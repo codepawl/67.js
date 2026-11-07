@@ -134,7 +134,7 @@ export async function scoreSilhouetteOfGeometries(taskId, rawGeometries) {
   return { views: overlap, mean: Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4)) };
 }
 
-function readTranscript(output) {
+export function readTranscript(output) {
   const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, result: null };
   for (const line of output.split('\n')) {
     if (!line.trim().startsWith('{')) continue;
