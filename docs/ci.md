@@ -10,7 +10,7 @@ All jobs start at once.
 | --- | --- |
 | `audit` | `npm audit --audit-level=high` |
 | `size` | `npm run size` and `npm run tool-cost` against the pull request base (pull requests only; a release has no base) |
-| `unit` (6 shards by hashed file name, `scripts/shard-test-files.mjs`) | `npm run build:lib`, then `npm run test:coverage` on one third of the test files; uploads its lcov |
+| `unit` (6 shards balanced by measured time, `scripts/shard-test-files.mjs` and `test-timings.json`) | `npm run build:lib`, then `npm run test:coverage` on one sixth of the test files; uploads its lcov and per-file timings |
 | `coverage` | merges the shard lcov files, writes the summary, compares with `coverage-baseline.json`, uploads `lcov` |
 | `package` | `prepare:release`, `check:links:package`, `smoke:package`, `smoke:mcp-package` |
 | `test` | waits for every job above and fails unless each one succeeded. Branch protection on `main` requires this name. |
