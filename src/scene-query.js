@@ -8,8 +8,14 @@ const DEFAULT_WALK_OPTIONS = Object.freeze({
   clearanceCap: 99,
   maxCells: 65_536,
 });
-const WALK_OPTION_NAMES = new Set(['min', 'max', 'cellSize', 'topY', 'probeHeight', 'clearanceCap', 'maxCells', 'lowerPass']);
+const WALK_OPTION_NAMES = new Set(['min', 'max', 'cellSize', 'topY', 'probeHeight', 'clearanceCap', 'maxCells', 'lowerPass', 'obstacles']);
 const LOWER_PASS_NAMES = new Set(['fromY', 'maxDistance', 'groundBelow', 'minHeadroom']);
+// A kerb is about 0.15 to 0.2 m, so 0.3 m keeps kerbs walkable while bollards, lamp posts, planters and tables stand out.
+const DEFAULT_OBSTACLES = Object.freeze({ reach: 2.6, minHeight: 0.3, maxDrop: 6, maxLayers: 8 });
+const OBSTACLE_NAMES = new Set(['streetY', 'fromY', 'reach', 'minHeight']);
+const STREET_SAMPLE_CELLS = 1024;
+// Seams a closing step fills: kerb faces and cracks narrower than this many metres.
+const SEAM_METRES = 0.75;
 
 function assertNumber(value, label) {
   if (!Number.isFinite(value)) throw new TypeError(`${label} requires a finite number.`);
@@ -117,6 +123,21 @@ function faceNormal(geometry, triangle, matrix, direction) {
   return normal.map(value => (value / length) * facing);
 }
 
+// The lowest surface among an evenly spaced sample of the region: the street level when no streetY is given.
+function lowestSampledGround(settings, topHit) {
+  const { columns, rows, cellSize } = settings;
+  const stride = Math.max(1, Math.ceil(Math.sqrt((columns * rows) / STREET_SAMPLE_CELLS)));
+  let lowest = Infinity;
+  for (let column = 0; column < columns; column += stride) {
+    for (let row = 0; row < rows; row += stride) {
+      const top = topHit(settings.min[0] + column * cellSize, settings.min[1] + row * cellSize);
+      if (top) lowest = Math.min(lowest, top.point[1]);
+    }
+  }
+  if (lowest === Infinity) throw new RangeError('walkMap obstacles found no surface to take the street level from. Pass obstacles.streetY.');
+  return lowest;
+}
+
 function readWalkOptions(options) {
   if (!options || typeof options !== 'object') throw new TypeError('walkMap requires an options object.');
   for (const name of Object.keys(options)) {
@@ -137,6 +158,16 @@ function readWalkOptions(options) {
     }
     settings.lowerPass = { maxDistance: 4, minHeadroom: 2.4, ...settings.lowerPass };
     for (const field of ['fromY', 'groundBelow']) assertNumber(settings.lowerPass[field], `walkMap lowerPass.${field}`);
+  }
+  if (settings.obstacles !== undefined) {
+    const given = settings.obstacles === true ? {} : settings.obstacles;
+    if (!given || typeof given !== 'object') throw new TypeError('walkMap obstacles requires true or an options object.');
+    for (const name of Object.keys(given)) {
+      if (!OBSTACLE_NAMES.has(name)) throw new TypeError(`Unsupported walkMap obstacles option ${name}.`);
+      assertNumber(given[name], `walkMap obstacles.${name}`);
+    }
+    settings.obstacles = { ...DEFAULT_OBSTACLES, ...given };
+    if (settings.obstacles.minHeight <= 0 || settings.obstacles.reach <= 0) throw new RangeError('walkMap obstacles minHeight and reach must be positive.');
   }
   settings.columns = Math.floor((settings.max[0] - settings.min[0]) / settings.cellSize + 1e-9) + 1;
   settings.rows = Math.floor((settings.max[1] - settings.min[1]) / settings.cellSize + 1e-9) + 1;
@@ -219,11 +250,37 @@ export function createSceneQuery(parts, options = {}) {
       const hit = raycast({ origin: [x, groundY + probeHeight, z], direction: up, maxDistance: topY - groundY });
       return hit ? Math.min(hit.point[1] - groundY, clearanceCap) : clearanceCap;
     }
+    // Obstacle marking: a down ray from about `reach` metres above the street. When its first hit stands more than
+    // `minHeight` above the lowest surface under it, the cell holds an obstacle. Ground and headroom come from that column.
+    const obstacles = settings.obstacles;
+    let obstacleFromY = obstacles?.fromY;
+    if (obstacles && obstacleFromY === undefined) {
+      const streetY = obstacles.streetY
+        ?? lowestSampledGround(settings, (x, z) => raycast({ origin: [x, topY, z], direction: down }));
+      obstacleFromY = streetY + obstacles.reach;
+    }
+    function obstacleCell(x, z) {
+      const first = raycast({ origin: [x, obstacleFromY, z], direction: down });
+      if (!first) return null;
+      let groundY = first.point[1];
+      for (let layer = 0; layer < obstacles.maxLayers; layer++) {
+        const lower = raycast({ origin: [x, groundY - 0.01, z], direction: down, maxDistance: obstacles.maxDrop });
+        if (!lower) break;
+        groundY = lower.point[1];
+      }
+      const standing = first.point[1] - groundY > obstacles.minHeight;
+      return [x, z, groundY, headroomAbove(x, z, groundY), standing ? 1 : 0];
+    }
     const cells = [];
     for (let column = 0; column < columns; column++) {
       for (let row = 0; row < rows; row++) {
         const x = settings.min[0] + column * cellSize;
         const z = settings.min[1] + row * cellSize;
+        if (obstacles) {
+          const cell = obstacleCell(x, z);
+          if (cell) cells.push(cell);
+          continue;
+        }
         const top = raycast({ origin: [x, topY, z], direction: down });
         if (!top) continue;
         let groundY = top.point[1];
@@ -255,4 +312,79 @@ export function createSceneQuery(parts, options = {}) {
       for (const entry of entries) entry.index?.dispose();
     },
   });
+}
+
+/**
+ * Which cells of a walkMap result an agent may walk, as a Uint8Array indexed `column * rows + row` (1 = walkable).
+ * A cell is open when it has a surface, enough headroom, is not an obstacle (see walkMap `obstacles`) and sits in
+ * `groundRange`. With `keepOut` (metres) the open cells go through a closing step, so one-cell seams such as kerb
+ * faces do not split a street, then obstacles are cut back out, and every cell closer than `keepOut` to anything that
+ * is not open (an obstacle, a wall, a gap) stops being walkable.
+ */
+export function walkableMask(map, { clearance = 2, groundRange, keepOut = 0 } = {}) {
+  const { columns, rows, cellSize, min } = map;
+  const count = columns * rows;
+  const open = new Uint8Array(count);
+  const obstacle = new Uint8Array(count);
+  for (const [x, z, groundY, headroom, standing] of map.cells) {
+    const slot = Math.round((x - min[0]) / cellSize) * rows + Math.round((z - min[1]) / cellSize);
+    const inRange = !groundRange || (groundY >= groundRange[0] && groundY <= groundRange[1]);
+    if (standing) obstacle[slot] = 1;
+    else if (headroom >= clearance && inRange) open[slot] = 1;
+  }
+  if (!(keepOut > 0)) return open;
+  const seam = Math.max(1, Math.round(SEAM_METRES / cellSize));
+  let free = open;
+  // Closing = grow the open cells, then shrink them. Outside the grid counts as the same state as the edge cell, so the
+  // border never eats into the result.
+  for (let step = 0; step < seam; step++) free = spread(free, columns, rows, 1);
+  for (let step = 0; step < seam; step++) free = spread(free, columns, rows, 0);
+  for (let slot = 0; slot < count; slot++) if (obstacle[slot]) free[slot] = 0;
+  free = spread(spread(free, columns, rows, 0), columns, rows, 1);
+  return keepClear(free, columns, rows, keepOut / cellSize);
+}
+
+// One 4-neighbour step: every cell next to a cell holding `value` takes `value` too.
+function spread(grid, columns, rows, value) {
+  const next = Uint8Array.from(grid);
+  for (let column = 0; column < columns; column++) {
+    for (let row = 0; row < rows; row++) {
+      const slot = column * rows + row;
+      if (grid[slot] === value) continue;
+      const beside = (column > 0 && grid[slot - rows] === value)
+        || (column < columns - 1 && grid[slot + rows] === value)
+        || (row > 0 && grid[slot - 1] === value)
+        || (row < rows - 1 && grid[slot + 1] === value);
+      if (beside) next[slot] = value;
+    }
+  }
+  return next;
+}
+
+// Clears every open cell within `radius` cells of a closed cell. Only closed cells that touch an open one need to spread.
+function keepClear(free, columns, rows, radius) {
+  const reach = Math.ceil(radius);
+  const offsets = [];
+  for (let dx = -reach; dx <= reach; dx++) {
+    for (let dz = -reach; dz <= reach; dz++) {
+      if (dx * dx + dz * dz < radius * radius) offsets.push([dx, dz]);
+    }
+  }
+  const result = Uint8Array.from(free);
+  for (let column = 0; column < columns; column++) {
+    for (let row = 0; row < rows; row++) {
+      if (free[column * rows + row]) continue;
+      const touchesOpen = (column > 0 && free[(column - 1) * rows + row])
+        || (column < columns - 1 && free[(column + 1) * rows + row])
+        || (row > 0 && free[column * rows + row - 1])
+        || (row < rows - 1 && free[column * rows + row + 1]);
+      if (!touchesOpen) continue;
+      for (const [dx, dz] of offsets) {
+        const nearColumn = column + dx;
+        const nearRow = row + dz;
+        if (nearColumn >= 0 && nearColumn < columns && nearRow >= 0 && nearRow < rows) result[nearColumn * rows + nearRow] = 0;
+      }
+    }
+  }
+  return result;
 }

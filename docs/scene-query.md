@@ -54,7 +54,7 @@ Measured on a machine under load: about 8 s for the first 12,630 cells including
 
 ## MCP tool
 
-`scene_walkmap` runs the same query on the active imported asset scene (made with `scene_create_asset`; procedural recipe scenes are not supported yet) and returns text rows an agent can read.
+`scene_walkmap` runs the same query on the active scene and returns text rows an agent can read.
 Rows follow z, columns follow x.
 
 ```json
@@ -70,8 +70,30 @@ Rows follow z, columns follow x.
 Pass `includeCells: true` for `[x, z, groundY, headroom]` per cell, up to 4,096 cells.
 Plan a camera path over the `.` cells, set each eye at `groundY` plus the eye height, and check it with `scene_look`.
 The server holds one query per session and rebuilds it when the revision or a pose changes.
-The MCP asset catalog is limited to 1,000,000 vertices (see [gltf.md](gltf.md)); a larger scene such as Bistro loads through `loadGltf` and `createSceneQuery` in code.
-
 Fields: `min` and `max` are `[x, z]` corners, x runs across the rows and z down them. `cellSize` defaults to 1 and `clearance` (headroom a walkable cell needs) to 2.
 The down rays start at y = 100, and the region may hold up to 65,536 cells.
 The tool does not take `topY`, `groundRange` or `lowerPass`: for a scene taller than 100, ground ranges or arches, call `walkMap` from code.
+
+The tool works on the active scene, a recipe scene or an imported asset scene.
+
+### Obstacles and keep-out
+
+Pass `keepOut` (metres) and bollards, lamp posts, planters and tables stop being ground.
+For each cell a ray goes down from 2.6 m above the street level, and when its first hit stands more than 0.3 m above the lowest surface under it, the cell is an obstacle.
+A kerb is 0.15 to 0.2 m, so kerbs stay walkable.
+`streetY` is the street level; it defaults to the lowest surface in a sample of the region.
+A closing step fills one-cell seams (kerb faces, cracks narrower than 0.75 m), obstacles are cut back out, and a cell closer than `keepOut` to an obstacle, a wall or a gap is not walkable (`x`).
+In code pass `obstacles: true` or `obstacles: { streetY, fromY, reach, minHeight }` to `walkMap`, and give the result to `walkableMask(map, { clearance, groundRange, keepOut })`, which returns one 0 or 1 per cell, `column * rows + row`.
+Cells then carry a fifth value, 1 for an obstacle.
+Use a small `cellSize`: a 0.25 m grid caught poles that a 1 m grid missed.
+
+### Large worlds
+
+Pass `assetId` (from `scene_asset_catalog`) instead of a session to query a catalog GLB without creating a scene.
+The file is read and parsed in the server process, its textures are dropped before decoding, and nothing is rendered, so it can pass the 1,000,000 vertex render cap (see [gltf.md](gltf.md)).
+It still has to be a file of the configured `--assets` folder, under that folder's 64 MiB file limit, and it must stay within 6,000,000 vertices, 6,000,000 triangles and 16,384 parts, with 256 MiB for each part's index.
+The server keeps one such scene; asking for another `assetId` replaces it.
+`assetId` and `sessionId` are mutually exclusive.
+
+Measured on the Bistro sample (2,829,226 triangles in 224 parts, 48 MiB file) on a machine under load: parsing 1.3 s, a 0.25 m grid over x -62 to 111 and z -88 to 97 (513,513 cells; in code, since the tool caps a region at 65,536 cells) with `keepOut` 1.0 in 38 s.
+Against a Blender walk map of the same grid, 99.95 percent of the 149,652 cells with a surface in both agree on obstacle or not, and all 295 pole clusters in it are excluded.

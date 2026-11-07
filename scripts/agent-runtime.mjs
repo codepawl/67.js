@@ -15,6 +15,7 @@ import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
+import { createQueryOnlyCache } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
@@ -105,6 +106,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   let queue = Promise.resolve();
   let closing;
   let catalogPromise;
+  const queryOnly = createQueryOnlyCache();
   let jobsPromise;
   const savedGlbPaths = [];
   function jobs() {
@@ -195,6 +197,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   }
 
   async function shutdownResources() {
+    queryOnly.dispose();
     try {
       await browserInstance?.close();
     } finally {
@@ -637,8 +640,11 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     inspectMeshes(input) {
       return enqueue(() => invoke('inspectMeshes', input));
     },
-    walkMap(input) {
-      return enqueue(() => invoke('walkMap', input));
+    walkMap({ assetId, ...input }) {
+      if (assetId === undefined) return enqueue(() => invoke('walkMap', input));
+      if (input.sessionId !== undefined) return Promise.reject(new TypeError('scene_walkmap takes a sessionId or an assetId, not both.'));
+      // Query-only: parsed in this process from the catalog file and never rendered, so it may pass the render vertex cap.
+      return enqueue(() => queryOnly.walkMap({ ...input, assetId, bytes: async () => (await catalog()).read(assetId) }));
     },
     setMeshStack(input) {
       return enqueue(async () => {
