@@ -40,6 +40,7 @@
     "docs/mesh.md",
     "docs/modeling.md",
     "docs/physics.md",
+    "docs/scene-query.md",
     "docs/user-passes.md",
     "docs/skeleton-pose.md",
     "docs/verification.md"
