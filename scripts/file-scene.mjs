@@ -1,14 +1,29 @@
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { resolve, dirname, join, basename } from 'node:path';
 
 const ASSET_FIELDS = ['glb', 'hdri'];
 const MAXIMUM_KEY_FILE_BYTES = 64 * 1024 ** 2;
 
+// Opens once and checks the size on the same handle, so the file cannot change between the check and the read.
+function readBoundedFile(file) {
+  let descriptor;
+  try {
+    descriptor = openSync(file, 'r');
+  } catch {
+    throw new Error('The camera keys file is missing or larger than 64 MiB.');
+  }
+  try {
+    if (fstatSync(descriptor).size > MAXIMUM_KEY_FILE_BYTES) throw new Error('The camera keys file is missing or larger than 64 MiB.');
+    return readFileSync(descriptor, 'utf8');
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 /** Reads camera keys: { fps, frames: [[eye, target], ...] } or the keys createCameraPath takes. */
 export function readCameraKeys(path) {
   const file = resolve(path);
-  if (!existsSync(file) || statSync(file).size > MAXIMUM_KEY_FILE_BYTES) throw new Error('The camera keys file is missing or larger than 64 MiB.');
-  const keys = JSON.parse(readFileSync(file, 'utf8'));
+  const keys = JSON.parse(readBoundedFile(file));
   if (Array.isArray(keys.frames)) {
     if (!keys.frames.length) throw new Error('Camera keys need at least one frame.');
     const valid = pose => Array.isArray(pose) && pose.length === 2 && pose.every(vector => Array.isArray(vector) && vector.length === 3 && vector.every(Number.isFinite));
