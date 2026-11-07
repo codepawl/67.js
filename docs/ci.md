@@ -19,7 +19,7 @@ All jobs start at once.
 
 ## Coverage
 
-Coverage comes from Node's built-in `--experimental-test-coverage`. The `coverage` job fails when line, branch or function coverage falls more than 0.5 points below `coverage-baseline.json`. Raise the baseline by editing that file; lower it only on purpose and say why in the pull request. To reproduce locally: `npm run test:coverage -- --test-reporter=lcov --test-reporter-destination=coverage/lcov.info`, then `npm run coverage:gate -- coverage`.
+Coverage comes from Node's built-in `--experimental-test-coverage`. The `coverage` job fails when line or function coverage falls more than 0.5 points, or branch coverage more than 1.5 points, below `coverage-baseline.json` (branch totals move by up to about 0.8 points between runs of the same commit). Raise the baseline by editing that file; lower it only on purpose and say why in the pull request. To reproduce locally: `npm run test:coverage -- --test-reporter=lcov --test-reporter-destination=coverage/lcov.info`, then `npm run coverage:gate -- coverage`.
 
 ## Add a job or a smoke
 

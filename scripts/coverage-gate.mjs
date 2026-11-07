@@ -6,7 +6,9 @@ import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } fr
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ALLOWED_DROP_POINTS = 0.5;
+// Branch totals move by up to about 0.8 points between runs of the same commit (merged V8 block ranges across shards),
+// so branches get more room than lines and functions, which stay within a few hundredths.
+const ALLOWED_DROP_POINTS = Object.freeze({ lines: 0.5, branches: 1.5, functions: 0.5 });
 const METRICS = ['lines', 'branches', 'functions'];
 
 function collectLcovPaths(inputs) {
@@ -94,7 +96,7 @@ export function compareWithBaseline(percentages, baseline) {
     metric,
     actual: percentages[metric],
     baseline: baseline[metric],
-    ok: percentages[metric] >= baseline[metric] - ALLOWED_DROP_POINTS,
+    ok: percentages[metric] >= baseline[metric] - ALLOWED_DROP_POINTS[metric],
   }));
 }
 
@@ -130,7 +132,7 @@ function main() {
   const results = compareWithBaseline(percentages, baseline);
 
   const table = [
-    `Coverage from ${paths.length} lcov file(s), ${files.size} source files. A drop of more than ${ALLOWED_DROP_POINTS} points below the baseline fails.`,
+    `Coverage from ${paths.length} lcov file(s), ${files.size} source files. A drop below the baseline of more than ${ALLOWED_DROP_POINTS.lines} points (lines, functions) or ${ALLOWED_DROP_POINTS.branches} points (branches) fails.`,
     '',
     '| Metric | Covered | Total | Actual % | Baseline % | Result |',
     '| --- | ---: | ---: | ---: | ---: | --- |',
