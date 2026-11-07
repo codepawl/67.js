@@ -397,7 +397,7 @@ Not run:
 
 ## Agent friendliness: 67js MCP against three.js by code (2026-11-07, issue #31)
 
-The three.js half of issue #31 and the 67js side of the same table. The Blender MCP half needs a VM and is not run. Model `sonnet`, headless `claude -p` on the subscription, 6 suite tasks (`crate`, `bolt`, `window`, `table`, `fence`, `bracket`), 1 run each per system, so 12 records in `results/2026-11-07-threejs-vs-67js.json`. Tokens and tool calls are reported; there is no API dollar figure.
+The three.js half of issue #31 and the 67js side of the same table. The Blender MCP half is in the next section. Model `sonnet`, headless `claude -p` on the subscription, 6 suite tasks (`crate`, `bolt`, `window`, `table`, `fence`, `bracket`), 1 run each per system, so 12 records in `results/2026-11-07-threejs-vs-67js.json`. Tokens and tool calls are reported; there is no API dollar figure.
 
 - 67js MCP: `run.mjs`, the task prompt behind the usual MCP preamble.
 - three.js: `threejs.mjs`, the same task text behind a different preamble. The agent gets an empty folder with `three` installed from npm, Bash, Read, Write, Edit, Glob and Grep, no web and no MCP. It writes `build.mjs`, which builds the object, writes `geometry.json` (world-space triangles per mesh) and renders `scene.png` with headless Chrome on SwiftShader.
@@ -407,6 +407,7 @@ The three.js half of issue #31 and the 67js side of the same table. The Blender 
 | --- | --- | --- | --- | --- | --- |
 | 67js MCP | 6/6 | 3.2 | 375k | 0.932 | 24 |
 | three.js by code | 5/6 | 8.8 | 269k | 0.926 | 359 |
+| Blender MCP (official server) | 6/6 | 3.8 | 177k | 0.926 | 517 |
 
 | Task | System | Pass | Tool calls (errors) | Look | Failure |
 | --- | --- | --- | --- | --- | --- |
@@ -428,3 +429,21 @@ The three.js half of issue #31 and the 67js side of the same table. The Blender 
 - 67js failures: none in the checks. One harness fault: the `bracket` look images failed because the look page could not fetch the boolean wasm (`both async and sync fetching of the wasm failed`), which threw away the whole look record, silhouette included. The silhouette was scored again afterwards from the exported recipe, and the record carries `imagesError`. `scoreLook` should score the silhouette before it renders images.
 - A first attempt of the 67js run failed on every task because the checkout had no `build/mcp` folder (`npm run build:lib` creates it); those results were discarded. The first three.js run stopped after `bolt` when its process disappeared, so `window`, `table`, `fence` and `bracket` were run again as a second run and joined with `compare-threejs.mjs`.
 - Limits: 1 run per cell, one model, tasks the 67js suite was built around (they favour 67js's checks, not three.js). The `window` three.js failure label came from an earlier wording of the same check.
+
+### Blender MCP half (2026-11-07, issue #31)
+
+The official Blender MCP server (Blender Lab, v1.0.3, add-on and server) driving Blender 5.1.2, same model, same six tasks, 1 run each, in `results/2026-11-07-blender-mcp.json`. The server runs model-written Python with no guards, so `blender.mjs` never runs it on the benchmark machine: Blender (headless, `--command blender_mcp`) and the HTTP MCP server run inside a throwaway Docker container (`blender-container/`, x86_64 under Rosetta on an Apple silicon laptop, one scratch folder mounted, a fresh container per task). `claude -p` reaches the server through an SSH port forward and gets only the MCP tools: no Bash and no file tools on its own machine. The prompt asks the agent to leave `geometry.json` (world-space triangles, Y up) and `scene.png` in the container's `/work`; the script copies them back and grades them exactly like the three.js run.
+
+| Task | Pass | Tool calls (errors) | Tokens in / out | Look | Wall seconds |
+| --- | --- | --- | --- | --- | --- |
+| crate | yes, 8/8 | 4 (1) | 179k / 3k | 1.000 | 590 |
+| bolt | yes, 7/7 | 4 (1) | 179k / 3k | 0.964 | 609 |
+| window | yes, 5/5 | 4 (1) | 181k / 4k | 1.000 | 611 |
+| table | yes, 6/6 | 5 (1) | 207k / 3k | 0.592 | 625 |
+| fence | yes, 6/6 | 2 (0) | 116k / 3k | 1.000 | 38 |
+| bracket | yes, 6/6 | 4 (1) | 182k / 4k | 1.000 | 626 |
+
+- Measured: no failures. Tool calls exclude the `ToolSearch` call that loads the one tool the agent uses (`execute_blender_code`), as in the other runs. Look matches the other two systems (`table` 0.592 again, so it is the reference).
+- Wall time is not a fair figure. Measured in the transcripts: `crate` hit Claude Code's 300 s no-response abort on its render call while the files were still written; the other four runs with an error and about 600 s show the same wall time. Inferred: the render is a CPU Cycles render of an x86 Blender under emulation, which a native Blender would finish much faster; `fence`, whose render stayed under the limit, took 38 s. Treat the 517 s mean as environment cost, not as Blender MCP latency.
+- Every run but `fence` spent one call on a failed first attempt (a Python traceback or the timeout) and then repaired it. The tool takes raw `bpy` code, so the agent writes the mesh code, the Z-up to Y-up conversion and the export itself, as in the three.js run; unlike three.js it needs no browser for the picture.
+- Limits: 1 run per cell, one model, tasks built around 67js. The server's own screenshot and render tools were never used; the agents rendered from their own code. The container has outbound network access (the model's code could reach the internet); only the scratch folder is shared with the host.

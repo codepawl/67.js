@@ -1,0 +1,279 @@
+{
+  "run": "2026-11-07-blender-mcp",
+  "system": "Blender MCP (official server in a container)",
+  "blenderVersion": "Blender 5.1.2",
+  "model": "claude-sonnet-5-5",
+  "date": "2026-11-07T18:04:20.919Z",
+  "runsPerTask": 1,
+  "passed": 6,
+  "tasks": 6,
+  "toolCalls": 23,
+  "byModel": {
+    "claude-sonnet-5-5": {
+      "runs": 6,
+      "passed": 6,
+      "successRate": 1,
+      "toolCalls": 23,
+      "toolErrors": 5,
+      "inputTokens": 1043319,
+      "outputTokens": 18972,
+      "costUsd": 0,
+      "tasks": {
+        "crate": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 4,
+          "toolErrors": 1,
+          "inputTokens": 178557,
+          "outputTokens": 3026,
+          "costUsd": 0
+        },
+        "bolt": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 4,
+          "toolErrors": 1,
+          "inputTokens": 178812,
+          "outputTokens": 3081,
+          "costUsd": 0
+        },
+        "window": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 4,
+          "toolErrors": 1,
+          "inputTokens": 181015,
+          "outputTokens": 3619,
+          "costUsd": 0
+        },
+        "table": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 5,
+          "toolErrors": 1,
+          "inputTokens": 206569,
+          "outputTokens": 2655,
+          "costUsd": 0
+        },
+        "fence": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 2,
+          "toolErrors": 0,
+          "inputTokens": 116074,
+          "outputTokens": 2525,
+          "costUsd": 0
+        },
+        "bracket": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 4,
+          "toolErrors": 1,
+          "inputTokens": 182292,
+          "outputTokens": 4066,
+          "costUsd": 0
+        }
+      }
+    }
+  },
+  "records": [
+    {
+      "task": "crate",
+      "attempt": 1,
+      "pass": true,
+      "passed": 8,
+      "total": 8,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 4,
+      "toolErrors": 1,
+      "toolsByName": {
+        "mcp__blender__execute_blender_code": 4
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 6,
+      "costUsd": null,
+      "inputTokens": 178557,
+      "outputTokens": 3026,
+      "wallSeconds": 590,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "task": "bolt",
+      "attempt": 1,
+      "pass": true,
+      "passed": 7,
+      "total": 7,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 4,
+      "toolErrors": 1,
+      "toolsByName": {
+        "mcp__blender__execute_blender_code": 4
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 0.9621,
+            "side": 0.9621,
+            "three-quarter": 0.9666
+          },
+          "mean": 0.9636
+        }
+      },
+      "turns": 6,
+      "costUsd": null,
+      "inputTokens": 178812,
+      "outputTokens": 3081,
+      "wallSeconds": 609,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "task": "window",
+      "attempt": 1,
+      "pass": true,
+      "passed": 5,
+      "total": 5,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 4,
+      "toolErrors": 1,
+      "toolsByName": {
+        "mcp__blender__execute_blender_code": 4
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 6,
+      "costUsd": null,
+      "inputTokens": 181015,
+      "outputTokens": 3619,
+      "wallSeconds": 611,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "task": "table",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 5,
+      "toolErrors": 1,
+      "toolsByName": {
+        "mcp__blender__execute_blender_code": 5
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 0.1684,
+            "three-quarter": 0.6073
+          },
+          "mean": 0.5919
+        }
+      },
+      "turns": 7,
+      "costUsd": null,
+      "inputTokens": 206569,
+      "outputTokens": 2655,
+      "wallSeconds": 625,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "task": "fence",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 2,
+      "toolErrors": 0,
+      "toolsByName": {
+        "mcp__blender__execute_blender_code": 2
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 4,
+      "costUsd": null,
+      "inputTokens": 116074,
+      "outputTokens": 2525,
+      "wallSeconds": 38,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "task": "bracket",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 4,
+      "toolErrors": 1,
+      "toolsByName": {
+        "mcp__blender__execute_blender_code": 4
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 6,
+      "costUsd": null,
+      "inputTokens": 182292,
+      "outputTokens": 4066,
+      "wallSeconds": 626,
+      "exitCode": 0,
+      "stopped": "success"
+    }
+  ]
+}
