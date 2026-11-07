@@ -63,6 +63,7 @@
     "./addons/sculpt": "./build/sculpt.js",
     "./addons/surface": "./build/surface.js",
     "./addons/mesh-query": "./build/mesh-query.js",
+    "./addons/scene-query": "./build/scene-query.js",
     "./addons/mesh": "./build/mesh.js",
     "./addons/shrinkwrap": "./build/shrinkwrap.js",
     "./addons/surface-attachment": "./build/surface-attachment.js",

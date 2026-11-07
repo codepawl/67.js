@@ -131,7 +131,7 @@ test('SDK advertises the complete strict JSON contract and truthful annotations'
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     'mesh_edit', 'mesh_inspect', 'mesh_stack', 'scene_apply', 'scene_asset_catalog', 'scene_capabilities', 'scene_checkpoint', 'scene_create', 'scene_create_asset', 'scene_dispose',
     'scene_export_glb', 'scene_export_recipe', 'scene_inspect', 'scene_look', 'scene_review', 'scene_release_checkpoint', 'scene_restore',
-    'scene_render_cancel', 'scene_render_release', 'scene_render_result', 'scene_render_status', 'scene_render_submit',
+    'scene_render_cancel', 'scene_render_release', 'scene_render_result', 'scene_render_status', 'scene_render_submit', 'scene_walkmap',
   ].sort());
   for (const tool of tools) {
     assert.equal(tool.inputSchema.type, 'object');
@@ -186,7 +186,7 @@ test('review SDK exposes one image and rejects unknown or unbounded shot fields 
   await client.callTool({ name: 'scene_create', arguments: { recipe: recipe() } });
   const { tools } = await client.listTools();
   const tool = tools.find(tool => tool.name === 'scene_review');
-  assert.equal(tools.length, 22);
+  assert.equal(tools.length, 23);
   assert.equal(tool.annotations.readOnlyHint, true);
   assert.equal(tool.inputSchema.properties.shots.maxItems, 4);
   assert.equal(tool.inputSchema.properties.shots.items.additionalProperties, false);
@@ -213,7 +213,7 @@ test('branch names and labels are bounded in every tool schema and rejected befo
   await client.callTool({ name: 'scene_create', arguments: { recipe: recipe() } });
   const { tools } = await client.listTools();
   const schema = name => tools.find(tool => tool.name === name).inputSchema;
-  assert.equal(tools.length, 22, 'branches add fields, not tools');
+  assert.equal(tools.length, 23, 'branches add fields, not tools');
   const pattern = '^[a-z][a-z0-9_-]{0,23}$';
   assert.equal(schema('scene_apply').properties.branch.pattern, pattern);
   assert.equal(schema('scene_restore').properties.branch.pattern, pattern);

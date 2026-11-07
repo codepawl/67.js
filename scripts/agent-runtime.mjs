@@ -637,6 +637,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     inspectMeshes(input) {
       return enqueue(() => invoke('inspectMeshes', input));
     },
+    walkMap(input) {
+      return enqueue(() => invoke('walkMap', input));
+    },
     setMeshStack(input) {
       return enqueue(async () => {
         await requirePreviewRenderer();
