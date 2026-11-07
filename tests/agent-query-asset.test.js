@@ -1,33 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { carAsset } from './fixtures/car-glb.js';
-import { createQueryOnlyCache, geometryOnlyGlb, loadQueryOnlyScene, QUERY_ASSET_LIMITS } from '../scripts/agent-query-asset.mjs';
+import { geometryOnlyGlb } from '../scripts/agent-query-asset.mjs';
+import { createQueryOnlyCache } from '../scripts/agent-walkmap.js';
+import { parseGltf } from '../src/gltf.js';
 
-test('geometryOnlyGlb keeps the geometry readable', async () => {
-  const stripped = geometryOnlyGlb(Buffer.from(carAsset()));
-  const scene = await loadQueryOnlyScene(stripped);
-  assert.ok(scene.parts > 0);
-  assert.ok(scene.triangles > 0);
-  assert.ok(scene.triangles <= QUERY_ASSET_LIMITS.maxTriangles);
-  scene.query.dispose();
-});
+const region = { min: [-3, -3], max: [3, 3], cellSize: 1, topY: 20, clearance: 1 };
 
-test('the query-only cache walks a catalog asset, reuses its scene and replaces it for another asset', async () => {
-  const cache = createQueryOnlyCache();
-  let reads = 0;
-  const bytes = async () => {
-    reads++;
-    return Buffer.from(carAsset());
-  };
-  const region = { min: [-3, -3], max: [3, 3], cellSize: 1, topY: 20, clearance: 1 };
-  const first = await cache.walkMap({ assetId: 'a'.repeat(64), bytes, ...region });
-  assert.equal(first.queryOnly, true);
-  assert.equal(first.grid.length, 7);
-  assert.ok(first.walkableCells > 0);
-  await cache.walkMap({ assetId: 'a'.repeat(64), bytes, ...region, keepOut: 0.5, streetY: 0 });
-  assert.equal(reads, 1);
-  await cache.walkMap({ assetId: 'b'.repeat(64), bytes, ...region });
-  assert.equal(reads, 2);
+test('the query-only cache asks for the file once, walks it and replaces it for another asset', async () => {
+  const cache = createQueryOnlyCache(parseGltf);
+  const bytes = new Uint8Array(geometryOnlyGlb(Buffer.from(carAsset())));
+  const first = { assetId: 'a'.repeat(64), ...region };
+  assert.deepEqual(await cache.walkMap(first), { needsData: true });
+  const result = await cache.walkMap({ ...first, bytes });
+  assert.equal(result.queryOnly, true);
+  assert.equal(result.grid.length, 7);
+  assert.ok(result.walkableCells > 0);
+  assert.ok(result.triangles > 0);
+  const guarded = await cache.walkMap({ ...first, keepOut: 0.5, streetY: 0 });
+  assert.equal(guarded.queryOnly, true);
+  assert.deepEqual(await cache.walkMap({ assetId: 'b'.repeat(64), ...region }), { needsData: true });
   cache.dispose();
 });
 

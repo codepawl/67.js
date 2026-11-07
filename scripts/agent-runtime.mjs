@@ -15,7 +15,7 @@ import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
-import { createQueryOnlyCache } from './agent-query-asset.mjs';
+import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
@@ -43,6 +43,7 @@ const MAXIMUM_QUEUED_CALLS = 16;
 const MAXIMUM_GLB_BYTES = 32 * 1024 * 1024;
 const MAXIMUM_KEPT_GLBS = 8;
 const EVALUATION_TIMEOUT_MS = 30000;
+const QUERY_ONLY_TIMEOUT_MS = 120000;
 /** A bake runs on a worker for up to its own limit, so a call that bakes gets that much more than a plain call. */
 const BAKE_EVALUATION_TIMEOUT_MS = EVALUATION_TIMEOUT_MS + BAKE_WORKER_MAXIMUM_SECONDS * 1000;
 
@@ -106,7 +107,6 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   let queue = Promise.resolve();
   let closing;
   let catalogPromise;
-  const queryOnly = createQueryOnlyCache();
   let jobsPromise;
   const savedGlbPaths = [];
   function jobs() {
@@ -197,7 +197,6 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   }
 
   async function shutdownResources() {
-    queryOnly.dispose();
     try {
       await browserInstance?.close();
     } finally {
@@ -643,8 +642,16 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     walkMap({ assetId, ...input }) {
       if (assetId === undefined) return enqueue(() => invoke('walkMap', input));
       if (input.sessionId !== undefined) return Promise.reject(new TypeError('scene_walkmap takes a sessionId or an assetId, not both.'));
-      // Query-only: parsed in this process from the catalog file and never rendered, so it may pass the render vertex cap.
-      return enqueue(() => queryOnly.walkMap({ ...input, assetId, bytes: async () => (await catalog()).read(assetId) }));
+      // Query-only: the preview page parses the textureless geometry and queries it, with no scene and no render, so it may
+      // pass the render vertex cap. The page keeps one scene and asks for the file only when it does not hold it.
+      return enqueue(async () => {
+        await boot();
+        const request = { ...input, assetId };
+        const cached = await evaluate('queryOnlyWalkMap', request, page, QUERY_ONLY_TIMEOUT_MS);
+        if (!cached.needsData) return cached;
+        const stripped = geometryOnlyGlb(await (await catalog()).read(assetId));
+        return evaluate('queryOnlyWalkMap', { ...request, data: stripped.toString('base64') }, page, QUERY_ONLY_TIMEOUT_MS);
+      });
     },
     setMeshStack(input) {
       return enqueue(async () => {

@@ -113,7 +113,6 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
     recipeAssetNeeds, sequenceFrameIds, TEXTURE_SEQUENCE_CAPABILITIES, AGENT_ASSET_LIMITS, assertCombinedAssetBytes,
     audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName,
-    createQueryOnlyCache: () => ({ walkMap: async () => ({}), dispose() {} }),
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
     setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },
   });

@@ -26,7 +26,7 @@ import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem } from '../src/agent-errors.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
-import { sceneQueryFor, summarizeWalkMap, walkOptionsFor } from './agent-walkmap.js';
+import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from './agent-walkmap.js';
 
 let active = null;
 let canvas = document.querySelector('canvas');
@@ -413,6 +413,7 @@ setPhysicsModuleLoader(() => import(/* @vite-ignore */ new URL('/vendor/rapier.j
 // The preview bundle is one file, so the on-demand scene modules load together on the first call and later calls stay
 // synchronous. The boolean engine is WebAssembly and loads asynchronously, once, only for calls that need it.
 
+let queryOnly;
 const ASSET_DECODE_LIMITS = agentAssetDecodeOptions();
 
 // An agent cannot pass loadGltf options, so a limit error names the catalog limits instead of "Fix: pass { ... }".
@@ -851,6 +852,10 @@ window.__agentPreview = {
     }
     if (!allAgentSceneModulesLoaded()) return loadAllAgentSceneModules().then(() => this.inspectMeshes({ sessionId, ...options }));
     return { sessionId, ...scene.inspectMeshes(options) };
+  },
+  async queryOnlyWalkMap({ data, ...input }) {
+    queryOnly ??= createQueryOnlyCache(parseGltf);
+    return queryOnly.walkMap({ ...input, bytes: data === undefined ? undefined : bytesFromBase64(data) });
   },
   async walkMap({ sessionId, clearance = 2, groundRange, keepOut, streetY, includeCells = false, ...options }) {
     const record = requireSession(sessionId);

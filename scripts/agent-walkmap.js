@@ -69,3 +69,52 @@ export function summarizeWalkMap(map, { clearance, groundRange, keepOut, include
     ...(includeCells ? { cells: listed } : {}),
   };
 }
+
+// Query-only load path: raycasts and walk maps over a catalog GLB that is too big to render through MCP. The server strips
+// its textures and sends the file once; this page parses geometry only and keeps one scene query, with no render targets.
+// Every number is a ceiling the agent cannot raise.
+export const QUERY_ASSET_LIMITS = Object.freeze({
+  maxVertices: 6_000_000,
+  maxTriangles: 6_000_000,
+  maxParts: 16_384,
+  // Per part BVH budget; the mesh query itself refuses a part over 1,000,000 triangles.
+  memoryBudgetMiB: 256,
+});
+
+/** One loaded scene at a time, keyed by the catalog asset ID. Without `bytes` an unknown asset answers `needsData`. */
+export function createQueryOnlyCache(parseGltf) {
+  let current = null;
+  async function load(bytes) {
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const asset = await parseGltf(buffer, { maxBytes: bytes.length + 1024, maxVertices: QUERY_ASSET_LIMITS.maxVertices, maxParts: QUERY_ASSET_LIMITS.maxParts });
+    let triangles = 0;
+    for (const part of asset.parts) triangles += part.geometry.indices.length / 3;
+    if (triangles > QUERY_ASSET_LIMITS.maxTriangles) {
+      throw new RangeError(`Query-only asset has ${triangles} triangles, over the query maxTriangles ${QUERY_ASSET_LIMITS.maxTriangles}. Split it or decimate it.`);
+    }
+    const parts = asset.parts.map((part, position) => ({ id: part.name ?? `part-${position}`, geometry: part.geometry, matrix: part.matrix, material: part.material?.id }));
+    return { query: createSceneQuery(parts, { memoryBudgetMiB: QUERY_ASSET_LIMITS.memoryBudgetMiB }), parts: parts.length, triangles };
+  }
+  return Object.freeze({
+    async walkMap({ assetId, bytes, clearance = 2, groundRange, keepOut, streetY, includeCells = false, ...options }) {
+      const started = performance.now();
+      if (current?.assetId !== assetId) {
+        if (!bytes) return { needsData: true };
+        current?.scene.query.dispose();
+        current = null;
+        current = { assetId, scene: await load(bytes) };
+      }
+      const { query, parts, triangles } = current.scene;
+      const map = query.walkMap(walkOptionsFor(options, keepOut, streetY));
+      return {
+        assetId, queryOnly: true, parts, triangles,
+        ...summarizeWalkMap(map, { clearance, groundRange, keepOut, includeCells }),
+        skippedParts: query.skipped.length, milliseconds: Math.round(performance.now() - started),
+      };
+    },
+    dispose() {
+      current?.scene.query.dispose();
+      current = null;
+    },
+  });
+}
