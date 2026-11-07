@@ -19,6 +19,17 @@ For imported character motion from `0.8.0`, read `docs/agent-character-motion.md
 
 For an offline path-traced still with **Cook** (glass refraction, soft multi-bounce indirect light, subsurface random walk, many lights), read `docs/path-tracer.md` and submit an `image` job with `settings.renderer: { type: "pathTracer" }`. It is slow, bounded and offline: read `scene_capabilities` `pathTracer` for its limits and what it skips, and keep rasterizer jobs for video and passes.
 
+## Render a scene.json world along a camera track
+
+To film a world the showcase page shows (GLB, sky, renderer options, exposure, effects), plan the path and render it headless:
+
+```powershell
+# keys.json: { "fps": 24, "frames": [[[x, y, z], [tx, ty, tz]], ...] }  (one eye and target per frame; createCameraPath keys also work)
+bash ~/.agents/tools/gpu-lock.sh node scripts/render-media.mjs --kind video --scene file --config public/showcase/bistro/scene.json --camera keys.json --width 960 --height 540 --duration 5 --output artifacts/walk.mp4
+```
+
+`--root <folder>` names the folder that `/showcase/...` paths in the config are relative to; without it they resolve next to the config. `--duration` and `--start` pick a slice of the track (default: all of it, at the track's fps). Check one frame first with `--kind image --time 2.5`.
+
 ## Choose and render
 
 1. Check the available GPU memory before a GPU job on a shared machine.
