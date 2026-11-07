@@ -1073,6 +1073,10 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       });
       return { revision, meshes, truncated: false };
     },
+    /** The surfaces a scene query walks: every part with its geometry, world matrix and material ID. */
+    queryParts() {
+      return records.map(record => ({ id: record.id, geometry: geometryOf(record), matrix: matrices[Number(record.id.slice(5))], material: record.material.id }));
+    },
     checkpoint() {
       if (checkpoints.size >= MAX_CHECKPOINTS) {
         throw new RangeError('Asset checkpoint budget exhausted. Release a checkpoint.');

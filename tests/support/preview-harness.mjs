@@ -13,6 +13,7 @@ import { assetCopyKey, recipeAssetNeeds } from '../../src/agent-scene-assets.js'
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../../src/agent-branches.js';
 import { sessionProblem } from '../../src/agent-errors.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../../src/agent-asset-limits.js';
+import { sceneQueryFor, summarizeWalkMap } from '../../scripts/agent-walkmap.js';
 
 // Runs the preview page's adapter code in a VM with a fault-injected renderer, the way the MCP preview runs it in a browser.
 const source = (await readFile(new URL('../../scripts/agent-preview-browser.js', import.meta.url), 'utf8')).replace(/^import .+;\r?$/gm, '');
@@ -77,7 +78,7 @@ export function previewHarness() {
     // The harness loads Manifold from node_modules directly, so the preview's served-file loader is ignored.
     setManifoldModuleLoader: () => {},
     needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader: () => {},
-    parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
+    sceneQueryFor, summarizeWalkMap, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
     applyProjection, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
     // Line art needs a real renderer with render passes, so the fault-injected one gets a no-op install.
     agentSceneModule: name => (name === 'lineArt' ? { installLineArt: renderer => renderer } : name === 'userPass' ? { ...agentSceneModule(name), installUserPasses: renderer => renderer } : agentSceneModule(name)), agentSceneModuleLoaded, createBranchStore, printableLabel,

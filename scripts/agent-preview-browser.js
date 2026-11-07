@@ -26,6 +26,7 @@ import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem } from '../src/agent-errors.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
+import { sceneQueryFor, summarizeWalkMap } from './agent-walkmap.js';
 
 let active = null;
 let canvas = document.querySelector('canvas');
@@ -850,6 +851,15 @@ window.__agentPreview = {
     }
     if (!allAgentSceneModulesLoaded()) return loadAllAgentSceneModules().then(() => this.inspectMeshes({ sessionId, ...options }));
     return { sessionId, ...scene.inspectMeshes(options) };
+  },
+  async walkMap({ sessionId, clearance = 2, groundRange, includeCells = false, ...options }) {
+    const record = requireSession(sessionId);
+    if (typeof record.scene.queryParts !== 'function') throw new TypeError('scene_walkmap needs an imported asset scene (scene_create_asset). Procedural recipe scenes have no loaded surfaces to query yet.');
+    if (!allAgentSceneModulesLoaded()) await loadAllAgentSceneModules();
+    const started = performance.now();
+    const query = sceneQueryFor(record);
+    const map = query.walkMap(options);
+    return { sessionId, revision: record.scene.revision, ...summarizeWalkMap(map, { clearance, groundRange, includeCells }), skippedParts: query.skipped.length, milliseconds: Math.round(performance.now() - started) };
   },
   apply(input) {
     if (input.sequenceData) {
