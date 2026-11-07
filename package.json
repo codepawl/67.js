@@ -122,7 +122,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test",
     "test:isolated": "node scripts/test-each-file.mjs",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-exclude=\"scripts/**\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-exclude=\"scripts/**\" --test-coverage-exclude=\"build/**\"",
     "coverage:gate": "node scripts/coverage-gate.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:scenes": "node scripts/smoke-scenes.mjs",
