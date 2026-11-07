@@ -105,3 +105,111 @@ export async function loadHdri(url, { intensity, rotation, showBackground, backg
 }
 
 export { createEnvironmentMap };
+
+const SUN_PEAK_TO_MEAN_RATIO = 20;
+const SUN_SEARCH_RADIUS = Math.PI / 18;
+
+function luminanceAt(data, offset) {
+  return 0.2126 * data[offset] + 0.7152 * data[offset + 1] + 0.0722 * data[offset + 2];
+}
+
+// Equirect pixel to a direction in the map's own frame (the inverse of the shader lookup, before `rotation`).
+function mapDirection(column, row, width, height) {
+  const azimuth = ((column + 0.5) / width - 0.5) * 2 * Math.PI;
+  const polar = ((row + 0.5) / height) * Math.PI;
+  return [Math.sin(polar) * Math.sin(azimuth), Math.cos(polar), -Math.sin(polar) * Math.cos(azimuth)];
+}
+
+// The shader turns a world direction into the map frame with a turn about +Y; this is the inverse.
+function worldFromMapDirection([x, y, z], rotation) {
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  return [cosine * x + sine * z, y, -sine * x + cosine * z];
+}
+
+/**
+ * Finds the sun in an HDR environment map: the brightest 3 by 3 block, then the luminance-weighted centre of the pixels
+ * within 10 degrees of it that reach half its brightness, so a single hot pixel does not move it.
+ * Returns `{ lightDirection, keyColor, keyIntensity }` (world direction toward the sun with `rotation` applied, colour
+ * with its largest channel at 1, and `irradiance / PI` of the sun disc scaled by the map intensity), or `null` when the
+ * peak is under 20 times the mean luminance, as on an overcast sky.
+ */
+export function sunFromEnvironmentMap(map) {
+  const { width, height, channels, data } = map;
+  const rowWeights = Float64Array.from({ length: height }, (_, row) => Math.sin(((row + 0.5) / height) * Math.PI));
+  const luminance = new Float32Array(width * height);
+  let weightedTotal = 0;
+  for (let row = 0; row < height; row++) {
+    for (let column = 0; column < width; column++) {
+      const value = luminanceAt(data, (row * width + column) * channels);
+      luminance[row * width + column] = value;
+      weightedTotal += value * rowWeights[row];
+    }
+  }
+  const meanLuminance = weightedTotal / (rowWeights.reduce((sum, weight) => sum + weight, 0) * width);
+
+  let peakValue = 0;
+  let peakColumn = 0;
+  let peakRow = 0;
+  for (let row = 1; row < height - 1; row++) {
+    for (let column = 0; column < width; column++) {
+      let blockSum = 0;
+      for (let rowOffset = -1; rowOffset <= 1; rowOffset++) {
+        for (let columnOffset = -1; columnOffset <= 1; columnOffset++) {
+          blockSum += luminance[(row + rowOffset) * width + ((column + columnOffset + width) % width)];
+        }
+      }
+      if (blockSum / 9 > peakValue) {
+        peakValue = blockSum / 9;
+        peakColumn = column;
+        peakRow = row;
+      }
+    }
+  }
+  if (!(peakValue > SUN_PEAK_TO_MEAN_RATIO * meanLuminance)) return null;
+
+  const peakDirection = mapDirection(peakColumn, peakRow, width, height);
+  const minimumCosine = Math.cos(SUN_SEARCH_RADIUS);
+  const pixelSolidAngle = ((2 * Math.PI) / width) * (Math.PI / height);
+  const centre = [0, 0, 0];
+  const colorSum = [0, 0, 0];
+  let irradiance = 0;
+  for (let row = 0; row < height; row++) {
+    for (let column = 0; column < width; column++) {
+      const value = luminance[row * width + column];
+      if (value < peakValue * 0.5) continue;
+      const direction = mapDirection(column, row, width, height);
+      const cosine = direction[0] * peakDirection[0] + direction[1] * peakDirection[1] + direction[2] * peakDirection[2];
+      if (cosine < minimumCosine) continue;
+      const weight = value * rowWeights[row];
+      for (let axis = 0; axis < 3; axis++) {
+        centre[axis] += direction[axis] * weight;
+        colorSum[axis] += data[(row * width + column) * channels + axis] * weight;
+      }
+      irradiance += value * rowWeights[row] * pixelSolidAngle * Math.max(cosine, 0);
+    }
+  }
+  const length = Math.hypot(...centre);
+  const brightest = Math.max(...colorSum);
+  return {
+    lightDirection: worldFromMapDirection(centre.map((component) => component / length), map.rotation),
+    keyColor: colorSum.map((component) => component / brightest),
+    keyIntensity: (irradiance * map.intensity) / Math.PI,
+  };
+}
+
+/**
+ * Lights a scene from the HDRI sun. Spread the result into the renderer's `environment` and pass its `shadowBounds`:
+ * `{ environment: { lightDirection, keyColor, keyIntensity }, shadowBounds }`. The shadow view looks at the middle of
+ * `bounds` ({ min, max }) from the sun side and covers its bounding sphere. Without a distinct sun it returns `null`,
+ * so the caller keeps its defaults.
+ */
+export function keyLightFromHdri(map, bounds) {
+  const sun = sunFromEnvironmentMap(map);
+  if (!sun) return null;
+  const target = bounds.min.map((minimum, axis) => (minimum + bounds.max[axis]) / 2);
+  const extent = Math.max(Math.hypot(...bounds.max.map((maximum, axis) => maximum - bounds.min[axis])) / 2, 1e-3);
+  const eye = target.map((component, axis) => component + sun.lightDirection[axis] * extent * 2);
+  const { lightDirection, keyColor, keyIntensity } = sun;
+  return { environment: { lightDirection, keyColor, keyIntensity }, shadowBounds: { target, eye, extent, near: extent * 0.5, far: extent * 3.5 } };
+}
