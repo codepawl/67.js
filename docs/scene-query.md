@@ -58,8 +58,7 @@ Measured on a machine under load: about 8 s for the first 12,630 cells including
 Rows follow z, columns follow x.
 
 ```json
-{ "min": [-62, -88], "max": [111, 97], "cellSize": 1, "topY": 60, "clearance": 2.4,
-  "groundRange": [-1, 1], "lowerPass": { "fromY": 2.4, "groundBelow": 1 } }
+{ "min": [-62, -88], "max": [111, 97], "cellSize": 1, "clearance": 2.4 }
 ```
 
 ```
@@ -67,8 +66,12 @@ Rows follow z, columns follow x.
   "grid": ["######...", "##....xx.", "..."] }
 ```
 
-`.` is walkable (headroom of at least `clearance`, ground inside `groundRange`), `x` is ground that is blocked, `#` has no surface.
+`.` is walkable (headroom of at least `clearance`), `x` is ground that is blocked, `#` has no surface.
 Pass `includeCells: true` for `[x, z, groundY, headroom]` per cell, up to 4,096 cells.
 Plan a camera path over the `.` cells, set each eye at `groundY` plus the eye height, and check it with `scene_look`.
 The server holds one query per session and rebuilds it when the revision or a pose changes.
 The MCP asset catalog is limited to 1,000,000 vertices (see [gltf.md](gltf.md)); a larger scene such as Bistro loads through `loadGltf` and `createSceneQuery` in code.
+
+Fields: `min` and `max` are `[x, z]` corners, x runs across the rows and z down them. `cellSize` defaults to 1 and `clearance` (headroom a walkable cell needs) to 2.
+The down rays start at y = 100, and the region may hold up to 65,536 cells.
+The tool does not take `topY`, `groundRange` or `lowerPass`: for a scene taller than 100, ground ranges or arches, call `walkMap` from code.
