@@ -134,3 +134,39 @@ test('direct light specular takes the same multiple scatter gain once per fragme
   assert.equal(source.match(/directSpecularGain = multipleScatterGain/g).length, 1);
   assert.equal(source.match(/texture\(environmentBrdf/g).length, 2);
 });
+
+test('sunFromEnvironmentMap finds a synthetic sun at a known direction with rotation applied', async () => {
+  const { sunFromEnvironmentMap, keyLightFromHdri } = await import('../src/hdri.js');
+  const width = 256;
+  const height = 128;
+  const sunRow = 40;
+  const sunColumn = 70;
+  const rotation = 1.1;
+  const map = filledMap(width, height, (column, row) => {
+    const nearSun = Math.abs(column - sunColumn) <= 2 && Math.abs(row - sunRow) <= 2;
+    return nearSun ? [400, 320, 200] : [0.4, 0.5, 0.6];
+  }, { rotation });
+  const azimuth = ((sunColumn + 0.5) / width - 0.5) * 2 * Math.PI;
+  const polar = ((sunRow + 0.5) / height) * Math.PI;
+  const inMap = [Math.sin(polar) * Math.sin(azimuth), Math.cos(polar), -Math.sin(polar) * Math.cos(azimuth)];
+  // The shader turns world into map by (cos x - sin z, y, sin x + cos z); the sun's world direction is the inverse turn.
+  const expected = [Math.cos(rotation) * inMap[0] + Math.sin(rotation) * inMap[2], inMap[1], -Math.sin(rotation) * inMap[0] + Math.cos(rotation) * inMap[2]];
+  const sun = sunFromEnvironmentMap(map);
+  const dot = sun.lightDirection.reduce((sum, component, axis) => sum + component * expected[axis], 0);
+  assert.ok(Math.acos(Math.min(1, dot)) < 0.01, 'within about half a degree');
+  assert.equal(Math.max(...sun.keyColor), 1);
+  assert.ok(sun.keyColor[2] < sun.keyColor[0]);
+  assert.ok(sun.keyIntensity > 0);
+  const lit = keyLightFromHdri(map, { min: [-1, 0, -1], max: [1, 2, 1] });
+  assert.deepEqual(lit.shadowBounds.target, [0, 1, 0]);
+  const toEye = lit.shadowBounds.eye.map((component, axis) => component - lit.shadowBounds.target[axis]);
+  const eyeDot = toEye.reduce((sum, component, axis) => sum + component * sun.lightDirection[axis], 0) / Math.hypot(...toEye);
+  assert.ok(eyeDot > 0.9999);
+});
+
+test('sunFromEnvironmentMap returns null for an overcast map', async () => {
+  const { sunFromEnvironmentMap, keyLightFromHdri } = await import('../src/hdri.js');
+  const map = filledMap(64, 32, (column, row) => [0.5 + row * 0.01, 0.5, 0.5]);
+  assert.equal(sunFromEnvironmentMap(map), null);
+  assert.equal(keyLightFromHdri(map, { min: [0, 0, 0], max: [1, 1, 1] }), null);
+});
