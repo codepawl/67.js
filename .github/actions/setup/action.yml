@@ -1,0 +1,21 @@
+name: Set up 67js
+description: Install Node 24, the pinned npm and the locked dependencies. Run actions/checkout first, a local action cannot be found before it.
+
+inputs:
+  registry-url:
+    description: npm registry for publishing; leave empty for jobs that only test.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '24'
+        registry-url: ${{ inputs.registry-url }}
+        package-manager-cache: false
+    - run: npm install --global npm@12.1.0
+      shell: bash
+    - run: npm ci --ignore-scripts
+      shell: bash

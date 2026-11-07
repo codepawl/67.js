@@ -8,30 +8,44 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: npm-release
   cancel-in-progress: false
 
 jobs:
+  # The same checks a pull request runs, from test.yml.
+  checks:
+    uses: ./.github/workflows/test.yml
+
   publish:
+    needs: checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/setup
         with:
-          node-version: '24'
           registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-      - run: npm install --global npm@12.1.0
-      - run: npm ci --ignore-scripts
-      - run: npm test
-      - run: npm run prepare:release
-      - run: npm run smoke:package
-      - run: npm run smoke:mcp-package -- --protocol-only
       - name: Publish a new version through OIDC
         run: npm run publish:ci
+      - name: Check that the registry serves the version in package.json
+        run: |
+          expected=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').name")
+          for attempt in $(seq 1 12); do
+            published=$(npm view "${name}" version 2>/dev/null || true)
+            if [ "${published}" = "${expected}" ]; then
+              echo "${name}@${published} is live."
+              exit 0
+            fi
+            echo "Registry shows '${published}', waiting for ${expected} (attempt ${attempt} of 12)."
+            sleep 10
+          done
+          echo "The registry did not serve ${name}@${expected} within two minutes." >&2
+          exit 1
 
   release:
     needs: publish

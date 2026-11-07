@@ -67,3 +67,5 @@ packages/denoise-oidn/vendor/
 # Renders and previews that are not part of the package
 out/
 __pycache__/
+
+coverage/
