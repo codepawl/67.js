@@ -61,7 +61,7 @@ jobs:
       - uses: ./.github/actions/setup
       # The live MCP tests need build/ and build/mcp.
       - run: npm run build:lib
-      - run: npm run test:coverage -- --test-shard=${{ matrix.shard }}/3 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/shard-${{ matrix.shard }}.info
+      - run: mkdir -p coverage && npm run test:coverage -- --test-shard=${{ matrix.shard }}/3 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/shard-${{ matrix.shard }}.info
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
