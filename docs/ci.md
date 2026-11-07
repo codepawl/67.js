@@ -10,7 +10,7 @@ All jobs start at once.
 | --- | --- |
 | `audit` | `npm audit --audit-level=high` |
 | `size` | `npm run size` and `npm run tool-cost` against the pull request base (pull requests only; a release has no base) |
-| `unit` (6 shards balanced by measured time, `scripts/shard-test-files.mjs` and `test-timings.json`) | `npm run build:lib`, then `npm run test:coverage` on one sixth of the test files; uploads its lcov and per-file timings |
+| `unit` (8 shards balanced by measured time, `scripts/shard-test-files.mjs` and `test-timings.json`) | `npm run build:lib`, then `npm run test:coverage` on one eighth of the test files; uploads its lcov and per-file timings |
 | `coverage` | merges the shard lcov files, writes the summary, compares with `coverage-baseline.json`, uploads `lcov` |
 | `package` | `prepare:release`, `check:links:package`, `smoke:package`, `smoke:mcp-package` |
 | `test` | waits for every job above and fails unless each one succeeded. Branch protection on `main` requires this name. |
@@ -19,7 +19,7 @@ All jobs start at once.
 
 ## Coverage
 
-Coverage comes from Node's built-in `--experimental-test-coverage`. The `coverage` job fails when line, branch or function coverage falls more than 0.5 points below `coverage-baseline.json`. Raise the baseline by editing that file; lower it only on purpose and say why in the pull request. To reproduce locally: `npm run test:coverage -- --test-reporter=lcov --test-reporter-destination=coverage/lcov.info`, then `npm run coverage:gate -- coverage`.
+Coverage comes from Node's built-in `--experimental-test-coverage`. The `coverage` job fails when line or function coverage falls more than 0.5 points, or branch coverage more than 1.5 points, below `coverage-baseline.json` (branch totals move by up to about 0.8 points between runs of the same commit). Raise the baseline by editing that file; lower it only on purpose and say why in the pull request. To reproduce locally: `npm run test:coverage -- --test-reporter=lcov --test-reporter-destination=coverage/lcov.info`, then `npm run coverage:gate -- coverage`.
 
 ## Add a job or a smoke
 
