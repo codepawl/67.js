@@ -26,7 +26,7 @@ import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem } from '../src/agent-errors.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
-import { sceneQueryFor, summarizeWalkMap } from './agent-walkmap.js';
+import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from './agent-walkmap.js';
 
 let active = null;
 let canvas = document.querySelector('canvas');
@@ -413,6 +413,7 @@ setPhysicsModuleLoader(() => import(/* @vite-ignore */ new URL('/vendor/rapier.j
 // The preview bundle is one file, so the on-demand scene modules load together on the first call and later calls stay
 // synchronous. The boolean engine is WebAssembly and loads asynchronously, once, only for calls that need it.
 
+let queryOnly;
 const ASSET_DECODE_LIMITS = agentAssetDecodeOptions();
 
 // An agent cannot pass loadGltf options, so a limit error names the catalog limits instead of "Fix: pass { ... }".
@@ -852,14 +853,17 @@ window.__agentPreview = {
     if (!allAgentSceneModulesLoaded()) return loadAllAgentSceneModules().then(() => this.inspectMeshes({ sessionId, ...options }));
     return { sessionId, ...scene.inspectMeshes(options) };
   },
-  async walkMap({ sessionId, clearance = 2, groundRange, includeCells = false, ...options }) {
+  async queryOnlyWalkMap({ data, ...input }) {
+    queryOnly ??= createQueryOnlyCache(parseGltf);
+    return queryOnly.walkMap({ ...input, bytes: data === undefined ? undefined : bytesFromBase64(data) });
+  },
+  async walkMap({ sessionId, clearance = 2, groundRange, keepOut, streetY, includeCells = false, ...options }) {
     const record = requireSession(sessionId);
-    if (typeof record.scene.queryParts !== 'function') throw new TypeError('scene_walkmap needs an imported asset scene (scene_create_asset). Procedural recipe scenes have no loaded surfaces to query yet.');
     if (!allAgentSceneModulesLoaded()) await loadAllAgentSceneModules();
     const started = performance.now();
     const query = sceneQueryFor(record);
-    const map = query.walkMap(options);
-    return { sessionId, revision: record.scene.revision, ...summarizeWalkMap(map, { clearance, groundRange, includeCells }), skippedParts: query.skipped.length, milliseconds: Math.round(performance.now() - started) };
+    const map = query.walkMap(walkOptionsFor(options, keepOut, streetY));
+    return { sessionId, revision: record.scene.revision, ...summarizeWalkMap(map, { clearance, groundRange, keepOut, includeCells }), skippedParts: query.skipped.length, milliseconds: Math.round(performance.now() - started) };
   },
   apply(input) {
     if (input.sequenceData) {
