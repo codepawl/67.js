@@ -117,7 +117,7 @@ for (const era of ['modern', 'legacy']) {
     const connectMs = performance.now() - start;
     processId = transport.pid;
     assert.equal(client.getServerVersion().version, metadata.version);
-    assert.equal((await client.listTools()).tools.length, 22);
+    assert.equal((await client.listTools()).tools.length, 23);
     const capabilities = (await call('scene_capabilities')).structuredContent;
     assert.equal(capabilities.phase, 'idle');
     assert.equal(capabilities.preview.maximumActiveScenes, 1);

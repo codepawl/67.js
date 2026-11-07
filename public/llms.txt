@@ -145,6 +145,7 @@ Share the target's retained matrix to follow rigid motion. Skin, morph, assembly
 Surface clearance prevents overlapping layers in this workflow. It does not detect general mesh penetration or provide whole-object shrinkwrap.
 
 `addons/mesh-query` owns copied static geometry in disposable BVH indices. Read `docs/mesh-query.md` before querying.
+`addons/scene-query` raycasts a whole loaded scene (every part with its world matrix) and samples a walk map of ground height and headroom. Read `docs/scene-query.md`.
 Use `solid: true` indices and `mode: 'closed-solids'` to distinguish boundary contact, containment and separation.
 Surface contact does not prove volume penetration or identify z-fighting. Never substitute surface-only results for containment.
 

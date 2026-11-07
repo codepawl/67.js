@@ -295,7 +295,16 @@ function validateSelfIntersections(record, welded, maximum) {
   return counter.tests;
 }
 
+// A scene query casts thousands of rays against one part with the same matrix, so the last validated state is kept.
 function matrixState(record, values) {
+  const cached = record.matrixCache;
+  if (cached && ArrayBuffer.isView(values) === cached.typed && values.length === 16 && cached.source.every((value, position) => value === values[position])) return cached.state;
+  const state = computeMatrixState(record, values);
+  record.matrixCache = { source: Array.from(values), typed: ArrayBuffer.isView(values), state };
+  return state;
+}
+
+function computeMatrixState(record, values) {
   if ((!Array.isArray(values) && !ArrayBuffer.isView(values)) || values.length !== 16) throw new TypeError('Query matrix requires 16 affine components.');
   const elements = Array.from(values, value => {
     if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isFinite(Math.fround(value))) throw new RangeError('Query matrix requires finite Float32 components.');

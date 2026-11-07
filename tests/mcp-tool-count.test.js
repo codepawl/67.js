@@ -38,6 +38,7 @@ test('documented MCP tool counts match the protocol listing', async () => {
     'docs/mcp.md': /Lists all (\d+) tools/,
     'index.html': /(\d+) MCP tools/,
     'scripts/smoke-mcp.mjs': /listing\.tools\.length, (\d+)\)/,
+    'scripts/smoke-mcp-package.mjs': /listTools\(\)\)\.tools\.length, (\d+)\)/,
   };
   for (const [file, pattern] of Object.entries(statements)) {
     assert.equal(await countStatedIn(file, pattern), listed, `${file} states a different tool count than tools/list`);
