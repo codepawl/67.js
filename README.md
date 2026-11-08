@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <a href="https://67js.codepawl.com/showcase.html?scene=airport"><img src="https://67js.codepawl.com/previews/showcase-airport.webp" alt="An airport ramp with an airliner at its stand and the turnaround crew, rendered by 67js" width="100%" /></a>
+  <img src="https://67js.codepawl.com/previews/bistro-street.webp" alt="A Paris side street in the Bistro scene with red awnings, string lights and a blue sky, rendered by 67js" width="100%" />
 </p>
 
 67js is a WebGL2 renderer with addons for terrain, vegetation, characters, liquid, vehicles and media export.
@@ -33,8 +33,16 @@ The goal is to be as capable as Blender and as light as three.js. [Issue #23](ht
 
 <table>
   <tr>
-    <td width="50%"><a href="https://67js.codepawl.com/showcase.html?scene=datacenter"><img src="https://67js.codepawl.com/previews/showcase-datacenter.webp" alt="A cutaway AI data center hall rendered by 67js" /></a><br /><b>AI data center</b></td>
-    <td width="50%"><a href="https://67js.codepawl.com/showcase.html?scene=port"><img src="https://67js.codepawl.com/previews/showcase-port.webp" alt="A container port with cranes and stacked containers rendered by 67js" /></a><br /><b>Container port</b></td>
+    <td width="50%"><img src="https://67js.codepawl.com/previews/bistro-cafe.webp" alt="A green corner restaurant with red awnings and a blue scooter in the Bistro scene, rendered by 67js" /><br /><b>Bistro cafe corner</b></td>
+    <td width="50%"><img src="https://67js.codepawl.com/previews/bistro-plaza.webp" alt="A large plane tree in a hedged circle on a Bistro plaza, rendered by 67js" /><br /><b>Bistro plaza</b></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="33%"><a href="https://67js.codepawl.com/showcase.html?scene=airport"><img src="https://67js.codepawl.com/previews/showcase-airport.webp" alt="An airport ramp with an airliner at its stand and the turnaround crew, rendered by 67js" /></a><br /><b>Airport ramp</b></td>
+    <td width="33%"><a href="https://67js.codepawl.com/showcase.html?scene=datacenter"><img src="https://67js.codepawl.com/previews/showcase-datacenter.webp" alt="A cutaway AI data center hall rendered by 67js" /></a><br /><b>AI data center</b></td>
+    <td width="33%"><a href="https://67js.codepawl.com/showcase.html?scene=port"><img src="https://67js.codepawl.com/previews/showcase-port.webp" alt="A container port with cranes and stacked containers rendered by 67js" /></a><br /><b>Container port</b></td>
   </tr>
 </table>
 
@@ -152,6 +160,7 @@ Read [CONTRIBUTING.md](https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.
 - [gl-matrix](https://github.com/toji/gl-matrix) supplies the matrix math.
 - The glTF addon has its own parser. The Draco, meshopt and KTX2 decoders are [three.js](https://threejs.org/) loaders that you pass in.
 - The textures and the HDRI on the site are CC0 scans from [Poly Haven](https://polyhaven.com) and [ambientCG](https://ambientcg.com). See [the texture credits](https://github.com/codepawl/67.js/blob/main/public/textures/CREDITS.md).
+- The Bistro renders use [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) (CC BY 4.0, from the NVIDIA ORCA library) under a CC0 [Poly Haven](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky) sky.
 - The showcase models and their sources are listed in each world's `scene.json` under `public/showcase/`.
 
 [MIT](LICENSE) © CodePawl
