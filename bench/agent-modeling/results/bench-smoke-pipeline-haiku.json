@@ -1,0 +1,151 @@
+{
+  "run": "bench-smoke-pipeline-haiku",
+  "model": "claude-haiku-5-5",
+  "date": "2026-11-08T20:37:12.587Z",
+  "skill": false,
+  "branches": "on",
+  "relations": "on",
+  "runsPerTask": 1,
+  "passed": 2,
+  "tasks": 2,
+  "toolCalls": 8,
+  "costUsd": 0.14,
+  "byModel": {
+    "claude-haiku-5-5": {
+      "runs": 2,
+      "passed": 2,
+      "successRate": 1,
+      "toolCalls": 8,
+      "toolErrors": 0,
+      "inputTokens": 958962,
+      "outputTokens": 4795,
+      "costUsd": 0.14,
+      "tasks": {
+        "bolt": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 5,
+          "toolErrors": 0,
+          "inputTokens": 582713,
+          "outputTokens": 3047,
+          "costUsd": 0.12
+        },
+        "camera-closeup": {
+          "runs": 1,
+          "passed": 1,
+          "successRate": 1,
+          "toolCalls": 3,
+          "toolErrors": 0,
+          "inputTokens": 376249,
+          "outputTokens": 1748,
+          "costUsd": 0.02
+        }
+      }
+    }
+  },
+  "records": [
+    {
+      "task": "bolt",
+      "attempt": 1,
+      "pass": true,
+      "passed": 7,
+      "total": 7,
+      "failed": [],
+      "model": "claude-haiku-5-5",
+      "toolCalls": 5,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 1,
+        "scene_create": 1,
+        "mesh_inspect": 1,
+        "scene_look": 1,
+        "scene_export_recipe": 1,
+        "scene_dispose": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "cylinder"
+        ],
+        "meshOperations": [],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        },
+        "images": [
+          "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/bolt-front.png",
+          "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/bolt-side.png",
+          "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/bolt-three-quarter.png"
+        ]
+      },
+      "turns": 7,
+      "costUsd": 0.11833810000000002,
+      "inputTokens": 582713,
+      "outputTokens": 3047,
+      "wallSeconds": 34,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "task": "camera-closeup",
+      "attempt": 1,
+      "pass": true,
+      "passed": 3,
+      "total": 3,
+      "failed": [],
+      "model": "claude-haiku-5-5",
+      "toolCalls": 3,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 1,
+        "scene_create": 1,
+        "scene_apply": 1,
+        "scene_export_recipe": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "box"
+        ],
+        "meshOperations": [],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        },
+        "images": [
+          "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/camera-closeup-front.png",
+          "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/camera-closeup-side.png",
+          "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/camera-closeup-three-quarter.png"
+        ]
+      },
+      "turns": 5,
+      "costUsd": 0.017836499999999998,
+      "inputTokens": 376249,
+      "outputTokens": 1748,
+      "wallSeconds": 40,
+      "exitCode": 0,
+      "stopped": "success"
+    }
+  ]
+}
