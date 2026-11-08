@@ -1,7 +1,7 @@
 // Draws reference scenes with the path tracer on the CPU and on the GPU, same seed, and writes the images and timings.
 //   node bench/reference/gpu-compare.mjs <output directory> <scene id>,<scene id> [--samples 64] [--backend cpu|gpu|webgpu|both]
 //     [--width 960] [--height 540] [--bounces 8] [--no-denoise] [--threads 8]
-// Files are <scene>-pathtracer-<backend>.png and timings.json. Run it through bash ~/.agents/tools/gpu-lock.sh: the GPU
+// Files are <scene>-pathtracer-<backend>.png and timings.json. Run it through the GPU lock script (gpu-lock.sh): the GPU
 // backend takes the whole GPU for seconds at a time.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
