@@ -23,7 +23,10 @@ const MAX_MESH_REPORTS = 16;
 // Terrain meshes carry one more float for each vertex (sky visibility) than the 56 bytes the budget estimates.
 const TERRAIN_SKY_VISIBILITY_BYTES = 4;
 const CAMERA_DEFAULTS = Object.freeze({ eye: [4, 3, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 1000 });
-const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend'];
+// Per-node render flags: `visible` hides a node and its children; the rest become renderer part flags of a mesh node.
+const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher'];
+const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
+const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
 const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', ...MATERIAL_LAYER_FIELDS];
 const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'boxMapScale', 'boxMapAxis'];
 const CAMERA_FIELDS = Object.keys(CAMERA_DEFAULTS);
@@ -309,6 +312,11 @@ function nodeFrom(value) {
   if (value.depthLayer !== undefined) {
     integer(value.depthLayer, 0, MAXIMUM_DEPTH_LAYER, 'depthLayer');
   }
+  for (const flag of RENDER_FLAG_FIELDS) {
+    if (value[flag] !== undefined && typeof value[flag] !== 'boolean') throw new TypeError(`${flag} must be boolean.`);
+    if (flag !== 'visible' && value[flag] !== undefined && value.geometry === undefined) throw new TypeError(`Node ${value.id}: ${flag} belongs on a mesh node.`);
+  }
+  if (value.holdout === true && value.shadowCatcher === true) throw new TypeError(`Node ${value.id}: a node is a holdout or a shadow catcher, not both.`);
   if (value.skin !== undefined) {
     if (value.geometry === undefined) {
       throw new TypeError('Only mesh nodes can have a skin.');
@@ -836,6 +844,7 @@ function cameraPoseFrom(pose) {
 // Candidate buffers are private. A failed seek cannot publish half a pose to render handles.
 function stagePose(stagedState, time) {
   const sampled = time === null ? null : stagedState.motionSampler?.sample(time);
+  const hiddenNodes = hiddenNodeIds(stagedState.recipe, sampled);
   // Physics holds its last pose after its duration, so a seek past the end is the resting state.
   const simulated = time === null ? null : stagedState.physicsSampler?.sample(Math.min(time, stagedState.physicsSampler.duration));
   const graph = stagedState.poseGraph ?? stagedState.graph;
@@ -879,7 +888,7 @@ function stagePose(stagedState, time) {
   const clothGeometries = sampledGeometries(stagedState, time);
   // Staged last: a pose pending on a decoded asset must be committed or discarded, so nothing above may throw after it.
   const assetClips = stagedState.assetRuntime.animators.length ? agentSceneModule('assets').stageAssetClips(stagedState.assetRuntime, graph, time) : null;
-  return { graph, materialUpdates, camera, time, clothGeometries, assetClips };
+  return { graph, materialUpdates, camera, time, clothGeometries, assetClips, hiddenNodes };
 }
 
 // Cloth and particles replace the geometry of their own nodes at a sampled time; no node belongs to both.
@@ -892,6 +901,38 @@ function sampledGeometries(stagedState, time) {
     sampler?.sample(time)?.forEach((geometry, nodeId) => geometries.set(nodeId, geometry));
   }
   return geometries.size ? geometries : null;
+}
+
+function partFlagsOf(node) {
+  return Object.fromEntries(PART_FLAG_FIELDS.filter(flag => node[flag] !== undefined).map(flag => [flag, node[flag]]));
+}
+
+function sameRenderFlags(part, node, usesVisibility, assetExtras) {
+  return PART_FLAG_FIELDS.every(flag => part[flag] === (node[flag] ?? assetExtras?.[flag])) && Boolean(part.visibility) === usesVisibility;
+}
+
+function recipeUsesVisibility(recipe) {
+  return recipe.nodes.some(node => node.visible !== undefined) || Boolean(recipe.motion?.tracks?.some(track => track.kind === 'node' && track.property === 'visible'));
+}
+
+/** Node IDs hidden at a pose: a node set invisible by its field or a sampled track, and everything under it. */
+function hiddenNodeIds(recipe, sampled) {
+  const hidden = new Set();
+  if (!recipeUsesVisibility(recipe)) return hidden;
+  const byId = new Map(recipe.nodes.map(node => [node.id, node]));
+  const hiddenOwn = node => {
+    const keyed = sampled?.nodes.get(node.id)?.visible;
+    return keyed === undefined ? node.visible === false : keyed < 0.5;
+  };
+  for (const node of recipe.nodes) {
+    for (let cursor = node, depth = 0; cursor && depth < 256; cursor = byId.get(cursor.parent), depth++) {
+      if (hiddenOwn(cursor)) {
+        hidden.add(node.id);
+        break;
+      }
+    }
+  }
+  return hidden;
 }
 
 // Cloth keeps one geometry per sheet that every sample rewrites, so the parts of a later seek are the previous ones and the
@@ -910,6 +951,7 @@ function partsWithCloth(restParts, clothGeometries, previousParts) {
 /** Returns true when the parts handed to a renderer changed, which the caller counts as a topology change. */
 function publishPose(stagedState, pose) {
   for (const part of stagedState.restParts) {
+    if (part.visibility) part.visibility.visible = !pose.hiddenNodes.has(part.name);
     Float32Array.prototype.set.call(part.matrix, pose.graph.getNode(part.name).worldMatrix);
   }
   for (const update of pose.materialUpdates) {
@@ -1119,6 +1161,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     }
     const activeParts = new Map(state?.sourceRestParts.map(part => [part.name, part]) ?? []);
     const preferredParts = new Map(preferred?.sourceRestParts.map(part => [part.name, part]) ?? []);
+    const usesVisibility = recipeUsesVisibility(recipe);
     const nextParts = recipe.nodes.filter(node => node.geometry !== undefined).map(node => {
       const binding = skinBindings.get(node.id);
       const geometry = binding?.geometry ?? geometries.get(node.geometry);
@@ -1126,10 +1169,13 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       const assetExtras = assetRuntime.partExtras.get(node.id);
       const activePart = removedNodes.has(node.id) ? null : activeParts.get(node.id);
       const existing = [activePart, preferredParts.get(node.id)]
-        .find(part => part?.geometry === geometry && part.material === material && part.skin === (assetExtras?.skin ?? binding?.skin) && part.morph === assetExtras?.morph && depthLayerOf(part) === depthLayerOf(node));
+        .find(part => part?.geometry === geometry && part.material === material && part.skin === (assetExtras?.skin ?? binding?.skin) && part.morph === assetExtras?.morph && depthLayerOf(part) === depthLayerOf(node) && sameRenderFlags(part, node, usesVisibility, assetExtras));
       return existing ?? Object.freeze({
         name: node.id, geometry, material,
         ...(depthLayerOf(node) ? { depthLayer: depthLayerOf(node) } : {}),
+        ...partFlagsOf(node),
+        // The renderer reads this holder every update, and publishPose rewrites it for each pose.
+        ...(usesVisibility ? { visibility: { visible: true } } : {}),
         matrix: new Float32Array(graph.getNode(node.id).worldMatrix),
         ...(binding ? { skin: binding.skin } : {}),
         ...assetExtras,

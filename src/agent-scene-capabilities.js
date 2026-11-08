@@ -228,6 +228,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     choose: 'agx for lit scenes and Blender comparisons, neutral for product and brand colour, aces for contrast; needs loadAgentSceneModules',
   }),
   // Flush surfaces flicker (z-fighting). scene_inspect and renderer.diagnostics warn with coplanar-overlap; these fix it at draw time.
+  renderFlags: Object.freeze({ nodeFields: Object.freeze(['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher']), motion: 'node track property visible: 1 or 0, STEP', note: 'visible:false hides a node and children; holdout and shadowCatcher need a transparent canvas (Renderer67 transparent:true); flags split batches.' }),
   depthBias: Object.freeze({ nodeFields: Object.freeze(['decal', 'depthLayer']), maxDepthLayer: 4, environment: 'environment.resolveCoplanar', modes: Object.freeze(['offset']), warning: 'coplanar-overlap', note: 'decal wins over the surface below; depthLayer stacks decals; resolveCoplanar offset biases the smaller part of a flagged pair.' }),
   proceduralMotion: true,
   motionIk: Object.freeze(['two-bone', 'aim']),
