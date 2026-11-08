@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { setPriority, constants } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import packageMetadata from '../package.json' with { type: 'json' };
@@ -757,7 +758,44 @@ const renderSettings = z.strictObject({
   region: z.strictObject({ x: z.number().int().min(0), y: z.number().int().min(0), width: z.number().int().min(16), height: z.number().int().min(16) }).optional().describe('Pixels to keep from the top left. Not with renderer.'),
 }).describe('Snapshot render: one PNG, eight evenly spaced PNGs, or H.264 MP4 (even dimensions). Defaults: 24 fps, one second. motion.start plays recipe tracks, animation an imported clip, both layer. Omitted motion holds time zero.');
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-const edit = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
+const edit = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+// Only these three remove something that cannot be restored: the scene, a checkpoint slot, a job's files.
+const destroy = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
+
+const TOOL_TITLES = {
+  scene_capabilities: 'Scene capabilities', scene_create: 'Create scene', scene_asset_catalog: 'Asset catalog', scene_create_asset: 'Create scene from asset',
+  scene_inspect: 'Inspect scene', scene_walkmap: 'Walkable map', mesh_inspect: 'Inspect meshes', mesh_edit: 'Edit mesh', mesh_stack: 'Set mesh modifiers',
+  scene_apply: 'Apply scene edits', scene_look: 'Look at scene', scene_review: 'Review camera samples', scene_checkpoint: 'Save checkpoint',
+  scene_restore: 'Restore checkpoint', scene_release_checkpoint: 'Release checkpoint', scene_export_recipe: 'Export recipe', scene_export_glb: 'Export GLB',
+  scene_dispose: 'Dispose scene', scene_render_submit: 'Submit render job', scene_render_status: 'Render job status', scene_render_cancel: 'Cancel render job',
+  scene_render_result: 'Render job result', scene_render_release: 'Release render job',
+};
+
+// Top-level fields only and loose nested objects: every output schema is sent with tools/list, so it counts against the tool-cost ceilings.
+const OUTPUT_SCHEMAS = {
+  scene_capabilities: z.looseObject({ phase: z.string().optional() }),
+  scene_inspect: z.looseObject({ sessionId: z.string().optional(), revision: z.number().int().optional() }),
+  scene_checkpoint: z.looseObject({ checkpointId: z.string(), revision: z.number().int().optional() }),
+  scene_release_checkpoint: z.looseObject({ released: z.boolean(), checkpointId: z.string().optional() }),
+  scene_render_status: z.looseObject({ jobId: z.string(), state: z.string() }),
+  scene_render_result: z.looseObject({ jobId: z.string(), artifacts: z.array(z.looseObject({ filename: z.string(), mimeType: z.string(), bytes: z.number(), path: z.string() })) }),
+};
+
+// A render result carries the files by path and digest. A PNG that fits is also sent inline so a client can show it,
+// and every artifact gets a resource link to its file. Video and larger files stay on disk.
+const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const INLINE_IMAGE_MAXIMUM_BYTES = 1024 * 1024;
+
+async function renderResultContent(result) {
+  const content = [{ type: 'text', text: JSON.stringify(result) }];
+  for (const artifact of result.artifacts) {
+    if (INLINE_IMAGE_TYPES.has(artifact.mimeType) && artifact.bytes <= INLINE_IMAGE_MAXIMUM_BYTES) {
+      content.push({ type: 'image', data: (await readFile(artifact.path)).toString('base64'), mimeType: artifact.mimeType });
+    }
+    content.push({ type: 'resource_link', uri: pathToFileURL(artifact.path).href, name: artifact.filename, mimeType: artifact.mimeType, size: artifact.bytes });
+  }
+  return { content, structuredContent: result };
+}
 
 // Errors from the preview page arrive as "page.evaluate: RangeError: <message>\n    at <bundle url>...": the stack
 // names bundle internals the agent cannot act on, so only the message is returned.
@@ -819,7 +857,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
     return activeSessionId ? { ...argumentsValue, sessionId: activeSessionId } : argumentsValue;
   }
   function register(name, description, inputSchema, annotations, run) {
-    server.registerTool(name, { description, inputSchema, annotations }, async argumentsValue => {
+    server.registerTool(name, { title: TOOL_TITLES[name], description, inputSchema, annotations: { title: TOOL_TITLES[name], ...annotations }, ...(OUTPUT_SCHEMAS[name] ? { outputSchema: OUTPUT_SCHEMAS[name] } : {}) }, async argumentsValue => {
       try {
         return await run(withActiveSession(argumentsValue, inputSchema));
       } catch (error) {
@@ -863,15 +901,15 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   });
   register('scene_checkpoint', 'Save a private recipe snapshot. Up to eight checkpoints can be retained per session.', z.strictObject(sessionFields), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.checkpoint(argumentsValue)));
   register('scene_restore', 'Restore a checkpoint atomically using the current revision. The checkpoint remains available and revision increments. With branch instead of checkpointId, keep that branch (one revision) and drop all branches.', z.strictObject({ ...sessionFields, checkpointId: restoreCheckpointId, ...restoreBranchField, expectedRevision }), edit, async argumentsValue => jsonResult(await runtime.restore(argumentsValue)));
-  register('scene_release_checkpoint', 'Release one checkpoint slot. Released or foreign checkpoints fail.', z.strictObject(checkpointFields), edit, async argumentsValue => jsonResult(await runtime.releaseCheckpoint(argumentsValue)));
+  register('scene_release_checkpoint', 'Release one checkpoint slot. Released or foreign checkpoints fail.', z.strictObject(checkpointFields), destroy, async argumentsValue => jsonResult(await runtime.releaseCheckpoint(argumentsValue)));
   register('scene_export_recipe', 'Read a detached canonical JSON recipe for reproduction.', z.strictObject(sessionFields), readOnly, async argumentsValue => jsonResult(await runtime.exportRecipe(argumentsValue)));
   register('scene_export_glb', 'Write the active scene as a GLB file in the configured jobs folder, under a server-chosen name (the result has the path, byte count and SHA-256). Needs --jobs. Exports the current pose with pattern and imported textures, skins, morph weights and IK as posed; motionTime seeks authored motion first. For an imported asset, clip adds that source clip (translation, rotation, scale and morph weight tracks) on the source skeleton, which needs no animation, node overrides or motion in the scene. At most eight files are kept, oldest removed first; the GLB is at most 32 MiB.', z.strictObject({ ...sessionFields, clip: z.number().int().min(0).max(255).optional().describe('Imported assets only: index of the source clip to write.'), motionTime: z.number().min(0).max(3600).optional().describe('Seek authored motion (and IK) to this time before exporting. Leaves the preview there, like scene_look.'), maxTextureSize: z.number().int().min(1).max(4096).optional().describe('Largest texture side in pixels. Defaults to 2048.') }), edit, async argumentsValue => jsonResult(await runtime.exportGlb(argumentsValue)));
-  register('scene_dispose', 'Dispose the active scene and its checkpoints, releasing renderer resources.', z.strictObject(sessionFields), edit, async argumentsValue => jsonResult(await runtime.dispose(argumentsValue)));
+  register('scene_dispose', 'Dispose the active scene and its checkpoints, releasing renderer resources.', z.strictObject(sessionFields), destroy, async argumentsValue => jsonResult(await runtime.dispose(argumentsValue)));
   register('scene_render_submit', 'Start one asynchronous snapshot job in the configured private job store. Requires the current revision. Temporarily leases the preview renderer; does not change source revision or checkpoints.', z.strictObject({ ...sessionFields, expectedRevision, settings: renderSettings }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.submitJob(argumentsValue)));
   register('scene_render_status', 'Read render job state and durable frame progress. Terminal states are completed, cancelled, failed and interrupted.', z.strictObject(jobFields), readOnly, async argumentsValue => jsonResult(await runtime.jobStatus(argumentsValue)));
   register('scene_render_cancel', 'Request cancellation of one job. Poll status until terminal before using the preview again.', z.strictObject(jobFields), { ...edit, idempotentHint: true }, async argumentsValue => jsonResult(await runtime.cancelJob(argumentsValue)));
-  register('scene_render_result', 'Read completed local output paths, MIME types, byte counts, SHA-256 digests and measured render metrics. Does not embed video bytes.', z.strictObject(jobFields), readOnly, async argumentsValue => jsonResult(await runtime.jobResult(argumentsValue)));
-  register('scene_render_release', 'Delete the owned files and record for a terminal job, freeing store quota. Active jobs must be cancelled first.', z.strictObject(jobFields), edit, async argumentsValue => jsonResult(await runtime.releaseJob(argumentsValue)));
+  register('scene_render_result', 'Read completed local output paths, MIME types, byte counts, SHA-256 digests and measured render metrics. Returns a PNG inline and a resource link to each file; video stays on disk.', z.strictObject(jobFields), readOnly, async argumentsValue => renderResultContent(await runtime.jobResult(argumentsValue)));
+  register('scene_render_release', 'Delete the owned files and record for a terminal job, freeing store quota. Active jobs must be cancelled first.', z.strictObject(jobFields), destroy, async argumentsValue => jsonResult(await runtime.releaseJob(argumentsValue)));
   return server;
 }
 
