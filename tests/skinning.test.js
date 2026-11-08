@@ -222,3 +222,27 @@ test('a mirrored weighted vertex draws pinched and is reported instead of failin
   assert.equal(reflectedSkinReport(pose), null);
   assert.deepEqual(reflectedSkinDiagnostics(new Map([[{ name: "knight" }, { skin: pose }]])), []);
 });
+
+test('a palette of many joints equals the four-matrix Float32 product with and without identity bind and mesh matrices (issue #572)', () => {
+  const jointCount = 5;
+  const jointWorld = new Float32Array(jointCount * 16);
+  const inverseBind = new Float32Array(jointCount * 16);
+  for (let joint = 0; joint < jointCount; joint++) {
+    const rotation = mat4.fromRotationTranslationScale(mat4.create(), [0.1 * joint, 0.3, 0.2, 1], [joint * 0.37, 1.1, -0.6 * joint], [1 + joint * 0.1, 1, 0.9]);
+    jointWorld.set(rotation, joint * 16);
+    inverseBind.set(mat4.invert(mat4.create(), rotation), joint * 16);
+  }
+  const transformedMesh = mat4.fromTranslation(mat4.create(), [0.4, -2.3, 1.7]);
+  const transformedBind = mat4.fromScaling(mat4.create(), [1.25, 0.8, 1.1]);
+  for (const [mesh, bind] of [[transformedMesh, transformedBind], [transformedMesh, mat4.create()], [mat4.create(), transformedBind], [mat4.create(), mat4.create()]]) {
+    const pose = createSkinPose(jointCount);
+    updateSkinPose(pose, jointWorld, inverseBind, mesh, bind, false);
+    const meshInverse = mat4.invert(mat4.create(), new Float32Array(mesh));
+    for (let joint = 0; joint < jointCount; joint++) {
+      const product = mat4.multiply(mat4.create(), jointWorld.subarray(joint * 16, joint * 16 + 16), inverseBind.subarray(joint * 16, joint * 16 + 16));
+      mat4.multiply(product, product, new Float32Array(bind));
+      mat4.multiply(product, meshInverse, product);
+      assert.deepEqual(Array.from(pose.jointMatrices.subarray(joint * 16, joint * 16 + 16)), Array.from(product));
+    }
+  }
+});
