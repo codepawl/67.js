@@ -4,6 +4,7 @@
 // fields is integrated from its own birth with a fixed step each time it is asked: still a pure function of time.
 
 import { addFieldAcceleration } from './force-fields.js';
+import { findFirstCollision } from './particle-collision.js';
 
 export const PARTICLE_LIMITS = Object.freeze({
   maxSystems: 4,
@@ -13,9 +14,14 @@ export const PARTICLE_LIMITS = Object.freeze({
   maxLifetime: 60,
   landingIterations: 32,
   fieldStepSeconds: 1 / 120,
+  maxColliders: 8,
+  maxColliderTriangles: 4096,
 });
 
 const NO_DRAG_THRESHOLD = 1e-6;
+// A bounce slower than this (m/s) is not a bounce: the particle slides along the surface, or settles when it is slow too.
+const REST_SPEED = 0.25;
+const CONTACT_OFFSET = 1e-4;
 const SEED_MIXER = 0x9e3779b1;
 
 export function createGenerator(seed, index) {
@@ -80,12 +86,16 @@ function pointInEmitter(emitter, fractions) {
  */
 export function createParticleLaunches(settings) {
   const { count, seed, emitter, lifetime, speed, direction, spreadRadians, size, rate, forces } = settings;
+  const spin = settings.spin ?? [0, 0];
   const axis = normalized(direction);
   const birth = new Float64Array(count);
   const life = new Float64Array(count);
   const origin = new Float64Array(count * 3);
   const velocity = new Float64Array(count * 3);
   const particleSize = new Float64Array(count);
+  const spinAxis = new Float64Array(count * 3);
+  const spinRate = new Float64Array(count);
+  const spinStart = new Float64Array(count);
   for (let index = 0; index < count; index++) {
     const random = createGenerator(seed, index);
     random();
@@ -99,12 +109,31 @@ export function createParticleLaunches(settings) {
     life[index] = between(lifetime, random());
     particleSize[index] = between(size, random());
     birth[index] = rate ? index / rate : 0;
+    // Drawn last, so adding spin never changes the launch of a particle that existed before.
+    const spinDirection = directionInCone([0, 1, 0], Math.PI, random(), random());
+    spinAxis.set(spinDirection, index * 3);
+    spinRate[index] = between(spin, random()) * Math.PI / 180;
+    spinStart[index] = random() * Math.PI * 2;
   }
-  const launches = { count, birth, life, origin, velocity, size: particleSize, landing: new Float64Array(count).fill(Infinity) };
-  const hasFields = Boolean(forces.fields?.length);
+  const launches = {
+    count, birth, life, origin, velocity, size: particleSize, spinAxis, spinRate, spinStart,
+    hasSpin: spin[0] !== 0 || spin[1] !== 0,
+    // Age at which a particle stops moving: its landing, or where it came to rest.
+    landing: new Float64Array(count).fill(Infinity),
+  };
+  // Fields, colliders and bounce have no closed form: the particle is stepped from its birth (see trackedState).
+  const integrated = Boolean(forces.fields?.length || forces.colliders || forces.bounce > 0);
+  if (integrated) {
+    launches.track = {
+      position: Float64Array.from(origin),
+      velocity: Float64Array.from(velocity),
+      steps: new Int32Array(count),
+      resting: new Uint8Array(count),
+    };
+    return launches;
+  }
   for (let index = 0; index < count; index++) {
-    // Under fields the floor is met while integrating, not by the closed form.
-    launches.landing[index] = hasFields ? Infinity : landingAge(launches, index, forces);
+    launches.landing[index] = landingAge(launches, index, forces);
   }
   return launches;
 }
@@ -162,32 +191,110 @@ function landingAge(launches, index, forces) {
   return high;
 }
 
-// Integrates one particle under gravity, drag toward the wind and every force field, from launch to `age`.
-// Semi-implicit Euler at a fixed step; a particle that reaches the floor stays there.
-function integrateUnderFields(launches, index, forces, age, target) {
-  const position = [launches.origin[index * 3], launches.origin[index * 3 + 1], launches.origin[index * 3 + 2]];
-  const velocity = [launches.velocity[index * 3], launches.velocity[index * 3 + 1], launches.velocity[index * 3 + 2]];
-  const acceleration = [0, 0, 0];
-  let elapsed = 0;
-  while (elapsed < age) {
-    const step = Math.min(PARTICLE_LIMITS.fieldStepSeconds, age - elapsed);
-    for (let axis = 0; axis < 3; axis++) {
-      acceleration[axis] = forces.gravity[axis] + forces.drag * (forces.wind[axis] - velocity[axis]);
-    }
-    for (const field of forces.fields) {
-      addFieldAcceleration(field, position, velocity, launches.birth[index] + elapsed, acceleration);
-    }
-    for (let axis = 0; axis < 3; axis++) {
-      velocity[axis] += acceleration[axis] * step;
-      position[axis] += velocity[axis] * step;
-    }
-    elapsed += step;
-    if (forces.floor !== undefined && position[1] <= forces.floor) {
-      position[1] = forces.floor;
-      break;
-    }
+const scratchFrom = [0, 0, 0];
+const scratchTo = [0, 0, 0];
+const scratchAcceleration = [0, 0, 0];
+const contact = { fraction: Infinity, normal: [0, 1, 0], onFloor: false };
+
+// The earliest surface the path from `from` to `to` crosses: the floor plane or a collider triangle.
+function earliestContact(forces, from, to) {
+  contact.fraction = Infinity;
+  if (forces.floor !== undefined && to[1] <= forces.floor) {
+    contact.fraction = from[1] > forces.floor ? (from[1] - forces.floor) / (from[1] - to[1]) : 0;
+    contact.normal[0] = 0;
+    contact.normal[1] = 1;
+    contact.normal[2] = 0;
+    contact.onFloor = true;
   }
-  for (let axis = 0; axis < 3; axis++) target.position[axis] = position[axis];
+  if (forces.colliders) {
+    findFirstCollision(forces.colliders, from, to, contact);
+  }
+  return contact.fraction <= 1;
+}
+
+// Handles a contact. Without bounce the particle sticks where it touched. With bounce the normal speed is reflected and
+// scaled by `bounce`, the speed along the surface by `1 - friction`. Returns true when the particle has come to rest.
+function resolveContact(forces, position, velocity, from, to) {
+  for (let axis = 0; axis < 3; axis++) {
+    position[axis] = from[axis] + (to[axis] - from[axis]) * contact.fraction;
+  }
+  if (contact.onFloor) position[1] = forces.floor;
+  if (!(forces.bounce > 0)) {
+    return true;
+  }
+  const normal = contact.normal;
+  const inward = velocity[0] * normal[0] + velocity[1] * normal[1] + velocity[2] * normal[2];
+  const rebound = inward < 0 ? -inward * forces.bounce : 0;
+  const outward = rebound < REST_SPEED ? 0 : rebound;
+  const keep = 1 - forces.friction;
+  let sliding = 0;
+  for (let axis = 0; axis < 3; axis++) {
+    const along = (velocity[axis] - normal[axis] * inward) * keep;
+    velocity[axis] = along + normal[axis] * outward;
+    position[axis] += normal[axis] * CONTACT_OFFSET;
+    sliding += along * along;
+  }
+  return outward === 0 && Math.sqrt(sliding) < REST_SPEED;
+}
+
+// One semi-implicit Euler step under gravity, drag toward the wind and every force field. Returns true at rest.
+function stepParticle(forces, position, velocity, step, fieldTime) {
+  for (let axis = 0; axis < 3; axis++) {
+    scratchAcceleration[axis] = forces.gravity[axis] + forces.drag * (forces.wind[axis] - velocity[axis]);
+  }
+  for (const field of forces.fields) {
+    addFieldAcceleration(field, position, velocity, fieldTime, scratchAcceleration);
+  }
+  for (let axis = 0; axis < 3; axis++) {
+    velocity[axis] += scratchAcceleration[axis] * step;
+    scratchFrom[axis] = position[axis];
+    scratchTo[axis] = position[axis] + velocity[axis] * step;
+  }
+  if (earliestContact(forces, scratchFrom, scratchTo)) {
+    return resolveContact(forces, position, velocity, scratchFrom, scratchTo);
+  }
+  for (let axis = 0; axis < 3; axis++) position[axis] = scratchTo[axis];
+  return false;
+}
+
+// Integrates one particle from launch to `age` at the fixed step. Whole steps are remembered per particle, so playing
+// forward continues where the last frame stopped and costs one frame of steps; a seek to an earlier age starts again
+// from birth. Both reach the same bytes, because the remembered state only ever sits on a whole step.
+function trackedState(launches, index, forces, age, target) {
+  const track = launches.track;
+  const stepSeconds = PARTICLE_LIMITS.fieldStepSeconds;
+  const wholeSteps = Math.floor(age / stepSeconds);
+  if (track.steps[index] > wholeSteps) {
+    for (let axis = 0; axis < 3; axis++) {
+      track.position[index * 3 + axis] = launches.origin[index * 3 + axis];
+      track.velocity[index * 3 + axis] = launches.velocity[index * 3 + axis];
+    }
+    track.steps[index] = 0;
+    track.resting[index] = 0;
+  }
+  const position = track.position.subarray(index * 3, index * 3 + 3);
+  const velocity = track.velocity.subarray(index * 3, index * 3 + 3);
+  while (track.steps[index] < wholeSteps && !track.resting[index]) {
+    const fieldTime = launches.birth[index] + track.steps[index] * stepSeconds;
+    if (stepParticle(forces, position, velocity, stepSeconds, fieldTime)) {
+      track.resting[index] = 1;
+      launches.landing[index] = (track.steps[index] + 1) * stepSeconds;
+    }
+    track.steps[index]++;
+  }
+  if (track.resting[index]) {
+    track.steps[index] = wholeSteps;
+    for (let axis = 0; axis < 3; axis++) target.position[axis] = position[axis];
+    return;
+  }
+  // The last partial step is not remembered.
+  const partialPosition = [position[0], position[1], position[2]];
+  const partialVelocity = [velocity[0], velocity[1], velocity[2]];
+  const remainder = age - wholeSteps * stepSeconds;
+  if (remainder > 1e-9) {
+    stepParticle(forces, partialPosition, partialVelocity, remainder, launches.birth[index] + wholeSteps * stepSeconds);
+  }
+  for (let axis = 0; axis < 3; axis++) target.position[axis] = partialPosition[axis];
 }
 
 function scaleAtLife(mode, lifeFraction) {
@@ -198,23 +305,28 @@ function scaleAtLife(mode, lifeFraction) {
 
 /**
  * World position and scale of one particle at a time. A particle that is not born yet or already dead has scale 0.
- * A particle that reaches the floor stays where it landed until it dies.
+ * A particle that reaches the floor or a collider without bounce stays where it landed until it dies.
+ * `target.fraction` is the share of its life used and `target.motionAge` the age it has moved for (it stops at rest).
  */
 export function particleStateAt(launches, index, forces, scaleMode, time, target) {
   const age = time - launches.birth[index];
   const lifetime = launches.life[index];
+  target.fraction = Math.min(Math.max(age / lifetime, 0), 1);
   if (age < 0 || age >= lifetime) {
     target.scale = 0;
+    target.motionAge = 0;
     for (let component = 0; component < 3; component++) target.position[component] = launches.origin[index * 3 + component];
     return target;
   }
-  if (forces.fields?.length) {
-    integrateUnderFields(launches, index, forces, age, target);
-    target.scale = launches.size[index] * scaleAtLife(scaleMode, age / lifetime);
+  target.scale = launches.size[index] * scaleAtLife(scaleMode, age / lifetime);
+  if (launches.track) {
+    trackedState(launches, index, forces, age, target);
+    target.motionAge = Math.min(age, launches.landing[index]);
     return target;
   }
   const landed = launches.landing[index];
   const effectiveAge = Math.min(age, landed);
+  target.motionAge = effectiveAge;
   for (let component = 0; component < 3; component++) {
     target.position[component] = launches.origin[index * 3 + component] +
       displacement(launches.velocity[index * 3 + component], forces.gravity[component], forces.wind[component], forces.drag, effectiveAge);
@@ -222,32 +334,78 @@ export function particleStateAt(launches, index, forces, scaleMode, time, target
   if (landed <= age) {
     target.position[1] = forces.floor;
   }
-  target.scale = launches.size[index] * scaleAtLife(scaleMode, age / lifetime);
   return target;
 }
 
-/** Copies a template mesh once per particle, scaled and moved to the particle's world position. */
-export function buildParticleMesh(template, launches, forces, scaleMode, time) {
+// Rotation matrix (row major) for `angle` radians around the unit `axis`.
+function rotationMatrix(axis, angle, matrix) {
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const [x, y, z] = axis;
+  const rest = 1 - cosine;
+  matrix[0] = cosine + x * x * rest;
+  matrix[1] = x * y * rest - z * sine;
+  matrix[2] = x * z * rest + y * sine;
+  matrix[3] = y * x * rest + z * sine;
+  matrix[4] = cosine + y * y * rest;
+  matrix[5] = y * z * rest - x * sine;
+  matrix[6] = z * x * rest - y * sine;
+  matrix[7] = z * y * rest + x * sine;
+  matrix[8] = cosine + z * z * rest;
+}
+
+function rotatedInto(matrix, source, sourceOffset, destination, destinationOffset, scale) {
+  for (let row = 0; row < 3; row++) {
+    destination[destinationOffset + row] = (matrix[row * 3] * source[sourceOffset] + matrix[row * 3 + 1] * source[sourceOffset + 1] + matrix[row * 3 + 2] * source[sourceOffset + 2]) * scale;
+  }
+}
+
+/**
+ * Copies a template mesh once per particle, scaled, spun and moved to the particle's world position. `look` may hold
+ * `color` ([start, end] RGB) and `alpha` ([start, end]) over life; they become vertex colors, and alpha multiplies the
+ * color, so a particle fades toward black (the renderer has no per-vertex alpha).
+ */
+export function buildParticleMesh(template, launches, forces, scaleMode, time, look = {}) {
   const vertexCount = template.positions.length / 3;
   const indexCount = template.indices.length;
   const positions = new Float32Array(vertexCount * launches.count * 3);
   const normals = new Float32Array(vertexCount * launches.count * 3);
   const indices = new Uint32Array(indexCount * launches.count);
   const uvs = template.uvs ? new Float32Array(vertexCount * launches.count * 2) : undefined;
+  const colors = look.color || look.alpha ? new Float32Array(vertexCount * launches.count * 3) : undefined;
   const state = { position: [0, 0, 0], scale: 0 };
+  const matrix = new Float64Array(9);
+  const tint = [1, 1, 1];
   for (let index = 0; index < launches.count; index++) {
     particleStateAt(launches, index, forces, scaleMode, time, state);
-    const vertexBase = index * vertexCount;
-    for (let vertex = 0; vertex < vertexCount; vertex++) {
-      for (let component = 0; component < 3; component++) {
-        positions[(vertexBase + vertex) * 3 + component] = state.position[component] + template.positions[vertex * 3 + component] * state.scale;
+    if (launches.hasSpin) {
+      rotationMatrix(launches.spinAxis.subarray(index * 3, index * 3 + 3), launches.spinStart[index] + launches.spinRate[index] * state.motionAge, matrix);
+    }
+    if (colors) {
+      const alpha = look.alpha ? look.alpha[0] + (look.alpha[1] - look.alpha[0]) * state.fraction : 1;
+      for (let channel = 0; channel < 3; channel++) {
+        const start = look.color ? look.color[0][channel] : 1;
+        const end = look.color ? look.color[1][channel] : 1;
+        tint[channel] = (start + (end - start) * state.fraction) * alpha;
       }
     }
-    normals.set(template.normals, vertexBase * 3);
+    const vertexBase = index * vertexCount;
+    for (let vertex = 0; vertex < vertexCount; vertex++) {
+      const offset = (vertexBase + vertex) * 3;
+      if (launches.hasSpin) {
+        rotatedInto(matrix, template.positions, vertex * 3, positions, offset, state.scale);
+        rotatedInto(matrix, template.normals, vertex * 3, normals, offset, 1);
+      }
+      for (let component = 0; component < 3; component++) {
+        positions[offset + component] = state.position[component] + (launches.hasSpin ? positions[offset + component] : template.positions[vertex * 3 + component] * state.scale);
+        if (colors) colors[offset + component] = tint[component] * (template.colors ? template.colors[vertex * 3 + component] : 1);
+      }
+    }
+    if (!launches.hasSpin) normals.set(template.normals, vertexBase * 3);
     uvs?.set(template.uvs, vertexBase * 2);
     for (let corner = 0; corner < indexCount; corner++) {
       indices[index * indexCount + corner] = template.indices[corner] + vertexBase;
     }
   }
-  return { ...template, positions, normals, indices, ...(uvs ? { uvs } : {}) };
+  return { ...template, positions, normals, indices, ...(uvs ? { uvs } : {}), ...(colors ? { colors } : {}) };
 }
