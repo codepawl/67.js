@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, DEFAULT_DETAIL } from './fog-field.js';
+import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
 
 // The volume fog step of the post pass: its uniforms and the march that scatters light through the fog box. Only a renderer that
 // draws a frame with environment.volumeFog needs this module; post.js gives every other post program a stub. It reads hash and
@@ -35,13 +35,15 @@ function bindUniforms(renderer, post, volume, environment, frame) {
 
 // Detail, layer top and key light controls. The detail ones only act in a program with the detail step compiled in (fogUsesDetail).
 function bindDetail(context, post, volume) {
-  const detail = { ...DEFAULT_DETAIL, ...volume };
-  context.uniform1i(post.uniforms.volumeDetailOctaves, detail.detailOctaves);
-  context.uniform1f(post.uniforms.volumeDetailAmount, detail.detailAmount);
-  context.uniform1f(post.uniforms.volumeWarp, detail.warp);
-  context.uniform1f(post.uniforms.volumeContrast, detail.contrast);
-  context.uniform1f(post.uniforms.volumeProfileStart, detail.profileSoftness);
-  context.uniform1f(post.uniforms.volumeKeyScattering, detail.keyScattering);
+  const detail = resolveFogDetail(volume);
+  // The renderer's post uniform list knows only the older fields; these locations are looked up here, once per program.
+  const locate = name => (post.uniforms[name] ??= context.getUniformLocation(post.program, name));
+  context.uniform1i(locate('volumeDetailOctaves'), detail.detailOctaves);
+  context.uniform1f(locate('volumeDetailAmount'), detail.detailAmount);
+  context.uniform1f(locate('volumeWarp'), detail.warp);
+  context.uniform1f(locate('volumeContrast'), detail.contrast);
+  context.uniform1f(locate('volumeProfileStart'), detail.profileSoftness);
+  context.uniform1f(locate('volumeKeyScattering'), detail.keyScattering);
 }
 
 // The fog's field texture and light buffers; a program without those steps has no such uniforms, and a null location is ignored.
@@ -72,7 +74,7 @@ function packLights(renderer) {
 
 registerShaderFeatureCode('volumeFog', {
   // The JavaScript half, which the renderer calls for a frame that draws a volume fog.
-  support: { packLights, bindUniforms },
+  support: { packLights, bindUniforms, usesDetail: fogUsesDetail },
   postDeclarations: `
 uniform highp sampler2DShadow volumeShadowMap;
 uniform mat4 volumeLightProjection;

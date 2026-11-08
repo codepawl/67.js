@@ -4,7 +4,7 @@ const DEFAULT_COLOR = Object.freeze([0.8, 0.85, 0.9]);
 const DEFAULT_AMBIENT = Object.freeze([0.03, 0.035, 0.04]);
 const DEFAULT_DRIFT = Object.freeze([0.03, 0, 0]);
 
-function finiteRange(value, minimum, maximum, label) {
+export function finiteRange(value, minimum, maximum, label) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
     throw new RangeError(`${label} must be between ${minimum} and ${maximum}`);
   }
@@ -53,7 +53,8 @@ export function resolveVolumeFog(input = {}) {
   const noiseScale = finiteRange(input.noiseScale ?? 0.3, 0.001, 100, 'Volume noise scale');
   const maxDistance = finiteRange(input.maxDistance ?? 100, 0.01, 1e4, 'Volume maximum distance');
   const heightFalloff = finiteRange(input.heightFalloff ?? 0, 0, 1e5, 'Volume height falloff');
-  const resolved = { density, minimum, maximum, color, ambient, drift, steps, anisotropy, noiseAmount, noiseScale, maxDistance, heightFalloff };
+  // The detail fields (detailOctaves ... keyScattering) pass through with the other unknown fields: the fog addon validates them (resolveFogDetail).
+  const resolved = { ...input, density, minimum, maximum, color, ambient, drift, steps, anisotropy, noiseAmount, noiseScale, maxDistance, heightFalloff };
   // Left out when unset, so the renderer can derive it from the scene (volumeShadowAmbient).
   if (input.shadowAmbient !== undefined) {
     resolved.shadowAmbient = finiteRange(input.shadowAmbient, 0, 1, 'Volume shadow ambient');
@@ -66,19 +67,5 @@ export function resolveVolumeFog(input = {}) {
     if (!FOG_PROFILES.includes(input.profile)) throw new RangeError(`Volume profile must be one of ${FOG_PROFILES.join(', ')}`);
     resolved.profile = input.profile;
   }
-  if (input.detailOctaves !== undefined) {
-    resolved.detailOctaves = finiteRange(input.detailOctaves, 1, 3, 'Volume detail octaves');
-    if (!Number.isInteger(resolved.detailOctaves)) throw new RangeError('Volume detail octaves must be an integer');
-  }
-  if (input.detailAmount !== undefined) resolved.detailAmount = finiteRange(input.detailAmount, 0, 1, 'Volume detail amount');
-  if (input.warp !== undefined) resolved.warp = finiteRange(input.warp, 0, 4, 'Volume warp');
-  if (input.contrast !== undefined) resolved.contrast = finiteRange(input.contrast, 0, 4, 'Volume contrast');
-  if (input.profileSoftness !== undefined) resolved.profileSoftness = finiteRange(input.profileSoftness, 0, 0.95, 'Volume profile softness');
-  if (input.keyScattering !== undefined) resolved.keyScattering = finiteRange(input.keyScattering, 0, 10, 'Volume key scattering');
   return resolved;
-}
-
-/** True when the density noise differs from the plain single lookup, so the frame needs the post program with the detail step. */
-export function fogUsesDetail(volume) {
-  return (volume.detailOctaves ?? 1) > 1 || (volume.warp ?? 0) > 0 || (volume.contrast ?? 1) !== 1;
 }
