@@ -1770,11 +1770,22 @@ export class Renderer67 {
     return variant;
   }
 
+  // The fog step leaves the last frame's texture on a mipmapped filter. The stages and bloom read before this frame's
+  // mip chain exists, so on that filter they would sample the previous frame's blurred levels: a ghost after a seek.
+  restoreSingleLevelFiltering() {
+    if (!this.mipmappedTexture) return;
+    const context = this.context;
+    context.bindTexture(context.TEXTURE_2D, this.mipmappedTexture);
+    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR);
+    this.mipmappedTexture = null;
+  }
+
   resolveFrame(frame, effects, environment, volume) {
     const context = this.context;
     context.bindFramebuffer(context.READ_FRAMEBUFFER, this.multisampleFramebuffer);
     context.bindFramebuffer(context.DRAW_FRAMEBUFFER, this.resolveFramebuffer);
     context.blitFramebuffer(0, 0, this.canvas.width, this.canvas.height, 0, 0, this.canvas.width, this.canvas.height, context.COLOR_BUFFER_BIT | (this.depth ? context.DEPTH_BUFFER_BIT : 0), context.NEAREST);
+    this.restoreSingleLevelFiltering();
     let sourceTexture = this.frameTexture;
     for (const stage of this.postStages) sourceTexture = stage.apply(this, frame, effects, sourceTexture) ?? sourceTexture;
     if (effects.bloom.strength > 0) this.drawBloom(effects.bloom, sourceTexture);
