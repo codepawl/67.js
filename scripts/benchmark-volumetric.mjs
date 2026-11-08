@@ -11,6 +11,7 @@ try {
   await page.goto('http://127.0.0.1:5173/volume-benchmark.html');
   const results = await page.evaluate(async () => {
     const { Renderer67 } = await import('/src/renderer.js');
+    await import('/src/fog-shader.js');
     const { createFilmScenes, sampleFilm } = await import('/src/film.js');
     const canvas = document.querySelector('canvas');
     const scene = createFilmScenes().laboratory;

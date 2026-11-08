@@ -19,8 +19,6 @@ function vector(value, minimum, maximum, label) {
 
 export const FOG_FIELD_MAXIMUM_SIZE = 2048;
 export const FOG_PROFILES = Object.freeze(['exponential', 'smoothstep']);
-export const DEFAULT_FLOW_STRENGTH = 1;
-export const DEFAULT_FLOW_PERIOD = 2;
 
 /** Checks a fog field and returns it unchanged: { width, height, data } with RGBA floats, row 0 at the box's minimum z. */
 export function validateFogField(field) {
@@ -69,27 +67,4 @@ export function resolveVolumeFog(input = {}) {
     resolved.profile = input.profile;
   }
   return resolved;
-}
-
-const derivedShadowAmbients = new WeakMap();
-
-/**
- * The share of the fog's ambient that survives in the sun's shadow. A set value wins. Otherwise it follows how open the sky is
- * from the middle of the fog: a closed room keeps 0.15, open ground under the sky keeps all of it.
- * `measureOpenness(parts, point)` is the `skyOpenness` option of the renderer (src/closed-room.js), kept out of the core
- * bundle; without it, or for a scene too large to test, the scene counts as enclosed. It runs once per scene and fog box.
- */
-export function volumeShadowAmbient(volume, parts, measureOpenness) {
-  if (volume.shadowAmbient !== undefined) {
-    return volume.shadowAmbient;
-  }
-  const key = `${volume.minimum}|${volume.maximum}`;
-  const cached = derivedShadowAmbients.get(parts);
-  if (cached?.key === key) {
-    return cached.value;
-  }
-  const centre = volume.minimum.map((low, axis) => (low + volume.maximum[axis]) / 2);
-  const value = 0.15 + 0.85 * (measureOpenness?.(parts, centre) ?? 0);
-  derivedShadowAmbients.set(parts, { key, value });
-  return value;
 }

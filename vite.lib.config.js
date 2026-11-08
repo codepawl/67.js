@@ -95,6 +95,7 @@ export default defineConfig({
         'world-material-shader': 'src/world-material-shader.js',
         'splat-shader': 'src/splat-shader.js',
         'subsurface-shader': 'src/subsurface-shader.js',
+        'fog-shader': 'src/fog-shader.js',
         'light-linking': 'src/light-linking.js',
         'cascaded-shadows': 'src/cascaded-shadows.js',
         'compact-color': 'src/compact-color.js',
