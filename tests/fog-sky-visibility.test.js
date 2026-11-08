@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { skyVisibilityGrid, skyGridSize, SKY_GRID_POINTS, SKY_GRID_LONGEST_AXIS } from '../src/closed-room.js';
 import { createPostFragment, postFragment } from '../src/post.js';
+import '../src/fog-shader.js';
 
 function flatPart(name, height, facesDown, half = 50, centreX = 0) {
   const corners = [centreX - half, height, -half, centreX + half, height, -half, centreX + half, height, half, centreX - half, height, half];

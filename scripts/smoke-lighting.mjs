@@ -17,6 +17,7 @@ try {
   await page.goto('http://127.0.0.1:5173/lighting-smoke.html');
   reports.contract = await page.evaluate(async () => {
     const { Renderer67, box } = await import('/build/67.module.js');
+    await import('/build/fog-shader.js');
     const canvas = document.querySelector('canvas');
     const part = { geometry: box(), matrix: new Float32Array([4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 1]), material: { color: [1, 1, 1], metallic: 0, roughness: 1 } };
     const renderer = new Renderer67(canvas, [part], { ground: false, hdr: true, pixelRatio: 1, samples: 1 });

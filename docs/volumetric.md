@@ -2,6 +2,8 @@
 
 Available from version `0.4.0`.
 
+The fog code is an addon: `import '@codepawlhq/67js/addons/fog-shader'` before the first frame that draws a fog, or a renderer that draws one throws and names this import. Recipes load it by themselves (`await loadAgentSceneModules(recipe)`), and the MCP server and the film player already do.
+
 Enable `{ hdr: true, depth: true }` when constructing an opaque, non-benchmark `Renderer67`. Active fog requires WebGL 2 `EXT_color_buffer_float`. Unsupported HDR negotiation rejects active fog. The depth option retains a resolved depth texture across frames and includes it in `memoryPlan`.
 
 ```js

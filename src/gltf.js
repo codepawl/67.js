@@ -974,14 +974,39 @@ function makeSkinBinding(node) {
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
+/** True when collapseSingularMatrix would replace the matrix at this offset: a non-finite value or a determinant below its floor. */
+function needsCollapse(values, offset) {
+  for (let index = offset; index < offset + 16; index++) {
+    if (!Number.isFinite(values[index])) return true;
+  }
+  // The determinant of mat4.determinant, read at an offset.
+  const a00 = values[offset], a01 = values[offset + 1], a02 = values[offset + 2], a03 = values[offset + 3];
+  const a10 = values[offset + 4], a11 = values[offset + 5], a12 = values[offset + 6], a13 = values[offset + 7];
+  const a20 = values[offset + 8], a21 = values[offset + 9], a22 = values[offset + 10], a23 = values[offset + 11];
+  const a30 = values[offset + 12], a31 = values[offset + 13], a32 = values[offset + 14], a33 = values[offset + 15];
+  const b0 = a00 * a11 - a01 * a10;
+  const b1 = a00 * a12 - a02 * a10;
+  const b2 = a01 * a12 - a02 * a11;
+  const b3 = a20 * a31 - a21 * a30;
+  const b4 = a20 * a32 - a22 * a30;
+  const b5 = a21 * a32 - a22 * a31;
+  const b6 = a00 * b5 - a01 * b4 + a02 * b3;
+  const b7 = a10 * b5 - a11 * b4 + a12 * b3;
+  const b8 = a20 * b2 - a21 * b1 + a22 * b0;
+  const b9 = a30 * b2 - a31 * b1 + a32 * b0;
+  const determinant = a13 * b6 - a03 * b7 + a33 * b8 - a23 * b9;
+  return !Number.isFinite(determinant) || Math.abs(determinant) < 1e-12;
+}
+
 function prepareSkinBinding(binding, geometry, checks = true) {
   const { node, skin, pendingPose, pendingWorld } = binding;
   if (skin.jointMatrices !== binding.palette || skin.jointWorldMatrices !== binding.jointWorld || binding.palette.length !== pendingPose.jointMatrices.length || binding.jointWorld.length !== pendingWorld.length) throw new Error('Imported skin palette identities must remain unchanged.');
   for (let joint = 0; joint < node.skeleton.bones.length; joint++) {
-    const jointWorld = pendingWorld.subarray(joint * 16, joint * 16 + 16);
-    jointWorld.set(node.skeleton.bones[joint].matrixWorld.elements);
-    // A joint at zero scale collapses its vertices to a point instead of refusing the pose.
-    if (collapseSingularMatrix(jointWorld, undefined, COLLAPSED_JOINT_SCALE)) binding.collapsedJoints = true;
+    const offset = joint * 16;
+    pendingWorld.set(node.skeleton.bones[joint].matrixWorld.elements, offset);
+    // A joint at zero scale collapses its vertices to a point instead of refusing the pose. Only a joint that needs
+    // the repair gets a view, so a normal pose allocates nothing.
+    if (needsCollapse(pendingWorld, offset) && collapseSingularMatrix(pendingWorld.subarray(offset, offset + 16), undefined, COLLAPSED_JOINT_SCALE)) binding.collapsedJoints = true;
   }
   updateSkinPose(pendingPose, pendingWorld, skin.inverseBindMatrices, node.matrixWorld.elements, skin.bindMatrix, checks);
   if (checks) validateSkinPose(pendingPose, geometry, node.matrixWorld.elements);

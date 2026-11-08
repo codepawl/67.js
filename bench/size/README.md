@@ -45,9 +45,10 @@ Moved out of the core bundle in this work, each loaded only by a scene that uses
 | `world-material-shader` | water, foliage, grass, terrain, moss, fire and smoke GLSL, and the vertex wind; `terrain`, `vegetation`, `grass`, `clutter`, `film` and recipes load it | about 1,500 |
 | `skinning.js`, `morph.js` | skin and morph GLSL, validation, texture layout and packing; they register on import, and every module that makes a pose (`createSkinPose`, `createMorphPose`, the glTF loader, rigs, the crowd addon) imports them | about 2,500, measured in steps (the depth and benchmark vertex shaders get stubs) |
 | `liquid-optics.js`, `ground-bounce.js` | the liquid optics check (the liquid pass and the recipe look import it) and a lamp-lit room's bounce method, which the map carries to the renderer | about 670 together, measured in steps |
+| `fog-shader` | the volume fog step of the post pass (GLSL, uniforms, field texture and light packing); recipes, the film and the MCP server load it, and a renderer that draws a fog without it throws | about 2,500 |
 | `explosion-shader` | the volumetric explosion step of the post pass (the film's ignition scene); the film player imports it | about 550, measured in steps |
 
-Still in the lit box and worth moving next, with rough gzip sizes: the post pass volume fog and occlusion steps (the volume fog GLSL is about 1,300). The other splice slots (`worldFunctions`, `worldSurface`, `worldLight`, `worldAfterEmission`, `worldFinal`, `worldVertexWind`, `environmentShading`) show the pattern: a block of GLSL registered by an addon, and a stub in `shaders.js` for a renderer without it.
+Still in the lit box and worth moving next, with rough gzip sizes: the post pass occlusion step. The other splice slots (`worldFunctions`, `worldSurface`, `worldLight`, `worldAfterEmission`, `worldFinal`, `worldVertexWind`, `environmentShading`) show the pattern: a block of GLSL registered by an addon, and a stub in `shaders.js` for a renderer without it.
 
 ## How the check decides
 
