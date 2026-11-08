@@ -1,13 +1,8 @@
-- entry:core: area light shadow tiles, the profile counter and two shader slots; the shader code, the profile math and the file reader are in the lazy light-shapes module.
-- entry:core+lazy: same core change.
 - entry:path-tracer: the sun disk radius and the 16-sample IES profile math (light-profile.js) so the tracer matches the raster.
+- entry:path-tracer-progressive: same tracer addition.
 - entry:cascaded-shadows: the soft sun (blocker search plus a 16 tap filter) lives in the lazy cascade module and runs only when sunAngularRadius is set.
-- scene:lit-box: the same core change, 191 bytes for the area shadow tile and profile hooks.
-- scene:lit-box+lazy: same.
-- scene:gltf-box: same core change.
-- scene:gltf-box+lazy: same.
-- scene:agent-scene: recipe validation for sunAngularRadius, area castShadow and ies, the lazy module marker and a capabilities line (359 bytes gzip); the rest is lazy.
-- scene:agent-scene+lazy: the new lazy modules light-shapes and light-profile (about 3 KB) plus the cascade and tracer additions, loaded only for a recipe that names them.
-- goal:lit-box: area shadow tiles and profile hooks in the core renderer (191 bytes); the code that uses them is lazy.
-- goal:gltf-box: same core change (196 bytes).
-- goal:agent-scene: recipe fields and a marker (359 bytes); the code is lazy.
+- scene:agent-scene: the recipe hook for sunAngularRadius, area castShadow and ies, three field names and a module marker (70 bytes gzip); the code is in the lazy light-shapes module.
+- scene:agent-scene+lazy: the lazy light-shapes and light-profile modules, loaded only for a recipe that names the new fields.
+- goal:lit-box: three one-line hooks in lighting, renderer and shaders (56 bytes gzip) that the lazy light-shapes module fills.
+- goal:gltf-box: the same three hooks (46 bytes gzip).
+- goal:agent-scene: the hooks plus the recipe fields (70 bytes gzip); everything else is lazy.

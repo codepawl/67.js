@@ -25,8 +25,7 @@ const MODULE_LOADERS = {
   terrain: () => import('./agent-terrain.js'),
   navigation: () => import('./agent-navigation.js'),
   lightLinking: () => import('./light-linking.js'),
-  cascades: () => import('./cascaded-shadows.js'),
-  lightShapes: () => import('./light-shapes.js'),
+  cascades: () => import('./light-modules.js'),
   assets: () => import('./agent-scene-assets.js'),
   vegetation: () => import('./agent-vegetation.js'),
   crowd: () => import('./agent-crowd.js'),
@@ -70,9 +69,8 @@ const MODULE_MARKERS = {
   // No recipe text asks for it, only the path option of scene_inspect does, so a host loads it with loadAllAgentSceneModules.
   navigation: [],
   lightLinking: ['"affects"', '"keyAffects"'],
-  cascades: ['"shadowCascades"', '"sunAngularRadius"'],
-  // Soft area light shadows and IES profiles; the module checks the fields. An area light loads it because the text does not say whether it casts a shadow.
-  lightShapes: ['"areaLights":[{', '"ies"'],
+  // The cascade module also loads light-shapes (soft area shadows, IES profiles), so these markers bring both.
+  cascades: [/"(?:shadowCascades|sunAngularRadius|ies)"|"areaLights":\[\{/],
   assets: ['"asset":{', '"sequence":{'],
   vegetation: ['"vegetation":{', '"wind":{'],
   crowd: ['"crowd":{'],

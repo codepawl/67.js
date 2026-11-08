@@ -1,5 +1,9 @@
 import { registerShaderFeatureCode, lightShapeSupport } from './shader-registry.js';
 import { MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from './light-limits.js';
+// The same values as in lighting.js, which this module does not import so the core bundle keeps its own chunk layout.
+const NO_SHADOW_TILE = -1;
+const SPOT_FACE = -1;
+const SHADOW_ATLAS_TILES = 24;
 import { PROFILE_SAMPLE_COUNT, resolveIesProfile, profileSamples } from './light-profile.js';
 
 export { PROFILE_SAMPLE_COUNT, IES_PROFILE_NAMES, resolveIesProfile, profileSamples, profileGain } from './light-profile.js';
@@ -103,7 +107,7 @@ registerShaderFeatureCode('areaShadows', {
 
 registerShaderFeatureCode('lightProfiles', {
   declarations: PROFILE_DECLARATIONS,
-  spotRadiance: '      lightRadiance *= lightProfileGain(index, -toLight, spotLightDirections[index].xyz);\n',
+  linkSpot: '      attenuation *= lightProfileGain(index, -toLight, spotLightDirections[index].xyz);\n',
   areaRadiance: `      lightRadiance *= lightProfileGain(${MAX_SPOT_LIGHTS} + index, -toLight, lightNormal);\n`,
 });
 
@@ -119,10 +123,53 @@ function fillProfileTable(environment) {
   }
 }
 
-lightShapeSupport.bind = renderer => {
-  if (!(renderer.lighting.profileCount > 0)) return;
+function uploadProfileTable(renderer) {
   const context = renderer.context;
   if (!tableLocations.has(renderer.program)) tableLocations.set(renderer.program, context.getUniformLocation(renderer.program, 'lightProfileTable[0]'));
   fillProfileTable(renderer.environment);
   context.uniform1fv(tableLocations.get(renderer.program), profileTable);
+}
+
+// Called by updateLightingState after the point, spot and area lights are written. A shadowed area light takes the
+// atlas tile after the spot lights' tiles; its position's w holds the tile, and the widest tile view looks along its emitting side.
+lightShapeSupport.update = (state, spotLights, areaLights) => {
+  const features = [];
+  areaLights.forEach((light, index) => {
+    if (light.castShadow !== undefined && typeof light.castShadow !== 'boolean') throw new TypeError('Area light castShadow must be true or false');
+    state.areaPositions[index * 4 + 3] = NO_SHADOW_TILE;
+    if (!light.castShadow) return;
+    if (state.shadowCasters.length >= SHADOW_ATLAS_TILES) throw new RangeError(`Shadow casting lights need more than the ${SHADOW_ATLAS_TILES} atlas tiles (a point light uses 6, a spot or area light one)`);
+    state.areaPositions[index * 4 + 3] = state.shadowCasters.length;
+    const direction = state.areaNormals.slice(index * 4, index * 4 + 3);
+    state.shadowCasters.push({ light: { position: light.position, direction, range: 0, angle: Math.PI / 2 - 0.01 }, face: SPOT_FACE });
+    if (!features.includes('areaShadows')) features.push('areaShadows');
+  });
+  if ([...spotLights, ...areaLights].some(light => light.ies !== undefined)) {
+    features.push('lightProfiles');
+    state.bind = uploadProfileTable;
+  } else {
+    state.bind = undefined;
+  }
+  state.extraFeatures = features;
+};
+
+function checkedShape(light, label) {
+  if (light.castShadow !== undefined && typeof light.castShadow !== 'boolean') throw new TypeError(`${label} castShadow must be boolean.`);
+  return light.ies === undefined ? undefined : resolveIesProfile(light.ies, `${label} ies`);
+}
+
+// Called by normalizeAgentLook: the sun angle, and the castShadow of area lights and the ies of spot and area lights, which the core light readers leave out.
+lightShapeSupport.normalize = (input, environment) => {
+  const radius = input.sunAngularRadius;
+  if (radius !== undefined) {
+    if (typeof radius !== 'number' || !Number.isFinite(radius) || radius < 0.0005 || radius > 0.2) throw new RangeError('sunAngularRadius must be between 0.0005 and 0.2');
+    environment.sunAngularRadius = radius;
+  }
+  for (const [field, label] of [['spotLights', 'spot light'], ['areaLights', 'area light']]) {
+    (input[field] ?? []).forEach((light, index) => {
+      const profile = checkedShape(light, label);
+      if (profile !== undefined) environment[field][index].ies = profile;
+      if (field === 'areaLights' && light.castShadow) environment[field][index].castShadow = true;
+    });
+  }
 };

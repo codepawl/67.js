@@ -5,6 +5,7 @@ import { resolveVolumeFog } from './volumetric.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
 import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
+import { lightShapeSupport } from './shader-registry.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
 import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference } from './look-catalog.js';
 import { DEFAULT_LIGHTING_SETUP, LIGHTING_SETUP_NAMES, DEFAULT_AMBIENT_OCCLUSION } from './agent-scene-capabilities.js';
@@ -173,11 +174,6 @@ function shadowFieldFrom(light, label) {
   return castShadow ? { castShadow } : {};
 }
 
-// An IES profile (a bundled name or { angles, candela }) is checked by the light shapes module, which loads on demand.
-function profileFieldFrom(light, label) {
-  return light.ies === undefined ? {} : { ies: copiedJson(agentSceneModule('lightShapes').resolveIesProfile(light.ies, `${label} ies`)) };
-}
-
 function pointLightFrom(light) {
   knownKeys(light, POINT_LIGHT_FIELDS, 'point light');
   return {
@@ -203,7 +199,6 @@ function spotLightFrom(light) {
     radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'spot light radius'),
     range: rangeFrom(light, 'spot light'),
     ...shadowFieldFrom(light, 'spot light'),
-    ...profileFieldFrom(light, 'spot light'),
     ...affectsFrom(light, 'spot light'),
   };
 }
@@ -219,7 +214,7 @@ function areaLightFrom(light) {
     intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'area light intensity'),
   };
   if (light.up !== undefined) resolved.up = directionFrom(light.up, 'area light up').direction;
-  return { ...resolved, ...shadowFieldFrom(light, 'area light'), ...profileFieldFrom(light, 'area light'), ...affectsFrom(light, 'area light') };
+  return { ...resolved, ...affectsFrom(light, 'area light') };
 }
 
 function volumeFogFrom(input = {}) {
@@ -297,10 +292,6 @@ function environmentFrom(input = {}) {
   if (input.specularAntiAliasing !== undefined) {
     environment.specularAntiAliasing = numberInRange(input.specularAntiAliasing, 0, MAXIMUM_SPECULAR_ANTI_ALIASING, 'specularAntiAliasing');
   }
-  // Angular radius of the sun disk in radians (0.0087 is half a degree, the path tracer's default). Raster shadows soften with it through the cascades; the path tracer samples the same disk.
-  if (input.sunAngularRadius !== undefined) {
-    environment.sunAngularRadius = numberInRange(input.sunAngularRadius, 0.0005, 0.2, 'sunAngularRadius');
-  }
   // Outlines and line geometry; null clears them. The module checks the fields and loads on demand.
   if (input.lines !== undefined && input.lines !== null) {
     environment.lines = copiedJson(agentSceneModule('lineArt').resolveLineArt(input.lines));
@@ -347,6 +338,7 @@ function environmentFrom(input = {}) {
     knownKeys(input.liquid, Object.keys(LIQUID_OPTICS), 'liquid');
     environment.liquid = copiedJson(resolveLiquidOptics(copiedJson(input.liquid)));
   }
+  lightShapeSupport.normalize?.(input, environment);
   updateLightingState(createLightingState(), environment, { world });
   return environment;
 }

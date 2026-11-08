@@ -15,7 +15,8 @@ export const layerTextureSupport = {};
 // view-transform-shader.js sets apply(source, kind, viewTransform, hasLook), bindLook(renderer, program) and dispose(renderer).
 export const viewTransformShader = {};
 
-// light-shapes.js sets bind(renderer): it uploads the light profile table that the lightProfiles shader code reads.
+// light-profile.js sets profile(ies), the 16 samples of a profile as an array. light-shapes.js sets update(state, spotLights, areaLights, environment) and normalize(input, environment): the lighting state and
+// recipe hooks for area light shadows, IES profiles and the sun angle. update sets state.extraFeatures and state.bind.
 export const lightShapeSupport = {};
 
 // texture-update.js sets update(renderer, descriptor, update): the body of renderer.updateTexture.
@@ -48,7 +49,7 @@ export function registerShaderFeatureCode(feature, slots) {
 }
 
 // The addon that registers each feature's code; a feature not listed here is registered by material-layer-shaders.
-const FEATURE_ADDONS = { splat: 'splat-shader', liquid: 'liquid-shader', worldMaterials: 'world-material-shader', subsurface: 'subsurface-shader', volumeFog: 'fog-shader', areaShadows: 'light-shapes', lightProfiles: 'light-shapes' };
+const FEATURE_ADDONS = { splat: 'splat-shader', liquid: 'liquid-shader', worldMaterials: 'world-material-shader', subsurface: 'subsurface-shader', volumeFog: 'fog-shader' };
 
 export function requireFeatureCode(feature) {
   const slots = registeredFeatureCode.get(feature);

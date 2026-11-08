@@ -656,7 +656,6 @@ ${featureCode("linkSpot")}      vec3 lightRadiance = spotLightColors[index].rgb 
       if (USES_LOCAL_SHADOWS && spotLightParameters[index].z >= 0.0) {
         lightRadiance *= shadowBlind > 0.5 ? 1.0 : localShadowVisibility(spotLightParameters[index].z, worldPosition, normal, sqrt(distanceSquared));
       }
-${featureCode("spotRadiance")}
       radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
   }

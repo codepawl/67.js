@@ -1,3 +1,5 @@
+import { lightShapeSupport } from './shader-registry.js';
+
 // The IES profile math, apart from the shader code so the path tracer can read it alone.
 
 // An IES profile is the candela of a lamp against the angle from its axis, in degrees. It is stored as 16 relative
@@ -87,3 +89,6 @@ export function profileGain(samples, cosine) {
   return samples[lower] + (samples[upper] - samples[lower]) * (position - lower);
 }
 
+
+// The path tracer's scene builder reaches the profile through this hook, so it carries none of this code unless a light asks for a profile.
+lightShapeSupport.profile = value => Array.from(profileSamples(resolveIesProfile(value, 'ies')));

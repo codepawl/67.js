@@ -39,14 +39,14 @@ test('an IES file averages its horizontal planes and applies the multiplier', ()
 test('an area light that casts a shadow takes one tile after the spot lights, and the default takes none', () => {
   const plain = updateLightingState(createLightingState(), { areaLights: [areaLight] });
   assert.equal(plain.shadowCasters.length, 0);
-  assert.equal(plain.areaShadowCount, 0);
+  assert.deepEqual(plain.extraFeatures, []);
   assert.equal(plain.areaPositions[3], NO_SHADOW_TILE);
   const shadowed = updateLightingState(createLightingState(), {
     spotLights: [{ position: [0, 2, 0], direction: [0, -1, 0], castShadow: true }],
     areaLights: [areaLight, { ...areaLight, castShadow: true }],
   });
   assert.equal(shadowed.shadowCasters.length, 2);
-  assert.equal(shadowed.areaShadowCount, 1);
+  assert.deepEqual(shadowed.extraFeatures, ['areaShadows']);
   assert.equal(shadowed.areaPositions[3], NO_SHADOW_TILE);
   assert.equal(shadowed.areaPositions[7], 1);
   assert.throws(() => updateLightingState(createLightingState(), { pointLights: Array.from({ length: 5 }, () => ({ position: [0, 1, 0], castShadow: true })) }), /atlas/);
@@ -54,8 +54,9 @@ test('an area light that casts a shadow takes one tile after the spot lights, an
 
 test('a lamp with an ies profile is counted so the renderer compiles the profile code', () => {
   const state = updateLightingState(createLightingState(), { spotLights: [{ position: [0, 2, 0], direction: [0, -1, 0], ies: 'downlight' }], areaLights: [areaLight] });
-  assert.equal(state.profileCount, 1);
-  assert.equal(updateLightingState(createLightingState(), {}).profileCount, 0);
+  assert.deepEqual(state.extraFeatures, ['lightProfiles']);
+  assert.equal(typeof state.bind, 'function');
+  assert.deepEqual(updateLightingState(createLightingState(), {}).extraFeatures, []);
 });
 
 test('a named sun angle gives the sun at least one cascade, and an explicit count wins', () => {

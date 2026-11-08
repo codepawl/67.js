@@ -4,7 +4,7 @@ import { SUN_BIT, POINT_FIRST_BIT, SPOT_FIRST_BIT, AREA_FIRST_BIT } from './ligh
 import { boxProjectedGeometry, columnLengths } from './export-box-uv.js';
 import { resolveTraceVolume } from './path-tracer-volume.js';
 import { resolveTraceSubsurface } from './path-tracer-subsurface.js';
-import { profileSamples, resolveIesProfile } from './light-profile.js';
+import { lightShapeSupport } from './shader-registry.js';
 
 // The scene a path trace reads: every part flattened into one world-space triangle soup with per-vertex normals, UVs
 // and colours, one resolved material per part, the lights in plain arrays, and the environment map as a sampling table.
@@ -241,7 +241,7 @@ function normalized(vector) {
 
 // The 16 relative values of the light's IES profile, or null for a light with none.
 function traceProfile(light) {
-  return light.ies === undefined ? null : Array.from(profileSamples(resolveIesProfile(light.ies, 'ies')));
+  return light.ies === undefined ? null : lightShapeSupport.profile(light.ies);
 }
 
 function resolveLights(environment) {
