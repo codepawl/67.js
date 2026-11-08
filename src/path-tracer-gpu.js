@@ -125,7 +125,7 @@ export function setSceneUniforms(gl, program, scene, camera, options, lightCount
   gl.uniform1i(location('uHasSun'), sun ? 1 : 0);
   gl.uniform3fv(location('uSunDirection'), sun?.direction ?? [0, 1, 0]);
   gl.uniform3fv(location('uSunColor'), sun?.color ?? [0, 0, 0]);
-  gl.uniform1f(location('uSunCosineMax'), Math.cos(Math.PI / 360));
+  gl.uniform1f(location('uSunCosineMax'), Math.cos(sun?.angularRadius ?? Math.PI / 360));
   gl.uniform1i(location('uHasEnvironment'), environment ? 1 : 0);
   gl.uniform4f(location('uEnvironmentShape'), environment?.width ?? 1, environment?.height ?? 1, environment?.intensity ?? 1, environment?.total ?? 1);
   gl.uniform2f(location('uEnvironmentRotation'), environment?.cosine ?? 1, environment?.sine ?? 0);

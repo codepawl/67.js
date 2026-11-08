@@ -1,4 +1,5 @@
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from './light-limits.js';
+import { lightShapeSupport } from './shader-registry.js';
 
 export { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS };
 export const DEFAULT_SPECULAR_ANTI_ALIASING = 1;
@@ -218,6 +219,7 @@ export function updateLightingState(state, environment, { world = false } = {}) 
   writePointLights(state, pointLights);
   writeSpotLights(state, spotLights);
   writeAreaLights(state, areaLights);
+  lightShapeSupport.update?.(state, spotLights, areaLights);
   for (let axis = 0; axis < 3; axis++) state.keyColor[axis] = keyColor[axis] * keyIntensity;
   state.pointCount = pointLights.length;
   state.spotCount = spotLights.length;
