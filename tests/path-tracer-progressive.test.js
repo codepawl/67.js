@@ -52,9 +52,11 @@ test('the options choose the sampling pattern and the light choice, and the CPU 
   const gpu = normalizePathTracerOptions({ backend: 'gpu', samplingPattern: 'blue-noise-first', lightSelection: 'importance' });
   assert.equal(gpu.samplingPattern, 'blue-noise-first');
   assert.equal(gpu.lightSelection, 'importance');
-  assert.throws(() => normalizePathTracerOptions({ samplingPattern: 'blue-noise-first' }), /need backend "gpu"/);
-  assert.throws(() => normalizePathTracerOptions({ lightSelection: 'importance' }), /need backend "gpu"/);
-  assert.throws(() => normalizePathTracerOptions({ backend: 'gpu', lightSelection: 'tree' }), /lightSelection must be one of/);
+  assert.throws(() => normalizePathTracerOptions({ samplingPattern: 'blue-noise-first' }), /needs backend "gpu"/);
+  assert.throws(() => normalizePathTracerOptions({ lightSelection: 'importance' }), /needs backend "gpu"/);
+  assert.throws(() => normalizePathTracerOptions({ backend: 'gpu', lightSelection: 'bogus' }), /lightSelection must be one of/);
+  assert.equal(normalizePathTracerOptions({ lightSelection: 'tree' }).lightSelection, 'tree');
+  assert.throws(() => normalizePathTracerOptions({ backend: 'webgpu', lightSelection: 'tree' }), /needs backend/);
 });
 
 test('the kernel compiles the new paths only when asked, so the default kernel keeps its pixels', () => {

@@ -1,4 +1,5 @@
 import { DATA_TEXTURE_WIDTH, TRIANGLE_TEXELS, MATERIAL_TEXELS, LIGHT_TEXELS } from './path-tracer-gpu-shader.js';
+import { buildLightTree, LIGHT_TREE_NODE_TEXELS } from './path-tracer-light-tree.js';
 import { SUBSURFACE_TEXELS } from './path-tracer-gpu-subsurface.js';
 
 // Lays a traced scene (path-tracer-scene.js) out as the float textures the GPU kernel reads. Everything here is plain
@@ -181,6 +182,14 @@ export function packLights(lights) {
     data.set([light.intensity, light.range, 0, 0], base + 20);
   });
   return { table, count: entries.length };
+}
+
+/** The light tree (path-tracer-light-tree.js) as a table: four texels per node, in the node order of the tree. */
+export function packLightTree(lights) {
+  const tree = buildLightTree(lights);
+  const table = createTable(Math.max(1, tree.nodeCount) * LIGHT_TREE_NODE_TEXELS);
+  table.data.set(tree.data);
+  return table;
 }
 
 /** The map as RGBA32F plus normalised cumulative tables, so the shader compares them with a unit random number. */

@@ -100,9 +100,9 @@ function withoutAlpha(rgba, pixelCount) {
  * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet" or
  * "oidn"; `denoiser` is the loaded OIDN package for "oidn". Throws when the tracer cannot run, so the caller can fall back.
  */
-export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser }) {
+export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds }) {
   const started = performance.now();
-  const traced = tracer.traceNative(decodeTables(exported), { width, height, samples });
+  const traced = tracer.traceNative(decodeTables(exported), { width, height, samples, maxSeconds });
   const tracedSeconds = (performance.now() - started) / 1000;
   const pixelCount = width * height;
   const features = { color: withoutAlpha(traced.rgba, pixelCount), albedo: traced.albedo, normal: traced.normal,
@@ -133,4 +133,32 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const png = encodePng(toneMapToRgba8(linear, width, height), width, height);
   report.seconds = (performance.now() - started) / 1000;
   return { data: Buffer.from(png).toString('base64'), report };
+}
+
+function floatsToBase64(values) {
+  return Buffer.from(values.buffer, values.byteOffset, values.byteLength).toString('base64');
+}
+
+function floatsFromBase64(data) {
+  const bytes = Buffer.from(data, 'base64');
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  return new Float32Array(copy.buffer, 0, copy.length / Float32Array.BYTES_PER_ELEMENT);
+}
+
+/**
+ * Traces the texels of a recipe bake that the page packed, for the page's `__67jsNativeBake` bridge. `request` holds the
+ * scene `tables` and `triangleCount` as `exportNativeScene` makes them, plus `texelCount`, `points`, `normals` (base64
+ * floats) and `samples`. Resolves with the base64 `radiance` and `escaped` arrays; throws when the tracer cannot run.
+ */
+export function traceTexelsNative({ tracer, request, maxSeconds }) {
+  const texels = { count: request.texelCount, points: floatsFromBase64(request.points), normals: floatsFromBase64(request.normals) };
+  const traced = tracer.traceNativeTexels(decodeTables(request), texels, { samples: request.samples, maxSeconds });
+  return { radiance: floatsToBase64(traced.radiance), escaped: floatsToBase64(traced.escaped), adapter: traced.adapter,
+    compileSeconds: traced.compileSeconds, tracedSeconds: traced.tracedSeconds };
+}
+
+/** True for the error the native tracer raises when a trace passes its `maxSeconds`: a clean failure, not a broken adapter. */
+export function isNativeTimeLimitError(error) {
+  return /passed its time limit/.test(error?.message ?? '');
 }
