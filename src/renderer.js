@@ -24,10 +24,17 @@ import { requireFeatureCode, deformationSupport, requireDeformationSupport, text
 const SHADOW_MAP_SIZE = 2048;
 // Liquid and foam see the resolved opaque scene, so they draw in their own pass after it.
 const TRANSLUCENT_TAGS = new Set(['liquid', 'foam']);
-const INSTANCE_STRIDE = 41;
+// The 42nd float is the opacity of a blend or add part, so parts that differ only in opacity share a batch.
+const INSTANCE_STRIDE = 42;
+const OPACITY_OFFSET = 41;
 // Shaders get this in place of an infinite attenuation distance, which is not a safe uniform value.
 const MAX_FINITE_DISTANCE = 3e38;
-const ALPHA_MODES = { opaque: 0, mask: 1, blend: 2 };
+const ALPHA_MODES = { opaque: 0, mask: 1, blend: 2, add: 3 };
+
+/** Blend and add draw after the opaque loop, sorted, without writing depth. */
+function isTranslucentMode(alphaMode) {
+  return alphaMode === 'blend' || alphaMode === 'add';
+}
 const ZERO_VECTOR = Object.freeze([0, 0, 0]);
 const MATERIAL_MAPS = ['map', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap'];
 const MAP_UNIFORMS = ['baseMap', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap'];
@@ -183,7 +190,7 @@ function lightMapState(material) {
 
 function validateAlphaMaterial(material) {
   const alphaMode = material.alphaMode ?? 'opaque';
-  if (!Object.hasOwn(ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask' or 'blend'.");
+  if (!Object.hasOwn(ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask', 'blend' or 'add'.");
   for (const field of ['alphaCutoff', 'opacity']) {
     const value = material[field] ?? 1;
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${field} must be a number within zero and one.`);
@@ -191,21 +198,27 @@ function validateAlphaMaterial(material) {
   if (material.doubleSided !== undefined && typeof material.doubleSided !== 'boolean') throw new TypeError('doubleSided must be a boolean');
 }
 
-/** Alpha settings that every instance of one draw call must share. Fields that a mode ignores are normalized away. */
+/** Opacity of one instance: blend and add parts carry it per instance, so it never splits a batch. */
+function instanceOpacity(material) {
+  const alphaMode = material.alphaMode ?? 'opaque';
+  return isTranslucentMode(alphaMode) ? (material.opacity ?? 1) + (material.opacityBias ?? 0) : 1;
+}
+
+/** Alpha settings that every instance of one draw call must share. Fields that a mode ignores, and the per-instance opacity, are normalized away. */
 function materialAlphaState(material) {
   validateAlphaMaterial(material);
   const alphaMode = material.alphaMode ?? 'opaque';
   const alphaCutoff = alphaMode === 'mask' ? material.alphaCutoff ?? 0.5 : 0;
-  const opacity = alphaMode === 'opaque' ? 1 : (material.opacity ?? 1) + (material.opacityBias ?? 0);
+  const opacity = alphaMode === 'mask' ? (material.opacity ?? 1) + (material.opacityBias ?? 0) : 1;
   return [alphaMode, alphaCutoff, opacity, material.doubleSided === true];
 }
 
 // A decal or depth layer draws with a scoped polygon offset so it wins against the surface it lies on (z-fighting).
 // Larger layers win over smaller ones; geometry never moves.
 
-// Translucent glass is not a shadow caster unless the part asks for it.
+// Translucent glass and additive light are not shadow casters unless the part asks for it.
 function castsShadow(part) {
-  return part.castShadow ?? (part.material.alphaMode ?? 'opaque') !== 'blend';
+  return part.castShadow ?? !isTranslucentMode(part.material.alphaMode ?? 'opaque');
 }
 
 function hasMaterialMap(material) {
@@ -265,6 +278,7 @@ function packInstance(data, index, part, normalMatrix) {
   copyVector3(data, offset + 32, part.assembly?.offset ?? ZERO_VECTOR);
   copyVector3(data, offset + 35, part.assembly?.detailOffset ?? ZERO_VECTOR);
   copyVector3(data, offset + 38, material.emissiveColor ?? material.color);
+  data[offset + OPACITY_OFFSET] = instanceOpacity(material);
 }
 
 // The objectId mode of RENDER_PASS_MODES in render-passes.js.
@@ -274,7 +288,7 @@ function isCullable(parts) {
   const first = parts[0];
   if (first.skin || first.morph) return false;
   if (DEFORMING_TAGS.has(first.material.tag) && !SWAYING_TAGS.has(first.material.tag)) return false;
-  if (renderPass(first.material) !== 'opaque' || materialAlphaState(first.material)[0] === 'blend') return false;
+  if (renderPass(first.material) !== 'opaque' || isTranslucentMode(materialAlphaState(first.material)[0])) return false;
   return parts.every(part => !part.assembly || part.crowd);
 }
 
@@ -736,7 +750,7 @@ export class Renderer67 {
 
   finishMainProgram(pendingProgram) {
     this.program = finishProgram(this.context, pendingProgram);
-    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'boxNormalMatrix', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
+    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
       this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     }
@@ -926,7 +940,7 @@ export class Renderer67 {
     this.attribute(10, 4, stride * 4, 112);
     this.attribute(11, 3, stride * 4, 128);
     this.attribute(12, 3, stride * 4, 140);
-    this.attribute(15, 3, stride * 4, 152);
+    this.attribute(15, 4, stride * 4, 152);
   }
 
   createCullingState(parts) {
@@ -1235,7 +1249,7 @@ export class Renderer67 {
       if (!materialUnchanged) {
         const alphaState = materialAlphaState(part.material);
         const batchAlphaState = [location.batch.alphaMode, location.batch.alphaCutoff, location.batch.opacity, location.batch.doubleSided];
-        if (alphaState.some((value, index) => value !== batchAlphaState[index])) throw new Error(`Alpha mode, cutoff, opacity and double-sided changes require a new renderer: ${part.name}`);
+        if (alphaState.some((value, index) => value !== batchAlphaState[index])) throw new Error(`Alpha mode, cutoff, double-sided and mask opacity changes require a new renderer (blend and add opacity may change): ${part.name}`);
       }
       if (part.geometry !== location.geometry) throw new Error(`Geometry changes require a new renderer: ${part.name}`);
       if (!materialUnchanged && renderPass(part.material) !== batchPass(location.batch)) throw new Error(`Moving a part into or out of the liquid or foam pass requires replaceParts: ${part.name}`);
@@ -1520,7 +1534,7 @@ export class Renderer67 {
 
   /** Whether a batch is drawn by the opaque loop, and so by render passes. Its parts take object IDs in this order. */
   drawsInOpaqueLoop(batch) {
-    return batchPass(batch) === 'opaque' && batch.alphaMode !== 'blend';
+    return batchPass(batch) === 'opaque' && !isTranslucentMode(batch.alphaMode);
   }
 
   // Compiled and allocated on first use, so scenes without occlusion pay nothing.
@@ -1740,6 +1754,7 @@ export class Renderer67 {
     if (effects.bloom.strength > 0) steps.push('bloom');
     if (volume.density > 0) steps.push('volume');
     if (volume.density > 0 && volume.field) steps.push('field');
+    if (volume.density > 0 && requireFeatureCode('volumeFog').support.usesDetail(volume)) steps.push('detail');
     if (volume.density > 0 && this.fogLightBuffers?.count > 0) steps.push('lights');
     if (fogSky) steps.push('sky');
     if (frame.volumeExplosion) steps.push('explosion');
@@ -1963,12 +1978,22 @@ export class Renderer67 {
     this.context.bufferSubData(this.context.ARRAY_BUFFER, 0, batch.sortedData);
   }
 
-  /** Alpha-blended batches draw after opaque and masked geometry, farthest first, without writing depth. */
+  /** Whether any instance of a blend batch is fully opaque, and so has opaque texels to draw as a cutout first. */
+  hasOpaqueInstance(batch) {
+    for (let index = 0; index < batch.instanceCount; index++) {
+      if (batch.instanceData[index * INSTANCE_STRIDE + OPACITY_OFFSET] >= 0.999) return true;
+    }
+    return false;
+  }
+
+  /** Alpha-blended batches draw after opaque and masked geometry, farthest first, without writing depth. Additive batches draw last. */
   drawBlendBatches(frame) {
     const context = this.context;
     const eye = frame.eye;
     const blendBatches = this.batches.filter(batch => batch.alphaMode === 'blend' && batchPass(batch) === 'opaque');
-    if (blendBatches.length === 0) return;
+    // Light adds in any order, so additive batches need no sort.
+    const addBatches = this.batches.filter(batch => batch.alphaMode === 'add' && batchPass(batch) === 'opaque');
+    if (blendBatches.length === 0 && addBatches.length === 0) return;
     // The liquid and foam pass may have switched program, texture unit 0 and the viewport.
     context.bindFramebuffer(context.FRAMEBUFFER, this.multisampleFramebuffer);
     context.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -1989,7 +2014,7 @@ export class Renderer67 {
     // Fully opaque texels (most of a baked scene exported as BLEND) draw first as a cutout that writes depth, so they hide
     // whatever lies behind them in any draw order. The blend pass below then shades only the translucent texels (depth LESS).
     for (const { batch } of ordered) {
-      if (batch.opacity >= 0.999) this.drawAlphaBatch({ ...batch, alphaMode: 'mask', alphaCutoff: 0.999 }, true);
+      if (this.hasOpaqueInstance(batch)) this.drawAlphaBatch({ ...batch, alphaMode: 'mask', alphaCutoff: 0.999 }, true);
     }
     context.enable(context.BLEND);
     context.blendFuncSeparate(context.SRC_ALPHA, context.ONE_MINUS_SRC_ALPHA, context.ONE, context.ONE_MINUS_SRC_ALPHA);
@@ -1997,6 +2022,11 @@ export class Renderer67 {
     for (const { batch } of ordered) {
       this.uploadSortedInstances(batch, eye);
       this.drawAlphaBatch(batch, true);
+    }
+    if (addBatches.length > 0) {
+      // Source colour times opacity is added to the frame; the destination alpha is kept.
+      context.blendFuncSeparate(context.SRC_ALPHA, context.ONE, context.ZERO, context.ONE);
+      for (const batch of addBatches) this.drawAlphaBatch(batch, true);
     }
     context.depthMask(true);
     this.applyDepthLayer(0);
@@ -2019,6 +2049,7 @@ export class Renderer67 {
     context.uniform3f(this.uniforms.baseColor, data[25], data[26], data[27]);
     context.uniform4f(this.uniforms.surface, data[28], data[29], data[30], data[31]);
     context.uniform4f(this.uniforms.instanceEmission, data[38], data[39], data[40], 0);
+    context.uniform1f(this.uniforms.instanceOpacity, data[OPACITY_OFFSET]);
     if (this.shaderFeatures.has('boxMapScale')) context.uniformMatrix3fv(this.uniforms.boxNormalMatrix, false, data.subarray(16, 25));
   }
 

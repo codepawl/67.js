@@ -230,8 +230,8 @@ function materialFrom(value) {
   if (!RECIPE_ALPHA_MODES.includes(requestedAlphaMode)) {
     throw new RangeError(`alphaMode must be one of ${RECIPE_ALPHA_MODES.join(', ')}.`);
   }
-  // The renderer ignores opacity on opaque surfaces, so any opacity below one means blending.
-  result.alphaMode = result.opacity < 1 ? 'blend' : requestedAlphaMode;
+  // The renderer ignores opacity on opaque surfaces, so any opacity below one means blending (additive stays additive).
+  result.alphaMode = result.opacity < 1 && requestedAlphaMode === 'opaque' ? 'blend' : requestedAlphaMode;
   result.doubleSided = defaultValue(value.doubleSided, false);
   if (typeof result.doubleSided !== 'boolean') {
     throw new TypeError('doubleSided must be boolean.');

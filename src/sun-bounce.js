@@ -34,7 +34,7 @@ const KEY_THRESHOLD = 1e-3;
 const EXCLUDED_TAGS = new Set(['liquid', 'foam', 'unlit', 'fire', 'smoke']);
 
 function isBounceSurface(part) {
-  return part.material?.alphaMode !== 'blend' && !((part.material?.emission ?? 0) > 0) && !EXCLUDED_TAGS.has(part.material?.tag);
+  return !['blend', 'add'].includes(part.material?.alphaMode) && !((part.material?.emission ?? 0) > 0) && !EXCLUDED_TAGS.has(part.material?.tag);
 }
 
 function sunOf(environment) {

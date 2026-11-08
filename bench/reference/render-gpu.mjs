@@ -42,6 +42,12 @@ const sunBounce = numberAfter('--sun-bounce');
 const sunBounceRange = numberAfter('--sun-bounce-range');
 const sunBounceGain = numberAfter('--sun-bounce-gain');
 
+// --fog '<json>' merges those fields into the scene's volumeFog, for example --fog '{"noiseAmount":1,"warp":0.8}'.
+function fogOption() {
+  const index = argumentsGiven.indexOf('--fog');
+  return index >= 0 ? JSON.parse(argumentsGiven[index + 1]) : null;
+}
+
 const options = {
   ambient: numberAfter('--ambient'),
   fill: numberAfter('--fill'),
@@ -49,6 +55,7 @@ const options = {
   ambientOcclusion: numberAfter('--ambient-occlusion') ?? 0,
   ambientOcclusionRadius: numberAfter('--ambient-occlusion-radius') ?? 0.5,
   bloom: bloomOption(),
+  volumeFog: fogOption(),
   bake: bakePresetOption(),
 };
 

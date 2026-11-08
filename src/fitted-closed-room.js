@@ -54,7 +54,7 @@ function partsNearTheRest(parts, worldMatrices) {
  * CLOSED_ROOM_MAXIMUM_TRIANGLES triangles. Null when nothing is left to test. `worldMatrices` maps a part's name to its world matrix.
  */
 export function fittedClosedRoomShare(parts, worldMatrices) {
-  const kept = lightestParts(parts.filter(part => part.material?.alphaMode !== 'blend'));
+  const kept = lightestParts(parts.filter(part => !['blend', 'add'].includes(part.material?.alphaMode)));
   const share = closedRoomShare(kept, worldMatrices);
   if (share === null || share >= CLOSED_ROOM_SHARE) {
     return share;

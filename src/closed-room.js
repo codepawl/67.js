@@ -83,7 +83,7 @@ function hitsFrontFace(corners, offset, origin, direction) {
  * has more than CLOSED_ROOM_MAXIMUM_TRIANGLES triangles. `worldMatrices` maps a part's name to its world matrix.
  */
 export function closedRoomShare(parts, worldMatrices) {
-  const triangles = worldTriangles(parts.filter(part => part.material?.alphaMode !== 'blend'), worldMatrices);
+  const triangles = worldTriangles(parts.filter(part => !['blend', 'add'].includes(part.material?.alphaMode)), worldMatrices);
   if (!triangles) {
     return null;
   }
@@ -111,7 +111,7 @@ export const SKY_OPENNESS_RAYS = 32;
  */
 export function skyOpenness(parts, point) {
   const worldMatrices = new Map(parts.map(part => [part.name, part.matrix]));
-  const triangles = worldTriangles(parts.filter(part => part.material?.alphaMode !== 'blend'), worldMatrices);
+  const triangles = worldTriangles(parts.filter(part => !['blend', 'add'].includes(part.material?.alphaMode)), worldMatrices);
   if (!triangles) {
     return null;
   }
@@ -148,7 +148,7 @@ export function skyGridSize(minimum, maximum) {
  */
 export function skyVisibilityGrid(parts, minimum, maximum) {
   const worldMatrices = new Map(parts.map(part => [part.name, part.matrix]));
-  const triangles = worldTriangles(parts.filter(part => part.material?.alphaMode !== 'blend'), worldMatrices);
+  const triangles = worldTriangles(parts.filter(part => !['blend', 'add'].includes(part.material?.alphaMode)), worldMatrices);
   if (!triangles) {
     return null;
   }

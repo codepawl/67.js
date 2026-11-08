@@ -292,3 +292,13 @@ test('GLB Float32 rotated nonuniform, reflected and tiny TRS transforms roundtri
     }
   }
 });
+
+test('GLB export writes an additive material as BLEND because glTF has no additive mode', async () => {
+  const part = createModel()[0];
+  const material = { ...part.material, alphaMode: 'add', opacity: 0.5 };
+  const gltf = await new GLTFLoader().parseAsync(exportGlb([{ ...part, material }]), '');
+  let loaded;
+  gltf.scene.traverse((node) => { if (node.isMesh) loaded = node.material; });
+  assert.equal(loaded.transparent, true);
+  assert.ok(Math.abs(loaded.opacity - 0.5) < 1e-6);
+});

@@ -173,6 +173,12 @@ const volumeFog = z.strictObject({
   noiseScale: bounded(0.001, 100).optional(),
   maxDistance: bounded(0.01, 1e4).optional(),
   shadowAmbient: unit.optional(),
+  detailOctaves: z.number().int().min(1).max(3).optional(),
+  detailAmount: unit.optional(),
+  warp: bounded(0, 4).optional(),
+  contrast: bounded(0, 4).optional(),
+  profileSoftness: bounded(0, 0.95).optional(),
+  keyScattering: bounded(0, 10).optional(),
 });
 const affects = z.array(z.string()).optional();
 const lines = z.record(z.string(), z.unknown()).describe('Outlines, toon light and polylines as plain JSON; fields and limits in scene_capabilities lineArt. null clears.');
