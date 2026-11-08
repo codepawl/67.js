@@ -285,10 +285,10 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   // Recipe particles: closed-form from seeded launch values, so any time is computed directly and a seek never replays.
   particles: Object.freeze({
-    emitter: 'System node keeps its geometry as the particle shape (keep it low-poly); node transform does not move particles. Fields (defaults): node, seed (1), count (100), rate (per second; omit for a burst at 0), lifetime, speed, size (each number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc, position, halfExtents, radius }, scale constant|shrink|grow, drag (1/s, 0), floor (world y where particles land and rest).',
-    hair: 'type hair grows strands from a read-only root surface node into node (its own geometry is ignored). Fields (defaults): surface, seed, count, length (m, number or [min, max], 0.1), segments (1-8, 4), width (m, 0.004), droop (0.5), lean (0.2), sway (tip travel m, off), swayRate (Hz, 0.5). Triangular tapering tubes, no UVs.',
-    sectionFields: 'systems, gravity ([0,-9.81,0]), wind (m/s; moves emitter particles only with drag > 0, and sets the hair sway direction)',
-    notes: 'A particle is a pure function of seed, index and time; raising count keeps earlier ones. No collision but the floor, no bounce, rotation, colour or alpha; no hair collision, combing or clumping. Report: maxAlive and endsAt per system.',
+    emitter: 'System node keeps its geometry as the particle shape; node transform does not move particles. Fields (defaults): node, seed (1), count (100), rate (per second; omit for a burst at 0), lifetime, speed, size (each number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc, position, halfExtents, radius }, scale constant|shrink|grow, drag (1/s, 0), floor (world y particles land on).',
+    hair: 'type hair grows strands from a read-only root surface node into node (its own geometry is ignored). Fields (defaults): surface, seed, count, length (m, number or [min, max], 0.1), segments (1-8, 4), width (m, 0.004), droop (0.5), lean (0.2), sway (tip travel m, off), swayRate (Hz, 0.5). Tapering tubes, no UVs.',
+    sectionFields: 'systems, gravity ([0,-9.81,0]), wind (m/s; moves emitter particles only with drag > 0, and sets the hair sway direction), fields (also cloth; wind, turbulence, vortex, drag, magnet: docs/physics.md)',
+    notes: 'Pure function of seed, index and time; raising count keeps earlier ones. No collision but the floor, no bounce, rotation, colour or alpha; no hair collision.',
     limits: Object.freeze({ maxSystems: 4, maxParticlesPerSystem: 2000, maxParticles: 4000, maxVertices: 100000, maxLifetime: 60 }),
   }),
   // Recipe bake: bounced light written into lightmaps at build time (src/light-bake.js, loaded on demand).

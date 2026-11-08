@@ -590,6 +590,7 @@ const cloth = z.strictObject({
   wind: vector3.optional(),
   sheets: z.array(clothSheet).min(1).max(8),
   colliders: z.array(looseRecord).max(80).optional().describe('Fields: scene_capabilities cloth.'),
+  fields: z.array(looseRecord).max(8).optional().describe('Force fields: scene_capabilities particles.'),
 }).describe('Baked at 60 fps, seeked by motionTime. Units, defaults: scene_capabilities cloth.');
 // The full motion schema (tracks, ik, constraints, drivers) is in scene_create's recipe. scene_apply and asset recipes
 // take the same object, validated by the backend, without repeating about 35 KB of schema in each tool.
