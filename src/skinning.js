@@ -9,6 +9,34 @@ function finiteFloat(value) {
   return Number.isFinite(value) && Number.isFinite(Math.fround(value));
 }
 
+function isIdentityMatrix(values) {
+  for (let index = 0; index < 16; index++) {
+    if (values[index] !== IDENTITY_MATRIX[index]) return false;
+  }
+  return true;
+}
+
+/**
+ * out = a * b for 4x4 matrices at offsets, in the operation order of gl-matrix's mat4.multiply, so the Float32 results
+ * are the same without copying each operand into a workspace first. out may be the same array and offset as a or b.
+ */
+function multiplyAt(out, outOffset, a, aOffset, b, bOffset) {
+  const a00 = a[aOffset], a01 = a[aOffset + 1], a02 = a[aOffset + 2], a03 = a[aOffset + 3];
+  const a10 = a[aOffset + 4], a11 = a[aOffset + 5], a12 = a[aOffset + 6], a13 = a[aOffset + 7];
+  const a20 = a[aOffset + 8], a21 = a[aOffset + 9], a22 = a[aOffset + 10], a23 = a[aOffset + 11];
+  const a30 = a[aOffset + 12], a31 = a[aOffset + 13], a32 = a[aOffset + 14], a33 = a[aOffset + 15];
+  for (let column = 0; column < 16; column += 4) {
+    const b0 = b[bOffset + column];
+    const b1 = b[bOffset + column + 1];
+    const b2 = b[bOffset + column + 2];
+    const b3 = b[bOffset + column + 3];
+    out[outOffset + column] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+    out[outOffset + column + 1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+    out[outOffset + column + 2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+    out[outOffset + column + 3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  }
+}
+
 export function matrixDeterminant(values, offset) {
   const matrixXX = Math.fround(values[offset]);
   const matrixYX = Math.fround(values[offset + 1]);
@@ -70,16 +98,16 @@ export function updateSkinPose(pose, jointWorldMatrices, inverseBindMatrices, me
   workspace.bind.set(bindMatrix);
   if (!mat4.invert(workspace.meshInverse, workspace.meshWorld)) throw new Error('Mesh world matrix cannot be inverted.');
   if (checks) validateMatrices(workspace.meshInverse, 1, 'Inverse mesh world matrix');
+  // Multiplying by an exact identity returns the same Float32 values, so those products are skipped.
+  const bindIsIdentity = isIdentityMatrix(workspace.bind);
+  const meshInverseIsIdentity = isIdentityMatrix(workspace.meshInverse);
+  const product = workspace.product;
   for (let joint = 0; joint < count; joint++) {
     const offset = joint * 16;
-    for (let component = 0; component < 16; component++) {
-      workspace.world[component] = jointWorldMatrices[offset + component];
-      workspace.inverseBind[component] = inverseBindMatrices[offset + component];
-    }
-    mat4.multiply(workspace.product, workspace.world, workspace.inverseBind);
-    mat4.multiply(workspace.product, workspace.product, workspace.bind);
-    mat4.multiply(workspace.product, workspace.meshInverse, workspace.product);
-    workspace.pending.set(workspace.product, offset);
+    multiplyAt(product, 0, jointWorldMatrices, offset, inverseBindMatrices, offset);
+    if (!bindIsIdentity) multiplyAt(product, 0, product, 0, workspace.bind, 0);
+    if (meshInverseIsIdentity) workspace.pending.set(product, offset);
+    else multiplyAt(workspace.pending, offset, workspace.meshInverse, 0, product, 0);
   }
   if (checks) validateMatrices(workspace.pending, count, 'Joint palette');
   pose.jointMatrices.set(workspace.pending);
