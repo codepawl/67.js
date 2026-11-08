@@ -10,7 +10,7 @@ import { createStage, sharedFragmentHeader } from './camera-effects.js';
 
 const STREAK_DIRECTIONS = 4;
 const STREAK_STEPS = 12;
-const FOG_SAMPLES = 24;
+const FOG_SAMPLES = 32;
 // Longest lateral color offset at the image corner at full dispersion, as a fraction of the distance from the center.
 const MAXIMUM_DISPERSION = 0.03;
 
@@ -98,8 +98,9 @@ uniform float streakAmount;
 uniform float fogAmount;
 uniform float threshold;
 uniform float sizePixels;
-vec3 brightPart(vec2 coordinate) {
-  vec3 color = texture(sourceTexture, coordinate).rgb;
+uniform float fogLod;
+vec3 brightPart(vec2 coordinate, float lod) {
+  vec3 color = textureLod(sourceTexture, coordinate, lod).rgb;
   float peak = max(color.r, max(color.g, color.b));
   return color * max(peak - threshold, 0.0) / max(peak, 0.00001);
 }
@@ -115,20 +116,20 @@ void main() {
       for (int index = 1; index <= ${STREAK_STEPS}; index++) {
         float along = float(index) - jitter;
         float weight = 1.0 - along / (${STREAK_STEPS}.0 + 1.0);
-        streaks += (brightPart(textureCoordinate + step * along) + brightPart(textureCoordinate - step * along)) * weight * weight;
+        streaks += (brightPart(textureCoordinate + step * along, 0.0) + brightPart(textureCoordinate - step * along, 0.0)) * weight * weight;
       }
     }
     glow += streaks * streakAmount / ${STREAK_STEPS}.0;
   }
   if (fogAmount > 0.0) {
-    float rotation = pixelRotation();
+    // Taps read a blurred level of the frame, so the fixed spiral of taps merges into one smooth halo with no per-pixel noise.
     vec3 fog = vec3(0.0);
     float weightSum = 0.0;
     for (int index = 0; index < ${FOG_SAMPLES}; index++) {
       float ring = sqrt((float(index) + 0.5) / ${FOG_SAMPLES}.0);
-      float angle = float(index) * 2.3999632 + rotation;
+      float angle = float(index) * 2.3999632;
       float weight = 1.0 - ring * ring;
-      fog += brightPart(textureCoordinate + vec2(cos(angle), sin(angle)) * ring * sizePixels / resolution) * weight;
+      fog += brightPart(textureCoordinate + vec2(cos(angle), sin(angle)) * ring * sizePixels / resolution, fogLod) * weight;
       weightSum += weight;
     }
     glow += fog / weightSum * fogAmount;
@@ -146,7 +147,10 @@ void main() {
   // Positive distortion is barrel: the edges sample from further out, so they bunch toward the center. Each channel
   // takes a slightly different scale, so a line off center splits into color fringes that grow with the distance.
   float bend = 1.0 + distortion * 0.25 * dot(centered, centered);
-  vec3 scales = bend * (1.0 + dispersion * ${MAXIMUM_DISPERSION} * vec3(1.0, 0.0, -1.0));
+  vec3 spread = 1.0 + dispersion * ${MAXIMUM_DISPERSION} * vec3(1.0, 0.0, -1.0);
+  // Barrel samples from beyond the frame at the corners, so the picture is scaled to fill: the corner maps onto the corner for every channel.
+  float cornerBend = max(1.0 + distortion * 0.25 * (aspect * aspect + 1.0), 1.0);
+  vec3 scales = bend * spread / (cornerBend * (1.0 + dispersion * ${MAXIMUM_DISPERSION}));
   vec2 red = centered * scales.r;
   vec2 green = centered * scales.g;
   vec2 blue = centered * scales.b;
@@ -180,10 +184,10 @@ function createColorBalanceStage() {
 }
 
 function createGlareStage() {
-  return createStage({
+  const stage = createStage({
     name: 'Glare',
     fragment: glareFragment,
-    uniformNames: ['streakAmount', 'fogAmount', 'threshold', 'sizePixels'],
+    uniformNames: ['streakAmount', 'fogAmount', 'threshold', 'sizePixels', 'fogLod'],
     isActive: (effects, frame) => {
       const { glare } = stepsOf(frame);
       return Boolean(glare) && (glare.streaks > 0 || glare.fogGlow > 0);
@@ -193,9 +197,33 @@ function createGlareStage() {
       context.uniform1f(uniforms.streakAmount, glare.streaks);
       context.uniform1f(uniforms.fogAmount, glare.fogGlow);
       context.uniform1f(uniforms.threshold, glare.threshold);
-      context.uniform1f(uniforms.sizePixels, glare.size * renderer.canvas.height);
+      const sizePixels = glare.size * renderer.canvas.height;
+      context.uniform1f(uniforms.sizePixels, sizePixels);
+      // The halo blurs at about two thirds of its radius: coarse enough to hide the tap spacing, fine enough to keep its shape.
+      context.uniform1f(uniforms.fogLod, Math.max(0, Math.log2(sizePixels / 1.5)));
     },
   });
+  // The halo reads blurred levels of the frame, so the frame gets a mip chain for this draw and goes back to one level after it.
+  return {
+    ...stage,
+    apply(renderer, frame, effects, sourceTexture) {
+      const context = renderer.context;
+      const fogOn = stepsOf(frame).glare?.fogGlow > 0;
+      if (fogOn) {
+        context.activeTexture(context.TEXTURE0);
+        context.bindTexture(context.TEXTURE_2D, sourceTexture);
+        context.generateMipmap(context.TEXTURE_2D);
+        context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR_MIPMAP_LINEAR);
+      }
+      const result = stage.apply(renderer, frame, effects, sourceTexture);
+      if (fogOn) {
+        context.activeTexture(context.TEXTURE0);
+        context.bindTexture(context.TEXTURE_2D, sourceTexture);
+        context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR);
+      }
+      return result;
+    },
+  };
 }
 
 function createLensDistortionStage() {
