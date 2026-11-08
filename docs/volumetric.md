@@ -54,6 +54,10 @@ renderer.render({ eye: [0, 2, 5], target: [0, 1, 0], time: 0 });
 | `contrast` | `1` | `0…4`; stretches the noise around its middle, so thin gaps sit next to thick patches |
 | `profileSoftness` | `0.5` | `0…0.95`; where the `'smoothstep'` layer top starts to fade, as a share of the layer height. Lower tapers from nearer the floor |
 | `keyScattering` | `1` | `0…10`; scales the key light's in-scattering (the shadow-mapped god rays) and leaves `ambient` alone |
+| `scatterOctaves` | `1` | Integer `1…4`; above 1 the key light's in-scatter sums octaves that approximate multiple scattering (Wrenninge et al. 2015). Octave n scatters `multiScatter`^n as much, sees `multiExtinction`^n of the extinction and has `multiAnisotropy`^n of the anisotropy. Each octave needs the optical depth to the sun, three extra density taps per step |
+| `multiScatter`, `multiExtinction`, `multiAnisotropy` | `0.5`, `0.5`, `0.5` | `0…1` each; the octave factors above. They act only with `scatterOctaves` above 1 |
+| `keyTransmittance` | `0` | `0…1`; how much of the fog between a point and the sun dims the key light scattered there (three taps along the light, to the box exit). 0 keeps today's look |
+| `surfaceTransmittance` | `0` | `0…1`; the same dimming for the key light on a lit surface inside the box, so a dense haze dims a sunlit floor. 0 keeps today's look |
 
 Values must be finite numbers. Active volume fog accepts finite frame time within ±1,000,000 seconds and a nonzero light direction with components within ±1,000,000. Noise samples absolute time, so backward seeks reproduce earlier density.
 

@@ -103,6 +103,14 @@ const cascadesFlag = argumentsGiven.indexOf('--cascades');
 const cascades = cascadesFlag >= 0 ? Number(argumentsGiven[cascadesFlag + 1]) : 0;
 const ambientFlag = argumentsGiven.indexOf('--ambient');
 const ambient = ambientFlag >= 0 ? Number(argumentsGiven[ambientFlag + 1]) : null;
+// --key <scale> multiplies the sun and --fog-density <density> replaces the volume fog's density (0 removes the haze): measurement switches that split a picture into its light components (issue #543).
+const keyFlag = argumentsGiven.indexOf('--key');
+const keyScale = keyFlag >= 0 ? Number(argumentsGiven[keyFlag + 1]) : null;
+const fogDensityFlag = argumentsGiven.indexOf('--fog-density');
+// --fog-set name=value,name=value replaces any other volume fog fields, for example scatterOctaves=3,keyTransmittance=1.
+const fogSetFlag = argumentsGiven.indexOf('--fog-set');
+const fogSet = fogSetFlag >= 0 ? Object.fromEntries(argumentsGiven[fogSetFlag + 1].split(',').map(pair => pair.split('=')).map(([name, value]) => [name, Number(value)])) : {};
+const fogDensity = fogDensityFlag >= 0 || fogSetFlag >= 0 ? { ...fogSet, ...(fogDensityFlag >= 0 ? { density: Number(argumentsGiven[fogDensityFlag + 1]) } : {}) } : null;
 const pathTracerFlag = argumentsGiven.includes('--path-tracer');
 const samplesFlag = argumentsGiven.indexOf('--samples');
 const pathTracerSamples = samplesFlag >= 0 ? Number(argumentsGiven[samplesFlag + 1]) : 64;
@@ -118,7 +126,7 @@ const sceneIdsGiven = lookIds ?? (sceneFlag >= 0 ? argumentsGiven[sceneFlag + 1]
 // The fresh bake.json lands in the work directory and is checked against the committed one (compare-scores.mjs); --update-baseline replaces
 // the committed bake.json and images/<id>-baked.jpg with it.
 const bakeScoreRun = bakedSceneIds !== null && !sceneSet && !pathTracerFlag;
-const bakeVariantFlags = ['--no-glossy', '--sky-only', '--bake-preset', '--bake-grid', '--bake-grid-fog', '--no-bake-worker', '--bake-bounces', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
+const bakeVariantFlags = ['--no-glossy', '--sky-only', '--bake-preset', '--bake-grid', '--bake-grid-fog', '--no-bake-worker', '--bake-bounces', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--key', '--fog-density', '--fog-set', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
 const bakeScoreIsBaseline = bakeScoreRun && argumentsGiven.includes('--update-baseline') && !bakeVariantFlags.some(flag => argumentsGiven.includes(flag));
 const onlyScenes = sceneIdsGiven ?? (bakeScoreRun ? bakedSceneIds : null);
 const skipCpu = skipCpuFlag || bakeScoreRun || Boolean(viewTransform);
@@ -149,7 +157,7 @@ async function renderBackend(backend, serverUrl, graphics) {
       const objectProbesThisScene = !argumentsGiven.includes('--no-object-probes') && (objectProbeSceneIds === null || objectProbeSceneIds.includes(id));
       const probes = probesThisScene || (objectProbesThisScene ? 'objects' : false);
       const bake = bakesThisScene ? { ...skyOnlyOptions, ...(bakePreset ? { preset: bakePreset } : {}), ...(argumentsGiven.includes('--bake-grid') ? { irradianceGrid: Number(argumentsGiven[argumentsGiven.indexOf('--bake-grid') + 1]) || true } : {}), ...(argumentsGiven.includes('--bake-grid-fog') ? { gridFog: true } : {}), ...(argumentsGiven.includes('--bake-bounces') ? { bounces: Number(argumentsGiven[argumentsGiven.indexOf('--bake-bounces') + 1]) } : {}), ...(bakeBackend ? { backend: bakeBackend } : {}), ...(bakeSamples ? { samples: bakeSamples } : {}), ...(bakeDensity ? { texelsPerUnit: bakeDensity } : {}) } : null;
-      const result = await page.evaluate(([sceneId, shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bakeOptions, cascadeCount, withProbes, ambientScale, selectedViewTransform]) => window.renderReferenceScene(sceneId, { describe: shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bake: bakeOptions, cascades: cascadeCount, probes: withProbes, ambient: ambientScale, viewTransform: selectedViewTransform }), [id, describe, ambientOcclusion, ambientOcclusionRadius, bake, cascades, probes, ambient, viewTransform]);
+      const result = await page.evaluate(([sceneId, shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bakeOptions, cascadeCount, withProbes, ambientScale, selectedViewTransform, keyScaleGiven, fogGiven]) => window.renderReferenceScene(sceneId, { describe: shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bake: bakeOptions, cascades: cascadeCount, probes: withProbes, ambient: ambientScale, viewTransform: selectedViewTransform, key: keyScaleGiven, volumeFog: fogGiven }), [id, describe, ambientOcclusion, ambientOcclusionRadius, bake, cascades, probes, ambient, viewTransform, keyScale, fogDensity]);
       if (result.glError !== 0) throw new Error(`${id} on ${backend} gave WebGL error ${result.glError}.`);
       graphics[backend] = result.graphics;
       await writeFile(`${WORK_DIRECTORY}/${id}-${backend}.png`, Buffer.from(result.image, 'base64'));

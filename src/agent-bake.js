@@ -3,6 +3,7 @@ import { runKernel } from './kernel-offload.js';
 import { normalizeProbeList, traceProbes } from './probe-trace.js';
 import { placeProbes } from './reflection-probes.js';
 import { normalizeIrradianceGrid, placeIrradianceGrid, traceIrradianceGrid, withMeanRadiance } from './irradiance-grid.js';
+import { meanSkyRadiance } from './grid-medium.js';
 import { knownKeys, finiteNumber } from './agent-recipe-checks.js';
 import { BAKE_PRESETS, BAKE_RANGES, BAKE_MAXIMUM_SECONDS, BAKE_WORKER_MAXIMUM_SECONDS, BAKE_PRESET_PATH_WORK, BAKE_EXPLICIT_PATH_WORK_LIMIT } from './agent-scene-capabilities.js';
 
@@ -227,6 +228,7 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
   };
   if (settings.gridFog) {
     lighting.volumeFog = environment.volumeFog;
+    lighting.skyMean = meanSkyRadiance(environment.map);
   }
   // A hair, particle or cloth node is drawn from geometry built every frame, which has no lightmap UVs.
   const snapshots = parts.map(part => ({
