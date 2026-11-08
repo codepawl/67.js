@@ -52,19 +52,24 @@ export function createSkinPose(jointCount) {
   return pose;
 }
 
-/** Atomically calculate inverse(meshWorld) * jointWorld * inverseBind * bindMatrix. */
-export function updateSkinPose(pose, jointWorldMatrices, inverseBindMatrices, meshWorldMatrix = IDENTITY_MATRIX, bindMatrix = IDENTITY_MATRIX) {
+/**
+ * Atomically calculate inverse(meshWorld) * jointWorld * inverseBind * bindMatrix. `checks: false` skips the finite,
+ * affine and singular checks for inputs already checked, such as a loaded clip; a mesh world that cannot be inverted still throws.
+ */
+export function updateSkinPose(pose, jointWorldMatrices, inverseBindMatrices, meshWorldMatrix = IDENTITY_MATRIX, bindMatrix = IDENTITY_MATRIX, checks = true) {
   const workspace = poseWorkspaces.get(pose);
   if (!workspace || pose.jointMatrices !== workspace.jointMatrices) throw new Error('Use an unchanged pose from createSkinPose().');
   const count = pose.jointMatrices.length / 16;
-  validateMatrices(jointWorldMatrices, count, 'Joint world matrices');
-  validateMatrices(inverseBindMatrices, count, 'Inverse bind matrices');
-  validateMatrices(meshWorldMatrix, 1, 'Mesh world matrix');
-  validateMatrices(bindMatrix, 1, 'Bind matrix');
+  if (checks) {
+    validateMatrices(jointWorldMatrices, count, 'Joint world matrices');
+    validateMatrices(inverseBindMatrices, count, 'Inverse bind matrices');
+    validateMatrices(meshWorldMatrix, 1, 'Mesh world matrix');
+    validateMatrices(bindMatrix, 1, 'Bind matrix');
+  }
   workspace.meshWorld.set(meshWorldMatrix);
   workspace.bind.set(bindMatrix);
   if (!mat4.invert(workspace.meshInverse, workspace.meshWorld)) throw new Error('Mesh world matrix cannot be inverted.');
-  validateMatrices(workspace.meshInverse, 1, 'Inverse mesh world matrix');
+  if (checks) validateMatrices(workspace.meshInverse, 1, 'Inverse mesh world matrix');
   for (let joint = 0; joint < count; joint++) {
     const offset = joint * 16;
     for (let component = 0; component < 16; component++) {
@@ -76,7 +81,7 @@ export function updateSkinPose(pose, jointWorldMatrices, inverseBindMatrices, me
     mat4.multiply(workspace.product, workspace.meshInverse, workspace.product);
     workspace.pending.set(workspace.product, offset);
   }
-  validateMatrices(workspace.pending, count, 'Joint palette');
+  if (checks) validateMatrices(workspace.pending, count, 'Joint palette');
   pose.jointMatrices.set(workspace.pending);
   return pose;
 }

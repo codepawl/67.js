@@ -1,0 +1,2 @@
+- scene:agent-scene: the checks option and the same-clip path for animated assets, which cut skinned update CPU further.
+- goal:agent-scene: 85 bytes for that; accepted by the lead under the trade-off rule.

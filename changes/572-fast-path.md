@@ -1,0 +1,1 @@
+- `applyAnimation(time, clip, { checks: false })` and `renderer.updateParts(parts, { checks: false })` skip the per-frame pose checks for clips you trust, and frames on the same clip no longer reset and snapshot every node. Eight animated characters: update CPU 1.6 ms to 1.3 ms with checks, 0.9 ms without.
