@@ -237,11 +237,11 @@ export function traceIrradianceGrid(parts, lighting, { resolution = true, sample
   const scale = sceneScale(world.positions);
   const offset = scale * 1e-4;
   const tracer = createTracer(world);
-  const directIrradiance = createDirectIrradiance(tracer, withReach(lights, parts), offset, scale);
-  const albedoOfPart = parts.map(part => diffuseAlbedo(part.material));
-  const emissionOfPart = parts.map(part => emittedRadiance(part.material));
   const sun = lights.sun ?? null;
   const medium = createGridMedium({ lighting, sun, tracer, scale });
+  const directIrradiance = createDirectIrradiance(tracer, withReach(lights, parts), offset, scale, medium?.sunReaching);
+  const albedoOfPart = parts.map(part => diffuseAlbedo(part.material));
+  const emissionOfPart = parts.map(part => emittedRadiance(part.material));
   const gather = createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium, fogScatterLimit: MAXIMUM_FOG_SCATTERS });
   const started = performance.now();
   const data = new Float32Array(nodeCount * COEFFICIENTS_PER_NODE);

@@ -1,0 +1,1 @@
+- bake.gridFog: the sun the fog scatters is dimmed by the fog between it and the sun (#543)

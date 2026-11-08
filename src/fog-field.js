@@ -6,7 +6,7 @@ export const FOG_LIGHT_LIMIT = 8;
 export const DEFAULT_FLOW_STRENGTH = 1;
 export const DEFAULT_FLOW_PERIOD = 2;
 // What a fog without detail controls uses: one octave, no warp, the noise as is, the layer top fading from half its height.
-const DEFAULT_DETAIL = { detailOctaves: 1, detailAmount: 0.5, warp: 0, contrast: 1, profileSoftness: 0.5, keyScattering: 1 };
+const DEFAULT_DETAIL = { detailOctaves: 1, detailAmount: 0.5, warp: 0, contrast: 1, profileSoftness: 0.5, keyScattering: 1, scatterOctaves: 1, multiScatter: 0.5, multiExtinction: 0.5, multiAnisotropy: 0.5, keyTransmittance: 0, surfaceTransmittance: 0 };
 const DETAIL_LIMITS = {
   detailOctaves: [1, 3, 'Volume detail octaves'],
   detailAmount: [0, 1, 'Volume detail amount'],
@@ -14,6 +14,12 @@ const DETAIL_LIMITS = {
   contrast: [0, 4, 'Volume contrast'],
   profileSoftness: [0, 0.95, 'Volume profile softness'],
   keyScattering: [0, 10, 'Volume key scattering'],
+  scatterOctaves: [1, 4, 'Volume scatter octaves'],
+  multiScatter: [0, 1, 'Volume multi scatter'],
+  multiExtinction: [0, 1, 'Volume multi extinction'],
+  multiAnisotropy: [0, 1, 'Volume multi anisotropy'],
+  keyTransmittance: [0, 1, 'Volume key transmittance'],
+  surfaceTransmittance: [0, 1, 'Volume surface transmittance'],
 };
 
 /** The six detail fields of a resolved volume fog with defaults filled in. Anything unset or out of range throws like the core fields. */
@@ -23,6 +29,7 @@ export function resolveFogDetail(volume) {
     if (volume[field] !== undefined) detail[field] = finiteRange(volume[field], minimum, maximum, label);
   }
   if (!Number.isInteger(detail.detailOctaves)) throw new RangeError('Volume detail octaves must be an integer');
+  if (!Number.isInteger(detail.scatterOctaves)) throw new RangeError('Volume scatter octaves must be an integer');
   return detail;
 }
 
