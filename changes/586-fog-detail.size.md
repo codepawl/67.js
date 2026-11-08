@@ -4,3 +4,5 @@
 - scene:agent-scene+lazy: the same fog-shader code in the lazy build.
 - goal:lit-box: 49 bytes in the core (a spread of unknown fog fields and one post step line); the detail code itself lives in the fog addon.
 - goal:gltf-box: 48 bytes for the same core change.
+- tool:scene_create: six bounded volumeFog detail fields (detailOctaves, detailAmount, warp, contrast, profileSoftness, keyScattering) so agents can shape ground mist (issue #586)
+- tool-total: same six fields
