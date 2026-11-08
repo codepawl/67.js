@@ -28,7 +28,7 @@ const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout',
 const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
 const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
 const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', ...MATERIAL_LAYER_FIELDS];
-const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'boxMapScale', 'boxMapAxis'];
+const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'layerMaps', 'transmissionMap', 'boxMapScale', 'boxMapAxis'];
 const CAMERA_FIELDS = [...Object.keys(CAMERA_DEFAULTS), ...CAMERA_LENS_FIELDS];
 const LOOK_OPERATION_FIELDS = Object.freeze({
   'set-environment': 'environment',
@@ -200,6 +200,11 @@ function copyMaterialLayers(value, result) {
     if (value[field] === undefined) continue;
     result[field] = Array.isArray(value[field]) ? vector(value[field], 3, field) : value[field];
   }
+  // A graph that outputs clearcoat or transmission is the per-pixel mask, so the factor defaults to 1 (full strength).
+  const graph = value.pattern?.type === 'graph' ? value.pattern.graph : null;
+  for (const field of ['clearcoat', 'transmission']) {
+    if (value[field] === undefined && graph && Object.hasOwn(graph, field)) result[field] = 1;
+  }
   validateMaterialLayers(result);
   if (value.subsurface !== undefined) result.subsurface = agentSceneModule('subsurfaceShader').copySubsurface(value.subsurface, result.tag);
   if (value.snippet) result.snippet = agentSceneModule('materialSnippet').normalizeMaterialSnippet(value.snippet, { hasMap: Boolean(value.map || value.pattern) });
@@ -234,7 +239,9 @@ function materialFrom(value) {
     throw new RangeError(`alphaMode must be one of ${RECIPE_ALPHA_MODES.join(', ')}.`);
   }
   // The renderer ignores opacity on opaque surfaces, so any opacity below one means blending (additive stays additive).
-  result.alphaMode = result.opacity < 1 && requestedAlphaMode === 'opaque' ? 'blend' : requestedAlphaMode;
+  // A graph that outputs opacity writes it into the base texture alpha, which only blend, add and mask read.
+  const graphHasOpacity = value.pattern?.type === 'graph' && Object.hasOwn(value.pattern.graph ?? {}, 'opacity');
+  result.alphaMode = (result.opacity < 1 || graphHasOpacity) && requestedAlphaMode === 'opaque' ? 'blend' : requestedAlphaMode;
   result.doubleSided = defaultValue(value.doubleSided, false);
   if (typeof result.doubleSided !== 'boolean') {
     throw new TypeError('doubleSided must be boolean.');

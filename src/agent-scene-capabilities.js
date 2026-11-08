@@ -50,10 +50,11 @@ export const MATERIAL_PATTERN_TYPES =Object.freeze(['noise', 'wood', 'planks', '
 export const MAX_MATERIAL_PATTERNS = 16;
 // A material graph bakes to textures on the CPU and never becomes shader text. Its node and depth limits are the field
 // expression limits; maxWork is work units per pixel times pixels, so a costly graph needs a smaller texture.
-export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height']);
+export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height', 'opacity', 'clearcoat', 'transmission']);
 export const MATERIAL_GRAPH_OPERATORS = Object.freeze([
   'uv', 'vec', 'ramp', 'noise', 'voronoi', 'wave', 'checker', 'gradient',
   'add', 'sub', 'mul', 'div', 'min', 'max', 'pow', 'abs', 'floor', 'fract', 'sqrt', 'invert', 'clamp', 'smoothstep', 'mix',
+  'layer', 'hue', 'curve',
 ]);
 export const MATERIAL_GRAPH_LIMITS = Object.freeze({ maxNodes: MAX_FIELD_NODES, maxDepth: MAX_FIELD_DEPTH, maxStops: 8, maxWork: 30_000_000 });
 // Curve and text geometry. A text geometry is bounded by vertices per curve segment: the bundled font stays under
@@ -68,7 +69,7 @@ export const CURVE_TEXT_DETAILS = Object.freeze({
 });
 export const MATERIAL_MAPPINGS = Object.freeze(['box', 'uv']);
 export const MATERIAL_GRAPH_NODES = Object.freeze({
-  outputs: 'color (linear RGB; a number is grey), roughness, metallic, emission (colour; defaults to 1), height (becomes a normal map).',
+  outputs: 'color (linear RGB; a number is grey), roughness, metallic, emission (colour; defaults to 1), height (becomes a normal map), opacity (base texture alpha; the material blends unless alphaMode says otherwise), clearcoat and transmission (per-pixel masks of the material factors, which default to 1; the path tracer reads both, the rasterizer reads clearcoat only).',
   node: 'A number, [x, y, z], or an object with exactly one operator.',
   textures: Object.freeze({
     noise: '{"noise":{"scale":8,"seed":1,"octaves":4}}',
@@ -80,6 +81,7 @@ export const MATERIAL_GRAPH_NODES = Object.freeze({
   }),
   uv: '{"uv":"u"|"v"|"both"} are the coordinates.',
   ramp: '{"ramp":{"value":node,"stops":[[0,[r,g,b]],[1,[r,g,b]]]}} maps a number to colours, 2 to 8 stops rising from 0 to 1.',
+  mixing: '{"layer":{"base":node,"top":node,"mask":number node,"edge":0.5,"softness":0.1}} puts top over base where mask passes edge (paint over rust); {"hue":{"color":node,"shift":number node (turns),"saturation":1,"value":1}}; {"curve":{"value":node,"points":[[x,y],...]}} remaps by 2 to 8 points with rising x.',
   maths: 'add sub mul div min max pow take [a,b]; abs floor fract sqrt invert take one node; clamp smoothstep mix take [a,b,c]; {"vec":[r,g,b]}. Numbers combine with vectors per component.',
   example: '{"color":{"ramp":{"value":{"noise":{"scale":8}},"stops":[[0,[0.1,0.05,0.02]],[1,[0.6,0.4,0.2]]]}},"height":{"noise":{"scale":8}}}',
   mapping: 'box (default) projects along the object axes and needs no UVs; uv follows geometry UVs, so the mesh needs a uv_unwrap node or geometry.uvs. size and axis only apply to box.',

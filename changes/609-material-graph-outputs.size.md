@@ -1,0 +1,2 @@
+- scene:agent-scene: three graph outputs and three mixing nodes add about 2 KB source to the already loaded graph baker, and the clearcoat texture now reads through the box projection.
+- goal:capable: the path tracer reads two more textures per hit; the graph language gains what paint-over-rust needs.
