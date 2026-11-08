@@ -1,4 +1,4 @@
-// Compiles the WGSL kernel on SwiftShader's Vulkan adapter (CPU only, no GPU queue) and prints every error with its line.
+// Compiles both WGSL kernels on SwiftShader's Vulkan adapter (CPU only, no GPU queue) and prints every error with its line, per kernel.
 //   node bench/webgpu-tracer/validate.mjs
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
@@ -11,12 +11,15 @@ try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/bench/webgpu-tracer/harness.html`);
   const messages = await page.evaluate(async () => {
-    const { KERNEL_SOURCE } = await import('/bench/webgpu-tracer/kernel.js');
+    const { MEGAKERNEL_SOURCE, WAVEFRONT_SOURCE } = await import('/src/path-tracer-webgpu-kernel.js');
     const adapter = await navigator.gpu.requestAdapter();
     const device = await adapter.requestDevice();
-    const module = device.createShaderModule({ code: KERNEL_SOURCE });
-    const info = await module.getCompilationInfo();
-    return info.messages.map(message => `${message.type} ${message.lineNum}:${message.linePos} ${message.message}`);
+    const lines = [];
+    for (const [name, code] of [['megakernel', MEGAKERNEL_SOURCE], ['wavefront', WAVEFRONT_SOURCE]]) {
+      const info = await device.createShaderModule({ code }).getCompilationInfo();
+      for (const message of info.messages) lines.push(`${name} ${message.type} ${message.lineNum}:${message.linePos} ${message.message}`);
+    }
+    return lines;
   });
   console.log(messages.length === 0 ? 'WGSL ok' : messages.join('\n'));
 } finally {

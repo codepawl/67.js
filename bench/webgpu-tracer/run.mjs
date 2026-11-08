@@ -1,6 +1,6 @@
 // One timed trace of the demo room with one backend, in a headless Chrome whose profile persists per backend (so the first
 // run in a fresh profile is the cold compile and later runs are warm). On a shared card, run it through a GPU job queue.
-//   node bench/webgpu-tracer/run.mjs <output directory> <webgl|webgpu> [--samples 64] [--width 1920] [--height 1080] [--label run1]
+//   node bench/webgpu-tracer/run.mjs <output directory> <webgl|wavefront|megakernel> [--samples 64] [--width 1920] [--height 1080] [--label run1] [--sort on|off]
 // Writes <variant>-<label>.png and <variant>-<label>.json; the profile lives in <output directory>/profile-<variant>.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
@@ -25,6 +25,7 @@ const options = {
   bounces: 8,
   seed: 0,
   fireflyClamp: 20,
+  sortByMaterial: valueAfter('--sort', 'off') === 'on',
 };
 const label = valueAfter('--label', 'run1');
 
@@ -48,7 +49,7 @@ try {
   await page.waitForFunction(() => window.harnessReady, null, { timeout: 180000 });
   const recipe = JSON.parse(await readFile('tests/fixtures/demo-room.recipe.json', 'utf8'));
   const scene = await page.evaluate(([sceneRecipe, width, height]) => window.prepareScene(sceneRecipe, width, height), [recipe, options.width, options.height]);
-  const result = await page.evaluate(([name, tracerOptions]) => (name === 'webgl' ? window.traceWithWebGl(tracerOptions) : window.traceWithWebGpu(tracerOptions)), [variant, options]);
+  const result = await page.evaluate(([name, tracerOptions]) => (name === 'webgl' ? window.traceWithWebGl(tracerOptions) : window.traceWithWebGpu(tracerOptions, name)), [variant, options]);
   const { image, ...numbers } = result;
   await writeFile(`${outputDirectory}/${variant}-${label}.png`, Buffer.from(image, 'base64'));
   const record = { variant, label, ...options, ...scene, ...numbers };

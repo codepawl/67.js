@@ -7,8 +7,8 @@ set -u
 OUT="${1:?output directory}"
 for RUN in 1 2 3; do
   ${GPU_LOCK:-} node bench/native-tracer/run.mjs "$OUT" --label "run$RUN" 2>&1 | cut -c1-1500
-  ${GPU_LOCK:-} node bench/webgpu-tracer/run.mjs "$OUT" webgpu --label "run$RUN" 2>&1 | cut -c1-1500
+  ${GPU_LOCK:-} node bench/webgpu-tracer/run.mjs "$OUT" megakernel --label "run$RUN" 2>&1 | cut -c1-1500
 done
 for RUN in 1 2 3; do
-  echo "flip run$RUN native vs webgpu: $(uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/webgpu-tracer/flip.py "$OUT/webgpu-run$RUN.png" "$OUT/native-run$RUN.png")"
+  echo "flip run$RUN native vs WebGPU megakernel: $(uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/webgpu-tracer/flip.py "$OUT/megakernel-run$RUN.png" "$OUT/native-run$RUN.png")"
 done
