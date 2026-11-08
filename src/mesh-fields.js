@@ -1,7 +1,6 @@
-import { TAG_PREFIX, meshTags } from './mesh-data.js';
+import { TAG_PREFIX, meshTags, vertexGroupWeights } from './mesh-data.js';
 import { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK, FIELD_ATTRIBUTES } from './mesh-operations.js';
 import { faceCentroids, faceNormals, vertexNormals } from './mesh-normals.js';
-import { ROTATION_OPERATORS } from './field-rotation.js';
 import {
   COMPONENTS, compileNode, createOperators, describeKey, isBoundedNumber, isPlainObject, requireScalar, scalarValue, vectorValue,
 } from './expression.js';
@@ -158,11 +157,23 @@ OPERATORS.set('normalize', vectorOperator(1, 1, normalizeValue));
 OPERATORS.set('x', vectorOperator(1, 1, selectComponent(0)));
 OPERATORS.set('y', vectorOperator(1, 1, selectComponent(1)));
 OPERATORS.set('z', vectorOperator(1, 1, selectComponent(2)));
-for (const [name, operator] of Object.entries(ROTATION_OPERATORS)) OPERATORS.set(name, operator);
+// Operators that other modules add (field-rotation.js registers itself), so a bundle that never uses one does not carry its code.
+export function registerFieldOperator(name, operator) {
+  OPERATORS.set(name, operator);
+  FIELD_OPERATORS.push(name);
+}
 
 export { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK };
-const SOURCE_KEYS = Object.freeze(['attr', 'noise', 'random']);
-export const FIELD_OPERATORS = Object.freeze([...OPERATORS.keys(), ...SOURCE_KEYS]);
+const SOURCE_KEYS = Object.freeze(['attr', 'noise', 'random', 'nearest', 'raycast']);
+
+// Inputs that other modules supply (the surface inputs register themselves), so a bundle that never reads one does not carry its code.
+const FIELD_SOURCES = new Map();
+
+export function registerFieldSource(name, compile) {
+  FIELD_SOURCES.set(name, compile);
+}
+// Every operator and input name; registerFieldOperator adds the late ones.
+export const FIELD_OPERATORS = [...OPERATORS.keys(), ...SOURCE_KEYS];
 
 // ---------------------------------------------------------------------------------------------------------------
 // Compiling an expression against an element context: { count, positions(), normals(), tag(name) }.
@@ -184,6 +195,13 @@ function compileAttribute(node, context) {
   if (node.attr === 'index') {
     if (node.component !== undefined || node.name !== undefined) throw fieldError('index takes no component or name.');
     return scalarValue(index => index);
+  }
+  if (node.attr === 'group') {
+    if (typeof node.name !== 'string' || !TAG_NAME_PATTERN.test(node.name) || node.component !== undefined) {
+      throw fieldError('group needs the name of a vertex group.');
+    }
+    const weights = context.group(node.name);
+    return scalarValue(index => weights[index]);
   }
   if (node.attr === 'tag') {
     if (typeof node.name !== 'string' || !TAG_NAME_PATTERN.test(node.name) || node.component !== undefined) {
@@ -240,12 +258,15 @@ function compileInput(node, state, depth) {
   if (keys.length !== 1) return undefined;
   if (keys[0] === 'noise') return compileNoise(node, state, depth);
   if (keys[0] === 'random') return compileRandom(node);
+  const positionInput = () => compileAttribute({ attr: 'position' }, state.context);
+  const compileSource = FIELD_SOURCES.get(keys[0]);
+  if (compileSource) return compileSource(node, state, depth, positionInput);
   return undefined;
 }
 
 const FIELD_DIALECT = Object.freeze({
   name: 'field',
-  accepts: 'a number, a boolean, a vector of three numbers, an attribute, noise, random or an operator object',
+  accepts: 'a number, a boolean, a vector of three numbers, an attribute, noise, random, nearest, raycast or an operator object',
   maxNodes: MAX_FIELD_NODES,
   maxDepth: MAX_FIELD_DEPTH,
   operators: OPERATORS,
@@ -277,7 +298,7 @@ export function validateField(expression, { kind } = {}) {
 }
 
 const EMPTY = new Float64Array(0);
-const VALIDATION_CONTEXT = Object.freeze({ count: 0, positions: () => EMPTY, normals: () => EMPTY, tag: () => EMPTY });
+const VALIDATION_CONTEXT = Object.freeze({ count: 0, positions: () => EMPTY, normals: () => EMPTY, tag: () => EMPTY, group: () => EMPTY, loadSurface: null });
 
 function finiteValues(source, count, width) {
   const values = new Float64Array(count * width);
@@ -289,7 +310,7 @@ function finiteValues(source, count, width) {
 // Contexts: the elements an expression runs over.
 
 /** A mesh domain: "point" (one element per vertex) or "face" (one per face). Face values average from points and back. */
-export function meshFieldContext(mesh, domain) {
+export function meshFieldContext(mesh, domain, loadSurface) {
   if (domain !== 'point' && domain !== 'face') throw fieldError('domain must be point or face.');
   const isPoint = domain === 'point';
   const cache = {};
@@ -297,12 +318,29 @@ export function meshFieldContext(mesh, domain) {
     count: isPoint ? mesh.vertexCount : mesh.faceCount,
     positions: () => (cache.positions ??= isPoint ? mesh.positions : faceCentroids(mesh)),
     normals: () => (cache.normals ??= isPoint ? vertexNormals(mesh) : faceNormals(mesh).normals),
+    loadSurface,
+    group: name => {
+      const weights = vertexGroupWeights(mesh, name);
+      return isPoint ? weights : faceGroupAverage(mesh, weights);
+    },
     tag: name => {
       const attribute = mesh.attributes.face[TAG_PREFIX + name];
       if (!attribute) throw new RangeError(`Unknown tag ${name}. Known tags: ${meshTags(mesh).join(', ') || 'none'}.`);
       return isPoint ? pointTagAverage(mesh, attribute.data) : attribute.data;
     },
   };
+}
+
+function faceGroupAverage(mesh, pointWeights) {
+  const averages = new Float64Array(mesh.faceCount);
+  for (let face = 0; face < mesh.faceCount; face++) {
+    const start = mesh.faceOffsets[face];
+    const end = mesh.faceOffsets[face + 1];
+    let sum = 0;
+    for (let corner = start; corner < end; corner++) sum += pointWeights[mesh.cornerVertices[corner]];
+    averages[face] = sum / (end - start);
+  }
+  return averages;
 }
 
 function pointTagAverage(mesh, faceValues) {
@@ -320,11 +358,15 @@ function pointTagAverage(mesh, faceValues) {
 }
 
 /** A free point set (instance candidates): positions and optional normals, flat arrays of three numbers per point. */
-export function pointSetContext(positions, normals) {
+export function pointSetContext(positions, normals, loadSurface) {
   return {
     count: positions.length / 3,
     positions: () => positions,
     normals: () => normals,
+    loadSurface,
+    group: name => {
+      throw new RangeError(`Unknown vertex group ${name}. Point sets carry no groups.`);
+    },
     tag: name => {
       throw new RangeError(`Unknown tag ${name}. Point sets carry no tags.`);
     },

@@ -20,6 +20,11 @@ import { decimateMesh } from './mesh-decimate.js';
 import { isModifierOperation, normalizeModifierEdit, runModifierEdit } from './mesh-modifiers.js';
 import { sculptMesh, checkSculptBudget } from './mesh-sculpt.js';
 import { shrinkwrapMesh } from './mesh-shrinkwrap.js';
+import { triangulatedSurface } from './mesh-surface-distance.js';
+import { createTriangleSurfaceIndex } from './mesh-query.js';
+import './mesh-field-surfaces.js';
+import './field-rotation.js';
+import './mesh-hull-modifiers.js';
 import { remeshMesh, remeshGridSize, MAX_REMESH_RESOLUTION } from './mesh-remesh.js';
 import {
   MESH_EDIT_OPERATIONS, MAX_MESH_EDITS, STACK_OPERATIONS, MAX_STACK_NODES, SCULPT_STROKE_TYPES, MAX_SCULPT_STROKES, SHRINKWRAP_MODES,
@@ -368,7 +373,16 @@ function runShrinkwrap(current, edit, resolveCutter) {
 }
 
 /** Run one normalized edit on MeshData and describe what it did. */
+// Field inputs that read another surface take a geometry record here, built by the same resolver as a boolean cutter.
+function surfaceLoader(resolveCutter) {
+  return surface => {
+    if (!resolveCutter || typeof surface === 'string') throw new TypeError('A mesh edit field reads a surface given as a geometry record such as { "type": "terrain", ... }, not an id.');
+    return createTriangleSurfaceIndex(triangulatedSurface(resolveCutter(surface)));
+  };
+}
+
 function runEdit(current, edit, index, { resolveCutter, limits }) {
+  const loadSurface = surfaceLoader(resolveCutter);
   const result = { op: edit.op };
   if (edit.name) result.name = edit.name;
   if (isModifierOperation(edit.op)) {
@@ -447,7 +461,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
   if (edit.op === 'set_position' || edit.op === 'displace') {
     let outcome;
     try {
-      outcome = edit.op === 'set_position' ? setPosition(current, edit) : displaceMesh(current, edit);
+      outcome = edit.op === 'set_position' ? setPosition(current, edit, loadSurface) : displaceMesh(current, edit, loadSurface);
     } catch (error) {
       throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
     }
@@ -457,7 +471,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
   if (edit.op === 'vertex_group' || edit.op === 'vertex_color') {
     let outcome;
     try {
-      outcome = edit.op === 'vertex_group' ? setVertexGroup(current, edit) : setVertexColor(current, edit);
+      outcome = edit.op === 'vertex_group' ? setVertexGroup(current, edit, loadSurface) : setVertexColor(current, edit, loadSurface);
     } catch (error) {
       throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
     }

@@ -5,7 +5,7 @@ export const MAX_MESH_EDITS = 64;
 
 // Modifiers that work on the whole mesh and take no selection or name. Their fields are checked in mesh-modifiers.js and
 // each one is described for agents by MESH_MODIFIER_NOTES in agent-scene-capabilities.js.
-export const MODIFIER_OPERATIONS = Object.freeze({
+export const MODIFIER_OPERATIONS = /* @__PURE__ */ Object.freeze({
   weld: { fields: ['distance'], tags: [] },
   triangulate: { fields: ['minVertices'], tags: [] },
   edge_split: { fields: ['angle'], tags: [] },
@@ -25,7 +25,7 @@ export const MODIFIER_OPERATIONS = Object.freeze({
   convex_hull: { fields: [], tags: [] },
 });
 
-export const MESH_EDIT_OPERATIONS = Object.freeze({
+export const MESH_EDIT_OPERATIONS = /* @__PURE__ */ Object.freeze({
   extrude_face_region: { fields: ['select', 'name', 'offset', 'direction', 'alongNormals'], tags: ['cap', 'side'] },
   extrude_individual: { fields: ['select', 'name', 'offset', 'direction'], tags: ['cap', 'side'] },
   inset_region: { fields: ['select', 'name', 'thickness', 'depth'], tags: ['cap', 'rim'] },
@@ -65,13 +65,13 @@ export const MESH_EDIT_OPERATIONS = Object.freeze({
 });
 
 // Limits of the sculpt and shrinkwrap edits, and their vocabulary, as plain data.
-export const SCULPT_STROKE_TYPES = Object.freeze(['inflate', 'displace', 'smooth']);
+export const SCULPT_STROKE_TYPES = /* @__PURE__ */ Object.freeze(['inflate', 'displace', 'smooth']);
 export const MAX_SCULPT_STROKES = 32;
 export const MAX_SCULPT_VISITS = 5_000_000;
-export const SHRINKWRAP_MODES = Object.freeze(['nearest', 'project']);
+export const SHRINKWRAP_MODES = /* @__PURE__ */ Object.freeze(['nearest', 'project']);
 export const MAX_SHRINKWRAP_TRIANGLE_TESTS = 20_000_000;
 
-export const STACK_OPERATIONS = Object.freeze(['mirror', 'array', 'solidify', 'bevel', 'uv_unwrap', 'subdivide', 'set_position', 'displace', 'decimate', 'remesh', ...Object.keys(MODIFIER_OPERATIONS)]);
+export const STACK_OPERATIONS = /* @__PURE__ */ Object.freeze(['mirror', 'array', 'solidify', 'bevel', 'uv_unwrap', 'subdivide', 'set_position', 'displace', 'decimate', 'remesh', ...Object.keys(MODIFIER_OPERATIONS)]);
 export const MAX_STACK_NODES = 16;
 
 // Field expressions (mesh-fields.js) and instancing (mesh-instances.js): limits and names as plain data. A test
@@ -80,19 +80,19 @@ export const MAX_FIELD_NODES = 64;
 export const MAX_FIELD_DEPTH = 12;
 export const MAX_FIELD_ELEMENTS = 250_000;
 export const MAX_FIELD_WORK = 8_000_000;
-export const FIELD_ATTRIBUTES = Object.freeze(['position', 'normal', 'index', 'tag']);
-export const FIELD_OPERATOR_NAMES = Object.freeze([
+export const FIELD_ATTRIBUTES = /* @__PURE__ */ Object.freeze(['position', 'normal', 'index', 'tag', 'group']);
+export const FIELD_OPERATOR_NAMES = /* @__PURE__ */ Object.freeze([
   'add', 'mul', 'min', 'max', 'sub', 'div', 'mod', 'pow', 'atan2', 'clamp', 'mix', 'smoothstep',
   'neg', 'abs', 'sqrt', 'sin', 'cos', 'floor', 'ceil', 'round', 'fract', 'sign', 'saturate',
   'lt', 'lte', 'gt', 'gte', 'eq', 'and', 'or', 'not', 'if',
   'vec', 'dot', 'cross', 'distance', 'length', 'normalize', 'x', 'y', 'z',
   'rotate', 'align', 'transform',
-  'attr', 'noise', 'random',
+  'attr', 'noise', 'random', 'nearest', 'raycast',
 ]);
-export const INSTANCE_SOURCES = Object.freeze(['grid', 'scatter', 'surface', 'curve']);
+export const INSTANCE_SOURCES = /* @__PURE__ */ Object.freeze(['grid', 'scatter', 'surface', 'curve']);
 export const MAX_INSTANCE_CANDIDATES = 2048;
 
 // Imported GLB parts take the same edits. Skin weights, morph deltas and vertex colours of new geometry come from the
 // nearest point of the original surface; an edit that reaches farther than this fraction of the part's bounds
 // diagonal from that surface is rejected on a skinned or morphed part, because the transfer would be a guess.
-export const IMPORTED_MESH_EDIT_LIMITS = Object.freeze({ maxTransferFraction: 0.25, maxEditedParts: 64 });
+export const IMPORTED_MESH_EDIT_LIMITS = /* @__PURE__ */ Object.freeze({ maxTransferFraction: 0.25, maxEditedParts: 64 });

@@ -5,7 +5,6 @@ import { MODIFIER_OPERATIONS } from './mesh-operations.js';
 import { normalizeGeneratorEdit, GENERATOR_RUNNERS } from './mesh-generator-modifiers.js';
 import { normalizeNormalEdit, NORMAL_RUNNERS } from './mesh-normal-modifiers.js';
 import { isDeformModifier, normalizeDeformEdit, runDeformEdit } from './mesh-deform-modifiers.js';
-import { HULL_RUNNERS } from './mesh-hull-modifiers.js';
 
 // The whole-mesh modifiers as recipe operations: validation of their fields and running them on MeshData. Smooth, cast and
 // simple_deform only move vertices; weld, triangulate and edge_split change the faces (see mesh-restructure.js).
@@ -185,10 +184,17 @@ function simpleDeformPositions(mesh, { mode, axis, angle, factor }) {
 }
 
 /** Run a modifier edit. Returns { mesh, result } where result holds the counts to report. */
+// Modifiers that other modules supply (mesh-hull-modifiers.js registers itself), so a bundle that never runs one does not carry its code.
+const REGISTERED_RUNNERS = Object.create(null);
+
+export function registerModifierRunner(operation, runner) {
+  REGISTERED_RUNNERS[operation] = runner;
+}
+
 export function runModifierEdit(mesh, edit, { maxVertices, maxFaces }) {
   if (Object.hasOwn(GENERATOR_RUNNERS, edit.op)) return GENERATOR_RUNNERS[edit.op](mesh, edit, { maxVertices, maxFaces });
   if (Object.hasOwn(NORMAL_RUNNERS, edit.op)) return { mesh: NORMAL_RUNNERS[edit.op](mesh, edit), result: {} };
-  if (Object.hasOwn(HULL_RUNNERS, edit.op)) return HULL_RUNNERS[edit.op](mesh);
+  if (Object.hasOwn(REGISTERED_RUNNERS, edit.op)) return REGISTERED_RUNNERS[edit.op](mesh, edit);
   if (isDeformModifier(edit.op)) return runDeformEdit(mesh, edit);
   switch (edit.op) {
     case 'weld': {

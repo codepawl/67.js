@@ -1,4 +1,5 @@
 import { createMeshData } from './mesh-data.js';
+import { registerModifierRunner } from './mesh-modifiers.js';
 
 // Two whole-mesh modifiers that replace the mesh with a simple solid around it: bounding_box is the axis-aligned box
 // (6 quads) and convex_hull is the smallest convex solid (triangles). Tags and attributes are dropped.
@@ -156,3 +157,5 @@ export const HULL_RUNNERS = Object.freeze({
     return { mesh: hull, result: { hullVertices: hull.vertexCount } };
   },
 });
+
+for (const [operation, runner] of Object.entries(HULL_RUNNERS)) registerModifierRunner(operation, runner);

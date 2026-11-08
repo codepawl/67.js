@@ -1,4 +1,5 @@
 import { partsOf, requireScalar, vectorValue } from './expression.js';
+import { registerFieldOperator } from './mesh-fields.js';
 
 // Rotation and matrix operators of the field language, kept apart from the vector basics in mesh-fields.js.
 // Angles are radians and an Euler triple is X then Y then Z (the rotation of a node), like sin and cos.
@@ -114,3 +115,5 @@ export const ROTATION_OPERATORS = Object.freeze({
   align: { min: 1, max: 1, build: buildAlign },
   transform: { min: 1, max: 4, build: buildTransform },
 });
+
+for (const [name, operator] of Object.entries(ROTATION_OPERATORS)) registerFieldOperator(name, operator);
