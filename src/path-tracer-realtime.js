@@ -1,10 +1,11 @@
 import { buildTraceScene } from './path-tracer-scene.js';
-import { createCamera, normalizePathTracerOptions } from './path-tracer.js';
+import { createCamera } from './path-tracer.js';
 import { getContext, getKernel, releaseResources, setSceneUniforms, uploadScene } from './path-tracer-gpu.js';
 import { sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 import { createRadianceCache } from './path-tracer-radiance-cache.js';
 import { createTemporalDenoiser } from './path-tracer-temporal-denoise.js';
 import { createFloatTexture, createFramebuffer, FIRST_PASS_TEXTURE_UNIT } from './path-tracer-realtime-gl.js';
+import { cacheCellSizes, resolveRealtimeOptions, viewsMatch } from './path-tracer-realtime-options.js';
 
 // A real-time hybrid view of the GPU path tracer (issue #624): one path per pixel and frame at half the output size,
 // two bounces, ended by a spatial hash radiance cache, then a temporal denoiser that also upsamples to the output size.
@@ -13,35 +14,27 @@ import { createFloatTexture, createFramebuffer, FIRST_PASS_TEXTURE_UNIT } from '
 // static). It shares the WebGL2 context of `traceOnGpu`, so one render at a time owns it. The pieces:
 //   path-tracer-radiance-cache.js, path-tracer-temporal-denoise.js, path-tracer-reprojection.js.
 
-const DEFAULT_BOUNCES = 2;
-const DEFAULT_RESOLUTION_DIVISOR = 2;
-const CACHE_CELLS_ACROSS_SCENE = 200;
-const CACHE_LEVEL_CELLS = 64;
-const SCENE_EXTENT_SCALE = 1e4;
-
-function viewsMatch(first, second) {
-  if (!first || !second) return false;
-  const keys = ['eye', 'forward', 'right', 'above'];
-  return keys.every(key => first[key].every((value, axis) => value === second[key][axis])) && first.halfWidth === second.halfWidth && first.halfHeight === second.halfHeight;
-}
-
 /**
  * `scene` is `{ parts, environment, camera }` as `renderPathTracedImage` takes them. `options`: `width` and `height` of the
  * output, `bounces` (2), `resolutionDivisor` (2: the tracing size is half the output), `seed`, `lightSelection`
  * ("importance"), `historyLimit` and `filterIterations` of the denoiser, `cacheCellSize` (the scene's size over 200).
- * The picture is tone mapped with ACES like the default view transform.
+ * The picture is tone mapped with ACES like the default view transform. `backend` is "gpu" (WebGL2, the default) or
+ * "webgpu" (compute passes, path-tracer-realtime-webgpu.js): without WebGPU on the page, "webgpu" falls back to WebGL2, and
+ * the tracer's `backend` and `fallbackReason` say so. The WebGPU tracer draws to its own `canvas` (or the one in
+ * `options.canvas`), and its `readFrame` and `frame({ wait })` return promises.
  */
 export async function createRealtimeTracer(scene, rawOptions = {}) {
-  const { resolutionDivisor = DEFAULT_RESOLUTION_DIVISOR, historyLimit, filterIterations, cacheCellSize } = rawOptions;
-  const outputWidth = rawOptions.width ?? 960;
-  const outputHeight = rawOptions.height ?? 540;
-  const traceWidth = Math.max(1, Math.ceil(outputWidth / resolutionDivisor));
-  const traceHeight = Math.max(1, Math.ceil(outputHeight / resolutionDivisor));
-  const options = normalizePathTracerOptions({
-    seed: rawOptions.seed, lightSelection: rawOptions.lightSelection ?? 'importance', bounces: rawOptions.bounces ?? DEFAULT_BOUNCES,
-    width: traceWidth, height: traceHeight, samples: 1, backend: 'gpu', denoise: false,
-  });
-  options.radianceCache = true;
+  const resolved = resolveRealtimeOptions(rawOptions);
+  let fallbackReason = null;
+  if (resolved.backend === 'webgpu') {
+    try {
+      const { createWebGpuRealtimeTracer } = await import('./path-tracer-realtime-webgpu.js');
+      return await createWebGpuRealtimeTracer(scene, resolved, rawOptions.canvas);
+    } catch (error) {
+      fallbackReason = error.message;
+    }
+  }
+  const { outputWidth, outputHeight, traceWidth, traceHeight, options, historyLimit, filterIterations, cacheCellSize } = resolved;
   const { gl, gpu } = getContext();
   if (gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) < FIRST_PASS_TEXTURE_UNIT + 12) throw new Error('The real-time path tracer needs 28 texture units.');
   gl.canvas.width = outputWidth;
@@ -81,10 +74,9 @@ export async function createRealtimeTracer(scene, rawOptions = {}) {
     lightCount = uploaded.lightCount;
     cacheTextureUnit = uploaded.nextUnit;
     gl.uniform1i(gl.getUniformLocation(program, 'uRadianceCache'), cacheTextureUnit);
-    const extent = traceScene.farDistance / SCENE_EXTENT_SCALE;
-    const cellSize = cacheCellSize ?? extent / CACHE_CELLS_ACROSS_SCENE;
+    const { cellSize, levelDistance } = cacheCellSizes(traceScene, cacheCellSize);
     gl.uniform1f(gl.getUniformLocation(program, 'uCacheCellSize'), cellSize);
-    gl.uniform1f(gl.getUniformLocation(program, 'uCacheLevelDistance'), cellSize * CACHE_LEVEL_CELLS);
+    gl.uniform1f(gl.getUniformLocation(program, 'uCacheLevelDistance'), levelDistance);
     cache.clear();
     view = null;
     resetHistory = true;
@@ -106,6 +98,8 @@ export async function createRealtimeTracer(scene, rawOptions = {}) {
 
   return {
     gpu,
+    backend: 'gpu',
+    fallbackReason,
     canvas: gl.canvas,
     width: outputWidth,
     height: outputHeight,

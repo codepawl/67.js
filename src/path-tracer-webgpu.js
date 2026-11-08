@@ -73,8 +73,9 @@ async function getSession() {
 }
 
 /** The WGSL and entry points of a kernel variant; a variant is one of the two kernels, with the optional parts a scene needs. */
-function describeVariant({ kernel, hasVolume, hasSubsurface, texelBake }) {
+function describeVariant({ kernel, hasVolume, hasSubsurface, texelBake, realtime }) {
   if (kernel === 'wavefront') return { code: WAVEFRONT_SOURCE, entryPoints: WAVEFRONT_ENTRY_POINTS };
+  if (realtime) return { code: buildMegakernelSource({ hasVolume, hasSubsurface, realtime }), entryPoints: ['traceRealtime'] };
   return { code: buildMegakernelSource({ hasVolume, hasSubsurface, texelBake }), entryPoints: [texelBake ? 'bakeTexels' : 'main'] };
 }
 
@@ -92,7 +93,7 @@ async function compileKernel(current, variant) {
 }
 
 async function getKernel(current, variant) {
-  const key = [variant.kernel, variant.hasVolume, variant.hasSubsurface, variant.texelBake].join(':');
+  const key = [variant.kernel, variant.hasVolume, variant.hasSubsurface, variant.texelBake, Boolean(variant.realtime)].join(':');
   if (!current.kernels.has(key)) current.kernels.set(key, compileKernel(current, variant));
   return current.kernels.get(key);
 }
@@ -318,6 +319,26 @@ export async function traceOnWebGpu(scene, camera, options, shouldStop) {
   readback.destroy();
   for (const buffer of [...uploaded.buffers, accumulation, parameters, stateBuffer, binQueue]) buffer.destroy();
   return Object.assign(buffers, { gpu: current.gpu, compileSeconds });
+}
+
+/**
+ * The pieces the real-time tracer (path-tracer-realtime-webgpu.js) builds its frame from, given its kernel's WGSL `realtimePieces`: the device, the real-time kernel's
+ * pipeline and bind group layout for `scene`, the uploaded scene tables, and `parameterWords(camera)`, the words of the
+ * parameter block for a camera (the caller sets the sample index and the cache words).
+ */
+export async function prepareRealtimeKernel(scene, options, realtimePieces) {
+  const current = await getSession();
+  const { device } = current;
+  const { pipelines, compileSeconds } = await getKernel(current, { kernel: 'megakernel', ...sceneFeatures(scene), realtime: realtimePieces });
+  const uploaded = uploadScene(device, scene);
+  const emitterCount = (scene.lights.sun ? 1 : 0) + uploaded.lightCount + (scene.environment ? 1 : 0);
+  return {
+    device, gpu: current.gpu, compileSeconds, uploaded,
+    bindGroupLayout: current.bindGroupLayout,
+    pipeline: pipelines.traceRealtime,
+    parameterBytes: PARAMETER_BYTES,
+    parameterWords: camera => createParameterTemplate(scene, camera, options, uploaded, emitterCount).unsigned,
+  };
 }
 
 const TEXEL_GROUPS_PER_ROW = 4096;
