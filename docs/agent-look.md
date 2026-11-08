@@ -258,12 +258,25 @@ Ambient occlusion reads the depth texture, so it needs the HDR depth target that
 | `depthOfField.focusDistance` | `5` | `0.01` to `100000` metres from the camera that stay sharp |
 | `motionBlur.shutter` | `0` | `0` to `0.5` seconds of camera motion to smear |
 | `motionBlur.objects` | `0` | `0` to `1`. How much of each moving part's own motion to smear over the same shutter; `0` leaves it off |
+| `colorBalance.lift` | `[0, 0, 0]` | Three numbers, `-1` to `1`. Raises the shadows per channel and fades out toward white |
+| `colorBalance.gamma` | `[1, 1, 1]` | Three numbers, `0.1` to `4`. Bends the midtones; above `1` is brighter |
+| `colorBalance.gain` | `[1, 1, 1]` | Three numbers, `0` to `4`. Scales the highlights |
+| `glare.streaks` | `0` | `0` to `1`. Thin star streaks from every pixel above the threshold, bright at the core and fading to the tip |
+| `glare.count` | `4` | Whole number, `1` to `8`. Arms spaced evenly around the circle: `2` is one straight line (a horizontal anamorphic streak at angle `0`), `4` a plus, `6` a six-point star |
+| `glare.angle` | `0` | `-360` to `360` degrees. Turns the first arm from the horizontal; `45` turns a plus into an X |
+| `glare.fogGlow` | `0` | `0` to `1`. A soft halo around the same bright pixels |
+| `glare.threshold` | `1` | `0` to `10`. Peak scene brightness (linear, before tone mapping) from which a pixel glares |
+| `glare.size` | `0.15` | `0.01` to `1`. Streak length and halo radius as a fraction of the image height |
+| `lensDistortion.distortion` | `0` | `-1` to `1`. Above `0` is barrel, below is pincushion |
+| `lensDistortion.dispersion` | `0` | `0` to `1`. Red and blue split apart toward the edges, up to 3 percent of the distance from the center |
 
 Depth of field and motion blur are deterministic: they read the frame, its depth and the camera, with fixed sample patterns, so a seek to a time gives the same pixels as playing to it.
 Depth of field applies to every render, including `scene_look`.
 Motion blur needs camera `motion` tracks and a render job with `settings.motion`: the job samples the camera at `motion.start + elapsed - shutter` as well, and smears each pixel along the screen movement between the two.
 With `motionBlur.objects` above zero, a part that moves between `motion.start + elapsed - shutter` and `motion.start + elapsed` also smears along its own screen path while the still background stays sharp (`1` is the full shutter). It reads each pixel's part from an object ID pass, so it costs a second draw of the frame, and it replaces the camera smear on that frame, since it covers the camera's motion too. A part is moved as one rigid body by its node transform: a skinned or morphed part, an imported asset and a translucent part are not smeared per object.
 Both effects compile their shader and allocate their targets the first time a frame uses them, and a scene that leaves them at zero pays nothing.
+
+The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `glare` and `lensDistortion`. Each is its own group, off until a recipe names it, and a group at its neutral values draws nothing. They run on the resolved HDR frame, before bloom and tone mapping, in this order: depth of field, motion blur, glare, lens distortion, color balance. Like the two above they are deterministic, and `colorBalance`, `glare` and `lensDistortion` load their code and shaders only for a recipe that names one.
 
 ## Directional shadows
 

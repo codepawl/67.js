@@ -35,6 +35,7 @@ const MODULE_LOADERS = {
   floorSky: () => import('./floor-sky-visibility.js'),
   userPass: () => import('./user-pass.js'),
   objectMotionBlur: () => import('./object-motion-blur.js'),
+  postSteps: () => import('./post-steps.js'),
   materialSnippet: () => import('./material-snippet.js'),
 };
 
@@ -84,6 +85,7 @@ const MODULE_MARKERS = {
   materialSnippet: ['"snippet":{'],
   // Only a motionBlur object that sets a non-zero `objects` loads it; the common `"shutter":0` look does not.
   objectMotionBlur: [/"motionBlur":\{[^}]*"objects":(?!0[,}])/],
+  postSteps: [/"(?:colorBalance|glare|lensDistortion)"/],
 };
 
 /** Whether a recipe, operation list or edit list contains a boolean edit, which needs loadMeshBooleans() first. */

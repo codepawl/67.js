@@ -28,6 +28,7 @@ import { parseCube } from '../src/view-transform.js';
 import { weightTracksFromGltfAnimation } from '../src/export-skeleton.js';
 import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem } from '../src/agent-errors.js';
+import { framingProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
 import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from './agent-walkmap.js';
@@ -83,7 +84,32 @@ function candidateCamera(record, operations) {
   return createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], camera }).camera;
 }
 
-function renderInfo(renderer) {
+const EXPOSURE_PROBE_SIZE = 64;
+let exposureProbe;
+
+/** Luma shares of a 64 by 64 copy of the frame just drawn; the copy is a read of the drawing buffer, so call it in the draw's task. */
+function sampleFrameShares() {
+  exposureProbe ??= Object.assign(document.createElement('canvas'), { width: EXPOSURE_PROBE_SIZE, height: EXPOSURE_PROBE_SIZE });
+  const context = exposureProbe.getContext('2d', { willReadFrequently: true });
+  context.drawImage(canvas, 0, 0, EXPOSURE_PROBE_SIZE, EXPOSURE_PROBE_SIZE);
+  return lumaShares(context.getImageData(0, 0, EXPOSURE_PROBE_SIZE, EXPOSURE_PROBE_SIZE).data);
+}
+
+/**
+ * Warnings about the frame just drawn from `camera`: framing, a stale bake and exposure (when `exposure` is given, the
+ * effects.exposure drawn with). Imported assets have no part bounds or bake, so they get the exposure check only.
+ */
+function viewProblems(record, camera, exposure) {
+  const problems = [];
+  const boxes = record.scene.worldBounds?.();
+  if (boxes) problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes }));
+  if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());
+  if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure }));
+  return problems;
+}
+
+function renderInfo(renderer, viewWarnings = []) {
+  const diagnostics = [...(renderer.diagnostics ?? []), ...viewWarnings];
   const context = renderer.context;
   const debug = context.getExtension('WEBGL_debug_renderer_info');
   return {
@@ -100,7 +126,7 @@ function renderInfo(renderer) {
     morphTextures: renderer.morphTextures?.size ?? 0,
     gpuBuffers: renderer.buffers?.length ?? 0,
     drawBatches: renderer.batches?.length ?? 0,
-    ...(renderer.diagnostics?.length ? { diagnostics: renderer.diagnostics } : {}),
+    ...(diagnostics.length ? { diagnostics } : {}),
   };
 }
 
@@ -259,6 +285,7 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   applyRecipeWindHeading(record.renderer, environment);
   const { objectMotion, ...renderOptions } = frameOptions;
   const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
+  if (effects.colorBalance || effects.glare || effects.lensDistortion) agentSceneModule('postSteps').installPostSteps(record.renderer);
   if (objectMotion) {
     // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
     const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
@@ -711,7 +738,7 @@ window.__agentPreview = {
       geometries: [], materials: [], nodes: [], camera: { ...record.scene.camera, ...shot.camera } }).camera;
     validatePreviewCamera(camera);
     draw(record, shot.rendererTime, camera);
-    const render = renderInfo(record.renderer);
+    const render = renderInfo(record.renderer, viewProblems(record, camera, record.scene.effects.exposure));
     if (render.width < 64 || render.height < 64) throw new Error('Render budget reduced review below its minimum output size.');
     const context = reviewGrid.getContext('2d');
     const x = index % columns * width;
@@ -763,7 +790,7 @@ window.__agentPreview = {
   },
   // `pass` draws one render pass instead of the lit image. Object ID frames also list the part behind each ID.
   // `camera` overrides camera fields and `depthOfField` the blur and focus distance (a timeline shot); `brightness` scales exposure for a dip through black.
-  frame({ sessionId, animation, motionTime, rendererTime = 0, pass, passDepthRange, passFloat = false, floatOutput = false, camera: cameraOverrides, depthOfField: depthOfFieldOverrides, brightness = 1 }) {
+  frame({ sessionId, animation, motionTime, rendererTime = 0, pass, passDepthRange, passFloat = false, floatOutput = false, camera: cameraOverrides, depthOfField: depthOfFieldOverrides, brightness = 1, diagnose = false }) {
     const record = requireSession(sessionId);
     if (!Number.isFinite(brightness) || brightness < 0 || brightness > 1) throw new RangeError('Invalid frame brightness.');
     if (!Number.isFinite(rendererTime) || rendererTime < 0 || rendererTime > 3600) throw new RangeError('Invalid render time.');
@@ -784,7 +811,9 @@ window.__agentPreview = {
     const outputFramebuffer = floatOutput && !pass ? record.floatModule.outputFor(record, canvas).framebuffer : undefined;
     draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
       ...(brightness === 1 ? {} : { exposure }), ...(shotEffects ? { effects: shotEffects } : {}) });
-    const info = renderInfo(record.renderer);
+    // The first lit frame of a job is checked; a pass or a fade has no exposure to judge.
+    const checkLitFrame = diagnose && !pass && !floatOutput && brightness === 1;
+    const info = renderInfo(record.renderer, pass ? [] : viewProblems(record, shotCamera ?? record.scene.camera, checkLitFrame ? record.scene.effects.exposure : undefined));
     return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() } : info;
   },
   // Reads the last frame as RGBA float32, rows bottom to top, cropped to `region` (pixels from the top left): the lit image
@@ -1012,7 +1041,7 @@ window.__agentPreview = {
       record.scene.sampleMotion(motionTime);
     }
     draw(record);
-    const render = renderInfo(record.renderer);
+    const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure));
     record.lastRender = render;
     const labels = withLabels ? collectLabels(record, record.scene.camera, canvas.width, canvas.height) : undefined;
     return {

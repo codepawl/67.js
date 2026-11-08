@@ -283,6 +283,8 @@ const environment = z.strictObject({
 });
 // Every tool lists the same short environment; the full schema is served by scene_capabilities topic environment.
 const environmentListed = listed('environment', environment, 'Lighting and sky. More fields: hdri, look, viewTransform, keyColor, keyIntensity, fillIntensity, ambientIntensity, daylight, keyAffects, shadowCascades, pointLights, spotLights, areaLights, skyTop, skyBottom, fogColor, fogDensity, volumeFog (density, scatterOctaves, multiScatter, keyTransmittance, surfaceTransmittance and more: scene_capabilities environment), liquid, lines, wind, objectReflections, floorSkyTrace, sunBounce, specularAntiAliasing, resolveCoplanar; see scene_capabilities environment.', coreOf(environment.shape, ['setup', 'world', 'ground', 'lightDirection', 'environmentIntensity']));
+// Named post steps are checked by the engine and listed in docs/agent-look.md; every tool that takes a recipe repeats this schema.
+const looseField = z.unknown().optional();
 const effects = z.strictObject({
   exposure: bounded(0.01, 16).optional(),
   saturation: bounded(0, 2).optional(),
@@ -299,8 +301,11 @@ const effects = z.strictObject({
   }).optional(),
   depthOfField: z.strictObject({ blur: unit.optional(), focusDistance: bounded(0.01, 100000).optional() }).optional().describe('Lens blur: blur 0 to 1, focusDistance metres.'),
   motionBlur: z.strictObject({ shutter: bounded(0, 0.5).optional(), objects: bounded(0, 1).optional() }).optional().describe('Motion smear, shutter in seconds. objects 0 to 1 also smears each moving part along its own motion (off at 0).'),
+  colorBalance: looseField,
+  glare: looseField,
+  lensDistortion: looseField,
 });
-const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
+const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}, colorBalance, glare, lensDistortion; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
 const shadow = z.strictObject({
   target: boundedVector(-1e6, 1e6).optional(),
   extent: bounded(0.01, 1e5).optional(),
@@ -310,7 +315,6 @@ const shadow = z.strictObject({
 }).describe('Directional shadow coverage. Backend checks Float32 view/projection consistency.');
 // Curve and text sit in the geometry list only, not in mesh bases or cutters. Value types and limits are checked by the
 // engine and listed in scene_capabilities curveText, because every tool that takes a recipe repeats this schema.
-const looseField = z.unknown().optional();
 function curveAndTextGeometries(id) {
   return [
     z.strictObject({ ...id, type: z.literal('curve'), points: z.array(z.unknown()).max(1024), closed: looseField, radius: looseField, taper: looseField, profile: looseField, resolution: looseField, radialSegments: looseField }).describe('Bezier sweep; see scene_capabilities curveText.'),

@@ -1,6 +1,8 @@
 # Contributing to 67js
 
 This file covers setup, the checks a change must pass, the code style and the release flow.
+Coding agents can start with [AGENTS.md](AGENTS.md), the short version. Everyone follows the [code of conduct](CODE_OF_CONDUCT.md).
+To ask a question or report a bug, see [SUPPORT.md](SUPPORT.md).
 
 ## Set up
 
@@ -14,16 +16,18 @@ The tests are in `tests/` and the guides are in `docs/`.
 
 ## Make a change
 
-1. For a large feature, open an issue first, so that we agree on the design before you write it.
+1. For a large feature, open an issue first with the feature form, so that we agree on the design before you write it. Issues labelled `good first issue` are a good place to start.
 2. Create a branch from `main`.
 3. Write the change and its tests in the same commit.
 4. Update the guide in `docs/` that describes the feature.
 5. Add `changes/<issue-or-branch>.md` with your changelog bullet (format in `changes/README.md`). Do not edit `CHANGELOG.md`: two pull requests that edit it conflict on GitHub.
-6. Open a pull request that says what changed and how you checked it.
+6. Open a pull request. The template asks what changed and how you checked it.
 
 ## Checks
 
-Run these before you open a pull request:
+Run `npm run preflight` before you open a pull request. It runs every check below that applies to the files you changed, plus the size, tool cost and coverage gates, keeps going after a failure and ends with one line per check and how to fix it. Logs go to `artifacts/preflight/`. `--skip-tests` skips the slow test pass while you iterate.
+
+The checks it runs, if you want one alone:
 
 1. Run `npm test`. All Node tests must pass.
 2. Run `npm run check:links` if you changed a Markdown or HTML file. It finds links that point at no file.
@@ -35,7 +39,7 @@ Run `npm run smoke` or the `smoke:*` script for the area that you changed, and l
 A change to skinning, glTF loading, poses or IK also needs `npm run smoke:character`, which takes a real character through the MCP server. Run `npm run prepare:release` first.
 Screenshots and other output go to `artifacts/`, which Git ignores.
 
-Every pull request runs `npm audit`, `npm run size`, `npm run tool-cost`, `npm test` (with coverage, six shards; Node runs each file in its own process), `prepare:release`, `smoke:package` and `smoke:mcp-package` in the `Test` workflow. `smoke:mcp-package` draws through the MCP server on SwiftShader in Chrome. `npm run size` compares every bundle with `origin/main`. If a bundle grows past its allowance (64 bytes gzip for core and the scenes, 2% for the npm archive), add `changes/<issue>.size.md` with the line `- entry:core: <why it is worth the bytes>` and say why in the pull request. Never edit `bench/size/budgets.json` or `baseline.json` in a pull request. `bench/size/README.md` has the details.
+Every pull request runs `npm audit`, `npm run size`, `npm run tool-cost`, `npm test` (with coverage, eight shards; Node runs each file in its own process), `prepare:release`, `smoke:package` and `smoke:mcp-package` in the `Test` workflow. `smoke:mcp-package` draws through the MCP server on SwiftShader in Chrome. `npm run size` compares every bundle with `origin/main`. If a bundle grows past its allowance (64 bytes gzip for core and the scenes, 2% for the npm archive), add `changes/<issue>.size.md` with the line `- entry:core: <why it is worth the bytes>` and say why in the pull request. Never edit `bench/size/budgets.json` or `baseline.json` in a pull request. `bench/size/README.md` has the details.
 
 `npm run tool-cost` does the same for what the MCP tools cost an agent. If a tool schema grows by more than 64 bytes, a typical result by more than 128 bytes, or the schema total by more than 128 bytes, first move rare detail into `scene_capabilities` or a shared schema. If the growth is worth it, add a line to `changes/<issue>.size.md`, such as `- tool:scene_create: <why it is worth the bytes>`, `- tool-total: <why>` or `- result:scene_capabilities: <why>`. Never edit `bench/tool-cost-budgets.json` in a pull request. `bench/tool-cost-ceilings.json` holds fixed absolute ceilings (the schema total, each tool and the default `scene_capabilities` answer) that fail the check whatever the growth. Put field detail in a `scene_capabilities` topic and keep only the common fields in the tool schema. `bench/tool-cost/README.md` has the details.
 
