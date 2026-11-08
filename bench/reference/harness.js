@@ -335,7 +335,7 @@ async function compareBakeBackends(id, variants) {
   const results = {};
   let reference = null;
   for (const [name, bakeOptions] of Object.entries(variants)) {
-    if (bakeOptions.backend === 'gpu') await bakeScene(scene, { ...bakeOptions, samples: 1 });
+    if (bakeOptions.backend !== 'cpu') await bakeScene(scene, { ...bakeOptions, samples: 1 });
     const baked = await bakeScene(scene, bakeOptions);
     const radiance = baked.parts.map(lightmapRadiance);
     reference ??= radiance;

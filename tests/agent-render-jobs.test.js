@@ -435,7 +435,10 @@ test('a path tracer job runs on the cpu unless it asks for the gpu, and film job
   const onGpu = await submitWith({ backend: 'gpu' });
   await terminal(controller, onGpu.jobId);
   assert.equal(controller.status(onGpu.jobId).settings.renderer.backend, 'gpu');
-  await assert.rejects(submitWith({ backend: 'metal' }), /backend must be cpu or gpu/);
+  const onNative = await submitWith({ backend: 'native' });
+  await terminal(controller, onNative.jobId);
+  assert.equal(controller.status(onNative.jobId).settings.renderer.backend, 'native');
+  await assert.rejects(submitWith({ backend: 'metal' }), /backend must be cpu, gpu or native/);
   const film = await submitWith({ backend: 'gpu', samples: 16 }, 'video');
   assert.equal(controller.status(film.jobId).settings.renderer.samples, 16);
   await controller.close();

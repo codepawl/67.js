@@ -1,0 +1,26 @@
+{
+  "name": "@codepawlhq/67js-render-native",
+  "version": "0.1.0",
+  "description": "Optional hardware ray traced stills for 67js: the path tracer on wgpu and Vulkan ray queries. Not part of the core archive.",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "pack-input.mjs",
+    "build.mjs",
+    "build.rs",
+    "Cargo.toml",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -158,3 +158,39 @@ What this says:
 Go or no-go: **go, for an offline WebGPU tracer backend behind `navigator.gpu`, with WebGL2 kept as the fallback.** Basis: it matches the picture within the issue's FLIP bar, compiles in under a second instead of 14 to 20, and traces about 1.2 times as many paths per second at the median of 4 runs (1.9 times on the quietest, 0.88 times on the most loaded; all measured). The speed gain alone is modest, so the case for a backend rests on the compile time and on the wavefront work the issue wants (shading sorted by material, reservoirs), which this megakernel cannot show and no measurement here supports yet (guessed). The issue's own bar for a go on speed, "traces in less than 40.67 s", is met by both kernels now.
 
 Not measured: the wavefront variant (extend, shade, shadow kernels with sorted shading), which is where a larger gain would have to come from; the 16 path tracer reference scenes (only the demo room and a 480 by 270 check of it were scored); the volume and subsurface features; adapters other than the RTX 3060 and Chrome other than 156; a quiet card; WebGPU timestamp queries (the times are wall clock around `onSubmittedWorkDone`).
+
+## The WebGPU path tracer backend (issue #625, 2026-11-09)
+
+The spike's go was built: `backend: 'webgpu'` runs `src/path-tracer-webgpu.js` (host) and `src/path-tracer-webgpu-kernel.js` (WGSL), loaded only for that backend. The spike's megakernel is the production default; a wavefront version of the same maths was built and measured, and it lost.
+
+Two kernels share one prelude (traversal, hits, materials, light sampling, random numbers, in the order of the GLSL kernel). The megakernel traces a pixel's whole path in one invocation. The wavefront keeps path state in a storage buffer (9 vec4 per path) and runs `generatePaths`, then per bounce `extendPaths` (closest hit, sky on a miss), optionally a material histogram, scan and scatter that sort the hits by material, `shadePaths` (emission, features, one shadow record per emitter, next direction), `shadowPaths` (any hit), then `resolvePaths`. Paths are numbered in 8 by 8 pixel blocks so a workgroup looks at neighbouring pixels, and the image is traced in tiles of at most 524,288 paths so the state stays under 128 MB. Random numbers are drawn in the megakernel's order, so both kernels give the same picture (FLIP 0.0035 against WebGL2 at 1080p and 64 samples for each).
+
+Setup (measured): the demo room at 1920 by 1080, 64 samples, 8 bounces, no denoiser, headless Chrome 156, RTX 3060 shared with other sessions, each trace its own `gpu-lock` job, the three variants alternated 3 times by `bench/webgpu-tracer/compare.sh`. Time is the second, warm call (upload, trace and readback).
+
+| | WebGL2 fragment | WGSL megakernel | WGSL wavefront |
+| --- | --- | --- | --- |
+| Trace seconds, 3 alternating runs | 15.20, 15.24, 15.24 | 7.96, 8.32, 8.51 | 17.30, 17.62, 18.12 |
+| Paths per second | 8.7 million | 15.6 to 16.7 million | 7.3 to 7.7 million |
+| Compile seconds, first run (fresh profile) | 29.1 | 0.47 | 0.22 |
+| Compile seconds, later runs | 0.01 to 0.02 | 0.00 to 0.01 | 0.01 to 0.02 |
+
+The megakernel traces the demo room 1.8 to 1.9 times as fast as the WebGL2 kernel in the same session and compiles 60 times faster cold; the wavefront is 1.1 to 1.2 times slower than WebGL2 and 2.1 times slower than the megakernel (all measured).
+
+Why the wavefront loses here (GPU timestamp queries per kernel on the wavefront, two samples at 1080p, from a throwaway hook that is not in the repo; measured): unsorted, `extendPaths` took 0.11 s a sample, `shadePaths` 0.02 s and `shadowPaths` 0.13 s, 0.26 s in all, against 0.20 s for the whole megakernel sample. The demo room is bound by BVH traversal, not by shading, and splitting the path adds a pass over all paths per bounce and loses the megakernel's ray coherence between a hit and its shadow rays. Sorting hits by material made `shadePaths` slower, not faster (0.033 against 0.021 s a sample, plus 0.007 s to scatter), because the sort scatters neighbouring pixels and the room has few, cheap materials (measured). The wavefront would pay off where shading is divergent and expensive, which no reference scene measured here is (guessed). It stays as `kernel: 'wavefront'` of `traceOnWebGpu` (with `sortByMaterial`) for that work and for the real-time passes the issue names; it is not reachable through `renderPathTracedImage` options, and the default is the megakernel.
+
+The 16 path tracer reference scenes at 480 by 270, 32 samples, no denoiser, FLIP (LDR) of `webgpu` against `gpu` (`bench/reference/gpu-compare.mjs --backend webgpu`; measured):
+
+| Scene | FLIP | Scene | FLIP |
+| --- | --- | --- | --- |
+| `brick-flat` | 0.0015 | `lit-interior` | 0.0001 |
+| `brick-graph` | 0.0017 | `long-street` | 0.0000 |
+| `brick-room` | 0.0005 | `material-spheres` | 0.0016 |
+| `brushed-film` | 0.0015 | `metal` | 0.0016 |
+| `car-paint` | 0.0015 | `outdoor-hdri` | 0.0017 |
+| `character` | 0.0019 | `spot-area` | 0.0000 |
+| `foliage` | 0.0019 | `light-linking` | 0.0000 |
+| `glass` | 0.0017 | `fog` | not supported |
+
+Fifteen scenes are within 0.002 (the bar is 0.005). `fog` uses volume fog, which the WGSL kernel does not trace: `traceOnWebGpu` throws `The WebGPU path tracer does not trace volume fog yet. Use backend "gpu" for this scene.` and the same for subsurface scattering (no reference scene uses it). Neither is ported and neither is hidden: a caller falls back to `gpu`. Not done: fog and subsurface in WGSL, the texel bake and the GPU bake on WebGPU, hardware ray queries for the native package, a run on another adapter or browser, and the shading-sorted path on a scene with many expensive materials.
+
+Without `navigator.gpu`, or with no adapter, the backend throws and names `gpu` and `cpu`; the MCP `cpu` runtime has neither. No default backend changed.
