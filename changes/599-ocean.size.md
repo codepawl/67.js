@@ -1,0 +1,2 @@
+- entry:mesh: the ocean modifier is about 1.2 KB gzip of mesh code that agents cannot get any other way.
+- scene:agent-scene+lazy: the ocean modifier lives in the lazy part, which holds the whole mesh engine.
