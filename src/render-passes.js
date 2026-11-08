@@ -17,10 +17,13 @@ uniform sampler2D sourceTexture;
 out vec4 outputColor;
 void main() { outputColor = vec4(texelFetch(sourceTexture, ivec2(gl_FragCoord.xy), 0).rgb, 1.0); }`;
 
-function createPassTarget(context, width, height) {
+// A float target keeps the pass values as half floats (frame.passFloat) for 16-bit PNG and EXR output; the shader writes the same values.
+function createPassTarget(context, width, height, float = false) {
+  if (float && !context.getExtension('EXT_color_buffer_float')) throw new Error('16-bit PNG and EXR output need EXT_color_buffer_float. Use format png.');
   const texture = context.createTexture();
   context.bindTexture(context.TEXTURE_2D, texture);
-  context.texImage2D(context.TEXTURE_2D, 0, context.RGBA8, width, height, 0, context.RGBA, context.UNSIGNED_BYTE, null);
+  if (float) context.texImage2D(context.TEXTURE_2D, 0, context.RGBA16F, width, height, 0, context.RGBA, context.HALF_FLOAT, null);
+  else context.texImage2D(context.TEXTURE_2D, 0, context.RGBA8, width, height, 0, context.RGBA, context.UNSIGNED_BYTE, null);
   context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.NEAREST);
   context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, context.NEAREST);
   const depth = context.createRenderbuffer();
@@ -33,7 +36,7 @@ function createPassTarget(context, width, height) {
   if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) {
     throw new Error('Render pass framebuffer allocation failed. Choose a lower quality preset.');
   }
-  return { texture, depth, framebuffer };
+  return { texture, depth, framebuffer, float };
 }
 
 /**
@@ -74,10 +77,12 @@ export function installRenderPasses(renderer) {
       copyProgram = compileProgram(context, fullscreenVertex, passCopyFragment);
       copyTextureUniform = context.getUniformLocation(copyProgram, 'sourceTexture');
     }
+    const float = frame.passFloat === true;
+    if (target && target.float !== float) releaseTargets(context);
     if (!target) {
       const { width, height } = renderer.canvas;
-      target = createPassTarget(context, width, height);
-      renderer.renderTargets.record('passColor', { width, height, format: 'RGBA8' });
+      target = createPassTarget(context, width, height, float);
+      renderer.renderTargets.record('passColor', { width, height, format: float ? 'RGBA16F' : 'RGBA8' });
       renderer.renderTargets.record('passDepth', { width, height, format: 'DEPTH_COMPONENT24' });
     }
     return mode;
