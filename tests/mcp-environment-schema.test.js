@@ -131,3 +131,49 @@ test('a coplanar depth layer regroups parts, and the preview sees every texture 
   }
   assert.equal(hasPatternTextures(scene.parts), false);
 });
+
+const OPTIONAL_VOLUME_FOG_PATCH = { scatterOctaves: 2, multiScatter: 0.6, multiExtinction: 0.4, multiAnisotropy: 0.3, keyTransmittance: 0.2, surfaceTransmittance: 0.1, heightFalloff: 2 };
+
+test('set-environment sets every optional volumeFog field on a recipe that did not set them at creation', () => {
+  const scene = createAgentScene(coplanarRecipe());
+  scene.apply([{ type: 'set-environment', environment: { volumeFog: OPTIONAL_VOLUME_FOG_PATCH } }], { expectedRevision: scene.revision });
+  for (const [field, value] of Object.entries(OPTIONAL_VOLUME_FOG_PATCH)) assert.equal(scene.environment.volumeFog[field], value, field);
+  assert.throws(() => scene.apply([{ type: 'set-environment', environment: { volumeFog: { mystery: 1 } } }], { expectedRevision: scene.revision }), /mystery/);
+});
+
+// The MCP schema names only the two fields agents use; the others stay reachable through the recipe, within the tool cost allowance.
+const MCP_VOLUME_FOG_PATCH = { scatterOctaves: 2, multiScatter: 0.6 };
+
+test('the MCP scene_create and scene_apply schemas accept the optional volumeFog fields', async () => {
+  let scene;
+  const runtime = {
+    async capabilities() { return {}; },
+    async create({ recipe }) {
+      scene = createAgentScene(recipe);
+      return { revision: scene.revision };
+    },
+    async apply({ expectedRevision, operations }) {
+      scene.apply(operations, { expectedRevision });
+      return { revision: scene.revision };
+    },
+    async close() {},
+    activeSessionId() { return null; },
+  };
+  const server = createAgentMcpServer(runtime);
+  const client = new Client({ name: '67js-volume-fog-schema-test', version: '1' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const created = await client.callTool({ name: 'scene_create', arguments: { recipe: coplanarRecipe() } });
+    assert.notEqual(created.isError, true, created.content?.[0]?.text);
+    const applied = await client.callTool({ name: 'scene_apply', arguments: { expectedRevision: 0, operations: [{ type: 'set-environment', environment: { volumeFog: MCP_VOLUME_FOG_PATCH } }] } });
+    assert.notEqual(applied.isError, true, applied.content?.[0]?.text);
+    assert.equal(scene.environment.volumeFog.multiScatter, 0.6);
+    const atCreation = await client.callTool({ name: 'scene_create', arguments: { recipe: { ...coplanarRecipe(), environment: { volumeFog: MCP_VOLUME_FOG_PATCH } } } });
+    assert.notEqual(atCreation.isError, true, atCreation.content?.[0]?.text);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

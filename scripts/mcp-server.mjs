@@ -192,6 +192,8 @@ const volumeFog = z.strictObject({
   contrast: bounded(0, 4).optional(),
   profileSoftness: bounded(0, 0.95).optional(),
   keyScattering: bounded(0, 10).optional(),
+  scatterOctaves: z.number().optional(),
+  multiScatter: z.number().optional(),
 });
 const affects = z.array(z.string()).optional();
 const iesProfile = z.any().optional();
@@ -250,7 +252,7 @@ const environment = z.strictObject({
   skyBottom: color.optional(),
   fogColor: color.optional(),
   fogDensity: bounded(0, 10).optional(),
-  volumeFog: volumeFog.optional().describe('Directional scattering; needs HDR.'),
+  volumeFog: volumeFog.optional().describe('Light-shaft fog; needs HDR.'),
   liquid: liquidOptics.optional().describe('Optics for materials tagged liquid or foam.'),
   lines: lines.nullable().optional(),
   objectReflections: z.boolean().optional().describe("false turns off reflection probes on smooth metal parts."),
