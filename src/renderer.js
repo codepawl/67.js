@@ -9,7 +9,6 @@ import { applyProjection } from './camera.js';
 import { resolveEffects } from './effects.js';
 import { frameDiagnostics } from './frame-diagnostics.js';
 import { depthLayerOf } from './depth-layer.js';
-import { resolveFlushParts } from './coplanar-overlap.js';
 import { createLightingState, updateLightingState } from './lighting.js';
 import { RenderTargetLedger } from './render-target-ledger.js';
 import { SHADOW_ATLAS_WIDTH, SHADOW_TILE_SIZE, SHADOW_TILES_PER_ROW, tileViewport, writeShadowTile } from './local-shadows.js';
@@ -493,7 +492,7 @@ function allFinite(values) {
 }
 
 export class Renderer67 {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto' } = {}) {
     this.canvas = canvas;
     this.sceneParts = parts;
     // `skyOpenness` from closed-room.js is passed in, which keeps the ray code out of scenes without volume fog.
@@ -532,6 +531,10 @@ export class Renderer67 {
     this.shadowBounds = shadowBounds;
     /** Set by installCoplanarDiagnostics (coplanar-overlap.js): called with the batches, returns coplanar-overlap warnings. */
     this.coplanarDiagnostics = null;
+    /** `false` keeps the standard depth buffer; `'auto'` (default) loads reversed-Z once a frame's far / near passes 10,000. */
+    this.reversedDepthMode = reversedDepth;
+    /** Resolves once reversed depth is installed (set by the first frame with a stretched lens); `await` it to render with it from the start. */
+    this.reversedDepthReady = null;
     /** Warnings about the last frame drawn, in the shape of `agent-diagnostics.js`; see `frame-diagnostics.js`. */
     this.diagnostics = [];
     this.activeLightDirection = environment.lightDirection ?? [-3, 6, 4];
@@ -572,7 +575,9 @@ export class Renderer67 {
     this.windState = { time: 0, strength: 0.3 };
     // The shadow map the constructor draws uses no assembly, so a first frame with none does not draw it again.
     this.assemblyAmount = 0;
-    if (resolveCoplanar && !benchmark) resolveFlushParts(parts);
+    // `resolveCoplanar` is resolveFlushParts from the coplanar-overlap addon, passed in so the search stays out of the core bundle.
+    if (resolveCoplanar && typeof resolveCoplanar !== 'function') throw new TypeError('resolveCoplanar is resolveFlushParts from 67js/addons/coplanar-overlap.');
+    if (resolveCoplanar && !benchmark) resolveCoplanar(parts);
     const groups = groupParts(this.groundPart ? [...parts, this.groundPart] : parts, batching);
     const textureLimit = this.context.getParameter(this.context.MAX_TEXTURE_SIZE);
     this.hasSkins = groups.some(group => group[0].skin || group[0].crowd);
@@ -2138,7 +2143,16 @@ export class Renderer67 {
     this.fogFieldOverride = field === null ? null : validateFogField(field);
   }
 
+  // A 24-bit depth buffer cannot tell surfaces 2 micrometres apart at 2.6 m when far / near is this large (issue #593), so the
+  // first such frame loads reversed-Z (reversed-depth.js, a separate chunk) and the frames after it use a float depth buffer.
+  loadReversedDepthFor(frame) {
+    if (this.reversedDepthMode === false || this.reversedDepth !== undefined || this.reversedDepthReady) return;
+    if (!(frame.far / (frame.near ?? 0.1) > 1e4)) return;
+    this.reversedDepthReady = import('./reversed-depth.js').then(({ installReversedDepth }) => installReversedDepth(this, this.reversedDepthMode));
+  }
+
   render(frame) {
+    this.loadReversedDepthFor?.(frame);
     const { eye, target = [0, 1.2, 0], armorColor = [0.53, 0.39, 0.24], armorSurface = [0.88, 0.32], exposure = 1, inspection = false } = frame;
     const effects = resolveEffects(frame.effects);
     const environment = { lightDirection: [-3, 6, 4], fogColor: [0.35, 0.43, 0.43], fogDensity: 0.006, daylight: 1, explosionCenter: [0, 0, 0], ...this.environment, ...frame.environment };

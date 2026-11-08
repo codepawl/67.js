@@ -80,7 +80,7 @@ test('auto mode stays off until a frame or a request asks, true forces it and fa
   const off = fakeRenderer();
   installReversedDepth(off.renderer, false);
   off.renderer.render({ far: 1e6, near: 0.1 });
-  assert.equal(off.renderer.reversedDepth, undefined);
+  assert.equal(off.renderer.reversedDepth, false);
   assert.equal(off.renderer.requestReversedDepth, undefined);
 });
 
@@ -123,4 +123,24 @@ test('the main vertex shader is compiled camera-relative only through the addon,
   assert.match(cameraRelative, /gl_Position = viewProjection \* vec4\(world\.xyz - cameraOffset\.xyz, 1\.0 - cameraOffset\.w\) \+ cameraShift;/);
   assert.doesNotMatch(cameraRelative, /gl_Position = viewProjection \* world;/);
   assert.equal(compile(mainSource), mainSource);
+});
+
+test('the renderer loads reversed depth itself for a stretched lens, once, and not when the mode is false', async () => {
+  const { Renderer67 } = await import('../src/renderer.js');
+  const stretched = { far: 9000, near: 0.08 };
+  const automatic = Object.create(Renderer67.prototype);
+  automatic.reversedDepthMode = 'auto';
+  automatic.loadReversedDepthFor({ far: 100, near: 0.1 });
+  assert.equal(automatic.reversedDepthReady ?? null, null);
+  automatic.loadReversedDepthFor(stretched);
+  assert.ok(automatic.reversedDepthReady instanceof Promise);
+  const first = automatic.reversedDepthReady;
+  automatic.loadReversedDepthFor(stretched);
+  assert.equal(automatic.reversedDepthReady, first);
+  await first.catch(() => {});
+
+  const disabled = Object.create(Renderer67.prototype);
+  disabled.reversedDepthMode = false;
+  disabled.loadReversedDepthFor(stretched);
+  assert.equal(disabled.reversedDepthReady ?? null, null);
 });
