@@ -59,12 +59,13 @@ const instanceSpec = z.strictObject({
   grid: z.strictObject({ counts: z.tuple([instanceCount, instanceCount, instanceCount]), spacing: vector3 }).optional().describe('Grid of counts[0] x counts[1] x counts[2] points centred on the group.'),
   scatter: z.strictObject({ count: instanceCount, min: vector3, max: vector3 }).optional().describe('Seeded random points in a box.'),
   surface: z.strictObject({ geometry: identifier, count: instanceCount }).optional().describe("Seeded random points on the surface of a recipe geometry, in that geometry's own space; parent the instanced node to the node that carries it."),
+  curve: z.strictObject({ points: z.array(vector3).min(2).max(256), count: instanceCount, closed: z.boolean().optional(), fillet: z.number().positive().optional() }).optional().describe('Equal steps along a polyline; fillet is a corner radius.'),
   seed: z.number().int().min(0).max(2147483647).optional(),
   where: fieldExpression.optional().describe('Number expression over the points (position, normal, index); points where it is 0 are dropped.'),
   yaw: z.boolean().optional().describe('Random turn about up.'),
-  alignToNormal: z.boolean().optional().describe('Surface only: tilt up to the surface normal.'),
+  alignToNormal: z.boolean().optional().describe('Surface or curve: turn up to the normal or direction.'),
   scale: z.tuple([z.number().min(0.001).max(1000), z.number().min(0.001).max(1000)]).optional().describe('Random uniform scale range [min, max].'),
-}).describe('Exactly one of grid, scatter or surface. Expands at scene_create into a group node plus one child node per point (<id>.0, <id>.1, ...) that share geometry and material and draw as one instanced batch. At most 2048 candidate points.');
+}).describe('One of grid, scatter, surface or curve. Expands at scene_create into a group node plus one child node per point (<id>.0, <id>.1, ...) that share geometry and material and draw as one instanced batch. At most 2048 candidate points.');
 const nodeRecord = z.strictObject({ armature: identifier.optional().describe('Set on nodes an armature generates, and ignored on input. Edit bones through armatures.'), id: identifier, geometry: identifier.optional(), material: identifier.optional(), instances: instanceSpec.optional().describe('Repeat geometry and material at points; needs both ids. Only in the recipe given to scene_create, not in add-node.'), ...nodeFields });
 const materialGraph = z.record(z.string(), z.unknown()).describe('Node graph as plain JSON, never code. Outputs, nodes, inputs and limits are in scene_capabilities materialGraph.');
 const materialPattern = z.strictObject({

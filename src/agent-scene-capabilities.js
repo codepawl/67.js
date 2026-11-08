@@ -155,6 +155,8 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
   wave: 'a gaussian ripple of height 0.5 along z (normal true: along the vertex normal) that travels from start [0,0] over axes xy (default), x or y; width 1.5, narrowness 0 to 50 (1.5), speed 0.25 per frame, time 0 (a frame number), timeOffset 0, cyclic true repeats it. Matches Blender Wave at the same frame.',
   weighted_normal: 'corner normals weighted by face area ^ (weight/50), weight 1-100 (50), smoothed across edges under angle 30 that are not sharp. Put it last in the stack.',
   smooth_by_angle: 'edges bending over angle 30 (0-180) become sharp, others smooth, over smoothAngle; ignoreSharp true also clears hand-made sharp edges.',
+  bounding_box: 'becomes its axis-aligned box.',
+  convex_hull: 'becomes its convex hull, up to 8192 vertices.',
 });
 
 // Vertex colors and groups. Details stay here so the tool schemas stay small.
@@ -165,7 +167,7 @@ export const MESH_ATTRIBUTE_NOTES = Object.freeze({
 
 // Shape keys on a recipe mesh. Details stay here so the tool schemas stay small.
 export const MESH_SHAPE_KEY_NOTES = Object.freeze({
-  shapeKeys: 'On a mesh geometry, at most 16: { name, offsets, value } or { name, edits, value }. offsets is a list of { select, offset: [x,y,z], falloff } moves like the translate edit; edits are mesh edits that only move vertices (set_position, displace, sculpt, simple_deform, lattice, hook and so on) run on the finished mesh, after the stack. A key that adds or removes vertices is refused. value (0, from 0 to 1) is the weight without motion. Each key becomes a glTF morph target of the mesh. Animate it with a motion track { kind: "morph", id: <key name>, property: "weight", keyframes } (weight 0 to 1; keys add up); a GLB export writes the targets, their names (mesh.extras.targetNames) and the weights. Normals stay those of the base mesh.',
+  shapeKeys: 'On a mesh geometry, at most 16: { name, offsets, value } or { name, edits, value }. offsets is a list of { select, offset: [x,y,z], falloff } moves like the translate edit; edits are vertex-moving mesh edits (set_position, displace, sculpt, simple_deform, lattice, hook...) run after the stack. value (0, 0 to 1) is the weight without motion. Each key is a glTF morph target. Animate it with a motion track { kind: "morph", id: <key name>, property: "weight", keyframes }; a GLB export writes targets, names (mesh.extras.targetNames) and weights.',
 });
 
 // Organic shaping edits. Details stay here so the tool schemas stay small.
@@ -180,7 +182,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   camera: 'eye, target, up, near, far, then fov (vertical degrees) or focalLength (mm, with sensorWidth mm, default 36; not both). projection orthographic with orthoScale (view height in m, default 4). shift [x, y] moves the frame by a fraction of its width and height. fStop (0.7 to 64) turns on depth of field focused on target; 1.4 or lower is full blur, and effects.depthOfField.blur must stay 0. Orthographic and shifted cameras render with the rasterizer, not the path tracer.',
   terrain: 'One mesh, x and z from -size/2 to size/2, hills about y = 0. size 40 m (1-2000), resolution 64 cells (2-256), seed 1, amplitude 1 m (0-200), holes up to 16 of {center:[x,z],radius} with no surface inside; radius a few cells or more.',
   placedAssets: 'Node field asset:{id,materials?,clip?,drive?} turns a group node into a catalog GLB (id from asset_catalog; scene_create_asset is one asset alone). Its transform places it. materials:[{name,color,metallic,roughness,opacity,emission,emissiveColor}] override source materials by name. clip:{index,start=0,speed=1,loop=true} plays that clip from scene time start, on a decoded copy of its own; scene_apply set-motion tracks move the node as usual and scene time seeks the clip. Copies of one asset share geometry and materials and draw as one batch. drive:{path | legs, cruiseSpeed | speed, wheels, lights} drives a car along a path in the placement frame on a decoded copy of its own (fields as motion.drive in an asset recipe, docs/vehicle.md; no tail-light glow). scene_inspect assets adds its wheels, rejectedNames and light signals. At most 512 placements, 16 assets, 16 playing a clip or driving. Render jobs do not draw placed assets yet; scene_look does.',
-  navigation: 'scene_inspect path:{ground,from:[x,z],to:[x,z]} returns a route over the ground node around its holes, steep slopes and the nodes in avoid:[ids] (box footprints), as keyframes [{time,value:[x,y,z]}] for a node translation track with interpolation LINEAR. radius 0.3 m is how far the walker position stays from holes and avoided nodes; maxSlope 40 degrees; cellSize defaults to radius; give seconds for the whole walk or speed (1.4 m/s); lift raises y, such as half the walker height. Ground and avoided nodes are read at their authored pose. Errors name an unwalkable start or goal, or one that cannot be reached.',
+  navigation: 'scene_inspect path:{ground,from:[x,z],to:[x,z]} returns a route over the ground node around its holes, steep slopes and the nodes in avoid:[ids] (box footprints), as keyframes [{time,value:[x,y,z]}] for a node translation track with interpolation LINEAR. radius 0.3 m is how far the walker position stays from holes and avoided nodes; maxSlope 40 degrees; cellSize defaults to radius; give seconds for the whole walk or speed (1.4 m/s); lift raises y, such as half the walker height. Ground and avoided nodes are read at their authored pose.',
   meshEdits: Object.freeze({ operations: Object.freeze(Object.keys(MESH_EDIT_OPERATIONS)), maxEdits: MAX_MESH_EDITS }),
   meshStack: Object.freeze({ operations: STACK_OPERATIONS, maxNodes: MAX_STACK_NODES }),
   meshModifiers: MESH_MODIFIER_NOTES,
@@ -190,6 +192,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   fieldExpressions: Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,
     maxNodes: MAX_FIELD_NODES, maxDepth: MAX_FIELD_DEPTH, maxElements: MAX_FIELD_ELEMENTS,
+    rotation: 'rotate [v, axis, rad]; align [dir]: Euler of +Y to dir; transform [p, move, euler, size].',
   }),
   instancing: Object.freeze({ sources: INSTANCE_SOURCES, maxCandidatePoints: MAX_INSTANCE_CANDIDATES }),
   operations: Object.freeze([

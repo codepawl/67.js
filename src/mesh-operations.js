@@ -21,6 +21,8 @@ export const MODIFIER_OPERATIONS = Object.freeze({
   wave: { fields: ['height', 'width', 'narrowness', 'speed', 'time', 'timeOffset', 'start', 'cyclic', 'axes', 'normal'], tags: [] },
   weighted_normal: { fields: ['angle', 'weight'], tags: [] },
   smooth_by_angle: { fields: ['angle', 'ignoreSharp'], tags: [] },
+  bounding_box: { fields: [], tags: [] },
+  convex_hull: { fields: [], tags: [] },
 });
 
 export const MESH_EDIT_OPERATIONS = Object.freeze({
@@ -84,9 +86,10 @@ export const FIELD_OPERATOR_NAMES = Object.freeze([
   'neg', 'abs', 'sqrt', 'sin', 'cos', 'floor', 'ceil', 'round', 'fract', 'sign', 'saturate',
   'lt', 'lte', 'gt', 'gte', 'eq', 'and', 'or', 'not', 'if',
   'vec', 'dot', 'cross', 'distance', 'length', 'normalize', 'x', 'y', 'z',
+  'rotate', 'align', 'transform',
   'attr', 'noise', 'random',
 ]);
-export const INSTANCE_SOURCES = Object.freeze(['grid', 'scatter', 'surface']);
+export const INSTANCE_SOURCES = Object.freeze(['grid', 'scatter', 'surface', 'curve']);
 export const MAX_INSTANCE_CANDIDATES = 2048;
 
 // Imported GLB parts take the same edits. Skin weights, morph deltas and vertex colours of new geometry come from the

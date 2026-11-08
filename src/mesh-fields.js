@@ -1,6 +1,7 @@
 import { TAG_PREFIX, meshTags } from './mesh-data.js';
 import { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK, FIELD_ATTRIBUTES } from './mesh-operations.js';
 import { faceCentroids, faceNormals, vertexNormals } from './mesh-normals.js';
+import { ROTATION_OPERATORS } from './field-rotation.js';
 import {
   COMPONENTS, compileNode, createOperators, describeKey, isBoundedNumber, isPlainObject, requireScalar, scalarValue, vectorValue,
 } from './expression.js';
@@ -157,6 +158,7 @@ OPERATORS.set('normalize', vectorOperator(1, 1, normalizeValue));
 OPERATORS.set('x', vectorOperator(1, 1, selectComponent(0)));
 OPERATORS.set('y', vectorOperator(1, 1, selectComponent(1)));
 OPERATORS.set('z', vectorOperator(1, 1, selectComponent(2)));
+for (const [name, operator] of Object.entries(ROTATION_OPERATORS)) OPERATORS.set(name, operator);
 
 export { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK };
 const SOURCE_KEYS = Object.freeze(['attr', 'noise', 'random']);
