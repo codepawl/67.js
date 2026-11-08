@@ -679,7 +679,7 @@ ${featureCode("linkArea")}      vec3 lightNormal = areaLightNormals[index].xyz;
       // Adding area / pi keeps the term finite at the surface and matches a disc source on its axis.
       float attenuation = emission / (distanceSquared + area / PI);
       vec3 lightRadiance = areaLightColors[index].rgb * areaLightColors[index].w * attenuation;
-      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
+${featureCode("areaRadiance")}      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
   }
   vec3 reflectance = fresnel(max(dot(normal, viewDirection), 0.0), baseReflectance);
@@ -759,7 +759,7 @@ const SHADER_FEATURE_CONDITIONS = {
   areaLights: ['USES_AREA_LIGHTS', 'areaLightCount > 0'],
   localShadows: ['USES_LOCAL_SHADOWS', 'true'],
   fill: ['FILL_ON', 'true'],
-  renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5'],
+  renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5 && renderPassMode < 5.5'],
   sheen: ['USES_SHEEN', 'materialSheen.rgb != vec3(0.0)'],
   clearcoat: ['USES_CLEARCOAT', 'materialCoat.x > 0.0'],
 };

@@ -25,7 +25,7 @@ const MODULE_LOADERS = {
   terrain: () => import('./agent-terrain.js'),
   navigation: () => import('./agent-navigation.js'),
   lightLinking: () => import('./light-linking.js'),
-  cascades: () => import('./cascaded-shadows.js'),
+  cascades: () => import('./light-modules.js'),
   assets: () => import('./agent-scene-assets.js'),
   vegetation: () => import('./agent-vegetation.js'),
   crowd: () => import('./agent-crowd.js'),
@@ -34,6 +34,7 @@ const MODULE_LOADERS = {
   coplanar: () => import('./coplanar-overlap.js'),
   floorSky: () => import('./floor-sky-visibility.js'),
   userPass: () => import('./user-pass.js'),
+  objectMotionBlur: () => import('./object-motion-blur.js'),
   materialSnippet: () => import('./material-snippet.js'),
 };
 
@@ -68,7 +69,8 @@ const MODULE_MARKERS = {
   // No recipe text asks for it, only the path option of scene_inspect does, so a host loads it with loadAllAgentSceneModules.
   navigation: [],
   lightLinking: ['"affects"', '"keyAffects"'],
-  cascades: ['"shadowCascades"'],
+  // The cascade module also loads light-shapes (soft area shadows, IES profiles), so these markers bring both.
+  cascades: [/"(?:shadowCascades|sunAngularRadius|ies)"|"areaLights":\[\{/],
   assets: ['"asset":{', '"sequence":{'],
   vegetation: ['"vegetation":{', '"wind":{'],
   crowd: ['"crowd":{'],
@@ -80,6 +82,8 @@ const MODULE_MARKERS = {
   floorSky: ['"keyColor"', '"keyIntensity"'],
   userPass: ['"postPasses"'],
   materialSnippet: ['"snippet":{'],
+  // Only a motionBlur object that sets a non-zero `objects` loads it; the common `"shutter":0` look does not.
+  objectMotionBlur: [/"motionBlur":\{[^}]*"objects":(?!0[,}])/],
 };
 
 /** Whether a recipe, operation list or edit list contains a boolean edit, which needs loadMeshBooleans() first. */

@@ -3,6 +3,7 @@ import { facesWithTag } from './mesh-data.js';
 import { lintMesh } from './mesh-lint.js';
 import { applyMeshEdits, evaluateMeshStack } from './mesh-recipe.js';
 import { extractRender } from './mesh-render.js';
+import { normalizeShapeKeys, shapeKeyTargets } from './mesh-shape-keys.js';
 import { MESH_SMOOTH_ANGLE_DEFAULT } from './agent-scene-capabilities.js';
 
 export { MESH_SMOOTH_ANGLE_DEFAULT };
@@ -83,7 +84,7 @@ export function meshCacheStats() {
  * does. `cacheKey` identifies the base; the edit result and every stack prefix are cached under it.
  */
 export function generateMeshGeometry(baseGeometry, edits, {
-  maxVertices, smoothAngle = MESH_SMOOTH_ANGLE_DEFAULT, resolveCutter, stack = [], cacheKey,
+  maxVertices, smoothAngle = MESH_SMOOTH_ANGLE_DEFAULT, resolveCutter, stack = [], cacheKey, shapeKeys = [],
 }) {
   const editsKey = cacheKey === undefined ? undefined : `${cacheKey}|edits|${JSON.stringify(edits)}`;
   let edited = editsKey === undefined ? undefined : evaluationCache.get(editsKey);
@@ -97,9 +98,15 @@ export function generateMeshGeometry(baseGeometry, edits, {
     if (editsKey !== undefined) evaluationCache.set(editsKey, edited);
   }
   const evaluated = evaluateMeshStack(edited.mesh, stack, { maxVertices, maxFaces: maxVertices, cache: evaluationCache, cacheKey: editsKey });
-  const { geometry } = extractRender(evaluated.mesh, { sharpAngle: smoothAngle * Math.PI / 180 });
+  const { geometry, renderVertexSource } = extractRender(evaluated.mesh, { sharpAngle: smoothAngle * Math.PI / 180 });
   if (geometry.positions.length / 3 > maxVertices) {
     throw new RangeError(`The edited mesh needs ${geometry.positions.length / 3} render vertices, over maxVertices ${maxVertices}.`);
+  }
+  const keys = normalizeShapeKeys(shapeKeys);
+  if (keys.length) {
+    geometry.morphTargets = shapeKeyTargets(evaluated.mesh, renderVertexSource, keys, { maxVertices, maxFaces: maxVertices, resolveCutter: resolveCutter && (cutter => meshFromGeometry(resolveCutter(cutter))) });
+    geometry.morphTargetNames = keys.map(key => key.name);
+    geometry.morphTargetValues = Float32Array.from(keys, key => key.value);
   }
   polygonMeshes.set(geometry, { mesh: evaluated.mesh, results: edited.result, stack: evaluated.results });
   return geometry;

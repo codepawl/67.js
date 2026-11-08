@@ -1,5 +1,6 @@
 import { cameraFieldOfView } from './camera.js';
 import { pointLightFalloff } from './ray-query.js';
+import { profileGain } from './light-profile.js';
 import { buildTraceScene, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
 import { denoiseRadiance } from './path-tracer-denoise.js';
 import { acesChannel, displayColor } from './view-transform.js';
@@ -47,9 +48,13 @@ const IGNORED_LAYERS = [
   ['iridescence', material => material.iridescence > 0],
   ['sheen', material => (material.sheenColor ?? []).some(channel => channel !== 0)],
   ['moss', material => material.moss > 0],
-  ['splat layers', material => Boolean(material.layers || material.layerMaps)],
+  ['splat layers', material => Boolean(material.layers || Object.keys(material.layerMaps ?? {}).some(name => name !== 'clearcoatTexture'))],
   ['lightMap', material => Boolean(material.lightMap)],
 ];
+
+function hasGraphOpacity(material) {
+  return material.pattern?.type === 'graph' && Object.hasOwn(material.pattern.graph ?? {}, 'opacity');
+}
 
 function boundedInteger(options, name) {
   const limit = PATH_TRACER_LIMITS[name];
@@ -180,7 +185,7 @@ function createHit() {
     distance: 0, material: null,
     point: new Float64Array(3), normal: new Float64Array(3), color: new Float64Array(3),
     texel: new Float64Array(4), mapTexel: new Float64Array(4), emission: new Float64Array(3),
-    metallic: 0, roughness: 0,
+    metallic: 0, roughness: 0, clearcoat: 0, transmission: 0,
   };
 }
 
@@ -355,6 +360,16 @@ function fillHit(scene, triangleId, originX, originY, originZ, directionX, direc
   }
   hit.metallic = material.metallic;
   hit.roughness = material.roughness;
+  hit.clearcoat = material.clearcoat;
+  hit.transmission = material.transmission;
+  if (material.clearcoatTexture) {
+    sampleTexture(material.clearcoatTexture, u, v, hit.mapTexel);
+    hit.clearcoat *= hit.mapTexel[0];
+  }
+  if (material.transmissionTexture) {
+    sampleTexture(material.transmissionTexture, u, v, hit.mapTexel);
+    hit.transmission *= hit.mapTexel[0];
+  }
   if (material.surfaceTexture) {
     sampleTexture(material.surfaceTexture, u, v, hit.mapTexel);
     hit.roughness *= hit.mapTexel[1];
@@ -453,7 +468,7 @@ function createPathTracer(scene, options) {
   let featuresRecorded = false;
   const { lights, environment } = scene;
   if (lights.sun) buildFrame(lights.sun.direction, sunFrame);
-  const sunCosineMax = Math.cos(SUN_ANGULAR_RADIUS);
+  const sunCosineMax = Math.cos(lights.sun?.angularRadius ?? SUN_ANGULAR_RADIUS);
 
   function addRadiance(depth, red, green, blue) {
     let clampedRed = red;
@@ -591,7 +606,7 @@ function createPathTracer(scene, options) {
     const inside = axisCosine - light.cosineHalfAngle;
     if (inside <= 0) return;
     const mask = light.blend > 0 && inside < light.blend ? smoothstep(inside / light.blend) : 1;
-    const strength = light.intensity * pointLightFalloff(distanceSquared, light) * mask;
+    const strength = light.intensity * pointLightFalloff(distanceSquared, light) * mask * (light.profile ? profileGain(light.profile, axisCosine) : 1);
     for (let channel = 0; channel < 3; channel++) lightRadiance[channel] = light.color[channel] * strength;
     addDirect(depth, normal, distance - scene.surfaceOffset, fullWeight);
   }
@@ -607,7 +622,7 @@ function createPathTracer(scene, options) {
     if (distance < 1e-6) return;
     const emitCosine = -(light.normal[0] * lightDirection[0] + light.normal[1] * lightDirection[1] + light.normal[2] * lightDirection[2]);
     if (emitCosine <= 0) return;
-    const strength = light.intensity * emitCosine / distanceSquared;
+    const strength = light.intensity * emitCosine / distanceSquared * (light.profile ? profileGain(light.profile, emitCosine) : 1);
     for (let channel = 0; channel < 3; channel++) lightRadiance[channel] = light.color[channel] * strength;
     addDirect(depth, normal, distance - scene.surfaceOffset, fullWeight);
   }
@@ -833,7 +848,7 @@ function createPathTracer(scene, options) {
       normal[0] = hit.normal[0] * facing;
       normal[1] = hit.normal[1] * facing;
       normal[2] = hit.normal[2] * facing;
-      const isGlass = material.transmission > 0 && random.next() < material.transmission;
+      const isGlass = hit.transmission > 0 && random.next() < hit.transmission;
       if (!featuresRecorded) {
         recordFeatures(normal, isGlass);
         featuresRecorded = true;
@@ -853,7 +868,7 @@ function createPathTracer(scene, options) {
         }
         afterMirror = true;
       } else {
-        prepareSurface(surface, material, hit.metallic, hit.roughness, hit.color, normal, viewX, viewY, viewZ);
+        prepareSurface(surface, material, hit.metallic, hit.roughness, hit.color, normal, viewX, viewY, viewZ, hit.clearcoat);
         const subsurface = material.subsurface;
         if (subsurface) splitSubsurface(surface, subsurface.weight);
         addLights(depth, normal);
@@ -918,7 +933,8 @@ export function describeIgnoredFeatures(parts, environment) {
     const material = part.material ?? {};
     for (const field of IGNORED_MAP_FIELDS) if (material[field]) notes.add(`${field} is ignored.`);
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
-    if (material.alphaMode === 'blend') notes.add('Blended transparency is traced as opaque.');
+    if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');
+    if (material.layerMaps?.clearcoatTexture || material.transmissionMap) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
     for (const [name, isUsed] of IGNORED_LAYERS) if (isUsed(material)) notes.add(`${name} is ignored.`);
   }
   return [...notes];

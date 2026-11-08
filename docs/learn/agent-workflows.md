@@ -395,14 +395,16 @@ The result call returns the path of the file in the jobs folder. The agent reads
 }
 ```
 
+For compositing, add `"transparent": true` (PNG with alpha), `"format": "png16"` or `"exr"`, or a `"region": {"x": 0, "y": 0, "width": 640, "height": 360}` crop to an image or stills job; a video can run at up to 60 fps. Each is off unless set.
+
 While a job runs, previews and edits pause. Inspection and recipe export still work. After the job, call `scene_render_release` to delete files that you no longer need. [Render jobs](/agent-render-jobs.md) covers sequences, video, render passes and the path tracer.
 
 ## Skills
 
 A skill is a folder with a `SKILL.md` file. It gives an agent a procedure and the names of the files to read. The npm package includes two skills:
 
-- `build-67js-scene` for building and refining scenes.
-- `render-67js-media` for PNG and MP4 export, backends and memory limits.
+- `build-67js-scene` for building scenes through the MCP tools: look, light, camera, film and animation, and error recovery.
+- `render-67js-media` for PNG, pass and MP4 render jobs, with limits and error recovery.
 
 Copy them from the installed package into the skill folder of your harness. Run this in your project folder, after `npm install 67js@npm:@codepawlhq/67js`:
 

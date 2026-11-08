@@ -1,5 +1,5 @@
 import { bakeChangedParts, traceGridKernel } from './agent-bake.js';
-import { bakeCloth } from './cloth.js';
+import { bakeClothWithFields } from './cloth-fields.js';
 import { bakeMaterialPattern } from './material-patterns.js';
 import { traceProbes } from './probe-trace.js';
 import { unwrapUv } from './mesh-uv.js';
@@ -10,7 +10,7 @@ const KERNELS = {
   lightBake: bakeChangedParts,
   probeTrace: traceProbes,
   gridTrace: traceGridKernel,
-  cloth: bakeCloth,
+  cloth: bakeClothWithFields,
   pattern: bakeMaterialPattern,
   uvUnwrap: unwrapUv,
 };

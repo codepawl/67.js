@@ -22,7 +22,8 @@ import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
 import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
-import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME } from './agent-render-jobs.mjs';
+import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
+import { encodeRenderOutput } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
 import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, startVideoEncoderInPage } from './gpu-frame-reader.mjs';
 import { audioInputArguments, createAudioLibrary, measureStreamSeconds } from './job-audio.mjs';
@@ -157,12 +158,15 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   /** The HDRI and .cube files a recipe names: shipped ones by name from assets/looks, the others by catalog ID. The page decodes them. */
   async function lookFileData(value) {
     const { environments, looks } = catalogLookReferences(value);
+    // Derived from previewUrl (build/mcp/preview.js in the repo and the package), not from import.meta.url: the bundler
+    // inlines a literal `new URL(..., import.meta.url)` as a data URL, and the bundled server sits two folders below the package root.
+    const shippedLooksUrl = new URL('../../assets/looks/', previewUrl);
     const lookData = {};
     for (const [kind, references] of [['environment', environments], ['look', looks]]) {
       for (const reference of references) {
         const shipped = BUNDLED_ENVIRONMENT_NAMES.includes(reference) || BUNDLED_CUBE_LOOK_NAMES.includes(reference);
         const bytes = shipped
-          ? await readFile(new URL(`../assets/looks/${reference}.${kind === 'environment' ? 'hdr' : 'cube'}`, import.meta.url))
+          ? await readFile(new URL(`${reference}.${kind === 'environment' ? 'hdr' : 'cube'}`, shippedLooksUrl))
           : await (await catalog()).read(reference);
         lookData[reference] = kind === 'environment' ? { kind, base64: bytes.toString('base64') } : { kind, text: bytes.toString('utf8') };
       }
@@ -426,7 +430,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       jobPage.setDefaultTimeout(15000);
       await jobPage.goto(origin);
       await jobPage.waitForFunction(() => Boolean(window.__agentPreview));
-      const input = { sessionId: jobId, recipe: snapshot.recipe, memoryBudgetMiB: memory, backend,
+      const input = { sessionId: jobId, recipe: snapshot.recipe, memoryBudgetMiB: memory, backend, ...(settings.transparent ? { transparent: true } : {}),
         ...(snapshot.assetBytes ? { data: snapshot.assetBytes.toString('base64'), ...(await motionSources([snapshot.recipe.motion])) } : await placedAssetData(snapshot.recipe)) };
       const created = await jobPage.evaluate(({ method, input }) => window.__agentPreview[method](input),
         { method: snapshot.assetBytes ? 'createAsset' : 'create', input });
@@ -435,6 +439,26 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       if (width < 64 || height < 64) throw new Error('Render budget reduced the job below its minimum output size.');
       await jobPage.setViewportSize({ width, height });
       const session = await jobPage.context().newCDPSession(jobPage);
+      const region = settings.region;
+      if (settings.format && settings.format !== 'png') await jobPage.evaluate(prepareInput => window.__agentPreview.prepareFloatOutput(prepareInput), { sessionId: jobId });
+      // A memory budget can shrink the frame below the size the region was chosen for.
+      if (region && (region.x + region.width > width || region.y + region.height > height)) {
+        throw new Error(`The region lies outside the rendered frame, which the memory budget reduced to ${width}x${height}.`);
+      }
+      const outputWidth = region?.width ?? width;
+      const outputHeight = region?.height ?? height;
+      const format = settings.format ?? 'png';
+      const highPrecision = format !== 'png';
+      const artifactExtension = format === 'exr' ? 'exr' : 'png';
+      const artifactMimeType = format === 'exr' ? 'image/x-exr' : 'image/png';
+      // A transparent canvas shows the page behind it in a screenshot, so the page and the browser's default are made clear.
+      if (settings.transparent) {
+        await session.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
+        await jobPage.evaluate(() => {
+          document.documentElement.style.background = 'transparent';
+          document.body.style.background = 'transparent';
+        });
+      }
       const artifacts = [];
       const timeline = settings.timeline ? snapshot.recipe.timeline : undefined;
       const audio = settings.audio ? await prepareAudio(settings) : undefined;
@@ -445,13 +469,13 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         activeFrameReceiver = frameReceiver;
         const frameSocketUrl = `ws://127.0.0.1:${httpServer.address().port}${frameReceiver.path}`;
         // A path traced frame is a PNG made outside the page's drawing buffer, so the browser encoder has nothing to encode.
-        if (settings.encoder === 'nvenc' && !settings.renderer) {
+        if (settings.encoder === 'nvenc' && !settings.renderer && !region) {
           const pageEncoder = await startVideoEncoderInPage(jobPage, frameSocketUrl,
             { width, height, fps: settings.fps, quantizer: DEFAULT_PAGE_ENCODER_QUANTIZER });
           pageEncodes = pageEncoder.supported;
         }
         encoder = createFrameEncoder({ executable: ffmpeg, output: join(directory, 'render.mp4.partial'),
-          fps: settings.fps, format: pageEncodes ? 'h264' : settings.renderer ? 'png' : 'jpeg', width, height, signal, maximumFrameBytes: MAXIMUM_JOB_FRAME_BYTES, backend: settings.encoder === 'nvenc' ? 'gpu' : 'cpu',
+          fps: settings.fps, format: pageEncodes ? 'h264' : settings.renderer ? 'png' : 'jpeg', width: outputWidth, height: outputHeight, signal, maximumFrameBytes: MAXIMUM_JOB_FRAME_BYTES, backend: settings.encoder === 'nvenc' ? 'gpu' : 'cpu',
           audioArguments: settings.audio ? audioInputArguments(audio.path, settings.audio.offset) : [],
           audioCodec: settings.audio?.track === 'pcm' ? 'pcm' : 'aac' });
         if (pageEncodes) frameReceiver.onChunk(chunk => encoder.writeChunk(chunk));
@@ -465,7 +489,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         // A timeline job reads one clock for the shot, the motion and the renderer, so a seek matches the frame in a video.
         const timelineTime = timeline ? Math.min(filmTimelineDuration(timeline), settings.timeline.start + elapsed) : undefined;
         const shotSample = timeline ? sampleFilmTimeline(timeline, snapshot.recipe, timelineTime) : undefined;
-        const frameInput = { sessionId: jobId,
+        const frameInput = { sessionId: jobId, ...(highPrecision ? { floatOutput: true } : {}),
           rendererTime: (settings.rendererTime?.start ?? 0) + (timelineTime ?? elapsed) * (settings.rendererTime?.rate ?? 1),
           ...(settings.motion ? { motionTime: settings.motion.start + elapsed } : {}),
           ...(shotSample?.motionTime == null ? {} : { motionTime: shotSample.motionTime }),
@@ -548,6 +572,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           const captureStarted = performance.now();
           const captured = await session.send('Page.captureScreenshot', { fromSurface: true,
             format: settings.kind === 'video' ? 'jpeg' : 'png',
+            ...(region ? { clip: { ...region, scale: 1 } } : {}),
             ...(settings.kind === 'video' ? { quality: 95 } : { optimizeForSpeed: true }) });
           const captureBytes = Buffer.from(captured.data, 'base64');
           metrics.captureSeconds += (performance.now() - captureStarted) / 1000;
@@ -555,22 +580,36 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           signal.throwIfAborted();
           return captureBytes;
         }
+        // 16-bit PNG and EXR come from a float readback of the same frame (or of its pass), encoded here.
+        async function captureHighPrecisionBytes(pass) {
+          const captureStarted = performance.now();
+          const read = await jobPage.evaluate(readInput => window.__agentPreview.readFloat(readInput),
+            { sessionId: jobId, source: pass ? 'pass' : 'frame', ...(region ? { region } : {}) });
+          const readBytes = Buffer.from(read.data, 'base64');
+          const pixels = new Float32Array(readBytes.buffer.slice(readBytes.byteOffset, readBytes.byteOffset + readBytes.length));
+          const encodedBytes = encodeRenderOutput({ format, pixels, width: read.width, height: read.height, pass,
+            hasAlpha: settings.transparent === true, depthRange: RENDER_PASS_DEPTH_RANGE });
+          metrics.captureSeconds += (performance.now() - captureStarted) / 1000;
+          if (encodedBytes.length > MAXIMUM_JOB_FRAME_BYTES * HIGH_PRECISION_FRAME_FACTOR) throw new Error('Rendered frame exceeded the high-precision size limit.');
+          signal.throwIfAborted();
+          return encodedBytes;
+        }
         async function writeArtifact(filename, artifactBytes) {
           await writeFile(join(directory, `${filename}.partial`), artifactBytes, { flag: 'wx' });
-          artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: 'image/png' });
+          artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: artifactMimeType });
         }
-        const bytes = await captureFrameBytes();
+        const bytes = highPrecision ? await captureHighPrecisionBytes(undefined) : await captureFrameBytes();
         if (encoder) {
           if (bytes) await encoder.writeFrame(bytes);
         }
         else {
           const stem = settings.kind === 'image' ? 'render' : `frame-${frame}`;
-          await writeArtifact(`${stem}.png`, bytes);
+          await writeArtifact(`${stem}.${artifactExtension}`, bytes);
           // Passes follow the lit image of the same instant, so each seek yields every file for that frame.
           for (const pass of settings.passes ?? []) {
             const passInfo = await jobPage.evaluate(input => window.__agentPreview.frame(input),
-              { ...frameInput, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE });
-            await writeArtifact(`${stem}-${pass}.png`, await captureFrameBytes());
+              { ...frameInput, floatOutput: false, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE, ...(highPrecision ? { passFloat: true } : {}) });
+            await writeArtifact(`${stem}-${pass}.${artifactExtension}`, highPrecision ? await captureHighPrecisionBytes(pass) : await captureFrameBytes());
             if (pass === 'depth') metrics.depthRangeMetres = RENDER_PASS_DEPTH_RANGE;
             if (pass === 'objectId') {
               metrics.objectNames = passInfo.objectNames.slice(0, MAXIMUM_OBJECT_NAMES);

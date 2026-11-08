@@ -52,7 +52,9 @@ export const MESH_EDIT_OPERATIONS = Object.freeze({
   grid_fill: { fields: ['edges', 'name'], tags: ['fill'] },
   knife_project: { fields: ['name', 'path', 'direction'], tags: ['cut'] },
   set_position: { fields: ['select', 'position', 'offset'], tags: [] },
-  displace: { fields: ['select', 'field', 'strength', 'midlevel', 'direction'], tags: [] },
+  displace: { fields: ['select', 'field', 'strength', 'midlevel', 'direction', 'group'], tags: [] },
+  vertex_group: { fields: ['select', 'name', 'weight', 'field', 'gradient'], tags: [] },
+  vertex_color: { fields: ['select', 'color', 'field', 'gradient'], tags: [] },
   decimate: { fields: ['ratio'], tags: [] },
   remesh: { fields: ['voxelSize', 'resolution'], tags: [] },
   sculpt: { fields: ['select', 'strokes'], tags: [] },
@@ -76,13 +78,13 @@ export const MAX_FIELD_NODES = 64;
 export const MAX_FIELD_DEPTH = 12;
 export const MAX_FIELD_ELEMENTS = 250_000;
 export const MAX_FIELD_WORK = 8_000_000;
-export const FIELD_ATTRIBUTES = Object.freeze(['position', 'normal', 'index', 'tag']);
+export const FIELD_ATTRIBUTES = Object.freeze(['position', 'normal', 'index', 'tag', 'group']);
 export const FIELD_OPERATOR_NAMES = Object.freeze([
   'add', 'mul', 'min', 'max', 'sub', 'div', 'mod', 'pow', 'atan2', 'clamp', 'mix', 'smoothstep',
   'neg', 'abs', 'sqrt', 'sin', 'cos', 'floor', 'ceil', 'round', 'fract', 'sign', 'saturate',
   'lt', 'lte', 'gt', 'gte', 'eq', 'and', 'or', 'not', 'if',
   'vec', 'dot', 'cross', 'distance', 'length', 'normalize', 'x', 'y', 'z',
-  'attr', 'noise', 'random',
+  'attr', 'noise', 'random', 'nearest', 'raycast',
 ]);
 export const INSTANCE_SOURCES = Object.freeze(['grid', 'scatter', 'surface']);
 export const MAX_INSTANCE_CANDIDATES = 2048;

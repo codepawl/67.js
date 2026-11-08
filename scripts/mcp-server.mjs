@@ -10,7 +10,7 @@ import packageMetadata from '../package.json' with { type: 'json' };
 import { MODIFIER_OPERATIONS } from '../src/mesh-operations.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from '../src/view-transform-names.js';
 import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, CATALOG_FILE_ID } from '../src/look-catalog.js';
-import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER_PASS_NAMES, VIDEO_ENCODERS, MAXIMUM_JOB_SIDE, MAXIMUM_MEMORY_MIB } from '../src/agent-scene-capabilities.js';
+import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, VIDEO_ENCODERS, MAXIMUM_JOB_SIDE, MAXIMUM_MEMORY_MIB } from '../src/agent-scene-capabilities.js';
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
@@ -213,6 +213,7 @@ const volumeFog = z.strictObject({
   surfaceTransmittance: finite.optional(),
 });
 const affects = z.array(z.string()).optional();
+const iesProfile = z.any().optional();
 const lines = z.record(z.string(), z.unknown()).describe('Outlines, toon light and polylines as plain JSON; fields and limits in scene_capabilities lineArt. null clears.');
 const environment = z.strictObject({
   world: z.boolean().optional().describe('Draw the sky and apply surface fog.'),
@@ -229,6 +230,7 @@ const environment = z.strictObject({
   daylight: bounded(0, 100).optional(),
   keyAffects: affects.describe('Node IDs lit; default all.'),
   shadowCascades: z.number().int().min(0).max(4).optional().describe('Sun shadow slices; 0 one map.'),
+  sunAngularRadius: z.number().optional(),
   pointLights: z.array(z.strictObject({
     position: boundedVector(-1e6, 1e6),
     color: color.optional(),
@@ -248,6 +250,7 @@ const environment = z.strictObject({
     radius: bounded(0.001, 1e6).optional(),
     range: z.union([z.literal(0), bounded(0.001, 1e6)]).optional(),
     castShadow: z.boolean().optional().describe('Casts a shadow; 1 atlas tile.'),
+    ies: iesProfile,
     affects,
   })).max(MAX_SPOT_LIGHTS).optional().describe('Replaces the list; [] clears.'),
   areaLights: z.array(z.strictObject({
@@ -258,8 +261,10 @@ const environment = z.strictObject({
     height: bounded(0.001, 1e4),
     color: color.optional(),
     intensity: bounded(0, 1e5).optional().describe('Candela head on.'),
+    castShadow: z.boolean().optional(),
+    ies: iesProfile,
     affects,
-  })).max(MAX_AREA_LIGHTS).optional().describe('Replaces the list; [] clears. No shadow.'),
+  })).max(MAX_AREA_LIGHTS).optional().describe('Replaces the list; [] clears.'),
   skyTop: color.optional(),
   skyBottom: color.optional(),
   fogColor: color.optional(),
@@ -293,7 +298,7 @@ const effects = z.strictObject({
     radius: bounded(0.1, 4).optional(),
   }).optional(),
   depthOfField: z.strictObject({ blur: unit.optional(), focusDistance: bounded(0.01, 100000).optional() }).optional().describe('Lens blur: blur 0 to 1, focusDistance metres.'),
-  motionBlur: z.strictObject({ shutter: bounded(0, 0.5).optional() }).optional().describe('Camera motion smear, shutter in seconds.'),
+  motionBlur: z.strictObject({ shutter: bounded(0, 0.5).optional(), objects: bounded(0, 1).optional() }).optional().describe('Motion smear, shutter in seconds. objects 0 to 1 also smears each moving part along its own motion (off at 0).'),
 });
 const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
 const shadow = z.strictObject({
@@ -329,6 +334,8 @@ function primitiveGeometries(identified) {
 const selectRule = z.record(z.string(), z.unknown()).describe('Face rule: {"all":true}, {"tag":"top"}, {"normal":[0,1,0],"maxAngle":10}, {"inside":{"min":[x,y,z],"max":[x,y,z]}} (centroids), {"faces":[i]}, {"and"|"or":[rules]}, {"not":rule}, {"grow":rule,"steps":1}, {"boundary":rule}, {"field":expr}. Tags: top, bottom, side, left, right, front, back, <name>.cap|side|rim.');
 const editName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/).optional().describe('Tag prefix. Defaults to <op>-<index>.');
 const edgeRule = z.record(z.string(), z.unknown()).describe('Edge rule: {"all":true}, {"angle":30}, {"along":[x,y,z]}, {"between":[faceRule,faceRule]}, {"boundaryOf":faceRule} or {"open":true} for boundary edges (also {"open":{"inside":{"min":[x,y,z],"max":[x,y,z]}}}).');
+const shortSelect = z.record(z.string(), z.unknown()).describe('Face rule, as in set_position.');
+const shortField = z.union([finite, z.record(z.string(), z.unknown())]);
 const meshEdit = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('extrude_face_region'), select: selectRule.optional(), name: editName, offset: finite.describe('Distance along each connected region\'s average normal (negative pushes in).'), direction: vector3.optional().describe('Move along this direction instead of the normal.'), alongNormals: z.boolean().optional().describe('Move each vertex along its own normal instead, keeping the region joined: use for rings and curved bands.') }),
   z.strictObject({ op: z.literal('extrude_individual'), select: selectRule.optional(), name: editName, offset: finite.describe('Distance along each face\'s own normal.'), direction: vector3.optional() }),
@@ -379,6 +386,8 @@ const meshEdit = z.discriminatedUnion('op', [
       type: z.enum(['inflate', 'displace', 'smooth']), center: vector3, radius: finite, strength: finite, direction: vector3.optional(),
     })).min(1).max(32),
   }).describe('Brush strokes on the vertices of the selected faces, in order. Fields and units in scene_capabilities meshSculpt.'),
+  z.strictObject({ op: z.literal('vertex_group'), name: z.string().max(48), select: shortSelect.optional(), weight: unit.optional(), field: shortField.optional(), gradient: z.record(z.string(), z.unknown()).optional() }).describe('Vertex group weights 0-1: weight, field or gradient. See meshAttributes.'),
+  z.strictObject({ op: z.literal('vertex_color'), select: shortSelect.optional(), color: vector3.optional(), field: shortField.optional(), gradient: z.record(z.string(), z.unknown()).optional() }).describe('Vertex colors: color, vector field or gradient. See meshAttributes.'),
   z.strictObject({
     op: z.literal('shrinkwrap'), select: selectRule.optional(),
     target: z.record(z.string(), z.unknown()).describe('Primitive to wrap onto, a record like a boolean cutter ({"type":"sphere"}), placed by translation, rotation and scale.'),
@@ -397,6 +406,7 @@ const stackNodes = [
     field: fieldExpression.describe('Number expression used as the texture.'),
     strength: finite.optional().describe('Defaults to 1.'), midlevel: finite.optional().describe('Field value that does not move. Defaults to 0.5, the middle of noise.'),
     direction: z.enum(['normal', 'x', 'y', 'z']).optional().describe('Defaults to normal.'),
+    group: z.string().max(48).optional(),
   }).describe('Blender Displace with a field as the texture: each vertex moves by (field - midlevel) * strength.'),
   z.strictObject({ op: z.literal('mirror'), name: editName, axis: z.enum(['x', 'y', 'z']).optional().describe('Mirror across the plane through the local origin perpendicular to this axis. Defaults to x.'), merge: bounded(0, 1000).optional().describe('Vertices this close to the plane are shared by both halves. Defaults to 0.001. Faces lying in the plane are removed, so a closed half becomes a closed whole.') }),
   z.strictObject({ op: z.literal('array'), name: editName, count: z.number().int().min(1).max(256).optional(), offset: vector3.optional().describe('Constant step between copies.'), relativeOffset: vector3.optional().describe('Step in bounding-box sizes. Defaults to [1, 0, 0] unless offset is given.'), merge: bounded(0, 1000).optional().describe('Weld touching copies and remove the faces between them.') }),
@@ -446,8 +456,12 @@ const recipeMeshEdits = z.array(z.record(z.string(), z.unknown())).max(64);
 const recipeMeshStack = z.array(z.record(z.string(), z.unknown())).max(16);
 const geometry = z.discriminatedUnion('type', [
   ...primitiveGeometries(true),
-  z.strictObject({ id: identifier, type: z.literal('grid'), segments: detail(1, 64) }),
-  z.strictObject({ id: identifier, type: z.literal('mesh'), base: z.discriminatedUnion('type', primitiveGeometries(false)).describe('Starting shape, converted to welded quads with axis face tags.'), edits: recipeMeshEdits.optional().describe('Replayable edit log, applied in order. Each item has the shape of one mesh_edit edit; read that tool for every op and field.'), stack: recipeMeshStack.optional().describe('Non-destructive modifier stack evaluated after the edits. Each item has the shape of one mesh_stack node; read that tool for the ops.'), smoothAngle: bounded(0, 180).optional().describe('Edges bending more than this many degrees render hard. Defaults to 30.') }),
+  z.strictObject({ id: identifier, type: z.enum(['grid', 'plane']), segments: detail(1, 64) }).describe('Unit sheet in XY facing +Z; plane = grid.'),
+  z.strictObject({ id: identifier, type: z.literal('cone'), radiusTop: finite.optional(), radiusBottom: finite.optional(), segments }).describe('Along Y, height 1; radiusTop 0 is a point, radiusBottom 1.'),
+  z.strictObject({ id: identifier, type: z.literal('icoSphere'), subdivisions: detail(0, 7) }),
+  z.strictObject({ id: identifier, type: z.literal('circle'), segments, innerRadius: finite.optional() }).describe('Unit disc facing +Z; innerRadius makes a ring.'),
+  z.strictObject({ id: identifier, type: z.literal('line'), from: vector3, to: vector3, radius: finite.optional(), radialSegments: detail(3, 128) }),
+  z.strictObject({ id: identifier, type: z.literal('mesh'), base: z.discriminatedUnion('type', primitiveGeometries(false)).describe('Starting shape, converted to welded quads with axis face tags.'), edits: recipeMeshEdits.optional().describe('Replayable edit log, applied in order. Each item has the shape of one mesh_edit edit; read that tool for every op and field.'), stack: recipeMeshStack.optional().describe('Non-destructive modifier stack evaluated after the edits. Each item has the shape of one mesh_stack node; read that tool for the ops.'), smoothAngle: bounded(0, 180).optional().describe('Edges bending more than this many degrees render hard. Defaults to 30.'), shapeKeys: recipeMeshEdits.optional().describe('Named morph targets, at most 16: { name, offsets | edits, value }. See scene_capabilities meshShapeKeys.') }),
 ]);
 // No description: this field repeats in every motion track schema. A wrong name fails with every valid form, and docs/agent-motion.md lists them.
 const easingField = z.string().max(80).optional();
@@ -505,7 +519,7 @@ const constraint = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('limit_rotation'), node: identifier, x: degreeRange.optional(), y: degreeRange.optional(), z: degreeRange.optional(), space: constraintSpace, influence }),
   z.strictObject({ type: z.literal('track_to'), node: identifier, target: identifier, trackAxis: signedAxis.optional(), upAxis: axisName.optional(), worldUp: vector3.optional(), influence }),
   z.strictObject({ type: z.literal('child_of'), node: identifier, target: identifier, inverse: z.enum(['rest', 'none']).optional(), influence }),
-  z.strictObject({ type: z.literal('floor'), node: identifier, target: identifier, axis: signedAxis.optional(), offset: z.number().min(-1e6).max(1e6).optional(), influence }),
+  z.strictObject({ type: z.enum(['floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action']), node: identifier, target: identifier.optional(), axis: signedAxis.optional(), offset: z.number().min(-1e6).max(1e6).optional(), influence, args: z.record(z.string(), z.unknown()).optional() }),
 ]);
 const driver = z.strictObject({
   target: z.union([
@@ -591,6 +605,7 @@ const looseRecord = z.record(z.string(), z.unknown()).meta({ id: 'LooseRecord' }
 const clothSheet = z.strictObject({
   node: identifier.describe('Root mesh node.'),
   pin: z.array(z.enum(['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight'])).max(8).optional(),
+  pinGroup: z.string().max(48).optional(),
   pinTo: looseRecord.optional(),
   stiffness: unit.optional(), bend: unit.optional(), density: positive.optional(), damping: nonnegative.optional(), friction: unit.optional(), thickness: nonnegative.optional(),
 });
@@ -600,6 +615,7 @@ const cloth = z.strictObject({
   wind: vector3.optional(),
   sheets: z.array(clothSheet).min(1).max(8),
   colliders: z.array(looseRecord).max(80).optional().describe('Fields: scene_capabilities cloth.'),
+  fields: z.array(looseRecord).max(8).optional().describe('Force fields: scene_capabilities particles.'),
 }).describe('Baked at 60 fps, seeked by motionTime. Units, defaults: scene_capabilities cloth.');
 // The full motion schema (tracks, ik, constraints, drivers) is in scene_create's recipe. scene_apply and asset recipes
 // take the same object, validated by the backend, without repeating about 35 KB of schema in each tool.
@@ -721,7 +737,7 @@ const renderSettings = z.strictObject({
   kind: z.enum(['image', 'stills', 'video']),
   width: z.number().int().min(64).max(MAXIMUM_JOB_SIDE),
   height: z.number().int().min(64).max(MAXIMUM_JOB_SIDE),
-  fps: z.number().int().min(1).max(30).optional(),
+  fps: z.number().int().min(1).max(MAXIMUM_JOB_FPS).optional(),
   duration: z.number().min(0.1).max(60).optional(),
   animation: z.strictObject({ clip: z.number().int().min(0), start: z.number().min(0).max(3600).optional() }).optional(),
   motion: z.strictObject({ start: z.number().min(0).max(3600).optional() }).optional(),
@@ -731,6 +747,9 @@ const renderSettings = z.strictObject({
   audio: z.strictObject({ file: z.string().max(68), offset: z.number().min(0).max(3600).optional(), track: z.enum(['aac', 'pcm']).optional() }).optional().describe('Video only: a file name in the --audio folder (.wav, .mp3, .ogg, .flac) mixed in from offset seconds.'),
   encoder: z.enum(VIDEO_ENCODERS).optional().describe('Video only: cpu (default) or nvenc.'),
   passes: z.array(z.enum(RENDER_PASS_NAMES)).min(1).max(RENDER_PASS_NAMES.length).optional().describe('image and stills only: also write raw PNGs per frame for these passes; opaque geometry only.'),
+  transparent: z.boolean().optional().describe('image and stills only: lit image with alpha. No sky, background or auto ground; no volume fog.'),
+  format: z.enum(RENDER_OUTPUT_FORMATS).optional().describe('image and stills only: png (8-bit, default), png16 or exr (half float; depth in metres).'),
+  region: z.strictObject({ x: z.number().int().min(0), y: z.number().int().min(0), width: z.number().int().min(16), height: z.number().int().min(16) }).optional().describe('Pixels from the top left to keep; the frame is rendered whole. Not with renderer.'),
 }).describe('Immutable snapshot render: one PNG, eight evenly spaced PNGs, or CPU H.264 MP4. Video dimensions must be even. Defaults: 24 fps, one second. Use motion.start for authored recipe tracks, animation for an imported clip, or both to layer them. Omitted motion holds time zero. Nonlooping samples must fit the authored duration.');
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const edit = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };

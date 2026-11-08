@@ -105,7 +105,7 @@ and a click placed on a cut in a WAV lands on the decoded cut frame within a fra
 
 ## Render passes
 
-`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth` and `objectId`.
+`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao` and `mist`.
 Each frame writes its lit image and then one PNG per pass: `render.png` and `render-<pass>.png` for an image, `frame-N.png` and `frame-N-<pass>.png` for stills.
 Passes are raw data at the lit image's size: no tone mapping, grading, bloom, depth of field or antialiasing, so values stay exact at silhouettes.
 Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky and the environment background do not.
@@ -117,6 +117,13 @@ Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky
 | `emission` | Emissive colour times strength, clamped to 1 |
 | `depth` | Metres from the camera over 100 m as a 16-bit value, high byte in red and low byte in green. Background is `255, 255, 0` |
 | `objectId` | 24-bit ID, low byte in red, then green, then blue. Zero is background |
+| `diffuse` | Linear diffuse light (every light, sky and bounce) times exposure, before fog and without emission. Background 0 |
+| `glossy` | Linear specular light (each light's lobe and the sky reflection) times exposure, before fog. Background 0 |
+| `shadow` | Sun shadow visibility, 1 lit and 0 shadowed. Background 1 |
+| `ao` | Ambient occlusion the shader applies (occlusion map, vertex sky visibility, room term). Background 1 |
+| `mist` | Fog amount `1 - exp(-distance * fogDensity)`. Background 1 |
+
+The lighting passes hold linear values above 1, so write them as `exr` (a `png` or `png16` file clamps at 1). They add back to the lit image: `diffuse + glossy + emission * exposure` is the radiance before fog, and with an open world the lit image is that radiance mixed toward the fog colour by `mist`, then tone mapped. `tests/lighting-passes.test.js` checks the sum against the beauty frame (mean difference under 1.5 display levels, under 2% of samples off by more than 4). Not covered: unlit parts, the editor floor, parts that a probe or irradiance grid changes after the sky term, and anything the lit image adds after the shader (bloom, grading, depth of field).
 
 `scene_render_result` metrics carry `objectNames`, the part name for ID 1, 2 and so on (the first 1000, with `objectNamesTruncated`), and `depthRangeMetres`.
 IDs follow draw order, which groups parts by shared geometry, so read the names list and not node order.
@@ -124,6 +131,23 @@ Videos hold the lit image only.
 
 A seek to any frame gives the same pixels: a job samples each frame from its time and keeps no state between frames.
 `npm run smoke:render-passes` proves it through MCP: it renders eight stills with every pass, then renders frame 3 again as an image in a different order of seeks and compares the bytes of the lit image and all five passes.
+
+## Output options: transparent, 16-bit PNG, EXR, region and 60 fps
+
+Four optional settings, each off by default. A job without them writes the same bytes as before.
+
+| Setting | Meaning |
+| --- | --- |
+| `transparent: true` | `image` and `stills`: the lit image keeps alpha (a PNG of colour type 6). The sky, the environment background and the automatic ground are not drawn, so give the scene its own ground or a `shadowCatcher` node (see `renderFlags` in `scene_capabilities`). Volume fog is refused. Passes ignore it. |
+| `format` | `image` and `stills`: `png` (8-bit, default), `png16` or `exr`. The lit image is drawn into a half-float target and read back, so the file holds the same graded display colour as the 8-bit PNG (within one 8-bit step) with 16-bit steps. |
+| `region: { x, y, width, height }` | Pixels from the top left, each side at least 16. The frame is rendered whole and the crop is kept, so the look is the same as the full frame. Works for `image`, `stills` and `video` (a video region has even sides). Not with `renderer`. |
+| `fps` | Up to 60 for video, within the 900 frame limit. |
+
+`png16` writes `render.png` (RGB, or RGBA with `transparent`; alpha is straight) and one PNG per pass. A depth pass is a 16-bit gray PNG holding the raw step 0 to 65535 over 100 m, an `objectId` pass is a 16-bit gray PNG of the ID (a scene with more than 65535 objects fails: use `exr`), and `albedo`, `normal` and `emission` are 16-bit RGB with the same values as the 8-bit pass.
+`exr` writes `render.exr` (half-float R, G, B and A when transparent; alpha stays premultiplied) and `render-<pass>.exr`. `depth` is one float32 channel `Z` in metres (the far limit, 100, is background), `objectId` one float32 channel `id` (0 is background), and `albedo`, `normal` and `emission` are half-float RGB. Files use ZIP compression and open in Blender, Nuke and OpenEXR tools.
+Passes in these formats are drawn into half-float targets, so albedo, normal and emission carry half-float precision, not the 8 bits of the default passes.
+The path tracer writes an 8-bit PNG of the whole frame: `transparent`, `format` and `region` are refused with `renderer`. H.264 has no alpha, so `transparent` and `format` are refused for video. 16-bit and EXR output need `EXT_color_buffer_float`; without it the job fails with a message that says to use `png`.
+A `png16` or `exr` frame is up to four times the 8-bit frame limit (48 MiB). A region with the browser H.264 encoder (`encoder: "nvenc"`) uses screenshot frames instead.
 
 ## Path tracer
 
@@ -278,11 +302,11 @@ This conservative repair step prevents two recovery processes from deleting a ne
 | Retained records | 32 |
 | Total store bytes | 512 MiB |
 | Combined output bytes per job | 128 MiB |
-| PNG artifact bytes | 12 MiB each (a 1920x1080 frame) |
+| PNG artifact bytes | 12 MiB each (a 1920x1080 frame); 48 MiB each for `png16` and `exr` |
 | Snapshot JSON | 1 MiB |
 | Asset bytes | 64 MiB |
 | Dimensions | 64 to 1920 pixels each, at most 1920x1080 pixels in all (1080x1920 fits) |
-| Video frame rate | 1 to 30 fps |
+| Video frame rate | 1 to 60 fps |
 | Duration | 0.1 to 60 seconds |
 | Maximum video frames | 900 |
 | Still frames | 8 |

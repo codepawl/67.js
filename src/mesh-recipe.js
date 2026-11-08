@@ -14,11 +14,15 @@ import { unwrapUv } from './mesh-uv.js';
 import { runKernel, KernelDeferred } from './kernel-offload.js';
 import { validateField } from './mesh-fields.js';
 import { setPosition, displaceMesh, DISPLACE_DIRECTIONS } from './mesh-field-edits.js';
+import { normalizeVertexColorEdit, normalizeVertexGroupEdit, setVertexColor, setVertexGroup } from './mesh-attribute-edits.js';
 import { subdivideMesh, subdivisionSize, MAX_SUBDIVISION_LEVELS, MAX_CREASE_SHARPNESS } from './mesh-subdivide.js';
 import { decimateMesh } from './mesh-decimate.js';
 import { isModifierOperation, normalizeModifierEdit, runModifierEdit } from './mesh-modifiers.js';
 import { sculptMesh, checkSculptBudget } from './mesh-sculpt.js';
 import { shrinkwrapMesh } from './mesh-shrinkwrap.js';
+import { triangulatedSurface } from './mesh-surface-distance.js';
+import { createTriangleSurfaceIndex } from './mesh-query.js';
+import './mesh-field-surfaces.js';
 import { remeshMesh, remeshGridSize, MAX_REMESH_RESOLUTION } from './mesh-remesh.js';
 import {
   MESH_EDIT_OPERATIONS, MAX_MESH_EDITS, STACK_OPERATIONS, MAX_STACK_NODES, SCULPT_STROKE_TYPES, MAX_SCULPT_STROKES, SHRINKWRAP_MODES,
@@ -112,7 +116,7 @@ export function normalizeMeshEdits(edits) {
       normalized.select = edit.select ?? { all: true };
     }
     if (definition.fields.includes('name')) {
-      const name = edit.name ?? (edit.op === 'tag' ? undefined : `${edit.op.split('_')[0]}-${index + 1}`);
+      const name = edit.name ?? (['tag', 'vertex_group'].includes(edit.op) ? undefined : `${edit.op.split('_')[0]}-${index + 1}`);
       if (typeof name !== 'string' || !NAME_PATTERN.test(name)) throw editError(index, 'name must be 1 to 48 letters, digits, dots, dashes or underscores');
       normalized.name = name;
     }
@@ -261,6 +265,16 @@ export function normalizeMeshEdits(edits) {
         normalized.midlevel = edit.midlevel === undefined ? 0.5 : finiteNumber(edit.midlevel, index, 'midlevel');
         if (edit.direction !== undefined && !DISPLACE_DIRECTIONS.includes(edit.direction)) throw editError(index, `direction must be one of ${DISPLACE_DIRECTIONS.join(', ')}`);
         normalized.direction = edit.direction ?? 'normal';
+        if (edit.group !== undefined) {
+          if (typeof edit.group !== 'string' || !NAME_PATTERN.test(edit.group)) throw editError(index, 'group must be the name of a vertex group');
+          normalized.group = edit.group;
+        }
+        break;
+      case 'vertex_group':
+        normalizeVertexGroupEdit(edit, normalized, index, { finiteNumber, checkedField });
+        break;
+      case 'vertex_color':
+        normalizeVertexColorEdit(edit, normalized, index, { finiteNumber, checkedField });
         break;
       case 'decimate':
         normalized.ratio = finiteNumber(edit.ratio, index, 'ratio', { minimum: 0, maximum: 1, exclusiveMinimum: true });
@@ -357,7 +371,16 @@ function runShrinkwrap(current, edit, resolveCutter) {
 }
 
 /** Run one normalized edit on MeshData and describe what it did. */
+// Field inputs that read another surface take a geometry record here, built by the same resolver as a boolean cutter.
+function surfaceLoader(resolveCutter) {
+  return surface => {
+    if (!resolveCutter || typeof surface === 'string') throw new TypeError('A mesh edit field reads a surface given as a geometry record such as { "type": "terrain", ... }, not an id.');
+    return createTriangleSurfaceIndex(triangulatedSurface(resolveCutter(surface)));
+  };
+}
+
 function runEdit(current, edit, index, { resolveCutter, limits }) {
+  const loadSurface = surfaceLoader(resolveCutter);
   const result = { op: edit.op };
   if (edit.name) result.name = edit.name;
   if (isModifierOperation(edit.op)) {
@@ -436,11 +459,26 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
   if (edit.op === 'set_position' || edit.op === 'displace') {
     let outcome;
     try {
-      outcome = edit.op === 'set_position' ? setPosition(current, edit) : displaceMesh(current, edit);
+      outcome = edit.op === 'set_position' ? setPosition(current, edit, loadSurface) : displaceMesh(current, edit, loadSurface);
     } catch (error) {
       throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
     }
     result.movedVertices = outcome.movedVertices;
+    return { mesh: outcome.mesh, result };
+  }
+  if (edit.op === 'vertex_group' || edit.op === 'vertex_color') {
+    let outcome;
+    try {
+      outcome = edit.op === 'vertex_group' ? setVertexGroup(current, edit, loadSurface) : setVertexColor(current, edit, loadSurface);
+    } catch (error) {
+      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+    }
+    if (edit.op === 'vertex_group') {
+      result.group = edit.name;
+      result.assignedVertices = outcome.assignedVertices;
+    } else {
+      result.assignedCorners = outcome.assignedCorners;
+    }
     return { mesh: outcome.mesh, result };
   }
   if (edit.op === 'sculpt' || edit.op === 'shrinkwrap') {

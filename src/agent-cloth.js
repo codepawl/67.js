@@ -1,5 +1,7 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { runKernel } from './kernel-offload.js';
+import { bakeClothWithFields } from './cloth-fields.js';
+import { normalizeForceFields } from './force-fields.js';
 import { bakeCloth, sampleClothFrames, weldVertices, CLOTH_LIMITS } from './cloth.js';
 import { recomputeNormals } from './geometry-normals.js';
 import { bakingContext, boundedArray, finiteNumber, knownKeys, rootNodeWithGeometry, vectorOfThree } from './agent-recipe-checks.js';
@@ -20,8 +22,8 @@ const MIN_BONE_LENGTH = 1e-4;
 const PIN_EDGES = ['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
 const COLLIDER_SHAPES = ['ball', 'box'];
 const MOVING_SHAPES = ['ball', 'capsule'];
-const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'sheets', 'colliders'];
-const SHEET_FIELDS = ['node', 'pin', 'pinTo', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
+const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'fields', 'sheets', 'colliders'];
+const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
 const PIN_TO_FIELDS = ['node', 'weight'];
 const FIXED_COLLIDER_FIELDS = ['node', 'shape'];
 // A ball or capsule that rides on a node: the capsule runs from `attach` (plus offset) to `to` (plus toOffset).
@@ -29,6 +31,9 @@ const MOVING_COLLIDER_FIELDS = ['attach', 'shape', 'radius', 'offset', 'to', 'to
 // One capsule per bone of an armature, radius a fraction of the bone length as the ragdoll fits it.
 const FITTED_COLLIDER_FIELDS = ['armature', 'radiusFraction', 'exclude'];
 const PIN_TOLERANCE = 1e-4;
+// A vertex of the pin group is held when its weight is at least this much.
+const PIN_GROUP_THRESHOLD = 0.5;
+const GROUP_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/;
 const NO_PATCHES = new Map();
 
 function normalizeSheet(input, context) {
@@ -44,10 +49,16 @@ function normalizeSheet(input, context) {
     }
     sheet.pin = [...new Set(edges)];
   }
+  if (input.pinGroup !== undefined) {
+    if (typeof input.pinGroup !== 'string' || !GROUP_NAME_PATTERN.test(input.pinGroup)) {
+      throw new RangeError('Cloth pinGroup must be the name of a vertex group on the sheet mesh.');
+    }
+    sheet.pinGroup = input.pinGroup;
+  }
   if (input.pinTo !== undefined) {
     knownKeys(input.pinTo, PIN_TO_FIELDS, 'cloth pinTo');
-    if (!sheet.pin?.length) {
-      throw new RangeError('Cloth pinTo moves the pinned edges, so the sheet needs pin too.');
+    if (!sheet.pin?.length && !sheet.pinGroup) {
+      throw new RangeError('Cloth pinTo moves the pinned vertices, so the sheet needs pin too (or pinGroup).');
     }
     const target = existingNode(input.pinTo.node, context, 'Cloth pinTo');
     if (target === input.node) {
@@ -140,6 +151,7 @@ export function normalizeAgentCloth(input, recipe) {
   }
   if (input.gravity !== undefined) result.gravity = vectorOfThree(input.gravity, 'Cloth gravity', 1000);
   if (input.wind !== undefined) result.wind = vectorOfThree(input.wind, 'Cloth wind', 100);
+  if (input.fields !== undefined) result.fields = normalizeForceFields(input.fields, 'Cloth force field');
   if (input.colliders !== undefined) {
     const entries = boundedArray(input.colliders, MAX_COLLIDERS + MAX_MOVING_COLLIDERS, 'Cloth colliders');
     boundedArray(entries.filter(entry => !Object.hasOwn(entry ?? {}, 'attach') && !Object.hasOwn(entry ?? {}, 'armature')), MAX_COLLIDERS, 'Cloth colliders on fixed nodes');
@@ -189,9 +201,21 @@ function colliderFor(collider, node, geometry) {
   return { kind: 'box', center, axes, halfExtents };
 }
 
-// Particles on the requested edges of the sheet's local bounds, so 'top' is the row of highest local y.
-function pinnedParticles(localPositions, representatives, pin) {
-  if (!pin?.length) return [];
+// The weights of the sheet's pin group per render vertex, or null without one. A name the mesh lacks is an error that lists the groups it has.
+function pinGroupWeights(sheet, geometry) {
+  if (!sheet.pinGroup) return null;
+  const weights = geometry.vertexGroups?.[sheet.pinGroup];
+  if (!weights) {
+    const known = Object.keys(geometry.vertexGroups ?? {});
+    throw new RangeError(`Cloth pinGroup ${sheet.pinGroup} is not a vertex group of ${sheet.node}. Known groups: ${known.join(', ') || 'none'}. Make one with a vertex_group mesh edit.`);
+  }
+  return weights;
+}
+
+// Particles on the requested edges of the sheet's local bounds, so 'top' is the row of highest local y, plus the particles
+// whose vertex weighs at least half in the pin group.
+function pinnedParticles(localPositions, representatives, pin, groupWeights = null) {
+  if (!pin?.length && !groupWeights) return [];
   const particlePositions = representatives.map(vertex => localPositions.subarray(vertex * 3, vertex * 3 + 3));
   const { minimum, maximum } = localBounds(particlePositions.reduce((all, point) => [...all, ...point], []));
   const tolerance = PIN_TOLERANCE * Math.max(maximum[0] - minimum[0], maximum[1] - minimum[1], 1e-6);
@@ -204,7 +228,9 @@ function pinnedParticles(localPositions, representatives, pin) {
   };
   const pinned = [];
   particlePositions.forEach((point, particle) => {
-    if (pin.some(edge => tests[edge](point))) pinned.push(particle);
+    const onPinnedEdge = pin?.some(edge => tests[edge](point));
+    const inPinGroup = groupWeights !== null && groupWeights[representatives[particle]] >= PIN_GROUP_THRESHOLD;
+    if (onPinnedEdge || inPinGroup) pinned.push(particle);
   });
   return pinned;
 }
@@ -348,15 +374,15 @@ function bakeSheet(sheet, cloth, node, geometry, colliders, frameCount, movingSe
     }
     worldPositions.set(world, particle * 3);
   });
-  const pinned = pinnedParticles(geometry.positions, welded.representatives, sheet.pin);
+  const pinned = pinnedParticles(geometry.positions, welded.representatives, sheet.pin, pinGroupWeights(sheet, geometry));
   const needsMoving = Boolean(movingSetup && (sheet.pinTo || movingSetup.specs.length));
   const moving = needsMoving ? createMovingBodies(sheet, pinned, worldPositions, movingSetup, frameCount) : null;
   const recording = Object.freeze({ ...runKernel('cloth', [worldPositions, welded.triangles, {
     pinned: sheet.pinTo ? [] : pinned, moving,
-    gravity: cloth.gravity, wind: cloth.wind, stiffness: sheet.stiffness, bend: sheet.bend,
+    gravity: cloth.gravity, wind: cloth.wind, fields: cloth.fields, stiffness: sheet.stiffness, bend: sheet.bend,
     density: sheet.density, damping: sheet.damping, friction: sheet.friction, thickness: sheet.thickness,
     colliders, frameCount, framesPerSecond: FRAMES_PER_SECOND,
-  }], bakeCloth) });
+  }], bakeClothWithFields) });
   return { recording, welded, inverse: mat4.invert(mat4.create(), matrix), geometry, particleScratch: new Float32Array(recording.particleCount * 3), live: liveGeometry(geometry) };
 }
 
@@ -403,7 +429,7 @@ function sheetReport(baked, node, sheet) {
   const round = values => values.map(value => Number(value.toFixed(4)));
   return {
     node: node.id, particles: recording.particleCount, triangles: welded.triangles.length / 3, vertices: geometry.positions.length / 3,
-    pinned: pinnedParticles(geometry.positions, welded.representatives, sheet.pin).length,
+    pinned: pinnedParticles(geometry.positions, welded.representatives, sheet.pin, pinGroupWeights(sheet, geometry)).length,
     finalBoundsMin: round(minimum), finalBoundsMax: round(maximum),
   };
 }
@@ -435,7 +461,7 @@ export function bakeAgentCloth(cloth, recipe, geometries, motionSampler = null) 
     /** Particle counts and where each sheet ends, as numbers an agent can read without a picture. */
     report() {
       reportCache ??= {
-        duration: cloth.duration, frames: frameCount, gravity: cloth.gravity ?? [0, -9.81, 0], wind: cloth.wind ?? [0, 0, 0],
+        duration: cloth.duration, frames: frameCount, gravity: cloth.gravity ?? [0, -9.81, 0], wind: cloth.wind ?? [0, 0, 0], fields: cloth.fields ?? [],
         sheets: cloth.sheets.map(sheet => sheetReport(baked.get(sheet.node), nodes.get(sheet.node), sheet)),
       };
       return structuredClone(reportCache);

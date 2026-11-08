@@ -72,6 +72,7 @@ function shaderFeaturesOfLighting(lighting) {
   if (lighting.spotCount > 0) features.push('spotLights');
   if (lighting.areaCount > 0) features.push('areaLights');
   if (lighting.shadowCasters.length > 0) features.push('localShadows');
+  if (lighting.extraFeatures) features.push(...lighting.extraFeatures);
   if (lighting.fillIntensity > 0) features.push('fill');
   return features;
 }
@@ -1837,7 +1838,8 @@ export class Renderer67 {
     if (effects.bloom.strength > 0) this.drawBloom(effects.bloom, sourceTexture);
     const occluded = effects.ambientOcclusion > 0 && Boolean(this.depthTexture);
     if (occluded) this.drawAmbientOcclusion(frame, effects);
-    context.bindFramebuffer(context.FRAMEBUFFER, null);
+    // A frame that names an outputFramebuffer (src/float-output.js) draws its final pass there, not on the canvas.
+    context.bindFramebuffer(context.FRAMEBUFFER, frame.outputFramebuffer ?? null);
     context.viewport(0, 0, this.canvas.width, this.canvas.height);
     context.disable(context.DEPTH_TEST);
     context.disable(context.CULL_FACE);
@@ -2264,6 +2266,7 @@ export class Renderer67 {
     context.uniform4fv(this.uniforms['pointLightColors[0]'], this.lighting.colors);
     context.uniform1fv(this.uniforms['pointLightRadii[0]'], this.lighting.radii);
     this.applyLocalLightUniforms(Boolean(frame.reflectionTarget));
+    this.lighting.bind?.(this);
     context.uniform3fv(this.uniforms.keyColor, this.lighting.keyColor);
     context.uniform1f(this.uniforms.fillIntensity, this.lighting.fillIntensity);
     context.uniform1f(this.uniforms.ambientIntensity, this.lighting.ambientIntensity);

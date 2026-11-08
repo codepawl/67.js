@@ -172,11 +172,14 @@ texture images, so no text from a recipe ever reaches the shader. The language s
 | `roughness`, `metallic` | The metallic-roughness map. A material that has either output defaults the matching factor to 1 |
 | `emission` | The emissive map. The material `emission` defaults to 1 when the graph has it |
 | `height` | A normal map, so it gives bump. `bump` (0 to 4, default 1) scales the relief |
+| `opacity` | The alpha of the base colour map. The material blends unless `alphaMode` says otherwise. The path tracer cuts it out at 0.5 |
+| `clearcoat` | A per-pixel mask of the clear coat (the red channel of `layerMaps.clearcoatTexture`). The material `clearcoat` defaults to 1. The rasterizer and the CPU path tracer read it |
+| `transmission` | A per-pixel mask of transmission (`transmissionMap`). The material `transmission` defaults to 1. Only the CPU path tracer reads the mask; the rasterizer and GPU tracers use the factor |
 
 Nodes: `uv` (`"u"`, `"v"` or `"both"`), `noise`, `voronoi` (`output`: `distance`, `edge` or `cell`, a random value per cell),
 `wave` (`sine`, `saw` or `triangle` along `u`, `v` or `diagonal`), `checker`, `gradient` (`u`, `v` or `radial`), `ramp`
 (2 to 8 stops of numbers or colours), `vec`, and the maths nodes `add`, `sub`, `mul`, `div`, `min`, `max`, `pow`, `abs`, `floor`,
-`fract`, `sqrt`, `invert`, `clamp`, `smoothstep` and `mix`. Maths nodes work on each component of a vector. Every texture
+`fract`, `sqrt`, `invert`, `clamp`, `smoothstep` and `mix`. Mixing nodes: `layer` (`base`, `top`, `mask`, `edge` 0.5, `softness` 0.1) puts `top` over `base` where the mask passes the edge, so `{ "layer": { "base": [0.45, 0.18, 0.06], "top": [0.1, 0.35, 0.7], "mask": chipMask } }` is paint over rust; `hue` (`color`, `shift` in turns, `saturation`, `value`) and `curve` (`value`, 2 to 8 `points` `[x, y]` with rising x, straight segments). Maths nodes work on each component of a vector. Every texture
 node takes `at`, a vector expression such as `{ "add": [{ "uv": "both" }, { "mul": [{ "vec": [0.1, 0, 0] }, 1] }] }`, to warp
 it. Scales and counts are whole numbers (1 to 64, even for `checker`), so every texture node tiles. `noise` is Blender's Noise Texture
 (2D, detail `octaves - 1`, roughness 0.5, lacunarity 2, normalized; `seed` moves the lattice by whole cells) with the lattice

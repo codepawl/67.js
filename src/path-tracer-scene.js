@@ -4,6 +4,7 @@ import { SUN_BIT, POINT_FIRST_BIT, SPOT_FIRST_BIT, AREA_FIRST_BIT } from './ligh
 import { boxProjectedGeometry, columnLengths } from './export-box-uv.js';
 import { resolveTraceVolume } from './path-tracer-volume.js';
 import { resolveTraceSubsurface } from './path-tracer-subsurface.js';
+import { lightShapeSupport } from './shader-registry.js';
 
 // The scene a path trace reads: every part flattened into one world-space triangle soup with per-vertex normals, UVs
 // and colours, one resolved material per part, the lights in plain arrays, and the environment map as a sampling table.
@@ -115,6 +116,12 @@ function resolveTexture(descriptor) {
 // A part without a mask is lit by every light.
 const ALL_LIGHTS = -1;
 
+// A graph opacity output is texture alpha on a blended material. The tracer has no blending, so it cuts out at half.
+function graphOpacityCutoff(material) {
+  const graph = material.pattern?.type === 'graph' ? material.pattern.graph : null;
+  return material.alphaMode === 'blend' && graph && Object.hasOwn(graph, 'opacity') ? 0.5 : 0;
+}
+
 function resolveMaterial(material) {
   const emissionColor = material.emissiveColor ?? material.color;
   const emissionStrength = material.emission ?? 0;
@@ -125,6 +132,8 @@ function resolveMaterial(material) {
     emission: emissionColor.map(channel => channel * emissionStrength),
     emissiveTexture: emissionStrength > 0 ? resolveTexture(material.emissiveMap) : null,
     clearcoat: material.clearcoat ?? 0,
+    clearcoatTexture: resolveTexture(material.layerMaps?.clearcoatTexture),
+    transmissionTexture: resolveTexture(material.transmissionMap),
     clearcoatRoughness: material.clearcoatRoughness ?? 0,
     transmission: material.transmission ?? 0,
     subsurface: resolveTraceSubsurface(material.subsurface),
@@ -134,7 +143,7 @@ function resolveMaterial(material) {
     normalScale: material.normalScale ?? [1, 1],
     surfaceTexture: resolveTexture(material.metallicRoughnessMap),
     lightMask: material.lightMask ?? ALL_LIGHTS,
-    alphaCutoff: material.alphaMode === 'mask' ? material.alphaCutoff ?? 0.5 : 0,
+    alphaCutoff: material.alphaMode === 'mask' ? material.alphaCutoff ?? 0.5 : graphOpacityCutoff(material),
   };
 }
 
@@ -230,17 +239,23 @@ function normalized(vector) {
   return [vector[0] / length, vector[1] / length, vector[2] / length];
 }
 
+// The 16 relative values of the light's IES profile, or null for a light with none.
+function traceProfile(light) {
+  return light.ies === undefined ? null : lightShapeSupport.profile(light.ies);
+}
+
 function resolveLights(environment) {
   const sunPower = Math.max(...(environment.keyColor ?? [0, 0, 0]));
   const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.length ?? 0);
   if (lightCount > MAX_TRACE_LIGHTS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_LIGHTS} point, spot and area lights.`);
   return {
-    sun: sunPower > 0 ? { bit: SUN_BIT, direction: normalized(environment.lightDirection ?? [0, 1, 0]), color: environment.keyColor } : null,
+    sun: sunPower > 0 ? { bit: SUN_BIT, direction: normalized(environment.lightDirection ?? [0, 1, 0]), color: environment.keyColor, angularRadius: environment.sunAngularRadius ?? SUN_ANGULAR_RADIUS } : null,
     points: (environment.pointLights ?? []).map((light, index) => ({ bit: POINT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0 })),
     spots: (environment.spotLights ?? []).map((light, index) => ({
       bit: SPOT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0,
       direction: normalized(light.direction),
       cosineHalfAngle: Math.cos(light.angle),
+      profile: traceProfile(light),
       blend: (1 - Math.cos(light.angle)) * (light.penumbra ?? 0),
     })),
     areas: (environment.areaLights ?? []).map((light, index) => {
@@ -248,7 +263,7 @@ function resolveLights(environment) {
       const guide = normalized(light.up ?? [0, 1, 0]);
       const across = normalized([guide[1] * normal[2] - guide[2] * normal[1], guide[2] * normal[0] - guide[0] * normal[2], guide[0] * normal[1] - guide[1] * normal[0]]);
       const along = [normal[1] * across[2] - normal[2] * across[1], normal[2] * across[0] - normal[0] * across[2], normal[0] * across[1] - normal[1] * across[0]];
-      return { bit: AREA_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, width: light.width, height: light.height, normal, across, along };
+      return { bit: AREA_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, width: light.width, height: light.height, normal, across, along, profile: traceProfile(light) };
     }),
   };
 }

@@ -68,12 +68,12 @@ The sky colors are display RGB. Fog colors are linear RGB.
 Local `environment.pointLights` support 16 world-space sources with inverse-square falloff.
 Each light provides `position` and optional `color`, `intensity`, `radius`, `range` and `castShadow`.
 `environment.spotLights` (eight) take `position`, `direction`, and optional `angle` (outer half angle in radians, default 0.785), `penumbra` (0 to 1, default 0.15), `color`, `intensity`, `radius`, `range` and `castShadow`. Intensity is candela, the same unit as a point light.
-`environment.areaLights` (four) are rectangles with `position`, `direction` (the side that emits), `width`, `height`, optional `up`, `color` and `intensity` (candela seen head on). They cast no shadow.
+`environment.areaLights` (four) are rectangles with `position`, `direction` (the side that emits), `width`, `height`, optional `up`, `color` and `intensity` (candela seen head on). With `castShadow: true` (1 of the 24 tiles) they cast a soft shadow. `environment.sunAngularRadius` (radians) softens the sun shadow; `ies` on a spot or area light takes `downlight`, `wide-flood`, `narrow-spot`, `batwing` or `{ angles, candela }`.
 `environment.viewTransform` (`aces` default, `agx` for lit scenes and Blender comparisons, `neutral` for product and brand colour) and `environment.look` (`warm`, `cool`, `contrast`, `faded`) set the display curve and a grade; `scene_capabilities.viewTransform` says when to pick each, and a recipe using them needs `loadAgentSceneModules`.
 
 `castShadow: true` on a point light uses 6 of the 24 shadow tiles, on a spot light 1. Past 24 the edit is rejected. Shadows reach `range`, or 30 units when `range` is 0. Set `castShadow` on the few lights that show a visible shadow, because each one adds a depth pass. `affects: ['node-id', ...]` on a point, spot or area light, and `environment.keyAffects` for the sun, limit a light to those nodes (a light without it lights every node; an unknown ID is rejected; the bake honours it, the path tracer ignores it and says so). `environment.shadowCascades` (1 to 4, 0 for one map) sharpens a long sun shadow near the camera; it turns on by itself at 3 when `shadow.extent` is above 40, so set it only to choose another count or 0. Details: docs/lighting.md.
 `keyIntensity`, `fillIntensity` and `ambientIntensity` independently scale existing lighting.
-Read the checkout's `docs/lighting.md` for defaults, numeric limits and frame overrides.
+Read `docs/lighting.md` in the npm package for defaults, numeric limits and frame overrides.
 Point lights currently cast no local shadows. Radius limits attenuation without creating an area emitter.
 
 `environment.volumeFog` receives directional scattering and shadows in one bounded volume.
@@ -147,10 +147,10 @@ Read `docs/surface-attachment.md`. Share its retained `matrix` with the accessor
 The frame follows relative morphs before four-influence skinning. Clearance uses world units and the geometric triangle normal.
 
 Bind immutable geometry once. This sparse point attachment does not deform the accessory or certify clearance over its footprint.
-The surface-attachment addon is included in npm `0.4.1`.
+
 
 Agent authoring uses `createAgentScene(recipe, limits)` from `67js/addons/agent-scene`.
-This addon is included in npm `0.5.0` and later.
+
 Read `docs/agent-scene.md` for schema version one, immutable resources and atomic topology commands.
 Start with capabilities and bounded inspection. Edit stable IDs through one `apply` batch with the current `expectedRevision`.
 
@@ -166,7 +166,7 @@ Do not inspect all vertex bounds in a frame loop. Memory estimates cover unique 
 
 The scene addon does not implement MCP transport, asset search, or render jobs.
 
-Release `0.7.0` adds recipe-owned procedural motion. Read `docs/agent-motion.md` before authoring local node, material or camera tracks.
+Recipes own procedural motion. Read `docs/agent-motion.md` before authoring local node, material or camera tracks.
 Use `set-motion` for revisioned edits and `sampleMotion(time)` for transient poses. Sampling preserves geometry, canonical recipes and revisions.
 Use `sampleMotion(null)` for the authored base pose. Inspection bounds remain authored-base-world, independent of transient motion.
 
@@ -176,17 +176,17 @@ Use the revision returned by each committed apply or restore. A response with `c
 Inspect or export the canonical recipe after a render failure. Do not retry the edit with its old revision.
 
 The server retains one renderer, bounds image dimensions and payloads, and closes its browser on stdio EOF.
-Export the recipe before disposal. Release `0.6.0` includes bounded snapshot PNG, still and MP4 jobs documented in `docs/agent-render-jobs.md`.
-Release `0.7.0` supports procedural `motionTime` preview seeks and `settings.motion.start` in jobs. Imported tracks retain their separate clip workflow.
+Export the recipe before disposal. The server runs bounded snapshot PNG, still and MP4 jobs documented in `docs/agent-render-jobs.md`.
+It supports procedural `motionTime` preview seeks and `settings.motion.start` in jobs. Imported tracks retain their separate clip workflow.
 
-Release `0.9.0` adds `scene_review` for up to four labeled cameras or pose samples without editing the source.
+`scene_review` compares for up to four labeled cameras or pose samples without editing the source.
 Read `docs/agent-review.md`. Each shot starts from the authored base pose and reports its camera, clocks and actual render resources.
 
 For imported models, read `docs/agent-asset.md`, configure `--assets` with an absolute local GLB directory, then select a digest from `scene_asset_catalog`.
 Use `scene_create_asset` with a `67js.asset` recipe. Supported texture maps, skinning, morphs and existing clips remain attached to decoded meshes.
 Edit imported models through `set-root`, factor-only `set-material`, look commands and absolute `set-animation` sampling. Imported topology is immutable.
 
-Release `0.8.0` adds imported source-node overrides and motion. Read `docs/agent-character-motion.md` before editing a rig.
+Imported source-node overrides and motion exist. Read `docs/agent-character-motion.md` before editing a rig.
 Inspect `kind: 'hierarchy'` with offset and limit for stable `node-N` IDs, parents, joint flags and editability.
 Use `set-asset-node` for local TRS and `set-motion` for authored tracks. Keep decoded skin bindings, maps and topology unchanged.
 
@@ -197,7 +197,7 @@ Discard failed candidate poses before renderer upload. Flat models need a rig be
 Use `{ type: 'set-animation', time }` to sample the current clip. `{ type: 'set-animation', clip: null }` restores the decoded pose.
 Bounds describe authored base geometry, not the deformed skin/morph silhouette. Check the rendered PNG before accepting framing.
 
-Read `docs/agent-look.md` for authored lighting, fog, effects and shadow coverage, included in npm `0.5.0`.
+Read `docs/agent-look.md` for authored lighting, fog, effects and shadow coverage,.
 Use atomic `set-environment`, `set-effects` and `set-shadow` partial records instead of editing renderer internals through MCP.
 Nested `volumeFog` and `bloom` fields merge. The `pointLights`, `spotLights` and `areaLights` fields each replace the full list. Point and spot lights cast shadows only with `castShadow: true`; area lights never do.
 
