@@ -209,13 +209,6 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   materialPatterns: MATERIAL_PATTERN_TYPES, maxMaterialPatterns: MAX_MATERIAL_PATTERNS,
   materialMappings: MATERIAL_MAPPINGS,
   renderPasses: Object.freeze({ names: RENDER_PASS_NAMES, files: 'render-<pass>.png or frame-N-<pass>.png, raw and unantialiased; opaque and cutout geometry only', depth: `16 bits in red and green over ${RENDER_PASS_DEPTH_RANGE} m`, objectId: '24 bits in RGB; the job result lists the part names' }),
-  renderOutput: Object.freeze({
-    transparent: 'true writes the lit image with alpha (PNG, 16-bit PNG or EXR); image and stills only. The sky, environment background and automatic ground are not drawn, so the scene needs its own ground or a shadowCatcher; volume fog is refused.',
-    format: `${RENDER_OUTPUT_FORMATS.join(', ')}: png is 8-bit (default); png16 is 16-bit from a half-float frame; exr holds the same display colour as the PNG in half floats (alpha stays premultiplied); its depth pass is metres in one float32 channel Z and objectId one float32 channel id. image and stills only.`,
-    region: '{x, y, width, height} pixels from the top left, at least 16 each; renders the whole frame and keeps the crop. Works for image, stills and video (even sizes).',
-    fps: `1 to ${MAXIMUM_JOB_FPS}; a video is at most 900 frames`,
-    pathTracer: 'renderer jobs write the whole opaque 8-bit PNG: transparent, format and region are refused.',
-  }),
   // Recipe timeline (src/film-timeline.js), rendered with settings.timeline; the rest is in docs/agent-render-jobs.md.
   filmTimeline: Object.freeze({
     maxShots: 64, maxTotalSeconds: 60, maxShotSeconds: 30,

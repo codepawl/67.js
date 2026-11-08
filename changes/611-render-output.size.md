@@ -1,6 +1,4 @@
-- entry:render-passes: the pass target can be half float (173 bytes gzip), which 16-bit PNG and EXR passes read back instead of 8-bit bytes.
-- scene:agent-scene: the preview page carries the transparent flag, the half-float output target and its readback (about 400 bytes gzip), the compositing output of issue 611.
-- scene:agent-scene+lazy: the same 400 bytes, nothing else lazy changed.
-- goal:lit-box: 10 bytes gzip for one `frame.outputFramebuffer ?? null` in the final pass, the only core change that lets a render job draw the finished frame into a float target; there is no addon seam for it.
+- entry:render-passes: a pass target can be half float (128 bytes gzip, a static addon, not lazy), which 16-bit PNG and EXR passes read back instead of 8-bit bytes.
+- goal:lit-box: 9 bytes gzip for one `frame.outputFramebuffer ?? null` in the final pass, the only core change that lets a render job draw the finished frame into a float target.
 - goal:gltf-box: the same 11 bytes in the core renderer.
-- goal:agent-scene: the same 411 bytes, a visible capability (alpha, 16-bit and EXR render output) for agent jobs.
+- goal:agent-scene: 25 bytes gzip for the transparent flag and the lazy hook; the float target and its readback load on demand (`src/float-output.js`), and the encoders run in Node.

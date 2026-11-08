@@ -440,6 +440,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       await jobPage.setViewportSize({ width, height });
       const session = await jobPage.context().newCDPSession(jobPage);
       const region = settings.region;
+      if (settings.format && settings.format !== 'png') await jobPage.evaluate(prepareInput => window.__agentPreview.prepareFloatOutput(prepareInput), { sessionId: jobId });
       // A memory budget can shrink the frame below the size the region was chosen for.
       if (region && (region.x + region.width > width || region.y + region.height > height)) {
         throw new Error(`The region lies outside the rendered frame, which the memory budget reduced to ${width}x${height}.`);

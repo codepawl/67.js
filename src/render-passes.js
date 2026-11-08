@@ -1,5 +1,4 @@
 import { compileProgram, fullscreenVertex } from './gl-program.js';
-import { requireFloatTargets } from './float-output.js';
 
 // Render passes draw raw material data (albedo, normal, emission, depth, object ID) instead of the lit image.
 // The shader branch lives in the main fragment shader behind the `renderPass` feature, which compiles on the first
@@ -20,7 +19,7 @@ void main() { outputColor = vec4(texelFetch(sourceTexture, ivec2(gl_FragCoord.xy
 
 // A float target keeps the pass values as half floats (frame.passFloat) for 16-bit PNG and EXR output; the shader writes the same values.
 function createPassTarget(context, width, height, float = false) {
-  if (float) requireFloatTargets(context);
+  if (float && !context.getExtension('EXT_color_buffer_float')) throw new Error('16-bit PNG and EXR output need EXT_color_buffer_float. Use format png.');
   const texture = context.createTexture();
   context.bindTexture(context.TEXTURE_2D, texture);
   if (float) context.texImage2D(context.TEXTURE_2D, 0, context.RGBA16F, width, height, 0, context.RGBA, context.HALF_FLOAT, null);

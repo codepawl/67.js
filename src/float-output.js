@@ -52,3 +52,23 @@ export function readFloatPixels(context, framebuffer, frameWidth, frameHeight, r
   context.bindFramebuffer(context.READ_FRAMEBUFFER, null);
   return pixels;
 }
+
+/** The target a floatOutput frame draws into, kept on the session record and rebuilt when the renderer or the size changes. */
+export function outputFor(record, canvas) {
+  const cached = record.floatOutput;
+  if (cached && cached.renderer === record.renderer && cached.output.width === canvas.width && cached.output.height === canvas.height) return cached.output;
+  cached?.output.dispose();
+  const output = createFloatOutput(record.renderer.context, canvas.width, canvas.height);
+  record.floatOutput = { renderer: record.renderer, output };
+  return output;
+}
+
+/** The last frame, or its pass, as base64 RGBA float32 (rows bottom to top) cropped to `region`. */
+export function readFrame(record, canvas, source, region) {
+  const framebuffer = source === 'pass' ? record.renderer.passSupport.framebuffer : outputFor(record, canvas).framebuffer;
+  const pixels = readFloatPixels(record.renderer.context, framebuffer, canvas.width, canvas.height, region);
+  const bytes = new Uint8Array(pixels.buffer);
+  let text = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) text += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return { width: region?.width ?? canvas.width, height: region?.height ?? canvas.height, data: btoa(text) };
+}

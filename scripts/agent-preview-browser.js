@@ -24,7 +24,6 @@ import { hasPatternTextures } from './agent-preview-textures.js';
 import { TEXTURE_SEQUENCE_LIMITS } from '../src/texture-sequence-limits.js';
 import { registerCatalogEnvironment, registerCatalogLook } from '../src/look-catalog.js';
 import { parseRadianceHdr } from '../src/hdri.js';
-import { createFloatOutput, readFloatPixels } from '../src/float-output.js';
 import { parseCube } from '../src/view-transform.js';
 import { weightTracksFromGltfAnimation } from '../src/export-skeleton.js';
 import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
@@ -82,16 +81,6 @@ function candidateCamera(record, operations) {
     }
   }
   return createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], camera }).camera;
-}
-
-// The half-float target a floatOutput frame draws into; rebuilt when the renderer or the canvas size changes.
-function floatOutputFor(record) {
-  const cached = record.floatOutput;
-  if (cached && cached.renderer === record.renderer && cached.output.width === canvas.width && cached.output.height === canvas.height) return cached.output;
-  cached?.output.dispose();
-  const output = createFloatOutput(record.renderer.context, canvas.width, canvas.height);
-  record.floatOutput = { renderer: record.renderer, output };
-  return output;
 }
 
 function renderInfo(renderer) {
@@ -769,7 +758,7 @@ window.__agentPreview = {
     const shotEffects = depthOfFieldOverrides
       ? { ...record.scene.effects, depthOfField: { ...record.scene.effects.depthOfField, ...depthOfFieldOverrides } }
       : undefined;
-    const outputFramebuffer = floatOutput && !pass ? floatOutputFor(record).framebuffer : undefined;
+    const outputFramebuffer = floatOutput && !pass ? record.floatModule.outputFor(record, canvas).framebuffer : undefined;
     draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer,
       ...(brightness === 1 ? {} : { exposure }), ...(shotEffects ? { effects: shotEffects } : {}) });
     const info = renderInfo(record.renderer);
@@ -777,12 +766,13 @@ window.__agentPreview = {
   },
   // Reads the last frame as RGBA float32, rows bottom to top, cropped to `region` (pixels from the top left): the lit image
   // when it was drawn with floatOutput, a pass when it was drawn with passFloat. Base64 of the float bytes.
+  // 16-bit PNG and EXR output load their module here, so a scene that never asks for them does not carry it.
+  async prepareFloatOutput({ sessionId }) {
+    requireSession(sessionId).floatModule = await import('../src/float-output.js');
+  },
   readFloat({ sessionId, source, region }) {
     const record = requireSession(sessionId);
-    const context = record.renderer.context;
-    const framebuffer = source === 'pass' ? record.renderer.passSupport.framebuffer : floatOutputFor(record).framebuffer;
-    const pixels = readFloatPixels(context, framebuffer, canvas.width, canvas.height, region);
-    return { width: region?.width ?? canvas.width, height: region?.height ?? canvas.height, data: bytesToBase64(new Uint8Array(pixels.buffer)) };
+    return record.floatModule.readFrame(record, canvas, source, region);
   },
   // Offline path trace of the scene at one instant. The tracer loads here, on first use, and not with the preview.
   async pathTrace({ sessionId, animation, motionTime, options }) {
