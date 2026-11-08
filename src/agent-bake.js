@@ -209,6 +209,7 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
     skyTop: environment.skyTop,
     skyBottom: environment.skyBottom,
     lightDirection: environment.lightDirection,
+    volumeFog: environment.volumeFog,
   };
   // A hair, particle or cloth node is drawn from geometry built every frame, which has no lightmap UVs.
   const snapshots = parts.map(part => ({
