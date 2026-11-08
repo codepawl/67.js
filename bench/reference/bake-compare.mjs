@@ -3,7 +3,7 @@
 // The variants are named bake options; the first is the reference the others are compared with, for example
 //   '{"cpu":{"backend":"cpu","samples":128},"gpu":{"backend":"gpu","samples":512}}'
 // The backend is cpu, gpu, webgpu or native (the hardware ray query tracer of packages/render-native, when it is built).
-// Run it through GPU_LOCK_WEIGHT=heavy bash ~/.agents/tools/gpu-lock.sh: the GPU bake takes the whole GPU for seconds.
+// Run it through a heavy GPU lock job (GPU_LOCK_WEIGHT=heavy) when the card is shared: the GPU bake takes the whole GPU for seconds.
 import { constants, setPriority } from 'node:os';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
