@@ -35,8 +35,8 @@ export function selectedVertices(mesh, rule) {
  * Blender's Set Position: `position` (a vector expression, default the current position) and then `offset` (a vector
  * expression added to it) for the vertices of the selected faces.
  */
-export function setPosition(mesh, { select, position, offset }) {
-  const context = meshFieldContext(mesh, 'point');
+export function setPosition(mesh, { select, position, offset }, loadSurface) {
+  const context = meshFieldContext(mesh, 'point', loadSurface);
   const target = position === undefined ? null : evaluateField(position, context, { kind: 'vector' }).values;
   const shift = offset === undefined ? null : evaluateField(offset, context, { kind: 'vector' }).values;
   const flags = selectedVertices(mesh, select);
@@ -57,8 +57,8 @@ export function setPosition(mesh, { select, position, offset }) {
  * Blender's Displace modifier with a field as the texture: each vertex of the selected faces moves by
  * (field - midlevel) * strength along its normal or an axis.
  */
-export function displaceMesh(mesh, { select, field, strength = 1, midlevel = 0.5, direction = 'normal', group }) {
-  const context = meshFieldContext(mesh, 'point');
+export function displaceMesh(mesh, { select, field, strength = 1, midlevel = 0.5, direction = 'normal', group }, loadSurface) {
+  const context = meshFieldContext(mesh, 'point', loadSurface);
   const { values } = evaluateField(field, context, { kind: 'scalar' });
   const normals = direction === 'normal' ? vertexNormals(mesh) : null;
   const axis = AXIS_DIRECTIONS.get(direction);
