@@ -431,7 +431,11 @@ const recipeMeshEdits = z.array(z.record(z.string(), z.unknown())).max(64);
 const recipeMeshStack = z.array(z.record(z.string(), z.unknown())).max(16);
 const geometry = z.discriminatedUnion('type', [
   ...primitiveGeometries(true),
-  z.strictObject({ id: identifier, type: z.literal('grid'), segments: detail(1, 64) }),
+  z.strictObject({ id: identifier, type: z.enum(['grid', 'plane']), segments: detail(1, 64) }).describe('Unit sheet in XY facing +Z; plane = grid.'),
+  z.strictObject({ id: identifier, type: z.literal('cone'), radiusTop: finite.optional(), radiusBottom: finite.optional(), segments }).describe('Along Y, height 1; radiusTop 0 is a point, radiusBottom 1.'),
+  z.strictObject({ id: identifier, type: z.literal('icoSphere'), subdivisions: detail(0, 7) }),
+  z.strictObject({ id: identifier, type: z.literal('circle'), segments, innerRadius: finite.optional() }).describe('Unit disc facing +Z; innerRadius makes a ring.'),
+  z.strictObject({ id: identifier, type: z.literal('line'), from: vector3, to: vector3, radius: finite.optional(), radialSegments: detail(3, 128) }),
   z.strictObject({ id: identifier, type: z.literal('mesh'), base: z.discriminatedUnion('type', primitiveGeometries(false)).describe('Starting shape, converted to welded quads with axis face tags.'), edits: recipeMeshEdits.optional().describe('Replayable edit log, applied in order. Each item has the shape of one mesh_edit edit; read that tool for every op and field.'), stack: recipeMeshStack.optional().describe('Non-destructive modifier stack evaluated after the edits. Each item has the shape of one mesh_stack node; read that tool for the ops.'), smoothAngle: bounded(0, 180).optional().describe('Edges bending more than this many degrees render hard. Defaults to 30.') }),
 ]);
 // No description: this field repeats in every motion track schema. A wrong name fails with every valid form, and docs/agent-motion.md lists them.
