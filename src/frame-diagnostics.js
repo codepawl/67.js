@@ -28,7 +28,7 @@ function shadowDirectionProblem(world, lightDirection, shadowBounds) {
     'Drop shadowBounds.eye, or point lightDirection from shadowBounds.target to it.');
 }
 
-export function frameDiagnostics({ world, depth, effects, lightDirection, shadowBounds, coplanarProblems = null }) {
+export function frameDiagnostics({ world, depth, effects, lightDirection, shadowBounds, coplanarProblems = null, skinProblems = null }) {
   const problems = [];
   if (effects.ambientOcclusion > 0 && !depth) {
     problems.push(warning('ambient-occlusion-without-depth', 'effects.ambientOcclusion',
@@ -40,5 +40,6 @@ export function frameDiagnostics({ world, depth, effects, lightDirection, shadow
     if (problem) problems.push(problem);
   }
   if (coplanarProblems?.length) problems.push(...coplanarProblems);
+  if (skinProblems?.length) problems.push(...skinProblems);
   return problems.length ? problems : NO_DIAGNOSTICS;
 }

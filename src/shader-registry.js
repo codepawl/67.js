@@ -68,7 +68,7 @@ export const MAX_MORPH_TARGETS = 64;
 
 // skinning.js and morph.js set the JavaScript half of skinned and morphed parts: validation, texture layout and packing.
 // The renderer calls them only for a part with a skin or morph targets, so a renderer without those parts never carries them.
-const deformationSupport = {};
+export const deformationSupport = {};
 
 export function registerDeformationSupport(functions) {
   Object.assign(deformationSupport, functions);
