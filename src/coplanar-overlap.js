@@ -11,6 +11,8 @@ import { depthLayerOf, MAXIMUM_DEPTH_LAYER, setFlushDepthLayers } from './depth-
 export const COPLANAR_TOLERANCE = 0.001;
 /** Overlaps smaller than this (square metres) are edge contact, not a fight. */
 export const COPLANAR_MINIMUM_AREA = 1e-4;
+/** Pairs on one plane to within this distance (metres) are left to the depth buffer by resolveFlushParts. */
+export const EXACT_FLUSH_DISTANCE = 1e-6;
 /** The distance suggested in the fix text, in metres. */
 export const SUGGESTED_OFFSET = 0.002;
 const DEFAULT_WORK_BUDGET = 1_000_000;
@@ -452,21 +454,30 @@ export function coplanarOverlapDiagnostics({ overlaps, truncated }) {
 
 /**
  * The layer each smaller part of a pair should draw on, as a Map from part to layer. A part that is the smaller one against
- * a part already on layer n gets n + 1, up to MAXIMUM_DEPTH_LAYER. Parts that set their own layer are left alone.
+ * a part already on layer n gets n + 1. Parts that set their own layer are left alone.
+ * A chain deeper than MAXIMUM_DEPTH_LAYER would pile parts on the top layer, where they fight each other again at the largest
+ * offset, so a part that cannot clear its larger part stays where it is. Layers are settled by repeating until nothing moves,
+ * because parts of equal size have no order that a single sweep could follow.
+ * A pair closer than `minimumGap` (metres, default 0: every pair counts) is skipped. resolveFlushParts passes
+ * EXACT_FLUSH_DISTANCE: such a pair lies on one plane to within rounding, which a float depth buffer (reversed depth, the
+ * default) already breaks the same way every frame, while an offset moves the whole part and made the metro film flicker far
+ * more (issue #593: 5 to 7633 flagged pixels), so only pairs with a real gap get a layer there.
  */
-export function coplanarLayers(overlaps) {
+export function coplanarLayers(overlaps, { minimumGap = 0 } = {}) {
   const layers = new Map();
-  const ordered = [...overlaps].sort((first, second) => diagonalOfPart(second.larger) - diagonalOfPart(first.larger));
-  for (const { smaller, larger } of ordered) {
-    if (smaller.decal !== undefined || smaller.depthLayer !== undefined) continue;
-    const base = layers.get(larger) ?? depthLayerOf(larger);
-    layers.set(smaller, Math.min(MAXIMUM_DEPTH_LAYER, Math.max(layers.get(smaller) ?? 0, base + 1)));
+  for (let pass = 0; pass <= MAXIMUM_DEPTH_LAYER + 1; pass++) {
+    let moved = false;
+    for (const { smaller, larger, distance } of overlaps) {
+      if (distance < minimumGap) continue;
+      if (smaller.decal !== undefined || smaller.depthLayer !== undefined) continue;
+      const wanted = (layers.get(larger) ?? depthLayerOf(larger)) + 1;
+      if (wanted > MAXIMUM_DEPTH_LAYER || wanted <= (layers.get(smaller) ?? 0)) continue;
+      layers.set(smaller, wanted);
+      moved = true;
+    }
+    if (!moved) break;
   }
   return layers;
-}
-
-function diagonalOfPart(part) {
-  return diagonal(worldBounds(part));
 }
 
 /**
@@ -491,9 +502,12 @@ export function installCoplanarDiagnostics(renderer, onOverlaps = null) {
 /**
  * Puts the smaller part of each coplanar pair on the next depth layer (a polygon offset at draw time, geometry never moves),
  * for the parts of one scene. The renderer calls it once when it is built; a part that sets `decal` or `depthLayer` keeps its own.
+ * Pairs on one plane to within `minimumGap` (default EXACT_FLUSH_DISTANCE) are left to the depth buffer; the renderer passes
+ * `{ minimumGap: 0 }` when `reversedDepth` is false. With 'auto', a scene whose far / near ratio stays low never switches
+ * reversed depth on, and there exact-flush pairs rely on the plain depth buffer.
  */
-export function resolveFlushParts(parts) {
-  const layers = coplanarLayers(findCoplanarOverlaps(parts).overlaps);
+export function resolveFlushParts(parts, { minimumGap = EXACT_FLUSH_DISTANCE } = {}) {
+  const layers = coplanarLayers(findCoplanarOverlaps(parts).overlaps, { minimumGap });
   setFlushDepthLayers(layers);
   return layers.size;
 }

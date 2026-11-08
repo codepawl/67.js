@@ -26,6 +26,12 @@ const CAMERA_MAIN = `void main() {
   if (uHasSun) sunFrame = buildFrame(uSunDirection);
   float jitterX = hashJitter(pixel, sampleIndex, uSeed, 1u);
   float jitterY = hashJitter(pixel, sampleIndex, uSeed, 2u);
+  if (BLUE_NOISE_FIRST && sampleIndex == 0u) {
+    blueSample = blueNoiseAt(pixelCoordinate);
+    jitterX = blueSample.x;
+    jitterY = blueSample.y;
+    blueDrawsUsed = 0;
+  }
   float screenX = ((float(pixelCoordinate.x) + jitterX) / float(uSize.x) * 2.0 - 1.0) * uHalfSize.x;
   float screenY = (1.0 - (float(row) + jitterY) / float(uSize.y) * 2.0) * uHalfSize.y;
   vec3 rayDirection = normalize(uForward + uRight * screenX + uAbove * screenY);
@@ -55,7 +61,7 @@ const TEXEL_MAIN = `void main() {
   if (texelIndex >= uTexelCount) rayDirection = normal;
   tracePath(origin, rayDirection, pixel, sampleIndex);`;
 
-const buildSource = (hasSubsurface, texelBake) => `#version 300 es
+const buildSource = (hasSubsurface, texelBake, blueNoise, lightImportance) => `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -68,6 +74,8 @@ const int TRIANGLE_TEXELS = ${TRIANGLE_TEXELS};
 const int MATERIAL_TEXELS = ${MATERIAL_TEXELS};
 const int LIGHT_TEXELS = ${LIGHT_TEXELS};
 const int STACK_SIZE = 128;
+const bool BLUE_NOISE_FIRST = ${blueNoise};
+const bool IMPORTANT_LIGHTS = ${lightImportance};
 const int ALPHA_STEP_LIMIT = 8;
 const int RUSSIAN_ROULETTE_START = 3;
 const float MINIMUM_ALPHA = 1e-3;
@@ -82,6 +90,7 @@ uniform sampler2D uAtlas;
 uniform sampler2D uEnvironment;
 uniform sampler2D uEnvironmentRows;
 uniform sampler2D uEnvironmentPixels;
+uniform sampler2D uBlueNoise;
 
 uniform vec3 uEye;
 uniform vec3 uForward;
@@ -136,7 +145,20 @@ void resetRandom(uint pixel, uint sampleIndex, uint seed) {
   rngState = mixed == 0u ? 1u : mixed;
 }
 
+// Blue noise tile of the first sample of a pixel: its first two values replace the first two random draws of the path.
+vec4 blueSample = vec4(0.0);
+int blueDrawsUsed = 2;
+
+vec4 blueNoiseAt(ivec2 pixelCoordinate) {
+  vec4 bytes = round(texelFetch(uBlueNoise, pixelCoordinate & 63, 0) * 255.0);
+  return (bytes + 0.5) / 256.0;
+}
+
 float nextRandom() {
+  if (BLUE_NOISE_FIRST && blueDrawsUsed < 2) {
+    blueDrawsUsed++;
+    return blueDrawsUsed == 1 ? blueSample.z : blueSample.w;
+  }
   rngState = rngState * 747796405u + 2891336453u;
   uint word = ((rngState >> ((rngState >> 28) + 4u)) ^ rngState) * 277803737u;
   word = (word >> 22) ^ word;
@@ -931,6 +953,66 @@ void sampleEmitter(int depth, vec3 normal, int emitter) {
   addDirect(depth, normal, distance, weightMode);
 }
 
+/**
+ * A cheap estimate of the light one local light brings to the hit point: its power over the squared distance, the
+ * cosine at the surface and, for a spot light, whether the point is inside the cone. It ignores shadows. The estimate only
+ * steers the choice; the chance of the choice is divided out, so the image stays the same in expectation.
+ */
+float lightImportance(int index, vec3 normal) {
+  int base = index * LIGHT_TEXELS;
+  vec4 positionType = fetchData(uLights, base);
+  vec4 colorBit = fetchData(uLights, base + 1);
+  vec4 directionRadius = fetchData(uLights, base + 2);
+  vec4 acrossCone = fetchData(uLights, base + 3);
+  vec4 intensityRange = fetchData(uLights, base + 5);
+  vec3 delta = positionType.xyz - hitPoint;
+  float distanceSquared = max(dot(delta, delta), 1e-8);
+  vec3 toLight = delta * inversesqrt(distanceSquared);
+  float cosine = 0.1 + max(dot(normal, toLight), 0.0);
+  float power = luminance(colorBit.rgb) * intensityRange.x;
+  int type = int(positionType.w);
+  if (type == 2) return power * max(-dot(directionRadius.xyz, toLight), 0.0) * cosine / distanceSquared;
+  float coneFactor = 1.0;
+  if (type == 1 && -dot(directionRadius.xyz, toLight) - acrossCone.w <= 0.0) coneFactor = 0.0;
+  return power * coneFactor * cosine * pointLightFalloff(distanceSquared, intensityRange.y, directionRadius.w);
+}
+
+/**
+ * Draws one emitter. The sun and the sky keep their uniform share; the local lights split their shares by importance,
+ * mixed with a uniform part so no light that could contribute has no chance. With one local light, or none, this is the
+ * uniform choice with the same random number.
+ */
+int chooseEmitterByImportance(vec3 normal, out float probability) {
+  float uniformShare = 1.0 / float(uEmitterCount);
+  float draw = nextRandom();
+  int firstLightEmitter = uHasSun ? 1 : 0;
+  float total = 0.0;
+  if (uLightCount > 1) {
+    for (int index = 0; index < uLightCount; index++) total += lightImportance(index, normal);
+  }
+  if (!(total > 0.0)) {
+    probability = uniformShare;
+    return min(int(floor(draw * float(uEmitterCount))), uEmitterCount - 1);
+  }
+  float lightsShare = float(uLightCount) * uniformShare;
+  float cumulative = 0.0;
+  int chosen = uEmitterCount - 1;
+  probability = uniformShare;
+  for (int emitter = 0; emitter < uEmitterCount; emitter++) {
+    int index = emitter - firstLightEmitter;
+    float share = uniformShare;
+    if (index >= 0 && index < uLightCount) share = lightsShare * (0.9 * lightImportance(index, normal) / total + 0.1 / float(uLightCount));
+    cumulative += share;
+    if (draw < cumulative) {
+      chosen = emitter;
+      probability = share;
+      break;
+    }
+    probability = share;
+  }
+  return chosen;
+}
+
 /** The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it. */
 void addLights(int depth, vec3 normal) {
   if (depth == 0 || uEmitterCount <= 1) {
@@ -939,6 +1021,12 @@ void addLights(int depth, vec3 normal) {
       sampleEmitter(depth, normal, emitter);
       flushShadowRay();
     }
+    return;
+  }
+  if (IMPORTANT_LIGHTS) {
+    int chosen = chooseEmitterByImportance(normal, selectionProbability);
+    sampleEmitter(depth, normal, chosen);
+    flushShadowRay();
     return;
   }
   selectionProbability = 1.0 / float(uEmitterCount);
@@ -1087,8 +1175,8 @@ ${texelBake ? TEXEL_MAIN : CAMERA_MAIN}
  * The kernel; `hasSubsurface` compiles in the random walk, which only scenes with a subsurface part need. `texelBake`
  * starts every path at a lightmap texel instead of the camera (see light-bake-gpu.js).
  */
-export function buildFragmentSource({ hasSubsurface = false, texelBake = false } = {}) {
-  return buildSource(hasSubsurface, texelBake);
+export function buildFragmentSource({ hasSubsurface = false, texelBake = false, blueNoise = false, lightImportance = false } = {}) {
+  return buildSource(hasSubsurface, texelBake, blueNoise, lightImportance);
 }
 
 export const FRAGMENT_SOURCE = buildFragmentSource();
