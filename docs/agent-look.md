@@ -261,7 +261,9 @@ Ambient occlusion reads the depth texture, so it needs the HDR depth target that
 | `colorBalance.lift` | `[0, 0, 0]` | Three numbers, `-1` to `1`. Raises the shadows per channel and fades out toward white |
 | `colorBalance.gamma` | `[1, 1, 1]` | Three numbers, `0.1` to `4`. Bends the midtones; above `1` is brighter |
 | `colorBalance.gain` | `[1, 1, 1]` | Three numbers, `0` to `4`. Scales the highlights |
-| `glare.streaks` | `0` | `0` to `1`. Four diagonal streaks from every pixel above the threshold |
+| `glare.streaks` | `0` | `0` to `1`. Thin star streaks from every pixel above the threshold, bright at the core and fading to the tip |
+| `glare.count` | `4` | Whole number, `1` to `8`. Arms spaced evenly around the circle: `2` is one straight line (a horizontal anamorphic streak at angle `0`), `4` a plus, `6` a six-point star |
+| `glare.angle` | `0` | `-360` to `360` degrees. Turns the first arm from the horizontal; `45` turns a plus into an X |
 | `glare.fogGlow` | `0` | `0` to `1`. A soft halo around the same bright pixels |
 | `glare.threshold` | `1` | `0` to `10`. Peak scene brightness (linear, before tone mapping) from which a pixel glares |
 | `glare.size` | `0.15` | `0.01` to `1`. Streak length and halo radius as a fraction of the image height |

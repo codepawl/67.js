@@ -44,7 +44,11 @@ test('a look that names no step resolves exactly as before', async () => {
 
 test('each named step resolves with defaults and refuses bad input', () => {
   assert.deepEqual(resolvePostSteps({ colorBalance: {} }).colorBalance, { lift: [0, 0, 0], gamma: [1, 1, 1], gain: [1, 1, 1] });
-  assert.deepEqual(resolvePostSteps({ glare: { streaks: 0.5 } }).glare, { streaks: 0.5, fogGlow: 0, threshold: 1, size: 0.15 });
+  assert.deepEqual(resolvePostSteps({ glare: { streaks: 0.5 } }).glare, { streaks: 0.5, count: 4, angle: 0, fogGlow: 0, threshold: 1, size: 0.15 });
+  assert.deepEqual(resolvePostSteps({ glare: { streaks: 1, count: 2, angle: 30 } }).glare, { streaks: 1, count: 2, angle: 30, fogGlow: 0, threshold: 1, size: 0.15 });
+  assert.throws(() => resolvePostSteps({ glare: { count: 2.5 } }), /whole number/);
+  assert.throws(() => resolvePostSteps({ glare: { count: 9 } }), /glare.count must be between/);
+  assert.throws(() => resolvePostSteps({ glare: { angle: 400 } }), /glare.angle must be between/);
   assert.deepEqual(resolvePostSteps({ lensDistortion: { dispersion: 1 } }).lensDistortion, { distortion: 0, dispersion: 1 });
   assert.deepEqual(resolvePostSteps({ saturation: 1 }), {});
   assert.throws(() => resolvePostSteps({ colorBalance: { lift: [0, 0] } }), /three numbers/);
@@ -114,7 +118,7 @@ test('the shaders keep their fixed sample patterns and read no history', () => {
 //   RENDER_TESTS=1 node --test tests/post-steps.test.js (on a shared GPU, start it through the machine GPU lock)
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const rendersEnabled = process.env.RENDER_TESTS === '1' && existsSync(chromePath);
-const STEP_CASES = ['defocus', 'color-balance', 'glare-streaks', 'glare-fog', 'lens-distortion', 'lens-dispersion'];
+const STEP_CASES = ['defocus', 'color-balance', 'glare-streaks', 'glare-streaks-6', 'glare-anamorphic', 'glare-fog', 'lens-distortion', 'lens-dispersion'];
 
 test('each named step changes the picture and the default still keeps its hash', { skip: !rendersEnabled, timeout: 300000 }, () => {
   const output = execFileSync('node', ['bench/post/post-steps.mjs', '--rounds=1', `--out=${join(tmpdir(), 'post-steps-test')}`], { encoding: 'utf8' });

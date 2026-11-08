@@ -32,6 +32,8 @@ const CASES = {
   defocus: { depthOfField: { blur: 0.8, focusDistance: 4.5 } },
   'color-balance': { colorBalance: { lift: [0.06, 0, -0.06], gamma: [1, 1, 1.2], gain: [1.2, 1, 0.8] } },
   'glare-streaks': { glare: { streaks: 0.8, threshold: 1, size: 0.2 } },
+  'glare-streaks-6': { glare: { streaks: 0.8, count: 6, angle: 30, threshold: 1, size: 0.2 } },
+  'glare-anamorphic': { glare: { streaks: 0.8, count: 2, angle: 0, threshold: 1, size: 0.35 } },
   'glare-fog': { glare: { fogGlow: 0.6, threshold: 1, size: 0.12 } },
   'lens-distortion': { lensDistortion: { distortion: 0.8 } },
   'lens-dispersion': { lensDistortion: { dispersion: 1 } },

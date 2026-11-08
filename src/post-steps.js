@@ -8,8 +8,8 @@ import { createStage, sharedFragmentHeader } from './camera-effects.js';
 //
 // All three are deterministic: fixed sample patterns and no history, so a seek repeats the same pixels.
 
-const STREAK_DIRECTIONS = 4;
-const STREAK_STEPS = 12;
+const MAXIMUM_STREAK_ARMS = 8;
+const STREAK_STEPS = 24;
 const FOG_SAMPLES = 32;
 // Longest lateral color offset at the image corner at full dispersion, as a fraction of the distance from the center.
 const MAXIMUM_DISPERSION = 0.03;
@@ -51,9 +51,13 @@ function resolveColorBalance(input) {
 
 function resolveGlare(input) {
   const group = groupOf(input, 'glare');
-  onlyKeys(group, ['streaks', 'fogGlow', 'threshold', 'size'], 'glare');
+  onlyKeys(group, ['streaks', 'count', 'angle', 'fogGlow', 'threshold', 'size'], 'glare');
+  const count = numberInRange(group.count, 4, 1, MAXIMUM_STREAK_ARMS, 'glare.count');
+  if (!Number.isInteger(count)) throw new RangeError('glare.count must be a whole number.');
   return {
     streaks: numberInRange(group.streaks, 0, 0, 1, 'glare.streaks'),
+    count,
+    angle: numberInRange(group.angle, 0, -360, 360, 'glare.angle'),
     fogGlow: numberInRange(group.fogGlow, 0, 0, 1, 'glare.fogGlow'),
     threshold: numberInRange(group.threshold, 1, 0, 10, 'glare.threshold'),
     size: numberInRange(group.size, 0.15, 0.01, 1, 'glare.size'),
@@ -95,6 +99,8 @@ void main() {
 
 export const glareFragment = `${sharedFragmentHeader}
 uniform float streakAmount;
+uniform int streakCount;
+uniform float streakAngle;
 uniform float fogAmount;
 uniform float threshold;
 uniform float sizePixels;
@@ -110,16 +116,19 @@ void main() {
   float jitter = pixelRotation() / 6.2831853;
   if (streakAmount > 0.0) {
     vec3 streaks = vec3(0.0);
-    for (int direction = 0; direction < ${STREAK_DIRECTIONS}; direction++) {
-      float angle = 0.7853982 + float(direction) * 1.5707963;
+    // Each arm is one thin line of taps from the pixel outward, evenly spaced around the circle; a pair of arms is one streak.
+    // Weights fall off cubically, so a streak is bright at its core and thins to nothing at its tip.
+    for (int arm = 0; arm < ${MAXIMUM_STREAK_ARMS}; arm++) {
+      if (arm >= streakCount) break;
+      float angle = streakAngle + float(arm) * 6.2831853 / float(streakCount);
       vec2 step = vec2(cos(angle), sin(angle)) * sizePixels / ${STREAK_STEPS}.0 / resolution;
       for (int index = 1; index <= ${STREAK_STEPS}; index++) {
         float along = float(index) - jitter;
         float weight = 1.0 - along / (${STREAK_STEPS}.0 + 1.0);
-        streaks += (brightPart(textureCoordinate + step * along, 0.0) + brightPart(textureCoordinate - step * along, 0.0)) * weight * weight;
+        streaks += brightPart(textureCoordinate + step * along, 0.0) * weight * weight * weight;
       }
     }
-    glow += streaks * streakAmount / ${STREAK_STEPS}.0;
+    glow += streaks * streakAmount * 4.0 / ${STREAK_STEPS}.0;
   }
   if (fogAmount > 0.0) {
     // Taps read a blurred level of the frame, so the fixed spiral of taps merges into one smooth halo with no per-pixel noise.
@@ -187,7 +196,7 @@ function createGlareStage() {
   const stage = createStage({
     name: 'Glare',
     fragment: glareFragment,
-    uniformNames: ['streakAmount', 'fogAmount', 'threshold', 'sizePixels', 'fogLod'],
+    uniformNames: ['streakAmount', 'streakCount', 'streakAngle', 'fogAmount', 'threshold', 'sizePixels', 'fogLod'],
     isActive: (effects, frame) => {
       const { glare } = stepsOf(frame);
       return Boolean(glare) && (glare.streaks > 0 || glare.fogGlow > 0);
@@ -195,6 +204,8 @@ function createGlareStage() {
     setUniforms(context, uniforms, renderer, frame) {
       const { glare } = stepsOf(frame);
       context.uniform1f(uniforms.streakAmount, glare.streaks);
+      context.uniform1i(uniforms.streakCount, glare.count);
+      context.uniform1f(uniforms.streakAngle, glare.angle * Math.PI / 180);
       context.uniform1f(uniforms.fogAmount, glare.fogGlow);
       context.uniform1f(uniforms.threshold, glare.threshold);
       const sizePixels = glare.size * renderer.canvas.height;
