@@ -9,6 +9,7 @@
   },
   "files": [
     "index.mjs",
+    "pack-input.mjs",
     "build.mjs",
     "build.rs",
     "Cargo.toml",

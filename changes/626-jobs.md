@@ -1,0 +1,1 @@
+- renderer.backend "native" on render jobs (image, stills, video): hardware ray queries through the optional @codepawlhq/67js-render-native package, then the usual wavelet or OIDN denoise and PNG. Without the package, its binary or a Vulkan ray query adapter the job runs on gpu (cpu on a cpu runtime) and metrics.pathTracer.backendNote says why (#626)
