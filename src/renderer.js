@@ -1837,7 +1837,8 @@ export class Renderer67 {
     if (effects.bloom.strength > 0) this.drawBloom(effects.bloom, sourceTexture);
     const occluded = effects.ambientOcclusion > 0 && Boolean(this.depthTexture);
     if (occluded) this.drawAmbientOcclusion(frame, effects);
-    context.bindFramebuffer(context.FRAMEBUFFER, null);
+    // A frame that names an outputFramebuffer (src/float-output.js) draws its final pass there, not on the canvas.
+    context.bindFramebuffer(context.FRAMEBUFFER, frame.outputFramebuffer ?? null);
     context.viewport(0, 0, this.canvas.width, this.canvas.height);
     context.disable(context.DEPTH_TEST);
     context.disable(context.CULL_FACE);

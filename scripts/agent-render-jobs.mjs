@@ -3,7 +3,7 @@ import { mkdir, open, readFile, writeFile, rename, unlink, rmdir, readdir, lstat
 import { randomUUID, createHash } from 'node:crypto';
 import { isAbsolute, join, resolve } from 'node:path';
 
-import { RENDER_PASS_NAMES, VIDEO_ENCODERS, AUDIO_FILE_PATTERN, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS } from '../src/agent-scene-capabilities.js';
+import { RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, VIDEO_ENCODERS, AUDIO_FILE_PATTERN, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS } from '../src/agent-scene-capabilities.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { normalizeFilmTimeline, filmTimelineDuration } from '../src/film-timeline.js';
 import { OIDN_DEFAULT_SAMPLES, PATH_TRACER_DENOISERS, PATH_TRACER_JOB_LIMITS } from '../src/path-tracer-capabilities.js';
@@ -33,6 +33,9 @@ export function jobDeadlineMs({ frameCount, width, height, renderer }, maximumMs
   const traceDeadline = renderer?.type === 'pathTracer' ? Math.ceil(renderer.maxSeconds * 1000 * frameCount) + PATH_TRACE_OVERHEAD_MS : 0;
   return Math.min(maximumMs, Math.max(frameDeadline, traceDeadline));
 }
+const MINIMUM_REGION_SIDE = 16;
+/** A 16-bit PNG or an EXR of a busy 1920x1080 frame is bigger than the 8-bit PNG the frame limit was sized for. */
+export const HIGH_PRECISION_FRAME_FACTOR = 4;
 const MAXIMUM_JSON_BYTES = 1024 ** 2;
 const MAXIMUM_ASSET_BYTES = AGENT_ASSET_LIMITS.maxBytes;
 /** Sibling folder of the job directories where the runtime keeps GLB exports; the store never reads or counts it. */
@@ -82,13 +85,13 @@ function jsonCopy(value, maximum = MAXIMUM_JSON_BYTES) {
 }
 
 function settingsFrom(input, clips, recipe) {
-  objectKeys(input, ['kind', 'width', 'height', 'fps', 'duration', 'animation', 'motion', 'rendererTime', 'passes', 'renderer', 'timeline', 'audio', 'encoder'], 'settings');
+  objectKeys(input, ['kind', 'width', 'height', 'fps', 'duration', 'animation', 'motion', 'rendererTime', 'passes', 'renderer', 'timeline', 'audio', 'encoder', 'transparent', 'format', 'region'], 'settings');
   if (!['image', 'stills', 'video'].includes(input.kind)) throw new TypeError('kind must be image, stills or video.');
   const width = boundedNumber(input.width, 64, MAXIMUM_JOB_SIDE, 'width', true);
   const height = boundedNumber(input.height, 64, MAXIMUM_JOB_SIDE, 'height', true);
   if (width * height > MAXIMUM_JOB_PIXELS) throw new RangeError('width x height must not exceed 1920x1080 pixels.');
   if (input.kind === 'video' && (width % 2 || height % 2)) throw new RangeError('Video dimensions must be even.');
-  const fps = boundedNumber(input.fps ?? 24, 1, 30, 'fps', true);
+  const fps = boundedNumber(input.fps ?? 24, 1, MAXIMUM_JOB_FPS, 'fps', true);
   const timelineStart = timelineStartFrom(input, recipe);
   const defaultDuration = timelineStart === undefined || input.kind === 'image' ? 1 : filmTimelineDuration(recipe.timeline) - timelineStart;
   const duration = boundedNumber(input.duration ?? defaultDuration, 0.1, MAXIMUM_VIDEO_SECONDS, 'duration');
@@ -97,6 +100,7 @@ function settingsFrom(input, clips, recipe) {
   const result = { kind: input.kind, width, height, fps, duration, frameCount };
   if (input.passes !== undefined) result.passes = passesFrom(input.passes, input.kind);
   if (input.renderer !== undefined) result.renderer = rendererFrom(input.renderer, input.passes);
+  Object.assign(result, outputOptionsFrom(input, result));
   const lastSampleTime = input.kind === 'image' ? 0 : input.kind === 'stills' ? duration : (frameCount - 1) / fps;
   if (timelineStart !== undefined) {
     if (input.motion !== undefined || input.animation !== undefined) throw new TypeError('A timeline owns the motion clock; leave motion and animation out.');
@@ -144,6 +148,38 @@ function settingsFrom(input, clips, recipe) {
   }
   boundedNumber(result.rendererTime.start + lastSampleTime * result.rendererTime.rate, 0, 3600, 'renderer time end');
   return result;
+}
+
+/** The optional transparent, format and region settings, kept only when they differ from the defaults so old records read the same. */
+function outputOptionsFrom(input, { kind, width, height, renderer }) {
+  const options = {};
+  const tracerNote = 'The path tracer writes an opaque 8-bit PNG of the whole frame.';
+  if (input.transparent !== undefined) {
+    if (typeof input.transparent !== 'boolean') throw new TypeError('transparent must be boolean.');
+    if (input.transparent && kind === 'video') throw new RangeError('H.264 video has no alpha: transparent needs kind image or stills.');
+    if (input.transparent && renderer) throw new RangeError(`transparent cannot combine with renderer. ${tracerNote}`);
+    if (input.transparent) options.transparent = true;
+  }
+  if (input.format !== undefined) {
+    if (!RENDER_OUTPUT_FORMATS.includes(input.format)) throw new TypeError(`format must be one of ${RENDER_OUTPUT_FORMATS.join(', ')}.`);
+    if (input.format !== 'png' && kind === 'video') throw new RangeError('A video is H.264: format needs kind image or stills.');
+    if (input.format !== 'png' && renderer) throw new RangeError(`format cannot combine with renderer. ${tracerNote}`);
+    if (input.format !== 'png') options.format = input.format;
+  }
+  if (input.region !== undefined) {
+    objectKeys(input.region, ['x', 'y', 'width', 'height'], 'region');
+    if (renderer) throw new RangeError(`region cannot combine with renderer. ${tracerNote}`);
+    const region = {
+      x: boundedNumber(input.region.x, 0, width - 1, 'region x', true),
+      y: boundedNumber(input.region.y, 0, height - 1, 'region y', true),
+      width: boundedNumber(input.region.width, MINIMUM_REGION_SIDE, width, 'region width', true),
+      height: boundedNumber(input.region.height, MINIMUM_REGION_SIDE, height, 'region height', true),
+    };
+    if (region.x + region.width > width || region.y + region.height > height) throw new RangeError('region must lie inside the frame.');
+    if (kind === 'video' && (region.width % 2 || region.height % 2)) throw new RangeError('A video region must have even width and height.');
+    options.region = region;
+  }
+  return options;
 }
 
 const PATH_TRACER_BACKENDS = ['cpu', 'gpu', 'native'];
@@ -195,15 +231,26 @@ function passesFrom(passes, kind) {
 }
 
 /** Every artifact filename of a job, lit image first and then each requested pass, frame by frame. */
-export function artifactNames(kind, passes = []) {
+export function artifactNames(kind, passes = [], format = 'png') {
   if (kind === 'video') return ['render.mp4'];
+  const extension = format === 'exr' ? 'exr' : 'png';
   const stems = kind === 'image' ? ['render'] : Array.from({ length: 8 }, (_, index) => `frame-${index}`);
-  return stems.flatMap(stem => [`${stem}.png`, ...passes.map(pass => `${stem}-${pass}.png`)]);
+  return stems.flatMap(stem => [`${stem}.${extension}`, ...passes.map(pass => `${stem}-${pass}.${extension}`)]);
+}
+
+function artifactMimeType(settings) {
+  if (settings.kind === 'video') return 'video/mp4';
+  return settings.format === 'exr' ? 'image/x-exr' : 'image/png';
+}
+
+function artifactByteLimit(settings, limits) {
+  if (settings.kind === 'video') return limits.maxOutputBytes;
+  return settings.format === undefined ? limits.maxFrameBytes : limits.maxFrameBytes * HIGH_PRECISION_FRAME_FACTOR;
 }
 
 function allowedFile(name) {
   const passNames = RENDER_PASS_NAMES.join('|');
-  const artifact = new RegExp(`^(?:render\\.(?:png|mp4)|(?:render|frame-[0-7])(?:-(?:${passNames}))?\\.png)(?:\\.partial)?$`);
+  const artifact = new RegExp(`^(?:render\\.(?:png|mp4|exr)|(?:render|frame-[0-7])(?:-(?:${passNames}))?\\.(?:png|exr))(?:\\.partial)?$`);
   return INTERNAL_FILES.has(name) || artifact.test(name);
 }
 
@@ -415,15 +462,15 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       boundedNumber(record.progress.maximumPendingFrames, 0, 1, 'persisted pending frames', true);
       if (record.metrics !== undefined) record.metrics = jsonCopy(record.metrics, 65536);
       if (record.reason !== undefined && (typeof record.reason !== 'string' || record.reason.length > 2048)) throw new Error('Invalid persisted job reason.');
-      const namesAllowed = artifactNames(settings.kind, settings.passes);
+      const namesAllowed = artifactNames(settings.kind, settings.passes, settings.format);
       if (!Array.isArray(record.artifacts) || record.artifacts.length > namesAllowed.length) throw new Error('Invalid persisted artifacts.');
       const seen = new Set();
       for (const artifact of record.artifacts) {
         objectKeys(artifact, ['filename', 'mimeType', 'bytes', 'sha256'], 'artifact');
         if (!namesAllowed.includes(artifact.filename) || seen.has(artifact.filename)) throw new Error('Invalid persisted artifact name.');
         seen.add(artifact.filename);
-        const actual = await hashFile(join(directory, artifact.filename), settings.kind === 'video' ? limits.maxOutputBytes : limits.maxFrameBytes);
-        if (artifact.mimeType !== (settings.kind === 'video' ? 'video/mp4' : 'image/png') || artifact.bytes !== actual.bytes || artifact.sha256 !== actual.sha256) throw new Error('Persisted artifact integrity failed.');
+        const actual = await hashFile(join(directory, artifact.filename), artifactByteLimit(settings, limits));
+        if (artifact.mimeType !== artifactMimeType(settings) || artifact.bytes !== actual.bytes || artifact.sha256 !== actual.sha256) throw new Error('Persisted artifact integrity failed.');
       }
       if (record.state === 'completed' && record.artifacts.length !== namesAllowed.length) throw new Error('Completed job is missing its artifacts.');
       const job = { record, persistence: Promise.resolve(), settled: Promise.resolve() };
@@ -479,7 +526,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       record.state = 'finalizing';
       await persist(job);
       objectKeys(completed, ['artifacts', 'metrics'], 'runner result');
-      const expected = artifactNames(record.settings.kind, record.settings.passes);
+      const expected = artifactNames(record.settings.kind, record.settings.passes, record.settings.format);
       if (!Array.isArray(completed.artifacts) || completed.artifacts.length !== expected.length) throw new Error('Runner did not return the required fixed artifacts.');
       const directory = await directoryFor(record.jobId);
       const metrics = jsonCopy(completed.metrics ?? {}, 65536);
@@ -488,9 +535,9 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       let outputBytes = 0;
       for (const output of completed.artifacts) {
         objectKeys(output, ['temporary', 'filename', 'mimeType'], 'runner artifact');
-        if (!expected.includes(output.filename) || seen.has(output.filename) || output.temporary !== `${output.filename}.partial` || output.mimeType !== (record.settings.kind === 'video' ? 'video/mp4' : 'image/png')) throw new Error('Runner artifact must use the fixed filename and MIME type.');
+        if (!expected.includes(output.filename) || seen.has(output.filename) || output.temporary !== `${output.filename}.partial` || output.mimeType !== artifactMimeType(record.settings)) throw new Error('Runner artifact must use the fixed filename and MIME type.');
         seen.add(output.filename);
-        const artifact = { filename: output.filename, mimeType: output.mimeType, ...await hashFile(join(directory, output.temporary), record.settings.kind === 'video' ? limits.maxOutputBytes : limits.maxFrameBytes) };
+        const artifact = { filename: output.filename, mimeType: output.mimeType, ...await hashFile(join(directory, output.temporary), artifactByteLimit(record.settings, limits)) };
         outputBytes += artifact.bytes;
         if (outputBytes > limits.maxOutputBytes) throw new RangeError('Job exceeds its combined output byte budget.');
         artifacts.push(artifact);
