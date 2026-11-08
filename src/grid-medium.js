@@ -20,7 +20,7 @@ export function createGridMedium({ lighting, sun, tracer, scale }) {
   if (!volume) return null;
   const interval = [0, 0];
   const shadowReach = scale * 1e6;
-  return function medium(origin, direction, distance, throughput, sum, texelIndex, sample, leg) {
+  function medium(origin, direction, distance, throughput, sum, texelIndex, sample, leg) {
     if (!volumeInterval(volume, origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], distance, interval)) return false;
     const scatteredShare = 1 - Math.exp(-volume.density * (interval[1] - interval[0]));
     const seed = leg * 4;
@@ -31,13 +31,21 @@ export function createGridMedium({ lighting, sun, tracer, scale }) {
       const sunBlocked = tracer.trace(origin[0], origin[1], origin[2], sun.direction[0], sun.direction[1], sun.direction[2], shadowReach, true).nearestTriangle >= 0;
       if (!sunBlocked) {
         const phase = henyeyGreensteinPhase(volume.anisotropy, direction[0] * sun.direction[0] + direction[1] * sun.direction[1] + direction[2] * sun.direction[2]);
-        for (let channel = 0; channel < 3; channel++) sum[channel] += throughput[channel] * volume.albedo[channel] * sun.color[channel] * phase;
+        const sunLight = sunTransmittance(volume, origin, sun.direction, interval);
+        for (let channel = 0; channel < 3; channel++) sum[channel] += throughput[channel] * volume.albedo[channel] * sun.color[channel] * phase * sunLight;
       }
     }
     for (let channel = 0; channel < 3; channel++) throughput[channel] *= volume.albedo[channel];
     turnDirection(direction, sampleHenyeyGreensteinCosine(volume.anisotropy, hashUnit(texelIndex, sample, seed + 202)), 2 * Math.PI * hashUnit(texelIndex, sample, seed + 203));
     return true;
-  };
+  }
+  return medium;
+}
+
+/** The share of the sun that reaches a point inside the fog: the fog's extinction along the way to the sun. */
+function sunTransmittance(volume, origin, sunDirection, interval) {
+  if (!volumeInterval(volume, origin[0], origin[1], origin[2], sunDirection[0], sunDirection[1], sunDirection[2], Infinity, interval)) return 1;
+  return Math.exp(-volume.density * (interval[1] - interval[0]));
 }
 
 /** Turns `direction` (a unit vector) in place by the polar angle whose cosine is given, around it by `azimuth`. */
