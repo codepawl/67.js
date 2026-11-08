@@ -5,6 +5,7 @@ export const DOMAINS = Object.freeze(['point', 'edge', 'face', 'corner']);
 export const MAX_MESH_VERTICES = 4_000_000;
 export const MAX_MESH_CORNERS = 16_000_000;
 export const TAG_PREFIX = 'tag:';
+export const GROUP_PREFIX = 'group:';
 const RESERVED_ATTRIBUTE_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 
 const ATTRIBUTE_TYPES = new Map([
@@ -171,6 +172,20 @@ export function createMeshData({ positions, faceOffsets, cornerVertices, edgeVer
 /** Names of face tags, without the "tag:" prefix. */
 export function meshTags(mesh) {
   return Object.keys(mesh.attributes.face).filter(name => name.startsWith(TAG_PREFIX)).map(name => name.slice(TAG_PREFIX.length));
+}
+
+/** Names of vertex groups (point attributes "group:<name>" of one float weight per vertex), without the prefix. */
+export function vertexGroupNames(mesh) {
+  return Object.keys(mesh.attributes.point).filter(name => name.startsWith(GROUP_PREFIX)).map(name => name.slice(GROUP_PREFIX.length));
+}
+
+/** The weight of every vertex in a named group. Throws a message listing the known groups when the name is unknown. */
+export function vertexGroupWeights(mesh, name) {
+  const attribute = mesh.attributes.point[GROUP_PREFIX + name];
+  if (!attribute || attribute.size !== 1) {
+    throw new RangeError(`Unknown vertex group ${name}. Known groups: ${vertexGroupNames(mesh).join(', ') || 'none'}. Make one with a vertex_group edit before this one.`);
+  }
+  return attribute.data;
 }
 
 /** Face indices carrying a tag. */

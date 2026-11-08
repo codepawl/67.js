@@ -1,0 +1,8 @@
+- scene:agent-scene+lazy: the object blur stage and its packing load on demand and only for a recipe that sets motionBlur.objects; nothing runs for any other scene
+- goal:lit-box: 31 bytes gzip in the shared effect resolver (the optional objects field) and the pass texture getter, which the lazy stage needs
+- goal:gltf-box: the same 36 bytes gzip of shared effect and pass code, in a scene that never loads the stage
+- goal:agent-scene: the same 32 bytes gzip of shared effect and pass code, in a scene that never loads the stage
+- tool-total: the shared effects schema gains the opt-in `motionBlur.objects` field (122 bytes in each of the three tools that embed it).
+- tool:scene_create: the `motionBlur.objects` field of the shared effects schema.
+- tool:scene_apply: the `motionBlur.objects` field of the shared effects schema.
+- tool:scene_create_asset: the `motionBlur.objects` field of the shared effects schema.

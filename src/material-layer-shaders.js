@@ -216,7 +216,7 @@ uniform float ${name}On;
 
 registerShaderFeatureCode('clearcoatTexture', Object.freeze({
   declarations: textureUniforms('clearcoatTexture') + COAT_STATE_DECLARATIONS,
-  mainSetup: COAT_STATE_SETUP + `  if (clearcoatTextureOn > 0.5) coatState.x *= texture(clearcoatTexture, textureUV).r;
+  mainSetup: COAT_STATE_SETUP + `  if (clearcoatTextureOn > 0.5) coatState.x *= (BOX_MAPPED ? sampleBox(clearcoatTexture) : texture(clearcoatTexture, textureUV)).r;
 `,
 }));
 

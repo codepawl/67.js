@@ -53,6 +53,14 @@ Install 67js from npm as `67js@npm:@codepawlhq/67js` and connect its MCP server 
 https://67js.codepawl.com/llms.txt first and follow it.
 ```
 
+**Claude Code plugin.** One command adds the MCP server and both skills. The server starts from the published npm
+package with `npx`, so nothing is built locally.
+
+```text
+/plugin marketplace add codepawl/67.js
+/plugin install 67js@67js
+```
+
 **By hand**
 
 ```sh
