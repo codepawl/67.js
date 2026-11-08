@@ -182,6 +182,7 @@
     "smoke:agent-review": "node scripts/smoke-agent-review.mjs",
     "smoke:agent-branches": "node scripts/smoke-agent-branches.mjs",
     "parity": "node scripts/parity-report.mjs",
+    "bench:agent": "node bench/agent-modeling/bench.mjs",
     "reference": "node bench/reference/run.mjs",
     "reference:line-art": "node bench/reference/line-art.mjs",
     "size": "node scripts/measure-size.mjs",
