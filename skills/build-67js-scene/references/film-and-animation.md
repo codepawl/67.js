@@ -88,3 +88,15 @@ rejected; the job reads timeline time (`settings.timeline: { start }`).
 Rigs, `motion.ik`, constraints, drivers, clip layers on an imported asset and morph weights are listed in
 `scene_capabilities`. Read `scene_inspect` (`motionIk`, `rig`, `animations`) after every change and fix its warnings
 before you finish.
+
+## Before a film goes out
+
+A metro film once shipped all of these as "texture glitches". Check each one in the preview:
+
+- Crop 4 consecutive full-size frames of every textured floor, tread, rail and metal surface seen at a steep angle. Speckles that move between them are specular sparkle (67.js#588), not a missing mipmap.
+- When you drop a material's base colour map, also drop or soften its normal and metallic-roughness maps (`normalScale` 0.2 to 0.35). Paint is a dielectric (`metallic: 0`).
+- Thin shiny metal boxes such as handrails and posts mirror a bright ceiling as jagged shapes. Make painted rails matte.
+- Dust motes outside the depth of field blur into hollow rings. Fade them by circle of confusion.
+- Lens ghosts are filled soft discs, never bright-rimmed rings.
+- Screen-space sun shafts take their source only from sky masked around the sun. Otherwise a lit sign casts rays through itself.
+- A dot-matrix sign keeps only its lit dots. The unlit grid aliases into moire.
