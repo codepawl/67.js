@@ -599,7 +599,8 @@ export class Renderer67 {
     this.assemblyAmount = 0;
     // `resolveCoplanar` is resolveFlushParts from the coplanar-overlap addon, passed in so the search stays out of the core bundle.
     if (resolveCoplanar && typeof resolveCoplanar !== 'function') throw new TypeError('resolveCoplanar is resolveFlushParts from 67js/addons/coplanar-overlap.');
-    if (resolveCoplanar && !benchmark) resolveCoplanar(parts);
+    // Exact-flush pairs are left to a float depth buffer, so they are layered only when reversed depth is switched off.
+    if (resolveCoplanar && !benchmark) resolveCoplanar(parts, reversedDepth === false && { minimumGap: 0 });
     const groups = groupParts(this.groundPart ? [...parts, this.groundPart] : parts, batching);
     const textureLimit = this.context.getParameter(this.context.MAX_TEXTURE_SIZE);
     this.hasSkins = groups.some(group => group[0].skin || group[0].crowd);
