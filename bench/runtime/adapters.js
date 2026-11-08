@@ -74,6 +74,8 @@ export async function create67Adapter(canvas, scene, characters, { culling = tru
   return {
     context: renderer.context,
     memoryReport: () => renderer.memoryReport(),
+    // Time spent in renderer.updateParts after animation, so the update splits into posing and upload.
+    updatePartsTimes: [],
     update(time) {
       if (scene.update) {
         scene.update(time);
@@ -81,7 +83,9 @@ export async function create67Adapter(canvas, scene, characters, { culling = tru
       }
       if (assets.length) {
         assets.forEach((asset, index) => asset.applyAnimation(time + index * SECONDS_PER_CHARACTER_OFFSET, 0));
+        const beforeUpload = performance.now();
         renderer.updateParts(parts);
+        this.updatePartsTimes.push(performance.now() - beforeUpload);
       }
     },
     render() {
