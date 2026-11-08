@@ -13,7 +13,7 @@ function createPart(name, material = {}) {
 
 function createRenderer(parts) {
   const renderer = Object.create(Renderer67.prototype);
-  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42), castShadow: true, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false, pass: 'opaque' };
+  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42), castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false, pass: 'opaque' };
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData() {} };
   renderer.partLocations = new Map(parts.map((part, index) => [part, {
     batch, index, geometry: GEOMETRY, map: null, normalMatrix: mat3.create(), layerState: materialLayerState({}), skin: null,

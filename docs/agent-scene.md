@@ -307,6 +307,16 @@ An asset placement with a `crowd` field fills its group node with `count` (1 to 
 
 Three node fields fix what looks wrong where meshes meet; `add-node` and `set-node` take all of them. `blend: { "radius": 0.15 }` (metres, 0.005 to 2) softens the seam where a rock or trunk cuts into the ground and needs a preview with depth; see [mesh-blend.md](mesh-blend.md). `decal: true` and `depthLayer` (0 to 4) stop z-fighting on flush faces; see `depthBias` in `scene_capabilities`.
 
+### Visibility and render flags
+
+Five node fields change how a node renders; `add-node` and `set-node` take them, and `scene_capabilities` lists them as `renderFlags`.
+
+- `visible: false` hides the node and every child: nothing is drawn and nothing casts a shadow, but the parts stay in their batches, so a film can cut between shots without parking parts out of view. Key it in a motion track with `{ "kind": "node", "id": "robot", "property": "visible", "keyframes": [{ "time": 0, "value": 1 }, { "time": 2, "value": 0 }] }`; values are 1 or 0 and the track steps by default.
+- `castShadow: false` and `receiveShadow: false` (mesh nodes) stop a mesh casting or receiving shadows. Both default to true; glass casts none unless `castShadow` is set.
+- `holdout: true` writes zero colour and zero alpha where the mesh covers, and still hides what is behind it and still casts its shadow. `shadowCatcher: true` draws only the shadow it receives, black with the shadow as premultiplied alpha, and casts none. Both are for compositing over footage and need a transparent canvas: `new Renderer67(canvas, parts, { transparent: true })`. A node is never both. The shadow catcher shows the sun shadow only.
+
+Parts with different `castShadow`, `receiveShadow`, `holdout` or `shadowCatcher` values batch apart; `visible` never splits a batch. `receiveShadow`, `holdout` and `shadowCatcher` changes need `replaceParts`, not `updateParts`.
+
 ### Relations between parts
 
 A mesh node can list `relations` that place it against other mesh nodes, so a resized body keeps its handle where it
