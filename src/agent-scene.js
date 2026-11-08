@@ -1,5 +1,5 @@
 import { mat4, mat3 } from 'gl-matrix';
-import { box, cylinder, grid, sphere, torus } from './geometry.js';
+import { box, circle, cone, cylinder, grid, icoSphere, sphere, torus } from './geometry.js';
 import { createSceneGraph } from './scene-graph.js';
 import { applyProjection, validateCameraShift, CAMERA_LENS_FIELDS } from './camera.js';
 import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, agentEnvironmentMap } from './agent-look.js';
@@ -421,7 +421,9 @@ function cameraFrom(value = {}) {
 
 const GEOMETRY_FIELDS = {
   box: ['bevel', 'subdivisions'], cylinder: ['segments', 'bevel', 'bevelSegments'],
-  sphere: ['segments', 'rings'], grid: ['segments'], torus: ['tubeRadius', 'segments', 'sides', 'arc', 'start'],
+  sphere: ['segments', 'rings'], grid: ['segments'], plane: ['segments'],
+  cone: ['radiusTop', 'radiusBottom', 'segments'], icoSphere: ['subdivisions'], circle: ['segments', 'innerRadius'],
+  line: ['from', 'to', 'radius', 'radialSegments'], torus: ['tubeRadius', 'segments', 'sides', 'arc', 'start'],
   lathe: ['profile', 'segments', 'startAngle', 'sweep'],
   extrude: ['contour', 'holes', 'depth', 'steps', 'bevel', 'bevelThickness', 'bevelSegments'],
   tube: ['path', 'radius', 'segments', 'radialSegments', 'closed'],
@@ -430,6 +432,16 @@ const GEOMETRY_FIELDS = {
   mesh: ['base', 'edits', 'stack', 'smoothAngle'],
   terrain: ['size', 'resolution', 'seed', 'amplitude', 'holes'],
 };
+
+// A line is a two-point curve; both ends must be finite and apart.
+function lineEnds(value) {
+  const ends = [value.from, value.to];
+  for (const end of ends) vector(end, 3, 'line end');
+  if (ends[0].every((component, axis) => component === ends[1][axis])) {
+    throw new RangeError('A line needs two distinct end points.');
+  }
+  return ends;
+}
 
 function geometryEstimate(value) {
   if (!Object.hasOwn(GEOMETRY_FIELDS, value.type)) {
@@ -449,7 +461,7 @@ function geometryEstimate(value) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'points', 'taper', 'text', 'font', 'align'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'points', 'taper', 'text', 'font', 'align', 'from', 'to'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -461,7 +473,19 @@ function geometryEstimate(value) {
     case 'sphere':
       return (detail('segments', 64, 3, 2048) + 1) * (detail('rings', 40, 2, 2048) + 1);
     case 'grid':
+    case 'plane':
       return (detail('segments', 16, 1, 64) + 1) ** 2;
+    case 'cone':
+      return (detail('segments', 64, 3, 2048) + 1) * 2 + 2 * ((value.segments ?? 64) + 2);
+    case 'icoSphere':
+      return 10 * 4 ** detail('subdivisions', 2, 0, 7) + 2;
+    case 'circle':
+      return value.innerRadius > 0 ? (detail('segments', 64, 3, 2048) + 1) * 2 : detail('segments', 64, 3, 2048) + 2;
+    case 'line': {
+      const sides = detail('radialSegments', 8, 3, 128);
+      lineEnds(value);
+      return 2 * sides * 2 + 2 * (sides + 1);
+    }
     case 'torus':
       return (detail('segments', 96, 3, 2048) + 1) * (detail('sides', 24, 3, 128) + 1) + 2 * ((value.sides ?? 24) + 2);
     case 'lathe':
@@ -548,7 +572,16 @@ function generateGeometry(value, maxVertices) {
     case 'sphere':
       return sphere(value.segments, value.rings);
     case 'grid':
+    case 'plane':
       return grid(value.segments);
+    case 'cone':
+      return cone(value.radiusTop, value.radiusBottom, value.segments);
+    case 'icoSphere':
+      return icoSphere(value.subdivisions);
+    case 'circle':
+      return circle(value.segments, value.innerRadius);
+    case 'line':
+      return agentSceneModule('modeling').curve(lineEnds(value), { radius: value.radius, radialSegments: value.radialSegments, resolution: 1, maxVertices });
     case 'torus':
       return torus(value.tubeRadius, value.segments, value.sides, value.arc, value.start);
     case 'lathe':
@@ -735,7 +768,7 @@ function normalizeRecipe(input, limits) {
   if (Array.isArray(recipe.nodes)) recipe.nodes = recipe.nodes.filter(node => !node?.assetPart);
   recipe.geometries = resources(recipe.geometries, limits.maxGeometries, 'geometries', value => {
     geometryEstimate(value);
-    const definition = { id: value.id, type: value.type };
+    const definition = { id: value.id, type: value.type === 'plane' ? 'grid' : value.type };
     for (const field of GEOMETRY_FIELDS[value.type]) {
       if (Object.hasOwn(value, field)) {
         definition[field] = value[field];
