@@ -1335,38 +1335,24 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     return linked;
   }
 
-  function bakeGenerators(recipe) {
-    const generators = new Map();
-    for (const system of recipe.particles?.systems ?? []) {
-      generators.set(system.node, 'a hair or particle system');
-    }
-    for (const sheet of recipe.cloth?.sheets ?? []) {
-      generators.set(sheet.node, 'a cloth simulation');
-    }
-    return generators;
-  }
-
   // The bake no longer matches the frame: motion moved a light, the sun or a part off the pose it was traced at.
   // Only a scene with both a bake and motion pays for this check, and bake.rebake turns it off (it bakes each sampled pose).
   function staleBakeProblems() {
-    if (!lightBake || !state.recipe.bake || state.recipe.bake.rebake || !state.motionSampler) {
-      return [];
-    }
-    return agentSceneModule('bake').staleBakeProblems(state, bakeGenerators(state.recipe), lightBake.key);
+    return lightBake && state.recipe.bake && state.motionSampler ? agentSceneModule('bake').staleBakeProblems(state, lightBake.key) : [];
   }
 
   function stageRestParts(recipe, sourceRestParts, lightBakeResult, graph) {
-    const reflected = stageObjectReflections(recipe, sourceRestParts, lightBakeResult ? lightBakeResult.parts : sourceRestParts, graph);
-    return { reflected, restParts: stageCoplanarOffsets(recipe, stageLightLinks(recipe, stageFloorSky(recipe, reflected ? reflected.parts : lightBakeResult ? lightBakeResult.parts : sourceRestParts))) };
+    const baked = lightBakeResult?.parts ?? sourceRestParts;
+    const reflected = stageObjectReflections(recipe, sourceRestParts, baked, graph);
+    return { reflected, restParts: stageCoplanarOffsets(recipe, stageLightLinks(recipe, stageFloorSky(recipe, reflected ? reflected.parts : baked))) };
   }
 
   // bake.rebake: a frame sampled at a pose the bake was not traced at is lit by a bake of that pose, cached by its key.
   function rebakeAtPose(pose) {
-    const rebaked = lightBake && state.recipe.bake?.rebake && state.motionSampler && agentSceneModule('bake').bakeAtSampledPose(lightBake, state.recipe, bakeGenerators(state.recipe), pose);
+    const rebaked = state.recipe.bake?.rebake && agentSceneModule('bake').bakeAtSampledPose(lightBake, state.recipe, pose);
     if (rebaked) {
-      rebaked.entry.staged ??= stageRestParts(state.recipe, state.sourceRestParts, rebaked.entry, pose.graph);
-      state.restParts = rebaked.entry.staged.restParts;
-      state.bakeReport = { ...rebaked.entry.report, reused: rebaked.reused };
+      state.restParts = stageRestParts(state.recipe, state.sourceRestParts, rebaked, pose.graph).restParts;
+      state.bakeReport = rebaked.report;
     }
   }
 
@@ -1377,14 +1363,14 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       return null;
     }
     const worldMatrices = new Map(sourceRestParts.map(part => [part.name, new Float32Array(graph.getNode(part.name).worldMatrix)]));
-    const generatedGeometryGenerators = bakeGenerators(recipe);
+    const generatedGeometryGenerators = agentSceneModule('bake').bakeGenerators(recipe);
     const key = agentSceneModule('bake').lightBakeKey(recipe, generatedGeometryGenerators, recipe.environment, worldMatrices);
     if (lightBake?.key === key && lightBake.sourceRestParts === sourceRestParts) {
       lightBake.currentKey = key;
       return { ...lightBake, reused: true };
     }
     const baked = agentSceneModule('bake').bakeAgentParts(sourceRestParts, worldMatrices, recipe.environment, recipe.bake, generatedGeometryGenerators);
-    lightBake = { key, currentKey: key, sourceRestParts, parts: baked.parts, report: baked.report, cache: new Map([[key, { parts: baked.parts, report: baked.report }]]) };
+    lightBake = { key, currentKey: key, sourceRestParts, parts: baked.parts, report: baked.report };
     return { ...lightBake, reused: false };
   }
 

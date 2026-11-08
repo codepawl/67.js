@@ -79,6 +79,18 @@ export function lightBakeKey(recipe, generatedGeometryGenerators, environment, w
     [...worldMatrices].map(([name, matrix]) => [name, Array.from(matrix)])]);
 }
 
+/** The nodes whose geometry is built every frame, which no lightmap fits, with what builds each. */
+export function bakeGenerators(recipe) {
+  const generators = new Map();
+  for (const system of recipe.particles?.systems ?? []) {
+    generators.set(system.node, 'a hair or particle system');
+  }
+  for (const sheet of recipe.cloth?.sheets ?? []) {
+    generators.set(sheet.node, 'a cloth simulation');
+  }
+  return generators;
+}
+
 // The bake inputs at a sampled pose: the lights, sun and part matrices as motion has set them, and the key they give.
 function sampledBakeInputs(recipe, sourceRestParts, generators, pose) {
   const environment = pose.movedLook ? motionEnvironment(structuredClone(recipe.environment), pose.movedLook) : recipe.environment;
@@ -87,9 +99,12 @@ function sampledBakeInputs(recipe, sourceRestParts, generators, pose) {
 }
 
 /** The scene_inspect diagnostics for a bake whose inputs, at the sampled pose, differ from the ones it was traced at. */
-export function staleBakeProblems(state, generators, bakedKey) {
+export function staleBakeProblems(state, bakedKey) {
+  if (state.recipe.bake.rebake) {
+    return [];
+  }
   const pose = { graph: state.poseGraph ?? state.graph, movedLook: state.movedLook };
-  return sampledBakeInputs(state.recipe, state.sourceRestParts, generators, pose).key === bakedKey ? [] : [staleBakeDiagnostic()];
+  return sampledBakeInputs(state.recipe, state.sourceRestParts, bakeGenerators(state.recipe), pose).key === bakedKey ? [] : [staleBakeDiagnostic()];
 }
 
 const REBAKE_CACHE_SIZE = 4;
@@ -99,24 +114,23 @@ const REBAKE_CACHE_SIZE = 4;
  * otherwise the bake traced at the sampled lights, sun and part matrices, from the cache (the last 4 poses, least recently
  * used leaves first) or freshly traced. `lightBake.currentKey` is the pose the scene is drawn with.
  */
-export function bakeAtSampledPose(lightBake, recipe, generators, pose) {
+export function bakeAtSampledPose(lightBake, recipe, pose) {
+  const generators = bakeGenerators(recipe);
   const { key, environment, worldMatrices } = sampledBakeInputs(recipe, lightBake.sourceRestParts, generators, pose);
   if (key === lightBake.currentKey) {
     return null;
   }
-  let entry = lightBake.cache.get(key);
+  const cache = lightBake.cache ??= new Map([[lightBake.key, lightBake]]);
+  let entry = cache.get(key);
   const reused = Boolean(entry);
-  lightBake.cache.delete(key);
-  if (!entry) {
-    const baked = bakeAgentParts(lightBake.sourceRestParts, worldMatrices, environment, recipe.bake, generators);
-    entry = { parts: baked.parts, report: baked.report };
-  }
-  lightBake.cache.set(key, entry);
-  if (lightBake.cache.size > REBAKE_CACHE_SIZE) {
-    lightBake.cache.delete(lightBake.cache.keys().next().value);
+  cache.delete(key);
+  entry ??= bakeAgentParts(lightBake.sourceRestParts, worldMatrices, environment, recipe.bake, generators);
+  cache.set(key, entry);
+  if (cache.size > REBAKE_CACHE_SIZE) {
+    cache.delete(cache.keys().next().value);
   }
   lightBake.currentKey = key;
-  return { entry, reused };
+  return { parts: entry.parts, report: { ...entry.report, reused } };
 }
 
 function staleBakeDiagnostic() {
