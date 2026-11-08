@@ -158,15 +158,3 @@ test('an update that only moves a part keeps the history and sends the part moti
   assert.equal(still[12], 0, 'then the part is still');
   tracer.dispose();
 });
-
-test('the denoiser with its history at the output size runs the same frame', async () => {
-  installGpu(async () => fakeAdapter);
-  const tracer = await createRealtimeTracer(scene, { backend: 'webgpu', width: 64, height: 32, canvas: fakeCanvas, accumulateAtOutputSize: true });
-  const dispatchesBefore = recorded.dispatches;
-  tracer.frame(camera);
-  tracer.frame({ ...camera, eye: [0.1, 1, 4] });
-  assert.ok(recorded.dispatches - dispatchesBefore >= 12, 'trace, cache, resolve, a-trous and present passes for two frames');
-  const picture = await tracer.readFrame();
-  assert.equal(picture.rgba.length, 64 * 32 * 4);
-  tracer.dispose();
-});

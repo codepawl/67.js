@@ -5,7 +5,7 @@ import { CACHE_SLOT_COUNT, MAXIMUM_LEVEL, NORMAL_AXIS_THRESHOLD } from './path-t
 //   - the cache table and the record buffer (bindings 9 and 10), the cell hash (the same value as `cacheSlot`) and the lookup;
 //   - light selection that draws one emitter at every hit (the denoiser averages the draws over frames), by importance;
 //   - the last hit of a path ending in a cache lookup, and the hit before it remembering its cell for a record;
-//   - an entry point that writes the first hit's radiance, albedo (with the sample's jitter), normal and material to the frame buffer and the record.
+//   - an entry point that writes the first hit's radiance, albedo, normal and material to the frame buffer and the record.
 // The cell size and the level distance travel in the tile words of the parameter block, as float bits.
 
 const REALTIME_DECLARATIONS = /* wgsl */ `
@@ -149,9 +149,7 @@ fn traceRealtime(@builtin(global_invocation_id) id: vec3<u32>) {
   if (!(all(featureAlbedo >= vec3<f32>(0.0)) && all(featureAlbedo < vec3<f32>(1e30)))) { featureAlbedo = vec3<f32>(1.0); }
   let pixelCount = u32(width * height);
   accumulation[pixel] = vec4<f32>(radiance, featureDepth);
-  // The jitter goes next to the albedo as two 12 bit fractions in one float, for the denoiser that accumulates at the output size.
-  let packedJitter = f32(u32(jitterX * 4095.0 + 0.5) * 4096u + u32(jitterY * 4095.0 + 0.5));
-  accumulation[pixelCount + pixel] = vec4<f32>(featureAlbedo, packedJitter);
+  accumulation[pixelCount + pixel] = vec4<f32>(featureAlbedo, 0.0);
   accumulation[2u * pixelCount + pixel] = vec4<f32>(featureNormal, firstHitMaterial);
   // The record: the light the rest of the path brought, per unit of the weight at that hit (the incoming radiance).
   let recordedTail = clamp((radiance - recordedRadianceBefore) / max(recordedThroughput, vec3<f32>(0.05)), vec3<f32>(0.0), vec3<f32>(params.cameraAndClamp.z));

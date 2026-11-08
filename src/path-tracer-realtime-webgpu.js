@@ -4,7 +4,6 @@ import { prepareRealtimeKernel } from './path-tracer-webgpu.js';
 import { REALTIME_KERNEL_PIECES } from './path-tracer-realtime-webgpu-kernel.js';
 import { cacheCellSizes } from './path-tracer-realtime-options.js';
 import { createWebGpuDenoiser, createWebGpuRadianceCache } from './path-tracer-realtime-webgpu-passes.js';
-import { createWebGpuFullResolutionDenoiser } from './path-tracer-realtime-webgpu-fullres.js';
 import { PART_MOTION_CHANGED, PART_MOTION_FLOATS, partMotionTable } from './path-tracer-reprojection.js';
 import { MAX_TRACE_PARTS } from './path-tracer-scene.js';
 
@@ -36,7 +35,7 @@ function createOutputCanvas(width, height) {
 
 /** `resolved` is what `resolveRealtimeOptions` returns for the options of `createRealtimeTracer`; `suppliedCanvas` is optional. */
 export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas) {
-  const { outputWidth, outputHeight, traceWidth, traceHeight, options, historyLimit, filterIterations, cacheCellSize, accumulateAtOutputSize, followPartMotion } = resolved;
+  const { outputWidth, outputHeight, traceWidth, traceHeight, options, historyLimit, filterIterations, cacheCellSize, followPartMotion } = resolved;
   let traceScene = null;
   let kernel = null;
   let device = null;
@@ -82,8 +81,7 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
       parameterBuffer = device.createBuffer({ label: 'realtime parameters', size: 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       motionBuffer = device.createBuffer({ label: 'part motion', size: MAX_TRACE_PARTS * PART_MOTION_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       cache = await createWebGpuRadianceCache(device);
-      const createDenoiser = accumulateAtOutputSize ? createWebGpuFullResolutionDenoiser : createWebGpuDenoiser;
-      denoiser = await createDenoiser(device, { traceWidth, traceHeight, outputWidth, outputHeight, tracedBuffers: traced, motionBuffer, historyLimit, filterIterations, swapped });
+      denoiser = await createWebGpuDenoiser(device, { traceWidth, traceHeight, outputWidth, outputHeight, tracedBuffers: traced, motionBuffer, historyLimit, filterIterations, swapped });
       canvas = suppliedCanvas ?? createOutputCanvas(outputWidth, outputHeight);
       context = canvas.getContext('webgpu');
       context.configure({ device, format: navigator.gpu.getPreferredCanvasFormat(), usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST, alphaMode: 'opaque' });

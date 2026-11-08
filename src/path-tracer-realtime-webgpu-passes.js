@@ -12,13 +12,13 @@ import { DEPTH_TOLERANCE, NORMAL_AGREEMENT, PART_MOTION_CHANGED, PART_MOTION_FLO
 
 const FIXED_POINT_SCALE = 1024;
 const RECORD_LIMIT = 32;
-export const MINIMUM_ALBEDO = 0.02;
-export const SPATIAL_VARIANCE_HISTORY = 4;
-export const FIREFLY_DEVIATIONS = 2.5;
-export const SHORT_HISTORY_LENGTH = 8;
+const MINIMUM_ALBEDO = 0.02;
+const SPATIAL_VARIANCE_HISTORY = 4;
+const FIREFLY_DEVIATIONS = 2.5;
+const SHORT_HISTORY_LENGTH = 8;
 const CACHE_WORKGROUP_SIZE = 256;
 const CACHE_PARAMETER_BYTES = 16;
-export const DENOISE_PARAMETER_BYTES = 12 * 16;
+const DENOISE_PARAMETER_BYTES = 12 * 16;
 
 const CACHE_SOURCE = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> records: array<vec4<f32>>;
@@ -56,7 +56,7 @@ fn resolveCells(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workg
 }
 `;
 
-export const DENOISE_COMMON = /* wgsl */ `
+const DENOISE_COMMON = /* wgsl */ `
 struct DenoiseParams {
   eye: vec4<f32>,
   forward: vec4<f32>,
@@ -124,7 +124,7 @@ fn insideTraceImage(texel: vec2<i32>) -> bool {
  * The motion table of the parts (see partMotionTable in path-tracer-reprojection.js) at binding `binding`, and the lookup
  * of where a surface point of this frame was in the previous frame. The result's w is 0 when history cannot be reused.
  */
-export const partMotionSource = binding => /* wgsl */ `
+const partMotionSource = binding => /* wgsl */ `
 @group(0) @binding(${binding}) var<storage, read> partMotion: array<vec4<f32>>;
 
 fn previousPointOf(point: vec3<f32>, material: f32) -> vec4<f32> {
@@ -355,11 +355,11 @@ fn present(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 `;
 
-export function createPipeline(device, module, entryPoint) {
+function createPipeline(device, module, entryPoint) {
   return device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint } });
 }
 
-export async function compileModule(device, label, code) {
+async function compileModule(device, label, code) {
   const module = device.createShaderModule({ label, code });
   const info = await module.getCompilationInfo();
   const errors = info.messages.filter(message => message.type === 'error');
@@ -367,9 +367,9 @@ export async function compileModule(device, label, code) {
   return module;
 }
 
-export const storage = (device, label, bytes, extraUsage = 0) => device.createBuffer({ label, size: Math.max(16, bytes), usage: GPUBufferUsage.STORAGE | extraUsage });
-export const uniform = (device, label, bytes) => device.createBuffer({ label, size: bytes, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-export const bind = (device, pipeline, buffers) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer } })) });
+const storage = (device, label, bytes, extraUsage = 0) => device.createBuffer({ label, size: Math.max(16, bytes), usage: GPUBufferUsage.STORAGE | extraUsage });
+const uniform = (device, label, bytes) => device.createBuffer({ label, size: bytes, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+const bind = (device, pipeline, buffers) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer } })) });
 
 /**
  * The cache table (CACHE_SLOT_COUNT vec4: mean radiance and the number of records behind it) and the pass that folds the
@@ -409,7 +409,7 @@ export async function createWebGpuRadianceCache(device) {
 /** Rows of a texture copy start at multiples of 256 bytes. */
 export const outputRowWords = width => Math.ceil(width * 4 / 256) * 64;
 
-export function writeDenoiseParameters(device, buffer, inputs, sizes, step, rowWords, swapped) {
+function writeDenoiseParameters(device, buffer, inputs, sizes, step, rowWords, swapped) {
   const words = new ArrayBuffer(DENOISE_PARAMETER_BYTES);
   const floats = new Float32Array(words);
   const integers = new Int32Array(words);

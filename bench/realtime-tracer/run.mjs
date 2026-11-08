@@ -1,6 +1,6 @@
 // The real-time path tracer (issue #624): frame time with an orbiting camera, the resting frame after one second, a camera move.
 //   [GPU_LOCK="bash <path to gpu-lock.sh>"] ${GPU_LOCK} node bench/realtime-tracer/run.mjs <output directory> <scene id or recipe.json>,...
-//     [--mode time|rest|move|ghost|all] [--output-history] [--rest-seconds 1 | --rest-frames 60] [--frames 200] [--width 1920] [--height 1080] [--bounces 2] [--repetitions 3] [--backend gpu|webgpu]
+//     [--mode time|rest|move|ghost|all] [--rest-seconds 1 | --rest-frames 60] [--frames 200] [--width 1920] [--height 1080] [--bounces 2] [--repetitions 3] [--backend gpu|webgpu]
 // (use one output directory per backend: the picture files carry no backend name)
 // Files: <scene>@realtime-rest.png, <scene>@move-<n>.png and timings.json. bench/realtime-tracer/score.py scores the
 // resting frames against Cycles, and bench/realtime-tracer/sheet.py puts a camera move on one contact sheet.
@@ -18,7 +18,7 @@ const valueAfter = (flag, fallback) => (argumentsGiven.includes(flag) ? argument
 const mode = valueAfter('--mode', 'all');
 const frames = Number(valueAfter('--frames', 200));
 const repetitions = Number(valueAfter('--repetitions', 3));
-const options = { width: Number(valueAfter('--width', 1920)), height: Number(valueAfter('--height', 1080)), bounces: Number(valueAfter('--bounces', 2)), resolutionDivisor: Number(valueAfter('--divisor', 2)), backend: valueAfter('--backend', 'gpu'), accumulateAtOutputSize: argumentsGiven.includes('--output-history'), filterIterations: valueAfter('--iterations', undefined) === undefined ? undefined : Number(valueAfter('--iterations', undefined)) };
+const options = { width: Number(valueAfter('--width', 1920)), height: Number(valueAfter('--height', 1080)), bounces: Number(valueAfter('--bounces', 2)), resolutionDivisor: Number(valueAfter('--divisor', 2)), backend: valueAfter('--backend', 'gpu') };
 const restSeconds = Number(valueAfter('--rest-seconds', 1));
 const restFrames = Number(valueAfter('--rest-frames', 0));
 const recipeName = id => id.replace(/^.*[\/]/, '').replace(/\.recipe\.json$|\.json$/, '');
