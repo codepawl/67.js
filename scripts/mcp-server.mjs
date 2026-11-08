@@ -58,7 +58,7 @@ const nodeFields = {
   blend: z.strictObject({ radius: z.number().min(0.005).max(2) }).optional().describe('Soft seam into another mesh, radius in m; docs/mesh-blend.md.'),
   label: z.string().max(256).optional().describe('Human-readable label. Identity remains the node ID.'),
   parent: identifier.nullable().optional().describe('Parent node ID, or null for a root. Local transforms stay unchanged.'),
-  translation: vector3.optional().describe('Local XYZ translation.'),
+  translation: vector3.optional().describe('Local XYZ of the node centre in metres, Y up, relative to its parent.'),
   rotation: quaternion.optional().describe('Nonzero local XYZW quaternion. The backend normalizes it.'),
   scale: z.tuple([positive, positive, positive]).optional().describe('Positive local XYZ scale.'),
 };
@@ -641,8 +641,8 @@ const armature = z.strictObject({
 }).describe('A skeleton. Each bone becomes a recipe node named after it (parented like the bones, rotating about its head), so motion tracks, motion.ik and set-node address bones by name. Mesh nodes bind with skin. scene_inspect rig lists unweighted vertices, bones with no vertices and joint axis problems.');
 const armaturesReference = z.array(z.record(z.string(), z.unknown())).max(16).describe('The same array as recipe.armatures in scene_create: id, parent, preset, fit, bones. Read that tool for the fields.');
 const timelineReference = z.record(z.string(), z.unknown()).describe('Shots in order, up to 60 s; fields in scene_capabilities filmTimeline.');
-const geometryTypes = geometry.options.map(option => option.shape.type.value);
-const geometryListed = listed('geometries', geometry, 'Geometry { id, type, ...fields of that type }; mesh also takes base, edits, stack, smoothAngle. Fields per type: scene_capabilities geometries.', { id: identifier, type: z.enum(geometryTypes) });
+const geometryTypes = geometry.options.flatMap(option => option.shape.type.options ?? [option.shape.type.value]);
+const geometryListed = listed('geometries', geometry, 'Geometry { id, type, ...fields of that type }; mesh also takes base, edits, stack, smoothAngle. Fields per type: scene_capabilities geometries. box and cylinder are unit solids (box -0.5..0.5) sized by node scale; their default bevel rounds the edges, so give bevel 0 for exact sizes. uv_unwrap stretches under a non-uniform node scale: bake the size into the vertices first (set_position, position {mul:[{attr:position},[x,y,z]]}).', { id: identifier, type: z.enum(geometryTypes) });
 const motionListed = listed('motion', motion, 'One absolute-time clip: duration in s, loop, tracks [{kind, id, property, interpolation, keyframes [{time, value, easing}]}], ik, constraints, drivers; see scene_capabilities motion.', coreOf(motion.shape, ['duration', 'loop']));
 const physicsListed = listed('physics', physics, 'Rigid bodies recorded offline with Rapier: duration, gravity, bodies [{node, type, shape, mass, ...}], joints; see scene_capabilities physics.', coreOf(physics.shape, ['duration']));
 const clothListed = listed('cloth', cloth, 'Baked cloth sheets: duration, gravity, wind, sheets [{node, pin, pinTo, stiffness, ...}], colliders; see scene_capabilities cloth.', coreOf(cloth.shape, ['duration']));
@@ -742,15 +742,15 @@ const renderSettings = z.strictObject({
   animation: z.strictObject({ clip: z.number().int().min(0), start: z.number().min(0).max(3600).optional() }).optional(),
   motion: z.strictObject({ start: z.number().min(0).max(3600).optional() }).optional(),
   rendererTime: z.strictObject({ start: z.number().min(0).max(3600).optional(), rate: z.number().min(-16).max(16).optional() }).optional(),
-  renderer: z.strictObject({ type: z.literal('pathTracer'), backend: z.enum(['cpu', 'gpu', 'native']).optional(), samples: z.number().optional(), bounces: z.number().optional(), denoise: z.union([z.boolean(), z.enum(['wavelet', 'oidn', 'none'])]).optional(), seed: z.number().optional(), maxSeconds: z.number().optional(), noiseThreshold: z.number().optional() }).optional().describe('path tracer, backend gpu is faster, native fastest if installed; see scene_capabilities pathTracer.'),
-  timeline: z.strictObject({ start: z.number().min(0).max(60).optional() }).optional().describe('Play the recipe timeline from start (default 0); duration defaults to the rest of it. It owns the motion clock, so leave motion and animation out.'),
-  audio: z.strictObject({ file: z.string().max(68), offset: z.number().min(0).max(3600).optional(), track: z.enum(['aac', 'pcm']).optional() }).optional().describe('Video only: a file name in the --audio folder (.wav, .mp3, .ogg, .flac) mixed in from offset seconds.'),
+  renderer: z.looseObject({ type: z.literal('pathTracer'), backend: z.enum(['cpu', 'gpu', 'native']).optional() }).meta({ description: 'Path tracer. Also samples, bounces, denoise, seed, maxSeconds, noiseThreshold: scene_capabilities pathTracer.' }).pipe(z.strictObject({ type: z.literal('pathTracer'), backend: z.enum(['cpu', 'gpu', 'native']).optional(), samples: z.number().optional(), bounces: z.number().optional(), denoise: z.union([z.boolean(), z.enum(['wavelet', 'oidn', 'none'])]).optional(), seed: z.number().optional(), maxSeconds: z.number().optional(), noiseThreshold: z.number().optional() })).optional(),
+  timeline: z.strictObject({ start: z.number().min(0).max(60).optional() }).optional().describe('Play the recipe timeline from start (default 0); it owns the motion clock, so leave motion and animation out.'),
+  audio: z.strictObject({ file: z.string().max(68), offset: z.number().min(0).max(3600).optional(), track: z.enum(['aac', 'pcm']).optional() }).optional().describe('Video only: a file in the --audio folder, mixed in from offset seconds.'),
   encoder: z.enum(VIDEO_ENCODERS).optional().describe('Video only: cpu (default) or nvenc.'),
-  passes: z.array(z.enum(RENDER_PASS_NAMES)).min(1).max(RENDER_PASS_NAMES.length).optional().describe('image and stills only: also write raw PNGs per frame for these passes; opaque geometry only.'),
-  transparent: z.boolean().optional().describe('image and stills only: lit image with alpha. No sky, background or auto ground; no volume fog.'),
-  format: z.enum(RENDER_OUTPUT_FORMATS).optional().describe('image and stills only: png (8-bit, default), png16 or exr (half float; depth in metres).'),
-  region: z.strictObject({ x: z.number().int().min(0), y: z.number().int().min(0), width: z.number().int().min(16), height: z.number().int().min(16) }).optional().describe('Pixels from the top left to keep; the frame is rendered whole. Not with renderer.'),
-}).describe('Immutable snapshot render: one PNG, eight evenly spaced PNGs, or CPU H.264 MP4. Video dimensions must be even. Defaults: 24 fps, one second. Use motion.start for authored recipe tracks, animation for an imported clip, or both to layer them. Omitted motion holds time zero. Nonlooping samples must fit the authored duration.');
+  passes: z.array(z.enum(RENDER_PASS_NAMES)).min(1).max(RENDER_PASS_NAMES.length).optional().describe('image and stills: also write a raw PNG per pass; opaque geometry only.'),
+  transparent: z.boolean().optional().describe('image and stills: lit image with alpha; no sky, auto ground or volume fog.'),
+  format: z.enum(RENDER_OUTPUT_FORMATS).optional().describe('image and stills: png (default), png16 or exr (depth in metres).'),
+  region: z.strictObject({ x: z.number().int().min(0), y: z.number().int().min(0), width: z.number().int().min(16), height: z.number().int().min(16) }).optional().describe('Pixels to keep from the top left. Not with renderer.'),
+}).describe('Snapshot render: one PNG, eight evenly spaced PNGs, or H.264 MP4 (even dimensions). Defaults: 24 fps, one second. motion.start plays recipe tracks, animation an imported clip, both layer. Omitted motion holds time zero.');
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const edit = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
 

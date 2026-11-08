@@ -150,7 +150,7 @@ test('SDK advertises the complete strict JSON contract and truthful annotations'
   assert.equal(recipeSchema.properties.materials.maxItems, 256);
   assert.equal(recipeSchema.properties.geometries.maxItems, 256);
   // The tool lists the common fields; the strict schema still validates and scene_capabilities serves the full outline.
-  assert.deepEqual(recipeSchema.properties.geometries.items.properties.type.enum, ['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'terrain', 'grid', 'mesh']);
+  assert.deepEqual(recipeSchema.properties.geometries.items.properties.type.enum, ['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'terrain', 'grid', 'plane', 'cone', 'icoSphere', 'circle', 'line', 'mesh']);
   assert.ok(recipeSchema.properties.environment.properties.setup);
   assert.equal(recipeSchema.properties.shadow.additionalProperties, false);
   for (const topic of ['geometries', 'environment', 'effects', 'motion', 'physics', 'cloth', 'armatures', 'materialFields', 'meshEdit', 'meshStack']) {

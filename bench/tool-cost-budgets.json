@@ -1,13 +1,13 @@
 {
-  "schemaTotalBytes": 67100,
+  "schemaTotalBytes": 68590,
   "schemaToolBytes": {
-    "scene_apply": 20370,
-    "scene_create": 12380,
-    "scene_create_asset": 8770
+    "scene_apply": 20900,
+    "scene_create": 12870,
+    "scene_create_asset": 8900
   },
   "schemaOtherToolBytes": 4000,
   "resultBytes": {
-    "scene_capabilities": 1380,
+    "scene_capabilities": 1410,
     "scene_create": 1200,
     "scene_inspect": 1150,
     "mesh_inspect": 940,
