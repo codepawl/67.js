@@ -1,0 +1,6 @@
+- entry:mesh: rotation operators for fields, curve resample and fillet for instances, and the bounding box and convex hull modifiers are about 1.8 KB gzip of mesh code that agents cannot get any other way.
+- scene:agent-scene+lazy: the new mesh operators live in the lazy part, which holds the whole mesh engine.
+- goal:agent-scene: the core grows under 64 bytes for the operator names; the notes were shortened elsewhere to pay for the rest.
+- tool:scene_create: the instance spec gains `curve` (points, count, closed, fillet), the only way for an agent to place instances along a path; the instance spec is inlined in each recipe field that carries nodes, so one field costs about 400 bytes.
+- tool:scene_apply: same `curve` instance field as scene_create, inlined through the shared node record.
+- tool-total: the `curve` instance field in scene_create and scene_apply, as above.

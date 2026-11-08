@@ -1,8 +1,10 @@
 import { quat } from 'gl-matrix';
 import { INSTANCE_SOURCES, MAX_INSTANCE_CANDIDATES } from './mesh-operations.js';
 import { evaluateField, pointSetContext, seededRandom } from './mesh-fields.js';
+import { MAX_CURVE_POINTS, filletCurve, resampleCurve } from './curve-operations.js';
 import { createTriangleSurfaceIndex } from './mesh-query.js';
 import './mesh-field-surfaces.js';
+import './field-rotation.js';
 
 // Instance on points: a node with an `instances` record becomes a group node plus one child node per point, all
 // sharing the node's geometry and material, so the renderer draws them in one instanced call. Points come from a
@@ -22,6 +24,7 @@ const MAX_COORDINATE = 1e6;
 const SOURCES = INSTANCE_SOURCES;
 const INSTANCE_FIELDS = Object.freeze([...SOURCES, 'seed', 'where', 'yaw', 'alignToNormal', 'scale']);
 const MAX_SEED = 0x7fffffff;
+const CURVE_FILLET_SEGMENTS = 8;
 const UP = Object.freeze([0, 1, 0]);
 
 const CHANNEL_SCATTER = 20;
@@ -143,11 +146,37 @@ export function surfacePoints(geometry, count, seed) {
   return { positions, normals };
 }
 
+// Points at equal arc length along a polyline, optionally with rounded corners; the "normal" of each point is the
+// direction of travel, so alignToNormal turns up along the curve.
+function curvePoints(source) {
+  plainRecord(source, 'curve', ['points', 'count', 'closed', 'fillet']);
+  if (!Array.isArray(source.points) || source.points.length < 2 || source.points.length > MAX_CURVE_POINTS) {
+    throw instanceError(`curve points are 2 to ${MAX_CURVE_POINTS} positions.`);
+  }
+  const corners = source.points.map(point => coordinates(point, 'curve point'));
+  const closed = source.closed === true;
+  if (source.closed !== undefined && typeof source.closed !== 'boolean') throw instanceError('curve closed must be boolean.');
+  const count = wholeNumber(source.count, closed ? 3 : 2, MAX_INSTANCE_CANDIDATES, 'curve count');
+  if (source.fillet !== undefined && !(typeof source.fillet === 'number' && source.fillet > 0 && source.fillet <= MAX_COORDINATE)) {
+    throw instanceError('curve fillet is a radius above 0.');
+  }
+  const path = source.fillet === undefined ? corners : filletCurve(corners, source.fillet, CURVE_FILLET_SEGMENTS, closed);
+  const samples = resampleCurve(path, count, closed);
+  const positions = new Float64Array(count * 3);
+  const normals = new Float64Array(count * 3);
+  samples.forEach(({ point, direction }, index) => {
+    positions.set(point, index * 3);
+    normals.set(direction, index * 3);
+  });
+  return { positions, normals };
+}
+
 function candidatePoints(spec, seed, resolveSurface) {
   const sourceName = SOURCES.filter(name => Object.hasOwn(spec, name));
   if (sourceName.length !== 1) throw instanceError(`give exactly one point source: ${SOURCES.join(', ')}.`);
   if (sourceName[0] === 'grid') return gridPoints(spec.grid);
   if (sourceName[0] === 'scatter') return scatterPoints(spec.scatter, seed);
+  if (sourceName[0] === 'curve') return curvePoints(spec.curve);
   const source = plainRecord(spec.surface, 'surface', ['geometry', 'count']);
   const count = wholeNumber(source.count, 1, MAX_INSTANCE_CANDIDATES, 'surface count');
   if (typeof source.geometry !== 'string') throw instanceError('surface needs a geometry id.');
@@ -197,7 +226,7 @@ function checkedSpec(spec) {
   for (const flag of ['yaw', 'alignToNormal']) {
     if (spec[flag] !== undefined && typeof spec[flag] !== 'boolean') throw instanceError(`${flag} must be boolean.`);
   }
-  if (spec.alignToNormal && !Object.hasOwn(spec, 'surface')) throw instanceError('alignToNormal needs a surface source, because only a surface has normals.');
+  if (spec.alignToNormal && !Object.hasOwn(spec, 'surface') && !Object.hasOwn(spec, 'curve')) throw instanceError('alignToNormal needs a surface or curve source, because only those have normals.');
   if (spec.scale !== undefined) {
     const range = spec.scale;
     if (!Array.isArray(range) || range.length !== 2 || !range.every(entry => typeof entry === 'number' && Number.isFinite(entry) && entry > 0 && entry <= 1000) || range[0] > range[1]) {

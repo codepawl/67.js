@@ -218,7 +218,7 @@ Normals stay those of the base mesh. Test: `tests/mesh-shape-keys.test.js`.
 
 ### Whole-mesh modifiers
 
-`weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `weighted_normal` and `smooth_by_angle` take no selection and no name, and work as edits or stack nodes. Their fields and defaults are plain data in `MESH_MODIFIER_NOTES` (`src/agent-scene-capabilities.js`), which `scene_capabilities` returns as `meshModifiers`; the code is in `src/mesh-modifiers.js` and `src/mesh-restructure.js`.
+`weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `bounding_box`, `convex_hull`, `weighted_normal` and `smooth_by_angle` take no selection and no name, and work as edits or stack nodes. Their fields and defaults are plain data in `MESH_MODIFIER_NOTES` (`src/agent-scene-capabilities.js`), which `scene_capabilities` returns as `meshModifiers`; the code is in `src/mesh-modifiers.js` and `src/mesh-restructure.js`.
 
 | op | fields | does |
 | --- | --- | --- |
@@ -237,6 +237,8 @@ Normals stay those of the base mesh. Test: `tests/mesh-shape-keys.test.js`.
 | `wave` | `height` (0.5), `width` (1.5), `narrowness` (1.5), `speed` (0.25), `time` (0), `timeOffset`, `start`, `cyclic` (true), `axes` (xy), `normal` | A travelling gaussian ripple along z, equal to Blender Wave at the same frame. |
 | `weighted_normal` | `angle` (30), `weight` (50, 1 to 100) | Stores one shading normal per corner: faces around a vertex share it unless the edge is sharp or bends more than the angle, each face counting by its area to the power weight / 50. Put it last in the stack. |
 | `smooth_by_angle` | `angle` (30), `ignoreSharp` (false) | Marks edges bending more than the angle sharp and the others smooth, over the geometry `smoothAngle`; sharp edges made by hand, and the 12 of a box, stay sharp unless `ignoreSharp` is set. |
+| `bounding_box` | none | Replaces the mesh with the axis-aligned box around all its vertices: 8 vertices and 6 quads. Tags and attributes are dropped. |
+| `convex_hull` | none | Replaces the mesh with its convex hull, outward triangles on the extreme vertices only, from at most 8192 vertices. A mesh whose vertices lie on one line or in one plane has no hull and is refused. Tags and attributes are dropped. |
 
 `triangulate` and `edge_split` check their output size before building it, against the same vertex and face limits as the other edits. Each op has cases in `tests/fixtures/blender/cases.json` and matches Blender 5.2 with no listed difference. `screw` and `wireframe` have cases in the same fixtures (the volume of the open screw strips differs by winding, listed in `differences.json`); `wave` matches Blender on two cases; `skin`, `lattice`, `curve` and `hook` are not compared with Blender, because each needs a second object there. The two normal modifiers are tested by their own properties, because the Blender comparison does not measure normals. Not yet: `shrinkwrap` and `scatter_on_surface` as stack nodes (`instances` already scatters), and cast shapes other than the sphere.
 
@@ -266,6 +268,7 @@ Operators that take numbers also take vectors and work on each component; a numb
 | Comparison and logic | `lt` `lte` `gt` `gte` `eq` give 1 or 0; `and` `or` `not`; `if: [condition, a, b]` |
 | Motion only | `"time"` and `{ "node", "property", "component", "space" }` read time and node values in a driver; a field rejects them, and a driver rejects the field inputs below. |
 | Vectors | `vec: [x, y, z]`, `dot` `cross` `distance`, `length` `normalize`, `x` `y` `z` read a component |
+| Rotation | `rotate: [vector, axis, angle]` turns a vector about an axis (radians; a zero axis does nothing); `align: [direction]` gives the Euler angles (X then Y then Z, radians) that turn +Y onto the direction; `transform: [point, move, euler, size]` scales, rotates, then moves a point (only the point is required) |
 | Attributes | `{ "attr": "position" \| "normal" }` with optional `component`, `{ "attr": "index" }`, `{ "attr": "tag", "name": "top" }` |
 | Random | `{ "noise": { "scale", "seed", "octaves", "at" } }` smooth value noise in 0 to 1 at a position (default the element's), `{ "random": { "seed" } }` a number in 0 to 1 per element |
 
