@@ -1,3 +1,4 @@
+import { CACHE_DECLARATIONS, CACHE_OUTPUT, CACHE_RECORD, CACHE_TERMINAL } from './path-tracer-radiance-cache.js';
 import { SUBSURFACE_FUNCTIONS, SUBSURFACE_LOBE, SUBSURFACE_SPLIT, SUBSURFACE_UNIFORM } from './path-tracer-gpu-subsurface.js';
 
 // The GPU path tracer kernel: a WebGL2 fragment shader that follows the same paths as the CPU tracer in
@@ -61,7 +62,7 @@ const TEXEL_MAIN = `void main() {
   if (texelIndex >= uTexelCount) rayDirection = normal;
   tracePath(origin, rayDirection, pixel, sampleIndex);`;
 
-const buildSource = (hasSubsurface, texelBake, blueNoise, lightImportance) => `#version 300 es
+const buildSource = (hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache) => `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -76,6 +77,8 @@ const int LIGHT_TEXELS = ${LIGHT_TEXELS};
 const int STACK_SIZE = 128;
 const bool BLUE_NOISE_FIRST = ${blueNoise};
 const bool IMPORTANT_LIGHTS = ${lightImportance};
+// The real-time kernel picks one emitter at the first hit too (the denoiser averages the choices over frames) instead of tracing a shadow ray to every emitter.
+const bool STOCHASTIC_FIRST_HIT = ${radianceCache};
 const int ALPHA_STEP_LIMIT = 8;
 const int RUSSIAN_ROULETTE_START = 3;
 const float MINIMUM_ALPHA = 1e-3;
@@ -124,6 +127,7 @@ layout(location = 0) out vec4 outRadiance;
 layout(location = 1) out vec4 outAlbedo;
 layout(location = 2) out vec4 outNormal;
 layout(location = 3) out vec4 outStatistics;
+${radianceCache ? CACHE_DECLARATIONS : ''}
 
 vec4 fetchData(sampler2D source, int index) {
   return texelFetch(source, ivec2(index & TEXTURE_MASK, index >> TEXTURE_SHIFT), 0);
@@ -1015,7 +1019,7 @@ int chooseEmitterByImportance(vec3 normal, out float probability) {
 
 /** The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it. */
 void addLights(int depth, vec3 normal) {
-  if (depth == 0 || uEmitterCount <= 1) {
+  if ((depth == 0 && !STOCHASTIC_FIRST_HIT) || uEmitterCount <= 1) {
     selectionProbability = 1.0;
     for (int emitter = 0; emitter < uEmitterCount; emitter++) {
       sampleEmitter(depth, normal, emitter);
@@ -1109,6 +1113,7 @@ ${hasSubsurface ? SUBSURFACE_SPLIT : ''}
     }
     if (needsLights) addLights(depth, normal);
     inMedium = false;
+${radianceCache ? CACHE_TERMINAL : ''}
     if (inFog) {
       float cosine = sampleHenyeyGreensteinCosine(uVolumeShape.y, nextRandom());
       float sine = sqrt(max(0.0, 1.0 - cosine * cosine));
@@ -1151,6 +1156,7 @@ ${hasSubsurface ? SUBSURFACE_LOBE : ''}
         previousPdf = surfacePdf;
         afterMirror = false;
       }
+${radianceCache ? CACHE_RECORD : ''}
     }
     position = hitPoint + direction * uSurfaceOffset;
     if (!survivesRoulette(depth)) break;
@@ -1168,6 +1174,7 @@ ${texelBake ? TEXEL_MAIN : CAMERA_MAIN}
   outAlbedo = vec4(featureAlbedo, 0.0);
   outNormal = vec4(featureNormal, 0.0);
   outStatistics = vec4(sampleLuminance, sampleLuminance * sampleLuminance, firstLegEscaped, 0.0);
+${radianceCache ? CACHE_OUTPUT : ''}
 }
 `;
 
@@ -1175,8 +1182,8 @@ ${texelBake ? TEXEL_MAIN : CAMERA_MAIN}
  * The kernel; `hasSubsurface` compiles in the random walk, which only scenes with a subsurface part need. `texelBake`
  * starts every path at a lightmap texel instead of the camera (see light-bake-gpu.js).
  */
-export function buildFragmentSource({ hasSubsurface = false, texelBake = false, blueNoise = false, lightImportance = false } = {}) {
-  return buildSource(hasSubsurface, texelBake, blueNoise, lightImportance);
+export function buildFragmentSource({ hasSubsurface = false, texelBake = false, blueNoise = false, lightImportance = false, radianceCache = false } = {}) {
+  return buildSource(hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache);
 }
 
 export const FRAGMENT_SOURCE = buildFragmentSource();

@@ -87,6 +87,7 @@
     "./addons/floor-sky-visibility": "./build/floor-sky-visibility.js",
     "./addons/path-tracer": "./build/path-tracer.js",
     "./addons/path-tracer-progressive": "./build/path-tracer-progressive.js",
+    "./addons/path-tracer-realtime": "./build/path-tracer-realtime.js",
     "./addons/texture-set": "./build/texture-set.js",
     "./addons/agent-scene": "./build/agent-scene.js",
     "./addons/agent-asset": "./build/agent-asset.js",

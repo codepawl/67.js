@@ -217,10 +217,11 @@ export function getKernel(hasSubsurface, texelBake = false, options = {}) {
   const { gl, programs } = getContext();
   const blueNoise = options.samplingPattern === 'blue-noise-first';
   const lightImportance = options.lightSelection === 'importance';
-  const key = `${hasSubsurface}:${texelBake}:${blueNoise}:${lightImportance}`;
+  const radianceCache = options.radianceCache === true;
+  const key = `${hasSubsurface}:${texelBake}:${blueNoise}:${lightImportance}:${radianceCache}`;
   if (!programs.has(key)) {
     const started = performance.now();
-    const program = createProgram(gl, { hasSubsurface, texelBake, blueNoise, lightImportance });
+    const program = createProgram(gl, { hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache });
     gl.getProgramParameter(program, gl.LINK_STATUS);
     programs.set(key, { program, compileSeconds: (performance.now() - started) / 1000 });
     if (!texelBake) kernelCompileCount++;
