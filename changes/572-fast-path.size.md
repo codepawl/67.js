@@ -5,3 +5,4 @@
 - scene:gltf-box+lazy: same code as scene:gltf-box.
 - goal:gltf-box: 196 bytes for that speed-up; accepted on the same grounds.
 - scene:agent-scene+lazy: the same skinning and glTF pose code, which agent scenes import.
+- goal:agent-scene: about 100 bytes for the same animation speed-up; accepted on the same grounds.
