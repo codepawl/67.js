@@ -83,8 +83,21 @@ function influenceFrom(value, nodeIds, label) {
   return structuredClone(value);
 }
 
-function normalizeConstraint(input, position, movableIds, visibleIds) {
+const ARGUMENT_TYPES = ['copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action'];
+
+// The newer types may carry their own fields in `args`, so the MCP schema stays small; they merge into the flat shape.
+function withArguments(input, label) {
+  if (!input || input.args === undefined || !ARGUMENT_TYPES.includes(input.type)) return input;
+  knownKeys(input.args, ['influence', ...CONSTRAINT_FIELDS[input.type]], `${label} args`);
+  const { args, ...rest } = input;
+  const clash = Object.keys(args).find(key => Object.hasOwn(rest, key));
+  if (clash) throw new RangeError(`${label} gives ${clash} both directly and in args.`);
+  return { ...rest, ...args };
+}
+
+function normalizeConstraint(rawInput, position, movableIds, visibleIds) {
   const label = `Motion constraint ${position}`;
+  const input = withArguments(rawInput, label);
   if (!input || !Object.hasOwn(CONSTRAINT_FIELDS, input.type)) {
     throw new RangeError(`${label} type must be one of ${CONSTRAINT_TYPES.join(', ')}.`);
   }

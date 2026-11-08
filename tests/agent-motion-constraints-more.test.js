@@ -114,6 +114,14 @@ test('the new constraints refuse bad fields', () => {
   refuses({ type: 'copy_transforms' }, /target/);
 });
 
+test('the newer types accept their fields in args, the shape the MCP schema uses', () => {
+  const nested = sampled([{ ...owner, translation: [6, 8, 0] }, targetAt([0, 0, 0])], { type: 'limit_distance', args: { target: 'target', distance: 5, influence: 1 } });
+  assertClose(translationOf(nested), [3, 4, 0], 'args');
+  const pair = [owner, targetAt([1, 0, 0])];
+  assert.throws(() => sampled(pair, { type: 'limit_distance', args: { target: 'target', distance: 5, speed: 1 } }), /Allowed fields/);
+  assert.throws(() => sampled(pair, { type: 'limit_distance', target: 'target', args: { target: 'target', distance: 5 } }), /both directly and in args/);
+});
+
 test('scene_capabilities lists every constraint type', () => {
   assert.deepEqual([...AGENT_SCENE_CAPABILITIES.motionConstraints].sort(), [...CONSTRAINT_TYPES].sort());
 });

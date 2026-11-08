@@ -1,2 +1,3 @@
-- scene:agent-scene+lazy: seven constraint operators and their validation load only with motion, each a few hundred bytes of the 1.6 KB (#595)
-- tool:scene_motion: one constraint entry names the seven new types and their optional fields, so strict-mode clients see them (#595)
+- scene:agent-scene+lazy: seven constraint operators and their validation load only with motion (#595)
+- tool:scene_create: the seven new type names join the floor entry's type enum and one args record carries their fields, validated in node-constraints with errors that list the allowed fields (#595)
+- tool-total: the same enum and args record, counted once (#595)

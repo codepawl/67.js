@@ -285,6 +285,10 @@ own transform under its parent.
 | `transformation` | `target`, `source`, `destination` (`translation`, `rotation` or `scale`), `map` (the source axis for each destination x, y, z), `fromMin`, `fromMax` (per source axis), `toMin`, `toMax` (per destination axis), `space` | The target's channel, clamped to its range, sets the node's channel over its range. Rotation is Euler degrees |
 | `action` | `target`, `source`, `axis`, `min`, `max`, `destination`, `keys` (2 to 16 of `{ at, value }`, `at` 0 to 1 rising), `space` | Read the curve where the target's channel sits between `min` and `max`; its value sets the node's channel |
 
+Over MCP, the seven newest types (`copy_transforms` to `action`) take `node`, `type` and `args`, an object holding every other
+field above (`target`, `influence` and the type's own); the validator names the allowed fields when one is wrong. Direct fields
+also work from code, but not both for the same key.
+
 Not covered yet: `use_*` switches on `child_of`, `damped_track`, bone sub-targets and `head_tail`.
 
 ## Drivers

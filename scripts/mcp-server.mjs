@@ -477,8 +477,6 @@ const axisName = z.enum(['x', 'y', 'z']);
 const axisNames = z.array(axisName).min(1).max(3);
 const signedAxis = z.enum(['+x', '-x', '+y', '-y', '+z', '-z']);
 const constraintSpace = z.enum(['world', 'local']).optional();
-const constraintChannel = z.enum(['translation', 'rotation', 'scale']).optional();
-const number1e6 = z.number().min(-1e6).max(1e6);
 const limitRange = z.tuple([z.number().min(-1e6).max(1e6), z.number().min(-1e6).max(1e6)]).optional();
 // A bounded expression: data only, never code. See docs/agent-motion.md for the operators.
 const expression = z.lazy(() => z.union([
@@ -496,17 +494,7 @@ const constraint = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('limit_rotation'), node: identifier, x: degreeRange.optional(), y: degreeRange.optional(), z: degreeRange.optional(), space: constraintSpace, influence }),
   z.strictObject({ type: z.literal('track_to'), node: identifier, target: identifier, trackAxis: signedAxis.optional(), upAxis: axisName.optional(), worldUp: vector3.optional(), influence }),
   z.strictObject({ type: z.literal('child_of'), node: identifier, target: identifier, inverse: z.enum(['rest', 'none']).optional(), influence }),
-  z.strictObject({ type: z.literal('floor'), node: identifier, target: identifier, axis: signedAxis.optional(), offset: z.number().min(-1e6).max(1e6).optional(), influence }),
-  // One entry for the seven newer types; the motion validator checks which fields each one needs.
-  z.strictObject({
-    type: z.enum(['copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action']), node: identifier, target: identifier.optional(), influence,
-    distance: number1e6.optional(), mode: z.enum(['inside', 'outside', 'surface']).optional(), x: limitRange, y: limitRange, z: limitRange, space: constraintSpace,
-    restLength: number1e6.optional(), volume: z.enum(['xz', 'x', 'z', 'none']).optional(), bulge: z.number().min(0).max(4).optional(), worldUp: vector3.optional(),
-    trackAxis: signedAxis.optional(), lockAxis: axisName.optional(), axis: axisName.optional(),
-    source: constraintChannel, destination: constraintChannel, map: z.array(axisName).length(3).optional(),
-    fromMin: vector3.optional(), fromMax: vector3.optional(), toMin: vector3.optional(), toMax: vector3.optional(),
-    min: number1e6.optional(), max: number1e6.optional(), keys: z.array(z.strictObject({ at: unit, value: vector3 })).min(2).max(16).optional(),
-  }),
+  z.strictObject({ type: z.enum(['floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action']), node: identifier, target: identifier.optional(), axis: signedAxis.optional(), offset: z.number().min(-1e6).max(1e6).optional(), influence, args: z.record(z.string(), z.unknown()).optional() }),
 ]);
 const driver = z.strictObject({
   target: z.union([
@@ -540,7 +528,7 @@ const ikSolver = z.discriminatedUnion('type', [
 const motion = z.strictObject({
   duration: z.number().min(0.1).max(30),
   ik: z.array(ikSolver).max(16).optional().describe('Inverse kinematics run after the tracks and any selected clip, in order, on recipes and imported assets. IDs are recipe node IDs or an asset\'s node-N IDs; find them with scene_inspect kind hierarchy. scene_inspect reports motionIk: whether each solver reaches its target across the clip.'),
-  constraints: z.array(constraint).max(32).optional().describe('Blender-style node constraints, run in order after the tracks, drivers and IK, each on the pose the one before left: copy_location, copy_rotation, copy_scale, limit_location, limit_rotation, track_to, child_of, floor, and more (scene_capabilities). Euler angles are XYZ in degrees; space defaults to world. Same result at any time, so seeking equals playing.'),
+  constraints: z.array(constraint).max(32).optional().describe('Blender-style node constraints, run in order after the tracks, drivers and IK, each on the pose the one before left: copy_location, copy_rotation, copy_scale, limit_location, limit_rotation, track_to, child_of, floor. Euler angles are XYZ in degrees; space defaults to world. Same result at any time, so seeking equals playing.'),
   drivers: z.array(driver).max(32).optional().describe('Drive one node component or material property from a bounded expression over time and other nodes\' values. A driven property cannot also have a track.'),
   loop: z.boolean().optional(),
   tracks: z.array(z.union([
