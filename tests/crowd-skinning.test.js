@@ -147,10 +147,10 @@ test('the renderer culls crowd instances with the bound of the whole clip, and r
   assert.equal(culling.levelGeometries.length, 3);
   const projection = mat4.perspective(mat4.create(), Math.PI / 4, 16 / 9, 0.5, 200);
   const viewProjection = mat4.multiply(mat4.create(), projection, mat4.lookAt(mat4.create(), [0, 2, 12], [0, 1, 0], [0, 1, 0]));
-  const instanceData = new Float32Array(batch.length * 41);
-  batch.forEach((part, index) => instanceData.set(part.matrix, index * 41));
+  const instanceData = new Float32Array(batch.length * 42);
+  batch.forEach((part, index) => instanceData.set(part.matrix, index * 42));
   const selection = selectInstances(new InstanceSelection(batch.length, 3), {
-    instanceData, instanceCount: batch.length, stride: 41, bounds: culling.bounds, levelErrors: culling.levelErrors,
+    instanceData, instanceCount: batch.length, stride: 42, bounds: culling.bounds, levelErrors: culling.levelErrors,
     planes: extractFrustumPlanes(viewProjection, new Float32Array(24)), viewProjection, pixelsPerUnit: 540 / 2 * projection[5], pixelError: 1,
   });
   assert.equal(selection.visibleCount, 1, 'only the instance in front of the camera draws');

@@ -62,7 +62,7 @@ layout(location=11) in vec3 assemblyOffset;
 layout(location=12) in vec3 assemblyDetailOffset;
 layout(location=13) in vec4 uvSets;
 layout(location=14) in vec4 vertexColor;
-layout(location=15) in vec3 instanceEmissive;
+layout(location=15) in vec4 instanceEmissive;
 uniform mat4 viewProjection;
 uniform mat4 lightProjection;
 uniform float time;
@@ -75,6 +75,7 @@ out vec3 worldPosition, worldNormal;
 flat out vec3 baseColor;
 flat out vec4 surface;
 flat out vec4 instanceEmission;
+flat out float instanceOpacity;
 flat out mat3 boxNormalMatrix;
 #endif
 #ifdef VERTEX_COLORS
@@ -116,7 +117,8 @@ void main() {
   lightmapUV = uvSets.zw;
 #ifdef INSTANCED
   baseColor = instanceColor;
-  instanceEmission = vec4(instanceEmissive, gl_InstanceID);
+  instanceEmission = vec4(instanceEmissive.rgb, gl_InstanceID);
+  instanceOpacity = instanceEmissive.w;
   surface = instanceSurface;
 #endif
 #ifdef VERTEX_COLORS
@@ -213,11 +215,13 @@ in vec3 worldPosition, worldNormal;
 flat in vec3 baseColor;
 flat in vec4 surface;
 flat in vec4 instanceEmission;
+flat in float instanceOpacity;
 flat in mat3 boxNormalMatrix;
 #else
 uniform vec3 baseColor;
 uniform vec4 surface;
 uniform vec4 instanceEmission;
+uniform float instanceOpacity;
 uniform mat3 boxNormalMatrix;
 #endif
 #ifdef VERTEX_COLORS
@@ -480,10 +484,10 @@ vec3 mappedNormal(vec3 normal) {
 
 ${featureCode("libraries")}
 
-${featureCode("worldMossFunction")}// Opaque draws 1, mask resolves to a cutout (smooth coverage with MSAA) and blend keeps the fraction.
+${featureCode("worldMossFunction")}// Opaque draws 1, mask resolves to a cutout (smooth coverage with MSAA), blend and add keep the fraction (per instance opacity times the batch one).
 float surfaceAlpha(float textureAlpha) {
   if (!USES_ALPHA_MODE) return 1.0;
-  float alpha = materialOpacity * textureAlpha;
+  float alpha = materialOpacity * instanceOpacity * textureAlpha;
   if (alphaMode > 1.5) return alpha;
   if (alphaToCoverage > 0.5) {
     float softness = max(fwidth(alpha), 0.0001);
@@ -697,7 +701,8 @@ ${featureCode("afterEmission")}${featureCode("worldAfterEmission")}  if (TAG_FLO
     radiance = mix(radiance, vec3(0.018, 0.022, 0.026), fog);
   }
 ${featureCode("worldFinal")}  float fog = 1.0 - exp(-length(worldPosition - eye) * fogDensity);
-  radiance = mix(radiance, fogColor, fog * worldMode);
+  // Additive light fades to black through fog; mixing it toward the fog colour would add a glow of fog.
+  radiance = alphaMode > 2.5 ? radiance * (1.0 - fog * worldMode) : mix(radiance, fogColor, fog * worldMode);
   if (inspection > 0.5) radiance = normal * 0.5 + 0.5;
   outputColor = vec4(hdrEnabled > 0.5 ? clamp(radiance * exposure, vec3(0), vec3(65504.0)) : pow(toneMap(radiance * exposure), vec3(1.0 / 2.2)), alpha);
   if (TAG_FLOOR && inspection < 0.5) {

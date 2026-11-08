@@ -19,12 +19,13 @@ function validateFloatChannel(values, length, label, bounded = false) {
   }
 }
 
-const GLTF_ALPHA_MODES = { mask: 'MASK', blend: 'BLEND' };
+// glTF has no additive blending, so an add material is written as BLEND and loads back as blend.
+const GLTF_ALPHA_MODES = { mask: 'MASK', blend: 'BLEND', add: 'BLEND' };
 
 function writeAlphaFields(gltfMaterial, material) {
   const alphaMode = material.alphaMode ?? 'opaque';
   if (alphaMode !== 'opaque') {
-    if (!Object.hasOwn(GLTF_ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask' or 'blend'.");
+    if (!Object.hasOwn(GLTF_ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask', 'blend' or 'add'.");
     gltfMaterial.alphaMode = GLTF_ALPHA_MODES[alphaMode];
     validateFactor(material.opacity ?? 1, 'opacity');
     gltfMaterial.pbrMetallicRoughness.baseColorFactor[3] = material.opacity ?? 1;

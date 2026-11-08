@@ -638,3 +638,15 @@ test('a recipe without a materials or geometries list reads them as empty, and t
   assert.deepEqual(bare.materials, []);
   assert.throws(() => createAgentScene({ format: '67js.scene', schemaVersion: 1 }), /nodes/);
 });
+
+test("recipe materials accept alphaMode 'add' and keep it when opacity is below one", () => {
+  assert.ok(AGENT_SCENE_CAPABILITIES.alphaModes.includes('add'));
+  const input = recipe();
+  input.materials.push({ id: 'spark', color: [1, 0.6, 0.2], emission: 4, alphaMode: 'add' });
+  input.materials.push({ id: 'faint spark', color: [1, 0.6, 0.2], alphaMode: 'add', opacity: 0.4 });
+  const exported = createAgentScene(input).exportRecipe();
+  assert.equal(exported.materials.find(material => material.id === 'spark').alphaMode, 'add');
+  assert.equal(exported.materials.find(material => material.id === 'faint spark').alphaMode, 'add');
+  input.materials.push({ id: 'bad', color: [1, 1, 1], alphaMode: 'multiply' });
+  assert.throws(() => createAgentScene(input), /alphaMode must be one of opaque, blend, add/);
+});

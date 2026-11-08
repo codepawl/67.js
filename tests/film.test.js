@@ -91,7 +91,7 @@ test('sets keep shared geometry, valid surfaces and the 384 MiB target budget', 
     const geometries = new Set(scene.parts.map(part => part.geometry));
     // Two shared garment contours replace rectangular collars and lapels.
     assert.ok(geometries.size <= 15);
-    let geometryBytes = scene.parts.length * 41 * 4;
+    let geometryBytes = scene.parts.length * 42 * 4;
     for (const geometry of geometries) {
       geometryBytes += geometry.positions.byteLength + geometry.normals.byteLength + geometry.indices.byteLength;
       geometryBytes += geometry.colors?.byteLength ?? 0;
