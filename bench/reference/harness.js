@@ -389,8 +389,8 @@ async function renderReferencePathTracedFeatures(id, options) {
 
 window.renderReferencePathTracedFeatures = renderReferencePathTracedFeatures;
 
-// Traces a scene recipe the way an agent render job does (parts, environment map and camera of the agent scene).
-async function renderRecipePathTraced(recipe, options) {
+// Builds the parts, environment and camera of a scene recipe the way an agent render job does.
+async function loadRecipeTraceScene(recipe) {
   const { createAgentScene, loadAllAgentSceneModules, needsMeshBooleans, loadMeshBooleans, setManifoldModuleLoader } = await import('/src/agent-scene.js');
   const { agentEnvironmentMap } = await import('/src/agent-look.js');
   await loadAllAgentSceneModules();
@@ -399,9 +399,14 @@ async function renderRecipePathTraced(recipe, options) {
     await loadMeshBooleans();
   }
   const scene = createAgentScene(recipe);
-  const { renderPathTracedImage } = await import('/src/path-tracer.js');
   const environment = scene.environment;
-  const result = await renderPathTracedImage({ parts: scene.parts, environment: { ...environment, map: agentEnvironmentMap(environment) }, camera: scene.camera }, options);
+  return { parts: scene.parts, environment: { ...environment, map: agentEnvironmentMap(environment) }, camera: scene.camera };
+}
+
+// Traces a scene recipe the way an agent render job does (parts, environment map and camera of the agent scene).
+async function renderRecipePathTraced(recipe, options) {
+  const { renderPathTracedImage } = await import('/src/path-tracer.js');
+  const result = await renderPathTracedImage(await loadRecipeTraceScene(recipe), options);
   const canvas = document.createElement('canvas');
   canvas.width = result.width;
   canvas.height = result.height;
@@ -414,3 +419,65 @@ window.renderReferenceScene = renderReferenceScene;
 window.loadBarnLampVariant = loadBarnLampVariant;
 window.renderReferencePathTraced = renderReferencePathTraced;
 window.referenceSceneIds = Object.keys(SCENES);
+
+async function loadTraceSceneFor(source) {
+  if (typeof source === 'string') {
+    const scene = await REFERENCE_SCENES[source]();
+    return { parts: applyLightLinks(scene.parts, scene.environment), environment: scene.environment, camera: scene.camera };
+  }
+  return loadRecipeTraceScene(source);
+}
+
+function rgbaToBase64Png(rgba, width, height) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').putImageData(new ImageData(rgba, width, height), 0, 0);
+  return canvas.toDataURL('image/png').split(',')[1];
+}
+
+const median = values => [...values].sort((first, second) => first - second)[Math.floor(values.length / 2)];
+
+// Draws a scene progressively (issue #623) and saves the image after each count in `checkpoints` (samples at full size).
+// `stepSeconds` is the time of the drawing steps alone (reduced sizes included), `snapshotSeconds` one read back and filter.
+async function renderProgressiveCheckpoints(source, options, checkpoints) {
+  const scene = await loadTraceSceneFor(source);
+  const { createProgressiveTracer } = await import('/src/path-tracer-progressive.js');
+  const setupStarted = performance.now();
+  const tracer = await createProgressiveTracer(scene, options);
+  const setupSeconds = (performance.now() - setupStarted) / 1000;
+  const results = [];
+  let stepSeconds = 0;
+  for (let stepIndex = 0; results.length < checkpoints.length; stepIndex++) {
+    const started = performance.now();
+    const drawn = await tracer.step();
+    stepSeconds += (performance.now() - started) / 1000;
+    const fullSamples = drawn.divisor === 1 ? drawn.samples : 0;
+    if (fullSamples !== checkpoints[results.length]) continue;
+    const snapshotStarted = performance.now();
+    const snapshot = tracer.snapshot();
+    const snapshotSeconds = (performance.now() - snapshotStarted) / 1000;
+    results.push({ samples: fullSamples, stepSeconds, snapshotSeconds, image: rgbaToBase64Png(snapshot.rgba, snapshot.width, snapshot.height) });
+  }
+  const report = { gpu: tracer.gpu, compileSeconds: tracer.compileSeconds, setupSeconds };
+  tracer.dispose();
+  return { results, report };
+}
+
+// Time of one sample of every pixel at full size, `frames` times (the first `warmup` frames are not counted).
+async function measureProgressiveFrameTime(source, options, frames = 200, warmup = 5) {
+  const scene = await loadTraceSceneFor(source);
+  const { createProgressiveTracer } = await import('/src/path-tracer-progressive.js');
+  const tracer = await createProgressiveTracer(scene, options, { resolutionDivisors: [1] });
+  const times = [];
+  for (let frame = 0; frame < frames + warmup; frame++) {
+    const started = performance.now();
+    await tracer.step();
+    if (frame >= warmup) times.push(performance.now() - started);
+  }
+  tracer.dispose();
+  return { frames, medianMilliseconds: median(times), minimumMilliseconds: Math.min(...times), maximumMilliseconds: Math.max(...times) };
+}
+
+window.renderProgressiveCheckpoints = renderProgressiveCheckpoints;
+window.measureProgressiveFrameTime = measureProgressiveFrameTime;

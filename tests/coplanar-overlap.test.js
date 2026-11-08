@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene } from '../src/agent-scene.js';
-import { findCoplanarOverlaps, coplanarOverlapDiagnostics, installCoplanarDiagnostics, resolveCoplanarParts, resolveFlushParts } from '../src/coplanar-overlap.js';
-import { depthLayerOf } from '../src/depth-layer.js';
+import { coplanarLayers, findCoplanarOverlaps, coplanarOverlapDiagnostics, installCoplanarDiagnostics, resolveCoplanarParts, resolveFlushParts } from '../src/coplanar-overlap.js';
+import { depthLayerOf, MAXIMUM_DEPTH_LAYER } from '../src/depth-layer.js';
 import { loadAgentSceneModules } from '../src/agent-scene-modules.js';
 import { frameDiagnostics } from '../src/frame-diagnostics.js';
 import { groupParts, Renderer67 } from '../src/renderer.js';
@@ -182,11 +182,51 @@ test('hundreds of copies parked at one spot cost two parts, not every pair among
 
 test('flush parts get a layer beside the part, so the part objects and updateParts keep working', () => {
   const road = gridPart('roadTwo', 4, 4, 0);
-  const marking = gridPart('markingTwo', 2, 2, 0);
+  const marking = gridPart('markingTwo', 2, 2, 0.00005);
   const far = gridPart('farAway', 4, 4, 30);
   assert.equal(resolveFlushParts([road, marking, far]), 1);
   assert.equal(depthLayerOf(marking), 1);
   assert.equal(depthLayerOf(road), 0);
   assert.equal(depthLayerOf(far), 0);
   assert.equal(marking.depthLayer, undefined);
+});
+
+test('faces that share only an edge or a seam are not pairs, and a sliver under the minimum area is ignored', () => {
+  const left = gridPart('left', 2, 2, 0);
+  const right = movedPart(gridPart('right', 2, 2, 0), 'right', 2, 0);
+  assert.deepEqual(findCoplanarOverlaps([left, right]).overlaps, []);
+  const cornerOnly = movedPart(gridPart('cornerOnly', 2, 2, 0), 'cornerOnly', 2, 2);
+  assert.deepEqual(findCoplanarOverlaps([left, cornerOnly]).overlaps, []);
+  const sliver = movedPart(gridPart('sliver', 2, 2, 0), 'sliver', 1.99999, 0);
+  assert.deepEqual(findCoplanarOverlaps([left, sliver]).overlaps, []);
+  assert.equal(resolveFlushParts([left, right, cornerOnly]), 0);
+});
+
+test('two parts that really share area are a pair with that area', () => {
+  const base = gridPart('base', 4, 1, 0);
+  const overlapping = movedPart(gridPart('overlapping', 4, 1, 0), 'overlapping', 3, 0);
+  const { overlaps } = findCoplanarOverlaps([base, overlapping]);
+  assert.equal(overlaps.length, 1);
+  assert.ok(Math.abs(overlaps[0].area - 4) < 1e-6);
+});
+
+test('resolveFlushParts leaves exactly flush pairs to the depth buffer; coplanarLayers still layers them', () => {
+  const road = gridPart('roadExact', 4, 4, 0);
+  const marking = gridPart('markingExact', 2, 2, 0);
+  assert.equal(resolveFlushParts([road, marking]), 0);
+  assert.equal(coplanarLayers(findCoplanarOverlaps([road, marking]).overlaps).get(marking), 1);
+  assert.equal(resolveFlushParts([road, marking], { minimumGap: 0 }), 1, 'the renderer passes a gap of 0 when reversedDepth is false');
+  assert.equal(depthLayerOf(marking), 1);
+});
+
+test('layers settle in chains and never pile up on the top layer', () => {
+  const big = gridPart('chainBig', 10, 1, 0);
+  const middle = gridPart('chainMiddle', 5, 1, 0);
+  const small = gridPart('chainSmall', 2, 1, 0);
+  const layers = coplanarLayers(findCoplanarOverlaps([small, middle, big]).overlaps);
+  assert.equal(layers.get(middle), 1);
+  assert.equal(layers.get(small), 2);
+  const stack = Array.from({ length: 8 }, (unused, index) => gridPart(`stack${index}`, 10 - index, 1, 0));
+  const stackLayers = coplanarLayers(findCoplanarOverlaps(stack).overlaps);
+  for (const layer of stackLayers.values()) assert.ok(layer <= MAXIMUM_DEPTH_LAYER);
 });

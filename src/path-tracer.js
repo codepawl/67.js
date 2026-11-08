@@ -71,6 +71,8 @@ function boundedNumber(options, name) {
 // Kept equal to PATH_TRACER_DENOISERS in path-tracer-capabilities.js by tests/path-tracer-denoise-oidn.test.js; the
 // capabilities file stays out of this bundle.
 export const PATH_TRACER_DENOISERS = Object.freeze(['wavelet', 'oidn', 'none']);
+export const SAMPLING_PATTERNS = Object.freeze(['random', 'blue-noise-first']);
+export const LIGHT_SELECTIONS = Object.freeze(['uniform', 'importance']);
 
 /**
  * `denoise` is true (the wavelet filter) or false (none), or a name: "wavelet", "oidn" or "none". "oidn" is the optional
@@ -103,10 +105,17 @@ export function normalizePathTracerOptions(options = {}) {
     viewTransform: options.viewTransform ?? 'aces',
     look: options.look ?? null,
     backend: options.backend ?? 'cpu',
+    samplingPattern: options.samplingPattern ?? 'random',
+    lightSelection: options.lightSelection ?? 'uniform',
   };
   result.denoise = result.denoiser !== 'none';
   if (!VIEW_TRANSFORM_NAMES.includes(result.viewTransform)) throw new RangeError(`Path tracer viewTransform must be one of ${VIEW_TRANSFORM_NAMES.join(', ')}.`);
   if (!PATH_TRACER_BACKENDS.includes(result.backend)) throw new TypeError('Path tracer backend must be "cpu", "gpu" or "webgpu".');
+  if (!SAMPLING_PATTERNS.includes(result.samplingPattern)) throw new RangeError(`Path tracer samplingPattern must be one of ${SAMPLING_PATTERNS.join(', ')}.`);
+  if (!LIGHT_SELECTIONS.includes(result.lightSelection)) throw new RangeError(`Path tracer lightSelection must be one of ${LIGHT_SELECTIONS.join(', ')}.`);
+  if (result.backend !== 'gpu' && (result.samplingPattern !== 'random' || result.lightSelection !== 'uniform')) {
+    throw new RangeError('Path tracer samplingPattern "blue-noise-first" and lightSelection "importance" need backend "gpu"; the CPU reference and the WebGPU tracer draw random samples and pick lights uniformly.');
+  }
   if (result.width * result.height > MAX_TRACE_PIXELS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_PIXELS} pixels.`);
   if (result.width * result.height * result.samples * (result.bounces + 1) > MAX_TRACE_RAY_WORK) throw new RangeError('This path trace would need too much ray work: lower the size, samples or bounces.');
   return result;

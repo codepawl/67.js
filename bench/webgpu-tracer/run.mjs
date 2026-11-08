@@ -1,5 +1,5 @@
 // One timed trace of the demo room with one backend, in a headless Chrome whose profile persists per backend (so the first
-// run in a fresh profile is the cold compile and later runs are warm). Run it through the GPU lock script (gpu-lock.sh).
+// run in a fresh profile is the cold compile and later runs are warm). On a shared card, run it through a GPU job queue.
 //   node bench/webgpu-tracer/run.mjs <output directory> <webgl|wavefront|megakernel> [--samples 64] [--width 1920] [--height 1080] [--label run1] [--sort on|off]
 // Writes <variant>-<label>.png and <variant>-<label>.json; the profile lives in <output directory>/profile-<variant>.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

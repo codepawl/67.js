@@ -129,3 +129,23 @@ OIDN's output is the same bytes run to run on one machine (the CPU device, two r
 `npm run reference -- --path-tracer [--samples 32]` draws each reference scene with the tracer and scores it against the Cycles render of the same scene with FLIP (`bench/reference/path-tracer.json`). It leaves `baseline.json` and `images/` alone, and it needs the Cycles renders of an earlier `npm run reference`.
 
 Scores and times are in the table of `bench/reference/README.md`. Cycles used 256 samples with a denoiser, and the tracer 32 samples with its own filter, so the remaining gap is partly noise and partly the differences listed above.
+
+## Progressive preview, blue noise and light choice (issue #623)
+
+`67js/addons/path-tracer-progressive` (`createProgressiveTracer(scene, options)`) draws the GPU tracer one sample per pixel per `step()`. The first two steps draw at a quarter and a half of the size, one sample each, then every step adds a sample at full size; `update({ camera, parts, environment })` starts the image over, and `snapshot()` reads the image back (filtered unless `denoise` is off). It shares the WebGL2 context of the GPU still, so one render at a time owns it. The core bundle does not carry it.
+
+Two GPU options, both off by default, so the default pixels do not change (the CPU reference rejects them):
+
+- `samplingPattern: "blue-noise-first"` uses a 64 by 64 void-and-cluster tile (`src/path-tracer-blue-noise.js`, same bytes for the same seed) for the pixel jitter and the first two random numbers of sample 0, as `SAMPLING_PATTERN_BLUE_NOISE_FIRST` does in Cycles. Later samples are random.
+- `lightSelection: "importance"` replaces the uniform light draw past the first hit: the sun and the sky keep their uniform share, and the local lights split theirs by power over squared distance, surface cosine and spot cone, mixed 10 percent with a uniform part. It ignores shadows and is a flat sum over the lights, not the light tree of Conty and Kulla (Cycles `light/tree.h`) nor ReSTIR; a scene with one local light or none draws the same pixels as before.
+
+Measured on the RTX 3060, 960 by 540, FLIP against Cycles of the denoised image, machine shared with other jobs (times are ranges of repeated runs: GPU steps only, without the first step's kernel compile and without the read back, which took 1.8 to 2.6 s with the filter):
+
+| Scene | Still, 64 samples | Random, 64 steps | Importance, 32 steps | Importance, 64 steps |
+| --- | --- | --- | --- | --- |
+| `lit-interior` | 0.0769 | 0.0769 in 2.2 s | 0.0671 in 1.3 s | 0.0572 in 2.6 s |
+| `spot-area` | 0.0262 | 0.0262 in 0.9 s | 0.0274 in 0.5 s | 0.0224 in 0.9 s |
+
+The still of `spot-area` took 60.5 s including 29.9 s of kernel compile. Blue noise alone scored the same as random within 0.0003 at every count on both scenes (it helps the 1 sample image only by 0.001 to 0.002). Median frame time of one sample per pixel, 200 frames, 960 by 540: demo room 69 ms (67 to 71) random and 71 to 73 ms with both options; `lit-interior` 32 ms; `spot-area` 14 ms.
+
+Light choice at equal samples (16 and 64) on the 16 path tracer scenes: 12 scenes have one local light or none and are identical. Better: `lit-interior` 0.0769 to 0.0572 at 64 (0.1318 to 0.0884 at 16), `spot-area` 0.0262 to 0.0224, `light-linking` 0.0291 to 0.0273 at 16. Not better: `brick-room` 0.2587 to 0.2686 at 64 and `light-linking` 0.0213 to 0.0217 at 64. In `brick-room` both choices score worse at 64 than at 16 (0.2491 and 0.2499 at 16), so the converged image is further from Cycles and the score cannot judge the noise; the criterion "no worse on every scene" is therefore not met by this measure, which is why the option stays off. `bench/reference/progressive-compare.mjs` and `progressive-score.py` made the numbers.
