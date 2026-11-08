@@ -1,5 +1,6 @@
 import { planLightmaps, estimateBake, traceLightmaps } from './light-bake.js';
 import { runKernel } from './kernel-offload.js';
+import { motionEnvironment } from './agent-motion.js';
 import { normalizeProbeList, traceProbes } from './probe-trace.js';
 import { placeProbes } from './reflection-probes.js';
 import { normalizeIrradianceGrid, placeIrradianceGrid, traceIrradianceGrid, withMeanRadiance } from './irradiance-grid.js';
@@ -12,7 +13,7 @@ const PRESET_SAMPLES_FLOOR = 16;
 // Recipe `bake`: bounced light written into lightmaps when the scene builds. This module loads on demand, so scenes
 // without a bake never download the ray tracer.
 
-const BAKE_FIELDS = ['preset', 'samples', 'bounces', 'texelsPerUnit', 'probes', 'irradianceGrid', 'gridFog'];
+const BAKE_FIELDS = ['preset', 'samples', 'bounces', 'texelsPerUnit', 'probes', 'irradianceGrid', 'gridFog', 'rebake'];
 const BAKED_MATERIAL_FIELDS = ['emission', 'emissiveColor', 'emissiveMap', 'lightMap', 'lightMapScale', 'occlusionMap', 'occlusionStrength'];
 
 /** Validates a recipe bake section and returns the plain, resolved form stored in the recipe (null clears it). */
@@ -53,12 +54,45 @@ export function normalizeAgentBake(input) {
     }
     resolved.gridFog = true;
   }
+  // Not stored when off, so the default bake keeps its bytes.
+  if (input.rebake !== undefined && typeof input.rebake !== 'boolean') {
+    throw new RangeError('bake.rebake must be a boolean.');
+  }
+  if (input.rebake === true) {
+    resolved.rebake = true;
+  }
   for (const field of ['samples', 'bounces']) {
     if (!Number.isInteger(resolved[field])) {
       throw new RangeError(`Bake ${field} must be an integer.`);
     }
   }
   return resolved;
+}
+
+/**
+ * The text a bake is cached by: the bake settings (not `rebake`), the lights, materials and the world matrix of every
+ * part. The scene stores it when it bakes; a frame whose key differs is lit by a bake that no longer matches.
+ */
+export function lightBakeKey(recipe, generatedGeometryGenerators, environment, worldMatrices) {
+  const { pointLights, spotLights, areaLights, keyColor, keyIntensity, lightDirection, keyAffects } = environment;
+  return JSON.stringify([{ ...recipe.bake, rebake: undefined }, [...generatedGeometryGenerators], pointLights, spotLights, areaLights, keyColor, keyIntensity, lightDirection, keyAffects, recipe.materials,
+    [...worldMatrices].map(([name, matrix]) => [name, Array.from(matrix)])]);
+}
+
+/** The scene_inspect diagnostics for a bake whose inputs, at the sampled pose, differ from the ones it was traced at. */
+export function staleBakeProblems(state, generators, bakedKey) {
+  const environment = state.movedLook ? motionEnvironment(structuredClone(state.recipe.environment), state.movedLook) : state.recipe.environment;
+  const graph = state.poseGraph ?? state.graph;
+  const worldMatrices = new Map(state.sourceRestParts.map(part => [part.name, graph.getNode(part.name).worldMatrix]));
+  return lightBakeKey(state.recipe, generators, environment, worldMatrices) === bakedKey ? [] : [staleBakeDiagnostic()];
+}
+
+function staleBakeDiagnostic() {
+  return {
+    kind: 'bake-stale', severity: 'warning', target: 'bake',
+    message: 'A light, the sun or a part has moved from the pose the bake was traced at, so the baked light no longer matches the frame.',
+    fix: 'Bounced light does not follow motion. Bake a pose that stays put, or set bake.rebake true (scene_apply set-bake) to trace again on every build and silence this. Material animation is not checked.',
+  };
 }
 
 function isPreset(settings) {

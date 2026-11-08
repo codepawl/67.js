@@ -1,0 +1,1 @@
+- `scene_inspect` reports a `bake-stale` warning when motion has moved a light, the sun or a part off the pose a light bake was traced at; a scene without motion or without a bake pays nothing. `bake.rebake: true` traces on every build and silences the warning. Material animation is not checked, see docs/light-bake.md (#603)

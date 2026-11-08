@@ -1336,6 +1336,26 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     return linked;
   }
 
+  function bakeGenerators(recipe) {
+    const generators = new Map();
+    for (const system of recipe.particles?.systems ?? []) {
+      generators.set(system.node, 'a hair or particle system');
+    }
+    for (const sheet of recipe.cloth?.sheets ?? []) {
+      generators.set(sheet.node, 'a cloth simulation');
+    }
+    return generators;
+  }
+
+  // The bake no longer matches the frame: motion moved a light, the sun or a part off the pose it was traced at.
+  // Only a scene with both a bake and motion pays for this check, and bake.rebake turns it off.
+  function staleBakeProblems() {
+    if (!lightBake || !state.recipe.bake || state.recipe.bake.rebake || !state.motionSampler) {
+      return [];
+    }
+    return agentSceneModule('bake').staleBakeProblems(state, bakeGenerators(state.recipe), lightBake.key);
+  }
+
   // A light bake costs seconds of ray tracing: it runs when the parts, the lights, the materials or the bake fields
   // change, and every other edit, seek or camera move reuses the last result.
   function stageLightBake(recipe, sourceRestParts, graph) {
@@ -1343,18 +1363,9 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       return null;
     }
     const worldMatrices = new Map(sourceRestParts.map(part => [part.name, new Float32Array(graph.getNode(part.name).worldMatrix)]));
-    const { pointLights, keyColor, keyIntensity, lightDirection } = recipe.environment;
-    const generatedGeometryGenerators = new Map();
-    for (const system of recipe.particles?.systems ?? []) {
-      generatedGeometryGenerators.set(system.node, 'a hair or particle system');
-    }
-    for (const sheet of recipe.cloth?.sheets ?? []) {
-      generatedGeometryGenerators.set(sheet.node, 'a cloth simulation');
-    }
-    const { spotLights, areaLights } = recipe.environment;
-    const key = JSON.stringify([recipe.bake, [...generatedGeometryGenerators], pointLights, spotLights, areaLights, keyColor, keyIntensity, lightDirection, recipe.environment.keyAffects, recipe.materials,
-      [...worldMatrices].map(([name, matrix]) => [name, Array.from(matrix)])]);
-    if (lightBake?.key === key && lightBake.sourceRestParts === sourceRestParts) {
+    const generatedGeometryGenerators = bakeGenerators(recipe);
+    const key = agentSceneModule('bake').lightBakeKey(recipe, generatedGeometryGenerators, recipe.environment, worldMatrices);
+    if (!recipe.bake.rebake && lightBake?.key === key && lightBake.sourceRestParts === sourceRestParts) {
       return { ...lightBake, reused: true };
     }
     const baked = agentSceneModule('bake').bakeAgentParts(sourceRestParts, worldMatrices, recipe.environment, recipe.bake, generatedGeometryGenerators);
@@ -1714,7 +1725,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         return result;
       });
       const resident = geometryStats(ownedGeometryRecords());
-      const diagnostics = [...recipeDiagnostics(state.recipe), ...closedRoomProblems(), ...coplanarProblems()];
+      const diagnostics = [...recipeDiagnostics(state.recipe), ...closedRoomProblems(), ...staleBakeProblems(), ...coplanarProblems()];
       return {
         revision, topologyRevision,
         ...(state.recipe.motion?.ik?.length ? { motionIk: agentSceneModule('motion').compileAgentMotion(state.recipe.motion, state.recipe).sweepIk() } : {}),

@@ -1,0 +1,1 @@
+- scene:agent-scene+lazy: the stale check, the bake key and `bake.rebake` live in the lazy bake chunk, which now imports the motion look code it needs to sample lights; the core bundle shrinks by 7 bytes because the new capability text is paid for by shorter notes.
