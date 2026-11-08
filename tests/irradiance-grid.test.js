@@ -127,3 +127,22 @@ test('a scene with splat layers and the grid keeps the two on different texture 
   assert.match(source, /irradianceGridSample/);
   assert.match(source, /splatColor/);
 });
+
+test('bake.gridFog is a boolean that needs the grid, and is not stored when off', () => {
+  assert.equal(normalizeAgentBake({ irradianceGrid: true, gridFog: true }).gridFog, true);
+  assert.equal(Object.hasOwn(normalizeAgentBake({ irradianceGrid: true, gridFog: false }), 'gridFog'), false);
+  assert.equal(Object.hasOwn(normalizeAgentBake({ irradianceGrid: true }), 'gridFog'), false);
+  assert.throws(() => normalizeAgentBake({ gridFog: true }), /needs bake\.irradianceGrid/);
+  assert.throws(() => normalizeAgentBake({ irradianceGrid: true, gridFog: 'yes' }), /boolean/);
+});
+
+test('the grid scatters in the fog only when the lighting carries the fog', () => {
+  const fog = { minimum: [-4, -1, -4], maximum: [4, 4, 4], density: 0.4, color: [1, 1, 1] };
+  const options = { resolution: 10, samples: 16, bounces: 2 };
+  const without = traceIrradianceGrid(sunlitRoom(), sun, options);
+  const withFog = traceIrradianceGrid(sunlitRoom(), { ...sun, volumeFog: fog }, options);
+  assert.equal(Object.hasOwn(without, 'fogScattered'), false);
+  assert.ok(withFog.fogScattered.some(value => value > 0), 'the sun the fog scattered is recorded');
+  assert.notDeepEqual(Array.from(withFog.data), Array.from(without.data));
+  assert.deepEqual(Array.from(traceIrradianceGrid(sunlitRoom(), sun, options).data), Array.from(without.data));
+});

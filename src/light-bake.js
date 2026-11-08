@@ -499,10 +499,8 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
         const albedo = albedoOfPart[owner];
         const emission = emissionOfPart[owner];
         const irradiance = directIrradiance(hitPoint, normal, owner);
-        const lightTarget = fogScatters > 0 ? scatterSum : sum;
         for (let channel = 0; channel < 3; channel++) {
-          // Light that reaches the point through a fog scattering counts as the fog's, which the fog on screen scatters again itself.
-          lightTarget[channel] += throughput[channel] * (emission[channel] + albedo[channel] * irradiance[channel] / Math.PI);
+          sum[channel] += throughput[channel] * (emission[channel] + albedo[channel] * irradiance[channel] / Math.PI);
           throughput[channel] *= albedo[channel];
         }
         if (throughput[0] + throughput[1] + throughput[2] < 1e-4) break;

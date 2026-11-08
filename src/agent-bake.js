@@ -11,7 +11,7 @@ const PRESET_SAMPLES_FLOOR = 16;
 // Recipe `bake`: bounced light written into lightmaps when the scene builds. This module loads on demand, so scenes
 // without a bake never download the ray tracer.
 
-const BAKE_FIELDS = ['preset', 'samples', 'bounces', 'texelsPerUnit', 'probes', 'irradianceGrid'];
+const BAKE_FIELDS = ['preset', 'samples', 'bounces', 'texelsPerUnit', 'probes', 'irradianceGrid', 'gridFog'];
 const BAKED_MATERIAL_FIELDS = ['emission', 'emissiveColor', 'emissiveMap', 'lightMap', 'lightMapScale', 'occlusionMap', 'occlusionStrength'];
 
 /** Validates a recipe bake section and returns the plain, resolved form stored in the recipe (null clears it). */
@@ -41,6 +41,16 @@ export function normalizeAgentBake(input) {
   const irradianceGrid = normalizeIrradianceGrid(input.irradianceGrid);
   if (irradianceGrid) {
     resolved.irradianceGrid = irradianceGrid;
+  }
+  // Opt in on top of the grid: the grid's paths scatter in the scene's volume fog. Not stored when off, so the default bake keeps its bytes.
+  if (input.gridFog !== undefined && typeof input.gridFog !== 'boolean') {
+    throw new RangeError('bake.gridFog must be a boolean.');
+  }
+  if (input.gridFog === true) {
+    if (!irradianceGrid) {
+      throw new RangeError('bake.gridFog needs irradianceGrid.');
+    }
+    resolved.gridFog = true;
   }
   for (const field of ['samples', 'bounces']) {
     if (!Number.isInteger(resolved[field])) {
@@ -209,8 +219,10 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
     skyTop: environment.skyTop,
     skyBottom: environment.skyBottom,
     lightDirection: environment.lightDirection,
-    volumeFog: environment.volumeFog,
   };
+  if (settings.gridFog) {
+    lighting.volumeFog = environment.volumeFog;
+  }
   // A hair, particle or cloth node is drawn from geometry built every frame, which has no lightmap UVs.
   const snapshots = parts.map(part => ({
     ...part,

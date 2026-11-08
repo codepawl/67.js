@@ -1,0 +1,2 @@
+- scene:agent-scene+lazy: the opt-in grid fog (a volumetric path in the fog, gridFog) brings temple-hall-a and -b closer to Cycles; the code loads only with a bake.
+- goal:agent-scene: gridFog adds a validated bake field (36 bytes gzip); the fog trace itself is in the lazy bake module.
