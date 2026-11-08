@@ -6,7 +6,7 @@ import { renderPathTracedImage } from '../src/path-tracer.js';
 import { packLightTree } from '../src/path-tracer-gpu-pack.js';
 import { buildFragmentSource } from '../src/path-tracer-gpu-shader.js';
 import {
-  buildLightTree, chooseLightFromTree, leftChildProbability, LIGHT_TREE_NODE_FLOATS, mergeCones, nodeImportance,
+  buildLightTree, chooseLightFromTree, leftChildProbability, LIGHT_TREE_MINIMUM_SHARE, LIGHT_TREE_NODE_FLOATS, mergeCones, nodeImportance,
 } from '../src/path-tracer-light-tree.js';
 
 function pointLight(position, intensity = 1) {
@@ -89,7 +89,8 @@ test('a node is worth more when it is near, bright and turned toward the point, 
 });
 
 test('the left chance mixes the two measures and falls back to the minimum measure', () => {
-  assert.equal(leftChildProbability(3, 1, 1, 1), 0.5 * (0.75 + 0.5));
+  const minimumShare = LIGHT_TREE_MINIMUM_SHARE;
+  assert.ok(Math.abs(leftChildProbability(3, 1, 1, 1) - ((1 - minimumShare) * 0.75 + minimumShare * 0.5)) < 1e-12);
   assert.equal(leftChildProbability(0, 1, 0, 3), 0.25);
   assert.equal(leftChildProbability(0, 0, 0, 0), -1);
 });
@@ -146,5 +147,25 @@ test('the CPU tracer with the light tree keeps the mean radiance of the uniform 
     const tree = await renderPathTracedImage(manyLightScene(lightCount), { ...options, lightSelection: 'tree' });
     const ratio = meanRadiance(tree.linear) / meanRadiance(uniform.linear);
     assert.ok(Math.abs(ratio - 1) < 0.03, `${lightCount} lights: ratio ${ratio}`);
+  }
+});
+
+test('the surface area orientation split keeps two far apart clusters of lights in separate subtrees', () => {
+  const near = Array.from({ length: 4 }, (_, index) => pointLight([index * 0.3, 1, 0], 2));
+  const far = Array.from({ length: 4 }, (_, index) => pointLight([40 + index * 0.3, 1, 0], 2));
+  const tree = buildLightTree({ points: [...near, ...far], spots: [], areas: [] });
+  const base = node => node * LIGHT_TREE_NODE_FLOATS;
+  const left = tree.data[base(0) + 12];
+  const right = tree.data[base(0) + 13];
+  const leftMaximumX = tree.data[base(left) + 4];
+  const rightMinimumX = tree.data[base(right)];
+  assert.ok(leftMaximumX < 10 && rightMinimumX > 30, `children split at ${leftMaximumX} and ${rightMinimumX}`);
+});
+
+test('the WebGPU kernels carry the tree walk', async () => {
+  const { buildMegakernelSource, WAVEFRONT_SOURCE } = await import('../src/path-tracer-webgpu-kernel.js');
+  for (const source of [buildMegakernelSource(), WAVEFRONT_SOURCE]) {
+    assert.ok(source.includes('fn chooseEmitter'));
+    assert.ok(source.includes('lightsFromEveryEmitter'));
   }
 });

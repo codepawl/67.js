@@ -1,5 +1,5 @@
 import { CACHE_DECLARATIONS, CACHE_OUTPUT, CACHE_RECORD, CACHE_TERMINAL } from './path-tracer-radiance-cache.js';
-import { LIGHT_TREE_FIRST_HIT_LIGHTS, LIGHT_TREE_NODE_TEXELS } from './path-tracer-light-tree.js';
+import { LIGHT_TREE_FIRST_HIT_LIGHTS, LIGHT_TREE_MINIMUM_SHARE, LIGHT_TREE_NODE_TEXELS } from './path-tracer-light-tree.js';
 import { SUBSURFACE_FUNCTIONS, SUBSURFACE_LOBE, SUBSURFACE_SPLIT, SUBSURFACE_UNIFORM } from './path-tracer-gpu-subsurface.js';
 
 // The GPU path tracer kernel: a WebGL2 fragment shader that follows the same paths as the CPU tracer in
@@ -118,7 +118,7 @@ int chooseEmitterByTree(vec3 normal, out float probability) {
     float totalMinimum = left.y + right.y;
     if (!(totalMinimum > 0.0)) return -1;
     float leftProbability = left.y / totalMinimum;
-    if (totalMaximum > 0.0) leftProbability = 0.5 * (left.x / totalMaximum + leftProbability);
+    if (totalMaximum > 0.0) leftProbability = ${(1 - LIGHT_TREE_MINIMUM_SHARE).toFixed(4)} * (left.x / totalMaximum) + ${LIGHT_TREE_MINIMUM_SHARE.toFixed(4)} * leftProbability;
     if (nextRandom() < leftProbability) {
       node = int(links.x);
       pathProbability *= leftProbability;

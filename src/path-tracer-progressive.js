@@ -1,5 +1,6 @@
 import { buildTraceScene } from './path-tracer-scene.js';
 import { denoiseRadiance } from './path-tracer-denoise.js';
+import { resolveLightSelection } from './path-tracer-light-tree.js';
 import { createCamera, normalizePathTracerOptions, toneMapToRgba8 } from './path-tracer.js';
 import {
   averageBuffers, createBandState, createTargets, drawOneSample, getContext, getKernel, releaseResources, setSceneUniforms, uploadScene, withBlueNoiseTile,
@@ -23,6 +24,7 @@ export async function createProgressiveTracer(scene, rawOptions = {}, { resoluti
   const { gl, gpu } = getContext();
   const { width, height } = options;
   let traceScene = null;
+  let sceneOptions = options;
   let program = null;
   let compileSeconds = 0;
   let lightCount = 0;
@@ -41,17 +43,18 @@ export async function createProgressiveTracer(scene, rawOptions = {}, { resoluti
   const loadScene = (parts, environment) => {
     releaseResources(gl);
     traceScene = buildTraceScene(parts, environment);
-    const kernel = getKernel(sceneUsesSubsurface(traceScene.materials), false, options);
+    sceneOptions = { ...options, lightSelection: resolveLightSelection(options.lightSelection, traceScene.lights) };
+    const kernel = getKernel(sceneUsesSubsurface(traceScene.materials), false, sceneOptions);
     program = kernel.program;
     compileSeconds = kernel.compileSeconds;
     gl.useProgram(program);
-    lightCount = uploadScene(gl, program, traceScene, options).lightCount;
+    lightCount = uploadScene(gl, program, traceScene, sceneOptions).lightCount;
     createTargets(gl, width, height);
   };
 
   const loadCamera = camera => {
     const view = createCamera(camera, width, height);
-    setSceneUniforms(gl, program, traceScene, view, options, lightCount);
+    setSceneUniforms(gl, program, traceScene, view, sceneOptions, lightCount);
   };
 
   const clearTargets = () => {
