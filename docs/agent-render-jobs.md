@@ -55,7 +55,7 @@ Imported clips retain separate absolute sampling through `settings.animation`.
 ## Timeline, audio and encoder
 
 A recipe `timeline` plays shots one after another over the recipe's motion clock. It is small on purpose: the video sequence
-editor is a non-goal of the engine (issue #23), so there are no layers, overlaps, trimming or crossfades. Shots cut, or dip through black.
+editor is a non-goal of the engine (`docs/goal.md`), so there are no layers, overlaps, trimming or crossfades. Shots cut, or dip through black.
 
 ```json
 { "timeline": { "shots": [

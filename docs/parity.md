@@ -1,7 +1,7 @@
 # Blender parity ledger
 
 This ledger compares 67js with each feature in the [Blender 5.2 manual](https://docs.blender.org/manual/en/latest/).
-It is the record for the goal in issue #23. Use `npm run parity` to print the coverage of each section.
+It is the record for the goal in `docs/goal.md`. Use `npm run parity` to print the coverage of each section.
 
 Modifier coverage (rows under `Modeling > Modifiers`, from `npm run parity`): 12 done, 25 partial, 23 missing and 1 out of scope, 8 of the done rows compared with Blender, 20% of the in-scope rows done.
 
@@ -130,7 +130,7 @@ To move to a new Blender release, run `node scripts/parity-manual-snapshot.mjs`.
 | Sculpting & Painting > Vertex Paint | partial | Imported vertex colors render. Recipes can not author them. | | |
 | Sculpting & Painting > Weight Paint | partial | Automatic weights replace painting by hand. Skin weights are a mesh attribute, but there are no named vertex groups and no painting. | [rigging](../tests/rigging.test.js) | #46 |
 | Sculpting & Painting > Curves Sculpting | missing | No hair curves. | | #63 |
-| Grease Pencil | out of scope | Decided in issue #23. | | |
+| Grease Pencil | out of scope | Decided in `docs/goal.md`. | | |
 | Animation & Rigging > Animation Editors | out of scope | Interface for a mouse. | | |
 | Animation & Rigging > Keyframes | partial | Linear, step, smooth and Hermite curves with deterministic seeks, plus per-keyframe named easings (Sine, Quad, Cubic, Quart, Quint, Expo, Circ, Back, Bounce and Elastic, each in, out or in-out) and `cubic-bezier` (#286). Each easing matches Blender 5.2 within 1e-4 at 20 sample times. Back and Elastic take overshoot, amplitude and period. There are no Bezier handles or keying sets. | [animation](../tests/animation.test.js), [easing](../tests/easing.test.js) | #286 |
 | Animation & Rigging > Armatures > Bones | partial | Recipe `armatures` list bones with a name, parent, head and tail, and each bone is a recipe node that tracks, `motion.ik` and a physics ragdoll (#96, `tests/ragdoll.test.js`: a capsule body per bone, spherical joints without swing limits, a seekable baked fall, at most 48 bones) address. No roll, bone shapes or custom properties. | [rigging](../tests/rigging.test.js) | #46 |
@@ -140,7 +140,7 @@ To move to a new Blender release, run `node scripts/parity-manual-snapshot.mjs`.
 | Animation & Rigging > Armatures > Posing | partial | Layers, masks, additive poses and IK in code. MCP asset recipes take `motion.layers` (clips, masks, weights, additive, rename retarget) beside IK; no foot tilt on slopes or full-body IK. | [skeleton-pose](../tests/skeleton-pose.test.js), [agent-asset-ik](../tests/agent-asset-ik.test.js) | #58, #59 |
 | Animation & Rigging > Lattice | missing | No lattice. | | #42 |
 | Animation & Rigging > Constraints > Interface | out of scope | Interface for a mouse. | | |
-| Animation & Rigging > Constraints > Motion Tracking | out of scope | Motion tracking is out of scope in issue #23. | | |
+| Animation & Rigging > Constraints > Motion Tracking | out of scope | Motion tracking is out of scope in `docs/goal.md`. | | |
 | Animation & Rigging > Constraints > Transform > Copy Location Constraint | partial | `copy_location` in `motion.constraints`: axes, invert, offset, world or local space, influence. Matches Blender where tested. | [agent-motion-constraints](../tests/agent-motion-constraints.test.js), [src/expression.js](../src/expression.js) | #58, #98 |
 | Animation & Rigging > Constraints > Transform > Copy Rotation Constraint | partial | `copy_rotation`: Euler axes, invert, replace or add, world or local. World matrices match Blender 5.2 in 2 cases. | [blender-constraints](../tests/blender-constraints.test.js) | #58 |
 | Animation & Rigging > Constraints > Transform > Copy Scale Constraint | partial | `copy_scale`: axes and offset, world or local. | [agent-motion-constraints](../tests/agent-motion-constraints.test.js) | #58 |
@@ -215,22 +215,22 @@ To move to a new Blender release, run `node scripts/parity-manual-snapshot.mjs`.
 | Rendering > Render Output > Rendering Animations | done | Snapshot render jobs with progress, cancel and verified output. | [agent-render-jobs](../tests/agent-render-jobs.test.js) | |
 | Rendering > Render Output > Animation Player | out of scope | Interface for a person. | | |
 | Compositing | partial | A fixed chain of bloom, grading and FXAA. There is no graph. | [effects](../tests/effects.test.js) | #54 |
-| Motion Tracking & Masking | out of scope | Decided in issue #23. | | |
-| Video Editing | out of scope | Decided in issue #23. DaVinci Resolve or FFmpeg can cut rendered output. | | |
-| Assets, Files, & Data System > Blender File | out of scope | Decided in issue #23. Recipes and GLB are the file formats. | | |
+| Motion Tracking & Masking | out of scope | Decided in `docs/goal.md`. | | |
+| Video Editing | out of scope | Decided in `docs/goal.md`. DaVinci Resolve or FFmpeg can cut rendered output. | | |
+| Assets, Files, & Data System > Blender File | out of scope | Decided in `docs/goal.md`. Recipes and GLB are the file formats. | | |
 | Assets, Files, & Data System > Data-Blocks | out of scope | Blender file internals. Recipes name resources by ID. | | |
 | Assets, Files, & Data System > Custom Properties | missing | Nodes have a label and no other fields. | | |
 | Assets, Files, & Data System > File Paths | out of scope | The MCP server allows only a configured catalog. | | |
 | Assets, Files, & Data System > Linked Libraries | out of scope | Blender file internals. | | |
 | Assets, Files, & Data System > Asset Libraries | partial | A local GLB catalog. There is no library of reusable parts. | [agent-asset-catalog](../tests/agent-asset-catalog.test.js) | #68 |
 | Assets, Files, & Data System > Media Formats | partial | Common web images in, and PNG and MP4 out. | | |
-| Assets, Files, & Data System > Importing & Exporting Files | out of scope | Decided in issue #23: GLB is the exchange format. | | |
+| Assets, Files, & Data System > Importing & Exporting Files | out of scope | Decided in `docs/goal.md`: GLB is the exchange format. | | |
 | Add-ons > Node Wrangler | out of scope | Interface for a mouse. | | |
 | Add-ons > Rigify | missing | No rig presets. | | #46 |
 | Add-ons > glTF 2.0 | partial | Import is broad. Export writes the five texture channels as PNG, skins with joints, morph targets and node clips, and bakes pattern materials with box projected UVs; Blender 5.2 and three.js open the RobotExpressive export with its 43 bones and 14 clips. Morph weight clips export, and the `scene_export_glb` MCP tool writes the current pose or an imported clip as a GLB file, checked in Blender 5.2 for a patterned recipe, the robot with IK and its Walking action. Not yet: recipe motion tracks as clips, a clip together with IK or node overrides. | [gltf](../tests/gltf.test.js), [export](../tests/export.test.js), [round trip](../tests/export-roundtrip.test.js), [MCP contract](../tests/mcp-tools.test.js) | #49 |
 | Add-ons > Manage UI Translations | out of scope | Blender interface work. | | |
 | Add-ons > VR Scene Inspection | out of scope | Interface for a person. | | |
-| Advanced | out of scope | Decided in issue #23: 67js does not run agent code. MCP and the JavaScript API take the place of `bpy`. | | |
+| Advanced | out of scope | Decided in `docs/goal.md`: 67js does not run agent code. MCP and the JavaScript API take the place of `bpy`. | | |
 
 ## Work outside the manual
 
