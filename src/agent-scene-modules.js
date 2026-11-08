@@ -34,6 +34,7 @@ const MODULE_LOADERS = {
   coplanar: () => import('./coplanar-overlap.js'),
   floorSky: () => import('./floor-sky-visibility.js'),
   userPass: () => import('./user-pass.js'),
+  objectMotionBlur: () => import('./object-motion-blur.js'),
   materialSnippet: () => import('./material-snippet.js'),
 };
 
@@ -80,6 +81,8 @@ const MODULE_MARKERS = {
   floorSky: ['"keyColor"', '"keyIntensity"'],
   userPass: ['"postPasses"'],
   materialSnippet: ['"snippet":{'],
+  // Only a motionBlur object that sets a non-zero `objects` loads it; the common `"shutter":0` look does not.
+  objectMotionBlur: [/"motionBlur":\{[^}]*"objects":(?!0[,}])/],
 };
 
 /** Whether a recipe, operation list or edit list contains a boolean edit, which needs loadMeshBooleans() first. */

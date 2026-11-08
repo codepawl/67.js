@@ -154,6 +154,7 @@
     "smoke:agent-material-snippet": "node scripts/smoke-agent-material-snippet.mjs",
     "smoke:agent-texture-sequence": "node scripts/smoke-agent-texture-sequence.mjs",
     "smoke:render-passes": "node scripts/smoke-render-passes.mjs",
+    "smoke:object-motion-blur": "node scripts/smoke-object-motion-blur.mjs",
     "smoke:path-tracer": "node scripts/smoke-path-tracer.mjs",
     "smoke:film-timeline": "node scripts/smoke-film-timeline.mjs",
     "smoke:material-layers": "node scripts/smoke-material-layers.mjs",

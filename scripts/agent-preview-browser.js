@@ -257,7 +257,16 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   syncMeshBlend(record);
   record.renderer.userPasses?.set(record.scene.postPasses ?? []);
   applyRecipeWindHeading(record.renderer, environment);
-  record.renderer.render({ ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...frameOptions, effects: effectsWithFStop(frameOptions.effects ?? effects, camera) });
+  const { objectMotion, ...renderOptions } = frameOptions;
+  const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
+  if (objectMotion) {
+    // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
+    const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
+    installObjectMotionBlur(record.renderer);
+    record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
+    frame.objectMotion = packObjectMotion(record.renderer, objectMotion.current, objectMotion.previous);
+  }
+  record.renderer.render(frame);
   const error = record.renderer.context.getError();
   if (error !== 0) {
     throw new Error(`WebGL render failed with error ${error}.`);
@@ -387,6 +396,19 @@ function previousCameraFor(record, motionTime) {
   const previousCamera = record.scene.camera;
   record.scene.sampleMotion(motionTime);
   return previousCamera;
+}
+
+// The parts' world matrices now and at the start of the shutter, sampled from time like the previous camera. Only a scene that
+// asks for object blur (and has motion to sample) pays for it; an imported asset animates by skin, which this does not follow.
+function objectMotionFor(record, motionTime) {
+  const { shutter, objects } = record.scene.effects.motionBlur;
+  if (!(shutter > 0 && objects > 0) || motionTime === undefined || record.asset) return undefined;
+  const { sampleWorldMatrices } = agentSceneModule('objectMotionBlur');
+  const current = sampleWorldMatrices(record.scene.parts);
+  record.scene.sampleMotion(Math.max(0, motionTime - shutter));
+  const previous = sampleWorldMatrices(record.scene.parts);
+  record.scene.sampleMotion(motionTime);
+  return { current, previous };
 }
 
 function createPreview(scene, { sessionId, memoryBudgetMiB, backend, transparent = false }, asset, placedAssets, sequenceFrames) {
@@ -754,12 +776,13 @@ window.__agentPreview = {
     const shotCamera = cameraOverrides ? withCameraOverrides(record.scene.camera, cameraOverrides) : undefined;
     const sampledPreviousCamera = pass ? undefined : previousCameraFor(record, motionTime);
     const previousCamera = sampledPreviousCamera && cameraOverrides ? withCameraOverrides(sampledPreviousCamera, cameraOverrides) : sampledPreviousCamera;
+    const objectMotion = pass ? undefined : objectMotionFor(record, motionTime);
     const exposure = record.scene.effects.exposure * brightness;
     const shotEffects = depthOfFieldOverrides
       ? { ...record.scene.effects, depthOfField: { ...record.scene.effects.depthOfField, ...depthOfFieldOverrides } }
       : undefined;
     const outputFramebuffer = floatOutput && !pass ? record.floatModule.outputFor(record, canvas).framebuffer : undefined;
-    draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer,
+    draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
       ...(brightness === 1 ? {} : { exposure }), ...(shotEffects ? { effects: shotEffects } : {}) });
     const info = renderInfo(record.renderer);
     return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() } : info;
