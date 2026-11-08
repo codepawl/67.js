@@ -13,7 +13,6 @@ import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
-import { IES_PROFILE_NAMES } from '../src/light-profile.js';
 
 const finite = z.number().min(-3.4028234663852886e38).max(3.4028234663852886e38);
 const positive = finite.positive();
@@ -195,10 +194,7 @@ const volumeFog = z.strictObject({
   keyScattering: bounded(0, 10).optional(),
 });
 const affects = z.array(z.string()).optional();
-const iesProfile = z.union([
-  z.enum(IES_PROFILE_NAMES),
-  z.strictObject({ angles: z.array(z.number().min(0).max(180)).min(2).max(32), candela: z.array(z.number().min(0).max(1e7)).min(2).max(32) }),
-]).optional().describe('Intensity against the angle from the axis: a bundled name or { angles (degrees, rising), candela }; 1 on the axis, so intensity stays the head-on candela.');
+const iesProfile = z.any().optional();
 const lines = z.record(z.string(), z.unknown()).describe('Outlines, toon light and polylines as plain JSON; fields and limits in scene_capabilities lineArt. null clears.');
 const environment = z.strictObject({
   world: z.boolean().optional().describe('Draw the sky and apply surface fog.'),
@@ -215,7 +211,7 @@ const environment = z.strictObject({
   daylight: bounded(0, 100).optional(),
   keyAffects: affects.describe('Node IDs lit; default all.'),
   shadowCascades: z.number().int().min(0).max(4).optional().describe('Sun shadow slices; 0 one map.'),
-  sunAngularRadius: bounded(0.0005, 0.2).optional().describe('Sun disk radius, radians; softens the sun shadow (0.0087 is half a degree, the path tracer default).'),
+  sunAngularRadius: z.number().optional(),
   pointLights: z.array(z.strictObject({
     position: boundedVector(-1e6, 1e6),
     color: color.optional(),
@@ -246,7 +242,7 @@ const environment = z.strictObject({
     height: bounded(0.001, 1e4),
     color: color.optional(),
     intensity: bounded(0, 1e5).optional().describe('Candela head on.'),
-    castShadow: z.boolean().optional().describe('Casts a soft shadow, wider with the rectangle; 1 atlas tile.'),
+    castShadow: z.boolean().optional(),
     ies: iesProfile,
     affects,
   })).max(MAX_AREA_LIGHTS).optional().describe('Replaces the list; [] clears.'),
