@@ -122,8 +122,8 @@ const BALL_REGION = { left: 125, right: 195, top: 85, bottom: 155 };
 
 try {
   await client.connect(transport);
-  const capabilities = (await call('scene_capabilities')).structuredContent;
-  const layerNames = Object.keys(capabilities.scene?.materialLayers ?? {});
+  const capabilities = (await call('scene_capabilities', { topic: 'materialLayers' })).structuredContent;
+  const layerNames = Object.keys(capabilities.value ?? {});
   for (const field of ['clearcoat', 'transmission', 'thickness', 'ior', 'anisotropy', 'iridescence']) {
     assert.ok(layerNames.includes(field), `scene_capabilities materialLayers lists ${field}`);
   }

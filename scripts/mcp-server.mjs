@@ -1,3 +1,4 @@
+import { answerCapabilities } from './capabilities-topics.mjs';
 import { BRANCH_NAME_PATTERN } from '../src/agent-branches.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
@@ -23,6 +24,14 @@ const vector3 = z.tuple([finite, finite, finite]).meta({ id: 'Vector3' });
 const color = z.tuple([unit, unit, unit]).meta({ id: 'Color' });
 const quaternion = z.tuple([finite, finite, finite, finite]).meta({ id: 'Quaternion' });
 const point2 = z.tuple([finite, finite]);
+// A tool lists a short object (its common fields and one line naming the rest) while the full strict schema still validates
+// every call, because a pipe publishes its input side. scene_capabilities serves the full schema as an outline by topic.
+const outlineSources = new Map();
+function listed(topic, fullSchema, description, coreShape = {}) {
+  if (!outlineSources.has(topic)) outlineSources.set(topic, fullSchema);
+  return z.looseObject(coreShape).describe(description).pipe(fullSchema);
+}
+const coreOf = (strictShape, names) => Object.fromEntries(names.map(name => [name, strictShape[name]]));
 const detail = (minimum, maximum) => z.number().int().min(minimum).max(maximum).optional();
 const segments = detail(3, 2048);
 const ring = z.array(point2).min(3).max(4096);
@@ -38,7 +47,7 @@ const nodeFields = {
   relations: relationList.optional(),
   asset: placedAsset.optional(),
   vegetation: placedVegetation.optional(),
-  skin: skinSpec.optional(),
+  skin: listed('skin', skinSpec, 'Bind this mesh node to an armature with automatic weights: { armature, maxInfluences, maxDistance }.', coreOf(skinSpec.shape, ['armature'])).optional(),
   decal: z.boolean().optional(),
   depthLayer: z.number().int().min(0).max(4).optional(),
   visible: z.boolean().optional().describe('false hides the node and children; keyable in motion. Flags: scene_capabilities renderFlags.'),
@@ -65,7 +74,7 @@ const instanceSpec = z.strictObject({
   alignToNormal: z.boolean().optional().describe('Surface only: tilt up to the surface normal.'),
   scale: z.tuple([z.number().min(0.001).max(1000), z.number().min(0.001).max(1000)]).optional().describe('Random uniform scale range [min, max].'),
 }).describe('Exactly one of grid, scatter or surface. Expands at scene_create into a group node plus one child node per point (<id>.0, <id>.1, ...) that share geometry and material and draw as one instanced batch. At most 2048 candidate points.');
-const nodeRecord = z.strictObject({ armature: identifier.optional().describe('Set on nodes an armature generates, and ignored on input. Edit bones through armatures.'), id: identifier, geometry: identifier.optional(), material: identifier.optional(), instances: instanceSpec.optional().describe('Repeat geometry and material at points; needs both ids. Only in the recipe given to scene_create, not in add-node.'), ...nodeFields });
+const nodeRecord = z.strictObject({ armature: identifier.optional().describe('Set on nodes an armature generates, and ignored on input. Edit bones through armatures.'), id: identifier, geometry: identifier.optional(), material: identifier.optional(), instances: listed('instances', instanceSpec, 'Repeat geometry and material at points; needs both ids. Only in scene_create, not in add-node. One of grid {counts, spacing}, scatter {count, min, max} or surface {geometry, count}; also seed, where, yaw, alignToNormal, scale.').optional(), ...nodeFields });
 const materialGraph = z.record(z.string(), z.unknown()).describe('Node graph as plain JSON, never code. Outputs, nodes, inputs and limits are in scene_capabilities materialGraph.');
 const materialPattern = z.strictObject({
   type: z.enum([...MATERIAL_PATTERN_TYPES, 'graph']).describe('Surface look: a preset, or graph for your own node graph (give graph). Directional presets (wood, planks, metal) run along axis.'),
@@ -79,39 +88,39 @@ const materialPattern = z.strictObject({
   axis: z.enum(['x', 'y', 'z']).optional().describe('Object axis the grain runs along. Defaults to y.'),
   resolution: z.union([z.literal(256), z.literal(512), z.literal(1024)]).optional().describe('Texture size. Defaults to 512; each pattern takes about 4 MiB at 512.'),
 }).describe('Procedural texture; box mapping needs no UVs. color tints it, roughness and metallic scale it.');
-function layerNumber(field, description) {
+function layerNumber(field) {
   const [minimum, maximum] = MATERIAL_LAYER_SCALAR_RANGES[field];
-  return z.number()
+  const ranged = z.number()
     .min(minimum, `${field} must be at least ${minimum}. Raise it to ${minimum} or more.`)
-    .max(maximum, `${field} must be at most ${maximum}. Lower it to ${maximum} or less.`)
-    .describe(description).optional();
+    .max(maximum, `${field} must be at most ${maximum}. Lower it to ${maximum} or less.`);
+  return z.number().pipe(ranged).optional();
 }
 
-function layerColor(field, description) {
+function layerColor(field) {
   const [minimum, maximum] = MATERIAL_LAYER_COLOR_RANGES[field];
   const component = z.number().min(minimum, `${field} components must be at least ${minimum}.`).max(maximum, `${field} components must be at most ${maximum}. Use linear values.`);
-  return z.tuple([component, component, component]).describe(description).optional();
+  return z.array(z.number()).length(3).pipe(z.tuple([component, component, component])).optional();
 }
 
-// One short line each; ranges and details are in scene_capabilities materialLayers.
+// Ranges and one line per field are in scene_capabilities materialLayers; the server still checks each range.
 const materialLayerFields = {
-  clearcoat: layerNumber('clearcoat', 'Clear coat strength.'),
-  clearcoatRoughness: layerNumber('clearcoatRoughness', 'Coat roughness.'),
-  transmission: layerNumber('transmission', 'Light passing through (glass).'),
-  thickness: layerNumber('thickness', 'Metres light crosses.'),
-  ior: layerNumber('ior', 'Index of refraction.'),
-  attenuationColor: layerColor('attenuationColor', 'Linear RGB kept after attenuationDistance.'),
+  clearcoat: layerNumber('clearcoat'),
+  clearcoatRoughness: layerNumber('clearcoatRoughness'),
+  transmission: layerNumber('transmission'),
+  thickness: layerNumber('thickness'),
+  ior: layerNumber('ior'),
+  attenuationColor: layerColor('attenuationColor'),
   attenuationDistance: z.number().positive('attenuationDistance must be above 0. Leave it out for no absorption.').max(3.4e38).describe('Metres to reach attenuationColor.').optional(),
-  sheenColor: layerColor('sheenColor', 'Linear RGB cloth glow.'),
-  sheenRoughness: layerNumber('sheenRoughness', 'Sheen width.'),
-  specular: layerNumber('specular', 'Reflection strength.'),
-  specularColor: layerColor('specularColor', 'Reflection tint.'),
-  anisotropy: layerNumber('anisotropy', 'Highlight stretch along a grain.'),
-  anisotropyRotation: layerNumber('anisotropyRotation', 'Grain turn, radians.'),
-  iridescence: layerNumber('iridescence', 'Thin-film colour shift.'),
-  iridescenceIor: layerNumber('iridescenceIor', 'Film index of refraction.'),
-  iridescenceThickness: layerNumber('iridescenceThickness', 'Film thickness, nanometres.'),
-  toon: layerNumber('toon', 'Light steps (toon); 0 off.'),
+  sheenColor: layerColor('sheenColor'),
+  sheenRoughness: layerNumber('sheenRoughness'),
+  specular: layerNumber('specular'),
+  specularColor: layerColor('specularColor'),
+  anisotropy: layerNumber('anisotropy'),
+  anisotropyRotation: layerNumber('anisotropyRotation'),
+  iridescence: layerNumber('iridescence'),
+  iridescenceIor: layerNumber('iridescenceIor'),
+  iridescenceThickness: layerNumber('iridescenceThickness'),
+  toon: layerNumber('toon'),
 };
 
 
@@ -131,9 +140,9 @@ const subsurface = z.strictObject({
 const materialFields = {
   ...waterFields,
   ...materialLayerFields,
-  subsurface: subsurface.optional(),
+  subsurface: listed('subsurface', subsurface, 'Subsurface scattering (skin, wax, leaves): weight, radius [r,g,b], scale, color [r,g,b]; ranges in scene_capabilities materialSubsurface.').optional(),
   snippet: z.record(z.string(), z.unknown()).nullable().optional().describe('GLSL fragment hook; scene_capabilities materialSnippet.'),
-  pattern: materialPattern.optional(),
+  pattern: listed('pattern', materialPattern, 'Procedural texture; box mapping needs no UVs. type is a preset or graph (give graph); also mapping, colors, size, count, bump, seed, axis, resolution; see scene_capabilities pattern.', coreOf(materialPattern.shape, ['type'])).optional(),
   map: z.strictObject({ sequence: z.strictObject({
     frames: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(2).max(64),
     fps: z.number().positive().max(60),
@@ -148,7 +157,10 @@ const materialFields = {
   alphaMode: z.enum(['opaque', 'blend']).optional().describe('blend draws after opaque geometry, sorted back to front.'),
   doubleSided: z.boolean().optional().describe('Draw and light both faces (thin sheets, leaves, cloth).'),
 };
-const materialTag = z.enum(['surface', 'unlit', 'liquid', 'foam', 'foliage', 'grass', 'water']).optional().describe('liquid refracts what lies behind it and absorbs by thickness: color is the light one metre lets through. foam is soft blended whitewater. foliage and grass sway in environment.wind. water is a flat mirror sheet; scene_capabilities water has its fields.');
+const materialTag = z.enum(['surface', 'unlit', 'liquid', 'foam', 'foliage', 'grass', 'water']).optional().describe('Surface kind; liquid, foam, foliage, grass and water change how it renders: see scene_capabilities materialTags and water.');
+const materialCore = coreOf(materialFields, ['color', 'metallic', 'roughness', 'emission', 'opacity']);
+const materialMore = 'More fields: tag, alphaMode, doubleSided, emissiveColor, map, pattern, subsurface, snippet, waterPreset, absorption, turbidity and the layers clearcoat, clearcoatRoughness, transmission, thickness, ior, attenuationColor, attenuationDistance, sheenColor, sheenRoughness, specular, specularColor, anisotropy, anisotropyRotation, iridescence, iridescenceIor, iridescenceThickness, toon; see scene_capabilities materialFields.';
+const materialListed = (strictSchema, description, extraCore) => listed('materialFields', strictSchema, `${description} ${materialMore}`, { ...extraCore, ...materialCore });
 const liquidOptics = z.strictObject({
   thickness: z.number().min(0).max(100).optional().describe('Metres of liquid where it faces the camera.'),
   ior: z.number().min(1).max(3).optional(),
@@ -158,18 +170,18 @@ const liquidOptics = z.strictObject({
   foamSoftness: unit.optional(),
 });
 const cameraFields = {
-  eye: vector3.optional().describe('Camera position in world coordinates.'),
-  target: vector3.optional().describe('World point toward which the camera looks.'),
-  up: vector3.optional().describe('Nonzero camera up direction, not collinear with the view direction.'),
+  eye: vector3.optional(),
+  target: vector3.optional(),
+  up: vector3.optional(),
   fov: finite.gt(0).lt(180).optional().describe('Vertical perspective field of view in degrees. Not with focalLength.'),
-  near: positive.optional().describe('Near clipping distance. Must be less than far.'),
-  far: positive.optional().describe('Far clipping distance. Must exceed near.'),
-  projection: z.enum(['perspective', 'orthographic']).optional().describe('Defaults to perspective.'),
-  orthoScale: positive.optional().describe('Orthographic view height in metres (default 4); needs projection orthographic.'),
+  near: positive.optional(),
+  far: positive.optional(),
+  projection: z.enum(['perspective', 'orthographic']).optional(),
+  orthoScale: positive.optional(),
   focalLength: positive.max(10000).optional().describe('Lens in mm, instead of fov.'),
-  sensorWidth: positive.max(1000).optional().describe('Sensor width in mm with focalLength; default 36.'),
-  shift: z.tuple([z.number().min(-1).max(1), z.number().min(-1).max(1)]).optional().describe('Lens shift [x, y] as a fraction of the frame; positive moves the frame right and up.'),
-  fStop: z.number().min(0.7).max(64).optional().describe('Depth of field focused on target; 1.4 is full blur. Not with effects.depthOfField.blur above 0.'),
+  sensorWidth: positive.max(1000).optional(),
+  shift: z.tuple([z.number().min(-1).max(1), z.number().min(-1).max(1)]).optional(),
+  fStop: z.number().min(0.7).max(64).optional(),
 };
 const bounded = (minimum, maximum) => z.number().min(minimum).max(maximum);
 const boundedVector = (minimum, maximum) => z.tuple([bounded(minimum, maximum), bounded(minimum, maximum), bounded(minimum, maximum)]);
@@ -192,6 +204,13 @@ const volumeFog = z.strictObject({
   contrast: bounded(0, 4).optional(),
   profileSoftness: bounded(0, 0.95).optional(),
   keyScattering: bounded(0, 10).optional(),
+  heightFalloff: finite.optional(),
+  scatterOctaves: finite.optional(),
+  multiScatter: finite.optional(),
+  multiExtinction: finite.optional(),
+  multiAnisotropy: finite.optional(),
+  keyTransmittance: finite.optional(),
+  surfaceTransmittance: finite.optional(),
 });
 const affects = z.array(z.string()).optional();
 const lines = z.record(z.string(), z.unknown()).describe('Outlines, toon light and polylines as plain JSON; fields and limits in scene_capabilities lineArt. null clears.');
@@ -257,12 +276,8 @@ const environment = z.strictObject({
   look: z.union([z.enum([...LOOK_NAMES, ...BUNDLED_CUBE_LOOK_NAMES]), z.string().regex(CATALOG_FILE_ID)]).nullable().optional().describe('Look preset or .cube; scene_capabilities catalogLooks. null clears.'),
   wind: z.strictObject({ strength: bounded(0, 4).optional(), direction: bounded(-360, 360).optional().describe('Degrees: 0 toward +x, 90 toward +z.') }).optional().describe('Sway of foliage and grass materials; strength defaults to 0.3.'),
 });
-// The full environment schema is published once, in scene_create. A JSON Schema $ref can not point from one tool's
-// inputSchema into another's, so scene_apply and scene_create_asset publish a plain object that names it and still
-// check every field against the same schema here, with the same error paths.
-const environmentReference = z.record(z.string(), z.unknown())
-  .describe('Same fields as recipe.environment in scene_create.')
-  .pipe(environment);
+// Every tool lists the same short environment; the full schema is served by scene_capabilities topic environment.
+const environmentListed = listed('environment', environment, 'Lighting and sky. More fields: hdri, look, viewTransform, keyColor, keyIntensity, fillIntensity, ambientIntensity, daylight, keyAffects, shadowCascades, pointLights, spotLights, areaLights, skyTop, skyBottom, fogColor, fogDensity, volumeFog (density, scatterOctaves, multiScatter, keyTransmittance, surfaceTransmittance and more: scene_capabilities environment), liquid, lines, wind, objectReflections, floorSkyTrace, sunBounce, specularAntiAliasing, resolveCoplanar; see scene_capabilities environment.', coreOf(environment.shape, ['setup', 'world', 'ground', 'lightDirection', 'environmentIntensity']));
 const effects = z.strictObject({
   exposure: bounded(0.01, 16).optional(),
   saturation: bounded(0, 2).optional(),
@@ -280,6 +295,7 @@ const effects = z.strictObject({
   depthOfField: z.strictObject({ blur: unit.optional(), focusDistance: bounded(0.01, 100000).optional() }).optional().describe('Lens blur: blur 0 to 1, focusDistance metres.'),
   motionBlur: z.strictObject({ shutter: bounded(0, 0.5).optional() }).optional().describe('Camera motion smear, shutter in seconds.'),
 });
+const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
 const shadow = z.strictObject({
   target: boundedVector(-1e6, 1e6).optional(),
   extent: bounded(0.01, 1e5).optional(),
@@ -418,8 +434,12 @@ const stackNodes = [
 // A whole-mesh modifier is a free record { op, ...fields }: its ops and fields live in scene_capabilities meshModifiers, so
 // the schema does not grow with each modifier, and the backend validates every field.
 const modifierRecord = z.record(z.string(), z.unknown()).describe(`Whole-mesh modifier { op, ...fields }, op one of: ${Object.keys(MODIFIER_OPERATIONS).join(', ')}.`);
-const meshStack = z.array(z.union([z.discriminatedUnion('op', stackNodes), modifierRecord])).max(16);
-const meshEdits = z.array(z.union([z.discriminatedUnion('op', [...meshEdit.options, ...stackNodes]), modifierRecord])).max(64);
+const stackNodeUnion = z.union([z.discriminatedUnion('op', stackNodes), modifierRecord]);
+const meshEditUnion = z.union([z.discriminatedUnion('op', [...meshEdit.options, ...stackNodes]), modifierRecord]);
+const stackOperationNames = [...stackNodes.map(node => node.shape.op.value), ...Object.keys(MODIFIER_OPERATIONS)];
+const editOperationNames = [...meshEdit.options.map(option => option.shape.op.value), ...stackOperationNames];
+const meshStack = z.array(listed('meshStack', stackNodeUnion, 'Stack node { op, ...fields }; fields per op: scene_capabilities meshStack.', { op: z.enum(stackOperationNames) })).max(16);
+const meshEdits = z.array(listed('meshEdit', meshEditUnion, 'Edit { op, ...fields }, applied in order; fields per op: scene_capabilities meshEdit, or meshEdit.<op> for one op.', { op: z.enum(editOperationNames) })).max(64);
 // The full edit and stack schemas live in mesh_edit and mesh_stack. Repeating them in every recipe cost about 45 KB
 // per tool; the backend still validates each item and names the valid ops when one is wrong.
 const recipeMeshEdits = z.array(z.record(z.string(), z.unknown())).max(64);
@@ -605,20 +625,26 @@ const armature = z.strictObject({
 }).describe('A skeleton. Each bone becomes a recipe node named after it (parented like the bones, rotating about its head), so motion tracks, motion.ik and set-node address bones by name. Mesh nodes bind with skin. scene_inspect rig lists unweighted vertices, bones with no vertices and joint axis problems.');
 const armaturesReference = z.array(z.record(z.string(), z.unknown())).max(16).describe('The same array as recipe.armatures in scene_create: id, parent, preset, fit, bones. Read that tool for the fields.');
 const timelineReference = z.record(z.string(), z.unknown()).describe('Shots in order, up to 60 s; fields in scene_capabilities filmTimeline.');
+const geometryTypes = geometry.options.map(option => option.shape.type.value);
+const geometryListed = listed('geometries', geometry, 'Geometry { id, type, ...fields of that type }; mesh also takes base, edits, stack, smoothAngle. Fields per type: scene_capabilities geometries.', { id: identifier, type: z.enum(geometryTypes) });
+const motionListed = listed('motion', motion, 'One absolute-time clip: duration in s, loop, tracks [{kind, id, property, interpolation, keyframes [{time, value, easing}]}], ik, constraints, drivers; see scene_capabilities motion.', coreOf(motion.shape, ['duration', 'loop']));
+const physicsListed = listed('physics', physics, 'Rigid bodies recorded offline with Rapier: duration, gravity, bodies [{node, type, shape, mass, ...}], joints; see scene_capabilities physics.', coreOf(physics.shape, ['duration']));
+const clothListed = listed('cloth', cloth, 'Baked cloth sheets: duration, gravity, wind, sheets [{node, pin, pinTo, stiffness, ...}], colliders; see scene_capabilities cloth.', coreOf(cloth.shape, ['duration']));
+const armatureListed = listed('armatures', armature, 'A skeleton { id, parent, preset humanoid|quadruped, fit, bones [{name, parent, head, tail}], prefix, translation, rotation }; see scene_capabilities armatures.', { id: identifier });
 const recipe = z.strictObject({
   format: z.literal('67js.scene'),
   schemaVersion: z.literal(1),
-  geometries: z.array(geometry).max(256).optional(),
-  materials: z.array(z.strictObject({ id: identifier, tag: materialTag, ...materialFields })).max(256).optional().describe('Omit for none.'),
+  geometries: z.array(geometryListed).max(256).optional(),
+  materials: z.array(materialListed(z.strictObject({ id: identifier, tag: materialTag, ...materialFields }), 'Material.', { id: identifier })).max(256).optional().describe('Omit for none.'),
   nodes: z.array(nodeRecord).max(4096),
-  armatures: z.array(armature).max(16).optional(),
+  armatures: z.array(armatureListed).max(16).optional(),
   camera: z.strictObject(cameraFields).optional(),
-  environment: environment.optional(),
-  effects: effects.optional(),
+  environment: environmentListed.optional(),
+  effects: effectsListed.optional(),
   shadow: shadow.optional(),
-  motion: motion.nullable().optional(),
-  physics: physics.nullable().optional(),
-  cloth: cloth.nullable().optional(),
+  motion: motionListed.nullable().optional(),
+  physics: physicsListed.nullable().optional(),
+  cloth: clothListed.nullable().optional(),
   timeline: timelineReference.nullable().optional(),
   particles: z.record(z.string(), z.unknown()).nullable().optional().describe('Particle emitters and hair, seeked by motionTime. Fields: scene_capabilities particles.'),
   bake: z.record(z.string(), z.unknown()).nullable().optional().describe('Bounced light baked at build time. Fields: scene_capabilities bake.'),
@@ -629,15 +655,15 @@ const assetRecipe = z.strictObject({
   schemaVersion: z.literal(1),
   assetId: z.string().regex(/^[a-f0-9]{64}$/).describe('SHA-256 asset ID from scene_asset_catalog.'),
   camera: z.strictObject(cameraFields).optional(),
-  environment: environmentReference.optional(),
-  effects: effects.optional(),
+  environment: environmentListed.optional(),
+  effects: effectsListed.optional(),
   shadow: shadow.optional(),
   root: z.strictObject({
     translation: vector3.optional(), rotation: quaternion.optional(),
     scale: z.tuple([positive, positive, positive]).optional(),
   }).optional(),
   animation: z.strictObject({ clip: z.number().int().min(0), time: nonnegative }).nullable().optional().describe('Absolute clip/time sample. null selects the original decoded pose.'),
-  materialOverrides: z.array(z.strictObject({ id: identifier, ...materialFields })).max(4096).optional(),
+  materialOverrides: z.array(materialListed(z.strictObject({ id: identifier, ...materialFields }), 'Override of a source material.', { id: identifier })).max(4096).optional(),
   nodeOverrides: z.array(z.strictObject({ id: identifier, translation: vector3.optional(), rotation: quaternion.optional(), scale: z.tuple([positive, positive, positive]).optional() })).max(4096).optional(),
   motion: recipeMotionReference.nullable().optional(),
 });
@@ -653,7 +679,7 @@ const nodeOperations = (nodeFieldShape, nodeSchema) => [
   z.strictObject({ type: z.literal('add-node'), node: nodeSchema }),
 ];
 const otherOperations = [
-  z.strictObject({ type: z.literal('set-material'), id: identifier, ...materialFields }, { error: flatFieldsHint('set-material', 'material') }),
+  materialListed(z.strictObject({ type: z.literal('set-material'), id: identifier, ...materialFields }, { error: flatFieldsHint('set-material', 'material') }), 'Change a material.', { type: z.literal('set-material'), id: identifier }),
   z.strictObject({ type: z.literal('set-camera'), ...cameraFields }),
   z.strictObject({ type: z.literal('set-motion'), motion: recipeMotionReference.nullable() }),
   z.strictObject({ type: z.literal('set-armatures'), armatures: armaturesReference.nullable() }),
@@ -663,16 +689,16 @@ const otherOperations = [
   z.strictObject({ type: z.literal('set-particles'), particles: z.record(z.string(), z.unknown()).nullable() }),
   z.strictObject({ type: z.literal('set-bake'), bake: z.record(z.string(), z.unknown()).nullable() }),
   z.strictObject({ type: z.literal('set-post-passes'), postPasses: z.array(z.record(z.string(), z.unknown())).nullable() }),
-  z.strictObject({ type: z.literal('set-environment'), environment: environmentReference }),
-  z.strictObject({ type: z.literal('set-effects'), effects }),
+  z.strictObject({ type: z.literal('set-environment'), environment: environmentListed }),
+  z.strictObject({ type: z.literal('set-effects'), effects: effectsListed }),
   z.strictObject({ type: z.literal('set-shadow'), shadow }),
   z.strictObject({ type: z.literal('set-root'), translation: vector3.optional(), rotation: quaternion.optional(), scale: z.tuple([positive, positive, positive]).optional() }),
   z.strictObject({ type: z.literal('set-asset-node'), id: identifier, translation: vector3.optional(), rotation: quaternion.optional(), scale: z.tuple([positive, positive, positive]).optional() }),
   z.strictObject({ type: z.literal('set-animation'), clip: z.number().int().min(0).nullable().optional(), time: nonnegative.optional() }),
   z.strictObject({ type: z.literal('remove-node'), id: identifier, recursive: z.boolean().optional().describe('Remove descendants too. Defaults to false; dangling children reject the batch.') }),
-  z.strictObject({ type: z.literal('add-geometry'), geometry }),
+  z.strictObject({ type: z.literal('add-geometry'), geometry: geometryListed }),
   z.strictObject({ type: z.literal('remove-geometry'), id: identifier }),
-  z.strictObject({ type: z.literal('add-material'), material: z.strictObject({ id: identifier, tag: materialTag, ...materialFields }) }),
+  z.strictObject({ type: z.literal('add-material'), material: materialListed(z.strictObject({ id: identifier, tag: materialTag, ...materialFields }), 'New material.', { id: identifier, tag: materialTag }) }),
   z.strictObject({ type: z.literal('remove-material'), id: identifier }),
 ];
 const operation = z.discriminatedUnion('type', [...nodeOperations(nodeFields, nodeRecord), ...otherOperations]);
@@ -780,7 +806,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
       }
     });
   }
-  register('scene_capabilities', 'Read supported recipe features and runtime budgets before authoring. Does not launch a browser.', z.strictObject({}), readOnly, async () => jsonResult(relations ? await runtime.capabilities() : withoutRelationsAdvice(await runtime.capabilities())));
+  register('scene_capabilities', 'Index of supported recipe features and runtime budgets; pass topic for the detail of one. Read it before authoring. Does not launch a browser.', z.strictObject({ topic: z.string().min(1).max(64).optional().describe('A name from the index, or name.branch such as meshEdit.bevel. Leave out for the index.') }), readOnly, async ({ topic }) => jsonResult(answerCapabilities(relations ? await runtime.capabilities() : withoutRelationsAdvice(await runtime.capabilities()), topic, outlineSources)));
   register('scene_create', 'Create the single active render scene from a JSON recipe. Dispose an existing scene first.', z.strictObject({ recipe: relations ? recipe : recipeWithoutRelations }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.create(argumentsValue)));
   register('scene_asset_catalog', 'List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory. No arbitrary paths or downloads.', z.strictObject({}), readOnly, async () => jsonResult(await runtime.assetCatalog()));
   register('scene_create_asset', 'Create the active scene from a catalog GLB and editable asset recipe. Preserves supported maps, skins, morphs and clips. Dispose the existing scene first.', z.strictObject({ recipe: assetRecipe }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.createAsset(argumentsValue)));

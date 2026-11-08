@@ -94,9 +94,9 @@ async function waitForJob(jobId) {
 try {
   await client.connect(transport);
   assert.equal((await client.listTools()).tools.length, 22);
-  const capabilities = (await call('scene_capabilities')).structuredContent;
-  assert.equal(capabilities.scene.postPasses.limits.maxPasses, 4);
-  assert.ok(capabilities.scene.operations.includes('set-post-passes'));
+  const capabilities = (await call('scene_capabilities', { topic: 'postPasses' })).structuredContent;
+  assert.equal(capabilities.value.limits.maxPasses, 4);
+  assert.ok((await call('scene_capabilities', { topic: 'operations' })).structuredContent.value.includes('set-post-passes'));
 
   const created = (await call('scene_create', { recipe: createAgentPreviewFixture() })).structuredContent;
   const sessionId = created.sessionId;

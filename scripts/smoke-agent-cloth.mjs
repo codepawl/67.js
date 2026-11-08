@@ -50,8 +50,8 @@ const recipe = {
 
 try {
   await client.connect(transport);
-  const capabilities = (await call('scene_capabilities')).structuredContent;
-  assert.deepEqual(capabilities.scene.cloth.limits.maxSheets, 8);
+  const capabilities = (await call('scene_capabilities', { topic: 'cloth' })).structuredContent;
+  assert.deepEqual(capabilities.notes.limits.maxSheets, 8);
   const created = (await call('scene_create', { recipe }, 180000)).structuredContent;
   const sessionId = created.sessionId;
   const report = (await call('scene_inspect', { sessionId })).structuredContent.cloth;

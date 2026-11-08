@@ -37,6 +37,12 @@ The allowance is about one short schema field. A change that adds a field to one
 
 The check reads only the notes that your branch adds, so a note from another pull request never accepts your growth. Your note is a new file, so it conflicts with nobody. A size note can hold bundle lines and tool cost lines together.
 
+## Absolute ceilings
+
+`bench/tool-cost-ceilings.json` holds hand-set ceilings for the schema total (100,000 bytes), each large tool, every other tool and the default `scene_capabilities` answer (4,000 bytes). `npm run tool-cost` enforces them on every run, beside the growth check, so the total cannot creep back up in allowed steps. A `size.md` line does not lift them: raising one means editing the file in the pull request, with the reason in the pull request.
+
+Tools list their common fields and a one-line list of the rest. The strict schema still validates every call; scene_capabilities serves the full field outline of each recipe part by topic (`motion`, `environment`, `materialFields`, `meshEdit`, `meshEdit.<op>` and others).
+
 ## Release ceilings
 
 `bench/tool-cost-budgets.json` holds the absolute ceilings. They are reported on a pull request and enforced with `npm run tool-cost -- --absolute`. A release refreshes them with `npm run tool-cost:release`, which sets each ceiling 2% over the measured value. Read the diff, because a reset hides growth since the last reset.

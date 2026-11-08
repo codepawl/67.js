@@ -1,14 +1,16 @@
 // Checks what the MCP tools cost an agent: npm run tool-cost
 // A pull request fails when a tool schema, the schema total or a typical result grows past its allowance against the base branch
 // (--base, default origin/main) unless its own changes/*.size.md accepts it. --absolute also enforces the release ceilings in
-// bench/tool-cost-budgets.json. --set-budgets refreshes the ceilings at release.
+// bench/tool-cost-budgets.json. --set-budgets refreshes the ceilings at release. The absolute ceilings in
+// bench/tool-cost-ceilings.json are enforced on every run, beside the growth check.
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { measureToolCost } from './measure-tool-cost.mjs';
 import { DEFAULT_BASE_REF, baseRefExists, measureBase, readAcceptedBundles } from './size-base.mjs';
-import { budgetsFrom, ceilingProblems, compareCostsToBase, costsFrom, formatCostRows } from './tool-cost-growth.mjs';
+import { budgetsFrom, ceilingProblems, compareCostsToBase, costsFrom, formatCostRows, hardCeilingProblems } from './tool-cost-growth.mjs';
 
 const BUDGETS_PATH = 'bench/tool-cost-budgets.json';
+const CEILINGS_PATH = 'bench/tool-cost-ceilings.json';
 // The measuring script imports the source beside itself, so the base branch runs its own copy of it.
 const TOOL_COST_METHOD = {
   script: fileURLToPath(new URL('./measure-tool-cost.mjs', import.meta.url)),
@@ -42,6 +44,9 @@ if (refreshing) {
   console.log(`Wrote the release ceilings to ${BUDGETS_PATH}.`);
   process.exit(0);
 }
+
+const ceilings = JSON.parse(await readFile(CEILINGS_PATH, 'utf8'));
+problems.push(...hardCeilingProblems(measured, ceilings));
 
 if (checkGrowth) {
   const accepted = readAcceptedBundles(baseRef);
