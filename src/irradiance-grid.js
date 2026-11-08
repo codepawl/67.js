@@ -2,9 +2,10 @@ import { createTracer } from './ray-query.js';
 import { readTriangle } from './triangle-math.js';
 import { registerShaderFeatureCode, layerTextureSupport } from './shader-registry.js';
 import {
-  MAX_BAKE_PARTS, buildWorld, createDirectIrradiance, createGatherer, diffuseAlbedo, emittedRadiance, normalizeLights, sceneScale, validatePart, withReach,
+  MAX_BAKE_PARTS, buildWorld, createDirectIrradiance, createGatherer, diffuseAlbedo, emittedRadiance, hitNormal, normalizeLights, sceneScale, validatePart, withReach,
 } from './light-bake.js';
 import { worldBounds } from './probe-trace.js';
+import { createGridMedium } from './grid-medium.js';
 
 // A baked grid of diffuse light: at each node of a 3D grid the light that other surfaces bounce toward it (the sun's lit
 // patches included, over several bounces), stored as first order spherical harmonics per colour channel. A lit surface reads
@@ -215,6 +216,30 @@ function smoothNodes(data, valid, size, isConnected) {
   }
 }
 
+const SURFACE_SCATTER = true;
+
+// The radiance the nearest surface along a ray sends back: its emission and its direct light (what one bounce of the gatherer adds).
+function createSurfaceRadiance({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance }) {
+  const hitPoint = [0, 0, 0];
+  const normal = [0, 0, 0];
+  return function surfaceRadiance(point, direction, out) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    const hit = tracer.trace(point[0], point[1], point[2], direction[0], direction[1], direction[2], Infinity, false);
+    const triangle = hit.nearestTriangle;
+    if (triangle < 0) return;
+    const distance = hit.nearestDistance;
+    for (let axis = 0; axis < 3; axis++) hitPoint[axis] = point[axis] + direction[axis] * distance;
+    hitNormal(world, triangle, direction, normal);
+    const owner = world.triangleOwner[triangle];
+    const irradiance = directIrradiance(hitPoint, normal, owner);
+    for (let channel = 0; channel < 3; channel++) {
+      out[channel] = emissionOfPart[owner][channel] + albedoOfPart[owner][channel] * irradiance[channel] / Math.PI;
+    }
+  };
+}
+
 /**
  * Traces the grid. For each node, the cosine weighted light arriving along the six axis directions (the bake's gatherer:
  * emission and direct light at every hit, bounced over `bounces` reflections) becomes a first order fit per colour channel:
@@ -239,12 +264,18 @@ export function traceIrradianceGrid(parts, lighting, { resolution = true, sample
   const directIrradiance = createDirectIrradiance(tracer, withReach(lights, parts), offset, scale);
   const albedoOfPart = parts.map(part => diffuseAlbedo(part.material));
   const emissionOfPart = parts.map(part => emittedRadiance(part.material));
-  const gather = createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces });
+  const sun = lights.sun ?? null;
+  const surfaceRadiance = createSurfaceRadiance({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance });
+  const medium = createGridMedium({ lighting, sun, tracer, scale, surfaceRadiance: SURFACE_SCATTER ? surfaceRadiance : null });
+  const gather = createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium });
   const started = performance.now();
   const data = new Float32Array(nodeCount * COEFFICIENTS_PER_NODE);
+  // The part of `data` that the fog scattered into the paths. The fog drawn on screen already scatters the sun itself, so it reads the grid without this part.
+  const scatteredData = medium ? new Float32Array(nodeCount * COEFFICIENTS_PER_NODE) : null;
   const valid = new Uint8Array(nodeCount);
   const point = [0, 0, 0];
   const axisLight = [new Float64Array(3), new Float64Array(3)];
+  const axisScattered = [new Float64Array(3), new Float64Array(3)];
   const axisSky = [0, 0];
   const axisNormal = [0, 0, 0];
   const [width, height] = layout.size;
@@ -265,7 +296,7 @@ export function traceIrradianceGrid(parts, lighting, { resolution = true, sample
       for (let side = 0; side < 2; side++) {
         axisNormal.fill(0);
         axisNormal[axis] = side === 0 ? 1 : -1;
-        axisSky[side] = gather(point, axisNormal, node * 6 + axis * 2 + side, axisLight[side]);
+        axisSky[side] = gather(point, axisNormal, node * 6 + axis * 2 + side, axisLight[side], axisScattered[side]);
       }
       const skyBase = node * COEFFICIENTS_PER_NODE + SKY_SLOT;
       data[skyBase] += (axisSky[0] + axisSky[1]) / 6;
@@ -274,6 +305,10 @@ export function traceIrradianceGrid(parts, lighting, { resolution = true, sample
         const base = node * COEFFICIENTS_PER_NODE + channel * 4;
         data[base] += (axisLight[0][channel] + axisLight[1][channel]) / 6;
         data[base + 1 + axis] = (axisLight[0][channel] - axisLight[1][channel]) / 2;
+        if (scatteredData) {
+          scatteredData[base] += (axisScattered[0][channel] + axisScattered[1][channel]) / 6;
+          scatteredData[base + 1 + axis] = (axisScattered[0][channel] - axisScattered[1][channel]) / 2;
+        }
       }
     }
   }
@@ -291,19 +326,35 @@ export function traceIrradianceGrid(parts, lighting, { resolution = true, sample
     const length = Math.hypot(dx, dy, dz);
     return tracer.trace(point[0], point[1], point[2], dx / length, dy / length, dz / length, length, true).nearestTriangle < 0;
   };
+  if (scatteredData) {
+    fillInvalidNodes(scatteredData, Uint8Array.from(valid), layout.size);
+    smoothNodes(scatteredData, valid, layout.size, isConnected);
+  }
   fillInvalidNodes(data, valid, layout.size);
   smoothNodes(data, valid, layout.size, isConnected);
-  return withMeanRadiance({ ...layout, data, nodes: nodeCount, solidNodes, seconds: (performance.now() - started) / 1000 });
+  const grid = { ...layout, data, nodes: nodeCount, solidNodes, seconds: (performance.now() - started) / 1000 };
+  if (scatteredData) {
+    grid.fogScattered = scatteredData;
+  }
+  return withMeanRadiance(grid);
 }
 
 /**
  * The fog's scattering reads the grid without importing this lazy module: the mean light arriving at a point from every
  * direction is the constant term of the fit. Not enumerable, so the report that copies the grid's fields stays plain data,
- * and a grid that came back from a worker (which clones plain data only) gets it here.
+ * and a grid that came back from a worker (which clones plain data only) gets it here. It leaves out the light the fog
+ * itself scattered (`fogScattered`, same layout as `data`), which the fog on screen adds again with its own sun term.
  */
 export function withMeanRadiance(grid) {
   if (!Object.hasOwn(grid, 'meanRadiance')) {
-    Object.defineProperty(grid, 'meanRadiance', { value: position => evaluateIrradianceGrid(grid, position, NO_DIRECTION) });
+    Object.defineProperty(grid, 'meanRadiance', {
+      value: position => {
+        const total = evaluateIrradianceGrid(grid, position, NO_DIRECTION);
+        if (!grid.fogScattered) return total;
+        const scattered = evaluateIrradianceGrid({ ...grid, data: grid.fogScattered }, position, NO_DIRECTION);
+        return total.map((value, channel) => Math.max(0, value - scattered[channel]));
+      },
+    });
   }
   return grid;
 }
