@@ -24,7 +24,7 @@ test('review rejects unknown fields, nonfinite values and unbounded inputs befor
     { ...request(), shots: [{ rendererTime: Infinity }] }, { ...request(), shots: [{ motionTime: NaN }] },
     { ...request(), shots: [{ animation: { clip: 0, time: 0, url: 'https://example.com' } }] },
     { ...request(), shots: [{ animation: { clip: 0, time: Infinity } }] },
-    { ...request(), shots: [{ camera: { projection: 'orthographic' } }] },
+    { ...request(), shots: [{ camera: { projection: 'fisheye' } }] },
     { ...request(), shots: [{ camera: { eye: [Infinity, 0, 0] } }] },
     { ...request(), shots: [{ camera: { fov: 1e100 } }] },
     { ...request(), shots: [{ camera: { fov: NaN } }] },

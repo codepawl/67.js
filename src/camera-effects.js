@@ -210,3 +210,16 @@ export function installCameraEffects(renderer) {
   }
   return renderer;
 }
+
+// A lens at this f-stop or wider (smaller number) gets the full blur setting; narrower stops scale it down in proportion.
+const FULL_BLUR_F_STOP = 1.4;
+
+/**
+ * The effects of one frame when the camera carries an f-stop: depth of field with the blur that stop gives (1.4 / fStop, at most
+ * 1), focused on the camera's target. Effects with their own blur (a timeline shot's) are left as they are.
+ */
+export function effectsWithFStop(effects, camera) {
+  if (camera.fStop === undefined || effects.depthOfField.blur > 0) return effects;
+  const focusDistance = Math.max(0.01, Math.hypot(...camera.target.map((component, axis) => component - camera.eye[axis])));
+  return { ...effects, depthOfField: { blur: Math.min(1, FULL_BLUR_F_STOP / camera.fStop), focusDistance } };
+}

@@ -12,6 +12,7 @@ import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, CATALOG_FILE_ID } f
 import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER_PASS_NAMES, VIDEO_ENCODERS, MAXIMUM_JOB_SIDE, MAXIMUM_MEMORY_MIB } from '../src/agent-scene-capabilities.js';
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
+import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
 
 const finite = z.number().min(-3.4028234663852886e38).max(3.4028234663852886e38);
 const positive = finite.positive();
@@ -40,6 +41,11 @@ const nodeFields = {
   skin: skinSpec.optional(),
   decal: z.boolean().optional(),
   depthLayer: z.number().int().min(0).max(4).optional(),
+  visible: z.boolean().optional().describe('false hides the node and children; keyable in motion. Flags: scene_capabilities renderFlags.'),
+  castShadow: z.boolean().optional(),
+  receiveShadow: z.boolean().optional(),
+  holdout: z.boolean().optional(),
+  shadowCatcher: z.boolean().optional(),
   blend: z.strictObject({ radius: z.number().min(0.005).max(2) }).optional().describe('Soft seam into another mesh, radius in m; docs/mesh-blend.md.'),
   label: z.string().max(256).optional().describe('Human-readable label. Identity remains the node ID.'),
   parent: identifier.nullable().optional().describe('Parent node ID, or null for a root. Local transforms stay unchanged.'),
@@ -155,9 +161,15 @@ const cameraFields = {
   eye: vector3.optional().describe('Camera position in world coordinates.'),
   target: vector3.optional().describe('World point toward which the camera looks.'),
   up: vector3.optional().describe('Nonzero camera up direction, not collinear with the view direction.'),
-  fov: finite.gt(0).lt(180).optional().describe('Vertical perspective field of view in degrees.'),
+  fov: finite.gt(0).lt(180).optional().describe('Vertical perspective field of view in degrees. Not with focalLength.'),
   near: positive.optional().describe('Near clipping distance. Must be less than far.'),
   far: positive.optional().describe('Far clipping distance. Must exceed near.'),
+  projection: z.enum(['perspective', 'orthographic']).optional().describe('Defaults to perspective.'),
+  orthoScale: positive.optional().describe('Orthographic view height in metres (default 4); needs projection orthographic.'),
+  focalLength: positive.max(10000).optional().describe('Lens in mm, instead of fov.'),
+  sensorWidth: positive.max(1000).optional().describe('Sensor width in mm with focalLength; default 36.'),
+  shift: z.tuple([z.number().min(-1).max(1), z.number().min(-1).max(1)]).optional().describe('Lens shift [x, y] as a fraction of the frame; positive moves the frame right and up.'),
+  fStop: z.number().min(0.7).max(64).optional().describe('Depth of field focused on target; 1.4 is full blur. Not with effects.depthOfField.blur above 0.'),
 };
 const bounded = (minimum, maximum) => z.number().min(minimum).max(maximum);
 const boundedVector = (minimum, maximum) => z.tuple([bounded(minimum, maximum), bounded(minimum, maximum), bounded(minimum, maximum)]);
@@ -206,7 +218,7 @@ const environment = z.strictObject({
     range: z.union([z.literal(0), bounded(0.001, 1e6)]).optional(),
     castShadow: z.boolean().optional().describe('Casts a shadow; 6 atlas tiles.'),
     affects,
-  })).max(8).optional().describe('Replaces the list; [] clears. Intensity in candela.'),
+  })).max(MAX_POINT_LIGHTS).optional().describe('Replaces the list; [] clears. Intensity in candela.'),
   spotLights: z.array(z.strictObject({
     position: boundedVector(-1e6, 1e6),
     direction: boundedVector(-1e6, 1e6).describe('Nonzero direction the cone points along.'),
@@ -218,7 +230,7 @@ const environment = z.strictObject({
     range: z.union([z.literal(0), bounded(0.001, 1e6)]).optional(),
     castShadow: z.boolean().optional().describe('Casts a shadow; 1 atlas tile.'),
     affects,
-  })).max(8).optional().describe('Replaces the list; [] clears.'),
+  })).max(MAX_SPOT_LIGHTS).optional().describe('Replaces the list; [] clears.'),
   areaLights: z.array(z.strictObject({
     position: boundedVector(-1e6, 1e6).describe('Center of the rectangle.'),
     direction: boundedVector(-1e6, 1e6).describe('Direction the rectangle faces; emits that side only.'),
@@ -228,7 +240,7 @@ const environment = z.strictObject({
     color: color.optional(),
     intensity: bounded(0, 1e5).optional().describe('Candela head on.'),
     affects,
-  })).max(4).optional().describe('Replaces the list; [] clears. No shadow.'),
+  })).max(MAX_AREA_LIGHTS).optional().describe('Replaces the list; [] clears. No shadow.'),
   skyTop: color.optional(),
   skyBottom: color.optional(),
   fogColor: color.optional(),

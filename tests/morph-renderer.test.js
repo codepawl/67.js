@@ -32,7 +32,7 @@ function retainedRenderer(parts) {
       morphWeights: new Float32Array(first.morph.weights),
       instanceBuffer: {},
       instanceData: new Float32Array(group.length * 42),
-      castShadow: true,
+      castShadow: true, receivesShadow: true, compositeMode: 0,
       alphaMode: 'opaque',
       alphaCutoff: 0,
       opacity: 1,

@@ -1,3 +1,4 @@
+import { cameraFieldOfView } from './camera.js';
 import { pointLightFalloff } from './ray-query.js';
 import { buildTraceScene, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
 import { denoiseRadiance } from './path-tracer-denoise.js';
@@ -119,7 +120,9 @@ export function createCamera(camera, width, height) {
   const eye = finiteVector(camera.eye, 'eye');
   const target = finiteVector(camera.target, 'target');
   const up = finiteVector(camera.up ?? [0, 1, 0], 'up');
-  if (typeof camera.fov !== 'number' || !(camera.fov > 1 && camera.fov < 170)) throw new RangeError('Path tracer camera fov must be between 1 and 170 degrees.');
+  if (camera.projection === 'orthographic' || camera.shift) throw new RangeError('The path tracer draws perspective cameras without lens shift. Render those without the renderer option.');
+  const fov = camera.focalLength === undefined ? camera.fov : cameraFieldOfView(camera, width / height);
+  if (typeof fov !== 'number' || !(fov > 1 && fov < 170)) throw new RangeError('Path tracer camera fov must be between 1 and 170 degrees.');
   const forward = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
   const forwardLength = Math.hypot(...forward);
   if (forwardLength === 0) throw new RangeError('Path tracer camera eye and target must differ.');
@@ -129,7 +132,7 @@ export function createCamera(camera, width, height) {
   if (rightLength === 0) throw new RangeError('Path tracer camera up must not be parallel to its view.');
   for (let axis = 0; axis < 3; axis++) right[axis] /= rightLength;
   const above = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
-  const halfHeight = Math.tan(camera.fov * Math.PI / 360);
+  const halfHeight = Math.tan(fov * Math.PI / 360);
   return { eye, forward, right, above, halfHeight, halfWidth: halfHeight * width / height };
 }
 

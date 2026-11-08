@@ -13,7 +13,7 @@ function part(name, geometry = {}, map) {
 function retainedRenderer(parts) {
   const writes = [];
   const renderer = Object.create(Renderer67.prototype);
-  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42).fill(7), castShadow: true, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false };
+  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42).fill(7), castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false };
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData(target, offset, data) { writes.push({ target, offset, data: Array.from(data) }); } };
   renderer.partLocations = new Map(parts.map((item, index) => [item, {
     batch, index, geometry: item.geometry, map: item.material.map ?? null, normalMatrix: mat3.create(), layerState: materialLayerState(item.material), skin: item.skin ?? null,

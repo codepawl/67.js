@@ -1,7 +1,7 @@
 import { mat4, mat3 } from 'gl-matrix';
 import { box, cylinder, grid, sphere, torus } from './geometry.js';
 import { createSceneGraph } from './scene-graph.js';
-import { applyProjection } from './camera.js';
+import { applyProjection, validateCameraShift, CAMERA_LENS_FIELDS } from './camera.js';
 import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, agentEnvironmentMap } from './agent-look.js';
 import { agentSceneModule, agentSceneModuleLoaded } from './agent-scene-modules.js';
 import { MESH_SMOOTH_ANGLE_DEFAULT, CURVE_TEXT_LIMITS, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, MAX_MATERIAL_PATTERNS, RECIPE_ALPHA_MODES } from './agent-scene-capabilities.js';
@@ -23,10 +23,13 @@ const MAX_MESH_REPORTS = 16;
 // Terrain meshes carry one more float for each vertex (sky visibility) than the 56 bytes the budget estimates.
 const TERRAIN_SKY_VISIBILITY_BYTES = 4;
 const CAMERA_DEFAULTS = Object.freeze({ eye: [4, 3, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 1000 });
-const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend'];
+// Per-node render flags: `visible` hides a node and its children; the rest become renderer part flags of a mesh node.
+const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher'];
+const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
+const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
 const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', ...MATERIAL_LAYER_FIELDS];
 const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'boxMapScale', 'boxMapAxis'];
-const CAMERA_FIELDS = Object.keys(CAMERA_DEFAULTS);
+const CAMERA_FIELDS = [...Object.keys(CAMERA_DEFAULTS), ...CAMERA_LENS_FIELDS];
 const LOOK_OPERATION_FIELDS = Object.freeze({
   'set-environment': 'environment',
   'set-effects': 'effects',
@@ -309,6 +312,11 @@ function nodeFrom(value) {
   if (value.depthLayer !== undefined) {
     integer(value.depthLayer, 0, MAXIMUM_DEPTH_LAYER, 'depthLayer');
   }
+  for (const flag of RENDER_FLAG_FIELDS) {
+    if (value[flag] !== undefined && typeof value[flag] !== 'boolean') throw new TypeError(`${flag} must be boolean.`);
+    if (flag !== 'visible' && value[flag] !== undefined && value.geometry === undefined) throw new TypeError(`Node ${value.id}: ${flag} belongs on a mesh node.`);
+  }
+  if (value.holdout === true && value.shadowCatcher === true) throw new TypeError(`Node ${value.id}: a node is a holdout or a shadow catcher, not both.`);
   if (value.skin !== undefined) {
     if (value.geometry === undefined) {
       throw new TypeError('Only mesh nodes can have a skin.');
@@ -325,9 +333,55 @@ function nodeFrom(value) {
   return result;
 }
 
+/** Sets the given camera fields on a camera; a focal length replaces fov and a fov replaces focal length and sensor, never both. */
+export function applyCameraFields(camera, fields) {
+  rejectFovWithFocalLength(fields);
+  for (const field of CAMERA_FIELDS) {
+    if (Object.hasOwn(fields, field)) camera[field] = fields[field];
+  }
+  if (Object.hasOwn(fields, 'focalLength')) delete camera.fov;
+  // Back to a perspective view: the old orthographic size no longer applies.
+  if (fields.projection === 'perspective' && !Object.hasOwn(fields, 'orthoScale')) delete camera.orthoScale;
+  if (Object.hasOwn(fields, 'fov')) {
+    delete camera.focalLength;
+    delete camera.sensorWidth;
+  }
+  return camera;
+}
+
+function rejectFovWithFocalLength(fields) {
+  if (fields.fov !== undefined && fields.focalLength !== undefined) {
+    throw new RangeError('Give a camera fov or a focalLength, not both. Use focalLength (with sensorWidth) for a lens in millimetres, fov for degrees.');
+  }
+}
+
+function checkCameraLens(camera) {
+  if (camera.projection !== undefined && camera.projection !== 'perspective' && camera.projection !== 'orthographic') {
+    throw new RangeError('Camera projection must be perspective or orthographic.');
+  }
+  const orthographic = camera.projection === 'orthographic';
+  if (camera.orthoScale !== undefined) {
+    if (!orthographic) throw new RangeError('Camera orthoScale needs projection orthographic.');
+    if (!Number.isFinite(camera.orthoScale) || camera.orthoScale <= 0) throw new RangeError('Camera orthoScale is the view height in metres and must be positive.');
+  }
+  if (camera.sensorWidth !== undefined && camera.focalLength === undefined) throw new RangeError('Camera sensorWidth needs focalLength.');
+  if (camera.focalLength !== undefined) {
+    if (orthographic) throw new RangeError('Camera focalLength needs a perspective projection; an orthographic camera is sized by orthoScale.');
+    if (!Number.isFinite(camera.focalLength) || camera.focalLength <= 0 || camera.focalLength > 10000) throw new RangeError('Camera focalLength must be between 0 and 10000 millimetres.');
+    if (camera.sensorWidth !== undefined && !(Number.isFinite(camera.sensorWidth) && camera.sensorWidth > 0 && camera.sensorWidth <= 1000)) throw new RangeError('Camera sensorWidth must be between 0 and 1000 millimetres.');
+  }
+  if (camera.shift !== undefined) validateCameraShift(camera.shift);
+  if (camera.fStop !== undefined && !(Number.isFinite(camera.fStop) && camera.fStop >= 0.7 && camera.fStop <= 64)) {
+    throw new RangeError('Camera fStop must be between 0.7 and 64. Smaller numbers blur more.');
+  }
+}
+
 function cameraFrom(value = {}) {
   knownKeys(value, CAMERA_FIELDS, 'camera');
+  rejectFovWithFocalLength(value);
   const result = { ...CAMERA_DEFAULTS, ...value };
+  if (result.focalLength !== undefined) delete result.fov;
+  checkCameraLens(result);
   result.eye = vector(result.eye, 3, 'eye');
   result.target = vector(result.target, 3, 'target');
   result.up = vector(result.up, 3, 'up');
@@ -337,9 +391,10 @@ function cameraFrom(value = {}) {
   }
   result.up = result.up.map(component => component / upLength);
   for (const field of ['fov', 'near', 'far']) {
-    finite(result[field], field);
+    if (result[field] !== undefined) finite(result[field], field);
   }
-  if (Math.fround(result.fov) <= 0 || Math.fround(result.fov) >= 180 || Math.fround(result.near) <= 0 || Math.fround(result.far) <= Math.fround(result.near)) {
+  // Without fov the lens is a focal length, which gives a valid angle at any positive size.
+  if ((result.fov !== undefined && (Math.fround(result.fov) <= 0 || Math.fround(result.fov) >= 180)) || Math.fround(result.near) <= 0 || Math.fround(result.far) <= Math.fround(result.near)) {
     throw new RangeError('Camera needs 0 < fov < 180 and 0 < near < far at Float32 precision.');
   }
   if (result.eye.every((component, axis) => Math.fround(component) === Math.fround(result.target[axis]))) {
@@ -715,6 +770,9 @@ function normalizeRecipe(input, limits) {
     }
   }
   Object.assign(recipe, normalizeAgentLook(look));
+  if (recipe.camera.fStop !== undefined && recipe.effects?.depthOfField.blur > 0) {
+    throw new RangeError('Camera fStop drives depth of field; set effects.depthOfField.blur to 0 or remove fStop.');
+  }
   checkLightLinkNames(recipe);
   if (Object.hasOwn(recipe, 'motion')) {
     recipe.motion = recipe.motion === null || recipe.motion === undefined ? null : agentSceneModule('motion').normalizeAgentMotion(recipe.motion, recipe);
@@ -820,7 +878,8 @@ function retainedMatrices(parts) {
 function cameraPoseFrom(pose) {
   const camera = cameraFrom({
     eye: Array.from(pose.eye), target: Array.from(pose.target), up: Array.from(pose.up),
-    fov: pose.fov, near: pose.near, far: pose.far,
+    ...(pose.focalLength === undefined ? { fov: pose.fov } : {}), near: pose.near, far: pose.far,
+    ...Object.fromEntries(CAMERA_LENS_FIELDS.filter(field => pose[field] !== undefined).map(field => [field, pose[field]])),
   });
   const view = mat4.lookAt(mat4.create(), camera.eye, camera.target, camera.up);
   for (const aspect of [1 / 16, 16]) {
@@ -836,6 +895,7 @@ function cameraPoseFrom(pose) {
 // Candidate buffers are private. A failed seek cannot publish half a pose to render handles.
 function stagePose(stagedState, time) {
   const sampled = time === null ? null : stagedState.motionSampler?.sample(time);
+  const hiddenNodes = hiddenNodeIds(stagedState.recipe, sampled);
   // Physics holds its last pose after its duration, so a seek past the end is the resting state.
   const simulated = time === null ? null : stagedState.physicsSampler?.sample(Math.min(time, stagedState.physicsSampler.duration));
   const graph = stagedState.poseGraph ?? stagedState.graph;
@@ -879,7 +939,7 @@ function stagePose(stagedState, time) {
   const clothGeometries = sampledGeometries(stagedState, time);
   // Staged last: a pose pending on a decoded asset must be committed or discarded, so nothing above may throw after it.
   const assetClips = stagedState.assetRuntime.animators.length ? agentSceneModule('assets').stageAssetClips(stagedState.assetRuntime, graph, time) : null;
-  return { graph, materialUpdates, camera, time, clothGeometries, assetClips };
+  return { graph, materialUpdates, camera, time, clothGeometries, assetClips, hiddenNodes };
 }
 
 // Cloth and particles replace the geometry of their own nodes at a sampled time; no node belongs to both.
@@ -892,6 +952,38 @@ function sampledGeometries(stagedState, time) {
     sampler?.sample(time)?.forEach((geometry, nodeId) => geometries.set(nodeId, geometry));
   }
   return geometries.size ? geometries : null;
+}
+
+function partFlagsOf(node) {
+  return Object.fromEntries(PART_FLAG_FIELDS.filter(flag => node[flag] !== undefined).map(flag => [flag, node[flag]]));
+}
+
+function sameRenderFlags(part, node, usesVisibility, assetExtras) {
+  return PART_FLAG_FIELDS.every(flag => part[flag] === (node[flag] ?? assetExtras?.[flag])) && Boolean(part.visibility) === usesVisibility;
+}
+
+function recipeUsesVisibility(recipe) {
+  return recipe.nodes.some(node => node.visible !== undefined) || Boolean(recipe.motion?.tracks?.some(track => track.kind === 'node' && track.property === 'visible'));
+}
+
+/** Node IDs hidden at a pose: a node set invisible by its field or a sampled track, and everything under it. */
+function hiddenNodeIds(recipe, sampled) {
+  const hidden = new Set();
+  if (!recipeUsesVisibility(recipe)) return hidden;
+  const byId = new Map(recipe.nodes.map(node => [node.id, node]));
+  const hiddenOwn = node => {
+    const keyed = sampled?.nodes.get(node.id)?.visible;
+    return keyed === undefined ? node.visible === false : keyed < 0.5;
+  };
+  for (const node of recipe.nodes) {
+    for (let cursor = node, depth = 0; cursor && depth < 256; cursor = byId.get(cursor.parent), depth++) {
+      if (hiddenOwn(cursor)) {
+        hidden.add(node.id);
+        break;
+      }
+    }
+  }
+  return hidden;
 }
 
 // Cloth keeps one geometry per sheet that every sample rewrites, so the parts of a later seek are the previous ones and the
@@ -910,6 +1002,7 @@ function partsWithCloth(restParts, clothGeometries, previousParts) {
 /** Returns true when the parts handed to a renderer changed, which the caller counts as a topology change. */
 function publishPose(stagedState, pose) {
   for (const part of stagedState.restParts) {
+    if (part.visibility) part.visibility.visible = !pose.hiddenNodes.has(part.name);
     Float32Array.prototype.set.call(part.matrix, pose.graph.getNode(part.name).worldMatrix);
   }
   for (const update of pose.materialUpdates) {
@@ -1119,6 +1212,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     }
     const activeParts = new Map(state?.sourceRestParts.map(part => [part.name, part]) ?? []);
     const preferredParts = new Map(preferred?.sourceRestParts.map(part => [part.name, part]) ?? []);
+    const usesVisibility = recipeUsesVisibility(recipe);
     const nextParts = recipe.nodes.filter(node => node.geometry !== undefined).map(node => {
       const binding = skinBindings.get(node.id);
       const geometry = binding?.geometry ?? geometries.get(node.geometry);
@@ -1126,10 +1220,13 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       const assetExtras = assetRuntime.partExtras.get(node.id);
       const activePart = removedNodes.has(node.id) ? null : activeParts.get(node.id);
       const existing = [activePart, preferredParts.get(node.id)]
-        .find(part => part?.geometry === geometry && part.material === material && part.skin === (assetExtras?.skin ?? binding?.skin) && part.morph === assetExtras?.morph && depthLayerOf(part) === depthLayerOf(node));
+        .find(part => part?.geometry === geometry && part.material === material && part.skin === (assetExtras?.skin ?? binding?.skin) && part.morph === assetExtras?.morph && depthLayerOf(part) === depthLayerOf(node) && sameRenderFlags(part, node, usesVisibility, assetExtras));
       return existing ?? Object.freeze({
         name: node.id, geometry, material,
         ...(depthLayerOf(node) ? { depthLayer: depthLayerOf(node) } : {}),
+        ...partFlagsOf(node),
+        // The renderer reads this holder every update, and publishPose rewrites it for each pose.
+        ...(usesVisibility ? { visibility: { visible: true } } : {}),
         matrix: new Float32Array(graph.getNode(node.id).worldMatrix),
         ...(binding ? { skin: binding.skin } : {}),
         ...assetExtras,
@@ -1520,9 +1617,13 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         if (!target) {
           throw new RangeError(`${operation.type} target was not found: ${operation.id}. scene_inspect lists the IDs; add it first with an add operation.`);
         }
-        for (const field of fields) {
-          if (Object.hasOwn(operation, field)) {
-            target[field] = operation[field];
+        if (operation.type === 'set-camera') {
+          applyCameraFields(target, operation);
+        } else {
+          for (const field of fields) {
+            if (Object.hasOwn(operation, field)) {
+              target[field] = operation[field];
+            }
           }
         }
       }
