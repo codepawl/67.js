@@ -151,8 +151,10 @@ function validateRotations(values, interpolation) {
   }
 }
 
+/** Unnamed nodes are addressed by their source id ("node-4"), the same id the asset's node metadata falls back to. */
 function nodeTrackName(node) {
-  return node.name ? node.name : node.uuid;
+  if (node.name) return node.name;
+  return node.association?.nodes === undefined ? node.uuid : `node-${node.association.nodes}`;
 }
 
 function tracksForChannel(channel, sampler, node, readAccessor) {

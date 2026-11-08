@@ -108,7 +108,7 @@ test('invalid tracks, values and bindings fail explicitly', () => {
   assert.throws(() => createAnimationClip({ duration: 1, tracks: [{ ...track, keyframes: [track.keyframes[0], track.keyframes[0]] }] }), RangeError);
   assert.throws(() => createAnimationClip({ duration: 1, tracks: [{ ...track, keyframes: [{ time: 2, value: [0, 0, 0] }] }] }), RangeError);
   assert.throws(() => createAnimationClip({ duration: 1, tracks: [{ ...track, property: 'rotation', keyframes: [{ time: 0, value: [0, 0, 0, 0] }] }] }), RangeError);
-  assert.throws(() => createAnimationClip({ duration: 1, tracks: [{ ...track, property: 'scale', keyframes: [{ time: 0, value: [0, 1, 1] }] }] }), RangeError);
+  assert.throws(() => createAnimationClip({ duration: 1, tracks: [{ ...track, property: 'scale', keyframes: [{ time: 0, value: [-1, 1, 1] }] }] }), RangeError);
   assert.throws(() => sampleAnimationClip(valueClip(), Infinity), TypeError);
   assert.throws(() => createAnimationPlayer(createAnimationClip({ duration: 1, tracks: [track] }), []), RangeError);
 });

@@ -7,7 +7,7 @@ import { decodeGltf, isLinePrimitive, overLimit, textureSourceIndex, throwOverru
 import { readPunctualLights } from './gltf-lights.js';
 import { Matrix4 } from './gltf-nodes.js';
 import { textureDescriptorInfo } from './renderer.js';
-import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose } from './skinning.js';
+import { createSkinPose, matrixDeterminant, updateSkinPose, validateSkinGeometry, validateSkinPose } from './skinning.js';
 import { MAX_MORPH_TARGETS, createMorphPose, validateMorphGeometry, validateMorphPose, validateMorphTransform } from './morph.js';
 
 // The defaults fit one large exported scene (a 240 MB GLB of 8 million vertices with 8K textures) and still bound a hostile file.
@@ -950,6 +950,7 @@ function makeSkinBinding(node) {
   const pendingPose = createSkinPose(count);
   const inverseBindMatrices = new Float32Array(count * 16);
   let repairedInverseBindMatrices = 0;
+  let collapsedJoints = false;
   const jointWorldMatrices = new Float32Array(count * 16);
   const pendingWorld = new Float32Array(count * 16);
   const joints = node.skeleton.bones.map((bone, index) => {
@@ -959,11 +960,15 @@ function makeSkinBinding(node) {
       // A non-finite inverse bind matrix would turn every vertex of the joint into NaN: bind that joint at the identity.
       inverse.set(IDENTITY_MATRIX);
       repairedInverseBindMatrices++;
+    } else if (Math.abs(matrixDeterminant(inverse, 0)) < 1e-10) {
+      // A joint authored at zero scale has no inverse. Keep the file's matrices usable: its vertices collapse to a speck.
+      inverse.set(IDENTITY_MATRIX);
+      collapsedJoints = true;
     }
     return { name: bone.name, parent: node.skeleton.bones.indexOf(bone.parent) };
   });
   const skin = Object.assign(pose, { joints, inverseBindMatrices, jointWorldMatrices, bindMatrix: new Float32Array(node.bindMatrix.elements) });
-  return { node, skin, pendingPose, pendingWorld, palette: skin.jointMatrices, jointWorld: skin.jointWorldMatrices, repairedInverseBindMatrices };
+  return { node, skin, pendingPose, pendingWorld, palette: skin.jointMatrices, jointWorld: skin.jointWorldMatrices, repairedInverseBindMatrices, collapsedJoints };
 }
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -1386,7 +1391,7 @@ export async function parseGltf(data, options = {}) {
           Math.abs(value - composed.elements[index]) <= 1e-6 * Math.max(1, Math.abs(value)));
       const meshIds = meshIdsByNode.get(node);
       // `name` is the decoded node name, which clip tracks address; `label` is the name as authored in the file.
-      return { id, label: String(original.name ?? id).slice(0, 256), name: node.name, parent: sourceIds.get(parent) ?? null,
+      return { id, label: String(original.name ?? id).slice(0, 256), name: node.name || id, parent: sourceIds.get(parent) ?? null,
         translation: node.position.toArray(), rotation: node.quaternion.toArray(), scale: node.scale.toArray(),
         editable, joint: jointNodes.has(node), meshIds };
     });
