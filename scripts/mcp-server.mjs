@@ -269,7 +269,7 @@ const environment = z.strictObject({
   skyBottom: color.optional(),
   fogColor: color.optional(),
   fogDensity: bounded(0, 10).optional(),
-  volumeFog: volumeFog.optional().describe('Directional scattering; needs HDR.'),
+  volumeFog: volumeFog.optional().describe('Light-shaft fog; needs HDR.'),
   liquid: liquidOptics.optional().describe('Optics for materials tagged liquid or foam.'),
   lines: lines.nullable().optional(),
   objectReflections: z.boolean().optional().describe("false turns off reflection probes on smooth metal parts."),
