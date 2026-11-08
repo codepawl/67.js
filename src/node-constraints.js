@@ -1,4 +1,4 @@
-import { mat4, quat, vec3 } from 'gl-matrix';
+import { mat3, mat4, quat, vec3 } from 'gl-matrix';
 import { compileMotionExpression } from './motion-expression.js';
 import { bounded, denseArray, knownKeys, valueFrom } from './motion-validation.js';
 import { eulerFromQuaternion, quaternionFromEuler } from './rotation-euler.js';
@@ -32,7 +32,16 @@ const CONSTRAINT_FIELDS = {
   track_to: ['target', 'trackAxis', 'upAxis', 'worldUp'],
   child_of: ['target', 'inverse'],
   floor: ['target', 'axis', 'offset'],
+  copy_transforms: ['target'],
+  limit_distance: ['target', 'distance', 'mode'],
+  limit_scale: ['x', 'y', 'z', 'space'],
+  stretch_to: ['target', 'restLength', 'volume', 'bulge', 'worldUp'],
+  locked_track: ['target', 'trackAxis', 'lockAxis'],
+  transformation: ['target', 'source', 'destination', 'map', 'fromMin', 'fromMax', 'toMin', 'toMax', 'space'],
+  action: ['target', 'source', 'axis', 'min', 'max', 'destination', 'keys', 'space'],
 };
+const PROPERTIES = ['translation', 'rotation', 'scale'];
+const MAX_ACTION_KEYS = 16;
 export const CONSTRAINT_TYPES = Object.freeze(Object.keys(CONSTRAINT_FIELDS));
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -74,8 +83,21 @@ function influenceFrom(value, nodeIds, label) {
   return structuredClone(value);
 }
 
-function normalizeConstraint(input, position, movableIds, visibleIds) {
+const ARGUMENT_TYPES = ['copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action'];
+
+// The newer types may carry their own fields in `args`, so the MCP schema stays small; they merge into the flat shape.
+function withArguments(input, label) {
+  if (!input || input.args === undefined || !ARGUMENT_TYPES.includes(input.type)) return input;
+  knownKeys(input.args, ['influence', ...CONSTRAINT_FIELDS[input.type]], `${label} args`);
+  const { args, ...rest } = input;
+  const clash = Object.keys(args).find(key => Object.hasOwn(rest, key));
+  if (clash) throw new RangeError(`${label} gives ${clash} both directly and in args.`);
+  return { ...rest, ...args };
+}
+
+function normalizeConstraint(rawInput, position, movableIds, visibleIds) {
   const label = `Motion constraint ${position}`;
+  const input = withArguments(rawInput, label);
   if (!input || !Object.hasOwn(CONSTRAINT_FIELDS, input.type)) {
     throw new RangeError(`${label} type must be one of ${CONSTRAINT_TYPES.join(', ')}.`);
   }
@@ -120,11 +142,71 @@ function normalizeConstraint(input, position, movableIds, visibleIds) {
     case 'child_of':
       result.inverse = oneOf(input.inverse, ['rest', 'none'], 'rest', `${label} inverse`);
       break;
-    default:
+    case 'floor':
       result.axis = oneOf(input.axis, SIGNED_AXES, '+y', `${label} axis`);
       result.offset = input.offset === undefined ? 0 : bounded(input.offset, -MAX_COORDINATE, MAX_COORDINATE, `${label} offset`);
+      break;
+    default:
+      normalizeExtraConstraint(input, result, label);
   }
   return result;
+}
+
+function normalizeExtraConstraint(input, result, label) {
+  switch (input.type) {
+    case 'copy_transforms':
+      break;
+    case 'limit_distance':
+      result.distance = bounded(input.distance, 0, MAX_COORDINATE, `${label} distance`);
+      result.mode = oneOf(input.mode, ['inside', 'outside', 'surface'], 'inside', `${label} mode`);
+      break;
+    case 'limit_scale':
+      Object.assign(result, axisRanges(input, MAX_COORDINATE, label));
+      for (const axis of AXES) {
+        if (result[axis] && !(result[axis][0] > 0)) throw new RangeError(`${label} ${axis} minimum must be above 0.`);
+      }
+      break;
+    case 'stretch_to':
+      result.restLength = input.restLength === undefined ? 0 : bounded(input.restLength, 0, MAX_COORDINATE, `${label} restLength`);
+      result.volume = oneOf(input.volume, ['xz', 'x', 'z', 'none'], 'xz', `${label} volume`);
+      result.bulge = input.bulge === undefined ? 1 : bounded(input.bulge, 0, 4, `${label} bulge`);
+      result.worldUp = input.worldUp === undefined ? [0, 1, 0] : valueFrom(input.worldUp, 3, `${label} worldUp`);
+      if (vec3.length(result.worldUp) < NEAR_ZERO) throw new RangeError(`${label} worldUp cannot be zero.`);
+      break;
+    case 'locked_track':
+      result.trackAxis = oneOf(input.trackAxis, SIGNED_AXES, '+y', `${label} trackAxis`);
+      result.lockAxis = oneOf(input.lockAxis, AXES, 'z', `${label} lockAxis`);
+      if (result.trackAxis.slice(1) === result.lockAxis) throw new RangeError(`${label} trackAxis and lockAxis must be different axes.`);
+      break;
+    case 'transformation':
+      result.source = oneOf(input.source, PROPERTIES, 'translation', `${label} source`);
+      result.destination = oneOf(input.destination, PROPERTIES, 'translation', `${label} destination`);
+      result.map = input.map === undefined ? [...AXES] : denseArray(input.map, 3, `${label} map`);
+      if (result.map.length !== 3 || result.map.some(axis => !AXES.includes(axis))) throw new RangeError(`${label} map needs three axes from x, y and z, one per destination axis.`);
+      for (const [field, fallback] of [['fromMin', 0], ['fromMax', 1], ['toMin', 0], ['toMax', 1]]) {
+        result[field] = input[field] === undefined ? [fallback, fallback, fallback] : valueFrom(input[field], 3, `${label} ${field}`);
+      }
+      if (result.fromMin.some((value, index) => value === result.fromMax[index])) throw new RangeError(`${label} fromMax must differ from fromMin on every axis.`);
+      break;
+    default:
+      normalizeActionConstraint(input, result, label);
+  }
+}
+
+function normalizeActionConstraint(input, result, label) {
+  result.source = oneOf(input.source, PROPERTIES, 'translation', `${label} source`);
+  result.destination = oneOf(input.destination, PROPERTIES, 'translation', `${label} destination`);
+  result.axis = oneOf(input.axis, AXES, 'x', `${label} axis`);
+  result.min = bounded(input.min, -MAX_COORDINATE, MAX_COORDINATE, `${label} min`);
+  result.max = bounded(input.max, -MAX_COORDINATE, MAX_COORDINATE, `${label} max`);
+  if (!(result.min < result.max)) throw new RangeError(`${label} min must be below max.`);
+  denseArray(input.keys, MAX_ACTION_KEYS, `${label} keys`);
+  if (input.keys.length < 2) throw new RangeError(`${label} keys needs at least 2 keys.`);
+  result.keys = input.keys.map((key, index) => {
+    knownKeys(key, ['at', 'value'], `${label} key ${index}`);
+    return { at: bounded(key.at, 0, 1, `${label} key ${index} at`), value: valueFrom(key.value, 3, `${label} key ${index} value`) };
+  });
+  if (result.keys.some((key, index) => index && key.at <= result.keys[index - 1].at)) throw new RangeError(`${label} keys must have rising at values.`);
 }
 
 /** Validate a constraint list against the node IDs a motion may move and the ones it may read. Returns plain data. */
@@ -256,9 +338,56 @@ function limitRotation(owner, target, constraint) {
   quaternionFromEuler(owner.rotation, angles[0], angles[1], angles[2]);
 }
 
+function limitScale(owner, target, constraint) {
+  for (const axis of AXES) {
+    if (!constraint[axis]) continue;
+    const index = axisIndex(axis);
+    owner.scale[index] = Math.min(constraint[axis][1], Math.max(constraint[axis][0], owner.scale[index]));
+  }
+}
+
+/** A frame's translation, scale or Euler rotation (degrees) as three numbers. */
+function channelOf(frame, property) {
+  return property === 'rotation' ? eulerFromQuaternion(frame.rotation).map(radians => radians / TO_RADIANS) : Array.from(frame[property]);
+}
+
+function writeChannel(frame, property, values) {
+  if (property === 'rotation') {
+    const [x, y, z] = values.map(degrees => degrees * TO_RADIANS);
+    quaternionFromEuler(frame.rotation, x, y, z);
+  } else {
+    frame[property].set(values);
+  }
+}
+
+function transformation(owner, target, constraint) {
+  const source = channelOf(target, constraint.source);
+  const result = channelOf(owner, constraint.destination);
+  constraint.map.forEach((sourceAxis, index) => {
+    const from = axisIndex(sourceAxis);
+    const fraction = (source[from] - constraint.fromMin[from]) / (constraint.fromMax[from] - constraint.fromMin[from]);
+    const clamped = Math.min(1, Math.max(0, fraction));
+    result[index] = constraint.toMin[index] + clamped * (constraint.toMax[index] - constraint.toMin[index]);
+  });
+  writeChannel(owner, constraint.destination, result);
+}
+
+/** The owner's channel follows a keyed curve, read where the target's channel sits between min and max. */
+function action(owner, target, constraint) {
+  const value = channelOf(target, constraint.source)[axisIndex(constraint.axis)];
+  const at = Math.min(1, Math.max(0, (value - constraint.min) / (constraint.max - constraint.min)));
+  const { keys } = constraint;
+  const found = keys.findIndex(key => key.at >= at);
+  const next = found < 0 ? keys.length - 1 : Math.max(1, found);
+  const previous = keys[next - 1];
+  const following = keys[next];
+  const fraction = Math.min(1, Math.max(0, (at - previous.at) / (following.at - previous.at)));
+  writeChannel(owner, constraint.destination, previous.value.map((from, index) => from + fraction * (following.value[index] - from)));
+}
+
 const FRAME_CONSTRAINTS = {
   copy_location: copyLocation, copy_rotation: copyRotation, copy_scale: copyScale,
-  limit_location: limitLocation, limit_rotation: limitRotation,
+  limit_location: limitLocation, limit_rotation: limitRotation, limit_scale: limitScale, transformation, action,
 };
 
 function perpendicularTo(direction) {
@@ -284,6 +413,51 @@ function trackTo(ownerWorld, targetWorld, constraint) {
   const thirdIndex = 3 - trackIndex - upIndex;
   columns[thirdIndex] = vec3.cross(new Float64Array(3), columns[(thirdIndex + 1) % 3], columns[(thirdIndex + 2) % 3]);
   frame.rotation = quat.normalize(new Float64Array(4), quat.fromMat3(new Float64Array(4), columns.flatMap(column => Array.from(column))));
+  return compose(frame);
+}
+
+function limitDistance(ownerWorld, targetWorld, constraint) {
+  const center = mat4.getTranslation(new Float64Array(3), targetWorld);
+  const offset = vec3.subtract(new Float64Array(3), mat4.getTranslation(new Float64Array(3), ownerWorld), center);
+  const distance = vec3.length(offset);
+  const outside = constraint.mode === 'outside';
+  const inside = constraint.mode === 'inside';
+  if (distance < NEAR_ZERO || (inside && distance <= constraint.distance) || (outside && distance >= constraint.distance)) return ownerWorld;
+  const moved = mat4.clone(ownerWorld);
+  vec3.scaleAndAdd(offset, center, offset, constraint.distance / distance);
+  moved.set(offset, 12);
+  return moved;
+}
+
+/** Aim the track axis at the target as far as turning about the owner's own lock axis allows. */
+function lockedTrack(ownerWorld, targetWorld, constraint) {
+  const frame = decompose(ownerWorld);
+  const rotation = mat3.fromQuat(new Float64Array(9), frame.rotation);
+  const columnOf = axis => Array.from(rotation.slice(axisIndex(axis) * 3, axisIndex(axis) * 3 + 3));
+  const lock = columnOf(constraint.lockAxis);
+  const track = columnOf(constraint.trackAxis).map(component => component * signOf(constraint.trackAxis));
+  const wanted = vec3.subtract(new Float64Array(3), mat4.getTranslation(new Float64Array(3), targetWorld), frame.translation);
+  vec3.scaleAndAdd(wanted, wanted, lock, -vec3.dot(wanted, lock));
+  if (vec3.length(wanted) < NEAR_ZERO) return ownerWorld;
+  vec3.normalize(wanted, wanted);
+  const angle = Math.atan2(vec3.dot(lock, vec3.cross(new Float64Array(3), track, wanted)), vec3.dot(track, wanted));
+  const turn = quat.setAxisAngle(new Float64Array(4), lock, angle);
+  frame.rotation = quat.normalize(new Float64Array(4), quat.multiply(new Float64Array(4), turn, frame.rotation));
+  return compose(frame);
+}
+
+/** Aim +y at the target and stretch it to the distance; x and z swell or thin to keep volume as `volume` says. */
+function stretchTo(ownerWorld, targetWorld, constraint, restLength) {
+  const aimed = trackTo(ownerWorld, targetWorld, { trackAxis: '+y', upAxis: 'z', worldUp: constraint.worldUp });
+  const distance = vec3.distance(mat4.getTranslation(new Float64Array(3), ownerWorld), mat4.getTranslation(new Float64Array(3), targetWorld));
+  if (aimed === ownerWorld || !(restLength > 0)) return aimed;
+  const frame = decompose(aimed);
+  const ratio = distance / restLength;
+  const swell = ratio ** -constraint.bulge;
+  const side = constraint.volume === 'xz' ? Math.sqrt(swell) : swell;
+  frame.scale[1] *= ratio;
+  if (constraint.volume !== 'none' && constraint.volume !== 'z') frame.scale[0] *= side;
+  if (constraint.volume !== 'none' && constraint.volume !== 'x') frame.scale[2] *= side;
   return compose(frame);
 }
 
@@ -413,6 +587,15 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
       result = trackTo(ownerWorld, worlds[targetIndex], constraint);
     } else if (constraint.type === 'floor') {
       result = floorConstraint(ownerWorld, worlds[targetIndex], constraint);
+    } else if (constraint.type === 'copy_transforms') {
+      result = worlds[targetIndex];
+    } else if (constraint.type === 'limit_distance') {
+      result = limitDistance(ownerWorld, worlds[targetIndex], constraint);
+    } else if (constraint.type === 'locked_track') {
+      result = lockedTrack(ownerWorld, worlds[targetIndex], constraint);
+    } else if (constraint.type === 'stretch_to') {
+      const restLength = constraint.restLength || vec3.distance(mat4.getTranslation(new Float64Array(3), restWorlds[ownerIndex]), mat4.getTranslation(new Float64Array(3), restWorlds[targetIndex]));
+      result = stretchTo(ownerWorld, worlds[targetIndex], constraint, restLength);
     } else {
       const inverse = constraint.inverse === 'rest' ? mat4.invert(new Float64Array(16), restWorlds[targetIndex]) : mat4.create();
       const parent = mat4.multiply(new Float64Array(16), worlds[targetIndex], inverse);

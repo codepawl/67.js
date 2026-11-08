@@ -494,7 +494,7 @@ const constraint = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('limit_rotation'), node: identifier, x: degreeRange.optional(), y: degreeRange.optional(), z: degreeRange.optional(), space: constraintSpace, influence }),
   z.strictObject({ type: z.literal('track_to'), node: identifier, target: identifier, trackAxis: signedAxis.optional(), upAxis: axisName.optional(), worldUp: vector3.optional(), influence }),
   z.strictObject({ type: z.literal('child_of'), node: identifier, target: identifier, inverse: z.enum(['rest', 'none']).optional(), influence }),
-  z.strictObject({ type: z.literal('floor'), node: identifier, target: identifier, axis: signedAxis.optional(), offset: z.number().min(-1e6).max(1e6).optional(), influence }),
+  z.strictObject({ type: z.enum(['floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action']), node: identifier, target: identifier.optional(), axis: signedAxis.optional(), offset: z.number().min(-1e6).max(1e6).optional(), influence, args: z.record(z.string(), z.unknown()).optional() }),
 ]);
 const driver = z.strictObject({
   target: z.union([

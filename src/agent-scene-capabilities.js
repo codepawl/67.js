@@ -263,10 +263,10 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
       align: 'to, axis, at (min, center, max), offset: anchor on one axis',
       centered: 'to, axes (default x, y, z): centre on those axes',
     }),
-    notes: 'Optional region (a mesh tag) uses only those faces of the target. One relation per axis, no loops, mesh nodes only. A relation replaces translation on its axes. set-node with relations [] removes them.',
+    notes: 'Region (mesh tag): target faces only. One relation per axis, no loops, mesh nodes only. A relation sets translation on its axes. set-node with relations [] removes them.',
   }),
   rigging: Object.freeze({ presets: Object.freeze(['humanoid', 'quadruped']), maxArmatures: 16, maxBones: 128, maxInfluences: 4, weights: 'bone-distance' }),
-  motionConstraints: Object.freeze(['copy_location', 'copy_rotation', 'copy_scale', 'limit_location', 'limit_rotation', 'track_to', 'child_of', 'floor']),
+  motionConstraints: Object.freeze(['copy_location', 'copy_rotation', 'copy_scale', 'limit_location', 'limit_rotation', 'track_to', 'child_of', 'floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action']),
   motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxExpressionParts: 64, maxExpressionDepth: 8 }),
   // Recipe physics: Rapier (an optional peer) bakes bodies on nodes offline; playback is a seek into the bake.
   physics: Object.freeze({
@@ -281,7 +281,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   cloth: Object.freeze({
     sheetGeometry: 'grid { segments 1-64 }: unit sheet in XY facing +Z, sized by node scale; any triangle mesh works',
     defaults: Object.freeze({ stiffness: 0.9, bend: 0.1, density: 0.2, damping: 0.3, friction: 0.3, thickness: 0.01, colliderShape: 'box' }),
-    notes: 'density kg/m2, damping 1/s, thickness m, wind m/s steady. Pin edges are of the local bounds. Colliders { node, shape ball|box } are fixed fits to geometry bounds and, like sheets, root nodes with no motion track or physics body. Moving: { attach, shape ball|capsule, radius, offset, to, toOffset } or { armature, radiusFraction, exclude } (a capsule per bone). Sheet pinGroup names a vertex group of the sheet mesh whose vertices (weight 0.5 or more) are held, with or without pin. Sheet pinTo { node, weight } rides the pinned edges on a node. No self collision.',
+    notes: 'density kg/m2, damping 1/s, thickness m, wind m/s steady. Pin edges are of the local bounds. Colliders { node, shape ball|box } are fixed fits to geometry bounds and, like sheets, root nodes without a motion track or body. Moving: { attach, shape ball|capsule, radius, offset, to, toOffset } or { armature, radiusFraction, exclude }. Sheet pinGroup names a sheet vertex group whose vertices (weight 0.5 or more) are held. Sheet pinTo { node, weight } rides pinned edges on a node. No self collision.',
     limits: Object.freeze({ maxSheets: 8, maxColliders: 16, maxMovingColliders: 64, maxDuration: 10, maxParticles: 5000, framesPerSecond: 60, substeps: 4, iterations: 8 }),
   }),
   // Recipe particles: closed-form from seeded launch values, so any time is computed directly and a seek never replays.
