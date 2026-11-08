@@ -200,11 +200,6 @@ function copyMaterialLayers(value, result) {
     if (value[field] === undefined) continue;
     result[field] = Array.isArray(value[field]) ? vector(value[field], 3, field) : value[field];
   }
-  // A graph that outputs clearcoat or transmission is the per-pixel mask, so the factor defaults to 1 (full strength).
-  const graph = value.pattern?.type === 'graph' ? value.pattern.graph : null;
-  for (const field of ['clearcoat', 'transmission']) {
-    if (value[field] === undefined && graph && Object.hasOwn(graph, field)) result[field] = 1;
-  }
   validateMaterialLayers(result);
   if (value.subsurface !== undefined) result.subsurface = agentSceneModule('subsurfaceShader').copySubsurface(value.subsurface, result.tag);
   if (value.snippet) result.snippet = agentSceneModule('materialSnippet').normalizeMaterialSnippet(value.snippet, { hasMap: Boolean(value.map || value.pattern) });
@@ -220,6 +215,7 @@ function materialFrom(value) {
   // A graph that makes roughness, metallic or emission passes it through as written, so the factors default to 1.
   const graphFactor = (output, fallback) => (Object.hasOwn(graph ?? {}, output) ? 1 : fallback);
   const result = { id: value.id, tag: defaultValue(value.tag, 'surface'), color: vector(defaultValue(value.color, defaultColor), 3, 'color'),
+    ...(graphFactor('clearcoat', 0) && { clearcoat: 1 }), ...(graphFactor('transmission', 0) && { transmission: 1 }),
     metallic: defaultValue(value.metallic, graphFactor('metallic', 0)), roughness: defaultValue(value.roughness, graphFactor('roughness', 0.5)), emission: defaultValue(value.emission, graphFactor('emission', 0)) };
   if (!AGENT_SCENE_CAPABILITIES.materialTags.includes(result.tag)) {
     throw new RangeError(`Material tag must be one of ${AGENT_SCENE_CAPABILITIES.materialTags.join(', ')}.`);
@@ -239,8 +235,7 @@ function materialFrom(value) {
     throw new RangeError(`alphaMode must be one of ${RECIPE_ALPHA_MODES.join(', ')}.`);
   }
   // The renderer ignores opacity on opaque surfaces, so any opacity below one means blending (additive stays additive).
-  // A graph that outputs opacity writes it into the base texture alpha, which only blend, add and mask read.
-  const graphHasOpacity = value.pattern?.type === 'graph' && Object.hasOwn(value.pattern.graph ?? {}, 'opacity');
+  const graphHasOpacity = graphFactor('opacity', 0);
   result.alphaMode = (result.opacity < 1 || graphHasOpacity) && requestedAlphaMode === 'opaque' ? 'blend' : requestedAlphaMode;
   result.doubleSided = defaultValue(value.doubleSided, false);
   if (typeof result.doubleSided !== 'boolean') {
