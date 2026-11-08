@@ -66,7 +66,7 @@ Call `loadAgentSceneModules(operations)` before `apply` when the operations add 
 ## Recipe contract
 
 The recipe must contain `format`, `schemaVersion`, `geometries`, `materials`, and `nodes`.
-The optional `camera` object supplies a perspective camera.
+The optional `camera` object supplies a perspective camera, or an orthographic one with `projection: 'orthographic'` and `orthoScale` (view height in metres, default 4). The lens is `fov` (vertical degrees) or `focalLength` in millimetres with `sensorWidth` (default 36); giving both is an error. `shift: [x, y]` moves the frame by a fraction of its width and height, positive right and up. `fStop` (0.7 to 64) turns on depth of field focused on `target` (1.4 or lower is full blur) and cannot be combined with `effects.depthOfField.blur`. The path tracer draws perspective cameras without shift.
 All objects reject unknown keys.
 Inputs must contain plain, finite, acyclic JSON data without accessors, sparse arrays, or executable values.
 JSON nesting has a fixed maximum of 64 levels.
@@ -225,7 +225,7 @@ Normal transforms must also remain finite.
 Cached local geometry bounds provide a conservative world Float32 check from eight corners per mesh.
 The check bounds the sum of absolute matrix products, so intermediate shader arithmetic cannot overflow before cancellation.
 
-The camera contains `eye`, `target`, `up`, `fov`, `near`, and `far`.
+The camera contains `eye`, `target`, `up`, `fov`, `near`, and `far`, plus the optional `projection`, `orthoScale`, `focalLength`, `sensorWidth`, `shift` and `fStop` when the recipe sets them.
 Its defaults are `[4, 3, 5]`, `[0, 0, 0]`, `[0, 1, 0]`, `45`, `0.1`, and `1000`.
 FOV uses degrees and ranges between zero and 180.
 The clipping range must satisfy `0 < near < far` at Float32 precision.
@@ -354,7 +354,7 @@ Final resource references and hierarchy must be valid before publication.
 | --- | --- |
 | `set-node` | `id`, optional `translation`, `rotation`, `scale`, `parent`, `label`, `geometry`, `material` |
 | `set-material` | `id`, optional `color`, `metallic`, `roughness`, `emission`, `emissiveColor`, `pattern`, `map` |
-| `set-camera` | Optional `eye`, `target`, `up`, `fov`, `near`, `far` directly on the command |
+| `set-camera` | Optional `eye`, `target`, `up`, `fov`, `near`, `far`, `projection`, `orthoScale`, `focalLength`, `sensorWidth`, `shift`, `fStop` directly on the command; `focalLength` replaces `fov` and `fov` replaces `focalLength` |
 | `add-geometry` | `geometry`, containing a complete geometry record |
 | `remove-geometry` | `id` |
 | `add-material` | `material`, containing a complete material record |
