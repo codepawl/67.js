@@ -3,7 +3,7 @@
 67js develops 3D authoring and rendering tools for agents, with browser previews, deterministic animation and exported media.
 This document separates shipping capabilities from work in progress. Performance claims require measurements on matching scenes and hardware.
 
-The end goal is to be as capable as Blender, as light as three.js and as AI friendly as possible. Issue 23 in the project repository defines each part and orders the work. `docs/parity.md` in that repository records the coverage of each Blender feature.
+The end goal is to be as capable as Blender, as light as three.js and as AI friendly as possible. `docs/goal.md` defines each part, and the GitHub milestones order the work. `docs/parity.md` in that repository records the coverage of each Blender feature.
 
 ## Available
 
@@ -43,7 +43,7 @@ The npm package includes the prebuilt `67js-mcp` command with lazy browser start
 
 ## Next
 
-Issue 23 in the project repository orders the work in six milestones. Each milestone lists its own issues.
+The work is ordered in six GitHub milestones. Each milestone lists its own issues.
 
 1. Measure: benchmarks, size budgets and reference-scene scores that make each goal checkable.
 2. Lighter: remove weight so that new features fit under the package size budget.
