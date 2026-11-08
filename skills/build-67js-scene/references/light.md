@@ -77,8 +77,10 @@ sunlit closed room. It needs `irradianceGrid`; without it the call fails with "b
 ```
 
 The bake runs when the scene builds and again only when parts, lights, materials or the bake change.
+A motion track that moves a light, the sun or a part leaves the baked light behind: `scene_inspect` then reports
+`bake-stale`. Keep lit lights and parts still, or set `bake.rebake` true: each pose motion samples is baked (the last 4 are kept), about 0.7 s each on a small room, so use it for a few poses.
 `scene_inspect` shows `bake.seconds`, `bake.skipped` (alpha, skins, morphs, hair and cloth are left as they were) and
-`bake.used`. It bakes the rest pose, so a light moved by a motion track does not move its baked light. `"bake": null`
+`bake.used`. Without rebake it bakes the rest pose, so a light moved by a motion track does not move its baked light. `"bake": null`
 (`set-bake`) removes it.
 
 ## Flush faces flicker (z-fighting)
