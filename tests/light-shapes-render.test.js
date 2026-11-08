@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Draws each soft-light feature off and on in Chrome and records the frame time, so it runs only when asked:
-//   RENDER_TESTS=1 bash ~/.agents/tools/gpu-lock.sh node --test tests/light-shapes-render.test.js
+//   RENDER_TESTS=1 node --test tests/light-shapes-render.test.js (on a shared GPU, start it through the machine GPU lock)
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const enabled = process.env.RENDER_TESTS === '1' && existsSync(chromePath);
 const PAIRS = [['sun-hard', 'sun-soft'], ['area-lit', 'area-shadow'], ['spot-plain', 'spot-ies']];
