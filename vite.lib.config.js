@@ -74,6 +74,7 @@ export default defineConfig({
         'ground-bounce': 'src/ground-bounce.js',
         'floor-sky-visibility': 'src/floor-sky-visibility.js',
         'path-tracer': 'src/path-tracer.js',
+        'path-tracer-progressive': 'src/path-tracer-progressive.js',
         'path-tracer-worker': 'src/path-tracer-worker.js',
         'kernel-worker': 'src/kernel-worker.js',
         'texture-set': 'src/texture-set.js',
