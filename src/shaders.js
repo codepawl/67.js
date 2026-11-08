@@ -759,7 +759,7 @@ const SHADER_FEATURE_CONDITIONS = {
   areaLights: ['USES_AREA_LIGHTS', 'areaLightCount > 0'],
   localShadows: ['USES_LOCAL_SHADOWS', 'true'],
   fill: ['FILL_ON', 'true'],
-  renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5'],
+  renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5 && renderPassMode < 5.5'],
   sheen: ['USES_SHEEN', 'materialSheen.rgb != vec3(0.0)'],
   clearcoat: ['USES_CLEARCOAT', 'materialCoat.x > 0.0'],
 };
