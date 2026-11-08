@@ -3,7 +3,7 @@ import './support/load-agent-scene-modules.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAgentScene } from '../src/agent-scene.js';
-import { closedRoom } from './support/agent-bake-rooms.mjs';
+import { closedRoom, lightmapBytesOf } from './support/agent-bake-rooms.mjs';
 
 const LIGHT_MOVES = { kind: 'light', id: 'point:0', property: 'position', keyframes: [{ time: 0, value: [0, 2, 0] }, { time: 2, value: [1, 2, 0] }] };
 
@@ -37,12 +37,36 @@ test('an unchanged scene, or one with a bake and no motion, gives no warning', (
   assert.deepEqual(staleDiagnostics(unmoved), []);
 });
 
-test('bake.rebake turns the warning off and skips the cache on a rebuild', () => {
+const lightMapData = (scene, name) => Array.from(lightmapBytesOf(scene, name));
+
+test('bake.rebake bakes the pose motion samples: the light map at time t equals a fresh bake of the scene posed at t', () => {
   const scene = createAgentScene(bakedRoom({ rebake: true }));
+  const authoredFloor = lightMapData(scene, 'floor');
   scene.sampleMotion(2);
   assert.deepEqual(staleDiagnostics(scene), []);
-  assert.equal(scene.inspect().bake.rebake, true);
-  const firstBake = scene.inspect().bake.reused;
-  assert.equal(firstBake, false);
+  assert.equal(scene.inspect().bake.reused, false);
+  const posed = bakedRoom();
+  delete posed.motion;
+  posed.environment.pointLights[0].position = [1, 2, 0];
+  const fresh = createAgentScene(posed);
+  for (const name of ['floor', 'back', 'block']) {
+    assert.deepEqual(lightMapData(scene, name), lightMapData(fresh, name), name);
+  }
+  assert.notDeepEqual(lightMapData(scene, 'floor'), authoredFloor);
+  scene.sampleMotion(0);
+  assert.deepEqual(lightMapData(scene, 'floor'), authoredFloor);
+  assert.equal(scene.inspect().bake.reused, true);
+});
+
+test('bake.rebake keeps the bakes of the last 4 poses and traces nothing for a pose it holds', () => {
+  const scene = createAgentScene(bakedRoom({ rebake: true }));
+  const times = [0.5, 1, 1.5, 2];
+  for (const time of times) {
+    scene.sampleMotion(time);
+    assert.equal(scene.inspect().bake.reused, false, `time ${time}`);
+  }
+  scene.sampleMotion(2);
+  scene.sampleMotion(1.5);
+  assert.equal(scene.inspect().bake.reused, true);
   assert.throws(() => createAgentScene(bakedRoom({ rebake: 'yes' })), /rebake must be a boolean/);
 });

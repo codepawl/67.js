@@ -79,19 +79,51 @@ export function lightBakeKey(recipe, generatedGeometryGenerators, environment, w
     [...worldMatrices].map(([name, matrix]) => [name, Array.from(matrix)])]);
 }
 
+// The bake inputs at a sampled pose: the lights, sun and part matrices as motion has set them, and the key they give.
+function sampledBakeInputs(recipe, sourceRestParts, generators, pose) {
+  const environment = pose.movedLook ? motionEnvironment(structuredClone(recipe.environment), pose.movedLook) : recipe.environment;
+  const worldMatrices = new Map(sourceRestParts.map(part => [part.name, new Float32Array(pose.graph.getNode(part.name).worldMatrix)]));
+  return { environment, worldMatrices, key: lightBakeKey(recipe, generators, environment, worldMatrices) };
+}
+
 /** The scene_inspect diagnostics for a bake whose inputs, at the sampled pose, differ from the ones it was traced at. */
 export function staleBakeProblems(state, generators, bakedKey) {
-  const environment = state.movedLook ? motionEnvironment(structuredClone(state.recipe.environment), state.movedLook) : state.recipe.environment;
-  const graph = state.poseGraph ?? state.graph;
-  const worldMatrices = new Map(state.sourceRestParts.map(part => [part.name, graph.getNode(part.name).worldMatrix]));
-  return lightBakeKey(state.recipe, generators, environment, worldMatrices) === bakedKey ? [] : [staleBakeDiagnostic()];
+  const pose = { graph: state.poseGraph ?? state.graph, movedLook: state.movedLook };
+  return sampledBakeInputs(state.recipe, state.sourceRestParts, generators, pose).key === bakedKey ? [] : [staleBakeDiagnostic()];
+}
+
+const REBAKE_CACHE_SIZE = 4;
+
+/**
+ * bake.rebake: the bake for the pose a frame is sampled at. Returns null while the bake in use already matches that pose;
+ * otherwise the bake traced at the sampled lights, sun and part matrices, from the cache (the last 4 poses, least recently
+ * used leaves first) or freshly traced. `lightBake.currentKey` is the pose the scene is drawn with.
+ */
+export function bakeAtSampledPose(lightBake, recipe, generators, pose) {
+  const { key, environment, worldMatrices } = sampledBakeInputs(recipe, lightBake.sourceRestParts, generators, pose);
+  if (key === lightBake.currentKey) {
+    return null;
+  }
+  let entry = lightBake.cache.get(key);
+  const reused = Boolean(entry);
+  lightBake.cache.delete(key);
+  if (!entry) {
+    const baked = bakeAgentParts(lightBake.sourceRestParts, worldMatrices, environment, recipe.bake, generators);
+    entry = { parts: baked.parts, report: baked.report };
+  }
+  lightBake.cache.set(key, entry);
+  if (lightBake.cache.size > REBAKE_CACHE_SIZE) {
+    lightBake.cache.delete(lightBake.cache.keys().next().value);
+  }
+  lightBake.currentKey = key;
+  return { entry, reused };
 }
 
 function staleBakeDiagnostic() {
   return {
     kind: 'bake-stale', severity: 'warning', target: 'bake',
     message: 'A light, the sun or a part has moved from the pose the bake was traced at, so the baked light no longer matches the frame.',
-    fix: 'Bounced light does not follow motion. Bake a pose that stays put, or set bake.rebake true (scene_apply set-bake) to trace again on every build and silence this. Material animation is not checked.',
+    fix: 'Bounced light does not follow motion. Bake a pose that stays put, or set bake.rebake true (scene_apply set-bake) to bake each sampled pose. Material animation is not checked.',
   };
 }
 

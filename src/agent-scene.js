@@ -1288,8 +1288,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       state.sourceRestParts.every((part, index) => part === nextParts[index]);
     const sourceRestParts = sameParts ? state.sourceRestParts : Object.freeze(nextParts);
     const lightBakeResult = stageLightBake(recipe, sourceRestParts, graph);
-    const reflected = stageObjectReflections(recipe, sourceRestParts, lightBakeResult ? lightBakeResult.parts : sourceRestParts, graph);
-    const restParts = stageCoplanarOffsets(recipe, stageLightLinks(recipe, stageFloorSky(recipe, reflected ? reflected.parts : lightBakeResult ? lightBakeResult.parts : sourceRestParts)));
+    const { reflected, restParts } = stageRestParts(recipe, sourceRestParts, lightBakeResult, graph);
     const stagedState = {
       recipe, geometryRecords, geometries, graph, materialHandles,
       // Part identity decides what the next stage reuses, so it compares the parts as built, before any bake.
@@ -1348,12 +1347,27 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
   }
 
   // The bake no longer matches the frame: motion moved a light, the sun or a part off the pose it was traced at.
-  // Only a scene with both a bake and motion pays for this check, and bake.rebake turns it off.
+  // Only a scene with both a bake and motion pays for this check, and bake.rebake turns it off (it bakes each sampled pose).
   function staleBakeProblems() {
     if (!lightBake || !state.recipe.bake || state.recipe.bake.rebake || !state.motionSampler) {
       return [];
     }
     return agentSceneModule('bake').staleBakeProblems(state, bakeGenerators(state.recipe), lightBake.key);
+  }
+
+  function stageRestParts(recipe, sourceRestParts, lightBakeResult, graph) {
+    const reflected = stageObjectReflections(recipe, sourceRestParts, lightBakeResult ? lightBakeResult.parts : sourceRestParts, graph);
+    return { reflected, restParts: stageCoplanarOffsets(recipe, stageLightLinks(recipe, stageFloorSky(recipe, reflected ? reflected.parts : lightBakeResult ? lightBakeResult.parts : sourceRestParts))) };
+  }
+
+  // bake.rebake: a frame sampled at a pose the bake was not traced at is lit by a bake of that pose, cached by its key.
+  function rebakeAtPose(pose) {
+    const rebaked = lightBake && state.recipe.bake?.rebake && state.motionSampler && agentSceneModule('bake').bakeAtSampledPose(lightBake, state.recipe, bakeGenerators(state.recipe), pose);
+    if (rebaked) {
+      rebaked.entry.staged ??= stageRestParts(state.recipe, state.sourceRestParts, rebaked.entry, pose.graph);
+      state.restParts = rebaked.entry.staged.restParts;
+      state.bakeReport = { ...rebaked.entry.report, reused: rebaked.reused };
+    }
   }
 
   // A light bake costs seconds of ray tracing: it runs when the parts, the lights, the materials or the bake fields
@@ -1365,11 +1379,12 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     const worldMatrices = new Map(sourceRestParts.map(part => [part.name, new Float32Array(graph.getNode(part.name).worldMatrix)]));
     const generatedGeometryGenerators = bakeGenerators(recipe);
     const key = agentSceneModule('bake').lightBakeKey(recipe, generatedGeometryGenerators, recipe.environment, worldMatrices);
-    if (!recipe.bake.rebake && lightBake?.key === key && lightBake.sourceRestParts === sourceRestParts) {
+    if (lightBake?.key === key && lightBake.sourceRestParts === sourceRestParts) {
+      lightBake.currentKey = key;
       return { ...lightBake, reused: true };
     }
     const baked = agentSceneModule('bake').bakeAgentParts(sourceRestParts, worldMatrices, recipe.environment, recipe.bake, generatedGeometryGenerators);
-    lightBake = { key, sourceRestParts, parts: baked.parts, report: baked.report };
+    lightBake = { key, currentKey: key, sourceRestParts, parts: baked.parts, report: baked.report, cache: new Map([[key, { parts: baked.parts, report: baked.report }]]) };
     return { ...lightBake, reused: false };
   }
 
@@ -1529,7 +1544,9 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       if (time !== null && !state.motionSampler && !state.physicsSampler && !state.clothSampler && !state.particleSampler && !state.assetRuntime.animators.length && !state.sequences.length) {
         throw new RangeError('This procedural recipe has no motion, physics, cloth or particles, and no placed asset clip.');
       }
-      if (publishPose(state, stagePose(state, time))) {
+      const pose = stagePose(state, time);
+      rebakeAtPose(pose);
+      if (publishPose(state, pose)) {
         topologyRevision++;
       }
       return state.motionTime;
