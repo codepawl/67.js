@@ -78,7 +78,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   if (!['gpu', 'cpu'].includes(backend)) {
     throw new RangeError('backend must be gpu or cpu.');
   }
-  const nativeTracerLocator = createNativeTracerLocator();
+  let nativeTracerLocator;
   if (!Number.isInteger(memory) || memory < 32 || memory > MAXIMUM_MEMORY_MIB) {
     throw new RangeError(`memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
@@ -461,6 +461,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           const { type, ...tracerOptions } = settings.renderer;
           if (settings.renderer.backend === 'gpu' && backend === 'cpu') throw new Error('renderer.backend "gpu" needs a runtime on the GPU backend, and this one runs on SwiftShader.');
           const choice = await chooseDenoiser(settings.renderer.denoise);
+          nativeTracerLocator ??= createNativeTracerLocator();
           const trace = await chooseTraceBackend({ requested: settings.renderer.backend, runtimeBackend: backend, locator: nativeTracerLocator });
           const traceOptions = { width, height, ...tracerOptions, backend: trace.backend === 'native' ? 'gpu' : trace.backend, denoise: choice.denoise, threads: PATH_TRACER_THREADS };
           let traced;
