@@ -73,6 +73,25 @@ Only opaque and cutout geometry appears. `scene_render_result` metrics carry `ob
 IDs follow draw order, not node order) and `depthRangeMetres`. Depth is metres over 100 in a 16-bit value (high byte
 in red, low in green); background is `255, 255, 0`. Videos hold the lit image only.
 
+## Compositing output: alpha, 16-bit, EXR, region, 60 fps
+
+Four optional settings, off unless set, so defaults write the same bytes as before.
+
+```json
+{ "expectedRevision": 3, "settings": { "kind": "image", "width": 1280, "height": 720, "transparent": true, "format": "exr",
+  "passes": ["depth"], "region": { "x": 320, "y": 180, "width": 640, "height": 360 } } }
+```
+
+- `transparent: true` (image, stills): the lit PNG keeps alpha. Sky, environment background and the automatic ground are not
+  drawn, so add your own ground or a `shadowCatcher` node; volume fog is refused; passes ignore it.
+- `format` (image, stills): `png` (default), `png16` (16-bit RGB or RGBA) or `exr` (half float, premultiplied alpha). Files are
+  `render.png` or `render.exr` plus `render-<pass>.<ext>`. Depth is a 16-bit gray step in `png16` and float metres in channel `Z`
+  in `exr`; object IDs are a gray 16-bit PNG (up to 65535 objects) or float channel `id`.
+- `region: { x, y, width, height }` (pixels from the top left, each side 16 or more; even sides for video): the frame is
+  rendered whole and cropped, so the look matches the full frame.
+- `fps` up to 60 for video, inside 900 frames.
+- The path tracer refuses transparent, format and region; H.264 refuses transparent and format.
+
 ## Path traced still
 
 Offline Cook path tracing: glass refraction, soft multi-bounce light, subsurface, many lights. Slow and bounded, for

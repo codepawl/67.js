@@ -356,7 +356,7 @@ function cascadesFor(scene) {
   return count > 0 ? agentSceneModule('cascades').createCascadedShadows({ count }) : null;
 }
 
-function initializeRenderer(scene, { memoryBudgetMiB, backend }) {
+function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = false }) {
   probeSnippets(scene);
   const placement = agentGroundPlacement(scene.parts, scene.environment);
   const renderer = installDepthPrecision(installRenderPasses(installCameraEffects(new Renderer67(canvas, scene.parts, {
@@ -372,6 +372,7 @@ function initializeRenderer(scene, { memoryBudgetMiB, backend }) {
     pixelRatio: 1,
     samples: backend === 'cpu' ? 1 : 4,
     memoryBudgetMiB,
+    transparent,
   }))));
   // Outlines, toon light and polylines draw only for a frame that carries environment.lines; user passes run last, on the finished frame.
   // Mesh blend installs before line art, so its stage runs first and the lines draw over the blended colour; it blends only the
@@ -410,15 +411,15 @@ function objectMotionFor(record, motionTime) {
   return { current, previous };
 }
 
-function createPreview(scene, { sessionId, memoryBudgetMiB, backend }, asset, placedAssets, sequenceFrames) {
+function createPreview(scene, { sessionId, memoryBudgetMiB, backend, transparent = false }, asset, placedAssets, sequenceFrames) {
   if (active) {
     throw new Error('Dispose the current scene before creating another.');
   }
   validatePreviewCamera(scene.camera);
   let renderer;
   try {
-    renderer = initializeRenderer(scene, { memoryBudgetMiB, backend });
-    const record = { scene, renderer, asset, placedAssets, sessionId, options: { memoryBudgetMiB, backend },
+    renderer = initializeRenderer(scene, { memoryBudgetMiB, backend, transparent });
+    const record = { scene, renderer, asset, placedAssets, sessionId, options: { memoryBudgetMiB, backend, transparent },
       checkpoints: new Map(), branches: createBranchStore(), rendererTopology: scene.topologyRevision, rendererTextured: sceneIsTextured(scene), sequenceFrames };
     draw(record);
     const result = status(record);
@@ -762,7 +763,7 @@ window.__agentPreview = {
   },
   // `pass` draws one render pass instead of the lit image. Object ID frames also list the part behind each ID.
   // `camera` overrides camera fields and `depthOfField` the blur and focus distance (a timeline shot); `brightness` scales exposure for a dip through black.
-  frame({ sessionId, animation, motionTime, rendererTime = 0, pass, passDepthRange, camera: cameraOverrides, depthOfField: depthOfFieldOverrides, brightness = 1 }) {
+  frame({ sessionId, animation, motionTime, rendererTime = 0, pass, passDepthRange, passFloat = false, floatOutput = false, camera: cameraOverrides, depthOfField: depthOfFieldOverrides, brightness = 1 }) {
     const record = requireSession(sessionId);
     if (!Number.isFinite(brightness) || brightness < 0 || brightness > 1) throw new RangeError('Invalid frame brightness.');
     if (!Number.isFinite(rendererTime) || rendererTime < 0 || rendererTime > 3600) throw new RangeError('Invalid render time.');
@@ -780,10 +781,21 @@ window.__agentPreview = {
     const shotEffects = depthOfFieldOverrides
       ? { ...record.scene.effects, depthOfField: { ...record.scene.effects.depthOfField, ...depthOfFieldOverrides } }
       : undefined;
-    draw(record, rendererTime, shotCamera, { pass, passDepthRange, previousCamera, ...(objectMotion ? { objectMotion } : {}),
+    const outputFramebuffer = floatOutput && !pass ? record.floatModule.outputFor(record, canvas).framebuffer : undefined;
+    draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
       ...(brightness === 1 ? {} : { exposure }), ...(shotEffects ? { effects: shotEffects } : {}) });
     const info = renderInfo(record.renderer);
     return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() } : info;
+  },
+  // Reads the last frame as RGBA float32, rows bottom to top, cropped to `region` (pixels from the top left): the lit image
+  // when it was drawn with floatOutput, a pass when it was drawn with passFloat. Base64 of the float bytes.
+  // 16-bit PNG and EXR output load their module here, so a scene that never asks for them does not carry it.
+  async prepareFloatOutput({ sessionId }) {
+    requireSession(sessionId).floatModule = await import('../src/float-output.js');
+  },
+  readFloat({ sessionId, source, region }) {
+    const record = requireSession(sessionId);
+    return record.floatModule.readFrame(record, canvas, source, region);
   },
   // Offline path trace of the scene at one instant. The tracer loads here, on first use, and not with the preview.
   async pathTrace({ sessionId, animation, motionTime, options }) {

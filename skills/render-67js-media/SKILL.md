@@ -42,6 +42,7 @@ submit call fails: tell the user which launch option is missing.
   job holds the first pose, which is the usual reason a video is a still frame. A recipe with a `timeline` uses
   `settings.timeline` and rejects `motion` and `animation`.
 - Imported clips use `settings.animation`; the two clocks are independent.
+- For compositing, `settings.transparent`, `settings.format` (`png16`, `exr`) and `settings.region` are off by default; video runs up to 60 fps (`references/jobs.md`, Compositing output).
 - Path tracing (`settings.renderer`) is offline and slow, for stills; video and passes use the rasterizer.
 - Do not stop another session's process. Heavy local exports run at below-normal priority, one job at a time.
 - A GLB for Blender is `scene_export_glb`, not a render job.

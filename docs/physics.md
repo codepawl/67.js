@@ -518,6 +518,25 @@ renderer.render(frame);
 - The culling bounds and the shadow map follow the new positions.
 - Per vertex a cloth steps on welded particles, so copy each vertex from its particle (`weldVertices(...).particleOfVertex`) and recompute normals (`recomputeNormals`) before the call.
 
+## Force fields
+
+One list of up to 8 fields, `fields` on the `particles` section and on the `cloth` section, accelerates every particle, hair strand and cloth particle through the same evaluation (`src/force-fields.js`, `evaluateForceFields`). Each field has a `type`:
+
+| type | acceleration | keys |
+| --- | --- | --- |
+| `wind` | `strength` m/s2 along `direction` (default +x) | `direction` |
+| `drag` | `-strength` times the velocity, in 1/s | |
+| `vortex` | `strength` m/s2 around `axis` (default +y) through `position`, along axis cross offset | `axis` |
+| `magnet` | `strength` m/s2 toward `position`; a negative strength pushes away | |
+| `turbulence` | smooth seeded value noise, each component within `strength` | `seed`, `scale` (cycles per metre, 1), `rate` (cycles per second, 0.5) |
+
+Every field also takes `strength` (default 1, -1000 to 1000), `position` (default the origin), `falloff` (exponent of 1 / (1 + distance from `position`), 0 means none) and `radius` (cutoff distance, 0 means none). Unknown keys are rejected with the list of known ones.
+
+- Particles under fields have no closed form, so each one is integrated from its own birth at a fixed 1/120 s (semi-implicit Euler, gravity, drag toward the wind, then the fields) every time it is asked. It is still a pure function of time: a seek back repeats exactly, and the same seed gives the same frames. The floor stops a particle where it lands. Cost grows with age, about the age times 120 steps for each live particle.
+- Cloth adds the fields to the velocity of every particle at each of the four substeps, with the substep time as the turbulence time, so the recording stays deterministic.
+- Hair leans: the strand tip moves by 0.02 m for each m/s2 of field acceleration at the strand root (no velocity, so drag does nothing), clamped to the strand length. A strand without turbulence builds once.
+- `tests/force-fields.test.js` checks each type against a known particle path (wind against constant acceleration, drag against the exponential, magnet against free fall toward a point, vortex against the swirl direction), falloff, seeds and seeks.
+
 ## Recipe particles and hair
 
 A recipe `particles` section holds up to 4 systems (`src/particles.js`, `src/hair.js`, `src/agent-particles.js`). It needs no peer dependency and loads on demand with the `particles` module, so a scene without particles pays nothing. Blender's particle system has the same two kinds, Emitter and Hair.
