@@ -13,6 +13,7 @@ Use the repository pipeline rather than constructing a parallel exporter.
 For MCP snapshot jobs, read the checkout's `docs/agent-render-jobs.md` and verify source versus published support.
 Configure a private job store. Poll status after cancellation before resuming preview edits.
 For a video with cuts, sound or an encoder choice, use the recipe `timeline`, `settings.timeline`, `settings.audio` (a file in the server's `--audio` folder) and `settings.encoder` described in the same document; the job reports measured sync.
+For compositing output, add `settings.transparent: true` (PNG with alpha; no sky or auto ground), `settings.format` `png16` or `exr` (depth in metres, object IDs as float) and `settings.region` `{x, y, width, height}` (a crop of the whole frame, also for video); video runs up to 60 fps. These stay off unless set, so defaults are unchanged. Details in `docs/agent-render-jobs.md`, section Output options.
 For procedural motion, read `docs/agent-motion.md` and select `settings.motion.start`. Preview seeks preserve revisions and authored recipes.
 
 For imported character motion from `0.8.0`, read `docs/agent-character-motion.md`. Use independent `settings.animation` and `settings.motion` clocks.
