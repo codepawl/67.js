@@ -1,0 +1,14 @@
+{
+  "name": "67js",
+  "owner": { "name": "CodePawl", "url": "https://67js.codepawl.com" },
+  "metadata": { "description": "67js, a 3D engine an AI agent drives through MCP." },
+  "plugins": [
+    {
+      "name": "67js",
+      "source": "./",
+      "description": "The 67js MCP server and the build-67js-scene and render-67js-media skills.",
+      "version": "0.16.0",
+      "category": "development"
+    }
+  ]
+}
