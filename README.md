@@ -12,7 +12,7 @@
 67js is a WebGL2 renderer with addons for terrain, vegetation, characters, liquid, vehicles and media export.
 A scene is plain data: each part has a geometry, a matrix and a material.
 An agent builds and changes a scene through an MCP server, looks at PNG previews and renders stills or MP4 video.
-The goal is to be as capable as Blender and as light as three.js. [docs/goal.md](docs/goal.md) defines each part.
+The goal is to be as capable as Blender and as light as three.js. [docs/goal.md](https://github.com/codepawl/67.js/blob/main/docs/goal.md) defines each part.
 See the [showcase](https://67js.codepawl.com/showcase.html), the [documentation](https://67js.codepawl.com/docs.html), the [guide for agents](https://67js.codepawl.com/llms.txt) and the [changelog](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md).
 
 ## Showcase
