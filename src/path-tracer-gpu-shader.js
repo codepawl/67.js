@@ -151,7 +151,7 @@ const int LIGHT_TREE_FIRST_HIT_LIGHTS = ${LIGHT_TREE_FIRST_HIT_LIGHTS};
 const int LIGHT_TREE_TEXELS = ${LIGHT_TREE_NODE_TEXELS};
 // The real-time kernel picks one emitter at the first hit too (the denoiser averages the choices over frames) instead of tracing a shadow ray to every emitter.
 const bool STOCHASTIC_FIRST_HIT = ${radianceCache};
-const int ALPHA_STEP_LIMIT = 8;
+const int ALPHA_STEP_LIMIT = 64;
 const int RUSSIAN_ROULETTE_START = 3;
 const float MINIMUM_ALPHA = 1e-3;
 const float MIRROR_ALPHA = 2e-3;
