@@ -1,0 +1,10 @@
+- entry:core: the six volumeFog detail fields are validated in resolveVolumeFog, their uniform names join the post uniform list and the renderer adds the detail step.
+- entry:fog-shader: the warp, extra octave, contrast, layer top and key scattering GLSL, which a detail-free fog compiles out.
+- scene:lit-box: the same core validation and uniform names.
+- goal:lit-box: 256 bytes for fog detail controls an agent-facing look needs; core growth accepted under the trade-off rule.
+- scene:gltf-box: the same core validation and uniform names.
+- scene:gltf-box+lazy: the same core code as scene:gltf-box.
+- goal:gltf-box: 266 bytes for the same fog detail controls; accepted on the same grounds.
+- scene:agent-scene: the same core code plus the recipe field names and the MCP-facing ranges.
+- goal:agent-scene: 272 bytes for the same fog detail controls; accepted on the same grounds.
+- scene:agent-scene+lazy: the same core code plus the fog shader addon the recipe loads.

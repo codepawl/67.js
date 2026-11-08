@@ -48,6 +48,12 @@ renderer.render({ eye: [0, 2, 5], target: [0, 1, 0], time: 0 });
 | `profile` | `'exponential'` | `'exponential'` or `'smoothstep'`; the vertical shape of a layer when a `field` is set |
 | `flowStrength` | `1` | `0…100`; how far the noise travels along the field's velocity, as a share of velocity times `flowPeriod` |
 | `flowPeriod` | `2` | `0.01…1,000` seconds; how often a noise lookup restarts |
+| `detailOctaves` | `1` | Integer `1…3`; noise octaves at 1x, 2x and 4x `noiseScale`. Above 1 the frame compiles the detail step in |
+| `detailAmount` | `0.5` | `0…1`; weight of the extra octaves against the base noise, which keeps its own weight |
+| `warp` | `0` | `0…4`; domain warp strength in noise cells, for wisps and curls |
+| `contrast` | `1` | `0…4`; stretches the noise around its middle, so thin gaps sit next to thick patches |
+| `profileSoftness` | `0.5` | `0…0.95`; where the `'smoothstep'` layer top starts to fade, as a share of the layer height. Lower tapers from nearer the floor |
+| `keyScattering` | `1` | `0…10`; scales the key light's in-scattering (the shadow-mapped god rays) and leaves `ambient` alone |
 
 Values must be finite numbers. Active volume fog accepts finite frame time within ±1,000,000 seconds and a nonzero light direction with components within ±1,000,000. Noise samples absolute time, so backward seeks reproduce earlier density.
 

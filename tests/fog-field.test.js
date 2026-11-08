@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveVolumeFog, validateFogField } from '../src/volumetric.js';
+import { resolveVolumeFog, validateFogField, fogUsesDetail } from '../src/volumetric.js';
 import { createLightingState, updateLightingState } from '../src/lighting.js';
+import { normalizeAgentLook } from '../src/agent-look.js';
 import { FOG_LIGHT_LIMIT, createFogLightBuffers, packFogLights, FogFieldTexture } from '../src/fog-field.js';
 import { createPostFragment, POST_STEPS } from '../src/post.js';
 
@@ -76,4 +77,40 @@ test('the field texture allocates once per size and writes into it afterwards', 
   assert.deepEqual(calls.filter(name => name.startsWith('tex') && name.endsWith('2D')), ['texImage2D', 'texSubImage2D', 'texImage2D']);
   texture.dispose();
   assert.equal(calls.at(-1), 'delete');
+});
+
+const DETAIL_FIELDS = ['detailOctaves', 'detailAmount', 'warp', 'contrast', 'profileSoftness', 'keyScattering'];
+
+test('a fog without detail controls resolves without them and needs no detail step', () => {
+  const resolved = resolveVolumeFog({ density: 0.1 });
+  for (const key of DETAIL_FIELDS) assert.equal(Object.hasOwn(resolved, key), false, key);
+  assert.equal(fogUsesDetail(resolved), false);
+  assert.equal(fogUsesDetail(resolveVolumeFog({ density: 0.1, detailOctaves: 1, warp: 0, contrast: 1, profileSoftness: 0.2, keyScattering: 3 })), false, 'profile and key scattering are plain uniforms');
+});
+
+test('detail controls are kept, bounded and typed', () => {
+  const resolved = resolveVolumeFog({ detailOctaves: 3, detailAmount: 0.6, warp: 0.8, contrast: 1.6, profileSoftness: 0.1, keyScattering: 2 });
+  assert.deepEqual(DETAIL_FIELDS.map(key => resolved[key]), [3, 0.6, 0.8, 1.6, 0.1, 2]);
+  assert.equal(fogUsesDetail(resolved), true);
+  for (const bounds of [{ detailOctaves: 4 }, { detailOctaves: 0 }, { detailAmount: 1.1 }, { warp: -1 }, { warp: 5 }, { contrast: 4.5 }, { profileSoftness: 1 }, { keyScattering: 11 }, { keyScattering: -1 }]) {
+    assert.throws(() => resolveVolumeFog(bounds), RangeError, JSON.stringify(bounds));
+  }
+  assert.throws(() => resolveVolumeFog({ detailOctaves: 2.5 }), /integer/);
+  for (const field of DETAIL_FIELDS) {
+    for (const bad of ['1', null, NaN, Infinity]) assert.throws(() => resolveVolumeFog({ [field]: bad }), /must be between/, `${field} ${bad}`);
+  }
+});
+
+test('the recipe look accepts the detail controls and rejects bad ones', () => {
+  const look = normalizeAgentLook({ environment: { volumeFog: { density: 0.5, detailOctaves: 2, detailAmount: 0.4, warp: 1, contrast: 1.2, profileSoftness: 0.3, keyScattering: 1.5 } } });
+  assert.equal(look.environment.volumeFog.detailOctaves, 2);
+  assert.equal(look.environment.volumeFog.keyScattering, 1.5);
+  assert.throws(() => normalizeAgentLook({ environment: { volumeFog: { detailOctaves: 1.5 } } }));
+  assert.throws(() => normalizeAgentLook({ environment: { volumeFog: { warp: 9 } } }));
+});
+
+test('the detail step is compiled in only on request', () => {
+  assert.equal(POST_STEPS.includes('detail'), false);
+  assert.match(createPostFragment(), /#define POST_DETAIL false/);
+  assert.match(createPostFragment([...POST_STEPS, 'detail']), /#define POST_DETAIL \(true\)/);
 });

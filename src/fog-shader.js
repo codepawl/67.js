@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD } from './fog-field.js';
+import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, DEFAULT_DETAIL } from './fog-field.js';
 
 // The volume fog step of the post pass: its uniforms and the march that scatters light through the fog box. Only a renderer that
 // draws a frame with environment.volumeFog needs this module; post.js gives every other post program a stub. It reads hash and
@@ -27,9 +27,21 @@ function bindUniforms(renderer, post, volume, environment, frame) {
   context.uniform1f(post.uniforms.volumeMaxDistance, volume.maxDistance);
   context.uniform1f(post.uniforms.volumeHeightFalloff, volume.heightFalloff);
   bindFieldAndLights(renderer, post, volume);
+  bindDetail(context, post, volume);
   context.uniform1f(post.uniforms.orthographic, frame.projection === 'orthographic' ? 1 : 0);
   context.uniform1i(post.uniforms.fogSkyVisibility, 5);
   context.uniform1f(post.uniforms.volumeGridFog, renderer.sceneParts.some(part => part.material?.irradianceGrid) ? 1 : 0);
+}
+
+// Detail, layer top and key light controls. The detail ones only act in a program with the detail step compiled in (fogUsesDetail).
+function bindDetail(context, post, volume) {
+  const detail = { ...DEFAULT_DETAIL, ...volume };
+  context.uniform1i(post.uniforms.volumeDetailOctaves, detail.detailOctaves);
+  context.uniform1f(post.uniforms.volumeDetailAmount, detail.detailAmount);
+  context.uniform1f(post.uniforms.volumeWarp, detail.warp);
+  context.uniform1f(post.uniforms.volumeContrast, detail.contrast);
+  context.uniform1f(post.uniforms.volumeProfileStart, detail.profileSoftness);
+  context.uniform1f(post.uniforms.volumeKeyScattering, detail.keyScattering);
 }
 
 // The fog's field texture and light buffers; a program without those steps has no such uniforms, and a null location is ignored.
@@ -84,6 +96,12 @@ uniform sampler2D volumeField;
 uniform float volumeProfile;
 uniform float volumeFlowStrength;
 uniform float volumeFlowPeriod;
+uniform int volumeDetailOctaves;
+uniform float volumeDetailAmount;
+uniform float volumeWarp;
+uniform float volumeContrast;
+uniform float volumeProfileStart;
+uniform float volumeKeyScattering;
 uniform int volumeLightCount;
 uniform vec4 volumeLightPositions[8];
 uniform vec4 volumeLightColors[8];
@@ -121,16 +139,47 @@ vec3 fogLightScattering(vec3 position, vec3 direction) {
   }
   return total;
 }
-float flowedNoise(vec3 samplePosition, vec2 velocity) {
+float flowedNoise(vec3 samplePosition, vec2 velocity, float noiseScale) {
   float firstPhase = fract(time / volumeFlowPeriod);
   float secondPhase = fract(time / volumeFlowPeriod + 0.5);
   vec3 travel = vec3(velocity.x, 0.0, velocity.y) * volumeFlowStrength * volumeFlowPeriod;
-  float first = cloudNoise((samplePosition - travel * firstPhase) * volumeNoiseScale);
-  float second = cloudNoise((samplePosition - travel * secondPhase) * volumeNoiseScale);
+  float first = cloudNoise((samplePosition - travel * firstPhase) * noiseScale);
+  float second = cloudNoise((samplePosition - travel * secondPhase) * noiseScale);
   return mix(first, second, abs(2.0 * firstPhase - 1.0));
 }
+float noiseAt(vec3 samplePosition, vec2 velocity, float noiseScale) {
+  return POST_FIELD ? flowedNoise(samplePosition, velocity, noiseScale) : cloudNoise(samplePosition * noiseScale);
+}
+// The density noise in 0..1. With the detail step compiled out this is the single lookup. With it, the position is warped by
+// three low-frequency lookups (warp counts noise cells), up to two octaves at 2x and 4x frequency join in (weights 0.5 and 0.25
+// times detailAmount, renormalised so the mean stays), and contrast stretches the result around its middle.
+float densityNoise(vec3 samplePosition, vec2 velocity) {
+  vec3 warped = samplePosition;
+  if (POST_DETAIL && volumeWarp > 0.0) {
+    vec3 seed = samplePosition * volumeNoiseScale * 0.5;
+    vec3 offset = vec3(cloudNoise(seed + 17.0), cloudNoise(seed + 43.0), cloudNoise(seed + 71.0)) - 0.5;
+    warped += offset * (2.0 * volumeWarp / volumeNoiseScale);
+  }
+  float lookup = noiseAt(warped, velocity, volumeNoiseScale);
+  if (POST_DETAIL) {
+    float total = 1.0;
+    float sum = lookup;
+    if (volumeDetailOctaves > 1) {
+      float weight = 0.5 * volumeDetailAmount;
+      sum += weight * noiseAt(warped, velocity, volumeNoiseScale * 2.0);
+      total += weight;
+    }
+    if (volumeDetailOctaves > 2) {
+      float weight = 0.25 * volumeDetailAmount;
+      sum += weight * noiseAt(warped, velocity, volumeNoiseScale * 4.0);
+      total += weight;
+    }
+    lookup = clamp(0.5 + (sum / total - 0.5) * volumeContrast, 0.0, 1.0);
+  }
+  return lookup;
+}
 float layerProfile(float relativeHeight) {
-  return volumeProfile > 0.5 ? 1.0 - smoothstep(0.5, 1.0, relativeHeight) : exp(-relativeHeight);
+  return volumeProfile > 0.5 ? 1.0 - smoothstep(volumeProfileStart, 1.0, relativeHeight) : exp(-relativeHeight);
 }
 vec3 volumeFog(vec3 background) {
   vec2 clipXY = textureCoordinate * 2.0 - 1.0;
@@ -169,7 +218,7 @@ vec3 volumeFog(vec3 background) {
     float noise = 1.0;
     vec4 field = POST_FIELD ? texture(volumeField, (position.xz - volumeMinimum.xz) / (volumeMaximum.xz - volumeMinimum.xz)) : vec4(1);
     if (volumeNoiseAmount > 0.0) {
-      float lookup = POST_FIELD ? flowedNoise(position - volumeDrift * time, field.zw) : cloudNoise((position - volumeDrift * time) * volumeNoiseScale);
+      float lookup = densityNoise(position - volumeDrift * time, field.zw);
       noise = mix(1.0, lookup * 2.0, volumeNoiseAmount);
     }
     if (POST_FIELD) noise *= field.r * layerProfile((position.y - volumeMinimum.y) / max(field.g, 0.0001));
@@ -185,7 +234,7 @@ vec3 volumeFog(vec3 background) {
     float shadowShare = POST_SKY ? 0.1 + 0.9 * min(1.0, 30.0 * skyCell.r) : volumeShadowAmbient;
     float ambientShare = mix(shadowShare, 1.0, visibility);
     if (volumeGridFog > 0.5) ambientShare = min(1.0, 30.0 * skyCell.r);
-    vec3 scattering = volumeColor * (volumeAmbient * ambientShare + volumeLightColor * phase * visibility + 0.6 * skyCell.gba);
+    vec3 scattering = volumeColor * (volumeAmbient * ambientShare + volumeLightColor * (phase * visibility * volumeKeyScattering) + 0.6 * skyCell.gba);
     if (POST_LIGHTS) scattering += volumeColor * fogLightScattering(position, direction);
     accumulated += transmittance * opacity * scattering;
     transmittance *= 1.0 - opacity;

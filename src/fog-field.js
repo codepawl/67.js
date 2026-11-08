@@ -4,6 +4,8 @@ import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS } from './light-limits.js';
 export const FOG_LIGHT_LIMIT = 8;
 export const DEFAULT_FLOW_STRENGTH = 1;
 export const DEFAULT_FLOW_PERIOD = 2;
+// What a fog without detail controls uses: one octave, no warp, the noise as is, the layer top fading from half its height.
+export const DEFAULT_DETAIL = Object.freeze({ detailOctaves: 1, detailAmount: 0.5, warp: 0, contrast: 1, profileSoftness: 0.5, keyScattering: 1 });
 // A light's own radius is a few centimetres, and inside fog that would put a spike of glow around it.
 const FOG_LIGHT_MINIMUM_RADIUS = 0.1;
 
