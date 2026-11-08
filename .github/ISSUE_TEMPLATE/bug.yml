@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Search [open issues](https://github.com/codepawl/67.js/issues?q=is%3Aissue) first. A security problem goes to legal@codepawl.com, not here ([SECURITY.md](https://github.com/codepawl/67.js/blob/main/SECURITY.md)).
+        Search [open issues](https://github.com/codepawl/67.js/issues?q=is%3Aissue) first. Report a security problem [privately](https://github.com/codepawl/67.js/security/advisories/new), not here. Ask questions in [Discussions](https://github.com/codepawl/67.js/discussions/categories/q-a).
         Leave out local paths, tokens and personal data: issues are public.
   - type: dropdown
     id: surface

@@ -9,14 +9,15 @@
 
 ## Ask or report
 
-Open an [issue](https://github.com/codepawl/67.js/issues/new/choose) and pick the form that fits: a bug, a feature or a question.
+Ask how to do something in [Discussions Q&A](https://github.com/codepawl/67.js/discussions/categories/q-a), and show what you made in [Show and tell](https://github.com/codepawl/67.js/discussions/categories/show-and-tell).
+Open an [issue](https://github.com/codepawl/67.js/issues/new/choose) for a bug or a feature request.
 A bug report that has the version, the environment and the smallest recipe or script that shows the problem gets fixed first.
 
 Issues are public. Leave out local paths, tokens and personal data.
 
 ## Security
 
-Email legal@codepawl.com and do not open a public issue. [SECURITY.md](SECURITY.md) has the details.
+Report it [privately on GitHub](https://github.com/codepawl/67.js/security/advisories/new), or email legal@codepawl.com. Do not open a public issue. [SECURITY.md](SECURITY.md) has the details.
 
 ## Common problems
 
