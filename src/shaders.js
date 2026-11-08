@@ -679,7 +679,7 @@ ${featureCode("linkArea")}      vec3 lightNormal = areaLightNormals[index].xyz;
       // Adding area / pi keeps the term finite at the surface and matches a disc source on its axis.
       float attenuation = emission / (distanceSquared + area / PI);
       vec3 lightRadiance = areaLightColors[index].rgb * areaLightColors[index].w * attenuation;
-      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
+${featureCode("areaRadiance")}      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
   }
   vec3 reflectance = fresnel(max(dot(normal, viewDirection), 0.0), baseReflectance);
