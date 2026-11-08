@@ -1,0 +1,1 @@
+- Fixed: the CPU, WebGL2 and WebGPU path tracers gave up after 8 transparent cutout texels on one ray, so dense foliage showed holes and lost shadows; the limit is now 64, and the foliage reference scene matches the native tracer to FLIP 0.001
