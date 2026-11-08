@@ -1,0 +1,1 @@
+- resolveCoplanar: resolveFlushParts no longer layers pairs that lie on one plane to within a micrometre (the depth buffer already settles them) and settles chains of equal-sized parts, so it stops adding flicker on dense scenes (#593)
