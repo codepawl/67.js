@@ -1,0 +1,54 @@
+name: Bug report
+description: Something renders wrong, throws, crashes or runs slower than it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [open issues](https://github.com/codepawl/67.js/issues?q=is%3Aissue) first. Report a security problem [privately](https://github.com/codepawl/67.js/security/advisories/new), not here. Ask questions in [Discussions](https://github.com/codepawl/67.js/discussions/categories/q-a).
+        Leave out local paths, tokens and personal data: issues are public.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it happens
+      options:
+        - Library in my app (import from @codepawlhq/67js)
+        - MCP server, driven by an agent
+        - Render job or video export
+        - The site or the docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead. Paste the full error text and attach a screenshot when it is about the look.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest code, scene recipe or MCP tool call that shows it. A recipe JSON or a short script is ideal.
+      render: js
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 67js version
+      description: Run `npm ls @codepawlhq/67js` or `npx 67js-mcp --version`.
+      placeholder: 0.16.0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, browser and version, GPU, Node version. For the MCP server, also the agent client and the flags you start it with (`--backend`, `--memory`).
+      placeholder: |
+        Windows 11, Chrome 142, RTX 3060, Node 24
+        Claude Code, npx 67js-mcp --backend gpu --memory 192
+    validations:
+      required: true
