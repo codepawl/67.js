@@ -111,6 +111,7 @@ async function createAdapter(engine, canvas, scene, characters) {
   if (engine === '67js-no-lod') return create67Adapter(canvas, scene, characters, { lods: false });
   if (engine === '67js-no-culling') return create67Adapter(canvas, scene, characters, { culling: false, lods: false });
   if (engine === '67js-ldr') return create67Adapter(canvas, scene, characters, { hdr: false });
+  if (engine === '67js-trusted') return create67Adapter(canvas, scene, characters, { checks: false });
   if (engine === '67js-light') return create67Adapter(canvas, scene, characters, { shading: 'light' });
   if (engine === '67js-one-sample') return create67Adapter(canvas, scene, characters, { samples: 1 });
   if (engine === '67js-ldr-one-sample') return create67Adapter(canvas, scene, characters, { hdr: false, samples: 1 });

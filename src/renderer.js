@@ -1205,7 +1205,13 @@ export class Renderer67 {
     return { ...layout, texture, data };
   }
 
-  updateParts(parts, { shadows = true } = {}) {
+  /**
+   * Upload changed parts. `checks: false` skips the per-frame pose checks (finite, non-singular, unmirrored skin and
+   * morph transforms) for poses already checked where they were made, such as `applyAnimation(time, clip, { checks: false })`.
+   * Identity, material and transform rules still apply.
+   */
+  updateParts(parts, { shadows = true, checks = true } = {}) {
+    if (typeof checks !== "boolean") throw new TypeError("updateParts checks must be a boolean.");
     this.updatePartIdentities ??= new Set();
     this.updatePartIdentities.clear();
     this.updateSkins.clear();
@@ -1236,13 +1242,13 @@ export class Renderer67 {
       if ((part.skin ?? null) !== location.skin || part.skin?.jointMatrices !== location.jointMatrices || part.geometry.skinIndices !== location.skinIndices || part.geometry.skinWeights !== location.skinWeights) throw new Error(`Skin identity changes require a new renderer: ${part.name}`);
       if (part.skin) {
         if (PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Skinned parts require a standard material tag.');
-        skinSupport().validateSkinPose(part.skin, part.geometry, part.matrix);
+        if (checks) skinSupport().validateSkinPose(part.skin, part.geometry, part.matrix);
         this.updateSkins.add(location.batch.skinTexture);
       }
       if ((part.morph ?? null) !== (location.morph ?? null) || part.morph?.weights !== location.morphWeights || part.geometry.morphTargets !== location.morphTargets) throw new Error(`Morph identity changes require a new renderer: ${part.name}`);
       if (part.morph) {
         if (PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Morphed parts require a standard material tag.');
-        morphSupport().validateMorphTransform(part.morph, location.batch.morphTexture.info, part.matrix, part.skin);
+        if (checks) morphSupport().validateMorphTransform(part.morph, location.batch.morphTexture.info, part.matrix, part.skin);
         this.updateMorphs.add(part.morph);
       }
       if (materialUnchanged) {
@@ -1263,7 +1269,7 @@ export class Renderer67 {
       location.materialSnapshot = MaterialSnapshot.of(part.material);
     }
     // A palette upload also changes consumers absent from the submitted part list.
-    if (this.updateSkins.size) {
+    if (checks && this.updateSkins.size) {
       for (const [part, location] of this.partLocations) {
         if (!location.skin || !this.updateSkins.has(location.batch.skinTexture) || this.updatePartIdentities.has(part)) continue;
         const committedMatrix = location.committedMatrix ?? location.batch.instanceData.subarray(location.index * INSTANCE_STRIDE, location.index * INSTANCE_STRIDE + 16);
@@ -1272,7 +1278,7 @@ export class Renderer67 {
     }
     // Shared weights also affect batches absent from the submitted part list.
     // Nothing is shared when the update carries no morph and no skin.
-    if (this.updateMorphs.size || this.updateSkins.size) {
+    if (checks && (this.updateMorphs.size || this.updateSkins.size)) {
       for (const [part, location] of this.partLocations) {
         if (!location.morph || this.updatePartIdentities.has(part)) continue;
         if (!this.updateMorphs.has(location.morph) && !this.updateSkins.has(location.batch.skinTexture)) continue;
