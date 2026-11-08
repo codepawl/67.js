@@ -1,0 +1,1 @@
+- The README banner is a full-width Bistro street render with the wordmark on the left, and the showcase table lists the airport, data center and port worlds again.
