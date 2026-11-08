@@ -1,5 +1,3 @@
-import { createEnvironmentMap } from './environment.js';
-
 // HDRI environments and .cube looks a recipe names. A recipe never carries a path or a URL: it names one of the entries
 // shipped in assets/looks, or the SHA-256 ID of a .hdr or .cube file in the MCP asset catalog. The host (the MCP runtime,
 // or an app that calls the register functions) decodes the file and registers it here before the scene builds.
@@ -13,10 +11,9 @@ export const BUNDLED_CUBE_LOOK_NAMES = Object.freeze(['teal-orange', 'noir']);
 export const CATALOG_FILE_ID = /^[a-f0-9]{64}$/;
 export const MAXIMUM_CATALOG_LOOK_BYTES = 4 * 1024 * 1024;
 
-const MAXIMUM_CACHED_MAPS = 16;
 const environmentSources = new Map();
+let registrationCount = 0;
 const cubeLooks = new Map();
-const mapsByKey = new Map();
 
 export function isEnvironmentReference(reference) {
   return BUNDLED_ENVIRONMENT_NAMES.includes(reference) || CATALOG_FILE_ID.test(reference);
@@ -30,7 +27,7 @@ export function isCubeLookReference(reference) {
 export function registerCatalogEnvironment(reference, decoded) {
   if (!isEnvironmentReference(reference)) throw new RangeError(`environment.hdri must be one of ${BUNDLED_ENVIRONMENT_NAMES.join(', ')} or the 64-character ID of a .hdr file in the asset catalog.`);
   environmentSources.set(reference, decoded);
-  mapsByKey.clear();
+  registrationCount++;
 }
 
 /** Registers a parsed look ({ size, data } from parseCube) under a bundled name or catalog ID. */
@@ -46,16 +43,16 @@ export function catalogLook(reference) {
   return look;
 }
 
-/** The environment map of a registered HDRI; the same object returns while name, strength, rotation and background hold. */
-export function catalogEnvironmentMap(reference, { intensity = 1, rotation = 0, showBackground = false } = {}) {
+/** Changes whenever an HDRI is registered, so a map cache can drop maps built from older data. */
+export function environmentRegistrationCount() {
+  return registrationCount;
+}
+
+/** The decoded data registered for an HDRI reference. */
+export function catalogEnvironmentSource(reference) {
   const source = environmentSources.get(reference);
   if (!source) throw new Error(`The HDRI ${reference.slice(0, 16)} is not loaded: the host registers it with registerCatalogEnvironment (the MCP runtime does this from assets/looks or the asset catalog).`);
-  const key = [reference, intensity, rotation, showBackground].join('|');
-  if (!mapsByKey.has(key)) {
-    if (mapsByKey.size >= MAXIMUM_CACHED_MAPS) mapsByKey.clear();
-    mapsByKey.set(key, createEnvironmentMap({ ...source, intensity, rotation, showBackground }));
-  }
-  return mapsByKey.get(key);
+  return source;
 }
 
 /** The catalog references a recipe or edit list uses: `{ environments, looks }`, each a sorted list of unique strings. */

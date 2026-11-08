@@ -1,5 +1,6 @@
 import { createEnvironmentMap } from './environment.js';
 import { LIGHTING_SETUP_NAMES } from './agent-scene-capabilities.js';
+import { catalogEnvironmentSource, environmentRegistrationCount } from './look-catalog.js';
 
 const MAP_WIDTH = 128;
 const MAP_HEIGHT = 64;
@@ -112,4 +113,16 @@ export function createLightingSetupMap(name, { intensity = 1, rotation = 0, show
   const map = createEnvironmentMap({ width: MAP_WIDTH, height: MAP_HEIGHT, data: mapDataByName.get(name), intensity, rotation, showBackground });
   mapsByKey.set(key, map);
   return map;
+}
+
+/** The environment map of a registered catalog HDRI; the same object returns while name, strength, rotation, background and registered data hold. */
+export function createCatalogEnvironmentMap(reference, { intensity = 1, rotation = 0, showBackground = false } = {}) {
+  const key = ['catalog', reference, environmentRegistrationCount(), intensity, rotation, showBackground].join('|');
+  if (!mapsByKey.has(key)) {
+    if (mapsByKey.size >= MAXIMUM_CACHED_MAPS) {
+      mapsByKey.clear();
+    }
+    mapsByKey.set(key, createEnvironmentMap({ ...catalogEnvironmentSource(reference), intensity, rotation, showBackground }));
+  }
+  return mapsByKey.get(key);
 }

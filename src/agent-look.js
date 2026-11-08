@@ -3,10 +3,10 @@ import { createLightingState, updateLightingState, MAX_POINT_LIGHTS, MAX_SPOT_LI
 import { resolveEffects } from './effects.js';
 import { resolveVolumeFog } from './volumetric.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
-import { createLightingSetupMap, lightingSetupFields } from './lighting-setups.js';
+import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
-import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference, catalogEnvironmentMap } from './look-catalog.js';
+import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference } from './look-catalog.js';
 import { DEFAULT_LIGHTING_SETUP, LIGHTING_SETUP_NAMES, DEFAULT_AMBIENT_OCCLUSION } from './agent-scene-capabilities.js';
 
 // The longest list in a look is the longest light list.
@@ -355,7 +355,7 @@ export function environmentPatchWithSetup(patch) {
 /** The procedural environment map that lights a normalized environment; the same object returns while inputs hold. */
 export function agentEnvironmentMap(environment) {
   if (environment.hdri) {
-    return catalogEnvironmentMap(environment.hdri, { intensity: environment.environmentIntensity, rotation: environment.environmentRotation, showBackground: environment.world });
+    return createCatalogEnvironmentMap(environment.hdri, { intensity: environment.environmentIntensity, rotation: environment.environmentRotation, showBackground: environment.world });
   }
   return createLightingSetupMap(environment.setup, {
     intensity: environment.environmentIntensity,

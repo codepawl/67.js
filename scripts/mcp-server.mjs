@@ -200,7 +200,7 @@ const environment = z.strictObject({
   ground: z.boolean().optional().describe('false: no automatic floor.'),
   setup: z.enum(LIGHTING_SETUP_NAMES).optional().describe('Named lighting; resets key, fill and ambient fields. Default daylight.'),
   environmentIntensity: bounded(0, 100).optional().describe('Scales the setup environment light and its reflections.'),
-  hdri: z.union([z.enum(BUNDLED_ENVIRONMENT_NAMES), z.string().regex(CATALOG_FILE_ID)]).nullable().optional().describe('HDRI that lights and reflects instead of the setup sky: a shipped name or the ID of a .hdr file in scene_asset_catalog. environmentIntensity and environmentRotation apply; set keyIntensity 0 when it has its own sun.'),
+  hdri: z.union([z.enum(BUNDLED_ENVIRONMENT_NAMES), z.string().regex(CATALOG_FILE_ID)]).nullable().optional().describe('HDRI instead of the setup sky; scene_capabilities catalogLooks.'),
   environmentRotation: bounded(-100, 100).optional().describe('Turns the setup environment around the vertical axis, in radians.'),
   lightDirection: boundedVector(-1e6, 1e6).optional().describe('Direction toward the key light; shadows follow.'),
   keyColor: boundedVector(0, 1000).optional(),
@@ -254,7 +254,7 @@ const environment = z.strictObject({
   specularAntiAliasing: z.number().min(0).max(4).optional().describe('Specular anti-aliasing: 0 off, 1 default; widens highlights that sparkle on grainy normal-mapped metal.'),
   resolveCoplanar: z.union([z.literal('offset'), z.literal(false)]).optional().describe("'offset' biases the smaller part of each coplanar pair at draw time; false clears."),
   viewTransform: z.enum(VIEW_TRANSFORM_NAMES).optional().describe('Display transform, for example agx to compare with Blender.'),
-  look: z.union([z.enum([...LOOK_NAMES, ...BUNDLED_CUBE_LOOK_NAMES]), z.string().regex(CATALOG_FILE_ID)]).nullable().optional().describe('Look: a named preset, a shipped .cube name, or the ID of a .cube file in scene_asset_catalog; null clears.'),
+  look: z.union([z.enum([...LOOK_NAMES, ...BUNDLED_CUBE_LOOK_NAMES]), z.string().regex(CATALOG_FILE_ID)]).nullable().optional().describe('Look preset or .cube; scene_capabilities catalogLooks. null clears.'),
   wind: z.strictObject({ strength: bounded(0, 4).optional(), direction: bounded(-360, 360).optional().describe('Degrees: 0 toward +x, 90 toward +z.') }).optional().describe('Sway of foliage and grass materials; strength defaults to 0.3.'),
 });
 // The full environment schema is published once, in scene_create. A JSON Schema $ref can not point from one tool's
