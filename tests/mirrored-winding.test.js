@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mat3 } from 'gl-matrix';
+import { materialLayerState } from '../src/material-layers.js';
 import { groupParts, isMirroredMatrix, Renderer67 } from '../src/renderer.js';
 
 const quad = {
@@ -48,13 +50,25 @@ test('a mirrored batch draws with clockwise front faces and restores the default
   assert.deepEqual(calls, ['frontFace cw', 'draw', 'frontFace ccw', 'draw']);
 });
 
-test('updateParts rejects a part whose matrix changes sign after batching', () => {
+test('updateParts regroups once when a part crosses a mirror instead of throwing', () => {
   const renderer = Object.create(Renderer67.prototype);
-  const part = quadPart('sprite', 1);
-  const batch = { mirrored: false, castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false };
-  renderer.partLocations = new Map([[part, { batch, geometry: quad, skin: null, morph: null }]]);
+  const part = quadPart('card', 1);
+  const batch = { mirrored: false, castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false, instanceData: new Float32Array(42), instanceBuffer: {} };
+  renderer.partLocations = new Map([[part, { batch, index: 0, geometry: quad, skin: null, morph: null, map: null, layerState: materialLayerState({}), mapState: [null, null, null, null, null, 1, 1, 1, 0, 0.05, 0.085, 0.02], normalMatrix: mat3.create() }]]);
   renderer.updateSkins = new Set();
   renderer.updateBatches = new Set();
-  part.matrix[0] = -1;
-  assert.throws(() => renderer.updateParts([part]), /Mirroring changes.*replaceParts: sprite/);
+  const regroups = [];
+  renderer.replaceParts = (parts, options) => {
+    regroups.push({ parts, options });
+    // The real replaceParts groups by the new sign and packs every part again.
+    batch.mirrored = isMirroredMatrix(part.matrix);
+  };
+  renderer.context = { ARRAY_BUFFER: 1, bindBuffer() {}, bufferSubData() {} };
+  for (const scaleX of [1, 0.5, -0.5, -1, -0.25, 0.75]) {
+    part.matrix[0] = scaleX;
+    assert.equal(renderer.updateParts([part]), 1);
+  }
+  assert.equal(regroups.length, 2, 'one regroup for each crossing: 0.5 to -0.5 and -0.25 to 0.75');
+  assert.deepEqual(regroups[0].parts, [part]);
+  assert.deepEqual(regroups[0].options, { regroupOnly: true });
 });

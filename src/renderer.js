@@ -113,8 +113,9 @@ function renderPass(material) {
   return TRANSLUCENT_TAGS.has(material.tag) ? material.tag : 'opaque';
 }
 
-function partNeedsFullUpload(part) {
-  return Boolean(part.skin || part.morph || part.geometry.morphTargets || part.geometry.skinIndices || hasMaterialMap(part.material) && !texturedReplaceSupport.begin);
+// Regrouping parts that already draw (a mirrored sign change) reuses their cached textures, so it needs no texture bookkeeping.
+function partNeedsFullUpload(part, texturesReplaceable = Boolean(texturedReplaceSupport.begin)) {
+  return Boolean(part.skin || part.morph || part.geometry.morphTargets || part.geometry.skinIndices || hasMaterialMap(part.material) && !texturesReplaceable);
 }
 
 function batchPass(batch) {
@@ -1104,7 +1105,7 @@ export class Renderer67 {
   }
 
   /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. */
-  replaceParts(parts) {
+  replaceParts(parts, { regroupOnly = false } = {}) {
     if (!Array.isArray(parts) || new Set(parts).size !== parts.length) {
       throw new TypeError('Scene parts must be an array with distinct object identities.');
     }
@@ -1136,13 +1137,13 @@ export class Renderer67 {
     });
     // Skinned and morphed batches stay valid only while retained unchanged. Textured ones need the replace-textured-parts addon to be added or dropped.
     for (const item of replacements) {
-      if (!item.batch && item.group.some(partNeedsFullUpload)) {
+      if (!item.batch && item.group.some(part => partNeedsFullUpload(part, regroupOnly || Boolean(texturedReplaceSupport.begin)))) {
         throw new Error('replaceParts can add or change only rigid, untextured parts. Keep textured, skinned and morphed parts unchanged, or import replace-textured-parts to add textured ones.');
       }
     }
     for (const [part, location] of this.partLocations) {
       if (retained.has(location.batch)) continue;
-      if (location.skin || location.morph || location.morphTargets || location.skinIndices || (location.mapState.slice(0, 5).some(Boolean) && !texturedReplaceSupport.begin)) {
+      if (location.skin || location.morph || location.morphTargets || location.skinIndices || (location.mapState.slice(0, 5).some(Boolean) && !texturedReplaceSupport.begin && !regroupOnly)) {
         throw new Error(`replaceParts can remove or regroup only existing rigid, untextured parts; ${part.name} is textured, skinned or morphed and needs a new renderer.`);
       }
     }
@@ -1276,6 +1277,7 @@ export class Renderer67 {
     this.updateBatches.clear();
     const locations = this.updateLocations ??= [];
     locations.length = parts.length;
+    let mirrorChanged = false;
     // Preflight every part before touching packed data or submitting GPU writes.
     for (let partIndex = 0; partIndex < parts.length; partIndex++) {
       const part = parts[partIndex];
@@ -1295,7 +1297,7 @@ export class Renderer67 {
         if (alphaState.some((value, index) => value !== batchAlphaState[index])) throw new Error(`Alpha mode, cutoff, double-sided and mask opacity changes require a new renderer (blend and add opacity may change): ${part.name}`);
       }
       if (part.geometry !== location.geometry) throw new Error(`Geometry changes require a new renderer: ${part.name}`);
-      if (isMirroredMatrix(part.matrix) !== Boolean(location.batch.mirrored)) throw new Error(`Mirroring changes (negative determinant) require replaceParts: ${part.name}`);
+      if (isMirroredMatrix(part.matrix) !== Boolean(location.batch.mirrored)) mirrorChanged = true;
       if (!materialUnchanged && renderPass(part.material) !== batchPass(location.batch)) throw new Error(`Moving a part into or out of the liquid or foam pass requires replaceParts: ${part.name}`);
       if ((part.skin ?? null) !== location.skin || part.skin?.jointMatrices !== location.jointMatrices || part.geometry.skinIndices !== location.skinIndices || part.geometry.skinWeights !== location.skinWeights) throw new Error(`Skin identity changes require a new renderer: ${part.name}`);
       if (part.skin) {
@@ -1325,6 +1327,12 @@ export class Renderer67 {
       if (normalScale[0] !== mapState[5] || normalScale[1] !== mapState[6] || (part.material.occlusionStrength ?? 1) !== mapState[7] || mossState(part.material).some((value, index) => value !== mapState[8 + index]) || materialLayerState(part.material).some((value, index) => value !== location.layerState[index])) throw new Error(`Material map or scale changes require a new renderer: ${part.name}`);
       validateTransform(part, location.normalMatrix);
       location.materialSnapshot = MaterialSnapshot.of(part.material);
+    }
+    // A part that crossed a mirror (a flip animation, a toggled billboard) belongs to the other winding batch: regroup every part once.
+    // replaceParts packs all parts again, so the rest of this update is done.
+    if (mirrorChanged) {
+      this.replaceParts([...this.partLocations.keys()].filter(part => part !== this.groundPart), { regroupOnly: true });
+      return parts.length;
     }
     // A palette upload also changes consumers absent from the submitted part list.
     if (checks && this.updateSkins.size) {
