@@ -15,6 +15,43 @@ const PRESET_SAMPLES_FLOOR = 16;
 const BAKE_FIELDS = ['preset', 'samples', 'bounces', 'texelsPerUnit', 'probes', 'irradianceGrid', 'gridFog'];
 const BAKED_MATERIAL_FIELDS = ['emission', 'emissiveColor', 'emissiveMap', 'lightMap', 'lightMapScale', 'occlusionMap', 'occlusionStrength'];
 
+const MATRIX_TOLERANCE = 1e-4;
+const MAXIMUM_NAMED_PARTS = 3;
+
+function staleWarning(message, fix) {
+  return { kind: 'bake-stale', severity: 'warning', target: 'bake', message, fix };
+}
+
+/** A string that changes when a light, the sun or the key color changes: the lights a bake lit the scene with. */
+export function lightsFingerprint(environment) {
+  const { pointLights, spotLights, areaLights, keyColor, keyIntensity, lightDirection, keyAffects } = environment;
+  return JSON.stringify([pointLights, spotLights, areaLights, keyColor, keyIntensity, lightDirection, keyAffects]);
+}
+
+/**
+ * Warnings when what is drawn is no longer what the bake lit: `baked` holds the lights fingerprint and part matrices from
+ * the bake, `current` the sampled environment and the matrices of the parts now (a motion seek moves both).
+ */
+export function staleBakeProblems({ baked, current }) {
+  const problems = [];
+  if (lightsFingerprint(current.environment) !== baked.lightsFingerprint) {
+    problems.push(staleWarning('A light or the sun has moved or changed since the bake, but baked light does not follow it.',
+      'Set motionTime to null to draw the rest pose the bake lit, or remove the light motion tracks, or remove bake and use live lights.'));
+  }
+  const moved = [];
+  for (const [name, matrix] of current.matrices) {
+    const bakedMatrix = baked.matrices.get(name);
+    if (bakedMatrix && matrix.some((value, index) => Math.abs(value - bakedMatrix[index]) > MATRIX_TOLERANCE)) moved.push(name);
+  }
+  if (moved.length) {
+    const named = moved.slice(0, MAXIMUM_NAMED_PARTS).join(', ');
+    const rest = moved.length > MAXIMUM_NAMED_PARTS ? ` and ${moved.length - MAXIMUM_NAMED_PARTS} more` : '';
+    problems.push(staleWarning(`${named}${rest} moved since the bake, so their baked light and shadows stay where they were.`,
+      'Set motionTime to null for the rest pose, remove the motion tracks that move them, or remove bake and use live lights.'));
+  }
+  return problems;
+}
+
 /** Validates a recipe bake section and returns the plain, resolved form stored in the recipe (null clears it). */
 export function normalizeAgentBake(input) {
   if (input === null || input === undefined) {

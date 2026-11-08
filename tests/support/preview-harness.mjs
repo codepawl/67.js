@@ -13,6 +13,7 @@ import { hasPatternTextures } from '../../scripts/agent-preview-textures.js';
 import { assetCopyKey, recipeAssetNeeds } from '../../src/agent-scene-assets.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../../src/agent-branches.js';
 import { sessionProblem } from '../../src/agent-errors.js';
+import { framingProblems, exposureProblems, lumaShares } from '../../src/frame-checks.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../../src/agent-asset-limits.js';
 import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from '../../scripts/agent-walkmap.js';
 
@@ -30,8 +31,9 @@ export function previewHarness() {
   const tiles = [];
   const makeCanvas = () => ({ width: 768, height: 512,
     replaceWith() {}, toDataURL: () => 'data:image/png;base64,cG5n',
-    getContext: kind => kind === '2d' ? { fillRect() {}, fillText() {}, strokeText() {},
-      drawImage: () => tiles.push(renders.at(-1)) } : { getExtension: () => null } });
+    getContext(kind) { const target = this; return kind === '2d' ? { fillRect() {}, fillText() {}, strokeText() {},
+      drawImage: () => { if (target.width !== 64) tiles.push(renders.at(-1)); },
+      getImageData: (x, y, width, height) => ({ data: new Uint8ClampedArray(width * height * 4).fill(128) }) } : { getExtension: () => null }; } });
   const canvas = makeCanvas();
   class FaultInjectedRenderer {
     memoryPlan = { estimatedBytes: 1024 };
@@ -79,7 +81,7 @@ export function previewHarness() {
     // The harness loads Manifold from node_modules directly, so the preview's served-file loader is ignored.
     setManifoldModuleLoader: () => {},
     needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader: () => {},
-    sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
+    sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, framingProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
     applyProjection, applyCameraFields, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
     // Line art needs a real renderer with render passes, so the fault-injected one gets a no-op install.
     agentSceneModule: name => (name === 'lineArt' ? { installLineArt: renderer => renderer } : name === 'userPass' ? { ...agentSceneModule(name), installUserPasses: renderer => renderer } : agentSceneModule(name)), agentSceneModuleLoaded, createBranchStore, printableLabel,

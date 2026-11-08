@@ -1296,6 +1296,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       sourceRestParts,
       parts: restParts, restParts,
       bakeReport: lightBakeResult ? { ...lightBakeResult.report, reused: lightBakeResult.reused } : null,
+      bakeInputs: lightBakeResult ? lightBakeResult.inputs : null,
       reflectionReport: reflected ? reflected.report : null,
       // A renderer holding the deformed cloth parts of the old state needs the rest parts back as a topology change.
       topologyChanged: Boolean(state && (restParts !== state.restParts || state.parts !== state.restParts)),
@@ -1357,8 +1358,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     if (lightBake?.key === key && lightBake.sourceRestParts === sourceRestParts) {
       return { ...lightBake, reused: true };
     }
-    const baked = agentSceneModule('bake').bakeAgentParts(sourceRestParts, worldMatrices, recipe.environment, recipe.bake, generatedGeometryGenerators);
-    lightBake = { key, sourceRestParts, parts: baked.parts, report: baked.report };
+    const bakeModule = agentSceneModule('bake');
+    const baked = bakeModule.bakeAgentParts(sourceRestParts, worldMatrices, recipe.environment, recipe.bake, generatedGeometryGenerators);
+    lightBake = { key, sourceRestParts, parts: baked.parts, report: baked.report,
+      inputs: { lightsFingerprint: bakeModule.lightsFingerprint(recipe.environment), matrices: worldMatrices } };
     return { ...lightBake, reused: false };
   }
 
@@ -1527,6 +1530,29 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     get environment() {
       const environment = structuredClone(state.recipe.environment);
       return state.movedLook ?agentSceneModule('motion').motionEnvironment(environment, state.movedLook) : environment;
+    },
+    /** World bounds ({ name, min, max }) of the visible mesh parts in the current pose; parts with no known bounds are left out. */
+    worldBounds() {
+      const bounds = [];
+      // A bake or a skin replaces a drawn part's geometry, so the bounds come from the part as built, in the drawn pose.
+      const drawnParts = new Map(state.restParts.map(part => [part.name, part]));
+      for (const sourcePart of state.sourceRestParts) {
+        const part = drawnParts.get(sourcePart.name);
+        const local = state.localBounds.get(sourcePart.geometry);
+        if (!part || !local || part.visibility?.visible === false) continue;
+        const positions = [];
+        for (let corner = 0; corner < 8; corner++) {
+          positions.push(corner & 1 ? local.max[0] : local.min[0], corner & 2 ? local.max[1] : local.min[1], corner & 4 ? local.max[2] : local.min[2]);
+        }
+        bounds.push({ name: part.name, ...boundsFor({ positions }, part.matrix) });
+      }
+      return bounds;
+    },
+    /** Warnings when the sampled lights or part poses no longer match what the last bake lit; empty without a bake. */
+    bakeStaleness() {
+      if (!state.bakeInputs) return [];
+      const matrices = new Map(state.restParts.map(part => [part.name, part.matrix]));
+      return agentSceneModule('bake').staleBakeProblems({ baked: state.bakeInputs, current: { environment: this.environment, matrices } });
     },
     get postPasses() {
       return structuredClone(state.recipe.postPasses ?? []);
