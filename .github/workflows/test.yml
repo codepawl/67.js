@@ -104,9 +104,24 @@ jobs:
       - run: npm run smoke:package
       - run: npm run smoke:mcp-package
 
+  # Users may start the MCP server with bunx, so the packed server also runs the package smoke under bun.
+  bun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: npm run prepare:release
+      - run: npm run smoke:mcp-package
+        env:
+          MCP_SERVER_RUNTIME: bun
+
   test:
     if: always()
-    needs: [audit, size, unit, coverage, package]
+    needs: [audit, size, unit, coverage, package, bun]
     runs-on: ubuntu-latest
     steps:
       # A skipped size job is expected outside pull requests. Anything else that is not a success fails the check.

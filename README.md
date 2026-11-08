@@ -106,6 +106,7 @@ npx 67js-mcp --backend gpu --memory 192
 ```
 
 Use `--backend cpu` on a machine without a GPU.
+With bun, `bunx 67js-mcp` takes the same flags; CI runs the packaged server under bun on every pull request.
 An agent authors a [JSON recipe](docs/agent-scene.md), sets [lights and fog](docs/agent-look.md), imports [GLB assets](docs/agent-asset.md) and adds [motion](docs/agent-motion.md).
 It gets PNG previews back, compares up to four views in a [review grid](docs/agent-review.md) and runs [render jobs](docs/agent-render-jobs.md) for stills and MP4 video.
 The server accepts no arbitrary code and no remote asset URLs. The [MCP reference](docs/mcp.md) lists its tools.
