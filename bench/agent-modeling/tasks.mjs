@@ -11,6 +11,7 @@ import { DUSK_START, DUSK_PROMPT, DUSK_CHECKS } from './dusk.mjs';
 import { COLONNADE_START, COLONNADE_PROMPT, COLONNADE_CHECKS } from './colonnade.mjs';
 import { TERRAIN_TASKS } from './terrain.mjs';
 import { EASING_TASKS } from './easing.mjs';
+import { SCENE_TASKS } from './scenes.mjs';
 
 export const PROMPT_PREAMBLE = `You are modeling with the 67js MCP tools. Build the object described below as a procedural recipe scene:
 start it with scene_create, refine it with mesh_edit, mesh_stack and scene_apply, and look at it with scene_look when
@@ -588,6 +589,7 @@ scene. When it is finished, call scene_export_recipe once: the exported recipe i
   ...LONG_TASKS,
   ...TERRAIN_TASKS,
   ...EASING_TASKS,
+  ...SCENE_TASKS,
 ];
 
 /** The task text an agent receives, with the starting recipe appended when the task changes an existing scene. */

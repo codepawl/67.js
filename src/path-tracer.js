@@ -30,7 +30,7 @@ export const PATH_TRACER_LIMITS = Object.freeze({
 });
 export const MAX_TRACE_PIXELS = 2_073_600;
 export const MAX_TRACE_RAY_WORK = 4_000_000_000;
-const ALPHA_STEP_LIMIT = 8;
+const ALPHA_STEP_LIMIT = 64;
 const WORKER_BAND_ROWS = 8;
 // Held in a constant so the bundler leaves the URL alone: the worker is its own package entry, built beside this file.
 const WORKER_FILE = './path-tracer-worker.js';

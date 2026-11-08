@@ -14,6 +14,7 @@ import { unwrapUv } from './mesh-uv.js';
 import { runKernel, KernelDeferred } from './kernel-offload.js';
 import { validateField } from './mesh-fields.js';
 import { setPosition, displaceMesh, DISPLACE_DIRECTIONS } from './mesh-field-edits.js';
+import { normalizeVertexColorEdit, normalizeVertexGroupEdit, setVertexColor, setVertexGroup } from './mesh-attribute-edits.js';
 import { subdivideMesh, subdivisionSize, MAX_SUBDIVISION_LEVELS, MAX_CREASE_SHARPNESS } from './mesh-subdivide.js';
 import { decimateMesh } from './mesh-decimate.js';
 import { isModifierOperation, normalizeModifierEdit, runModifierEdit } from './mesh-modifiers.js';
@@ -112,7 +113,7 @@ export function normalizeMeshEdits(edits) {
       normalized.select = edit.select ?? { all: true };
     }
     if (definition.fields.includes('name')) {
-      const name = edit.name ?? (edit.op === 'tag' ? undefined : `${edit.op.split('_')[0]}-${index + 1}`);
+      const name = edit.name ?? (['tag', 'vertex_group'].includes(edit.op) ? undefined : `${edit.op.split('_')[0]}-${index + 1}`);
       if (typeof name !== 'string' || !NAME_PATTERN.test(name)) throw editError(index, 'name must be 1 to 48 letters, digits, dots, dashes or underscores');
       normalized.name = name;
     }
@@ -261,6 +262,16 @@ export function normalizeMeshEdits(edits) {
         normalized.midlevel = edit.midlevel === undefined ? 0.5 : finiteNumber(edit.midlevel, index, 'midlevel');
         if (edit.direction !== undefined && !DISPLACE_DIRECTIONS.includes(edit.direction)) throw editError(index, `direction must be one of ${DISPLACE_DIRECTIONS.join(', ')}`);
         normalized.direction = edit.direction ?? 'normal';
+        if (edit.group !== undefined) {
+          if (typeof edit.group !== 'string' || !NAME_PATTERN.test(edit.group)) throw editError(index, 'group must be the name of a vertex group');
+          normalized.group = edit.group;
+        }
+        break;
+      case 'vertex_group':
+        normalizeVertexGroupEdit(edit, normalized, index, { finiteNumber, checkedField });
+        break;
+      case 'vertex_color':
+        normalizeVertexColorEdit(edit, normalized, index, { finiteNumber, checkedField });
         break;
       case 'decimate':
         normalized.ratio = finiteNumber(edit.ratio, index, 'ratio', { minimum: 0, maximum: 1, exclusiveMinimum: true });
@@ -441,6 +452,21 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
       throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
     }
     result.movedVertices = outcome.movedVertices;
+    return { mesh: outcome.mesh, result };
+  }
+  if (edit.op === 'vertex_group' || edit.op === 'vertex_color') {
+    let outcome;
+    try {
+      outcome = edit.op === 'vertex_group' ? setVertexGroup(current, edit) : setVertexColor(current, edit);
+    } catch (error) {
+      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+    }
+    if (edit.op === 'vertex_group') {
+      result.group = edit.name;
+      result.assignedVertices = outcome.assignedVertices;
+    } else {
+      result.assignedCorners = outcome.assignedCorners;
+    }
     return { mesh: outcome.mesh, result };
   }
   if (edit.op === 'sculpt' || edit.op === 'shrinkwrap') {
