@@ -9,6 +9,12 @@ const RUSSIAN_ROULETTE_START: i32 = 3;
 const MINIMUM_ALPHA: f32 = 1e-3;
 const MIRROR_ALPHA: f32 = 2e-3;
 const DIELECTRIC_COAT_REFLECTANCE: f32 = 0.04;
+const ADAPTIVE_MINIMUM_SAMPLES: u32 = 16u;
+const ADAPTIVE_BATCH_SAMPLES: u32 = 8u;
+const CONVERGENCE_LUMINANCE_FLOOR: f32 = 0.05;
+// The host sets these two before it compiles the kernel, so a scene without fog or subsurface scattering carries neither.
+const HAS_VOLUME: bool = false;
+const HAS_SUBSURFACE: bool = false;
 
 struct Params {
   eye: vec4<f32>,
@@ -23,6 +29,12 @@ struct Params {
   sizeBouncesLights: vec4<i32>,
   emittersFlagsSample: vec4<i32>,
   seedAndAtlas: vec4<u32>,
+  // Fog box minimum and density, box maximum and anisotropy, albedo and the longest distance.
+  volumeMinimumDensity: vec4<f32>,
+  volumeMaximumAnisotropy: vec4<f32>,
+  volumeAlbedoDistance: vec4<f32>,
+  // x is the vector index where the subsurface table starts in the materials buffer.
+  extras: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -33,7 +45,7 @@ struct Params {
 @group(0) @binding(5) var<storage, read> atlas: array<u32>;
 @group(0) @binding(6) var<storage, read> environmentColors: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read> environmentTables: array<f32>;
-// Four planes of pixelCount vec4 each: radiance and depth, albedo, normal, luminance statistics.
+// Four planes of pixelCount vec4 each: radiance and depth, albedo, normal, then the luminance sum, its square sum, the first-ray escape count and the samples drawn.
 @group(0) @binding(8) var<storage, read_write> accumulation: array<vec4<f32>>;
 @group(0) @binding(9) var<storage, read> primitiveSlots: array<u32>;
 
@@ -139,6 +151,7 @@ var<private> hitTransmission: f32;
 var<private> hitIor: f32;
 var<private> hitCutoff: f32;
 var<private> hitMask: u32;
+var<private> hitMaterialIndex: i32;
 
 fn srgbToLinear(encoded: vec3<f32>) -> vec3<f32> {
   return select(pow((encoded + 0.055) / 1.055, vec3<f32>(2.4)), encoded / 12.92, encoded <= vec3<f32>(0.04045));
@@ -226,7 +239,8 @@ fn fillHit(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> f32 {
   hitNormal = normal / select(normalLength, 1.0, normalLength == 0.0);
   let vertexColor = firstWeight * colorOneData.xyz + secondWeight * colorTwoData.xyz + thirdWeight * colorThreeData.xyz;
   let uv = firstWeight * vec2<f32>(normalOneData.w, colorOneData.w) + secondWeight * vec2<f32>(normalTwoData.w, colorTwoData.w) + thirdWeight * vec2<f32>(normalThreeData.w, colorThreeData.w);
-  let material = i32(cornerData.w) * MATERIAL_TEXELS;
+  hitMaterialIndex = i32(cornerData.w);
+  let material = hitMaterialIndex * MATERIAL_TEXELS;
   let colorMetallic = materials[material];
   let emissionRoughness = materials[material + 1];
   let coating = materials[material + 2];
@@ -438,6 +452,7 @@ var<private> surfaceCoatChance: f32;
 var<private> surfaceSampledCoat: bool;
 var<private> surfaceCoatAlpha: f32;
 var<private> surfaceDiffuseChance: f32;
+var<private> surfaceDiffuseShare: f32;
 var<private> surfaceSpecularChance: f32;
 var<private> surfaceValue: vec3<f32>;
 var<private> surfacePdf: f32;
@@ -462,6 +477,7 @@ fn prepareSurface(normal: vec3<f32>, view: vec3<f32>) {
   let underCoat = 1.0 - surfaceCoatWeight;
   let diffuseShare = (1.0 - hitMetallic) * (1.0 - dielectricFresnel) * underCoat;
   surfaceDiffuse = hitColor * diffuseShare;
+  surfaceDiffuseShare = diffuseShare;
   surfaceSpecularNormal = vec3<f32>(dielectricNormalReflectance * (1.0 - hitMetallic)) + hitColor * hitMetallic;
   let specularLuminance = luminance(surfaceSpecularNormal);
   surfaceSpecularWeight = underCoat;
@@ -579,6 +595,7 @@ var<private> featureAlbedo: vec3<f32>;
 var<private> featureNormal: vec3<f32>;
 var<private> featureDepth: f32;
 var<private> firstLegEscaped: f32 = 0.0;
+var<private> inMedium: bool = false;
 
 fn addRadiance(depth: i32, amountIn: vec3<f32>) {
   var amount = amountIn;
@@ -610,20 +627,79 @@ var<private> shadowDepth: i32;
 var<private> shadowPending: bool = false;
 
 fn addDirect(depth: i32, normal: vec3<f32>, distance: f32, weightMode: i32) {
-  let cosine = dot(normal, lightDirection);
-  if (cosine <= 0.0) { return; }
-  evaluateSurface(lightDirection);
-  let value = surfaceValue;
-  if (value.x + value.y + value.z <= 0.0) { return; }
-  shadowOrigin = hitPoint + normal * params.environmentRotationAndRays.z;
-  let scale = cosine * directWeight(weightMode, surfacePdf);
-  shadowAmount = throughput * value * lightRadiance * scale;
-  shadowDepth = depth;
+  if (HAS_VOLUME && inMedium) {
+    let phase = henyeyGreensteinPhase(params.volumeMaximumAnisotropy.w, dot(lightDirection, direction));
+    let scale = phase * fogTransmittance(hitPoint, distance) * directWeight(weightMode, phase);
+    shadowOrigin = hitPoint;
+    shadowAmount = throughput * lightRadiance * scale;
+    shadowDepth = depth + 1;
+  } else {
+    let cosine = dot(normal, lightDirection);
+    if (cosine <= 0.0) { return; }
+    evaluateSurface(lightDirection);
+    let value = surfaceValue;
+    if (value.x + value.y + value.z <= 0.0) { return; }
+    shadowOrigin = hitPoint + normal * params.environmentRotationAndRays.z;
+    var transmittance = 1.0;
+    if (HAS_VOLUME) { transmittance = fogTransmittance(shadowOrigin, distance); }
+    let scale = cosine * directWeight(weightMode, surfacePdf) * transmittance;
+    shadowAmount = throughput * value * lightRadiance * scale;
+    shadowDepth = depth;
+  }
   shadowDirection = lightDirection;
   shadowLimit = distance;
   shadowPending = true;
 }
 
+
+var<private> volumeSpan: vec2<f32>;
+
+fn clipAxis(origin: f32, axisDirection: f32, minimum: f32, maximum: f32, span: ptr<function, vec2<f32>>) -> bool {
+  if (axisDirection == 0.0) { return origin >= minimum && origin <= maximum; }
+  let first = (minimum - origin) / axisDirection;
+  let second = (maximum - origin) / axisDirection;
+  (*span).x = max((*span).x, min(first, second));
+  (*span).y = min((*span).y, max(first, second));
+  return true;
+}
+
+fn volumeInterval(origin: vec3<f32>, rayDirection: vec3<f32>, limit: f32) -> bool {
+  var span = vec2<f32>(0.0, min(limit, params.volumeAlbedoDistance.w));
+  let minimum = params.volumeMinimumDensity.xyz;
+  let maximum = params.volumeMaximumAnisotropy.xyz;
+  if (!clipAxis(origin.x, rayDirection.x, minimum.x, maximum.x, &span)) { return false; }
+  if (!clipAxis(origin.y, rayDirection.y, minimum.y, maximum.y, &span)) { return false; }
+  if (!clipAxis(origin.z, rayDirection.z, minimum.z, maximum.z, &span)) { return false; }
+  if (!(span.x < span.y)) { return false; }
+  volumeSpan = span;
+  return true;
+}
+
+fn henyeyGreensteinPhase(anisotropy: f32, cosine: f32) -> f32 {
+  let squared = anisotropy * anisotropy;
+  return (1.0 - squared) / (4.0 * PI * pow(1.0 + squared - 2.0 * anisotropy * cosine, 1.5));
+}
+
+fn sampleHenyeyGreensteinCosine(anisotropy: f32, unit: f32) -> f32 {
+  if (abs(anisotropy) < 1e-3) { return 1.0 - 2.0 * unit; }
+  let squared = anisotropy * anisotropy;
+  let ratio = (1.0 - squared) / (1.0 - anisotropy + 2.0 * anisotropy * unit);
+  return clamp((1.0 + squared - ratio * ratio) / (2.0 * anisotropy), -1.0, 1.0);
+}
+
+fn fogTransmittance(origin: vec3<f32>, distance: f32) -> f32 {
+  if (!volumeInterval(origin, lightDirection, distance)) { return 1.0; }
+  return exp(-params.volumeMinimumDensity.w * (volumeSpan.y - volumeSpan.x));
+}
+
+// Draws the next scattering event along the segment; when there is one it becomes hitPoint.
+fn scatterInFog(origin: vec3<f32>, segmentLength: f32) -> bool {
+  if (!volumeInterval(origin, direction, segmentLength)) { return false; }
+  let eventDistance = volumeSpan.x - log(1.0 - nextRandom()) / params.volumeMinimumDensity.w;
+  if (eventDistance >= volumeSpan.y) { return false; }
+  hitPoint = origin + direction * eventDistance;
+  return true;
+}
 fn flushShadowRay() {
   if (!shadowPending) { return; }
   shadowPending = false;
@@ -631,7 +707,7 @@ fn flushShadowRay() {
 }
 
 fn reaches(bit: i32) -> bool {
-  return ((hitMask >> u32(bit)) & 1u) == 1u;
+  return inMedium || ((hitMask >> u32(bit)) & 1u) == 1u;
 }
 
 // Aims lightDirection at the target and returns the distance; distanceSquared goes into aimedDistanceSquared.
@@ -763,6 +839,112 @@ fn survivesRoulette(depth: i32) -> bool {
   return true;
 }
 
+
+const WALK_STEPS: i32 = 32;
+const WALK_EXIT: i32 = 0;
+const WALK_THIN: i32 = 1;
+const WALK_LOST: i32 = 2;
+const SUBSURFACE_TEXELS: i32 = 2;
+
+var<private> subsurfaceWeight: f32 = 0.0;
+var<private> surfaceSubsurfaceChance: f32 = 0.0;
+var<private> walkWeight: vec3<f32>;
+var<private> walkDirection: vec3<f32>;
+var<private> subsurfaceNormal: vec3<f32>;
+
+fn subsurfaceVector(material: i32, offset: i32) -> vec4<f32> {
+  return materials[i32(params.extras.x) + material * SUBSURFACE_TEXELS + offset];
+}
+
+// Moves the subsurface share of the diffuse lobe to the walk; returns the material's weight.
+fn splitSubsurface() -> f32 {
+  let weight = subsurfaceVector(hitMaterialIndex, 0).x;
+  surfaceSubsurfaceChance = surfaceDiffuseChance * weight;
+  surfaceDiffuseChance -= surfaceSubsurfaceChance;
+  surfaceDiffuse *= 1.0 - weight;
+  return weight;
+}
+
+fn singleScatterAlbedo(multipleScatterAlbedo: f32) -> f32 {
+  let albedo = clamp(multipleScatterAlbedo, 0.0, 1.0);
+  let root = sqrt(9.59217 + 41.6808 * albedo + 17.7126 * albedo * albedo);
+  let offset = 4.09712 + 4.20863 * albedo - root;
+  return clamp(1.0 - offset * offset, 0.0, 1.0);
+}
+
+// Walks inward from the entry point until the walk meets the part's own surface; leaves its throughput in walkWeight.
+fn randomWalk(point: vec3<f32>, normal: vec3<f32>, meanFreePath: vec3<f32>, color: vec3<f32>, material: i32) -> i32 {
+  let extinction = 1.0 / meanFreePath;
+  let albedo = vec3<f32>(singleScatterAlbedo(color.r), singleScatterAlbedo(color.g), singleScatterAlbedo(color.b));
+  var position = point - normal * params.environmentRotationAndRays.z;
+  let frame = buildFrame(normal);
+  let radius = sqrt(nextRandom());
+  let angle = TWO_PI * nextRandom();
+  let height = sqrt(max(0.0, 1.0 - radius * radius));
+  walkDirection = frame[0] * (radius * cos(angle)) + frame[1] * (radius * sin(angle)) - normal * height;
+  for (var scatters = 0; scatters <= WALK_STEPS; scatters++) {
+    let found = intersectScene(position, walkDirection);
+    if (!found || hitMaterialIndex != material) { return select(WALK_LOST, WALK_THIN, scatters == 0); }
+    // One channel draws the distance; weighting by the mean density over the three channels keeps every channel unbiased.
+    let hero = min(2, i32(floor(nextRandom() * 3.0)));
+    let distance = -log(1.0 - nextRandom()) / extinction[hero];
+    if (distance >= hitDistance) {
+      let attenuation = exp(-extinction * hitDistance);
+      let survival = (attenuation.x + attenuation.y + attenuation.z) / 3.0;
+      if (!(survival > 0.0)) { return WALK_LOST; }
+      walkWeight *= attenuation / survival;
+      return WALK_EXIT;
+    }
+    if (scatters == WALK_STEPS) { return WALK_LOST; }
+    let falloff = exp(-extinction * distance);
+    let scatterDensity = extinction * falloff;
+    let density = (scatterDensity.x + scatterDensity.y + scatterDensity.z) / 3.0;
+    if (!(density > 0.0)) { return WALK_LOST; }
+    walkWeight *= albedo * scatterDensity / density;
+    position += walkDirection * distance;
+    let up = 2.0 * nextRandom() - 1.0;
+    let azimuth = TWO_PI * nextRandom();
+    let ring = sqrt(max(0.0, 1.0 - up * up));
+    walkDirection = vec3<f32>(ring * cos(azimuth), up, ring * sin(azimuth));
+  }
+  return WALK_LOST;
+}
+
+// Sends the diffuse light of the hit through its walk. On success the path stands where the walk left, subsurfaceNormal
+// faces out of that point, the surface is white diffuse there with its lights added, and the throughput carries the walk.
+// False when the walk ended inside the part.
+fn enterSubsurface(depth: i32, entryNormal: vec3<f32>) -> bool {
+  let block = subsurfaceVector(hitMaterialIndex, 0);
+  let colorBlock = subsurfaceVector(hitMaterialIndex, 1);
+  let color = select(colorBlock.rgb, hitColor, colorBlock.x < 0.0);
+  let material = hitMaterialIndex;
+  let entryPoint = hitPoint;
+  let entryMask = hitMask;
+  let entryScale = surfaceDiffuseShare * block.x / surfaceSubsurfaceChance;
+  walkWeight = vec3<f32>(1.0);
+  subsurfaceNormal = entryNormal;
+  let outcome = randomWalk(entryPoint, entryNormal, block.yzw, color, material);
+  if (outcome == WALK_LOST) { return false; }
+  if (outcome == WALK_EXIT) {
+    subsurfaceNormal = hitNormal * select(1.0, -1.0, dot(hitNormal, walkDirection) < 0.0);
+    throughput *= walkWeight * entryScale;
+  } else {
+    // A card: half of the colour is reflected on the side the ray came from and half is transmitted diffusely through it.
+    hitPoint = entryPoint;
+    hitMask = entryMask;
+    if (nextRandom() < 0.5) { subsurfaceNormal = -entryNormal; }
+    throughput *= color * entryScale;
+  }
+  surfaceFrame = buildFrame(subsurfaceNormal);
+  surfaceDiffuse = vec3<f32>(1.0);
+  surfaceDiffuseChance = 1.0;
+  surfaceSubsurfaceChance = 0.0;
+  surfaceSpecularChance = 0.0;
+  surfaceCoatChance = 0.0;
+  surfaceCoatWeight = 0.0;
+  addLights(depth, subsurfaceNormal);
+  return true;
+}
 fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
   resetRandom(pixel, sampleIndex, params.seedAndAtlas.x);
   radiance = vec3<f32>(0.0);
@@ -780,24 +962,49 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
   let surfaceOffset = params.environmentRotationAndRays.z;
   for (var depth = 0; depth <= bounces; depth++) {
     let found = intersectScene(position, direction);
-    if (!found) {
+    var inFog = false;
+    if (HAS_VOLUME) { inFog = scatterInFog(position, select(params.environmentRotationAndRays.w, hitDistance, found)); }
+    if (!inFog && !found) {
       if (depth == 0) { firstLegEscaped = 1.0; }
       addEscape(depth, previousPdf, afterMirror);
       break;
     }
-    let entering = dot(hitNormal, direction) < 0.0;
-    normal = select(-hitNormal, hitNormal, entering);
-    let isGlass = hitTransmission > 0.0 && nextRandom() < hitTransmission;
-    if (!featuresRecorded) {
-      featureAlbedo = select(hitColor, vec3<f32>(1.0), isGlass);
-      featureNormal = normal;
-      featureDepth = hitDistance;
-      featuresRecorded = true;
+    var isGlass = false;
+    var entering = true;
+    var needsLights = true;
+    if (inFog) {
+      throughput *= params.volumeAlbedoDistance.xyz;
+      inMedium = true;
+    } else {
+      entering = dot(hitNormal, direction) < 0.0;
+      normal = select(-hitNormal, hitNormal, entering);
+      isGlass = hitTransmission > 0.0 && nextRandom() < hitTransmission;
+      if (!featuresRecorded) {
+        featureAlbedo = select(hitColor, vec3<f32>(1.0), isGlass);
+        featureNormal = normal;
+        featureDepth = hitDistance;
+        featuresRecorded = true;
+      }
+      addRadiance(depth, throughput * hitEmission);
+      needsLights = !isGlass;
+      if (needsLights) {
+        prepareSurface(normal, -direction);
+        if (HAS_SUBSURFACE) { subsurfaceWeight = splitSubsurface(); }
+      }
     }
-    addRadiance(depth, throughput * hitEmission);
-    if (!isGlass) {
-      prepareSurface(normal, -direction);
-      addLights(depth, normal);
+    if (needsLights) { addLights(depth, normal); }
+    inMedium = false;
+    if (inFog) {
+      let phaseCosine = sampleHenyeyGreensteinCosine(params.volumeMaximumAnisotropy.w, nextRandom());
+      let phaseSine = sqrt(max(0.0, 1.0 - phaseCosine * phaseCosine));
+      let azimuth = TWO_PI * nextRandom();
+      let frame = buildFrame(direction);
+      direction = frame[0] * phaseSine * cos(azimuth) + frame[1] * phaseSine * sin(azimuth) + frame[2] * phaseCosine;
+      previousPdf = henyeyGreensteinPhase(params.volumeMaximumAnisotropy.w, phaseCosine);
+      afterMirror = false;
+      position = hitPoint;
+      if (!survivesRoulette(depth)) { break; }
+      continue;
     }
     if (isGlass) {
       let alpha = roughnessToAlpha(hitRoughness);
@@ -809,7 +1016,16 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
       if (dot(direction, normal) < 0.0) { throughput *= hitColor; }
       afterMirror = true;
     } else {
-      let lobeUnit = nextRandom();
+      var lobeUnit = nextRandom();
+      if (HAS_SUBSURFACE && subsurfaceWeight > 0.0) {
+        if (lobeUnit < surfaceSubsurfaceChance) {
+          if (!enterSubsurface(depth, normal)) { break; }
+          normal = subsurfaceNormal;
+          lobeUnit = 0.0;
+        } else {
+          lobeUnit -= surfaceSubsurfaceChance;
+        }
+      }
       let firstUnit = nextRandom();
       let secondUnit = nextRandom();
       let isMirror = sampleSurface(lobeUnit, firstUnit, secondUnit);
@@ -832,12 +1048,26 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
   }
 }
 
+// The same stop rule as the CPU tracer: after 16 samples, and then every 8, a pixel whose standard error of the mean luminance is
+// under the threshold times the mean plus a small floor draws no more samples. It reads only the pixel's own sums.
+fn pixelHasConverged(statistics: vec4<f32>, threshold: f32) -> bool {
+  let taken = u32(statistics.w);
+  if (taken < ADAPTIVE_MINIMUM_SAMPLES || (taken - ADAPTIVE_MINIMUM_SAMPLES) % ADAPTIVE_BATCH_SAMPLES != 0u) { return false; }
+  let count = f32(taken);
+  let mean = statistics.x / count;
+  let sampleVariance = max(0.0, statistics.y / count - mean * mean) * count / (count - 1.0);
+  return sqrt(sampleVariance / count) < threshold * (mean + CONVERGENCE_LUMINANCE_FLOOR);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let width = params.sizeBouncesLights.x;
   let height = params.sizeBouncesLights.y;
   if (i32(id.x) >= width || i32(id.y) >= height) { return; }
   let pixel = id.y * u32(width) + id.x;
+  let pixelCount = u32(width * height);
+  let noiseThreshold = params.cameraAndClamp.w;
+  if (noiseThreshold > 0.0 && pixelHasConverged(accumulation[3u * pixelCount + pixel], noiseThreshold)) { return; }
   let sampleIndex = u32(params.emittersFlagsSample.w);
   let seed = params.seedAndAtlas.x;
   if (params.emittersFlagsSample.y != 0) { sunFrame = buildFrame(params.sunDirection.xyz); }
@@ -852,9 +1082,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   if (!(all(featureNormal >= vec3<f32>(-1.5)) && all(featureNormal < vec3<f32>(1.5)))) { featureNormal = vec3<f32>(0.0, 0.0, 1.0); }
   if (!(all(featureAlbedo >= vec3<f32>(0.0)) && all(featureAlbedo < vec3<f32>(1e30)))) { featureAlbedo = vec3<f32>(1.0); }
   let sampleLuminance = luminance(radiance);
-  let pixelCount = u32(width * height);
   accumulation[pixel] += vec4<f32>(radiance, featureDepth);
   accumulation[pixelCount + pixel] += vec4<f32>(featureAlbedo, 0.0);
   accumulation[2u * pixelCount + pixel] += vec4<f32>(featureNormal, 0.0);
-  accumulation[3u * pixelCount + pixel] += vec4<f32>(sampleLuminance, sampleLuminance * sampleLuminance, firstLegEscaped, 0.0);
+  accumulation[3u * pixelCount + pixel] += vec4<f32>(sampleLuminance, sampleLuminance * sampleLuminance, firstLegEscaped, 1.0);
 }

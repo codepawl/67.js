@@ -485,10 +485,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           let backendNote = trace.note;
           if (trace.backend === 'native') {
             try {
-              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20 } });
+              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold } });
               traced = await traceFrameNative({ tracer: trace.tracer, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
                 seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
-                maxSeconds: tracerOptions.maxSeconds });
+                maxSeconds: tracerOptions.maxSeconds, noiseThreshold: tracerOptions.noiseThreshold });
             } catch (error) {
               // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
               if (isNativeTimeLimitError(error)) throw error;

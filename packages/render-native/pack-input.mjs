@@ -1,8 +1,9 @@
 // Packs a trace scene into the tables the native kernel reads. It imports nothing from Node, so the job page can run it too.
-const PARAMETER_BYTES = 12 * 16;
+// 16 vectors: the 12 of the camera, lights and seed, the fog box and medium, and the subsurface table's first vector index.
+const PARAMETER_BYTES = 16 * 16;
 const SUN_CONE_COSINE = Math.cos(Math.PI / 360);
 
-function writeParameters(scene, camera, options, lightCount, atlasWidth) {
+function writeParameters(scene, camera, options, lightCount, atlasWidth, subsurfaceOffset) {
   const buffer = new ArrayBuffer(PARAMETER_BYTES);
   const floats = new Float32Array(buffer);
   const integers = new Int32Array(buffer);
@@ -17,10 +18,16 @@ function writeParameters(scene, camera, options, lightCount, atlasWidth) {
   floats.set([...(sun?.color ?? [0, 0, 0]), SUN_CONE_COSINE], 20);
   floats.set([environment?.width ?? 1, environment?.height ?? 1, environment?.intensity ?? 1, environment?.total ?? 1], 24);
   floats.set([environment?.cosine ?? 1, environment?.sine ?? 0, scene.surfaceOffset, scene.farDistance], 28);
-  floats.set([camera.halfWidth, camera.halfHeight, options.fireflyClamp ?? 20, 0], 32);
+  // The fourth float is the noise threshold: pixels under it stop early, and 0 draws every sample.
+  floats.set([camera.halfWidth, camera.halfHeight, options.fireflyClamp ?? 20, options.noiseThreshold ?? 0], 32);
   integers.set([options.width, options.height, options.bounces, lightCount], 36);
   integers.set([(sun ? 1 : 0) + lightCount + (environment ? 1 : 0), sun ? 1 : 0, environment ? 1 : 0, 0], 40);
   words.set([options.seed >>> 0, atlasWidth, 0, 0], 44);
+  const { volume } = scene;
+  floats.set([...(volume?.minimum ?? [0, 0, 0]), volume?.density ?? 0], 48);
+  floats.set([...(volume?.maximum ?? [0, 0, 0]), volume?.anisotropy ?? 0], 52);
+  floats.set([...(volume?.albedo ?? [1, 1, 1]), volume?.maxDistance ?? 0], 56);
+  words.set([subsurfaceOffset, 0, 0, 0], 60);
   return new Uint8Array(buffer);
 }
 
@@ -37,15 +44,23 @@ export function buildNativeInput(scene, camera, options, pack) {
     environmentTables.set(environment.rows.data.subarray(0, environment.height), 0);
     environmentTables.set(environment.pixels.data.subarray(0, environment.width * environment.height), environment.height);
   }
+  // The subsurface table (two vectors per material) follows the material table in the same buffer; its offset is 0 when no
+  // material scatters light under its surface, which keeps the walk out of the kernel.
+  const materialData = pack.packMaterials(scene.materials, atlas).data;
+  const usesSubsurface = pack.sceneUsesSubsurface(scene.materials);
+  const subsurfaceData = usesSubsurface ? pack.packSubsurface(scene.materials).data : new Float32Array(0);
+  const materials = new Float32Array(materialData.length + subsurfaceData.length);
+  materials.set(materialData);
+  materials.set(subsurfaceData, materialData.length);
   return {
     triangles: pack.packTriangles(scene).data,
     triangleCount: scene.bvh.triangleOrder.length,
-    materials: pack.packMaterials(scene.materials, atlas).data,
+    materials,
     lights: lights.table.data,
     atlas: new Uint32Array(atlas.data.buffer, atlas.data.byteOffset, Math.floor(atlas.data.byteLength / 4)),
     environmentColors: environment?.colors ?? new Float32Array(4),
     environmentTables,
-    parameters: writeParameters(scene, camera, options, lights.count, atlas.width),
+    parameters: writeParameters(scene, camera, options, lights.count, atlas.width, usesSubsurface ? materialData.length / 4 : 0),
   };
 }
 
