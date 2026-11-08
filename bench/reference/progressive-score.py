@@ -32,6 +32,8 @@ def split_name(stem):
     if "@" in stem:
         scene_id, label = stem.split("@", 1)
         return scene_id, label
+    if stem.endswith("-pathtracer-webgpu"):
+        return stem.removesuffix("-pathtracer-webgpu"), "webgpu"
     return stem.removesuffix("-pathtracer-gpu"), "gpu"
 
 

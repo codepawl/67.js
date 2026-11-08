@@ -1,3 +1,4 @@
+import { resolveLightSelection } from './path-tracer-light-tree.js';
 import { buildFragmentSource, VERTEX_SOURCE } from './path-tracer-gpu-shader.js';
 import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 
@@ -278,7 +279,8 @@ async function drawSamples(gl, program, width, height, samples, shouldStop) {
 }
 
 export async function traceOnGpu(scene, camera, rawOptions, shouldStop) {
-  const options = await withBlueNoiseTile(rawOptions);
+  const tiledOptions = await withBlueNoiseTile(rawOptions);
+  const options = { ...tiledOptions, lightSelection: resolveLightSelection(tiledOptions.lightSelection, scene.lights) };
   const { gl, gpu } = getContext();
   const { program, compileSeconds } = getKernel(sceneUsesSubsurface(scene.materials), false, options);
   const { width, height, samples } = options;
