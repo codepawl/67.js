@@ -442,6 +442,14 @@ function motionTrack(kind, property, value, tangent) {
     })).min(1).max(64),
   });
 }
+// Lights, sun, sky and effects share one track shape: the backend names the valid light IDs and properties of each kind when one is wrong.
+const lookTrack = z.strictObject({
+  kind: z.enum(['light', 'sun', 'environment', 'effects']).describe('Properties per kind: scene_capabilities motionLook.'),
+  id: z.string().max(16).optional().describe('Light only: point:0, spot:0, area:0.'),
+  property: z.string().max(24),
+  interpolation: z.enum(['LINEAR', 'STEP', 'SMOOTH']).optional(),
+  keyframes: z.array(z.strictObject({ time: z.number().min(0).max(30), value: z.union([finite, vector3]), easing: easingField })).min(1).max(64),
+});
 const ikKeyframes = (value, description) => z.strictObject({
   interpolation: z.enum(['LINEAR', 'STEP', 'SMOOTH']).optional(),
   keyframes: z.array(z.strictObject({ time: z.number().min(0).max(30), value })).min(1).max(64),
@@ -525,6 +533,7 @@ const motion = z.strictObject({
     motionTrack('camera', 'target', vector3, vector3),
     motionTrack('camera', 'fov', finite.gt(0).lt(180), finite),
     motionTrack('camera', 'roll', finite, finite),
+    lookTrack,
   ])).max(128),
 }).describe('One absolute-time procedural clip. Local node transforms propagate through parents. Cubic tangents are derivatives per second. Backend checks references, duplicate tracks, 2048 total keys and every sampled pose.');
 const physicsBody = z.strictObject({
