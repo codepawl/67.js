@@ -1,52 +1,50 @@
 <p align="center">
-  <a href="https://67js.codepawl.com">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://67js.codepawl.com/brand/wordmark-dark.svg" />
-      <img src="https://67js.codepawl.com/brand/wordmark-light.svg" alt="67js" width="144" />
-    </picture>
-  </a>
-</p>
-
-<p align="center"><strong>A WebGL2 3D engine that AI agents drive.</strong></p>
-
-<p align="center">
-  <a href="https://www.npmjs.com/package/@codepawlhq/67js"><img src="https://img.shields.io/npm/v/@codepawlhq/67js?color=3b6e22&label=npm" alt="npm version" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3b6e22" alt="MIT license" /></a>
-  <img src="https://img.shields.io/badge/node-%E2%89%A520.19-3b6e22" alt="Node.js 20.19 or later" />
+  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/banner.jpg" alt="67js: a WebGL2 3D engine that AI agents drive, with an airport ramp, a Bistro street and an AI data center rendered by it" width="100%"></a>
 </p>
 
 <p align="center">
-  <a href="https://67js.codepawl.com/showcase.html">Showcase</a> ·
-  <a href="https://67js.codepawl.com/docs.html">Documentation</a> ·
-  <a href="https://67js.codepawl.com/llms.txt">Guide for agents</a> ·
-  <a href="https://github.com/codepawl/67.js/blob/main/CHANGELOG.md">Changelog</a>
-</p>
-
-<p align="center">
-  <img src="https://67js.codepawl.com/previews/bistro-street.webp" alt="A Paris side street in the Bistro scene with red awnings, string lights and a blue sky, rendered by 67js" width="100%" />
+  <a href="https://www.npmjs.com/package/@codepawlhq/67js"><img alt="npm version" src="https://img.shields.io/npm/v/@codepawlhq/67js?style=flat-square&label=npm&color=7CC765&labelColor=0A1D1A"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-E9F5F0?style=flat-square&labelColor=0A1D1A"></a>
+  <img alt="Node.js 20.19 or later" src="https://img.shields.io/badge/node-%E2%89%A520.19-4DB6FF?style=flat-square&labelColor=0A1D1A">
+  <img alt="MCP server for agents" src="https://img.shields.io/badge/agents-MCP%20server-F7C948?style=flat-square&labelColor=0A1D1A">
 </p>
 
 67js is a WebGL2 renderer with addons for terrain, vegetation, characters, liquid, vehicles and media export.
 A scene is plain data: each part has a geometry, a matrix and a material.
 An agent builds and changes a scene through an MCP server, looks at PNG previews and renders stills or MP4 video.
 The goal is to be as capable as Blender and as light as three.js. [Issue #23](https://github.com/codepawl/67.js/issues/23) tracks the work.
+See the [showcase](https://67js.codepawl.com/showcase.html), the [documentation](https://67js.codepawl.com/docs.html), the [guide for agents](https://67js.codepawl.com/llms.txt) and the [changelog](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md).
+
+## Showcase
+
+Each picture below is a 67js render. The linked ones open live in the browser.
 
 <table>
   <tr>
-    <td width="50%"><img src="https://67js.codepawl.com/previews/bistro-cafe.webp" alt="A green corner restaurant with red awnings and a blue scooter in the Bistro scene, rendered by 67js" /><br /><b>Bistro cafe corner</b></td>
-    <td width="50%"><img src="https://67js.codepawl.com/previews/bistro-plaza.webp" alt="A large plane tree in a hedged circle on a Bistro plaza, rendered by 67js" /><br /><b>Bistro plaza</b></td>
+    <td width="33%" valign="top"><b>Bistro cafe corner</b></td>
+    <td width="33%" valign="top"><b>Bistro plaza</b></td>
+    <td width="33%" valign="top"><b><a href="https://67js.codepawl.com/showcase.html?scene=port">Container port</a></b></td>
+  </tr>
+  <tr>
+    <td><img src="https://67js.codepawl.com/previews/bistro-cafe.webp" alt="A green corner restaurant with red awnings and a blue scooter in the Bistro scene"></td>
+    <td><img src="https://67js.codepawl.com/previews/bistro-plaza.webp" alt="A large plane tree in a hedged circle on a Bistro plaza"></td>
+    <td><a href="https://67js.codepawl.com/showcase.html?scene=port"><img src="https://67js.codepawl.com/previews/showcase-port.webp" alt="A container port with cranes and stacked containers"></a></td>
   </tr>
 </table>
 
-<table>
-  <tr>
-    <td width="33%"><a href="https://67js.codepawl.com/showcase.html?scene=airport"><img src="https://67js.codepawl.com/previews/showcase-airport.webp" alt="An airport ramp with an airliner at its stand and the turnaround crew, rendered by 67js" /></a><br /><b>Airport ramp</b></td>
-    <td width="33%"><a href="https://67js.codepawl.com/showcase.html?scene=datacenter"><img src="https://67js.codepawl.com/previews/showcase-datacenter.webp" alt="A cutaway AI data center hall rendered by 67js" /></a><br /><b>AI data center</b></td>
-    <td width="33%"><a href="https://67js.codepawl.com/showcase.html?scene=port"><img src="https://67js.codepawl.com/previews/showcase-port.webp" alt="A container port with cranes and stacked containers rendered by 67js" /></a><br /><b>Container port</b></td>
-  </tr>
-</table>
+The [airport ramp](https://67js.codepawl.com/showcase.html?scene=airport) and the [AI data center](https://67js.codepawl.com/showcase.html?scene=datacenter) in the banner open live too.
 
 ## Install
+
+**Let your agent do it.** Paste this prompt into Claude Code, Codex, Cursor, Gemini CLI or OpenCode. The agent installs
+the package, reads the guide and connects the MCP server.
+
+```text
+Install 67js from npm as `67js@npm:@codepawlhq/67js` and connect its MCP server with `npx 67js-mcp`. Read
+https://67js.codepawl.com/llms.txt first and follow it.
+```
+
+**By hand**
 
 ```sh
 npm install 67js@npm:@codepawlhq/67js
@@ -162,5 +160,8 @@ Read [CONTRIBUTING.md](https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.
 - The textures and the HDRI on the site are CC0 scans from [Poly Haven](https://polyhaven.com) and [ambientCG](https://ambientcg.com). See [the texture credits](https://github.com/codepawl/67.js/blob/main/public/textures/CREDITS.md).
 - The Bistro renders use [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) (CC BY 4.0, from the NVIDIA ORCA library) under a CC0 [Poly Haven](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky) sky.
 - The showcase models and their sources are listed in each world's `scene.json` under `public/showcase/`.
+- The banner wordmark uses [Sora](https://fonts.google.com/specimen/Sora) (SIL Open Font License).
+
+## License
 
 [MIT](LICENSE) © CodePawl
