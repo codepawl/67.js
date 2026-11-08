@@ -27,6 +27,8 @@ requires a clean lint, so keep them valid when the API changes.
    Paint and weight after the shape edits: `vertex_color` (`color`, `field` or a two-color `gradient`) colors the selected faces and
    exports as `COLOR_0`; `vertex_group` (`name` plus `weight`, `field` or `gradient`) makes weights that `displace` reads with `group`
    and a cloth sheet reads with `pinGroup`. Example: `{ "op": "vertex_group", "name": "hem", "gradient": { "axis": "y", "range": [-0.5, 0.5], "weights": [1, 0] } }`.
+   Faces, blinks and squash are shape keys on the same mesh geometry: `"shapeKeys": [{ "name": "blink", "offsets": [{ "select": { "tag": "lid" }, "offset": [0, -0.1, 0] }] }]`
+   (offsets or move-only `edits`, at most 16, no new vertices), animated by a motion track `{ "kind": "morph", "id": "blink", "property": "weight", "keyframes": [...] }`.
 3. Add edits in small batches with `mesh_edit` (or in the recipe). Name every edit (`name: "lid"` gives `lid.cap`,
    `lid.side`); an unnamed one gets `<op>-<index>`, which is hard to predict. Select faces by tags, never by index.
 4. After each batch read the `mesh_edit` result: `edits[i].selected`, `tags` and `edges` say what each edit touched;
