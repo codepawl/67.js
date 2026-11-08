@@ -4,6 +4,9 @@ import { prepareRealtimeKernel } from './path-tracer-webgpu.js';
 import { REALTIME_KERNEL_PIECES } from './path-tracer-realtime-webgpu-kernel.js';
 import { cacheCellSizes } from './path-tracer-realtime-options.js';
 import { createWebGpuDenoiser, createWebGpuRadianceCache } from './path-tracer-realtime-webgpu-passes.js';
+import { createWebGpuFullResolutionDenoiser } from './path-tracer-realtime-webgpu-fullres.js';
+import { PART_MOTION_CHANGED, PART_MOTION_FLOATS, partMotionTable } from './path-tracer-reprojection.js';
+import { MAX_TRACE_PARTS } from './path-tracer-scene.js';
 
 // The WebGPU backend of the real-time path tracer (issue #624): the same frame as path-tracer-realtime.js, one path per
 // pixel at half the output size, two bounces ended by the radiance cache, then the temporal denoiser, but every step is a
@@ -33,7 +36,7 @@ function createOutputCanvas(width, height) {
 
 /** `resolved` is what `resolveRealtimeOptions` returns for the options of `createRealtimeTracer`; `suppliedCanvas` is optional. */
 export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas) {
-  const { outputWidth, outputHeight, traceWidth, traceHeight, options, historyLimit, filterIterations, cacheCellSize } = resolved;
+  const { outputWidth, outputHeight, traceWidth, traceHeight, options, historyLimit, filterIterations, cacheCellSize, accumulateAtOutputSize, followPartMotion } = resolved;
   let traceScene = null;
   let kernel = null;
   let device = null;
@@ -44,6 +47,11 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
   let context = null;
   let parameterBuffer = null;
   let recordBuffer = null;
+  let motionBuffer = null;
+  let currentParts = null;
+  let currentEnvironment = null;
+  let pendingMotion = null;
+  let motionIsActive = false;
   let traceGroups = null;
   let cellSizes = null;
   const pixelCount = traceWidth * traceHeight;
@@ -55,7 +63,13 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
   let clearCache = true;
   let disposed = false;
 
-  const loadScene = async (parts, environment) => {
+  // `motion` is for an update that moves parts of the same scene: the denoiser's history and the cache stay, and the table
+  // tells the denoiser where each part was (path-tracer-reprojection.js, partMotionTable).
+  const loadScene = async (parts, environment, motion = null) => {
+    const keepHistory = motion !== null;
+    pendingMotion = motion;
+    currentParts = parts;
+    currentEnvironment = environment;
     traceScene = buildTraceScene(parts, environment);
     const next = await prepareRealtimeKernel(traceScene, options, REALTIME_KERNEL_PIECES);
     const previousKernel = kernel;
@@ -66,8 +80,10 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
       traced = [0, 1].map(index => device.createBuffer({ label: `traced ${index}`, size: pixelCount * 16 * 3, usage: GPUBufferUsage.STORAGE }));
       recordBuffer = device.createBuffer({ label: 'cache records', size: pixelCount * 16, usage: GPUBufferUsage.STORAGE });
       parameterBuffer = device.createBuffer({ label: 'realtime parameters', size: 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      motionBuffer = device.createBuffer({ label: 'part motion', size: MAX_TRACE_PARTS * PART_MOTION_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       cache = await createWebGpuRadianceCache(device);
-      denoiser = await createWebGpuDenoiser(device, { traceWidth, traceHeight, outputWidth, outputHeight, tracedBuffers: traced, historyLimit, filterIterations, swapped });
+      const createDenoiser = accumulateAtOutputSize ? createWebGpuFullResolutionDenoiser : createWebGpuDenoiser;
+      denoiser = await createDenoiser(device, { traceWidth, traceHeight, outputWidth, outputHeight, tracedBuffers: traced, motionBuffer, historyLimit, filterIterations, swapped });
       canvas = suppliedCanvas ?? createOutputCanvas(outputWidth, outputHeight);
       context = canvas.getContext('webgpu');
       context.configure({ device, format: navigator.gpu.getPreferredCanvasFormat(), usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST, alphaMode: 'opaque' });
@@ -81,9 +97,11 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
       ],
     }));
     cellSizes = cacheCellSizes(traceScene, cacheCellSize);
-    view = null;
-    resetHistory = true;
-    clearCache = true;
+    if (!keepHistory) {
+      view = null;
+      resetHistory = true;
+      clearCache = true;
+    }
   };
 
   await loadScene(scene.parts, scene.environment ?? {});
@@ -97,7 +115,20 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
     device.queue.writeBuffer(parameterBuffer, 0, words);
   };
 
+  // The motion table goes up with the first frame after an update, and a table of still parts follows it.
+  const uploadPartMotion = () => {
+    if (pendingMotion) {
+      device.queue.writeBuffer(motionBuffer, 0, pendingMotion);
+      pendingMotion = null;
+      motionIsActive = true;
+    } else if (motionIsActive) {
+      device.queue.writeBuffer(motionBuffer, 0, partMotionTable(currentParts, currentParts));
+      motionIsActive = false;
+    }
+  };
+
   const encodeFrame = (nextView, previousView) => {
+    uploadPartMotion();
     const encoder = device.createCommandEncoder();
     if (clearCache) {
       cache.clear(encoder);
@@ -130,9 +161,17 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
     get compileSeconds() { return kernel.compileSeconds; },
     get frameCount() { return frameIndex; },
 
-    /** A new scene: the radiance cache and the denoiser's history start over. */
+    /**
+     * New parts. The radiance cache and the denoiser's history start over, except when the part count and the environment are the
+     * same and some part keeps its geometry: then a part that only moved (another matrix) is followed by the denoiser and a
+     * part that changed in any other way loses its history, so a moving object does not leave a trail.
+     */
     async update({ parts, environment }) {
-      if (parts) await loadScene(parts, environment ?? {});
+      if (!parts) return;
+      const sameScene = currentParts?.length === parts.length && (environment === undefined || environment === currentEnvironment);
+      const motion = sameScene ? partMotionTable(currentParts, parts) : null;
+      const followsSomePart = motion !== null && parts.some((part, index) => motion[index * PART_MOTION_FLOATS + 12] !== PART_MOTION_CHANGED);
+      await loadScene(parts, environment ?? currentEnvironment ?? {}, followsSomePart ? (followPartMotion ? motion : partMotionTable(parts, parts)) : null);
     },
 
     /** Forgets the denoiser's history (the cache stays: it only depends on the scene). */
@@ -182,7 +221,7 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
       disposed = true;
       cache.dispose();
       denoiser.dispose();
-      for (const buffer of [...traced, recordBuffer, parameterBuffer, ...kernel.uploaded.buffers]) buffer.destroy();
+      for (const buffer of [...traced, recordBuffer, parameterBuffer, motionBuffer, ...kernel.uploaded.buffers]) buffer.destroy();
       context.unconfigure();
     },
   };

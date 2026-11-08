@@ -1,6 +1,6 @@
 // The real-time path tracer (issue #624): frame time with an orbiting camera, the resting frame after one second, a camera move.
 //   [GPU_LOCK="bash <path to gpu-lock.sh>"] ${GPU_LOCK} node bench/realtime-tracer/run.mjs <output directory> <scene id or recipe.json>,...
-//     [--mode time|rest|move|all] [--frames 200] [--width 1920] [--height 1080] [--bounces 2] [--repetitions 3] [--backend gpu|webgpu]
+//     [--mode time|rest|move|ghost|all] [--output-history] [--rest-seconds 1 | --rest-frames 60] [--frames 200] [--width 1920] [--height 1080] [--bounces 2] [--repetitions 3] [--backend gpu|webgpu]
 // (use one output directory per backend: the picture files carry no backend name)
 // Files: <scene>@realtime-rest.png, <scene>@move-<n>.png and timings.json. bench/realtime-tracer/score.py scores the
 // resting frames against Cycles, and bench/realtime-tracer/sheet.py puts a camera move on one contact sheet.
@@ -18,7 +18,9 @@ const valueAfter = (flag, fallback) => (argumentsGiven.includes(flag) ? argument
 const mode = valueAfter('--mode', 'all');
 const frames = Number(valueAfter('--frames', 200));
 const repetitions = Number(valueAfter('--repetitions', 3));
-const options = { width: Number(valueAfter('--width', 1920)), height: Number(valueAfter('--height', 1080)), bounces: Number(valueAfter('--bounces', 2)), resolutionDivisor: Number(valueAfter('--divisor', 2)), backend: valueAfter('--backend', 'gpu') };
+const options = { width: Number(valueAfter('--width', 1920)), height: Number(valueAfter('--height', 1080)), bounces: Number(valueAfter('--bounces', 2)), resolutionDivisor: Number(valueAfter('--divisor', 2)), backend: valueAfter('--backend', 'gpu'), accumulateAtOutputSize: argumentsGiven.includes('--output-history'), filterIterations: valueAfter('--iterations', undefined) === undefined ? undefined : Number(valueAfter('--iterations', undefined)) };
+const restSeconds = Number(valueAfter('--rest-seconds', 1));
+const restFrames = Number(valueAfter('--rest-frames', 0));
 const recipeName = id => id.replace(/^.*[\/]/, '').replace(/\.recipe\.json$|\.json$/, '');
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
@@ -50,7 +52,7 @@ try {
       }
     }
     if (mode === 'rest' || mode === 'all') {
-      const rest = await page.evaluate(([scene, tracerOptions]) => window.renderRestingFrame(scene, tracerOptions, 1), [source, options]);
+      const rest = await page.evaluate(([scene, tracerOptions, seconds, frameLimit]) => window.renderRestingFrame(scene, tracerOptions, seconds, frameLimit), [source, options, restSeconds, restFrames]);
       await writeFile(`${outputDirectory}/${name}@realtime-rest.png`, Buffer.from(rest.image, 'base64'));
       timings[`${name}:rest-frame`] = { frames: rest.frames, seconds: Number(rest.elapsedSeconds.toFixed(2)) };
       console.log(name, 'resting frame', JSON.stringify(timings[`${name}:rest-frame`]));
@@ -59,6 +61,12 @@ try {
       const images = await page.evaluate(([scene, tracerOptions]) => window.renderCameraMove(scene, tracerOptions), [source, options]);
       for (const [index, image] of images.entries()) await writeFile(`${outputDirectory}/${name}@move-${index + 1}.png`, Buffer.from(image, 'base64'));
       console.log(name, 'camera move', images.length, 'frames');
+    }
+    if (mode === 'ghost' || mode === 'all') {
+      const ghost = await page.evaluate(([scene, tracerOptions]) => window.measureMovingPart(scene, tracerOptions), [source, options]);
+      for (const label of ['reference', 'follow', 'ignore']) await writeFile(`${outputDirectory}/${name}@ghost-${label}.png`, Buffer.from(ghost[label].image, 'base64'));
+      timings[`${name}:ghost`] = { trailPixels: ghost.trail, followed: { trailError: ghost.follow.trailError, frameError: ghost.follow.frameError }, ignored: { trailError: ghost.ignore.trailError, frameError: ghost.ignore.frameError } };
+      console.log(name, 'moving part', JSON.stringify(timings[`${name}:ghost`]));
     }
   }
 } finally {

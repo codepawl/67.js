@@ -2,7 +2,47 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createCamera } from '../src/path-tracer.js';
-import { bilinearTaps, isHistoryConsistent, motionVector, pixelRayDirection, projectToPixel } from '../src/path-tracer-reprojection.js';
+import {
+  PART_MOTION_CHANGED, PART_MOTION_FLOATS, PART_MOTION_RIGID, PART_MOTION_STATIC, bilinearTaps, invertAffine, isHistoryConsistent, motionVector,
+  partMotionTable, pixelRayDirection, previousPointOfPart, projectToPixel,
+} from '../src/path-tracer-reprojection.js';
+
+function transformPoint(matrix, point) {
+  return [0, 1, 2].map(axis => matrix[axis] * point[0] + matrix[4 + axis] * point[1] + matrix[8 + axis] * point[2] + matrix[12 + axis]);
+}
+
+test('a part that slid is followed, a part that changed shape is not', () => {
+  const geometry = { positions: new Float32Array(9) };
+  const slid = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 1];
+  const before = [{ geometry }, { geometry }, { geometry }];
+  const after = [{ geometry }, { geometry, matrix: slid }, { geometry: { positions: new Float32Array(9) } }];
+  const table = partMotionTable(before, after);
+  assert.equal(table.length, 3 * PART_MOTION_FLOATS);
+  assert.equal(table[12], PART_MOTION_STATIC);
+  assert.equal(table[PART_MOTION_FLOATS + 12], PART_MOTION_RIGID);
+  assert.equal(table[2 * PART_MOTION_FLOATS + 12], PART_MOTION_CHANGED);
+  assert.deepEqual(previousPointOfPart(table, 0, [1, 2, 3]), [1, 2, 3]);
+  assert.deepEqual(previousPointOfPart(table, 1, [3, 0, 0]), [1, 0, 0], 'a point on the part was 2 units back');
+  assert.equal(previousPointOfPart(table, 2, [0, 0, 0]), null);
+});
+
+test('a part that turned and moved maps its points back through the previous matrix', () => {
+  const geometry = { positions: new Float32Array(9) };
+  const quarterTurn = [0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1];
+  const turnedFurther = [0.6, 0, -0.8, 0, 0, 1, 0, 0, 0.8, 0, 0.6, 0, 5, 0, 2, 1];
+  const table = partMotionTable([{ geometry, matrix: quarterTurn }], [{ geometry, matrix: turnedFurther }]);
+  const surfacePoint = [1, 2, 3];
+  const found = previousPointOfPart(table, 0, transformPoint(turnedFurther, surfacePoint));
+  transformPoint(quarterTurn, surfacePoint).forEach((expected, axis) => assert.ok(Math.abs(found[axis] - expected) < 1e-5, `axis ${axis}`));
+});
+
+test('invertAffine undoes a matrix and refuses a singular one', () => {
+  const matrix = [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 1, 2, 3, 1];
+  const inverse = invertAffine(matrix);
+  const point = [5, 6, 7];
+  transformPoint(inverse, transformPoint(matrix, point)).forEach((value, axis) => assert.ok(Math.abs(value - point[axis]) < 1e-9));
+  assert.equal(invertAffine([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), null);
+});
 
 const WIDTH = 480;
 const HEIGHT = 270;

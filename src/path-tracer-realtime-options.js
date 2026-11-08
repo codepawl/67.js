@@ -5,6 +5,8 @@ import { normalizePathTracerOptions } from './path-tracer.js';
 export const REALTIME_BACKENDS = ['gpu', 'webgpu'];
 const DEFAULT_BOUNCES = 2;
 const DEFAULT_RESOLUTION_DIVISOR = 2;
+// The WebGPU backend keeps its temporal history at the output size (path-tracer-realtime-webgpu-fullres.js) instead of the traced size.
+const DEFAULT_ACCUMULATE_AT_OUTPUT_SIZE = false;
 const CACHE_CELLS_ACROSS_SCENE = 200;
 const CACHE_LEVEL_CELLS = 64;
 const SCENE_EXTENT_SCALE = 1e4;
@@ -26,6 +28,8 @@ export function resolveRealtimeOptions(rawOptions) {
   return {
     backend, outputWidth, outputHeight, traceWidth, traceHeight, options,
     historyLimit: rawOptions.historyLimit, filterIterations: rawOptions.filterIterations, cacheCellSize: rawOptions.cacheCellSize,
+    accumulateAtOutputSize: rawOptions.accumulateAtOutputSize ?? DEFAULT_ACCUMULATE_AT_OUTPUT_SIZE,
+    followPartMotion: rawOptions.followPartMotion ?? true,
   };
 }
 
