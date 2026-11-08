@@ -104,6 +104,7 @@
     "./addons/world-material-shader": "./build/world-material-shader.js",
     "./addons/splat-shader": "./build/splat-shader.js",
     "./addons/subsurface-shader": "./build/subsurface-shader.js",
+    "./addons/fog-shader": "./build/fog-shader.js",
     "./addons/light-linking": "./build/light-linking.js",
     "./addons/cascaded-shadows": "./build/cascaded-shadows.js",
     "./addons/compact-color": "./build/compact-color.js",

@@ -11,6 +11,7 @@ try {
   await page.goto('http://127.0.0.1:5173/volume-smoke.html');
   const report = await page.evaluate(async () => {
     const { Renderer67, box } = await import('/build/67.module.js');
+    await import('/build/fog-shader.js');
     const canvas = document.querySelector('canvas');
     const part = { geometry: box(), matrix: new Float32Array([4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 1]), material: { tag: 'unlit', color: [0.5, 0.5, 0.5], metallic: 0, roughness: 1, emission: 0 } };
     const renderer = new Renderer67(canvas, [part], { hdr: true, depth: true, samples: 4, pixelRatio: 1, ground: false });

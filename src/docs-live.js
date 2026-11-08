@@ -54,6 +54,7 @@ const addonLoaders = import.meta.glob([
   './world-material-shader.js',
   './splat-shader.js',
   './subsurface-shader.js',
+  './fog-shader.js',
   './light-linking.js',
   './cascaded-shadows.js',
   './compact-color.js',

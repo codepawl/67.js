@@ -1,7 +1,7 @@
 import { materialTags } from './shader-registry.js';
 import { mat4, mat3 } from 'gl-matrix';
 import { SPLAT_UNITS, requireSplatSupport, layerTextureSupport, LIGHT_SHADING_FEATURE, SHADING_MODES, LIGHT_SHADING_MAXIMUM_SAMPLES, createVertexShader, vertexShader, liquidFragmentSource, createFragmentShader, liquidPassDrawer, depthFragmentShader, withDepthCode, benchmarkVertexShader, benchmarkFragmentShader, viewTransformShader, createDepthVertexShader } from './shaders.js';
-import { postFragment, createPostFragment, POST_STEPS, skyFragment, bloomFragment } from './post.js';
+import { postFragment, createPostFragment, POST_STEPS, POST_STEPS_WITH_OPTIONAL_CODE, skyFragment, bloomFragment } from './post.js';
 import { fullscreenVertex, startProgram, finishProgram, compileProgram } from './gl-program.js';
 import { ambientOcclusionFragment } from './ambient-occlusion.js';
 import { planRenderSize, estimateTextureBytes, estimateFrameBytes, memoryBudgetError } from './budget.js';
@@ -12,15 +12,14 @@ import { depthLayerOf } from './depth-layer.js';
 import { createLightingState, updateLightingState } from './lighting.js';
 import { RenderTargetLedger } from './render-target-ledger.js';
 import { SHADOW_ATLAS_WIDTH, SHADOW_TILE_SIZE, SHADOW_TILES_PER_ROW, tileViewport, writeShadowTile } from './local-shadows.js';
-import { resolveVolumeFog, volumeShadowAmbient, validateFogField, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD } from './volumetric.js';
-import { FogFieldTexture, createFogLightBuffers, packFogLights } from './fog-field.js';
+import { resolveVolumeFog, validateFogField } from './volumetric.js';
 import { requireEnvironmentSupport } from './environment-shading.js';
 import { materialLayerState, materialLayerValue } from './material-layers.js';
 import { MaterialSnapshot } from './material-snapshot.js';
 import { fittedFogDensity } from './fog-fit.js';
 import { InstanceSelection, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from './render-culling.js';
 import { resolveShadowLight, shadowBiasPerSlope } from './shadow-light.js';
-import { deformationSupport, requireDeformationSupport, texturedReplaceSupport, textureUpdateSupport } from './shader-registry.js';
+import { requireFeatureCode, deformationSupport, requireDeformationSupport, texturedReplaceSupport, textureUpdateSupport } from './shader-registry.js';
 
 const SHADOW_MAP_SIZE = 2048;
 // Liquid and foam see the resolved opaque scene, so they draw in their own pass after it.
@@ -488,7 +487,8 @@ export class Renderer67 {
     this.fogSkyVisibility = fogSkyVisibility;
     this.fogFieldOverride = null;
     this.fogFieldTexture = null;
-    this.fogLightBuffers = createFogLightBuffers();
+    // fog-shader.js creates the light buffers on the first frame that draws a volume fog.
+    this.fogLightBuffers = null;
     // `createGpuTimer` from adaptive-quality.js is passed in, which keeps the timer code out of scenes that do not time frames.
     this.createGpuTimer = createGpuTimer;
     this.gpuTimer = undefined;
@@ -1740,7 +1740,7 @@ export class Renderer67 {
     if (effects.bloom.strength > 0) steps.push('bloom');
     if (volume.density > 0) steps.push('volume');
     if (volume.density > 0 && volume.field) steps.push('field');
-    if (volume.density > 0 && this.fogLightBuffers.count > 0) steps.push('lights');
+    if (volume.density > 0 && this.fogLightBuffers?.count > 0) steps.push('lights');
     if (fogSky) steps.push('sky');
     if (frame.volumeExplosion) steps.push('explosion');
     const gradesColor = effects.saturation !== 1 || effects.contrast !== 1 || effects.temperature !== 0;
@@ -1761,7 +1761,7 @@ export class Renderer67 {
     }
     if (variant.pending) {
       const parallelCompile = this.context.getExtension('KHR_parallel_shader_compile');
-      const building = parallelCompile && !['sky', 'field', 'lights', 'explosion'].some(step => steps.includes(step)) && !this.context.getProgramParameter(variant.pending.program, parallelCompile.COMPLETION_STATUS_KHR);
+      const building = parallelCompile && !POST_STEPS_WITH_OPTIONAL_CODE.some(step => steps.includes(step)) && !this.context.getProgramParameter(variant.pending.program, parallelCompile.COMPLETION_STATUS_KHR);
       if (building) return { program: this.postProgram, uniforms: this.postUniforms };
       variant.program = finishProgram(this.context, variant.pending);
       variant.uniforms = postUniformLocations(this.context, variant.program);
@@ -1797,8 +1797,9 @@ export class Renderer67 {
     context.disable(context.CULL_FACE);
     context.bindVertexArray(null);
     const fogSky = this.fogSkyVisibility?.(this.sceneParts, volume, context, environment);
-    if (volume.density > 0) packFogLights(this.lighting, this.fogLightBuffers);
-    else this.fogLightBuffers.count = 0;
+    const fogSupport = volume.density > 0 ? requireFeatureCode('volumeFog').support : null;
+    if (fogSupport) fogSupport.packLights(this);
+    else if (this.fogLightBuffers) this.fogLightBuffers.count = 0;
     const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky));
     context.useProgram(post.program);
     if (this.look) viewTransformShader.bindLook(this, post.program);
@@ -1817,29 +1818,7 @@ export class Renderer67 {
     context.activeTexture(context.TEXTURE1);
     context.bindTexture(context.TEXTURE_2D, this.depthTexture ?? this.whiteTexture);
     context.uniform1i(post.uniforms.sceneDepth, 1);
-    context.activeTexture(context.TEXTURE3);
-    context.bindTexture(context.TEXTURE_2D, this.shadowTexture);
-    context.uniform1i(post.uniforms.volumeShadowMap, 3);
-    context.uniformMatrix4fv(post.uniforms.volumeLightProjection, false, this.lightProjection);
-    context.uniform3fv(post.uniforms.volumeLightDirection, environment.lightDirection);
-    context.uniform3fv(post.uniforms.volumeLightColor, this.lighting.keyColor);
-    context.uniform1f(post.uniforms.volumeDensity, volume.density);
-    context.uniform3fv(post.uniforms.volumeMinimum, volume.minimum);
-    context.uniform3fv(post.uniforms.volumeMaximum, volume.maximum);
-    context.uniform3fv(post.uniforms.volumeColor, volume.color);
-    context.uniform3fv(post.uniforms.volumeAmbient, volume.ambient);
-    context.uniform3fv(post.uniforms.volumeDrift, volume.drift);
-    context.uniform1i(post.uniforms.volumeSteps, volume.steps);
-    context.uniform1f(post.uniforms.volumeAnisotropy, volume.anisotropy);
-    context.uniform1f(post.uniforms.volumeShadowAmbient, volumeShadowAmbient(volume, this.sceneParts, this.skyOpenness));
-    context.uniform1f(post.uniforms.volumeNoiseAmount, volume.noiseAmount);
-    context.uniform1f(post.uniforms.volumeNoiseScale, volume.noiseScale);
-    context.uniform1f(post.uniforms.volumeMaxDistance, volume.maxDistance);
-    context.uniform1f(post.uniforms.volumeHeightFalloff, volume.heightFalloff);
-    this.bindFogExtras(post, volume);
-    context.uniform1f(post.uniforms.orthographic, frame.projection === 'orthographic' ? 1 : 0);
-    context.uniform1i(post.uniforms.fogSkyVisibility, 5);
-    context.uniform1f(post.uniforms.volumeGridFog, this.sceneParts.some(part => part.material?.irradianceGrid) ? 1 : 0);
+    fogSupport?.bindUniforms(this, post, volume, environment, frame);
     context.activeTexture(context.TEXTURE2);
     context.bindTexture(context.TEXTURE_2D, effects.bloom.strength > 0 ? this.bloomTargets[1].texture : this.whiteTexture);
     context.uniform1i(post.uniforms.bloomTexture, 2);
@@ -1864,27 +1843,6 @@ export class Renderer67 {
     context.uniformMatrix4fv(post.uniforms.inverseViewProjection, false, this.inverseViewProjection);
     context.uniform3fv(post.uniforms.eye, frame.eye);
     context.drawArrays(context.TRIANGLES, 0, 3);
-  }
-
-  // The fog's field texture and light buffers; a program without those steps has no such uniforms, and a null location is ignored.
-  bindFogExtras(post, volume) {
-    const context = this.context;
-    if (volume.density > 0 && volume.field) {
-      this.fogFieldTexture ??= new FogFieldTexture(context);
-      context.activeTexture(context.TEXTURE6);
-      this.fogFieldTexture.upload(volume.field);
-      context.uniform1i(post.uniforms.volumeField, 6);
-      context.uniform1f(post.uniforms.volumeProfile, volume.profile === 'smoothstep' ? 1 : 0);
-      context.uniform1f(post.uniforms.volumeFlowStrength, volume.flowStrength ?? DEFAULT_FLOW_STRENGTH);
-      context.uniform1f(post.uniforms.volumeFlowPeriod, volume.flowPeriod ?? DEFAULT_FLOW_PERIOD);
-    }
-    const lights = this.fogLightBuffers;
-    context.uniform1i(post.uniforms.volumeLightCount, lights.count);
-    if (lights.count === 0) return;
-    context.uniform4fv(post.uniforms['volumeLightPositions[0]'], lights.positions);
-    context.uniform4fv(post.uniforms['volumeLightColors[0]'], lights.colors);
-    context.uniform4fv(post.uniforms['volumeLightDirections[0]'], lights.directions);
-    context.uniform4fv(post.uniforms['volumeLightCones[0]'], lights.cones);
   }
 
   drawTranslucent(frame, environment, assemblyAmount, environmentMap) {
@@ -2155,6 +2113,7 @@ export class Renderer67 {
     const volume = resolveVolumeFog(environment.volumeFog);
     if (this.fogFieldOverride) volume.field = this.fogFieldOverride;
     if (volume.density > 0) {
+      requireFeatureCode('volumeFog');
       if (!this.depth || !this.hdr || this.transparent || this.benchmark) throw new Error('Volume fog requires depth:true, active HDR and an opaque canvas');
       if (!Number.isFinite(frame.time ?? 0) || Math.abs(frame.time ?? 0) > 1e6) throw new RangeError('Volume time must be finite and within ±1000000 seconds');
       const direction = environment.lightDirection;
