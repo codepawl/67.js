@@ -1,0 +1,2 @@
+- scene:agent-scene+lazy: particle collision, bounce, friction, spin, and color and alpha over life load only with the particles module (about 2.1 KB gzip: the triangle path test, the contact response, the per-particle step cache, the new validators); a scene without particles never loads it.
+- goal:agent-scene: 29 bytes gzip for the one-line collision entry in scene_capabilities, which an agent needs to find the new fields; no tool schema grows because the particles section is already an open record.
