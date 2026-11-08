@@ -1,2 +1,1 @@
-- scene:agent-scene: three graph outputs and three mixing nodes add about 2 KB source to the already loaded graph baker, and the clearcoat texture now reads through the box projection.
-- goal:capable: the path tracer reads two more textures per hit; the graph language gains what paint-over-rust needs.
+- scene:agent-scene+lazy: the material graph gains opacity, clearcoat and transmission outputs and the layer, hue and curve nodes (about 1.3 KB gzip in the lazily loaded graph baker), so an agent can paint over rust or fade a part in one recipe.
