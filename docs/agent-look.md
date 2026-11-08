@@ -226,6 +226,7 @@ These controls reuse `resolveVolumeFog` and its existing domain rules.
 | `noiseScale` | `0.3` | `0.001` to `100` |
 | `maxDistance` | `100` | `0.01` to `10000` |
 | `shadowAmbient` | derived from the scene: 0.15 in a closed room, 1 under open sky | `0` to `1` |
+| `scatterOctaves`, `multiScatter`, `multiExtinction`, `multiAnisotropy`, `keyTransmittance`, `surfaceTransmittance` | `1`, `0.5`, `0.5`, `0.5`, `0`, `0` | Integer `1` to `4`, then `0` to `1` each; off by default, see [volume fog](https://67js.codepawl.com/volumetric.md) |
 | `detailOctaves`, `detailAmount`, `warp`, `contrast`, `profileSoftness`, `keyScattering` | `1`, `0.5`, `0`, `1`, `0.5`, `1` | Integer `1` to `3`, `0` to `1`, `0` to `4`, `0` to `4`, `0` to `0.95`, `0` to `10`; see [volume fog](https://67js.codepawl.com/volumetric.md) |
 
 Fog bounds reject dimensions that collapse after Float32 rounding.

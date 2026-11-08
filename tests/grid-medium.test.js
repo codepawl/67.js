@@ -37,8 +37,10 @@ test('a leg scatters with the probability a photon would and the path goes on fr
     assert.ok(leg.origin[0] > 0 && leg.origin[0] < distance, 'the point lies inside the leg');
     assert.ok(Math.abs(Math.hypot(...leg.direction) - 1) < 1e-9, 'the new direction is a unit vector');
     FOG_BOX.color.forEach((albedo, channel) => assert.ok(Math.abs(leg.throughput[channel] - albedo) < 1e-12));
-    // Isotropic phase is 1 / (4 pi), so the sun adds throughput times albedo times its colour over 4 pi.
-    FOG_BOX.color.forEach((albedo, channel) => assert.ok(Math.abs(leg.sum[channel] - albedo * 2 / (4 * Math.PI)) < 1e-12));
+    // Isotropic phase is 1 / (4 pi), so the sun adds throughput times albedo times its colour over 4 pi,
+    // dimmed by the fog between the point and the sun (the sun is straight up, the box ends at y = 10).
+    const sunReaching = Math.exp(-FOG_BOX.density * (10 - leg.origin[1]));
+    FOG_BOX.color.forEach((albedo, channel) => assert.ok(Math.abs(leg.sum[channel] - albedo * 2 * sunReaching / (4 * Math.PI)) < 1e-12));
   }
   const expectedShare = 1 - Math.exp(-0.5 * distance);
   assert.ok(Math.abs(scatterCount / trials - expectedShare) < 0.03, `${scatterCount / trials} against ${expectedShare}`);
