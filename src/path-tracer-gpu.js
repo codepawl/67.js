@@ -1,5 +1,5 @@
 import { buildFragmentSource, VERTEX_SOURCE } from './path-tracer-gpu-shader.js';
-import { packAtlas, packEnvironment, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 
 // The GPU backend of the path tracer: one WebGL2 fragment pass per sample draws every pixel of a band, and four float
 // targets add the samples up. It needs a page with WebGL2 (a canvas), EXT_color_buffer_float and EXT_float_blend. The
@@ -80,6 +80,7 @@ export function uploadScene(gl, program, scene, options = {}) {
   const materials = packMaterials(scene.materials, atlas);
   const floatTables = [['uNodes', nodes], ['uTriangles', triangles], ['uMaterials', materials], ['uLights', lights.table]];
   if (sceneUsesSubsurface(scene.materials)) floatTables.push(['uSubsurface', packSubsurface(scene.materials)]);
+  if (options.lightSelection === 'tree') floatTables.push(['uLightTree', packLightTree(scene.lights)]);
   let unit = 0;
   const bind = (name) => gl.uniform1i(gl.getUniformLocation(program, name), unit++);
   for (const [name, table] of floatTables) {
@@ -217,11 +218,12 @@ export function getKernel(hasSubsurface, texelBake = false, options = {}) {
   const { gl, programs } = getContext();
   const blueNoise = options.samplingPattern === 'blue-noise-first';
   const lightImportance = options.lightSelection === 'importance';
+  const lightTree = options.lightSelection === 'tree';
   const radianceCache = options.radianceCache === true;
-  const key = `${hasSubsurface}:${texelBake}:${blueNoise}:${lightImportance}:${radianceCache}`;
+  const key = `${hasSubsurface}:${texelBake}:${blueNoise}:${lightImportance}:${radianceCache}:${lightTree}`;
   if (!programs.has(key)) {
     const started = performance.now();
-    const program = createProgram(gl, { hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache });
+    const program = createProgram(gl, { hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache, lightTree });
     gl.getProgramParameter(program, gl.LINK_STATUS);
     programs.set(key, { program, compileSeconds: (performance.now() - started) / 1000 });
     if (!texelBake) kernelCompileCount++;
