@@ -1,6 +1,7 @@
 // The real-time path tracer (issue #624): frame time with an orbiting camera, the resting frame after one second, a camera move.
 //   [GPU_LOCK="bash <path to gpu-lock.sh>"] ${GPU_LOCK} node bench/realtime-tracer/run.mjs <output directory> <scene id or recipe.json>,...
-//     [--mode time|rest|move|all] [--frames 200] [--width 1920] [--height 1080] [--bounces 2] [--repetitions 3]
+//     [--mode time|rest|move|all] [--frames 200] [--width 1920] [--height 1080] [--bounces 2] [--repetitions 3] [--backend gpu|webgpu]
+// (use one output directory per backend: the picture files carry no backend name)
 // Files: <scene>@realtime-rest.png, <scene>@move-<n>.png and timings.json. bench/realtime-tracer/score.py scores the
 // resting frames against Cycles, and bench/realtime-tracer/sheet.py puts a camera move on one contact sheet.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -17,7 +18,7 @@ const valueAfter = (flag, fallback) => (argumentsGiven.includes(flag) ? argument
 const mode = valueAfter('--mode', 'all');
 const frames = Number(valueAfter('--frames', 200));
 const repetitions = Number(valueAfter('--repetitions', 3));
-const options = { width: Number(valueAfter('--width', 1920)), height: Number(valueAfter('--height', 1080)), bounces: Number(valueAfter('--bounces', 2)), resolutionDivisor: Number(valueAfter('--divisor', 2)) };
+const options = { width: Number(valueAfter('--width', 1920)), height: Number(valueAfter('--height', 1080)), bounces: Number(valueAfter('--bounces', 2)), resolutionDivisor: Number(valueAfter('--divisor', 2)), backend: valueAfter('--backend', 'gpu') };
 const recipeName = id => id.replace(/^.*[\/]/, '').replace(/\.recipe\.json$|\.json$/, '');
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
@@ -25,7 +26,7 @@ await mkdir(outputDirectory, { recursive: true });
 const server = await createServer({ server: { host: '127.0.0.1', port: 0, fs: { strict: false } }, logLevel: 'silent' });
 await server.listen();
 const serverUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
-const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--enable-webgl', '--ignore-gpu-blocklist', '--disable-renderer-backgrounding'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--enable-webgl', '--ignore-gpu-blocklist', '--disable-renderer-backgrounding', '--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU', '--use-angle=d3d11'] });
 const timings = {};
 try {
   const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
@@ -44,7 +45,7 @@ try {
         const label = degreesPerFrame ? 'orbit' : 'rest';
         const runs = [];
         for (let repetition = 0; repetition < repetitions; repetition++) runs.push(await page.evaluate(([scene, tracerOptions, count, step]) => window.measureRealtimeFrames(scene, tracerOptions, count, step), [source, options, frames, degreesPerFrame]));
-        timings[`${name}:${label}`] = { medians: runs.map(run => Number(run.medianMilliseconds.toFixed(2))), compileSeconds: runs.map(run => Number(run.compileSeconds.toFixed(2))), gpu: runs[0].gpu };
+        timings[`${name}:${label}`] = { medians: runs.map(run => Number(run.medianMilliseconds.toFixed(2))), compileSeconds: runs.map(run => Number(run.compileSeconds.toFixed(2))), gpu: runs[0].gpu, backend: runs[0].backend, fallbackReason: runs[0].fallbackReason };
         console.log(name, label, JSON.stringify(timings[`${name}:${label}`]));
       }
     }
