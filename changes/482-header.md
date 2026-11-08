@@ -1,1 +1,0 @@
-- Show the changelog page title once (issue #482): the small "Changelog" link above the Versions picker is gone, and the page keeps its heading. Below 480 px the site header's GitHub button shows only its mark, with an `aria-label`, so the header stays on one row on a phone on every page that shares it.

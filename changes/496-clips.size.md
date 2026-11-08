@@ -1,3 +1,0 @@
-- scene:gltf-box: a node that a clip scales to zero draws a speck at that pose instead of refusing the file, 268 bytes; this is the keyed-clip half of the #496 loader fixes.
-- scene:gltf-box+lazy: the same loader change, 268 bytes.
-- goal:gltf-box: the 96 bytes over the goal buy loading Objaverse and Sketchfab models with zero-scale animated nodes.

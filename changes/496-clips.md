@@ -1,1 +1,0 @@
-- `loadGltf` and `parseGltf` keep a node that a clip scales to zero (issue #496): it draws a speck while its scale is zero and a node that starts at zero scale shows again when a clip scales it up, instead of throwing at that pose.

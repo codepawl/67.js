@@ -1,1 +1,0 @@
-- Restyle the site, showcase and docs with the CodePawl Afterimage theme (always dark, glass header, scene-coloured glow, grain, pointer light), show a loading chip with real download progress when a showcase scene opens, and add pan, pinch, keyboard movement and Reset view to the showcase.

@@ -1,4 +1,0 @@
-- entry:gltf: +298 bytes gzip (51077 to 51375) for the per-target morph normal computation, the non-finite zeroing helper and the inverse bind matrix repair
-- scene:gltf-box: +283 bytes gzip (80251 to 80534)
-- goal:gltf-box: already over its 80000 goal before this change; +283 bytes pays for lighting that follows a morph on files without a base NORMAL and for loading files with NaN vertices or inverse bind matrices instead of refusing them, a real capability for downloaded models (#496), not a score gain.
-- scene:gltf-box+lazy: +285 bytes gzip, the same loader change as gltf-box (morph normals from morphed positions, NaN repairs).

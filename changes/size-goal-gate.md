@@ -1,1 +1,0 @@
-- `npm run size` fails a pull request that takes `scene:lit-box`, `scene:gltf-box` or `scene:agent-scene` over its goal when the base branch met it. Only a `- goal:<scene>:` line, approved by An, accepts that.

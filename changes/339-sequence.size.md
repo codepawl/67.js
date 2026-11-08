@@ -1,6 +1,0 @@
-- tool-total: one new material field, map.sequence, in the shared material schema that scene_create, scene_apply (set-material and add-material) and scene_create_asset repeat; the prose lives in scene_capabilities and docs.
-- tool:scene_create: material.map.sequence { frames, fps, loop }, about 480 bytes of schema.
-- tool:scene_apply: the same field in set-material and add-material.
-- tool:scene_create_asset: the same field in the shared material schema.
-- result:scene_capabilities: textureSequence documents the field, its frame rule, covered maps, image formats and limits for agents.
-- scene:agent-scene+lazy: the sequence code (frame selection, validation, descriptor runtime) in the lazy assets module, and the path query that moved to the lazy navigation module.

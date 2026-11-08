@@ -1,1 +1,0 @@
-- Keep the package version in `src/version.js` instead of importing `package.json`, so the core bundle no longer carries the whole manifest. `entry:core` drops from 87,557 to 85,749 bytes gzip.

@@ -1,6 +1,6 @@
 {
   "name": "@codepawlhq/67js",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": false,
   "type": "module",
   "description": "A WebGL2 3D engine that AI agents drive: an MCP server, PNG previews and CPU or GPU export to images and video",

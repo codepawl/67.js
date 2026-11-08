@@ -1,1 +1,0 @@
-- entry:vegetation: the faster impostor bake loop and its reusable bleed buffer, about 129 bytes gzip against the baseline; entry:core, scene:lit-box and scene:agent-scene grow 0 B

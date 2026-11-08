@@ -1,3 +1,0 @@
-- scene:gltf-box: quantized int8 and int16 morph targets and zero-scale skin joints load instead of refusing the file, 129 bytes; 2 of 30 sampled Objaverse models were still refused for these.
-- scene:gltf-box+lazy: the same loader change, 129 bytes.
-- goal:gltf-box: the 215 bytes over the goal buy loading the last two refused Objaverse sample models.

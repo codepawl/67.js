@@ -1,8 +1,0 @@
-- entry:core: +114 B so a renderer with no memoryBudgetMiB sizes its budget to the scene (bounded at 512 or 1024 MiB) and budget errors name the bytes and the memoryBudgetMiB that fits. The 234 MB warehouse and 244 MB paint studio exports now draw with default options; before, both threw.
-- scene:lit-box: the same core code, +111 B.
-- scene:agent-scene: the same core code, +118 B.
-- scene:agent-scene+lazy: the same core code, +120 B.
-- scene:gltf-box: core code plus color-first texture scaling and a three-name scaling warning, +212 B.
-- scene:gltf-box+lazy: the same as gltf-box, +212 B.
-- goal:lit-box: lead approved: the default budget sized to the scene lets 234-244 MB exports draw with no options, a functional gain over a fixed 256 MiB failure.
-- goal:agent-scene: same reason, lead approved.

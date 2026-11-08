@@ -1,1 +1,0 @@
-- The build-67js-scene skill tells agents to file a 67js bug at once on codepawl/67.js, with the steps, the scene and a still.

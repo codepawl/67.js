@@ -1,1 +1,0 @@
-- Colour the code on the site: the home page example, the MCP command and the install command now use the same syntax colours as the docs, and shell commands colour the program, subcommand, flags, numbers and package specifiers.

@@ -1,1 +1,0 @@
-- Link [viz3d](https://github.com/codepawl/viz3d) from the README, a skill that renders its films and stills in 67js.

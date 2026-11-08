@@ -1,20 +1,20 @@
 {
-  "schemaTotalBytes": 192690,
+  "schemaTotalBytes": 194070,
   "schemaToolBytes": {
-    "scene_create": 63800,
-    "scene_apply": 45750,
-    "mesh_edit": 33980,
-    "scene_create_asset": 19770,
+    "scene_create": 69360,
+    "scene_apply": 44460,
+    "mesh_edit": 34430,
+    "scene_create_asset": 14370,
     "mesh_stack": 11030
   },
   "schemaOtherToolBytes": 4000,
   "resultBytes": {
-    "scene_capabilities": 17880,
-    "scene_create": 1400,
-    "scene_inspect": 1400,
-    "mesh_inspect": 1200,
-    "mesh_edit": 2400,
-    "scene_apply": 200,
-    "scene_export_recipe": 2800
+    "scene_capabilities": 24660,
+    "scene_create": 1200,
+    "scene_inspect": 1150,
+    "mesh_inspect": 940,
+    "mesh_edit": 2050,
+    "scene_apply": 100,
+    "scene_export_recipe": 2720
   }
 }

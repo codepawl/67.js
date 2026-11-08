@@ -1,2 +1,0 @@
-- entry:water-reflection: grew 100 bytes gzip (13057 to 13157) for the typed-array comparison; a still frame of the container port at 1080p on an RTX 3060 goes from 112-187 ms to 0.6-1.7 ms
-- entry:core, scene:lit-box and scene:agent-scene: unchanged to the byte

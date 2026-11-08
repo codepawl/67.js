@@ -1,1 +1,0 @@
-- Turn the three showcase scenes into worlds you can explore: the container port with a fully stacked ship, yard, quay and gate, the airport with piers, runway and tower, and the data center campus with halls, cooling, substation, gate and parking. Each scene sets camera bounds for the free camera.

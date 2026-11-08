@@ -1,3 +1,0 @@
-- entry:terrain: +100 bytes gzip (9787 to 9887) for the lazy build hook that builds the mirror meshes when the scene gets water. The lead approved the lazy build; only code that already lives in the terrain module grew.
-- scene:agent-scene+lazy: +90 bytes gzip (359904 to 359994), because the lazy bundle of this scene contains the terrain module. scene:agent-scene itself is -3, entry:core, scene:lit-box and scene:gltf-box are 0.
-- entry:water-reflection: +18 bytes gzip (13036 to 13054) for the call that hands the parts to the terrain hook.

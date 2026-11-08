@@ -1,1 +1,0 @@
-- The showcase water mirror redraws every second frame while the camera moves, about 1.3 ms off an orbiting frame of the container port; a still camera looks the same.

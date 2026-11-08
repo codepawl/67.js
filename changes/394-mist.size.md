@@ -1,8 +1,0 @@
-- entry:core: volumeFog heightFalloff (one uniform, one shader line, one validated field) lets a mist thin with height, about 79 B.
-- scene:lit-box: the same change, about 81 B.
-- scene:gltf-box: the same change, about 74 B.
-- scene:gltf-box+lazy: the same change.
-- scene:agent-scene: the same change, about 91 B.
-- scene:agent-scene+lazy: the same change.
-- goal:lit-box: volumeFog heightFalloff is a visible capability; it makes valley mist dense at the floor and thin above, where a uniform box read as a grey block over the forest. Approved by the lead under An's 2026-11-04 rule on size trade-offs.
-- goal:agent-scene: the same change, approved the same way.
