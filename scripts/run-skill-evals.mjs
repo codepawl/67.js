@@ -1,5 +1,5 @@
 // Runs the skill evals through headless `claude -p` with the 67js MCP server, one model at a time.
-// Usage: node skills/evals/run.mjs --model haiku|sonnet|opus [--only <eval name>] [--out <folder>]
+// Usage: node scripts/run-skill-evals.mjs --model haiku|sonnet|opus [--only <eval name>] [--out <folder>]
 // It needs the built server (`npm run build:lib`), Chrome and the claude CLI. Each eval file holds a prompt and checks that
 // read the tool calls and the last recipe the agent exported with scene_export_recipe. Skills are injected as system
 // prompt text (with ${CLAUDE_SKILL_DIR} replaced), because the claude CLI would otherwise also load the user's own copies.
@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const skillsFolder = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const skillsFolder = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
 const repositoryRoot = resolve(skillsFolder, '..');
 const options = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, index, all) => (value.startsWith('--') ? [...pairs, [value.slice(2), all[index + 1]]] : pairs), []));
 const model = options.model ?? 'haiku';
