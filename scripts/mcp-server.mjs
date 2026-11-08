@@ -195,6 +195,7 @@ const volumeFog = z.strictObject({
   keyScattering: bounded(0, 10).optional(),
 });
 const affects = z.array(z.string()).optional();
+const iesProfile = z.any().optional();
 const lines = z.record(z.string(), z.unknown()).describe('Outlines, toon light and polylines as plain JSON; fields and limits in scene_capabilities lineArt. null clears.');
 const environment = z.strictObject({
   world: z.boolean().optional().describe('Draw the sky and apply surface fog.'),
@@ -211,6 +212,7 @@ const environment = z.strictObject({
   daylight: bounded(0, 100).optional(),
   keyAffects: affects.describe('Node IDs lit; default all.'),
   shadowCascades: z.number().int().min(0).max(4).optional().describe('Sun shadow slices; 0 one map.'),
+  sunAngularRadius: z.number().optional(),
   pointLights: z.array(z.strictObject({
     position: boundedVector(-1e6, 1e6),
     color: color.optional(),
@@ -230,6 +232,7 @@ const environment = z.strictObject({
     radius: bounded(0.001, 1e6).optional(),
     range: z.union([z.literal(0), bounded(0.001, 1e6)]).optional(),
     castShadow: z.boolean().optional().describe('Casts a shadow; 1 atlas tile.'),
+    ies: iesProfile,
     affects,
   })).max(MAX_SPOT_LIGHTS).optional().describe('Replaces the list; [] clears.'),
   areaLights: z.array(z.strictObject({
@@ -240,8 +243,10 @@ const environment = z.strictObject({
     height: bounded(0.001, 1e4),
     color: color.optional(),
     intensity: bounded(0, 1e5).optional().describe('Candela head on.'),
+    castShadow: z.boolean().optional(),
+    ies: iesProfile,
     affects,
-  })).max(MAX_AREA_LIGHTS).optional().describe('Replaces the list; [] clears. No shadow.'),
+  })).max(MAX_AREA_LIGHTS).optional().describe('Replaces the list; [] clears.'),
   skyTop: color.optional(),
   skyBottom: color.optional(),
   fogColor: color.optional(),
