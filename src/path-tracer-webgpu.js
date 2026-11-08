@@ -1,10 +1,11 @@
-import { MEGAKERNEL_SOURCE, PATH_STATE_VECTORS, WAVEFRONT_SOURCE, WAVEFRONT_WORKGROUP_SIZE, WORKGROUP_SIZE } from './path-tracer-webgpu-kernel.js';
-import { packAtlas, packEnvironment, packLights, packMaterials, packNodes, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { buildMegakernelSource, PATH_STATE_VECTORS, WAVEFRONT_SOURCE, WAVEFRONT_WORKGROUP_SIZE, WORKGROUP_SIZE } from './path-tracer-webgpu-kernel.js';
+import { packAtlas, packEnvironment, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 
 // The WebGPU backend of the path tracer (issue #625): the same scene tables, camera, options and random numbers as the
 // WebGL2 backend (path-tracer-gpu.js) go in, the same buffers come out. The tracer is WGSL compute, so a page needs
-// navigator.gpu; without it traceOnWebGpu throws and the caller falls back to the "gpu" or "cpu" backend. Fog, subsurface and
-// the texel bake are not ported: a scene that uses fog or subsurface throws an error that names it.
+// navigator.gpu; without it traceOnWebGpu throws and the caller falls back to the "gpu" or "cpu" backend. Volume fog and
+// subsurface scattering compile into the megakernel only for a scene that uses them, and traceTexelsOnWebGpu is the texel
+// entry of the light bake (light-bake-gpu.js). The wavefront kernel traces neither fog nor subsurface.
 
 /** `megakernel`: one invocation per path (the default, faster on the demo room). `wavefront`: generate, extend, shade, shadow kernels with the path state in a buffer. */
 export const WEBGPU_KERNELS = ['megakernel', 'wavefront'];
@@ -12,9 +13,9 @@ export const DEFAULT_WEBGPU_KERNEL = 'megakernel';
 /** Whether the wavefront bins the hits by material before shading them (decided by the measurement in docs/webgpu-decision.md). */
 export const DEFAULT_SORT_BY_MATERIAL = false;
 
-const PARAMETER_BYTES = 14 * 16;
-// Dynamic uniform offsets must be a multiple of minUniformBufferOffsetAlignment, which is 256 on every adapter.
-const PARAMETER_SLOT_BYTES = 256;
+const PARAMETER_BYTES = 17 * 16;
+// Dynamic uniform offsets must be a multiple of minUniformBufferOffsetAlignment, which is 256 on every adapter; a slot holds the parameter block.
+const PARAMETER_SLOT_BYTES = 512;
 const STORAGE_BUFFER_COUNT = 10;
 const MAXIMUM_TILE_PATHS = 1 << 19;
 // The path state of one tile stays under the default maxStorageBufferBindingSize.
@@ -71,22 +72,34 @@ async function getSession() {
   return session;
 }
 
-async function compileKernel(current, kernel) {
+/** The WGSL and entry points of a kernel variant; a variant is one of the two kernels, with the optional parts a scene needs. */
+function describeVariant({ kernel, hasVolume, hasSubsurface, texelBake }) {
+  if (kernel === 'wavefront') return { code: WAVEFRONT_SOURCE, entryPoints: WAVEFRONT_ENTRY_POINTS };
+  return { code: buildMegakernelSource({ hasVolume, hasSubsurface, texelBake }), entryPoints: [texelBake ? 'bakeTexels' : 'main'] };
+}
+
+async function compileKernel(current, variant) {
   const { device, pipelineLayout } = current;
   const started = performance.now();
-  const module = device.createShaderModule({ label: `path tracer ${kernel}`, code: kernel === 'wavefront' ? WAVEFRONT_SOURCE : MEGAKERNEL_SOURCE });
+  const { code, entryPoints } = describeVariant(variant);
+  const module = device.createShaderModule({ label: `path tracer ${variant.kernel}`, code });
   const info = await module.getCompilationInfo();
   const errors = info.messages.filter(message => message.type === 'error');
   if (errors.length > 0) throw new Error(`The WebGPU path tracer shader did not compile: ${errors.slice(0, 8).map(message => `${message.lineNum}: ${message.message}`).join('; ')}`);
-  const entryPoints = kernel === 'wavefront' ? WAVEFRONT_ENTRY_POINTS : ['main'];
   const pipelines = await Promise.all(entryPoints.map(entryPoint => device.createComputePipelineAsync({ layout: pipelineLayout, compute: { module, entryPoint } })));
   kernelCompileCount++;
   return { pipelines: Object.fromEntries(entryPoints.map((entryPoint, index) => [entryPoint, pipelines[index]])), compileSeconds: (performance.now() - started) / 1000 };
 }
 
-async function getKernel(current, kernel) {
-  if (!current.kernels.has(kernel)) current.kernels.set(kernel, compileKernel(current, kernel));
-  return current.kernels.get(kernel);
+async function getKernel(current, variant) {
+  const key = [variant.kernel, variant.hasVolume, variant.hasSubsurface, variant.texelBake].join(':');
+  if (!current.kernels.has(key)) current.kernels.set(key, compileKernel(current, variant));
+  return current.kernels.get(key);
+}
+
+/** The optional parts the scene needs, as the kernel variant flags. */
+function sceneFeatures(scene) {
+  return { hasVolume: Boolean(scene.volume), hasSubsurface: sceneUsesSubsurface(scene.materials), texelBake: false };
 }
 
 function createStorageBuffer(device, data, label) {
@@ -109,24 +122,23 @@ function uploadScene(device, scene) {
     environmentTables.set(environment.rows.data.subarray(0, environment.height), 0);
     environmentTables.set(environment.pixels.data.subarray(0, environment.width * environment.height), environment.height);
   }
+  // The subsurface table (two vectors per material) follows the material table in the same buffer.
+  const materialData = packMaterials(scene.materials, atlas).data;
+  const subsurfaceOffset = materialData.length / 4;
+  const subsurfaceData = sceneUsesSubsurface(scene.materials) ? packSubsurface(scene.materials).data : new Float32Array(0);
+  const materialsWithSubsurface = new Float32Array(materialData.length + subsurfaceData.length);
+  materialsWithSubsurface.set(materialData);
+  materialsWithSubsurface.set(subsurfaceData, materialData.length);
   const buffers = [
     createStorageBuffer(device, packNodes(scene.bvh).data, 'bvh nodes'),
     createStorageBuffer(device, packTriangles(scene).data, 'triangles'),
-    createStorageBuffer(device, packMaterials(scene.materials, atlas).data, 'materials'),
+    createStorageBuffer(device, materialsWithSubsurface, 'materials'),
     createStorageBuffer(device, lights.table.data, 'lights'),
     createStorageBuffer(device, atlasWords(atlas), 'texture atlas'),
     createStorageBuffer(device, environment?.colors ?? new Float32Array(4), 'environment colors'),
     createStorageBuffer(device, environmentTables, 'environment tables'),
   ];
-  return { buffers, lightCount: lights.count, atlasWidth: atlas.width };
-}
-
-/** The scene features this backend does not trace; the caller can fall back to the "gpu" backend. */
-export function unsupportedWebGpuFeatures(scene) {
-  const unsupported = [];
-  if (scene.volume) unsupported.push('volume fog');
-  if (sceneUsesSubsurface(scene.materials)) unsupported.push('subsurface scattering');
-  return unsupported;
+  return { buffers, lightCount: lights.count, atlasWidth: atlas.width, subsurfaceOffset };
 }
 
 /** The words of one uniform block: the 12 vectors of the megakernel parameters, then the tile and shadow slot words. */
@@ -148,7 +160,11 @@ function createParameterTemplate(scene, camera, options, uploaded, emitterCount)
   floats.set([camera.halfWidth, camera.halfHeight, options.fireflyClamp, 0], 32);
   integers.set([options.width, options.height, options.bounces, uploaded.lightCount], 36);
   integers.set([emitterCount, sun ? 1 : 0, environment ? 1 : 0, 0], 40);
-  unsigned.set([options.seed >>> 0, uploaded.atlasWidth, 0, 0], 44);
+  unsigned.set([options.seed >>> 0, uploaded.atlasWidth, uploaded.subsurfaceOffset, 0], 44);
+  const { volume } = scene;
+  floats.set([...(volume?.minimum ?? [0, 0, 0]), volume?.density ?? 0], 56);
+  floats.set([...(volume?.maximum ?? [0, 0, 0]), volume?.anisotropy ?? 0], 60);
+  floats.set([...(volume?.albedo ?? [1, 1, 1]), volume?.maxDistance ?? 0], 64);
   return { unsigned, integers };
 }
 
@@ -156,6 +172,8 @@ const SAMPLE_INDEX_WORD = 43;
 const TILE_WORD = 48;
 const SHADOW_SLOT_WORD = 52;
 const SORT_FLAG_WORD = 53;
+// The texel kernel keeps the sample count in a shadow slot word the megakernel leaves unused.
+const SAMPLE_COUNT_WORD = 54;
 
 /** Fills one 256 byte slot per (tile, depth) of a sample; the kernels find their tile and depth in the slot they are bound to. */
 function writeParameterSlots(template, sampleIndex, tiles, depthCount, materialCount, shadowSlots, sortByMaterial) {
@@ -237,13 +255,15 @@ function encodeWavefrontSample(pass, pipelines, bindGroup, tiles, depthCount, ma
  * samples. `shouldStop` throws when the time limit passes; it runs between samples.
  */
 export async function traceOnWebGpu(scene, camera, options, shouldStop) {
-  const unsupported = unsupportedWebGpuFeatures(scene);
-  if (unsupported.length > 0) throw new Error(`The WebGPU path tracer does not trace ${unsupported.join(' or ')} yet. Use backend "gpu" for this scene.`);
   const kernel = options.kernel ?? DEFAULT_WEBGPU_KERNEL;
   if (!WEBGPU_KERNELS.includes(kernel)) throw new RangeError(`The WebGPU path tracer kernel must be one of ${WEBGPU_KERNELS.join(', ')}.`);
+  const features = sceneFeatures(scene);
+  if (kernel === 'wavefront' && (features.hasVolume || features.hasSubsurface)) {
+    throw new RangeError('The WebGPU wavefront kernel does not trace volume fog or subsurface scattering. Use the megakernel, the default.');
+  }
   const current = await getSession();
   const { device } = current;
-  const { pipelines, compileSeconds } = await getKernel(current, kernel);
+  const { pipelines, compileSeconds } = await getKernel(current, { kernel, ...features });
   const { width, height, samples } = options;
   const pixelCount = width * height;
   const planeBytes = pixelCount * 16;
@@ -298,6 +318,81 @@ export async function traceOnWebGpu(scene, camera, options, shouldStop) {
   readback.destroy();
   for (const buffer of [...uploaded.buffers, accumulation, parameters, stateBuffer, binQueue]) buffer.destroy();
   return Object.assign(buffers, { gpu: current.gpu, compileSeconds });
+}
+
+const TEXEL_GROUPS_PER_ROW = 4096;
+const TEXEL_SAMPLES_PER_WAIT = 16;
+
+function padVectors(vectors, count) {
+  const padded = new Float32Array(Math.max(count, 1) * 4);
+  for (let index = 0; index < count; index++) padded.set(vectors.subarray(index * 3, index * 3 + 3), index * 4);
+  return padded;
+}
+
+/**
+ * The texel entry of the light bake, the WebGPU form of `traceTexelsOnGpu` in path-tracer-gpu.js: traces `options.samples`
+ * cosine weighted paths from every texel in `texels` (`count`, `points` and `normals`, three floats each) and resolves with
+ * the mean `radiance` that arrives (three floats per texel), the share of first rays that `escaped`, the `gpu` name and the
+ * `compileSeconds` of the kernel. `options.bounces` counts hits, as in the CPU bake.
+ */
+export async function traceTexelsOnWebGpu(scene, texels, options, shouldStop) {
+  const current = await getSession();
+  const { device } = current;
+  const { count, points, normals } = texels;
+  const { samples, seed } = options;
+  const features = { ...sceneFeatures(scene), texelBake: true };
+  const { pipelines, compileSeconds } = await getKernel(current, { kernel: 'megakernel', ...features });
+  const accumulationBytes = Math.max(count, 1) * 16 * 2;
+  if (accumulationBytes > device.limits.maxStorageBufferBindingSize) {
+    throw new RangeError(`${count} lightmap texels are too many for this WebGPU adapter. Lower the lightmap resolution or use backend "gpu".`);
+  }
+  const uploaded = uploadScene(device, scene);
+  const emitterCount = (scene.lights.sun ? 1 : 0) + uploaded.lightCount + (scene.environment ? 1 : 0);
+  const camera = { eye: [0, 0, 0], forward: [0, 0, 1], right: [1, 0, 0], above: [0, 1, 0], halfWidth: 1, halfHeight: 1 };
+  const template = createParameterTemplate(scene, camera, { width: count, height: 1, seed, bounces: options.bounces - 1, fireflyClamp: options.fireflyClamp }, uploaded, emitterCount);
+  template.unsigned[SAMPLE_COUNT_WORD] = samples;
+  const accumulation = device.createBuffer({ label: 'accumulation', size: accumulationBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const parameters = device.createBuffer({ label: 'parameters', size: PARAMETER_SLOT_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const texelBuffers = [padVectors(points, count), padVectors(normals, count)].map((vectors, index) => createStorageBuffer(device, vectors, index === 0 ? 'texel points' : 'texel normals'));
+  const bindGroup = device.createBindGroup({
+    layout: current.bindGroupLayout,
+    entries: [
+      { binding: 0, resource: { buffer: parameters, size: PARAMETER_BYTES } },
+      ...[...uploaded.buffers, accumulation, ...texelBuffers].map((buffer, index) => ({ binding: index + 1, resource: { buffer } })),
+    ],
+  });
+  const groups = Math.max(1, Math.ceil(count / WAVEFRONT_WORKGROUP_SIZE));
+  const groupsAcross = Math.min(groups, TEXEL_GROUPS_PER_ROW);
+  for (let sample = 0; sample < samples; sample++) {
+    device.queue.writeBuffer(parameters, 0, writeParameterSlots(template, sample, [{ start: 0, count }], 1, 0, 1, false));
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipelines.bakeTexels);
+    pass.setBindGroup(0, bindGroup, [0]);
+    pass.dispatchWorkgroups(groupsAcross, Math.ceil(groups / groupsAcross));
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    // A texel pass is short, so the queue is awaited every few samples: one round trip per sample would dominate the bake.
+    if ((sample + 1) % TEXEL_SAMPLES_PER_WAIT === 0 || sample === samples - 1) {
+      await device.queue.onSubmittedWorkDone();
+      shouldStop();
+    }
+  }
+  const readback = device.createBuffer({ size: accumulationBytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(accumulation, 0, readback, 0, accumulationBytes);
+  device.queue.submit([encoder.finish()]);
+  await readback.mapAsync(GPUMapMode.READ);
+  const sums = new Float32Array(readback.getMappedRange());
+  const radiance = new Float32Array(count * 3);
+  const escaped = new Float32Array(count);
+  for (let texel = 0; texel < count; texel++) {
+    for (let channel = 0; channel < 3; channel++) radiance[texel * 3 + channel] = sums[texel * 4 + channel] / samples;
+    escaped[texel] = sums[(count + texel) * 4] / samples;
+  }
+  readback.destroy();
+  for (const buffer of [...uploaded.buffers, accumulation, parameters, ...texelBuffers]) buffer.destroy();
+  return { radiance, escaped, gpu: current.gpu, compileSeconds };
 }
 
 // The names path-tracer.js looks for in a backend module, the same as path-tracer-gpu.js.

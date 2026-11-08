@@ -4,14 +4,17 @@
 //   MEGAKERNEL_SOURCE: one invocation traces one pixel's whole path (entry point `main`).
 //   WAVEFRONT_SOURCE: path state lives in a storage buffer and the path is split into kernels (generate, extend, shade,
 //   shadow, resolve); after extend the hits are binned by material so that neighbouring invocations of shade run the same material.
-// Left out: volume fog, subsurface and the texel bake (the host throws a clear error for the first two).
+// Volume fog and the subsurface walk (path-tracer-webgpu-medium.js) are spliced into the megakernel only for a scene that uses them.
+// The megakernel has a texel entry point (`bakeTexels`) that starts a path at every lightmap texel, for the light bake.
+
+import { SUBSURFACE_FUNCTIONS, VOLUME_FUNCTIONS } from './path-tracer-webgpu-medium.js';
 
 export const WORKGROUP_SIZE = 8;
 export const WAVEFRONT_WORKGROUP_SIZE = 64;
 /** vec4 slots of path state per path; the wavefront section below names each one. */
 export const PATH_STATE_VECTORS = 9;
 
-const COMMON_SOURCE = /* wgsl */ `
+const buildCommonSource = ({ hasVolume = false } = {}) => /* wgsl */ `
 const PI: f32 = 3.14159265358979;
 const TWO_PI: f32 = 6.28318530717959;
 const TRIANGLE_TEXELS: i32 = 9;
@@ -39,6 +42,9 @@ struct Params {
   seedAndAtlas: vec4<u32>,
   tileAndDepth: vec4<u32>,
   shadowSlots: vec4<u32>,
+  volumeMinimumDensity: vec4<f32>,
+  volumeMaximumAnisotropy: vec4<f32>,
+  volumeAlbedoDistance: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -185,6 +191,7 @@ var<private> hitTransmission: f32;
 var<private> hitIor: f32;
 var<private> hitCutoff: f32;
 var<private> hitMask: u32;
+var<private> hitMaterialIndex: i32;
 
 fn srgbToLinear(encoded: vec3<f32>) -> vec3<f32> {
   return select(pow((encoded + 0.055) / 1.055, vec3<f32>(2.4)), encoded / 12.92, encoded <= vec3<f32>(0.04045));
@@ -272,7 +279,8 @@ fn fillHit(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> f32 {
   hitNormal = normal / select(normalLength, 1.0, normalLength == 0.0);
   let vertexColor = firstWeight * colorOneData.xyz + secondWeight * colorTwoData.xyz + thirdWeight * colorThreeData.xyz;
   let uv = firstWeight * vec2<f32>(normalOneData.w, colorOneData.w) + secondWeight * vec2<f32>(normalTwoData.w, colorTwoData.w) + thirdWeight * vec2<f32>(normalThreeData.w, colorThreeData.w);
-  let material = i32(cornerData.w) * MATERIAL_TEXELS;
+  hitMaterialIndex = i32(cornerData.w);
+  let material = hitMaterialIndex * MATERIAL_TEXELS;
   let colorMetallic = materials[material];
   let emissionRoughness = materials[material + 1];
   let coating = materials[material + 2];
@@ -528,6 +536,7 @@ var<private> surfaceCoatChance: f32;
 var<private> surfaceSampledCoat: bool;
 var<private> surfaceCoatAlpha: f32;
 var<private> surfaceDiffuseChance: f32;
+var<private> surfaceDiffuseShare: f32;
 var<private> surfaceSpecularChance: f32;
 var<private> surfaceValue: vec3<f32>;
 var<private> surfacePdf: f32;
@@ -552,6 +561,7 @@ fn prepareSurface(normal: vec3<f32>, view: vec3<f32>) {
   let underCoat = 1.0 - surfaceCoatWeight;
   let diffuseShare = (1.0 - hitMetallic) * (1.0 - dielectricFresnel) * underCoat;
   surfaceDiffuse = hitColor * diffuseShare;
+  surfaceDiffuseShare = diffuseShare;
   surfaceSpecularNormal = vec3<f32>(dielectricNormalReflectance * (1.0 - hitMetallic)) + hitColor * hitMetallic;
   let specularLuminance = luminance(surfaceSpecularNormal);
   surfaceSpecularWeight = underCoat;
@@ -669,6 +679,7 @@ var<private> featureAlbedo: vec3<f32>;
 var<private> featureNormal: vec3<f32>;
 var<private> featureDepth: f32;
 var<private> firstLegEscaped: f32 = 0.0;
+var<private> inMedium: bool = false;
 
 fn addRadiance(depth: i32, amountIn: vec3<f32>) {
   var amount = amountIn;
@@ -700,20 +711,30 @@ var<private> shadowDepth: i32;
 var<private> shadowPending: bool = false;
 
 fn addDirect(depth: i32, normal: vec3<f32>, distance: f32, weightMode: i32) {
-  let cosine = dot(normal, lightDirection);
-  if (cosine <= 0.0) { return; }
-  evaluateSurface(lightDirection);
-  let value = surfaceValue;
-  if (value.x + value.y + value.z <= 0.0) { return; }
-  shadowOrigin = hitPoint + normal * params.environmentRotationAndRays.z;
-  let scale = cosine * directWeight(weightMode, surfacePdf);
-  shadowAmount = throughput * value * lightRadiance * scale;
-  shadowDepth = depth;
+  ${hasVolume ? `if (inMedium) {
+    let phase = henyeyGreensteinPhase(params.volumeMaximumAnisotropy.w, dot(lightDirection, direction));
+    let scale = phase * fogTransmittance(hitPoint, distance) * directWeight(weightMode, phase);
+    shadowOrigin = hitPoint;
+    shadowAmount = throughput * lightRadiance * scale;
+    shadowDepth = depth + 1;
+  } else {` : '{'}
+    let cosine = dot(normal, lightDirection);
+    if (cosine <= 0.0) { return; }
+    evaluateSurface(lightDirection);
+    let value = surfaceValue;
+    if (value.x + value.y + value.z <= 0.0) { return; }
+    shadowOrigin = hitPoint + normal * params.environmentRotationAndRays.z;
+    ${hasVolume ? `let transmittance = fogTransmittance(shadowOrigin, distance);` : `let transmittance = 1.0;`}
+    let scale = cosine * directWeight(weightMode, surfacePdf) * transmittance;
+    shadowAmount = throughput * value * lightRadiance * scale;
+    shadowDepth = depth;
+  }
   shadowDirection = lightDirection;
   shadowLimit = distance;
   shadowPending = true;
 }
 
+${hasVolume ? VOLUME_FUNCTIONS : ''}
 fn flushShadowRay() {
   if (!shadowPending) { return; }
   shadowPending = false;
@@ -721,7 +742,7 @@ fn flushShadowRay() {
 }
 
 fn reaches(bit: i32) -> bool {
-  return ((hitMask >> u32(bit)) & 1u) == 1u;
+  return inMedium || ((hitMask >> u32(bit)) & 1u) == 1u;
 }
 
 // Aims lightDirection at the target and returns the distance; distanceSquared goes into aimedDistanceSquared.
@@ -837,92 +858,10 @@ fn survivesRoulette(depth: i32) -> bool {
   return true;
 }
 `;
+const COMMON_SOURCE = buildCommonSource();
 
-export const MEGAKERNEL_SOURCE = COMMON_SOURCE + /* wgsl */ `
-// The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it.
-fn addLights(depth: i32, normal: vec3<f32>) {
-  let emitterCount = params.emittersFlagsSample.x;
-  if (depth == 0 || emitterCount <= 1) {
-    selectionProbability = 1.0;
-    for (var emitter = 0; emitter < emitterCount; emitter++) {
-      sampleEmitter(depth, normal, emitter);
-      flushShadowRay();
-    }
-    return;
-  }
-  selectionProbability = 1.0 / f32(emitterCount);
-  sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
-  flushShadowRay();
-}
-fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
-  resetRandom(pixel, sampleIndex, params.seedAndAtlas.x);
-  radiance = vec3<f32>(0.0);
-  throughput = vec3<f32>(1.0);
-  featureAlbedo = vec3<f32>(1.0);
-  featureNormal = vec3<f32>(0.0, 0.0, 1.0);
-  featureDepth = 0.0;
-  var featuresRecorded = false;
-  direction = startDirection;
-  var position = origin;
-  var previousPdf = 0.0;
-  var afterMirror = true;
-  var normal = vec3<f32>(0.0, 1.0, 0.0);
-  let bounces = params.sizeBouncesLights.z;
-  let surfaceOffset = params.environmentRotationAndRays.z;
-  for (var depth = 0; depth <= bounces; depth++) {
-    let found = intersectScene(position, direction);
-    if (!found) {
-      if (depth == 0) { firstLegEscaped = 1.0; }
-      addEscape(depth, previousPdf, afterMirror);
-      break;
-    }
-    let entering = dot(hitNormal, direction) < 0.0;
-    normal = select(-hitNormal, hitNormal, entering);
-    let isGlass = hitTransmission > 0.0 && nextRandom() < hitTransmission;
-    if (!featuresRecorded) {
-      featureAlbedo = select(hitColor, vec3<f32>(1.0), isGlass);
-      featureNormal = normal;
-      featureDepth = hitDistance;
-      featuresRecorded = true;
-    }
-    addRadiance(depth, throughput * hitEmission);
-    if (!isGlass) {
-      prepareSurface(normal, -direction);
-      addLights(depth, normal);
-    }
-    if (isGlass) {
-      let alpha = roughnessToAlpha(hitRoughness);
-      let selectionUnit = nextRandom();
-      let firstUnit = nextRandom();
-      let secondUnit = nextRandom();
-      if (!sampleGlass(normal, -direction, entering, hitIor, alpha, selectionUnit, firstUnit, secondUnit)) { break; }
-      direction = sampledDirection;
-      if (dot(direction, normal) < 0.0) { throughput *= hitColor; }
-      afterMirror = true;
-    } else {
-      let lobeUnit = nextRandom();
-      let firstUnit = nextRandom();
-      let secondUnit = nextRandom();
-      let isMirror = sampleSurface(lobeUnit, firstUnit, secondUnit);
-      direction = sampledDirection;
-      let cosine = dot(direction, normal);
-      if (cosine <= 0.0) { break; }
-      if (isMirror) {
-        throughput *= mirrorWeight();
-        afterMirror = true;
-      } else {
-        evaluateSurface(direction);
-        if (!(surfacePdf > 0.0)) { break; }
-        throughput *= surfaceValue * cosine / surfacePdf;
-        previousPdf = surfacePdf;
-        afterMirror = false;
-      }
-    }
-    position = hitPoint + direction * surfaceOffset;
-    if (!survivesRoulette(depth)) { break; }
-  }
-}
-
+// One invocation per pixel of the image.
+const CAMERA_MAIN = /* wgsl */ `
 @compute @workgroup_size(${WORKGROUP_SIZE}, ${WORKGROUP_SIZE}, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let width = params.sizeBouncesLights.x;
@@ -950,6 +889,160 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   accumulation[3u * pixelCount + pixel] += vec4<f32>(sampleLuminance, sampleLuminance * sampleLuminance, firstLegEscaped, 0.0);
 }
 `;
+
+// Texel mode: one invocation is one lightmap texel (params.sizeBouncesLights.x is the texel count, shadowSlots.z the sample
+// count). The path starts on the texel's surface with a cosine weighted direction, so the radiance it returns is the light
+// that arrives at the texel; the bake multiplies by the albedo. Plane 0 of the accumulation holds the radiance sums, plane 1
+// the sums of first rays that left the scene.
+const TEXEL_MAIN = /* wgsl */ `
+@group(0) @binding(9) var<storage, read_write> texelPoints: array<vec4<f32>>;
+@group(0) @binding(10) var<storage, read_write> texelNormals: array<vec4<f32>>;
+
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn bakeTexels(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
+  let texelCount = u32(params.sizeBouncesLights.x);
+  let texelIndex = id.y * groups.x * ${WAVEFRONT_WORKGROUP_SIZE}u + id.x;
+  if (texelIndex >= texelCount) { return; }
+  let sampleIndex = u32(params.emittersFlagsSample.w);
+  let seed = params.seedAndAtlas.x;
+  if (params.emittersFlagsSample.y != 0) { sunFrame = buildFrame(params.sunDirection.xyz); }
+  let normal = texelNormals[texelIndex].xyz;
+  let origin = texelPoints[texelIndex].xyz + normal * params.environmentRotationAndRays.z;
+  let firstUnit = (f32(sampleIndex) + hashJitter(texelIndex, sampleIndex, seed, 1u)) / f32(params.shadowSlots.z);
+  let secondUnit = hashJitter(texelIndex, sampleIndex, seed, 2u);
+  let coneRadius = sqrt(firstUnit);
+  let angle = TWO_PI * secondUnit;
+  let rayDirection = buildFrame(normal) * vec3<f32>(coneRadius * cos(angle), coneRadius * sin(angle), sqrt(max(0.0, 1.0 - firstUnit)));
+  tracePath(origin, rayDirection, texelIndex, sampleIndex);
+  if (!(all(radiance >= vec3<f32>(0.0)) && all(radiance < vec3<f32>(1e30)))) { radiance = vec3<f32>(0.0); }
+  accumulation[texelIndex] += vec4<f32>(radiance, 0.0);
+  accumulation[texelCount + texelIndex] += vec4<f32>(firstLegEscaped, 0.0, 0.0, 0.0);
+}
+`;
+
+export const buildMegakernelSource = ({ hasVolume = false, hasSubsurface = false, texelBake = false } = {}) => buildCommonSource({ hasVolume }) + /* wgsl */ `
+// The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it.
+fn addLights(depth: i32, normal: vec3<f32>) {
+  let emitterCount = params.emittersFlagsSample.x;
+  if (depth == 0 || emitterCount <= 1) {
+    selectionProbability = 1.0;
+    for (var emitter = 0; emitter < emitterCount; emitter++) {
+      sampleEmitter(depth, normal, emitter);
+      flushShadowRay();
+    }
+    return;
+  }
+  selectionProbability = 1.0 / f32(emitterCount);
+  sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
+  flushShadowRay();
+}
+${hasSubsurface ? SUBSURFACE_FUNCTIONS : ''}
+fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
+  resetRandom(pixel, sampleIndex, params.seedAndAtlas.x);
+  radiance = vec3<f32>(0.0);
+  throughput = vec3<f32>(1.0);
+  featureAlbedo = vec3<f32>(1.0);
+  featureNormal = vec3<f32>(0.0, 0.0, 1.0);
+  featureDepth = 0.0;
+  var featuresRecorded = false;
+  direction = startDirection;
+  var position = origin;
+  var previousPdf = 0.0;
+  var afterMirror = true;
+  var normal = vec3<f32>(0.0, 1.0, 0.0);
+  let bounces = params.sizeBouncesLights.z;
+  let surfaceOffset = params.environmentRotationAndRays.z;
+  for (var depth = 0; depth <= bounces; depth++) {
+    let found = intersectScene(position, direction);
+    ${hasVolume ? 'let inFog = scatterInFog(position, select(params.environmentRotationAndRays.w, hitDistance, found));' : 'let inFog = false;'}
+    if (!inFog && !found) {
+      if (depth == 0) { firstLegEscaped = 1.0; }
+      addEscape(depth, previousPdf, afterMirror);
+      break;
+    }
+    var isGlass = false;
+    var entering = true;
+    var needsLights = true;
+    if (inFog) {
+      throughput *= params.volumeAlbedoDistance.xyz;
+      inMedium = true;
+    } else {
+      entering = dot(hitNormal, direction) < 0.0;
+      normal = select(-hitNormal, hitNormal, entering);
+      isGlass = hitTransmission > 0.0 && nextRandom() < hitTransmission;
+      if (!featuresRecorded) {
+        featureAlbedo = select(hitColor, vec3<f32>(1.0), isGlass);
+        featureNormal = normal;
+        featureDepth = hitDistance;
+        featuresRecorded = true;
+      }
+      addRadiance(depth, throughput * hitEmission);
+      needsLights = !isGlass;
+      if (needsLights) {
+        prepareSurface(normal, -direction);
+        ${hasSubsurface ? 'subsurfaceWeight = splitSubsurface();' : ''}
+      }
+    }
+    if (needsLights) { addLights(depth, normal); }
+    inMedium = false;
+    ${hasVolume ? `if (inFog) {
+      let phaseCosine = sampleHenyeyGreensteinCosine(params.volumeMaximumAnisotropy.w, nextRandom());
+      let phaseSine = sqrt(max(0.0, 1.0 - phaseCosine * phaseCosine));
+      let azimuth = TWO_PI * nextRandom();
+      let frame = buildFrame(direction);
+      direction = frame[0] * phaseSine * cos(azimuth) + frame[1] * phaseSine * sin(azimuth) + frame[2] * phaseCosine;
+      previousPdf = henyeyGreensteinPhase(params.volumeMaximumAnisotropy.w, phaseCosine);
+      afterMirror = false;
+      position = hitPoint;
+      if (!survivesRoulette(depth)) { break; }
+      continue;
+    }` : ''}
+    if (isGlass) {
+      let alpha = roughnessToAlpha(hitRoughness);
+      let selectionUnit = nextRandom();
+      let firstUnit = nextRandom();
+      let secondUnit = nextRandom();
+      if (!sampleGlass(normal, -direction, entering, hitIor, alpha, selectionUnit, firstUnit, secondUnit)) { break; }
+      direction = sampledDirection;
+      if (dot(direction, normal) < 0.0) { throughput *= hitColor; }
+      afterMirror = true;
+    } else {
+      var lobeUnit = nextRandom();
+      ${hasSubsurface ? `if (subsurfaceWeight > 0.0) {
+        if (lobeUnit < surfaceSubsurfaceChance) {
+          if (!enterSubsurface(depth, normal)) { break; }
+          normal = subsurfaceNormal;
+          lobeUnit = 0.0;
+        } else {
+          lobeUnit -= surfaceSubsurfaceChance;
+        }
+      }` : ''}
+      let firstUnit = nextRandom();
+      let secondUnit = nextRandom();
+      let isMirror = sampleSurface(lobeUnit, firstUnit, secondUnit);
+      direction = sampledDirection;
+      let cosine = dot(direction, normal);
+      if (cosine <= 0.0) { break; }
+      if (isMirror) {
+        throughput *= mirrorWeight();
+        afterMirror = true;
+      } else {
+        evaluateSurface(direction);
+        if (!(surfacePdf > 0.0)) { break; }
+        throughput *= surfaceValue * cosine / surfacePdf;
+        previousPdf = surfacePdf;
+        afterMirror = false;
+      }
+    }
+    position = hitPoint + direction * surfaceOffset;
+    if (!survivesRoulette(depth)) { break; }
+  }
+}
+
+${texelBake ? TEXEL_MAIN : CAMERA_MAIN}
+`;
+
+export const MEGAKERNEL_SOURCE = buildMegakernelSource();
 
 export const WAVEFRONT_SOURCE = COMMON_SOURCE + /* wgsl */ `
 // Path state: PATH_STATE_VECTORS vec4<u32> per path (floats are stored as their bits, so nothing is ever rounded or
