@@ -37,7 +37,7 @@ function findSetEnvironmentSchema(node) {
 }
 
 async function withMcpClient(use) {
-  const server = createAgentMcpServer({ async close() {} });
+  const server = createAgentMcpServer({ async close() {}, async capabilities() { return { scene: {}, phase: 'idle' }; } });
   const client = new Client({ name: '67js-environment-schema-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -58,22 +58,24 @@ function toolSchema(tools, name) {
   return tools.find(tool => tool.name === name).inputSchema;
 }
 
-// scene_create publishes the one full environment schema; the other tools name it.
+// Every tool lists the same short environment; scene_capabilities topic environment outlines the full schema.
 async function mcpEnvironmentFields() {
-  const environment = toolSchema(await listedTools(), 'scene_create').properties.recipe.properties.environment;
-  assert.ok(environment?.properties, 'scene_create no longer publishes recipe.environment');
-  return Object.keys(environment.properties);
+  return withMcpClient(async client => {
+    const outline = (await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'environment' } })).structuredContent.fields;
+    return Object.keys(outline).filter(key => key !== '_' && key !== '$defs').map(key => key.replace(/[?]$/, ''));
+  });
 }
 
-test('scene_apply and scene_create_asset point to the environment schema in scene_create instead of repeating it', async () => {
+test('every tool lists a short environment that names the capabilities topic instead of repeating the fields', async () => {
   const tools = await listedTools();
   const references = [
     findSetEnvironmentSchema(toolSchema(tools, 'scene_apply')),
     toolSchema(tools, 'scene_create_asset').properties.recipe.properties.environment,
+    toolSchema(tools, 'scene_create').properties.recipe.properties.environment,
   ];
   for (const reference of references) {
-    assert.equal(reference.properties, undefined);
-    assert.match(reference.description, /recipe.environment in scene_create/);
+    assert.match(reference.description, /scene_capabilities environment/);
+    assert.ok(Object.keys(reference.properties).length < 10);
   }
 });
 
@@ -112,6 +114,25 @@ function coplanarRecipe() {
     ],
   };
 }
+
+test('set-environment accepts every optional volume fog field on a recipe that set none', () => {
+  const scene = createAgentScene(coplanarRecipe());
+  const fields = { scatterOctaves: 2, multiScatter: 0.5, multiExtinction: 0.4, multiAnisotropy: 0.3, keyTransmittance: 0.6, surfaceTransmittance: 0.7, detailOctaves: 2, detailAmount: 0.3, warp: 1, contrast: 1.2, profileSoftness: 0.4, keyScattering: 2 };
+  for (const [field, value] of Object.entries(fields)) {
+    const fresh = createAgentScene(coplanarRecipe());
+    fresh.apply([{ type: 'set-environment', environment: { volumeFog: { [field]: value } } }], { expectedRevision: fresh.revision });
+    assert.ok(Object.hasOwn(fresh.environment.volumeFog, field), field);
+  }
+  scene.apply([{ type: 'set-environment', environment: { volumeFog: fields } }], { expectedRevision: scene.revision });
+  assert.equal(scene.environment.volumeFog.scatterOctaves, fields.scatterOctaves);
+});
+
+test('the MCP schema accepts the opt-in fog fields', async () => {
+  await withMcpClient(async client => {
+    const result = await client.callTool({ name: 'scene_apply', arguments: { expectedRevision: 0, operations: [{ type: 'set-environment', environment: { volumeFog: { scatterOctaves: 2, multiScatter: 0.5 } } }] } });
+    assert.doesNotMatch(result.content[0].text, /Unrecognized|Unknown volumeFog/);
+  });
+});
 
 test('set-environment accepts ground, viewTransform and resolveCoplanar', () => {
   const scene = createAgentScene(coplanarRecipe());

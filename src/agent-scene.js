@@ -2,7 +2,7 @@ import { mat4, mat3 } from 'gl-matrix';
 import { box, circle, cone, cylinder, grid, icoSphere, sphere, torus } from './geometry.js';
 import { createSceneGraph } from './scene-graph.js';
 import { applyProjection, validateCameraShift, CAMERA_LENS_FIELDS } from './camera.js';
-import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, agentEnvironmentMap } from './agent-look.js';
+import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, agentEnvironmentMap, VOLUME_FOG_FIELDS } from './agent-look.js';
 import { postStepSupport } from './shader-registry.js';
 import { agentSceneModule, agentSceneModuleLoaded } from './agent-scene-modules.js';
 import { MESH_SMOOTH_ANGLE_DEFAULT, CURVE_TEXT_LIMITS, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, MAX_MATERIAL_PATTERNS, RECIPE_ALPHA_MODES } from './agent-scene-capabilities.js';
@@ -1613,8 +1613,9 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           knownKeys(patch, [...Object.keys(candidate[lookField]), ...optionalFields], lookField);
           const nestedField = lookField === 'environment' ? 'volumeFog' : 'bloom';
           const merged = { ...candidate[lookField], ...(lookField === 'environment' ? environmentPatchWithSetup(patch) : patch) };
-          if (Object.hasOwn(patch, nestedField)) {
-            if (lookField === 'effects') knownKeys(patch[nestedField], Object.keys(candidate[lookField][nestedField]), nestedField);
+          if (nestedField && Object.hasOwn(patch, nestedField)) {
+            const nestedKeys = nestedField === 'volumeFog' ? [...Object.keys(candidate[lookField][nestedField]), ...VOLUME_FOG_FIELDS] : Object.keys(candidate[lookField][nestedField]);
+            knownKeys(patch[nestedField], nestedKeys, nestedField);
             merged[nestedField] = { ...candidate[lookField][nestedField], ...patch[nestedField] };
           }
           candidate[lookField] = merged;

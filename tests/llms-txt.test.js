@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildLlmsText, listRegisteredTools } from '../scripts/generate-llms.mjs';
 
-const llmsText = await readFile(new URL('../public/llms.txt', import.meta.url), 'utf8');
+// A Windows checkout may turn LF into CRLF; compare the text, not the line endings.
+const llmsText = (await readFile(new URL('../public/llms.txt', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
 test('llms.txt names every registered MCP tool', async () => {
   const tools = await listRegisteredTools();

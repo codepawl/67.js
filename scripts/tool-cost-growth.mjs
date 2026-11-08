@@ -73,6 +73,26 @@ export function budgetsFrom(measured, previous) {
   return budgets;
 }
 
+/**
+ * The absolute ceilings in bench/tool-cost-ceilings.json. Unlike the release budgets they are set by hand and checked on every run,
+ * so the total cannot drift back up one allowed step at a time. A ceiling is only raised with a reason in the pull request.
+ */
+export function hardCeilingProblems(measured, ceilings) {
+  const problems = [];
+  const check = (name, bytes, ceiling) => {
+    if (bytes > ceiling) problems.push(`${name} is ${bytes} bytes, over its absolute ceiling of ${ceiling} by ${bytes - ceiling}. ${MOVE_ADVICE} Raise the ceiling in bench/tool-cost-ceilings.json only with a reason in the pull request.`);
+  };
+  check(TOTAL_NAME, measured[TOTAL_NAME], ceilings.schemaTotalBytes);
+  for (const [name, bytes] of Object.entries(measured)) {
+    if (name.startsWith('tool:')) check(name, bytes, ceilings.schemaToolBytes[name.slice('tool:'.length)] ?? ceilings.schemaOtherToolBytes);
+    if (name.startsWith('result:')) {
+      const ceiling = ceilings.resultBytes[name.slice('result:'.length)];
+      if (ceiling !== undefined) check(name, bytes, ceiling);
+    }
+  }
+  return problems;
+}
+
 /** The release ceilings in bench/tool-cost-budgets.json that the measured costs are past, as problems. */
 export function ceilingProblems(measured, budgets) {
   const problems = [];
