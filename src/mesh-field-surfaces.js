@@ -1,3 +1,4 @@
+import { registerFieldSource } from './mesh-fields.js';
 import { compileNode, constantScalar, isBoundedNumber, isPlainObject, scalarValue, vectorValue } from './expression.js';
 
 // Field inputs that read another surface: "nearest" (Geometry Proximity and Sample Nearest Surface) and "raycast"
@@ -86,7 +87,7 @@ function readResult(read, queryAt, miss) {
 }
 
 function chargedQuery(state, run) {
-  const { budget } = state.context.surfaceLookup;
+  const { budget } = lookupOf(state.context);
   const result = run(budget.remaining);
   budget.remaining -= result.triangleTests;
   if (budget.remaining <= 0) throw new RangeError('Field expression searched too many surface triangles. Use fewer elements or a simpler surface.');
@@ -100,7 +101,7 @@ export function compileNearest(node, state, depth, positionInput) {
   const surface = checkedSurface(settings, 'nearest');
   const read = checkedRead(settings, NEAREST_READS, 'distance', 'nearest');
   const [partX, partY, partZ] = atParts(settings, state, depth, 'nearest', positionInput);
-  const lookup = state.context.surfaceLookup;
+  const lookup = lookupOf(state.context);
   if (!lookup) return VECTOR_READS.has(read) ? vectorValue(() => 0, () => 0, () => 0) : constantScalar(0);
   const surfaceIndex = lookup.indexOf(surface);
   return readResult(read, index => chargedQuery(state, remaining => surfaceIndex.nearest([partX(index), partY(index), partZ(index)], { maxTriangleTests: remaining })), 0);
@@ -119,7 +120,7 @@ export function compileRaycast(node, state, depth, positionInput) {
   if (settings.miss !== undefined && !isBoundedNumber(settings.miss)) throw surfaceError('raycast miss must be a number.');
   if (settings.maxDistance !== undefined && !(isBoundedNumber(settings.maxDistance) && settings.maxDistance > 0)) throw surfaceError('raycast maxDistance must be above 0.');
   const [partX, partY, partZ] = atParts(settings, state, depth, 'raycast', positionInput);
-  const lookup = state.context.surfaceLookup;
+  const lookup = lookupOf(state.context);
   if (!lookup) return VECTOR_READS.has(read) ? vectorValue(() => 0, () => 0, () => 0) : constantScalar(0);
   const surfaceIndex = lookup.indexOf(surface);
   const maxDistance = settings.maxDistance ?? Infinity;
@@ -127,3 +128,15 @@ export function compileRaycast(node, state, depth, positionInput) {
     origin: [partX(index), partY(index), partZ(index)], direction, maxDistance, maxTriangleTests: remaining,
   })), settings.miss);
 }
+
+const lookups = new WeakMap();
+
+// One lookup per context, built on first use; a context without a loader (validation only) has none.
+function lookupOf(context) {
+  if (!context.loadSurface) return null;
+  if (!lookups.has(context)) lookups.set(context, createSurfaceLookup(context.loadSurface));
+  return lookups.get(context);
+}
+
+registerFieldSource('nearest', compileNearest);
+registerFieldSource('raycast', compileRaycast);

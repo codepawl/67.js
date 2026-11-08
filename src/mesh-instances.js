@@ -2,6 +2,7 @@ import { quat } from 'gl-matrix';
 import { INSTANCE_SOURCES, MAX_INSTANCE_CANDIDATES } from './mesh-operations.js';
 import { evaluateField, pointSetContext, seededRandom } from './mesh-fields.js';
 import { createTriangleSurfaceIndex } from './mesh-query.js';
+import './mesh-field-surfaces.js';
 
 // Instance on points: a node with an `instances` record becomes a group node plus one child node per point, all
 // sharing the node's geometry and material, so the renderer draws them in one instanced call. Points come from a

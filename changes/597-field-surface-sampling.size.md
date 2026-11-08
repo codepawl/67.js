@@ -1,6 +1,1 @@
-- entry:light-bake: its field-selection code now carries the surface inputs of fields (about 840 bytes gzip, `src/mesh-field-surfaces.js`); the BVH query itself stays in the mesh chunk.
-- entry:light-bake-gpu: the same field module growth as entry:light-bake, in its shared mesh-selection path.
-- entry:ground-bounce: the same field module growth, about 840 bytes gzip.
-- entry:floor-sky-visibility: the same field module growth, about 840 bytes gzip.
-- entry:water-reflection: the same field module growth, about 840 bytes gzip.
 - scene:agent-scene+lazy: the surface inputs and the BVH query wrapper load only with the mesh chunk and buy scatter that avoids paths and follows terrain, plus density maps stored as vertex groups; the core bundle shrinks by 4 bytes because new capability text is paid for by shorter notes.

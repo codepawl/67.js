@@ -1,5 +1,4 @@
 import { TAG_PREFIX, meshTags, vertexGroupWeights } from './mesh-data.js';
-import { compileNearest, compileRaycast, createSurfaceLookup } from './mesh-field-surfaces.js';
 import { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK, FIELD_ATTRIBUTES } from './mesh-operations.js';
 import { faceCentroids, faceNormals, vertexNormals } from './mesh-normals.js';
 import {
@@ -161,6 +160,13 @@ OPERATORS.set('z', vectorOperator(1, 1, selectComponent(2)));
 
 export { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK };
 const SOURCE_KEYS = Object.freeze(['attr', 'noise', 'random', 'nearest', 'raycast']);
+
+// Inputs that other modules supply (the surface inputs register themselves), so a bundle that never reads one does not carry its code.
+const FIELD_SOURCES = new Map();
+
+export function registerFieldSource(name, compile) {
+  FIELD_SOURCES.set(name, compile);
+}
 export const FIELD_OPERATORS = Object.freeze([...OPERATORS.keys(), ...SOURCE_KEYS]);
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -247,8 +253,8 @@ function compileInput(node, state, depth) {
   if (keys[0] === 'noise') return compileNoise(node, state, depth);
   if (keys[0] === 'random') return compileRandom(node);
   const positionInput = () => compileAttribute({ attr: 'position' }, state.context);
-  if (keys[0] === 'nearest') return compileNearest(node, state, depth, positionInput);
-  if (keys[0] === 'raycast') return compileRaycast(node, state, depth, positionInput);
+  const compileSource = FIELD_SOURCES.get(keys[0]);
+  if (compileSource) return compileSource(node, state, depth, positionInput);
   return undefined;
 }
 
@@ -286,7 +292,7 @@ export function validateField(expression, { kind } = {}) {
 }
 
 const EMPTY = new Float64Array(0);
-const VALIDATION_CONTEXT = Object.freeze({ count: 0, positions: () => EMPTY, normals: () => EMPTY, tag: () => EMPTY, group: () => EMPTY, surfaceLookup: null });
+const VALIDATION_CONTEXT = Object.freeze({ count: 0, positions: () => EMPTY, normals: () => EMPTY, tag: () => EMPTY, group: () => EMPTY, loadSurface: null });
 
 function finiteValues(source, count, width) {
   const values = new Float64Array(count * width);
@@ -306,7 +312,7 @@ export function meshFieldContext(mesh, domain, loadSurface) {
     count: isPoint ? mesh.vertexCount : mesh.faceCount,
     positions: () => (cache.positions ??= isPoint ? mesh.positions : faceCentroids(mesh)),
     normals: () => (cache.normals ??= isPoint ? vertexNormals(mesh) : faceNormals(mesh).normals),
-    surfaceLookup: createSurfaceLookup(loadSurface),
+    loadSurface,
     group: name => {
       const weights = vertexGroupWeights(mesh, name);
       return isPoint ? weights : faceGroupAverage(mesh, weights);
@@ -351,7 +357,7 @@ export function pointSetContext(positions, normals, loadSurface) {
     count: positions.length / 3,
     positions: () => positions,
     normals: () => normals,
-    surfaceLookup: createSurfaceLookup(loadSurface),
+    loadSurface,
     group: name => {
       throw new RangeError(`Unknown vertex group ${name}. Point sets carry no groups.`);
     },
