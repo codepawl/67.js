@@ -13,6 +13,7 @@ import { DUSK_SOLUTION } from './dusk.mjs';
 import { COLONNADE_SOLUTION } from './colonnade.mjs';
 import { DESK_FINAL, DESK_FINAL_PLAIN } from './desk.mjs';
 import { CABINET_FINAL, CABINET_FINAL_PLAIN } from './cabinet.mjs';
+import { SCENE_REFERENCES } from './scenes.mjs';
 import { EASING_PLAIN_SOLUTION, EASING_SOLUTION } from './easing.mjs';
 
 const material = [{ id: 'paint', color: [0.6, 0.55, 0.5] }];
@@ -169,6 +170,7 @@ function robotArmSolver(root, middle, end, target) {
 }
 
 export const REFERENCES = {
+  ...SCENE_REFERENCES,
   'best-of-three': LAMP_SOLUTION,
   'render-pick': GALLERY_SOLUTION,
   'light-pick-hard': COLONNADE_SOLUTION,
