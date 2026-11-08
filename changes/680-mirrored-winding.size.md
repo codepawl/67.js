@@ -1,0 +1,11 @@
+- entry:core: mirrored parts batch apart and draw with clockwise front faces, so the visible side of a flipped quad is lit and culled correctly
+- entry:core+lazy: same renderer change as entry:core
+- scene:lit-box: the renderer owns mirrored winding (a determinant sign test, a batch key and a frontFace call), which fixes the washed-out flipped quads
+- scene:lit-box+lazy: same renderer change as scene:lit-box
+- scene:gltf-box: the same renderer change, minus the loader's winding flip that this replaces
+- scene:gltf-box+lazy: same renderer change as scene:gltf-box
+- scene:agent-scene: the same renderer change as scene:lit-box
+- scene:agent-scene+lazy: same renderer change as scene:agent-scene
+- goal:lit-box: fixes a visible glitch (flipped billboards render ghosted or pale); about 140 B
+- goal:gltf-box: fixes a visible glitch with mirrored glTF and flipped quads sharing one path; about 110 B
+- goal:agent-scene: fixes a visible glitch (flipped billboards render ghosted or pale); about 140 B
