@@ -115,6 +115,8 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: npm run prepare:release
+      # The smoke installs the archive offline, so its one runtime dependency must be in the npm cache first.
+      - run: npm cache add "playwright-core@$(node -p "require('./package.json').dependencies['playwright-core']")"
       - run: npm run smoke:mcp-package
         env:
           MCP_SERVER_RUNTIME: bun
