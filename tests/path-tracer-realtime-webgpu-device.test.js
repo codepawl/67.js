@@ -122,7 +122,7 @@ test('the WebGPU real-time tracer encodes a frame per call and ping-pongs its hi
 
   await tracer.update({});
   assert.equal(recorded.clears, 1, 'no parts, no new scene');
-  await tracer.update({ parts: scene.parts });
+  await tracer.update({ parts: [{ ...scene.parts[0], geometry: { ...floor } }] });
   tracer.frame(camera);
   assert.equal(recorded.clears, 2, 'a new scene empties the cache again');
 
@@ -131,4 +131,30 @@ test('the WebGPU real-time tracer encodes a frame per call and ping-pongs its hi
   assert.ok(recorded.destroyedBuffers > destroyedBefore);
   assert.equal(recorded.unconfigured, 1);
   assert.throws(() => tracer.frame(camera), /disposed/);
+});
+
+test('an update that only moves a part keeps the history and sends the part motion with the next frame', async () => {
+  installGpu(async () => fakeAdapter);
+  const tracer = await createRealtimeTracer(scene, { backend: 'webgpu', width: 64, height: 32, canvas: fakeCanvas });
+  tracer.frame(camera);
+  const motionWrites = [];
+  const originalWriteBuffer = fakeDevice.queue.writeBuffer;
+  fakeDevice.queue.writeBuffer = (buffer, offset, data) => {
+    if (buffer.label === 'part motion') motionWrites.push(Array.from(data.slice(0, 16)));
+  };
+  const clearsBefore = recorded.clears;
+  const slideMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1];
+  await tracer.update({ parts: [{ ...scene.parts[0], matrix: slideMatrix }] });
+  tracer.frame(camera);
+  tracer.frame(camera);
+  tracer.frame(camera);
+  fakeDevice.queue.writeBuffer = originalWriteBuffer;
+
+  assert.equal(recorded.clears, clearsBefore, 'the cache and the history stay');
+  assert.equal(motionWrites.length, 2, 'the moved table once, then the still table once');
+  const [moved, still] = motionWrites;
+  assert.equal(moved[12], 1, 'the part is rigid');
+  assert.equal(moved[3], -0.5, 'a point of this frame was half a unit back along x');
+  assert.equal(still[12], 0, 'then the part is still');
+  tracer.dispose();
 });

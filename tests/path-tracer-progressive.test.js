@@ -48,7 +48,7 @@ test('every channel of the tile holds each value equally often, and its blurred 
 test('the options choose the sampling pattern and the light choice, and the CPU reference keeps its defaults', () => {
   const defaults = normalizePathTracerOptions({});
   assert.equal(defaults.samplingPattern, 'random');
-  assert.equal(defaults.lightSelection, 'uniform');
+  assert.equal(defaults.lightSelection, 'auto');
   const gpu = normalizePathTracerOptions({ backend: 'gpu', samplingPattern: 'blue-noise-first', lightSelection: 'importance' });
   assert.equal(gpu.samplingPattern, 'blue-noise-first');
   assert.equal(gpu.lightSelection, 'importance');
@@ -56,7 +56,8 @@ test('the options choose the sampling pattern and the light choice, and the CPU 
   assert.throws(() => normalizePathTracerOptions({ lightSelection: 'importance' }), /needs backend "gpu"/);
   assert.throws(() => normalizePathTracerOptions({ backend: 'gpu', lightSelection: 'bogus' }), /lightSelection must be one of/);
   assert.equal(normalizePathTracerOptions({ lightSelection: 'tree' }).lightSelection, 'tree');
-  assert.throws(() => normalizePathTracerOptions({ backend: 'webgpu', lightSelection: 'tree' }), /needs backend/);
+  assert.throws(() => normalizePathTracerOptions({ backend: 'webgpu', lightSelection: 'importance' }), /needs backend/);
+  assert.equal(normalizePathTracerOptions({ backend: 'webgpu', lightSelection: 'tree' }).lightSelection, 'tree');
 });
 
 test('the kernel compiles the new paths only when asked, so the default kernel keeps its pixels', () => {

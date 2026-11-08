@@ -19,6 +19,11 @@ const TEXEL_WORKGROUP_SIZE: u32 = 64;
 /// A dispatch is at most 65535 workgroups wide; a larger bake wraps onto the second dimension.
 const MAXIMUM_TEXEL_GROUPS_X: u32 = 4096;
 const TRIANGLE_FLOATS: usize = 9 * 4;
+/// The parameter block is 16 vec4s: the 12 of the kernel, the fog box and medium, and the subsurface table offset.
+const PARAMETER_BYTES: usize = 16 * 16;
+/// Byte offsets of the fog density (the fourth float of the first fog vector) and of the subsurface table's vector index.
+const VOLUME_DENSITY_BYTE_OFFSET: usize = 51 * 4;
+const SUBSURFACE_OFFSET_BYTE_OFFSET: usize = 60 * 4;
 /// Byte offset of the sample index inside the parameter block (`emittersFlagsSample.w`).
 const SAMPLE_INDEX_BYTE_OFFSET: u64 = 43 * 4;
 /// Samples submitted before the CPU waits, so a long trace never queues thousands of dispatches.
@@ -36,7 +41,7 @@ pub struct NativeTraceInput {
     pub atlas: Uint32Array,
     pub environment_colors: Float32Array,
     pub environment_tables: Float32Array,
-    /// The 12 vec4 parameter block, exactly as the browser harness writes it, as bytes.
+    /// The 16 vec4 parameter block of `packages/render-native/pack-input.mjs`, as bytes.
     pub parameters: Uint8Array,
 }
 
@@ -91,8 +96,12 @@ pub struct NativeTraceResult {
     pub normal: Float32Array,
     pub depth: Float32Array,
     pub variance: Float32Array,
+    /// The mean number of samples a pixel drew: below the requested count when `noise_threshold` stopped converged pixels.
+    pub average_samples: f64,
     pub adapter: String,
     pub backend: String,
+    /// "EXPERIMENTAL_RAY_QUERY" when the device the trace ran on was opened with ray queries (the tracer needs them).
+    pub features: String,
     pub setup_seconds: f64,
     pub compile_seconds: f64,
     pub upload_seconds: f64,
@@ -144,6 +153,7 @@ struct PreparedScene {
     parameters: wgpu::Buffer,
     adapter_name: String,
     backend_name: String,
+    features: String,
     setup_seconds: f64,
     compile_seconds: f64,
     upload_seconds: f64,
@@ -212,16 +222,23 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
         return Err(failure("The triangle table must hold triangle_count triangles of 9 texels."));
     }
     let triangle_data: &[f32] = &input.triangles[..triangle_count * TRIANGLE_FLOATS];
-    if input.parameters.len() != 12 * 16 {
-        return Err(failure("The parameter block must be 192 bytes."));
+    if input.parameters.len() != PARAMETER_BYTES {
+        return Err(failure("The parameter block must be 256 bytes."));
     }
     let (device, queue, adapter_info) = open_device()?;
     let setup_seconds = setup_started.elapsed().as_secs_f64();
 
     let compile_started = Instant::now();
+    // Fog and subsurface scattering compile in only for a scene that uses them: the kernel declares both as false constants.
+    let fog_density = f32::from_le_bytes(input.parameters[VOLUME_DENSITY_BYTE_OFFSET..VOLUME_DENSITY_BYTE_OFFSET + 4].try_into().unwrap());
+    let subsurface_offset = u32::from_le_bytes(input.parameters[SUBSURFACE_OFFSET_BYTE_OFFSET..SUBSURFACE_OFFSET_BYTE_OFFSET + 4].try_into().unwrap());
+    let source = shape
+        .source
+        .replace("const HAS_VOLUME: bool = false;", &format!("const HAS_VOLUME: bool = {};", fog_density > 0.0))
+        .replace("const HAS_SUBSURFACE: bool = false;", &format!("const HAS_SUBSURFACE: bool = {};", subsurface_offset > 0));
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("path tracer"),
-        source: wgpu::ShaderSource::Wgsl(shape.source.into()),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
     });
     let mut layout_entries = vec![
         layout_entry(
@@ -401,6 +418,7 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
         layout: &bind_group_layout,
         entries: &entries,
     });
+    let features = if device.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY) { "EXPERIMENTAL_RAY_QUERY" } else { "" };
     Ok(PreparedScene {
         device,
         queue,
@@ -410,6 +428,7 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
         parameters,
         adapter_name: adapter_info.name,
         backend_name: format!("{:?}", adapter_info.backend),
+        features: features.to_string(),
         setup_seconds,
         compile_seconds,
         upload_seconds,
@@ -477,8 +496,7 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
     let groups = (options.width.div_ceil(WORKGROUP_SIZE), options.height.div_ceil(WORKGROUP_SIZE));
     let (sums, traced_seconds) = trace_samples(&prepared, options.samples, groups, accumulation_bytes, options.max_seconds)?;
     let plane_length = pixel_count as usize * 4;
-    let sample_scale = 1.0 / options.samples.max(1) as f32;
-    let variance_divisor = options.samples.saturating_sub(1).max(1) as f32;
+    let mut taken_total = 0.0f64;
     let mut rgba = Vec::with_capacity(pixel_count as usize * 4);
     let mut albedo = Vec::with_capacity(pixel_count as usize * 3);
     let mut normal = Vec::with_capacity(pixel_count as usize * 3);
@@ -488,7 +506,12 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
         let radiance = &sums[pixel * 4..pixel * 4 + 4];
         let albedo_sum = &sums[plane_length + pixel * 4..plane_length + pixel * 4 + 3];
         let normal_sum = &sums[2 * plane_length + pixel * 4..2 * plane_length + pixel * 4 + 3];
-        let statistics = &sums[3 * plane_length + pixel * 4..3 * plane_length + pixel * 4 + 2];
+        let statistics = &sums[3 * plane_length + pixel * 4..3 * plane_length + pixel * 4 + 4];
+        // A pixel that converged early drew fewer samples; its sums are divided by its own count.
+        let taken = statistics[3].max(1.0);
+        taken_total += taken as f64;
+        let sample_scale = 1.0 / taken;
+        let variance_divisor = (taken - 1.0).max(1.0);
         rgba.extend_from_slice(&[radiance[0] * sample_scale, radiance[1] * sample_scale, radiance[2] * sample_scale, 1.0]);
         depth.push(radiance[3] * sample_scale);
         albedo.extend(albedo_sum.iter().map(|value| value * sample_scale));
@@ -502,8 +525,10 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
         normal: Float32Array::new(normal),
         depth: Float32Array::new(depth),
         variance: Float32Array::new(variance),
+        average_samples: taken_total / pixel_count.max(1) as f64,
         adapter: prepared.adapter_name,
         backend: prepared.backend_name,
+        features: prepared.features,
         setup_seconds: prepared.setup_seconds,
         compile_seconds: prepared.compile_seconds,
         upload_seconds: prepared.upload_seconds,

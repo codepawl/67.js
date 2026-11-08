@@ -38,6 +38,8 @@ export function createNativeTracerLocator({ importPackage = specifier => import(
   let unusableReason = null;
   return {
     async find() {
+      // JS67_NATIVE_TRACER=off keeps a job on the gpu or cpu backend whatever is installed, which is also how the fallback is tested.
+      if (process.env.JS67_NATIVE_TRACER === 'off') return { reason: 'renderer.backend "native" is switched off by JS67_NATIVE_TRACER=off.' };
       lookup ??= importNativePackage(importPackage).then(tracer => {
         if (!tracer) return { reason: `renderer.backend "native" needs ${NATIVE_PACKAGE}.` };
         if (!tracer.findNativeAddon()) return { reason: `renderer.backend "native" needs the built binary of ${NATIVE_PACKAGE} (npm run build in that package).` };
@@ -100,7 +102,7 @@ function withoutAlpha(rgba, pixelCount) {
  * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet" or
  * "oidn"; `denoiser` is the loaded OIDN package for "oidn". Throws when the tracer cannot run, so the caller can fall back.
  */
-export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds }) {
+export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0 }) {
   const started = performance.now();
   const traced = tracer.traceNative(decodeTables(exported), { width, height, samples, maxSeconds });
   const tracedSeconds = (performance.now() - started) / 1000;
@@ -109,9 +111,9 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
     depth: traced.depth, variance: traced.variance };
   normalizeNormals(features.normal);
   const report = { width, height, samples, bounces, seed, denoised: false, denoiser: 'none', threads: 1, backend: 'native',
-    gpu: traced.adapter, nativeBackend: traced.backend, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
+    gpu: traced.adapter, nativeBackend: traced.backend, nativeFeatures: traced.features, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
     uploadSeconds: traced.uploadSeconds, accelerationBuildSeconds: traced.accelerationBuildSeconds,
-    averageSamples: samples, triangles: exported.triangles, tracedSeconds, ignored: exported.ignored };
+    averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, tracedSeconds, ignored: exported.ignored };
   let linear = features.color;
   const denoiseStarted = performance.now();
   if (denoise === 'oidn') {

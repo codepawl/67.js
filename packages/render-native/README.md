@@ -19,7 +19,7 @@ const { rgba, adapter, tracedSeconds } = traceNative(input, options);
 
 `rgba` is linear float RGBA, rows from the top, averaged over the samples. `albedo` and `normal` (three floats per pixel, normalise the normal), `depth` and `variance` (one float) are the first-hit features the wavelet and OIDN denoisers read. `pack-input.mjs` holds `buildNativeInput` without Node imports, so the job page packs the scene itself. `bench/native-tracer` compares it with the browser kernel.
 
-`traceNative` also takes `maxSeconds`: the trace stops with an error ("passed its time limit") once it has run that long. Alpha cutouts are traced by stepping through transparent texels in the kernel (the acceleration structure is opaque).
+Fog (`scene.volume`), subsurface scattering and `options.noiseThreshold` (the CPU tracer's stop rule: converged pixels draw no more samples, `averageSamples` in the result is the mean drawn) are in the kernel. `traceNative` also takes `maxSeconds`: the trace stops with an error ("passed its time limit") once it has run that long. Alpha cutouts are traced by stepping through transparent texels in the kernel (the acceleration structure is opaque).
 
 The light bake uses the texel entry of the same kernel:
 
