@@ -5,6 +5,7 @@ import { resolveEffects } from '../src/effects.js';
 import { normalizeAgentLook } from '../src/agent-look.js';
 import { agentSceneModulesNeeded } from '../src/agent-scene-modules.js';
 import { installCameraEffects } from '../src/camera-effects.js';
+import { installRenderPasses } from '../src/render-passes.js';
 import { installObjectMotionBlur, packObjectMotion, sampleWorldMatrices } from '../src/object-motion-blur.js';
 
 test('object blur is absent from resolved effects until it is set above zero', () => {
