@@ -1542,6 +1542,25 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       const environment = structuredClone(state.recipe.environment);
       return state.movedLook ?agentSceneModule('motion').motionEnvironment(environment, state.movedLook) : environment;
     },
+    /** World bounds ({ name, min, max }) of the visible mesh parts in the current pose; parts with no known bounds are left out. */
+    worldBounds() {
+      const bounds = [];
+      // A bake or a skin replaces a drawn part's geometry, so the bounds come from the part as built, in the drawn pose.
+      const drawnParts = new Map(state.restParts.map(part => [part.name, part]));
+      for (const sourcePart of state.sourceRestParts) {
+        const part = drawnParts.get(sourcePart.name);
+        const local = state.localBounds.get(sourcePart.geometry);
+        if (!part || !local || part.visibility?.visible === false) continue;
+        const positions = [];
+        for (let corner = 0; corner < 8; corner++) {
+          positions.push(corner & 1 ? local.max[0] : local.min[0], corner & 2 ? local.max[1] : local.min[1], corner & 4 ? local.max[2] : local.min[2]);
+        }
+        bounds.push({ name: part.name, ...boundsFor({ positions }, part.matrix) });
+      }
+      return bounds;
+    },
+    /** The bake-stale warning, or none: see `staleBakeProblems` in `agent-bake.js`. */
+    bakeStaleness: staleBakeProblems,
     get postPasses() {
       return structuredClone(state.recipe.postPasses ?? []);
     },

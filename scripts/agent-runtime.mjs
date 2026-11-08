@@ -30,6 +30,7 @@ import { audioInputArguments, createAudioLibrary, measureStreamSeconds } from '.
 import { filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline } from '../src/film-timeline.js';
 import { isPreviewHost } from './preview-host.mjs';
 import { normalizeReview, REVIEW_LIMITS } from './agent-review.mjs';
+import { mergeFrameDiagnostics } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
 import { sessionProblem } from '../src/agent-errors.js';
 
@@ -554,7 +555,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           window.__finishDraw();
           const drawMilliseconds = performance.now() - drawStarted;
           return { ...result, drawMilliseconds, pageEncoded: await window.__encodeFrame(encodeIndex) };
-        }, { input: frameInput, encodeIndex: pageEncodes ? frame : null });
+        }, { input: { ...frameInput, diagnose: frame === 0 }, encodeIndex: pageEncodes ? frame : null });
         const roundTripSeconds = (performance.now() - renderStarted) / 1000;
         const drawSeconds = rendered.pageEncoded ? rendered.drawMilliseconds / 1000 : roundTripSeconds;
         metrics.renderSeconds += drawSeconds;
@@ -564,6 +565,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         metrics.width = width;
         metrics.height = height;
         metrics.estimatedBytes = rendered.estimatedBytes;
+        mergeFrameDiagnostics(metrics, rendered.diagnostics);
         async function captureFrameBytes() {
           if (rendered.pageEncoded) {
             signal.throwIfAborted();
