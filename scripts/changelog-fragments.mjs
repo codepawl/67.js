@@ -37,13 +37,29 @@ function issueNumberOf(text, fallbackName) {
   return inName ? Number(inName[1]) : null;
 }
 
+// A "### Group" heading names the group of the entries below it. Every entry under a group called
+// "Breaking changes" is breaking.
+const groupHeading = /^###\s+(.+?)\s*$/;
+
 export function parseEntries(markdown, fallbackName) {
   const entries = [];
+  let group = null;
   for (const line of markdown.replace(/\r\n/g, '\n').split('\n')) {
-    if (line.startsWith('- ')) entries.push(line.slice(2).trim());
-    else if (line.trim() && entries.length > 0) entries[entries.length - 1] += ` ${line.trim()}`;
+    const heading = line.match(groupHeading);
+    if (heading) {
+      group = heading[1];
+    } else if (line.startsWith('- ')) {
+      entries.push({ text: line.slice(2).trim(), group });
+    } else if (line.trim() && entries.length > 0) {
+      entries[entries.length - 1].text += ` ${line.trim()}`;
+    }
   }
-  return entries.map((text) => ({ issue: issueNumberOf(text, fallbackName), text, breaking: breakingPattern.test(text) }));
+  return entries.map(({ text, group: entryGroup }) => {
+    const breaking = breakingPattern.test(text) || breakingPattern.test(entryGroup ?? '');
+    const entry = { issue: issueNumberOf(text, fallbackName), text, breaking };
+    if (entryGroup) entry.group = entryGroup;
+    return entry;
+  });
 }
 
 // Splits CHANGELOG.md into its "## <version>" sections, newest first as written.

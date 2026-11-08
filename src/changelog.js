@@ -56,7 +56,9 @@ function entryRow(entry) {
     label.append(breakingIcon(), 'Breaking');
     text.append(label);
   }
-  appendText(text, entry.text);
+  // The issue column already links the number, so a trailing "(#N)" for the same issue is dropped.
+  const trailingIssue = entry.issue === null ? null : new RegExp(`\\s*\\(#${entry.issue}\\)$`);
+  appendText(text, trailingIssue ? entry.text.replace(trailingIssue, '') : entry.text);
   row.append(issue, text);
   return row;
 }
@@ -66,10 +68,25 @@ function versionSection(id, title, entries) {
   section.id = id;
   const heading = document.createElement('h2');
   heading.textContent = title;
-  const list = document.createElement('ul');
-  list.className = 'change-list';
-  list.append(...entries.map(entryRow));
-  section.append(heading, list);
+  section.append(heading);
+  // Entries come in runs that share a group. Each run gets its own heading and list.
+  let list = null;
+  let currentGroup;
+  for (const entry of entries) {
+    const group = entry.group ?? null;
+    if (!list || group !== currentGroup) {
+      if (group) {
+        const groupHeading = document.createElement('h3');
+        groupHeading.textContent = group;
+        section.append(groupHeading);
+      }
+      list = document.createElement('ul');
+      list.className = 'change-list';
+      section.append(list);
+      currentGroup = group;
+    }
+    list.append(entryRow(entry));
+  }
   return section;
 }
 
