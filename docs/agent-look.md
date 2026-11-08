@@ -257,11 +257,12 @@ Ambient occlusion reads the depth texture, so it needs the HDR depth target that
 | `depthOfField.blur` | `0` | `0` to `1`. Lens blur from depth, off by default; the widest circle is 5 percent of the image height |
 | `depthOfField.focusDistance` | `5` | `0.01` to `100000` metres from the camera that stay sharp |
 | `motionBlur.shutter` | `0` | `0` to `0.5` seconds of camera motion to smear |
+| `motionBlur.objects` | `0` | `0` to `1`. How much of each moving part's own motion to smear over the same shutter; `0` leaves it off |
 
 Depth of field and motion blur are deterministic: they read the frame, its depth and the camera, with fixed sample patterns, so a seek to a time gives the same pixels as playing to it.
 Depth of field applies to every render, including `scene_look`.
 Motion blur needs camera `motion` tracks and a render job with `settings.motion`: the job samples the camera at `motion.start + elapsed - shutter` as well, and smears each pixel along the screen movement between the two.
-It follows camera motion only; moving objects are not blurred.
+With `motionBlur.objects` above zero, a part that moves between `motion.start + elapsed - shutter` and `motion.start + elapsed` also smears along its own screen path while the still background stays sharp (`1` is the full shutter). It reads each pixel's part from an object ID pass, so it costs a second draw of the frame, and it replaces the camera smear on that frame, since it covers the camera's motion too. A part is moved as one rigid body by its node transform: a skinned or morphed part, an imported asset and a translucent part are not smeared per object.
 Both effects compile their shader and allocate their targets the first time a frame uses them, and a scene that leaves them at zero pays nothing.
 
 ## Directional shadows

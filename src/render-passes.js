@@ -105,6 +105,8 @@ export function installRenderPasses(renderer) {
   renderer.passSupport = {
     prepare,
     get framebuffer() { return target.framebuffer; },
+    // The pass colour of the last pass frame; object motion blur reads the object IDs from it.
+    get texture() { return target.texture; },
     background: pass => PASS_BACKGROUNDS[pass] ?? DEFAULT_BACKGROUND,
     copyToCanvas,
     objectNames,
