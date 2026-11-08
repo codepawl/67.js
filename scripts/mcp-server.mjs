@@ -231,6 +231,7 @@ const environment = z.strictObject({
   objectReflections: z.boolean().optional().describe("false turns off reflection probes on smooth metal parts."),
   floorSkyTrace: z.boolean().optional().describe('false turns off the sky traced into floors of sun-lit closed rooms.'),
   sunBounce: z.number().min(0).optional().describe('Sun bounce in a closed room: 0 off, 1 default.'),
+  specularAntiAliasing: z.number().min(0).max(4).optional().describe('Specular anti-aliasing: 0 off, 1 default; widens highlights that sparkle on grainy normal-mapped metal.'),
   resolveCoplanar: z.union([z.literal('offset'), z.literal(false)]).optional().describe("'offset' biases the smaller part of each coplanar pair at draw time; false clears."),
   viewTransform: z.enum(VIEW_TRANSFORM_NAMES).optional().describe('Display transform, for example agx to compare with Blender.'),
   look: z.enum(LOOK_NAMES).nullable().optional().describe('Named look preset; null clears.'),

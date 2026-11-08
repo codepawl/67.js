@@ -127,7 +127,7 @@ const LOCAL_SHADOW_UNIT = 15;
 const LIGHT_UNIFORMS = ['pointLightCount', 'pointLightPositions[0]', 'pointLightColors[0]', 'pointLightRadii[0]', 'pointLightShadowTiles[0]',
   'spotLightCount', 'spotLightPositions[0]', 'spotLightColors[0]', 'spotLightDirections[0]', 'spotLightParameters[0]',
   'areaLightCount', 'areaLightPositions[0]', 'areaLightColors[0]', 'areaLightNormals[0]', 'areaLightTangents[0]',
-  'localShadowAtlas', 'localShadowMatrices[0]', 'localShadowTexelAngles[0]', 'keyColor', 'fillIntensity', 'ambientIntensity'];
+  'localShadowAtlas', 'localShadowMatrices[0]', 'localShadowTexelAngles[0]', 'keyColor', 'fillIntensity', 'ambientIntensity', 'specularAntiAliasing'];
 const SPLAT_UNIFORMS = ['splatEnabled', 'splatColor', 'splatNormal', 'splatPacked', 'splatMask', 'splatLayer[0]', 'splatTint[0]', 'splatSlope[0]', 'splatHeightRange[0]', 'splatMaskChannel[0]', 'splatMaskInvert[0]', 'splatBlend', 'splatOptions', 'splatMaskBounds', 'splatVariation'];
 
 function validateMaterialMaps(material) {
@@ -2194,6 +2194,7 @@ export class Renderer67 {
     context.uniform3fv(this.uniforms.keyColor, this.lighting.keyColor);
     context.uniform1f(this.uniforms.fillIntensity, this.lighting.fillIntensity);
     context.uniform1f(this.uniforms.ambientIntensity, this.lighting.ambientIntensity);
+    context.uniform1f(this.uniforms.specularAntiAliasing, this.lighting.specularAntiAliasing);
     context.uniform1f(this.uniforms.time, frame.time ?? 0);
     context.uniform1f(this.uniforms.wind, frame.wind ?? 0.3);
     context.uniform1f(this.uniforms.worldMode, this.world ? 1 : 0);
