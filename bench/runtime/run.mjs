@@ -87,6 +87,7 @@ function summarize({ image: _image, repeatable: _repeatable, glError: _glError, 
   return {
     firstFrameMilliseconds: rounded(result.firstFrameMilliseconds, 0),
     updateMilliseconds: rounded(result.updateMilliseconds),
+    updatePartsMilliseconds: result.updatePartsMilliseconds === null ? null : rounded(result.updatePartsMilliseconds),
     renderCpuMilliseconds: rounded(result.renderCpuMilliseconds),
     gpuMilliseconds: rounded(result.gpuMilliseconds),
     fullFrameMilliseconds: rounded(result.fullFrameMilliseconds),
@@ -120,7 +121,7 @@ async function runBackend(backendName, serverUrl, report) {
         report.results[backendName][sceneId] ??= {};
         report.results[backendName][sceneId][engine] = { ...summarize(result), gpuBusyBefore };
         const summary = report.results[backendName][sceneId][engine];
-        console.log(`${backendName} ${sceneId.padEnd(20)} ${engine.padEnd(16)} first ${summary.firstFrameMilliseconds} ms, render ${summary.renderCpuMilliseconds} ms, frame ${summary.fullFrameMilliseconds} ms, ${summary.drawCalls} draws, ${summary.triangles} tris, gpu mem ${summary.gpuMegabytes} MB, heap ${summary.heapMegabytes} MB, busy ${gpuBusyBefore}%${summary.renderTargets ? `
+        console.log(`${backendName} ${sceneId.padEnd(20)} ${engine.padEnd(16)} first ${summary.firstFrameMilliseconds} ms, update ${summary.updateMilliseconds} ms${summary.updatePartsMilliseconds === null ? "" : ` (updateParts ${summary.updatePartsMilliseconds})`}, render ${summary.renderCpuMilliseconds} ms, frame ${summary.fullFrameMilliseconds} ms, ${summary.drawCalls} draws, ${summary.triangles} tris, gpu mem ${summary.gpuMegabytes} MB, heap ${summary.heapMegabytes} MB, busy ${gpuBusyBefore}%${summary.renderTargets ? `
   targets: ${summary.renderTargets.map(target => `${target.name} ${target.megabytes} MB`).join(", ")}` : ""}`);
       }
     }

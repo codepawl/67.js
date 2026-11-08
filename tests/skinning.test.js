@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4 } from 'gl-matrix';
 import { Bone, Skeleton, SkinnedMesh, BufferGeometry, Float32BufferAttribute, Uint16BufferAttribute, Matrix4, Matrix3, Vector3 } from 'three';
-import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences } from '../src/skinning.js';
+import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences, skinInfluenceSets } from '../src/skinning.js';
 
 function influences() {
   return { positions: new Float32Array([0.2, 1, 0]), skinIndices: new Uint16Array([0, 1, 0, 0]), skinWeights: new Float32Array([0.3, 0.7, 0, 0]) };
@@ -179,4 +179,25 @@ test('pose calculations use Float32 mesh and bind matrices before inversion and 
   assert.deepEqual(Array.from(pose.jointMatrices), Array.from(expected));
   updateSkinPose(pose, identity, identity, mesh);
   assert.deepEqual(Array.from(pose.jointMatrices), Array.from(expectedInverse));
+});
+
+test('validateSkinPose checks each distinct influence set once and still finds a singular one', () => {
+  const pose = createSkinPose(2);
+  // Joint 1 mirrors x. Each joint is healthy, but a 50/50 blend with the identity flattens x to zero.
+  pose.jointMatrices.set([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 16);
+  const repeatedHealthy = Array.from({ length: 50 }, () => [0, 0, 0, 0]).flat();
+  const geometry = {
+    skinIndices: new Uint16Array([...repeatedHealthy, 0, 1, 0, 0]),
+    skinWeights: new Float32Array([...Array.from({ length: 50 }, () => [1, 0, 0, 0]).flat(), 0.5, 0.5, 0, 0]),
+  };
+  assert.equal(skinInfluenceSets(geometry).joints.length / 4, 2);
+  assert.throws(() => validateSkinPose(pose, geometry), /singular weighted vertex transform/);
+});
+
+test('skinInfluenceSets rebuilds when the index array is replaced', () => {
+  const skinWeights = new Float32Array([1, 0, 0, 0, 0.5, 0.5, 0, 0]);
+  const first = skinInfluenceSets({ skinIndices: new Uint16Array([0, 0, 0, 0, 0, 1, 0, 0]), skinWeights });
+  const replaced = skinInfluenceSets({ skinIndices: new Uint16Array([1, 0, 0, 0, 1, 1, 0, 0]), skinWeights });
+  assert.notEqual(first, replaced);
+  assert.deepEqual([...replaced.joints.subarray(0, 4)], [1, 0, 0, 0]);
 });
