@@ -56,6 +56,10 @@ Spot lights take the cone and soft edge the renderer uses (`angle`, `penumbra`, 
 
 Not baked: the environment map (it already lights every surface at run time) and specular reflection. A metal part reflects no baked light. Fresnel and sheen are ignored.
 
+### Recipe bakes choose the backend themselves
+
+A recipe `bake` built in a runtime on the GPU backend (the MCP server's default, `scene_inspect`, render jobs) traces its lightmaps on the GPU when the page has WebGL2 with `EXT_color_buffer_float` and `EXT_float_blend`, and on the CPU worker otherwise: SwiftShader runtimes (`--backend cpu`), a recipe whose lights use `affects`, or a GPU bake that fails. `scene_inspect` reports `bake.backend` (`cpu` or `gpu`) and, for the GPU, `bake.gpu` and `bake.gpuCompileSeconds`. The CPU path is unchanged, so the same recipe gives the same bytes there. The irradiance grid and probes still trace on the CPU.
+
 ## How a part draws it
 
 A baked part is a copy with new geometry and a new material. A plain part (no maps, pattern, layers or emission) gets lightmap UVs from the `uv_unwrap` unwrap in channel 0, and its material gets `emissiveMap` (the lightmap, `srgb`, linear filter, clamped), `emissiveColor [1, 1, 1]` and `emission` set to the brightest texel, so the renderer, its shaders and every scene without a bake stay as they are. The input parts are not changed.

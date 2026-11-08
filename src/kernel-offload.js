@@ -23,15 +23,16 @@ let workerStartFailure = null;
 // What ran where, since the last reset: a kernel served by a worker, a kernel computed inline, and why a kernel that
 // should have gone to a worker did not. A silent fallback would otherwise look the same as success.
 const MAXIMUM_RECORDED_FALLBACKS = 16;
-const statistics = { worker: 0, inline: 0, fallbacks: [] };
+const statistics = { worker: 0, page: 0, inline: 0, fallbacks: [] };
 
 /** Counts of kernels served by a worker and run inline, with the reason for each fallback. */
 export function kernelStats() {
-  return { worker: statistics.worker, inline: statistics.inline, fallbacks: statistics.fallbacks.map(fallback => ({ ...fallback })) };
+  return { worker: statistics.worker, page: statistics.page, inline: statistics.inline, fallbacks: statistics.fallbacks.map(fallback => ({ ...fallback })) };
 }
 
 export function resetKernelStats() {
   statistics.worker = 0;
+  statistics.page = 0;
   statistics.inline = 0;
   statistics.fallbacks = [];
 }
@@ -202,7 +203,7 @@ function requestKernel(worker, job, signal) {
  * built from identical bytes. `createWorker` replaces the browser Worker (tests, other hosts); `signal` cancels the
  * build and ends the worker. Hosts without workers just run the build.
  */
-export async function buildWithKernels(build, { createWorker = defaultWorkerFactory, signal, available = kernelWorkersAvailable() } = {}) {
+export async function buildWithKernels(build, { createWorker = defaultWorkerFactory, signal, available = kernelWorkersAvailable(), pageKernels } = {}) {
   if (!available || activeSession) {
     return build();
   }
@@ -227,6 +228,9 @@ export async function buildWithKernels(build, { createWorker = defaultWorkerFact
           session.inlineAll = true;
           recordFallback(error.job.name, 'the build asked for more kernels than any scene holds');
         }
+        if (await computeOnPage(session, pageKernels, error.job)) {
+          continue;
+        }
         worker ??= createWorkerOrNull(createWorker);
         await computeOnWorker(session, worker, error.job, signal);
       } finally {
@@ -235,6 +239,23 @@ export async function buildWithKernels(build, { createWorker = defaultWorkerFact
     }
   } finally {
     worker?.terminate();
+  }
+}
+
+// A page kernel answers a job on the page itself, where the GPU is, instead of on the worker. It takes a job only when its
+// `accepts` says so; if it fails, the worker still does the job on the CPU, so a GPU fault never fails a build.
+async function computeOnPage(session, pageKernels, job) {
+  const kernel = pageKernels?.[job.name];
+  if (!kernel?.accepts(job.args)) {
+    return false;
+  }
+  try {
+    session.results.set(job.key, { value: await kernel.compute(job.args) });
+    statistics.page++;
+    return true;
+  } catch (error) {
+    recordFallback(job.name, `the page kernel failed: ${error.message}`);
+    return false;
   }
 }
 

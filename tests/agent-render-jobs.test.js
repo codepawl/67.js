@@ -5,7 +5,7 @@ import { watch, writeFileSync } from 'node:fs';
 import { tmpdir, constants, setPriority } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { createAgentRenderJobs } from '../scripts/agent-render-jobs.mjs';
+import { createAgentRenderJobs, jobDeadlineMs } from '../scripts/agent-render-jobs.mjs';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const limits = { maxOutputBytes: 1024, maxFrameBytes: 128, maxStoreBytes: 1024 ** 2, cleanupMs: 100 };
@@ -417,4 +417,33 @@ test('a path tracer job draws every sample unless it passes a noise threshold, w
   assert.equal(controller.status(adaptive.jobId).settings.renderer.noiseThreshold, 0.03);
   for (const noiseThreshold of [-0.01, 0.11, Number.NaN]) await assert.rejects(submitWith({ noiseThreshold }), /noiseThreshold/);
   await controller.close();
+});
+
+test('a path tracer job runs on the cpu unless it asks for the gpu, and film jobs may trace every frame', async context => {
+  const root = await temporary(context);
+  const assetBytes = Buffer.from('bounded embedded GLB fixture');
+  const assetId = createHash('sha256').update(assetBytes).digest('hex');
+  const snapshot = { recipe: { format: '67js.asset', assetId }, assetBytes, clips: [{ duration: 5 }] };
+  const controller = await createAgentRenderJobs({ root, limits, async run({ directory }) {
+    await writeFile(join(directory, 'render.png.partial'), Buffer.alloc(32, 1));
+    return { artifacts: [{ temporary: 'render.png.partial', filename: 'render.png', mimeType: 'image/png' }], metrics: {} };
+  } });
+  const submitWith = (renderer, kind = 'image') => controller.submit({ sourceRevision: 1, snapshot, settings: { kind, width: 64, height: 64, duration: 1, fps: 2, renderer: { type: 'pathTracer', ...renderer } } });
+  const defaulted = await submitWith({});
+  await terminal(controller, defaulted.jobId);
+  assert.equal(controller.status(defaulted.jobId).settings.renderer.backend, 'cpu');
+  const onGpu = await submitWith({ backend: 'gpu' });
+  await terminal(controller, onGpu.jobId);
+  assert.equal(controller.status(onGpu.jobId).settings.renderer.backend, 'gpu');
+  await assert.rejects(submitWith({ backend: 'metal' }), /backend must be cpu or gpu/);
+  const film = await submitWith({ backend: 'gpu', samples: 16 }, 'video');
+  assert.equal(controller.status(film.jobId).settings.renderer.samples, 16);
+  await controller.close();
+});
+
+test('the deadline of a traced film covers every frame', () => {
+  const renderer = { type: 'pathTracer', maxSeconds: 10 };
+  const single = jobDeadlineMs({ frameCount: 1, width: 64, height: 64, renderer });
+  const film = jobDeadlineMs({ frameCount: 5, width: 64, height: 64, renderer });
+  assert.equal(film - single, 4 * 10 * 1000);
 });

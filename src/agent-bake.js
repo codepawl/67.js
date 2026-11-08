@@ -196,13 +196,18 @@ export function bakeChangedParts(snapshots, lighting, settings) {
   const plan = planLightmaps(snapshots, lighting, { ...settings, maxSeconds: bakeSecondsLimit() });
   const { used, reduced, reduction } = fitSettingsToBudget(plan, settings);
   const { parts, report } = traceWithAdvice(plan, used);
+  return { changed: changedPartsOf(parts, snapshots), report, used, reduced, reduction };
+}
+
+/** The [index, part] pairs of the parts a bake replaced; a part left alone is the caller's own object. */
+export function changedPartsOf(bakedParts, snapshots) {
   const changed = [];
-  parts.forEach((part, index) => {
+  bakedParts.forEach((part, index) => {
     if (part !== snapshots[index]) {
       changed.push([index, part]);
     }
   });
-  return { changed, report, used, reduced, reduction };
+  return changed;
 }
 
 /**
@@ -253,7 +258,7 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
   // Probes are placed here, on the page, because they build maps and materials; their trace ran above.
   const placed = probeTrace ? placeProbes(bakedParts, probeTrace) : null;
   return { parts: Object.freeze(placed ? placed.parts : bakedParts), report: { ...settings, ...(placed ? { probes: placed.report } : {}), used, reduced, reduction, texels: report.texels, rayWork: report.rayWork, seconds: report.seconds,
-    bakedParts: report.parts.length, skipped: report.skipped } };
+    backend: report.backend, ...(report.gpu ? { gpu: report.gpu, gpuCompileSeconds: report.gpuCompileSeconds } : {}), bakedParts: report.parts.length, skipped: report.skipped } };
 }
 
 // The grid is a few thousand nodes of six gathers each, so its samples are a quarter of the lightmap preset's: about 32 at standard.

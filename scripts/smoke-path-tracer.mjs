@@ -75,6 +75,7 @@ try {
   const first = await renderedBytes(sessionId, { ...base, renderer: tracer });
   assert.equal(first.metrics.pathTracer.samples, 4);
   assert.equal(first.metrics.pathTracer.threads, 8);
+  assert.equal(first.metrics.pathTracer.backend, 'cpu');
   const second = await renderedBytes(sessionId, { ...base, renderer: tracer });
   assert.deepEqual(second.bytes, first.bytes, 'The same recipe and seed must give the same PNG.');
   const reseeded = await renderedBytes(sessionId, { ...base, renderer: { ...tracer, seed: 5 } });
@@ -98,12 +99,17 @@ try {
     [{ ...base, renderer: { ...tracer, samples: 99999 } }, /samples/],
     [{ ...base, renderer: { ...tracer, extra: 1 } }, /extra|Unrecognized|Unknown/],
     [{ ...base, renderer: tracer, passes: ['albedo'] }, /passes/],
-    [{ ...base, kind: 'stills', renderer: tracer }, /image/],
+    [{ ...base, renderer: { ...tracer, backend: 'metal' } }, /backend/],
   ]) {
     const refused = await submit(sessionId, settings);
     assert.equal(refused.isError, true, JSON.stringify(settings));
     assert.match(refused.content[0].text, message);
   }
+
+  // A SwiftShader runtime keeps the CPU tracer: a job that asks for the GPU backend fails instead of drawing something else.
+  const gpuOnSwiftShader = await submit(sessionId, { ...base, renderer: { ...tracer, backend: 'gpu' } });
+  assert.equal(gpuOnSwiftShader.isError, undefined, gpuOnSwiftShader.content?.[0]?.text);
+  assert.equal((await finished(gpuOnSwiftShader.structuredContent.jobId)).state, 'failed', 'backend gpu must fail on a cpu runtime.');
 
   const slow = await submit(sessionId, { kind: 'image', width: 512, height: 512, renderer: { type: 'pathTracer', samples: 1024, maxSeconds: 1 } });
   assert.equal(slow.isError, undefined, slow.content?.[0]?.text);

@@ -25,12 +25,12 @@ const PATH_TRACE_OVERHEAD_MS = 60 * 1000;
 
 /**
  * 60 s plus 2 s per frame, scaled up for frames larger than 1024x576, never above the ceiling. A path trace may run for
- * its own maxSeconds, so its deadline also reaches that plus the overhead and the trace stops itself first.
+ * its own maxSeconds on every frame, so its deadline also reaches that plus the overhead and the trace stops itself first.
  */
 export function jobDeadlineMs({ frameCount, width, height, renderer }, maximumMs = MAXIMUM_JOB_DEADLINE_MS) {
   const sizeScale = Math.max(1, (width * height) / REFERENCE_FRAME_PIXELS);
   const frameDeadline = Math.ceil(BASE_DEADLINE_MS + frameCount * FRAME_ALLOWANCE_MS * sizeScale);
-  const traceDeadline = renderer?.type === 'pathTracer' ? Math.ceil(renderer.maxSeconds * 1000) + PATH_TRACE_OVERHEAD_MS : 0;
+  const traceDeadline = renderer?.type === 'pathTracer' ? Math.ceil(renderer.maxSeconds * 1000 * frameCount) + PATH_TRACE_OVERHEAD_MS : 0;
   return Math.min(maximumMs, Math.max(frameDeadline, traceDeadline));
 }
 const MAXIMUM_JSON_BYTES = 1024 ** 2;
@@ -96,7 +96,7 @@ function settingsFrom(input, clips, recipe) {
   if (frameCount > 900) throw new RangeError('Job exceeds 900 frames.');
   const result = { kind: input.kind, width, height, fps, duration, frameCount };
   if (input.passes !== undefined) result.passes = passesFrom(input.passes, input.kind);
-  if (input.renderer !== undefined) result.renderer = rendererFrom(input.renderer, input.kind, input.passes);
+  if (input.renderer !== undefined) result.renderer = rendererFrom(input.renderer, input.passes);
   const lastSampleTime = input.kind === 'image' ? 0 : input.kind === 'stills' ? duration : (frameCount - 1) / fps;
   if (timelineStart !== undefined) {
     if (input.motion !== undefined || input.animation !== undefined) throw new TypeError('A timeline owns the motion clock; leave motion and animation out.');
@@ -148,14 +148,15 @@ function settingsFrom(input, clips, recipe) {
 
 const FRACTIONAL_RENDERER_FIELDS = new Set(['maxSeconds', 'noiseThreshold']);
 
-function rendererFrom(renderer, kind, passes) {
-  objectKeys(renderer, ['type', 'samples', 'bounces', 'denoise', 'seed', 'maxSeconds', 'noiseThreshold'], 'renderer');
+function rendererFrom(renderer, passes) {
+  objectKeys(renderer, ['type', 'backend', 'samples', 'bounces', 'denoise', 'seed', 'maxSeconds', 'noiseThreshold'], 'renderer');
   if (renderer.type !== 'pathTracer') throw new TypeError('renderer.type must be pathTracer.');
-  if (kind !== 'image') throw new RangeError('The path tracer renders one image: use kind image.');
   if (passes !== undefined) throw new RangeError('The path tracer writes the lit image only: leave passes out.');
   const denoise = renderer.denoise ?? true;
   if (typeof denoise !== 'boolean' && !PATH_TRACER_DENOISERS.includes(denoise)) throw new TypeError(`renderer.denoise must be a boolean or one of ${PATH_TRACER_DENOISERS.join(', ')}.`);
-  const result = { type: 'pathTracer', denoise };
+  const backend = renderer.backend ?? 'cpu';
+  if (backend !== 'cpu' && backend !== 'gpu') throw new TypeError('renderer.backend must be cpu or gpu.');
+  const result = { type: 'pathTracer', backend, denoise };
   for (const name of Object.keys(PATH_TRACER_JOB_LIMITS)) {
     const { minimum, maximum, default: fallback } = PATH_TRACER_JOB_LIMITS[name];
     const defaultValue = name === 'samples' && denoise === 'oidn' ? OIDN_DEFAULT_SAMPLES : fallback;
