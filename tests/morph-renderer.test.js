@@ -31,7 +31,7 @@ function retainedRenderer(parts) {
       morphTexture: { info: validateMorphGeometry(first.geometry, first.morph) },
       morphWeights: new Float32Array(first.morph.weights),
       instanceBuffer: {},
-      instanceData: new Float32Array(group.length * 41),
+      instanceData: new Float32Array(group.length * 42),
       castShadow: true,
       alphaMode: 'opaque',
       alphaCutoff: 0,

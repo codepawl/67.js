@@ -85,7 +85,7 @@ export const MATERIAL_GRAPH_NODES = Object.freeze({
 });
 
 // Recipe textures are opaque patterns, so cutout masking has nothing to cut.
-export const RECIPE_ALPHA_MODES = Object.freeze(['opaque', 'blend']);
+export const RECIPE_ALPHA_MODES = Object.freeze(['opaque', 'blend', 'add']);
 
 // Named lighting setups (see lighting-setups.js) and the occlusion strength that recipes get when they set none.
 export const LIGHTING_SETUP_NAMES = Object.freeze(['daylight', 'overcast', 'sunset', 'studio']);
