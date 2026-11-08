@@ -7,6 +7,7 @@
 // Volume fog and the subsurface walk (path-tracer-webgpu-medium.js) are spliced into the megakernel only for a scene that uses them.
 // The megakernel has a texel entry point (`bakeTexels`) that starts a path at every lightmap texel, for the light bake.
 
+import { LIGHT_TREE_FIRST_HIT_LIGHTS, LIGHT_TREE_MINIMUM_SHARE } from './path-tracer-light-tree.js';
 import { SUBSURFACE_FUNCTIONS, VOLUME_FUNCTIONS } from './path-tracer-webgpu-medium.js';
 
 export const WORKGROUP_SIZE = 8;
@@ -21,7 +22,7 @@ const TRIANGLE_TEXELS: i32 = 9;
 const MATERIAL_TEXELS: i32 = 10;
 const LIGHT_TEXELS: i32 = 6;
 const STACK_SIZE: i32 = 128;
-const ALPHA_STEP_LIMIT: i32 = 8;
+const ALPHA_STEP_LIMIT: i32 = 64;
 const RUSSIAN_ROULETTE_START: i32 = 3;
 const MINIMUM_ALPHA: f32 = 1e-3;
 const MIRROR_ALPHA: f32 = 2e-3;
@@ -779,6 +780,93 @@ fn pointLightFalloff(distanceSquared: f32, range: f32, radius: f32) -> f32 {
   return cutoff / max(distanceSquared, radius * radius);
 }
 
+// The light tree (path-tracer-light-tree.js) follows the light table in the same buffer, four vectors a node; the word
+// params.cameraAndClamp.w holds the index of its first vector, 0 when the scene draws lights uniformly.
+const LIGHT_TREE_TEXELS: i32 = 4;
+const LIGHT_TREE_FIRST_HIT_LIGHTS: i32 = ${LIGHT_TREE_FIRST_HIT_LIGHTS};
+const LIGHT_TREE_MINIMUM_SHARE: f32 = ${LIGHT_TREE_MINIMUM_SHARE.toFixed(4)};
+var<private> treeChoiceProbability: f32 = 1.0;
+
+fn lightTreeActive() -> bool {
+  return params.cameraAndClamp.w > 0.0;
+}
+
+// Past this many lights the tree also draws one light at the first hit; below it the first hit lights from every emitter.
+fn firstHitByTree() -> bool {
+  return lightTreeActive() && params.sizeBouncesLights.w > LIGHT_TREE_FIRST_HIT_LIGHTS;
+}
+
+// The maximum and the minimum importance measure of one tree node for the current hit point.
+fn lightTreeImportance(node: i32, normal: vec3<f32>) -> vec2<f32> {
+  let base = i32(params.cameraAndClamp.w) + node * LIGHT_TREE_TEXELS;
+  let minimumEnergy = lights[base];
+  let maximumCosineO = lights[base + 1];
+  let axisCosineE = lights[base + 2];
+  let energy = minimumEnergy.w;
+  let delta = 0.5 * (minimumEnergy.xyz + maximumCosineO.xyz) - hitPoint;
+  let halfDiagonal = 0.5 * length(maximumCosineO.xyz - minimumEnergy.xyz);
+  let centerDistance = length(delta);
+  let nearest = max(max(centerDistance, halfDiagonal), 1e-4);
+  let farthest = centerDistance + halfDiagonal;
+  let minimumMeasure = energy / max(farthest * farthest, 1e-8);
+  if (centerDistance <= halfDiagonal) { return vec2<f32>(energy / (nearest * nearest), minimumMeasure); }
+  let toward = delta / centerDistance;
+  let ratio = halfDiagonal / centerDistance;
+  let thetaU = acos(sqrt(max(0.0, 1.0 - ratio * ratio)));
+  let theta = acos(clamp(-dot(axisCosineE.xyz, toward), -1.0, 1.0));
+  let thetaO = acos(clamp(maximumCosineO.w, -1.0, 1.0));
+  let thetaE = acos(clamp(axisCosineE.w, -1.0, 1.0));
+  let thetaPrime = max(theta - thetaO - thetaU, 0.0);
+  if (thetaPrime >= thetaE) { return vec2<f32>(0.0, minimumMeasure); }
+  let surfaceTheta = acos(clamp(dot(normal, toward), -1.0, 1.0));
+  let surfaceCosine = max(cos(max(surfaceTheta - thetaU, 0.0)), 0.0);
+  return vec2<f32>(energy * cos(thetaPrime) * surfaceCosine / (nearest * nearest), minimumMeasure);
+}
+
+// Draws the emitter of a later hit and sets selectionProbability to the chance of the draw. Without a tree it is the uniform
+// choice; with one the sun and the sky keep their uniform share and a local light is reached by walking the tree from the
+// root. Returns -1 when no light is worth sampling.
+fn chooseEmitter(normal: vec3<f32>) -> i32 {
+  let emitterCount = params.emittersFlagsSample.x;
+  let uniformShare = 1.0 / f32(emitterCount);
+  let emitter = min(i32(floor(nextRandom() * f32(emitterCount))), emitterCount - 1);
+  selectionProbability = uniformShare;
+  if (!lightTreeActive()) { return emitter; }
+  let firstLightEmitter = select(0, 1, params.emittersFlagsSample.y != 0);
+  let lightIndex = emitter - firstLightEmitter;
+  let lightCount = params.sizeBouncesLights.w;
+  if (lightIndex < 0 || lightIndex >= lightCount) { return emitter; }
+  var node = 0;
+  var pathProbability = 1.0;
+  for (var step = 0; step < 64; step++) {
+    let links = lights[i32(params.cameraAndClamp.w) + node * LIGHT_TREE_TEXELS + 3];
+    if (links.x < 0.0) {
+      selectionProbability = f32(lightCount) * uniformShare * pathProbability;
+      return firstLightEmitter + i32(links.z);
+    }
+    let left = lightTreeImportance(i32(links.x), normal);
+    let right = lightTreeImportance(i32(links.y), normal);
+    let totalMaximum = left.x + right.x;
+    let totalMinimum = left.y + right.y;
+    if (!(totalMinimum > 0.0)) { return -1; }
+    var leftProbability = left.y / totalMinimum;
+    if (totalMaximum > 0.0) { leftProbability = (1.0 - LIGHT_TREE_MINIMUM_SHARE) * (left.x / totalMaximum) + LIGHT_TREE_MINIMUM_SHARE * leftProbability; }
+    if (nextRandom() < leftProbability) {
+      node = i32(links.x);
+      pathProbability *= leftProbability;
+    } else {
+      node = i32(links.y);
+      pathProbability *= 1.0 - leftProbability;
+    }
+  }
+  return -1;
+}
+
+// True when the hit lights from every emitter: the first hit, unless the tree draws one there too, and any hit with one emitter.
+fn lightsFromEveryEmitter(depth: i32, emitterCount: i32) -> bool {
+  return (depth == 0 && !firstHitByTree()) || emitterCount <= 1;
+}
+
 // Draws one emitter's contribution into the pending shadow ray: emitter 0 is the sun when there is one, then the lights, then the sky.
 fn sampleEmitter(depth: i32, normal: vec3<f32>, emitter: i32) {
   var distance = 0.0;
@@ -931,7 +1019,7 @@ export const buildMegakernelSource = ({ hasVolume = false, hasSubsurface = false
 ${realtime ? realtime.declarations + realtime.addLights : `// The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it.
 fn addLights(depth: i32, normal: vec3<f32>) {
   let emitterCount = params.emittersFlagsSample.x;
-  if (depth == 0 || emitterCount <= 1) {
+  if (lightsFromEveryEmitter(depth, emitterCount)) {
     selectionProbability = 1.0;
     for (var emitter = 0; emitter < emitterCount; emitter++) {
       sampleEmitter(depth, normal, emitter);
@@ -939,9 +1027,13 @@ fn addLights(depth: i32, normal: vec3<f32>) {
     }
     return;
   }
+  let chosen = chooseEmitter(normal);
+  if (chosen >= 0) {
+    sampleEmitter(depth, normal, chosen);
+    flushShadowRay();
+  }
+  // The sky is drawn with its uniform share whatever light was chosen: that share weighs the next escape ray.
   selectionProbability = 1.0 / f32(emitterCount);
-  sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
-  flushShadowRay();
 }`}
 ${hasSubsurface ? SUBSURFACE_FUNCTIONS : ''}
 fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
@@ -1094,7 +1186,7 @@ fn materialCount() -> u32 {
 // How many shadow rays a path casts at this depth: every emitter at the first hit, one afterwards.
 fn emitterSlotCount(depth: i32) -> u32 {
   let emitterCount = u32(max(params.emittersFlagsSample.x, 0));
-  if (depth == 0 || emitterCount <= 1u) { return emitterCount; }
+  if (lightsFromEveryEmitter(depth, i32(emitterCount))) { return emitterCount; }
   return 1u;
 }
 
@@ -1283,7 +1375,7 @@ fn shadePaths(@builtin(global_invocation_id) id: vec3<u32>) {
   } else {
     prepareSurface(normal, -direction);
     let emitterCount = params.emittersFlagsSample.x;
-    if (depth == 0 || emitterCount <= 1) {
+    if (lightsFromEveryEmitter(depth, emitterCount)) {
       selectionProbability = 1.0;
       for (var emitter = 0; emitter < emitterCount; emitter++) {
         shadowPending = false;
@@ -1291,10 +1383,11 @@ fn shadePaths(@builtin(global_invocation_id) id: vec3<u32>) {
         storeShadowRecord(path, u32(emitter));
       }
     } else {
-      selectionProbability = 1.0 / f32(emitterCount);
+      let chosen = chooseEmitter(normal);
       shadowPending = false;
-      sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
+      if (chosen >= 0) { sampleEmitter(depth, normal, chosen); }
       storeShadowRecord(path, 0u);
+      selectionProbability = 1.0 / f32(emitterCount);
     }
   }
   var alive = depth < params.sizeBouncesLights.z;

@@ -322,3 +322,22 @@ test('adaptive bands split anywhere give the pixels of the whole image', () => {
 test('the noise threshold is validated', () => {
   for (const noiseThreshold of [-0.1, 1.5, Number.NaN, '0.1']) assert.throws(() => normalizePathTracerOptions({ noiseThreshold }), /noiseThreshold/);
 });
+
+test('a camera ray and a shadow ray pass through a deep stack of transparent cutouts', async () => {
+  const transparentTexel = { image: { data: new Uint8Array([255, 255, 255, 0]), width: 1, height: 1 }, colorSpace: 'linear' };
+  const floor = { name: 'floor', geometry: floorQuad(), material: surface([0.5, 0.5, 0.5], { roughness: 1 }) };
+  const layerCount = 24;
+  const layers = Array.from({ length: layerCount }, (unused, layer) => ({
+    name: `layer-${layer}`,
+    geometry: floorQuad(),
+    matrix: placed([0, 0.1 + layer * 0.05, 0], [1, 1, 1]),
+    material: surface([1, 1, 1], { map: transparentTexel, alphaMode: 'mask', alphaCutoff: 0.5, doubleSided: true }),
+  }));
+  const options = { width: 16, height: 16, samples: 4, bounces: 1, denoise: false, threads: 1 };
+  const scene = parts => ({ parts, environment: OVERHEAD_SUN, camera: LOOKING_DOWN });
+  const plain = await renderPathTracedImage(scene([floor]), options);
+  const stacked = await renderPathTracedImage(scene([floor, ...layers]), options);
+  const centre = (8 * 16 + 8) * 3;
+  assert.ok(plain.linear[centre] > 0.1, 'the plain floor is lit');
+  assert.equal(stacked.linear[centre], plain.linear[centre], 'transparent layers change neither the hit nor the shadow');
+});

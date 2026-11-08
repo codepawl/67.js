@@ -8,7 +8,7 @@ import {
   buildFrame, createSurface, environmentPdf, environmentRadiance, evaluateSurface, luminance, mirrorWeight, prepareSurface,
   roughnessToAlpha, sampleEnvironment, sampleGlass, sampleSurface, setWhiteDiffuse, splitSubsurface,
 } from './path-tracer-shading.js';
-import { buildLightTree, chooseLightFromTree, LIGHT_TREE_FIRST_HIT_LIGHTS } from './path-tracer-light-tree.js';
+import { buildLightTree, chooseLightFromTree, LIGHT_TREE_FIRST_HIT_LIGHTS, resolveLightSelection } from './path-tracer-light-tree.js';
 import { createRandomWalk, WALK_OUTCOME } from './path-tracer-subsurface.js';
 import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval } from './path-tracer-volume.js';
 
@@ -30,7 +30,7 @@ export const PATH_TRACER_LIMITS = Object.freeze({
 });
 export const MAX_TRACE_PIXELS = 2_073_600;
 export const MAX_TRACE_RAY_WORK = 4_000_000_000;
-const ALPHA_STEP_LIMIT = 8;
+const ALPHA_STEP_LIMIT = 64;
 const WORKER_BAND_ROWS = 8;
 // Held in a constant so the bundler leaves the URL alone: the worker is its own package entry, built beside this file.
 const WORKER_FILE = './path-tracer-worker.js';
@@ -73,7 +73,7 @@ function boundedNumber(options, name) {
 // capabilities file stays out of this bundle.
 export const PATH_TRACER_DENOISERS = Object.freeze(['wavelet', 'oidn', 'none']);
 export const SAMPLING_PATTERNS = Object.freeze(['random', 'blue-noise-first']);
-export const LIGHT_SELECTIONS = Object.freeze(['uniform', 'importance', 'tree']);
+export const LIGHT_SELECTIONS = Object.freeze(['auto', 'uniform', 'importance', 'tree']);
 
 /**
  * `denoise` is true (the wavelet filter) or false (none), or a name: "wavelet", "oidn" or "none". "oidn" is the optional
@@ -107,7 +107,7 @@ export function normalizePathTracerOptions(options = {}) {
     look: options.look ?? null,
     backend: options.backend ?? 'cpu',
     samplingPattern: options.samplingPattern ?? 'random',
-    lightSelection: options.lightSelection ?? 'uniform',
+    lightSelection: options.lightSelection ?? 'auto',
   };
   result.denoise = result.denoiser !== 'none';
   if (!VIEW_TRANSFORM_NAMES.includes(result.viewTransform)) throw new RangeError(`Path tracer viewTransform must be one of ${VIEW_TRANSFORM_NAMES.join(', ')}.`);
@@ -118,10 +118,7 @@ export function normalizePathTracerOptions(options = {}) {
     throw new RangeError('Path tracer samplingPattern "blue-noise-first" needs backend "gpu"; the CPU reference and the WebGPU tracer draw random samples.');
   }
   if (result.lightSelection === 'importance' && result.backend !== 'gpu') {
-    throw new RangeError('Path tracer lightSelection "importance" needs backend "gpu"; the CPU reference and the WebGPU tracer pick lights uniformly.');
-  }
-  if (result.lightSelection === 'tree' && result.backend === 'webgpu') {
-    throw new RangeError('Path tracer lightSelection "tree" needs backend "cpu" or "gpu"; the WebGPU tracer picks lights uniformly.');
+    throw new RangeError('Path tracer lightSelection "importance" needs backend "gpu"; the CPU reference and the WebGPU tracer pick lights uniformly; "tree" also runs on the WebGPU tracer.');
   }
   if (result.width * result.height > MAX_TRACE_PIXELS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_PIXELS} pixels.`);
   if (result.width * result.height * result.samples * (result.bounces + 1) > MAX_TRACE_RAY_WORK) throw new RangeError('This path trace would need too much ray work: lower the size, samples or bounces.');
@@ -641,7 +638,7 @@ function createPathTracer(scene, options) {
   }
 
   const lightCount = lights.points.length + lights.spots.length + lights.areas.length;
-  const useLightTree = options.lightSelection === 'tree' && lightCount > 1;
+  const useLightTree = resolveLightSelection(options.lightSelection, lights) === 'tree' && lightCount > 1;
   const lightTree = useLightTree ? buildLightTree(lights) : null;
   const drawRandom = () => random.next();
   function sampleLightByIndex(depth, normal, index) {

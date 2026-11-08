@@ -1,6 +1,6 @@
 import { CACHE_HISTORY_LIMIT, CACHE_SLOT_COUNT } from './path-tracer-radiance-cache.js';
 import { DEFAULT_FILTER_ITERATIONS, DEFAULT_HISTORY_LIMIT } from './path-tracer-temporal-denoise.js';
-import { DEPTH_TOLERANCE, NORMAL_AGREEMENT } from './path-tracer-reprojection.js';
+import { DEPTH_TOLERANCE, NORMAL_AGREEMENT, PART_MOTION_CHANGED, PART_MOTION_FLOATS } from './path-tracer-reprojection.js';
 
 // The compute passes of the WebGPU real-time tracer (issue #624): the radiance cache update and the temporal denoiser,
 // the WGSL form of path-tracer-radiance-cache.js and path-tracer-temporal-denoise.js (read those for the reasoning). Two
@@ -120,7 +120,27 @@ fn insideTraceImage(texel: vec2<i32>) -> bool {
 }
 `;
 
-const ACCUMULATE_SOURCE = DENOISE_COMMON + /* wgsl */ `
+/**
+ * The motion table of the parts (see partMotionTable in path-tracer-reprojection.js) at binding `binding`, and the lookup
+ * of where a surface point of this frame was in the previous frame. The result's w is 0 when history cannot be reused.
+ */
+const partMotionSource = binding => /* wgsl */ `
+@group(0) @binding(${binding}) var<storage, read> partMotion: array<vec4<f32>>;
+
+fn previousPointOf(point: vec3<f32>, material: f32) -> vec4<f32> {
+  if (material < 0.5) { return vec4<f32>(point, 1.0); }
+  let base = u32(material - 1.0) * ${PART_MOTION_FLOATS / 4}u;
+  let kind = partMotion[base + 3u].x;
+  if (kind < 0.5) { return vec4<f32>(point, 1.0); }
+  if (kind > ${PART_MOTION_CHANGED}.0 - 0.5) { return vec4<f32>(point, 0.0); }
+  let rowX = partMotion[base];
+  let rowY = partMotion[base + 1u];
+  let rowZ = partMotion[base + 2u];
+  return vec4<f32>(dot(rowX.xyz, point) + rowX.w, dot(rowY.xyz, point) + rowY.w, dot(rowZ.xyz, point) + rowZ.w, 1.0);
+}
+`;
+
+const ACCUMULATE_SOURCE = DENOISE_COMMON + partMotionSource(6) + /* wgsl */ `
 @group(0) @binding(1) var<storage, read> traced: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> tracedPrevious: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read> historyPrevious: array<vec4<f32>>;
@@ -145,13 +165,14 @@ fn accumulate(@builtin(global_invocation_id) id: vec3<u32>) {
   var illumination = tracedValue.rgb / max(albedo, vec3<f32>(MINIMUM_ALBEDO));
   let size = vec2<f32>(params.sizes.xy);
   let point = params.eye.xyz + pixelRayDirection(vec2<f32>(texel) + 0.5, size) * distanceOf(tracedValue);
+  let previousPoint = previousPointOf(point, normalAndMaterial.w);
 
   var history = vec4<f32>(0.0);
   var historyMoments = vec4<f32>(0.0);
   var historyAlbedo = vec3<f32>(0.0);
   var totalWeight = 0.0;
-  let projection = projectToPrevious(point, size);
-  if (params.settings.z < 0.5 && projection.w > 0.5) {
+  let projection = projectToPrevious(previousPoint.xyz, size);
+  if (params.settings.z < 0.5 && projection.w > 0.5 && previousPoint.w > 0.5) {
     let base = floor(projection.xy - 0.5);
     let fraction = projection.xy - 0.5 - base;
     for (var tap = 0; tap < 4; tap++) {
@@ -408,7 +429,7 @@ function writeDenoiseParameters(device, buffer, inputs, sizes, step, rowWords, s
  * pass for the traced frame in `tracedBuffers[set]` (the frame before it is in the other set). The result is packed
  * pixels in `outputBuffer`, `outputRowWords(outputWidth)` words per row, red first, or blue first when `swapped`.
  */
-export async function createWebGpuDenoiser(device, { traceWidth, traceHeight, outputWidth, outputHeight, tracedBuffers, historyLimit = DEFAULT_HISTORY_LIMIT, filterIterations = DEFAULT_FILTER_ITERATIONS, swapped = false }) {
+export async function createWebGpuDenoiser(device, { traceWidth, traceHeight, outputWidth, outputHeight, tracedBuffers, motionBuffer, historyLimit = DEFAULT_HISTORY_LIMIT, filterIterations = DEFAULT_FILTER_ITERATIONS, swapped = false }) {
   const [accumulateModule, atrousModule, presentModule] = await Promise.all([
     compileModule(device, 'accumulate', ACCUMULATE_SOURCE), compileModule(device, 'a-trous', ATROUS_SOURCE), compileModule(device, 'present', PRESENT_SOURCE),
   ]);
@@ -427,7 +448,7 @@ export async function createWebGpuDenoiser(device, { traceWidth, traceHeight, ou
   const finalFilter = filters[filterIterations % 2];
   const groupsFor = (width, height) => [Math.ceil(width / 8), Math.ceil(height / 8)];
   const sets = [0, 1].map(set => ({
-    accumulate: bind(device, accumulatePipeline, [accumulateParameters, tracedBuffers[set], tracedBuffers[1 - set], histories[1 - set], histories[set], filters[0]]),
+    accumulate: bind(device, accumulatePipeline, [accumulateParameters, tracedBuffers[set], tracedBuffers[1 - set], histories[1 - set], histories[set], filters[0], motionBuffer]),
     atrous: atrousParameters.map((parameters, iteration) => bind(device, atrousPipeline, [parameters, tracedBuffers[set], filters[iteration % 2], filters[1 - iteration % 2]])),
     present: bind(device, presentPipeline, [presentParameters, tracedBuffers[set], finalFilter, histories[set], outputBuffer]),
   }));
