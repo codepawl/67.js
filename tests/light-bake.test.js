@@ -258,9 +258,11 @@ test('the default bounces follow most of the light that a closed room keeps, whi
   assert.equal(BAKE_LIMITS.bounces.fallback, 3);
 });
 
-test('the backend option is cpu or gpu, and the synchronous bake refuses the GPU', async () => {
+test('the backend option is cpu, gpu or webgpu, and the synchronous bake refuses the GPU ones', async () => {
   assert.equal(normalizeBakeOptions({ backend: 'gpu' }).backend, 'gpu');
-  for (const bad of ['webgpu', 'GPU', 1]) assert.throws(() => normalizeBakeOptions({ backend: bad }), { name: 'TypeError', message: /backend/ }, String(bad));
+  assert.equal(normalizeBakeOptions({ backend: 'webgpu' }).backend, 'webgpu');
+  assert.throws(() => bakeLightmaps(smallRoom(), lamp, { ...fastOptions, backend: 'webgpu' }), { name: 'TypeError', message: /"webgpu".*light-bake-gpu/ });
+  for (const bad of ['WebGPU', 'GPU', 1]) assert.throws(() => normalizeBakeOptions({ backend: bad }), { name: 'TypeError', message: /backend/ }, String(bad));
   assert.throws(() => bakeLightmaps(smallRoom(), lamp, { ...fastOptions, backend: 'gpu' }), { name: 'TypeError', message: /light-bake-gpu/ });
   const asynchronous = await bakeLightmapsAsync(smallRoom(), lamp, fastOptions);
   const synchronous = bakeLightmaps(smallRoom(), lamp, fastOptions);

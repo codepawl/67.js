@@ -26,6 +26,7 @@ export const MAX_BAKE_TRIANGLES = 200_000;
 export const MAX_BAKE_PARTS = 256;
 // The GPU tracer takes as many parts as the path tracer does (MAX_TRACE_PARTS); the CPU bake keeps 256.
 export const MAX_GPU_BAKE_PARTS = 1024;
+const BAKE_BACKENDS = ['cpu', 'gpu', 'webgpu', 'native'];
 export const MAX_BAKE_POINT_LIGHTS = MAX_POINT_LIGHTS;
 export const MAX_BAKE_SPOT_LIGHTS = MAX_SPOT_LIGHTS;
 export const MAX_BAKE_AREA_LIGHTS = MAX_AREA_LIGHTS;
@@ -65,7 +66,7 @@ export function normalizeBakeOptions(options = {}) {
   const normalized = {};
   for (const name of Object.keys(BAKE_LIMITS)) normalized[name] = boundedNumber(options, name);
   normalized.backend = options.backend ?? 'cpu';
-  if (normalized.backend !== 'cpu' && normalized.backend !== 'gpu') throw new TypeError('Light bake backend must be "cpu" or "gpu".');
+  if (!BAKE_BACKENDS.includes(normalized.backend)) throw new TypeError('Light bake backend must be "cpu", "gpu", "webgpu" or "native".');
   return normalized;
 }
 
@@ -901,7 +902,7 @@ function createSkyVisibilityGatherer({ tracer, offset, samples }) {
 export function planLightmaps(parts, lighting, options = {}) {
   const settings = normalizeBakeOptions(options);
   const lights = normalizeLights(lighting);
-  const maximumParts = settings.backend === 'gpu' ? MAX_GPU_BAKE_PARTS : MAX_BAKE_PARTS;
+  const maximumParts = settings.backend !== 'cpu' ? MAX_GPU_BAKE_PARTS : MAX_BAKE_PARTS;
   if (!Array.isArray(parts) || parts.length === 0 || parts.length > maximumParts) throw new RangeError(`Light bake takes from 1 to ${maximumParts} parts.`);
   parts.forEach(validatePart);
   const triangleTotal = parts.reduce((total, part) => total + part.geometry.indices.length / 3, 0);
@@ -1044,7 +1045,7 @@ export function finishLightmaps(plan, settings, rasterized, gathered, sizes) {
 /** Traces a plan with the given settings (samples, bounces, texelsPerUnit, maxSeconds) and returns the baked parts and the report. */
 export function traceLightmaps(plan, tracedSettings) {
   const settings = { ...plan.settings, ...tracedSettings };
-  if (settings.backend !== 'cpu') throw new TypeError('Light bake backend "gpu" is asynchronous: use bakeLightmapsAsync from light-bake-gpu.js.');
+  if (settings.backend !== 'cpu') throw new TypeError(`Light bake backend "${settings.backend}" is asynchronous: use bakeLightmapsAsync from light-bake-gpu.js.`);
   const sizes = checkedBakeSize(plan, settings);
   const rasterized = rasterizeEntries(plan, settings);
   return finishLightmaps(plan, settings, rasterized, gatherOnCpu(plan, settings, rasterized), sizes);

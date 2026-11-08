@@ -1,3 +1,4 @@
+import { encodeNativeTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
 import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
@@ -509,11 +510,12 @@ function useKernelWorkers() {
   return kernelWorkersAvailable() && globalThis.__67jsKernelWorkers !== 'off';
 }
 
-// A recipe bake runs on the GPU when the page has float render targets; the CPU bake stays the default everywhere else.
+// A recipe bake runs on the native tracer when the host offers it, on the GPU when the page has float render targets, and on
+// the CPU everywhere else.
 async function pageKernelsFor(recipe, backend) {
   if (!recipe.bake || backend !== 'gpu') return undefined;
   const { gpuBakeKernels } = await import('../src/agent-bake-gpu.js');
-  return gpuBakeKernels();
+  return gpuBakeKernels({ texelTracer: await nativeTexelTracerIfAvailable() });
 }
 
 async function buildSceneOffMainThread(recipe, options, backend) {
@@ -787,6 +789,32 @@ window.__agentPreview = {
       return { features, report: result.report };
     }
     return { data: encodeTracedPng(result.rgba, result.width, result.height), report: result.report };
+  },
+  // The scene at one instant packed into the tables the native ray query tracer reads (renderer.backend "native"). The job
+  // runner traces them outside the page; each table comes back as base64 bytes.
+  async exportNativeScene({ sessionId, animation, motionTime, options }) {
+    const record = requireSession(sessionId);
+    if (record.asset && (animation !== undefined || motionTime !== undefined)) {
+      record.scene.sampleFrame({ ...(animation === undefined ? {} : { animation }),
+        ...(motionTime === undefined ? {} : { motionTime }) });
+    } else if (motionTime !== undefined) {
+      record.scene.sampleMotion(motionTime);
+    }
+    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene }, pack, { buildNativeInput }] = await Promise.all([
+      import('../src/path-tracer.js'), import('../src/path-tracer-scene.js'), import('../src/path-tracer-gpu-pack.js'),
+      import('../packages/render-native/pack-input.mjs'),
+    ]);
+    const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
+    const { sceneUsesSubsurface } = pack;
+    const traceScene = buildTraceScene(record.scene.parts, environment);
+    const camera = createCamera(record.scene.camera, options.width, options.height);
+    const input = buildNativeInput(traceScene, camera, options, pack);
+    const tables = encodeNativeTables(input);
+    // The native kernel has no participating media yet, so say so instead of claiming a fog or a subsurface look it did not trace.
+    const ignored = describeIgnoredFeatures(record.scene.parts, environment);
+    if (environment.volumeFog?.density > 0) ignored.push('volumeFog is not traced by the native backend.');
+    if (sceneUsesSubsurface(traceScene.materials)) ignored.push('subsurface is not traced by the native backend.');
+    return { tables, triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, ignored };
   },
   // The PNG of linear pixels (three floats each, base64) that a denoiser outside the page returned, or of the wavelet
   // filter over the kept features when none came back.

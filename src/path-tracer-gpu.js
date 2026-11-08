@@ -1,5 +1,5 @@
 import { buildFragmentSource, VERTEX_SOURCE } from './path-tracer-gpu-shader.js';
-import { packAtlas, packEnvironment, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 
 // The GPU backend of the path tracer: one WebGL2 fragment pass per sample draws every pixel of a band, and four float
 // targets add the samples up. It needs a page with WebGL2 (a canvas), EXT_color_buffer_float and EXT_float_blend. The
@@ -61,7 +61,17 @@ function createTexture(gl, unit, internalFormat, format, type, width, height, da
   return texture;
 }
 
-function uploadScene(gl, program, scene) {
+/**
+ * The options with the blue noise tile of the seed added when the sampling pattern needs it. The tile maker loads on
+ * demand, so a render that draws random samples (and the light bake) does not carry it.
+ */
+export async function withBlueNoiseTile(options) {
+  if (options.samplingPattern !== 'blue-noise-first') return options;
+  const { BLUE_NOISE_SIZE, createBlueNoiseTile } = await import('./path-tracer-blue-noise.js');
+  return { ...options, blueNoiseTile: { size: BLUE_NOISE_SIZE, bytes: createBlueNoiseTile(options.seed ?? 0) } };
+}
+
+export function uploadScene(gl, program, scene, options = {}) {
   const atlas = packAtlas(scene.materials);
   const lights = packLights(scene.lights);
   const environment = packEnvironment(scene.environment);
@@ -70,6 +80,7 @@ function uploadScene(gl, program, scene) {
   const materials = packMaterials(scene.materials, atlas);
   const floatTables = [['uNodes', nodes], ['uTriangles', triangles], ['uMaterials', materials], ['uLights', lights.table]];
   if (sceneUsesSubsurface(scene.materials)) floatTables.push(['uSubsurface', packSubsurface(scene.materials)]);
+  if (options.lightSelection === 'tree') floatTables.push(['uLightTree', packLightTree(scene.lights)]);
   let unit = 0;
   const bind = (name) => gl.uniform1i(gl.getUniformLocation(program, name), unit++);
   for (const [name, table] of floatTables) {
@@ -86,10 +97,14 @@ function uploadScene(gl, program, scene) {
     createTexture(gl, unit, gl.R32F, gl.RED, gl.FLOAT, table.width, table.height, table.data);
     bind(name);
   }
+  if (options.blueNoiseTile) {
+    createTexture(gl, unit, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, options.blueNoiseTile.size, options.blueNoiseTile.size, options.blueNoiseTile.bytes);
+    bind('uBlueNoise');
+  }
   return { lightCount: lights.count, nextUnit: unit };
 }
 
-function setSceneUniforms(gl, program, scene, camera, options, lightCount) {
+export function setSceneUniforms(gl, program, scene, camera, options, lightCount) {
   const location = name => gl.getUniformLocation(program, name);
   const { sun } = scene.lights;
   const { environment, volume } = scene;
@@ -120,7 +135,7 @@ function setSceneUniforms(gl, program, scene, camera, options, lightCount) {
   gl.uniform3f(location('uVolumeShape'), volume?.density ?? 0, volume?.anisotropy ?? 0, volume?.maxDistance ?? 0);
 }
 
-function createTargets(gl, width, height) {
+export function createTargets(gl, width, height) {
   const framebuffer = gl.createFramebuffer();
   resources.push(framebuffer);
   gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -143,14 +158,14 @@ function createTargets(gl, width, height) {
   return attachments;
 }
 
-function readTarget(gl, index, width, height) {
+export function readTarget(gl, index, width, height) {
   const pixels = new Float32Array(width * height * 4);
   gl.readBuffer(gl.COLOR_ATTACHMENT0 + index);
   gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, pixels);
   return pixels;
 }
 
-function averageBuffers(gl, width, height, samples) {
+export function averageBuffers(gl, width, height, samples) {
   const pixelCount = width * height;
   const radiance = readTarget(gl, 0, width, height);
   const albedo = readTarget(gl, 1, width, height);
@@ -180,7 +195,7 @@ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
  * (color, albedo, normal, depth, variance, samplesTaken) plus a `gpu` note. `noiseThreshold` is not used: every pixel
  * draws all its samples. `shouldStop` throws when the time limit passes.
  */
-function getContext() {
+export function getContext() {
   if (session) return session;
   const canvas = createCanvas();
   const gl = canvas?.getContext('webgl2', { antialias: false, depth: false, stencil: false, alpha: false, powerPreference: 'high-performance' });
@@ -199,12 +214,16 @@ export function gpuKernelCompileCount() {
 }
 
 /** The kernel for a scene, compiled once per variant: a scene with a subsurface part gets the random walk, any other scene the plain kernel. */
-function getKernel(hasSubsurface, texelBake = false) {
+export function getKernel(hasSubsurface, texelBake = false, options = {}) {
   const { gl, programs } = getContext();
-  const key = `${hasSubsurface}:${texelBake}`;
+  const blueNoise = options.samplingPattern === 'blue-noise-first';
+  const lightImportance = options.lightSelection === 'importance';
+  const lightTree = options.lightSelection === 'tree';
+  const radianceCache = options.radianceCache === true;
+  const key = `${hasSubsurface}:${texelBake}:${blueNoise}:${lightImportance}:${radianceCache}:${lightTree}`;
   if (!programs.has(key)) {
     const started = performance.now();
-    const program = createProgram(gl, { hasSubsurface, texelBake });
+    const program = createProgram(gl, { hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache, lightTree });
     gl.getProgramParameter(program, gl.LINK_STATUS);
     programs.set(key, { program, compileSeconds: (performance.now() - started) / 1000 });
     if (!texelBake) kernelCompileCount++;
@@ -212,7 +231,7 @@ function getKernel(hasSubsurface, texelBake = false) {
   return programs.get(key);
 }
 
-function releaseResources(gl) {
+export function releaseResources(gl) {
   for (const resource of resources) {
     if (resource instanceof WebGLFramebuffer) gl.deleteFramebuffer(resource);
     else gl.deleteTexture(resource);
@@ -220,45 +239,51 @@ function releaseResources(gl) {
   resources.length = 0;
 }
 
-/** Draws every sample of every pixel in bands that take about DRAW_SECONDS_TARGET each, giving the page a turn now and then. */
-async function drawSamples(gl, program, width, height, samples, shouldStop) {
+/** The band size and the last turn given to the page, kept from one sample to the next. */
+export function createBandState(height) {
+  return { bandRows: Math.min(height, 32), lastYield: performance.now() };
+}
+
+/** Draws one sample of every pixel in bands that take about DRAW_SECONDS_TARGET each, giving the page a turn now and then. */
+export async function drawOneSample(gl, program, width, height, sample, band, shouldStop) {
   gl.viewport(0, 0, width, height);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
   gl.enable(gl.SCISSOR_TEST);
-  const sampleLocation = gl.getUniformLocation(program, 'uSample');
-  let bandRows = Math.min(height, 32);
-  let lastYield = performance.now();
-  for (let sample = 0; sample < samples; sample++) {
-    gl.uniform1i(sampleLocation, sample);
-    let rowStart = 0;
-    while (rowStart < height) {
-      const rows = Math.min(bandRows, height - rowStart);
-      const firstRow = rowStart;
-      rowStart += rows;
-      const started = performance.now();
-      gl.scissor(0, firstRow, width, rows);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.finish();
-      const seconds = (performance.now() - started) / 1000;
-      const scale = Math.min(2, DRAW_SECONDS_TARGET / Math.max(seconds, 1e-4));
-      bandRows = Math.max(MINIMUM_BAND_ROWS, Math.min(height, Math.round(rows * scale)));
-      shouldStop();
-      if ((performance.now() - lastYield) / 1000 > YIELD_SECONDS) {
-        await nextTask();
-        lastYield = performance.now();
-      }
+  gl.uniform1i(gl.getUniformLocation(program, 'uSample'), sample);
+  let rowStart = 0;
+  while (rowStart < height) {
+    const rows = Math.min(band.bandRows, height - rowStart);
+    const firstRow = rowStart;
+    rowStart += rows;
+    const started = performance.now();
+    gl.scissor(0, firstRow, width, rows);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.finish();
+    const seconds = (performance.now() - started) / 1000;
+    const scale = Math.min(2, DRAW_SECONDS_TARGET / Math.max(seconds, 1e-4));
+    band.bandRows = Math.max(MINIMUM_BAND_ROWS, Math.min(height, Math.round(rows * scale)));
+    shouldStop();
+    if ((performance.now() - band.lastYield) / 1000 > YIELD_SECONDS) {
+      await nextTask();
+      band.lastYield = performance.now();
     }
   }
   gl.disable(gl.SCISSOR_TEST);
 }
 
-export async function traceOnGpu(scene, camera, options, shouldStop) {
+async function drawSamples(gl, program, width, height, samples, shouldStop) {
+  const band = createBandState(height);
+  for (let sample = 0; sample < samples; sample++) await drawOneSample(gl, program, width, height, sample, band, shouldStop);
+}
+
+export async function traceOnGpu(scene, camera, rawOptions, shouldStop) {
+  const options = await withBlueNoiseTile(rawOptions);
   const { gl, gpu } = getContext();
-  const { program, compileSeconds } = getKernel(sceneUsesSubsurface(scene.materials));
+  const { program, compileSeconds } = getKernel(sceneUsesSubsurface(scene.materials), false, options);
   const { width, height, samples } = options;
   gl.useProgram(program);
-  const { lightCount } = uploadScene(gl, program, scene);
+  const { lightCount } = uploadScene(gl, program, scene, options);
   setSceneUniforms(gl, program, scene, camera, options, lightCount);
   createTargets(gl, width, height);
   await drawSamples(gl, program, width, height, samples, shouldStop);

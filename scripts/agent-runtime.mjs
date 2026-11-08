@@ -14,6 +14,7 @@ import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
 import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS } from '../src/agent-scene-capabilities.js';
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
+import { chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
 import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
@@ -77,6 +78,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   if (!['gpu', 'cpu'].includes(backend)) {
     throw new RangeError('backend must be gpu or cpu.');
   }
+  let nativeTracerLocator;
   if (!Number.isInteger(memory) || memory < 32 || memory > MAXIMUM_MEMORY_MIB) {
     throw new RangeError(`memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
@@ -317,6 +319,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         return url.origin === origin ? route.continue() : route.abort();
       });
       page.setDefaultTimeout(15000);
+      if (backend === 'gpu') await page.exposeFunction('__67jsNativeBake', answerNativeBake);
       if (!kernelWorkers) {
         await page.addInitScript(() => { globalThis.__67jsKernelWorkers = 'off'; });
       }
@@ -331,6 +334,22 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       phase = 'failed';
       await shutdownResources();
       throw error;
+    }
+  }
+
+  // The page's bridge to the native tracer for recipe bakes: `probe` says whether it can run, `trace` bakes the texels the page
+  // packed. A failure comes back as `{ error }` so the page falls back to its own GPU kernel, and the cause is remembered, so
+  // later bakes and render jobs skip the attempt.
+  async function answerNativeBake(request) {
+    nativeTracerLocator ??= createNativeTracerLocator();
+    const found = await nativeTracerLocator.find();
+    if (request.action === 'probe') return { available: Boolean(found.tracer) };
+    if (!found.tracer) return { error: found.reason };
+    try {
+      return traceTexelsNative({ tracer: found.tracer, request, maxSeconds: BAKE_WORKER_MAXIMUM_SECONDS });
+    } catch (error) {
+      if (!isNativeTimeLimitError(error)) nativeTracerLocator.markUnusable(error.message);
+      return { error: error.message };
     }
   }
 
@@ -459,10 +478,33 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           const { type, ...tracerOptions } = settings.renderer;
           if (settings.renderer.backend === 'gpu' && backend === 'cpu') throw new Error('renderer.backend "gpu" needs a runtime on the GPU backend, and this one runs on SwiftShader.');
           const choice = await chooseDenoiser(settings.renderer.denoise);
-          let traced = await jobPage.evaluate(input => window.__agentPreview.pathTrace(input), { ...frameInput, options: { width, height, ...tracerOptions, denoise: choice.denoise, threads: PATH_TRACER_THREADS } });
-          if (traced.features) {
-            traced = await finishWithOidn({ traced, denoiser: choice.denoiser, drawLinear: input => jobPage.evaluate(drawInput => window.__agentPreview.finishPathTrace(drawInput), input) });
+          nativeTracerLocator ??= createNativeTracerLocator();
+          const trace = await chooseTraceBackend({ requested: settings.renderer.backend, runtimeBackend: backend, locator: nativeTracerLocator });
+          const traceOptions = { width, height, ...tracerOptions, backend: trace.backend === 'native' ? 'gpu' : trace.backend, denoise: choice.denoise, threads: PATH_TRACER_THREADS };
+          let traced;
+          let backendNote = trace.note;
+          if (trace.backend === 'native') {
+            try {
+              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20 } });
+              traced = await traceFrameNative({ tracer: trace.tracer, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
+                seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
+                maxSeconds: tracerOptions.maxSeconds });
+            } catch (error) {
+              // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
+              if (isNativeTimeLimitError(error)) throw error;
+              nativeTracerLocator.markUnusable(error.message);
+              backendNote = (await nativeTracerLocator.find()).reason;
+              traceOptions.backend = backend === 'cpu' ? 'cpu' : 'gpu';
+              backendNote += ' The ' + traceOptions.backend + ' backend ran instead.';
+            }
           }
+          if (!traced) {
+            traced = await jobPage.evaluate(input => window.__agentPreview.pathTrace(input), { ...frameInput, options: traceOptions });
+            if (traced.features) {
+              traced = await finishWithOidn({ traced, denoiser: choice.denoiser, drawLinear: input => jobPage.evaluate(drawInput => window.__agentPreview.finishPathTrace(drawInput), input) });
+            }
+          }
+          if (backendNote) traced.report.backendNote = backendNote;
           if (choice.note) traced.report.denoiserNote = choice.note;
           metrics.renderSeconds += (performance.now() - renderStarted) / 1000;
           metrics.width = width;

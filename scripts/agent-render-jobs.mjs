@@ -146,6 +146,7 @@ function settingsFrom(input, clips, recipe) {
   return result;
 }
 
+const PATH_TRACER_BACKENDS = ['cpu', 'gpu', 'native'];
 const FRACTIONAL_RENDERER_FIELDS = new Set(['maxSeconds', 'noiseThreshold']);
 
 function rendererFrom(renderer, passes) {
@@ -155,7 +156,7 @@ function rendererFrom(renderer, passes) {
   const denoise = renderer.denoise ?? true;
   if (typeof denoise !== 'boolean' && !PATH_TRACER_DENOISERS.includes(denoise)) throw new TypeError(`renderer.denoise must be a boolean or one of ${PATH_TRACER_DENOISERS.join(', ')}.`);
   const backend = renderer.backend ?? 'cpu';
-  if (backend !== 'cpu' && backend !== 'gpu') throw new TypeError('renderer.backend must be cpu or gpu.');
+  if (!PATH_TRACER_BACKENDS.includes(backend)) throw new TypeError('renderer.backend must be cpu, gpu or native.');
   const result = { type: 'pathTracer', backend, denoise };
   for (const name of Object.keys(PATH_TRACER_JOB_LIMITS)) {
     const { minimum, maximum, default: fallback } = PATH_TRACER_JOB_LIMITS[name];

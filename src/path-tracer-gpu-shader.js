@@ -1,3 +1,5 @@
+import { CACHE_DECLARATIONS, CACHE_OUTPUT, CACHE_RECORD, CACHE_TERMINAL } from './path-tracer-radiance-cache.js';
+import { LIGHT_TREE_FIRST_HIT_LIGHTS, LIGHT_TREE_NODE_TEXELS } from './path-tracer-light-tree.js';
 import { SUBSURFACE_FUNCTIONS, SUBSURFACE_LOBE, SUBSURFACE_SPLIT, SUBSURFACE_UNIFORM } from './path-tracer-gpu-subsurface.js';
 
 // The GPU path tracer kernel: a WebGL2 fragment shader that follows the same paths as the CPU tracer in
@@ -26,6 +28,12 @@ const CAMERA_MAIN = `void main() {
   if (uHasSun) sunFrame = buildFrame(uSunDirection);
   float jitterX = hashJitter(pixel, sampleIndex, uSeed, 1u);
   float jitterY = hashJitter(pixel, sampleIndex, uSeed, 2u);
+  if (BLUE_NOISE_FIRST && sampleIndex == 0u) {
+    blueSample = blueNoiseAt(pixelCoordinate);
+    jitterX = blueSample.x;
+    jitterY = blueSample.y;
+    blueDrawsUsed = 0;
+  }
   float screenX = ((float(pixelCoordinate.x) + jitterX) / float(uSize.x) * 2.0 - 1.0) * uHalfSize.x;
   float screenY = (1.0 - (float(row) + jitterY) / float(uSize.y) * 2.0) * uHalfSize.y;
   vec3 rayDirection = normalize(uForward + uRight * screenX + uAbove * screenY);
@@ -55,7 +63,75 @@ const TEXEL_MAIN = `void main() {
   if (texelIndex >= uTexelCount) rayDirection = normal;
   tracePath(origin, rayDirection, pixel, sampleIndex);`;
 
-const buildSource = (hasSubsurface, texelBake) => `#version 300 es
+// The light tree walk of path-tracer-light-tree.js (nodeImportance, leftChildProbability, chooseLightFromTree), four texels a node.
+const LIGHT_TREE_FUNCTIONS = `
+/** The maximum and the minimum importance measure of one tree node for the current hit point. */
+vec2 lightTreeImportance(int node, vec3 normal) {
+  int base = node * LIGHT_TREE_TEXELS;
+  vec4 minimumEnergy = fetchData(uLightTree, base);
+  vec4 maximumCosineO = fetchData(uLightTree, base + 1);
+  vec4 axisCosineE = fetchData(uLightTree, base + 2);
+  float energy = minimumEnergy.w;
+  vec3 delta = 0.5 * (minimumEnergy.xyz + maximumCosineO.xyz) - hitPoint;
+  float halfDiagonal = 0.5 * length(maximumCosineO.xyz - minimumEnergy.xyz);
+  float centerDistance = length(delta);
+  float nearest = max(max(centerDistance, halfDiagonal), 1e-4);
+  float farthest = centerDistance + halfDiagonal;
+  float minimumMeasure = energy / max(farthest * farthest, 1e-8);
+  if (centerDistance <= halfDiagonal) return vec2(energy / (nearest * nearest), minimumMeasure);
+  vec3 toward = delta / centerDistance;
+  float ratio = halfDiagonal / centerDistance;
+  float thetaU = acos(sqrt(max(0.0, 1.0 - ratio * ratio)));
+  float theta = acos(clamp(-dot(axisCosineE.xyz, toward), -1.0, 1.0));
+  float thetaO = acos(clamp(maximumCosineO.w, -1.0, 1.0));
+  float thetaE = acos(clamp(axisCosineE.w, -1.0, 1.0));
+  float thetaPrime = max(theta - thetaO - thetaU, 0.0);
+  if (thetaPrime >= thetaE) return vec2(0.0, minimumMeasure);
+  float surfaceTheta = acos(clamp(dot(normal, toward), -1.0, 1.0));
+  float surfaceCosine = max(cos(max(surfaceTheta - thetaU, 0.0)), 0.0);
+  return vec2(energy * cos(thetaPrime) * surfaceCosine / (nearest * nearest), minimumMeasure);
+}
+
+/**
+ * Draws one emitter. The sun and the sky keep their uniform share of the draw; a local light is reached by walking the
+ * light tree from the root, each step choosing a child by the mix of its two measures. Returns -1 when no light is worth
+ * sampling. With one local light, or none, this is the uniform choice.
+ */
+int chooseEmitterByTree(vec3 normal, out float probability) {
+  float uniformShare = 1.0 / float(uEmitterCount);
+  int firstLightEmitter = uHasSun ? 1 : 0;
+  int emitter = min(int(floor(nextRandom() * float(uEmitterCount))), uEmitterCount - 1);
+  probability = uniformShare;
+  int lightIndex = emitter - firstLightEmitter;
+  if (lightIndex < 0 || lightIndex >= uLightCount) return emitter;
+  int node = 0;
+  float pathProbability = 1.0;
+  for (int step = 0; step < 64; step++) {
+    vec4 links = fetchData(uLightTree, node * LIGHT_TREE_TEXELS + 3);
+    if (links.x < 0.0) {
+      probability = float(uLightCount) * uniformShare * pathProbability;
+      return firstLightEmitter + int(links.z);
+    }
+    vec2 left = lightTreeImportance(int(links.x), normal);
+    vec2 right = lightTreeImportance(int(links.y), normal);
+    float totalMaximum = left.x + right.x;
+    float totalMinimum = left.y + right.y;
+    if (!(totalMinimum > 0.0)) return -1;
+    float leftProbability = left.y / totalMinimum;
+    if (totalMaximum > 0.0) leftProbability = 0.5 * (left.x / totalMaximum + leftProbability);
+    if (nextRandom() < leftProbability) {
+      node = int(links.x);
+      pathProbability *= leftProbability;
+    } else {
+      node = int(links.y);
+      pathProbability *= 1.0 - leftProbability;
+    }
+  }
+  return -1;
+}
+`;
+
+const buildSource = (hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache, lightTree) => `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -68,6 +144,13 @@ const int TRIANGLE_TEXELS = ${TRIANGLE_TEXELS};
 const int MATERIAL_TEXELS = ${MATERIAL_TEXELS};
 const int LIGHT_TEXELS = ${LIGHT_TEXELS};
 const int STACK_SIZE = 128;
+const bool BLUE_NOISE_FIRST = ${blueNoise};
+const bool IMPORTANT_LIGHTS = ${lightImportance};
+const bool LIGHT_TREE = ${lightTree};
+const int LIGHT_TREE_FIRST_HIT_LIGHTS = ${LIGHT_TREE_FIRST_HIT_LIGHTS};
+const int LIGHT_TREE_TEXELS = ${LIGHT_TREE_NODE_TEXELS};
+// The real-time kernel picks one emitter at the first hit too (the denoiser averages the choices over frames) instead of tracing a shadow ray to every emitter.
+const bool STOCHASTIC_FIRST_HIT = ${radianceCache};
 const int ALPHA_STEP_LIMIT = 8;
 const int RUSSIAN_ROULETTE_START = 3;
 const float MINIMUM_ALPHA = 1e-3;
@@ -78,10 +161,12 @@ uniform sampler2D uNodes;
 uniform sampler2D uTriangles;
 uniform sampler2D uMaterials;
 uniform sampler2D uLights;
+${lightTree ? 'uniform sampler2D uLightTree;' : ''}
 uniform sampler2D uAtlas;
 uniform sampler2D uEnvironment;
 uniform sampler2D uEnvironmentRows;
 uniform sampler2D uEnvironmentPixels;
+uniform sampler2D uBlueNoise;
 
 uniform vec3 uEye;
 uniform vec3 uForward;
@@ -115,6 +200,7 @@ layout(location = 0) out vec4 outRadiance;
 layout(location = 1) out vec4 outAlbedo;
 layout(location = 2) out vec4 outNormal;
 layout(location = 3) out vec4 outStatistics;
+${radianceCache ? CACHE_DECLARATIONS : ''}
 
 vec4 fetchData(sampler2D source, int index) {
   return texelFetch(source, ivec2(index & TEXTURE_MASK, index >> TEXTURE_SHIFT), 0);
@@ -136,7 +222,20 @@ void resetRandom(uint pixel, uint sampleIndex, uint seed) {
   rngState = mixed == 0u ? 1u : mixed;
 }
 
+// Blue noise tile of the first sample of a pixel: its first two values replace the first two random draws of the path.
+vec4 blueSample = vec4(0.0);
+int blueDrawsUsed = 2;
+
+vec4 blueNoiseAt(ivec2 pixelCoordinate) {
+  vec4 bytes = round(texelFetch(uBlueNoise, pixelCoordinate & 63, 0) * 255.0);
+  return (bytes + 0.5) / 256.0;
+}
+
 float nextRandom() {
+  if (BLUE_NOISE_FIRST && blueDrawsUsed < 2) {
+    blueDrawsUsed++;
+    return blueDrawsUsed == 1 ? blueSample.z : blueSample.w;
+  }
   rngState = rngState * 747796405u + 2891336453u;
   uint word = ((rngState >> ((rngState >> 28) + 4u)) ^ rngState) * 277803737u;
   word = (word >> 22) ^ word;
@@ -424,13 +523,19 @@ float alphaAtNearestHit() {
 bool occluded(vec3 origin, vec3 direction, float limit) {
   vec3 start = origin;
   float remaining = limit;
+  // A solid any-hit shadows the point wherever it lies; a transparent one hides what sits before it, so retrace for nearest hits.
+  bool anyHit = true;
   for (int attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
-    traceRay(start, direction, remaining, true);
+    traceRay(start, direction, remaining, anyHit);
     if (nearestSlot < 0) return false;
     int material = int(fetchData(uTriangles, nearestSlot * TRIANGLE_TEXELS).w) * MATERIAL_TEXELS;
     float cutoff = fetchData(uMaterials, material + 3).z;
     if (cutoff == 0.0) return true;
     if (alphaAtNearestHit() >= cutoff) return true;
+    if (anyHit) {
+      anyHit = false;
+      continue;
+    }
     float advance = nearestDistance + uSurfaceOffset;
     remaining -= advance;
     if (remaining <= 0.0) return false;
@@ -931,14 +1036,92 @@ void sampleEmitter(int depth, vec3 normal, int emitter) {
   addDirect(depth, normal, distance, weightMode);
 }
 
+/**
+ * A cheap estimate of the light one local light brings to the hit point: its power over the squared distance, the
+ * cosine at the surface and, for a spot light, whether the point is inside the cone. It ignores shadows. The estimate only
+ * steers the choice; the chance of the choice is divided out, so the image stays the same in expectation.
+ */
+float lightImportance(int index, vec3 normal) {
+  int base = index * LIGHT_TEXELS;
+  vec4 positionType = fetchData(uLights, base);
+  vec4 colorBit = fetchData(uLights, base + 1);
+  vec4 directionRadius = fetchData(uLights, base + 2);
+  vec4 acrossCone = fetchData(uLights, base + 3);
+  vec4 intensityRange = fetchData(uLights, base + 5);
+  vec3 delta = positionType.xyz - hitPoint;
+  float distanceSquared = max(dot(delta, delta), 1e-8);
+  vec3 toLight = delta * inversesqrt(distanceSquared);
+  float cosine = 0.1 + max(dot(normal, toLight), 0.0);
+  float power = luminance(colorBit.rgb) * intensityRange.x;
+  int type = int(positionType.w);
+  if (type == 2) return power * max(-dot(directionRadius.xyz, toLight), 0.0) * cosine / distanceSquared;
+  float coneFactor = 1.0;
+  if (type == 1 && -dot(directionRadius.xyz, toLight) - acrossCone.w <= 0.0) coneFactor = 0.0;
+  return power * coneFactor * cosine * pointLightFalloff(distanceSquared, intensityRange.y, directionRadius.w);
+}
+
+/**
+ * Draws one emitter. The sun and the sky keep their uniform share; the local lights split their shares by importance,
+ * mixed with a uniform part so no light that could contribute has no chance. With one local light, or none, this is the
+ * uniform choice with the same random number.
+ */
+int chooseEmitterByImportance(vec3 normal, out float probability) {
+  float uniformShare = 1.0 / float(uEmitterCount);
+  float draw = nextRandom();
+  int firstLightEmitter = uHasSun ? 1 : 0;
+  float total = 0.0;
+  if (uLightCount > 1) {
+    for (int index = 0; index < uLightCount; index++) total += lightImportance(index, normal);
+  }
+  if (!(total > 0.0)) {
+    probability = uniformShare;
+    return min(int(floor(draw * float(uEmitterCount))), uEmitterCount - 1);
+  }
+  float lightsShare = float(uLightCount) * uniformShare;
+  float cumulative = 0.0;
+  int chosen = uEmitterCount - 1;
+  probability = uniformShare;
+  for (int emitter = 0; emitter < uEmitterCount; emitter++) {
+    int index = emitter - firstLightEmitter;
+    float share = uniformShare;
+    if (index >= 0 && index < uLightCount) share = lightsShare * (0.9 * lightImportance(index, normal) / total + 0.1 / float(uLightCount));
+    cumulative += share;
+    if (draw < cumulative) {
+      chosen = emitter;
+      probability = share;
+      break;
+    }
+    probability = share;
+  }
+  return chosen;
+}
+
+${lightTree ? LIGHT_TREE_FUNCTIONS : ''}
 /** The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it. */
 void addLights(int depth, vec3 normal) {
-  if (depth == 0 || uEmitterCount <= 1) {
+  bool firstHitByTree = LIGHT_TREE && uLightCount > LIGHT_TREE_FIRST_HIT_LIGHTS;
+  if ((depth == 0 && !STOCHASTIC_FIRST_HIT && !firstHitByTree) || uEmitterCount <= 1) {
     selectionProbability = 1.0;
     for (int emitter = 0; emitter < uEmitterCount; emitter++) {
       sampleEmitter(depth, normal, emitter);
       flushShadowRay();
     }
+    return;
+  }
+${lightTree ? `  if (LIGHT_TREE) {
+    int chosen = chooseEmitterByTree(normal, selectionProbability);
+    if (chosen >= 0) {
+      sampleEmitter(depth, normal, chosen);
+      flushShadowRay();
+    }
+    // The sky is drawn with its uniform share whatever light was chosen: that share weighs the next escape ray.
+    selectionProbability = 1.0 / float(uEmitterCount);
+    return;
+  }
+` : ''}  if (IMPORTANT_LIGHTS) {
+    int chosen = chooseEmitterByImportance(normal, selectionProbability);
+    sampleEmitter(depth, normal, chosen);
+    flushShadowRay();
     return;
   }
   selectionProbability = 1.0 / float(uEmitterCount);
@@ -1021,6 +1204,7 @@ ${hasSubsurface ? SUBSURFACE_SPLIT : ''}
     }
     if (needsLights) addLights(depth, normal);
     inMedium = false;
+${radianceCache ? CACHE_TERMINAL : ''}
     if (inFog) {
       float cosine = sampleHenyeyGreensteinCosine(uVolumeShape.y, nextRandom());
       float sine = sqrt(max(0.0, 1.0 - cosine * cosine));
@@ -1063,6 +1247,7 @@ ${hasSubsurface ? SUBSURFACE_LOBE : ''}
         previousPdf = surfacePdf;
         afterMirror = false;
       }
+${radianceCache ? CACHE_RECORD : ''}
     }
     position = hitPoint + direction * uSurfaceOffset;
     if (!survivesRoulette(depth)) break;
@@ -1080,6 +1265,7 @@ ${texelBake ? TEXEL_MAIN : CAMERA_MAIN}
   outAlbedo = vec4(featureAlbedo, 0.0);
   outNormal = vec4(featureNormal, 0.0);
   outStatistics = vec4(sampleLuminance, sampleLuminance * sampleLuminance, firstLegEscaped, 0.0);
+${radianceCache ? CACHE_OUTPUT : ''}
 }
 `;
 
@@ -1087,8 +1273,8 @@ ${texelBake ? TEXEL_MAIN : CAMERA_MAIN}
  * The kernel; `hasSubsurface` compiles in the random walk, which only scenes with a subsurface part need. `texelBake`
  * starts every path at a lightmap texel instead of the camera (see light-bake-gpu.js).
  */
-export function buildFragmentSource({ hasSubsurface = false, texelBake = false } = {}) {
-  return buildSource(hasSubsurface, texelBake);
+export function buildFragmentSource({ hasSubsurface = false, texelBake = false, blueNoise = false, lightImportance = false, radianceCache = false, lightTree = false } = {}) {
+  return buildSource(hasSubsurface, texelBake, blueNoise, lightImportance, radianceCache, lightTree);
 }
 
 export const FRAGMENT_SOURCE = buildFragmentSource();

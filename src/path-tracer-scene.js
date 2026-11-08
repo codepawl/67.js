@@ -69,13 +69,44 @@ function srgbToLinearTable() {
 
 const SRGB_TO_LINEAR = srgbToLinearTable();
 
+// Pixels read back from browser images, kept per image so parts that share a texture read it once.
+const drawablePixels = new WeakMap();
+
+/**
+ * RGBA8 pixels of a texture image: its own `data`, or, for a decoded glTF texture (an ImageBitmap, an image element or a
+ * canvas), the pixels read back through a 2D canvas. GPU-compressed images and runtimes without a canvas give null.
+ */
+export function texturePixels(image, createCanvas = defaultCanvas) {
+  if (!image?.width || !image.height) return null;
+  if (image.data) return image.data;
+  if (image.compressed || typeof image !== 'object') return null;
+  if (drawablePixels.has(image)) return drawablePixels.get(image);
+  const canvas = createCanvas(image.width, image.height);
+  const context = canvas?.getContext('2d', { willReadFrequently: true });
+  if (!context) return null;
+  context.drawImage(image, 0, 0);
+  const pixels = context.getImageData(0, 0, image.width, image.height).data;
+  drawablePixels.set(image, pixels);
+  return pixels;
+}
+
+function defaultCanvas(width, height) {
+  if (typeof OffscreenCanvas === 'function') return new OffscreenCanvas(width, height);
+  const canvas = globalThis.document?.createElement('canvas');
+  if (!canvas) return null;
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
 function resolveTexture(descriptor) {
   const image = descriptor?.image;
-  if (!image?.data || !image.width || !image.height) return null;
+  const data = texturePixels(image);
+  if (!data) return null;
   return {
     width: image.width,
     height: image.height,
-    data: image.data,
+    data,
     colorLookup: descriptor.colorSpace === 'linear' ? null : SRGB_TO_LINEAR,
     repeat: descriptor.wrapS === REPEAT_WRAP,
   };
