@@ -939,7 +939,8 @@ function stagePose(stagedState, time) {
   const clothGeometries = sampledGeometries(stagedState, time);
   // Staged last: a pose pending on a decoded asset must be committed or discarded, so nothing above may throw after it.
   const assetClips = stagedState.assetRuntime.animators.length ? agentSceneModule('assets').stageAssetClips(stagedState.assetRuntime, graph, time) : null;
-  return { graph, materialUpdates, camera, time, clothGeometries, assetClips, hiddenNodes };
+  const movedLook = stagedState.motionSampler && agentSceneModule('motion').motionMovesLook(sampled) ? sampled : null;
+  return { graph, materialUpdates, camera, time, clothGeometries, assetClips, hiddenNodes, movedLook };
 }
 
 // Cloth and particles replace the geometry of their own nodes at a sampled time; no node belongs to both.
@@ -1018,6 +1019,7 @@ function publishPose(stagedState, pose) {
   }
   for (const sequence of stagedState.sequences) sequence.seek(pose.time);
   stagedState.renderCamera = pose.camera;
+  stagedState.movedLook = pose.movedLook;
   stagedState.motionTime = pose.time;
   const nextParts = partsWithCloth(stagedState.restParts, pose.clothGeometries, stagedState.parts);
   const partsChanged = nextParts !== stagedState.parts;
@@ -1472,14 +1474,17 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       }
       return state.motionTime;
     },
+    // After sampleMotion, the lights, sun and sky the motion tracks set at that time; the recipe keeps its authored values.
     get environment() {
-      return structuredClone(state.recipe.environment);
+      const environment = structuredClone(state.recipe.environment);
+      return state.movedLook ?agentSceneModule('motion').motionEnvironment(environment, state.movedLook) : environment;
     },
     get postPasses() {
       return structuredClone(state.recipe.postPasses ?? []);
     },
     get effects() {
-      return structuredClone(state.recipe.effects);
+      const effects = structuredClone(state.recipe.effects);
+      return state.movedLook?.effects ?agentSceneModule('motion').motionEffects(effects, state.movedLook) : effects;
     },
     get shadow() {
       return structuredClone(state.recipe.shadow);

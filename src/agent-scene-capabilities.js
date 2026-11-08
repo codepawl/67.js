@@ -282,6 +282,13 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     notes: 'Bounced light from point, spot, area and key lights. Reruns when parts, lights, materials or bake change. Skips alpha, skin, morph, hair, cloth (bake.skipped). A preset shrinks to fit, never refuses (bake.used, bake.reduction); explicit settings fail over maxPathWork or past maxSeconds. No environment map or specular. Probes: specular only, none in glTF.',
     limits: Object.freeze({ maxSeconds: BAKE_MAXIMUM_SECONDS, workerMaxSeconds: BAKE_WORKER_MAXIMUM_SECONDS, maxPathWork: BAKE_EXPLICIT_PATH_WORK_LIMIT, maxPointLights: MAX_POINT_LIGHTS }),
   }),
+  motionLook: Object.freeze({
+    light: 'id point:N, spot:N or area:N (index in its list): position, color, intensity; direction on spot and area',
+    sun: 'direction, color, intensity (lightDirection, keyColor, keyIntensity)',
+    environment: 'skyTop, skyBottom, fogColor, fogDensity, volumeFogDensity, ambientIntensity, fillIntensity, environmentIntensity, environmentRotation',
+    effects: 'exposure, focusDistance (needs effects.depthOfField.blur above 0; an fStop camera focuses on its target)',
+    note: 'Same keyframes and easing as other tracks. After sampleMotion, scene.environment and scene.effects hold the sampled values; the recipe keeps its authored ones. Baked light (bake) does not follow.',
+  }),
   motionLimits: Object.freeze({ maxTracks: 128, maxKeyframesPerTrack: 64, maxKeyframes: 2048, maxDuration: 30 }),
 });
 
