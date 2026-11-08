@@ -1,6 +1,6 @@
-import { depthLayerOf, MAXIMUM_DEPTH_LAYER } from './depth-layer.js';
+import { depthLayerOf, MAXIMUM_DEPTH_LAYER, setFlushDepthLayers } from './depth-layer.js';
 
-// Loaded on demand (renderer diagnostics, scene_inspect, resolveCoplanar), never part of the core bundle.
+// The renderer runs resolveFlushParts once on the parts it is built with; the diagnostics and resolveCoplanar use the same search.
 // Finds pairs of parts that draw the same plane in the same place, which z-fight: a sign flush with a wall, a road marking
 // on asphalt, two boxes whose visible faces coincide. The work is bounded: a grid over part bounds, then triangles only
 // inside the shared box of a pair, with a fixed budget for the whole scene (`truncated` says it ran out).
@@ -14,7 +14,8 @@ export const COPLANAR_MINIMUM_AREA = 1e-4;
 /** The distance suggested in the fix text, in metres. */
 export const SUGGESTED_OFFSET = 0.002;
 const DEFAULT_WORK_BUDGET = 1_000_000;
-const MAXIMUM_TRIANGLES_PER_PART_IN_PAIR = 512;
+const PRIORITY_BINS = 12;
+const MAXIMUM_LISTED_PAIRS = 3_000_000;
 const SAME_FACING = Math.cos(Math.PI / 180);
 const REPORTED_PAIRS = 8;
 
@@ -59,27 +60,37 @@ function determinantSign(matrix) {
   return determinant < 0 ? -1 : 1;
 }
 
-// World-space triangles of one part that touch `region`, each as corners (9 numbers) plus a unit normal (3).
-function trianglesInRegion(part, region, tolerance) {
+// A plane is hashed by its normal (sign folded, 0.01 steps) and its offset (buckets of twice the tolerance), so two
+// triangles on one plane meet in a bucket without testing every pair of triangles.
+const NORMAL_STEPS = 100;
+const OFFSET_BUCKET_RANGE = 2 ** 27;
+
+function planeKey(normal, corners, tolerance) {
+  const sign = normal[[0, 1, 2].reduce((best, axis) => (Math.abs(normal[axis]) > Math.abs(normal[best]) ? axis : best), 0)] < 0 ? -1 : 1;
+  const [x, y, z] = normal.map(component => Math.round(component * sign * NORMAL_STEPS) + NORMAL_STEPS);
+  const offset = (corners[0] * normal[0] + corners[1] * normal[1] + corners[2] * normal[2]) * sign;
+  const position = offset / (2 * tolerance);
+  const bucket = Math.floor(position);
+  const normalKey = (x * (2 * NORMAL_STEPS + 1) + y) * (2 * NORMAL_STEPS + 1) + z;
+  const nearer = position - bucket < 0.5 ? bucket - 1 : bucket + 1;
+  const toKey = value => normalKey * OFFSET_BUCKET_RANGE + value + OFFSET_BUCKET_RANGE / 2;
+  return { own: toKey(bucket), nearer: toKey(nearer) };
+}
+
+// Every non-degenerate world-space triangle of a part, each as corners (9 numbers), a unit normal (3) and its plane keys.
+function worldTriangles(part, tolerance) {
   const { positions, indices } = part.geometry;
   const matrix = part.matrix;
   const flip = determinantSign(matrix);
   const triangles = [];
-  const corners = new Float64Array(9);
   for (let triangle = 0; triangle < indices.length / 3; triangle++) {
-    let outside = false;
+    const corners = new Float64Array(9);
     for (let corner = 0; corner < 3; corner++) {
       const vertex = indices[triangle * 3 + corner] * 3;
       for (let axis = 0; axis < 3; axis++) {
         corners[corner * 3 + axis] = matrix[axis] * positions[vertex] + matrix[4 + axis] * positions[vertex + 1] + matrix[8 + axis] * positions[vertex + 2] + matrix[12 + axis];
       }
     }
-    for (let axis = 0; axis < 3 && !outside; axis++) {
-      const low = Math.min(corners[axis], corners[3 + axis], corners[6 + axis]);
-      const high = Math.max(corners[axis], corners[3 + axis], corners[6 + axis]);
-      outside = high < region[axis] - tolerance || low > region[3 + axis] + tolerance;
-    }
-    if (outside) continue;
     const edgeOne = [corners[3] - corners[0], corners[4] - corners[1], corners[5] - corners[2]];
     const edgeTwo = [corners[6] - corners[0], corners[7] - corners[1], corners[8] - corners[2]];
     const normal = [
@@ -89,10 +100,24 @@ function trianglesInRegion(part, region, tolerance) {
     ];
     const length = Math.hypot(...normal);
     if (!(length > 1e-12)) continue;
-    triangles.push({ corners: Float64Array.from(corners), normal: normal.map(component => component * flip / length) });
-    if (triangles.length >= MAXIMUM_TRIANGLES_PER_PART_IN_PAIR) break;
+    const unitNormal = normal.map(component => component * flip / length);
+    triangles.push({ corners, normal: unitNormal, planes: planeKey(unitNormal, corners, tolerance) });
   }
   return triangles;
+}
+
+// The part's triangles that touch `region`; the world-space triangles are built once per part and kept on its entry.
+function trianglesInRegion(entry, region, tolerance, budget) {
+  entry.triangles ??= worldTriangles(entry.part, tolerance);
+  budget.work += entry.triangles.length / 32;
+  return entry.triangles.filter(({ corners }) => {
+    for (let axis = 0; axis < 3; axis++) {
+      const low = Math.min(corners[axis], corners[3 + axis], corners[6 + axis]);
+      const high = Math.max(corners[axis], corners[3 + axis], corners[6 + axis]);
+      if (high < region[axis] - tolerance || low > region[3 + axis] + tolerance) return false;
+    }
+    return true;
+  });
 }
 
 function planeDistance(first, second, corner) {
@@ -160,17 +185,39 @@ function resolvedByLayer(first, second) {
   return depthLayerOf(first) !== depthLayerOf(second);
 }
 
+// Whether the boxes of two triangles touch, a cheap test before the plane and area checks.
+function trianglesMeet(first, second, tolerance) {
+  for (let axis = 0; axis < 3; axis++) {
+    const firstLow = Math.min(first.corners[axis], first.corners[3 + axis], first.corners[6 + axis]);
+    const firstHigh = Math.max(first.corners[axis], first.corners[3 + axis], first.corners[6 + axis]);
+    const secondLow = Math.min(second.corners[axis], second.corners[3 + axis], second.corners[6 + axis]);
+    const secondHigh = Math.max(second.corners[axis], second.corners[3 + axis], second.corners[6 + axis]);
+    if (firstHigh < secondLow - tolerance || secondHigh < firstLow - tolerance) return false;
+  }
+  return true;
+}
+
 function pairOverlap(first, second, region, tolerance, budget) {
   const bothSides = first.part.material?.doubleSided === true || second.part.material?.doubleSided === true;
-  const firstTriangles = trianglesInRegion(first.part, region, tolerance);
-  const secondTriangles = trianglesInRegion(second.part, region, tolerance);
+  const firstTriangles = trianglesInRegion(first, region, tolerance, budget);
+  const secondTriangles = trianglesInRegion(second, region, tolerance, budget);
+  const secondByPlane = new Map();
+  for (const secondTriangle of secondTriangles) {
+    const members = secondByPlane.get(secondTriangle.planes.own);
+    if (members) members.push(secondTriangle);
+    else secondByPlane.set(secondTriangle.planes.own, [secondTriangle]);
+  }
   let area = 0;
   let distance = 0;
   let normal = null;
   let largestPiece = 0;
   for (const firstTriangle of firstTriangles) {
     if (budget.work > budget.limit) break;
-    for (const secondTriangle of secondTriangles) {
+    const sameOffset = secondByPlane.get(firstTriangle.planes.own) ?? [];
+    const nearerOffset = secondByPlane.get(firstTriangle.planes.nearer) ?? [];
+    for (const secondTriangle of [...sameOffset, ...nearerOffset]) {
+      budget.work += 1 / 64;
+      if (!trianglesMeet(firstTriangle, secondTriangle, tolerance)) continue;
       budget.work++;
       const facing = firstTriangle.normal[0] * secondTriangle.normal[0] + firstTriangle.normal[1] * secondTriangle.normal[1] + firstTriangle.normal[2] * secondTriangle.normal[2];
       const visibleTogether = facing >= SAME_FACING || (bothSides && facing <= -SAME_FACING);
@@ -267,16 +314,31 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
   const budget = { work: 0, limit: workBudget };
   const overlaps = [];
   if (entries.length < 2) return { overlaps, truncated: false, work: 0 };
-  const test = (first, second) => {
-    budget.work++;
+  // The sweep first lists every pair whose boxes meet (cheap), binned by how much flat contact the shared box offers, so the
+  // work budget goes to the pairs that can show a large flush face before it goes to edge contacts and thin slivers.
+  const bins = Array.from({ length: PRIORITY_BINS }, () => []);
+  let listed = 0;
+  const collect = (first, second) => {
     const region = boundsOverlapRegion(first.bounds, second.bounds, tolerance);
-    if (!region || resolvedByLayer(first.part, second.part)) return;
-    const found = pairOverlap(first, second, region, tolerance, budget);
-    if (!found) return;
-    const firstIsLarger = diagonal(first.bounds) >= diagonal(second.bounds);
-    overlaps.push({ smaller: (firstIsLarger ? second : first).part, larger: (firstIsLarger ? first : second).part, ...found });
+    if (!region || resolvedByLayer(first.part, second.part) || listed >= MAXIMUM_LISTED_PAIRS) return;
+    const extents = [region[3] - region[0], region[4] - region[1], region[5] - region[2]].sort((smallest, largest) => smallest - largest);
+    const faceArea = extents[1] * extents[2];
+    const flatBonus = extents[0] <= tolerance ? PRIORITY_BINS / 2 : 0;
+    const sizeRank = Math.max(0, Math.min(PRIORITY_BINS / 2 - 1, Math.floor(Math.log10(Math.max(faceArea, 1e-6)) + 6)));
+    bins[PRIORITY_BINS - 1 - (flatBonus + sizeRank)].push(first, second, region);
+    listed++;
   };
-  forEachCandidatePair(entries, tolerance, budget, test);
+  forEachCandidatePair(entries, tolerance, { work: 0, limit: Infinity }, collect);
+  for (const bin of bins) {
+    for (let index = 0; index < bin.length && budget.work <= budget.limit; index += 3) {
+      const first = bin[index];
+      const second = bin[index + 1];
+      const found = pairOverlap(first, second, bin[index + 2], tolerance, budget);
+      if (!found) continue;
+      const firstIsLarger = diagonal(first.bounds) >= diagonal(second.bounds);
+      overlaps.push({ smaller: (firstIsLarger ? second : first).part, larger: (firstIsLarger ? first : second).part, ...found });
+    }
+  }
   const truncated = budget.work > workBudget;
   overlaps.sort((first, second) => second.area - first.area || String(first.smaller.name).localeCompare(String(second.smaller.name)));
   return { overlaps, truncated, work: budget.work };
@@ -345,6 +407,16 @@ export function installCoplanarDiagnostics(renderer, onOverlaps = null) {
     return problems;
   };
   return renderer;
+}
+
+/**
+ * Puts the smaller part of each coplanar pair on the next depth layer (a polygon offset at draw time, geometry never moves),
+ * for the parts of one scene. The renderer calls it once when it is built; a part that sets `decal` or `depthLayer` keeps its own.
+ */
+export function resolveFlushParts(parts) {
+  const layers = coplanarLayers(findCoplanarOverlaps(parts).overlaps);
+  setFlushDepthLayers(layers);
+  return layers.size;
 }
 
 /** `parts` with `depthLayer` set on the smaller part of each coplanar pair; other parts are returned as they are. */

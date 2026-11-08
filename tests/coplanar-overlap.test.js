@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene } from '../src/agent-scene.js';
-import { findCoplanarOverlaps, coplanarOverlapDiagnostics, installCoplanarDiagnostics, resolveCoplanarParts } from '../src/coplanar-overlap.js';
+import { findCoplanarOverlaps, coplanarOverlapDiagnostics, installCoplanarDiagnostics, resolveCoplanarParts, resolveFlushParts } from '../src/coplanar-overlap.js';
 import { depthLayerOf } from '../src/depth-layer.js';
 import { loadAgentSceneModules } from '../src/agent-scene-modules.js';
 import { frameDiagnostics } from '../src/frame-diagnostics.js';
@@ -114,4 +114,43 @@ test('the check is bounded: a work budget ends the sweep and says so', () => {
   const result = findCoplanarOverlaps(scene.parts, { workBudget: 0 });
   assert.equal(result.truncated, true);
   assert.deepEqual(coplanarOverlapDiagnostics({ overlaps: [], truncated: true }), []);
+});
+
+// A grid of `cells` x `cells` quads on the plane y = height, spanning `size` metres, as one part.
+function gridPart(name, size, cells, height) {
+  const positions = [];
+  const indices = [];
+  for (let row = 0; row <= cells; row++) {
+    for (let column = 0; column <= cells; column++) positions.push(column * size / cells, height, row * size / cells);
+  }
+  for (let row = 0; row < cells; row++) {
+    for (let column = 0; column < cells; column++) {
+      const corner = row * (cells + 1) + column;
+      indices.push(corner, corner + cells + 1, corner + 1, corner + 1, corner + cells + 1, corner + cells + 2);
+    }
+  }
+  const matrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  return { name, geometry: { positions: new Float32Array(positions), indices: new Uint32Array(indices) }, matrix, material: {} };
+}
+
+test('a flush pair of finely tessellated parts is found, with no cap on the triangles tested', () => {
+  const road = gridPart('road', 20, 40, 0);
+  const marking = gridPart('marking', 10, 30, 0.0004);
+  const crowd = Array.from({ length: 60 }, (unused, index) => gridPart(`filler${index}`, 20, 40, 5 + index));
+  const { overlaps, truncated } = findCoplanarOverlaps([...crowd, road, marking]);
+  assert.equal(truncated, false);
+  assert.equal(overlaps.length, 1);
+  assert.equal(overlaps[0].smaller.name, 'marking');
+  assert.ok(overlaps[0].area > 90);
+});
+
+test('flush parts get a layer beside the part, so the part objects and updateParts keep working', () => {
+  const road = gridPart('roadTwo', 4, 4, 0);
+  const marking = gridPart('markingTwo', 2, 2, 0);
+  const far = gridPart('farAway', 4, 4, 30);
+  assert.equal(resolveFlushParts([road, marking, far]), 1);
+  assert.equal(depthLayerOf(marking), 1);
+  assert.equal(depthLayerOf(road), 0);
+  assert.equal(depthLayerOf(far), 0);
+  assert.equal(marking.depthLayer, undefined);
 });
