@@ -10,6 +10,19 @@ export const LIGHT_TREE_NODE_TEXELS = 4;
 // Past this many local lights the tree also draws one light at the first hit; below it the first hit lights from every
 // light, as the other selections do.
 export const LIGHT_TREE_FIRST_HIT_LIGHTS = 16;
+// The share of a walk step that follows the minimum measure (no angles): it keeps a node the angle test culls reachable, so the
+// choice stays unbiased, but every bit of it is spent on lights that cannot reach the point. The rest follows the maximum measure.
+export const LIGHT_TREE_MINIMUM_SHARE = 0.1;
+
+// With lightSelection "auto" (the default) the tree draws the lights of a scene with more than this many local lights.
+export const LIGHT_TREE_AUTO_LIGHTS = 8;
+
+/** "auto" becomes "tree" for a scene with more than LIGHT_TREE_AUTO_LIGHTS local lights and "uniform" otherwise; other choices stay. */
+export function resolveLightSelection(selection, lights) {
+  if (selection !== 'auto') return selection;
+  const lightCount = lights.points.length + lights.spots.length + lights.areas.length;
+  return lightCount > LIGHT_TREE_AUTO_LIGHTS ? 'tree' : 'uniform';
+}
 
 const LEAF = -1;
 const HALF_PI = Math.PI / 2;
@@ -93,9 +106,83 @@ function centroidOf(entry, axis) {
   return entry.minimum[axis] + entry.maximum[axis];
 }
 
+const BUCKET_COUNT = 12;
+
+function boxArea(minimum, maximum) {
+  const extent = maximum.map((value, axis) => value - minimum[axis]);
+  const longest = Math.max(...extent, 1e-6);
+  // A point light has a flat or empty box: pad it a little so the area never reaches zero.
+  const padded = extent.map(value => value + longest * 1e-3);
+  return padded[0] * padded[1] + padded[1] * padded[2] + padded[2] * padded[0];
+}
+
+/** The orientation measure M_Omega of Conty and Kulla (equation 4): how much solid angle a cone of spread thetaO, thetaE lights. */
+export function orientationMeasure(thetaO, thetaE) {
+  const thetaW = Math.min(thetaO + thetaE, Math.PI);
+  const wide = 2 * Math.PI * (1 - Math.cos(thetaO));
+  const rim = 0.5 * Math.PI * (2 * thetaW * Math.sin(thetaO) - Math.cos(thetaO - 2 * thetaW) - 2 * thetaO * Math.sin(thetaO) + Math.cos(thetaO));
+  return wide + rim;
+}
+
+function mergeAll(entries) {
+  return entries.reduce((merged, entry) => (merged ? mergeEntries(merged, entry) : entry), null);
+}
+
+function saohCost(entry) {
+  return entry.energy * boxArea(entry.minimum, entry.maximum) * orientationMeasure(entry.thetaO, entry.thetaE);
+}
+
+/**
+ * Splits a group with the surface area orientation heuristic (Conty and Kulla, section 4.2): on each axis the centroids go in
+ * buckets, every bucket boundary is costed as energy times box area times orientation measure of both sides (scaled so a
+ * split across the longest axis is favoured), and the cheapest wins. Returns [left, right]; a degenerate cost falls back to the median.
+ */
+function splitGroup(group) {
+  const bounds = group.reduce((box, entry) => ({
+    minimum: box.minimum.map((value, axis) => Math.min(value, entry.minimum[axis])),
+    maximum: box.maximum.map((value, axis) => Math.max(value, entry.maximum[axis])),
+  }), { minimum: [Infinity, Infinity, Infinity], maximum: [-Infinity, -Infinity, -Infinity] });
+  const longestExtent = Math.max(...bounds.maximum.map((value, axis) => value - bounds.minimum[axis]), 1e-9);
+  let best = null;
+  for (let axis = 0; axis < 3; axis++) {
+    const centroids = group.map(entry => centroidOf(entry, axis));
+    const low = Math.min(...centroids);
+    const high = Math.max(...centroids);
+    if (!(high - low > 1e-9)) continue;
+    const buckets = Array.from({ length: BUCKET_COUNT }, () => []);
+    group.forEach((entry, index) => {
+      const slot = Math.min(BUCKET_COUNT - 1, Math.floor(((centroids[index] - low) / (high - low)) * BUCKET_COUNT));
+      buckets[slot].push(entry);
+    });
+    const extent = bounds.maximum[axis] - bounds.minimum[axis];
+    const lengthScale = longestExtent / Math.max(extent, longestExtent * 1e-3);
+    for (let boundary = 1; boundary < BUCKET_COUNT; boundary++) {
+      const left = buckets.slice(0, boundary).flat();
+      const right = buckets.slice(boundary).flat();
+      if (left.length === 0 || right.length === 0) continue;
+      const cost = lengthScale * (saohCost(mergeAll(left)) + saohCost(mergeAll(right)));
+      if (!best || cost < best.cost) best = { cost, left, right };
+    }
+  }
+  if (best && Number.isFinite(best.cost)) return [best.left, best.right];
+  let splitAxis = 0;
+  let longest = -1;
+  for (let axis = 0; axis < 3; axis++) {
+    const values = group.map(entry => centroidOf(entry, axis));
+    const extent = Math.max(...values) - Math.min(...values);
+    if (extent > longest) {
+      longest = extent;
+      splitAxis = axis;
+    }
+  }
+  const sorted = [...group].sort((first, second) => centroidOf(first, splitAxis) - centroidOf(second, splitAxis));
+  const middle = sorted.length >> 1;
+  return [sorted.slice(0, middle), sorted.slice(middle)];
+}
+
 /**
  * The tree over `lights` ({ points, spots, areas }), leaves numbered in the order the tracers sample the lights (points,
- * spots, areas). Nodes split the longest centroid axis at the median, so the tree is balanced: depth about log2(count).
+ * spots, areas). Nodes split by the surface area orientation heuristic (splitGroup), so the tree is not balanced: nodes join lights that are near and face the same way.
  * Returns { nodeCount, data } where each node is LIGHT_TREE_NODE_FLOATS floats:
  *   (box minimum, energy) (box maximum, cos thetaO) (cone axis, cos thetaE) (left child or -1, right child, light index, 0).
  */
@@ -115,20 +202,9 @@ export function buildLightTree(lights) {
       Object.assign(node, group[0]);
       return nodeIndex;
     }
-    let splitAxis = 0;
-    let longest = -1;
-    for (let axis = 0; axis < 3; axis++) {
-      const values = group.map(entry => centroidOf(entry, axis));
-      const extent = Math.max(...values) - Math.min(...values);
-      if (extent > longest) {
-        longest = extent;
-        splitAxis = axis;
-      }
-    }
-    const sorted = [...group].sort((first, second) => centroidOf(first, splitAxis) - centroidOf(second, splitAxis));
-    const middle = sorted.length >> 1;
-    node.left = build(sorted.slice(0, middle));
-    node.right = build(sorted.slice(middle));
+    const [leftGroup, rightGroup] = splitGroup(group);
+    node.left = build(leftGroup);
+    node.right = build(rightGroup);
     Object.assign(node, mergeEntries(nodes[node.left], nodes[node.right]));
     return nodeIndex;
   }
@@ -152,7 +228,7 @@ const importance = { maximum: 0, minimum: 0 };
  * What a node is worth to the shading point at (px, py, pz) with surface normal (nx, ny, nz), as two measures: the
  * maximum one (energy times the cosines of the best angles the box and cone allow, over the squared distance to the
  * nearest point the box may hold) and the minimum one (energy over the squared distance to the farthest, no angles). The
- * walk mixes them half and half, so a node the angle test culls still keeps a chance and the choice stays unbiased.
+ * walk mixes them by LIGHT_TREE_MINIMUM_SHARE, so a node the angle test culls still keeps a chance and the choice stays unbiased.
  */
 export function nodeImportance(data, node, px, py, pz, nx, ny, nz) {
   const base = node * LIGHT_TREE_NODE_FLOATS;
@@ -191,13 +267,13 @@ export function nodeImportance(data, node, px, py, pz, nx, ny, nz) {
   return importance;
 }
 
-/** The chance of taking the left child, mixing the maximum and the minimum measure evenly; -1 when both children are worth nothing. */
+/** The chance of taking the left child, mixing the maximum and the minimum measure; -1 when both children are worth nothing. */
 export function leftChildProbability(leftMaximum, leftMinimum, rightMaximum, rightMinimum) {
   const totalMaximum = leftMaximum + rightMaximum;
   const totalMinimum = leftMinimum + rightMinimum;
   if (!(totalMinimum > 0)) return -1;
   if (!(totalMaximum > 0)) return leftMinimum / totalMinimum;
-  return 0.5 * (leftMaximum / totalMaximum + leftMinimum / totalMinimum);
+  return (1 - LIGHT_TREE_MINIMUM_SHARE) * (leftMaximum / totalMaximum) + LIGHT_TREE_MINIMUM_SHARE * (leftMinimum / totalMinimum);
 }
 
 const choice = { lightIndex: -1, probability: 0 };
