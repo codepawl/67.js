@@ -129,11 +129,12 @@ test('rigid animation seeks are absolute, order independent, clip selectable and
   assert.throws(() => asset.applyAnimation(1), /disposed/);
 });
 
-test('mirrored static transforms reverse triangle winding without altering world matrices', async () => {
+test('mirrored static transforms keep the authored winding and the world matrix; the renderer owns the reversal', async () => {
   const asset = await parseGltf(triangleAsset(document => { document.nodes[2].scale = [-1, 1, 1]; }));
   assert.deepEqual(Array.from(asset.parts[0].geometry.indices), [0, 1, 2]);
-  assert.deepEqual(Array.from(asset.parts[1].geometry.indices), [0, 2, 1]);
+  assert.deepEqual(Array.from(asset.parts[1].geometry.indices), [0, 1, 2]);
   assert.equal(asset.parts[1].matrix[0], -1);
+  assert.equal(asset.parts[0].geometry, asset.parts[1].geometry);
   asset.dispose();
 });
 

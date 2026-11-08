@@ -875,7 +875,7 @@ function hasTriangleWithArea(positions, indices) {
   return false;
 }
 
-function convertGeometry(source, mirrored, primitive, secondUvSet, onIgnoredVertexAlpha, onRepair) {
+function convertGeometry(source, primitive, secondUvSet, onIgnoredVertexAlpha, onRepair) {
   const { position, normal, uv, uv1, color, skinIndex, skinWeight } = source.attributes;
   const zeroedBy = label => count => onRepair(`${count} non-finite ${label} value(s) were set to 0`);
   const positions = copyAttributeZeroingNonFinite(position, 3, zeroedBy('POSITION'));
@@ -923,13 +923,6 @@ function convertGeometry(source, mirrored, primitive, secondUvSet, onIgnoredVert
     });
     if (!normal && geometry.morphTargets.some(channels => channels.normals)) {
       onRepair('it has morph targets but no base NORMAL; base and per-target normals are generated from the triangles');
-    }
-  }
-  if (mirrored) {
-    for (let index = 0; index < indices.length; index += 3) {
-      const second = indices[index + 1];
-      indices[index + 1] = indices[index + 2];
-      indices[index + 2] = second;
     }
   }
   if (uv && uv.count !== position.count) throw new Error('TEXCOORD_0 and POSITION counts must match.');
@@ -1308,8 +1301,7 @@ export async function parseGltf(data, options = {}) {
           if (!keyed) continue;
         }
         const mirrored = singular ? false : determinant < 0;
-        const geometryMirrored = node.isSkinnedMesh ? false : mirrored;
-        const geometryKey = `${node.geometry.uuid}:${geometryMirrored}:${uvKey}:${secondUvSet}`;
+        const geometryKey = `${node.geometry.uuid}:${uvKey}:${secondUvSet}`;
         if (!geometries.has(geometryKey)) {
           actualVertices += node.geometry.attributes.position.count * (1 + (primitive.targets?.length ?? 0));
           throwOverruns(overLimit([], 'decoded vertices', actualVertices, 'maxVertices', limits.maxVertices));
@@ -1318,7 +1310,7 @@ export async function parseGltf(data, options = {}) {
               const warning = `Repaired ${primitiveLabel(document, association.meshes, association.primitives)}: ${reason}.`;
               if (!warnings.includes(warning)) warnings.push(warning);
             };
-            const converted = convertGeometry(node.geometry, geometryMirrored, primitive, secondUvSet, () => meshNamesWithIgnoredAlpha.add(node.name), onRepair);
+            const converted = convertGeometry(node.geometry, primitive, secondUvSet, () => meshNamesWithIgnoredAlpha.add(node.name), onRepair);
             if (converted.uvs) bakeUvTransform(converted.uvs, uvTransform);
             geometries.set(geometryKey, converted);
           } catch (error) {
