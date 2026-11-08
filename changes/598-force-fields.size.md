@@ -1,0 +1,2 @@
+- scene:agent-scene+lazy: force-fields.js (about 2 KB gzip), the cloth-fields.js wrapper and the fielded particle integrator load only with the cloth and particles modules, and the fields list reaches cloth and hair as well as particles.
+- entry:cloth: one optional hook call in the substep loop so the field code stays out of the core.

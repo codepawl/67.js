@@ -1,6 +1,9 @@
 // Stateless particles: every particle is a closed-form function of its own seeded launch values and the time.
 // There is no stepping, so the state at time t never depends on which times were visited before. A seek backwards
-// repeats exactly, and the same seed gives the same bytes.
+// repeats exactly, and the same seed gives the same bytes. Force fields have no closed form, so a particle under
+// fields is integrated from its own birth with a fixed step each time it is asked: still a pure function of time.
+
+import { addFieldAcceleration } from './force-fields.js';
 
 export const PARTICLE_LIMITS = Object.freeze({
   maxSystems: 4,
@@ -9,6 +12,7 @@ export const PARTICLE_LIMITS = Object.freeze({
   maxVertices: 100000,
   maxLifetime: 60,
   landingIterations: 32,
+  fieldStepSeconds: 1 / 120,
 });
 
 const NO_DRAG_THRESHOLD = 1e-6;
@@ -97,8 +101,10 @@ export function createParticleLaunches(settings) {
     birth[index] = rate ? index / rate : 0;
   }
   const launches = { count, birth, life, origin, velocity, size: particleSize, landing: new Float64Array(count).fill(Infinity) };
+  const hasFields = Boolean(forces.fields?.length);
   for (let index = 0; index < count; index++) {
-    launches.landing[index] = landingAge(launches, index, forces);
+    // Under fields the floor is met while integrating, not by the closed form.
+    launches.landing[index] = hasFields ? Infinity : landingAge(launches, index, forces);
   }
   return launches;
 }
@@ -156,6 +162,34 @@ function landingAge(launches, index, forces) {
   return high;
 }
 
+// Integrates one particle under gravity, drag toward the wind and every force field, from launch to `age`.
+// Semi-implicit Euler at a fixed step; a particle that reaches the floor stays there.
+function integrateUnderFields(launches, index, forces, age, target) {
+  const position = [launches.origin[index * 3], launches.origin[index * 3 + 1], launches.origin[index * 3 + 2]];
+  const velocity = [launches.velocity[index * 3], launches.velocity[index * 3 + 1], launches.velocity[index * 3 + 2]];
+  const acceleration = [0, 0, 0];
+  let elapsed = 0;
+  while (elapsed < age) {
+    const step = Math.min(PARTICLE_LIMITS.fieldStepSeconds, age - elapsed);
+    for (let axis = 0; axis < 3; axis++) {
+      acceleration[axis] = forces.gravity[axis] + forces.drag * (forces.wind[axis] - velocity[axis]);
+    }
+    for (const field of forces.fields) {
+      addFieldAcceleration(field, position, velocity, launches.birth[index] + elapsed, acceleration);
+    }
+    for (let axis = 0; axis < 3; axis++) {
+      velocity[axis] += acceleration[axis] * step;
+      position[axis] += velocity[axis] * step;
+    }
+    elapsed += step;
+    if (forces.floor !== undefined && position[1] <= forces.floor) {
+      position[1] = forces.floor;
+      break;
+    }
+  }
+  for (let axis = 0; axis < 3; axis++) target.position[axis] = position[axis];
+}
+
 function scaleAtLife(mode, lifeFraction) {
   if (mode === 'shrink') return 1 - lifeFraction;
   if (mode === 'grow') return lifeFraction;
@@ -172,6 +206,11 @@ export function particleStateAt(launches, index, forces, scaleMode, time, target
   if (age < 0 || age >= lifetime) {
     target.scale = 0;
     for (let component = 0; component < 3; component++) target.position[component] = launches.origin[index * 3 + component];
+    return target;
+  }
+  if (forces.fields?.length) {
+    integrateUnderFields(launches, index, forces, age, target);
+    target.scale = launches.size[index] * scaleAtLife(scaleMode, age / lifetime);
     return target;
   }
   const landed = launches.landing[index];

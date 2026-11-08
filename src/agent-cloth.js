@@ -1,5 +1,7 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { runKernel } from './kernel-offload.js';
+import { bakeClothWithFields } from './cloth-fields.js';
+import { normalizeForceFields } from './force-fields.js';
 import { bakeCloth, sampleClothFrames, weldVertices, CLOTH_LIMITS } from './cloth.js';
 import { recomputeNormals } from './geometry-normals.js';
 import { bakingContext, boundedArray, finiteNumber, knownKeys, rootNodeWithGeometry, vectorOfThree } from './agent-recipe-checks.js';
@@ -20,7 +22,7 @@ const MIN_BONE_LENGTH = 1e-4;
 const PIN_EDGES = ['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
 const COLLIDER_SHAPES = ['ball', 'box'];
 const MOVING_SHAPES = ['ball', 'capsule'];
-const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'sheets', 'colliders'];
+const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'fields', 'sheets', 'colliders'];
 const SHEET_FIELDS = ['node', 'pin', 'pinTo', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
 const PIN_TO_FIELDS = ['node', 'weight'];
 const FIXED_COLLIDER_FIELDS = ['node', 'shape'];
@@ -140,6 +142,7 @@ export function normalizeAgentCloth(input, recipe) {
   }
   if (input.gravity !== undefined) result.gravity = vectorOfThree(input.gravity, 'Cloth gravity', 1000);
   if (input.wind !== undefined) result.wind = vectorOfThree(input.wind, 'Cloth wind', 100);
+  if (input.fields !== undefined) result.fields = normalizeForceFields(input.fields, 'Cloth force field');
   if (input.colliders !== undefined) {
     const entries = boundedArray(input.colliders, MAX_COLLIDERS + MAX_MOVING_COLLIDERS, 'Cloth colliders');
     boundedArray(entries.filter(entry => !Object.hasOwn(entry ?? {}, 'attach') && !Object.hasOwn(entry ?? {}, 'armature')), MAX_COLLIDERS, 'Cloth colliders on fixed nodes');
@@ -353,10 +356,10 @@ function bakeSheet(sheet, cloth, node, geometry, colliders, frameCount, movingSe
   const moving = needsMoving ? createMovingBodies(sheet, pinned, worldPositions, movingSetup, frameCount) : null;
   const recording = Object.freeze({ ...runKernel('cloth', [worldPositions, welded.triangles, {
     pinned: sheet.pinTo ? [] : pinned, moving,
-    gravity: cloth.gravity, wind: cloth.wind, stiffness: sheet.stiffness, bend: sheet.bend,
+    gravity: cloth.gravity, wind: cloth.wind, fields: cloth.fields, stiffness: sheet.stiffness, bend: sheet.bend,
     density: sheet.density, damping: sheet.damping, friction: sheet.friction, thickness: sheet.thickness,
     colliders, frameCount, framesPerSecond: FRAMES_PER_SECOND,
-  }], bakeCloth) });
+  }], bakeClothWithFields) });
   return { recording, welded, inverse: mat4.invert(mat4.create(), matrix), geometry, particleScratch: new Float32Array(recording.particleCount * 3), live: liveGeometry(geometry) };
 }
 
@@ -435,7 +438,7 @@ export function bakeAgentCloth(cloth, recipe, geometries, motionSampler = null) 
     /** Particle counts and where each sheet ends, as numbers an agent can read without a picture. */
     report() {
       reportCache ??= {
-        duration: cloth.duration, frames: frameCount, gravity: cloth.gravity ?? [0, -9.81, 0], wind: cloth.wind ?? [0, 0, 0],
+        duration: cloth.duration, frames: frameCount, gravity: cloth.gravity ?? [0, -9.81, 0], wind: cloth.wind ?? [0, 0, 0], fields: cloth.fields ?? [],
         sheets: cloth.sheets.map(sheet => sheetReport(baked.get(sheet.node), nodes.get(sheet.node), sheet)),
       };
       return structuredClone(reportCache);
