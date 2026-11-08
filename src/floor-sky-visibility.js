@@ -47,7 +47,7 @@ function hasPlainMesh(part) {
 }
 
 function isFloorMaterial(material) {
-  return !material || (material.alphaMode !== 'blend' && material.alphaMode !== 'mask' && !(material.transmission > 0) && !EXCLUDED_TAGS.has(material.tag));
+  return !material || (!['blend', 'add', 'mask'].includes(material.alphaMode) && !(material.transmission > 0) && !EXCLUDED_TAGS.has(material.tag));
 }
 
 // The share of a part's triangle area whose world normal points up: a slab with a roof and a floor side counts half.
@@ -212,7 +212,7 @@ export function applyFloorSkyVisibility(parts, { raysPerTexel = FLOOR_SKY_RAYS, 
   if (floorIndices.length === 0) return unchanged('no floor');
   // Every opaque part blocks sky, floors included: a floor above another one (a gallery, a bridge) hides it, and a floor never
   // blocks its own texels because the rays leave from its top face.
-  const occluders = parts.filter(part => part.material?.alphaMode !== 'blend');
+  const occluders = parts.filter(part => !['blend', 'add'].includes(part.material?.alphaMode));
   if (occluders.length < 2) return unchanged('nothing above the floor');
   // A closed room has no sky to see: its walls and lamps give the light, and the shader's room term already handles it.
   const roomShare = closedRoomShare(parts, new Map(parts.map(part => [part.name, part.matrix])));

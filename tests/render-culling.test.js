@@ -6,7 +6,7 @@ import { generateGeometryLods } from '../src/mesh-lod.js';
 import { Renderer67 } from '../src/renderer.js';
 import { InstanceSelection, chooseLevel, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from '../src/render-culling.js';
 
-const STRIDE = 41;
+const STRIDE = 42;
 const CANVAS_HEIGHT = 540;
 
 function cameraMatrices(eye = [0, 0, 10], target = [0, 0, 0]) {
