@@ -481,3 +481,5 @@ async function measureProgressiveFrameTime(source, options, frames = 200, warmup
 
 window.renderProgressiveCheckpoints = renderProgressiveCheckpoints;
 window.measureProgressiveFrameTime = measureProgressiveFrameTime;
+
+window.loadTraceSceneFor = loadTraceSceneFor;
