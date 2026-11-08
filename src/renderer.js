@@ -72,6 +72,7 @@ function shaderFeaturesOfLighting(lighting) {
   if (lighting.spotCount > 0) features.push('spotLights');
   if (lighting.areaCount > 0) features.push('areaLights');
   if (lighting.shadowCasters.length > 0) features.push('localShadows');
+  if (lighting.extraFeatures) features.push(...lighting.extraFeatures);
   if (lighting.fillIntensity > 0) features.push('fill');
   return features;
 }
@@ -2265,6 +2266,7 @@ export class Renderer67 {
     context.uniform4fv(this.uniforms['pointLightColors[0]'], this.lighting.colors);
     context.uniform1fv(this.uniforms['pointLightRadii[0]'], this.lighting.radii);
     this.applyLocalLightUniforms(Boolean(frame.reflectionTarget));
+    this.lighting.bind?.(this);
     context.uniform3fv(this.uniforms.keyColor, this.lighting.keyColor);
     context.uniform1f(this.uniforms.fillIntensity, this.lighting.fillIntensity);
     context.uniform1f(this.uniforms.ambientIntensity, this.lighting.ambientIntensity);

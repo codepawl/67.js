@@ -15,6 +15,10 @@ export const layerTextureSupport = {};
 // view-transform-shader.js sets apply(source, kind, viewTransform, hasLook), bindLook(renderer, program) and dispose(renderer).
 export const viewTransformShader = {};
 
+// light-profile.js sets profile(ies), the 16 samples of a profile as an array. light-shapes.js sets update(state, spotLights, areaLights, environment) and normalize(input, environment): the lighting state and
+// recipe hooks for area light shadows, IES profiles and the sun angle. update sets state.extraFeatures and state.bind.
+export const lightShapeSupport = {};
+
 // texture-update.js sets update(renderer, descriptor, update): the body of renderer.updateTexture.
 export const textureUpdateSupport = {};
 
