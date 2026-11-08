@@ -100,6 +100,7 @@ export default defineConfig({
         'fog-shader': 'src/fog-shader.js',
         'light-linking': 'src/light-linking.js',
         'cascaded-shadows': 'src/cascaded-shadows.js',
+        'light-shapes': 'src/light-shapes.js',
         'compact-color': 'src/compact-color.js',
         'gaussian-splats': 'src/gaussian-splats.js',
         'texture-update': 'src/texture-update.js',

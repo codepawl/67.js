@@ -1,0 +1,10 @@
+- entry:path-tracer: the sun disk radius and the 16-sample IES profile math (light-profile.js) so the tracer matches the raster.
+- entry:path-tracer-progressive: same tracer addition.
+- entry:cascaded-shadows: the soft sun (blocker search plus a 16 tap filter) lives in the lazy cascade module and runs only when sunAngularRadius is set.
+- scene:agent-scene: the recipe hook for sunAngularRadius, area castShadow and ies, three field names and a module marker (70 bytes gzip); the code is in the lazy light-shapes module.
+- scene:agent-scene+lazy: the lazy light-shapes and light-profile modules, loaded only for a recipe that names the new fields.
+- tool:scene_create: three bare schema fields (sunAngularRadius, ies on spot and area lights, castShadow on area lights), 76 bytes; the rules and names are in the docs and the recipe errors.
+- tool-total: the same three fields.
+- goal:lit-box: three one-line hooks in lighting, renderer and shaders (56 bytes gzip) that the lazy light-shapes module fills.
+- goal:gltf-box: the same three hooks (46 bytes gzip).
+- goal:agent-scene: the hooks plus the recipe fields (70 bytes gzip); everything else is lazy.
