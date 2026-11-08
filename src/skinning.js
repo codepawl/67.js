@@ -26,7 +26,12 @@ export function matrixDeterminant(values, offset) {
 
 function validateMatrices(values, count, label) {
   if (values?.length !== count * 16) throw new Error(`${label} must contain one matrix per joint.`);
-  for (const value of values) if (!finiteFloat(value)) throw new Error(`${label} must contain finite floats.`);
+  // A Float32Array element is already a float, so finiteness is the whole check; other arrays must also fit a Float32.
+  if (values instanceof Float32Array) {
+    for (let index = 0; index < values.length; index++) if (!Number.isFinite(values[index])) throw new Error(`${label} must contain finite floats.`);
+  } else {
+    for (const value of values) if (!finiteFloat(value)) throw new Error(`${label} must contain finite floats.`);
+  }
   for (let offset = 0; offset < values.length; offset += 16) {
     if (values[offset + 3] !== 0 || values[offset + 7] !== 0 || values[offset + 11] !== 0 || values[offset + 15] !== 1) throw new Error(`${label} must contain affine matrices.`);
     if (Math.abs(matrixDeterminant(values, offset)) < 1e-10) throw new Error(`${label} contains a singular joint transform.`);
@@ -109,12 +114,46 @@ export function validateSkinGeometry(geometry, pose) {
   validateSkinPose(pose, geometry);
 }
 
-/** Validate weighted normal transforms without allocating temporary matrices. */
+// Distinct (joints, normalized weights) sets of a geometry, keyed by its weight array. The renderer refuses a changed
+// skinIndices or skinWeights identity and packs influences to the GPU once, so the arrays are fixed for a renderer's life.
+const influenceSetCache = new WeakMap();
+
+/** The distinct influence sets in vertex order of first use. Many vertices share one set, and each set gives one transform. */
+export function skinInfluenceSets(geometry) {
+  const cached = influenceSetCache.get(geometry.skinWeights);
+  if (cached && cached.skinIndices === geometry.skinIndices) return cached;
+  const vertexCount = geometry.skinWeights.length / 4;
+  const seen = new Map();
+  const joints = [];
+  const weights = [];
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    let total = 0;
+    for (let influence = 0; influence < 4; influence++) total += geometry.skinWeights[vertex * 4 + influence];
+    const setJoints = [];
+    const setWeights = [];
+    for (let influence = 0; influence < 4; influence++) {
+      setJoints.push(geometry.skinIndices[vertex * 4 + influence]);
+      setWeights.push(Math.fround(geometry.skinWeights[vertex * 4 + influence] / total));
+    }
+    const key = `${setJoints.join(',')}|${setWeights.join(',')}`;
+    if (seen.has(key)) continue;
+    seen.set(key, true);
+    joints.push(...setJoints);
+    weights.push(...setWeights);
+  }
+  const sets = { skinIndices: geometry.skinIndices, joints: Int32Array.from(joints), weights: Float32Array.from(weights) };
+  influenceSetCache.set(geometry.skinWeights, sets);
+  return sets;
+}
+
+/** Validate weighted normal transforms without allocating temporary matrices, once per distinct influence set. */
 export function validateSkinPose(pose, geometry, worldMatrix) {
   const matrices = pose.jointMatrices;
   validateMatrices(matrices, matrices.length / 16, 'Joint palette');
   if (!geometry) return;
-  for (let vertex = 0; vertex < geometry.skinWeights.length / 4; vertex++) {
+  const { joints, weights } = skinInfluenceSets(geometry);
+  const worldDeterminant = worldMatrix ? matrixDeterminant(worldMatrix, 0) : 0;
+  for (let set = 0; set < joints.length / 4; set++) {
     let matrixXX = 0;
     let matrixYX = 0;
     let matrixZX = 0;
@@ -124,11 +163,9 @@ export function validateSkinPose(pose, geometry, worldMatrix) {
     let matrixXZ = 0;
     let matrixYZ = 0;
     let matrixZZ = 0;
-    let total = 0;
-    for (let influence = 0; influence < 4; influence++) total += geometry.skinWeights[vertex * 4 + influence];
     for (let influence = 0; influence < 4; influence++) {
-      const weight = Math.fround(geometry.skinWeights[vertex * 4 + influence] / total);
-      const offset = geometry.skinIndices[vertex * 4 + influence] * 16;
+      const weight = weights[set * 4 + influence];
+      const offset = joints[set * 4 + influence] * 16;
       matrixXX += matrices[offset] * weight;
       matrixYX += matrices[offset + 1] * weight;
       matrixZX += matrices[offset + 2] * weight;
@@ -141,7 +178,7 @@ export function validateSkinPose(pose, geometry, worldMatrix) {
     }
     const determinant = matrixXX * (matrixYY * matrixZZ - matrixYZ * matrixZY) - matrixXY * (matrixYX * matrixZZ - matrixYZ * matrixZX) + matrixXZ * (matrixYX * matrixZY - matrixYY * matrixZX);
     if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-8) throw new Error('Skin pose produces a singular weighted vertex transform.');
-    if (worldMatrix && determinant * matrixDeterminant(worldMatrix, 0) < 0) throw new Error('Reflected weighted skin transforms are unsupported.');
+    if (worldMatrix && determinant * worldDeterminant < 0) throw new Error('Reflected weighted skin transforms are unsupported.');
   }
 }
 
