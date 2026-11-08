@@ -51,6 +51,11 @@ own mesh report:
 | workshop | Long: a whole scene, a floor slab with a table, a chair and a mug, 12 parts that rest on each other |
 | robot-shot | Long: the robot with both hands placed by IK, then a side-on camera, checked from the exported recipe |
 
+| camera-closeup, camera-orbit | Frame the statue in a close-up; a 6 second camera orbit of at least 180 degrees (`scenes.mjs`) |
+| light-key-fill, light-spot-shadow | A warm sun plus a cool point fill; one shadow-casting spotlight aimed at the statue |
+| look-metal, look-fog | A polished gold material; a thin cool fog with a readable exposure |
+| sunset-timelapse, film-reveal | Sun direction and colour tracks over 4 s; a 6 second dolly-in reveal with an exposure fade |
+
 `references.mjs` holds one hand-built solution per task. `tests/agent-modeling-suite.test.js` checks that every
 reference passes and that broken variants fail. That keeps a wrong checker from costing an agent run.
 
@@ -71,6 +76,38 @@ the session, goes to `results/<run>.json`. Grade one recipe by hand with
 
 Compare runs only when they use the same model and suite version. A single run per task is noisy, so read differences
 of one or two tasks as noise.
+
+### The agent bench
+
+`bench.mjs` is the whole bench in one command. It runs the 28 tasks of `suite.mjs` (8 modeling, 3 revision, 3 scene,
+3 look, 4 light, 3 camera, 2 animation, 2 film), k times each, on each model, through headless `claude -p` with the 67js
+MCP config. It calls `run.mjs` once per model, so every run is a fresh session in its own empty temp folder with only the
+67js tools, and the grader reads the exported recipe, never the transcript. Graders are the checks above plus the state
+checks in `scene-checks.mjs` (camera aim and orbit, lights, materials, fog, sun and camera tracks) and the rendered-look
+check, and every task has a reference solution that the tests grade. Runs use the Claude Code subscription (there is no API
+key), so the summary reports tokens, calls and seconds and never dollars.
+
+The baseline, on the current main. It is long (28 tasks, 3 runs, 3 models run one after another), so start it in the
+background:
+
+```sh
+node bench/agent-modeling/bench.mjs --claude <path to claude> --models haiku,sonnet,opus --runs 3 --label baseline --backend cpu
+```
+
+It prints a table with pass@1 (average success over all runs), pass^k (share of tasks that passed on all k runs),
+`any of k`, calls, input and output tokens and seconds per run, then a line per model by kind. The file
+`results/bench-<label>.json` holds that summary and every run's record. `--smoke` runs the two smoke tasks once to prove the
+pipeline, `--tasks a,b` picks tasks, and `--resume` (same label, models and `--runs`) continues a stopped bench.
+
+To compare a branch with the baseline, run the same command with another label on the branch, then:
+
+```sh
+node bench/agent-modeling/compare-bench.mjs bench/agent-modeling/results/bench-baseline.json bench/agent-modeling/results/bench-<branch label>.json
+```
+
+It prints the totals side by side per model and the tasks whose pass count changed, and exits with 1 when a model's pass@1
+drops by more than `--tolerance` (0.05). Use the same models, `--runs` and backend on both sides. A task that moves by one
+run out of three is noise; read the totals and the tasks that moved by two runs or more.
 
 ### Several runs and several models
 

@@ -158,12 +158,15 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   /** The HDRI and .cube files a recipe names: shipped ones by name from assets/looks, the others by catalog ID. The page decodes them. */
   async function lookFileData(value) {
     const { environments, looks } = catalogLookReferences(value);
+    // Derived from previewUrl (build/mcp/preview.js in the repo and the package), not from import.meta.url: the bundler
+    // inlines a literal `new URL(..., import.meta.url)` as a data URL, and the bundled server sits two folders below the package root.
+    const shippedLooksUrl = new URL('../../assets/looks/', previewUrl);
     const lookData = {};
     for (const [kind, references] of [['environment', environments], ['look', looks]]) {
       for (const reference of references) {
         const shipped = BUNDLED_ENVIRONMENT_NAMES.includes(reference) || BUNDLED_CUBE_LOOK_NAMES.includes(reference);
         const bytes = shipped
-          ? await readFile(new URL(`../assets/looks/${reference}.${kind === 'environment' ? 'hdr' : 'cube'}`, import.meta.url))
+          ? await readFile(new URL(`${reference}.${kind === 'environment' ? 'hdr' : 'cube'}`, shippedLooksUrl))
           : await (await catalog()).read(reference);
         lookData[reference] = kind === 'environment' ? { kind, base64: bytes.toString('base64') } : { kind, text: bytes.toString('utf8') };
       }

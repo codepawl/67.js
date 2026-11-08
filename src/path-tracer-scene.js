@@ -115,6 +115,12 @@ function resolveTexture(descriptor) {
 // A part without a mask is lit by every light.
 const ALL_LIGHTS = -1;
 
+// A graph opacity output is texture alpha on a blended material. The tracer has no blending, so it cuts out at half.
+function graphOpacityCutoff(material) {
+  const graph = material.pattern?.type === 'graph' ? material.pattern.graph : null;
+  return material.alphaMode === 'blend' && graph && Object.hasOwn(graph, 'opacity') ? 0.5 : 0;
+}
+
 function resolveMaterial(material) {
   const emissionColor = material.emissiveColor ?? material.color;
   const emissionStrength = material.emission ?? 0;
@@ -125,6 +131,8 @@ function resolveMaterial(material) {
     emission: emissionColor.map(channel => channel * emissionStrength),
     emissiveTexture: emissionStrength > 0 ? resolveTexture(material.emissiveMap) : null,
     clearcoat: material.clearcoat ?? 0,
+    clearcoatTexture: resolveTexture(material.layerMaps?.clearcoatTexture),
+    transmissionTexture: resolveTexture(material.transmissionMap),
     clearcoatRoughness: material.clearcoatRoughness ?? 0,
     transmission: material.transmission ?? 0,
     subsurface: resolveTraceSubsurface(material.subsurface),
@@ -134,7 +142,7 @@ function resolveMaterial(material) {
     normalScale: material.normalScale ?? [1, 1],
     surfaceTexture: resolveTexture(material.metallicRoughnessMap),
     lightMask: material.lightMask ?? ALL_LIGHTS,
-    alphaCutoff: material.alphaMode === 'mask' ? material.alphaCutoff ?? 0.5 : 0,
+    alphaCutoff: material.alphaMode === 'mask' ? material.alphaCutoff ?? 0.5 : graphOpacityCutoff(material),
   };
 }
 

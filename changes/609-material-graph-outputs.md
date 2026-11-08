@@ -1,0 +1,1 @@
+- Material graphs: new outputs `opacity` (base texture alpha), `clearcoat` and `transmission` (per-pixel masks), and mixing nodes `layer` (mask-blended layers such as paint over rust), `hue` and `curve`. The rasterizer reads opacity and clearcoat, the CPU path tracer all three. Graphs without them bake the same (#609)
