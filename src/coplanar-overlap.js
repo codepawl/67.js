@@ -14,6 +14,8 @@ export const COPLANAR_MINIMUM_AREA = 1e-4;
 /** The distance suggested in the fix text, in metres. */
 export const SUGGESTED_OFFSET = 0.002;
 const DEFAULT_WORK_BUDGET = 1_000_000;
+// Triangles whose planes are read in the first pass; a scene past it is searched part by part, smallest first.
+const DEFAULT_TRIANGLE_BUDGET = 600_000;
 const PRIORITY_BINS = 12;
 const MAXIMUM_LISTED_PAIRS = 3_000_000;
 const SAME_FACING = Math.cos(Math.PI / 180);
@@ -118,10 +120,16 @@ function forEachWorldTriangle(part, visit) {
   }
 }
 
-// The plane buckets a part has triangles in: the cheap pass that decides which parts can fight at all.
-function planeKeysOf(part, tolerance) {
+// The plane buckets a part has triangles in, for the triangles that touch `region` (the box where other parts' bounds meet
+// this part's): the cheap pass that decides which parts can fight at all.
+function planeKeysOf(part, tolerance, region) {
   const keys = new Set();
   forEachWorldTriangle(part, (corners, normalX, normalY, normalZ) => {
+    for (let axis = 0; axis < 3; axis++) {
+      const low = Math.min(corners[axis], corners[3 + axis], corners[6 + axis]);
+      const high = Math.max(corners[axis], corners[3 + axis], corners[6 + axis]);
+      if (high < region[axis] - tolerance || low > region[3 + axis] + tolerance) return;
+    }
     keys.add(planeKey(normalX, normalY, normalZ, corners[0], corners[1], corners[2], tolerance));
   });
   return keys;
@@ -291,19 +299,49 @@ function pairOverlap(first, second, region, tolerance, budget) {
   return area >= COPLANAR_MINIMUM_AREA ? { area, distance, normal } : null;
 }
 
+// Gives each part the box where other parts' bounds touch it (`region`), or none when nothing touches it: a part alone in
+// space can z-fight with nothing, and its triangles are never read.
+function markContactRegions(entries, tolerance) {
+  const sorted = [...entries].sort((first, second) => first.bounds[0] - second.bounds[0]);
+  for (let first = 0; first < sorted.length; first++) {
+    const a = sorted[first];
+    for (let second = first + 1; second < sorted.length; second++) {
+      const b = sorted[second];
+      if (b.bounds[0] > a.bounds[3] + tolerance) break;
+      const overlap = boundsOverlapRegion(a.bounds, b.bounds, tolerance);
+      if (!overlap) continue;
+      for (const entry of [a, b]) {
+        if (!entry.region) entry.region = overlap.slice();
+        for (let axis = 0; axis < 3; axis++) {
+          entry.region[axis] = Math.min(entry.region[axis], overlap[axis]);
+          entry.region[3 + axis] = Math.max(entry.region[3 + axis], overlap[3 + axis]);
+        }
+      }
+    }
+  }
+}
+
 // Broad phase: parts are bucketed by the planes their triangles lie on, and only parts that share a bucket (or sit in
 // neighbouring offset buckets) and whose bounds meet become a pair. Inside a bucket the parts are swept along x, so a wall
 // and a thousand small parts on other planes cost nothing, and a pair is reported once however many planes it shares.
-function forEachCandidatePair(entries, tolerance, test) {
+function forEachCandidatePair(entries, tolerance, scanBudget, test) {
   const buckets = new Map();
-  entries.forEach((entry, index) => {
-    entry.index = index;
-    for (const key of planeKeysOf(entry.part, tolerance)) {
+  markContactRegions(entries, tolerance);
+  entries.forEach((entry, index) => { entry.index = index; });
+  // Small parts are read first, so the scan budget (triangles) goes to many flat parts before it goes to one huge mesh.
+  const scanOrder = entries.filter(entry => entry.region).sort((first, second) => first.part.geometry.indices.length - second.part.geometry.indices.length);
+  for (const entry of scanOrder) {
+    if (scanBudget.triangles <= 0) {
+      scanBudget.exhausted = true;
+      break;
+    }
+    scanBudget.triangles -= entry.part.geometry.indices.length / 3;
+    for (const key of planeKeysOf(entry.part, tolerance, entry.region)) {
       const members = buckets.get(key);
       if (members) members.push(entry);
       else buckets.set(key, [entry]);
     }
-  });
+  }
   const seen = new Set();
   for (const [key, own] of buckets) {
     const next = buckets.get(key + 1) ?? [];
@@ -336,7 +374,7 @@ function forEachCandidatePair(entries, tolerance, test) {
  * `{ overlaps, truncated, work }` with each overlap as `{ smaller, larger, area, distance, normal }` (areas in square
  * metres, the larger part by bounds diagonal). `work` counts bounds and triangle tests, capped by `workBudget`.
  */
-export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, workBudget = DEFAULT_WORK_BUDGET } = {}) {
+export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, workBudget = DEFAULT_WORK_BUDGET, triangleBudget = DEFAULT_TRIANGLE_BUDGET } = {}) {
   const entries = [];
   const stacks = new Map();
   for (const part of parts) {
@@ -352,6 +390,7 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
     entries.push({ part, bounds: worldBounds(part) });
   }
   const budget = { work: 0, limit: workBudget };
+  const scanBudget = { triangles: triangleBudget, exhausted: false };
   const overlaps = [];
   if (entries.length < 2) return { overlaps, truncated: false, work: 0 };
   // The sweep first lists every pair whose boxes meet (cheap), binned by how much flat contact the shared box offers, so the
@@ -368,7 +407,7 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
     bins[PRIORITY_BINS - 1 - (flatBonus + sizeRank)].push(first, second, region);
     listed++;
   };
-  forEachCandidatePair(entries, tolerance, collect);
+  forEachCandidatePair(entries, tolerance, scanBudget, collect);
   for (const bin of bins) {
     for (let index = 0; index < bin.length && budget.work <= budget.limit; index += 3) {
       const first = bin[index];
@@ -379,7 +418,7 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
       overlaps.push({ smaller: (firstIsLarger ? second : first).part, larger: (firstIsLarger ? first : second).part, ...found });
     }
   }
-  const truncated = budget.work > workBudget;
+  const truncated = budget.work > workBudget || scanBudget.exhausted;
   overlaps.sort((first, second) => second.area - first.area || String(first.smaller.name).localeCompare(String(second.smaller.name)));
   return { overlaps, truncated, work: budget.work };
 }
