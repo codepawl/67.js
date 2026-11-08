@@ -118,7 +118,7 @@ const sceneIdsGiven = lookIds ?? (sceneFlag >= 0 ? argumentsGiven[sceneFlag + 1]
 // The fresh bake.json lands in the work directory and is checked against the committed one (compare-scores.mjs); --update-baseline replaces
 // the committed bake.json and images/<id>-baked.jpg with it.
 const bakeScoreRun = bakedSceneIds !== null && !sceneSet && !pathTracerFlag;
-const bakeVariantFlags = ['--no-glossy', '--sky-only', '--bake-preset', '--bake-grid', '--bake-bounces', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
+const bakeVariantFlags = ['--no-glossy', '--sky-only', '--bake-preset', '--bake-grid', '--no-bake-worker', '--bake-bounces', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
 const bakeScoreIsBaseline = bakeScoreRun && argumentsGiven.includes('--update-baseline') && !bakeVariantFlags.some(flag => argumentsGiven.includes(flag));
 const onlyScenes = sceneIdsGiven ?? (bakeScoreRun ? bakedSceneIds : null);
 const skipCpu = skipCpuFlag || bakeScoreRun || Boolean(viewTransform);
@@ -132,7 +132,7 @@ async function renderBackend(backend, serverUrl, graphics) {
     page.on('console', message => message.text().includes('GL_') && console.log('PAGE', message.text().slice(0, 200)));
     // Each scene gets a fresh page, so a large scene leaves no GL state or memory behind for the next one.
     const openHarness = async () => {
-      const harnessQuery = [sceneSet ? `set=${sceneSet}` : null, argumentsGiven.includes('--no-glossy') ? 'glossy=0' : null, argumentsGiven.includes('--no-water') ? 'water=off' : argumentsGiven.includes('--ssr-water') ? 'water=ssr' : null, argumentsGiven.includes('--no-ground-bounce') ? 'groundBounce=off' : null, floorSkyStrength ? `floorSky=${floorSkyStrength}` : argumentsGiven.includes('--no-floor-sky') ? 'floorSky=0' : null, argumentsGiven.includes('--floor-sky-rooms') ? 'floorSkyRooms=1' : null, sunBounceQuery].filter(Boolean).join('&');
+      const harnessQuery = [sceneSet ? `set=${sceneSet}` : null, argumentsGiven.includes('--no-glossy') ? 'glossy=0' : null, argumentsGiven.includes('--no-bake-worker') ? 'kernelWorkers=off' : null, argumentsGiven.includes('--no-water') ? 'water=off' : argumentsGiven.includes('--ssr-water') ? 'water=ssr' : null, argumentsGiven.includes('--no-ground-bounce') ? 'groundBounce=off' : null, floorSkyStrength ? `floorSky=${floorSkyStrength}` : argumentsGiven.includes('--no-floor-sky') ? 'floorSky=0' : null, argumentsGiven.includes('--floor-sky-rooms') ? 'floorSkyRooms=1' : null, sunBounceQuery].filter(Boolean).join('&');
       await page.goto(`${serverUrl}/bench/reference/harness.html${harnessQuery ? `?${harnessQuery}` : ''}`, { timeout: PAGE_LOAD_TIMEOUT });
       await page.waitForFunction(() => window.renderReferenceScene, null, { timeout: PAGE_LOAD_TIMEOUT });
     };

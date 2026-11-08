@@ -195,7 +195,10 @@ async function bakeScenePreset(scene, preset, irradianceGrid = false, overrides 
   const started = performance.now();
   let baked;
   try {
-    baked = bakeAgentParts(scene.parts, new Map(scene.parts.map(part => [part.name, part.matrix])), scene.environment, settings);
+    // The recipe path bakes on a kernel worker (90 s); ?kernelWorkers=off keeps the page's thread (20 s) to compare.
+    const { buildWithKernels } = await import('/src/kernel-offload.js');
+    const available = new URLSearchParams(location.search).get('kernelWorkers') !== 'off';
+    baked = await buildWithKernels(() => bakeAgentParts(scene.parts, new Map(scene.parts.map(part => [part.name, part.matrix])), scene.environment, settings), { available: available && typeof Worker === 'function' });
   } catch (error) {
     // A recipe would get this error and no bake: the scene is drawn unbaked and the row says so.
     return { parts: scene.parts, report: { refused: error.message, texels: 0 }, seconds: 0 };

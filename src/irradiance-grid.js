@@ -293,10 +293,18 @@ export function traceIrradianceGrid(parts, lighting, { resolution = true, sample
   };
   fillInvalidNodes(data, valid, layout.size);
   smoothNodes(data, valid, layout.size, isConnected);
-  const grid = { ...layout, data, nodes: nodeCount, solidNodes, seconds: (performance.now() - started) / 1000 };
-  // The fog's scattering reads the grid without importing this lazy module: the mean light arriving at a point from every
-  // direction is the constant term of the fit. Not enumerable, so the report that copies the grid's fields stays plain data.
-  Object.defineProperty(grid, 'meanRadiance', { value: position => evaluateIrradianceGrid(grid, position, NO_DIRECTION) });
+  return withMeanRadiance({ ...layout, data, nodes: nodeCount, solidNodes, seconds: (performance.now() - started) / 1000 });
+}
+
+/**
+ * The fog's scattering reads the grid without importing this lazy module: the mean light arriving at a point from every
+ * direction is the constant term of the fit. Not enumerable, so the report that copies the grid's fields stays plain data,
+ * and a grid that came back from a worker (which clones plain data only) gets it here.
+ */
+export function withMeanRadiance(grid) {
+  if (!Object.hasOwn(grid, 'meanRadiance')) {
+    Object.defineProperty(grid, 'meanRadiance', { value: position => evaluateIrradianceGrid(grid, position, NO_DIRECTION) });
+  }
   return grid;
 }
 
