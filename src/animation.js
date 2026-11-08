@@ -47,7 +47,7 @@ function normalizedValue(property, value) {
     if (!Number.isFinite(length) || length < 1e-8) throw new RangeError('Rotation keyframes need a finite nonzero quaternion length.');
     return Object.freeze(result.map(component => component / length));
   }
-  if (property === 'scale' && result.some(component => component <= 0)) throw new RangeError('Scale keyframes must stay positive.');
+  if (property === 'scale' && result.some(component => component < 0)) throw new RangeError('Scale keyframes cannot be negative. Zero is allowed and hides the node.');
   return Object.freeze(result);
 }
 

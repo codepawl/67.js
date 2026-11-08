@@ -9,7 +9,7 @@ function finiteFloat(value) {
   return Number.isFinite(value) && Number.isFinite(Math.fround(value));
 }
 
-function matrixDeterminant(values, offset) {
+export function matrixDeterminant(values, offset) {
   const matrixXX = Math.fround(values[offset]);
   const matrixYX = Math.fround(values[offset + 1]);
   const matrixZX = Math.fround(values[offset + 2]);

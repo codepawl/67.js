@@ -110,7 +110,7 @@ A track names one part (`target`) and one `property`. Each target property can h
 | Option | Values | Meaning |
 | --- | --- | --- |
 | `target` | A unique part name | The part that the track drives. |
-| `property` | `translation`, `rotation`, `scale`, `metallic`, `roughness`, `emission` | Rotation is a quaternion in XYZW order. Scale must stay positive. |
+| `property` | `translation`, `rotation`, `scale`, `metallic`, `roughness`, `emission` | Rotation is a quaternion in XYZW order. Scale cannot be negative; zero is allowed and hides the node. |
 | `interpolation` | `LINEAR` (default), `STEP`, `SMOOTH`, `CUBICSPLINE` | How values blend between keyframes. |
 | `keyframes` | `{ time, value }` | Times are in seconds, from 0 to the clip `duration`. |
 | keyframe `easing` | `easeOutBack`, `easeInOutCubic`, `cubic-bezier(...)` and the other names | Shapes the segment that starts at that keyframe. |
