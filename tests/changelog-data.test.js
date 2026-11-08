@@ -75,6 +75,28 @@ test('release notes are one version section with its breaking marker and the ins
   assert.equal(extractVersionSection(changelog, '0.14.0'), '- Fix a seek that works without breaking playback (part of #9).');
 });
 
+test('a ### heading groups the entries below it, and the Breaking changes group marks them breaking', async () => {
+  const grouped = [
+    '## 0.16.0',
+    '',
+    '### Highlights',
+    '',
+    '- A GPU path tracer (#302)',
+    '',
+    '### Breaking changes',
+    '',
+    '- Shaders moved into addons (#281)',
+    '',
+  ].join('\n');
+  await withFragments({}, async (folder) => {
+    const data = await readChangelogData({ changelogText: grouped, version: '0.16.0', folder });
+    assert.deepEqual(data.released[0].entries, [
+      { issue: 302, text: 'A GPU path tracer (#302)', breaking: false, group: 'Highlights' },
+      { issue: 281, text: 'Shaders moved into addons (#281)', breaking: true, group: 'Breaking changes' },
+    ]);
+  });
+});
+
 test('release notes fail clearly when the version is not in the changelog', () => {
   assert.throws(() => releaseNotes(changelog, '9.9.9', '@codepawlhq/67js'), /CHANGELOG\.md has no section for 9\.9\.9\./);
 });

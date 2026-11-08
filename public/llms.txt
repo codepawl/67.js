@@ -1,6 +1,6 @@
 # 67js
 
-> A WebGL2 toolkit for interactive browser scenes and deterministic PNG/MP4 output. Reuse the scene across preview and export.
+> 3D engine that AI agents drive. Real-time WebGL2 scenes in the browser and deterministic PNG/MP4 output from the same scene.
 
 This file is a compact map for LLMs and coding agents. The linked guide contains the API contract and runnable examples.
 Unreleased changes, with issue numbers and breaking flags, are in changelog.json next to release.json on the site. Check it before you rely on a feature from the docs.

@@ -1,0 +1,1 @@
+- The tagline is now "3D engine that AI agents drive" on the site, the package and the README banner
