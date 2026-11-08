@@ -23,6 +23,8 @@ import { shrinkwrapMesh } from './mesh-shrinkwrap.js';
 import { triangulatedSurface } from './mesh-surface-distance.js';
 import { createTriangleSurfaceIndex } from './mesh-query.js';
 import './mesh-field-surfaces.js';
+import './field-rotation.js';
+import './mesh-hull-modifiers.js';
 import { remeshMesh, remeshGridSize, MAX_REMESH_RESOLUTION } from './mesh-remesh.js';
 import {
   MESH_EDIT_OPERATIONS, MAX_MESH_EDITS, STACK_OPERATIONS, MAX_STACK_NODES, SCULPT_STROKE_TYPES, MAX_SCULPT_STROKES, SHRINKWRAP_MODES,
