@@ -1,0 +1,3 @@
+- entry:light-bake-gpu+lazy: the WGSL texel bake chunk (loaded only for backend 'webgpu') holds the WebGPU tracer with fog and the subsurface walk, so a bake on WebGPU is possible without WebGL2; the WebGL2 bake loads none of it.
+- entry:path-tracer+lazy: the WGSL fog and subsurface walk (3.9 KB gzip, in the lazy chunk loaded only for backend 'webgpu') so scenes with fog or subsurface no longer need the WebGL2 backend.
+- entry:path-tracer-progressive+lazy: the same lazy WebGPU chunk (3.9 KB gzip), shared with the progressive tracer.

@@ -1,5 +1,4 @@
 import { buildTraceScene } from './path-tracer-scene.js';
-import { traceTexelsOnGpu } from './path-tracer-gpu.js';
 import { checkBudget, checkedBakeSize, finishLightmaps, planLightmaps, rasterizeEntries, traceLightmaps } from './light-bake.js';
 
 // The GPU side of the light bake: the texels of every part go to the path tracer's kernel in one batch, which starts a
@@ -49,11 +48,18 @@ function packCoveredTexels(rasterized) {
  * Traces every covered texel on the GPU and resolves with `entries` (per rasterized part, `light` and `escaped` in the
  * layout the CPU gatherer returns), the `gpu` name and the kernel's `compileSeconds`.
  */
+/** The texel tracer of the backend; each is loaded only when a bake asks for it. */
+async function loadTexelTracer(backend) {
+  if (backend === 'webgpu') return (await import('./path-tracer-webgpu.js')).traceTexelsOnWebGpu;
+  return (await import('./path-tracer-gpu.js')).traceTexelsOnGpu;
+}
+
 async function gatherOnGpu(plan, settings, rasterized, shouldStop) {
   const environment = traceEnvironment(plan);
   const texels = packCoveredTexels(rasterized);
   const scene = buildTraceScene(plan.parts, environment);
-  const traced = await traceTexelsOnGpu(scene, texels, { samples: settings.samples, bounces: settings.bounces, seed: BAKE_SEED, fireflyClamp: NO_FIREFLY_CLAMP }, shouldStop);
+  const traceTexels = await loadTexelTracer(settings.backend);
+  const traced = await traceTexels(scene, texels, { samples: settings.samples, bounces: settings.bounces, seed: BAKE_SEED, fireflyClamp: NO_FIREFLY_CLAMP }, shouldStop);
   let next = 0;
   const entries = rasterized.map(({ resolution }, entryNumber) => {
     const light = new Float32Array(resolution * resolution * 3);
@@ -82,8 +88,8 @@ export async function traceLightmapsAsync(plan, tracedSettings) {
 
 /**
  * `bakeLightmaps` with a choice of tracer: `options.backend` is "cpu" (the default, the reference) or "gpu", which traces the
- * texels with the GPU path tracer's kernel and needs a page with WebGL2. Resolves with the same `{ parts, report }`;
- * `report.backend` names the tracer, and a GPU bake adds `gpu` and `gpuCompileSeconds`.
+ * texels with the GPU path tracer's kernel and needs a page with WebGL2, or "webgpu", which runs the WGSL kernel and needs `navigator.gpu`. Resolves with the same `{ parts, report }`;
+ * `report.backend` names the tracer, and a GPU or WebGPU bake adds `gpu` and `gpuCompileSeconds`.
  */
 export async function bakeLightmapsAsync(parts, lighting, options = {}) {
   const plan = planLightmaps(parts, lighting, options);

@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { normalizePathTracerOptions, renderPathTracedImage } from '../src/path-tracer.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
-import { MEGAKERNEL_SOURCE, PATH_STATE_VECTORS, WAVEFRONT_SOURCE } from '../src/path-tracer-webgpu-kernel.js';
-import { DEFAULT_WEBGPU_KERNEL, isWebGpuTracerAvailable, traceOnWebGpu, unsupportedWebGpuFeatures, WEBGPU_KERNELS } from '../src/path-tracer-webgpu.js';
+import { buildMegakernelSource, MEGAKERNEL_SOURCE, PATH_STATE_VECTORS, WAVEFRONT_SOURCE } from '../src/path-tracer-webgpu-kernel.js';
+import { DEFAULT_WEBGPU_KERNEL, isWebGpuTracerAvailable, traceOnWebGpu, WEBGPU_KERNELS } from '../src/path-tracer-webgpu.js';
 
 function quad(offset) {
   return {
@@ -47,15 +47,33 @@ test('an unknown kernel name is rejected before any GPU work', async () => {
   assert.deepEqual(calls, ['adapter']);
 });
 
-test('fog and subsurface scenes are named as unsupported so callers can fall back to gpu', async () => {
-  assert.deepEqual(unsupportedWebGpuFeatures(buildTraceScene(parts, {})), []);
+test('fog and the subsurface walk are compiled in only for the megakernel of a scene that uses them', () => {
+  assert.doesNotMatch(MEGAKERNEL_SOURCE, /scatterInFog|volumeInterval|randomWalk|bakeTexels/);
+  const fogSource = buildMegakernelSource({ hasVolume: true });
+  assert.match(fogSource, /fn scatterInFog\(/);
+  assert.match(fogSource, /fn fogTransmittance\(/);
+  assert.doesNotMatch(fogSource, /randomWalk/);
+  const subsurfaceSource = buildMegakernelSource({ hasSubsurface: true });
+  assert.match(subsurfaceSource, /fn randomWalk\(/);
+  assert.match(subsurfaceSource, /fn enterSubsurface\(/);
+  assert.doesNotMatch(subsurfaceSource, /scatterInFog/);
+  assert.doesNotMatch(WAVEFRONT_SOURCE, /scatterInFog|randomWalk/);
+});
+
+test('the texel kernel replaces the camera entry point and reads the texels from the two spare bindings', () => {
+  const texelSource = buildMegakernelSource({ texelBake: true });
+  assert.match(texelSource, /fn bakeTexels\(/);
+  assert.match(texelSource, /@binding\(9\)[^\n]*texelPoints/);
+  assert.match(texelSource, /@binding\(10\)[^\n]*texelNormals/);
+  assert.doesNotMatch(texelSource, /fn main\(/);
+});
+
+test('the wavefront kernel refuses a scene with fog or subsurface scattering before it asks for an adapter', async () => {
   const fogScene = buildTraceScene(parts, { volumeFog: { minimum: [-30, 1, -30], maximum: [30, 2, 30], density: 0.5 } });
   const subsurfaceParts = [{ ...parts[0], material: { color: [0.7, 0.4, 0.3], subsurface: { weight: 1, radius: [1, 0.2, 0.1], scale: 0.05 } } }];
   const subsurfaceScene = buildTraceScene(subsurfaceParts, {});
-  assert.deepEqual(unsupportedWebGpuFeatures(fogScene), ['volume fog']);
-  assert.deepEqual(unsupportedWebGpuFeatures(subsurfaceScene), ['subsurface scattering']);
-  await assert.rejects(traceOnWebGpu(fogScene, {}, {}, () => {}), /does not trace volume fog yet.*"gpu"/);
-  await assert.rejects(traceOnWebGpu(subsurfaceScene, {}, {}, () => {}), /does not trace subsurface scattering yet/);
+  await assert.rejects(traceOnWebGpu(fogScene, {}, { kernel: 'wavefront' }, () => {}), /wavefront kernel does not trace volume fog or subsurface/);
+  await assert.rejects(traceOnWebGpu(subsurfaceScene, {}, { kernel: 'wavefront' }, () => {}), /wavefront kernel does not trace volume fog or subsurface/);
 });
 
 test('both kernels share the scene bindings and the wavefront adds its path state', () => {
