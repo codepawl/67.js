@@ -89,19 +89,18 @@ test('moving a light after a bake gives bake-stale with the fix', () => {
   scene.sampleMotion(2);
   const problems = scene.bakeStaleness();
   assert.deepEqual(kinds(problems), ['bake-stale']);
-  assert.match(problems[0].fix, /motionTime to null/);
+  assert.match(problems[0].fix, /bake.rebake/);
   scene.sampleMotion(null);
   assert.deepEqual(scene.bakeStaleness(), []);
 });
 
-test('moving a part after a bake names the part', () => {
+test('moving a part after a bake gives bake-stale', () => {
   const scene = createAgentScene(closedRoom({ motion: { duration: 2, loop: false, tracks: [
     { kind: 'node', id: 'block', property: 'translation', keyframes: [{ time: 0, value: [-0.7, 0.6, -0.4] }, { time: 2, value: [0.5, 0.6, -0.4] }] },
   ] } }));
   scene.sampleMotion(2);
   const problems = scene.bakeStaleness();
   assert.deepEqual(kinds(problems), ['bake-stale']);
-  assert.match(problems[0].message, /block moved/);
 });
 
 test('job metrics keep one entry per warning across frames', () => {

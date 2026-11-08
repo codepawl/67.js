@@ -2,16 +2,20 @@ import { mat3, mat4 } from 'gl-matrix';
 import { HAIR_LIMITS, buildHairMesh, createStrandRoots } from './hair.js';
 import { normalizeForceFields } from './force-fields.js';
 import { PARTICLE_LIMITS, buildParticleMesh, createParticleLaunches } from './particles.js';
+import { createCollisionSurface } from './particle-collision.js';
 import { bakingContext, boundedArray, finiteNumber, knownKeys, rootNodeWithGeometry, vectorOfThree } from './agent-recipe-checks.js';
 
 const PARTICLES_FIELDS = ['gravity', 'wind', 'fields', 'systems'];
 const SYSTEM_TYPES = ['emitter', 'hair'];
-const EMITTER_SYSTEM_FIELDS = ['type', 'node', 'seed', 'count', 'rate', 'lifetime', 'speed', 'direction', 'spread', 'emitter', 'size', 'scale', 'drag', 'floor'];
+const EMITTER_SYSTEM_FIELDS = ['type', 'node', 'seed', 'count', 'rate', 'lifetime', 'speed', 'direction', 'spread', 'emitter', 'size', 'scale', 'drag', 'floor', 'bounce', 'friction', 'colliders', 'spin', 'color', 'alpha'];
 const HAIR_FIELDS = ['type', 'node', 'surface', 'seed', 'count', 'length', 'segments', 'width', 'droop', 'lean', 'sway', 'swayRate'];
 const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius'];
 const EMITTER_SHAPES = ['point', 'box', 'sphere', 'disc'];
 const SCALE_MODES = ['constant', 'shrink', 'grow'];
 const DEFAULT_GRAVITY = Object.freeze([0, -9.81, 0]);
+// Defaults that read as debris: a bounce keeps 30 percent of the speed (the first release of collision stuck at 0 without colliders and had no default with them), friction 0.5.
+const DEBRIS_BOUNCE = 0.3;
+const DEBRIS_FRICTION = 0.5;
 const POSITION_LIMIT = 10000;
 const MAX_SEED = 0xffffffff;
 
@@ -60,6 +64,33 @@ function normalizeSeed(input) {
   return seed;
 }
 
+function normalizeColors(value) {
+  if (!Array.isArray(value) || value.length !== 2) {
+    throw new TypeError('Particle color must be [start, end], each [r, g, b] from 0 to 1.');
+  }
+  return value.map(color => vectorOfThree(color, 'Particle color', 1000).map(channel => finiteNumber(channel, 'Particle color', 0, 1000)));
+}
+
+// [start, end] over the life, in either direction; a number holds one value.
+function normalizeAlpha(value) {
+  if (typeof value === 'number') {
+    return [finiteNumber(value, 'Particle alpha', 0, 1), value];
+  }
+  if (!Array.isArray(value) || value.length !== 2) {
+    throw new TypeError('Particle alpha must be a number or [start, end] from 0 to 1.');
+  }
+  return value.map(entry => finiteNumber(entry, 'Particle alpha', 0, 1));
+}
+
+function normalizeColliders(value, context) {
+  const nodeIds = boundedArray(value, PARTICLE_LIMITS.maxColliders, 'Particle colliders');
+  // Colliders are only read, so several systems may share one.
+  for (const nodeId of nodeIds) {
+    rootNodeWithGeometry(nodeId, context.recipeNodes, new Set(), context.motionNodeIds, context.physicsNodeIds, 'Particle collider', 'particles');
+  }
+  return nodeIds;
+}
+
 function normalizeEmitterSystem(input, context) {
   knownKeys(input, EMITTER_SYSTEM_FIELDS, 'particle system');
   rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, 'Particle system', 'particles');
@@ -81,6 +112,17 @@ function normalizeEmitterSystem(input, context) {
     throw new RangeError(`Particle scale must be one of ${SCALE_MODES.join(', ')}.`);
   }
   if (input.rate !== undefined) system.rate = finiteNumber(input.rate, 'Particle rate', 0.01, PARTICLE_LIMITS.maxParticlesPerSystem * 100);
+  if (input.bounce !== undefined) system.bounce = finiteNumber(input.bounce, 'Particle bounce', 0, 1);
+  if (input.friction !== undefined) system.friction = finiteNumber(input.friction, 'Particle friction', 0, 1);
+  if (input.spin !== undefined) system.spin = rangeOf(input.spin, 'Particle spin', -100000, 100000);
+  if (input.color !== undefined) system.color = normalizeColors(input.color);
+  if (input.alpha !== undefined) system.alpha = normalizeAlpha(input.alpha);
+  if (input.colliders !== undefined) {
+    system.colliders = normalizeColliders(input.colliders, context);
+    if (system.colliders.includes(system.node)) {
+      throw new RangeError('A particle system node cannot be its own collider.');
+    }
+  }
   if (input.floor !== undefined) system.floor = finiteNumber(input.floor, 'Particle floor', -POSITION_LIMIT, POSITION_LIMIT);
   return system;
 }
@@ -130,6 +172,13 @@ export function normalizeAgentParticles(input, recipe) {
   result.systems = boundedArray(input.systems, PARTICLE_LIMITS.maxSystems, 'Particle systems').map(system => normalizeSystem(system, context));
   if (!result.systems.length) {
     throw new RangeError('Particles need at least one system. Use null to clear it.');
+  }
+  const systemNodes = new Set(result.systems.map(system => system.node));
+  for (const system of result.systems) {
+    const clash = system.colliders?.find(nodeId => systemNodes.has(nodeId));
+    if (clash) {
+      throw new RangeError(`Particle collider ${clash} is a particle system node; its own geometry is replaced by particles.`);
+    }
   }
   const total = result.systems.reduce((sum, system) => sum + system.count, 0);
   if (total > PARTICLE_LIMITS.maxParticles) {
@@ -204,13 +253,27 @@ function horizontalDirection(wind) {
   return length > 1e-6 ? [wind[0] / length, 0, wind[2] / length] : [1, 0, 0];
 }
 
-function prepareEmitter(system, node, template, forces) {
-  const systemForces = { ...forces, drag: system.drag, floor: system.floor };
+function collisionSurfaceOf(system, nodes, geometries) {
+  if (!system.colliders) return undefined;
+  const meshes = system.colliders.map(nodeId => {
+    const collider = nodes.get(nodeId);
+    const geometry = geometries.get(collider.geometry);
+    return { positions: surfaceInWorld(geometry, nodeMatrix(collider)).positions, indices: geometry.indices };
+  });
+  const surface = createCollisionSurface(meshes);
+  if (surface.triangleCount > PARTICLE_LIMITS.maxColliderTriangles) {
+    throw new RangeError(`Particle colliders of ${system.node} hold ${surface.triangleCount} triangles; the limit is ${PARTICLE_LIMITS.maxColliderTriangles}.`);
+  }
+  return surface;
+}
+
+function prepareEmitter(system, node, template, forces, colliders) {
+  const systemForces = { ...forces, drag: system.drag, floor: system.floor, bounce: system.bounce ?? (colliders ? DEBRIS_BOUNCE : 0), friction: system.friction ?? DEBRIS_FRICTION, colliders };
   const launches = createParticleLaunches({ ...system, spreadRadians: system.spread * Math.PI / 180, forces: systemForces });
   return {
     node,
     report: () => ({ node: system.node, type: 'emitter', particles: system.count, verticesPerParticle: template.positions.length / 3, ...lifeSummary(launches) }),
-    build: time => buildParticleMesh(template, launches, systemForces, system.scale, time),
+    build: time => buildParticleMesh(template, launches, systemForces, system.scale, time, system),
   };
 }
 
@@ -253,7 +316,7 @@ export function bakeAgentParticles(particles, recipe, geometries) {
       const surfaceNode = nodes.get(system.surface);
       return prepareHair(system, node, surfaceNode, geometries.get(surfaceNode.geometry), forces);
     }
-    return prepareEmitter(system, node, geometries.get(node.geometry), forces);
+    return prepareEmitter(system, node, geometries.get(node.geometry), forces, collisionSurfaceOf(system, nodes, geometries));
   });
   return Object.freeze({
     sample(time) {

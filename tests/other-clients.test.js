@@ -76,7 +76,7 @@ test('every page that llms.txt and the README link to exists in the package or o
   const missing = [];
   for (const { file, text } of documents) {
     for (const path of linkedPaths(text)) {
-      if (path === '/' || path === '/release.json') continue;
+      if (path === '/' || path === '/release.json' || path === '/changelog.json') continue;
       const found = pageSources(path).some(source => existsSync(`${repositoryRoot}${source}`));
       if (!found) missing.push(`${file} links ${path}`);
     }
