@@ -107,7 +107,10 @@ const ambient = ambientFlag >= 0 ? Number(argumentsGiven[ambientFlag + 1]) : nul
 const keyFlag = argumentsGiven.indexOf('--key');
 const keyScale = keyFlag >= 0 ? Number(argumentsGiven[keyFlag + 1]) : null;
 const fogDensityFlag = argumentsGiven.indexOf('--fog-density');
-const fogDensity = fogDensityFlag >= 0 ? { density: Number(argumentsGiven[fogDensityFlag + 1]) } : null;
+// --fog-set name=value,name=value replaces any other volume fog fields, for example scatterOctaves=3,keyTransmittance=1.
+const fogSetFlag = argumentsGiven.indexOf('--fog-set');
+const fogSet = fogSetFlag >= 0 ? Object.fromEntries(argumentsGiven[fogSetFlag + 1].split(',').map(pair => pair.split('=')).map(([name, value]) => [name, Number(value)])) : {};
+const fogDensity = fogDensityFlag >= 0 || fogSetFlag >= 0 ? { ...fogSet, ...(fogDensityFlag >= 0 ? { density: Number(argumentsGiven[fogDensityFlag + 1]) } : {}) } : null;
 const pathTracerFlag = argumentsGiven.includes('--path-tracer');
 const samplesFlag = argumentsGiven.indexOf('--samples');
 const pathTracerSamples = samplesFlag >= 0 ? Number(argumentsGiven[samplesFlag + 1]) : 64;
@@ -123,7 +126,7 @@ const sceneIdsGiven = lookIds ?? (sceneFlag >= 0 ? argumentsGiven[sceneFlag + 1]
 // The fresh bake.json lands in the work directory and is checked against the committed one (compare-scores.mjs); --update-baseline replaces
 // the committed bake.json and images/<id>-baked.jpg with it.
 const bakeScoreRun = bakedSceneIds !== null && !sceneSet && !pathTracerFlag;
-const bakeVariantFlags = ['--no-glossy', '--sky-only', '--bake-preset', '--bake-grid', '--bake-grid-fog', '--no-bake-worker', '--bake-bounces', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--key', '--fog-density', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
+const bakeVariantFlags = ['--no-glossy', '--sky-only', '--bake-preset', '--bake-grid', '--bake-grid-fog', '--no-bake-worker', '--bake-bounces', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--key', '--fog-density', '--fog-set', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
 const bakeScoreIsBaseline = bakeScoreRun && argumentsGiven.includes('--update-baseline') && !bakeVariantFlags.some(flag => argumentsGiven.includes(flag));
 const onlyScenes = sceneIdsGiven ?? (bakeScoreRun ? bakedSceneIds : null);
 const skipCpu = skipCpuFlag || bakeScoreRun || Boolean(viewTransform);

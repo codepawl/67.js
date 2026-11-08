@@ -162,4 +162,5 @@ def main():
     print("\n".join(lines))
 
 
-main()
+if __name__ == "__main__":
+    main()
