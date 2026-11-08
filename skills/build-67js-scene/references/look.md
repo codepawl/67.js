@@ -92,6 +92,8 @@ Point lights do not scatter in volume fog; the sun does. A sunlit closed room wi
 
 `effects` holds `exposure`, `saturation`, `contrast`, `temperature`, `vignette`, `grain`, `ambientOcclusion` (0 = off),
 `bloom` and `depthOfField` (see `camera.md`). Nested `bloom` fields merge.
+Named post steps, each off until set: `colorBalance` (`lift`, `gamma`, `gain`, three numbers each), `glare` (`streaks`,
+`count`, `angle`, `fogGlow`, `threshold`, `size`) and `lensDistortion` (`distortion`, `dispersion`); ranges in `docs/agent-look.md`.
 
 Tool `scene_apply`:
 

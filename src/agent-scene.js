@@ -3,6 +3,7 @@ import { box, circle, cone, cylinder, grid, icoSphere, sphere, torus } from './g
 import { createSceneGraph } from './scene-graph.js';
 import { applyProjection, validateCameraShift, CAMERA_LENS_FIELDS } from './camera.js';
 import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, agentEnvironmentMap } from './agent-look.js';
+import { postStepSupport } from './shader-registry.js';
 import { agentSceneModule, agentSceneModuleLoaded } from './agent-scene-modules.js';
 import { MESH_SMOOTH_ANGLE_DEFAULT, CURVE_TEXT_LIMITS, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, MAX_MATERIAL_PATTERNS, RECIPE_ALPHA_MODES } from './agent-scene-capabilities.js';
 import { ALL_LIGHTS_MASK, MATERIAL_LAYER_FIELDS, validateMaterialLayers } from './material-layers.js';
@@ -1608,7 +1609,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           knownKeys(operation, ['type', lookField], 'operation');
           const patch = operation[lookField];
           // Spot and area lights, cascades and sun links are absent from a recipe until it sets them.
-          const optionalFields = lookField === 'environment' ? ['ground', 'spotLights', 'areaLights', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'hdri'] : [];
+          const optionalFields = lookField === 'environment' ? ['ground', 'spotLights', 'areaLights', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'hdri'] : lookField === 'effects' ? postStepSupport.fields : [];
           knownKeys(patch, [...Object.keys(candidate[lookField]), ...optionalFields], lookField);
           const nestedField = lookField === 'environment' ? 'volumeFog' : lookField === 'effects' ? 'bloom' : null;
           const merged = { ...candidate[lookField], ...(lookField === 'environment' ? environmentPatchWithSetup(patch) : patch) };

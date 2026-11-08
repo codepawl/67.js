@@ -5,7 +5,7 @@ import { resolveVolumeFog } from './volumetric.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
 import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
-import { lightShapeSupport } from './shader-registry.js';
+import { lightShapeSupport, postStepSupport } from './shader-registry.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
 import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference } from './look-catalog.js';
 import { DEFAULT_LIGHTING_SETUP, LIGHTING_SETUP_NAMES, DEFAULT_AMBIENT_OCCLUSION } from './agent-scene-capabilities.js';
@@ -367,7 +367,7 @@ export function agentEnvironmentMap(environment) {
 }
 
 function effectsFrom(input = {}) {
-  knownKeys(input, EFFECT_FIELDS, 'effects');
+  knownKeys(input, [...EFFECT_FIELDS, ...postStepSupport.fields], 'effects');
   const groupFields = { bloom: BLOOM_FIELDS, depthOfField: DEPTH_OF_FIELD_FIELDS, motionBlur: MOTION_BLUR_FIELDS };
   for (const field of EFFECT_FIELDS) {
     if (!(field in groupFields) && Object.hasOwn(input, field)) {
@@ -386,7 +386,7 @@ function effectsFrom(input = {}) {
   }
   const ambientOcclusion = fallback(input.ambientOcclusion, DEFAULT_AMBIENT_OCCLUSION);
   const resolved = resolveEffects({ ...input, ambientOcclusion, ...groups, bloom: { strength: 0.12, threshold: 1, radius: 1, ...groups.bloom } });
-  return { ...resolved, exposure: numberInRange(fallback(input.exposure, 1), 0.01, 16, 'exposure') };
+  return { ...resolved, exposure: numberInRange(fallback(input.exposure, 1), 0.01, 16, 'exposure'), ...postStepSupport.resolve?.(input) };
 }
 
 function shadowFrom(input = {}) {

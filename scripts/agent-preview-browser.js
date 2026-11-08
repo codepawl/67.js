@@ -285,6 +285,7 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   applyRecipeWindHeading(record.renderer, environment);
   const { objectMotion, ...renderOptions } = frameOptions;
   const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
+  if (effects.colorBalance || effects.glare || effects.lensDistortion) agentSceneModule('postSteps').installPostSteps(record.renderer);
   if (objectMotion) {
     // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
     const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
