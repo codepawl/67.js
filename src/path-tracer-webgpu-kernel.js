@@ -926,8 +926,9 @@ fn bakeTexels(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgro
 }
 `;
 
-export const buildMegakernelSource = ({ hasVolume = false, hasSubsurface = false, texelBake = false } = {}) => buildCommonSource({ hasVolume }) + /* wgsl */ `
-// The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it.
+// `realtime` is the set of WGSL pieces of path-tracer-realtime-webgpu-kernel.js (REALTIME_KERNEL_PIECES); the real-time tracer passes them in, so other bundles do not carry them.
+export const buildMegakernelSource = ({ hasVolume = false, hasSubsurface = false, texelBake = false, realtime = null } = {}) => buildCommonSource({ hasVolume }) + /* wgsl */ `
+${realtime ? realtime.declarations + realtime.addLights : `// The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it.
 fn addLights(depth: i32, normal: vec3<f32>) {
   let emitterCount = params.emittersFlagsSample.x;
   if (depth == 0 || emitterCount <= 1) {
@@ -941,7 +942,7 @@ fn addLights(depth: i32, normal: vec3<f32>) {
   selectionProbability = 1.0 / f32(emitterCount);
   sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
   flushShadowRay();
-}
+}`}
 ${hasSubsurface ? SUBSURFACE_FUNCTIONS : ''}
 fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
   resetRandom(pixel, sampleIndex, params.seedAndAtlas.x);
@@ -976,6 +977,7 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
       entering = dot(hitNormal, direction) < 0.0;
       normal = select(-hitNormal, hitNormal, entering);
       isGlass = hitTransmission > 0.0 && nextRandom() < hitTransmission;
+      ${realtime ? realtime.firstHit : ''}
       if (!featuresRecorded) {
         featureAlbedo = select(hitColor, vec3<f32>(1.0), isGlass);
         featureNormal = normal;
@@ -991,6 +993,7 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
     }
     if (needsLights) { addLights(depth, normal); }
     inMedium = false;
+    ${realtime ? realtime.terminal : ''}
     ${hasVolume ? `if (inFog) {
       let phaseCosine = sampleHenyeyGreensteinCosine(params.volumeMaximumAnisotropy.w, nextRandom());
       let phaseSine = sqrt(max(0.0, 1.0 - phaseCosine * phaseCosine));
@@ -1039,13 +1042,14 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
         previousPdf = surfacePdf;
         afterMirror = false;
       }
+      ${realtime ? realtime.record : ''}
     }
     position = hitPoint + direction * surfaceOffset;
     if (!survivesRoulette(depth)) { break; }
   }
 }
 
-${texelBake ? TEXEL_MAIN : CAMERA_MAIN}
+${texelBake ? TEXEL_MAIN : realtime ? realtime.main : CAMERA_MAIN}
 `;
 
 export const MEGAKERNEL_SOURCE = buildMegakernelSource();

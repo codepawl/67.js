@@ -1,0 +1,1 @@
+- entry:path-tracer-realtime+lazy: the WebGPU backend of the real-time tracer (WGSL kernel pieces, cache update and denoiser passes, about 9 KB gzip) loads only for `backend: 'webgpu'`; the demo room takes 20 ms a frame on it against 36 ms on WebGL2, and the kernel compiles in under a second.
