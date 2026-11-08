@@ -1,1 +1,0 @@
-- entry:reversed-depth: the camera-relative vertex transform (a patched main vertex shader line, two uniforms and their per-frame upload) halves the wrong pixels of the 500 m, 0.1 mm flush pair, 343 bytes; the renderer core and every scene bundle are unchanged

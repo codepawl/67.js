@@ -1,1 +1,0 @@
-- Docs live examples: the status label no longer takes the article's paragraph style (it was 14 px with a 23 px bottom margin, so it sat high and large), each example shows what its `console.log`, `info`, `warn` and `error` print in a small output panel under the picture, and the introduction cube can be dragged to orbit.

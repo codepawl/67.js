@@ -1,1 +1,0 @@
-- Add the `overshoot-lift-plain` task and a `--backend cpu|gpu` option to the agent modeling suite (issue #286). Three live Sonnet runs of each overshoot task passed with 2 tool calls each, because the agent never chose a named easing.

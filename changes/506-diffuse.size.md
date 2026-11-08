@@ -1,6 +1,0 @@
-- entry:core: +72 bytes gzip (80865 to 80937) for the `volumeGridFog` uniform in the fog pass, which makes the fog's ambient count the sky only when the fog reads its bounce from an irradiance grid. Accepted for #506 (An chose to ship the fog change): with it the grid halls `temple-hall-a`, `temple-hall-b` and `temple-hall` get closer to Cycles (FLIP 0.1454 to 0.1323, 0.1211 to 0.1085, 0.0576 to 0.0513).
-- scene:lit-box: +75 bytes gzip, the same uniform in the core bundle.
-- goal:lit-box: +75 bytes gzip over a goal it already misses, the same uniform; accepted by An with the fog change on 2026-11-07.
-- goal:gltf-box: +61 bytes gzip, the same uniform; accepted by An with the fog change on 2026-11-07.
-- goal:agent-scene: +59 bytes gzip, the same uniform; accepted by An with the fog change on 2026-11-07.
-- scene:agent-scene+lazy: +342 bytes gzip (376099 to 376441): the uniform plus the automatic grid density and the grid's mean-light lookup for the fog in the lazy irradiance grid module.

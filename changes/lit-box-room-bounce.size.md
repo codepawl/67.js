@@ -1,1 +1,0 @@
-- entry:liquid-shader: the liquid optics check moved here from the renderer core, which takes 269 bytes gzip out of every plain lit box; only a scene with liquid pays for it

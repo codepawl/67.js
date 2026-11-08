@@ -1,1 +1,0 @@
-- scene:lit-box: the sky light of a mapped normal is squared in the main fragment shader (16 bytes gzip).

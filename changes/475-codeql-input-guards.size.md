@@ -1,2 +1,0 @@
-- entry:cloth: +87 B for the collider kind and pinned particle checks, which turn a silent call through an inherited method into an error that names the allowed kinds.
-- scene:agent-scene+lazy: +133 B for the same cloth checks, the reserved attribute names in mesh data and the pattern type check.

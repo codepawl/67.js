@@ -1,1 +1,0 @@
-- A Blender Cycles reference of the water shadow pool (volume absorption and scatter) and its FLIP score against 67js sit in `bench/reference/README.md` and `scripts/score-water-shadows.mjs` (issue #349). No engine code changed.

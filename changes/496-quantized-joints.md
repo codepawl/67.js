@@ -1,1 +1,0 @@
-- `loadGltf` and `parseGltf` load morph targets with normalized int8 or int16 POSITION deltas (KHR_mesh_quantization) and keep a skin whose joint has zero scale, collapsing its vertices to a point with a warning (issue #496).

@@ -1,1 +1,0 @@
-- Docs live examples can import every addon the package exports (`67js/addons/<name>`), loaded only when an example imports it, and `new Float32Array(...)` in example code passes the engine's typed array checks without borrowing the page's constructors.

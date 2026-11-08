@@ -1,2 +1,0 @@
-- entry:cascaded-shadows: grew 7 bytes gzip (10559 to 10566) for the light-side margin of a wide cascade map; the farthest cascade of the container port redraws 1 frame in 40 while orbiting instead of 25
-- entry:core, scene:lit-box and scene:agent-scene: unchanged to the byte

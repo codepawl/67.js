@@ -1,8 +1,0 @@
-- entry:vegetation: the foliage and canopy shading moved out of the core bundle into world-material-shader, which vegetation imports itself (about 2.3 KB gzip).
-- entry:terrain: the terrain shading moved out of the core bundle into world-material-shader, which terrain imports itself (about 2.3 KB gzip).
-- entry:grass: the grass shading moved out of the core bundle into world-material-shader, which grass imports itself (about 2.3 KB gzip).
-- entry:clutter: the moss shading moved out of the core bundle into world-material-shader, which clutter imports itself (about 2.3 KB gzip).
-- entry:hdri: the HDRI entry registers the shader registry and the environment GLSL, which left the core bundle.
-- entry:ground-bounce: the ground bounce registers the shader registry and the environment GLSL, which left the core bundle.
-- scene:agent-scene+lazy: the world materials, liquid and environment code load as their own chunks, so the total with every lazy chunk grows by the registration and stub text (1.9 KB) while the first load shrinks by 1.2 KB.
-- archive: the world material shader ships as its own addon file and the GLSL comment stripper is a new build script, about 0.4 KB of package for a smaller core.

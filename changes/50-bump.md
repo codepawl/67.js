@@ -1,1 +1,0 @@
-- Graph normal maps bake at the colour resolution again. The twice-resolution bake from #401 brought `brick-graph` from 0.0734 to 0.0714 against Cycles, but it cost 4 times the texels (5.6 MB against 1.4 MB with mips for a 512 pattern), which is not worth the gain as a default. The measurement stays in `bench/reference/README.md`.

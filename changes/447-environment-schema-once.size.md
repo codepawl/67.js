@@ -1,1 +1,0 @@
-- tool:scene_create: +594 bytes for the environment field descriptions #444 had to shorten (shadows follow the key light, the reflection-probe note, the four new fields); the same change removes two copies of the environment schema from scene_apply and scene_create_asset, so the tool total drops by 15,146 bytes

@@ -1,1 +1,0 @@
-- Record the next levers for the tilted-normal dark side of `brick-graph` (issue #50). The cube, a half-step exponent, a sun clip with the geometric normal and the fill and environment terms were each scored on the GPU and none beat the squared horizon share, so `src/shaders.js` is unchanged; the README has the table.

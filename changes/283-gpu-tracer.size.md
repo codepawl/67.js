@@ -1,2 +1,0 @@
-- entry:path-tracer: grows by about 460 bytes gzip for the GPU subsurface kernel pieces (path-tracer-gpu-subsurface.js) and the block packing; the GPU tracer is a dynamic import of the path-tracer addon and no core entry grows.
-- entry:path-tracer+lazy: the same bytes.

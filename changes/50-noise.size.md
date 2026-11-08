@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: Blender's hash and Perlin gradients take the place of the gradient noise in the graph bake, which brings the brick-tone noise of `brick-graph` to the pixels Cycles draws

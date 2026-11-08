@@ -1,1 +1,0 @@
-- Docs: add an API reference and a Resources page (part of #508). `scripts/api-reference.mjs` reads the exports of `67js` and every addon, with signatures, the comment above each declaration and a source link. `npm run build` writes it to `/api-reference.json`, so the page always matches the code. Resources links the demos, the agent guides, every contract, the changelog and npm.

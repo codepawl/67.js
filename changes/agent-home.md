@@ -1,1 +1,0 @@
-- The homepage hero is a live 3D airport ramp you can orbit or switch between four shots, on wide screens after the page has loaded; phones and data-saver visitors keep the still image. The real-time renderer is also exported as `Glaze` and the path tracer as `Cook` (`Renderer67` and `renderPathTracedImage` keep working).

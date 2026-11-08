@@ -1,1 +1,0 @@
-- Document the float32 depth limit of reversed-Z (closes #310): `docs/guide.md` gives the measured failure rates far from the camera (0.1 mm gap at 500 m: 6.9% of pixels; 1 mm at 500 m: 1.4%) and the workaround, a gap of at least 1 mm or `decal: true`. A split-float vertex path that would remove the limit is tracked separately.

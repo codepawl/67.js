@@ -1,2 +1,0 @@
-- entry:vegetation: the four-view blend in the card shaders (the vertex pick, a fragment pick with textureGrad) and `pixelErrorScale` add 682 bytes gzip to the lazy vegetation addon; entry:core, scene:lit-box and scene:agent-scene do not grow.
-- scene:agent-scene+lazy: the same 572 bytes gzip, since the lazy bundle holds the vegetation addon.

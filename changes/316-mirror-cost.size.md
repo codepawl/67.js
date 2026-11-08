@@ -1,1 +1,0 @@
-- No bundle grows. Gzip bytes after the change against origin/main: entry:core 80032 (0), entry:water-reflection 13036 (-2), scene:lit-box 50137 (0), scene:gltf-box 77581 (0), scene:agent-scene 103052 (-3), scene:agent-scene+lazy 359884 (-16). The only source change in a shipped file is a constant in the water addon.

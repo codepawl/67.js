@@ -1,1 +1,0 @@
-- The site header shows a history icon beside Changelog, as it does beside Docs. Footer links stay plain text. The navigation smoke checks now expect both links.

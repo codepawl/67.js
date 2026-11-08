@@ -1,3 +1,0 @@
-- scene:agent-scene+lazy: the single shadow map follows its casters and shrinks to one texel under cascades; the cascade addon adds 51 B and the core 41 to 44 B, for 16 MB less render target memory in every cascaded scene without volume fog or subsurface.
-- goal:lit-box: +41 B gzip (50029 to 50070) for the shadow map sizing above; needs An's acceptance, since lit-box is over its 50000 goal and may otherwise only shrink.
-- goal:agent-scene: +38 B gzip (102902 to 102940) for the same change; needs An's acceptance, since agent-scene is over its 100000 goal and may otherwise only shrink.
