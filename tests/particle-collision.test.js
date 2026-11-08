@@ -62,7 +62,7 @@ test('a bounce keeps its energy ratio: the first apex is about the bounce square
 });
 
 test('without bounce a particle sticks where it lands, on the top face', () => {
-  const scene = createAgentScene(dropRecipe({}));
+  const scene = createAgentScene(dropRecipe({ bounce: 0 }));
   const [early, late] = [1.5, 5].map(time => traceOf(scene, [time])[0]);
   assert.ok(Math.abs(early[1] - SLAB_TOP) < 1e-3, `rests at ${early[1]}`);
   assert.deepEqual(late, early, 'a stuck particle does not move again');
@@ -213,4 +213,23 @@ test('stepping from birth every frame stays cheap enough for long lives, and pla
   cold.sampleMotion(20 - 0.01);
   const coldSeek = performance.now() - coldStart;
   assert.ok(playback < 20000 && coldSeek < 20000, `playback ${playback.toFixed(0)} ms for 121 frames, cold seek to the end ${coldSeek.toFixed(0)} ms`);
+});
+
+test('Coulomb friction stops a slider after about v squared over two mu g, and a settled particle stops turning', () => {
+  const forces = { gravity: [0, -9.81, 0], wind: [0, 0, 0], fields: [], drag: 0, floor: 0, bounce: 0.3, friction: 0.5 };
+  const settings = { count: 1, seed: 1, emitter: { shape: 'point', position: [0, 0.0005, 0], halfExtents: [0, 0, 0], radius: 0 }, lifetime: [8, 8], speed: [3, 3], direction: [1, 0, 0], spreadRadians: 0, size: [1, 1], spin: [400, 400], forces };
+  const launches = createParticleLaunches(settings);
+  const state = { position: [0, 0, 0], scale: 0 };
+  const [early, late] = [3, 6].map(time => {
+    particleStateAt(launches, 0, forces, 'constant', time, state);
+    return { x: state.position[0], angle: state.angle };
+  });
+  assert.ok(early.x > 0.8 && early.x < 1, `slid ${early.x} m, expected about 0.9`);
+  assert.deepEqual(late, early, 'the slider is at rest and no longer turns');
+});
+
+test('the default bounce with colliders reads as debris', () => {
+  const heights = traceOf(createAgentScene(dropRecipe({})), frames).map(center => center[1]);
+  const rise = Math.max(...heights.slice(65, 100)) - SLAB_TOP;
+  assert.ok(rise > 0 && rise < 0.3, `default bounce rebounds ${rise} m from a 1.9 m drop`);
 });

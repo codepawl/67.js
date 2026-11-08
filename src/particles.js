@@ -20,7 +20,9 @@ export const PARTICLE_LIMITS = Object.freeze({
 
 const NO_DRAG_THRESHOLD = 1e-6;
 // A bounce slower than this (m/s) is not a bounce: the particle slides along the surface, or settles when it is slow too.
-const REST_SPEED = 0.25;
+const REST_SPEED = 0.4;
+// How strongly a sliding contact pulls the spin down, per second and unit of friction.
+const SPIN_COUPLING = 20;
 const CONTACT_OFFSET = 1e-4;
 const SEED_MIXER = 0x9e3779b1;
 
@@ -129,6 +131,8 @@ export function createParticleLaunches(settings) {
       velocity: Float64Array.from(velocity),
       steps: new Int32Array(count),
       resting: new Uint8Array(count),
+      // Angle and rate of the spin: damped by contact, so it is stepped with the position.
+      spin: Float64Array.from({ length: count * 2 }, (unused, slot) => slot % 2 ? spinRate[slot >> 1] : spinStart[slot >> 1]),
     };
     return launches;
   }
@@ -213,32 +217,52 @@ function earliestContact(forces, from, to) {
 }
 
 // Handles a contact. Without bounce the particle sticks where it touched. With bounce the normal speed is reflected and
-// scaled by `bounce`, the speed along the surface by `1 - friction`. Returns true when the particle has come to rest.
-function resolveContact(forces, position, velocity, from, to) {
+// scaled by `bounce`. Coulomb friction removes `friction` times the normal impulse from the speed along the surface
+// (a particle resting under gravity loses friction * g per second, so a slider slows and stops, never glides). The spin
+// is damped by the same contact. Returns true when the particle has come to rest.
+function resolveContact(forces, position, velocity, from, to, spin, step) {
   for (let axis = 0; axis < 3; axis++) {
     position[axis] = from[axis] + (to[axis] - from[axis]) * contact.fraction;
   }
   if (contact.onFloor) position[1] = forces.floor;
   if (!(forces.bounce > 0)) {
+    spin[1] = 0;
     return true;
   }
   const normal = contact.normal;
   const inward = velocity[0] * normal[0] + velocity[1] * normal[1] + velocity[2] * normal[2];
   const rebound = inward < 0 ? -inward * forces.bounce : 0;
   const outward = rebound < REST_SPEED ? 0 : rebound;
-  const keep = 1 - forces.friction;
+  const tangent = [0, 0, 0];
+  let tangentSpeed = 0;
+  for (let axis = 0; axis < 3; axis++) {
+    tangent[axis] = velocity[axis] - normal[axis] * inward;
+    tangentSpeed += tangent[axis] * tangent[axis];
+  }
+  tangentSpeed = Math.sqrt(tangentSpeed);
+  const impulse = Math.abs(Math.min(inward, 0)) + outward;
+  const keep = tangentSpeed > 0 ? Math.max(0, 1 - forces.friction * impulse / tangentSpeed) : 0;
   let sliding = 0;
   for (let axis = 0; axis < 3; axis++) {
-    const along = (velocity[axis] - normal[axis] * inward) * keep;
+    const along = tangent[axis] * keep;
     velocity[axis] = along + normal[axis] * outward;
     position[axis] += normal[axis] * CONTACT_OFFSET;
     sliding += along * along;
   }
-  return outward === 0 && Math.sqrt(sliding) < REST_SPEED;
+  // A bounce cuts the spin by friction at once; rolling contact keeps pulling it down while it slides.
+  spin[1] *= outward > 0 ? 1 - forces.friction : Math.max(0, 1 - forces.friction * SPIN_COUPLING * step);
+  const atRest = outward === 0 && Math.sqrt(sliding) < REST_SPEED;
+  if (atRest) spin[1] = 0;
+  if (!atRest) {
+    // The rest of the step is spent moving along the response velocity, so a slider keeps its distance.
+    for (let axis = 0; axis < 3; axis++) position[axis] += velocity[axis] * step * (1 - contact.fraction);
+  }
+  return atRest;
 }
 
 // One semi-implicit Euler step under gravity, drag toward the wind and every force field. Returns true at rest.
-function stepParticle(forces, position, velocity, step, fieldTime) {
+function stepParticle(forces, position, velocity, spin, step, fieldTime) {
+  spin[0] += spin[1] * step;
   for (let axis = 0; axis < 3; axis++) {
     scratchAcceleration[axis] = forces.gravity[axis] + forces.drag * (forces.wind[axis] - velocity[axis]);
   }
@@ -251,7 +275,7 @@ function stepParticle(forces, position, velocity, step, fieldTime) {
     scratchTo[axis] = position[axis] + velocity[axis] * step;
   }
   if (earliestContact(forces, scratchFrom, scratchTo)) {
-    return resolveContact(forces, position, velocity, scratchFrom, scratchTo);
+    return resolveContact(forces, position, velocity, scratchFrom, scratchTo, spin, step);
   }
   for (let axis = 0; axis < 3; axis++) position[axis] = scratchTo[axis];
   return false;
@@ -271,12 +295,15 @@ function trackedState(launches, index, forces, age, target) {
     }
     track.steps[index] = 0;
     track.resting[index] = 0;
+    track.spin[index * 2] = launches.spinStart[index];
+    track.spin[index * 2 + 1] = launches.spinRate[index];
   }
   const position = track.position.subarray(index * 3, index * 3 + 3);
   const velocity = track.velocity.subarray(index * 3, index * 3 + 3);
+  const spin = track.spin.subarray(index * 2, index * 2 + 2);
   while (track.steps[index] < wholeSteps && !track.resting[index]) {
     const fieldTime = launches.birth[index] + track.steps[index] * stepSeconds;
-    if (stepParticle(forces, position, velocity, stepSeconds, fieldTime)) {
+    if (stepParticle(forces, position, velocity, spin, stepSeconds, fieldTime)) {
       track.resting[index] = 1;
       launches.landing[index] = (track.steps[index] + 1) * stepSeconds;
     }
@@ -285,16 +312,19 @@ function trackedState(launches, index, forces, age, target) {
   if (track.resting[index]) {
     track.steps[index] = wholeSteps;
     for (let axis = 0; axis < 3; axis++) target.position[axis] = position[axis];
+    target.angle = spin[0];
     return;
   }
   // The last partial step is not remembered.
   const partialPosition = [position[0], position[1], position[2]];
   const partialVelocity = [velocity[0], velocity[1], velocity[2]];
+  const partialSpin = [spin[0], spin[1]];
   const remainder = age - wholeSteps * stepSeconds;
   if (remainder > 1e-9) {
-    stepParticle(forces, partialPosition, partialVelocity, remainder, launches.birth[index] + wholeSteps * stepSeconds);
+    stepParticle(forces, partialPosition, partialVelocity, partialSpin, remainder, launches.birth[index] + wholeSteps * stepSeconds);
   }
   for (let axis = 0; axis < 3; axis++) target.position[axis] = partialPosition[axis];
+  target.angle = partialSpin[0];
 }
 
 function scaleAtLife(mode, lifeFraction) {
@@ -327,6 +357,7 @@ export function particleStateAt(launches, index, forces, scaleMode, time, target
   const landed = launches.landing[index];
   const effectiveAge = Math.min(age, landed);
   target.motionAge = effectiveAge;
+  target.angle = launches.hasSpin ? launches.spinStart[index] + launches.spinRate[index] * effectiveAge : 0;
   for (let component = 0; component < 3; component++) {
     target.position[component] = launches.origin[index * 3 + component] +
       displacement(launches.velocity[index * 3 + component], forces.gravity[component], forces.wind[component], forces.drag, effectiveAge);
@@ -379,7 +410,7 @@ export function buildParticleMesh(template, launches, forces, scaleMode, time, l
   for (let index = 0; index < launches.count; index++) {
     particleStateAt(launches, index, forces, scaleMode, time, state);
     if (launches.hasSpin) {
-      rotationMatrix(launches.spinAxis.subarray(index * 3, index * 3 + 3), launches.spinStart[index] + launches.spinRate[index] * state.motionAge, matrix);
+      rotationMatrix(launches.spinAxis.subarray(index * 3, index * 3 + 3), state.angle, matrix);
     }
     if (colors) {
       const alpha = look.alpha ? look.alpha[0] + (look.alpha[1] - look.alpha[0]) * state.fraction : 1;

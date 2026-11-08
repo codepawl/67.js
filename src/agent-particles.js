@@ -13,6 +13,9 @@ const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius'];
 const EMITTER_SHAPES = ['point', 'box', 'sphere', 'disc'];
 const SCALE_MODES = ['constant', 'shrink', 'grow'];
 const DEFAULT_GRAVITY = Object.freeze([0, -9.81, 0]);
+// Defaults that read as debris: a bounce keeps 30 percent of the speed (the first release of collision stuck at 0 without colliders and had no default with them), friction 0.5.
+const DEBRIS_BOUNCE = 0.3;
+const DEBRIS_FRICTION = 0.5;
 const POSITION_LIMIT = 10000;
 const MAX_SEED = 0xffffffff;
 
@@ -265,7 +268,7 @@ function collisionSurfaceOf(system, nodes, geometries) {
 }
 
 function prepareEmitter(system, node, template, forces, colliders) {
-  const systemForces = { ...forces, drag: system.drag, floor: system.floor, bounce: system.bounce ?? 0, friction: system.friction ?? 0.2, colliders };
+  const systemForces = { ...forces, drag: system.drag, floor: system.floor, bounce: system.bounce ?? (colliders ? DEBRIS_BOUNCE : 0), friction: system.friction ?? DEBRIS_FRICTION, colliders };
   const launches = createParticleLaunches({ ...system, spreadRadians: system.spread * Math.PI / 180, forces: systemForces });
   return {
     node,
