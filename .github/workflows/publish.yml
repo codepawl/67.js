@@ -35,16 +35,16 @@ jobs:
         run: |
           expected=$(node -p "require('./package.json').version")
           name=$(node -p "require('./package.json').name")
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 30); do
             published=$(npm view "${name}" version 2>/dev/null || true)
             if [ "${published}" = "${expected}" ]; then
               echo "${name}@${published} is live."
               exit 0
             fi
-            echo "Registry shows '${published}', waiting for ${expected} (attempt ${attempt} of 12)."
+            echo "Registry shows '${published}', waiting for ${expected} (attempt ${attempt} of 30)."
             sleep 10
           done
-          echo "The registry did not serve ${name}@${expected} within two minutes." >&2
+          echo "The registry did not serve ${name}@${expected} within five minutes." >&2
           exit 1
 
   release:
