@@ -19,6 +19,9 @@ requires a clean lint, so keep them valid when the API changes.
    radius 1 and height 1 centred on the origin (`bevel: 0`); `sphere` has radius 1; `lathe` turns a profile;
    `extrude` makes outlines with holes. Set proportions first by translating tagged faces, so later widths and offsets
    stay in real units: a 0.5 x 0.6 x 1.0 box is `right` by -0.25, `left` by 0.25, `top` by -0.4.
+   Paint and weight after the shape edits: `vertex_color` (`color`, `field` or a two-color `gradient`) colors the selected faces and
+   exports as `COLOR_0`; `vertex_group` (`name` plus `weight`, `field` or `gradient`) makes weights that `displace` reads with `group`
+   and a cloth sheet reads with `pinGroup`. Example: `{ "op": "vertex_group", "name": "hem", "gradient": { "axis": "y", "range": [-0.5, 0.5], "weights": [1, 0] } }`.
 3. Add edits in small batches with `mesh_edit` (or in the recipe). Name every edit (`name: "lid"` gives `lid.cap`,
    `lid.side`); an unnamed one gets `<op>-<index>`, which is hard to predict. Select faces by tags, never by index.
 4. After each batch read the `mesh_edit` result: `edits[i].selected`, `tags` and `edges` say what each edit touched;
