@@ -62,7 +62,7 @@ fails the job and does not fall back, so choose `cpu` unless you know the machin
 
 ## Render passes
 
-`image` and `stills` jobs take `passes`, a list of `albedo`, `normal`, `emission`, `depth` and `objectId`. Each frame
+`image` and `stills` jobs take `passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao` and `mist` (lighting terms: use `exr` for them). Each frame
 also writes one raw PNG per pass at the lit image's size, with no grading, bloom, depth of field or antialiasing.
 
 ```json
