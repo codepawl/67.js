@@ -1754,6 +1754,7 @@ export class Renderer67 {
     if (effects.bloom.strength > 0) steps.push('bloom');
     if (volume.density > 0) steps.push('volume');
     if (volume.density > 0 && volume.field) steps.push('field');
+    if (volume.density > 0 && requireFeatureCode('volumeFog').support.usesDetail(volume)) steps.push('detail');
     if (volume.density > 0 && this.fogLightBuffers?.count > 0) steps.push('lights');
     if (fogSky) steps.push('sky');
     if (frame.volumeExplosion) steps.push('explosion');

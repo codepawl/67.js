@@ -163,6 +163,7 @@ const POST_STEP_CONDITIONS = {
   volume: ['POST_VOLUME', 'volumeDensity > 0.0'],
   sky: ['POST_SKY', 'true'],
   field: ['POST_FIELD', 'true'],
+  detail: ['POST_DETAIL', 'true'],
   lights: ['POST_LIGHTS', 'volumeLightCount > 0'],
   explosion: ['POST_EXPLOSION', 'volumeExplosion > 0.5'],
   finish: ['POST_FINISH', 'true'],
@@ -171,7 +172,7 @@ const POST_STEP_CONDITIONS = {
 // The program with every step is the one a frame draws while a variant builds. It leaves out the steps below: the fog sky grid,
 // field and lights exist only inside a fog, and the volume fog and explosion code load from fog-shader.js and explosion-shader.js
 // only for a renderer that draws them.
-export const POST_STEPS_WITH_OPTIONAL_CODE = Object.freeze(['volume', 'sky', 'field', 'lights', 'explosion']);
+export const POST_STEPS_WITH_OPTIONAL_CODE = Object.freeze(['volume', 'sky', 'field', 'detail', 'lights', 'explosion']);
 export const POST_STEPS = Object.freeze(Object.keys(POST_STEP_CONDITIONS).filter(step => !POST_STEPS_WITH_OPTIONAL_CODE.includes(step)));
 
 const EXPLOSION_STUB = 'vec3 explosion(vec3 background) { return background; }';

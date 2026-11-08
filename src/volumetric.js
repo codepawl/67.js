@@ -4,7 +4,7 @@ const DEFAULT_COLOR = Object.freeze([0.8, 0.85, 0.9]);
 const DEFAULT_AMBIENT = Object.freeze([0.03, 0.035, 0.04]);
 const DEFAULT_DRIFT = Object.freeze([0.03, 0, 0]);
 
-function finiteRange(value, minimum, maximum, label) {
+export function finiteRange(value, minimum, maximum, label) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
     throw new RangeError(`${label} must be between ${minimum} and ${maximum}`);
   }
@@ -53,7 +53,8 @@ export function resolveVolumeFog(input = {}) {
   const noiseScale = finiteRange(input.noiseScale ?? 0.3, 0.001, 100, 'Volume noise scale');
   const maxDistance = finiteRange(input.maxDistance ?? 100, 0.01, 1e4, 'Volume maximum distance');
   const heightFalloff = finiteRange(input.heightFalloff ?? 0, 0, 1e5, 'Volume height falloff');
-  const resolved = { density, minimum, maximum, color, ambient, drift, steps, anisotropy, noiseAmount, noiseScale, maxDistance, heightFalloff };
+  // The detail fields (detailOctaves ... keyScattering) pass through with the other unknown fields: the fog addon validates them (resolveFogDetail).
+  const resolved = { ...input, density, minimum, maximum, color, ambient, drift, steps, anisotropy, noiseAmount, noiseScale, maxDistance, heightFalloff };
   // Left out when unset, so the renderer can derive it from the scene (volumeShadowAmbient).
   if (input.shadowAmbient !== undefined) {
     resolved.shadowAmbient = finiteRange(input.shadowAmbient, 0, 1, 'Volume shadow ambient');
