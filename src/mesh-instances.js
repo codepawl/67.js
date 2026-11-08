@@ -1,6 +1,8 @@
 import { quat } from 'gl-matrix';
 import { INSTANCE_SOURCES, MAX_INSTANCE_CANDIDATES } from './mesh-operations.js';
 import { evaluateField, pointSetContext, seededRandom } from './mesh-fields.js';
+import { createTriangleSurfaceIndex } from './mesh-query.js';
+import './mesh-field-surfaces.js';
 
 // Instance on points: a node with an `instances` record becomes a group node plus one child node per point, all
 // sharing the node's geometry and material, so the renderer draws them in one instanced call. Points come from a
@@ -152,7 +154,7 @@ function candidatePoints(spec, seed, resolveSurface) {
   return surfacePoints(resolveSurface(source.geometry), count, seed);
 }
 
-function keptIndices(spec, points) {
+function keptIndices(spec, points, resolveSurface) {
   const count = points.positions.length / 3;
   const kept = [];
   if (spec.where === undefined) {
@@ -160,7 +162,11 @@ function keptIndices(spec, points) {
     return kept;
   }
   const normals = points.normals ?? Float64Array.from({ length: count * 3 }, (unused, position) => UP[position % 3]);
-  const { values } = evaluateField(spec.where, pointSetContext(points.positions, normals), { kind: 'scalar' });
+  const loadSurface = surface => {
+    if (typeof surface !== 'string') throw instanceError('a where field reads a surface by its geometry id.');
+    return createTriangleSurfaceIndex(resolveSurface(surface));
+  };
+  const { values } = evaluateField(spec.where, pointSetContext(points.positions, normals, loadSurface), { kind: 'scalar' });
   for (let index = 0; index < count; index++) {
     if (values[index] !== 0) kept.push(index);
   }
@@ -219,7 +225,7 @@ export function expandInstancedNodes(nodes, { resolveSurface, maxNodes }) {
     const seed = checkedSpec(spec);
     const points = candidatePoints(spec, seed, resolveSurface);
     expanded.push(group);
-    for (const [slot, candidate] of keptIndices(spec, points).entries()) {
+    for (const [slot, candidate] of keptIndices(spec, points, resolveSurface).entries()) {
       const scale = instanceScale(spec, seed, candidate);
       expanded.push({
         id: `${node.id}.${slot}`, parent: node.id, geometry, material,

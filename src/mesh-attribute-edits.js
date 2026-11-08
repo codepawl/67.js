@@ -95,7 +95,7 @@ function gradientFractions(mesh, gradient) {
 }
 
 /** Set the weight of a named group for the vertices of the selected faces; other vertices keep their weight (0 in a new group). */
-export function setVertexGroup(mesh, { select, name, weight, field, gradient }) {
+export function setVertexGroup(mesh, { select, name, weight, field, gradient }, loadSurface) {
   const attributeName = GROUP_PREFIX + name;
   const existing = mesh.attributes.point[attributeName];
   if (!existing && vertexGroupNames(mesh).length >= MAX_VERTEX_GROUPS) {
@@ -103,7 +103,7 @@ export function setVertexGroup(mesh, { select, name, weight, field, gradient }) 
   }
   const weights = existing ? Float32Array.from(existing.data) : new Float32Array(mesh.vertexCount);
   const flags = selectedVertices(mesh, select);
-  const fieldValues = field === undefined ? null : evaluateField(field, meshFieldContext(mesh, 'point'), { kind: 'scalar' }).values;
+  const fieldValues = field === undefined ? null : evaluateField(field, meshFieldContext(mesh, 'point', loadSurface), { kind: 'scalar' }).values;
   const fractions = gradient ? gradientFractions(mesh, gradient) : null;
   let assignedVertices = 0;
   for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
@@ -118,11 +118,11 @@ export function setVertexGroup(mesh, { select, name, weight, field, gradient }) 
 }
 
 /** Set the corner colors of the selected faces; corners of other faces keep their color (white when the mesh had none). */
-export function setVertexColor(mesh, { select, color, field, gradient }) {
+export function setVertexColor(mesh, { select, color, field, gradient }, loadSurface) {
   const existing = mesh.attributes.corner[COLOR_ATTRIBUTE];
   const colors = existing?.size === 3 ? Float32Array.from(existing.data) : new Float32Array(mesh.cornerCount * 3).fill(1);
   const faceMask = select ? selectFaces(mesh, select) : null;
-  const fieldValues = field === undefined ? null : evaluateField(field, meshFieldContext(mesh, 'point'), { kind: 'vector' }).values;
+  const fieldValues = field === undefined ? null : evaluateField(field, meshFieldContext(mesh, 'point', loadSurface), { kind: 'vector' }).values;
   const fractions = gradient ? gradientFractions(mesh, gradient) : null;
   let assignedCorners = 0;
   for (let face = 0; face < mesh.faceCount; face++) {
