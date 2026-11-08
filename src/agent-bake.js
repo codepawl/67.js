@@ -48,7 +48,7 @@ export function normalizeAgentBake(input) {
   }
   if (input.gridFog === true) {
     if (!irradianceGrid) {
-      throw new RangeError('bake.gridFog needs irradianceGrid.');
+      throw new RangeError('bake.gridFog needs bake.irradianceGrid.');
     }
     resolved.gridFog = true;
   }
