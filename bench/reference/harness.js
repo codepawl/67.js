@@ -485,3 +485,15 @@ window.renderProgressiveCheckpoints = renderProgressiveCheckpoints;
 window.measureProgressiveFrameTime = measureProgressiveFrameTime;
 
 window.loadTraceSceneFor = loadTraceSceneFor;
+
+// The masked leaf cards of bench/native-tracer/cutout-scene.js on the path tracer's gpu or webgpu backend, as the PNG of the
+// tone mapped pixels (bench/native-tracer/cutout-gpu.mjs writes it).
+window.renderCutoutScene = async function renderCutoutScene(leafCount, options) {
+  const [{ buildCutoutParts, CUTOUT_CAMERA, CUTOUT_ENVIRONMENT }, { renderPathTracedImage }] = await Promise.all([import('/bench/native-tracer/cutout-scene.js'), import('/src/path-tracer.js')]);
+  const result = await renderPathTracedImage({ parts: buildCutoutParts(leafCount), environment: CUTOUT_ENVIRONMENT, camera: CUTOUT_CAMERA }, { ...options, denoise: false });
+  const canvas = document.createElement('canvas');
+  canvas.width = result.width;
+  canvas.height = result.height;
+  canvas.getContext('2d').putImageData(new ImageData(result.rgba, result.width, result.height), 0, 0);
+  return { image: canvas.toDataURL('image/png').split(',')[1], report: result.report };
+};

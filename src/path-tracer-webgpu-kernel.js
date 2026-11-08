@@ -363,13 +363,19 @@ fn occluded(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> bool {
   var start = origin;
   var remaining = limit;
   let surfaceOffset = params.environmentRotationAndRays.z;
+  // A solid any-hit shadows the point wherever it lies; a transparent one hides what sits before it, so retrace for nearest hits.
+  var anyHit = true;
   for (var attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
-    traceRay(start, direction, remaining, true);
+    traceRay(start, direction, remaining, anyHit);
     if (nearestSlot < 0) { return false; }
     let material = i32(triangles[nearestSlot * TRIANGLE_TEXELS].w) * MATERIAL_TEXELS;
     let cutoff = materials[material + 3].z;
     if (cutoff == 0.0) { return true; }
     if (alphaAtNearestHit() >= cutoff) { return true; }
+    if (anyHit) {
+      anyHit = false;
+      continue;
+    }
     let advance = nearestDistance + surfaceOffset;
     remaining -= advance;
     if (remaining <= 0.0) { return false; }

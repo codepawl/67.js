@@ -50,7 +50,7 @@ const traceStarted = performance.now();
 const result = traceNative(input, options);
 const wallSeconds = (performance.now() - traceStarted) / 1000;
 
-const { rgba, ...numbers } = result;
+const { rgba, albedo, normal, depth, variance, ...numbers } = result;
 const linear = new Float32Array(options.width * options.height * 3);
 for (let pixel = 0; pixel < options.width * options.height; pixel++) {
   linear.set(rgba.subarray(pixel * 4, pixel * 4 + 3), pixel * 3);

@@ -13,6 +13,7 @@ const KERNEL_SOURCE: &str = include_str!("kernel.wgsl");
 /// The texel entry point of the light bake, appended to the kernel for a bake only.
 const TEXEL_SOURCE: &str = include_str!("texel.wgsl");
 const WORKGROUP_SIZE: u32 = 8;
+const MATERIAL_TEXELS: usize = 10;
 /// Must match `TEXEL_WORKGROUP_SIZE` in texel.wgsl.
 const TEXEL_WORKGROUP_SIZE: u32 = 64;
 /// A dispatch is at most 65535 workgroups wide; a larger bake wraps onto the second dimension.
@@ -194,6 +195,16 @@ fn open_device() -> Result<(wgpu::Device, wgpu::Queue, wgpu::AdapterInfo)> {
     Ok((device, queue, adapter.get_info()))
 }
 
+/// Whether a material takes its alpha from a colour map and cuts at a threshold. A material is `MATERIAL_TEXELS` vec4s: the cutoff
+/// is the third float of texel 3 and the width of the colour map's atlas rectangle the third float of texel 6.
+fn material_is_cutout(materials: &[f32], material: usize) -> bool {
+    let base = material * MATERIAL_TEXELS * 4;
+    if base + 7 * 4 > materials.len() {
+        return false;
+    }
+    materials[base + 3 * 4 + 2] > 0.0 && materials[base + 6 * 4 + 2] > 0.0
+}
+
 fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedScene> {
     let setup_started = Instant::now();
     let triangle_count = input.triangle_count as usize;
@@ -225,7 +236,7 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
     ];
     layout_entries.extend((2..=7).map(|binding| storage_entry(binding, true)));
     layout_entries.push(storage_entry(8, false));
-    layout_entries.extend((0..shape.extra_buffers.len()).map(|offset| storage_entry(9 + offset as u32, true)));
+    layout_entries.extend((0..shape.extra_buffers.len() + 1).map(|offset| storage_entry(9 + offset as u32, true)));
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("path tracer"),
         entries: &layout_entries,
@@ -246,16 +257,35 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
     let compile_seconds = compile_started.elapsed().as_secs_f64();
 
     let upload_started = Instant::now();
-    // The corners of every triangle: the table stores a corner and two edges in its first three texels.
-    let mut vertices: Vec<f32> = Vec::with_capacity(triangle_count * 9);
-    for triangle in triangle_data.chunks_exact(TRIANGLE_FLOATS) {
+    // The corners of every triangle: the table stores a corner and two edges in its first three texels. Opaque triangles come
+    // first and alpha cutout triangles after them, because the hardware takes its opaque flag per geometry; `slot_map`
+    // gives the table slot of each hardware primitive (the opaque ones, then the cutouts).
+    let mut opaque_vertices: Vec<f32> = Vec::with_capacity(triangle_count * 9);
+    let mut cutout_vertices: Vec<f32> = Vec::new();
+    let mut slot_map: Vec<u32> = Vec::with_capacity(triangle_count);
+    let mut cutout_slots: Vec<u32> = Vec::new();
+    for (slot, triangle) in triangle_data.chunks_exact(TRIANGLE_FLOATS).enumerate() {
         let corner = [triangle[0], triangle[1], triangle[2]];
         let edge_first = [triangle[4], triangle[5], triangle[6]];
         let edge_second = [triangle[8], triangle[9], triangle[10]];
+        let is_cutout = material_is_cutout(&input.materials, triangle[3] as usize);
+        let vertices = if is_cutout { &mut cutout_vertices } else { &mut opaque_vertices };
         vertices.extend_from_slice(&corner);
         vertices.extend((0..3).map(|axis| corner[axis] + edge_first[axis]));
         vertices.extend((0..3).map(|axis| corner[axis] + edge_second[axis]));
+        if is_cutout {
+            cutout_slots.push(slot as u32);
+        } else {
+            slot_map.push(slot as u32);
+        }
     }
+    let opaque_count = slot_map.len();
+    slot_map.extend(cutout_slots);
+    let mut vertices = opaque_vertices;
+    vertices.extend(cutout_vertices);
+    // Word 47 of the parameter block tells the kernel where the cutout primitives start in `slot_map`.
+    let mut parameter_bytes = input.parameters.to_vec();
+    parameter_bytes[47 * 4..48 * 4].copy_from_slice(&(opaque_count as u32).to_le_bytes());
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("triangle corners"),
         contents: bytemuck::cast_slice(&vertices),
@@ -269,6 +299,7 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
         storage_buffer(&device, "environment colors", bytemuck::cast_slice(&input.environment_colors)),
         storage_buffer(&device, "environment tables", bytemuck::cast_slice(&input.environment_tables)),
     ];
+    buffers.push(storage_buffer(&device, "primitive slots", bytemuck::cast_slice(&slot_map)));
     let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("accumulation"),
         size: shape.accumulation_bytes,
@@ -280,21 +311,32 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
     }
     let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("parameters"),
-        contents: &input.parameters[..],
+        contents: &parameter_bytes,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
     let upload_seconds = upload_started.elapsed().as_secs_f64();
 
     let build_started = Instant::now();
-    let geometry_size = wgpu::BlasTriangleGeometrySizeDescriptor {
-        vertex_format: wgpu::VertexFormat::Float32x3,
-        vertex_count: (triangle_count * 3) as u32,
-        index_format: None,
-        index_count: None,
-        // Opaque: the kernel steps through the transparent texels of a cutout itself (see `intersectScene`), so the hardware
-        // never runs an any-hit shader and every hit it returns is a candidate surface.
-        flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
-    };
+    // Opaque triangles never reach the any-hit loop of the kernel; cutout triangles are candidates it confirms when the alpha
+    // of their colour map reaches the material's cutoff (see `traceRay`).
+    let mut geometry_sizes: Vec<wgpu::BlasTriangleGeometrySizeDescriptor> = Vec::new();
+    let mut geometry_vertex_starts: Vec<u32> = Vec::new();
+    for (first_triangle, triangles_in_geometry, flags) in [
+        (0, opaque_count, wgpu::AccelerationStructureGeometryFlags::OPAQUE),
+        (opaque_count, triangle_count - opaque_count, wgpu::AccelerationStructureGeometryFlags::empty()),
+    ] {
+        if triangles_in_geometry == 0 {
+            continue;
+        }
+        geometry_vertex_starts.push((first_triangle * 3) as u32);
+        geometry_sizes.push(wgpu::BlasTriangleGeometrySizeDescriptor {
+            vertex_format: wgpu::VertexFormat::Float32x3,
+            vertex_count: (triangles_in_geometry * 3) as u32,
+            index_format: None,
+            index_count: None,
+            flags,
+        });
+    }
     let blas = device.create_blas(
         &wgpu::CreateBlasDescriptor {
             label: Some("scene"),
@@ -302,7 +344,7 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
             update_mode: wgpu::AccelerationStructureUpdateMode::Build,
         },
         wgpu::BlasGeometrySizeDescriptors::Triangles {
-            descriptors: vec![geometry_size.clone()],
+            descriptors: geometry_sizes.clone(),
         },
     );
     let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
@@ -317,20 +359,25 @@ fn prepare_scene(input: &NativeTraceInput, shape: JobShape) -> Result<PreparedSc
         0,
         0xFF,
     ));
+    let triangle_geometries: Vec<wgpu::BlasTriangleGeometry> = geometry_sizes
+        .iter()
+        .zip(&geometry_vertex_starts)
+        .map(|(size, first_vertex)| wgpu::BlasTriangleGeometry {
+            size,
+            vertex_buffer: &vertex_buffer,
+            first_vertex: *first_vertex,
+            vertex_stride: 12,
+            index_buffer: None,
+            first_index: None,
+            transform_buffer: None,
+            transform_buffer_offset: None,
+        })
+        .collect();
     let mut build_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("build") });
     build_encoder.build_acceleration_structures(
         std::iter::once(&wgpu::BlasBuildEntry {
             blas: &blas,
-            geometry: wgpu::BlasGeometries::TriangleGeometries(vec![wgpu::BlasTriangleGeometry {
-                size: &geometry_size,
-                vertex_buffer: &vertex_buffer,
-                first_vertex: 0,
-                vertex_stride: 12,
-                index_buffer: None,
-                first_index: None,
-                transform_buffer: None,
-                transform_buffer_offset: None,
-            }]),
+            geometry: wgpu::BlasGeometries::TriangleGeometries(triangle_geometries),
         }),
         std::iter::once(&tlas),
     );

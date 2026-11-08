@@ -523,13 +523,19 @@ float alphaAtNearestHit() {
 bool occluded(vec3 origin, vec3 direction, float limit) {
   vec3 start = origin;
   float remaining = limit;
+  // A solid any-hit shadows the point wherever it lies; a transparent one hides what sits before it, so retrace for nearest hits.
+  bool anyHit = true;
   for (int attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
-    traceRay(start, direction, remaining, true);
+    traceRay(start, direction, remaining, anyHit);
     if (nearestSlot < 0) return false;
     int material = int(fetchData(uTriangles, nearestSlot * TRIANGLE_TEXELS).w) * MATERIAL_TEXELS;
     float cutoff = fetchData(uMaterials, material + 3).z;
     if (cutoff == 0.0) return true;
     if (alphaAtNearestHit() >= cutoff) return true;
+    if (anyHit) {
+      anyHit = false;
+      continue;
+    }
     float advance = nearestDistance + uSurfaceOffset;
     remaining -= advance;
     if (remaining <= 0.0) return false;
