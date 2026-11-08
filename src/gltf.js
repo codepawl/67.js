@@ -1,3 +1,4 @@
+import { mat4 } from 'gl-matrix';
 import { applyClip } from './gltf-animation.js';
 import { GLTF_LAYER_EXTENSIONS, layerTextureReferences, materialLayersFromGltf } from './gltf-layers.js';
 import { attributeFloats } from './gltf-accessors.js';
@@ -973,7 +974,7 @@ function makeSkinBinding(node) {
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
-function prepareSkinBinding(binding, geometry) {
+function prepareSkinBinding(binding, geometry, checks = true) {
   const { node, skin, pendingPose, pendingWorld } = binding;
   if (skin.jointMatrices !== binding.palette || skin.jointWorldMatrices !== binding.jointWorld || binding.palette.length !== pendingPose.jointMatrices.length || binding.jointWorld.length !== pendingWorld.length) throw new Error('Imported skin palette identities must remain unchanged.');
   for (let joint = 0; joint < node.skeleton.bones.length; joint++) {
@@ -982,8 +983,8 @@ function prepareSkinBinding(binding, geometry) {
     // A joint at zero scale collapses its vertices to a point instead of refusing the pose.
     if (collapseSingularMatrix(jointWorld, undefined, COLLAPSED_JOINT_SCALE)) binding.collapsedJoints = true;
   }
-  updateSkinPose(pendingPose, pendingWorld, skin.inverseBindMatrices, node.matrixWorld.elements, skin.bindMatrix);
-  validateSkinPose(pendingPose, geometry, node.matrixWorld.elements);
+  updateSkinPose(pendingPose, pendingWorld, skin.inverseBindMatrices, node.matrixWorld.elements, skin.bindMatrix, checks);
+  if (checks) validateSkinPose(pendingPose, geometry, node.matrixWorld.elements);
 }
 
 function commitSkinBinding(binding) {
@@ -1014,15 +1015,21 @@ function prepareMorphBinding(binding) {
 
 const COLLAPSED_SCALE = 2e-4;
 const COLLAPSED_JOINT_SCALE = 1e-2;
-const collapseScratch = new Matrix4();
 
 /**
  * Replaces a singular or non-finite world matrix, in place, with a uniform scale of 0.0002 at the same position so the
  * part is a speck that stays finite and invertible. Returns true when it replaced the matrix.
  */
 function collapseSingularMatrix(elements, determinantFloor = 1e-12, collapsedScale = COLLAPSED_SCALE) {
-  const finite = elements.every(Number.isFinite);
-  const determinant = finite ? collapseScratch.fromArray(elements).determinant() : NaN;
+  let finite = true;
+  for (let index = 0; index < 16; index++) {
+    if (!Number.isFinite(elements[index])) {
+      finite = false;
+      break;
+    }
+  }
+  // mat4.determinant reads the elements as doubles, the same values a Float64 copy would hold.
+  const determinant = finite ? mat4.determinant(elements) : NaN;
   if (finite && Number.isFinite(determinant) && Math.abs(determinant) >= determinantFloor) return false;
   const position = [elements[12], elements[13], elements[14]];
   const keepPosition = position.every(Number.isFinite);
@@ -1465,9 +1472,10 @@ export async function parseGltf(data, options = {}) {
       applyClip(gltf.animations[animation.clip], animation.time);
     }
 
-    function preparePose() {
+    /** Pose every part from the scene graph. `checks: false` keeps the zero-scale repairs and skips the finite, singular and winding checks. */
+    function preparePose(checks = true) {
       gltf.scene.updateMatrixWorld(true);
-      validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform, toleratedNodes);
+      if (checks) validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform, toleratedNodes);
       const worldMatrix = new Matrix4();
       for (const { node, instanceMatrix, part, mirrored, matrix, pendingMatrix, skin } of bindings) {
         if (part.matrix !== matrix || matrix.length !== 16) {
@@ -1477,7 +1485,7 @@ export async function parseGltf(data, options = {}) {
           throw new Error('Imported skin pose identity must remain unchanged.');
         }
         pendingMatrix.set(worldMatrixOf(node, instanceMatrix, worldMatrix).elements);
-        if (collapseSingularMatrix(pendingMatrix)) continue;
+        if (collapseSingularMatrix(pendingMatrix) || !checks) continue;
         for (const value of pendingMatrix) {
           if (!Number.isFinite(value)) {
             throw new Error('Animation creates a non-finite Float32 world matrix.');
@@ -1490,14 +1498,14 @@ export async function parseGltf(data, options = {}) {
         }
       }
       for (const binding of skinBindings) {
-        prepareSkinBinding(binding, binding.geometry);
+        prepareSkinBinding(binding, binding.geometry, checks);
       }
       for (const binding of morphBindings) {
         if (binding.part.morph !== binding.pose) {
           throw new Error('Imported morph pose identity must remain unchanged.');
         }
         prepareMorphBinding(binding);
-        validateMorphTransform(binding.pendingPose, binding.metadata, binding.pendingMatrix, binding.pendingSkin);
+        if (checks) validateMorphTransform(binding.pendingPose, binding.metadata, binding.pendingMatrix, binding.pendingSkin);
       }
     }
 
@@ -1673,6 +1681,7 @@ export async function parseGltf(data, options = {}) {
             throw error;
           }
           commitPreparedPose(candidate.animation);
+          poseFromAnimationOnly = false;
           settled = true;
           pendingTransaction = null;
           return parts;
@@ -1698,12 +1707,20 @@ export async function parseGltf(data, options = {}) {
       gltf.release();
     }
 
-    function applyAnimation(time, clipIndex = 0) {
+    /**
+     * Pose the asset at `time` in a clip and commit it. `checks: false` skips the per-frame finite, singular and winding
+     * checks, for clips you trust: import checks the base pose, not every key, so a broken clip may draw wrong instead of
+     * throwing. Zero-scale joints are still repaired. Poses an agent sets go through stagePose, which always checks.
+     */
+    function applyAnimation(time, clipIndex = 0, { checks = true } = {}) {
       if (disposed) {
         throw new Error('The glTF asset was disposed.');
       }
       if (!Number.isFinite(time)) {
         throw new TypeError('Animation time must be finite.');
+      }
+      if (typeof checks !== 'boolean') {
+        throw new TypeError('Animation checks must be a boolean.');
       }
       const clip = gltf.animations[clipIndex];
       if (!Number.isInteger(clipIndex) || !clip) {
@@ -1713,24 +1730,29 @@ export async function parseGltf(data, options = {}) {
         throw new Error('A pose transaction is already pending. Commit or discard it first.');
       }
       // Same result as stagePose({ animation }).commit(), with one preparePose instead of two: nothing can change the
-      // scene between this stage and this commit. The rollback snapshot is reused across frames.
+      // scene between this stage and this commit. When the committed pose came from applyAnimation alone, replaying
+      // its animation restores it exactly, so no snapshot is needed; otherwise one reused snapshot is the rollback point.
       const animation = { clip: clipIndex, time: Math.max(0, Math.min(time, clip.duration)) };
-      rollbackPose ??= capturePrivatePose();
-      capturePrivatePose(rollbackPose);
+      const snapshot = poseFromAnimationOnly ? null : capturePrivatePose(rollbackPose ??= capturePrivatePose());
       const previousAnimation = currentAnimation;
       try {
-        playAnimation(animation);
-        preparePose();
+        // The same clip keys the same channels every frame, and every other node is still at its base pose.
+        if (poseFromAnimationOnly && previousAnimation?.clip === animation.clip) applyClip(clip, animation.time);
+        else playAnimation(animation);
+        preparePose(checks);
       } catch (error) {
         playAnimation(previousAnimation);
-        restorePrivatePose(rollbackPose);
+        if (snapshot) restorePrivatePose(snapshot);
         throw error;
       }
       commitPreparedPose(animation);
+      poseFromAnimationOnly = true;
       return parts;
     }
 
     let rollbackPose = null;
+    // True while the committed pose is the base pose or one applyAnimation made, with no overrides or morph weights.
+    let poseFromAnimationOnly = true;
 
     /** Copy the prepared candidate pose into the committed parts. */
     function commitPreparedPose(animation) {

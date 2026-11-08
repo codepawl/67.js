@@ -40,7 +40,7 @@ function levelsForScene(scene) {
   return levels;
 }
 
-export async function create67Adapter(canvas, scene, characters, { culling = true, lods = true, hdr = true, samples = 4, shading = 'full' } = {}) {
+export async function create67Adapter(canvas, scene, characters, { culling = true, lods = true, hdr = true, samples = 4, shading = 'full', checks = true } = {}) {
   const environment = {
     world: true, fillIntensity: 0, ambientIntensity: 1, fogDensity: 0,
     lightDirection: scene.sun.direction, keyColor: scene.sun.color,
@@ -82,9 +82,9 @@ export async function create67Adapter(canvas, scene, characters, { culling = tru
         renderer.updateParts(parts);
       }
       if (assets.length) {
-        assets.forEach((asset, index) => asset.applyAnimation(time + index * SECONDS_PER_CHARACTER_OFFSET, 0));
+        assets.forEach((asset, index) => asset.applyAnimation(time + index * SECONDS_PER_CHARACTER_OFFSET, 0, { checks }));
         const beforeUpload = performance.now();
-        renderer.updateParts(parts);
+        renderer.updateParts(parts, { checks });
         this.updatePartsTimes.push(performance.now() - beforeUpload);
       }
     },
