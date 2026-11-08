@@ -1,12 +1,17 @@
-// Spike for issue #625: the GPU path tracer kernel of src/path-tracer-gpu-shader.js written as one WGSL compute shader (a
-// megakernel: one invocation traces one pixel's whole path for one sample). The scene tables are the same packed arrays
-// (src/path-tracer-gpu-pack.js) bound as storage buffers instead of float textures, and the random numbers, light sampling
-// order and shading follow the GLSL line by line, so one seed gives the same picture. Left out on purpose: fog and
-// subsurface (the demo room has neither) and the texel bake entry point.
+// The WGSL kernels of the WebGPU path tracer (issue #625). The scene tables are the packed arrays of
+// path-tracer-gpu-pack.js bound as storage buffers; the random numbers, light sampling order and shading follow the GLSL
+// kernel of path-tracer-gpu-shader.js line by line, so one seed gives the same picture. Two ways to run the same maths:
+//   MEGAKERNEL_SOURCE: one invocation traces one pixel's whole path (entry point `main`).
+//   WAVEFRONT_SOURCE: path state lives in a storage buffer and the path is split into kernels (generate, extend, shade,
+//   shadow, resolve); after extend the hits are binned by material so that neighbouring invocations of shade run the same material.
+// Left out: volume fog, subsurface and the texel bake (the host throws a clear error for the first two).
 
 export const WORKGROUP_SIZE = 8;
+export const WAVEFRONT_WORKGROUP_SIZE = 64;
+/** vec4 slots of path state per path; the wavefront section below names each one. */
+export const PATH_STATE_VECTORS = 9;
 
-export const KERNEL_SOURCE = /* wgsl */ `
+const COMMON_SOURCE = /* wgsl */ `
 const PI: f32 = 3.14159265358979;
 const TWO_PI: f32 = 6.28318530717959;
 const TRIANGLE_TEXELS: i32 = 9;
@@ -32,6 +37,8 @@ struct Params {
   sizeBouncesLights: vec4<i32>,
   emittersFlagsSample: vec4<i32>,
   seedAndAtlas: vec4<u32>,
+  tileAndDepth: vec4<u32>,
+  shadowSlots: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -811,22 +818,6 @@ fn sampleEmitter(depth: i32, normal: vec3<f32>, emitter: i32) {
   addDirect(depth, normal, distance, weightMode);
 }
 
-// The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it.
-fn addLights(depth: i32, normal: vec3<f32>) {
-  let emitterCount = params.emittersFlagsSample.x;
-  if (depth == 0 || emitterCount <= 1) {
-    selectionProbability = 1.0;
-    for (var emitter = 0; emitter < emitterCount; emitter++) {
-      sampleEmitter(depth, normal, emitter);
-      flushShadowRay();
-    }
-    return;
-  }
-  selectionProbability = 1.0 / f32(emitterCount);
-  sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
-  flushShadowRay();
-}
-
 fn addEscape(depth: i32, previousPdf: f32, afterMirror: bool) {
   if (params.emittersFlagsSample.z == 0) { return; }
   let sky = environmentRadiance(direction);
@@ -845,7 +836,24 @@ fn survivesRoulette(depth: i32) -> bool {
   throughput /= survival;
   return true;
 }
+`;
 
+export const MEGAKERNEL_SOURCE = COMMON_SOURCE + /* wgsl */ `
+// The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it.
+fn addLights(depth: i32, normal: vec3<f32>) {
+  let emitterCount = params.emittersFlagsSample.x;
+  if (depth == 0 || emitterCount <= 1) {
+    selectionProbability = 1.0;
+    for (var emitter = 0; emitter < emitterCount; emitter++) {
+      sampleEmitter(depth, normal, emitter);
+      flushShadowRay();
+    }
+    return;
+  }
+  selectionProbability = 1.0 / f32(emitterCount);
+  sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
+  flushShadowRay();
+}
 fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
   resetRandom(pixel, sampleIndex, params.seedAndAtlas.x);
   radiance = vec3<f32>(0.0);
@@ -940,5 +948,353 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   accumulation[pixelCount + pixel] += vec4<f32>(featureAlbedo, 0.0);
   accumulation[2u * pixelCount + pixel] += vec4<f32>(featureNormal, 0.0);
   accumulation[3u * pixelCount + pixel] += vec4<f32>(sampleLuminance, sampleLuminance * sampleLuminance, firstLegEscaped, 0.0);
+}
+`;
+
+export const WAVEFRONT_SOURCE = COMMON_SOURCE + /* wgsl */ `
+// Path state: PATH_STATE_VECTORS vec4<u32> per path (floats are stored as their bits, so nothing is ever rounded or
+// canonicalised on the way through memory), then the shadow records, three vec4 per emitter slot of a path.
+//   0 origin, previous pdf   1 direction, selection probability   2 throughput   3 radiance, first leg escaped
+//   4 albedo   5 normal, depth   6 start of the last ray segment, distance in it   7 u, v, distance before the segment
+//   8 random state, flags, hit triangle slot, material
+// Shadow record: 0 origin, limit   1 direction, unused   2 amount, 1 when the ray is pending.
+@group(0) @binding(9) var<storage, read_write> pathState: array<vec4<u32>>;
+// Word 0 counts the hits of this bounce; then per material the count and the write cursor; then the hits sorted by material.
+@group(0) @binding(10) var<storage, read_write> binQueue: array<atomic<u32>>;
+
+const PATH_STATE_VECTORS: u32 = ${PATH_STATE_VECTORS}u;
+const FLAG_ALIVE: u32 = 1u;
+const FLAG_AFTER_MIRROR: u32 = 2u;
+const FLAG_HIT: u32 = 4u;
+const FLAG_SHADED: u32 = 8u;
+
+fn loadVector(index: u32) -> vec4<f32> {
+  return bitcast<vec4<f32>>(pathState[index]);
+}
+
+fn storeVector(index: u32, value: vec4<f32>) {
+  pathState[index] = bitcast<vec4<u32>>(value);
+}
+
+fn tilePathCount() -> u32 {
+  return params.tileAndDepth.y;
+}
+
+fn currentDepth() -> i32 {
+  return i32(params.tileAndDepth.z);
+}
+
+fn materialCount() -> u32 {
+  return params.tileAndDepth.w;
+}
+
+// How many shadow rays a path casts at this depth: every emitter at the first hit, one afterwards.
+fn emitterSlotCount(depth: i32) -> u32 {
+  let emitterCount = u32(max(params.emittersFlagsSample.x, 0));
+  if (depth == 0 || emitterCount <= 1u) { return emitterCount; }
+  return 1u;
+}
+
+fn shadowRecordBase(path: u32, slot: u32) -> u32 {
+  return tilePathCount() * PATH_STATE_VECTORS + (path * params.shadowSlots.x + slot) * 3u;
+}
+
+fn storeShadowRecord(path: u32, slot: u32) {
+  let base = shadowRecordBase(path, slot);
+  if (shadowPending) {
+    storeVector(base, vec4<f32>(shadowOrigin, shadowLimit));
+    storeVector(base + 1u, vec4<f32>(shadowDirection, 0.0));
+    storeVector(base + 2u, vec4<f32>(shadowAmount, 1.0));
+  } else {
+    storeVector(base + 2u, vec4<f32>(0.0));
+  }
+}
+
+// Paths are numbered in blocks of 8 by 8 pixels, so the 64 paths of a workgroup look at neighbouring pixels (rays that start
+// close together traverse the same part of the BVH). Numbers past the edge of the image have no pixel.
+fn blockedPixel(globalPath: u32) -> vec2<u32> {
+  let blocksPerRow = (u32(params.sizeBouncesLights.x) + 7u) / 8u;
+  let block = globalPath / 64u;
+  let within = globalPath % 64u;
+  return vec2<u32>((block % blocksPerRow) * 8u + within % 8u, (block / blocksPerRow) * 8u + within / 8u);
+}
+
+fn queuedPath(position: u32) -> u32 {
+  return atomicLoad(&binQueue[1u + 2u * materialCount() + position]);
+}
+
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn generatePaths(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= tilePathCount()) { return; }
+  let width = u32(params.sizeBouncesLights.x);
+  let height = u32(params.sizeBouncesLights.y);
+  let coordinates = blockedPixel(params.tileAndDepth.x + id.x);
+  let pixelX = coordinates.x;
+  let pixelY = coordinates.y;
+  if (pixelX >= width || pixelY >= height) {
+    pathState[id.x * PATH_STATE_VECTORS + 8u] = vec4<u32>(0u);
+    return;
+  }
+  let pixel = pixelY * width + pixelX;
+  let sampleIndex = u32(params.emittersFlagsSample.w);
+  let seed = params.seedAndAtlas.x;
+  let jitterX = hashJitter(pixel, sampleIndex, seed, 1u);
+  let jitterY = hashJitter(pixel, sampleIndex, seed, 2u);
+  let screenX = ((f32(pixelX) + jitterX) / f32(width) * 2.0 - 1.0) * params.cameraAndClamp.x;
+  let screenY = (1.0 - (f32(pixelY) + jitterY) / f32(height) * 2.0) * params.cameraAndClamp.y;
+  let rayDirection = normalize(params.forward.xyz + params.right.xyz * screenX + params.above.xyz * screenY);
+  resetRandom(pixel, sampleIndex, seed);
+  let base = id.x * PATH_STATE_VECTORS;
+  storeVector(base, vec4<f32>(params.eye.xyz, 0.0));
+  storeVector(base + 1u, vec4<f32>(rayDirection, 1.0));
+  storeVector(base + 2u, vec4<f32>(1.0, 1.0, 1.0, 0.0));
+  storeVector(base + 3u, vec4<f32>(0.0));
+  storeVector(base + 4u, vec4<f32>(1.0, 1.0, 1.0, 0.0));
+  storeVector(base + 5u, vec4<f32>(0.0, 0.0, 1.0, 0.0));
+  pathState[base + 8u] = vec4<u32>(rngState, FLAG_ALIVE | FLAG_AFTER_MIRROR, 0u, 0u);
+}
+
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn resetBins(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x == 0u) { atomicStore(&binQueue[0], 0u); }
+  if (id.x < materialCount()) { atomicStore(&binQueue[1u + id.x], 0u); }
+}
+
+// Finds the nearest solid hit of every live path (stepping through the transparent texels of cutout materials), adds the
+// sky to paths that left the scene, and counts the hits per material.
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn extendPaths(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= tilePathCount()) { return; }
+  let base = id.x * PATH_STATE_VECTORS;
+  var pathMeta = pathState[base + 8u];
+  let flags = pathMeta.y;
+  if ((flags & FLAG_ALIVE) == 0u) { return; }
+  let originPrevious = loadVector(base);
+  let directionSelection = loadVector(base + 1u);
+  let rayDirection = directionSelection.xyz;
+  let farDistance = params.environmentRotationAndRays.w;
+  let surfaceOffset = params.environmentRotationAndRays.z;
+  var start = originPrevious.xyz;
+  var travelled = 0.0;
+  var found = false;
+  for (var attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
+    traceRay(start, rayDirection, farDistance, false);
+    if (nearestSlot < 0) { break; }
+    let material = i32(triangles[nearestSlot * TRIANGLE_TEXELS].w) * MATERIAL_TEXELS;
+    let cutoff = materials[material + 3].z;
+    if (cutoff == 0.0 || alphaAtNearestHit() >= cutoff) {
+      found = true;
+      break;
+    }
+    let advance = nearestDistance + surfaceOffset;
+    travelled += advance;
+    start += rayDirection * advance;
+  }
+  if (found) {
+    let materialIndex = u32(triangles[nearestSlot * TRIANGLE_TEXELS].w);
+    storeVector(base + 6u, vec4<f32>(start, nearestDistance));
+    storeVector(base + 7u, vec4<f32>(nearestU, nearestV, travelled, 0.0));
+    pathMeta = vec4<u32>(pathMeta.x, flags | FLAG_HIT, u32(nearestSlot), materialIndex);
+    pathState[base + 8u] = pathMeta;
+    if (params.shadowSlots.y == 1u) { atomicAdd(&binQueue[1u + materialIndex], 1u); }
+    return;
+  }
+  var radianceData = loadVector(base + 3u);
+  if (currentDepth() == 0) { radianceData.w = 1.0; }
+  direction = rayDirection;
+  throughput = loadVector(base + 2u).xyz;
+  radiance = radianceData.xyz;
+  selectionProbability = directionSelection.w;
+  addEscape(currentDepth(), originPrevious.w, (flags & FLAG_AFTER_MIRROR) != 0u);
+  storeVector(base + 3u, vec4<f32>(radiance, radianceData.w));
+  pathMeta.y = flags & ~(FLAG_ALIVE | FLAG_HIT);
+  pathState[base + 8u] = pathMeta;
+}
+
+@compute @workgroup_size(1)
+fn scanBins() {
+  let count = materialCount();
+  var running = 0u;
+  for (var material = 0u; material < count; material++) {
+    atomicStore(&binQueue[1u + count + material], running);
+    running += atomicLoad(&binQueue[1u + material]);
+  }
+  atomicStore(&binQueue[0], running);
+}
+
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn scatterPaths(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= tilePathCount()) { return; }
+  let pathMeta = pathState[id.x * PATH_STATE_VECTORS + 8u];
+  if ((pathMeta.y & FLAG_HIT) == 0u) { return; }
+  let count = materialCount();
+  let position = atomicAdd(&binQueue[1u + count + pathMeta.w], 1u);
+  atomicStore(&binQueue[1u + 2u * count + position], id.x);
+}
+
+// Shades the hits in material order: emission, features, one shadow record per emitter, then the next direction. Draws
+// random numbers in the order of the megakernel, so the picture is the same.
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn shadePaths(@builtin(global_invocation_id) id: vec3<u32>) {
+  var path = id.x;
+  if (params.shadowSlots.y == 1u) {
+    if (id.x >= atomicLoad(&binQueue[0])) { return; }
+    path = queuedPath(id.x);
+  } else {
+    if (id.x >= tilePathCount()) { return; }
+    if ((pathState[id.x * PATH_STATE_VECTORS + 8u].y & FLAG_HIT) == 0u) { return; }
+  }
+  let base = path * PATH_STATE_VECTORS;
+  let depth = currentDepth();
+  let originPrevious = loadVector(base);
+  let directionSelection = loadVector(base + 1u);
+  let radianceData = loadVector(base + 3u);
+  let hitStart = loadVector(base + 6u);
+  let hitInfo = loadVector(base + 7u);
+  var pathMeta = pathState[base + 8u];
+  rngState = pathMeta.x;
+  direction = directionSelection.xyz;
+  selectionProbability = directionSelection.w;
+  throughput = loadVector(base + 2u).xyz;
+  radiance = radianceData.xyz;
+  nearestSlot = i32(pathMeta.z);
+  nearestU = hitInfo.x;
+  nearestV = hitInfo.y;
+  _ = fillHit(hitStart.xyz, direction, hitStart.w);
+  hitDistance += hitInfo.z;
+  let entering = dot(hitNormal, direction) < 0.0;
+  let normal = select(-hitNormal, hitNormal, entering);
+  let isGlass = hitTransmission > 0.0 && nextRandom() < hitTransmission;
+  if (depth == 0) {
+    storeVector(base + 4u, vec4<f32>(select(hitColor, vec3<f32>(1.0), isGlass), 0.0));
+    storeVector(base + 5u, vec4<f32>(normal, hitDistance));
+  }
+  addRadiance(depth, throughput * hitEmission);
+  if (params.emittersFlagsSample.y != 0) { sunFrame = buildFrame(params.sunDirection.xyz); }
+  if (isGlass) {
+    let slotCount = emitterSlotCount(depth);
+    for (var slot = 0u; slot < slotCount; slot++) {
+      shadowPending = false;
+      storeShadowRecord(path, slot);
+    }
+  } else {
+    prepareSurface(normal, -direction);
+    let emitterCount = params.emittersFlagsSample.x;
+    if (depth == 0 || emitterCount <= 1) {
+      selectionProbability = 1.0;
+      for (var emitter = 0; emitter < emitterCount; emitter++) {
+        shadowPending = false;
+        sampleEmitter(depth, normal, emitter);
+        storeShadowRecord(path, u32(emitter));
+      }
+    } else {
+      selectionProbability = 1.0 / f32(emitterCount);
+      shadowPending = false;
+      sampleEmitter(depth, normal, i32(floor(nextRandom() * f32(emitterCount))));
+      storeShadowRecord(path, 0u);
+    }
+  }
+  var alive = depth < params.sizeBouncesLights.z;
+  var afterMirror = (pathMeta.y & FLAG_AFTER_MIRROR) != 0u;
+  var previousPdf = originPrevious.w;
+  if (alive && isGlass) {
+    let alpha = roughnessToAlpha(hitRoughness);
+    let selectionUnit = nextRandom();
+    let firstUnit = nextRandom();
+    let secondUnit = nextRandom();
+    if (sampleGlass(normal, -direction, entering, hitIor, alpha, selectionUnit, firstUnit, secondUnit)) {
+      direction = sampledDirection;
+      if (dot(direction, normal) < 0.0) { throughput *= hitColor; }
+      afterMirror = true;
+    } else {
+      alive = false;
+    }
+  } else if (alive) {
+    let lobeUnit = nextRandom();
+    let firstUnit = nextRandom();
+    let secondUnit = nextRandom();
+    let isMirror = sampleSurface(lobeUnit, firstUnit, secondUnit);
+    direction = sampledDirection;
+    let cosine = dot(direction, normal);
+    if (cosine <= 0.0) {
+      alive = false;
+    } else if (isMirror) {
+      throughput *= mirrorWeight();
+      afterMirror = true;
+    } else {
+      evaluateSurface(direction);
+      if (surfacePdf > 0.0) {
+        throughput *= surfaceValue * cosine / surfacePdf;
+        previousPdf = surfacePdf;
+        afterMirror = false;
+      } else {
+        alive = false;
+      }
+    }
+  }
+  var nextOrigin = originPrevious.xyz;
+  if (alive) {
+    nextOrigin = hitPoint + direction * params.environmentRotationAndRays.z;
+    alive = survivesRoulette(depth);
+  }
+  storeVector(base, vec4<f32>(nextOrigin, previousPdf));
+  storeVector(base + 1u, vec4<f32>(direction, selectionProbability));
+  storeVector(base + 2u, vec4<f32>(throughput, 0.0));
+  storeVector(base + 3u, vec4<f32>(radiance, radianceData.w));
+  pathMeta.x = rngState;
+  pathMeta.y = select(0u, FLAG_ALIVE, alive) | select(0u, FLAG_AFTER_MIRROR, afterMirror) | FLAG_SHADED;
+  pathState[base + 8u] = pathMeta;
+}
+
+// Traces the shadow rays the shade kernel recorded and adds the light that gets through. It walks the paths in pixel order
+// (not material order) so that neighbouring invocations cast rays from neighbouring points.
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn shadowPaths(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= tilePathCount()) { return; }
+  let path = id.x;
+  let base = path * PATH_STATE_VECTORS;
+  var pathMeta = pathState[base + 8u];
+  if ((pathMeta.y & FLAG_SHADED) == 0u) { return; }
+  pathMeta.y = pathMeta.y & ~FLAG_SHADED;
+  pathState[base + 8u] = pathMeta;
+  let depth = currentDepth();
+  let radianceData = loadVector(base + 3u);
+  radiance = radianceData.xyz;
+  let slotCount = emitterSlotCount(depth);
+  for (var slot = 0u; slot < slotCount; slot++) {
+    let recordBase = shadowRecordBase(path, slot);
+    let amount = loadVector(recordBase + 2u);
+    if (amount.w == 0.0) { continue; }
+    let origin = loadVector(recordBase);
+    let rayDirection = loadVector(recordBase + 1u).xyz;
+    if (!occluded(origin.xyz, rayDirection, origin.w)) { addRadiance(depth, amount.xyz); }
+  }
+  storeVector(base + 3u, vec4<f32>(radiance, radianceData.w));
+}
+
+// Adds the finished sample of every path of the tile to the accumulation planes, dropping non-finite values as the megakernel does.
+@compute @workgroup_size(${WAVEFRONT_WORKGROUP_SIZE})
+fn resolvePaths(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= tilePathCount()) { return; }
+  let coordinates = blockedPixel(params.tileAndDepth.x + id.x);
+  if (coordinates.x >= u32(params.sizeBouncesLights.x) || coordinates.y >= u32(params.sizeBouncesLights.y)) { return; }
+  let base = id.x * PATH_STATE_VECTORS;
+  let radianceData = loadVector(base + 3u);
+  let normalDepth = loadVector(base + 5u);
+  var sampleRadiance = radianceData.xyz;
+  var sampleAlbedo = loadVector(base + 4u).xyz;
+  var sampleNormal = normalDepth.xyz;
+  var sampleDepth = normalDepth.w;
+  if (!(all(sampleRadiance >= vec3<f32>(0.0)) && all(sampleRadiance < vec3<f32>(1e30)))) { sampleRadiance = vec3<f32>(0.0); }
+  if (!(sampleDepth >= 0.0 && sampleDepth < 1e30)) { sampleDepth = 0.0; }
+  if (!(all(sampleNormal >= vec3<f32>(-1.5)) && all(sampleNormal < vec3<f32>(1.5)))) { sampleNormal = vec3<f32>(0.0, 0.0, 1.0); }
+  if (!(all(sampleAlbedo >= vec3<f32>(0.0)) && all(sampleAlbedo < vec3<f32>(1e30)))) { sampleAlbedo = vec3<f32>(1.0); }
+  let sampleLuminance = luminance(sampleRadiance);
+  let pixel = coordinates.y * u32(params.sizeBouncesLights.x) + coordinates.x;
+  let pixelCount = u32(params.sizeBouncesLights.x * params.sizeBouncesLights.y);
+  accumulation[pixel] += vec4<f32>(sampleRadiance, sampleDepth);
+  accumulation[pixelCount + pixel] += vec4<f32>(sampleAlbedo, 0.0);
+  accumulation[2u * pixelCount + pixel] += vec4<f32>(sampleNormal, 0.0);
+  accumulation[3u * pixelCount + pixel] += vec4<f32>(sampleLuminance, sampleLuminance * sampleLuminance, radianceData.w, 0.0);
 }
 `;

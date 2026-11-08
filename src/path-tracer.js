@@ -84,6 +84,9 @@ function denoiserNamed(value) {
   throw new TypeError(`Path tracer denoise must be a boolean or one of ${PATH_TRACER_DENOISERS.join(', ')}.`);
 }
 
+// "webgpu" is the WGSL compute tracer (src/path-tracer-webgpu.js, loaded only for that backend).
+const PATH_TRACER_BACKENDS = ['cpu', 'gpu', 'webgpu'];
+
 export function normalizePathTracerOptions(options = {}) {
   if (options === null || typeof options !== 'object') throw new TypeError('Path tracer options must be an object.');
   const result = {
@@ -103,7 +106,7 @@ export function normalizePathTracerOptions(options = {}) {
   };
   result.denoise = result.denoiser !== 'none';
   if (!VIEW_TRANSFORM_NAMES.includes(result.viewTransform)) throw new RangeError(`Path tracer viewTransform must be one of ${VIEW_TRANSFORM_NAMES.join(', ')}.`);
-  if (result.backend !== 'cpu' && result.backend !== 'gpu') throw new TypeError('Path tracer backend must be "cpu" or "gpu".');
+  if (!PATH_TRACER_BACKENDS.includes(result.backend)) throw new TypeError('Path tracer backend must be "cpu", "gpu" or "webgpu".');
   if (result.width * result.height > MAX_TRACE_PIXELS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_PIXELS} pixels.`);
   if (result.width * result.height * result.samples * (result.bounces + 1) > MAX_TRACE_RAY_WORK) throw new RangeError('This path trace would need too much ray work: lower the size, samples or bounces.');
   return result;
@@ -1044,8 +1047,8 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   let gpuName = null;
   let gpuCompileSeconds = 0;
   let gpuKernelCompiles = 0;
-  if (options.backend === 'gpu') {
-    const { traceOnGpu, gpuKernelCompileCount } = await import('./path-tracer-gpu.js');
+  if (options.backend === 'gpu' || options.backend === 'webgpu') {
+    const { traceOnGpu, gpuKernelCompileCount } = await (options.backend === 'webgpu' ? import('./path-tracer-webgpu.js') : import('./path-tracer-gpu.js'));
     const traced = await traceOnGpu(scene, view, options, shouldStop);
     gpuName = traced.gpu;
     gpuCompileSeconds = traced.compileSeconds;
