@@ -19,6 +19,8 @@ requires a clean lint, so keep them valid when the API changes.
    radius 1 and height 1 centred on the origin (`bevel: 0`); `sphere` has radius 1; `lathe` turns a profile;
    `extrude` makes outlines with holes. Set proportions first by translating tagged faces, so later widths and offsets
    stay in real units: a 0.5 x 0.6 x 1.0 box is `right` by -0.25, `left` by 0.25, `top` by -0.4.
+   Faces, blinks and squash are shape keys on the same mesh geometry: `"shapeKeys": [{ "name": "blink", "offsets": [{ "select": { "tag": "lid" }, "offset": [0, -0.1, 0] }] }]`
+   (offsets or move-only `edits`, at most 16, no new vertices), animated by a motion track `{ "kind": "morph", "id": "blink", "property": "weight", "keyframes": [...] }`.
 3. Add edits in small batches with `mesh_edit` (or in the recipe). Name every edit (`name: "lid"` gives `lid.cap`,
    `lid.side`); an unnamed one gets `<op>-<index>`, which is hard to predict. Select faces by tags, never by index.
 4. After each batch read the `mesh_edit` result: `edits[i].selected`, `tags` and `edges` say what each edit touched;

@@ -204,6 +204,18 @@ and misses. `evaluateMeshStack(mesh, stack, { cache, cacheKey })` runs a stack o
 The `mesh_stack` tool sets the whole stack in one revision. `apply: n` moves the first `n` nodes into the edit log,
 as Blender's Apply modifier, which leaves the result unchanged.
 
+### Shape keys
+
+A recipe `mesh` geometry may carry `shapeKeys` (up to 16), named offsets from the finished mesh that become glTF morph targets.
+A key is `{ "name": "blink", "offsets": [{ "select": { "tag": "lid" }, "offset": [0, -0.1, 0] }] }`, a list of moves like the
+`translate` edit, or `{ "name": "squash", "edits": [...] }`, mesh edits that only move vertices (`set_position`, `displace`,
+`sculpt`, `simple_deform`, `lattice`, `hook`, `wave`) run on the mesh after the stack. A key that adds or removes vertices is
+refused with the vertex counts. `value` (0 to 1) is the weight without motion.
+
+Animate a key with the existing morph track: `{ "kind": "morph", "id": "blink", "property": "weight", "keyframes": [...] }`. Weights
+from 0 to 1 add up, so two keys blend. A GLB export writes the targets, their names as `mesh.extras.targetNames` and the weights.
+Normals stay those of the base mesh. Test: `tests/mesh-shape-keys.test.js`.
+
 ### Whole-mesh modifiers
 
 `weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `weighted_normal` and `smooth_by_angle` take no selection and no name, and work as edits or stack nodes. Their fields and defaults are plain data in `MESH_MODIFIER_NOTES` (`src/agent-scene-capabilities.js`), which `scene_capabilities` returns as `meshModifiers`; the code is in `src/mesh-modifiers.js` and `src/mesh-restructure.js`.

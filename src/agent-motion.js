@@ -368,7 +368,8 @@ export function normalizeAgentMotion(input, recipe) {
   }
   const nodes = new Set((recipe.nodes ?? []).map(node => node.id));
   const materials = new Set((recipe.materials ?? []).map(material => material.id));
-  const morphTargets = new Set(recipe.morphTargets ?? []);
+  // An imported asset lists its morph targets; a recipe mesh offers the names of its shape keys.
+  const morphTargets = new Set(recipe.morphTargets ?? (recipe.geometries ?? []).flatMap(geometry => (geometry.shapeKeys ?? []).map(key => key.name)));
   const identities = new Set();
   let keyframeCount = 0;
   const tracks = inputTracks.map((track, index) => {
