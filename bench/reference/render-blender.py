@@ -4,6 +4,7 @@
 #   (0 leaves the sun and the point lights), into <id>-cycles-world<scale>.npy. The EEVEE render and the timings are left alone.
 #   ... -- <work directory> --sun-strength <scale> [scene ids]  the same for the sun: Cycles only, the sun times <scale> (0 leaves the world and
 #   the point lights), into <id>-cycles-sun<scale>.npy. Both switches together write <id>-cycles-world<a>-sun<b>.npy.
+#   ... -- <work directory> --no-fog [scene ids]  Cycles only, without the fog volume (combines with the switches above), into <id>-cycles-nofog....npy (issue #543).
 #   ... -- <work directory> --view-transform <AgX|Khronos PBR Neutral|...> [scene ids]  Cycles only, with that Blender view transform, into <id>-cycles-<name>.png (16-bit sRGB).
 #   ... -- <work directory> --max-bounces <n> [--floor-color <v>] [scene ids]  Cycles only, with at most n light bounces (0 is direct light only)
 #   and/or the part named "floor" painted a grey of v (0 is black), into <id>-cycles-bounces<n>-floor<v>.npy. They show how much light the ground bounces.
@@ -901,6 +902,28 @@ def render_with_view_transform(scene, work_directory, name, view_transform):
     return time.perf_counter() - started
 
 
+def render_passes(scene, work_directory, name):
+    """A measurement switch: one undenoised Cycles render whose light components are kept apart in a multilayer EXR (issue #543)."""
+    scene.cycles.use_denoising = False
+    layer = scene.view_layers[0]
+    layer.use_pass_diffuse_direct = True
+    layer.use_pass_diffuse_indirect = True
+    layer.use_pass_diffuse_color = True
+    layer.use_pass_glossy_direct = True
+    layer.use_pass_glossy_indirect = True
+    layer.use_pass_glossy_color = True
+    layer.use_pass_emit = True
+    layer.use_pass_environment = True
+    layer.cycles.use_pass_volume_direct = True
+    layer.cycles.use_pass_volume_indirect = True
+    scene.render.image_settings.media_type = "MULTI_LAYER_IMAGE"
+    scene.render.image_settings.file_format = "OPEN_EXR_MULTILAYER"
+    scene.render.filepath = os.path.join(work_directory, f"{name}.exr")
+    started = time.perf_counter()
+    bpy.ops.render.render(write_still=True)
+    return time.perf_counter() - started
+
+
 def import_glb(root, glb_file):
     """A Khronos sample asset goes through Blender's own glTF importer, so Cycles shades the file as its authors meant."""
     bpy.ops.import_scene.gltf(filepath=os.path.join(root, glb_file))
@@ -1045,6 +1068,12 @@ def main():
     print_materials = "--print-materials" in arguments
     if print_materials:
         arguments.remove("--print-materials")
+    no_fog = "--no-fog" in arguments
+    if no_fog:
+        arguments.remove("--no-fog")
+    passes = "--passes" in arguments
+    if passes:
+        arguments.remove("--passes")
     view_transform = None
     if "--view-transform" in arguments:
         flag_index = arguments.index("--view-transform")
@@ -1068,6 +1097,11 @@ def main():
             render_material_ids(scene, work_directory, f"{scene_id}-materials")
             print(f"RENDERED {scene_id} material ids")
             continue
+        if passes:
+            configure_cycles(scene)
+            seconds = render_passes(scene, work_directory, f"{scene_id}-passes")
+            print(f"RENDERED {scene_id} as cycles passes: {seconds:.1f} s")
+            continue
         if no_glossy:
             remove_glossy(scene)
             configure_cycles(scene)
@@ -1079,8 +1113,11 @@ def main():
             seconds = render_with_view_transform(scene, work_directory, f"{scene_id}-cycles-{view_transform.lower().replace(' ', '-')}", view_transform)
             print(f"RENDERED {scene_id} as cycles with {view_transform}: {seconds:.1f} s")
             continue
-        if world_scale is not None or sun_scale is not None or bounces is not None or floor_grey is not None:
+        if world_scale is not None or sun_scale is not None or bounces is not None or floor_grey is not None or no_fog:
             suffix = ""
+            if no_fog and "Fog" in bpy.data.objects:
+                bpy.data.objects.remove(bpy.data.objects["Fog"])
+                suffix += "-nofog"
             if bounces is not None:
                 suffix += f"-bounces{bounces}"
             if floor_grey is not None:
