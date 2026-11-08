@@ -395,6 +395,8 @@ The result call returns the path of the file in the jobs folder. The agent reads
 }
 ```
 
+For compositing, add `"transparent": true` (PNG with alpha), `"format": "png16"` or `"exr"`, or a `"region": {"x": 0, "y": 0, "width": 640, "height": 360}` crop to an image or stills job; a video can run at up to 60 fps. Each is off unless set.
+
 While a job runs, previews and edits pause. Inspection and recipe export still work. After the job, call `scene_render_release` to delete files that you no longer need. [Render jobs](/agent-render-jobs.md) covers sequences, video, render passes and the path tracer.
 
 ## Skills

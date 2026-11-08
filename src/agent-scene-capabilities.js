@@ -100,6 +100,9 @@ export const RENDER_PASS_NAMES = Object.freeze(['albedo', 'normal', 'emission', 
 // extension, no drive or protocol syntax.
 export const VIDEO_ENCODERS = Object.freeze(['cpu', 'nvenc']);
 export const MAXIMUM_VIDEO_SECONDS = 60;
+// File formats of an image or stills job (8-bit PNG by default, 16-bit PNG, OpenEXR) and the highest video frame rate.
+export const RENDER_OUTPUT_FORMATS = Object.freeze(['png', 'png16', 'exr']);
+export const MAXIMUM_JOB_FPS = 60;
 /** Recipe bake presets and ranges. A bake inline on the page fails the edit after 20 s, before the 30 s page deadline; on a worker it has 90 s. */
 export const BAKE_PRESETS = Object.freeze({
   draft: Object.freeze({ samples: 32, bounces: 1, texelsPerUnit: 3 }),

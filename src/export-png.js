@@ -59,6 +59,8 @@ function chunk(type, data) {
   return output;
 }
 
+export { PNG_SIGNATURE, chunk as pngChunk };
+
 function hasTransparentPixel(pixels) {
   for (let offset = 3; offset < pixels.length; offset += 4) {
     if (pixels[offset] !== 255) return true;
