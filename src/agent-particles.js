@@ -1,9 +1,10 @@
 import { mat3, mat4 } from 'gl-matrix';
 import { HAIR_LIMITS, buildHairMesh, createStrandRoots } from './hair.js';
+import { normalizeForceFields } from './force-fields.js';
 import { PARTICLE_LIMITS, buildParticleMesh, createParticleLaunches } from './particles.js';
 import { bakingContext, boundedArray, finiteNumber, knownKeys, rootNodeWithGeometry, vectorOfThree } from './agent-recipe-checks.js';
 
-const PARTICLES_FIELDS = ['gravity', 'wind', 'systems'];
+const PARTICLES_FIELDS = ['gravity', 'wind', 'fields', 'systems'];
 const SYSTEM_TYPES = ['emitter', 'hair'];
 const EMITTER_SYSTEM_FIELDS = ['type', 'node', 'seed', 'count', 'rate', 'lifetime', 'speed', 'direction', 'spread', 'emitter', 'size', 'scale', 'drag', 'floor'];
 const HAIR_FIELDS = ['type', 'node', 'surface', 'seed', 'count', 'length', 'segments', 'width', 'droop', 'lean', 'sway', 'swayRate'];
@@ -136,6 +137,7 @@ export function normalizeAgentParticles(input, recipe) {
   }
   if (input.gravity !== undefined) result.gravity = vectorOfThree(input.gravity, 'Particle gravity', 1000);
   if (input.wind !== undefined) result.wind = vectorOfThree(input.wind, 'Particle wind', 100);
+  if (input.fields !== undefined) result.fields = normalizeForceFields(input.fields, 'Particle force field');
   return result;
 }
 
@@ -217,6 +219,7 @@ function prepareHair(system, node, surfaceNode, surfaceGeometry, forces) {
   const strands = createStrandRoots({ ...system, spread: system.lean }, world.positions, world.normals, surfaceGeometry.indices);
   const settings = {
     segments: system.segments, width: system.width, droop: system.droop,
+    fields: forces.fields,
     sway: system.sway ? { amplitude: system.sway, rate: system.swayRate, direction: horizontalDirection(forces.wind) } : undefined,
   };
   const verticesPerStrand = (system.segments + 1) * HAIR_LIMITS.ringSides;
@@ -226,7 +229,7 @@ function prepareHair(system, node, surfaceNode, surfaceGeometry, forces) {
     report: () => ({ node: system.node, type: 'hair', surface: system.surface, strands: system.count, segments: system.segments, verticesPerStrand }),
     // Without sway a strand never moves, so one build serves every time.
     build: time => {
-      if (settings.sway) return buildHairMesh(strands, settings, time);
+      if (settings.sway || settings.fields.some(field => field.type === 'turbulence')) return buildHairMesh(strands, settings, time);
       staticMesh ??= buildHairMesh(strands, settings, 0);
       return staticMesh;
     },
@@ -239,7 +242,7 @@ function prepareHair(system, node, surfaceNode, surfaceGeometry, forces) {
  */
 export function bakeAgentParticles(particles, recipe, geometries) {
   const nodes = new Map(recipe.nodes.map(node => [node.id, node]));
-  const forces = { gravity: particles.gravity ?? DEFAULT_GRAVITY, wind: particles.wind ?? [0, 0, 0] };
+  const forces = { gravity: particles.gravity ?? DEFAULT_GRAVITY, wind: particles.wind ?? [0, 0, 0], fields: particles.fields ?? [] };
   let totalVertices = 0;
   const prepared = particles.systems.map(system => {
     const node = nodes.get(system.node);
@@ -258,7 +261,7 @@ export function bakeAgentParticles(particles, recipe, geometries) {
     },
     /** Counts, vertices drawn and, for emitters, when each system peaks and ends: numbers an agent can read without a picture. */
     report() {
-      return { gravity: [...forces.gravity], wind: [...forces.wind], vertices: totalVertices, systems: prepared.map(entry => entry.report()) };
+      return { gravity: [...forces.gravity], wind: [...forces.wind], fields: forces.fields.map(field => ({ ...field })), vertices: totalVertices, systems: prepared.map(entry => entry.report()) };
     },
   });
 }
