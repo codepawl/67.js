@@ -157,6 +157,11 @@ OPERATORS.set('normalize', vectorOperator(1, 1, normalizeValue));
 OPERATORS.set('x', vectorOperator(1, 1, selectComponent(0)));
 OPERATORS.set('y', vectorOperator(1, 1, selectComponent(1)));
 OPERATORS.set('z', vectorOperator(1, 1, selectComponent(2)));
+// Operators that other modules add (field-rotation.js registers itself), so a bundle that never uses one does not carry its code.
+export function registerFieldOperator(name, operator) {
+  OPERATORS.set(name, operator);
+  FIELD_OPERATORS.push(name);
+}
 
 export { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK };
 const SOURCE_KEYS = Object.freeze(['attr', 'noise', 'random', 'nearest', 'raycast']);
@@ -167,7 +172,8 @@ const FIELD_SOURCES = new Map();
 export function registerFieldSource(name, compile) {
   FIELD_SOURCES.set(name, compile);
 }
-export const FIELD_OPERATORS = Object.freeze([...OPERATORS.keys(), ...SOURCE_KEYS]);
+// Every operator and input name; registerFieldOperator adds the late ones.
+export const FIELD_OPERATORS = [...OPERATORS.keys(), ...SOURCE_KEYS];
 
 // ---------------------------------------------------------------------------------------------------------------
 // Compiling an expression against an element context: { count, positions(), normals(), tag(name) }.
