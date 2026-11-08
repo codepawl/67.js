@@ -1,3 +1,4 @@
+import { encodeNativeTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
 import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
@@ -509,11 +510,12 @@ function useKernelWorkers() {
   return kernelWorkersAvailable() && globalThis.__67jsKernelWorkers !== 'off';
 }
 
-// A recipe bake runs on the GPU when the page has float render targets; the CPU bake stays the default everywhere else.
+// A recipe bake runs on the native tracer when the host offers it, on the GPU when the page has float render targets, and on
+// the CPU everywhere else.
 async function pageKernelsFor(recipe, backend) {
   if (!recipe.bake || backend !== 'gpu') return undefined;
   const { gpuBakeKernels } = await import('../src/agent-bake-gpu.js');
-  return gpuBakeKernels();
+  return gpuBakeKernels({ texelTracer: await nativeTexelTracerIfAvailable() });
 }
 
 async function buildSceneOffMainThread(recipe, options, backend) {
@@ -807,10 +809,7 @@ window.__agentPreview = {
     const traceScene = buildTraceScene(record.scene.parts, environment);
     const camera = createCamera(record.scene.camera, options.width, options.height);
     const input = buildNativeInput(traceScene, camera, options, pack);
-    const tables = {};
-    for (const [name, values] of Object.entries(input)) {
-      if (ArrayBuffer.isView(values)) tables[name] = bytesToBase64(new Uint8Array(values.buffer, values.byteOffset, values.byteLength));
-    }
+    const tables = encodeNativeTables(input);
     // The native kernel has no participating media yet, so say so instead of claiming a fog or a subsurface look it did not trace.
     const ignored = describeIgnoredFeatures(record.scene.parts, environment);
     if (environment.volumeFog?.density > 0) ignored.push('volumeFog is not traced by the native backend.');

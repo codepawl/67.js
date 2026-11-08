@@ -50,6 +50,7 @@ function packCoveredTexels(rasterized) {
  */
 /** The texel tracer of the backend; each is loaded only when a bake asks for it. */
 async function loadTexelTracer(backend) {
+  if (backend === 'native') throw new RangeError('A light bake on the native backend needs a `texelTracer` function in its settings: the native tracer runs outside the page.');
   if (backend === 'webgpu') return (await import('./path-tracer-webgpu.js')).traceTexelsOnWebGpu;
   return (await import('./path-tracer-gpu.js')).traceTexelsOnGpu;
 }
@@ -58,7 +59,7 @@ async function gatherOnGpu(plan, settings, rasterized, shouldStop) {
   const environment = traceEnvironment(plan);
   const texels = packCoveredTexels(rasterized);
   const scene = buildTraceScene(plan.parts, environment);
-  const traceTexels = await loadTexelTracer(settings.backend);
+  const traceTexels = settings.texelTracer ?? await loadTexelTracer(settings.backend);
   const traced = await traceTexels(scene, texels, { samples: settings.samples, bounces: settings.bounces, seed: BAKE_SEED, fireflyClamp: NO_FIREFLY_CLAMP }, shouldStop);
   let next = 0;
   const entries = rasterized.map(({ resolution }, entryNumber) => {
@@ -88,10 +89,12 @@ export async function traceLightmapsAsync(plan, tracedSettings) {
 
 /**
  * `bakeLightmaps` with a choice of tracer: `options.backend` is "cpu" (the default, the reference) or "gpu", which traces the
- * texels with the GPU path tracer's kernel and needs a page with WebGL2, or "webgpu", which runs the WGSL kernel and needs `navigator.gpu`. Resolves with the same `{ parts, report }`;
- * `report.backend` names the tracer, and a GPU or WebGPU bake adds `gpu` and `gpuCompileSeconds`.
+ * texels with the GPU path tracer's kernel and needs a page with WebGL2, or "webgpu", which runs the WGSL kernel and needs `navigator.gpu`,
+ * or "native", which hands the texels to `options.texelTracer` (the hardware ray query tracer outside the page, see
+ * scripts/native-bake-page.js). Resolves with the same `{ parts, report }`;
+ * `report.backend` names the tracer, and a GPU, WebGPU or native bake adds `gpu` and `gpuCompileSeconds`.
  */
 export async function bakeLightmapsAsync(parts, lighting, options = {}) {
   const plan = planLightmaps(parts, lighting, options);
-  return traceLightmapsAsync(plan, { ...plan.settings, skyOnly: options.skyOnly === true });
+  return traceLightmapsAsync(plan, { ...plan.settings, skyOnly: options.skyOnly === true, ...(options.texelTracer ? { texelTracer: options.texelTracer } : {}) });
 }

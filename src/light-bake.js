@@ -26,7 +26,7 @@ export const MAX_BAKE_TRIANGLES = 200_000;
 export const MAX_BAKE_PARTS = 256;
 // The GPU tracer takes as many parts as the path tracer does (MAX_TRACE_PARTS); the CPU bake keeps 256.
 export const MAX_GPU_BAKE_PARTS = 1024;
-const BAKE_BACKENDS = ['cpu', 'gpu', 'webgpu'];
+const BAKE_BACKENDS = ['cpu', 'gpu', 'webgpu', 'native'];
 export const MAX_BAKE_POINT_LIGHTS = MAX_POINT_LIGHTS;
 export const MAX_BAKE_SPOT_LIGHTS = MAX_SPOT_LIGHTS;
 export const MAX_BAKE_AREA_LIGHTS = MAX_AREA_LIGHTS;
@@ -66,7 +66,7 @@ export function normalizeBakeOptions(options = {}) {
   const normalized = {};
   for (const name of Object.keys(BAKE_LIMITS)) normalized[name] = boundedNumber(options, name);
   normalized.backend = options.backend ?? 'cpu';
-  if (!BAKE_BACKENDS.includes(normalized.backend)) throw new TypeError('Light bake backend must be "cpu", "gpu" or "webgpu".');
+  if (!BAKE_BACKENDS.includes(normalized.backend)) throw new TypeError('Light bake backend must be "cpu", "gpu", "webgpu" or "native".');
   return normalized;
 }
 
