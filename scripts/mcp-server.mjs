@@ -173,7 +173,7 @@ const cameraFields = {
 };
 const bounded = (minimum, maximum) => z.number().min(minimum).max(maximum);
 const boundedVector = (minimum, maximum) => z.tuple([bounded(minimum, maximum), bounded(minimum, maximum), bounded(minimum, maximum)]);
-const volumeFog = z.strictObject({
+const volumeFog = z.object({
   density: bounded(0, 10).optional(),
   minimum: boundedVector(-1e5, 1e5).optional(),
   maximum: boundedVector(-1e5, 1e5).optional(),
@@ -192,14 +192,7 @@ const volumeFog = z.strictObject({
   contrast: bounded(0, 4).optional(),
   profileSoftness: bounded(0, 0.95).optional(),
   keyScattering: bounded(0, 10).optional(),
-  heightFalloff: bounded(0, 1e5).optional(),
-  scatterOctaves: z.number().int().min(1).max(4).optional(),
-  multiScatter: unit.optional(),
-  multiExtinction: unit.optional(),
-  multiAnisotropy: unit.optional(),
-  keyTransmittance: unit.optional(),
-  surfaceTransmittance: unit.optional(),
-});
+}).catchall(z.number()); // The optional detail fields (scatterOctaves, multiScatter, ...) are named and ranged by the backend.
 const affects = z.array(z.string()).optional();
 const iesProfile = z.any().optional();
 const lines = z.record(z.string(), z.unknown()).describe('Outlines, toon light and polylines as plain JSON; fields and limits in scene_capabilities lineArt. null clears.');
