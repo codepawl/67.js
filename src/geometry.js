@@ -91,6 +91,126 @@ export function grid(segments = 16) {
   return surface(segments, segments, (across, down) => ({ position: [across - 0.5, 0.5 - down, 0], normal: [0, 0, 1] }));
 }
 
+// A cone or frustum along Y, height 1 and centred like the cylinder. radiusTop 0 gives a point.
+export function cone(radiusTop = 0, radiusBottom = 1, segments = 64) {
+  finiteFloat(radiusTop, 'radiusTop');
+  finiteFloat(radiusBottom, 'radiusBottom');
+  if (radiusTop < 0 || radiusBottom < 0 || Math.fround(radiusTop) + Math.fround(radiusBottom) <= 0) {
+    throw new RangeError('radiusTop and radiusBottom must not be negative, and at least one must be above zero.');
+  }
+  integer(segments, 3, 2048, 'segments');
+  primitiveBudget((segments + 1) * 2 + 2 * (segments + 2));
+  const slope = radiusBottom - radiusTop;
+  const slopeLength = Math.hypot(1, slope);
+  const wall = surface(segments, 1, (along, height) => {
+    const angle = periodicAngle(along);
+    const radius = height === 0 ? radiusTop : radiusBottom;
+    return {
+      position: [radius * Math.cos(angle), 0.5 - height, radius * Math.sin(angle)],
+      normal: [Math.cos(angle) / slopeLength, slope / slopeLength, Math.sin(angle) / slopeLength],
+    };
+  });
+  const positions = [...wall.positions];
+  const normals = [...wall.normals];
+  const indices = [...wall.indices];
+  const caps = [{ sign: 1, radius: radiusTop }, { sign: -1, radius: radiusBottom }];
+  for (const { sign, radius } of caps) {
+    if (radius === 0) continue;
+    const center = positions.length / 3;
+    positions.push(0, sign * 0.5, 0);
+    normals.push(0, sign, 0);
+    for (let index = 0; index <= segments; index++) {
+      const angle = periodicAngle(index / segments);
+      positions.push(radius * Math.cos(angle), sign * 0.5, radius * Math.sin(angle));
+      normals.push(0, sign, 0);
+    }
+    for (let index = 0; index < segments; index++) {
+      const first = center + index + 1;
+      indices.push(center, sign > 0 ? first + 1 : first, sign > 0 ? first : first + 1);
+    }
+  }
+  return geometry(positions, normals, indices);
+}
+
+// A unit-radius sphere from a subdivided icosahedron: shared vertices and near-equal triangles, with no poles.
+export function icoSphere(subdivisions = 2) {
+  integer(subdivisions, 0, 7, 'subdivisions');
+  primitiveBudget(10 * 4 ** subdivisions + 2);
+  const golden = (1 + Math.sqrt(5)) / 2;
+  const positions = [];
+  const corners = [[-1, golden, 0], [1, golden, 0], [-1, -golden, 0], [1, -golden, 0], [0, -1, golden], [0, 1, golden],
+    [0, -1, -golden], [0, 1, -golden], [golden, 0, -1], [golden, 0, 1], [-golden, 0, -1], [-golden, 0, 1]];
+  for (const corner of corners) {
+    const length = Math.hypot(...corner);
+    positions.push(...corner.map(value => value / length));
+  }
+  let triangles = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+  for (let level = 0; level < subdivisions; level++) {
+    const midpoints = new Map();
+    const midpoint = (first, second) => {
+      const key = first < second ? `${first}:${second}` : `${second}:${first}`;
+      if (midpoints.has(key)) return midpoints.get(key);
+      const middle = [0, 1, 2].map(axis => positions[first * 3 + axis] + positions[second * 3 + axis]);
+      const length = Math.hypot(...middle);
+      const index = positions.length / 3;
+      positions.push(...middle.map(value => value / length));
+      midpoints.set(key, index);
+      return index;
+    };
+    const next = [];
+    for (const [first, second, third] of triangles) {
+      const ab = midpoint(first, second);
+      const bc = midpoint(second, third);
+      const ca = midpoint(third, first);
+      next.push([first, ab, ca], [second, bc, ab], [third, ca, bc], [ab, bc, ca]);
+    }
+    triangles = next;
+  }
+  return geometry(positions, positions, triangles.flat());
+}
+
+// A flat disc in XY facing +Z with unit radius. innerRadius above zero makes a ring instead of a filled disc.
+export function circle(segments = 64, innerRadius = 0) {
+  integer(segments, 3, 2048, 'segments');
+  finiteFloat(innerRadius, 'innerRadius');
+  if (innerRadius < 0 || innerRadius >= 1) {
+    throw new RangeError('innerRadius must be from 0 up to but not including 1.');
+  }
+  const radiusOf = row => row === 0 ? innerRadius : 1;
+  if (innerRadius > 0) {
+    primitiveBudget((segments + 1) * 2);
+    const ring = surface(segments, 1, (along, row) => {
+      const angle = periodicAngle(along);
+      return { position: [radiusOf(row) * Math.cos(angle), radiusOf(row) * Math.sin(angle), 0], normal: [0, 0, 1] };
+    });
+    const uvs = [];
+    for (let row = 0; row <= 1; row++) {
+      for (let column = 0; column <= segments; column++) {
+        const angle = periodicAngle(column / segments);
+        uvs.push(0.5 + 0.5 * radiusOf(row) * Math.cos(angle), 0.5 + 0.5 * radiusOf(row) * Math.sin(angle));
+      }
+    }
+    ring.uvs = new Float32Array(uvs);
+    return ring;
+  }
+  primitiveBudget(segments + 2);
+  const positions = [0, 0, 0];
+  const normals = [0, 0, 1];
+  const uvs = [0.5, 0.5];
+  const indices = [];
+  for (let index = 0; index <= segments; index++) {
+    const angle = periodicAngle(index / segments);
+    positions.push(Math.cos(angle), Math.sin(angle), 0);
+    normals.push(0, 0, 1);
+    uvs.push(0.5 + 0.5 * Math.cos(angle), 0.5 + 0.5 * Math.sin(angle));
+  }
+  for (let index = 0; index < segments; index++) {
+    indices.push(0, index + 1, index + 2);
+  }
+  return { ...geometry(positions, normals, indices), uvs: new Float32Array(uvs) };
+}
+
 // The torus lies in XY, facing +Z. Partial arcs are useful for interrupted armor rings.
 export function torus(tubeRadius = 0.08, segments = 96, sides = 24, arc = FULL_TURN, start = 0) {
   finiteFloat(tubeRadius, 'tubeRadius');
