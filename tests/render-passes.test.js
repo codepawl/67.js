@@ -15,12 +15,12 @@ const limits = { maxOutputBytes: 1024, maxFrameBytes: 128, maxStoreBytes: 1024 *
 
 test('capabilities and the renderer list the same passes in the same order', () => {
   assert.deepEqual(Object.keys(RENDER_PASS_MODES), [...RENDER_PASS_NAMES]);
-  assert.deepEqual(Object.values(RENDER_PASS_MODES), [1, 2, 3, 4, 5]);
+  assert.deepEqual(Object.values(RENDER_PASS_MODES), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });
 
 test('the pass branch of the main shader is compiled out unless a pass is requested', () => {
   assert.match(createFragmentShader([]), /#define USES_RENDER_PASS false/);
-  assert.match(createFragmentShader(['renderPass']), /#define USES_RENDER_PASS \(renderPassMode > 0\.5\)/);
+  assert.match(createFragmentShader(['renderPass']), /#define USES_RENDER_PASS \(renderPassMode > 0\.5 && renderPassMode < 5\.5\)/);
 });
 
 test('camera effects default off, validate ranges and survive look normalization', () => {
