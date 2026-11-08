@@ -62,7 +62,14 @@ On macOS and Linux, use the output of `which node` as the command. Use forward s
 
 ## Claude Code
 
-Claude Code can add the server with one command. Everything after `--` is the launch command:
+The plugin is the shortest route. It adds the server and the `build-67js-scene` and `render-67js-media` skills:
+
+```text
+/plugin marketplace add codepawl/67.js
+/plugin install 67js@67js
+```
+
+The plugin starts the server with `npx` from the published npm package. For a manual setup, Claude Code can add the server with one command. Everything after `--` is the launch command:
 
 ```sh
 claude mcp add --transport stdio 67js-scene -- npx -y --package @codepawlhq/67js 67js-mcp --backend gpu --memory 192
