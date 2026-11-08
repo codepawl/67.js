@@ -19,6 +19,9 @@ export const viewTransformShader = {};
 // recipe hooks for area light shadows, IES profiles and the sun angle. update sets state.extraFeatures and state.bind.
 export const lightShapeSupport = {};
 
+// post-steps.js sets fields (the effects it adds to the look) and resolve(effects), which returns those effects resolved.
+export const postStepSupport = { fields: [] };
+
 // texture-update.js sets update(renderer, descriptor, update): the body of renderer.updateTexture.
 export const textureUpdateSupport = {};
 
