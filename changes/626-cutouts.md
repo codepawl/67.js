@@ -1,0 +1,1 @@
+- The native tracer asks the hardware about alpha cutouts itself: cutout triangles are their own geometry and the kernel confirms a candidate hit when its colour map alpha reaches the cutoff, so rays no longer step through transparent texels (8 steps at most before).

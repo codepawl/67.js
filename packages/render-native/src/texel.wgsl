@@ -3,8 +3,8 @@
 // surface with a cosine weighted direction, so the radiance it returns is the light that arrives at the texel; the bake
 // multiplies by the albedo. Plane 0 of the accumulation holds the radiance sums, plane 1 the sums of first rays that left
 // the scene. Same random numbers and weights as `bakeTexels` in src/path-tracer-webgpu-kernel.js.
-@group(0) @binding(9) var<storage, read> texelPoints: array<vec4<f32>>;
-@group(0) @binding(10) var<storage, read> texelNormals: array<vec4<f32>>;
+@group(0) @binding(10) var<storage, read> texelPoints: array<vec4<f32>>;
+@group(0) @binding(11) var<storage, read> texelNormals: array<vec4<f32>>;
 
 const TEXEL_WORKGROUP_SIZE: u32 = 64u;
 

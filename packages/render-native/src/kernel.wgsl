@@ -5,7 +5,6 @@ const TWO_PI: f32 = 6.28318530717959;
 const TRIANGLE_TEXELS: i32 = 9;
 const MATERIAL_TEXELS: i32 = 10;
 const LIGHT_TEXELS: i32 = 6;
-const ALPHA_STEP_LIMIT: i32 = 8;
 const RUSSIAN_ROULETTE_START: i32 = 3;
 const MINIMUM_ALPHA: f32 = 1e-3;
 const MIRROR_ALPHA: f32 = 2e-3;
@@ -36,6 +35,7 @@ struct Params {
 @group(0) @binding(7) var<storage, read> environmentTables: array<f32>;
 // Four planes of pixelCount vec4 each: radiance and depth, albedo, normal, luminance statistics.
 @group(0) @binding(8) var<storage, read_write> accumulation: array<vec4<f32>>;
+@group(0) @binding(9) var<storage, read> primitiveSlots: array<u32>;
 
 var<private> rngState: u32 = 1u;
 
@@ -73,10 +73,33 @@ var<private> nearestSlot: i32;
 var<private> nearestU: f32;
 var<private> nearestV: f32;
 
-// The hardware ray query replaces the software BVH walk. The acceleration structure holds the triangles of the packed
-// table in order, so a primitive index is the same slot the browser kernel finds, and the barycentrics are the weights of
-// the second and third corner, as nearestU and nearestV were.
+// The hardware ray query replaces the software BVH walk. The acceleration structure holds the triangles of the packed table as
+// up to two geometries: the opaque triangles (committed by the hardware as they are found) and, after them, the alpha cutout
+// triangles, which arrive as candidates. A candidate is confirmed only when the alpha of its colour map reaches the material's
+// cutoff, so the hardware itself finds the nearest solid hit and no ray ever steps through a stack of leaves. `primitiveSlots`
+// maps a hardware primitive back to its slot in the packed table (the opaque ones first, then the cutouts, which start at
+// params.seedAndAtlas.w), and the barycentrics are the weights of the second and third corner, as nearestU and nearestV were.
 const RAY_FLAG_TERMINATE_ON_FIRST_HIT: u32 = 4u;
+
+fn primitiveSlot(geometryIndex: u32, primitiveIndex: u32) -> i32 {
+  let cutoutStart = params.seedAndAtlas.w;
+  return i32(primitiveSlots[primitiveIndex + select(0u, cutoutStart, geometryIndex > 0u)]);
+}
+
+// The alpha of the colour map of the triangle in `slot` at barycentric weights (secondWeight, thirdWeight), without touching
+// the hit globals.
+fn alphaAtSlot(slot: i32, secondWeight: f32, thirdWeight: f32) -> f32 {
+  let base = slot * TRIANGLE_TEXELS;
+  let firstWeight = 1.0 - secondWeight - thirdWeight;
+  let first = triangles[base + 3];
+  let second = triangles[base + 4];
+  let third = triangles[base + 5];
+  let uv = firstWeight * vec2<f32>(first.w, triangles[base + 6].w) + secondWeight * vec2<f32>(second.w, triangles[base + 7].w) + thirdWeight * vec2<f32>(third.w, triangles[base + 8].w);
+  let material = i32(triangles[base].w) * MATERIAL_TEXELS;
+  let mapRectangle = materials[material + 6];
+  if (mapRectangle.z <= 0.0) { return 1.0; }
+  return sampleAtlas(mapRectangle, materials[material + 4].y, uv).a;
+}
 
 fn traceRay(origin: vec3<f32>, direction: vec3<f32>, limit: f32, anyHit: bool) {
   nearestDistance = limit;
@@ -84,11 +107,19 @@ fn traceRay(origin: vec3<f32>, direction: vec3<f32>, limit: f32, anyHit: bool) {
   var query: ray_query;
   let flags = select(0u, RAY_FLAG_TERMINATE_ON_FIRST_HIT, anyHit);
   rayQueryInitialize(&query, sceneStructure, RayDesc(flags, 0xFFu, 0.0, limit, origin, direction));
-  while (rayQueryProceed(&query)) {}
+  while (rayQueryProceed(&query)) {
+    let candidate = rayQueryGetCandidateIntersection(&query);
+    let slot = primitiveSlot(candidate.geometry_index, candidate.primitive_index);
+    let material = i32(triangles[slot * TRIANGLE_TEXELS].w) * MATERIAL_TEXELS;
+    let cutoff = materials[material + 3].z;
+    if (alphaAtSlot(slot, candidate.barycentrics.x, candidate.barycentrics.y) >= cutoff) {
+      rayQueryConfirmIntersection(&query);
+    }
+  }
   let hit = rayQueryGetCommittedIntersection(&query);
   if (hit.kind == RAY_QUERY_INTERSECTION_NONE) { return; }
   nearestDistance = hit.t;
-  nearestSlot = i32(hit.primitive_index);
+  nearestSlot = primitiveSlot(hit.geometry_index, hit.primitive_index);
   nearestU = hit.barycentrics.x;
   nearestV = hit.barycentrics.y;
 }
@@ -236,61 +267,17 @@ fn fillHit(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> f32 {
   return alpha;
 }
 
-// The nearest solid hit, stepping through the transparent texels of cutout materials.
+// The nearest solid hit; transparent texels of cutout materials never reach here (see `traceRay`).
 fn intersectScene(origin: vec3<f32>, direction: vec3<f32>) -> bool {
-  var start = origin;
-  var travelled = 0.0;
-  let farDistance = params.environmentRotationAndRays.w;
-  let surfaceOffset = params.environmentRotationAndRays.z;
-  for (var attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
-    traceRay(start, direction, farDistance, false);
-    if (nearestSlot < 0) { return false; }
-    let foundDistance = nearestDistance;
-    let alpha = fillHit(start, direction, foundDistance);
-    if (hitCutoff == 0.0 || alpha >= hitCutoff) {
-      hitDistance += travelled;
-      return true;
-    }
-    let advance = foundDistance + surfaceOffset;
-    travelled += advance;
-    start += direction * advance;
-  }
-  return false;
-}
-
-// The alpha of the colour map at the nearest hit, without touching the hit globals a shadow ray must not disturb.
-fn alphaAtNearestHit() -> f32 {
-  let base = nearestSlot * TRIANGLE_TEXELS;
-  let secondWeight = nearestU;
-  let thirdWeight = nearestV;
-  let firstWeight = 1.0 - secondWeight - thirdWeight;
-  let first = triangles[base + 3];
-  let second = triangles[base + 4];
-  let third = triangles[base + 5];
-  let uv = firstWeight * vec2<f32>(first.w, triangles[base + 6].w) + secondWeight * vec2<f32>(second.w, triangles[base + 7].w) + thirdWeight * vec2<f32>(third.w, triangles[base + 8].w);
-  let material = i32(triangles[base].w) * MATERIAL_TEXELS;
-  let mapRectangle = materials[material + 6];
-  if (mapRectangle.z <= 0.0) { return 1.0; }
-  return sampleAtlas(mapRectangle, materials[material + 4].y, uv).a;
+  traceRay(origin, direction, params.environmentRotationAndRays.w, false);
+  if (nearestSlot < 0) { return false; }
+  fillHit(origin, direction, nearestDistance);
+  return true;
 }
 
 fn occluded(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> bool {
-  var start = origin;
-  var remaining = limit;
-  let surfaceOffset = params.environmentRotationAndRays.z;
-  for (var attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
-    traceRay(start, direction, remaining, true);
-    if (nearestSlot < 0) { return false; }
-    let material = i32(triangles[nearestSlot * TRIANGLE_TEXELS].w) * MATERIAL_TEXELS;
-    let cutoff = materials[material + 3].z;
-    if (cutoff == 0.0) { return true; }
-    if (alphaAtNearestHit() >= cutoff) { return true; }
-    let advance = nearestDistance + surfaceOffset;
-    remaining -= advance;
-    if (remaining <= 0.0) { return false; }
-    start += direction * advance;
-  }
-  return true;
+  traceRay(origin, direction, limit, true);
+  return nearestSlot >= 0;
 }
 
 // ---- Frames ----
