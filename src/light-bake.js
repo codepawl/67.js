@@ -335,7 +335,7 @@ export function cosineDirection(normal, firstUnit, secondUnit, out) {
  * Builds the function that returns the irradiance (light power per area, before the albedo and 1/pi of a diffuse
  * surface) of the direct lights at a point, with shadow rays against the world.
  */
-export function createDirectIrradiance(tracer, lights, offset, scale) {
+export function createDirectIrradiance(tracer, lights, offset, scale, sunReaching = null) {
   const result = [0, 0, 0];
   const shadowReach = scale * 1e6;
   function addLight(point, normal, toLight, distance, power) {
@@ -350,6 +350,7 @@ export function createDirectIrradiance(tracer, lights, offset, scale) {
   }
   const toLight = [0, 0, 0];
   const power = [0, 0, 0];
+  const sunPower = [0, 0, 0];
   // Aims `toLight` at a light's position and returns the distance, or 0 when the point sits on the light.
   function aimAtPosition(point, lightX, lightY, lightZ) {
     const deltaX = lightX - point[0];
@@ -420,7 +421,16 @@ export function createDirectIrradiance(tracer, lights, offset, scale) {
     for (let index = 0; index < lights.areaLights.length; index++) {
       if (lightReaches(lights.areaLights[index], owner)) addAreaLight(point, normal, lights.areaLights[index], index);
     }
-    if (lights.sun && lightReaches(lights.sun, owner)) addLight(point, normal, lights.sun.direction, shadowReach, lights.sun.color);
+    if (lights.sun && lightReaches(lights.sun, owner)) {
+      if (!sunReaching) {
+        addLight(point, normal, lights.sun.direction, shadowReach, lights.sun.color);
+      } else {
+        // The fog dims the sun on its way to the surface.
+        const reaching = sunReaching(point);
+        for (let channel = 0; channel < 3; channel++) sunPower[channel] = lights.sun.color[channel] * reaching;
+        addLight(point, normal, lights.sun.direction, shadowReach, sunPower);
+      }
+    }
     return result;
   };
 }
@@ -453,6 +463,7 @@ const SCRATCH_TRIANGLE = new Float64Array(9);
  */
 export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium = null, fogScatterLimit = 8 }) {
   const scatterSum = [0, 0, 0];
+  const singleScatterSum = [0, 0, 0];
   const direction = [0, 0, 0];
   const origin = [0, 0, 0];
   const normal = [0, 0, 0];
@@ -463,6 +474,7 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
     sum[1] = 0;
     sum[2] = 0;
     scatterSum.fill(0);
+    singleScatterSum.fill(0);
     const rotation = hashUnit(texelIndex, 1, 7);
     // Rays that leave the scene on their first leg see the sky, so the share of them is how much sky this point sees.
     let escaped = 0;
@@ -485,12 +497,14 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
         const hitTriangle = hit.nearestTriangle;
         const hitDistance = hit.nearestDistance;
         // The fog may scatter the path inside this leg: the path then goes on from the scattering point.
-        if (medium && medium(origin, direction, hitTriangle < 0 ? Infinity : hitDistance, throughput, scatterSum, texelIndex, sample, leg++)) {
+        if (medium && medium(origin, direction, hitTriangle < 0 ? Infinity : hitDistance, throughput, scatterSum, texelIndex, sample, leg++, singleScatterSum)) {
           if (++fogScatters >= fogScatterLimit) break;
           continue;
         }
         if (hitTriangle < 0) {
           if (bounce === 0) escaped++;
+          // A path the fog scattered brings the sky's light with it: the sky lights the fog through the openings.
+          if (fogScatters > 0) medium.addSky(throughput, scatterSum);
           break;
         }
         for (let axis = 0; axis < 3; axis++) hitPoint[axis] = origin[axis] + direction[axis] * hitDistance;
@@ -511,11 +525,11 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
         bounce++;
       }
     }
-    // `sum` holds the fog's light too; `fogLight`, when given, gets that part alone.
+    // `sum` holds the fog's light too; `fogLight`, when given, gets the single scattered sun alone, the part the fog on screen adds itself.
     for (let channel = 0; channel < 3; channel++) {
       scatterSum[channel] /= samples;
       sum[channel] = sum[channel] / samples + scatterSum[channel];
-      if (fogLight) fogLight[channel] = scatterSum[channel];
+      if (fogLight) fogLight[channel] = singleScatterSum[channel] / samples;
     }
     return escaped / samples;
   };
