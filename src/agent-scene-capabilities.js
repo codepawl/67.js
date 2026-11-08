@@ -50,10 +50,11 @@ export const MATERIAL_PATTERN_TYPES =Object.freeze(['noise', 'wood', 'planks', '
 export const MAX_MATERIAL_PATTERNS = 16;
 // A material graph bakes to textures on the CPU and never becomes shader text. Its node and depth limits are the field
 // expression limits; maxWork is work units per pixel times pixels, so a costly graph needs a smaller texture.
-export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height']);
+export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height', 'opacity', 'clearcoat', 'transmission']);
 export const MATERIAL_GRAPH_OPERATORS = Object.freeze([
   'uv', 'vec', 'ramp', 'noise', 'voronoi', 'wave', 'checker', 'gradient',
   'add', 'sub', 'mul', 'div', 'min', 'max', 'pow', 'abs', 'floor', 'fract', 'sqrt', 'invert', 'clamp', 'smoothstep', 'mix',
+  'layer', 'hue', 'curve',
 ]);
 export const MATERIAL_GRAPH_LIMITS = Object.freeze({ maxNodes: MAX_FIELD_NODES, maxDepth: MAX_FIELD_DEPTH, maxStops: 8, maxWork: 30_000_000 });
 // Curve and text geometry. A text geometry is bounded by vertices per curve segment: the bundled font stays under
@@ -68,21 +69,20 @@ export const CURVE_TEXT_DETAILS = Object.freeze({
 });
 export const MATERIAL_MAPPINGS = Object.freeze(['box', 'uv']);
 export const MATERIAL_GRAPH_NODES = Object.freeze({
-  outputs: 'color (linear RGB; a number is grey), roughness, metallic, emission (colour; defaults to 1), height (becomes a normal map).',
-  node: 'A number, [x, y, z], or an object with exactly one operator.',
+  outputs: 'color (linear RGB; a number is grey), roughness, metallic, emission (defaults to 1), height (normal map), opacity (alpha), clearcoat, transmission (masks).',
   textures: Object.freeze({
     noise: '{"noise":{"scale":8,"seed":1,"octaves":4}}',
     voronoi: '{"voronoi":{"scale":6,"output":"distance"|"edge"|"cell"}}',
-    wave: 'ripple along z (normal true: along normals) from start [0,0] over axes xy, x or y: height 0.5, width 1.5, narrowness 0-50 (1.5), speed 0.25 per frame, time 0 (frame), timeOffset 0, cyclic true.',
-    checker: '{"checker":{"count":8}} (even count)',
+    wave: '{"wave":{"frequency":4,"direction":"u"|"v"|"diagonal","shape":"sine"|"saw"|"triangle"}}',
+    checker: '{"checker":{"count":8}} (even)',
     gradient: '{"gradient":{"type":"u"|"v"|"radial"}}',
-    note: 'Each takes "at", a vector such as {"uv":"both"}, to warp it. Scales are whole numbers 1 to 64 so it tiles.',
+    note: 'Each takes "at", a vector such as {"uv":"both"}. Scales are whole numbers 1-64.',
   }),
-  uv: '{"uv":"u"|"v"|"both"} are the coordinates.',
-  ramp: '{"ramp":{"value":node,"stops":[[0,[r,g,b]],[1,[r,g,b]]]}} maps a number to colours, 2 to 8 stops rising from 0 to 1.',
-  maths: 'add sub mul div min max pow take [a,b]; abs floor fract sqrt invert take one node; clamp smoothstep mix take [a,b,c]; {"vec":[r,g,b]}. Numbers combine with vectors per component.',
-  example: '{"color":{"ramp":{"value":{"noise":{"scale":8}},"stops":[[0,[0.1,0.05,0.02]],[1,[0.6,0.4,0.2]]]}},"height":{"noise":{"scale":8}}}',
-  mapping: 'box (default) projects along the object axes and needs no UVs; uv follows geometry UVs, so the mesh needs a uv_unwrap node or geometry.uvs. size and axis only apply to box.',
+  uv: '{"uv":"u"|"v"|"both"} coordinates.',
+  ramp: '{"ramp":{"value":node,"stops":[[0,[r,g,b]],[1,[r,g,b]]]}} 2-8 stops rising from 0 to 1.',
+  mixing: '{"layer":{"base","top","mask","edge","softness"}}; {"hue":{"color","shift","saturation","value"}}; {"curve":{"value","points":[[x,y]]}}.',
+  maths: 'add sub mul div min max pow take [a,b]; abs floor fract sqrt invert take one node; clamp smoothstep mix take [a,b,c]; {"vec":[r,g,b]}.',
+  mapping: 'box (default) projects along object axes, no UVs; uv follows geometry UVs. size and axis only apply to box.',
 });
 
 // Recipe textures are opaque patterns, so cutout masking has nothing to cut.

@@ -168,7 +168,7 @@ glTF import and export carry these layers through `KHR_materials_clearcoat`, `tr
 ## Baked graphs and UV patterns
 
 A recipe material `pattern` of type `graph` bakes a bounded node graph into `map`, `normalMap` (from the graph's height),
-`metallicRoughnessMap` and `emissiveMap`, each only when the graph has that output. With `mapping: "uv"` the descriptors carry
+`metallicRoughnessMap` and `emissiveMap`, each only when the graph has that output; `opacity` goes into the alpha of `map`, `clearcoat` into `layerMaps.clearcoatTexture` and `transmission` into `transmissionMap`. With `mapping: "uv"` the descriptors carry
 `boxMapScale: 0`, so the renderer samples every map, the emissive map included, with the geometry's UV channel 0, and GLB
 export writes the maps with the authored UVs. With the default `box` mapping the maps are projected along the object axes.
 The graph never becomes shader source: the shader gains no code per graph. See "Material graphs" in agent-scene.md.
