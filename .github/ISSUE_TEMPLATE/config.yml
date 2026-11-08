@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/codepawl/67.js/blob/main/SECURITY.md
+    about: Email legal@codepawl.com. Do not open a public issue for a vulnerability.
+  - name: Guide and API reference
+    url: https://67js.codepawl.com/docs
+    about: How to install 67js, build scenes and drive the MCP server.

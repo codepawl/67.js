@@ -161,6 +161,8 @@ They compare matching scenes on the same hardware. They do not show a general sp
 ## Contributing
 
 Read [CONTRIBUTING.md](https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.md) before you open a pull request. It covers setup, checks, code style and the release flow.
+Coding agents start with [AGENTS.md](https://github.com/codepawl/67.js/blob/main/AGENTS.md), and `npm run preflight` runs the pull request checks locally.
+Questions and bug reports: [SUPPORT.md](https://github.com/codepawl/67.js/blob/main/SUPPORT.md).
 
 ## Credits
 
