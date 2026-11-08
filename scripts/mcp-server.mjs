@@ -278,7 +278,7 @@ const effects = z.strictObject({
     radius: bounded(0.1, 4).optional(),
   }).optional(),
   depthOfField: z.strictObject({ blur: unit.optional(), focusDistance: bounded(0.01, 100000).optional() }).optional().describe('Lens blur: blur 0 to 1, focusDistance metres.'),
-  motionBlur: z.strictObject({ shutter: bounded(0, 0.5).optional() }).optional().describe('Camera motion smear, shutter in seconds.'),
+  motionBlur: z.strictObject({ shutter: bounded(0, 0.5).optional(), objects: bounded(0, 1).optional() }).optional().describe('Motion smear, shutter in seconds. objects 0 to 1 also smears each moving part along its own motion (off at 0).'),
 });
 const shadow = z.strictObject({
   target: boundedVector(-1e6, 1e6).optional(),
