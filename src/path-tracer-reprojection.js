@@ -60,6 +60,91 @@ export function isHistoryConsistent({ expectedDistance, historyDistance, normal,
   return closeInDepth && normalDot >= NORMAL_AGREEMENT;
 }
 
+export const PART_MOTION_STATIC = 0;
+export const PART_MOTION_RIGID = 1;
+export const PART_MOTION_CHANGED = 2;
+/** Floats per part in the motion table: three rows of a 3 by 4 matrix, then a row whose first value is the kind. */
+export const PART_MOTION_FLOATS = 16;
+
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function matricesEqual(first, second) {
+  return first.every((value, index) => value === second[index]);
+}
+
+/** The inverse of a column major matrix whose last row is 0 0 0 1 (rotation, scale and translation), or null when it is singular. */
+export function invertAffine(matrix) {
+  const [a, d, g, , b, e, h, , c, f, i, , x, y, z] = matrix;
+  const cofactorA = e * i - f * h;
+  const cofactorB = f * g - d * i;
+  const cofactorC = d * h - e * g;
+  const determinant = a * cofactorA + b * cofactorB + c * cofactorC;
+  if (!(Math.abs(determinant) > 1e-12)) return null;
+  const inverse3 = [
+    cofactorA, c * h - b * i, b * f - c * e,
+    cofactorB, a * i - c * g, c * d - a * f,
+    cofactorC, b * g - a * h, a * e - b * d,
+  ].map(value => value / determinant);
+  const translation = [0, 1, 2].map(row => -(inverse3[row * 3] * x + inverse3[row * 3 + 1] * y + inverse3[row * 3 + 2] * z));
+  return [
+    inverse3[0], inverse3[3], inverse3[6], 0,
+    inverse3[1], inverse3[4], inverse3[7], 0,
+    inverse3[2], inverse3[5], inverse3[8], 0,
+    translation[0], translation[1], translation[2], 1,
+  ];
+}
+
+/** A column major 4 by 4 product `left * right`, so `right` is applied first. */
+function multiplyAffine(left, right) {
+  const product = new Array(16).fill(0);
+  for (let column = 0; column < 4; column++) {
+    for (let row = 0; row < 4; row++) {
+      for (let inner = 0; inner < 4; inner++) product[column * 4 + row] += left[inner * 4 + row] * right[column * 4 + inner];
+    }
+  }
+  return product;
+}
+
+/**
+ * Per part, how its surface moved between two frames, as the table the denoiser reads (PART_MOTION_FLOATS per part).
+ * A part with the same geometry and a different matrix is rigid: its rows map a point of this frame to where the same
+ * surface point was in the previous frame (previous matrix times the inverse of the current one). A part whose geometry,
+ * skin or matrix cannot be followed is PART_MOTION_CHANGED, and history is rejected on it.
+ */
+export function partMotionTable(previousParts, parts) {
+  const table = new Float32Array(Math.max(1, parts.length) * PART_MOTION_FLOATS);
+  parts.forEach((part, index) => {
+    const base = index * PART_MOTION_FLOATS;
+    const previous = previousParts?.[index];
+    const matrix = part.matrix ?? IDENTITY_MATRIX;
+    const previousMatrix = previous?.matrix ?? IDENTITY_MATRIX;
+    const sameSurface = Boolean(previous) && previous.geometry === part.geometry && !part.skin && !previous.skin;
+    let kind = PART_MOTION_CHANGED;
+    let relative = IDENTITY_MATRIX;
+    if (sameSurface && matricesEqual(previousMatrix, matrix)) {
+      kind = PART_MOTION_STATIC;
+    } else if (sameSurface) {
+      const inverse = invertAffine(matrix);
+      if (inverse) {
+        relative = multiplyAffine(previousMatrix, inverse);
+        kind = PART_MOTION_RIGID;
+      }
+    }
+    for (let row = 0; row < 3; row++) {
+      for (let column = 0; column < 4; column++) table[base + row * 4 + column] = relative[column * 4 + row];
+    }
+    table[base + 12] = kind;
+  });
+  return table;
+}
+
+/** Where the surface point `point` of this frame was in the previous frame, from the table; null when history cannot be reused there. */
+export function previousPointOfPart(table, partIndex, point) {
+  const base = partIndex * PART_MOTION_FLOATS;
+  if (table[base + 12] === PART_MOTION_CHANGED) return null;
+  return [0, 1, 2].map(row => table[base + row * 4] * point[0] + table[base + row * 4 + 1] * point[1] + table[base + row * 4 + 2] * point[2] + table[base + row * 4 + 3]);
+}
+
 export const REPROJECTION_GLSL = `
 uniform vec3 uEye;
 uniform vec3 uForward;

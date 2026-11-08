@@ -26,6 +26,7 @@ export function resolveRealtimeOptions(rawOptions) {
   return {
     backend, outputWidth, outputHeight, traceWidth, traceHeight, options,
     historyLimit: rawOptions.historyLimit, filterIterations: rawOptions.filterIterations, cacheCellSize: rawOptions.cacheCellSize,
+    followPartMotion: rawOptions.followPartMotion ?? true,
   };
 }
 
