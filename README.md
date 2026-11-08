@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/banner.jpg" alt="67js: a WebGL2 3D engine that AI agents drive, with an airport ramp, a Bistro street and an AI data center rendered by it" width="100%"></a>
+  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/banner.jpg" alt="67js: a WebGL2 3D engine that AI agents drive, over a Bistro street rendered by it" width="100%"></a>
 </p>
 
 <p align="center">
@@ -21,18 +21,27 @@ Each picture below is a 67js render. The linked ones open live in the browser.
 
 <table>
   <tr>
-    <td width="33%" valign="top"><b>Bistro cafe corner</b></td>
-    <td width="33%" valign="top"><b>Bistro plaza</b></td>
+    <td width="33%" valign="top"><b><a href="https://67js.codepawl.com/showcase.html?scene=airport">Airport ramp</a></b></td>
+    <td width="33%" valign="top"><b><a href="https://67js.codepawl.com/showcase.html?scene=datacenter">AI data center</a></b></td>
     <td width="33%" valign="top"><b><a href="https://67js.codepawl.com/showcase.html?scene=port">Container port</a></b></td>
   </tr>
   <tr>
-    <td><img src="https://67js.codepawl.com/previews/bistro-cafe.webp" alt="A green corner restaurant with red awnings and a blue scooter in the Bistro scene"></td>
-    <td><img src="https://67js.codepawl.com/previews/bistro-plaza.webp" alt="A large plane tree in a hedged circle on a Bistro plaza"></td>
+    <td><a href="https://67js.codepawl.com/showcase.html?scene=airport"><img src="https://67js.codepawl.com/previews/showcase-airport.webp" alt="An airport ramp with an airliner at its stand and the turnaround crew"></a></td>
+    <td><a href="https://67js.codepawl.com/showcase.html?scene=datacenter"><img src="https://67js.codepawl.com/previews/showcase-datacenter.webp" alt="A cutaway AI data center hall"></a></td>
     <td><a href="https://67js.codepawl.com/showcase.html?scene=port"><img src="https://67js.codepawl.com/previews/showcase-port.webp" alt="A container port with cranes and stacked containers"></a></td>
   </tr>
 </table>
 
-The [airport ramp](https://67js.codepawl.com/showcase.html?scene=airport) and the [AI data center](https://67js.codepawl.com/showcase.html?scene=datacenter) in the banner open live too.
+<table>
+  <tr>
+    <td width="50%" valign="top"><b>Bistro cafe corner</b></td>
+    <td width="50%" valign="top"><b>Bistro plaza</b></td>
+  </tr>
+  <tr>
+    <td><img src="https://67js.codepawl.com/previews/bistro-cafe.webp" alt="A green corner restaurant with red awnings and a blue scooter in the Bistro scene"></td>
+    <td><img src="https://67js.codepawl.com/previews/bistro-plaza.webp" alt="A large plane tree in a hedged circle on a Bistro plaza"></td>
+  </tr>
+</table>
 
 ## Install
 
