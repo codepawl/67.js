@@ -217,9 +217,27 @@ function materialAlphaState(material) {
 // Larger layers win over smaller ones; geometry never moves.
 
 // Translucent glass and additive light are not shadow casters unless the part asks for it.
+// A shadow catcher only shows the shadow it receives, so it never casts one unless the part asks for it.
 function castsShadow(part) {
-  return part.castShadow ?? !isTranslucentMode(part.material.alphaMode ?? 'opaque');
+  return part.castShadow ?? !(part.shadowCatcher === true || isTranslucentMode(part.material.alphaMode ?? 'opaque'));
 }
+
+const receivesShadow = part => part.receiveShadow !== false;
+
+// Uniform value of a batch: 0 draws normally, 1 is a holdout (zero colour, zero alpha), 2 is a shadow catcher (black, alpha = shadow).
+const compositeModeOf = part => (part.holdout === true ? 1 : part.shadowCatcher === true ? 2 : 0);
+
+const BOOLEAN_PART_FLAGS = ['castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'visible'];
+
+function validatePartFlags(part) {
+  for (const flag of BOOLEAN_PART_FLAGS) {
+    if (part[flag] !== undefined && typeof part[flag] !== 'boolean') throw new TypeError(`${flag} must be a boolean`);
+  }
+  if (part.holdout === true && part.shadowCatcher === true) throw new Error(`A part is a holdout or a shadow catcher, not both: ${part.name}`);
+}
+
+/** A hidden part keeps its slot in the batch but draws and casts nothing: its instance matrices are packed as zeros. */
+const isHidden = part => part.visible === false || part.visibility?.visible === false;
 
 function hasMaterialMap(material) {
   return MATERIAL_MAPS.some(field => material[field]);
@@ -268,8 +286,12 @@ function copyVector3(target, offset, source) {
 function packInstance(data, index, part, normalMatrix) {
   const offset = index * INSTANCE_STRIDE;
   const material = part.material;
-  data.set(part.matrix, offset);
-  data.set(normalMatrix, offset + 16);
+  if (isHidden(part)) {
+    data.fill(0, offset, offset + 25);
+  } else {
+    data.set(part.matrix, offset);
+    data.set(normalMatrix, offset + 16);
+  }
   copyVector3(data, offset + 25, material.color);
   data[offset + 28] = material.metallic;
   data[offset + 29] = material.roughness;
@@ -366,7 +388,7 @@ export function groupParts(parts, batching = true) {
   const morphInfos = new Map();
   for (const part of parts) {
     validateTransform(part);
-    if (part.castShadow !== undefined && typeof part.castShadow !== 'boolean') throw new TypeError('castShadow must be a boolean');
+    validatePartFlags(part);
     if (hasSkinData(part)) {
       const { validateSkinGeometry, validateSkinPose } = skinSupport();
       validateSkinGeometry(part.geometry, part.skin);
@@ -383,7 +405,7 @@ export function groupParts(parts, batching = true) {
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
-    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, ...materialAlphaState(part.material)]) {
+    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, ...materialAlphaState(part.material)]) {
       if (!maps.has(value)) maps.set(value, new Map());
       maps = maps.get(value);
     }
@@ -757,7 +779,7 @@ export class Renderer67 {
 
   finishMainProgram(pendingProgram) {
     this.program = finishProgram(this.context, pendingProgram);
-    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
+    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
       this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     }
@@ -1061,7 +1083,7 @@ export class Renderer67 {
     const [alphaMode, alphaCutoff, opacity, doubleSided] = materialAlphaState(parts[0].material);
     const layerState = materialLayerState(parts[0].material);
     const culling = this.createCullingState(parts);
-    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), depthLayer: depthLayerOf(parts[0]), pass: renderPass(parts[0].material) };
+    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), pass: renderPass(parts[0].material) };
     if (parts[0].lods) culling.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level));
     culling.shadowLevels?.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level, batch.shadowLevels));
     parts.forEach((part, index) => this.partLocations.set(part, { batch, index, geometry: part.geometry, map, mapState, layerState, skin, jointMatrices: skin?.jointMatrices, skinIndices: geometry.skinIndices, skinWeights: geometry.skinWeights, morph, morphWeights: morph?.weights, morphTargets: geometry.morphTargets, normalMatrix: mat3.create(), committedMatrix: batch.instanceData.subarray(index * INSTANCE_STRIDE, index * INSTANCE_STRIDE + 16) }));
@@ -1088,7 +1110,7 @@ export class Renderer67 {
       const mapState = materialMapState(first.material);
       const sameParts = batch?.parts.length === group.length && batch.parts.every((part, index) => part === group[index]);
       const alphaState = materialAlphaState(first.material);
-      const sameState = location?.geometry === first.geometry && batch?.castShadow === castsShadow(first) && (batch.depthLayer ?? 0) === depthLayerOf(first) &&
+      const sameState = location?.geometry === first.geometry && batch?.castShadow === castsShadow(first) && batch.receivesShadow === receivesShadow(first) && batch.compositeMode === compositeModeOf(first) && (batch.depthLayer ?? 0) === depthLayerOf(first) &&
         batch.floor === (first.material.tag === 'floor') && batchPass(batch) === renderPass(first.material) &&
         [batch.alphaMode, batch.alphaCutoff, batch.opacity, batch.doubleSided].every((value, index) => value === alphaState[index]) &&
         batch.mapState.every((value, index) => value === mapState[index]) &&
@@ -1248,8 +1270,9 @@ export class Renderer67 {
       if (!location) throw new Error(`Unknown part identity: ${part.name}`);
       locations[partIndex] = location;
       if (part.skin || part.morph) this.updatePartIdentities.add(part);
-      if (part.castShadow !== undefined && typeof part.castShadow !== 'boolean') throw new TypeError('castShadow must be a boolean');
+      validatePartFlags(part);
       if (castsShadow(part) !== location.batch.castShadow) throw new Error(`Shadow casting changes require a new renderer: ${part.name}`);
+      if (receivesShadow(part) !== location.batch.receivesShadow || compositeModeOf(part) !== location.batch.compositeMode) throw new Error(`receiveShadow, holdout and shadowCatcher changes require replaceParts: ${part.name}`);
       if (depthLayerOf(part) !== (location.batch.depthLayer ?? 0)) throw new Error(`depthLayer changes require replaceParts: ${part.name}`);
       // A material whose fields still equal the ones that passed the full checks below needs none of them again.
       const materialUnchanged = location.materialSnapshot?.matches(part.material) === true;
@@ -2090,6 +2113,8 @@ export class Renderer67 {
       }
     }
     if (textured && !this.benchmark) {
+      this.context.uniform1f(this.uniforms.shadowBlind, batch.receivesShadow === false ? 1 : 0);
+      this.context.uniform1f(this.uniforms.compositeMode, batch.compositeMode ?? 0);
       for (let index = 0; index < MATERIAL_MAPS.length; index++) {
         this.context.activeTexture(this.context.TEXTURE0 + index + 1);
         this.context.bindTexture(this.context.TEXTURE_2D, batch.textures[index]);

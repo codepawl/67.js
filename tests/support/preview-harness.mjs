@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { Script, createContext } from 'node:vm';
 import { mat4 } from 'gl-matrix';
-import { createAgentScene, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, loadAllAgentSceneModules, allAgentSceneModulesLoaded } from '../../src/agent-scene.js';
+import { createAgentScene, applyCameraFields, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, loadAllAgentSceneModules, allAgentSceneModulesLoaded } from '../../src/agent-scene.js';
 import { normalizeBlend } from '../../src/mesh-blend.js';
 import { applyProjection } from '../../src/camera.js';
+import { effectsWithFStop } from '../../src/camera-effects.js';
 import { resolveAgentShadow, agentEnvironmentMap } from '../../src/agent-look.js';
 import { agentSceneModule, agentSceneModuleLoaded } from '../../src/agent-scene-modules.js';
 import { createAgentAssetScene } from '../../src/agent-asset.js';
@@ -79,14 +80,14 @@ export function previewHarness() {
     setManifoldModuleLoader: () => {},
     needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader: () => {},
     sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
-    applyProjection, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
+    applyProjection, applyCameraFields, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
     // Line art needs a real renderer with render passes, so the fault-injected one gets a no-op install.
     agentSceneModule: name => (name === 'lineArt' ? { installLineArt: renderer => renderer } : name === 'userPass' ? { ...agentSceneModule(name), installUserPasses: renderer => renderer } : agentSceneModule(name)), agentSceneModuleLoaded, createBranchStore, printableLabel,
     Renderer67: FaultInjectedRenderer, skyOpenness: () => 1, fogSkyVisibility: () => null,
     // The fault-injected renderer has no floor part; the automatic floor is covered by agent-ground.test.js and the live smokes.
     agentGroundPlacement: () => null, createAgentGround: () => null, placeAgentGround: () => {}, FLOOR_COLOR: [0.22, 0.22, 0.21], groundBounceEnvironment: (parts, environment) => environment,
     // The optional addons only plug stages into a real renderer; the fault-injected one needs none.
-    installCameraEffects: renderer => renderer, installRenderPasses: renderer => renderer, installDepthPrecision: renderer => renderer,
+    installCameraEffects: renderer => renderer, effectsWithFStop, installRenderPasses: renderer => renderer, installDepthPrecision: renderer => renderer,
     installMeshBlend: renderer => Object.assign(renderer, { meshBlend: { radii: new Map() } }), normalizeBlend,
   });
   // Evaluate only trusted repository adapter code; inject the driver boundary for failure cases.

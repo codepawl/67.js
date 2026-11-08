@@ -153,7 +153,7 @@ test('SDK advertises the complete strict JSON contract and truthful annotations'
   assert.deepEqual(variants.map(variant => variant.properties.type.const), ['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'terrain', 'grid', 'mesh']);
   assert.ok(variants.every(variant => variant.additionalProperties === false));
   assert.equal(recipeSchema.properties.environment.additionalProperties, false);
-  assert.equal(recipeSchema.properties.environment.properties.pointLights.maxItems, 8);
+  assert.equal(recipeSchema.properties.environment.properties.pointLights.maxItems, 16);
   assert.equal(recipeSchema.properties.effects.additionalProperties, false);
   assert.equal(recipeSchema.properties.shadow.additionalProperties, false);
   const look = tools.find(tool => tool.name === 'scene_look');
@@ -200,7 +200,7 @@ test('review SDK exposes one image and rejects unknown or unbounded shot fields 
   const before = calls();
   for (const invalid of [
     { ...input, width: 481 }, { ...input, shots: [] }, { ...input, shots: Array(5).fill({}) },
-    { ...input, code: 'console.log(1)' }, { ...input, shots: [{ camera: { projection: 'orthographic' } }] },
+    { ...input, code: 'console.log(1)' }, { ...input, shots: [{ camera: { projection: 'fisheye' } }] },
     { ...input, shots: [{ animation: { clip: 0, time: 0, url: 'https://example.com' } }] },
     { ...input, shots: [{ label: 'x'.repeat(49) }] }, { ...input, shots: [{ motionTime: -1 }] },
     { ...input, shots: [{ rendererTime: 3601 }] }, { ...input, expectedRevision: -1 },

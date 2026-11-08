@@ -123,7 +123,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | --- | --- | --- |
 | `scene_capabilities` | None | Features, limits, and backend information |
 | `scene_create` | `recipe` | Session ID, revision, inspection, and render status |
-| `scene_asset_catalog` | None | Configured catalog and content-bound GLB IDs |
+| `scene_asset_catalog` | None | Configured catalog and content-bound GLB, image, `.hdr` (kind `environment`) and `.cube` (kind `look`) IDs; an ID goes in `environment.hdri` or `environment.look`, see [agent-look](agent-look.md#catalog-hdris-and-looks) |
 | `scene_create_asset` | `recipe` using `67js.asset` | Imported scene ID, revision, inspection and render status |
 | `scene_inspect` | `sessionId`, optional `ids`, `limit`, `includeBounds` | Compact node records and revision |
 | `scene_apply` | `sessionId`, `expectedRevision`, `operations` | Updated revision, inspection, and render status |

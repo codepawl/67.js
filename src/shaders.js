@@ -304,6 +304,8 @@ uniform float alphaCutoff;
 uniform float materialOpacity;
 uniform float alphaToCoverage;
 uniform float doubleSided;
+uniform float shadowBlind;
+uniform float compositeMode;
 out vec4 outputColor;
 const float PI = 3.14159265359;
 
@@ -618,7 +620,7 @@ ${featureCode("mainSetup")}  if (ENVIRONMENT_ENABLED && !LIGHT_SHADING) {
     vec2 brdfLookup = texture(environmentBrdf, vec2(clamp(dot(normal, viewDirection), 0.001, 1.0), roughness)).rg;
     directSpecularGain = multipleScatterGain(brdfLookup, baseReflectance);
   }
-  float visibility = shadowVisibility(normal);
+  float visibility = shadowBlind > 0.5 ? 1.0 : shadowVisibility(normal);
 ${featureCode("worldVisibility")}  vec3 radiance = illuminate(normal, viewDirection, normalize(lightDirection), keyColor * visibility${featureCode("linkSun")}, color, metallic, roughness);
   if (FILL_ON) {
   radiance += illuminate(normal, viewDirection, normalize(vec3(4.0, 2.0, -3.0)), mix(vec3(0.8, 2.0, 1.8), vec3(0.12, 0.17, 0.20) * daylight, worldMode) * fillIntensity * mix(1.0, vertexSkyVisibility, worldMode), color, metallic, roughness);
@@ -634,7 +636,7 @@ ${featureCode("worldVisibility")}  vec3 radiance = illuminate(normal, viewDirect
 ${featureCode("linkPoint")}    vec3 lightRadiance = pointLightColors[index].rgb * pointLightColors[index].w * attenuation;
     if (USES_LOCAL_SHADOWS && pointLightShadowTiles[index] >= 0.0) {
       float tile = pointLightShadowTiles[index] + pointShadowFace(-offset);
-      lightRadiance *= localShadowVisibility(tile, worldPosition, normal, sqrt(distanceSquared));
+      lightRadiance *= shadowBlind > 0.5 ? 1.0 : localShadowVisibility(tile, worldPosition, normal, sqrt(distanceSquared));
     }
     radiance += illuminate(normal, viewDirection, offset * inversesqrt(distanceSquared), lightRadiance, color, metallic, roughness);
   }
@@ -652,7 +654,7 @@ ${featureCode("linkPoint")}    vec3 lightRadiance = pointLightColors[index].rgb 
       if (attenuation == 0.0) continue;
 ${featureCode("linkSpot")}      vec3 lightRadiance = spotLightColors[index].rgb * spotLightColors[index].w * attenuation;
       if (USES_LOCAL_SHADOWS && spotLightParameters[index].z >= 0.0) {
-        lightRadiance *= localShadowVisibility(spotLightParameters[index].z, worldPosition, normal, sqrt(distanceSquared));
+        lightRadiance *= shadowBlind > 0.5 ? 1.0 : localShadowVisibility(spotLightParameters[index].z, worldPosition, normal, sqrt(distanceSquared));
       }
       radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
@@ -727,6 +729,8 @@ ${featureCode("worldFinal")}  float fog = 1.0 - exp(-length(worldPosition - eye)
     vec3 result = floorColor * (0.72 + 0.28 * visibility) * contact;
     outputColor = vec4(hdrEnabled > 0.5 ? pow(result, vec3(2.2)) : result, 1.0);
   }
+  // Holdout: nothing, not even alpha. Shadow catcher: black with the shadow it receives as premultiplied alpha.
+  if (compositeMode > 0.5) outputColor = compositeMode < 1.5 ? vec4(0.0) : vec4(0.0, 0.0, 0.0, 1.0 - visibility);
 }`;
 }
 

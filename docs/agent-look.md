@@ -61,6 +61,19 @@ function draw() {
 For a frame loop, update shadow bounds and mark shadows dirty only when projector controls or geometry change.
 Use `replaceParts` when `topologyRevision` changes, as described in the scene guide.
 
+## Catalog HDRIs and looks
+
+A recipe names a file; it never carries a path or a URL, and nothing is downloaded. Two kinds of entries exist:
+
+| Entry | Field | Source |
+| --- | --- | --- |
+| `sky-clouds` | `environment.hdri` | Poly Haven `kloofendal_48d_partly_cloudy_puresky`, CC0, shrunk to 128 x 64 |
+| `studio-softbox` | `environment.hdri` | Poly Haven `studio_small_03`, CC0, shrunk to 128 x 64 |
+| `teal-orange`, `noir` | `environment.look` | made for 67js, CC0, 9 points per side |
+| 64-character ID | either | a `.hdr` or `.cube` file (4 MiB at most) in the MCP `--assets` directory, listed by `scene_asset_catalog` as kind `environment` or `look` |
+
+The four shipped files total about 100 KB. For a bigger HDRI, put a 1k or 2k `.hdr` (for example from Poly Haven) in the assets directory and use its ID. Outside MCP, decode with `parseRadianceHdr` or `parseCube` and register with `registerCatalogEnvironment(name, data)` or `registerCatalogLook(name, look)` from `src/look-catalog.js` before building the scene. The look needs the `view-transform-shader` module (`loadAgentSceneModules` loads it). Render jobs light the scene with the same entries.
+
 ## Atomic look commands
 
 | Operation | Payload |
@@ -106,6 +119,7 @@ Sky colors use display RGB, matching the renderer's existing environment contrac
 | Field | Default | Range or meaning |
 | --- | --- | --- |
 | `world` | `false` | Boolean world presentation flag. With `true` the setup environment is also the background |
+| `hdri` | absent | A shipped HDRI (`sky-clouds`, `studio-softbox`) or the 64-character ID of a `.hdr` file in `scene_asset_catalog`. It lights, reflects and (with `world: true`) forms the background instead of the setup sky; `environmentIntensity` is its strength and `environmentRotation` turns it about the vertical axis. The setup still gives the key light, so set `keyIntensity: 0` when the HDRI has its own sun. `null` clears. See [Catalog HDRIs and looks](#catalog-hdris-and-looks) |
 | `ground` | on | Absent unless set. `false` removes the preview's automatic floor and contact shadow |
 | `resolveCoplanar` | off | `'offset'` puts the smaller part of each coplanar pair (see the `coplanar-overlap` warning) on the next depth layer, drawn with a polygon offset; `false` or absent leaves parts as authored. Geometry never moves. Parts that set `decal` or `depthLayer` keep their own |
 | `objectReflections` | on | Absent unless set. Each smooth metal part (`metallic` 0.5 or more, `roughness` 0.6 or less; at most 8 such parts) gets a reflection probe of the scene around it, so a chrome sphere shows the floor and its neighbours. `false` turns it off. Probes are traced at rest, so a part that moves reflects the scene as it started. `scene_inspect` names them in `reflections` |

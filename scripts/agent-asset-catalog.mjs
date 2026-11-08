@@ -3,11 +3,25 @@ import { open, readdir, realpath, lstat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 
 import { AGENT_ASSET_LIMITS, assetBytesLimitMessage } from '../src/agent-asset-limits.js';
+import { MAXIMUM_CATALOG_LOOK_BYTES } from '../src/look-catalog.js';
 
 const MAXIMUM_ASSETS = AGENT_ASSET_LIMITS.maxAssets;
 const MAXIMUM_BYTES = AGENT_ASSET_LIMITS.maxBytes;
 
 const IMAGE_EXTENSIONS = { png: /\.png$/i, jpeg: /\.jpe?g$/i, webp: /\.webp$/i };
+/** 'environment' for a Radiance .hdr and 'look' for a .cube file, by extension and a first-bytes check; the preview decodes them. */
+function lookFileKind(filename, bytes) {
+  if (/\.hdr$/i.test(filename)) {
+    if (bytes.toString('latin1', 0, 2) !== '#?') throw new Error('An .hdr catalog file must be a Radiance file starting with #?.');
+    return 'environment';
+  }
+  if (/\.cube$/i.test(filename)) {
+    if (bytes.length > MAXIMUM_CATALOG_LOOK_BYTES || !bytes.toString('utf8').includes('LUT_3D_SIZE')) throw new Error('A .cube catalog file must be a 3D look (LUT_3D_SIZE) of at most 4 MiB.');
+    return 'look';
+  }
+  return null;
+}
+
 const IMAGE_MIME = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' };
 
 /** 'png', 'jpeg' or 'webp' from the file signature, else null. Catalog images are decoded by the preview, never by the server. */
@@ -85,23 +99,28 @@ export async function createAgentAssetCatalog(root) {
       if (after.size !== current.size || after.mtimeMs !== current.mtimeMs || after.ctimeMs !== current.ctimeMs) {
         throw new Error('Asset changed during reading.');
       }
-      const imageFormat = imageKind(bytes);
+      const lookKind = lookFileKind(filename, bytes);
+      const imageFormat = lookKind ? null : imageKind(bytes);
       if (imageFormat && !IMAGE_EXTENSIONS[imageFormat].test(filename)) throw new Error('Image extension must match its PNG, JPEG or WebP content.');
-      if (!imageFormat && !/\.glb$/i.test(filename)) throw new Error('Catalog files must be GLB, PNG, JPEG or WebP, with a matching extension.');
-      const document = imageFormat ? null : selfContainedGlb(bytes);
+      if (!imageFormat && !lookKind && !/\.glb$/i.test(filename)) throw new Error('Catalog files must be GLB, PNG, JPEG, WebP, HDR or CUBE, with a matching extension.');
+      const document = imageFormat || lookKind ? null : selfContainedGlb(bytes);
       const assetId = createHash('sha256').update(bytes).digest('hex');
-      return { bytes, document, assetId, imageFormat };
+      return { bytes, document, assetId, imageFormat, lookKind };
     } finally {
       await handle.close();
     }
   }
 
   const files = (await readdir(directory, { withFileTypes: true }))
-    .filter(entry => /\.(glb|png|jpe?g|webp)$/i.test(entry.name)).sort((left, right) => left.name.localeCompare(right.name));
+    .filter(entry => /\.(glb|png|jpe?g|webp|hdr|cube)$/i.test(entry.name)).sort((left, right) => left.name.localeCompare(right.name));
   if (files.length > MAXIMUM_ASSETS) throw new RangeError(`Asset catalog has ${files.length} files, over its maxAssets ${MAXIMUM_ASSETS}. Remove files from the --assets directory.`);
   for (const file of files) {
-    const { bytes, document, assetId, imageFormat } = await readFile(file.name);
+    const { bytes, document, assetId, imageFormat, lookKind } = await readFile(file.name);
     if (entries.has(assetId)) continue;
+    if (lookKind) {
+      entries.set(assetId, { filename: file.name, metadata: Object.freeze({ assetId, name: file.name, bytes: bytes.length, kind: lookKind }) });
+      continue;
+    }
     if (imageFormat) {
       entries.set(assetId, { filename: file.name, metadata: Object.freeze({ assetId, name: file.name, bytes: bytes.length, kind: 'image', mimeType: IMAGE_MIME[imageFormat] }) });
       continue;

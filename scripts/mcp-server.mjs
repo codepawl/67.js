@@ -8,9 +8,11 @@ import { pathToFileURL } from 'node:url';
 import packageMetadata from '../package.json' with { type: 'json' };
 import { MODIFIER_OPERATIONS } from '../src/mesh-operations.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from '../src/view-transform-names.js';
+import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, CATALOG_FILE_ID } from '../src/look-catalog.js';
 import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER_PASS_NAMES, VIDEO_ENCODERS, MAXIMUM_JOB_SIDE, MAXIMUM_MEMORY_MIB } from '../src/agent-scene-capabilities.js';
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
+import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
 
 const finite = z.number().min(-3.4028234663852886e38).max(3.4028234663852886e38);
 const positive = finite.positive();
@@ -39,6 +41,11 @@ const nodeFields = {
   skin: skinSpec.optional(),
   decal: z.boolean().optional(),
   depthLayer: z.number().int().min(0).max(4).optional(),
+  visible: z.boolean().optional().describe('false hides the node and children; keyable in motion. Flags: scene_capabilities renderFlags.'),
+  castShadow: z.boolean().optional(),
+  receiveShadow: z.boolean().optional(),
+  holdout: z.boolean().optional(),
+  shadowCatcher: z.boolean().optional(),
   blend: z.strictObject({ radius: z.number().min(0.005).max(2) }).optional().describe('Soft seam into another mesh, radius in m; docs/mesh-blend.md.'),
   label: z.string().max(256).optional().describe('Human-readable label. Identity remains the node ID.'),
   parent: identifier.nullable().optional().describe('Parent node ID, or null for a root. Local transforms stay unchanged.'),
@@ -154,9 +161,15 @@ const cameraFields = {
   eye: vector3.optional().describe('Camera position in world coordinates.'),
   target: vector3.optional().describe('World point toward which the camera looks.'),
   up: vector3.optional().describe('Nonzero camera up direction, not collinear with the view direction.'),
-  fov: finite.gt(0).lt(180).optional().describe('Vertical perspective field of view in degrees.'),
+  fov: finite.gt(0).lt(180).optional().describe('Vertical perspective field of view in degrees. Not with focalLength.'),
   near: positive.optional().describe('Near clipping distance. Must be less than far.'),
   far: positive.optional().describe('Far clipping distance. Must exceed near.'),
+  projection: z.enum(['perspective', 'orthographic']).optional().describe('Defaults to perspective.'),
+  orthoScale: positive.optional().describe('Orthographic view height in metres (default 4); needs projection orthographic.'),
+  focalLength: positive.max(10000).optional().describe('Lens in mm, instead of fov.'),
+  sensorWidth: positive.max(1000).optional().describe('Sensor width in mm with focalLength; default 36.'),
+  shift: z.tuple([z.number().min(-1).max(1), z.number().min(-1).max(1)]).optional().describe('Lens shift [x, y] as a fraction of the frame; positive moves the frame right and up.'),
+  fStop: z.number().min(0.7).max(64).optional().describe('Depth of field focused on target; 1.4 is full blur. Not with effects.depthOfField.blur above 0.'),
 };
 const bounded = (minimum, maximum) => z.number().min(minimum).max(maximum);
 const boundedVector = (minimum, maximum) => z.tuple([bounded(minimum, maximum), bounded(minimum, maximum), bounded(minimum, maximum)]);
@@ -187,6 +200,7 @@ const environment = z.strictObject({
   ground: z.boolean().optional().describe('false: no automatic floor.'),
   setup: z.enum(LIGHTING_SETUP_NAMES).optional().describe('Named lighting; resets key, fill and ambient fields. Default daylight.'),
   environmentIntensity: bounded(0, 100).optional().describe('Scales the setup environment light and its reflections.'),
+  hdri: z.union([z.enum(BUNDLED_ENVIRONMENT_NAMES), z.string().regex(CATALOG_FILE_ID)]).nullable().optional().describe('HDRI instead of the setup sky; scene_capabilities catalogLooks.'),
   environmentRotation: bounded(-100, 100).optional().describe('Turns the setup environment around the vertical axis, in radians.'),
   lightDirection: boundedVector(-1e6, 1e6).optional().describe('Direction toward the key light; shadows follow.'),
   keyColor: boundedVector(0, 1000).optional(),
@@ -204,7 +218,7 @@ const environment = z.strictObject({
     range: z.union([z.literal(0), bounded(0.001, 1e6)]).optional(),
     castShadow: z.boolean().optional().describe('Casts a shadow; 6 atlas tiles.'),
     affects,
-  })).max(8).optional().describe('Replaces the list; [] clears. Intensity in candela.'),
+  })).max(MAX_POINT_LIGHTS).optional().describe('Replaces the list; [] clears. Intensity in candela.'),
   spotLights: z.array(z.strictObject({
     position: boundedVector(-1e6, 1e6),
     direction: boundedVector(-1e6, 1e6).describe('Nonzero direction the cone points along.'),
@@ -216,7 +230,7 @@ const environment = z.strictObject({
     range: z.union([z.literal(0), bounded(0.001, 1e6)]).optional(),
     castShadow: z.boolean().optional().describe('Casts a shadow; 1 atlas tile.'),
     affects,
-  })).max(8).optional().describe('Replaces the list; [] clears.'),
+  })).max(MAX_SPOT_LIGHTS).optional().describe('Replaces the list; [] clears.'),
   areaLights: z.array(z.strictObject({
     position: boundedVector(-1e6, 1e6).describe('Center of the rectangle.'),
     direction: boundedVector(-1e6, 1e6).describe('Direction the rectangle faces; emits that side only.'),
@@ -226,7 +240,7 @@ const environment = z.strictObject({
     color: color.optional(),
     intensity: bounded(0, 1e5).optional().describe('Candela head on.'),
     affects,
-  })).max(4).optional().describe('Replaces the list; [] clears. No shadow.'),
+  })).max(MAX_AREA_LIGHTS).optional().describe('Replaces the list; [] clears. No shadow.'),
   skyTop: color.optional(),
   skyBottom: color.optional(),
   fogColor: color.optional(),
@@ -240,7 +254,7 @@ const environment = z.strictObject({
   specularAntiAliasing: z.number().min(0).max(4).optional().describe('Specular anti-aliasing: 0 off, 1 default; widens highlights that sparkle on grainy normal-mapped metal.'),
   resolveCoplanar: z.union([z.literal('offset'), z.literal(false)]).optional().describe("'offset' biases the smaller part of each coplanar pair at draw time; false clears."),
   viewTransform: z.enum(VIEW_TRANSFORM_NAMES).optional().describe('Display transform, for example agx to compare with Blender.'),
-  look: z.enum(LOOK_NAMES).nullable().optional().describe('Named look preset; null clears.'),
+  look: z.union([z.enum([...LOOK_NAMES, ...BUNDLED_CUBE_LOOK_NAMES]), z.string().regex(CATALOG_FILE_ID)]).nullable().optional().describe('Look preset or .cube; scene_capabilities catalogLooks. null clears.'),
   wind: z.strictObject({ strength: bounded(0, 4).optional(), direction: bounded(-360, 360).optional().describe('Degrees: 0 toward +x, 90 toward +z.') }).optional().describe('Sway of foliage and grass materials; strength defaults to 0.3.'),
 });
 // The full environment schema is published once, in scene_create. A JSON Schema $ref can not point from one tool's
@@ -430,6 +444,14 @@ function motionTrack(kind, property, value, tangent) {
     })).min(1).max(64),
   });
 }
+// Lights, sun, sky and effects share one track shape: the backend names the valid light IDs and properties of each kind when one is wrong.
+const lookTrack = z.strictObject({
+  kind: z.enum(['light', 'sun', 'environment', 'effects']).describe('Properties per kind: scene_capabilities motionLook.'),
+  id: z.string().max(16).optional().describe('Light only: point:0, spot:0, area:0.'),
+  property: z.string().max(24),
+  interpolation: z.enum(['LINEAR', 'STEP', 'SMOOTH']).optional(),
+  keyframes: z.array(z.strictObject({ time: z.number().min(0).max(30), value: z.union([finite, vector3]), easing: easingField })).min(1).max(64),
+});
 const ikKeyframes = (value, description) => z.strictObject({
   interpolation: z.enum(['LINEAR', 'STEP', 'SMOOTH']).optional(),
   keyframes: z.array(z.strictObject({ time: z.number().min(0).max(30), value })).min(1).max(64),
@@ -513,6 +535,7 @@ const motion = z.strictObject({
     motionTrack('camera', 'target', vector3, vector3),
     motionTrack('camera', 'fov', finite.gt(0).lt(180), finite),
     motionTrack('camera', 'roll', finite, finite),
+    lookTrack,
   ])).max(128),
 }).describe('One absolute-time procedural clip. Local node transforms propagate through parents. Cubic tangents are derivatives per second. Backend checks references, duplicate tracks, 2048 total keys and every sampled pose.');
 const physicsBody = z.strictObject({

@@ -19,6 +19,7 @@ import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
+import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME } from './agent-render-jobs.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
@@ -148,7 +149,23 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   async function placedAssetData(value) {
     const needs = recipeAssetNeeds(value);
     const entries = await Promise.all(needs.map(async ({ id }) => [id, (await (await catalog()).read(id)).toString('base64')]));
-    return { ...(needs.length ? { assetData: Object.fromEntries(entries) } : {}), ...(await sequenceFrameData(value)) };
+    return { ...(needs.length ? { assetData: Object.fromEntries(entries) } : {}), ...(await sequenceFrameData(value)), ...(await lookFileData(value)) };
+  }
+
+  /** The HDRI and .cube files a recipe names: shipped ones by name from assets/looks, the others by catalog ID. The page decodes them. */
+  async function lookFileData(value) {
+    const { environments, looks } = catalogLookReferences(value);
+    const lookData = {};
+    for (const [kind, references] of [['environment', environments], ['look', looks]]) {
+      for (const reference of references) {
+        const shipped = BUNDLED_ENVIRONMENT_NAMES.includes(reference) || BUNDLED_CUBE_LOOK_NAMES.includes(reference);
+        const bytes = shipped
+          ? await readFile(new URL(`../assets/looks/${reference}.${kind === 'environment' ? 'hdr' : 'cube'}`, import.meta.url))
+          : await (await catalog()).read(reference);
+        lookData[reference] = kind === 'environment' ? { kind, base64: bytes.toString('base64') } : { kind, text: bytes.toString('utf8') };
+      }
+    }
+    return Object.keys(lookData).length ? { lookData } : {};
   }
 
   /** Bytes of the catalog images a recipe or edit list uses as map sequence frames, base64 by asset id. The page decodes them. */

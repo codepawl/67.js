@@ -36,7 +36,7 @@ export function stageObjectReflections(cache, recipe, sourceParts, drawnParts, g
   const { environment } = recipe;
   const worldMatrices = sourceParts.map(part => Array.from(graph.getNode(part.name).worldMatrix));
   const key = JSON.stringify([environment.pointLights, environment.spotLights, environment.areaLights, environment.keyColor, environment.keyIntensity, environment.lightDirection,
-    environment.skyTop, environment.skyBottom, environment.setup, environment.environmentIntensity, environment.environmentRotation, recipe.materials, worldMatrices]);
+    environment.skyTop, environment.skyBottom, environment.setup, environment.hdri, environment.environmentIntensity, environment.environmentRotation, recipe.materials, worldMatrices]);
   if (cache?.key === key && cache.sourceParts === sourceParts && cache.drawnParts === drawnParts) {
     return cache;
   }
