@@ -269,6 +269,8 @@ uniform float localShadowTexelAngles[24];
 uniform vec3 keyColor;
 uniform float fillIntensity;
 uniform float ambientIntensity;
+uniform float specularAntiAliasing;
+const float MAXIMUM_SPECULAR_WIDENING = 0.25;
 uniform vec3 fogColor;
 uniform float fogDensity;
 uniform vec3 waterRipple;
@@ -455,6 +457,10 @@ vec2 mapUV(float flag) {
   return flag > 1.5 ? lightmapUV : textureUV;
 }
 
+// Toksvig variance: a normal map mip averages texels that disagree, so the filtered normal is shorter than 1.
+// The shortfall is the detail the pixel can no longer resolve, and it widens the highlight instead of sparkling.
+float normalMapVariance = 0.0;
+
 vec3 mappedNormal(vec3 normal) {
   vec3 positionX = dFdx(worldPosition);
   vec3 positionY = dFdy(worldPosition);
@@ -477,6 +483,8 @@ vec3 mappedNormal(vec3 normal) {
   float handedness = dot(cross(normal, tangent), bitangent) < 0.0 ? -1.0 : 1.0;
   bitangent = normalize(cross(normal, tangent)) * handedness;
   vec3 sampled = texture(normalMap, textureUV${featureCode("normalUv")}).xyz * 2.0 - 1.0;
+  float filteredLength = clamp(length(sampled), 0.05, 1.0);
+  normalMapVariance = (1.0 - filteredLength) / filteredLength;
   sampled.xy *= normalScale;
   vec3 mapped = mat3(tangent, bitangent, normal) * sampled;
   return dot(mapped, mapped) > 1e-12 ? normalize(mapped) : normal;
@@ -593,8 +601,15 @@ ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
   float splatCavity = 1.0;
   if (USES_SPLAT) applySplat(color, normal, roughness, splatCavity);
   roughness = clamp(roughness, 0.075, 1.0);
-  vec3 normalChange = max(abs(dFdx(normal)), abs(dFdy(normal)));
-  roughness = clamp(sqrt(roughness * roughness + dot(normalChange, normalChange) * 0.3), 0.075, 1.0);
+  if (specularAntiAliasing > 0.0) {
+    // Kaplanyan-Hoffman: the variance of the shading normal across the pixel footprint, clamped by a kernel threshold,
+    // plus the Toksvig variance of the normal map. Both add to the squared roughness.
+    vec3 normalX = dFdx(normal);
+    vec3 normalY = dFdy(normal);
+    float screenVariance = 0.25 * (dot(normalX, normalX) + dot(normalY, normalY));
+    float widening = min(2.0 * screenVariance + 0.5 * normalMapVariance, MAXIMUM_SPECULAR_WIDENING);
+    roughness = clamp(sqrt(roughness * roughness + specularAntiAliasing * widening), 0.075, 1.0);
+  }
   float mossCover = 0.0;
   vec3 mossTone = vec3(0.0);
 ${featureCode("worldSurface")}  vec3 specularNormal = normal;
