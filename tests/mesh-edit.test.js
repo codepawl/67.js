@@ -150,11 +150,11 @@ test('translate with connected falloff moves nearby vertices less', () => {
 });
 
 test('edit validation names the op, field and allowed values', () => {
-  assert.throws(() => normalizeMeshEdits([{ op: 'knife' }]), /op must be one of extrude_face_region/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'knife' }]), /edits\[0\]\.op: got "knife"; expected one of extrude_face_region/);
   assert.throws(() => normalizeMeshEdits([{ op: 'extrude_individual', offset: 1, depth: 2 }]), /does not take depth/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'inset_region', thickness: 0 }]), /thickness must be a number above 0/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'inset_region', thickness: 0 }]), /edits\[0\]\.thickness: got 0; expected a number above 0/);
   assert.throws(() => normalizeMeshEdits([{ op: 'delete' }]), /delete needs select/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'tag', select: { all: true }, name: 'bad name' }]), /name must be/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'tag', select: { all: true }, name: 'bad name' }]), /edits\[0\]\.name: got "bad name"; expected 1 to 48 letters/);
   assert.throws(() => normalizeMeshEdits([{ op: 'translate', offset: [0, 1, 0], falloff: { radius: 1, curve: 'wobbly' } }]), /curve must be one of smooth/);
   assert.throws(() => applyMeshEdits(cube(), [{ op: 'extrude_individual', select: { tag: 'top' }, offset: 1 }, { op: 'delete', select: { faces: [99] } }]), /Mesh edit 1 \(delete\): Face index 99/);
   assert.throws(() => applyMeshEdits(cube(), Array.from({ length: 8 }, () => ({ op: 'extrude_individual', offset: 0.1 })), { maxFaces: 1000 }), /over the limit/);

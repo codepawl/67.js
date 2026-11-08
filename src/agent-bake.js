@@ -1,3 +1,4 @@
+import { invalidField } from './field-error.js';
 import { planLightmaps, estimateBake, traceLightmaps } from './light-bake.js';
 import { runKernel } from './kernel-offload.js';
 import { motionEnvironment } from './agent-motion.js';
@@ -23,7 +24,7 @@ export function normalizeAgentBake(input) {
   }
   knownKeys(input, BAKE_FIELDS, 'bake');
   if (input.preset !== undefined && !Object.hasOwn(BAKE_PRESETS, input.preset)) {
-    throw new RangeError(`Bake preset must be one of ${Object.keys(BAKE_PRESETS).join(', ')}.`);
+    throw invalidField('bake.preset', input.preset, `one of ${Object.keys(BAKE_PRESETS).join(', ')}`);
   }
   const resolved = { ...BAKE_PRESETS[input.preset ?? 'standard'] };
   for (const [field, [minimum, maximum]] of Object.entries(BAKE_RANGES)) {
@@ -46,24 +47,24 @@ export function normalizeAgentBake(input) {
   }
   // Opt in on top of the grid: the grid's paths scatter in the scene's volume fog. Not stored when off, so the default bake keeps its bytes.
   if (input.gridFog !== undefined && typeof input.gridFog !== 'boolean') {
-    throw new RangeError('bake.gridFog must be a boolean.');
+    throw invalidField('bake.gridFog', input.gridFog, 'true or false');
   }
   if (input.gridFog === true) {
     if (!irradianceGrid) {
-      throw new RangeError('bake.gridFog needs bake.irradianceGrid.');
+      throw invalidField('bake.gridFog', input.gridFog, 'true only together with bake.irradianceGrid, such as irradianceGrid: true');
     }
     resolved.gridFog = true;
   }
   // Not stored when off, so the default bake keeps its bytes.
   if (input.rebake !== undefined && typeof input.rebake !== 'boolean') {
-    throw new RangeError('bake.rebake must be a boolean.');
+    throw invalidField('bake.rebake', input.rebake, 'true or false');
   }
   if (input.rebake === true) {
     resolved.rebake = true;
   }
   for (const field of ['samples', 'bounces']) {
     if (!Number.isInteger(resolved[field])) {
-      throw new RangeError(`Bake ${field} must be an integer.`);
+      throw invalidField(`bake.${field}`, resolved[field], 'a whole number, such as 64');
     }
   }
   return resolved;

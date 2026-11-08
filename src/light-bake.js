@@ -1,3 +1,4 @@
+import { invalidField } from './field-error.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from './light-limits.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { readTriangle } from './triangle-math.js';
@@ -55,7 +56,7 @@ function boundedNumber(options, name) {
   const limit = BAKE_LIMITS[name];
   const value = options[name] ?? limit.fallback;
   if (!Number.isFinite(value) || value < limit.minimum || value > limit.maximum) {
-    throw new RangeError(`Light bake ${name} must be a number from ${limit.minimum} to ${limit.maximum}.`);
+    throw invalidField(`bake.${name}`, value, `a number from ${limit.minimum} to ${limit.maximum}, such as ${limit.fallback}`);
   }
   return name === 'samples' || name === 'bounces' || name === 'maxResolution' ? Math.floor(value) : value;
 }
@@ -66,7 +67,7 @@ export function normalizeBakeOptions(options = {}) {
   const normalized = {};
   for (const name of Object.keys(BAKE_LIMITS)) normalized[name] = boundedNumber(options, name);
   normalized.backend = options.backend ?? 'cpu';
-  if (!BAKE_BACKENDS.includes(normalized.backend)) throw new TypeError('Light bake backend must be "cpu", "gpu", "webgpu" or "native".');
+  if (!BAKE_BACKENDS.includes(normalized.backend)) throw invalidField('bake.backend', normalized.backend, 'one of "cpu", "gpu", "webgpu" or "native"', TypeError);
   return normalized;
 }
 

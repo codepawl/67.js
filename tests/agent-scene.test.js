@@ -648,5 +648,5 @@ test("recipe materials accept alphaMode 'add' and keep it when opacity is below 
   assert.equal(exported.materials.find(material => material.id === 'spark').alphaMode, 'add');
   assert.equal(exported.materials.find(material => material.id === 'faint spark').alphaMode, 'add');
   input.materials.push({ id: 'bad', color: [1, 1, 1], alphaMode: 'multiply' });
-  assert.throws(() => createAgentScene(input), /alphaMode must be one of opaque, blend, add/);
+  assert.throws(() => createAgentScene(input), /alphaMode: got .*; expected one of opaque, blend, add/);
 });

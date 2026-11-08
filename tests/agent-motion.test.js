@@ -114,7 +114,7 @@ test('strict schema, final references, duplicate tracks and allocation bounds re
   assert.throws(() => normalizeAgentMotion(motion([]), recipe), /at least one/);
   assert.throws(() => normalizeAgentMotion({ ...motion([]), unknown: true }, recipe), /field/);
   assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), id: 'missing' }]), recipe), /not found/);
-  assert.throws(() => normalizeAgentMotion(motion([track('emission', 0, 1), track('emission', 0, 1)]), recipe), /Duplicate/);
+  assert.throws(() => normalizeAgentMotion(motion([track('emission', 0, 1), track('emission', 0, 1)]), recipe), /repeats an earlier track/);
   assert.throws(() => normalizeAgentMotion(motion([{ kind: 'camera', id: 'camera', property: 'fov', keyframes: [{ time: 0, value: 45 }] }]), recipe), /cannot have/);
   assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), keyframes: [{ time: 0, value: 0, outTangent: 1 }] }]), recipe), /Tangents/);
   assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), interpolation: 'CUBICSPLINE' }]), recipe), /tangent/i);
@@ -145,7 +145,7 @@ test('invalid cubic scale and material overshoot throw without clamping or parti
     const sampler = compileAgentMotion(motion([track('emission', 0, 1), { ...channel, interpolation: 'CUBICSPLINE' }]), recipe);
     const output = sampler.sample(0);
     const before = snapshot(output);
-    assert.throws(() => sampler.sample(0.5), /positive|negative/);
+    assert.throws(() => sampler.sample(0.5), /positive numbers|numbers of 0 or more/);
     assert.deepEqual(snapshot(output), before);
     sampler.sample(1);
     sampler.sample(0);

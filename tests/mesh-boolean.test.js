@@ -86,7 +86,7 @@ test('boolean errors explain open inputs, empty results and bad fields', () => {
   const open = applyMeshEdits(cube(), [{ op: 'delete', select: { tag: 'top' } }]).mesh;
   assert.throws(() => meshBoolean(open, cube(), 'union'), /must be closed for a boolean: 4 boundary-edge/);
   assert.throws(() => meshBoolean(cube(), transformMesh(cube(), { translation: [5, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }), 'intersect'), /leaves nothing/);
-  assert.throws(() => applyMeshEdits(cube(), [{ op: 'boolean', operation: 'xor', cutter: { type: 'box' } }], { resolveCutter }), /operation must be one of union/);
+  assert.throws(() => applyMeshEdits(cube(), [{ op: 'boolean', operation: 'xor', cutter: { type: 'box' } }], { resolveCutter }), /edits\[0\]\.operation: got "xor"; expected one of union/);
   assert.throws(() => applyMeshEdits(cube(), [{ op: 'boolean', operation: 'union', cutter: { type: 'box' }, scale: [1, -1, 1] }], { resolveCutter }), /scale components must be positive/);
   assert.throws(() => applyMeshEdits(cube(), [{ op: 'boolean', operation: 'union', cutter: { type: 'box' } }]), /needs a cutter resolver/);
 });

@@ -98,7 +98,7 @@ test('the budget is checked before the mesh grows', () => {
 });
 
 test('the recipe rejects levels out of range and a sharpness without a crease', () => {
-  assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', levels: 5 }]), /levels must be an integer from 1 to 4/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', levels: 5 }]), /edits\[0\]\.levels: got 5; expected a whole number from 1 to 4/);
   assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', levels: 0 }]), /levels/);
   assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', sharpness: 2 }]), /sharpness needs a crease rule/);
   assert.throws(() => applyMeshEdits(cube(), [{ op: 'subdivide', crease: { angle: 179 } }]), /selects no edges/);

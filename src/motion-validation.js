@@ -1,4 +1,5 @@
 // Checks shared by the motion normalizers: agent input is untrusted plain data, so every field is named and bounded.
+import { invalidField } from './field-error.js';
 
 export function knownKeys(value, fields, label) {
   if (!value || Object.getPrototypeOf(value) !== Object.prototype) {
@@ -14,7 +15,7 @@ export function knownKeys(value, fields, label) {
 
 export function finite(value, label) {
   if (!Number.isFinite(value) || !Number.isFinite(Math.fround(value))) {
-    throw new RangeError(`${label} must be finite at Float32 precision.`);
+    throw invalidField(label, value, 'a finite number that fits Float32, such as 0.5');
   }
   return value;
 }
@@ -22,7 +23,7 @@ export function finite(value, label) {
 export function bounded(value, minimum, maximum, label) {
   finite(value, label);
   if (value < minimum || value > maximum) {
-    throw new RangeError(`${label} must be within ${minimum} and ${maximum}.`);
+    throw invalidField(label, value, `a number from ${minimum} to ${maximum}, such as ${minimum > 0 ? minimum : Math.min(maximum, 1)}`);
   }
   return value;
 }
@@ -46,7 +47,7 @@ export function valueFrom(value, size, label) {
   }
   denseArray(value, size, label);
   if (value.length !== size) {
-    throw new TypeError(`${label} needs ${size} components.`);
+    throw invalidField(label, value, `an array of ${size} numbers, such as [${Array(size).fill(0).join(', ')}]`, TypeError);
   }
   return value.map(component => finite(component, label));
 }

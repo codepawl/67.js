@@ -1,6 +1,7 @@
 import { mat4, mat3 } from 'gl-matrix';
 import { box, circle, cone, cylinder, grid, icoSphere, sphere, torus } from './geometry.js';
 import { createSceneGraph } from './scene-graph.js';
+import { invalidField, withFieldPrefix } from './field-error.js';
 import { applyProjection, validateCameraShift, CAMERA_LENS_FIELDS } from './camera.js';
 import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, agentEnvironmentMap, VOLUME_FOG_FIELDS } from './agent-look.js';
 import { postStepSupport } from './shader-registry.js';
@@ -151,16 +152,17 @@ function copiedJson(input, maximum) {
 
 function finite(value, label) {
   if (!Number.isFinite(value) || !Number.isFinite(Math.fround(value))) {
-    throw new TypeError(`${label} must be a finite Float32 number.`);
+    throw invalidField(label, value, 'a finite number that fits Float32, such as 0.5', TypeError);
   }
   return value;
 }
 
 function vector(value, length, label) {
   if (!Array.isArray(value) || value.length !== length) {
-    throw new TypeError(`${label} needs ${length} numbers.`);
+    const example = `[${Array.from({ length }, (_, index) => (index === length - 1 && length === 4 ? 1 : 0)).join(', ')}]`;
+    throw invalidField(label, value, `an array of ${length} numbers, such as ${example}`, TypeError);
   }
-  return value.map(component => finite(component, label));
+  return value.map((component, index) => finite(component, `${label}[${index}]`));
 }
 
 function defaultValue(value, fallback) {
@@ -169,14 +171,14 @@ function defaultValue(value, fallback) {
 
 function integer(value, minimum, maximum, label) {
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
-    throw new RangeError(`${label} must be within ${minimum} and ${maximum}.`);
+    throw invalidField(label, value, `a whole number from ${minimum} to ${maximum}, such as ${minimum}`);
   }
   return value;
 }
 
-function identifier(value) {
+function identifier(value, label = 'id') {
   if (typeof value !== 'string' || !value.trim() || value.length > 128) {
-    throw new TypeError('IDs must contain 1 to 128 characters.');
+    throw invalidField(label,value, 'a string of 1 to 128 characters, such as "wall-left"', TypeError);
   }
   return value;
 }
@@ -186,14 +188,14 @@ function resources(values, maximum, label, validate) {
     throw new RangeError(`${label} exceeds its resource limit of ${maximum} or is not an array. Pass "${label}": [] for none, or remove some.`);
   }
   const seen = new Set();
-  return values.map(value => {
+  return values.map((value, index) => withFieldPrefix(`${label}[${index}]`, () => {
     identifier(value?.id);
     if (seen.has(value.id)) {
       throw new RangeError(`Duplicate ${label} ID: ${value.id}. IDs must be unique: rename one, or remove the other.`);
     }
     seen.add(value.id);
     return validate(value);
-  });
+  }));
 }
 
 function copyMaterialLayers(value, result) {
@@ -229,33 +231,36 @@ function materialFrom(value) {
   result.opacity = defaultValue(value.opacity, 1);
   finite(result.opacity, 'opacity');
   if (result.opacity < 0 || result.opacity > 1) {
-    throw new RangeError('opacity must be within zero and one.');
+    throw invalidField('opacity', result.opacity, 'a number from 0 to 1, such as 0.5');
   }
   const requestedAlphaMode = defaultValue(value.alphaMode, 'opaque');
   if (!RECIPE_ALPHA_MODES.includes(requestedAlphaMode)) {
-    throw new RangeError(`alphaMode must be one of ${RECIPE_ALPHA_MODES.join(', ')}.`);
+    throw invalidField('alphaMode', requestedAlphaMode, `one of ${RECIPE_ALPHA_MODES.join(', ')}`);
   }
   // The renderer ignores opacity on opaque surfaces, so any opacity below one means blending (additive stays additive).
   const graphHasOpacity = graphFactor('opacity', 0);
   result.alphaMode = (result.opacity < 1 || graphHasOpacity) && requestedAlphaMode === 'opaque' ? 'blend' : requestedAlphaMode;
   result.doubleSided = defaultValue(value.doubleSided, false);
   if (typeof result.doubleSided !== 'boolean') {
-    throw new TypeError('doubleSided must be boolean.');
+    throw invalidField('doubleSided', result.doubleSided, 'true or false', TypeError);
   }
   for (const field of ['metallic', 'roughness']) {
     finite(result[field], field);
     if (result[field] < 0 || result[field] > 1) {
-      throw new RangeError(`${field} must be within zero and one.`);
+      throw invalidField(field, result[field], 'a number from 0 to 1, such as 0.5');
     }
   }
   finite(result.emission, 'emission');
-  if (result.emission < 0 || result.color.some(component => component < 0 || component > 1)) {
-    throw new RangeError('Emission must be nonnegative and color must be within zero and one.');
+  if (result.emission < 0) {
+    throw invalidField('emission', result.emission, 'a number of 0 or more, such as 1');
+  }
+  if (result.color.some(component => component < 0 || component > 1)) {
+    throw invalidField('color', result.color, 'three numbers from 0 to 1, such as [0.8, 0.2, 0.1]');
   }
   if (value.emissiveColor !== undefined) {
     result.emissiveColor = vector(value.emissiveColor, 3, 'emissiveColor');
     if (result.emissiveColor.some(component => component < 0)) {
-      throw new RangeError('emissiveColor must be nonnegative.');
+      throw invalidField('emissiveColor', result.emissiveColor, 'three numbers of 0 or more, such as [1, 0.5, 0.2]');
     }
   }
   copyMaterialLayers(value, result);
@@ -282,17 +287,17 @@ function nodeFrom(value) {
     rotation: vector(defaultValue(value.rotation, [0, 0, 0, 1]), 4, 'rotation'),
     scale: vector(defaultValue(value.scale, [1, 1, 1]), 3, 'scale') };
   if (result.parent !== null) {
-    identifier(result.parent);
+    identifier(result.parent, 'parent');
   }
   if (result.label !== undefined && (typeof result.label !== 'string' || result.label.length > 256)) {
-    throw new TypeError('label must be a string of at most 256 characters.');
+    throw invalidField('label', result.label, 'a string of at most 256 characters, such as "left wall"', TypeError);
   }
   if (result.scale.some(component => component <= 0 || Math.fround(component) <= 0)) {
-    throw new RangeError('scale must remain positive at Float32 precision.');
+    throw invalidField('scale', result.scale, 'three positive numbers, such as [1, 1, 1]');
   }
   const length = Math.hypot(...result.rotation);
   if (length === 0) {
-    throw new RangeError('rotation quaternion must be nonzero.');
+    throw invalidField('rotation', result.rotation, 'a nonzero quaternion [x, y, z, w], such as [0, 0, 0, 1] for no rotation');
   }
   result.rotation = result.rotation.map(component => component / length);
   if ((value.geometry !== undefined) !== (value.material !== undefined)) {
@@ -360,22 +365,22 @@ function rejectFovWithFocalLength(fields) {
 
 function checkCameraLens(camera) {
   if (camera.projection !== undefined && camera.projection !== 'perspective' && camera.projection !== 'orthographic') {
-    throw new RangeError('Camera projection must be perspective or orthographic.');
+    throw invalidField('camera.projection', camera.projection, 'perspective or orthographic');
   }
   const orthographic = camera.projection === 'orthographic';
   if (camera.orthoScale !== undefined) {
     if (!orthographic) throw new RangeError('Camera orthoScale needs projection orthographic.');
-    if (!Number.isFinite(camera.orthoScale) || camera.orthoScale <= 0) throw new RangeError('Camera orthoScale is the view height in metres and must be positive.');
+    if (!Number.isFinite(camera.orthoScale) || camera.orthoScale <= 0) throw invalidField('camera.orthoScale', camera.orthoScale, 'a positive view height in metres, such as 10');
   }
   if (camera.sensorWidth !== undefined && camera.focalLength === undefined) throw new RangeError('Camera sensorWidth needs focalLength.');
   if (camera.focalLength !== undefined) {
     if (orthographic) throw new RangeError('Camera focalLength needs a perspective projection; an orthographic camera is sized by orthoScale.');
-    if (!Number.isFinite(camera.focalLength) || camera.focalLength <= 0 || camera.focalLength > 10000) throw new RangeError('Camera focalLength must be between 0 and 10000 millimetres.');
-    if (camera.sensorWidth !== undefined && !(Number.isFinite(camera.sensorWidth) && camera.sensorWidth > 0 && camera.sensorWidth <= 1000)) throw new RangeError('Camera sensorWidth must be between 0 and 1000 millimetres.');
+    if (!Number.isFinite(camera.focalLength) || camera.focalLength <= 0 || camera.focalLength > 10000) throw invalidField('camera.focalLength', camera.focalLength, 'a lens length above 0 and up to 10000 millimetres, such as 35');
+    if (camera.sensorWidth !== undefined && !(Number.isFinite(camera.sensorWidth) && camera.sensorWidth > 0 && camera.sensorWidth <= 1000)) throw invalidField('camera.sensorWidth', camera.sensorWidth, 'a width above 0 and up to 1000 millimetres, such as 36');
   }
   if (camera.shift !== undefined) validateCameraShift(camera.shift);
   if (camera.fStop !== undefined && !(Number.isFinite(camera.fStop) && camera.fStop >= 0.7 && camera.fStop <= 64)) {
-    throw new RangeError('Camera fStop must be between 0.7 and 64. Smaller numbers blur more.');
+    throw invalidField('camera.fStop', camera.fStop, 'a number from 0.7 to 64, such as 2.8 (smaller numbers blur more)');
   }
 }
 
@@ -385,23 +390,26 @@ function cameraFrom(value = {}) {
   const result = { ...CAMERA_DEFAULTS, ...value };
   if (result.focalLength !== undefined) delete result.fov;
   checkCameraLens(result);
-  result.eye = vector(result.eye, 3, 'eye');
-  result.target = vector(result.target, 3, 'target');
-  result.up = vector(result.up, 3, 'up');
+  result.eye = vector(result.eye, 3, 'camera.eye');
+  result.target = vector(result.target, 3, 'camera.target');
+  result.up = vector(result.up, 3, 'camera.up');
   const upLength = Math.hypot(...result.up);
   if (upLength === 0) {
-    throw new RangeError('Camera up must be nonzero.');
+    throw invalidField('camera.up', result.up, 'a nonzero direction, such as [0, 1, 0]');
   }
   result.up = result.up.map(component => component / upLength);
   for (const field of ['fov', 'near', 'far']) {
-    if (result[field] !== undefined) finite(result[field], field);
+    if (result[field] !== undefined) finite(result[field], `camera.${field}`);
   }
   // Without fov the lens is a focal length, which gives a valid angle at any positive size.
   if ((result.fov !== undefined && (Math.fround(result.fov) <= 0 || Math.fround(result.fov) >= 180)) || Math.fround(result.near) <= 0 || Math.fround(result.far) <= Math.fround(result.near)) {
-    throw new RangeError('Camera needs 0 < fov < 180 and 0 < near < far at Float32 precision.');
+    if (result.fov !== undefined && (Math.fround(result.fov) <= 0 || Math.fround(result.fov) >= 180)) {
+      throw invalidField('camera.fov', result.fov, 'degrees above 0 and below 180, such as 50');
+    }
+    throw invalidField('camera.near', [result.near, result.far], 'near above 0 and far above near, such as near 0.1 and far 100');
   }
   if (result.eye.every((component, axis) => Math.fround(component) === Math.fround(result.target[axis]))) {
-    throw new RangeError('Camera eye and target must differ at Float32 precision.');
+    throw invalidField('camera.target', result.target, `a point different from eye ${JSON.stringify(result.eye)}, such as [0, 0, 0]`);
   }
   const direction = result.target.map((component, axis) => component - result.eye[axis]);
   const directionLength = Math.hypot(...direction);

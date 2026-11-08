@@ -1,4 +1,5 @@
 import { createAnimationClip, compileAnimationSampler } from './animation.js';
+import { invalidField, withFieldPrefix } from './field-error.js';
 import { createCameraPath } from './camera-path.js';
 import { CAMERA_LENS_FIELDS } from './camera.js';
 import { createSkeletonPose } from './skeleton-pose.js';
@@ -44,37 +45,37 @@ const MAX_IK_SOLVERS = 16;
 const IK_SWEEP_SAMPLES = 33;
 const CAMERA_DEFAULTS = { eye: [4, 3, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 1000 };
 
-function validateValue(kind, property, value) {
+function validateValue(kind, property, value, valuePath = `${kind}.${property}`) {
   const components = typeof value === 'number' ? [value] : value;
   for (const component of components) {
-    finite(component, `${kind} ${property}`);
+    finite(component, valuePath);
   }
   if (property === 'visible' && components.some(component => component !== 0 && component !== 1)) {
-    throw new RangeError('Motion visible must be 1 (shown) or 0 (hidden).');
+    throw invalidField(valuePath, value, '1 (shown) or 0 (hidden)');
   }
   if (property === 'scale' && components.some(component => Math.fround(component) <= 0)) {
-    throw new RangeError('Motion scale must remain positive at Float32 precision.');
+    throw invalidField(valuePath, value, 'positive numbers, such as [1, 1, 1]');
   }
   if (kind === 'material') {
     if (components.some(component => component < 0)) {
-      throw new RangeError(`Motion ${property} cannot be negative.`);
+      throw invalidField(valuePath, value, `numbers of 0 or more for ${property}, such as 0.5`);
     }
     if (['color', 'metallic', 'roughness'].includes(property) && components.some(component => component > 1)) {
-      throw new RangeError(`Motion ${property} must stay within zero and one.`);
+      throw invalidField(valuePath, value, `numbers from 0 to 1 for ${property}, such as 0.5`);
     }
   }
   if (kind === 'morph' && components.some(component => component < 0 || component > 1)) {
-    throw new RangeError('Motion morph weight must stay within zero and one.');
+    throw invalidField(valuePath, value, 'a morph weight from 0 to 1, such as 0.5');
   }
   const range = LOOK_RANGES[kind]?.[property];
   if (range && components.some(component => component < range[0] || component > range[1])) {
-    throw new RangeError(`Motion ${kind} ${property} must stay within ${range[0]} and ${range[1]}.`);
+    throw invalidField(valuePath, value, `${kind} ${property} values from ${range[0]} to ${range[1]}, such as ${Math.min(Math.max(1, range[0]), range[1])}`);
   }
   if (property === 'direction' && Math.hypot(...components) < 1e-6) {
-    throw new RangeError(`Motion ${kind} direction needs a length of at least 0.000001; a blend between opposite directions passes through zero.`);
+    throw invalidField(valuePath, value, 'a direction that is not all zero, such as [0, -1, 0]; keyframes of opposite directions blend through zero');
   }
   if (kind === 'camera' && property === 'fov' && (Math.fround(value) <= 0 || Math.fround(value) >= 180)) {
-    throw new RangeError('Motion fov must stay between zero and 180 at Float32 precision.');
+    throw invalidField(valuePath, value, 'degrees above 0 and below 180, such as 50');
   }
 }
 
@@ -102,10 +103,10 @@ function normalizedKeyframe(keyframe, track, duration, interpolation) {
   knownKeys(keyframe, ['time', 'value', 'inTangent', 'outTangent', 'easing'], 'motion keyframe');
   const size = PROPERTIES[track.kind][track.property];
   const result = {
-    time: bounded(keyframe.time, 0, duration, 'Keyframe time'),
-    value: valueFrom(keyframe.value, size, 'Keyframe value'),
+    time: bounded(keyframe.time, 0, duration, 'time'),
+    value: valueFrom(keyframe.value, size, 'value'),
   };
-  validateValue(track.kind, track.property, result.value);
+  validateValue(track.kind, track.property, result.value, 'value');
   const easing = normalizeKeyframeEasing(keyframe);
   if (easing && interpolation !== 'LINEAR' && interpolation !== 'SMOOTH') {
     throw new RangeError(`Keyframe easing needs LINEAR or SMOOTH interpolation, not ${interpolation}.`);
@@ -356,10 +357,10 @@ export function normalizeAgentMotion(input, recipe) {
   knownKeys(input, ['duration', 'loop', 'tracks', 'ik', 'constraints', 'drivers', 'layers', 'footLock', 'drive'], 'motion');
   const drive = input.drive === undefined ? null : normalizedDrive(input.drive, recipe);
   // A drive knows how long its path takes, so the motion may leave the duration out.
-  const duration = bounded(input.duration === undefined && drive ? Math.ceil(drive.built.duration * 1000) / 1000 : input.duration, 0.1, 30, 'Motion duration');
+  const duration = bounded(input.duration === undefined && drive ? Math.ceil(drive.built.duration * 1000) / 1000 : input.duration, 0.1, 30, 'motion.duration');
   const loop = input.loop === undefined ? false : input.loop;
   if (typeof loop !== 'boolean') {
-    throw new TypeError('Motion loop must be boolean.');
+    throw invalidField('motion.loop', loop, 'true or false', TypeError);
   }
   const inputTracks = input.tracks ?? [];
   denseArray(inputTracks, 128, 'Motion tracks');
@@ -376,7 +377,7 @@ export function normalizeAgentMotion(input, recipe) {
     knownKeys(track, ['kind', 'id', 'property', 'interpolation', 'keyframes'], 'motion track');
     if (!Object.hasOwn(PROPERTIES, track.kind) || !Object.hasOwn(PROPERTIES[track.kind], track.property)) {
       const known = Object.hasOwn(PROPERTIES, track.kind) ? ` ${track.kind} properties: ${Object.keys(PROPERTIES[track.kind]).join(', ')}.` : ` Kinds: ${Object.keys(PROPERTIES).join(', ')}.`;
-      throw new RangeError(`Unsupported motion target or property.${known}`);
+      throw invalidField(`motion.tracks[${index}].property`, `${track.kind}.${track.property}`, `a kind and property pair.${known}`);
     }
     if (SINGLETON_KINDS.has(track.kind)) {
       if (Object.hasOwn(track, 'id')) {
@@ -395,19 +396,19 @@ export function normalizeAgentMotion(input, recipe) {
     checkLookTarget(track, recipe);
     const identity = JSON.stringify([track.kind, track.id ?? null, track.property]);
     if (identities.has(identity)) {
-      throw new RangeError('Duplicate motion target property.');
+      throw invalidField(`motion.tracks[${index}].property`, `${track.kind}.${track.property}`, 'one track per target and property, but this one repeats an earlier track: merge the keyframes, or drop the duplicate');
     }
     identities.add(identity);
     const interpolation = track.interpolation ?? (track.property === 'visible' ? 'STEP' : 'LINEAR');
     if (!INTERPOLATIONS.includes(interpolation)) {
-      throw new RangeError('Unsupported motion interpolation.');
+      throw invalidField(`motion.tracks[${index}].interpolation`, interpolation, `one of ${INTERPOLATIONS.join(', ')}`);
     }
     denseArray(track.keyframes, 64, 'Motion keyframes');
     keyframeCount += track.keyframes.length;
     if (keyframeCount > 2048) {
       throw new RangeError('Motion exceeds 2048 total keyframes.');
     }
-    const keyframes = track.keyframes.map(keyframe => normalizedKeyframe(keyframe, track, duration, interpolation));
+    const keyframes = track.keyframes.map((keyframe, keyframeIndex) => withFieldPrefix(`motion.tracks[${index}].keyframes[${keyframeIndex}]`, () => normalizedKeyframe(keyframe, track, duration, interpolation)));
     const clip = createAnimationClip({
       duration, loop,
       tracks: [{ target: String(index), property: coreProperty(track), interpolation, keyframes }],

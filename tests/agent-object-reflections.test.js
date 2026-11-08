@@ -40,7 +40,7 @@ test('environment.objectReflections false turns the probes off', () => {
   const scene = createAgentScene(stillLife(0.05, { objectReflections: false }));
   assert.equal(scene.inspect().reflections, undefined);
   assert.ok(scene.parts.every(part => part.material.environmentProbe === undefined));
-  assert.throws(() => createAgentScene(stillLife(0.05, { objectReflections: 'no' })), /objectReflections must be a boolean/);
+  assert.throws(() => createAgentScene(stillLife(0.05, { objectReflections: 'no' })), /environment\.objectReflections: got "no"; expected true or false/);
 });
 
 test('an edit that changes nothing the probe sees keeps the traced probe', () => {

@@ -169,5 +169,5 @@ test('failed set-motion initial sampling is atomic across recipe, transforms and
 test('motion loop is optional boolean and never accepts null as a hidden default', () => {
   const input = recipe();
   input.motion.loop = null;
-  assert.throws(() => createAgentScene(input), /loop must be boolean/);
+  assert.throws(() => createAgentScene(input), /motion\.loop: got .*; expected true or false/);
 });

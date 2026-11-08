@@ -3,6 +3,7 @@ import { BRANCH_NAME_PATTERN } from '../src/agent-branches.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
+import { describeSchemaInputsWithReceivedValues } from './mcp-input-errors.mjs';
 import { setPriority, constants } from 'node:os';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,6 +15,8 @@ import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
+
+describeSchemaInputsWithReceivedValues();
 
 const finite = z.number().min(-3.4028234663852886e38).max(3.4028234663852886e38);
 const positive = finite.positive();
