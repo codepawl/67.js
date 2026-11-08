@@ -42,8 +42,33 @@ renderer.render({ eye: [0, 2, 5], target: [0, 1, 0], time: 0 });
 | `drift` | `[0.03, 0, 0]` | Three components within ±100, scene units per second |
 | `maxDistance` | `100` | `0.01…10,000`, ray distance in scene units |
 | `shadowAmbient` | derived | `0…1`; the share of `ambient` the fog keeps where the sun's shadow covers it. Left unset, 32 upward rays from the middle of the fog box decide: a closed room keeps 0.15, open ground under a sky keeps 1, and a partly covered scene lands between. Set it to override |
+| `field` | none | A fog field, see below |
+| `profile` | `'exponential'` | `'exponential'` or `'smoothstep'`; the vertical shape of a layer when a `field` is set |
+| `flowStrength` | `1` | `0…100`; how far the noise travels along the field's velocity, as a share of velocity times `flowPeriod` |
+| `flowPeriod` | `2` | `0.01…1,000` seconds; how often a noise lookup restarts |
 
 Values must be finite numbers. Active volume fog accepts finite frame time within ±1,000,000 seconds and a nonzero light direction with components within ±1,000,000. Noise samples absolute time, so backward seeks reproduce earlier density.
+
+## Fog field: density and velocity per footprint cell
+
+`volumeFog.field` is a 2D texture over the box's x/z footprint that the caller fills each frame, for fog that reacts to things (a character walks through it, a slam pushes it away). 67js only samples it; the simulation is the caller's.
+
+```js
+const data = new Float32Array(160 * 160 * 4); // RGBA, row 0 at the box's minimum z, column 0 at its minimum x
+// r: density multiplier (1 = the fog as is, 0 = a hole), g: layer height in metres, b: velocity x, a: velocity z (metres per second)
+renderer.setFogField({ width: 160, height: 160, data }); // stays until replaced; setFogField(null) clears it
+// or per frame: environment: { volumeFog: { density: 1.2, minimum, maximum, profile: 'smoothstep', field: { width: 160, height: 160, data } } }
+```
+
+- Density at a point is `density * field.r * profile(y / field.g) * noise`, with `y` measured from `minimum[1]`. `profile` is `exp(-y / g)` for `'exponential'` and `1 - smoothstep(0.5, 1, y / g)` for `'smoothstep'`, a flat body with a soft, readable top. With a field, `heightFalloff` is not used: the field's layer height replaces it.
+- The texture is RGBA16F, linear filtered and clamped at the edges, so the field may be coarse. `data` is a `Float32Array` of `width * height * 4` finite values; `width` and `height` are integers within `1…2048`. Anything else throws and names what it wanted.
+- A frame with a field uploads it, so rewriting the same `Float32Array` between frames is enough. The same size writes into the existing texture (`texSubImage2D`); a new size allocates a new one. `setFogField` wins over a `field` in the frame or constructor environment.
+- Flow: the noise lookup is carried along the field's velocity by two lookups that restart half a `flowPeriod` apart and cross-fade (Vlachos, "Water Flow in Portal 2", 2010), so detail swirls with the flow instead of drifting one way. It depends on frame time and the field only, so the same time and field give the same pixels after any seek. The constant `drift` still applies. Noise contrast dips slightly mid-fade, as in any flow map.
+- A fog without a field is drawn by the program it had before, pixel for pixel. The first frame with a field or a light compiles its program before drawing.
+
+## Point and spot lights in the fog
+
+Every point and spot light of the frame (`environment.pointLights`, `spotLights`) scatters in the march: points first, then spots, at most 8. Each uses the light's range window and inverse square (the same as lit surfaces, with the light's radius floored at 0.1 m so the glow has no spike), the spot cone, its colour times intensity and the fog's Henyey-Greenstein phase. There are no shadows and no light linking in the fog. Light beyond the eighth is left out.
 
 ## Sky visibility of the fog
 
@@ -61,7 +86,9 @@ The fullscreen march clips against resolved opaque depth, supports perspective a
 
 Resolved depth adds four estimated bytes per rendered pixel, or 2,073,600 bytes at 960 × 540. The planner reduces render dimensions when needed. The target is allocated at construction/resize, reused across frames and released by `dispose()`. The march adds no additional volume textures or geometry, but shading cost grows with covered pixels and step count.
 
-This implements one bounded medium and one directional scattering source. Point-light scattering, multiple scattering, attenuation toward the source, transparent depth, volume grids, particles, temporal accumulation and half-resolution rendering remain unfinished. The legacy film explosion is separate and does not use this depth-clipped medium. Fog runs after bloom extraction, so scattering itself does not feed bloom.
+This implements one bounded medium, a directional source with shadows and up to 8 unshadowed point and spot lights. Multiple scattering, attenuation toward the source, transparent depth, volume grids, particles, temporal accumulation and half-resolution rendering remain unfinished. The legacy film explosion is separate and does not use this depth-clipped medium. Fog runs after bloom extraction, so scattering itself does not feed bloom.
+
+Measured at 1920 × 1080 with 24 steps on an RTX 3060 shared with other jobs, whole frame (a small scene, fog and read-back): the fog as before 3.6 to 3.7 ms; with a field 4.8 to 5.1 ms (about 1.3 ms more); with 8 point lights 7.3 to 7.4 ms (about 0.46 ms per light); both 8.6 to 8.8 ms. Numbers move with other jobs on the card.
 
 Run `node scripts/smoke-volumetric.mjs` with the development server running for native GPU extinction, foreground clipping, directional shadow, long-distance ray, resource reuse and disposal checks. Run `node scripts/benchmark-volumetric.mjs` for a fixed laboratory comparison and deterministic noise seeking. These fixtures establish behavior, not cinematic trailer quality.
 
