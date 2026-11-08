@@ -44,7 +44,6 @@ function floatsToBase64(values) {
  */
 export async function traceTexelsOnNative(scene, texels, options) {
   const [pack, { buildNativeTexelInput }] = await Promise.all([import('../src/path-tracer-gpu-pack.js'), import('../packages/render-native/pack-input.mjs')]);
-  if (pack.sceneUsesSubsurface(scene.materials)) throw new Error('subsurface is not traced by the native backend');
   const input = buildNativeTexelInput(scene, { texelCount: texels.count, samples: options.samples, bounces: options.bounces, seed: options.seed, fireflyClamp: options.fireflyClamp }, pack);
   const answer = await globalThis.__67jsNativeBake({
     action: 'trace',
