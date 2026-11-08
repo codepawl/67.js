@@ -105,7 +105,7 @@ and a click placed on a cut in a WAV lands on the decoded cut frame within a fra
 
 ## Render passes
 
-`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth` and `objectId`.
+`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao` and `mist`.
 Each frame writes its lit image and then one PNG per pass: `render.png` and `render-<pass>.png` for an image, `frame-N.png` and `frame-N-<pass>.png` for stills.
 Passes are raw data at the lit image's size: no tone mapping, grading, bloom, depth of field or antialiasing, so values stay exact at silhouettes.
 Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky and the environment background do not.
@@ -117,6 +117,13 @@ Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky
 | `emission` | Emissive colour times strength, clamped to 1 |
 | `depth` | Metres from the camera over 100 m as a 16-bit value, high byte in red and low byte in green. Background is `255, 255, 0` |
 | `objectId` | 24-bit ID, low byte in red, then green, then blue. Zero is background |
+| `diffuse` | Linear diffuse light (every light, sky and bounce) times exposure, before fog and without emission. Background 0 |
+| `glossy` | Linear specular light (each light's lobe and the sky reflection) times exposure, before fog. Background 0 |
+| `shadow` | Sun shadow visibility, 1 lit and 0 shadowed. Background 1 |
+| `ao` | Ambient occlusion the shader applies (occlusion map, vertex sky visibility, room term). Background 1 |
+| `mist` | Fog amount `1 - exp(-distance * fogDensity)`. Background 1 |
+
+The lighting passes hold linear values above 1, so write them as `exr` (a `png` or `png16` file clamps at 1). They add back to the lit image: `diffuse + glossy + emission * exposure` is the radiance before fog, and with an open world the lit image is that radiance mixed toward the fog colour by `mist`, then tone mapped. `tests/lighting-passes.test.js` checks the sum against the beauty frame (mean difference under 1.5 display levels, under 2% of samples off by more than 4). Not covered: unlit parts, the editor floor, parts that a probe or irradiance grid changes after the sky term, and anything the lit image adds after the shader (bloom, grading, depth of field).
 
 `scene_render_result` metrics carry `objectNames`, the part name for ID 1, 2 and so on (the first 1000, with `objectNamesTruncated`), and `depthRangeMetres`.
 IDs follow draw order, which groups parts by shared geometry, so read the names list and not node order.

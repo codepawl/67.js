@@ -94,7 +94,7 @@ export const DEFAULT_LIGHTING_SETUP = 'daylight';
 export const DEFAULT_AMBIENT_OCCLUSION = 0;
 
 // Render passes a render job can write next to the lit image (see RENDER_PASS_MODES in renderer.js, which must list the same names).
-export const RENDER_PASS_NAMES = Object.freeze(['albedo', 'normal', 'emission', 'depth', 'objectId']);
+export const RENDER_PASS_NAMES = Object.freeze(['albedo', 'normal', 'emission', 'depth', 'objectId', 'diffuse', 'glossy', 'shadow', 'ao', 'mist']);
 // Video encoders a render job can choose (nvenc is h264_nvenc and fails the job when the GPU or ffmpeg lacks it), the
 // longest video, and the audio file names a job may mix in from the --audio folder: one path segment with a known
 // extension, no drive or protocol syntax.

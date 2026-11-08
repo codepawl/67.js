@@ -1,0 +1,2 @@
+- entry:render-passes: the lighting passes (diffuse, glossy, shadow, ao, mist) bring their GLSL (lighting-pass-shader.js) into the lazy render-passes addon, which only a render job with passes loads; 524 bytes gzip for five new outputs.
+- goal:agent-scene: 22 bytes gzip for the five new pass names in the render job schema and the pass mode range in the main shader; the lighting GLSL stays in the lazy addon.

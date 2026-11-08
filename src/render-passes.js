@@ -1,13 +1,16 @@
 import { compileProgram, fullscreenVertex } from './gl-program.js';
+import './lighting-pass-shader.js';
 
 // Render passes draw raw material data (albedo, normal, emission, depth, object ID) instead of the lit image.
 // The shader branch lives in the main fragment shader behind the `renderPass` feature, which compiles on the first
 // pass request; this addon owns the rest: the target, the copy to the canvas and the object ID table.
 
 /** The shader's `renderPassMode` for each pass name. agent-scene-capabilities.js lists the same names. */
-export const RENDER_PASS_MODES = Object.freeze({ albedo: 1, normal: 2, emission: 3, depth: 4, objectId: 5 });
-// Background pixels: depth reads as the far limit; every other pass reads zero, and object ID zero means no object.
-const PASS_BACKGROUNDS = Object.freeze({ depth: [1, 1, 0, 1] });
+export const RENDER_PASS_MODES = Object.freeze({ albedo: 1, normal: 2, emission: 3, depth: 4, objectId: 5, diffuse: 6, glossy: 7, shadow: 8, ao: 9, mist: 10 });
+// Background pixels: depth reads as the far limit, and shadow, ao and mist as open sky (one); every other pass reads zero, and object ID zero means no object.
+const PASS_BACKGROUNDS = Object.freeze({ depth: [1, 1, 0, 1], shadow: [1, 1, 1, 1], ao: [1, 1, 1, 1], mist: [1, 1, 1, 1] });
+// Modes above this one run the lit shader (lighting-pass-shader.js) and write one lighting term: linear, scaled by exposure.
+const LAST_RAW_PASS_MODE = 5;
 const DEFAULT_BACKGROUND = Object.freeze([0, 0, 0, 1]);
 
 // Copies a pass texture to the canvas byte for byte: one texel per pixel, no filtering, no grading.
@@ -72,7 +75,7 @@ export function installRenderPasses(renderer) {
     const depthRange = frame.passDepthRange ?? 1;
     if (!Number.isFinite(depthRange) || depthRange <= 0) throw new RangeError('Pass depth range must be positive and finite.');
     const context = renderer.context;
-    renderer.requireFeatureNames(['renderPass']);
+    renderer.requireFeatureNames(mode > LAST_RAW_PASS_MODE ? ['renderPass', 'lightingPass'] : ['renderPass']);
     if (!copyProgram) {
       copyProgram = compileProgram(context, fullscreenVertex, passCopyFragment);
       copyTextureUniform = context.getUniformLocation(copyProgram, 'sourceTexture');
