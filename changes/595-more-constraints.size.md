@@ -1,0 +1,3 @@
+- scene:agent-scene+lazy: seven constraint operators and their validation load only with motion (#595)
+- tool:scene_create: the seven new type names join the floor entry's type enum and one args record carries their fields, validated in node-constraints with errors that list the allowed fields (#595)
+- tool-total: the same enum and args record, counted once (#595)
