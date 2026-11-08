@@ -14,13 +14,13 @@ const MAX_LOOK_ARRAY_ENTRIES = Math.max(MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_A
 
 const ENVIRONMENT_FIELDS = [
   'world', 'ground', 'setup', 'hdri', 'environmentIntensity', 'environmentRotation', 'lightDirection', 'keyColor', 'keyIntensity', 'fillIntensity', 'ambientIntensity',
-  'daylight', 'pointLights', 'spotLights', 'areaLights', 'skyTop', 'skyBottom', 'fogColor', 'fogDensity', 'volumeFog', 'liquid', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'wind',
+  'daylight', 'pointLights', 'spotLights', 'areaLights', 'skyTop', 'skyBottom', 'fogColor', 'fogDensity', 'volumeFog', 'liquid', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'wind',
 ];
 const EFFECT_FIELDS = ['exposure', 'saturation', 'contrast', 'temperature', 'vignette', 'grain', 'ambientOcclusion', 'ambientOcclusionRadius', 'bloom', 'depthOfField', 'motionBlur'];
 const SHADOW_FIELDS = ['target', 'extent', 'distance', 'near', 'far'];
 const POINT_LIGHT_FIELDS = ['position', 'color', 'intensity', 'radius', 'range', 'castShadow', 'affects'];
-const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color', 'intensity', 'radius', 'range', 'castShadow', 'affects'];
-const AREA_LIGHT_FIELDS = ['position', 'direction', 'up', 'width', 'height', 'color', 'intensity', 'affects'];
+const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color', 'intensity', 'radius', 'range', 'castShadow', 'ies', 'affects'];
+const AREA_LIGHT_FIELDS = ['position', 'direction', 'up', 'width', 'height', 'color', 'intensity', 'castShadow', 'ies', 'affects'];
 const VOLUME_VECTOR_FIELDS = ['minimum', 'maximum', 'color', 'ambient', 'drift'];
 const VOLUME_NUMBER_FIELDS = ['density', 'steps', 'anisotropy', 'noiseAmount', 'noiseScale', 'maxDistance', 'shadowAmbient', 'heightFalloff', 'detailOctaves', 'detailAmount', 'warp', 'contrast', 'profileSoftness', 'keyScattering', 'scatterOctaves', 'multiScatter', 'multiExtinction', 'multiAnisotropy', 'keyTransmittance', 'surfaceTransmittance'];
 const BLOOM_FIELDS = ['strength', 'threshold', 'radius'];
@@ -173,6 +173,11 @@ function shadowFieldFrom(light, label) {
   return castShadow ? { castShadow } : {};
 }
 
+// An IES profile (a bundled name or { angles, candela }) is checked by the light shapes module, which loads on demand.
+function profileFieldFrom(light, label) {
+  return light.ies === undefined ? {} : { ies: copiedJson(agentSceneModule('lightShapes').resolveIesProfile(light.ies, `${label} ies`)) };
+}
+
 function pointLightFrom(light) {
   knownKeys(light, POINT_LIGHT_FIELDS, 'point light');
   return {
@@ -198,6 +203,7 @@ function spotLightFrom(light) {
     radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'spot light radius'),
     range: rangeFrom(light, 'spot light'),
     ...shadowFieldFrom(light, 'spot light'),
+    ...profileFieldFrom(light, 'spot light'),
     ...affectsFrom(light, 'spot light'),
   };
 }
@@ -213,7 +219,7 @@ function areaLightFrom(light) {
     intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'area light intensity'),
   };
   if (light.up !== undefined) resolved.up = directionFrom(light.up, 'area light up').direction;
-  return { ...resolved, ...affectsFrom(light, 'area light') };
+  return { ...resolved, ...shadowFieldFrom(light, 'area light'), ...profileFieldFrom(light, 'area light'), ...affectsFrom(light, 'area light') };
 }
 
 function volumeFogFrom(input = {}) {
@@ -290,6 +296,10 @@ function environmentFrom(input = {}) {
   // Strength of the specular anti-aliasing that widens highlights where normals or normal map detail change within a pixel (src/lighting.js); 0 turns it off.
   if (input.specularAntiAliasing !== undefined) {
     environment.specularAntiAliasing = numberInRange(input.specularAntiAliasing, 0, MAXIMUM_SPECULAR_ANTI_ALIASING, 'specularAntiAliasing');
+  }
+  // Angular radius of the sun disk in radians (0.0087 is half a degree, the path tracer's default). Raster shadows soften with it through the cascades; the path tracer samples the same disk.
+  if (input.sunAngularRadius !== undefined) {
+    environment.sunAngularRadius = numberInRange(input.sunAngularRadius, 0.0005, 0.2, 'sunAngularRadius');
   }
   // Outlines and line geometry; null clears them. The module checks the fields and loads on demand.
   if (input.lines !== undefined && input.lines !== null) {

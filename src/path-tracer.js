@@ -1,5 +1,6 @@
 import { cameraFieldOfView } from './camera.js';
 import { pointLightFalloff } from './ray-query.js';
+import { profileGain } from './light-profile.js';
 import { buildTraceScene, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
 import { denoiseRadiance } from './path-tracer-denoise.js';
 import { acesChannel, displayColor } from './view-transform.js';
@@ -453,7 +454,7 @@ function createPathTracer(scene, options) {
   let featuresRecorded = false;
   const { lights, environment } = scene;
   if (lights.sun) buildFrame(lights.sun.direction, sunFrame);
-  const sunCosineMax = Math.cos(SUN_ANGULAR_RADIUS);
+  const sunCosineMax = Math.cos(lights.sun?.angularRadius ?? SUN_ANGULAR_RADIUS);
 
   function addRadiance(depth, red, green, blue) {
     let clampedRed = red;
@@ -591,7 +592,7 @@ function createPathTracer(scene, options) {
     const inside = axisCosine - light.cosineHalfAngle;
     if (inside <= 0) return;
     const mask = light.blend > 0 && inside < light.blend ? smoothstep(inside / light.blend) : 1;
-    const strength = light.intensity * pointLightFalloff(distanceSquared, light) * mask;
+    const strength = light.intensity * pointLightFalloff(distanceSquared, light) * mask * (light.profile ? profileGain(light.profile, axisCosine) : 1);
     for (let channel = 0; channel < 3; channel++) lightRadiance[channel] = light.color[channel] * strength;
     addDirect(depth, normal, distance - scene.surfaceOffset, fullWeight);
   }
@@ -607,7 +608,7 @@ function createPathTracer(scene, options) {
     if (distance < 1e-6) return;
     const emitCosine = -(light.normal[0] * lightDirection[0] + light.normal[1] * lightDirection[1] + light.normal[2] * lightDirection[2]);
     if (emitCosine <= 0) return;
-    const strength = light.intensity * emitCosine / distanceSquared;
+    const strength = light.intensity * emitCosine / distanceSquared * (light.profile ? profileGain(light.profile, emitCosine) : 1);
     for (let channel = 0; channel < 3; channel++) lightRadiance[channel] = light.color[channel] * strength;
     addDirect(depth, normal, distance - scene.surfaceOffset, fullWeight);
   }

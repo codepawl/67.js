@@ -656,6 +656,7 @@ ${featureCode("linkSpot")}      vec3 lightRadiance = spotLightColors[index].rgb 
       if (USES_LOCAL_SHADOWS && spotLightParameters[index].z >= 0.0) {
         lightRadiance *= shadowBlind > 0.5 ? 1.0 : localShadowVisibility(spotLightParameters[index].z, worldPosition, normal, sqrt(distanceSquared));
       }
+${featureCode("spotRadiance")}
       radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
   }
@@ -679,7 +680,7 @@ ${featureCode("linkArea")}      vec3 lightNormal = areaLightNormals[index].xyz;
       // Adding area / pi keeps the term finite at the surface and matches a disc source on its axis.
       float attenuation = emission / (distanceSquared + area / PI);
       vec3 lightRadiance = areaLightColors[index].rgb * areaLightColors[index].w * attenuation;
-      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
+${featureCode("areaRadiance")}      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
   }
   vec3 reflectance = fresnel(max(dot(normal, viewDirection), 0.0), baseReflectance);

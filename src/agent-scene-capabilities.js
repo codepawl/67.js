@@ -220,9 +220,10 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   lightingSetups: LIGHTING_SETUP_NAMES, defaultLightingSetup: DEFAULT_LIGHTING_SETUP,
   ambientOcclusion: Object.freeze({ default: DEFAULT_AMBIENT_OCCLUSION, defaultRadius: 0.5, off: 0 }),
   // Local lights: spot and rectangular area lights. Shadows share one 2048 x 3072 depth atlas of 24 tiles; a shadowed
-  // point light uses 6 tiles and a shadowed spot light 1. Area lights cast no shadow. Recipes reach light linking and cascaded sun shadows through lightLinking and shadowCascades below.
+  // point light uses 6 tiles and a shadowed spot light 1. A shadowed area light uses 1 and its shadow softens with the rectangle. Recipes reach light linking and cascaded sun shadows through lightLinking and shadowCascades below.
   maxSpotLights: MAX_SPOT_LIGHTS, maxAreaLights: MAX_AREA_LIGHTS,
-  localShadows: Object.freeze({ lights: Object.freeze(['pointLights', 'spotLights']), atlasTiles: 24, pointLightTiles: 6, spotLightTiles: 1, tileSize: 512 }),
+  localShadows: Object.freeze({ lights: Object.freeze(['pointLights', 'spotLights', 'areaLights']), atlasTiles: 24, pointLightTiles: 6, spotLightTiles: 1, areaLightTiles: 1, tileSize: 512 }),
+  lightShapes: Object.freeze({ ies: Object.freeze(['wide-flood', 'downlight', 'narrow-spot', 'batwing']), sunAngularRadius: 'radians 0.0005 to 0.2, soft sun shadow' }),
   lightLinking: Object.freeze({ fields: Object.freeze(['environment.keyAffects', 'pointLights[].affects', 'spotLights[].affects', 'areaLights[].affects']), unlisted: 'a light without affects lights every node', unknownNode: 'rejected', bake: 'honoured', pathTracer: 'ignored, named in report.ignored' }),
   shadowCascades: Object.freeze({ field: 'environment.shadowCascades', counts: Object.freeze([0, 1, 2, 3, 4]), zero: 'one shadow map', automatic: 'three cascades when shadow.extent is above 40 and the field is unset', maximumDistance: 150, note: 'volume fog and water read the single map' }),
   lineArt: Object.freeze({ field: 'environment.lines', fields: 'width px 0.25-16 (1.5), color, boundaries, creaseAngle deg (35), depthJump (0.08), toon steps 0-8, polylines [{points [x,y,z] 2-256, color, width, depthTest, closed}] max 64; {} turns on, null clears; material toon 0-8', note: 'docs/line-art.md' }),

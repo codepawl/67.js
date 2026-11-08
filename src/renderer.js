@@ -19,7 +19,7 @@ import { MaterialSnapshot } from './material-snapshot.js';
 import { fittedFogDensity } from './fog-fit.js';
 import { InstanceSelection, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from './render-culling.js';
 import { resolveShadowLight, shadowBiasPerSlope } from './shadow-light.js';
-import { requireFeatureCode, deformationSupport, requireDeformationSupport, texturedReplaceSupport, textureUpdateSupport } from './shader-registry.js';
+import { requireFeatureCode, lightShapeSupport, deformationSupport, requireDeformationSupport, texturedReplaceSupport, textureUpdateSupport } from './shader-registry.js';
 
 const SHADOW_MAP_SIZE = 2048;
 // Liquid and foam see the resolved opaque scene, so they draw in their own pass after it.
@@ -72,6 +72,8 @@ function shaderFeaturesOfLighting(lighting) {
   if (lighting.spotCount > 0) features.push('spotLights');
   if (lighting.areaCount > 0) features.push('areaLights');
   if (lighting.shadowCasters.length > 0) features.push('localShadows');
+  if (lighting.areaShadowCount > 0) features.push('areaShadows');
+  if (lighting.profileCount > 0) features.push('lightProfiles');
   if (lighting.fillIntensity > 0) features.push('fill');
   return features;
 }
@@ -2264,6 +2266,7 @@ export class Renderer67 {
     context.uniform4fv(this.uniforms['pointLightColors[0]'], this.lighting.colors);
     context.uniform1fv(this.uniforms['pointLightRadii[0]'], this.lighting.radii);
     this.applyLocalLightUniforms(Boolean(frame.reflectionTarget));
+    lightShapeSupport.bind?.(this);
     context.uniform3fv(this.uniforms.keyColor, this.lighting.keyColor);
     context.uniform1f(this.uniforms.fillIntensity, this.lighting.fillIntensity);
     context.uniform1f(this.uniforms.ambientIntensity, this.lighting.ambientIntensity);

@@ -90,13 +90,15 @@ function validateAreaLight(light) {
   numberInRange(light.intensity ?? 1, 0, 1e5, 'Area light intensity');
   numberInRange(light.width, 0.001, 1e4, 'Area light width');
   numberInRange(light.height, 0.001, 1e4, 'Area light height');
+  validateCastShadow(light, 'Area light');
 }
 
 // Shadow tiles are handed out in order, point lights first. A request beyond the atlas is an error, not a silent drop.
-function countShadowTiles(pointLights, spotLights) {
+function countShadowTiles(pointLights, spotLights, areaLights) {
   let tiles = 0;
   for (const light of pointLights) if (light.castShadow) tiles += POINT_SHADOW_TILES;
   for (const light of spotLights) if (light.castShadow) tiles += 1;
+  for (const light of areaLights) if (light.castShadow) tiles += 1;
   if (tiles > SHADOW_ATLAS_TILES) {
     throw new RangeError(`Shadow casting lights need ${tiles} atlas tiles, and the atlas holds ${SHADOW_ATLAS_TILES} (a point light uses ${POINT_SHADOW_TILES}, a spot light one)`);
   }
@@ -123,6 +125,8 @@ export function createLightingState() {
     pointCount: 0,
     spotCount: 0,
     areaCount: 0,
+    areaShadowCount: 0,
+    profileCount: 0,
     fillIntensity: 1,
     ambientIntensity: 1,
     specularAntiAliasing: DEFAULT_SPECULAR_ANTI_ALIASING,
@@ -195,6 +199,12 @@ function writeAreaLights(state, areaLights) {
     state.areaNormals[index * 4 + 3] = light.width;
     state.areaTangents.set(tangent.map(component => component / tangentLength), index * 4);
     state.areaTangents[index * 4 + 3] = light.height;
+    // The w of the position is the atlas tile of the light's shadow. The tile looks along the emitting side with the widest view a tile allows.
+    state.areaPositions[index * 4 + 3] = NO_SHADOW_TILE;
+    if (!light.castShadow) continue;
+    state.areaPositions[index * 4 + 3] = state.shadowCasters.length;
+    state.shadowCasters.push({ light: { position: light.position, direction: normal, range: 0, angle: SPOT_MAXIMUM_ANGLE }, face: SPOT_FACE });
+    state.areaShadowCount++;
   }
 }
 
@@ -213,8 +223,9 @@ export function updateLightingState(state, environment, { world = false } = {}) 
   pointLights.forEach(validatePointLight);
   spotLights.forEach(validateSpotLight);
   areaLights.forEach(validateAreaLight);
-  countShadowTiles(pointLights, spotLights);
+  countShadowTiles(pointLights, spotLights, areaLights);
   state.shadowCasters = [];
+  state.areaShadowCount = 0;
   writePointLights(state, pointLights);
   writeSpotLights(state, spotLights);
   writeAreaLights(state, areaLights);
@@ -222,6 +233,7 @@ export function updateLightingState(state, environment, { world = false } = {}) 
   state.pointCount = pointLights.length;
   state.spotCount = spotLights.length;
   state.areaCount = areaLights.length;
+  state.profileCount = [...spotLights, ...areaLights].filter(light => light.ies !== undefined).length;
   state.fillIntensity = fillIntensity;
   state.ambientIntensity = ambientIntensity;
   state.specularAntiAliasing = specularAntiAliasing;

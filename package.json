@@ -110,6 +110,7 @@
     "./addons/fog-shader": "./build/fog-shader.js",
     "./addons/light-linking": "./build/light-linking.js",
     "./addons/cascaded-shadows": "./build/cascaded-shadows.js",
+    "./addons/light-shapes": "./build/light-shapes.js",
     "./addons/compact-color": "./build/compact-color.js",
     "./addons/gaussian-splats": "./build/gaussian-splats.js",
     "./addons/replace-textured-parts": "./build/replace-textured-parts.js",

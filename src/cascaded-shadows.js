@@ -32,6 +32,11 @@ uniform vec4 cascadeSplits;
 uniform vec4 cascadeTexels;
 uniform vec4 cascadeRanges;
 uniform vec4 cascadeFrame;
+uniform float sunSoftness;
+vec2 cascadeVogel(int index, int count, float rotation) {
+  float angle = float(index) * 2.399963 + rotation;
+  return sqrt((float(index) + 0.5) / float(count)) * vec2(cos(angle), sin(angle));
+}
 float cascadeTap(int layer, vec2 coordinates, float receiverDepth, ivec2 dimensions) {
   vec2 pixel = coordinates * vec2(dimensions) - 0.5;
   ivec2 origin = ivec2(floor(pixel));
@@ -43,12 +48,35 @@ float cascadeTap(int layer, vec2 coordinates, float receiverDepth, ivec2 dimensi
   float upperRight = step(receiverDepth, texelFetch(cascadeShadowMap, ivec3(clamp(origin + ivec2(1, 1), ivec2(0), maximum), layer), 0).r);
   return mix(mix(lowerLeft, lowerRight, blend.x), mix(upperLeft, upperRight, blend.x), blend.y);
 }
+float cascadeSoftVisibility(int layer, vec3 projected, float receiverDepth, ivec2 dimensions) {
+  float rotation = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  float texelWorld = cascadeTexels[layer];
+  float searchTexels = clamp(sunSoftness * 12.0 / texelWorld, 1.0, 24.0);
+  float gapSum = 0.0;
+  float blockers = 0.0;
+  for (int tap = 0; tap < 12; tap++) {
+    ivec2 texel = clamp(ivec2(floor(projected.xy * vec2(dimensions) + cascadeVogel(tap, 12, rotation) * searchTexels)), ivec2(0), dimensions - 1);
+    float stored = texelFetch(cascadeShadowMap, ivec3(texel, layer), 0).r;
+    if (stored < receiverDepth) {
+      gapSum += receiverDepth - stored;
+      blockers += 1.0;
+    }
+  }
+  if (blockers == 0.0) return 1.0;
+  float penumbraTexels = clamp(sunSoftness * (gapSum / blockers) * cascadeRanges[layer] / texelWorld, 1.0, 24.0);
+  float lit = 0.0;
+  for (int tap = 0; tap < 16; tap++) {
+    lit += cascadeTap(layer, projected.xy + cascadeVogel(tap, 16, rotation) * penumbraTexels / vec2(dimensions), receiverDepth, dimensions);
+  }
+  return lit / 16.0;
+}
 float cascadeLayerVisibility(int layer, vec3 normal) {
   vec3 shifted = worldPosition + normal * (cascadeTexels[layer] * 1.5);
   vec3 projected = (cascadeMatrices[layer] * vec4(shifted, 1.0)).xyz * 0.5 + 0.5;
   if (projected.z > 1.0 || projected.z < 0.0 || any(lessThan(projected.xy, vec2(0.0))) || any(greaterThan(projected.xy, vec2(1.0)))) return 1.0;
   float bias = cascadeTexels[layer] / cascadeRanges[layer] * (1.0 + 2.0 * (1.0 - dot(normal, normalize(lightDirection))));
   ivec2 dimensions = textureSize(cascadeShadowMap, 0).xy;
+  if (sunSoftness > 0.0) return cascadeSoftVisibility(layer, projected, projected.z - bias, dimensions);
   vec2 texel = 1.0 / vec2(dimensions);
   float visibility = 0.0;
   for (int row = -1; row <= 1; row++) {
@@ -297,7 +325,7 @@ export class CascadedShadows {
   bindUniforms(renderer) {
     const context = renderer.context;
     if (this.locationProgram !== renderer.program) {
-      const names = ['cascadeShadowMap', 'cascadeMatrices[0]', 'cascadeSplits', 'cascadeTexels', 'cascadeRanges', 'cascadeFrame'];
+      const names = ['cascadeShadowMap', 'cascadeMatrices[0]', 'cascadeSplits', 'cascadeTexels', 'cascadeRanges', 'cascadeFrame', 'sunSoftness'];
       this.locations = Object.fromEntries(names.map(name => [name, context.getUniformLocation(renderer.program, name)]));
       this.locationProgram = renderer.program;
       for (const [name, unit] of Object.entries(MAIN_SAMPLER_UNITS)) context.uniform1i(context.getUniformLocation(renderer.program, name), unit);
@@ -310,6 +338,8 @@ export class CascadedShadows {
     context.uniform4fv(this.locations.cascadeTexels, this.texels);
     context.uniform4fv(this.locations.cascadeRanges, this.ranges);
     context.uniform4fv(this.locations.cascadeFrame, this.forward);
+    const sunAngularRadius = renderer.environment?.sunAngularRadius;
+    context.uniform1f(this.locations.sunSoftness, sunAngularRadius > 0 ? Math.tan(sunAngularRadius) : 0);
   }
 
   dispose(context, renderTargets = null) {
@@ -337,5 +367,7 @@ export function effectiveShadowCascades(environment, shadow) {
   if (environment.shadowCascades !== undefined) {
     return environment.shadowCascades;
   }
-  return shadow.extent > AUTOMATIC_CASCADE_EXTENT ? AUTOMATIC_CASCADE_COUNT : 0;
+  const automaticCount = shadow.extent > AUTOMATIC_CASCADE_EXTENT ? AUTOMATIC_CASCADE_COUNT : 0;
+  // A soft sun reads depths from the cascade array, so a scene that names an angle gets at least one slice.
+  return environment.sunAngularRadius > 0 ? Math.max(automaticCount, 1) : automaticCount;
 }
