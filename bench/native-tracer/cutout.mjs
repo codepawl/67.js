@@ -23,7 +23,7 @@ function valueAfter(flag, fallback) {
 const label = argumentsGiven.includes('--opaque') ? '-opaque' : argumentsGiven.includes('--solid') ? '-solid' : '';
 const leafCount = Number(valueAfter('--leaves', 300));
 const options = { width: Number(valueAfter('--width', 960)), height: Number(valueAfter('--height', 540)),
-  samples: Number(valueAfter('--samples', 64)), bounces: 4, seed: 0, fireflyClamp: 20 };
+  samples: Number(valueAfter('--samples', 64)), bounces: Number(valueAfter('--bounces', 4)), seed: 0, fireflyClamp: 20 };
 
 import { CUTOUT_CAMERA, CUTOUT_ENVIRONMENT, buildCutoutParts } from './cutout-scene.js';
 
