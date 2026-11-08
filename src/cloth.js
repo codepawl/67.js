@@ -449,6 +449,7 @@ export function createCloth(positions, triangles, options = {}) {
     pinImpulses.fill(0);
     for (let substep = 0; substep < substeps; substep++) {
       if (hasWind) applyWind(state, wind, areas, triangles, substepSeconds, density);
+      options.applyFields?.(state.positions, state.velocities, substepsDone * substepSeconds, substepSeconds);
       previous.set(state.positions);
       let activeColliders = stepColliders;
       let anchorTargets = null;
@@ -564,7 +565,7 @@ export function createCloth(positions, triangles, options = {}) {
 
 /**
  * Simulate one sheet. `positions` are world-space rest positions (3 numbers per particle), `triangles` index them.
- * Options: pinned (particle indices that stay put), gravity, wind (m/s), stiffness and bend (0 to 1), density (kg/m2),
+ * Options: pinned (particle indices that stay put), gravity, wind (m/s), applyFields (see cloth-fields.js), stiffness and bend (0 to 1), density (kg/m2),
  * damping (1/s), friction (0 to 1), thickness (m), colliders ({ kind: 'ball', center, radius },
  * { kind: 'capsule', start, end, radius } or { kind: 'box', center, axes, halfExtents }), frameCount and framesPerSecond.
  * `moving` follows a body that moves with time, sampled ahead as plain numbers so it can cross to a worker. One entry per
