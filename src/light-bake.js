@@ -451,16 +451,18 @@ const SCRATCH_TRIANGLE = new Float64Array(9);
  * The mean radiance arriving at one texel from other surfaces: cosine-weighted paths of up to `bounces` reflections,
  * each hit adding its own emission and its direct light. The caller multiplies by the texel's albedo.
  */
-export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces }) {
+export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium = null, fogScatterLimit = 8 }) {
+  const scatterSum = [0, 0, 0];
   const direction = [0, 0, 0];
   const origin = [0, 0, 0];
   const normal = [0, 0, 0];
   const hitPoint = [0, 0, 0];
   const throughput = [1, 1, 1];
-  return function gather(point, surfaceNormal, texelIndex, sum) {
+  return function gather(point, surfaceNormal, texelIndex, sum, fogLight = null) {
     sum[0] = 0;
     sum[1] = 0;
     sum[2] = 0;
+    scatterSum.fill(0);
     const rotation = hashUnit(texelIndex, 1, 7);
     // Rays that leave the scene on their first leg see the sky, so the share of them is how much sky this point sees.
     let escaped = 0;
@@ -474,15 +476,26 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
       throughput[0] = 1;
       throughput[1] = 1;
       throughput[2] = 1;
-      for (let bounce = 0; bounce < bounces; bounce++) {
+      let bounce = 0;
+      let leg = 0;
+      let fogScatters = 0;
+      while (bounce < bounces) {
         const hit = tracer.trace(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], Infinity, false);
-        if (hit.nearestTriangle < 0) {
+        // The tracer reuses its hit record, and the fog traces rays of its own, so the hit is read first.
+        const hitTriangle = hit.nearestTriangle;
+        const hitDistance = hit.nearestDistance;
+        // The fog may scatter the path inside this leg: the path then goes on from the scattering point.
+        if (medium && medium(origin, direction, hitTriangle < 0 ? Infinity : hitDistance, throughput, scatterSum, texelIndex, sample, leg++)) {
+          if (++fogScatters >= fogScatterLimit) break;
+          continue;
+        }
+        if (hitTriangle < 0) {
           if (bounce === 0) escaped++;
           break;
         }
-        for (let axis = 0; axis < 3; axis++) hitPoint[axis] = origin[axis] + direction[axis] * hit.nearestDistance;
-        hitNormal(world, hit.nearestTriangle, direction, normal);
-        const owner = world.triangleOwner[hit.nearestTriangle];
+        for (let axis = 0; axis < 3; axis++) hitPoint[axis] = origin[axis] + direction[axis] * hitDistance;
+        hitNormal(world, hitTriangle, direction, normal);
+        const owner = world.triangleOwner[hitTriangle];
         const albedo = albedoOfPart[owner];
         const emission = emissionOfPart[owner];
         const irradiance = directIrradiance(hitPoint, normal, owner);
@@ -495,9 +508,15 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
         origin[1] = hitPoint[1] + normal[1] * offset;
         origin[2] = hitPoint[2] + normal[2] * offset;
         cosineDirection(normal, hashUnit(texelIndex, sample, bounce * 2 + 11), hashUnit(texelIndex, sample, bounce * 2 + 12), direction);
+        bounce++;
       }
     }
-    for (let channel = 0; channel < 3; channel++) sum[channel] /= samples;
+    // `sum` holds the fog's light too; `fogLight`, when given, gets that part alone.
+    for (let channel = 0; channel < 3; channel++) {
+      scatterSum[channel] /= samples;
+      sum[channel] = sum[channel] / samples + scatterSum[channel];
+      if (fogLight) fogLight[channel] = scatterSum[channel];
+    }
     return escaped / samples;
   };
 }

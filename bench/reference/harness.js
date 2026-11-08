@@ -177,7 +177,7 @@ function describeScene(id, scene) {
 // Blender always gets the original parts: the bake is 67js's approximation of what Cycles computes.
 async function bakeScene(scene, bakeOptions) {
   if (bakeOptions.preset) {
-    return bakeScenePreset(scene, bakeOptions.preset, bakeOptions.irradianceGrid, { bounces: bakeOptions.bounces });
+    return bakeScenePreset(scene, bakeOptions.preset, bakeOptions.irradianceGrid, { bounces: bakeOptions.bounces, gridFog: bakeOptions.gridFog });
   }
   const { bakeLightmapsAsync } = await import('/src/light-bake-gpu.js');
   const { pointLights, keyColor, lightDirection } = scene.environment;
@@ -191,7 +191,7 @@ async function bakeScene(scene, bakeOptions) {
 // from --probes, as in the other rows.
 async function bakeScenePreset(scene, preset, irradianceGrid = false, overrides = {}) {
   const { normalizeAgentBake, bakeAgentParts } = await import('/src/agent-bake.js');
-  const settings = normalizeAgentBake({ preset, probes: false, ...(overrides.bounces ? { bounces: overrides.bounces } : {}), ...(irradianceGrid ? { irradianceGrid } : {}) });
+  const settings = normalizeAgentBake({ preset, probes: false, ...(overrides.bounces ? { bounces: overrides.bounces } : {}), ...(irradianceGrid ? { irradianceGrid } : {}), ...(overrides.gridFog ? { gridFog: true } : {}) });
   const started = performance.now();
   let baked;
   try {
