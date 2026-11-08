@@ -120,7 +120,7 @@ async function runBackend(backendName, serverUrl, report) {
         report.results[backendName][sceneId] ??= {};
         report.results[backendName][sceneId][engine] = { ...summarize(result), gpuBusyBefore };
         const summary = report.results[backendName][sceneId][engine];
-        console.log(`${backendName} ${sceneId.padEnd(20)} ${engine.padEnd(16)} first ${summary.firstFrameMilliseconds} ms, render ${summary.renderCpuMilliseconds} ms, frame ${summary.fullFrameMilliseconds} ms, ${summary.drawCalls} draws, ${summary.triangles} tris, gpu mem ${summary.gpuMegabytes} MB, heap ${summary.heapMegabytes} MB, busy ${gpuBusyBefore}%${summary.renderTargets ? `
+        console.log(`${backendName} ${sceneId.padEnd(20)} ${engine.padEnd(16)} first ${summary.firstFrameMilliseconds} ms, update ${summary.updateMilliseconds} ms, render ${summary.renderCpuMilliseconds} ms, frame ${summary.fullFrameMilliseconds} ms, ${summary.drawCalls} draws, ${summary.triangles} tris, gpu mem ${summary.gpuMegabytes} MB, heap ${summary.heapMegabytes} MB, busy ${gpuBusyBefore}%${summary.renderTargets ? `
   targets: ${summary.renderTargets.map(target => `${target.name} ${target.megabytes} MB`).join(", ")}` : ""}`);
       }
     }

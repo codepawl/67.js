@@ -1411,11 +1411,31 @@ export async function parseGltf(data, options = {}) {
     let pendingTransaction;
     let currentAnimation = null;
 
-    function capturePrivatePose() {
-      return nodes.map(node => ({ node, translation: node.position.toArray(), rotation: node.quaternion.toArray(),
-        scale: node.scale.toArray(), matrix: [...node.matrix.elements], world: [...node.matrixWorld.elements],
-        matrixAutoUpdate: node.matrixAutoUpdate, matrixWorldNeedsUpdate: node.matrixWorldNeedsUpdate,
-        weights: node.morphTargetInfluences ? [...node.morphTargetInfluences] : null }));
+    /** Snapshot every node's private pose. With `snapshot`, writes into it in place, so a per-frame rollback point allocates nothing. */
+    function capturePrivatePose(snapshot = null) {
+      if (!snapshot) {
+        return nodes.map(node => ({ node, translation: node.position.toArray(), rotation: node.quaternion.toArray(),
+          scale: node.scale.toArray(), matrix: [...node.matrix.elements], world: [...node.matrixWorld.elements],
+          matrixAutoUpdate: node.matrixAutoUpdate, matrixWorldNeedsUpdate: node.matrixWorldNeedsUpdate,
+          weights: node.morphTargetInfluences ? [...node.morphTargetInfluences] : null }));
+      }
+      for (let index = 0; index < nodes.length; index++) {
+        const node = nodes[index];
+        const entry = snapshot[index];
+        copyValues(node.position.values, entry.translation);
+        copyValues(node.quaternion.values, entry.rotation);
+        copyValues(node.scale.values, entry.scale);
+        copyValues(node.matrix.elements, entry.matrix);
+        copyValues(node.matrixWorld.elements, entry.world);
+        entry.matrixAutoUpdate = node.matrixAutoUpdate;
+        entry.matrixWorldNeedsUpdate = node.matrixWorldNeedsUpdate;
+        if (entry.weights) copyValues(node.morphTargetInfluences, entry.weights);
+      }
+      return snapshot;
+    }
+
+    function copyValues(source, target) {
+      for (let index = 0; index < target.length; index++) target[index] = source[index];
     }
 
     function restorePrivatePose(snapshot) {
@@ -1652,16 +1672,7 @@ export async function parseGltf(data, options = {}) {
             pendingTransaction = null;
             throw error;
           }
-          for (const { matrix, pendingMatrix } of bindings) {
-            Float32Array.prototype.set.call(matrix, pendingMatrix);
-          }
-          for (const binding of skinBindings) {
-            commitSkinBinding(binding);
-          }
-          for (const binding of morphBindings) {
-            Float32Array.prototype.set.call(binding.weights, binding.pendingPose.weights);
-          }
-          currentAnimation = candidate.animation;
+          commitPreparedPose(candidate.animation);
           settled = true;
           pendingTransaction = null;
           return parts;
@@ -1698,7 +1709,41 @@ export async function parseGltf(data, options = {}) {
       if (!Number.isInteger(clipIndex) || !clip) {
         throw new RangeError('Animation clip index is out of range.');
       }
-      return stagePose({ animation: { clip: clipIndex, time: Math.max(0, Math.min(time, clip.duration)) } }).commit();
+      if (pendingTransaction) {
+        throw new Error('A pose transaction is already pending. Commit or discard it first.');
+      }
+      // Same result as stagePose({ animation }).commit(), with one preparePose instead of two: nothing can change the
+      // scene between this stage and this commit. The rollback snapshot is reused across frames.
+      const animation = { clip: clipIndex, time: Math.max(0, Math.min(time, clip.duration)) };
+      rollbackPose ??= capturePrivatePose();
+      capturePrivatePose(rollbackPose);
+      const previousAnimation = currentAnimation;
+      try {
+        playAnimation(animation);
+        preparePose();
+      } catch (error) {
+        playAnimation(previousAnimation);
+        restorePrivatePose(rollbackPose);
+        throw error;
+      }
+      commitPreparedPose(animation);
+      return parts;
+    }
+
+    let rollbackPose = null;
+
+    /** Copy the prepared candidate pose into the committed parts. */
+    function commitPreparedPose(animation) {
+      for (const { matrix, pendingMatrix } of bindings) {
+        Float32Array.prototype.set.call(matrix, pendingMatrix);
+      }
+      for (const binding of skinBindings) {
+        commitSkinBinding(binding);
+      }
+      for (const binding of morphBindings) {
+        Float32Array.prototype.set.call(binding.weights, binding.pendingPose.weights);
+      }
+      currentAnimation = animation;
     }
     return { parts, warnings, lights, scaledTextures: textureScaling.scaledTextures, textureFormats: textureFormatsOf(maps), skins: skinBindings.map(binding => binding.skin), animations: gltf.animations,
       get nodes() { return structuredClone(nodeMetadata); }, stagePose, applyAnimation, dispose, capabilities: GLTF_CAPABILITIES };
