@@ -2,7 +2,7 @@ import { planLightmaps, estimateBake, traceLightmaps } from './light-bake.js';
 import { runKernel } from './kernel-offload.js';
 import { normalizeProbeList, traceProbes } from './probe-trace.js';
 import { placeProbes } from './reflection-probes.js';
-import { normalizeIrradianceGrid, placeIrradianceGrid, traceIrradianceGrid } from './irradiance-grid.js';
+import { normalizeIrradianceGrid, placeIrradianceGrid, traceIrradianceGrid, withMeanRadiance } from './irradiance-grid.js';
 import { knownKeys, finiteNumber } from './agent-recipe-checks.js';
 import { BAKE_PRESETS, BAKE_RANGES, BAKE_MAXIMUM_SECONDS, BAKE_WORKER_MAXIMUM_SECONDS, BAKE_PRESET_PATH_WORK, BAKE_EXPLICIT_PATH_WORK_LIMIT } from './agent-scene-capabilities.js';
 
@@ -245,15 +245,23 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
 const GRID_SAMPLES_SHARE = 4;
 const GRID_MINIMUM_SAMPLES = 8;
 
+/**
+ * The irradiance grid trace as a worker kernel. The time limit is read here and not passed in, so a worker traces under its
+ * own 90 s and the page's 20 s never reaches it (and never changes the kernel's cache key).
+ */
+export function traceGridKernel(snapshots, lighting, options) {
+  return traceIrradianceGrid(snapshots, lighting, { ...options, maxSeconds: bakeSecondsLimit() });
+}
+
 // bake.irradianceGrid: no lightmaps. Every part reads one baked grid of bounced light (the sun's lit patches included), and the
-// probes still run. The grid traces on the page's thread, inside the same time limit as a bake.
+// probes still run. Inside a worker session the trace runs on the worker (90 s); otherwise on the page's thread (20 s).
 function bakeIrradianceGridParts(parts, snapshots, lighting, settings) {
-  const grid = traceIrradianceGrid(snapshots, lighting, {
+  const gridOptions = {
     resolution: settings.irradianceGrid,
     samples: Math.max(GRID_MINIMUM_SAMPLES, Math.round(settings.samples / GRID_SAMPLES_SHARE)),
     bounces: settings.bounces,
-    maxSeconds: bakeSecondsLimit(),
-  });
+  };
+  const grid = withMeanRadiance(runKernel('gridTrace', [snapshots, lighting, gridOptions], traceGridKernel));
   const probeTrace = !settings.probes ? null
     : runKernel('probeTrace', [snapshots, lighting, settings.probes, { environment: lighting, maxSeconds: bakeSecondsLimit() }], traceProbes);
   const gridParts = placeIrradianceGrid(parts, grid);
