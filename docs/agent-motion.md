@@ -201,6 +201,36 @@ uniform scale. `true` takes the defaults:
 The lock reads the layers only: tracks and `ik` are applied after it. `scene_inspect` returns `footLock.feet` with the
 planted phases per foot. The hips do not move, so a ground far from the character's floor can be out of reach.
 
+### Light, sun, sky and exposure tracks
+
+On a scene recipe (not an imported asset) four more kinds animate the look, with the keyframes, interpolations and `easing` of
+any other track. `light` takes an `id` of `point:N`, `spot:N` or `area:N` (the index in `environment.pointLights` and so on) and
+the properties `position`, `color`, `intensity`, plus `direction` on spot and area lights. `sun` (no ID) takes `direction`,
+`color` and `intensity`, which set `lightDirection`, `keyColor` and `keyIntensity`. `environment` takes `skyTop`, `skyBottom`,
+`fogColor`, `fogDensity`, `volumeFogDensity`, `ambientIntensity`, `fillIntensity`, `environmentIntensity` and
+`environmentRotation` (radians; these dim and turn the sky map shown when `environment.world` is true). `effects` takes `exposure`
+and `focusDistance`, which needs `effects.depthOfField.blur` above 0 (a camera with an `fStop` focuses on its target, so move the
+camera `target` track for a rack focus). Values keep the range of the environment field, and an unknown light, property or kind
+fails with the valid ones. Untracked values keep their authored value, and a scene with no such track renders as before.
+
+After `scene.sampleMotion(time)`, `scene.environment` and `scene.effects` return the sampled values (the exported recipe keeps
+the authored ones), so a renderer that reads them per frame follows the tracks without a rebuild. Baked light (`bake`) is computed
+once and does not follow a moving light.
+
+```js
+// A sunset: the sun drops to the horizon, the sky map turns and dims, the exposure rises to compensate.
+const sunset = {
+  duration: 4,
+  tracks: [
+    { kind: 'sun', property: 'direction', keyframes: [{ time: 0, value: [-1, 4, 1] }, { time: 4, value: [-4, 0.3, 1] }] },
+    { kind: 'sun', property: 'color', keyframes: [{ time: 0, value: [3, 2.8, 2.5] }, { time: 4, value: [3.4, 1.4, 0.6] }] },
+    { kind: 'environment', property: 'environmentIntensity', keyframes: [{ time: 0, value: 1 }, { time: 4, value: 0.4 }] },
+    { kind: 'light', id: 'point:0', property: 'intensity', keyframes: [{ time: 0, value: 0 }, { time: 4, value: 3 }] },
+    { kind: 'effects', property: 'exposure', keyframes: [{ time: 0, value: 1 }, { time: 4, value: 1.4 }] },
+  ],
+};
+```
+
 ### Morph weight tracks
 
 A track `{ "kind": "morph", "id": "eyeBlinkLeft", "property": "weight", "keyframes": [...] }` keys the weight (0 to 1) of every

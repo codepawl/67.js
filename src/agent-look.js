@@ -3,16 +3,17 @@ import { createLightingState, updateLightingState, MAX_POINT_LIGHTS, MAX_SPOT_LI
 import { resolveEffects } from './effects.js';
 import { resolveVolumeFog } from './volumetric.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
-import { createLightingSetupMap, lightingSetupFields } from './lighting-setups.js';
+import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
+import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference } from './look-catalog.js';
 import { DEFAULT_LIGHTING_SETUP, LIGHTING_SETUP_NAMES, DEFAULT_AMBIENT_OCCLUSION } from './agent-scene-capabilities.js';
 
 // The longest list in a look is the longest light list.
 const MAX_LOOK_ARRAY_ENTRIES = Math.max(MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS);
 
 const ENVIRONMENT_FIELDS = [
-  'world', 'ground', 'setup', 'environmentIntensity', 'environmentRotation', 'lightDirection', 'keyColor', 'keyIntensity', 'fillIntensity', 'ambientIntensity',
+  'world', 'ground', 'setup', 'hdri', 'environmentIntensity', 'environmentRotation', 'lightDirection', 'keyColor', 'keyIntensity', 'fillIntensity', 'ambientIntensity',
   'daylight', 'pointLights', 'spotLights', 'areaLights', 'skyTop', 'skyBottom', 'fogColor', 'fogDensity', 'volumeFog', 'liquid', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'wind',
 ];
 const EFFECT_FIELDS = ['exposure', 'saturation', 'contrast', 'temperature', 'vignette', 'grain', 'ambientOcclusion', 'ambientOcclusionRadius', 'bloom', 'depthOfField', 'motionBlur'];
@@ -310,6 +311,13 @@ function environmentFrom(input = {}) {
     environment.shadowCascades = shadowCascadesFrom(input.shadowCascades);
   }
   if (input.wind !== undefined && input.wind !== null) environment.wind = agentSceneModule('vegetation').normalizeWind(input.wind);
+  // A catalog HDRI replaces the procedural sky map. The setup still supplies the key light: set keyIntensity 0 when the HDRI has its own sun.
+  if (input.hdri !== undefined && input.hdri !== null) {
+    if (typeof input.hdri !== 'string' || !isEnvironmentReference(input.hdri)) {
+      throw new RangeError(`environment.hdri must be one of ${BUNDLED_ENVIRONMENT_NAMES.join(', ')} or the 64-character ID of a .hdr file in the asset catalog.`);
+    }
+    environment.hdri = input.hdri;
+  }
   if (input.viewTransform !== undefined) {
     if (!VIEW_TRANSFORM_NAMES.includes(input.viewTransform)) {
       throw new RangeError(`environment.viewTransform must be one of ${VIEW_TRANSFORM_NAMES.join(', ')}.`);
@@ -317,8 +325,8 @@ function environmentFrom(input = {}) {
     environment.viewTransform = input.viewTransform;
   }
   if (input.look !== undefined && input.look !== null) {
-    if (!LOOK_NAMES.includes(input.look)) {
-      throw new RangeError(`environment.look must be one of ${LOOK_NAMES.join(', ')}.`);
+    if (!LOOK_NAMES.includes(input.look) && !isCubeLookReference(input.look)) {
+      throw new RangeError(`environment.look must be one of ${[...LOOK_NAMES, ...BUNDLED_CUBE_LOOK_NAMES].join(', ')} or the 64-character ID of a .cube file in the asset catalog.`);
     }
     environment.look = input.look;
   }
@@ -346,6 +354,9 @@ export function environmentPatchWithSetup(patch) {
 
 /** The procedural environment map that lights a normalized environment; the same object returns while inputs hold. */
 export function agentEnvironmentMap(environment) {
+  if (environment.hdri) {
+    return createCatalogEnvironmentMap(environment.hdri, { intensity: environment.environmentIntensity, rotation: environment.environmentRotation, showBackground: environment.world });
+  }
   return createLightingSetupMap(environment.setup, {
     intensity: environment.environmentIntensity,
     rotation: environment.environmentRotation,
