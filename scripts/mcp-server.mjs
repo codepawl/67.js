@@ -192,6 +192,13 @@ const volumeFog = z.strictObject({
   contrast: bounded(0, 4).optional(),
   profileSoftness: bounded(0, 0.95).optional(),
   keyScattering: bounded(0, 10).optional(),
+  heightFalloff: bounded(0, 1e5).optional(),
+  scatterOctaves: z.number().int().min(1).max(4).optional(),
+  multiScatter: unit.optional(),
+  multiExtinction: unit.optional(),
+  multiAnisotropy: unit.optional(),
+  keyTransmittance: unit.optional(),
+  surfaceTransmittance: unit.optional(),
 });
 const affects = z.array(z.string()).optional();
 const iesProfile = z.any().optional();

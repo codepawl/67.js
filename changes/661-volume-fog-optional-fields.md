@@ -1,0 +1,1 @@
+- set-environment and the MCP schemas accept the optional volumeFog fields (scatterOctaves, multiScatter, multiExtinction, multiAnisotropy, keyTransmittance, surfaceTransmittance, heightFalloff) after creation (#661).
