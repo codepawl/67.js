@@ -146,6 +146,7 @@ async function runBenchmark(sceneId, engine, frames) {
   const fullFrameTimes = [];
   const queries = [];
   watcher.resetDrawCounters();
+  if (adapter.updatePartsTimes) adapter.updatePartsTimes.length = 0;
   for (let frame = 0; frame < frames; frame++) {
     time += FRAME_TIME_STEP;
     const beforeUpdate = performance.now();
@@ -178,6 +179,7 @@ async function runBenchmark(sceneId, engine, frames) {
     scene: sceneId, engine,
     firstFrameMilliseconds,
     updateMilliseconds: median(updateTimes),
+    updatePartsMilliseconds: adapter.updatePartsTimes?.length ? median(adapter.updatePartsTimes) : null,
     renderCpuMilliseconds: median(renderTimes),
     gpuMilliseconds: median(gpuTimes),
     fullFrameMilliseconds: median(fullFrameTimes),
