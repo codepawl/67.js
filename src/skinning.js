@@ -151,13 +151,27 @@ export function skinInfluenceSets(geometry) {
   return sets;
 }
 
-/** Validate weighted normal transforms without allocating temporary matrices, once per distinct influence set. */
+// The last check of each pose that found mirrored weighted transforms. The renderer reads it into renderer.diagnostics.
+const reflectedReports = new WeakMap();
+
+/** What the last checked pose drew mirrored: { sets, joints, weights } for the first such influence set, or null. */
+export function reflectedSkinReport(pose) {
+  return reflectedReports.get(pose) ?? null;
+}
+
+/**
+ * Validate weighted normal transforms without allocating temporary matrices, once per distinct influence set.
+ * A singular set throws. A set whose blend mirrors the mesh (linear blend skinning between joints that turn opposite
+ * ways, as a pinched finger) draws pinched, like other engines, and is reported through reflectedSkinReport.
+ */
 export function validateSkinPose(pose, geometry, worldMatrix) {
   const matrices = pose.jointMatrices;
   validateMatrices(matrices, matrices.length / 16, 'Joint palette');
   if (!geometry) return;
   const { joints, weights } = skinInfluenceSets(geometry);
   const worldDeterminant = worldMatrix ? matrixDeterminant(worldMatrix, 0) : 0;
+  let reflectedSets = 0;
+  let firstReflected = -1;
   for (let set = 0; set < joints.length / 4; set++) {
     let matrixXX = 0;
     let matrixYX = 0;
@@ -183,8 +197,24 @@ export function validateSkinPose(pose, geometry, worldMatrix) {
     }
     const determinant = matrixXX * (matrixYY * matrixZZ - matrixYZ * matrixZY) - matrixXY * (matrixYX * matrixZZ - matrixYZ * matrixZX) + matrixXZ * (matrixYX * matrixZY - matrixYY * matrixZX);
     if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-8) throw new Error('Skin pose produces a singular weighted vertex transform.');
-    if (worldMatrix && determinant * worldDeterminant < 0) throw new Error('Reflected weighted skin transforms are unsupported.');
+    if (worldMatrix && determinant * worldDeterminant < 0) {
+      if (firstReflected < 0) firstReflected = set;
+      reflectedSets++;
+    }
   }
+  if (!worldMatrix) return;
+  if (reflectedSets === 0) {
+    reflectedReports.delete(pose);
+    return;
+  }
+  const report = { sets: reflectedSets, joints: [], weights: [] };
+  for (let influence = 0; influence < 4; influence++) {
+    const weight = weights[firstReflected * 4 + influence];
+    if (weight <= 0) continue;
+    report.joints.push(joints[firstReflected * 4 + influence]);
+    report.weights.push(Math.round(weight * 100) / 100);
+  }
+  reflectedReports.set(pose, report);
 }
 
 export function packSkinInfluences(geometry, layout) {
@@ -226,4 +256,31 @@ mat4 jointMatrix(int joint) {
 `,
 });
 
-registerDeformationSupport({ validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences });
+// The skinned entries of each renderer part map. A renderer swaps in a new map when its parts change.
+const skinnedPartLists = new WeakMap();
+
+/** renderer.diagnostics warnings for skinned parts whose last checked pose drew mirrored vertices. */
+export function reflectedSkinDiagnostics(partLocations) {
+  let skinnedParts = skinnedPartLists.get(partLocations);
+  if (!skinnedParts) {
+    skinnedParts = [...partLocations].filter(([, location]) => location.skin);
+    skinnedPartLists.set(partLocations, skinnedParts);
+  }
+  const problems = [];
+  for (const [part, location] of skinnedParts) {
+    const report = reflectedSkinReport(location.skin);
+    if (!report) continue;
+    const name = part.name ?? 'a skinned part';
+    const joints = report.joints.map((joint, index) => `joint ${joint} at ${report.weights[index]}`).join(', ');
+    problems.push({
+      kind: 'skin-reflected-vertices',
+      severity: 'warning',
+      target: name,
+      message: `${report.sets} vertex weight set(s) of ${name} mirror in this pose and draw pinched. First: ${joints}.`,
+      fix: 'Move the weights of joints that turn opposite ways onto one joint, such as finger weights onto the hand.',
+    });
+  }
+  return problems;
+}
+
+registerDeformationSupport({ validateSkinGeometry, validateSkinPose, reflectedSkinDiagnostics, skinTextureLayout, packSkinInfluences });

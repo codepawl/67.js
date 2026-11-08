@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4 } from 'gl-matrix';
 import { Bone, Skeleton, SkinnedMesh, BufferGeometry, Float32BufferAttribute, Uint16BufferAttribute, Matrix4, Matrix3, Vector3 } from 'three';
-import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences, skinInfluenceSets } from '../src/skinning.js';
+import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences, skinInfluenceSets, reflectedSkinReport, reflectedSkinDiagnostics } from '../src/skinning.js';
 
 function influences() {
   return { positions: new Float32Array([0.2, 1, 0]), skinIndices: new Uint16Array([0, 1, 0, 0]), skinWeights: new Float32Array([0.3, 0.7, 0, 0]) };
@@ -200,4 +200,25 @@ test('skinInfluenceSets rebuilds when the index array is replaced', () => {
   const replaced = skinInfluenceSets({ skinIndices: new Uint16Array([1, 0, 0, 0, 1, 1, 0, 0]), skinWeights });
   assert.notEqual(first, replaced);
   assert.deepEqual([...replaced.joints.subarray(0, 4)], [1, 0, 0, 0]);
+});
+
+test('a mirrored weighted vertex draws pinched and is reported instead of failing the pose (issue #581)', () => {
+  const pose = createSkinPose(2);
+  // Joint 1 mirrors x. A 25/75 blend with the identity scales x by -0.5: a mirrored but healthy transform.
+  pose.jointMatrices.set([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 16);
+  const geometry = {
+    skinIndices: new Uint16Array([0, 0, 0, 0, 0, 1, 0, 0]),
+    skinWeights: new Float32Array([1, 0, 0, 0, 0.25, 0.75, 0, 0]),
+  };
+  const world = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  assert.doesNotThrow(() => validateSkinPose(pose, geometry, world));
+  assert.deepEqual(reflectedSkinReport(pose), { sets: 1, joints: [0, 1], weights: [0.25, 0.75] });
+  const [problem] = reflectedSkinDiagnostics(new Map([[{ name: "knight" }, { skin: pose }]]));
+  assert.equal(problem.kind, 'skin-reflected-vertices');
+  assert.match(problem.message, /1 vertex weight set\(s\) of knight mirror .*joint 0 at 0\.25, joint 1 at 0\.75/);
+  // Once the joint stops mirroring, the report clears.
+  pose.jointMatrices.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 16);
+  validateSkinPose(pose, geometry, world);
+  assert.equal(reflectedSkinReport(pose), null);
+  assert.deepEqual(reflectedSkinDiagnostics(new Map([[{ name: "knight" }, { skin: pose }]])), []);
 });

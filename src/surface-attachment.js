@@ -206,7 +206,7 @@ export function createSurfaceAttachment(target, options = {}) {
         }
         const blendedDeterminant = determinant(blended);
         if (!Number.isFinite(blendedDeterminant) || Math.abs(blendedDeterminant) < 1e-8) throw new RangeError('Attachment has a singular weighted skin transform.');
-        if (blendedDeterminant * worldDeterminant < 0) throw new RangeError('Reflected weighted skin transforms are unsupported by the renderer.');
+        if (blendedDeterminant * worldDeterminant < 0) throw new RangeError('A surface attachment cannot sit on a mirrored weighted skin vertex. Move it to a face whose joints do not turn opposite ways.');
         for (let column = 0; column < 4; column++) {
           for (let row = 0; row < 4; row++) {
             let coefficient = 0;

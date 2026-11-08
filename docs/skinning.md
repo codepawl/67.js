@@ -74,7 +74,7 @@ The installed Three.js skin shader transforms normals directly with the blended 
 The methods agree when the blended matrix represents a rigid transform. They can differ under nonuniform scale or blended rotations.
 Tests compare positions with Three.js and verify the normal's perpendicularity to a transformed tangent.
 
-Singular joints and singular weighted vertex transforms fail explicitly. Reflected weighted transforms in world space also fail.
+Singular joints and singular weighted vertex transforms fail explicitly. A vertex whose weighted transform mirrors the mesh, as when linear blend skinning pinches a finger between two joints that turn opposite ways, draws pinched as in other engines. The renderer lists it in `renderer.diagnostics` as `skin-reflected-vertices`, with the count and the joints and weights of the first one. `{ checks: false }` skips the check, so the warning then keeps its last value.
 The renderer validates weighted transforms on the CPU before uploads. This validation visits every influenced vertex in submitted parts.
 Skinning uses linear matrix blending. It does not implement dual-quaternion deformation or preserve volume around bent joints.
 
