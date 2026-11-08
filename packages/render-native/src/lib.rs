@@ -44,6 +44,12 @@ pub struct NativeTraceOptions {
 pub struct NativeTraceResult {
     /// Linear RGBA, averaged over the samples, row by row from the top.
     pub rgba: Float32Array,
+    /// First-hit albedo and normal (three floats per pixel, averaged over the samples; normalise the normal), the first-hit
+    /// depth and the variance of each pixel's mean luminance: the features the wavelet and OIDN denoisers read.
+    pub albedo: Float32Array,
+    pub normal: Float32Array,
+    pub depth: Float32Array,
+    pub variance: Float32Array,
     pub adapter: String,
     pub backend: String,
     pub setup_seconds: f64,
@@ -285,7 +291,7 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
     }
-    let readback_size = pixel_count * 16;
+    let readback_size = pixel_count * 16 * 4;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("readback"),
         size: readback_size,
@@ -299,16 +305,35 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
     let mapped = readback.slice(..).get_mapped_range().map_err(|error| failure(format!("Could not read the image back: {error}")))?;
     let sums: &[f32] = bytemuck::cast_slice(&mapped);
+    let plane_length = pixel_count as usize * 4;
     let sample_scale = 1.0 / options.samples.max(1) as f32;
+    let variance_divisor = options.samples.saturating_sub(1).max(1) as f32;
     let mut rgba = Vec::with_capacity(pixel_count as usize * 4);
-    for pixel in sums.chunks_exact(4) {
-        rgba.extend_from_slice(&[pixel[0] * sample_scale, pixel[1] * sample_scale, pixel[2] * sample_scale, 1.0]);
+    let mut albedo = Vec::with_capacity(pixel_count as usize * 3);
+    let mut normal = Vec::with_capacity(pixel_count as usize * 3);
+    let mut depth = Vec::with_capacity(pixel_count as usize);
+    let mut variance = Vec::with_capacity(pixel_count as usize);
+    for pixel in 0..pixel_count as usize {
+        let radiance = &sums[pixel * 4..pixel * 4 + 4];
+        let albedo_sum = &sums[plane_length + pixel * 4..plane_length + pixel * 4 + 3];
+        let normal_sum = &sums[2 * plane_length + pixel * 4..2 * plane_length + pixel * 4 + 3];
+        let statistics = &sums[3 * plane_length + pixel * 4..3 * plane_length + pixel * 4 + 2];
+        rgba.extend_from_slice(&[radiance[0] * sample_scale, radiance[1] * sample_scale, radiance[2] * sample_scale, 1.0]);
+        depth.push(radiance[3] * sample_scale);
+        albedo.extend(albedo_sum.iter().map(|value| value * sample_scale));
+        normal.extend(normal_sum.iter().map(|value| value * sample_scale));
+        let mean_luminance = statistics[0] * sample_scale;
+        variance.push((statistics[1] * sample_scale - mean_luminance * mean_luminance).max(0.0) / variance_divisor);
     }
     drop(mapped);
     let traced_seconds = trace_started.elapsed().as_secs_f64();
 
     Ok(NativeTraceResult {
         rgba: Float32Array::new(rgba),
+        albedo: Float32Array::new(albedo),
+        normal: Float32Array::new(normal),
+        depth: Float32Array::new(depth),
+        variance: Float32Array::new(variance),
         adapter: adapter_info.name,
         backend: format!("{:?}", adapter_info.backend),
         setup_seconds,
