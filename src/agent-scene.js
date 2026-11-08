@@ -13,6 +13,7 @@ import { depthLayerOf, MAXIMUM_DEPTH_LAYER } from './depth-layer.js';
 import { armatureNodes, bakeRigExport, bindSkins, createSkinStages, normalizeArmatures, publishSkinPoses, restWorldMatrix, rigReport, stageSkinPoses, transformedBounds, withoutArmatureNodes } from './rig.js';
 export { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS };
 export { normalizeAgentLook, resolveAgentShadow } from './agent-look.js';
+export { describeApplication } from './agent-apply-report.js';
 export {
   needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader,
   needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader,
