@@ -2,10 +2,10 @@ import { createTracer } from './ray-query.js';
 import { readTriangle } from './triangle-math.js';
 import { registerShaderFeatureCode, layerTextureSupport } from './shader-registry.js';
 import {
-  MAX_BAKE_PARTS, buildWorld, createDirectIrradiance, createGatherer, diffuseAlbedo, emittedRadiance, hitNormal, normalizeLights, sceneScale, validatePart, withReach,
+  MAX_BAKE_PARTS, buildWorld, createDirectIrradiance, createGatherer, diffuseAlbedo, emittedRadiance, normalizeLights, sceneScale, validatePart, withReach,
 } from './light-bake.js';
 import { worldBounds } from './probe-trace.js';
-import { createGridMedium } from './grid-medium.js';
+import { createGridMedium, MAXIMUM_FOG_SCATTERS } from './grid-medium.js';
 
 // A baked grid of diffuse light: at each node of a 3D grid the light that other surfaces bounce toward it (the sun's lit
 // patches included, over several bounces), stored as first order spherical harmonics per colour channel. A lit surface reads
@@ -216,30 +216,6 @@ function smoothNodes(data, valid, size, isConnected) {
   }
 }
 
-const SURFACE_SCATTER = true;
-
-// The radiance the nearest surface along a ray sends back: its emission and its direct light (what one bounce of the gatherer adds).
-function createSurfaceRadiance({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance }) {
-  const hitPoint = [0, 0, 0];
-  const normal = [0, 0, 0];
-  return function surfaceRadiance(point, direction, out) {
-    out[0] = 0;
-    out[1] = 0;
-    out[2] = 0;
-    const hit = tracer.trace(point[0], point[1], point[2], direction[0], direction[1], direction[2], Infinity, false);
-    const triangle = hit.nearestTriangle;
-    if (triangle < 0) return;
-    const distance = hit.nearestDistance;
-    for (let axis = 0; axis < 3; axis++) hitPoint[axis] = point[axis] + direction[axis] * distance;
-    hitNormal(world, triangle, direction, normal);
-    const owner = world.triangleOwner[triangle];
-    const irradiance = directIrradiance(hitPoint, normal, owner);
-    for (let channel = 0; channel < 3; channel++) {
-      out[channel] = emissionOfPart[owner][channel] + albedoOfPart[owner][channel] * irradiance[channel] / Math.PI;
-    }
-  };
-}
-
 /**
  * Traces the grid. For each node, the cosine weighted light arriving along the six axis directions (the bake's gatherer:
  * emission and direct light at every hit, bounced over `bounces` reflections) becomes a first order fit per colour channel:
@@ -265,9 +241,8 @@ export function traceIrradianceGrid(parts, lighting, { resolution = true, sample
   const albedoOfPart = parts.map(part => diffuseAlbedo(part.material));
   const emissionOfPart = parts.map(part => emittedRadiance(part.material));
   const sun = lights.sun ?? null;
-  const surfaceRadiance = createSurfaceRadiance({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance });
-  const medium = createGridMedium({ lighting, sun, tracer, scale, surfaceRadiance: SURFACE_SCATTER ? surfaceRadiance : null });
-  const gather = createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium });
+  const medium = createGridMedium({ lighting, sun, tracer, scale });
+  const gather = createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium, fogScatterLimit: MAXIMUM_FOG_SCATTERS });
   const started = performance.now();
   const data = new Float32Array(nodeCount * COEFFICIENTS_PER_NODE);
   // The part of `data` that the fog scattered into the paths. The fog drawn on screen already scatters the sun itself, so it reads the grid without this part.

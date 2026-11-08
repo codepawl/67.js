@@ -451,7 +451,7 @@ const SCRATCH_TRIANGLE = new Float64Array(9);
  * The mean radiance arriving at one texel from other surfaces: cosine-weighted paths of up to `bounces` reflections,
  * each hit adding its own emission and its direct light. The caller multiplies by the texel's albedo.
  */
-export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium = null }) {
+export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium = null, fogScatterLimit = 8 }) {
   const scatterSum = [0, 0, 0];
   const direction = [0, 0, 0];
   const origin = [0, 0, 0];
@@ -476,13 +476,19 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
       throughput[0] = 1;
       throughput[1] = 1;
       throughput[2] = 1;
-      for (let bounce = 0; bounce < bounces; bounce++) {
+      let bounce = 0;
+      let leg = 0;
+      let fogScatters = 0;
+      while (bounce < bounces) {
         const hit = tracer.trace(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], Infinity, false);
         // The tracer reuses its hit record, and the fog traces rays of its own, so the hit is read first.
         const hitTriangle = hit.nearestTriangle;
         const hitDistance = hit.nearestDistance;
-        // The fog along this leg scatters light into the path and dims what lies beyond it.
-        if (medium) medium(origin, direction, hitTriangle < 0 ? Infinity : hitDistance, throughput, scatterSum, texelIndex, sample, bounce);
+        // The fog may scatter the path inside this leg: the path then goes on from the scattering point.
+        if (medium && medium(origin, direction, hitTriangle < 0 ? Infinity : hitDistance, throughput, scatterSum, texelIndex, sample, leg++)) {
+          if (++fogScatters >= fogScatterLimit) break;
+          continue;
+        }
         if (hitTriangle < 0) {
           if (bounce === 0) escaped++;
           break;
@@ -493,8 +499,10 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
         const albedo = albedoOfPart[owner];
         const emission = emissionOfPart[owner];
         const irradiance = directIrradiance(hitPoint, normal, owner);
+        const lightTarget = fogScatters > 0 ? scatterSum : sum;
         for (let channel = 0; channel < 3; channel++) {
-          sum[channel] += throughput[channel] * (emission[channel] + albedo[channel] * irradiance[channel] / Math.PI);
+          // Light that reaches the point through a fog scattering counts as the fog's, which the fog on screen scatters again itself.
+          lightTarget[channel] += throughput[channel] * (emission[channel] + albedo[channel] * irradiance[channel] / Math.PI);
           throughput[channel] *= albedo[channel];
         }
         if (throughput[0] + throughput[1] + throughput[2] < 1e-4) break;
@@ -502,6 +510,7 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
         origin[1] = hitPoint[1] + normal[1] * offset;
         origin[2] = hitPoint[2] + normal[2] * offset;
         cosineDirection(normal, hashUnit(texelIndex, sample, bounce * 2 + 11), hashUnit(texelIndex, sample, bounce * 2 + 12), direction);
+        bounce++;
       }
     }
     // `sum` holds the fog's light too; `fogLight`, when given, gets that part alone.
