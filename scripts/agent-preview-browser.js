@@ -21,6 +21,9 @@ import '../src/texture-update.js';
 import { updatePartVertices } from '../src/update-part-vertices.js';
 import { hasPatternTextures } from './agent-preview-textures.js';
 import { TEXTURE_SEQUENCE_LIMITS } from '../src/texture-sequence-limits.js';
+import { registerCatalogEnvironment, registerCatalogLook } from '../src/look-catalog.js';
+import { parseRadianceHdr } from '../src/hdri.js';
+import { parseCube } from '../src/view-transform.js';
 import { weightTracksFromGltfAnimation } from '../src/export-skeleton.js';
 import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem } from '../src/agent-errors.js';
@@ -115,6 +118,14 @@ async function decodeSequenceFrame(id, base64) {
     return { width: bitmap.width, height: bitmap.height, data };
   } finally {
     bitmap.close();
+  }
+}
+
+// HDRI and .cube files a recipe names, by bundled name or catalog ID: { kind: 'environment', base64 } or { kind: 'look', text }.
+function registerLookData(lookData) {
+  for (const [reference, entry] of Object.entries(lookData ?? {})) {
+    if (entry.kind === 'environment') registerCatalogEnvironment(reference, parseRadianceHdr(bytesFromBase64(entry.base64)));
+    else registerCatalogLook(reference, parseCube(entry.text));
   }
 }
 
@@ -498,14 +509,22 @@ function useKernelWorkers() {
   return kernelWorkersAvailable() && globalThis.__67jsKernelWorkers !== 'off';
 }
 
-function buildSceneOffMainThread(recipe, options) {
+// A recipe bake runs on the GPU when the page has float render targets; the CPU bake stays the default everywhere else.
+async function pageKernelsFor(recipe, backend) {
+  if (!recipe.bake || backend !== 'gpu') return undefined;
+  const { gpuBakeKernels } = await import('../src/agent-bake-gpu.js');
+  return gpuBakeKernels();
+}
+
+async function buildSceneOffMainThread(recipe, options, backend) {
+  const pageKernels = await pageKernelsFor(recipe, backend);
   return buildWithKernels(() => {
     const scene = createAgentScene(recipe, {}, options);
     for (const part of scene.parts) {
       void part.material.map;
     }
     return scene;
-  });
+  }, { pageKernels });
 }
 
 function seekForExport(record, motionTime) {
@@ -806,7 +825,8 @@ window.__agentPreview = {
     }
   },
   create(input) {
-    if (active) throw new Error('Dispose the current scene before creating another.');
+    registerLookData(input.lookData);
+    if (active)throw new Error('Dispose the current scene before creating another.');
     if (recipeAssetNeeds(input.recipe).length) return this.createWithAssets(input);
     // Only a recipe with image sequences waits for its frames to decode; any other create stays synchronous.
     const build = sequenceFrames => {
@@ -817,7 +837,7 @@ window.__agentPreview = {
         finishBuildReport(startedAt);
         return createPreview(scene, input, undefined, undefined, sequenceFrames);
       }
-      return buildSceneOffMainThread(input.recipe, { sequenceFrames }).then(scene => {
+      return buildSceneOffMainThread(input.recipe, { sequenceFrames }, input.backend).then(scene => {
         finishBuildReport(startedAt);
         return createPreview(scene, input, undefined, undefined, sequenceFrames);
       });
@@ -862,6 +882,7 @@ window.__agentPreview = {
     return { sessionId, revision: record.scene.revision, ...summarizeWalkMap(map, { clearance, groundRange, keepOut, includeCells }), skippedParts: query.skipped.length, milliseconds: Math.round(performance.now() - started) };
   },
   apply(input) {
+    registerLookData(input.lookData);
     if (input.sequenceData) {
       const { sequenceFrames } = requireSession(input.sessionId);
       if (!sequenceFrames) throw new Error('This scene was created from an imported asset and has no image sequences.');

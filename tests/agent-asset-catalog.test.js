@@ -127,3 +127,25 @@ test('a decode limit error names the catalog limit and the value the file hit, w
   const other = new Error('unrelated');
   assert.equal(withCatalogLimitAdvice(other), other);
 });
+
+test('a Radiance .hdr and a .cube file are listed as environment and look entries and read back by ID', async context => {
+  const { directory } = await fixture(context);
+  const radiance = await readFile(new URL('../assets/looks/studio-softbox.hdr', import.meta.url));
+  const cube = await readFile(new URL('../assets/looks/noir.cube', import.meta.url));
+  await writeFile(join(directory, 'room.hdr'), radiance);
+  await writeFile(join(directory, 'grade.cube'), cube);
+  const catalog = await createAgentAssetCatalog(directory);
+  const entries = Object.fromEntries(catalog.list().assets.map(entry => [entry.name, entry]));
+  assert.equal(entries['room.hdr'].kind, 'environment');
+  assert.equal(entries['grade.cube'].kind, 'look');
+  assert.deepEqual(await catalog.read(entries['room.hdr'].assetId), radiance);
+});
+
+test('an .hdr that is not Radiance data and a .cube that is not a 3D look are refused', async context => {
+  const { directory } = await fixture(context);
+  await writeFile(join(directory, 'fake.hdr'), Buffer.alloc(64, 1));
+  await assert.rejects(createAgentAssetCatalog(directory), /Radiance/);
+  await rm(join(directory, 'fake.hdr'));
+  await writeFile(join(directory, 'fake.cube'), 'LUT_1D_SIZE 2\n0 0 0\n1 1 1\n'.padEnd(64, ' '));
+  await assert.rejects(createAgentAssetCatalog(directory), /LUT_3D_SIZE/);
+});
