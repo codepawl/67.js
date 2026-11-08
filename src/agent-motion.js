@@ -15,6 +15,29 @@ const PROPERTIES = {
   camera: { eye: 3, target: 3, fov: 1, roll: 1 },
   // An imported asset's morph target weight, addressed by the target's name.
   morph: { weight: 1 },
+  // A light of the scene, addressed as point:N, spot:N or area:N (its index in environment.pointLights and so on). Spot and area lights also take direction.
+  light: { position: 3, direction: 3, color: 3, intensity: 1 },
+  // The key light of the environment: lightDirection, keyColor, keyIntensity.
+  sun: { direction: 3, color: 3, intensity: 1 },
+  // Sky, fog and ambient values of the environment. volumeFogDensity is environment.volumeFog.density; environmentIntensity and
+  // environmentRotation (radians) dim and turn the sky map that shows when environment.world is true.
+  environment: { skyTop: 3, skyBottom: 3, fogColor: 3, fogDensity: 1, volumeFogDensity: 1, ambientIntensity: 1, fillIntensity: 1, environmentIntensity: 1, environmentRotation: 1 },
+  // Frame effects: exposure, and the focus distance of the depth of field (needs effects.depthOfField.blur above 0).
+  effects: { exposure: 1, focusDistance: 1 },
+};
+// Kinds with one target in the scene, so a track names no ID.
+const SINGLETON_KINDS = new Set(['camera', 'sun', 'environment', 'effects']);
+const LOOK_KINDS = new Set(['light', 'sun', 'environment', 'effects']);
+const LIGHT_LISTS = { point: 'pointLights', spot: 'spotLights', area: 'areaLights' };
+const LIGHT_DIRECTION_TYPES = new Set(['spot', 'area']);
+const LOOK_RANGES = {
+  light: { position: [-1e6, 1e6], direction: [-1e6, 1e6], color: [0, 1], intensity: [0, 1e5] },
+  sun: { direction: [-1e6, 1e6], color: [0, 1000], intensity: [0, 100] },
+  environment: {
+    skyTop: [0, 1], skyBottom: [0, 1], fogColor: [0, 1], fogDensity: [0, 10], volumeFogDensity: [0, 1000],
+    ambientIntensity: [0, 100], fillIntensity: [0, 100], environmentIntensity: [0, 100], environmentRotation: [-100, 100],
+  },
+  effects: { exposure: [0.01, 16], focusDistance: [0.01, 100000] },
 };
 const INTERPOLATIONS = ['LINEAR', 'STEP', 'SMOOTH', 'CUBICSPLINE'];
 const MAX_IK_SOLVERS = 16;
@@ -42,6 +65,13 @@ function validateValue(kind, property, value) {
   }
   if (kind === 'morph' && components.some(component => component < 0 || component > 1)) {
     throw new RangeError('Motion morph weight must stay within zero and one.');
+  }
+  const range = LOOK_RANGES[kind]?.[property];
+  if (range && components.some(component => component < range[0] || component > range[1])) {
+    throw new RangeError(`Motion ${kind} ${property} must stay within ${range[0]} and ${range[1]}.`);
+  }
+  if (property === 'direction' && Math.hypot(...components) < 1e-6) {
+    throw new RangeError(`Motion ${kind} direction needs a length of at least 0.000001; a blend between opposite directions passes through zero.`);
   }
   if (kind === 'camera' && property === 'fov' && (Math.fround(value) <= 0 || Math.fround(value) >= 180)) {
     throw new RangeError('Motion fov must stay between zero and 180 at Float32 precision.');
@@ -88,6 +118,32 @@ function normalizedKeyframe(keyframe, track, duration, interpolation) {
     throw new TypeError('Tangents require CUBICSPLINE interpolation.');
   }
   return result;
+}
+
+/** The light IDs a recipe's environment has, such as point:0, spot:0 and area:1. */
+function lightIds(environment) {
+  return Object.entries(LIGHT_LISTS).flatMap(([type, field]) => (environment[field] ?? []).map((_, index) => `${type}:${index}`));
+}
+
+/** Checks that a light, sun, environment or effects track names something the scene has. */
+function checkLookTarget(track, recipe) {
+  const { kind, id, property } = track;
+  if (!LOOK_KINDS.has(kind)) return;
+  if (!recipe.environment || !recipe.effects) {
+    throw new RangeError(`Motion ${kind} tracks move the lights, sky and effects of a scene recipe; an imported asset has none.`);
+  }
+  if (kind === 'light') {
+    const ids = lightIds(recipe.environment);
+    if (!ids.includes(id)) {
+      throw new RangeError(`Motion light was not found: ${JSON.stringify(id)}. Lights of this scene: ${ids.join(', ') || 'none'}. The sun is a sun track.`);
+    }
+    if (property === 'direction' && !LIGHT_DIRECTION_TYPES.has(id.split(':')[0])) {
+      throw new RangeError(`Motion light ${id} has no direction; only spot and area lights do. A point light takes position, color and intensity.`);
+    }
+  }
+  if (kind === 'effects' && property === 'focusDistance' && !(recipe.effects.depthOfField?.blur > 0)) {
+    throw new RangeError('Motion focusDistance needs effects.depthOfField.blur above 0. A camera with an fStop focuses on its target, so move the camera target track instead.');
+  }
 }
 
 function nodeIdFrom(value, nodes, label) {
@@ -318,22 +374,24 @@ export function normalizeAgentMotion(input, recipe) {
   const tracks = inputTracks.map((track, index) => {
     knownKeys(track, ['kind', 'id', 'property', 'interpolation', 'keyframes'], 'motion track');
     if (!Object.hasOwn(PROPERTIES, track.kind) || !Object.hasOwn(PROPERTIES[track.kind], track.property)) {
-      throw new RangeError('Unsupported motion target or property.');
+      const known = Object.hasOwn(PROPERTIES, track.kind) ? ` ${track.kind} properties: ${Object.keys(PROPERTIES[track.kind]).join(', ')}.` : ` Kinds: ${Object.keys(PROPERTIES).join(', ')}.`;
+      throw new RangeError(`Unsupported motion target or property.${known}`);
     }
-    if (track.kind === 'camera') {
+    if (SINGLETON_KINDS.has(track.kind)) {
       if (Object.hasOwn(track, 'id')) {
-        throw new TypeError('Camera tracks cannot have an ID.');
+        throw new TypeError(`${track.kind[0].toUpperCase()}${track.kind.slice(1)} tracks cannot have an ID.`);
       }
     } else {
       if (typeof track.id !== 'string' || !track.id.trim() || track.id.length > 128) {
         throw new TypeError('Motion target IDs need 1 to 128 characters.');
       }
       const references = track.kind === 'node' ? nodes : track.kind === 'morph' ? morphTargets : materials;
-      if (!references.has(track.id)) {
+      if (track.kind !== 'light' && !references.has(track.id)) {
         const hint = track.kind === 'morph' ? ` Morph targets of this asset: ${[...morphTargets].slice(0, 24).join(', ') || 'none'}.` : '';
         throw new RangeError(`Motion target was not found: ${track.id}.${hint}`);
       }
     }
+    checkLookTarget(track, recipe);
     const identity = JSON.stringify([track.kind, track.id ?? null, track.property]);
     if (identities.has(identity)) {
       throw new RangeError('Duplicate motion target property.');
@@ -359,7 +417,7 @@ export function normalizeAgentMotion(input, recipe) {
       interpolation,
       keyframes: clip.tracks[0].keyframes.map(keyframe => copiedKeyframe(keyframe, interpolation)),
     };
-    if (track.kind !== 'camera') {
+    if (!SINGLETON_KINDS.has(track.kind)) {
       result.id = track.id;
     }
     return result;
@@ -521,6 +579,43 @@ function constrainedNodeIds(motion) {
   return new Set([...driven, ...(motion.constraints ?? []).map(constraint => constraint.node)]);
 }
 
+/** An environment (a clone the caller may change) with the light, sun and sky values a sampled motion sets. */
+export function motionEnvironment(environment, sampled) {
+  for (const [id, patch] of sampled.lights) {
+    const [type, index] = id.split(':');
+    Object.assign(environment[LIGHT_LISTS[type]][Number(index)], copiedPatch(patch));
+  }
+  if (sampled.sun) {
+    const { direction, color, intensity } = copiedPatch(sampled.sun);
+    if (direction) environment.lightDirection = direction;
+    if (color) environment.keyColor = color;
+    if (intensity !== undefined) environment.keyIntensity = intensity;
+  }
+  if (sampled.environment) {
+    const { volumeFogDensity, ...fields } = copiedPatch(sampled.environment);
+    Object.assign(environment, fields);
+    if (volumeFogDensity !== undefined) environment.volumeFog.density = volumeFogDensity;
+  }
+  return environment;
+}
+
+/** Effects (a clone the caller may change) with the exposure and focus distance a sampled motion sets. */
+export function motionEffects(effects, sampled) {
+  const { exposure, focusDistance } = sampled.effects;
+  if (exposure !== undefined) effects.exposure = exposure;
+  if (focusDistance !== undefined) effects.depthOfField.focusDistance = focusDistance;
+  return effects;
+}
+
+/** True when a sample moves a light, the sky or the effects, which the scene then reads through the two functions above. */
+export function motionMovesLook(sampled) {
+  return Boolean(sampled && (sampled.lights.size || sampled.sun || sampled.environment || sampled.effects));
+}
+
+function copiedPatch(patch) {
+  return Object.fromEntries(Object.entries(patch).map(([property, value]) => [property, typeof value === 'number' ? value : Array.from(value)]));
+}
+
 /** Retains published maps and vectors. A failed sample leaves them unchanged. */
 export function compileAgentMotion(input, recipe) {
   const motion = normalizeAgentMotion(input, recipe);
@@ -528,6 +623,7 @@ export function compileAgentMotion(input, recipe) {
     return null;
   }
   const ordinaryTracks = motion.tracks.filter(track => track.kind !== 'camera');
+  // Light, sun, environment and effects patches are allocated once here; the scene reads them through lookAt functions below.
   const clip = createAnimationClip({
     duration: motion.duration,
     loop: motion.loop,
@@ -539,14 +635,20 @@ export function compileAgentMotion(input, recipe) {
     })),
   });
   const sampler = compileAnimationSampler(clip);
-  const output = { nodes: new Map(), materials: new Map(), morphs: new Map(), camera: null };
-  const patchesByKind = { node: output.nodes, material: output.materials, morph: output.morphs };
+  const output = { nodes: new Map(), materials: new Map(), morphs: new Map(), lights: new Map(), sun: null, environment: null, effects: null, camera: null };
+  const patchesByKind = { node: output.nodes, material: output.materials, morph: output.morphs, light: output.lights };
   const bindings = ordinaryTracks.map((track, index) => {
-    const patches = patchesByKind[track.kind];
-    if (!patches.has(track.id)) {
-      patches.set(track.id, {});
+    let patch;
+    if (LOOK_KINDS.has(track.kind) && track.kind !== 'light') {
+      output[track.kind] ??= {};
+      patch = output[track.kind];
+    } else {
+      const patches = patchesByKind[track.kind];
+      if (!patches.has(track.id)) {
+        patches.set(track.id, {});
+      }
+      patch = patches.get(track.id);
     }
-    const patch = patches.get(track.id);
     const size = PROPERTIES[track.kind][track.property];
     patch[track.property] = size === 1 ? 0 : new Float64Array(size);
     return { track, patch, staged: sampler.tracks[index].output };
