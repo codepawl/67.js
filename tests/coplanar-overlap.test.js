@@ -144,6 +144,42 @@ test('a flush pair of finely tessellated parts is found, with no cap on the tria
   assert.ok(overlaps[0].area > 90);
 });
 
+function movedPart(part, name, x, z) {
+  const matrix = new Float32Array(part.matrix);
+  matrix[12] = x;
+  matrix[14] = z;
+  return { ...part, name, matrix };
+}
+
+test('one large part against many small flush parts finds every pair within a small work budget', () => {
+  const floor = gridPart('floor', 100, 200, 0);
+  const tile = gridPart('tile', 1, 1, 0.0005);
+  const tiles = Array.from({ length: 300 }, (unused, index) => movedPart(tile, `tile${index}`, (index % 20) * 4 + 1, Math.floor(index / 20) * 4 + 1));
+  const { overlaps, truncated, work } = findCoplanarOverlaps([floor, ...tiles]);
+  assert.equal(truncated, false);
+  assert.equal(overlaps.length, 300);
+  assert.ok(overlaps.every(overlap => overlap.larger.name === 'floor'));
+  assert.ok(work < 1_000_000);
+});
+
+test('thousands of parts that touch no common plane cost no part-pair work', () => {
+  const crowd = Array.from({ length: 3000 }, (unused, index) => movedPart(gridPart('box', 1, 1, 0.1 * (index % 700)), `crowd${index}`, (index % 60) * 0.5, Math.floor(index / 60) * 0.5));
+  const flush = movedPart(gridPart('box', 1, 1, 0.0004), 'flushWithFirst', 0, 0);
+  const { overlaps, truncated, work } = findCoplanarOverlaps([...crowd, flush]);
+  assert.equal(truncated, false);
+  assert.ok(overlaps.some(overlap => overlap.smaller.name === 'flushWithFirst' || overlap.larger.name === 'flushWithFirst'));
+  assert.ok(work < 1_000_000);
+});
+
+test('hundreds of copies parked at one spot cost two parts, not every pair among them', () => {
+  const mote = gridPart('mote', 1, 1, 0);
+  const parked = Array.from({ length: 600 }, (unused, index) => ({ ...mote, name: `mote${index}` }));
+  const { overlaps, truncated, work } = findCoplanarOverlaps(parked);
+  assert.equal(truncated, false);
+  assert.equal(overlaps.length, 1);
+  assert.ok(work < 100);
+});
+
 test('flush parts get a layer beside the part, so the part objects and updateParts keep working', () => {
   const road = gridPart('roadTwo', 4, 4, 0);
   const marking = gridPart('markingTwo', 2, 2, 0);
