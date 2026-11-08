@@ -48,3 +48,20 @@ export function buildNativeInput(scene, camera, options, pack) {
     parameters: writeParameters(scene, camera, options, lights.count, atlas.width),
   };
 }
+
+// The words of the parameter block the texel entry reads: the texel count where an image holds its width, and the sample
+// count in the third word after the seed and the atlas width.
+const TEXEL_SAMPLES_WORD = 46;
+const NO_CAMERA = { eye: [0, 0, 0], forward: [0, 0, -1], right: [1, 0, 0], above: [0, 1, 0], halfWidth: 1, halfHeight: 1 };
+
+/**
+ * The tables of a light bake: the scene without a camera, with the texel count and the sample count in the parameter block.
+ * `options` holds `texelCount`, `samples`, `bounces`, `seed` and `fireflyClamp`; `pack` is as for `buildNativeInput`.
+ */
+export function buildNativeTexelInput(scene, options, pack) {
+  // The bake's `bounces` counts the leg that leaves the texel; the kernel counts the bounces after its first hit.
+  const input = buildNativeInput(scene, NO_CAMERA, { ...options, bounces: options.bounces - 1, width: options.texelCount, height: 1 }, pack);
+  const words = new Uint32Array(input.parameters.buffer, input.parameters.byteOffset, input.parameters.byteLength / 4);
+  words[TEXEL_SAMPLES_WORD] = options.samples;
+  return input;
+}

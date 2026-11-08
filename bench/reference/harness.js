@@ -183,7 +183,9 @@ async function bakeScene(scene, bakeOptions) {
   const { pointLights, keyColor, lightDirection } = scene.environment;
   const started = performance.now();
   // A scene as large as a hall can need its own texel density to stay under the bake's texel limit.
-  const baked = await bakeLightmapsAsync(scene.parts, { pointLights, keyColor, lightDirection }, { ...scene.bakeOptions, ...bakeOptions });
+  // The native backend traces in the host process; bake-compare.mjs exposes it to the page.
+  const texelTracer = bakeOptions.backend === 'native' ? (await import('/scripts/native-bake-page.js')).traceTexelsOnNative : undefined;
+  const baked = await bakeLightmapsAsync(scene.parts, { pointLights, keyColor, lightDirection }, { ...scene.bakeOptions, ...bakeOptions, texelTracer });
   return { parts: baked.parts, report: baked.report, seconds: (performance.now() - started) / 1000 };
 }
 

@@ -18,3 +18,16 @@ const { rgba, adapter, tracedSeconds } = traceNative(input, options);
 ```
 
 `rgba` is linear float RGBA, rows from the top, averaged over the samples. `albedo` and `normal` (three floats per pixel, normalise the normal), `depth` and `variance` (one float) are the first-hit features the wavelet and OIDN denoisers read. `pack-input.mjs` holds `buildNativeInput` without Node imports, so the job page packs the scene itself. `bench/native-tracer` compares it with the browser kernel.
+
+`traceNative` also takes `maxSeconds`: the trace stops with an error ("passed its time limit") once it has run that long. Alpha cutouts are traced by stepping through transparent texels in the kernel (the acceleration structure is opaque).
+
+The light bake uses the texel entry of the same kernel:
+
+```js
+import { buildNativeTexelInput, traceNativeTexels } from '@codepawlhq/67js-render-native';
+
+const input = buildNativeTexelInput(traceScene, { texelCount, samples: 256, bounces: 3, seed: 1, fireflyClamp: 1e6 }, pack);
+const { radiance, escaped } = traceNativeTexels(input, { count: texelCount, points, normals }, { samples: 256 });
+```
+
+`radiance` is the mean light that reaches each texel (three floats per texel) and `escaped` the share of first rays that left the scene. The agent runtime uses it for recipe bakes (`bake.backend: "native"`).
