@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/banner.jpg" alt="67js: a WebGL2 3D engine that AI agents drive, over a Bistro street rendered by it" width="100%"></a>
+  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/banner.jpg" alt="67js: 3D engine that AI agents drive, over a Bistro street rendered by it" width="100%"></a>
 </p>
 
 <p align="center">
