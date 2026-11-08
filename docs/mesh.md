@@ -269,7 +269,16 @@ Uses:
   expressions evaluated on the input positions, so vertex order never matters. It moves the vertices of the selected faces.
 - `displace` (`select`, `field`, `strength`, `midlevel`, `direction`) is Blender's Displace modifier with a field as
   the texture: each vertex moves by `(field - midlevel) * strength` along `normal` (default), `x`, `y` or `z`.
+  `displace` also takes `group`, the name of a vertex group: each move is scaled by the vertex's weight.
 - Both are also stack nodes, so a late change reuses the cached earlier nodes.
+- `vertex_group` (`name`, `select`, and one of `weight`, `field` or `gradient`) writes the weights, 0 to 1, of a named group for the
+  vertices of the selected faces; the others keep theirs (0 in a new group). `gradient` is `{ "axis": "y", "range": [0, 1], "weights": [0, 1] }`,
+  a straight blend between the weights at the two ends of the range along the axis. Up to 32 groups. `displace` reads one with
+  `group`, and a cloth sheet holds the vertices of weight 0.5 or more with `pinGroup` (see [physics.md](physics.md)). Groups are
+  point attributes: run `vertex_group` after the shape edits, because a stack node that rebuilds the mesh (`mirror`, `array`) drops them.
+- `vertex_color` (`select`, and one of `color`, `field` or `gradient`) sets the corner colors of the selected faces. `color` is
+  `[r, g, b]` from 0 to 1, `field` a vector expression of the vertex, and `gradient` is `{ "axis": "y", "range": [0, 1], "colors": [[0, 0, 1], [1, 0, 0]] }`.
+  The renderer multiplies the material color by it and a GLB export writes it as `COLOR_0`. Faces not selected stay white until painted.
 - `instances` on a recipe node repeats its geometry at points; see [agent-scene.md](agent-scene.md#instances-on-points).
 
 Blender comparison: `tests/blender-golden.test.js` runs `set_position` against a Geometry Nodes Set Position node

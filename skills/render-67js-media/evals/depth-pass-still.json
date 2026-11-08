@@ -1,0 +1,15 @@
+{
+  "name": "depth-pass-still",
+  "skills": ["render-67js-media"],
+  "prompt": "Using the 67js MCP tools and the render-67js-media skill: create a scene with a ground slab and a box, look at it, then render a 640x360 PNG still that also writes a depth pass. Wait for the job to finish, read its result, release it, and finish by calling scene_export_recipe. Keep it short.",
+  "expected": "scene_render_submit was called with kind image and passes including depth, status was polled, the result was read and the job released.",
+  "timeoutSeconds": 600,
+  "checks": [
+    { "label": "looked before submitting", "toolCalled": "scene_look" },
+    { "label": "submitted an image job", "toolInputIncludes": { "tool": "scene_render_submit", "text": "\"kind\":\"image\"" } },
+    { "label": "asked for a depth pass", "toolInputIncludes": { "tool": "scene_render_submit", "text": "depth" } },
+    { "label": "polled status", "toolCalled": "scene_render_status" },
+    { "label": "read the result", "toolCalled": "scene_render_result" },
+    { "label": "released the job", "toolCalled": "scene_render_release" }
+  ]
+}
