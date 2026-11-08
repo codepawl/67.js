@@ -1,5 +1,6 @@
 import { buildMegakernelSource, PATH_STATE_VECTORS, WAVEFRONT_SOURCE, WAVEFRONT_WORKGROUP_SIZE, WORKGROUP_SIZE } from './path-tracer-webgpu-kernel.js';
-import { packAtlas, packEnvironment, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
+import { resolveLightSelection } from './path-tracer-light-tree.js';
+import { packAtlas, packEnvironment, packLightTree, packLights, packMaterials, packNodes, packSubsurface, packTriangles, sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
 
 // The WebGPU backend of the path tracer (issue #625): the same scene tables, camera, options and random numbers as the
 // WebGL2 backend (path-tracer-gpu.js) go in, the same buffers come out. The tracer is WGSL compute, so a page needs
@@ -114,9 +115,17 @@ function atlasWords(atlas) {
   return new Uint32Array(atlas.data.buffer, atlas.data.byteOffset, Math.floor(atlas.data.byteLength / 4));
 }
 
-function uploadScene(device, scene) {
+function uploadScene(device, scene, requestedLightSelection = 'uniform') {
   const atlas = packAtlas(scene.materials);
   const lights = packLights(scene.lights);
+  // With the light tree the node table follows the light table in the same buffer; treeBase is the vector index of its first node.
+  const useLightTree = resolveLightSelection(requestedLightSelection, scene.lights) === 'tree' && lights.count > 1;
+  const lightTableData = lights.table.data;
+  const lightTreeBase = useLightTree ? lightTableData.length / 4 : 0;
+  const lightTreeData = useLightTree ? packLightTree(scene.lights).data : new Float32Array(0);
+  const lightsWithTree = new Float32Array(lightTableData.length + lightTreeData.length);
+  lightsWithTree.set(lightTableData);
+  lightsWithTree.set(lightTreeData, lightTableData.length);
   const environment = packEnvironment(scene.environment);
   const environmentTables = new Float32Array(environment ? environment.height + environment.width * environment.height : 4);
   if (environment) {
@@ -134,12 +143,12 @@ function uploadScene(device, scene) {
     createStorageBuffer(device, packNodes(scene.bvh).data, 'bvh nodes'),
     createStorageBuffer(device, packTriangles(scene).data, 'triangles'),
     createStorageBuffer(device, materialsWithSubsurface, 'materials'),
-    createStorageBuffer(device, lights.table.data, 'lights'),
+    createStorageBuffer(device, lightsWithTree, 'lights'),
     createStorageBuffer(device, atlasWords(atlas), 'texture atlas'),
     createStorageBuffer(device, environment?.colors ?? new Float32Array(4), 'environment colors'),
     createStorageBuffer(device, environmentTables, 'environment tables'),
   ];
-  return { buffers, lightCount: lights.count, atlasWidth: atlas.width, subsurfaceOffset };
+  return { buffers, lightCount: lights.count, lightTreeBase, atlasWidth: atlas.width, subsurfaceOffset };
 }
 
 /** The words of one uniform block: the 12 vectors of the megakernel parameters, then the tile and shadow slot words. */
@@ -158,7 +167,7 @@ function createParameterTemplate(scene, camera, options, uploaded, emitterCount)
   floats.set([...(sun?.color ?? [0, 0, 0]), Math.cos(Math.PI / 360)], 20);
   floats.set([environment?.width ?? 1, environment?.height ?? 1, environment?.intensity ?? 1, environment?.total ?? 1], 24);
   floats.set([environment?.cosine ?? 1, environment?.sine ?? 0, scene.surfaceOffset, scene.farDistance], 28);
-  floats.set([camera.halfWidth, camera.halfHeight, options.fireflyClamp, 0], 32);
+  floats.set([camera.halfWidth, camera.halfHeight, options.fireflyClamp, uploaded.lightTreeBase], 32);
   integers.set([options.width, options.height, options.bounces, uploaded.lightCount], 36);
   integers.set([emitterCount, sun ? 1 : 0, environment ? 1 : 0, 0], 40);
   unsigned.set([options.seed >>> 0, uploaded.atlasWidth, uploaded.subsurfaceOffset, 0], 44);
@@ -271,7 +280,7 @@ export async function traceOnWebGpu(scene, camera, options, shouldStop) {
   if (planeBytes * 4 > device.limits.maxStorageBufferBindingSize) {
     throw new RangeError(`A ${width} by ${height} image is too large for this WebGPU adapter. Lower the size or use backend "gpu".`);
   }
-  const uploaded = uploadScene(device, scene);
+  const uploaded = uploadScene(device, scene, options.lightSelection);
   const emitterCount = (scene.lights.sun ? 1 : 0) + uploaded.lightCount + (scene.environment ? 1 : 0);
   const shadowSlots = Math.max(emitterCount, 1);
   const materialCount = scene.materials.length;
