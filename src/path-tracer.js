@@ -407,13 +407,20 @@ function occluded(scene, originX, originY, originZ, directionX, directionY, dire
   let startY = originY;
   let startZ = originZ;
   let remaining = limit;
+  // An any-hit trace returns the first hit traversal meets, not the nearest. A solid one shadows the point wherever it lies;
+  // a transparent one says nothing about what sits before it, so the walk then retraces for nearest hits and steps through.
+  let anyHit = true;
   for (let attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
-    const found = scene.tracer.trace(startX, startY, startZ, directionX, directionY, directionZ, remaining, true);
+    const found = scene.tracer.trace(startX, startY, startZ, directionX, directionY, directionZ, remaining, anyHit);
     if (found.nearestTriangle < 0) return false;
     // Only a cutout material needs its texture read to know whether the ray passes through: skip the interpolation for the rest.
     if (scene.materials[scene.triangleMaterial[found.nearestTriangle]].alphaCutoff === 0) return true;
     const alpha = fillHit(scene, found.nearestTriangle, startX, startY, startZ, directionX, directionY, directionZ, found.nearestDistance, hit);
     if (alpha >= hit.material.alphaCutoff) return true;
+    if (anyHit) {
+      anyHit = false;
+      continue;
+    }
     const advance = found.nearestDistance + scene.surfaceOffset;
     remaining -= advance;
     if (remaining <= 0) return false;
