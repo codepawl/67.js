@@ -425,13 +425,14 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         frameReceiver = createFrameReceiver({ maximumBytes: width * height * 4 });
         activeFrameReceiver = frameReceiver;
         const frameSocketUrl = `ws://127.0.0.1:${httpServer.address().port}${frameReceiver.path}`;
-        if (settings.encoder === 'nvenc') {
+        // A path traced frame is a PNG made outside the page's drawing buffer, so the browser encoder has nothing to encode.
+        if (settings.encoder === 'nvenc' && !settings.renderer) {
           const pageEncoder = await startVideoEncoderInPage(jobPage, frameSocketUrl,
             { width, height, fps: settings.fps, quantizer: DEFAULT_PAGE_ENCODER_QUANTIZER });
           pageEncodes = pageEncoder.supported;
         }
         encoder = createFrameEncoder({ executable: ffmpeg, output: join(directory, 'render.mp4.partial'),
-          fps: settings.fps, format: pageEncodes ? 'h264' : 'jpeg', width, height, signal, maximumFrameBytes: MAXIMUM_JOB_FRAME_BYTES, backend: settings.encoder === 'nvenc' ? 'gpu' : 'cpu',
+          fps: settings.fps, format: pageEncodes ? 'h264' : settings.renderer ? 'png' : 'jpeg', width, height, signal, maximumFrameBytes: MAXIMUM_JOB_FRAME_BYTES, backend: settings.encoder === 'nvenc' ? 'gpu' : 'cpu',
           audioArguments: settings.audio ? audioInputArguments(audio.path, settings.audio.offset) : [],
           audioCodec: settings.audio?.track === 'pcm' ? 'pcm' : 'aac' });
         if (pageEncodes) frameReceiver.onChunk(chunk => encoder.writeChunk(chunk));
@@ -455,8 +456,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           ...(settings.animation ? { animation: { clip: settings.animation.clip, time: settings.animation.start + elapsed } } : {}) };
         const renderStarted = performance.now();
         if (settings.renderer) {
+          const { type, ...tracerOptions } = settings.renderer;
+          if (settings.renderer.backend === 'gpu' && backend === 'cpu') throw new Error('renderer.backend "gpu" needs a runtime on the GPU backend, and this one runs on SwiftShader.');
           const choice = await chooseDenoiser(settings.renderer.denoise);
-          let traced = await jobPage.evaluate(input => window.__agentPreview.pathTrace(input), { ...frameInput, options: { width, height, ...settings.renderer, denoise: choice.denoise, threads: PATH_TRACER_THREADS } });
+          let traced = await jobPage.evaluate(input => window.__agentPreview.pathTrace(input), { ...frameInput, options: { width, height, ...tracerOptions, denoise: choice.denoise, threads: PATH_TRACER_THREADS } });
           if (traced.features) {
             traced = await finishWithOidn({ traced, denoiser: choice.denoiser, drawLinear: input => jobPage.evaluate(drawInput => window.__agentPreview.finishPathTrace(drawInput), input) });
           }
@@ -466,10 +469,15 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           metrics.height = height;
           metrics.pathTracer = traced.report;
           const tracedBytes = Buffer.from(traced.data, 'base64');
-          if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced image exceeded 12 MiB.');
-          await writeFile(join(directory, 'render.png.partial'), tracedBytes, { flag: 'wx' });
-          artifacts.push({ temporary: 'render.png.partial', filename: 'render.png', mimeType: 'image/png' });
-          await progress({ frames: 1, maximumPendingFrames: 1 });
+          if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced frame exceeded 12 MiB.');
+          if (encoder) {
+            await encoder.writeFrame(tracedBytes);
+          } else {
+            const filename = settings.kind === 'image' ? 'render.png' : `frame-${frame}.png`;
+            await writeFile(join(directory, `${filename}.partial`), tracedBytes, { flag: 'wx' });
+            artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: 'image/png' });
+          }
+          await progress({ frames: frame + 1, maximumPendingFrames: 1 });
           continue;
         }
         // A video frame is read in the same task as its draw, because the browser clears the drawing buffer after presenting.

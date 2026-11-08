@@ -191,6 +191,13 @@ function getContext() {
   return session;
 }
 
+let kernelCompileCount = 0;
+
+/** How many path tracing kernels (the light bake's texel kernel not counted) this page has compiled so far: a job of many frames compiles one, because every frame reuses the cached program. */
+export function gpuKernelCompileCount() {
+  return kernelCompileCount;
+}
+
 /** The kernel for a scene, compiled once per variant: a scene with a subsurface part gets the random walk, any other scene the plain kernel. */
 function getKernel(hasSubsurface, texelBake = false) {
   const { gl, programs } = getContext();
@@ -200,6 +207,7 @@ function getKernel(hasSubsurface, texelBake = false) {
     const program = createProgram(gl, { hasSubsurface, texelBake });
     gl.getProgramParameter(program, gl.LINK_STATUS);
     programs.set(key, { program, compileSeconds: (performance.now() - started) / 1000 });
+    if (!texelBake) kernelCompileCount++;
   }
   return programs.get(key);
 }
