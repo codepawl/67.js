@@ -127,14 +127,14 @@ A seek to any frame gives the same pixels: a job samples each frame from its tim
 
 ## Path tracer
 
-An `image` job can ask for the offline [path tracer](https://github.com/codepawl/67.js/blob/main/docs/path-tracer.md) with `settings.renderer`:
+An `image`, `stills` or `video` job can ask for the offline [path tracer](https://github.com/codepawl/67.js/blob/main/docs/path-tracer.md) with `settings.renderer`:
 
 ```json
 { "kind": "image", "width": 960, "height": 540,
-  "renderer": { "type": "pathTracer", "samples": 64, "bounces": 8, "denoise": true, "seed": 0, "maxSeconds": 120 } }
+  "renderer": { "type": "pathTracer", "backend": "gpu", "samples": 64, "bounces": 8, "denoise": true, "seed": 0, "maxSeconds": 120 } }
 ```
 
-Every field after `type` is optional. Limits: `samples` 1 to 1024, `bounces` 1 to 16, `seed` 0 to 2147483647, `maxSeconds` 1 to 600 (the job's deadline is `maxSeconds` plus 60 seconds; a 1920 by 1080 still of a 180,000 triangle room at 64 samples took 246 s, so give a large still `maxSeconds` 600). `passes` and the other kinds are refused with it. The tracer loads in the job page on demand, uses eight threads at below-normal priority, stops pixels that have converged (`report.averageSamples`), and writes `render.png`; `scene_render_result` metrics carry `pathTracer` with the samples, threads, seconds and what the scene asked for that was not drawn. The same recipe and seed give the same PNG. A job that passes `maxSeconds` fails and writes no image.
+Every field after `type` is optional. `backend` is `cpu` (the default, byte-identical on SwiftShader smokes) or `gpu`, which traces in a WebGL2 shader and needs a runtime started on the GPU backend (a `--backend cpu` runtime refuses it). The report in `metrics.pathTracer` names the `backend` that ran, the `gpu`, `gpuCompileSeconds` and `gpuKernelCompiles`. A `stills` or `video` job traces every frame with the same options: the kernel compiles once per job page and each frame reuses it, so a film shows `gpuKernelCompiles: 1`. A video of traced frames goes through the ffmpeg encoder (the browser H.264 encoder has no drawn frame to read), `maxSeconds` limits each frame, and the job deadline is `maxSeconds` times the frame count plus 60 seconds, up to the job ceiling. Limits: `samples` 1 to 1024, `bounces` 1 to 16, `seed` 0 to 2147483647, `maxSeconds` 1 to 600 (the job's deadline is `maxSeconds` plus 60 seconds; a 1920 by 1080 still of a 180,000 triangle room at 64 samples took 246 s, so give a large still `maxSeconds` 600). `passes` are refused with it. The tracer loads in the job page on demand, uses eight threads at below-normal priority, stops pixels that have converged (`report.averageSamples`), and writes `render.png`; `scene_render_result` metrics carry `pathTracer` with the samples, threads, seconds and what the scene asked for that was not drawn. The same recipe and seed give the same PNG. A job that passes `maxSeconds` fails and writes no image.
 
 ## Controller API
 

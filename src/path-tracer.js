@@ -1043,11 +1043,13 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   const threads = typeof Worker === 'function' ? options.threads : 1;
   let gpuName = null;
   let gpuCompileSeconds = 0;
+  let gpuKernelCompiles = 0;
   if (options.backend === 'gpu') {
-    const { traceOnGpu } = await import('./path-tracer-gpu.js');
+    const { traceOnGpu, gpuKernelCompileCount } = await import('./path-tracer-gpu.js');
     const traced = await traceOnGpu(scene, view, options, shouldStop);
     gpuName = traced.gpu;
     gpuCompileSeconds = traced.compileSeconds;
+    gpuKernelCompiles = gpuKernelCompileCount();
     copyBand(buffers, traced, 0, width);
   } else if (threads > 1) {
     await renderBandsInWorkers(scene, view, { ...options, threads }, buffers, shouldStop);
@@ -1064,7 +1066,7 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
     report: {
       width, height, samples: options.samples, bounces: options.bounces, seed: options.seed, denoised: options.denoiser === 'wavelet',
       denoiser: options.denoiser, threads,
-      backend: options.backend, ...(gpuName ? { gpu: gpuName, gpuCompileSeconds } : {}),
+      backend: options.backend, ...(gpuName ? { gpu: gpuName, gpuCompileSeconds, gpuKernelCompiles } : {}),
       averageSamples: totalSamples(samplesTaken) / pixelCount, noiseThreshold: options.noiseThreshold,
       triangles: scene.indices.length / 3, tracedSeconds, seconds: (performance.now() - started) / 1000,
       ignored: describeIgnoredFeatures(parts, environment),

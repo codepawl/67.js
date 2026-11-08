@@ -498,14 +498,22 @@ function useKernelWorkers() {
   return kernelWorkersAvailable() && globalThis.__67jsKernelWorkers !== 'off';
 }
 
-function buildSceneOffMainThread(recipe, options) {
+// A recipe bake runs on the GPU when the page has float render targets; the CPU bake stays the default everywhere else.
+async function pageKernelsFor(recipe, backend) {
+  if (!recipe.bake || backend !== 'gpu') return undefined;
+  const { gpuBakeKernels } = await import('../src/agent-bake-gpu.js');
+  return gpuBakeKernels();
+}
+
+async function buildSceneOffMainThread(recipe, options, backend) {
+  const pageKernels = await pageKernelsFor(recipe, backend);
   return buildWithKernels(() => {
     const scene = createAgentScene(recipe, {}, options);
     for (const part of scene.parts) {
       void part.material.map;
     }
     return scene;
-  });
+  }, { pageKernels });
 }
 
 function seekForExport(record, motionTime) {
@@ -817,7 +825,7 @@ window.__agentPreview = {
         finishBuildReport(startedAt);
         return createPreview(scene, input, undefined, undefined, sequenceFrames);
       }
-      return buildSceneOffMainThread(input.recipe, { sequenceFrames }).then(scene => {
+      return buildSceneOffMainThread(input.recipe, { sequenceFrames }, input.backend).then(scene => {
         finishBuildReport(startedAt);
         return createPreview(scene, input, undefined, undefined, sequenceFrames);
       });
