@@ -141,6 +141,9 @@ test('set-environment sets every optional volumeFog field on a recipe that did n
   assert.throws(() => scene.apply([{ type: 'set-environment', environment: { volumeFog: { mystery: 1 } } }], { expectedRevision: scene.revision }), /mystery/);
 });
 
+// The MCP schema names only the two fields agents use; the others stay reachable through the recipe, within the tool cost allowance.
+const MCP_VOLUME_FOG_PATCH = { scatterOctaves: 2, multiScatter: 0.6 };
+
 test('the MCP scene_create and scene_apply schemas accept the optional volumeFog fields', async () => {
   let scene;
   const runtime = {
@@ -164,10 +167,10 @@ test('the MCP scene_create and scene_apply schemas accept the optional volumeFog
   try {
     const created = await client.callTool({ name: 'scene_create', arguments: { recipe: coplanarRecipe() } });
     assert.notEqual(created.isError, true, created.content?.[0]?.text);
-    const applied = await client.callTool({ name: 'scene_apply', arguments: { expectedRevision: 0, operations: [{ type: 'set-environment', environment: { volumeFog: OPTIONAL_VOLUME_FOG_PATCH } }] } });
+    const applied = await client.callTool({ name: 'scene_apply', arguments: { expectedRevision: 0, operations: [{ type: 'set-environment', environment: { volumeFog: MCP_VOLUME_FOG_PATCH } }] } });
     assert.notEqual(applied.isError, true, applied.content?.[0]?.text);
     assert.equal(scene.environment.volumeFog.multiScatter, 0.6);
-    const atCreation = await client.callTool({ name: 'scene_create', arguments: { recipe: { ...coplanarRecipe(), environment: { volumeFog: OPTIONAL_VOLUME_FOG_PATCH } } } });
+    const atCreation = await client.callTool({ name: 'scene_create', arguments: { recipe: { ...coplanarRecipe(), environment: { volumeFog: MCP_VOLUME_FOG_PATCH } } } });
     assert.notEqual(atCreation.isError, true, atCreation.content?.[0]?.text);
   } finally {
     await client.close();

@@ -173,7 +173,7 @@ const cameraFields = {
 };
 const bounded = (minimum, maximum) => z.number().min(minimum).max(maximum);
 const boundedVector = (minimum, maximum) => z.tuple([bounded(minimum, maximum), bounded(minimum, maximum), bounded(minimum, maximum)]);
-const volumeFog = z.object({
+const volumeFog = z.strictObject({
   density: bounded(0, 10).optional(),
   minimum: boundedVector(-1e5, 1e5).optional(),
   maximum: boundedVector(-1e5, 1e5).optional(),
@@ -192,7 +192,9 @@ const volumeFog = z.object({
   contrast: bounded(0, 4).optional(),
   profileSoftness: bounded(0, 0.95).optional(),
   keyScattering: bounded(0, 10).optional(),
-}).catchall(z.number()); // The optional detail fields (scatterOctaves, multiScatter, ...) are named and ranged by the backend.
+  scatterOctaves: z.number().optional(),
+  multiScatter: z.number().optional(),
+});
 const affects = z.array(z.string()).optional();
 const iesProfile = z.any().optional();
 const lines = z.record(z.string(), z.unknown()).describe('Outlines, toon light and polylines as plain JSON; fields and limits in scene_capabilities lineArt. null clears.');
@@ -250,7 +252,7 @@ const environment = z.strictObject({
   skyBottom: color.optional(),
   fogColor: color.optional(),
   fogDensity: bounded(0, 10).optional(),
-  volumeFog: volumeFog.optional().describe('Directional scattering; needs HDR.'),
+  volumeFog: volumeFog.optional().describe('Light-shaft fog; needs HDR.'),
   liquid: liquidOptics.optional().describe('Optics for materials tagged liquid or foam.'),
   lines: lines.nullable().optional(),
   objectReflections: z.boolean().optional().describe("false turns off reflection probes on smooth metal parts."),
