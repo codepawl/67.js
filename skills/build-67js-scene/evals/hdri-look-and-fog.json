@@ -1,0 +1,42 @@
+{
+  "name": "hdri-look-and-fog",
+  "skills": [
+    "build-67js-scene"
+  ],
+  "prompt": "Using the 67js MCP tools and the build-67js-scene skill: make a small outdoor-style scene (a ground slab and a sphere). Light it with a catalog HDRI as the visible sky if one works (otherwise a light setup), apply a color look, and add volume fog with multiple scattering if the tools allow it (otherwise plain volume fog). Look at it, then finish by calling scene_export_recipe. If a call fails, do not loop: use the closest thing that works.",
+  "expected": "The agent called scene_asset_catalog and ends with a recipe that has a sky (environment.hdri or a setup), a color look, volume fog with density above 0, and a scene_look after the last edit. Strict target once issues 661 and 664 are fixed: hdri sky-clouds, look teal-orange, volumeFog.scatterOctaves 3.",
+  "checks": [
+    {
+      "label": "scene_asset_catalog called",
+      "toolCalled": "scene_asset_catalog"
+    },
+    {
+      "label": "a sky is chosen",
+      "anyOf": [
+        {
+          "path": "environment.hdri",
+          "op": "exists"
+        },
+        {
+          "path": "environment.setup",
+          "op": "exists"
+        }
+      ]
+    },
+    {
+      "label": "a color look is set",
+      "path": "environment.look",
+      "op": "exists"
+    },
+    {
+      "label": "volume fog is on",
+      "path": "environment.volumeFog.density",
+      "op": "gt",
+      "value": 0
+    },
+    {
+      "label": "scene_look after the last edit",
+      "lookAfterLastEdit": true
+    }
+  ]
+}

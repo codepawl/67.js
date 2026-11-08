@@ -1,3 +1,4 @@
+import { vertexGroupNames, vertexGroupWeights } from './mesh-data.js';
 import { cornerNormals } from './mesh-normals.js';
 import { cornerCycles, edgeCornerTable, UnionFind } from './mesh-topology.js';
 
@@ -152,6 +153,18 @@ function joinRenderCorners(renderSets, groupOfCorner, splitAttributes, first, se
   renderSets.union(first, second);
 }
 
+// Vertex group weights per render vertex, so cloth and other bakes can read a group by name. Absent when the mesh has none.
+function renderVertexGroups(mesh, renderVertexSource) {
+  const names = vertexGroupNames(mesh);
+  if (!names.length) return undefined;
+  const groups = {};
+  for (const name of names) {
+    const weights = vertexGroupWeights(mesh, name);
+    groups[name] = Float32Array.from(renderVertexSource, vertex => weights[vertex]);
+  }
+  return groups;
+}
+
 /**
  * Convert MeshData into renderer geometry: Float32 positions, normals, optional uvs and colors, Uint32 triangles.
  * Render vertices are shared between corners of one vertex unless a hard edge or a UV/colour seam separates them.
@@ -227,6 +240,8 @@ export function extractRender(mesh, { sharpAngle = Infinity } = {}) {
   const geometry = { positions, normals, indices };
   if (uvs) geometry.uvs = uvs;
   if (colors) geometry.colors = colors;
+  const vertexGroups = renderVertexGroups(mesh, renderVertexSource);
+  if (vertexGroups) geometry.vertexGroups = vertexGroups;
   return { geometry, renderVertexSource, cornerRenderVertex, triangleFaces };
 }
 
