@@ -8,7 +8,7 @@ import { frameDiagnostics } from '../src/frame-diagnostics.js';
 import { groupParts, Renderer67 } from '../src/renderer.js';
 import { resolveEffects } from '../src/effects.js';
 
-await loadAgentSceneModules({ environment: { resolveCoplanar: 'offset' } });
+await loadAgentSceneModules({ nodes: [{ id: 'any' }] });
 
 function node(id, translation, scale, extra = {}) {
   return { id, geometry: 'box', material: 'paint', translation, scale, ...extra };
@@ -20,7 +20,7 @@ function recipe(nodes, environment) {
     geometries: [{ id: 'box', type: 'box', bevel: 0 }],
     materials: [{ id: 'paint', color: [0.5, 0.5, 0.5] }],
     nodes,
-    ...(environment ? { environment } : {}),
+    environment: environment ?? { resolveCoplanar: false },
   };
 }
 
@@ -114,4 +114,20 @@ test('the check is bounded: a work budget ends the sweep and says so', () => {
   const result = findCoplanarOverlaps(scene.parts, { workBudget: 0 });
   assert.equal(result.truncated, true);
   assert.deepEqual(coplanarOverlapDiagnostics({ overlaps: [], truncated: true }), []);
+});
+
+test('a coplanar pair is offset by default and resolveCoplanar false opts out', () => {
+  const defaulted = createAgentScene({ ...recipe([wall, sign]), environment: {} });
+  assert.equal(depthLayerOf(defaulted.parts.find(part => part.name === 'sign')), 1);
+  assert.equal(depthLayerOf(defaulted.parts.find(part => part.name === 'wall')), 0);
+  const optedOut = createAgentScene(recipe([wall, sign], { resolveCoplanar: false }));
+  assert.equal(depthLayerOf(optedOut.parts.find(part => part.name === 'sign')), 0);
+});
+
+test('a scene with no coplanar pair keeps its parts untouched by default', () => {
+  const apart = [node('first', [0, 0, 0], [1, 1, 1]), node('second', [3, 0, 0], [1, 1, 1])];
+  const defaulted = createAgentScene({ ...recipe(apart), environment: {} });
+  const optedOut = createAgentScene(recipe(apart, { resolveCoplanar: false }));
+  assert.deepEqual(defaulted.parts.map(part => depthLayerOf(part)), optedOut.parts.map(part => depthLayerOf(part)));
+  assert.deepEqual(defaulted.parts.map(part => Object.keys(part).sort()), optedOut.parts.map(part => Object.keys(part).sort()));
 });

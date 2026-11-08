@@ -1251,11 +1251,11 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     return share !== null && share >= CLOSED_ROOM_SHARE ? [closedRoomDiagnostic(share, isLitByLampsOnly(state.recipe.environment))] : [];
   }
 
-  // environment.resolveCoplanar 'offset' puts the smaller part of each coplanar pair on the next depth layer, so the
-  // renderer draws it with a polygon offset. Geometry never moves. The result is kept while the parts are the same objects.
+  // The smaller part of each coplanar pair goes on the next depth layer, so the renderer draws it with a polygon offset.
+  // Geometry never moves. On by default; environment.resolveCoplanar false opts out. The result is kept while the parts are the same objects.
   let coplanarCache = null;
   function stageCoplanarOffsets(recipe, parts) {
-    if (recipe.environment.resolveCoplanar !== 'offset') {
+    if (recipe.environment.resolveCoplanar === false || !agentSceneModuleLoaded('coplanar')) {
       return parts;
     }
     if (coplanarCache?.parts === parts) {

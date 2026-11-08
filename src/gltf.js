@@ -1377,6 +1377,10 @@ export async function parseGltf(data, options = {}) {
       const skipped = warnings.filter(warning => warning.startsWith('Skipped '));
       throw new Error(`glTF scene contains no supported triangle meshes and no skin or animation.${skipped.length ? ` ${skipped.join(' ')}` : ''}`);
     }
+    if (options.resolveCoplanarFaces !== false && parts.some(part => !part.skin && !part.morph)) {
+      const { repairCoplanarFaces } = await import('./gltf-coplanar.js');
+      warnings.push(...repairCoplanarFaces(parts));
+    }
     const { lights, warnings: lightWarnings } = readPunctualLights(document, lightNodes);
     warnings.push(...lightWarnings);
     if (meshNamesWithIgnoredAlpha.size) {

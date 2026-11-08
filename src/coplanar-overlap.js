@@ -104,7 +104,7 @@ function planeDistance(first, second, corner) {
 
 // Projects a triangle to the plane's two largest axes, clips it against the other (Sutherland-Hodgman) and returns the
 // shared area in square metres.
-function sharedArea(first, second) {
+export function sharedArea(first, second) {
   const normal = first.normal.map(Math.abs);
   const dropped = normal.indexOf(Math.max(...normal));
   const axes = [0, 1, 2].filter(axis => axis !== dropped);
