@@ -1,7 +1,7 @@
 import { mat4, mat3 } from 'gl-matrix';
 import { box, cylinder, grid, sphere, torus } from './geometry.js';
 import { createSceneGraph } from './scene-graph.js';
-import { applyProjection } from './camera.js';
+import { applyProjection, validateCameraShift, CAMERA_LENS_FIELDS } from './camera.js';
 import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, agentEnvironmentMap } from './agent-look.js';
 import { agentSceneModule, agentSceneModuleLoaded } from './agent-scene-modules.js';
 import { MESH_SMOOTH_ANGLE_DEFAULT, CURVE_TEXT_LIMITS, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, MAX_MATERIAL_PATTERNS, RECIPE_ALPHA_MODES } from './agent-scene-capabilities.js';
@@ -29,7 +29,7 @@ const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
 const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
 const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', ...MATERIAL_LAYER_FIELDS];
 const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'boxMapScale', 'boxMapAxis'];
-const CAMERA_FIELDS = Object.keys(CAMERA_DEFAULTS);
+const CAMERA_FIELDS = [...Object.keys(CAMERA_DEFAULTS), ...CAMERA_LENS_FIELDS];
 const LOOK_OPERATION_FIELDS = Object.freeze({
   'set-environment': 'environment',
   'set-effects': 'effects',
@@ -333,9 +333,55 @@ function nodeFrom(value) {
   return result;
 }
 
+/** Sets the given camera fields on a camera; a focal length replaces fov and a fov replaces focal length and sensor, never both. */
+export function applyCameraFields(camera, fields) {
+  rejectFovWithFocalLength(fields);
+  for (const field of CAMERA_FIELDS) {
+    if (Object.hasOwn(fields, field)) camera[field] = fields[field];
+  }
+  if (Object.hasOwn(fields, 'focalLength')) delete camera.fov;
+  // Back to a perspective view: the old orthographic size no longer applies.
+  if (fields.projection === 'perspective' && !Object.hasOwn(fields, 'orthoScale')) delete camera.orthoScale;
+  if (Object.hasOwn(fields, 'fov')) {
+    delete camera.focalLength;
+    delete camera.sensorWidth;
+  }
+  return camera;
+}
+
+function rejectFovWithFocalLength(fields) {
+  if (fields.fov !== undefined && fields.focalLength !== undefined) {
+    throw new RangeError('Give a camera fov or a focalLength, not both. Use focalLength (with sensorWidth) for a lens in millimetres, fov for degrees.');
+  }
+}
+
+function checkCameraLens(camera) {
+  if (camera.projection !== undefined && camera.projection !== 'perspective' && camera.projection !== 'orthographic') {
+    throw new RangeError('Camera projection must be perspective or orthographic.');
+  }
+  const orthographic = camera.projection === 'orthographic';
+  if (camera.orthoScale !== undefined) {
+    if (!orthographic) throw new RangeError('Camera orthoScale needs projection orthographic.');
+    if (!Number.isFinite(camera.orthoScale) || camera.orthoScale <= 0) throw new RangeError('Camera orthoScale is the view height in metres and must be positive.');
+  }
+  if (camera.sensorWidth !== undefined && camera.focalLength === undefined) throw new RangeError('Camera sensorWidth needs focalLength.');
+  if (camera.focalLength !== undefined) {
+    if (orthographic) throw new RangeError('Camera focalLength needs a perspective projection; an orthographic camera is sized by orthoScale.');
+    if (!Number.isFinite(camera.focalLength) || camera.focalLength <= 0 || camera.focalLength > 10000) throw new RangeError('Camera focalLength must be between 0 and 10000 millimetres.');
+    if (camera.sensorWidth !== undefined && !(Number.isFinite(camera.sensorWidth) && camera.sensorWidth > 0 && camera.sensorWidth <= 1000)) throw new RangeError('Camera sensorWidth must be between 0 and 1000 millimetres.');
+  }
+  if (camera.shift !== undefined) validateCameraShift(camera.shift);
+  if (camera.fStop !== undefined && !(Number.isFinite(camera.fStop) && camera.fStop >= 0.7 && camera.fStop <= 64)) {
+    throw new RangeError('Camera fStop must be between 0.7 and 64. Smaller numbers blur more.');
+  }
+}
+
 function cameraFrom(value = {}) {
   knownKeys(value, CAMERA_FIELDS, 'camera');
+  rejectFovWithFocalLength(value);
   const result = { ...CAMERA_DEFAULTS, ...value };
+  if (result.focalLength !== undefined) delete result.fov;
+  checkCameraLens(result);
   result.eye = vector(result.eye, 3, 'eye');
   result.target = vector(result.target, 3, 'target');
   result.up = vector(result.up, 3, 'up');
@@ -345,9 +391,10 @@ function cameraFrom(value = {}) {
   }
   result.up = result.up.map(component => component / upLength);
   for (const field of ['fov', 'near', 'far']) {
-    finite(result[field], field);
+    if (result[field] !== undefined) finite(result[field], field);
   }
-  if (Math.fround(result.fov) <= 0 || Math.fround(result.fov) >= 180 || Math.fround(result.near) <= 0 || Math.fround(result.far) <= Math.fround(result.near)) {
+  // Without fov the lens is a focal length, which gives a valid angle at any positive size.
+  if ((result.fov !== undefined && (Math.fround(result.fov) <= 0 || Math.fround(result.fov) >= 180)) || Math.fround(result.near) <= 0 || Math.fround(result.far) <= Math.fround(result.near)) {
     throw new RangeError('Camera needs 0 < fov < 180 and 0 < near < far at Float32 precision.');
   }
   if (result.eye.every((component, axis) => Math.fround(component) === Math.fround(result.target[axis]))) {
@@ -723,6 +770,9 @@ function normalizeRecipe(input, limits) {
     }
   }
   Object.assign(recipe, normalizeAgentLook(look));
+  if (recipe.camera.fStop !== undefined && recipe.effects?.depthOfField.blur > 0) {
+    throw new RangeError('Camera fStop drives depth of field; set effects.depthOfField.blur to 0 or remove fStop.');
+  }
   checkLightLinkNames(recipe);
   if (Object.hasOwn(recipe, 'motion')) {
     recipe.motion = recipe.motion === null || recipe.motion === undefined ? null : agentSceneModule('motion').normalizeAgentMotion(recipe.motion, recipe);
@@ -828,7 +878,8 @@ function retainedMatrices(parts) {
 function cameraPoseFrom(pose) {
   const camera = cameraFrom({
     eye: Array.from(pose.eye), target: Array.from(pose.target), up: Array.from(pose.up),
-    fov: pose.fov, near: pose.near, far: pose.far,
+    ...(pose.focalLength === undefined ? { fov: pose.fov } : {}), near: pose.near, far: pose.far,
+    ...Object.fromEntries(CAMERA_LENS_FIELDS.filter(field => pose[field] !== undefined).map(field => [field, pose[field]])),
   });
   const view = mat4.lookAt(mat4.create(), camera.eye, camera.target, camera.up);
   for (const aspect of [1 / 16, 16]) {
@@ -1566,9 +1617,13 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         if (!target) {
           throw new RangeError(`${operation.type} target was not found: ${operation.id}. scene_inspect lists the IDs; add it first with an add operation.`);
         }
-        for (const field of fields) {
-          if (Object.hasOwn(operation, field)) {
-            target[field] = operation[field];
+        if (operation.type === 'set-camera') {
+          applyCameraFields(target, operation);
+        } else {
+          for (const field of fields) {
+            if (Object.hasOwn(operation, field)) {
+              target[field] = operation[field];
+            }
           }
         }
       }

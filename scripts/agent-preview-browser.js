@@ -1,9 +1,9 @@
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
-import { createAgentScene, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
+import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
 import { skyOpenness } from '../src/closed-room.js';
 import { fogSkyVisibility } from '../src/fog-sky-visibility.js';
-import { installCameraEffects } from '../src/camera-effects.js';
+import { installCameraEffects, effectsWithFStop } from '../src/camera-effects.js';
 import { installRenderPasses } from '../src/render-passes.js';
 import { installMeshBlend, normalizeBlend } from '../src/mesh-blend.js';
 import { installDepthPrecision } from '../src/reversed-depth.js';
@@ -73,11 +73,7 @@ function candidateCamera(record, operations) {
   const camera = record.scene.exportRecipe().camera;
   for (const operation of operations) {
     if (operation.type === 'set-camera') {
-      for (const field of ['eye', 'target', 'up', 'fov', 'near', 'far']) {
-        if (Object.hasOwn(operation, field)) {
-          camera[field] = operation[field];
-        }
-      }
+      applyCameraFields(camera, operation);
     }
   }
   return createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], camera }).camera;
@@ -249,7 +245,7 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   syncMeshBlend(record);
   record.renderer.userPasses?.set(record.scene.postPasses ?? []);
   applyRecipeWindHeading(record.renderer, environment);
-  record.renderer.render({ ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...frameOptions });
+  record.renderer.render({ ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...frameOptions, effects: effectsWithFStop(frameOptions.effects ?? effects, camera) });
   const error = record.renderer.context.getError();
   if (error !== 0) {
     throw new Error(`WebGL render failed with error ${error}.`);

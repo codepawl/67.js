@@ -1,5 +1,6 @@
 import { createAnimationClip, compileAnimationSampler } from './animation.js';
 import { createCameraPath } from './camera-path.js';
+import { CAMERA_LENS_FIELDS } from './camera.js';
 import { createSkeletonPose } from './skeleton-pose.js';
 import { createNodeConstraintEvaluator, normalizeConstraints, normalizeDrivers } from './node-constraints.js';
 import { normalizeClipLayers } from './agent-clip-layers.js';
@@ -606,9 +607,14 @@ export function compileAgentMotion(input, recipe) {
   const cameraPath = cameraTracks.length ? createCameraPath(cameraInput) : null;
   const stagedCamera = cameraPath ? { eye: new Float32Array(3), target: new Float32Array(3), up: new Float32Array(3) } : null;
   if (cameraPath) {
+    if (cameraInput.focalLength !== undefined && cameraTracks.some(track => track.property === 'fov')) {
+      throw new RangeError('A camera with a focalLength cannot have a fov track. Give the camera a fov, or leave fov out of the motion.');
+    }
     output.camera = {
       eye: new Float32Array(3), target: new Float32Array(3), up: new Float32Array(3),
-      fov: 45, near: cameraInput.near, far: cameraInput.far, projection: 'perspective',
+      fov: 45, near: cameraInput.near, far: cameraInput.far,
+      // The lens the recipe camera sets (projection, focal length, shift, f-stop) stays while the tracks move the camera.
+      ...Object.fromEntries(CAMERA_LENS_FIELDS.filter(field => cameraInput[field] !== undefined).map(field => [field, cameraInput[field]])),
     };
   }
   const materialSamples = new Map([...output.materials.keys()].map(id => [id, { ...baselines.get(id) }]));
