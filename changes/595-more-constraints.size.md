@@ -1,0 +1,2 @@
+- scene:agent-scene+lazy: seven constraint operators and their validation load only with motion, each a few hundred bytes of the 1.6 KB (#595)
+- tool:scene_motion: one constraint entry names the seven new types and their optional fields, so strict-mode clients see them (#595)
