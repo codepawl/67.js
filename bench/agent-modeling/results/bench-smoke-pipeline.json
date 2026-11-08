@@ -1,0 +1,164 @@
+{
+  "bench": "smoke-pipeline",
+  "date": "2026-11-08T20:37:48.098Z",
+  "runsPerTask": 1,
+  "tasks": [
+    "bolt",
+    "camera-closeup"
+  ],
+  "backend": "cpu",
+  "summary": {
+    "haiku": {
+      "tasks": 2,
+      "runs": 2,
+      "passAt1": 1,
+      "passPowK": 1,
+      "passAtK": 1,
+      "callsPerRun": 4,
+      "errorsPerRun": 0,
+      "inputTokensPerRun": 479481,
+      "outputTokensPerRun": 2398,
+      "secondsPerRun": 37,
+      "kinds": {
+        "modeling": {
+          "tasks": 1,
+          "runs": 1,
+          "passAt1": 1,
+          "passPowK": 1,
+          "passAtK": 1,
+          "callsPerRun": 5,
+          "errorsPerRun": 0,
+          "inputTokensPerRun": 582713,
+          "outputTokensPerRun": 3047,
+          "secondsPerRun": 34
+        },
+        "camera": {
+          "tasks": 1,
+          "runs": 1,
+          "passAt1": 1,
+          "passPowK": 1,
+          "passAtK": 1,
+          "callsPerRun": 3,
+          "errorsPerRun": 0,
+          "inputTokensPerRun": 376249,
+          "outputTokensPerRun": 1748,
+          "secondsPerRun": 40
+        }
+      },
+      "taskResults": {
+        "bolt": {
+          "passed": 1,
+          "runs": 1
+        },
+        "camera-closeup": {
+          "passed": 1,
+          "runs": 1
+        }
+      }
+    }
+  },
+  "recordsByModel": {
+    "haiku": [
+      {
+        "task": "bolt",
+        "attempt": 1,
+        "pass": true,
+        "passed": 7,
+        "total": 7,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 5,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "mesh_inspect": 1,
+          "scene_look": 1,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "cylinder"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/bolt-front.png",
+            "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/bolt-side.png",
+            "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/bolt-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 582713,
+        "outputTokens": 3047,
+        "wallSeconds": 34,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "camera-closeup",
+        "attempt": 1,
+        "pass": true,
+        "passed": 3,
+        "total": 3,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/camera-closeup-front.png",
+            "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/camera-closeup-side.png",
+            "artifacts/agent-modeling/bench-smoke-pipeline-haiku/look/1/camera-closeup-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 376249,
+        "outputTokens": 1748,
+        "wallSeconds": 40,
+        "exitCode": 0,
+        "stopped": "success"
+      }
+    ]
+  }
+}

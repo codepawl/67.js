@@ -2,7 +2,7 @@
 // server, then grades the recipe the agent exported.
 //
 // node bench/agent-modeling/run.mjs --claude <claude executable> [--model sonnet] [--tasks crate,bolt]
-//   [--runs 3] [--budget 3] [--timeout 1200] [--label baseline] [--skill] [--branches off] [--relations off] [--backend gpu|cpu] [--resume <run name>]
+//   [--runs 3] [--run-name <name>] [--budget 3] [--timeout 1200] [--label baseline] [--skill] [--branches off] [--relations off] [--backend gpu|cpu] [--resume <run name>]
 //
 // --runs repeats every task that many times, each in a fresh session; the summary reports success rate, tool calls,
 // tool errors, tokens and cost for the model and for each task.
@@ -44,11 +44,12 @@ const { values: options } = parseArgs({
     branches: { type: 'string', default: 'on' },
     relations: { type: 'string', default: 'on' },
     resume: { type: 'string' },
+    'run-name': { type: 'string' },
     backend: { type: 'string', default: 'gpu' },
   },
 });
 
-const runName = options.resume ?? `${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-${options.model}-${options.label}`;
+const runName = options.resume ?? options['run-name'] ?? `${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-${options.model}-${options.label}`;
 const rawDirectory = join(repository, 'artifacts', 'agent-modeling', runName);
 const resultsDirectory = join(repository, 'bench', 'agent-modeling', 'results');
 
