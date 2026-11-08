@@ -502,9 +502,12 @@ export function installCoplanarDiagnostics(renderer, onOverlaps = null) {
 /**
  * Puts the smaller part of each coplanar pair on the next depth layer (a polygon offset at draw time, geometry never moves),
  * for the parts of one scene. The renderer calls it once when it is built; a part that sets `decal` or `depthLayer` keeps its own.
+ * Pairs on one plane to within `minimumGap` (default EXACT_FLUSH_DISTANCE) are left to the depth buffer; the renderer passes
+ * `{ minimumGap: 0 }` when `reversedDepth` is false. With 'auto', a scene whose far / near ratio stays low never switches
+ * reversed depth on, and there exact-flush pairs rely on the plain depth buffer.
  */
-export function resolveFlushParts(parts) {
-  const layers = coplanarLayers(findCoplanarOverlaps(parts).overlaps, { minimumGap: EXACT_FLUSH_DISTANCE });
+export function resolveFlushParts(parts, { minimumGap = EXACT_FLUSH_DISTANCE } = {}) {
+  const layers = coplanarLayers(findCoplanarOverlaps(parts).overlaps, { minimumGap });
   setFlushDepthLayers(layers);
   return layers.size;
 }

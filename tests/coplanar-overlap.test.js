@@ -215,6 +215,8 @@ test('resolveFlushParts leaves exactly flush pairs to the depth buffer; coplanar
   const marking = gridPart('markingExact', 2, 2, 0);
   assert.equal(resolveFlushParts([road, marking]), 0);
   assert.equal(coplanarLayers(findCoplanarOverlaps([road, marking]).overlaps).get(marking), 1);
+  assert.equal(resolveFlushParts([road, marking], { minimumGap: 0 }), 1, 'the renderer passes a gap of 0 when reversedDepth is false');
+  assert.equal(depthLayerOf(marking), 1);
 });
 
 test('layers settle in chains and never pile up on the top layer', () => {
