@@ -128,3 +128,33 @@ When to look again:
 - a three.js WebGPU frame beats WebGL2 on the same scenes on the 3060 on a quiet GPU.
 
 Not verified: a WGSL port of the 67js shaders; WebGPU timing on a quiet GPU (the RTX 3060 was shared); Firefox, Safari and Android behaviour (support facts only come from MDN and web.dev); the bundle growth of a real second backend.
+
+## Spike for the path tracer: WGSL compute against the WebGL2 kernel (issue #625, 2026-11-08)
+
+The question the first update left open: is a WGSL compute path tracer faster per path than the WebGL2 fragment kernel, and how long does it compile. The spike is `bench/webgpu-tracer/` (not in `src/`, no package export): `kernel.js` is `src/path-tracer-gpu-shader.js` ported to one WGSL megakernel (one invocation traces one pixel's whole path for one sample), `harness.js` and `run.mjs` time it and the shipped WebGL2 kernel on the same scene, `compare.sh` alternates them, `flip.py` scores the pictures.
+
+What the kernel covers: BVH traversal and triangle tests in storage buffers (the same packed tables as the textures, bound as is), the atlas for colour, normal, surface and emissive maps, diffuse, GGX metal, clearcoat and glass, sun, point, spot and area lights with shadow rays, the environment map with importance sampling, 8 bounces, Russian roulette, and the same PCG and hash random numbers in the same order. Left out: fog, subsurface and the texel bake entry point (the demo room uses none of them). It is a megakernel; the wavefront variant (extend, shade, shadow) was not built (see "Not measured").
+
+Setup (measured): `tests/fixtures/demo-room.recipe.json`, 181,708 triangles, 1920 by 1080, 64 samples, 8 bounces, seed 0, firefly clamp 20, no denoiser, headless Chrome 156 with no WebGPU flags, RTX 3060 (adapter `nvidia ampere`; WebGL2 through ANGLE on Direct3D 11), served from localhost, every trace its own `gpu-lock` job, the two backends alternated. The GPU was shared with other sessions (the card sat at 20 to 96 percent use during runs), so the spread below is mostly load. Time is the trace only: BVH build and tone mapping are outside both; WebGL2 time includes its texture upload and readback, WGSL time excludes its buffer upload (0.12 to 0.14 s, under 2 percent) and includes the readback. The WebGL2 number is a second, warm call in the same page, because the first call includes the compile.
+
+| | WebGL2 fragment | WGSL megakernel |
+| --- | --- | --- |
+| Trace seconds, 4 runs | 15.4, 15.4, 15.6, 16.3 | 8.2, 12.5, 13.0, 17.6 |
+| Paths per second (132.7 million paths) | 8.1 to 8.6 million | 7.5 to 16.3 million, median 10.4 million |
+| Compile seconds, cold profile (first run) | 19.5 (14.0 in the 480 by 270 check) | 0.75 (1.3 in the 480 by 270 check) |
+| Compile seconds, warm profile (runs 2 to 4) | 0.014 to 0.016 | 0.004 to 0.006 |
+| Mean FLIP (LDR) against the WebGL2 picture | 0 (same render twice) | 0.0035 at 1080p and 64 samples, 0.0041 at 480 by 270 and 4 samples |
+
+Every row is measured. The cold compile is one sample per backend per size, taken with a fresh Chrome profile; the warm numbers are the profile's disk cache and say nothing about a first visit. The WGSL kernel took `createComputePipelineAsync` 0.75 s cold; a second identical pipeline in the same page took 2 ms (in-process cache).
+
+What this says:
+
+- On the quietest run the megakernel traced 1.9 times as many paths per second as the WebGL2 kernel (8.2 s against 15.4 s), and on the most loaded run it was 1.14 times as slow (17.6 s against 15.4 s). The medians are 12.8 s and 15.5 s, about 1.2 times (measured, load-limited). Whether the quiet-card gap of 1.9 times is the real one needs a card with nothing else on it (guessed; the per-sample time of the quietest run was 0.125 s against 0.29 s of the loudest).
+- The compile cost is the clear win: 0.75 s against 19.5 s cold, 26 times less (measured; one sample each, a compile of 13 to 30 s on ANGLE was already known from the first update). The WGSL kernel needed no change to compile fast: it keeps the single shadow-ray traversal, and Dawn on Direct3D 12 builds a megakernel of this size without the minutes ANGLE spends on the unrolled GLSL (inferred).
+- The picture is the same scene: FLIP 0.0035 against the WebGL2 output, inside the 0.005 bar the issue sets, with no restricted feature set needed, because the demo room uses only features the kernel covers (measured). The small remainder is float arithmetic order and fast-math differences (inferred).
+- Both backends are far under the 40.67 s of the first update at the same size and samples. That number was end to end with the BVH build and the machine in another state, so this run does not show a regression or a gain against it (measured now; the earlier gap is unexplained).
+- The 8 storage buffers the kernel binds equal the default `maxStorageBuffersPerShaderStage`, so the scene tables fit with no limit request; the 1080p accumulation buffer is 132.7 MB, just under the 134.2 MB default `maxStorageBufferBindingSize` (measured; the spike asks for larger limits and a real backend should keep the planes in separate buffers).
+
+Go or no-go: **go, for an offline WebGPU tracer backend behind `navigator.gpu`, with WebGL2 kept as the fallback.** Basis: it matches the picture within the issue's FLIP bar, compiles in under a second instead of 14 to 20, and traces about 1.2 times as many paths per second at the median of 4 runs (1.9 times on the quietest, 0.88 times on the most loaded; all measured). The speed gain alone is modest, so the case for a backend rests on the compile time and on the wavefront work the issue wants (shading sorted by material, reservoirs), which this megakernel cannot show and no measurement here supports yet (guessed). The issue's own bar for a go on speed, "traces in less than 40.67 s", is met by both kernels now.
+
+Not measured: the wavefront variant (extend, shade, shadow kernels with sorted shading), which is where a larger gain would have to come from; the 16 path tracer reference scenes (only the demo room and a 480 by 270 check of it were scored); the volume and subsurface features; adapters other than the RTX 3060 and Chrome other than 156; a quiet card; WebGPU timestamp queries (the times are wall clock around `onSubmittedWorkDone`).
