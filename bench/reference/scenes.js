@@ -840,6 +840,34 @@ export const REFERENCE_SCENES = {
     };
   },
 
+  // Issue #623: a 36 m corridor with 24 lamps (16 point, 8 spot) along the ceiling and nothing else lighting it, so most lamps are far from
+  // any point and a light tree has something to choose. The lamps do not cast shadow maps (the rasterizer's atlas holds 24 tiles); the path tracer and Cycles shadow every light.
+  async 'many-lights'() {
+    const lighting = constantLighting(0.01);
+    const cube = box(0, 1);
+    const wall = { color: [0.72, 0.7, 0.66], roughness: 0.9 };
+    const parts = [
+      part('corridor-floor', cube, [0, -0.05, 0], [4, 0.1, 36], { color: [0.5, 0.45, 0.4], roughness: 0.6 }),
+      part('corridor-ceiling', cube, [0, 3.05, 0], [4, 0.1, 36], wall),
+      part('corridor-left', cube, [-2.05, 1.5, 0], [0.1, 3.2, 36], { ...wall, color: [0.6, 0.35, 0.3] }),
+      part('corridor-right', cube, [2.05, 1.5, 0], [0.1, 3.2, 36], { ...wall, color: [0.3, 0.42, 0.58] }),
+      part('corridor-end', cube, [0, 1.5, -18.05], [4, 3.2, 0.1], wall),
+      part('pillar-near', cube, [-1.2, 0.8, 4], [0.5, 1.6, 0.5], { color: [0.6, 0.6, 0.65], roughness: 0.5 }),
+      part('ball', sphere(48, 32), [0.8, 0.5, 1], [0.5, 0.5, 0.5], { color: [0.8, 0.25, 0.2], roughness: 0.3 }),
+      part('block-far', cube, [0.7, 0.4, -7], [0.8, 0.8, 0.8], { color: [0.2, 0.45, 0.75], roughness: 0.6 }),
+    ];
+    const lampPosition = index => [index % 2 === 0 ? -0.8 : 0.8, 2.8, 15 - index * 1.4];
+    const lampColor = index => (index % 3 === 0 ? [1, 0.75, 0.5] : index % 3 === 1 ? [0.85, 0.9, 1] : [1, 0.95, 0.85]);
+    const lampIndices = Array.from({ length: 24 }, (_, index) => index);
+    const pointLights = lampIndices.filter(index => index % 3 !== 2).map(index => ({ position: lampPosition(index), color: lampColor(index), intensity: 3, radius: 0.05, castShadow: false }));
+    const spotLights = lampIndices.filter(index => index % 3 === 2).map(index => ({ position: lampPosition(index), direction: [0, -1, 0], angle: 1, penumbra: 0.5, color: lampColor(index), intensity: 6, radius: 0.05, castShadow: false }));
+    return {
+      parts, blenderWorld: lighting.blenderWorld,
+      environment: environment(lighting, { pointLights, spotLights }),
+      camera: { eye: [0, 1.5, 17], target: [0, 1.2, -8], up: [0, 1, 0], fov: 55, near: 0.05, far: 80 },
+    };
+  },
+
   // A street 140 m long under the sun. A single shadow map has to cover the whole street, so its texels are about 8 cm wide;
   // cascades give the cars and lamp posts near the camera 1 to 2 cm texels. harness.js draws it with one map by default and
   // with cascades when run.mjs gets --cascades <count>.

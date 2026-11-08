@@ -8,6 +8,7 @@ import {
   buildFrame, createSurface, environmentPdf, environmentRadiance, evaluateSurface, luminance, mirrorWeight, prepareSurface,
   roughnessToAlpha, sampleEnvironment, sampleGlass, sampleSurface, setWhiteDiffuse, splitSubsurface,
 } from './path-tracer-shading.js';
+import { buildLightTree, chooseLightFromTree, LIGHT_TREE_FIRST_HIT_LIGHTS } from './path-tracer-light-tree.js';
 import { createRandomWalk, WALK_OUTCOME } from './path-tracer-subsurface.js';
 import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval } from './path-tracer-volume.js';
 
@@ -72,7 +73,7 @@ function boundedNumber(options, name) {
 // capabilities file stays out of this bundle.
 export const PATH_TRACER_DENOISERS = Object.freeze(['wavelet', 'oidn', 'none']);
 export const SAMPLING_PATTERNS = Object.freeze(['random', 'blue-noise-first']);
-export const LIGHT_SELECTIONS = Object.freeze(['uniform', 'importance']);
+export const LIGHT_SELECTIONS = Object.freeze(['uniform', 'importance', 'tree']);
 
 /**
  * `denoise` is true (the wavelet filter) or false (none), or a name: "wavelet", "oidn" or "none". "oidn" is the optional
@@ -113,8 +114,14 @@ export function normalizePathTracerOptions(options = {}) {
   if (!PATH_TRACER_BACKENDS.includes(result.backend)) throw new TypeError('Path tracer backend must be "cpu", "gpu" or "webgpu".');
   if (!SAMPLING_PATTERNS.includes(result.samplingPattern)) throw new RangeError(`Path tracer samplingPattern must be one of ${SAMPLING_PATTERNS.join(', ')}.`);
   if (!LIGHT_SELECTIONS.includes(result.lightSelection)) throw new RangeError(`Path tracer lightSelection must be one of ${LIGHT_SELECTIONS.join(', ')}.`);
-  if (result.backend !== 'gpu' && (result.samplingPattern !== 'random' || result.lightSelection !== 'uniform')) {
-    throw new RangeError('Path tracer samplingPattern "blue-noise-first" and lightSelection "importance" need backend "gpu"; the CPU reference and the WebGPU tracer draw random samples and pick lights uniformly.');
+  if (result.backend !== 'gpu' && result.samplingPattern !== 'random') {
+    throw new RangeError('Path tracer samplingPattern "blue-noise-first" needs backend "gpu"; the CPU reference and the WebGPU tracer draw random samples.');
+  }
+  if (result.lightSelection === 'importance' && result.backend !== 'gpu') {
+    throw new RangeError('Path tracer lightSelection "importance" needs backend "gpu"; the CPU reference and the WebGPU tracer pick lights uniformly.');
+  }
+  if (result.lightSelection === 'tree' && result.backend === 'webgpu') {
+    throw new RangeError('Path tracer lightSelection "tree" needs backend "cpu" or "gpu"; the WebGPU tracer picks lights uniformly.');
   }
   if (result.width * result.height > MAX_TRACE_PIXELS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_PIXELS} pixels.`);
   if (result.width * result.height * result.samples * (result.bounces + 1) > MAX_TRACE_RAY_WORK) throw new RangeError('This path trace would need too much ray work: lower the size, samples or bounces.');
@@ -626,6 +633,41 @@ function createPathTracer(scene, options) {
     if (environment) sampleEnvironmentLight(depth, normal);
   }
 
+  const lightCount = lights.points.length + lights.spots.length + lights.areas.length;
+  const useLightTree = options.lightSelection === 'tree' && lightCount > 1;
+  const lightTree = useLightTree ? buildLightTree(lights) : null;
+  const drawRandom = () => random.next();
+  function sampleLightByIndex(depth, normal, index) {
+    if (index < lights.points.length) return samplePointLight(depth, normal, lights.points[index]);
+    index -= lights.points.length;
+    if (index < lights.spots.length) return sampleSpotLight(depth, normal, lights.spots[index]);
+    return sampleAreaLight(depth, normal, lights.areas[index - lights.spots.length]);
+  }
+
+  /** One emitter by the light tree: the sun and the sky keep a uniform share, the local lights share theirs down the tree. */
+  function addOneLightByTree(depth, normal) {
+    const lightsShare = lightCount / emitterCount;
+    let remaining = Math.floor(random.next() * emitterCount);
+    if (lights.sun) {
+      if (remaining === 0) {
+        selectionProbability = 1 / emitterCount;
+        return sampleSun(depth, normal);
+      }
+      remaining--;
+    }
+    if (remaining >= lightCount) {
+      selectionProbability = 1 / emitterCount;
+      return sampleEnvironmentLight(depth, normal);
+    }
+    const picked = chooseLightFromTree(lightTree, hit.point[0], hit.point[1], hit.point[2], normal[0], normal[1], normal[2], drawRandom);
+    selectionProbability = 1 / emitterCount;
+    if (picked.lightIndex < 0) return;
+    selectionProbability = lightsShare * picked.probability;
+    sampleLightByIndex(depth, normal, picked.lightIndex);
+    // The sky is drawn with its uniform share whatever light was chosen: that share weighs the next escape ray.
+    selectionProbability = 1 / emitterCount;
+  }
+
   function addOneLight(depth, normal) {
     selectionProbability = 1 / emitterCount;
     let remaining = Math.floor(random.next() * emitterCount);
@@ -642,7 +684,9 @@ function createPathTracer(scene, options) {
   }
 
   function addLights(depth, normal) {
-    if (depth === 0 || emitterCount <= 1) addEveryLight(depth, normal);
+    const firstHitByTree = useLightTree && lightCount > LIGHT_TREE_FIRST_HIT_LIGHTS;
+    if ((depth === 0 && !firstHitByTree) || emitterCount <= 1) addEveryLight(depth, normal);
+    else if (useLightTree) addOneLightByTree(depth, normal);
     else addOneLight(depth, normal);
   }
 
