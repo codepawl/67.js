@@ -6,16 +6,16 @@ This page shows how to make an agent finish a 67js task with fewer tool calls, f
 
 An agent pays for three things: the tool list, the results of its calls, and the pictures that it reads.
 
-**The tool list.** The harness sends every tool's name, description and input schema to the model. The 22 tools total 189,144 bytes, about 54,000 tokens. Three tools make up most of it:
+**The tool list.** The harness sends every tool's name, description and input schema to the model. The 23 tools total 65,777 bytes, about 18,800 tokens (measured 2026-11-09 on the main branch after the schema diet; it was 196,826 bytes before). A tool lists its common fields and one line naming the rest, and every call is still checked against the full schema. `scene_capabilities` with a `topic` gives the field list of one recipe part. Three tools make up most of it:
 
 | Tool | Schema size | Estimated tokens |
 | --- | --- | --- |
-| `scene_create` | 67,995 B | 19,428 |
-| `scene_apply` | 43,581 B | 12,452 |
-| `mesh_edit` | 33,752 B | 9,644 |
-| `scene_create_asset` | 14,087 B | 4,025 |
-| `mesh_stack` | 10,806 B | 3,088 |
-| The other 17 tools | 18,923 B | 5,405 |
+| `scene_apply` | 19,964 B | 5,704 |
+| `scene_create` | 12,135 B | 3,468 |
+| `scene_create_asset` | 8,597 B | 2,457 |
+| `mesh_edit` | 2,558 B | 731 |
+| `mesh_stack` | 1,920 B | 549 |
+| The other 18 tools | 20,603 B | 5,885 |
 
 Claude Code loads tool schemas on demand through tool search by default, so it pays this cost only for the tools that a task uses. Other harnesses can send the whole list on every turn. If your harness does that, cut the list to the tools that your task needs:
 
@@ -26,19 +26,19 @@ args = ["-y", "--package", "@codepawlhq/67js", "67js-mcp", "--backend", "gpu"]
 disabled_tools = ["mesh_edit", "mesh_stack", "mesh_inspect", "scene_create_asset", "scene_asset_catalog"]
 ```
 
-This is Codex syntax. Gemini CLI uses `"excludeTools": [...]` in the server entry. Dropping these five tools saves about 17,200 estimated tokens of schema, and the agent can no longer edit meshes or import GLB files. Keep them when the task needs them.
+This is Codex syntax. Gemini CLI uses `"excludeTools": [...]` in the server entry. Dropping these five tools saves about 4,200 estimated tokens of schema, and the agent can no longer edit meshes or import GLB files. Keep them when the task needs them.
 
 **The results.** Most results are small. These sizes are from the same measurement:
 
 | Result | Size | Estimated tokens |
 | --- | --- | --- |
-| `scene_capabilities` | 24,167 B | 6,905 |
+| `scene_capabilities` (no topic) | 1,347 B | 385 |
 | `scene_export_recipe` | 2,664 B | 762 |
 | `mesh_edit` | 2,009 B | 574 |
 | `scene_create` | 1,176 B | 336 |
 | `scene_inspect` | 1,123 B | 321 |
 
-`scene_capabilities` is the one large result. The agent needs it once per session. Tell the agent in the first prompt that it must not call it again. A scene with more nodes gives a longer node list in `scene_create` and `scene_apply`. `scene_inspect` takes `ids` and `limit` to read only some nodes.
+Without a topic `scene_capabilities` is a short index; a topic such as `motion` or `environment` answers with the fields of that recipe part, from a few hundred bytes to about 11,000 for `motion`. Ask for a topic only when the task needs it. A scene with more nodes gives a longer node list in `scene_create` and `scene_apply`. `scene_inspect` takes `ids` and `limit` to read only some nodes.
 
 **The pictures.** A picture is the largest single result. See the next section.
 

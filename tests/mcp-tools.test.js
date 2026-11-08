@@ -28,7 +28,7 @@ async function connect(context) {
   const checkpoints = new Map();
   const status = () => ({ sessionId, revision: scene.revision, inspection: scene.inspect(), render: { backend: 'fake' } });
   const runtime = {
-    async capabilities() { return AGENT_SCENE_CAPABILITIES; },
+    async capabilities() { return { scene: AGENT_SCENE_CAPABILITIES, phase: 'idle', availableIn: 'test' }; },
     async create({ recipe: input }) {
       calls++;
       scene = createAgentScene(input);
@@ -149,14 +149,16 @@ test('SDK advertises the complete strict JSON contract and truthful annotations'
   assert.equal(recipeSchema.properties.nodes.maxItems, 4096);
   assert.equal(recipeSchema.properties.materials.maxItems, 256);
   assert.equal(recipeSchema.properties.geometries.maxItems, 256);
-  const variants = recipeSchema.properties.geometries.items.oneOf ?? recipeSchema.properties.geometries.items.anyOf;
-  assert.deepEqual(variants.map(variant => variant.properties.type.const ?? variant.properties.type.enum.join('|')),
-    ['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'terrain', 'grid|plane', 'cone', 'icoSphere', 'circle', 'line', 'mesh']);
-  assert.ok(variants.every(variant => variant.additionalProperties === false));
-  assert.equal(recipeSchema.properties.environment.additionalProperties, false);
-  assert.equal(recipeSchema.properties.environment.properties.pointLights.maxItems, 16);
-  assert.equal(recipeSchema.properties.effects.additionalProperties, false);
+  // The tool lists the common fields; the strict schema still validates and scene_capabilities serves the full outline.
+  assert.deepEqual(recipeSchema.properties.geometries.items.properties.type.enum, ['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'terrain', 'grid', 'plane', 'cone', 'icoSphere', 'circle', 'line', 'mesh']);
+  assert.ok(recipeSchema.properties.environment.properties.setup);
   assert.equal(recipeSchema.properties.shadow.additionalProperties, false);
+  for (const topic of ['geometries', 'environment', 'effects', 'motion', 'physics', 'cloth', 'armatures', 'materialFields', 'meshEdit', 'meshStack']) {
+    const answer = (await client.callTool({ name: 'scene_capabilities', arguments: { topic } })).structuredContent;
+    assert.ok(answer.fields, `${topic} has an outline of its fields`);
+  }
+  assert.equal((await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'meshEdit.bevel' } })).structuredContent.fields.op, '"bevel"');
+  assert.equal((await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'nope' } })).isError, true);
   const look = tools.find(tool => tool.name === 'scene_look');
   assert.equal(look.annotations.readOnlyHint, true);
   assert.equal(look.inputSchema.properties.width.maximum, 1024);
@@ -462,9 +464,10 @@ test('relations off leaves the relations field and the relations capabilities ou
     assert.ok((await schemaOf(true)).includes('"relations"'), `${toolName} offers relations by default`);
     assert.ok(!(await schemaOf(false)).includes('"relations"'), `${toolName} must not offer relations`);
   }
-  const capabilitiesOf = async relations => (await clients[relations].callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent.scene;
-  assert.ok('relations' in await capabilitiesOf(true));
-  assert.deepEqual(Object.keys(await capabilitiesOf(false)), ['rigging']);
+  const sceneTopicsOf = async relations => (await clients[relations].callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent.topics.scene;
+  assert.ok((await sceneTopicsOf(true)).includes('relations'));
+  assert.ok(!(await sceneTopicsOf(false)).includes('relations'));
+  assert.ok((await sceneTopicsOf(false)).includes('rigging'));
 });
 
 test('SDK dynamic batches create resources, reject dangling edits, and restore scene membership', async context => {

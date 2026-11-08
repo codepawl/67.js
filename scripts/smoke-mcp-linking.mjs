@@ -60,8 +60,8 @@ async function look(sessionId, motionTime) {
 let report;
 try {
   await client.connect(transport);
-  const capabilities = (await call('scene_capabilities')).structuredContent;
-  assert.ok(capabilities.scene.lightLinking.fields.length > 0);
+  const capabilities = (await call('scene_capabilities', { topic: 'lightLinking' })).structuredContent;
+  assert.ok(capabilities.value.fields.length > 0);
   const created = (await call('scene_create', { recipe: streetRecipe() })).structuredContent;
   const { sessionId } = created;
   assert.ok(created.render.graphics, 'the scene rendered');

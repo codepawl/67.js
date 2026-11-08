@@ -24,6 +24,7 @@ const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color'
 const AREA_LIGHT_FIELDS = ['position', 'direction', 'up', 'width', 'height', 'color', 'intensity', 'castShadow', 'ies', 'affects'];
 const VOLUME_VECTOR_FIELDS = ['minimum', 'maximum', 'color', 'ambient', 'drift'];
 const VOLUME_NUMBER_FIELDS = ['density', 'steps', 'anisotropy', 'noiseAmount', 'noiseScale', 'maxDistance', 'shadowAmbient', 'heightFalloff', 'detailOctaves', 'detailAmount', 'warp', 'contrast', 'profileSoftness', 'keyScattering', 'scatterOctaves', 'multiScatter', 'multiExtinction', 'multiAnisotropy', 'keyTransmittance', 'surfaceTransmittance'];
+export const VOLUME_FOG_FIELDS = Object.freeze([...VOLUME_VECTOR_FIELDS, ...VOLUME_NUMBER_FIELDS]);
 const BLOOM_FIELDS = ['strength', 'threshold', 'radius'];
 const DEPTH_OF_FIELD_FIELDS = ['blur', 'focusDistance'];
 const MOTION_BLUR_FIELDS = ['shutter', 'objects'];
@@ -218,7 +219,7 @@ function areaLightFrom(light) {
 }
 
 function volumeFogFrom(input = {}) {
-  knownKeys(input, [...VOLUME_VECTOR_FIELDS, ...VOLUME_NUMBER_FIELDS], 'volumeFog');
+  knownKeys(input, VOLUME_FOG_FIELDS, 'volumeFog');
   for (const field of VOLUME_VECTOR_FIELDS) {
     if (Object.hasOwn(input, field)) {
       vectorInRange(input[field], -1e5, 1e5, `volumeFog.${field}`);
