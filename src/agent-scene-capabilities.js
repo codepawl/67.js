@@ -160,6 +160,11 @@ export const MESH_ATTRIBUTE_NOTES = Object.freeze({
   vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Shown by the renderer and written as COLOR_0 in a GLB; it multiplies the material color.',
 });
 
+// Shape keys on a recipe mesh. Details stay here so the tool schemas stay small.
+export const MESH_SHAPE_KEY_NOTES = Object.freeze({
+  shapeKeys: 'On a mesh geometry, at most 16: { name, offsets, value } or { name, edits, value }. offsets is a list of { select, offset: [x,y,z], falloff } moves like the translate edit; edits are mesh edits that only move vertices (set_position, displace, sculpt, simple_deform, lattice, hook and so on) run on the finished mesh, after the stack. A key that adds or removes vertices is refused. value (0, from 0 to 1) is the weight without motion. Each key becomes a glTF morph target of the mesh. Animate it with a motion track { kind: "morph", id: <key name>, property: "weight", keyframes } (weight 0 to 1; keys add up); a GLB export writes the targets, their names (mesh.extras.targetNames) and the weights. Normals stay those of the base mesh.',
+});
+
 // Organic shaping edits. Details stay here so the tool schemas stay small.
 export const MESH_SCULPT_NOTES = Object.freeze({
   sculpt: 'strokes run in order on the vertices of the selected faces; other vertices stay, so a tag confines them. A stroke has type inflate (along the vertex normal), displace (along direction, needed) or smooth (strength 0 to 1), center and radius, strength in mesh units (negative pushes in). Falloff is smooth to zero at the radius. For bulges, dents and softened forms.',
@@ -178,6 +183,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   meshModifiers: MESH_MODIFIER_NOTES,
   meshSculpt: MESH_SCULPT_NOTES,
   meshAttributes: MESH_ATTRIBUTE_NOTES,
+  meshShapeKeys: MESH_SHAPE_KEY_NOTES,
   fieldExpressions: Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,
     maxNodes: MAX_FIELD_NODES, maxDepth: MAX_FIELD_DEPTH, maxElements: MAX_FIELD_ELEMENTS,

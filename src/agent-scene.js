@@ -431,7 +431,7 @@ const GEOMETRY_FIELDS = {
   tube: ['path', 'radius', 'segments', 'radialSegments', 'closed'],
   curve: ['points', 'closed', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
   text: ['text', 'size', 'depth', 'font', 'align', 'curveSegments'],
-  mesh: ['base', 'edits', 'stack', 'smoothAngle'],
+  mesh: ['base', 'edits', 'stack', 'smoothAngle', 'shapeKeys'],
   terrain: ['size', 'resolution', 'seed', 'amplitude', 'holes'],
 };
 
@@ -463,7 +463,7 @@ function geometryEstimate(value) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'points', 'taper', 'text', 'font', 'align', 'from', 'to'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -539,6 +539,7 @@ function geometryEstimate(value) {
       }
       // Stack nodes multiply the mesh: arrays by their count, mirror and solidify at most by two.
       for (const node of agentSceneModule('mesh').normalizeMeshStack(value.stack ?? [])) estimate *= node.op === 'array' ? node.count : 2;
+      if (value.shapeKeys !== undefined) agentSceneModule('mesh').normalizeShapeKeys(value.shapeKeys);
       if (value.smoothAngle !== undefined && (value.smoothAngle < 0 || value.smoothAngle > 180)) {
         throw new RangeError('smoothAngle is degrees from 0 to 180.');
       }
@@ -601,7 +602,7 @@ function generateGeometry(value, maxVertices) {
     case 'mesh':
       return agentSceneModule('mesh').generateMeshGeometry(() => generateGeometry(value.base, maxVertices), value.edits ?? [], {
         maxVertices, smoothAngle: value.smoothAngle ?? MESH_SMOOTH_ANGLE_DEFAULT,
-        stack: value.stack ?? [], cacheKey: JSON.stringify(value.base),
+        stack: value.stack ?? [], cacheKey: JSON.stringify(value.base), shapeKeys: value.shapeKeys ?? [],
         resolveCutter: cutter => {
           cutterEstimate(cutter);
           return generateGeometry(cutter, maxVertices);
@@ -975,7 +976,7 @@ function stagePose(stagedState, time) {
   // Staged last: a pose pending on a decoded asset must be committed or discarded, so nothing above may throw after it.
   const assetClips = stagedState.assetRuntime.animators.length ? agentSceneModule('assets').stageAssetClips(stagedState.assetRuntime, graph, time) : null;
   const movedLook = stagedState.motionSampler && agentSceneModule('motion').motionMovesLook(sampled) ? sampled : null;
-  return { graph, materialUpdates, camera, time, clothGeometries, assetClips, hiddenNodes, movedLook };
+  return { graph, materialUpdates, camera, time, clothGeometries, assetClips, hiddenNodes, movedLook, morphs: sampled?.morphs ?? null };
 }
 
 // Cloth and particles replace the geometry of their own nodes at a sampled time; no node belongs to both.
@@ -1035,11 +1036,21 @@ function partsWithCloth(restParts, clothGeometries, previousParts) {
   return next.every((part, index) => part === previousParts[index]) ? previousParts : Object.freeze(next);
 }
 
+// A shape key weighs what its morph track samples at this time, or its starting value when no track names it.
+function publishShapeKeyWeights(part, sampledMorphs) {
+  const { morphTargetNames, morphTargetValues } = part.geometry;
+  if (!morphTargetNames || !part.morph) return;
+  morphTargetNames.forEach((name, index) => {
+    part.morph.weights[index] = sampledMorphs?.get(name)?.weight ?? morphTargetValues[index];
+  });
+}
+
 /** Returns true when the parts handed to a renderer changed, which the caller counts as a topology change. */
 function publishPose(stagedState, pose) {
   for (const part of stagedState.restParts) {
     if (part.visibility) part.visibility.visible = !pose.hiddenNodes.has(part.name);
     Float32Array.prototype.set.call(part.matrix, pose.graph.getNode(part.name).worldMatrix);
+    publishShapeKeyWeights(part, pose.morphs);
   }
   for (const update of pose.materialUpdates) {
     update.holder.snapshot = update.snapshot;
@@ -1255,9 +1266,11 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       const geometry = binding?.geometry ?? geometries.get(node.geometry);
       const material = materialHandles.get(node.material).output;
       const assetExtras = assetRuntime.partExtras.get(node.id);
+      // Shape keys of a recipe mesh are morph targets with their own weights per part; an imported asset brings its own pose.
+      const shapeKeyMorph = geometry.morphTargetValues && !assetExtras?.morph ? { weights: Float32Array.from(geometry.morphTargetValues) } : undefined;
       const activePart = removedNodes.has(node.id) ? null : activeParts.get(node.id);
       const existing = [activePart, preferredParts.get(node.id)]
-        .find(part => part?.geometry === geometry && part.material === material && part.skin === (assetExtras?.skin ?? binding?.skin) && part.morph === assetExtras?.morph && depthLayerOf(part) === depthLayerOf(node) && sameRenderFlags(part, node, usesVisibility, assetExtras));
+        .find(part => part?.geometry === geometry && part.material === material && part.skin === (assetExtras?.skin ?? binding?.skin) && (assetExtras?.morph ? part.morph === assetExtras.morph : Boolean(part.morph) === Boolean(shapeKeyMorph)) && depthLayerOf(part) === depthLayerOf(node) && sameRenderFlags(part, node, usesVisibility, assetExtras));
       return existing ?? Object.freeze({
         name: node.id, geometry, material,
         ...(depthLayerOf(node) ? { depthLayer: depthLayerOf(node) } : {}),
@@ -1266,6 +1279,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         ...(usesVisibility ? { visibility: { visible: true } } : {}),
         matrix: new Float32Array(graph.getNode(node.id).worldMatrix),
         ...(binding ? { skin: binding.skin } : {}),
+        ...(shapeKeyMorph ? { morph: shapeKeyMorph } : {}),
         ...assetExtras,
       });
     });

@@ -304,7 +304,9 @@ export function exportGlb(parts, options = {}) {
     const meshKey = `${geometry.indices}:${material}`;
     if (!meshes.has(meshKey)) {
       meshes.set(meshKey, document.meshes.length);
-      document.meshes.push({ primitives: [{ ...geometry, material }] });
+      // glTF has no field for morph target names; the common convention is mesh.extras.targetNames.
+      const targetNames = part.geometry.morphTargetNames;
+      document.meshes.push({ primitives: [{ ...geometry, material }], ...(targetNames ? { extras: { targetNames } } : {}) });
     }
     const host = part.skin ? null : hostOfPart(partIndex, hierarchy, worldCache);
     // The mesh node of an imported asset is one of its nodes: keep the mesh on it instead of nesting a same-named node.
