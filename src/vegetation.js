@@ -293,7 +293,7 @@ function addCards(builder, skeleton, spec, site, scale, random) {
   }
 }
 
-function addBlob(builder, center, radius, shading) {
+function addBlob(builder, center, radius, brightness = 1) {
   const segments = 8;
   const rings = 5;
   const firstVertex = builder.vertexCount;
@@ -304,7 +304,7 @@ function addBlob(builder, center, radius, shading) {
       const direction = [Math.sin(polar) * Math.cos(azimuth), Math.cos(polar), Math.sin(polar) * Math.sin(azimuth)];
       const jitter = 1 + (valueNoise(direction[0] * 2 + center[0], direction[2] * 2 + center[2], 3) - 0.5) * 0.5;
       const position = [center[0] + direction[0] * radius * jitter, center[1] + direction[1] * radius * 0.8 * jitter, center[2] + direction[2] * radius * jitter];
-      const color = LEAF_COLOR_BASE.map(channel => channel * shading.brightness);
+      const color = scaleVector(LEAF_COLOR_BASE, brightness);
       builder.addVertex(position, direction, segment / segments, ring / rings, color);
     }
   }
@@ -337,7 +337,7 @@ function addCrownClumps(builder, skeleton, spec, mode, random, widthScale = 1) {
     const shading = crownShading(skeleton, center);
     const radius = cellSize * (0.55 + 0.1 * Math.min(sites.length, 5)) * widthScale * (spec.clumpScale ?? 1);
     if (mode === 'mesh') {
-      addBlob(builder, center, radius, { brightness: shading.brightness / 1.5 });
+      addBlob(builder, center, radius, shading.brightness / 1.5);
       continue;
     }
     for (let card = 0; card < 3; card++) {
@@ -621,7 +621,7 @@ function buildFlowerPatch(random, flowers, height, petalColor) {
         rows: [[0, 0.5], [0.5, 1], [1, 0.5]], canopyNormal: WORLD_UP, canopyBlend: 0.5, colorBase: petalColor, colorTip: petalColor,
       });
     }
-    addBlob(builder, addScaled(top, WORLD_UP, 0.004), 0.014, { brightness: 1 });
+    addBlob(builder, addScaled(top, WORLD_UP, 0.004), 0.014);
   }
   return builder.build();
 }
