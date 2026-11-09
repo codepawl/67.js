@@ -1,53 +1,56 @@
+import { invalidField } from './field-error.js';
+
 // Checks shared by the recipe sections that bake geometry (cloth, particles, hair).
 
-export function knownKeys(value, fields, label) {
+export function knownKeys(value, fields, path) {
   if (!value || Object.getPrototypeOf(value) !== Object.prototype) {
-    throw new TypeError(`${label} must be a plain object.`);
+    throw invalidField(path, value, 'a plain object, such as {}', TypeError);
   }
   for (const key of Object.keys(value)) {
     if (!fields.includes(key)) {
-      throw new TypeError(`Unknown or unsupported ${label} field: ${key}. Allowed fields: ${fields.join(', ')}.`);
+      throw invalidField(`${path}.${key}`, value[key], `no such field; use one of ${fields.join(', ')}`, TypeError);
     }
   }
 }
 
-export function finiteNumber(value, label, minimum, maximum) {
+export function finiteNumber(value, path, minimum, maximum) {
   if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isFinite(Math.fround(value)) || value < minimum || value > maximum) {
-    throw new RangeError(`${label} must be a finite number within ${minimum} and ${maximum}.`);
+    throw invalidField(path, value, `a number from ${minimum} to ${maximum}, such as ${Math.min(Math.max(1, minimum), maximum)}`);
   }
   return value;
 }
 
-export function vectorOfThree(value, label, limit) {
+export function vectorOfThree(value, path, limit) {
   if (!Array.isArray(value) || value.length !== 3) {
-    throw new TypeError(`${label} needs 3 numbers.`);
+    throw invalidField(path, value, 'an array of 3 numbers, such as [0, 1, 0]', TypeError);
   }
-  return value.map(component => finiteNumber(component, label, -limit, limit));
+  return value.map((component, index) => finiteNumber(component, `${path}[${index}]`, -limit, limit));
 }
 
-export function boundedArray(value, maximum, label) {
+export function boundedArray(value, maximum, path) {
   if (!Array.isArray(value) || value.length > maximum) {
-    throw new TypeError(`${label} must be an array of at most ${maximum} entries.`);
+    throw invalidField(path, Array.isArray(value) ? `${value.length} entries` : value, `an array of at most ${maximum} entries, such as []`, TypeError);
   }
   return value;
 }
 
-export function rootNodeWithGeometry(nodeId, recipeNodes, claimedNodes, motionNodeIds, physicsNodeIds, label, system = 'cloth') {
+// `path` names the field that holds the node ID, such as cloth.sheets[0].node.
+export function rootNodeWithGeometry(nodeId, recipeNodes, claimedNodes, motionNodeIds, physicsNodeIds, path, system = 'cloth') {
   const node = typeof nodeId === 'string' ? recipeNodes.get(nodeId) : undefined;
   if (!node) {
-    throw new RangeError(`${label} node was not found: ${String(nodeId).slice(0, 64)}.`);
+    throw invalidField(path, nodeId, 'the ID of a node in the recipe, such as "banner"');
   }
   if (node.geometry === undefined) {
-    throw new RangeError(`${label} node ${nodeId} has no geometry.`);
+    throw invalidField(path, nodeId, 'a node that draws a geometry; this one is a group');
   }
   if (node.parent !== null) {
-    throw new RangeError(`${label} node ${nodeId} must be a root node; reparent it first.`);
+    throw invalidField(path, nodeId, 'a root node with no parent; reparent it first');
   }
   if (claimedNodes.has(nodeId)) {
-    throw new RangeError(`Node ${nodeId} is used twice in ${system}.`);
+    throw invalidField(path, nodeId, `a node that ${system} uses once; this one is used twice`);
   }
   if (motionNodeIds.has(nodeId) || physicsNodeIds.has(nodeId)) {
-    throw new RangeError(`Node ${nodeId} has a motion translation or rotation track or a physics body. ${label} needs a node that stays where it is.`);
+    throw invalidField(path, nodeId, 'a node that stays where it is, with no translation or rotation track and no physics body');
   }
   claimedNodes.add(nodeId);
 }

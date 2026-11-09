@@ -72,7 +72,7 @@ export function answerCapabilities(capabilities, topic, outlineSources) {
     return {
       format: capabilities.scene.format, schemaVersion: capabilities.scene.schemaVersion,
       phase: capabilities.phase, availableIn: capabilities.availableIn,
-      how: 'Call scene_capabilities again with topic set to one name below. Tools list common fields; schemas names the full field list of a recipe part (meshEdit and meshStack also take <name>.<op>, geometries takes geometries.<type>).',
+      how: 'Call scene_capabilities with topic set to a name below. Tools list common fields; schemas names the full field list of a recipe part (meshEdit and meshStack also take <name>.<op>, geometries takes geometries.<type>).',
       topics: names,
     };
   }

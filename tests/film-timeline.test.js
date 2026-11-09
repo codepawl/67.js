@@ -45,7 +45,7 @@ test('set-timeline edits the timeline and null removes it', () => {
   assert.equal(scene.exportRecipe().timeline.shots.length, 3);
   scene.apply([{ type: 'set-timeline', timeline: null }], { expectedRevision: scene.revision });
   assert.equal(Object.hasOwn(scene.exportRecipe(), 'timeline'), false);
-  assert.throws(() => scene.apply([{ type: 'set-timeline' }], { expectedRevision: scene.revision }), /requires timeline/);
+  assert.throws(() => scene.apply([{ type: 'set-timeline' }], { expectedRevision: scene.revision }), /timeline: got undefined; expected a timeline value, or null to clear it/);
 });
 
 test('hostile timelines are rejected with a reason', () => {

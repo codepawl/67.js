@@ -3,6 +3,7 @@ import { HAIR_LIMITS, buildHairMesh, createStrandRoots } from './hair.js';
 import { normalizeForceFields } from './force-fields.js';
 import { PARTICLE_LIMITS, buildParticleMesh, createParticleLaunches } from './particles.js';
 import { createCollisionSurface } from './particle-collision.js';
+import { invalidField } from './field-error.js';
 import { bakingContext, boundedArray, finiteNumber, knownKeys, rootNodeWithGeometry, vectorOfThree } from './agent-recipe-checks.js';
 
 const PARTICLES_FIELDS = ['gravity', 'wind', 'fields', 'systems'];
@@ -20,145 +21,145 @@ const POSITION_LIMIT = 10000;
 const MAX_SEED = 0xffffffff;
 
 // A number stands for the range [value, value].
-function rangeOf(value, label, minimum, maximum) {
+function rangeOf(value, path, minimum, maximum) {
   if (typeof value === 'number') {
-    return [finiteNumber(value, label, minimum, maximum), value];
+    return [finiteNumber(value, path, minimum, maximum), value];
   }
   if (!Array.isArray(value) || value.length !== 2) {
-    throw new TypeError(`${label} must be a number or [minimum, maximum].`);
+    throw invalidField(path, value, `a number or [minimum, maximum] from ${minimum} to ${maximum}, such as [${Math.max(minimum, 0.5)}, ${Math.min(maximum, 1)}]`, TypeError);
   }
-  const range = value.map(entry => finiteNumber(entry, label, minimum, maximum));
+  const range = value.map((entry, index) => finiteNumber(entry, `${path}[${index}]`, minimum, maximum));
   if (range[0] > range[1]) {
-    throw new RangeError(`${label} minimum must not exceed its maximum.`);
+    throw invalidField(path, value, `[minimum, maximum] with the minimum not above the maximum, such as [${range[1]}, ${range[0]}]`);
   }
   return range;
 }
 
-function normalizeEmitter(input) {
-  knownKeys(input, EMITTER_FIELDS, 'particle emitter');
+function normalizeEmitter(input, path) {
+  knownKeys(input, EMITTER_FIELDS, path);
   const shape = input.shape ?? 'point';
   if (!EMITTER_SHAPES.includes(shape)) {
-    throw new RangeError(`Particle emitter shape must be one of ${EMITTER_SHAPES.join(', ')}.`);
+    throw invalidField(`${path}.shape`, shape, `one of ${EMITTER_SHAPES.join(', ')}`);
   }
   return {
     shape,
-    position: input.position === undefined ? [0, 0, 0] : vectorOfThree(input.position, 'Particle emitter position', POSITION_LIMIT),
-    halfExtents: input.halfExtents === undefined ? [0.5, 0.5, 0.5] : vectorOfThree(input.halfExtents, 'Particle emitter halfExtents', POSITION_LIMIT).map(Math.abs),
-    radius: input.radius === undefined ? 0.5 : finiteNumber(input.radius, 'Particle emitter radius', 0, POSITION_LIMIT),
+    position: input.position === undefined ? [0, 0, 0] : vectorOfThree(input.position, `${path}.position`, POSITION_LIMIT),
+    halfExtents: input.halfExtents === undefined ? [0.5, 0.5, 0.5] : vectorOfThree(input.halfExtents, `${path}.halfExtents`, POSITION_LIMIT).map(Math.abs),
+    radius: input.radius === undefined ? 0.5 : finiteNumber(input.radius, `${path}.radius`, 0, POSITION_LIMIT),
   };
 }
 
-function normalizeCount(input) {
+function normalizeCount(input, path) {
   const count = input.count ?? 100;
   if (!Number.isInteger(count) || count < 1 || count > PARTICLE_LIMITS.maxParticlesPerSystem) {
-    throw new RangeError(`Particle count must be an integer from 1 to ${PARTICLE_LIMITS.maxParticlesPerSystem}.`);
+    throw invalidField(`${path}.count`, count, `a whole number from 1 to ${PARTICLE_LIMITS.maxParticlesPerSystem}, such as 100`);
   }
   return count;
 }
 
-function normalizeSeed(input) {
+function normalizeSeed(input, path) {
   const seed = input.seed ?? 1;
   if (!Number.isInteger(seed) || seed < 0 || seed > MAX_SEED) {
-    throw new RangeError(`Particle seed must be an integer from 0 to ${MAX_SEED}.`);
+    throw invalidField(`${path}.seed`, seed, `a whole number from 0 to ${MAX_SEED}, such as 1`);
   }
   return seed;
 }
 
-function normalizeColors(value) {
+function normalizeColors(value, path) {
   if (!Array.isArray(value) || value.length !== 2) {
-    throw new TypeError('Particle color must be [start, end], each [r, g, b] from 0 to 1.');
+    throw invalidField(path, value, '[start, end], each [r, g, b] from 0 to 1, such as [[1, 0.6, 0.1], [0.3, 0, 0]]', TypeError);
   }
-  return value.map(color => vectorOfThree(color, 'Particle color', 1000).map(channel => finiteNumber(channel, 'Particle color', 0, 1000)));
+  return value.map((color, index) => vectorOfThree(color, `${path}[${index}]`, 1000).map((channel, channelIndex) => finiteNumber(channel, `${path}[${index}][${channelIndex}]`, 0, 1000)));
 }
 
 // [start, end] over the life, in either direction; a number holds one value.
-function normalizeAlpha(value) {
+function normalizeAlpha(value, path) {
   if (typeof value === 'number') {
-    return [finiteNumber(value, 'Particle alpha', 0, 1), value];
+    return [finiteNumber(value, path, 0, 1), value];
   }
   if (!Array.isArray(value) || value.length !== 2) {
-    throw new TypeError('Particle alpha must be a number or [start, end] from 0 to 1.');
+    throw invalidField(path, value, 'a number or [start, end] from 0 to 1, such as [1, 0]', TypeError);
   }
-  return value.map(entry => finiteNumber(entry, 'Particle alpha', 0, 1));
+  return value.map((entry, index) => finiteNumber(entry, `${path}[${index}]`, 0, 1));
 }
 
-function normalizeColliders(value, context) {
-  const nodeIds = boundedArray(value, PARTICLE_LIMITS.maxColliders, 'Particle colliders');
+function normalizeColliders(value, context, path) {
+  const nodeIds = boundedArray(value, PARTICLE_LIMITS.maxColliders, path);
   // Colliders are only read, so several systems may share one.
-  for (const nodeId of nodeIds) {
-    rootNodeWithGeometry(nodeId, context.recipeNodes, new Set(), context.motionNodeIds, context.physicsNodeIds, 'Particle collider', 'particles');
-  }
+  nodeIds.forEach((nodeId, index) => {
+    rootNodeWithGeometry(nodeId, context.recipeNodes, new Set(), context.motionNodeIds, context.physicsNodeIds, `${path}[${index}]`, 'particles');
+  });
   return nodeIds;
 }
 
-function normalizeEmitterSystem(input, context) {
-  knownKeys(input, EMITTER_SYSTEM_FIELDS, 'particle system');
-  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, 'Particle system', 'particles');
+function normalizeEmitterSystem(input, context, path) {
+  knownKeys(input, EMITTER_SYSTEM_FIELDS, path);
+  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, `${path}.node`, 'particles');
   const system = {
-    type: 'emitter', node: input.node, seed: normalizeSeed(input), count: normalizeCount(input),
-    lifetime: rangeOf(input.lifetime ?? 1, 'Particle lifetime', 0.01, PARTICLE_LIMITS.maxLifetime),
-    speed: rangeOf(input.speed ?? 1, 'Particle speed', 0, 1000),
-    size: rangeOf(input.size ?? 0.05, 'Particle size', 0.0001, 100),
-    direction: input.direction === undefined ? [0, 1, 0] : vectorOfThree(input.direction, 'Particle direction', 1000),
-    spread: input.spread === undefined ? 30 : finiteNumber(input.spread, 'Particle spread', 0, 180),
-    emitter: normalizeEmitter(input.emitter ?? {}),
+    type: 'emitter', node: input.node, seed: normalizeSeed(input, path), count: normalizeCount(input, path),
+    lifetime: rangeOf(input.lifetime ?? 1, `${path}.lifetime`, 0.01, PARTICLE_LIMITS.maxLifetime),
+    speed: rangeOf(input.speed ?? 1, `${path}.speed`, 0, 1000),
+    size: rangeOf(input.size ?? 0.05, `${path}.size`, 0.0001, 100),
+    direction: input.direction === undefined ? [0, 1, 0] : vectorOfThree(input.direction, `${path}.direction`, 1000),
+    spread: input.spread === undefined ? 30 : finiteNumber(input.spread, `${path}.spread`, 0, 180),
+    emitter: normalizeEmitter(input.emitter ?? {}, `${path}.emitter`),
     scale: input.scale ?? 'constant',
-    drag: input.drag === undefined ? 0 : finiteNumber(input.drag, 'Particle drag', 0, 100),
+    drag: input.drag === undefined ? 0 : finiteNumber(input.drag, `${path}.drag`, 0, 100),
   };
   if (Math.hypot(...system.direction) === 0) {
-    throw new RangeError('Particle direction must not be the zero vector.');
+    throw invalidField(`${path}.direction`, system.direction, 'a direction that is not the zero vector, such as [0, 1, 0]');
   }
   if (!SCALE_MODES.includes(system.scale)) {
-    throw new RangeError(`Particle scale must be one of ${SCALE_MODES.join(', ')}.`);
+    throw invalidField(`${path}.scale`, system.scale, `one of ${SCALE_MODES.join(', ')}`);
   }
-  if (input.rate !== undefined) system.rate = finiteNumber(input.rate, 'Particle rate', 0.01, PARTICLE_LIMITS.maxParticlesPerSystem * 100);
-  if (input.bounce !== undefined) system.bounce = finiteNumber(input.bounce, 'Particle bounce', 0, 1);
-  if (input.friction !== undefined) system.friction = finiteNumber(input.friction, 'Particle friction', 0, 1);
-  if (input.spin !== undefined) system.spin = rangeOf(input.spin, 'Particle spin', -100000, 100000);
-  if (input.color !== undefined) system.color = normalizeColors(input.color);
-  if (input.alpha !== undefined) system.alpha = normalizeAlpha(input.alpha);
+  if (input.rate !== undefined) system.rate = finiteNumber(input.rate, `${path}.rate`, 0.01, PARTICLE_LIMITS.maxParticlesPerSystem * 100);
+  if (input.bounce !== undefined) system.bounce = finiteNumber(input.bounce, `${path}.bounce`, 0, 1);
+  if (input.friction !== undefined) system.friction = finiteNumber(input.friction, `${path}.friction`, 0, 1);
+  if (input.spin !== undefined) system.spin = rangeOf(input.spin, `${path}.spin`, -100000, 100000);
+  if (input.color !== undefined) system.color = normalizeColors(input.color, `${path}.color`);
+  if (input.alpha !== undefined) system.alpha = normalizeAlpha(input.alpha, `${path}.alpha`);
   if (input.colliders !== undefined) {
-    system.colliders = normalizeColliders(input.colliders, context);
+    system.colliders = normalizeColliders(input.colliders, context, `${path}.colliders`);
     if (system.colliders.includes(system.node)) {
-      throw new RangeError('A particle system node cannot be its own collider.');
+      throw invalidField(`${path}.colliders`, system.colliders, `node IDs other than the system's own node "${system.node}"`);
     }
   }
-  if (input.floor !== undefined) system.floor = finiteNumber(input.floor, 'Particle floor', -POSITION_LIMIT, POSITION_LIMIT);
+  if (input.floor !== undefined) system.floor = finiteNumber(input.floor, `${path}.floor`, -POSITION_LIMIT, POSITION_LIMIT);
   return system;
 }
 
-function normalizeHairSystem(input, context) {
-  knownKeys(input, HAIR_FIELDS, 'hair system');
-  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, 'Hair system', 'particles');
+function normalizeHairSystem(input, context, path) {
+  knownKeys(input, HAIR_FIELDS, path);
+  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, `${path}.node`, 'particles');
   // The surface is only read, so several systems may grow from one node.
-  rootNodeWithGeometry(input.surface, context.recipeNodes, new Set(), context.motionNodeIds, context.physicsNodeIds, 'Hair surface', 'particles');
+  rootNodeWithGeometry(input.surface, context.recipeNodes, new Set(), context.motionNodeIds, context.physicsNodeIds, `${path}.surface`, 'particles');
   if (input.surface === input.node) {
-    throw new RangeError('Hair surface and hair node must be different nodes.');
+    throw invalidField(`${path}.surface`, input.surface, 'a node other than the hair node, such as the head mesh');
   }
   const segments = input.segments ?? 4;
   if (!Number.isInteger(segments) || segments < 1 || segments > HAIR_LIMITS.maxSegments) {
-    throw new RangeError(`Hair segments must be an integer from 1 to ${HAIR_LIMITS.maxSegments}.`);
+    throw invalidField(`${path}.segments`, segments, `a whole number from 1 to ${HAIR_LIMITS.maxSegments}, such as 4`);
   }
   const system = {
-    type: 'hair', node: input.node, surface: input.surface, seed: normalizeSeed(input), count: normalizeCount(input), segments,
-    length: rangeOf(input.length ?? 0.1, 'Hair length', 0.001, 100),
-    width: finiteNumber(input.width ?? 0.004, 'Hair width', 0.0001, 10),
-    droop: finiteNumber(input.droop ?? 0.5, 'Hair droop', 0, 10),
-    lean: finiteNumber(input.lean ?? 0.2, 'Hair lean', 0, 2),
+    type: 'hair', node: input.node, surface: input.surface, seed: normalizeSeed(input, path), count: normalizeCount(input, path), segments,
+    length: rangeOf(input.length ?? 0.1, `${path}.length`, 0.001, 100),
+    width: finiteNumber(input.width ?? 0.004, `${path}.width`, 0.0001, 10),
+    droop: finiteNumber(input.droop ?? 0.5, `${path}.droop`, 0, 10),
+    lean: finiteNumber(input.lean ?? 0.2, `${path}.lean`, 0, 2),
   };
   if (input.sway !== undefined) {
-    system.sway = finiteNumber(input.sway, 'Hair sway', 0, 10);
-    system.swayRate = finiteNumber(input.swayRate ?? 0.5, 'Hair swayRate', 0.01, 20);
+    system.sway = finiteNumber(input.sway, `${path}.sway`, 0, 10);
+    system.swayRate = finiteNumber(input.swayRate ?? 0.5, `${path}.swayRate`, 0.01, 20);
   }
   return system;
 }
 
-function normalizeSystem(input, context) {
+function normalizeSystem(input, context, path) {
   const type = input?.type ?? 'emitter';
   if (!SYSTEM_TYPES.includes(type)) {
-    throw new RangeError(`Particle system type must be one of ${SYSTEM_TYPES.join(', ')}.`);
+    throw invalidField(`${path}.type`, type, `one of ${SYSTEM_TYPES.join(', ')}`);
   }
-  return type === 'hair' ? normalizeHairSystem(input, context) : normalizeEmitterSystem(input, context);
+  return type === 'hair' ? normalizeHairSystem(input, context, path) : normalizeEmitterSystem(input, context, path);
 }
 
 /** Validate a recipe particles section against its nodes. Returns the plain, bounded form stored in the recipe. */
@@ -169,23 +170,23 @@ export function normalizeAgentParticles(input, recipe) {
   knownKeys(input, PARTICLES_FIELDS, 'particles');
   const context = bakingContext(recipe, ['cloth']);
   const result = {};
-  result.systems = boundedArray(input.systems, PARTICLE_LIMITS.maxSystems, 'Particle systems').map(system => normalizeSystem(system, context));
+  result.systems = boundedArray(input.systems, PARTICLE_LIMITS.maxSystems, 'particles.systems').map((system, index) => normalizeSystem(system, context, `particles.systems[${index}]`));
   if (!result.systems.length) {
-    throw new RangeError('Particles need at least one system. Use null to clear it.');
+    throw invalidField('particles.systems', result.systems, 'at least one system, such as [{ "node": "sparks" }]; use particles: null to clear it');
   }
   const systemNodes = new Set(result.systems.map(system => system.node));
   for (const system of result.systems) {
     const clash = system.colliders?.find(nodeId => systemNodes.has(nodeId));
     if (clash) {
-      throw new RangeError(`Particle collider ${clash} is a particle system node; its own geometry is replaced by particles.`);
+      throw invalidField('particles.systems', clash, 'colliders that are not particle system nodes, because a system replaces its own geometry with particles');
     }
   }
   const total = result.systems.reduce((sum, system) => sum + system.count, 0);
   if (total > PARTICLE_LIMITS.maxParticles) {
-    throw new RangeError(`Particle systems hold ${total} particles; the limit is ${PARTICLE_LIMITS.maxParticles} in total.`);
+    throw invalidField('particles.systems', `${total} particles in total`, `counts that add up to at most ${PARTICLE_LIMITS.maxParticles}, such as a lower count in each system`);
   }
-  if (input.gravity !== undefined) result.gravity = vectorOfThree(input.gravity, 'Particle gravity', 1000);
-  if (input.wind !== undefined) result.wind = vectorOfThree(input.wind, 'Particle wind', 100);
+  if (input.gravity !== undefined) result.gravity = vectorOfThree(input.gravity, 'particles.gravity', 1000);
+  if (input.wind !== undefined) result.wind = vectorOfThree(input.wind, 'particles.wind', 100);
   if (input.fields !== undefined) result.fields = normalizeForceFields(input.fields, 'Particle force field');
   return result;
 }
@@ -244,7 +245,7 @@ function surfaceInWorld(geometry, matrix) {
 
 function checkVertexBudget(vertices, totalVertices, nodeId) {
   if (vertices > PARTICLE_LIMITS.maxVertices || totalVertices > PARTICLE_LIMITS.maxVertices) {
-    throw new RangeError(`Particle node ${nodeId} would draw ${totalVertices} vertices (shape vertices times count); the limit is ${PARTICLE_LIMITS.maxVertices}. Use a shape with fewer segments or a lower count.`);
+    throw invalidField('particles.systems', `${totalVertices} vertices on node ${nodeId}`, `shape vertices times count of at most ${PARTICLE_LIMITS.maxVertices}; use a shape with fewer segments or a lower count`);
   }
 }
 
@@ -262,7 +263,7 @@ function collisionSurfaceOf(system, nodes, geometries) {
   });
   const surface = createCollisionSurface(meshes);
   if (surface.triangleCount > PARTICLE_LIMITS.maxColliderTriangles) {
-    throw new RangeError(`Particle colliders of ${system.node} hold ${surface.triangleCount} triangles; the limit is ${PARTICLE_LIMITS.maxColliderTriangles}.`);
+    throw invalidField('particles.systems', `${surface.triangleCount} collider triangles for node ${system.node}`, `colliders with at most ${PARTICLE_LIMITS.maxColliderTriangles} triangles in total, such as a simpler collider mesh`);
   }
   return surface;
 }

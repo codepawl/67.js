@@ -31,7 +31,7 @@ export function normalizeAgentBake(input) {
     if (input[field] === undefined) {
       continue;
     }
-    resolved[field] = finiteNumber(input[field], `Bake ${field}`, minimum, maximum);
+    resolved[field] = finiteNumber(input[field], `bake.${field}`, minimum, maximum);
   }
   // Absent means 'room', one probe in the middle of an enclosed room (an open scene gets none). false opts out; a list places them.
   // Measured against Cycles, a probe lowered the FLIP score of every baked room, so a bake brings one along.

@@ -77,7 +77,7 @@ test('decal, depthLayer and resolveCoplanar all silence the pair without moving 
 });
 
 test('node decal and depthLayer are validated', () => {
-  assert.throws(() => createAgentScene(recipe([wall, { ...sign, decal: 'yes' }])), /decal must be boolean/);
+  assert.throws(() => createAgentScene(recipe([wall, { ...sign, decal: 'yes' }])), /nodes\[1\]\.decal: got "yes"; expected true or false/);
   assert.throws(() => createAgentScene(recipe([wall, { ...sign, depthLayer: 9 }])), /depthLayer: got 9; expected a whole number from 0 to 4/);
   assert.throws(() => createAgentScene(recipe([wall], { resolveCoplanar: true })), /resolveCoplanar/);
 });

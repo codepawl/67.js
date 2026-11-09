@@ -130,5 +130,5 @@ test('recipe meshes run booleans with inline primitive cutters', () => {
     format: '67js.scene', schemaVersion: 1,
     geometries: [{ id: 'bad', type: 'mesh', base: { type: 'box' }, edits: [{ op: 'boolean', operation: 'union', cutter: { type: 'box', id: 'x' } }] }],
     materials: [], nodes: [],
-  }), /cutter must be a primitive/);
+  }), /geometries\[0\]\.cutter: got \{"type":"box","id":"x"\}; expected a primitive or profile record without an id/);
 });

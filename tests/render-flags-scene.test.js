@@ -84,9 +84,9 @@ test('shadow and composite flags reach the part and split batches', () => {
 
 test('flags must be booleans on mesh nodes and a node is not both holdout and catcher', () => {
   const node = fields => recipe({ nodes: [{ id: 'one', geometry: 'box', material: 'finish', ...fields }] });
-  assert.throws(() => createAgentScene(node({ castShadow: 'no' })), /castShadow must be boolean/);
-  assert.throws(() => createAgentScene(node({ visible: 0 })), /visible must be boolean/);
-  assert.throws(() => createAgentScene(node({ holdout: true, shadowCatcher: true })), /not both/);
-  assert.throws(() => createAgentScene(recipe({ nodes: [{ id: 'g', holdout: true }] })), /belongs on a mesh node/);
+  assert.throws(() => createAgentScene(node({ castShadow: 'no' })), /nodes\[0\]\.castShadow: got "no"; expected true or false/);
+  assert.throws(() => createAgentScene(node({ visible: 0 })), /nodes\[0\]\.visible: got 0; expected true or false/);
+  assert.throws(() => createAgentScene(node({ holdout: true, shadowCatcher: true })), /nodes\[0\]\.shadowCatcher: got true; expected false when holdout is true/);
+  assert.throws(() => createAgentScene(recipe({ nodes: [{ id: 'g', holdout: true }] })), /nodes\[0\]\.holdout: got true; expected a flag on a mesh node/);
   assert.throws(() => createAgentScene(recipe({ motion: { duration: 1, tracks: [{ kind: 'node', id: 'first', property: 'visible', keyframes: [{ time: 0, value: 0.5 }] }] } })), /1 \(shown\) or 0/);
 });

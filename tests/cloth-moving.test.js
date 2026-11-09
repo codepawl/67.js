@@ -170,10 +170,10 @@ test('a soft pin pulls the particle less than a hard pin', () => {
 
 test('recipe checks refuse bad moving colliders and pins', () => {
   const bad = cloth => () => createAgentScene(walkingCapeRecipe({ ...CAPE, ...cloth }));
-  assert.throws(bad({ colliders: [{ attach: 'chest', shape: 'capsule', radius: 0.1 }] }), /capsule collider needs to/);
-  assert.throws(bad({ colliders: [{ attach: 'nowhere', radius: 0.1 }] }), /not found/);
-  assert.throws(bad({ colliders: [{ armature: 'rig', exclude: ['tail'] }] }), /does not have/);
-  assert.throws(bad({ colliders: [{ armature: 'ghost' }] }), /armature was not found/);
-  assert.throws(bad({ sheets: [{ node: 'cape', pinTo: { node: 'chest' } }] }), /needs pin too/);
-  assert.throws(bad({ sheets: [{ node: 'cape', pin: ['top'], pinTo: { node: 'chest', weight: 0 } }] }), /weight/);
+  assert.throws(bad({ colliders: [{ attach: 'chest', shape: 'capsule', radius: 0.1 }] }), /cloth\.colliders\[0\]\.to: got undefined; expected the ID of the node the capsule other end rides on/);
+  assert.throws(bad({ colliders: [{ attach: 'nowhere', radius: 0.1 }] }), /cloth\.colliders\[0\]\.attach: got "nowhere"; expected the ID of a node in the recipe/);
+  assert.throws(bad({ colliders: [{ armature: 'rig', exclude: ['tail'] }] }), /cloth\.colliders\[0\]\.exclude: got "tail"; expected a bone name of rig/);
+  assert.throws(bad({ colliders: [{ armature: 'ghost' }] }), /cloth\.colliders\[0\]\.armature: got "ghost"; expected the ID of an armature/);
+  assert.throws(bad({ sheets: [{ node: 'cape', pinTo: { node: 'chest' } }] }), /cloth\.sheets\[0\]\.pinTo: got .*; expected a sheet that also sets pin/);
+  assert.throws(bad({ sheets: [{ node: 'cape', pin: ['top'], pinTo: { node: 'chest', weight: 0 } }] }), /cloth\.sheets\[0\]\.pinTo\.weight: got 0; expected a number from 0\.01 to 1/);
 });

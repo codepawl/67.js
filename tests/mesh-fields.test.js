@@ -253,5 +253,5 @@ test('a recipe with an instanced node creates one instanced batch of ordinary no
   assert.equal(session.parts.length, 1 + 30);
   assert.equal(new Set(session.parts.map(part => part.geometry)).size, 2);
   assert.throws(() => createAgentScene({ ...recipe, nodes: [{ ...recipe.nodes[1], instances: { scatter: { count: 10_000_000, min: [0, 0, 0], max: [1, 1, 1] } } }] }), /scatter count/);
-  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ ...recipe.nodes[1], instances: { surface: { geometry: 'missing', count: 3 } } }] }), /not in geometries/);
+  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ ...recipe.nodes[1], instances: { surface: { geometry: 'missing', count: 3 } } }] }), /instances\.surface: got "missing"; expected the ID of a geometry in geometries/);
 });

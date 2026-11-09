@@ -204,7 +204,7 @@ test('recipe mesh geometry renders, reports edits and rejects bad edits atomical
     format: '67js.scene', schemaVersion: 1,
     geometries: [{ id: 'plain', type: 'box', bevel: 0 }, { id: 'nested', type: 'mesh', base: { type: 'mesh', base: { type: 'box' } } }],
     materials: [], nodes: [],
-  }), /mesh base must be a primitive/);
+  }), /geometries\[1\]\.base: got .*expected a primitive or profile record without an id/);
   const plain = createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [{ id: 'plain', type: 'box', bevel: 0 }], materials: [], nodes: [] });
-  assert.throws(() => plain.apply([{ type: 'edit-mesh', geometry: 'plain', edits: [] }], { expectedRevision: 0 }), /Add a mesh geometry with base/);
+  assert.throws(() => plain.apply([{ type: 'edit-mesh', geometry: 'plain', edits: [] }], { expectedRevision: 0 }), /geometry: got "plain"; expected the ID of a mesh geometry, but it is a box\. Add a mesh geometry with base/);
 });
