@@ -117,3 +117,47 @@ test('capabilities name the physics surface and the detector finds a section', (
   assert.equal(needsPhysics(recipe(undefined)), false);
   assert.equal(needsPhysics([{ type: 'set-physics', physics: null }]), false);
 });
+
+test('recipe physics supports cylinder, cone, compound shapes, spring joints, motors, events and force fields', () => {
+  const scene = createAgentScene(recipe({
+    duration: 1,
+    gravity: [0, 0, 0],
+    fields: [{ type: 'wind', direction: [0, 0, 1], strength: 6 }],
+    bodies: [
+      { node: 'floor', type: 'fixed', shape: 'cylinder' },
+      { node: 'ball', shape: 'cone', mass: 1 },
+      { node: 'slider', shape: 'compound', shapes: [
+        { shape: 'box', halfExtents: [0.2, 0.2, 0.2], translation: [-0.2, 0, 0] },
+        { shape: 'ball', radius: 0.2, translation: [0.2, 0, 0] },
+        { shape: 'cylinder', radius: 0.1, halfHeight: 0.2 },
+      ] },
+      { node: 'bob', shape: 'capsule' },
+    ],
+    joints: [
+      { name: 'track', type: 'prismatic', bodyA: 'floor', bodyB: 'slider', anchorA: [0, 2, 0], anchorB: [0, 0, 0], axis: [1, 0, 0], limits: [-2, 2], motor: { mode: 'position', target: 0.8, stiffness: 60, damping: 10, maxForce: 100 }, contactsEnabled: false },
+      { type: 'spring', bodyA: 'floor', bodyB: 'bob', anchorA: [0, 2, 0], anchorB: [0, 0, 0], restLength: 0.5, stiffness: 30, damping: 3 },
+    ],
+    events: [
+      { time: 0.2, type: 'impulse', body: 'ball', impulse: [3, 0, 0], torqueImpulse: [0, 1, 0], point: [0, 2, 0] },
+      { tick: 30, type: 'jointMotor', joint: 'track', motor: { mode: 'velocity', target: -0.5, damping: 10, maxForce: 50 } },
+    ],
+  }, [
+    { id: 'slider', geometry: 'slab', material: 'paint', translation: [0, 1.75, 0], rotation: [0, 0, 0, 1], scale: [0.4, 0.4, 0.4] },
+    { id: 'bob', geometry: 'ball', material: 'paint', translation: [0, 0.5, 0], scale: [0.3, 0.3, 0.3] },
+  ]));
+  scene.sampleMotion(1);
+  const { physics } = scene.inspect({});
+  const ball = physics.bodies.find(body => body.node === 'ball');
+  const bob = physics.bodies.find(body => body.node === 'bob');
+  assert.ok(ball.finalPosition[0] > 1.5, `impulse pushes ball along +X, got ${ball.finalPosition[0]}`);
+  assert.ok(ball.finalPosition[2] > 2, `wind field pushes ball along +Z, got ${ball.finalPosition[2]}`);
+  assert.ok(bob.finalPosition[1] > 0.8, `spring pulls bob upward, got ${bob.finalPosition[1]}`);
+
+  const kinScene = createAgentScene(recipe({ duration: 1, bodies: [{ node: 'floor', type: 'kinematic', shape: 'box' }], events: [{ time: 0.1, type: 'kinematicPose', body: 'floor', translation: [0, 1, 0], rotation: [0, 0, 0, 1] }] }));
+  kinScene.sampleMotion(0.5);
+  assert.equal(kinScene.parts[0].matrix[13], 1);
+  assert.throws(() => createAgentScene(recipe({ duration: 1, bodies: [{ node: 'ball', shape: 'compound', shapes: [] }] })), /at least one sub-collider/);
+  assert.throws(() => createAgentScene(recipe({ duration: 1, bodies: [{ node: 'ball', shapes: [{ shape: 'box', halfExtents: [1, 1, 1] }] }] })), /compound/);
+  assert.throws(() => createAgentScene(recipe({ duration: 1, bodies: [{ node: 'ball' }], events: [{ time: 0.1, type: 'impulse', body: 'ball' }] })), /impulse or torqueImpulse/);
+  assert.throws(() => createAgentScene(recipe({ duration: 1, bodies: [{ node: 'floor', type: 'kinematic', shape: 'box' }], events: [{ time: 0.1, type: 'kinematicPose', body: 'floor' }] })), /translation or rotation/);
+});
