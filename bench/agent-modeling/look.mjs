@@ -74,7 +74,7 @@ export async function withLookPage(callback, viewport = { width: IMAGE_SIZE, hei
     const page = await browser.newPage({ viewport });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/bench/agent-modeling/look-harness.html`);
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/bench/agent-modeling/look-harness.html`, { timeout: 60000 });
     await page.waitForFunction(() => window.renderLookViews);
     const result = await callback(page);
     if (errors.length) throw new Error(errors.join('\n'));

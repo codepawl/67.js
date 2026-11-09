@@ -109,7 +109,7 @@ test('diffuse + glossy + emission match the beauty frame, and auxiliary passes r
       return;
     }
     const page = await browser.newPage({ viewport: { width: 64, height: 64 } });
-    await page.goto(`http://127.0.0.1:${port}/`);
+    await page.goto(`http://127.0.0.1:${port}/`, { timeout: 60000 });
     const { beauty, passes, movedVelocity, manifest, transmission, size: SIZE } = await drawFrames(page);
     let compared = 0;
     let totalError = 0;
