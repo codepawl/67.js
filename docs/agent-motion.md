@@ -279,15 +279,22 @@ own transform under its parent.
 | `limit_rotation` | `x`, `y`, `z` as `[min, max]` degrees, `space` | Clamp the Euler angles per axis |
 | `track_to` | `target`, `trackAxis` (default `-z`), `upAxis` (default `y`), `worldUp` (default `[0, 1, 0]`) | Turn the node so its track axis points at the target and its up axis leans toward `worldUp`. Blender's up is Z, so its numbers match with `worldUp: [0, 0, 1]` |
 | `child_of` | `target`, `inverse` (`rest` or `none`) | The node follows the target: its world matrix becomes target * inverse * its own. `rest` uses the inverse of the target's rest matrix, so the node stays put until the target moves; Blender's default is `none` |
-| `floor` | `target`, `axis` (default `+y`), `offset` | Keep the node on the positive side of the plane through the target, along `axis`, plus `offset` |
+| `floor` | `target`, `axis` (default `+y`), `offset`, `useRotation` | Keep the node on the positive side of the plane through the target, along `axis` (rotated by the target when `useRotation` is true), plus `offset` |
 
-| `copy_transforms` | `target` | The node's world matrix becomes the target's |
+| `copy_transforms` | `target`, `mix` (`replace`, `before`, `after`) | The node's world matrix becomes or multiplies with the target's |
 | `limit_distance` | `target`, `distance`, `mode` (`inside` default, `outside`, `surface`) | Keep the node's world position inside, outside or on the sphere of that radius around the target |
 | `limit_scale` | `x`, `y`, `z` as `[min, max]` above 0, `space` | Clamp the scale per axis |
 | `stretch_to` | `target`, `restLength` (default: the rest distance), `volume` (`xz` default, `x`, `z`, `none`), `bulge` (0 to 4, default 1), `worldUp` | Aim +y at the target, scale y by distance over `restLength` and x and z by that ratio to the power of minus `bulge` (its square root for `xz`). Z leans toward `worldUp` |
 | `locked_track` | `target`, `trackAxis` (default `+y`), `lockAxis` (default `z`) | Turn only about the node's own lock axis so the track axis points toward the target |
-| `transformation` | `target`, `source`, `destination` (`translation`, `rotation` or `scale`), `map` (the source axis for each destination x, y, z), `fromMin`, `fromMax` (per source axis), `toMin`, `toMax` (per destination axis), `space` | The target's channel, clamped to its range, sets the node's channel over its range. Rotation is Euler degrees |
+| `transformation` | `target`, `source`, `destination` (`translation`, `rotation` or `scale`), `map` (the source axis for each destination x, y, z), `fromMin`, `fromMax` (per source axis), `toMin`, `toMax` (per destination axis), `mix` (`replace`, `add`, `multiply`), `space` | The target's channel, clamped to its range, sets, adds to or multiplies the node's channel over its range. Rotation is Euler degrees |
 | `action` | `target`, `source`, `axis`, `min`, `max`, `destination`, `keys` (2 to 16 of `{ at, value }`, `at` 0 to 1 rising), `space` | Read the curve where the target's channel sits between `min` and `max`; its value sets the node's channel |
+| `maintain_volume` | `freeAxis` (default `y`), `volume` (default `1`), `space` | Scale the two non-free axes by `sqrt(volume / freeScale)` to preserve volume |
+| `damped_track` | `target`, `trackAxis` (default `+y`) | Rotate the node by the shortest arc that aligns `trackAxis` with the vector to the target |
+| `pivot` | `target` (optional), `offset` (default `[0, 0, 0]`) | Orbit the node's translation around `target + offset` (or rest position + `offset`) by its rotation |
+| `follow_path` | `points` (2 to 64 `[x, y, z]`), `closed`, `followCurve`, `forwardAxis` (default `-z`), `upAxis` (default `y`), `offset`, `duration` (default `1`) | Move the node along the Catmull-Rom curve over `duration`, optionally orienting `forwardAxis` along the tangent |
+| `clamp_to` | `points` (2 to 64 `[x, y, z]`), `mainAxis` (`auto`, `x`, `y`, `z`), `cyclic` | Place the node along the curve where its coordinate on `mainAxis` sits within the curve's span |
+| `shrinkwrap` | `target`, `mode` (`nearest`, `project`, `surface`), `projectAxis` (default `-y`), `distance` (default `0`) | Snap the node onto the target's bounding surface or along `projectAxis` at `distance` |
+| `armature` | `targets` (1 to 8 of `{ target, weight }`) | Blend `child_of` transforms from multiple target nodes by their weights |
 
 Over MCP, the seven newest types (`copy_transforms` to `action`) take `node`, `type` and `args`, an object holding every other
 field above (`target`, `influence` and the type's own); the validator names the allowed fields when one is wrong. Direct fields

@@ -31,14 +31,21 @@ const CONSTRAINT_FIELDS = {
   limit_rotation: ['x', 'y', 'z', 'space'],
   track_to: ['target', 'trackAxis', 'upAxis', 'worldUp'],
   child_of: ['target', 'inverse'],
-  floor: ['target', 'axis', 'offset'],
-  copy_transforms: ['target'],
+  floor: ['target', 'axis', 'offset', 'useRotation'],
+  copy_transforms: ['target', 'mix'],
   limit_distance: ['target', 'distance', 'mode'],
   limit_scale: ['x', 'y', 'z', 'space'],
   stretch_to: ['target', 'restLength', 'volume', 'bulge', 'worldUp'],
   locked_track: ['target', 'trackAxis', 'lockAxis'],
-  transformation: ['target', 'source', 'destination', 'map', 'fromMin', 'fromMax', 'toMin', 'toMax', 'space'],
+  transformation: ['target', 'source', 'destination', 'map', 'fromMin', 'fromMax', 'toMin', 'toMax', 'mix', 'space'],
   action: ['target', 'source', 'axis', 'min', 'max', 'destination', 'keys', 'space'],
+  maintain_volume: ['freeAxis', 'volume', 'space'],
+  damped_track: ['target', 'trackAxis'],
+  pivot: ['target', 'offset'],
+  follow_path: ['points', 'closed', 'followCurve', 'forwardAxis', 'upAxis', 'offset', 'duration'],
+  clamp_to: ['points', 'mainAxis', 'cyclic'],
+  shrinkwrap: ['target', 'mode', 'projectAxis', 'distance'],
+  armature: ['targets'],
 };
 const PROPERTIES = ['translation', 'rotation', 'scale'];
 const MAX_ACTION_KEYS = 16;
@@ -83,7 +90,7 @@ function influenceFrom(value, nodeIds, label) {
   return structuredClone(value);
 }
 
-const ARGUMENT_TYPES = ['copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action'];
+const ARGUMENT_TYPES = ['copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action', 'maintain_volume', 'damped_track', 'pivot', 'follow_path', 'clamp_to', 'shrinkwrap', 'armature'];
 
 // The newer types may carry their own fields in `args`, so the MCP schema stays small; they merge into the flat shape.
 function withArguments(input, label) {
@@ -104,7 +111,7 @@ function normalizeConstraint(rawInput, position, movableIds, visibleIds) {
   knownKeys(input, [...COMMON_FIELDS, ...CONSTRAINT_FIELDS[input.type]], label);
   if (!movableIds.has(input.node)) throw new RangeError(`${label} node must be a node ID in this recipe; got ${JSON.stringify(input.node)}.`);
   const result = { type: input.type, node: input.node, influence: influenceFrom(input.influence, visibleIds, label) };
-  if (CONSTRAINT_FIELDS[input.type].includes('target')) {
+  if (CONSTRAINT_FIELDS[input.type].includes('target') && (input.type !== 'pivot' || input.target !== undefined)) {
     if (!visibleIds.has(input.target)) throw new RangeError(`${label} target must be a node ID in this recipe; got ${JSON.stringify(input.target)}.`);
     if (input.target === input.node) throw new RangeError(`${label} target cannot be the constrained node itself.`);
     result.target = input.target;
@@ -145,16 +152,27 @@ function normalizeConstraint(rawInput, position, movableIds, visibleIds) {
     case 'floor':
       result.axis = oneOf(input.axis, SIGNED_AXES, '+y', `${label} axis`);
       result.offset = input.offset === undefined ? 0 : bounded(input.offset, -MAX_COORDINATE, MAX_COORDINATE, `${label} offset`);
+      if (input.useRotation !== undefined) {
+        if (typeof input.useRotation !== 'boolean') throw new TypeError(`${label} useRotation must be a boolean.`);
+        result.useRotation = input.useRotation;
+      }
       break;
     default:
-      normalizeExtraConstraint(input, result, label);
+      normalizeExtraConstraint(input, result, label, visibleIds);
   }
   return result;
 }
 
-function normalizeExtraConstraint(input, result, label) {
+function curvePathPoints(points, label) {
+  denseArray(points, 64, `${label} points`);
+  if (points.length < 2) throw new RangeError(`${label} points needs at least 2 points.`);
+  return points.map((point, index) => valueFrom(point, 3, `${label} points[${index}]`));
+}
+
+function normalizeExtraConstraint(input, result, label, visibleIds) {
   switch (input.type) {
     case 'copy_transforms':
+      result.mix = oneOf(input.mix, ['replace', 'before', 'after'], 'replace', `${label} mix`);
       break;
     case 'limit_distance':
       result.distance = bounded(input.distance, 0, MAX_COORDINATE, `${label} distance`);
@@ -187,6 +205,51 @@ function normalizeExtraConstraint(input, result, label) {
         result[field] = input[field] === undefined ? [fallback, fallback, fallback] : valueFrom(input[field], 3, `${label} ${field}`);
       }
       if (result.fromMin.some((value, index) => value === result.fromMax[index])) throw new RangeError(`${label} fromMax must differ from fromMin on every axis.`);
+      result.mix = oneOf(input.mix, ['replace', 'add', 'multiply'], 'replace', `${label} mix`);
+      if (result.mix === 'multiply' && result.destination !== 'scale') throw new RangeError(`${label} mix multiply is only for scale destination.`);
+      break;
+    case 'maintain_volume':
+      result.freeAxis = oneOf(input.freeAxis, AXES, 'y', `${label} freeAxis`);
+      result.volume = input.volume === undefined ? 1 : bounded(input.volume, 0.001, 1000, `${label} volume`);
+      break;
+    case 'damped_track':
+      result.trackAxis = oneOf(input.trackAxis, SIGNED_AXES, '+y', `${label} trackAxis`);
+      break;
+    case 'pivot':
+      result.offset = input.offset === undefined ? [0, 0, 0] : valueFrom(input.offset, 3, `${label} offset`);
+      break;
+    case 'follow_path':
+      result.points = curvePathPoints(input.points, label);
+      if (input.closed !== undefined && typeof input.closed !== 'boolean') throw new TypeError(`${label} closed must be a boolean.`);
+      if (input.followCurve !== undefined && typeof input.followCurve !== 'boolean') throw new TypeError(`${label} followCurve must be a boolean.`);
+      result.closed = input.closed ?? false;
+      result.followCurve = input.followCurve ?? false;
+      result.forwardAxis = oneOf(input.forwardAxis, SIGNED_AXES, '-z', `${label} forwardAxis`);
+      result.upAxis = oneOf(input.upAxis, AXES, 'y', `${label} upAxis`);
+      if (result.forwardAxis.slice(1) === result.upAxis) throw new RangeError(`${label} forwardAxis and upAxis must be different axes.`);
+      result.offset = input.offset === undefined ? 0 : bounded(input.offset, -MAX_COORDINATE, MAX_COORDINATE, `${label} offset`);
+      result.duration = input.duration === undefined ? 1 : bounded(input.duration, 0.001, MAX_COORDINATE, `${label} duration`);
+      break;
+    case 'clamp_to':
+      result.points = curvePathPoints(input.points, label);
+      result.mainAxis = oneOf(input.mainAxis, ['auto', ...AXES], 'auto', `${label} mainAxis`);
+      if (input.cyclic !== undefined && typeof input.cyclic !== 'boolean') throw new TypeError(`${label} cyclic must be a boolean.`);
+      result.cyclic = input.cyclic ?? false;
+      break;
+    case 'shrinkwrap':
+      result.mode = oneOf(input.mode, ['nearest', 'project', 'surface'], 'nearest', `${label} mode`);
+      result.projectAxis = oneOf(input.projectAxis, SIGNED_AXES, '-y', `${label} projectAxis`);
+      result.distance = input.distance === undefined ? 0 : bounded(input.distance, -MAX_COORDINATE, MAX_COORDINATE, `${label} distance`);
+      break;
+    case 'armature':
+      denseArray(input.targets, 8, `${label} targets`);
+      if (!input.targets.length) throw new RangeError(`${label} targets needs at least 1 target.`);
+      result.targets = input.targets.map((entry, index) => {
+        knownKeys(entry, ['target', 'weight'], `${label} targets[${index}]`);
+        if (!visibleIds.has(entry.target)) throw new RangeError(`${label} targets[${index}] target must be a node ID in this recipe; got ${JSON.stringify(entry.target)}.`);
+        if (entry.target === input.node) throw new RangeError(`${label} target cannot be the constrained node itself.`);
+        return { target: entry.target, weight: entry.weight === undefined ? 1 : bounded(entry.weight, 0, 1, `${label} targets[${index}] weight`) };
+      });
       break;
     default:
       normalizeActionConstraint(input, result, label);
@@ -367,9 +430,21 @@ function transformation(owner, target, constraint) {
     const from = axisIndex(sourceAxis);
     const fraction = (source[from] - constraint.fromMin[from]) / (constraint.fromMax[from] - constraint.fromMin[from]);
     const clamped = Math.min(1, Math.max(0, fraction));
-    result[index] = constraint.toMin[index] + clamped * (constraint.toMax[index] - constraint.toMin[index]);
+    const mapped = constraint.toMin[index] + clamped * (constraint.toMax[index] - constraint.toMin[index]);
+    if (constraint.mix === 'add') result[index] += mapped;
+    else if (constraint.mix === 'multiply') result[index] *= mapped;
+    else result[index] = mapped;
   });
   writeChannel(owner, constraint.destination, result);
+}
+
+function maintainVolume(owner, target, constraint) {
+  const freeIndex = axisIndex(constraint.freeAxis);
+  const freeScale = Math.max(NEAR_ZERO, owner.scale[freeIndex]);
+  const sideScale = Math.sqrt(constraint.volume / freeScale);
+  for (let index = 0; index < 3; index++) {
+    if (index !== freeIndex) owner.scale[index] *= sideScale;
+  }
 }
 
 /** The owner's channel follows a keyed curve, read where the target's channel sits between min and max. */
@@ -387,7 +462,8 @@ function action(owner, target, constraint) {
 
 const FRAME_CONSTRAINTS = {
   copy_location: copyLocation, copy_rotation: copyRotation, copy_scale: copyScale,
-  limit_location: limitLocation, limit_rotation: limitRotation, limit_scale: limitScale, transformation, action,
+  limit_location: limitLocation, limit_rotation: limitRotation, limit_scale: limitScale,
+  transformation, action, maintain_volume: maintainVolume,
 };
 
 function perpendicularTo(direction) {
@@ -464,6 +540,10 @@ function stretchTo(ownerWorld, targetWorld, constraint, restLength) {
 function floorConstraint(ownerWorld, targetWorld, constraint) {
   const normal = new Float64Array(3);
   normal[axisIndex(constraint.axis)] = signOf(constraint.axis);
+  if (constraint.useRotation) {
+    vec3.transformQuat(normal, normal, decompose(targetWorld).rotation);
+    vec3.normalize(normal, normal);
+  }
   const position = mat4.getTranslation(new Float64Array(3), ownerWorld);
   const planePoint = mat4.getTranslation(new Float64Array(3), targetWorld);
   const height = vec3.dot(vec3.subtract(new Float64Array(3), position, planePoint), normal);
@@ -472,6 +552,148 @@ function floorConstraint(ownerWorld, targetWorld, constraint) {
   const raise = constraint.offset - height;
   for (let index = 0; index < 3; index++) lifted[12 + index] += normal[index] * raise;
   return lifted;
+}
+
+/** Rotate the owner by the shortest arc that aligns its trackAxis with the vector to the target. */
+function dampedTrack(ownerWorld, targetWorld, constraint) {
+  const frame = decompose(ownerWorld);
+  const wanted = vec3.subtract(new Float64Array(3), mat4.getTranslation(new Float64Array(3), targetWorld), frame.translation);
+  if (vec3.length(wanted) < NEAR_ZERO) return ownerWorld;
+  vec3.normalize(wanted, wanted);
+  const localAxis = new Float64Array(3);
+  localAxis[axisIndex(constraint.trackAxis)] = signOf(constraint.trackAxis);
+  const currentAxis = vec3.transformQuat(new Float64Array(3), localAxis, frame.rotation);
+  vec3.normalize(currentAxis, currentAxis);
+  const turn = quat.rotationTo(new Float64Array(4), currentAxis, wanted);
+  frame.rotation = quat.normalize(new Float64Array(4), quat.multiply(new Float64Array(4), turn, frame.rotation));
+  return compose(frame);
+}
+
+/** Orbit the owner's translation around a pivot point (target + offset, or rest translation + offset) by its rotation. */
+function pivotConstraint(ownerWorld, targetWorld, restOwnerWorld, constraint) {
+  const frame = decompose(ownerWorld);
+  const restFrame = decompose(restOwnerWorld);
+  const base = targetWorld ? mat4.getTranslation(new Float64Array(3), targetWorld) : restFrame.translation;
+  const pivotPoint = vec3.add(new Float64Array(3), base, constraint.offset);
+  const arm = vec3.subtract(new Float64Array(3), frame.translation, pivotPoint);
+  vec3.transformQuat(arm, arm, frame.rotation);
+  vec3.add(frame.translation, pivotPoint, arm);
+  return compose(frame);
+}
+
+function sampleCatmullRom(points, closed, parameter) {
+  const count = points.length;
+  const segments = closed ? count : count - 1;
+  const wrapped = closed ? ((parameter % 1) + 1) % 1 : Math.min(1, Math.max(0, parameter));
+  const scaled = wrapped * segments;
+  const segment = Math.min(segments - 1, Math.floor(scaled));
+  const localT = scaled - segment;
+  const pick = index => {
+    if (closed) return points[((index % count) + count) % count];
+    if (index < 0) return points[0].map((v, i) => 2 * v - points[1][i]);
+    if (index >= count) return points[count - 1].map((v, i) => 2 * v - points[count - 2][i]);
+    return points[index];
+  };
+  const p0 = pick(segment - 1);
+  const p1 = pick(segment);
+  const p2 = pick(segment + 1);
+  const p3 = pick(segment + 2);
+  const t2 = localT * localT;
+  const t3 = t2 * localT;
+  const position = new Float64Array(3);
+  const tangent = new Float64Array(3);
+  for (let axis = 0; axis < 3; axis++) {
+    position[axis] = 0.5 * ((2 * p1[axis]) + (-p0[axis] + p2[axis]) * localT + (2 * p0[axis] - 5 * p1[axis] + 4 * p2[axis] - p3[axis]) * t2 + (-p0[axis] + 3 * p1[axis] - 3 * p2[axis] + p3[axis]) * t3);
+    tangent[axis] = 0.5 * ((-p0[axis] + p2[axis]) + 2 * (2 * p0[axis] - 5 * p1[axis] + 4 * p2[axis] - p3[axis]) * localT + 3 * (-p0[axis] + 3 * p1[axis] - 3 * p2[axis] + p3[axis]) * t2);
+  }
+  return { position, tangent };
+}
+
+function followPathConstraint(ownerWorld, constraint, time) {
+  const parameter = (time / constraint.duration) + constraint.offset;
+  const { position, tangent } = sampleCatmullRom(constraint.points, constraint.closed, parameter);
+  const moved = mat4.clone(ownerWorld);
+  moved.set(position, 12);
+  if (!constraint.followCurve || vec3.length(tangent) < NEAR_ZERO) return moved;
+  const targetPoint = vec3.add(new Float64Array(3), position, tangent);
+  const targetMatrix = mat4.fromTranslation(new Float64Array(16), targetPoint);
+  return trackTo(moved, targetMatrix, { trackAxis: constraint.forwardAxis, upAxis: constraint.upAxis, worldUp: [0, 1, 0] });
+}
+
+function clampToConstraint(ownerWorld, constraint) {
+  const points = constraint.points;
+  let axis = axisIndex(constraint.mainAxis);
+  if (constraint.mainAxis === 'auto') {
+    const spans = [0, 1, 2].map(index => {
+      const coords = points.map(point => point[index]);
+      return Math.max(...coords) - Math.min(...coords);
+    });
+    axis = spans.indexOf(Math.max(...spans));
+  }
+  const coords = points.map(point => point[axis]);
+  const minCoord = Math.min(...coords);
+  const maxCoord = Math.max(...coords);
+  const ownerPos = mat4.getTranslation(new Float64Array(3), ownerWorld);
+  const span = Math.max(NEAR_ZERO, maxCoord - minCoord);
+  let fraction = (ownerPos[axis] - minCoord) / span;
+  fraction = constraint.cyclic ? ((fraction % 1) + 1) % 1 : Math.min(1, Math.max(0, fraction));
+  const { position } = sampleCatmullRom(points, constraint.cyclic, fraction);
+  const moved = mat4.clone(ownerWorld);
+  moved.set(position, 12);
+  return moved;
+}
+
+function shrinkwrapConstraint(ownerWorld, targetWorld, constraint) {
+  const ownerPos = mat4.getTranslation(new Float64Array(3), ownerWorld);
+  const targetFrame = decompose(targetWorld);
+  const moved = mat4.clone(ownerWorld);
+  if (constraint.mode === 'project') {
+    const dir = new Float64Array(3);
+    dir[axisIndex(constraint.projectAxis)] = signOf(constraint.projectAxis);
+    const axis = axisIndex(constraint.projectAxis);
+    const sign = signOf(constraint.projectAxis);
+    const surfaceCoord = targetFrame.translation[axis] - sign * (targetFrame.scale[axis] * 0.5 + constraint.distance);
+    ownerPos[axis] = surfaceCoord;
+    moved.set(ownerPos, 12);
+    return moved;
+  }
+  const offset = vec3.subtract(new Float64Array(3), ownerPos, targetFrame.translation);
+  const radius = Math.max(...targetFrame.scale) * 0.5 + constraint.distance;
+  const dist = vec3.length(offset);
+  if (dist < NEAR_ZERO) {
+    moved[13] = targetFrame.translation[1] + radius;
+    return moved;
+  }
+  vec3.scaleAndAdd(ownerPos, targetFrame.translation, offset, radius / dist);
+  moved.set(ownerPos, 12);
+  return moved;
+}
+
+function armatureConstraint(ownerWorld, worlds, restWorlds, indexById, constraint) {
+  let totalWeight = 0;
+  const translations = new Float64Array(3);
+  const scales = new Float64Array(3);
+  const accumRotation = new Float64Array(4);
+  let firstQuat = null;
+  for (const entry of constraint.targets) {
+    if (entry.weight <= 0) continue;
+    const targetIdx = indexById.get(entry.target);
+    const inverse = mat4.invert(new Float64Array(16), restWorlds[targetIdx]);
+    const delta = mat4.multiply(new Float64Array(16), worlds[targetIdx], inverse);
+    const transformed = decompose(mat4.multiply(new Float64Array(16), delta, ownerWorld));
+    totalWeight += entry.weight;
+    vec3.scaleAndAdd(translations, translations, transformed.translation, entry.weight);
+    vec3.scaleAndAdd(scales, scales, transformed.scale, entry.weight);
+    const q = transformed.rotation;
+    if (!firstQuat) firstQuat = q;
+    const sign = quat.dot(firstQuat, q) < 0 ? -entry.weight : entry.weight;
+    for (let i = 0; i < 4; i++) accumRotation[i] += q[i] * sign;
+  }
+  if (totalWeight <= NEAR_ZERO) return ownerWorld;
+  vec3.scale(translations, translations, 1 / totalWeight);
+  vec3.scale(scales, scales, 1 / totalWeight);
+  quat.normalize(accumRotation, accumRotation);
+  return compose({ translation: translations, rotation: accumRotation, scale: scales });
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -588,7 +810,9 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
     } else if (constraint.type === 'floor') {
       result = floorConstraint(ownerWorld, worlds[targetIndex], constraint);
     } else if (constraint.type === 'copy_transforms') {
-      result = worlds[targetIndex];
+      if (constraint.mix === 'before') result = mat4.multiply(new Float64Array(16), ownerWorld, worlds[targetIndex]);
+      else if (constraint.mix === 'after') result = mat4.multiply(new Float64Array(16), worlds[targetIndex], ownerWorld);
+      else result = worlds[targetIndex];
     } else if (constraint.type === 'limit_distance') {
       result = limitDistance(ownerWorld, worlds[targetIndex], constraint);
     } else if (constraint.type === 'locked_track') {
@@ -596,6 +820,18 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
     } else if (constraint.type === 'stretch_to') {
       const restLength = constraint.restLength || vec3.distance(mat4.getTranslation(new Float64Array(3), restWorlds[ownerIndex]), mat4.getTranslation(new Float64Array(3), restWorlds[targetIndex]));
       result = stretchTo(ownerWorld, worlds[targetIndex], constraint, restLength);
+    } else if (constraint.type === 'damped_track') {
+      result = dampedTrack(ownerWorld, worlds[targetIndex], constraint);
+    } else if (constraint.type === 'pivot') {
+      result = pivotConstraint(ownerWorld, targetIndex >= 0 ? worlds[targetIndex] : null, restWorlds[ownerIndex], constraint);
+    } else if (constraint.type === 'follow_path') {
+      result = followPathConstraint(ownerWorld, constraint, context.time);
+    } else if (constraint.type === 'clamp_to') {
+      result = clampToConstraint(ownerWorld, constraint);
+    } else if (constraint.type === 'shrinkwrap') {
+      result = shrinkwrapConstraint(ownerWorld, worlds[targetIndex], constraint);
+    } else if (constraint.type === 'armature') {
+      result = armatureConstraint(ownerWorld, worlds, restWorlds, indexById, constraint);
     } else {
       const inverse = constraint.inverse === 'rest' ? mat4.invert(new Float64Array(16), restWorlds[targetIndex]) : mat4.create();
       const parent = mat4.multiply(new Float64Array(16), worlds[targetIndex], inverse);
