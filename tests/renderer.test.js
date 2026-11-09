@@ -627,3 +627,41 @@ test('resize keeps the projection centered at 699 px and 1440 px', () => {
     assert.equal(renderer.projection[8], 0);
   }
 });
+
+test('drawAmbientOcclusion unprojects in view space so far camera coordinates do not quantize distant normals', () => {
+  const uploaded = {};
+  const renderer = Object.create(Renderer67.prototype);
+  renderer.canvas = { width: 540, height: 960 };
+  renderer.depthTexture = 'depth';
+  renderer.projection = mat4.perspective(mat4.create(), (52 * Math.PI) / 180, 540 / 960, 0.05, 400);
+  renderer.view = mat4.lookAt(mat4.create(), [6000.3, 1.0, 9.2], [6000.0, 1.4, -20.0], [0, 1, 0]);
+  renderer.viewProjection = mat4.multiply(mat4.create(), renderer.projection, renderer.view);
+  renderer.inverseViewProjection = mat4.invert(mat4.create(), renderer.viewProjection);
+  renderer.occlusionTarget = { texture: 'ao', framebuffer: 'fbo', width: 270, height: 480 };
+  renderer.occlusionProgram = 'program';
+  renderer.occlusionUniforms = {
+    sceneDepth: 'sceneDepth', inverseViewProjection: 'inverseViewProjection',
+    radius: 'radius', projectionScale: 'projectionScale', aspect: 'aspect', orthographic: 'orthographic',
+  };
+  renderer.context = {
+    FRAMEBUFFER: 1, TEXTURE_2D: 2, TEXTURE1: 3, DEPTH_TEST: 4, CULL_FACE: 5, TRIANGLES: 6,
+    bindFramebuffer() {}, viewport() {}, disable() {}, bindVertexArray() {}, useProgram() {}, activeTexture() {}, bindTexture() {},
+    uniform1i(name, value) { uploaded[name] = value; },
+    uniform1f(name, value) { uploaded[name] = value; },
+    uniformMatrix4fv(name, transpose, value) { uploaded[name] = new Float32Array(value); },
+    drawArrays() {},
+  };
+  renderer.drawAmbientOcclusion({ eye: [6000.3, 1.0, 9.2], projection: 'perspective' }, { ambientOcclusionRadius: 0.5 });
+  const matrix = uploaded.inverseViewProjection;
+  const clipZ = (-renderer.projection[10] * 129.2 + renderer.projection[14]) / 129.2;
+  const unprojectX = (column) => {
+    const clipX = ((column + 0.5) / 270) * 2 - 1;
+    const x = Math.fround(Math.fround(Math.fround(matrix[0] * clipX) + Math.fround(matrix[8] * clipZ)) + matrix[12]);
+    const w = Math.fround(Math.fround(Math.fround(matrix[3] * clipX) + Math.fround(matrix[11] * clipZ)) + matrix[15]);
+    return Math.fround(x / w);
+  };
+  for (let column = 0; column < 269; column++) {
+    const step = unprojectX(column + 1) - unprojectX(column);
+    assert.ok(step > 0.25 && step < 0.27, `column ${column} step ${step} must not quantize to zero`);
+  }
+});

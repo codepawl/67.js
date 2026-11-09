@@ -1594,7 +1594,7 @@ export class Renderer67 {
     const context = this.context;
     if (!this.occlusionProgram) {
       this.occlusionProgram = compileProgram(context, fullscreenVertex, ambientOcclusionFragment);
-      const names = ['sceneDepth', 'inverseViewProjection', 'eye', 'radius', 'projectionScale', 'aspect', 'orthographic'];
+      const names = ['sceneDepth', 'inverseViewProjection', 'radius', 'projectionScale', 'aspect', 'orthographic'];
       this.occlusionUniforms = Object.fromEntries(names.map(name => [name, context.getUniformLocation(this.occlusionProgram, name)]));
     }
     if (this.occlusionTarget) return;
@@ -1627,8 +1627,7 @@ export class Renderer67 {
     context.activeTexture(context.TEXTURE1);
     context.bindTexture(context.TEXTURE_2D, this.depthTexture);
     context.uniform1i(uniforms.sceneDepth, 1);
-    context.uniformMatrix4fv(uniforms.inverseViewProjection, false, this.inverseViewProjection);
-    context.uniform3fv(uniforms.eye, frame.eye);
+    context.uniformMatrix4fv(uniforms.inverseViewProjection, false, mat4.invert([], this.projection));
     context.uniform1f(uniforms.radius, effects.ambientOcclusionRadius);
     context.uniform1f(uniforms.projectionScale, 0.5 * this.projection[5]);
     context.uniform1f(uniforms.aspect, this.canvas.width / this.canvas.height);
