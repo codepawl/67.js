@@ -30,8 +30,8 @@ const CAMERA_DEFAULTS = Object.freeze({ eye: [4, 3, 5], target: [0, 0, 0], up: [
 const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher'];
 const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
 const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
-const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', ...MATERIAL_LAYER_FIELDS];
-const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'layerMaps', 'transmissionMap', 'boxMapScale', 'boxMapAxis'];
+const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', 'aov', ...MATERIAL_LAYER_FIELDS];
+const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'layerMaps', 'transmissionMap', 'aovMap', 'boxMapScale', 'boxMapAxis'];
 const CAMERA_FIELDS = [...Object.keys(CAMERA_DEFAULTS), ...CAMERA_LENS_FIELDS];
 const LOOK_OPERATION_FIELDS = Object.freeze({
   'set-environment': 'environment',
@@ -263,6 +263,13 @@ function materialFrom(value) {
     if (result.emissiveColor.some(component => component < 0)) {
       throw invalidField('emissiveColor', result.emissiveColor, 'three numbers of 0 or more, such as [1, 0.5, 0.2]');
     }
+  }
+  if (value.aov !== undefined) {
+    const aov = typeof value.aov === 'number' ? [finite(value.aov, 'aov'), value.aov, value.aov] : vector(value.aov, 3, 'aov');
+    if (aov.some(component => component < 0 || component > 1)) {
+      throw invalidField('aov', value.aov, 'a number or three numbers from 0 to 1, such as [1, 0.5, 0]');
+    }
+    result.aov = aov;
   }
   copyMaterialLayers(value, result);
   if (agentSceneModuleLoaded('worldMaterials')) {
@@ -875,7 +882,7 @@ function batchSignature(material) {
 function materialHandle(snapshot, sequence) {
   const holder = { snapshot, sequence };
   const output = {};
-  for (const field of ['tag', ...MATERIAL_FIELDS]) {
+  for (const field of ['id', 'tag', ...MATERIAL_FIELDS]) {
     Object.defineProperty(output, field, {
       enumerable: true,
       configurable: true,
@@ -898,7 +905,7 @@ function materialHandle(snapshot, sequence) {
 }
 
 function immutableMaterial(snapshot) {
-  for (const field of ['color', 'emissiveColor', 'absorption']) {
+  for (const field of ['color', 'emissiveColor', 'absorption', 'aov']) {
     if (snapshot[field]) {
       Object.freeze(snapshot[field]);
     }
