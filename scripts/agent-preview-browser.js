@@ -314,27 +314,32 @@ function syncMeshBlend(record) {
   record.renderer.meshBlend.radii = radii;
 }
 
-function status(record) {
+function renderStatus(record) {
   const render = renderInfo(record.renderer);
   record.lastRender = render;
   return {
     sessionId: record.sessionId,
     revision: record.scene.revision,
     topologyRevision: record.scene.topologyRevision,
-    inspection: record.scene.inspect(),
     render,
   };
 }
 
+function status(record) {
+  const { sessionId, revision, topologyRevision, render } = renderStatus(record);
+  return { sessionId, revision, topologyRevision, inspection: record.scene.inspect(), render };
+}
+
+// The answer to an edit stays short: it holds no inspection, because every answer stays in the agent's context.
+// An agent that needs the node list calls scene_inspect.
 function mutationStatus(record) {
   try {
     draw(record);
-    return { ...status(record), committed: true, renderSucceeded: true };
+    return { ...renderStatus(record), committed: true, renderSucceeded: true };
   } catch (error) {
     return {
       sessionId: record.sessionId,
       revision: record.scene.revision,
-      inspection: record.scene.inspect(),
       render: record.lastRender ?? null,
       committed: true,
       renderSucceeded: false,

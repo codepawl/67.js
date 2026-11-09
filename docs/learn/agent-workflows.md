@@ -193,28 +193,6 @@ The image has the size that the agent asked for, here 512 by 320 pixels. It look
   "sessionId": "1f0ac91e-860f-4332-b6e6-44e7007a81a1",
   "revision": 1,
   "topologyRevision": 1,
-  "inspection": {
-    "revision": 1,
-    "topologyRevision": 1,
-    "motion": null,
-    "physics": null,
-    "boundsSpace": "authored-base-world",
-    "counts": {"nodes":6,"parts":5,"geometries":2,"materials":1,"vertices":1578},
-    "geometryBytes": 70272,
-    "estimatedGeometryBytes": 88368,
-    "residentGeometryBytes": 70272,
-    "residentGeometryVertices": 1578,
-    "look": {"world":false,"pointLights":0,"spotLights":0,"areaLights":0,"volumeFogDensity":0,"exposure":1},
-    "nodes": [
-      {"id":"table","label":"table","parent":null,"geometry":null,"material":null,"vertices":0,"triangles":0},
-      {"id":"top","label":"top","parent":"table","geometry":"top","material":"wood","vertices":1176,"triangles":2028},
-      {"id":"leg-a","label":"leg-a","parent":"table","geometry":"leg","material":"wood","vertices":402,"triangles":672},
-      {"id":"leg-b","label":"leg-b","parent":"table","geometry":"leg","material":"wood","vertices":402,"triangles":672},
-      {"id":"leg-c","label":"leg-c","parent":"table","geometry":"leg","material":"wood","vertices":402,"triangles":672},
-      {"id":"leg-d","label":"leg-d","parent":"table","geometry":"leg","material":"wood","vertices":402,"triangles":672}
-    ],
-    "truncated": false
-  },
   "render": {
     "graphics": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
     "estimatedBytes": 24212100,
@@ -231,7 +209,13 @@ The image has the size that the agent asked for, here 512 by 320 pixels. It look
     "drawBatches": 3
   },
   "committed": true,
-  "renderSucceeded": true
+  "renderSucceeded": true,
+  "results": [
+    { "i": 0, "op": "add-node", "target": "leg-b", "changed": "added node" },
+    { "i": 1, "op": "add-node", "target": "leg-c", "changed": "added node" },
+    { "i": 2, "op": "add-node", "target": "leg-d", "changed": "added node" }
+  ],
+  "diff": { "nodes": { "added": ["leg-b", "leg-c", "leg-d"] } }
 }
 ```
 
