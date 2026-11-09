@@ -1,0 +1,1 @@
+- Motion tracks take `extrapolation` (`constant` or `linear`) and `modifiers`: `cycles` (repeat, offset, mirror, with counts), `stepped`, `noise` (seeded), `generator`, `limits` and `envelope`, sampled the same in sampleMotion, camera paths and render jobs (#690)
