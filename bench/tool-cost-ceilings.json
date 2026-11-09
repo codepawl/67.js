@@ -1,0 +1,12 @@
+{
+  "schemaTotalBytes": 100000,
+  "schemaToolBytes": {
+    "scene_create": 15000,
+    "scene_apply": 24000,
+    "scene_create_asset": 10500
+  },
+  "schemaOtherToolBytes": 6000,
+  "resultBytes": {
+    "scene_capabilities": 4000
+  }
+}

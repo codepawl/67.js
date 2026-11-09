@@ -123,7 +123,7 @@ for (const era of ['modern', 'legacy']) {
     assert.equal((await client.listTools()).tools.length, 23);
     const capabilities = (await call('scene_capabilities')).structuredContent;
     assert.equal(capabilities.phase, 'idle');
-    assert.equal(capabilities.preview.maximumActiveScenes, 1);
+    assert.equal((await call('scene_capabilities', { topic: 'preview' })).structuredContent.value.maximumActiveScenes, 1);
     assert.equal(capabilities.availableIn, metadata.version);
     if (protocolOnly) {
       results.push({ era, tools: 18, connectMs, browserStarted: false });

@@ -1,0 +1,3 @@
+- scene:agent-scene+lazy: the lazy post-steps module (three GLSL stages, the resolver and the stage installer), loaded only for a recipe that names colorBalance, glare or lensDistortion; it brings the camera-effects stage code with it.
+- goal:agent-scene: a module marker, a loader line and two reads of the registry that carry the three field names (43 bytes gzip); every stage and shader is lazy.
+- tool-total: three bare group fields (49 bytes in each of scene_create, scene_apply and scene_create_asset); the fields and ranges are in docs/agent-look.md and the engine's errors.

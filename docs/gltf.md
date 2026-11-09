@@ -61,7 +61,7 @@ The result contains `parts`, `warnings`, `animations`, `applyAnimation`, `dispos
 Each part contains `name`, `geometry`, `matrix`, and `material`.
 The column-major matrix contains the complete world transform, including parent transforms.
 Repeated primitives share geometry objects.
-Static mirrored instances reverse triangle winding while preserving their world matrices.
+Static mirrored instances keep their authored winding and world matrices; the renderer batches parts with a negative-determinant matrix apart and draws them with clockwise front faces.
 
 Geometry contains `positions` and `normals` as `Float32Array` values, plus `indices` as a `Uint32Array`.
 The importer computes missing normals and normalizes supplied normals.

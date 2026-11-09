@@ -143,10 +143,11 @@ try {
   await connect();
   const recovered = (await call('scene_capabilities')).structuredContent;
   assert.equal(recovered.phase, 'idle');
-  assert.equal(recovered.jobs.records.find(record => record.jobId === interrupted.jobId).state, 'cancelled');
+  const recoveredJobs = (await call('scene_capabilities', { topic: 'jobs' })).structuredContent.value;
+  assert.equal(recoveredJobs.records.find(record => record.jobId === interrupted.jobId).state, 'cancelled');
   assert.deepEqual((await call('scene_render_result', { jobId: videoJob.jobId })).structuredContent, result);
   for (const jobId of [videoJob.jobId, longJob.jobId, interrupted.jobId, ...imageJobs]) await call('scene_render_release', { jobId });
-  assert.equal((await call('scene_capabilities')).structuredContent.jobs.records.length, 0);
+  assert.equal((await call('scene_capabilities', { topic: 'jobs' })).structuredContent.value.records.length, 0);
   await mkdir('artifacts', { recursive: true });
   await writeFile('artifacts/mcp-render-jobs-proof.json', JSON.stringify({ cli, video, result,
     animatedFramesDiffer: true, activeCancel: true, eofCleanup: true, restartResults: true,

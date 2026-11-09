@@ -93,7 +93,7 @@ Known gaps, checked by `npm run check:tool-schemas`:
 
 ## Workflow
 
-1. Call `scene_capabilities` to read supported features and runtime limits.
+1. Call `scene_capabilities` for the topic index, then again with `topic` for the detail you need (limits, field lists).
 2. Call `scene_create` with a [scene recipe](agent-scene.md#recipe-contract).
 3. Call `scene_inspect` to read node IDs, bounds, counts, and the current revision.
 4. Call `scene_checkpoint` before an experiment.
@@ -121,7 +121,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
-| `scene_capabilities` | None | Features, limits, and backend information |
+| `scene_capabilities` | `topic` (optional) | A short index of topics; with a topic, its limits and fields (`motion`, `environment`, `materialFields`, `meshEdit`, `meshEdit.<op>`, `physics`, `jobs` and more) |
 | `scene_create` | `recipe` | Session ID, revision, inspection, and render status |
 | `scene_asset_catalog` | None | Configured catalog and content-bound GLB, image, `.hdr` (kind `environment`) and `.cube` (kind `look`) IDs; an ID goes in `environment.hdri` or `environment.look`, see [agent-look](agent-look.md#catalog-hdris-and-looks) |
 | `scene_create_asset` | `recipe` using `67js.asset` | Imported scene ID, revision, inspection and render status |

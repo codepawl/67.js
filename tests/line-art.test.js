@@ -105,15 +105,15 @@ test('installLineArt needs render passes first and leaves a frame without lines 
 });
 
 test('the MCP scene_create schema accepts lines (or null) and a material toon', async () => {
-  const server = createAgentMcpServer({ async close() {} });
+  const server = createAgentMcpServer({ async close() {}, async capabilities() { return { scene: {}, phase: 'idle' }; } });
   const client = new Client({ name: '67js-line-art-test', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const { tools } = await client.listTools();
-  const environment = tools.find(tool => tool.name === 'scene_create').inputSchema.properties.recipe.properties.environment;
-  const options = environment.properties.lines.anyOf;
-  assert.deepEqual(options.map(option => option.type).sort(), ['null', 'object']);
+  const outline = (await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'environment' } })).structuredContent.fields;
+  assert.match(JSON.stringify(outline['lines?']), /null/);
+  const material = (await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'materialFields' } })).structuredContent.fields;
+  assert.ok(material['toon?']);
   await client.close();
   await server.close();
 });

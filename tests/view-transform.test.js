@@ -104,8 +104,8 @@ test('recipes take a view transform and a named look, and refuse anything else',
   assert.equal(look.environment.viewTransform, 'agx');
   assert.equal(look.environment.look, 'warm');
   assert.equal(normalizeAgentLook({}).environment.viewTransform, undefined);
-  assert.throws(() => normalizeAgentLook({ environment: { viewTransform: 'filmic' } }), /viewTransform must be one of aces, agx, neutral/);
-  assert.throws(() => normalizeAgentLook({ environment: { look: '../grade.cube' } }), /look must be one of/);
+  assert.throws(() => normalizeAgentLook({ environment: { viewTransform: 'filmic' } }), /environment\.viewTransform: got "filmic"; expected one of aces, agx, neutral/);
+  assert.throws(() => normalizeAgentLook({ environment: { look: '../grade.cube' } }), /environment\.look: got "..\/grade\.cube"; expected one of/);
 });
 
 const IDENTITY_CUBE = (size) => {

@@ -62,8 +62,8 @@ const recipe = {
 
 try {
   await client.connect(transport);
-  const capabilities = (await call('scene_capabilities')).structuredContent;
-  assert.equal(capabilities.scene.particles.limits.maxParticles, 4000);
+  const capabilities = (await call('scene_capabilities', { topic: 'particles' })).structuredContent;
+  assert.equal(capabilities.value.limits.maxParticles, 4000);
   const created = (await call('scene_create', { recipe }, 180000)).structuredContent;
   const sessionId = created.sessionId;
   const report = (await call('scene_inspect', { sessionId })).structuredContent.particles;

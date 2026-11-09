@@ -24,7 +24,7 @@ function baseRecipe(extra = {}) {
 async function connect(context) {
   let scene;
   const runtime = {
-    async capabilities() { return {}; },
+    async capabilities() { return { scene: {}, phase: 'idle' }; },
     async create({ recipe }) {
       scene = createAgentScene(recipe);
       return { revision: scene.revision };
@@ -52,23 +52,12 @@ function lightArray(count, make) {
   return Array.from({ length: count }, (_, index) => make(index));
 }
 
-function findProperty(node, name) {
-  if (!node || typeof node !== 'object') return null;
-  if (node.properties?.[name]) return node.properties[name];
-  for (const child of Object.values(node)) {
-    const found = findProperty(child, name);
-    if (found) return found;
-  }
-  return null;
-}
-
 test('the MCP light caps are the engine light limits', async context => {
   const { client } = await connect(context);
-  const { tools } = await client.listTools();
-  const create = tools.find(tool => tool.name === 'scene_create');
+  const outline = (await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'environment' } })).structuredContent.fields;
   const limits = { pointLights: MAX_POINT_LIGHTS, spotLights: MAX_SPOT_LIGHTS, areaLights: MAX_AREA_LIGHTS };
   for (const [field, limit] of Object.entries(limits)) {
-    assert.equal(findProperty(create.inputSchema, field).maxItems, limit, `${field} cap in scene_create`);
+    assert.equal(outline[`${field}?`].length, `{..${limit}}`, `${field} cap in the environment topic`);
   }
 });
 
@@ -109,7 +98,7 @@ test('a camera takes fov or focalLength, never both, and checks each lens field'
   assert.throws(() => make({ sensorWidth: 36 }), /sensorWidth needs focalLength/);
   assert.throws(() => make({ projection: 'orthographic', focalLength: 50 }), /perspective projection/);
   assert.throws(() => make({ orthoScale: 4 }), /needs projection orthographic/);
-  assert.throws(() => make({ projection: 'orthographic', orthoScale: 0 }), /must be positive/);
+  assert.throws(() => make({ projection: 'orthographic', orthoScale: 0 }), /camera\.orthoScale: got 0; expected a positive view height/);
   assert.throws(() => make({ projection: 'fisheye' }), /perspective or orthographic/);
   assert.throws(() => make({ shift: [2, 0] }), /shift/);
   assert.throws(() => make({ fStop: 0.1 }), /fStop/);

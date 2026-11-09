@@ -54,16 +54,29 @@ export function sampleRecipe() {
   };
 }
 
-export async function listTools() {
-  const server = createAgentMcpServer({ async close() {} });
+async function withClient(runtime, use) {
+  const server = createAgentMcpServer(runtime);
   const client = new Client({ name: 'tool-cost', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const { tools } = await client.listTools();
-  await client.close();
-  await server.close();
-  return tools;
+  try {
+    return await use(client);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
+export async function listTools() {
+  return withClient({ async close() {} }, async client => (await client.listTools()).tools);
+}
+
+/** What an agent receives from scene_capabilities with no topic: the index on this branch, the whole list on an older one. */
+async function defaultCapabilitiesResult() {
+  const scene = { ...AGENT_SCENE_CAPABILITIES, postPasses: USER_PASS_CAPABILITIES, meshBlend: MESH_BLEND_CAPABILITIES, materialSnippet: MATERIAL_SNIPPET_CAPABILITIES, vegetation: VEGETATION_CAPABILITY_NOTE, crowd: CROWD_CAPABILITY_NOTE, textureSequence: TEXTURE_SEQUENCE_CAPABILITIES };
+  const runtime = { async close() {}, async capabilities() { return { scene, phase: 'idle', availableIn: '0.0.0' }; } };
+  return withClient(runtime, async client => (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent);
 }
 
 async function typicalResults(recipe) {
@@ -74,7 +87,7 @@ async function typicalResults(recipe) {
   const meshReport = scene.inspectMeshes({ geometries: ['seat'] });
   const { inspection, ...statusWithoutInspection } = status;
   return {
-    scene_capabilities: { ...AGENT_SCENE_CAPABILITIES, postPasses: USER_PASS_CAPABILITIES, meshBlend: MESH_BLEND_CAPABILITIES, materialSnippet: MATERIAL_SNIPPET_CAPABILITIES, vegetation: VEGETATION_CAPABILITY_NOTE, crowd: CROWD_CAPABILITY_NOTE, textureSequence: TEXTURE_SEQUENCE_CAPABILITIES },
+    scene_capabilities: await defaultCapabilitiesResult(),
     scene_create: status,
     scene_inspect: { sessionId: SAMPLE_SESSION, ...scene.inspect() },
     mesh_inspect: { sessionId: SAMPLE_SESSION, ...meshReport },

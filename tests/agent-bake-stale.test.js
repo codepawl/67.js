@@ -68,5 +68,5 @@ test('bake.rebake keeps the bakes of the last 4 poses and traces nothing for a p
   scene.sampleMotion(2);
   scene.sampleMotion(1.5);
   assert.equal(scene.inspect().bake.reused, true);
-  assert.throws(() => createAgentScene(bakedRoom({ rebake: 'yes' })), /rebake must be a boolean/);
+  assert.throws(() => createAgentScene(bakedRoom({ rebake: 'yes' })), /bake\.rebake: got "yes"; expected true or false/);
 });

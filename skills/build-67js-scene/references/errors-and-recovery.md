@@ -10,15 +10,13 @@ Every tool error names what failed and what to do next, so read the message befo
 | `expectedRevision must match the current revision.` | Another call changed the scene, or you used an old number. | `scene_inspect`, take its `revision`, resend the same batch. |
 | `Camera fStop drives depth of field; set effects.depthOfField.blur to 0 or remove fStop.` | Both depth of field controls are on. | Keep one: `fStop` on the camera, or `effects.depthOfField.blur`. See `camera.md`. |
 | `Give a camera fov or a focalLength, not both.` | Both lens fields in one command. | Send only one; `focalLength` replaces `fov`. |
-| `Unrecognized keys: "scatterOctaves", "multiScatter"` on `volumeFog` | The MCP schema does not accept the opt-in scattering fields yet (#661). | Do not retry; use `density`, `anisotropy`, `noiseAmount`; see `look.md`. |
-| `The URL must be of scheme file` on `hdri` or `look` | A shipped catalog name fails in the packaged server (#664). | Use a catalog ID, a `setup` or a built-in look (`warm`, `cool`, `contrast`, `faded`). |
 | `bake.gridFog needs bake.irradianceGrid.` | `gridFog` alone. | Add `irradianceGrid: true`. See `light.md`. |
 | `Shot <name> reads motion up to N s but the motion lasts M s.` | A timeline longer than a non-looping motion. | Lengthen the motion, set `loop: true` or a shot `motionStart`. |
 | A light list error naming a cap | More than 16 point, 8 spot or 7 area lights. | Merge or remove lights; each list replaces the old one. |
 | `environment.hdri must be one of ... or the 64-character ID ...` | A made-up name, path or URL. | `scene_asset_catalog`, copy a listed name or ID. |
 | `No scene is active` | Nothing created yet, or disposed. | `scene_create`. |
 | Result has `renderSucceeded: false` and `renderError` | The edit committed, the draw failed (bad pass, lost context). | `scene_export_recipe` to keep it, fix the cause named in `renderError`, then `scene_look`. |
-| An unknown field is rejected before dispatch | A typo or a field of another recipe section. | Fix the name; `scene_capabilities` lists valid fields. |
+| An unknown field is rejected before dispatch | A typo or a field of another recipe section. | Fix the name; `scene_capabilities` with the section as `topic` lists valid fields. |
 
 ## Diagnostics in `scene_inspect`
 

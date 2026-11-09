@@ -1,4 +1,5 @@
 import { editMesh, meshData } from './mesh-edit.js';
+import { invalidField } from './field-error.js';
 import { countSelected, selectFaces } from './mesh-select.js';
 import {
   extrudeFaceRegion, extrudeIndividual, insetRegion, insetIndividual, deleteFaces, flipFaces, translateFaces, mergeByDistance, tagFaces,
@@ -38,19 +39,23 @@ const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/;
 const MAX_OFFSET = 1e6;
 
 
+function editField(index, field, value, expected) {
+  return invalidField(`edits[${index}].${field}`, value, expected, TypeError);
+}
+
 function editError(index, message) {
   return new TypeError(`Mesh edit ${index} (${message})`);
 }
 
 function finiteNumber(value, index, label, { minimum = -MAX_OFFSET, maximum = MAX_OFFSET, exclusiveMinimum = false } = {}) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum || (exclusiveMinimum && value === minimum)) {
-    throw editError(index, `${label} must be a number ${exclusiveMinimum ? 'above' : 'from'} ${minimum}${maximum < MAX_OFFSET ? ` to ${maximum}` : ''}`);
+    throw editField(index, label, value, `a number ${exclusiveMinimum ? 'above' : 'from'} ${minimum}${maximum < MAX_OFFSET ? ` to ${maximum}` : ''}, such as ${exclusiveMinimum ? minimum + 1 : Math.min(Math.max(1, minimum), maximum)}`);
   }
   return value;
 }
 
 function vector(value, index, label) {
-  if (!Array.isArray(value) || value.length !== 3) throw editError(index, `${label} needs three numbers`);
+  if (!Array.isArray(value) || value.length !== 3) throw editField(index, label, value, 'an array of three numbers, such as [0, 1, 0]');
   return value.map(component => finiteNumber(component, index, label));
 }
 
@@ -109,7 +114,7 @@ export function normalizeMeshEdits(edits) {
   return edits.map((edit, index) => {
     if (!edit || typeof edit !== 'object' || Array.isArray(edit)) throw editError(index, 'each edit must be an object');
     const definition = MESH_EDIT_OPERATIONS[edit.op];
-    if (!definition) throw editError(index, `op must be one of ${Object.keys(MESH_EDIT_OPERATIONS).join(', ')}`);
+    if (!definition) throw editField(index, 'op', edit.op, `one of ${Object.keys(MESH_EDIT_OPERATIONS).join(', ')}`);
     for (const key of Object.keys(edit)) {
       if (key !== 'op' && !definition.fields.includes(key)) throw editError(index, `${edit.op} does not take ${key}; fields: ${definition.fields.join(', ')}`);
     }
@@ -120,7 +125,7 @@ export function normalizeMeshEdits(edits) {
     }
     if (definition.fields.includes('name')) {
       const name = edit.name ?? (['tag', 'vertex_group'].includes(edit.op) ? undefined : `${edit.op.split('_')[0]}-${index + 1}`);
-      if (typeof name !== 'string' || !NAME_PATTERN.test(name)) throw editError(index, 'name must be 1 to 48 letters, digits, dots, dashes or underscores');
+      if (typeof name !== 'string' || !NAME_PATTERN.test(name)) throw editField(index, 'name', name, '1 to 48 letters, digits, dots, dashes or underscores, such as "lid.cap"');
       normalized.name = name;
     }
     switch (edit.op) {
@@ -129,7 +134,7 @@ export function normalizeMeshEdits(edits) {
         normalized.offset = finiteNumber(edit.offset, index, 'offset');
         if (edit.direction !== undefined) normalized.direction = vector(edit.direction, index, 'direction');
         if (edit.alongNormals !== undefined) {
-          if (typeof edit.alongNormals !== 'boolean') throw editError(index, 'alongNormals must be boolean');
+          if (typeof edit.alongNormals !== 'boolean') throw editField(index, 'alongNormals', edit.alongNormals, 'true or false');
           if (edit.alongNormals && edit.direction !== undefined) throw editError(index, 'alongNormals and direction cannot be combined');
           normalized.alongNormals = edit.alongNormals;
         }
@@ -148,7 +153,7 @@ export function normalizeMeshEdits(edits) {
             if (!['radius', 'curve', 'connected'].includes(key)) throw editError(index, `falloff does not take ${key}`);
           }
           const curve = falloff.curve ?? 'smooth';
-          if (!Object.hasOwn(FALLOFF_CURVES, curve)) throw editError(index, `falloff curve must be one of ${Object.keys(FALLOFF_CURVES).join(', ')}`);
+          if (!Object.hasOwn(FALLOFF_CURVES, curve)) throw editField(index, 'falloff.curve', curve, `one of ${Object.keys(FALLOFF_CURVES).join(', ')}`);
           if (falloff.connected !== undefined && typeof falloff.connected !== 'boolean') throw editError(index, 'falloff.connected must be boolean');
           normalized.falloff = {
             radius: finiteNumber(falloff.radius, index, 'falloff.radius', { minimum: 0, exclusiveMinimum: true }),
@@ -157,7 +162,7 @@ export function normalizeMeshEdits(edits) {
         }
         break;
       case 'boolean': {
-        if (!BOOLEAN_OPERATIONS.includes(edit.operation)) throw editError(index, `operation must be one of ${BOOLEAN_OPERATIONS.join(', ')}`);
+        if (!BOOLEAN_OPERATIONS.includes(edit.operation)) throw editField(index, 'operation', edit.operation, `one of ${BOOLEAN_OPERATIONS.join(', ')}`);
         normalized.operation = edit.operation;
         if (!edit.cutter || typeof edit.cutter !== 'object' || Array.isArray(edit.cutter) || typeof edit.cutter.type !== 'string') {
           throw editError(index, 'cutter must be a primitive record such as { "type": "cylinder", "segments": 32 }');
@@ -178,7 +183,7 @@ export function normalizeMeshEdits(edits) {
         }
         normalized.target = edit.target;
         normalizePlacement(edit, normalized, index);
-        if (!SHRINKWRAP_MODES.includes(edit.mode ?? 'nearest')) throw editError(index, `mode must be one of ${SHRINKWRAP_MODES.join(', ')}`);
+        if (!SHRINKWRAP_MODES.includes(edit.mode ?? 'nearest')) throw editField(index, 'mode', edit.mode, `one of ${SHRINKWRAP_MODES.join(', ')}`);
         normalized.mode = edit.mode ?? 'nearest';
         if (normalized.mode === 'project') {
           normalized.direction = vector(edit.direction, index, 'direction');
@@ -188,16 +193,16 @@ export function normalizeMeshEdits(edits) {
         }
         normalized.offset = edit.offset === undefined ? 0 : finiteNumber(edit.offset, index, 'offset', { minimum: 0 });
         if (edit.maxDistance !== undefined) normalized.maxDistance = finiteNumber(edit.maxDistance, index, 'maxDistance', { minimum: 0 });
-        if (!['error', 'keep'].includes(edit.onMiss ?? 'error')) throw editError(index, 'onMiss must be error or keep');
+        if (!['error', 'keep'].includes(edit.onMiss ?? 'error')) throw editField(index, 'onMiss', edit.onMiss, '"error" or "keep"');
         normalized.onMiss = edit.onMiss ?? 'error';
         break;
       case 'mirror':
-        if (!['x', 'y', 'z'].includes(edit.axis ?? 'x')) throw editError(index, 'axis must be x, y or z');
+        if (!['x', 'y', 'z'].includes(edit.axis ?? 'x')) throw editField(index, 'axis', edit.axis, '"x", "y" or "z"');
         normalized.axis = edit.axis ?? 'x';
         normalized.merge = edit.merge === undefined ? 0.001 : finiteNumber(edit.merge, index, 'merge', { minimum: 0, maximum: 1e3 });
         break;
       case 'array':
-        if (!Number.isInteger(edit.count ?? 2) || (edit.count ?? 2) < 1 || (edit.count ?? 2) > 256) throw editError(index, 'count must be an integer from 1 to 256');
+        if (!Number.isInteger(edit.count ?? 2) || (edit.count ?? 2) < 1 || (edit.count ?? 2) > 256) throw editField(index, 'count', edit.count, 'a whole number from 1 to 256, such as 4');
         normalized.count = edit.count ?? 2;
         normalized.offset = edit.offset === undefined ? [0, 0, 0] : vector(edit.offset, index, 'offset');
         normalized.relativeOffset = edit.relativeOffset === undefined ? (edit.offset === undefined ? [1, 0, 0] : [0, 0, 0]) : vector(edit.relativeOffset, index, 'relativeOffset');
@@ -206,7 +211,7 @@ export function normalizeMeshEdits(edits) {
       case 'solidify':
         normalized.thickness = finiteNumber(edit.thickness, index, 'thickness', { minimum: 0, exclusiveMinimum: true });
         normalized.offset = edit.offset === undefined ? -1 : finiteNumber(edit.offset, index, 'offset', { minimum: -1, maximum: 1 });
-        if (edit.evenThickness !== undefined && typeof edit.evenThickness !== 'boolean') throw editError(index, 'evenThickness must be boolean');
+        if (edit.evenThickness !== undefined && typeof edit.evenThickness !== 'boolean') throw editField(index, 'evenThickness', edit.evenThickness, 'true or false');
         normalized.evenThickness = edit.evenThickness ?? true;
         break;
       case 'bevel':
@@ -215,10 +220,10 @@ export function normalizeMeshEdits(edits) {
         }
         normalized.edges = edit.edges ?? { angle: 30 };
         normalized.width = finiteNumber(edit.width, index, 'width', { minimum: 0, exclusiveMinimum: true });
-        if (!Number.isInteger(edit.segments ?? 1) || (edit.segments ?? 1) < 1 || (edit.segments ?? 1) > 16) throw editError(index, 'segments must be an integer from 1 to 16');
+        if (!Number.isInteger(edit.segments ?? 1) || (edit.segments ?? 1) < 1 || (edit.segments ?? 1) > 16) throw editField(index, 'segments', edit.segments, 'a whole number from 1 to 16, such as 3');
         normalized.segments = edit.segments ?? 1;
         normalized.profile = edit.profile === undefined ? 0.5 : finiteNumber(edit.profile, index, 'profile', { minimum: 0, maximum: 1 });
-        if (edit.clampOverlap !== undefined && typeof edit.clampOverlap !== 'boolean') throw editError(index, 'clampOverlap must be boolean');
+        if (edit.clampOverlap !== undefined && typeof edit.clampOverlap !== 'boolean') throw editField(index, 'clampOverlap', edit.clampOverlap, 'true or false');
         normalized.clampOverlap = edit.clampOverlap ?? true;
         break;
       case 'loop_cut':
@@ -226,11 +231,11 @@ export function normalizeMeshEdits(edits) {
           throw editError(index, 'edges must be a rule that picks the ring, for example { "along": [0, 1, 0] } for the vertical edges');
         }
         normalized.edges = edit.edges;
-        if (!Number.isInteger(edit.cuts ?? 1) || (edit.cuts ?? 1) < 1 || (edit.cuts ?? 1) > 16) throw editError(index, 'cuts must be an integer from 1 to 16');
+        if (!Number.isInteger(edit.cuts ?? 1) || (edit.cuts ?? 1) < 1 || (edit.cuts ?? 1) > 16) throw editField(index, 'cuts', edit.cuts, 'a whole number from 1 to 16, such as 1');
         normalized.cuts = edit.cuts ?? 1;
         if (edit.factor !== undefined && normalized.cuts !== 1) throw editError(index, 'factor applies only to a single cut');
         normalized.factor = edit.factor === undefined ? 0.5 : finiteNumber(edit.factor, index, 'factor', { minimum: 0, maximum: 1 });
-        if (normalized.factor === 0 || normalized.factor === 1) throw editError(index, 'factor must be strictly between 0 and 1');
+        if (normalized.factor === 0 || normalized.factor === 1) throw editField(index, 'factor', normalized.factor, 'a number above 0 and below 1, such as 0.5');
         break;
       case 'uv_unwrap':
         if (edit.seams !== undefined && (!edit.seams || typeof edit.seams !== 'object' || Array.isArray(edit.seams))) {
@@ -242,7 +247,7 @@ export function normalizeMeshEdits(edits) {
         break;
       case 'subdivide':
         if (!Number.isInteger(edit.levels ?? 1) || (edit.levels ?? 1) < 1 || (edit.levels ?? 1) > MAX_SUBDIVISION_LEVELS) {
-          throw editError(index, `levels must be an integer from 1 to ${MAX_SUBDIVISION_LEVELS}`);
+          throw editField(index, 'levels', edit.levels, `a whole number from 1 to ${MAX_SUBDIVISION_LEVELS}, such as 1`);
         }
         normalized.levels = edit.levels ?? 1;
         if (edit.crease !== undefined) {
@@ -266,7 +271,7 @@ export function normalizeMeshEdits(edits) {
         normalized.field = checkedField(edit.field, index, 'field', 'scalar');
         normalized.strength = edit.strength === undefined ? 1 : finiteNumber(edit.strength, index, 'strength');
         normalized.midlevel = edit.midlevel === undefined ? 0.5 : finiteNumber(edit.midlevel, index, 'midlevel');
-        if (edit.direction !== undefined && !DISPLACE_DIRECTIONS.includes(edit.direction)) throw editError(index, `direction must be one of ${DISPLACE_DIRECTIONS.join(', ')}`);
+        if (edit.direction !== undefined && !DISPLACE_DIRECTIONS.includes(edit.direction)) throw editField(index, 'direction', edit.direction, `one of ${DISPLACE_DIRECTIONS.join(', ')}`);
         normalized.direction = edit.direction ?? 'normal';
         if (edit.group !== undefined) {
           if (typeof edit.group !== 'string' || !NAME_PATTERN.test(edit.group)) throw editError(index, 'group must be the name of a vertex group');

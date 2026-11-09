@@ -85,8 +85,8 @@ const broken = { fragment: 'void materialHook(inout vec3 color, inout float alph
 try {
   await client.connect(transport);
   assert.equal((await client.listTools()).tools.length, 22);
-  const capabilities = (await call('scene_capabilities')).structuredContent;
-  assert.equal(capabilities.scene.materialSnippet.limits.maxUniforms, 16);
+  const capabilities = (await call('scene_capabilities', { topic: 'materialSnippet' })).structuredContent;
+  assert.equal(capabilities.value.limits.maxUniforms, 16);
 
   const created = (await call('scene_create', { recipe })).structuredContent;
   const sessionId = created.sessionId;

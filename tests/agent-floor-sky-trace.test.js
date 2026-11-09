@@ -43,7 +43,7 @@ test('environment.floorSkyTrace false turns the trace off', () => {
 
 test('environment.floorSkyTrace that is not a boolean is refused, not read as on', () => {
   for (const value of ['off', 0, null, { enabled: false }]) {
-    assert.throws(() => createAgentScene(room({ keyColor: [3, 3, 3], floorSkyTrace: value })), /floorSkyTrace must be a boolean/);
+    assert.throws(() => createAgentScene(room({ keyColor: [3, 3, 3], floorSkyTrace: value })), /environment\.floorSkyTrace: got .*; expected true or false/);
   }
 });
 

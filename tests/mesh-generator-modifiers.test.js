@@ -54,8 +54,8 @@ test('wireframe makes two quads per face edge, stays closed and puts the strut e
 
 test('wireframe refuses a result over the limits and bad fields', () => {
   assert.throws(() => run(cube(), { op: 'wireframe' }, { maxVertices: 10, maxFaces: 1000 }), /wireframe would make 40 vertices/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'wireframe', thickness: 0 }]), /thickness must be a number above 0/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'wireframe', offset: 2 }]), /offset must be a number from -1 to 1/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'wireframe', thickness: 0 }]), /edits\[0\]\.thickness: got 0; expected a number above 0/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'wireframe', offset: 2 }]), /edits\[0\]\.offset: got 2; expected a number from -1 to 1/);
   assert.throws(() => normalizeMeshEdits([{ op: 'wireframe', replace: 'yes' }]), /booleans/);
 });
 
@@ -68,7 +68,7 @@ test('skin puts a closed square tube on every edge and takes a radius per vertex
   assert.ok(upperReach > 0.6 && upperReach < 0.7);
   assert.throws(() => run(cube(), { op: 'skin', radius: { mul: [0, { attr: 'position', component: 'z' }] } }), /radius must be above zero at every vertex/);
   assert.throws(() => run(cube(), { op: 'skin' }, { maxVertices: 50, maxFaces: 1000 }), /skin would make 96 vertices/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'skin', radius: -1 }]), /radius must be a number above 0/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'skin', radius: -1 }]), /edits\[0\]\.radius: got -1; expected a number above 0/);
 });
 
 test('the generating modifiers run as stack nodes', () => {

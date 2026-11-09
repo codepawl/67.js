@@ -28,6 +28,7 @@ import { parseCube } from '../src/view-transform.js';
 import { weightTracksFromGltfAnimation } from '../src/export-skeleton.js';
 import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem } from '../src/agent-errors.js';
+import { describeApplication } from '../src/agent-apply-report.js';
 import { framingProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
@@ -285,6 +286,7 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   applyRecipeWindHeading(record.renderer, environment);
   const { objectMotion, ...renderOptions } = frameOptions;
   const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
+  if (effects.colorBalance || effects.glare || effects.lensDistortion) agentSceneModule('postSteps').installPostSteps(record.renderer);
   if (objectMotion) {
     // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
     const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
@@ -1006,8 +1008,10 @@ window.__agentPreview = {
     if (fogDensity > 0 && !record.renderer.capabilities.hdr) {
       throw new Error('Volumetric fog requires HDR support; this preview cannot enable it.');
     }
+    const before = typeof record.scene.exportRecipe === 'function' ? record.scene.exportRecipe() : null;
     record.scene.apply(operations, { expectedRevision });
-    return mutationStatus(record);
+    const report = before ? describeApplication(before, record.scene.exportRecipe(), operations) : {};
+    return { ...mutationStatus(record), ...report };
   },
   editMesh({ sessionId, expectedRevision, geometry, edits, replace }) {
     const record = requireSession(sessionId);

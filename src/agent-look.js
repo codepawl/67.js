@@ -1,3 +1,4 @@
+import { invalidField, withFieldPrefix } from './field-error.js';
 import { mat4 } from 'gl-matrix';
 import { createLightingState, updateLightingState, MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS, MAXIMUM_SPECULAR_ANTI_ALIASING } from './lighting.js';
 import { resolveEffects } from './effects.js';
@@ -5,7 +6,7 @@ import { resolveVolumeFog } from './volumetric.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
 import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
-import { lightShapeSupport } from './shader-registry.js';
+import { lightShapeSupport, postStepSupport } from './shader-registry.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
 import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference } from './look-catalog.js';
 import { DEFAULT_LIGHTING_SETUP, LIGHTING_SETUP_NAMES, DEFAULT_AMBIENT_OCCLUSION } from './agent-scene-capabilities.js';
@@ -24,6 +25,7 @@ const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color'
 const AREA_LIGHT_FIELDS = ['position', 'direction', 'up', 'width', 'height', 'color', 'intensity', 'castShadow', 'ies', 'affects'];
 const VOLUME_VECTOR_FIELDS = ['minimum', 'maximum', 'color', 'ambient', 'drift'];
 const VOLUME_NUMBER_FIELDS = ['density', 'steps', 'anisotropy', 'noiseAmount', 'noiseScale', 'maxDistance', 'shadowAmbient', 'heightFalloff', 'detailOctaves', 'detailAmount', 'warp', 'contrast', 'profileSoftness', 'keyScattering', 'scatterOctaves', 'multiScatter', 'multiExtinction', 'multiAnisotropy', 'keyTransmittance', 'surfaceTransmittance'];
+export const VOLUME_FOG_FIELDS = Object.freeze([...VOLUME_VECTOR_FIELDS, ...VOLUME_NUMBER_FIELDS]);
 const BLOOM_FIELDS = ['strength', 'threshold', 'radius'];
 const DEPTH_OF_FIELD_FIELDS = ['blur', 'focusDistance'];
 const MOTION_BLUR_FIELDS = ['shutter', 'objects'];
@@ -121,19 +123,26 @@ function copiedJson(input, depth = 0, ancestors = new Set()) {
   return result;
 }
 
+function exampleInRange(minimum, maximum) {
+  if (minimum <= 1 && maximum >= 1) return '1';
+  return String(minimum > 0 ? minimum : maximum);
+}
+
 function numberInRange(value, minimum, maximum, label) {
   if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isFinite(Math.fround(value)) ||
       value < minimum || value > maximum) {
-    throw new RangeError(`${label} must be a finite Float32 number within ${minimum} and ${maximum}.`);
+    const unbounded = minimum < -1e30 && maximum > 1e30;
+    throw invalidField(label, value, unbounded ? 'a finite number, such as 0.5' : `a number from ${minimum} to ${maximum}, such as ${exampleInRange(minimum, maximum)}`);
   }
   return value;
 }
 
 function vectorInRange(value, minimum, maximum, label) {
   if (!Array.isArray(value) || value.length !== 3) {
-    throw new TypeError(`${label} needs three JSON numbers.`);
+    const example = exampleInRange(minimum, maximum);
+    throw invalidField(label, value, `an array of three numbers from ${minimum} to ${maximum}, such as [${example}, ${example}, ${example}]`, TypeError);
   }
-  return value.map(component => numberInRange(component, minimum, maximum, label));
+  return value.map((component, index) => numberInRange(component, minimum, maximum, `${label}[${index}]`));
 }
 
 function fallback(value, defaultValue) {
@@ -144,7 +153,7 @@ function directionFrom(value, label = 'lightDirection') {
   const direction = vectorInRange(value, -1e6, 1e6, label);
   const length = Math.hypot(...direction);
   if (length < 1e-6) {
-    throw new RangeError(`${label} length must be at least 0.000001.`);
+    throw invalidField(label, direction, 'a direction that is not all zero, such as [0, -1, 0]');
   }
   return { direction, unitDirection: direction.map(component => component / length) };
 }
@@ -152,24 +161,24 @@ function directionFrom(value, label = 'lightDirection') {
 function lightListFrom(value, maximum, name) {
   const lights = fallback(value, []);
   if (!Array.isArray(lights) || lights.length > maximum) {
-    throw new RangeError(`${name} must contain at most ${maximum} lights.`);
+    throw invalidField(name, Array.isArray(lights) ? `${lights.length} entries` : lights, `an array of at most ${maximum} lights, such as []`);
   }
   return lights;
 }
 
-function rangeFrom(light, label) {
-  const range = numberInRange(fallback(light.range, 0), 0, 1e6, `${label} range`);
+function rangeFrom(light) {
+  const range = numberInRange(fallback(light.range, 0), 0, 1e6, 'range');
   if (range !== 0 && range < 0.001) {
-    throw new RangeError(`${label} range must be zero or at least 0.001.`);
+    throw invalidField('range', range, '0 for unlimited, or at least 0.001, such as 10');
   }
   return range;
 }
 
 // Only a light that casts shadows carries the field, so recipes without shadows keep their exported shape.
-function shadowFieldFrom(light, label) {
+function shadowFieldFrom(light) {
   const castShadow = fallback(light.castShadow, false);
   if (typeof castShadow !== 'boolean') {
-    throw new TypeError(`${label} castShadow must be boolean.`);
+    throw invalidField('castShadow', castShadow, 'true or false', TypeError);
   }
   return castShadow ? { castShadow } : {};
 }
@@ -177,12 +186,12 @@ function shadowFieldFrom(light, label) {
 function pointLightFrom(light) {
   knownKeys(light, POINT_LIGHT_FIELDS, 'point light');
   return {
-    position: vectorInRange(light.position, -1e6, 1e6, 'point light position'),
-    color: vectorInRange(fallback(light.color, [1, 1, 1]), 0, 1, 'point light color'),
-    intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'point light intensity'),
-    radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'point light radius'),
-    range: rangeFrom(light, 'point light'),
-    ...shadowFieldFrom(light, 'point light'),
+    position: vectorInRange(light.position, -1e6, 1e6, 'position'),
+    color: vectorInRange(fallback(light.color, [1, 1, 1]), 0, 1, 'color'),
+    intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'intensity'),
+    radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'radius'),
+    range: rangeFrom(light),
+    ...shadowFieldFrom(light),
     ...affectsFrom(light, 'point light'),
   };
 }
@@ -190,15 +199,15 @@ function pointLightFrom(light) {
 function spotLightFrom(light) {
   knownKeys(light, SPOT_LIGHT_FIELDS, 'spot light');
   return {
-    position: vectorInRange(light.position, -1e6, 1e6, 'spot light position'),
-    direction: directionFrom(light.direction, 'spot light direction').direction,
-    angle: numberInRange(fallback(light.angle, Math.PI / 4), 0.01, Math.PI / 2 - 0.01, 'spot light angle'),
-    penumbra: numberInRange(fallback(light.penumbra, 0.15), 0, 1, 'spot light penumbra'),
-    color: vectorInRange(fallback(light.color, [1, 1, 1]), 0, 1, 'spot light color'),
-    intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'spot light intensity'),
-    radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'spot light radius'),
-    range: rangeFrom(light, 'spot light'),
-    ...shadowFieldFrom(light, 'spot light'),
+    position: vectorInRange(light.position, -1e6, 1e6, 'position'),
+    direction: directionFrom(light.direction, 'direction').direction,
+    angle: numberInRange(fallback(light.angle, Math.PI / 4), 0.01, Math.PI / 2 - 0.01, 'angle'),
+    penumbra: numberInRange(fallback(light.penumbra, 0.15), 0, 1, 'penumbra'),
+    color: vectorInRange(fallback(light.color, [1, 1, 1]), 0, 1, 'color'),
+    intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'intensity'),
+    radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'radius'),
+    range: rangeFrom(light),
+    ...shadowFieldFrom(light),
     ...affectsFrom(light, 'spot light'),
   };
 }
@@ -206,19 +215,19 @@ function spotLightFrom(light) {
 function areaLightFrom(light) {
   knownKeys(light, AREA_LIGHT_FIELDS, 'area light');
   const resolved = {
-    position: vectorInRange(light.position, -1e6, 1e6, 'area light position'),
-    direction: directionFrom(light.direction, 'area light direction').direction,
-    width: numberInRange(light.width, 0.001, 1e4, 'area light width'),
-    height: numberInRange(light.height, 0.001, 1e4, 'area light height'),
-    color: vectorInRange(fallback(light.color, [1, 1, 1]), 0, 1, 'area light color'),
-    intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'area light intensity'),
+    position: vectorInRange(light.position, -1e6, 1e6, 'position'),
+    direction: directionFrom(light.direction, 'direction').direction,
+    width: numberInRange(light.width, 0.001, 1e4, 'width'),
+    height: numberInRange(light.height, 0.001, 1e4, 'height'),
+    color: vectorInRange(fallback(light.color, [1, 1, 1]), 0, 1, 'color'),
+    intensity: numberInRange(fallback(light.intensity, 1), 0, 1e5, 'intensity'),
   };
-  if (light.up !== undefined) resolved.up = directionFrom(light.up, 'area light up').direction;
+  if (light.up !== undefined) resolved.up = directionFrom(light.up, 'up').direction;
   return { ...resolved, ...affectsFrom(light, 'area light') };
 }
 
 function volumeFogFrom(input = {}) {
-  knownKeys(input, [...VOLUME_VECTOR_FIELDS, ...VOLUME_NUMBER_FIELDS], 'volumeFog');
+  knownKeys(input, VOLUME_FOG_FIELDS, 'volumeFog');
   for (const field of VOLUME_VECTOR_FIELDS) {
     if (Object.hasOwn(input, field)) {
       vectorInRange(input[field], -1e5, 1e5, `volumeFog.${field}`);
@@ -236,61 +245,61 @@ function environmentFrom(input = {}) {
   knownKeys(input, ENVIRONMENT_FIELDS, 'environment');
   const world = fallback(input.world, false);
   if (typeof world !== 'boolean') {
-    throw new TypeError('environment.world must be boolean.');
+    throw invalidField('environment.world', world, 'true or false', TypeError);
   }
   const setup = fallback(input.setup, DEFAULT_LIGHTING_SETUP);
   if (!LIGHTING_SETUP_NAMES.includes(setup)) {
-    throw new RangeError(`environment.setup must be one of ${LIGHTING_SETUP_NAMES.join(', ')}.`);
+    throw invalidField('environment.setup', setup, `one of ${LIGHTING_SETUP_NAMES.join(', ')}`);
   }
   const defaults = lightingSetupFields(setup);
   const environment = {
     world,
     setup,
-    environmentIntensity: numberInRange(fallback(input.environmentIntensity, 1), 0, 100, 'environmentIntensity'),
-    environmentRotation: numberInRange(fallback(input.environmentRotation, 0), -100, 100, 'environmentRotation'),
-    lightDirection: directionFrom(fallback(input.lightDirection, defaults.lightDirection)).direction,
-    keyColor: vectorInRange(fallback(input.keyColor, defaults.keyColor), 0, 1000, 'keyColor'),
-    keyIntensity: numberInRange(fallback(input.keyIntensity, defaults.keyIntensity), 0, 100, 'keyIntensity'),
-    fillIntensity: numberInRange(fallback(input.fillIntensity, defaults.fillIntensity), 0, 100, 'fillIntensity'),
-    ambientIntensity: numberInRange(fallback(input.ambientIntensity, defaults.ambientIntensity), 0, 100, 'ambientIntensity'),
-    daylight: numberInRange(fallback(input.daylight, 1), 0, 100, 'daylight'),
-    pointLights: lightListFrom(input.pointLights, MAX_POINT_LIGHTS, 'pointLights').map(pointLightFrom),
-    skyTop: vectorInRange(fallback(input.skyTop, defaults.skyTop), 0, 1, 'skyTop'),
-    skyBottom: vectorInRange(fallback(input.skyBottom, defaults.skyBottom), 0, 1, 'skyBottom'),
-    fogColor: vectorInRange(fallback(input.fogColor, [0.35, 0.43, 0.43]), 0, 1, 'fogColor'),
-    fogDensity: input.fogDensity === undefined || input.fogDensity === null ? null : numberInRange(input.fogDensity, 0, 10, 'fogDensity'),
+    environmentIntensity: numberInRange(fallback(input.environmentIntensity, 1), 0, 100, 'environment.environmentIntensity'),
+    environmentRotation: numberInRange(fallback(input.environmentRotation, 0), -100, 100, 'environment.environmentRotation'),
+    lightDirection: directionFrom(fallback(input.lightDirection, defaults.lightDirection), 'environment.lightDirection').direction,
+    keyColor: vectorInRange(fallback(input.keyColor, defaults.keyColor), 0, 1000, 'environment.keyColor'),
+    keyIntensity: numberInRange(fallback(input.keyIntensity, defaults.keyIntensity), 0, 100, 'environment.keyIntensity'),
+    fillIntensity: numberInRange(fallback(input.fillIntensity, defaults.fillIntensity), 0, 100, 'environment.fillIntensity'),
+    ambientIntensity: numberInRange(fallback(input.ambientIntensity, defaults.ambientIntensity), 0, 100, 'environment.ambientIntensity'),
+    daylight: numberInRange(fallback(input.daylight, 1), 0, 100, 'environment.daylight'),
+    pointLights: lightListFrom(input.pointLights, MAX_POINT_LIGHTS, 'environment.pointLights').map((light, index) => withFieldPrefix(`environment.pointLights[${index}]`, () => pointLightFrom(light))),
+    skyTop: vectorInRange(fallback(input.skyTop, defaults.skyTop), 0, 1, 'environment.skyTop'),
+    skyBottom: vectorInRange(fallback(input.skyBottom, defaults.skyBottom), 0, 1, 'environment.skyBottom'),
+    fogColor: vectorInRange(fallback(input.fogColor, [0.35, 0.43, 0.43]), 0, 1, 'environment.fogColor'),
+    fogDensity: input.fogDensity === undefined || input.fogDensity === null ? null : numberInRange(input.fogDensity, 0, 10, 'environment.fogDensity'),
     volumeFog: volumeFogFrom(input.volumeFog),
   };
   // Optional so recipes without these fields keep their exported shape.
   if (input.ground !== undefined) {
     if (typeof input.ground !== 'boolean') {
-      throw new TypeError('environment.ground must be a boolean.');
+      throw invalidField('environment.ground', input.ground, 'true or false', TypeError);
     }
     environment.ground = input.ground;
   }
   if (input.objectReflections !== undefined) {
     if (typeof input.objectReflections !== 'boolean') {
-      throw new TypeError('environment.objectReflections must be a boolean.');
+      throw invalidField('environment.objectReflections', input.objectReflections, 'true or false', TypeError);
     }
     environment.objectReflections = input.objectReflections;
   }
   // `false` opts out of the floor sky trace that src/floor-sky-visibility.js gives sun-lit closed rooms.
   if (input.floorSkyTrace !== undefined) {
     if (typeof input.floorSkyTrace !== 'boolean') {
-      throw new TypeError('environment.floorSkyTrace must be a boolean.');
+      throw invalidField('environment.floorSkyTrace', input.floorSkyTrace, 'true or false', TypeError);
     }
     environment.floorSkyTrace = input.floorSkyTrace;
   }
   // Scales the light the sunlit patches of a sun-lit closed room bounce on (src/sun-bounce.js); 0 turns it off.
   if (input.sunBounce !== undefined) {
     if (!Number.isFinite(input.sunBounce) || input.sunBounce < 0) {
-      throw new TypeError('environment.sunBounce must be a number of 0 or more.');
+      throw invalidField('environment.sunBounce', input.sunBounce, 'a number of 0 or more, such as 1', TypeError);
     }
     environment.sunBounce = input.sunBounce;
   }
   // Strength of the specular anti-aliasing that widens highlights where normals or normal map detail change within a pixel (src/lighting.js); 0 turns it off.
   if (input.specularAntiAliasing !== undefined) {
-    environment.specularAntiAliasing = numberInRange(input.specularAntiAliasing, 0, MAXIMUM_SPECULAR_ANTI_ALIASING, 'specularAntiAliasing');
+    environment.specularAntiAliasing = numberInRange(input.specularAntiAliasing, 0, MAXIMUM_SPECULAR_ANTI_ALIASING, 'environment.specularAntiAliasing');
   }
   // Outlines and line geometry; null clears them. The module checks the fields and loads on demand.
   if (input.lines !== undefined && input.lines !== null) {
@@ -298,15 +307,15 @@ function environmentFrom(input = {}) {
   }
   if (input.resolveCoplanar !== undefined) {
     if (input.resolveCoplanar !== 'offset' && input.resolveCoplanar !== false) {
-      throw new TypeError("environment.resolveCoplanar must be 'offset' or false.");
+      throw invalidField('environment.resolveCoplanar', input.resolveCoplanar, "'offset' or false", TypeError);
     }
     environment.resolveCoplanar = input.resolveCoplanar;
   }
   if (input.spotLights !== undefined) {
-    environment.spotLights = lightListFrom(input.spotLights, MAX_SPOT_LIGHTS, 'spotLights').map(spotLightFrom);
+    environment.spotLights = lightListFrom(input.spotLights, MAX_SPOT_LIGHTS, 'environment.spotLights').map((light, index) => withFieldPrefix(`environment.spotLights[${index}]`, () => spotLightFrom(light)));
   }
   if (input.areaLights !== undefined) {
-    environment.areaLights = lightListFrom(input.areaLights, MAX_AREA_LIGHTS, 'areaLights').map(areaLightFrom);
+    environment.areaLights = lightListFrom(input.areaLights, MAX_AREA_LIGHTS, 'environment.areaLights').map((light, index) => withFieldPrefix(`environment.areaLights[${index}]`, () => areaLightFrom(light)));
   }
   if (input.shadowCascades !== undefined) {
     environment.shadowCascades = shadowCascadesFrom(input.shadowCascades);
@@ -315,19 +324,19 @@ function environmentFrom(input = {}) {
   // A catalog HDRI replaces the procedural sky map. The setup still supplies the key light: set keyIntensity 0 when the HDRI has its own sun.
   if (input.hdri !== undefined && input.hdri !== null) {
     if (typeof input.hdri !== 'string' || !isEnvironmentReference(input.hdri)) {
-      throw new RangeError(`environment.hdri must be one of ${BUNDLED_ENVIRONMENT_NAMES.join(', ')} or the 64-character ID of a .hdr file in the asset catalog.`);
+      throw invalidField('environment.hdri', input.hdri, `one of ${BUNDLED_ENVIRONMENT_NAMES.join(', ')} or the 64-character ID of a .hdr file in the asset catalog`);
     }
     environment.hdri = input.hdri;
   }
   if (input.viewTransform !== undefined) {
     if (!VIEW_TRANSFORM_NAMES.includes(input.viewTransform)) {
-      throw new RangeError(`environment.viewTransform must be one of ${VIEW_TRANSFORM_NAMES.join(', ')}.`);
+      throw invalidField('environment.viewTransform', input.viewTransform, `one of ${VIEW_TRANSFORM_NAMES.join(', ')}`);
     }
     environment.viewTransform = input.viewTransform;
   }
   if (input.look !== undefined && input.look !== null) {
     if (!LOOK_NAMES.includes(input.look) && !isCubeLookReference(input.look)) {
-      throw new RangeError(`environment.look must be one of ${[...LOOK_NAMES, ...BUNDLED_CUBE_LOOK_NAMES].join(', ')} or the 64-character ID of a .cube file in the asset catalog.`);
+      throw invalidField('environment.look', input.look, `one of ${[...LOOK_NAMES, ...BUNDLED_CUBE_LOOK_NAMES].join(', ')} or the 64-character ID of a .cube file in the asset catalog`);
     }
     environment.look = input.look;
   }
@@ -367,7 +376,7 @@ export function agentEnvironmentMap(environment) {
 }
 
 function effectsFrom(input = {}) {
-  knownKeys(input, EFFECT_FIELDS, 'effects');
+  knownKeys(input, [...EFFECT_FIELDS, ...postStepSupport.fields], 'effects');
   const groupFields = { bloom: BLOOM_FIELDS, depthOfField: DEPTH_OF_FIELD_FIELDS, motionBlur: MOTION_BLUR_FIELDS };
   for (const field of EFFECT_FIELDS) {
     if (!(field in groupFields) && Object.hasOwn(input, field)) {
@@ -386,7 +395,7 @@ function effectsFrom(input = {}) {
   }
   const ambientOcclusion = fallback(input.ambientOcclusion, DEFAULT_AMBIENT_OCCLUSION);
   const resolved = resolveEffects({ ...input, ambientOcclusion, ...groups, bloom: { strength: 0.12, threshold: 1, radius: 1, ...groups.bloom } });
-  return { ...resolved, exposure: numberInRange(fallback(input.exposure, 1), 0.01, 16, 'exposure') };
+  return { ...resolved, exposure: numberInRange(fallback(input.exposure, 1), 0.01, 16, 'exposure'), ...postStepSupport.resolve?.(input) };
 }
 
 function shadowFrom(input = {}) {

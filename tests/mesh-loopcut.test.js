@@ -97,7 +97,7 @@ test('a band around a cylinder extrudes along normals as one joined hoop', () =>
 test('loop cut validation and errors are explicit', () => {
   assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut' }]), /edges must be a rule that picks the ring/);
   assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut', edges: { along: [0, 1, 0] }, cuts: 2, factor: 0.3 }]), /factor applies only to a single cut/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut', edges: { along: [0, 1, 0] }, factor: 1 }]), /strictly between 0 and 1/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut', edges: { along: [0, 1, 0] }, factor: 1 }]), /edits\[0\]\.factor: got 1; expected a number above 0 and below 1/);
   assert.throws(() => loopCut(cube(), { along: [1, 1, 1], maxAngle: 1 }), /selects no edges/);
   assert.throws(() => loopCut(cube(), { all: true }), /rings cross/);
 });
