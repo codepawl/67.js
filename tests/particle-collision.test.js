@@ -143,7 +143,7 @@ test('collision input is validated and the capabilities describe it', () => {
   rejects({ bounce: 1.5 }, /bounce/);
   rejects({ friction: -1 }, /friction/);
   rejects({ colliders: ['ghost'] }, /particles\.systems\[0\]\.colliders\[0\]: got "ghost"; expected the ID of a node in the recipe/);
-  rejects({ colliders: ['sparks'] }, /own collider/);
+  rejects({ colliders: ['sparks'] }, /particles\.systems\[0\]\.colliders: got \["sparks"\]; expected node IDs other than the system/);
   rejects({ colliders: 'slab' }, /colliders/);
   rejects({ alpha: [0, 2] }, /alpha/);
   rejects({ alpha: 'clear' }, /alpha/);
