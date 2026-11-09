@@ -27,6 +27,8 @@ async function connect(context) {
   const sessionId = randomUUID();
   const checkpoints = new Map();
   const status = () => ({ sessionId, revision: scene.revision, inspection: scene.inspect(), render: { backend: 'fake' } });
+  // Edits answer without the inspection, like the preview does.
+  const editStatus = () => ({ sessionId, revision: scene.revision, render: { backend: 'fake' } });
   const runtime = {
     async capabilities() { return { scene: AGENT_SCENE_CAPABILITIES, phase: 'idle', availableIn: 'test' }; },
     async create({ recipe: input }) {
@@ -59,7 +61,7 @@ async function connect(context) {
     async apply({ expectedRevision, operations }) {
       calls++;
       scene.apply(operations, { expectedRevision });
-      return status();
+      return editStatus();
     },
     async look({ width, height, motionTime }) {
       calls++;
@@ -82,7 +84,7 @@ async function connect(context) {
     },
     async restore({ checkpointId, expectedRevision }) {
       scene.restore(checkpoints.get(checkpointId), { expectedRevision });
-      return status();
+      return editStatus();
     },
     async releaseCheckpoint({ checkpointId }) {
       scene.releaseCheckpoint(checkpoints.get(checkpointId));
@@ -482,15 +484,18 @@ test('SDK dynamic batches create resources, reject dangling edits, and restore s
     { type: 'add-node', node: { id: 'mesh', parent: 'group', geometry: 'cube', material: 'paint' } },
   ] });
   assert.equal(added.isError, undefined);
-  assert.equal(added.structuredContent.inspection.counts.parts, 1);
+  assert.equal(added.structuredContent.inspection, undefined);
+  assert.equal((await call('scene_inspect', { sessionId })).structuredContent.counts.parts, 1);
   const invalid = await call('scene_apply', { sessionId, expectedRevision: 1, operations: [{ type: 'remove-geometry', id: 'cube' }] });
   assert.equal(invalid.isError, true);
   const inspected = (await call('scene_inspect', { sessionId })).structuredContent;
   assert.equal(inspected.revision, 1);
   assert.equal(inspected.counts.geometries, 1);
   const restored = await call('scene_restore', { sessionId, checkpointId: initial.checkpointId, expectedRevision: 1 });
-  assert.equal(restored.structuredContent.inspection.counts.parts, 0);
-  assert.equal(restored.structuredContent.inspection.counts.geometries, 0);
+  assert.equal(restored.structuredContent.inspection, undefined);
+  const afterRestore = (await call('scene_inspect', { sessionId })).structuredContent;
+  assert.equal(afterRestore.counts.parts, 0);
+  assert.equal(afterRestore.counts.geometries, 0);
 });
 
 test('a tool that takes a sessionId defaults to the active scene, and still rejects a session that is not active', async context => {

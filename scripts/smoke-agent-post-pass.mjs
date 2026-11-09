@@ -123,7 +123,7 @@ try {
   // The session is still usable: the fix draws, and the result is quantised and blocky.
   const fixed = (await call('scene_apply', { sessionId, expectedRevision: brokenRevision, operations: [{ type: 'set-post-passes', postPasses: [ditherPass] }] })).structuredContent;
   assert.equal(fixed.renderSucceeded, true, fixed.renderError);
-  assert.deepEqual(fixed.inspection.postPasses, [{ name: 'pixel-dither', scale: SCALE, uniforms: ['levels:float', 'spread:float'], fragmentBytes: ditherFragment.length }]);
+  assert.deepEqual((await call('scene_inspect', { sessionId })).structuredContent.postPasses, [{ name: 'pixel-dither', scale: SCALE, uniforms: ['levels:float', 'spread:float'], fragmentBytes: ditherFragment.length }]);
   const dithered = await measure(await look(sessionId));
   assert.ok(dithered.colors <= LEVELS ** 3, `the dithered scene should have at most ${LEVELS ** 3} colours, has ${dithered.colors}`);
   assert.ok(dithered.uniformBlockShare > 0.99, `the dithered scene should be ${BLOCK}x${BLOCK} blocks, share ${dithered.uniformBlockShare}`);
