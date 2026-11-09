@@ -10,7 +10,6 @@ precision highp float;
 in vec2 textureCoordinate;
 uniform sampler2D sceneDepth;
 uniform mat4 inverseViewProjection;
-uniform vec3 eye;
 uniform float radius;
 uniform float projectionScale;
 uniform float aspect;
@@ -34,9 +33,8 @@ void main() {
   }
   vec3 position = worldPosition(textureCoordinate, depth);
   vec3 normal = normalize(cross(dFdx(position), dFdy(position)));
-  if (orthographic < 0.5 && dot(normal, eye - position) < 0.0) normal = -normal;
-  float distanceToEye = orthographic > 0.5 ? 1.0 : length(eye - position);
-  float screenRadius = min(radius * projectionScale / distanceToEye, 0.25);
+  if (orthographic < 0.5 && dot(normal, position) > 0.0) normal = -normal;
+  float screenRadius = min(radius * projectionScale / (orthographic > 0.5 ? 1.0 : length(position)), 0.25);
   float rotation = interleavedNoise(gl_FragCoord.xy) * 6.2831853;
   float total = 0.0;
   for (int index = 0; index < ${AMBIENT_OCCLUSION_SAMPLES}; index++) {
