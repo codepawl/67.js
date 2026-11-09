@@ -637,3 +637,39 @@ test('explicit initial and tick motor disable can be no-ops without changing the
   assert.deepEqual(scene.sample(scene.duration), scene.sample(0));
   scene.dispose();
 });
+
+test('cylinder and cone colliders, spring joints and force fields bake deterministically', async () => {
+  const definition = {
+    gravity: [0, 0, 0],
+    fields: [{ type: 'wind', direction: [1, 0, 0], strength: 4 }],
+    bodies: [
+      { name: 'anchor', type: 'fixed', translation: [0, 0, 0] },
+      { name: 'cyl', type: 'dynamic', translation: [0, -2, 0] },
+      { name: 'cone', type: 'dynamic', translation: [2, 0, 0] },
+    ],
+    colliders: [
+      { name: 'anchor', body: 'anchor', shape: 'cylinder', radius: 0.5, halfHeight: 0.5 },
+      { name: 'cyl', body: 'cyl', shape: 'cylinder', radius: 0.4, halfHeight: 0.6, mass: 1 },
+      { name: 'cone', body: 'cone', shape: 'cone', radius: 0.5, halfHeight: 0.8, mass: 1 },
+    ],
+    joints: [
+      { name: 'spring', type: 'spring', bodyA: 'anchor', bodyB: 'cyl', restLength: 1, stiffness: 20, damping: 2 },
+    ],
+  };
+  const scene = await createPhysicsScene(definition, { frameCount: 61 });
+  const cylEnd = bodyPose(scene, 1, 'cyl');
+  const coneEnd = bodyPose(scene, 1, 'cone');
+  assert.ok(cylEnd[1] > -1.8, `spring pulls cylinder toward restLength, got ${cylEnd[1]}`);
+  assert.ok(coneEnd[0] > 3.5, `wind field accelerates cone along +X, got ${coneEnd[0]}`);
+  scene.dispose();
+
+  assert.throws(() => planPhysicsScene({
+    bodies: [{ name: 'a', type: 'dynamic' }],
+    colliders: [{ name: 'a', body: 'a', shape: 'cylinder', radius: 0.5, halfHeight: 0.5, halfExtents: [1, 1, 1] }],
+  }), /cylinder only accepts radius and halfHeight/);
+  assert.throws(() => planPhysicsScene({
+    bodies: [{ name: 'a', type: 'fixed' }, { name: 'b', type: 'dynamic' }],
+    colliders: [{ name: 'b', body: 'b', shape: 'cone', radius: 0.5, halfHeight: 0.5 }],
+    joints: [{ name: 'j', type: 'fixed', bodyA: 'a', bodyB: 'b', stiffness: 10 }],
+  }), /spring joint/);
+});

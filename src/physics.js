@@ -1,4 +1,5 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
+import { evaluateForceFields, normalizeForceFields } from './force-fields.js';
 
 let rapierPromise;
 let rapierEngine;
@@ -257,7 +258,7 @@ function meshCollider(collider, body, limits, budget) {
 }
 
 function prepare(definition, options) {
-  fields(definition, ['bodies', 'colliders', 'joints', 'events', 'gravity'], 'definition');
+  fields(definition, ['bodies', 'colliders', 'joints', 'events', 'fields', 'gravity'], 'definition');
   fields(options, ['frameCount', 'timestep', 'solverIterations', 'maxMemoryBytes', ...Object.keys(LIMITS)], 'options');
   const limits = {};
   for (const [key, [fallback, cap]] of Object.entries(LIMITS)) {
@@ -370,6 +371,14 @@ function prepare(definition, options) {
       halfHeight = positive(collider.halfHeight, 'halfHeight');
       volume = Math.PI * radius ** 2 * 2 * halfHeight + 4 * Math.PI * radius ** 3 / 3;
       smallestExtent = radius;
+    } else if (collider.shape === 'cylinder' || collider.shape === 'cone') {
+      if (collider.halfExtents !== undefined) {
+        throw new TypeError(`${collider.shape} only accepts radius and halfHeight`);
+      }
+      radius = positive(collider.radius, 'radius');
+      halfHeight = positive(collider.halfHeight, 'halfHeight');
+      volume = Math.PI * radius ** 2 * 2 * halfHeight / (collider.shape === 'cone' ? 3 : 1);
+      smallestExtent = Math.min(radius, halfHeight);
     } else if (mesh) {
       volume = mesh.volume;
       smallestExtent = mesh.smallestExtent;
@@ -424,8 +433,8 @@ function prepare(definition, options) {
     }
   }
   const joints = rawJoints.map(joint => {
-    fields(joint, ['name', 'type', 'bodyA', 'bodyB', 'anchorA', 'anchorB', 'axis', 'frameA', 'frameB', 'contactsEnabled', 'limits', 'motor'], `joint ${joint.name}`);
-    if (!['spherical', 'revolute', 'prismatic', 'fixed'].includes(joint.type)) {
+    fields(joint, ['name', 'type', 'bodyA', 'bodyB', 'anchorA', 'anchorB', 'axis', 'frameA', 'frameB', 'contactsEnabled', 'limits', 'motor', 'restLength', 'stiffness', 'damping'], `joint ${joint.name}`);
+    if (!['spherical', 'revolute', 'prismatic', 'fixed', 'spring'].includes(joint.type)) {
       throw new TypeError('unsupported joint type');
     }
     const bodyA = bodyIndex(joint.bodyA);
@@ -443,6 +452,9 @@ function prepare(definition, options) {
     if (!unitJoint && (joint.limits !== undefined || joint.motor !== undefined)) throw new TypeError('limits and motors require a revolute or prismatic joint');
     if (joint.type !== 'fixed' && (joint.frameA !== undefined || joint.frameB !== undefined)) {
       throw new TypeError('joint frames require a fixed joint');
+    }
+    if (joint.type !== 'spring' && (joint.restLength !== undefined || joint.stiffness !== undefined || joint.damping !== undefined)) {
+      throw new TypeError('restLength, stiffness and damping require a spring joint');
     }
     const axis = unitJoint ? vector(joint.axis, 3, 'axis') : undefined;
     if (axis && Math.abs(Math.hypot(...axis) - 1) > 1e-4) {
@@ -465,6 +477,12 @@ function prepare(definition, options) {
       frameB: rotation(joint.frameB, 'frameB'),
       contactsEnabled: joint.contactsEnabled ?? false,
     };
+    if (joint.type === 'spring') {
+      result.restLength = scalar(joint.restLength ?? 0, 'restLength', 0, MAX_JOINT_DISTANCE);
+      result.stiffness = positive(joint.stiffness, 'stiffness');
+      if (result.stiffness > MAX_MOTOR_GAIN) throw new RangeError('spring stiffness exceeds the supported gain bound');
+      result.damping = scalar(joint.damping ?? 0, 'damping', 0, MAX_MOTOR_GAIN);
+    }
     if (joint.limits !== undefined) result.limits = jointLimits(joint.limits, joint.type);
     if (joint.motor !== undefined) result.motor = jointMotor(joint.motor, result);
     if (joint.type === 'prismatic' || joint.limits !== undefined || joint.motor !== undefined) initialJointCoordinate(result, bodies);
@@ -516,8 +534,9 @@ function prepare(definition, options) {
       rotation: event.rotation === undefined ? undefined : rotation(event.rotation, 'event rotation'),
     };
   }).sort((firstEvent, secondEvent) => firstEvent.tick - secondEvent.tick || firstEvent.order - secondEvent.order);
+  const forceFields = normalizeForceFields(definition.fields ?? [], 'fields');
   const gravity = vector(definition.gravity, 3, 'gravity', [0, -9.81, 0]);
-  validateMotionBounds(bodies, events, gravity, timestep, frameCount, massTotals, minimumInertiaTotals, maximumColliderOffsets, joints, inertiaTotals);
+  validateMotionBounds(bodies, events, gravity, forceFields, timestep, frameCount, massTotals, minimumInertiaTotals, maximumColliderOffsets, joints, inertiaTotals);
   const memoryPlan = Object.freeze({
     timelineBytes,
     solverReserveBytes,
@@ -534,6 +553,7 @@ function prepare(definition, options) {
     colliders,
     joints,
     events,
+    fields: forceFields,
     gravity,
     frameCount,
     timestep,
@@ -602,9 +622,10 @@ function validateMotorBounds(bodies, joints, events, timestep, duration, massTot
   }
 }
 
-function validateMotionBounds(bodies, events, gravity, timestep, frameCount, massTotals, minimumInertiaTotals, maximumColliderOffsets, joints, maximumInertiaTotals) {
+function validateMotionBounds(bodies, events, gravity, forceFields, timestep, frameCount, massTotals, minimumInertiaTotals, maximumColliderOffsets, joints, maximumInertiaTotals) {
   const duration = (frameCount - 1) * timestep;
-  const gravityMagnitude = vectorLength(gravity, 'gravity');
+  const fieldMagnitude = forceFields.reduce((total, field) => total + (field.type === 'drag' ? 0 : Math.abs(field.strength)), 0);
+  const gravityMagnitude = vectorLength(gravity, 'gravity') + fieldMagnitude;
   const linearSpeedBounds = bodies.map(body => {
     const initialSpeed = vectorLength(body.linearVelocity, 'linearVelocity');
     const speedBound = initialSpeed + (body.type === 'dynamic' ? gravityMagnitude * duration : 0);
@@ -707,6 +728,10 @@ function colliderDescriptor(rapier, collider) {
     descriptor = rapier.ColliderDesc.cuboid(...collider.halfExtents);
   } else if (collider.shape === 'capsule') {
     descriptor = rapier.ColliderDesc.capsule(collider.halfHeight, collider.radius);
+  } else if (collider.shape === 'cylinder') {
+    descriptor = rapier.ColliderDesc.cylinder(collider.halfHeight, collider.radius);
+  } else if (collider.shape === 'cone') {
+    descriptor = rapier.ColliderDesc.cone(collider.halfHeight, collider.radius);
   } else if (collider.shape === 'convexHull') {
     descriptor = rapier.ColliderDesc.convexHull(collider.points);
     if (!descriptor) {
@@ -778,6 +803,8 @@ function bakePrepared(preparedScene) {
         descriptor = rapier.JointData.revolute(anchorA, anchorB, xyz(joint.axis));
       } else if (joint.type === 'prismatic') {
         descriptor = rapier.JointData.prismatic(anchorA, anchorB, xyz(joint.axis));
+      } else if (joint.type === 'spring') {
+        descriptor = rapier.JointData.spring(joint.restLength, joint.stiffness, joint.damping, anchorA, anchorB);
       } else {
         descriptor = rapier.JointData.fixed(anchorA, xyzw(joint.frameA), anchorB, xyzw(joint.frameB));
       }
@@ -816,6 +843,21 @@ function bakePrepared(preparedScene) {
             }
             if (event.torqueImpulse) {
               body.applyTorqueImpulse(xyz(event.torqueImpulse), true);
+            }
+          }
+        }
+        if (preparedScene.fields.length) {
+          const fieldTime = (frame - 1) * preparedScene.timestep;
+          const fieldAccel = [0, 0, 0];
+          for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex++) {
+            if (preparedScene.bodies[bodyIndex].type !== 'dynamic') continue;
+            const body = bodies[bodyIndex];
+            const pos = body.translation();
+            const vel = body.linvel();
+            evaluateForceFields(preparedScene.fields, [pos.x, pos.y, pos.z], [vel.x, vel.y, vel.z], fieldTime, fieldAccel);
+            const scale = body.mass() * preparedScene.timestep;
+            if (fieldAccel[0] || fieldAccel[1] || fieldAccel[2]) {
+              body.applyImpulse({ x: fieldAccel[0] * scale, y: fieldAccel[1] * scale, z: fieldAccel[2] * scale }, true);
             }
           }
         }
