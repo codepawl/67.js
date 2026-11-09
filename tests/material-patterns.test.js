@@ -139,7 +139,7 @@ test('a material without a pattern is unchanged', () => {
 });
 
 test('patterns need the surface tag and a scene holds a bounded number', () => {
-  assert.throws(() => createAgentScene(baseScene([{ id: 'glow', tag: 'unlit', pattern: { type: 'wood' } }])), /needs the surface tag/);
+  assert.throws(() => createAgentScene(baseScene([{ id: 'glow', tag: 'unlit', pattern: { type: 'wood' } }])), /materials\[0\]\.pattern: got "wood"; expected a material with the surface tag/);
   const tooMany = Array.from({ length: MAX_MATERIAL_PATTERNS + 1 }, (_, index) => ({ id: `material-${index}`, pattern: { type: 'wood', seed: index } }));
   assert.throws(() => createAgentScene(baseScene(tooMany)), /at most 16 different material patterns/);
   const shared = Array.from({ length: MAX_MATERIAL_PATTERNS + 1 }, (_, index) => ({ id: `material-${index}`, pattern: { type: 'wood' }, color: [index / 17, 1, 1] }));

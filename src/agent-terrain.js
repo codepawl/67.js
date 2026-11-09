@@ -2,6 +2,7 @@
 // It loads on demand with the recipes that contain a terrain geometry, so the scene entry does not carry it.
 import './world-material-shader.js';
 import { createTerrain } from './terrain.js';
+import { invalidField } from './field-error.js';
 
 export const TERRAIN_LIMITS = Object.freeze({
   size: [1, 2000],
@@ -16,14 +17,14 @@ export const TERRAIN_LIMITS = Object.freeze({
 function numberWithin(value, fallback, [minimum, maximum], label) {
   const resolved = value ?? fallback;
   if (!Number.isFinite(resolved) || resolved < minimum || resolved > maximum) {
-    throw new RangeError(`terrain ${label} must be a number within ${minimum} and ${maximum}.`);
+    throw invalidField(`terrain.${label}`, resolved, `a number from ${minimum} to ${maximum}, such as ${fallback}`);
   }
   return resolved;
 }
 
 function integerWithin(value, fallback, [minimum, maximum], label) {
   const resolved = numberWithin(value, fallback, [minimum, maximum], label);
-  if (!Number.isInteger(resolved)) throw new RangeError(`terrain ${label} must be a whole number.`);
+  if (!Number.isInteger(resolved)) throw invalidField(`terrain.${label}`, resolved, `a whole number, such as ${fallback}`);
   return resolved;
 }
 
@@ -33,7 +34,7 @@ export function terrainVertexEstimate(value) {
   numberWithin(value.size, TERRAIN_LIMITS.defaultSize, TERRAIN_LIMITS.size, 'size');
   numberWithin(value.amplitude, TERRAIN_LIMITS.defaultAmplitude, TERRAIN_LIMITS.amplitude, 'amplitude');
   if (value.holes !== undefined && (!Array.isArray(value.holes) || value.holes.length > TERRAIN_LIMITS.maximumHoles)) {
-    throw new RangeError(`terrain holes must be a list of at most ${TERRAIN_LIMITS.maximumHoles} circles.`);
+    throw invalidField('terrain.holes', value.holes, `a list of at most ${TERRAIN_LIMITS.maximumHoles} circles, such as [{ "center": [0, 0], "radius": 2 }]`);
   }
   return (resolution + 1) * (resolution + 1);
 }
@@ -61,6 +62,6 @@ export function createRecipeTerrain(value) {
 /** Render geometry of a terrain record: ground from -size / 2 to size / 2 on X and Z, hills of the given amplitude, holes cut out. */
 export function generateTerrainGeometry(value, maxVertices) {
   const vertices = terrainVertexEstimate(value);
-  if (vertices > maxVertices) throw new RangeError(`Terrain needs ${vertices} vertices, exceeding maxVertices ${maxVertices}. Lower resolution.`);
+  if (vertices > maxVertices) throw invalidField('terrain.resolution', value.resolution ?? TERRAIN_LIMITS.defaultResolution, `a resolution whose ${vertices} vertices fit maxVertices ${maxVertices}; lower it`);
   return createRecipeTerrain(value).parts[0].geometry;
 }

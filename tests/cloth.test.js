@@ -174,7 +174,7 @@ test('cloth recipes need the cloth module and plain recipes do not', () => {
 
 test('set-cloth edits the section, null clears it and the recipe round trips', () => {
   const scene = createAgentScene(flagRecipe(null));
-  assert.throws(() => scene.sampleMotion(1), /no motion, physics, cloth or particles/);
+  assert.throws(() => scene.sampleMotion(1), /time: got 1; expected null, because this recipe has no motion, physics, cloth, particles or placed asset clip/);
   scene.apply([{ type: 'set-cloth', cloth: hangingFlag }], { expectedRevision: scene.revision });
   scene.sampleMotion(1);
   const exported = scene.exportRecipe();
@@ -201,22 +201,22 @@ test('hostile cloth sections are rejected before any solver runs', () => {
   bad({ duration: 2, sheets: [] }, /at least one sheet/);
   bad({ duration: 0, sheets: [{ node: 'flag' }] }, /duration/);
   bad({ duration: 11, sheets: [{ node: 'flag' }] }, /duration/);
-  bad({ duration: 2, sheets: [{ node: 'missing' }] }, /not found/);
-  bad({ duration: 2, sheets: [{ node: 'flag' }, { node: 'flag' }] }, /twice/);
+  bad({ duration: 2, sheets: [{ node: 'missing' }] }, /Cloth sheet node: got "missing"; expected the ID of a node in nodes/);
+  bad({ duration: 2, sheets: [{ node: 'flag' }, { node: 'flag' }] }, /Cloth sheet node: got "flag"; expected a node used once in cloth/);
   bad({ duration: 2, sheets: [{ node: 'flag', stiffness: 2 }] }, /stiffness/);
   bad({ duration: 2, sheets: [{ node: 'flag', density: 0 }] }, /density/);
   bad({ duration: 2, sheets: [{ node: 'flag', pin: ['middle'] }] }, /pin/);
-  bad({ duration: 2, sheets: [{ node: 'flag', surprise: 1 }] }, /Unknown/);
-  bad({ duration: 2, surprise: 1, sheets: [{ node: 'flag' }] }, /Unknown/);
+  bad({ duration: 2, sheets: [{ node: 'flag', surprise: 1 }] }, /cloth sheet\.surprise: got 1; expected one of the fields/);
+  bad({ duration: 2, surprise: 1, sheets: [{ node: 'flag' }] }, /cloth\.surprise: got 1; expected one of the fields/);
   bad({ duration: 2, wind: [0, 0, NaN], sheets: [{ node: 'flag' }] }, /finite/);
   bad({ duration: 2, wind: [0, 0, 1e9], sheets: [{ node: 'flag' }] }, /wind/);
   bad({ duration: 2, gravity: [0, -Infinity, 0], sheets: [{ node: 'flag' }] }, /finite/);
   bad({ duration: 2, sheets: Array.from({ length: 9 }, () => ({ node: 'flag' })) }, /at most 8/);
   bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: Array.from({ length: 17 }, () => ({ node: 'flag' })) }, /at most 16/);
-  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'flag' }] }, /twice/);
+  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'flag' }] }, /Cloth collider node: got "flag"; expected a node used once in cloth/);
   bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'stone', shape: 'cone' }] }, /shape/, [{ id: 'stone', geometry: 'ball', material: 'stone' }]);
   bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'child' }] }, /root node/, [{ id: 'child', parent: 'flag', geometry: 'ball', material: 'stone' }]);
-  bad('cloth', /plain object/);
+  bad('cloth', /expected an object/);
   bad({ duration: 2, sheets: 'flag' }, /array/);
 });
 

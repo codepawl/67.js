@@ -1,33 +1,34 @@
 // Checks shared by the recipe sections that bake geometry (cloth, particles, hair).
+import { invalidField } from './field-error.js';
 
 export function knownKeys(value, fields, label) {
   if (!value || Object.getPrototypeOf(value) !== Object.prototype) {
-    throw new TypeError(`${label} must be a plain object.`);
+    throw invalidField(label, value, 'an object, such as {}', TypeError);
   }
   for (const key of Object.keys(value)) {
     if (!fields.includes(key)) {
-      throw new TypeError(`Unknown or unsupported ${label} field: ${key}. Allowed fields: ${fields.join(', ')}.`);
+      throw invalidField(`${label}.${key}`, value[key], `one of the fields ${fields.join(', ')}; remove ${key}`, TypeError);
     }
   }
 }
 
 export function finiteNumber(value, label, minimum, maximum) {
   if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isFinite(Math.fround(value)) || value < minimum || value > maximum) {
-    throw new RangeError(`${label} must be a finite number within ${minimum} and ${maximum}.`);
+    throw invalidField(label, value, `a finite number from ${minimum} to ${maximum}, such as ${Math.min(Math.max(1, minimum), maximum)}`);
   }
   return value;
 }
 
 export function vectorOfThree(value, label, limit) {
   if (!Array.isArray(value) || value.length !== 3) {
-    throw new TypeError(`${label} needs 3 numbers.`);
+    throw invalidField(label, value, 'three numbers, such as [0, 1, 0]', TypeError);
   }
   return value.map(component => finiteNumber(component, label, -limit, limit));
 }
 
 export function boundedArray(value, maximum, label) {
   if (!Array.isArray(value) || value.length > maximum) {
-    throw new TypeError(`${label} must be an array of at most ${maximum} entries.`);
+    throw invalidField(label, value, `an array of at most ${maximum} entries, such as []`, TypeError);
   }
   return value;
 }
@@ -35,19 +36,19 @@ export function boundedArray(value, maximum, label) {
 export function rootNodeWithGeometry(nodeId, recipeNodes, claimedNodes, motionNodeIds, physicsNodeIds, label, system = 'cloth') {
   const node = typeof nodeId === 'string' ? recipeNodes.get(nodeId) : undefined;
   if (!node) {
-    throw new RangeError(`${label} node was not found: ${String(nodeId).slice(0, 64)}.`);
+    throw invalidField(`${label} node`, nodeId, 'the ID of a node in nodes, such as one scene_inspect lists');
   }
   if (node.geometry === undefined) {
-    throw new RangeError(`${label} node ${nodeId} has no geometry.`);
+    throw invalidField(`${label} node`, nodeId, 'a node with a geometry; give it geometry and material');
   }
   if (node.parent !== null) {
-    throw new RangeError(`${label} node ${nodeId} must be a root node; reparent it first.`);
+    throw invalidField(`${label} node`, nodeId, 'a root node without a parent; reparent it first');
   }
   if (claimedNodes.has(nodeId)) {
-    throw new RangeError(`Node ${nodeId} is used twice in ${system}.`);
+    throw invalidField(`${label} node`, nodeId, `a node used once in ${system}; pick another node`);
   }
   if (motionNodeIds.has(nodeId) || physicsNodeIds.has(nodeId)) {
-    throw new RangeError(`Node ${nodeId} has a motion translation or rotation track or a physics body. ${label} needs a node that stays where it is.`);
+    throw invalidField(`${label} node`, nodeId, 'a node that stays where it is, with no motion translation or rotation track and no physics body');
   }
   claimedNodes.add(nodeId);
 }

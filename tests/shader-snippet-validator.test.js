@@ -144,6 +144,6 @@ test('the documented example passes the validator and builds a scene', async () 
   assert.equal(scene.postPasses.length, 1);
   assert.throws(() => scene.apply([{ type: 'set-post-passes', postPasses: [{ ...postPasses[0], fragment: '#define A 1\n' + postPasses[0].fragment }] }], { expectedRevision: scene.revision }), /Preprocessor lines/);
   assert.equal(scene.postPasses.length, 1);
-  assert.throws(() => scene.apply([{ type: 'set-post-passes' }], { expectedRevision: scene.revision }), /requires postPasses; use null to clear it/);
+  assert.throws(() => scene.apply([{ type: 'set-post-passes' }], { expectedRevision: scene.revision }), /postPasses: got undefined; expected a postPasses value, or null to clear it/);
   assert.deepEqual(scene.exportRecipe().postPasses, scene.postPasses);
 });

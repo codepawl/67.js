@@ -99,7 +99,7 @@ test('a tagged region of the target is the reference, not the whole part', () =>
   ], [body]);
   assert.throws(() => createAgentScene(bad), /cannot be satisfied.*Unknown tag lid.*Known tags: .*top/s);
   const plain = recipeWith([{ id: 'a' }, { id: 'b', relations: [{ kind: 'gap', to: 'a', region: 'top', side: '+y' }] }]);
-  assert.throws(() => createAgentScene(plain), /plain shape.*tag faces with a mesh_edit tag op/s);
+  assert.throws(() => createAgentScene(plain), /region: got "top"; expected a tag on a mesh geometry.*tag faces with a mesh_edit tag op/s);
 });
 
 test('relations solve the same every time and again after an edit moves a referenced region', () => {

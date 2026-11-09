@@ -56,11 +56,11 @@ const REMOVAL_FIELDS = Object.freeze({
 
 function knownKeys(value, allowed, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw invalidField(label, value, 'an object, such as {}', TypeError);
   }
   for (const key of Object.keys(value)) {
     if (!allowed.includes(key)) {
-      throw new TypeError(`Unknown ${label} field: ${key}. Allowed fields: ${allowed.join(", ")}.`);
+      throw invalidField(`${label}.${key}`, value[key], `one of the fields ${allowed.join(', ')}; remove ${key}`, TypeError);
     }
   }
 }
@@ -70,7 +70,7 @@ function resolveLimits(input) {
   const result = { ...DEFAULT_LIMITS, ...input };
   for (const [key, value] of Object.entries(result)) {
     if (!Number.isSafeInteger(value) || value <= 0) {
-      throw new RangeError(`${key} must be a positive safe integer.`);
+      throw invalidField(`limits.${key}`, value, 'a positive whole number, such as 1024');
     }
   }
   if (result.maxNodes > 4096) {
@@ -186,13 +186,13 @@ function identifier(value, label = 'id') {
 
 function resources(values, maximum, label, validate) {
   if (!Array.isArray(values) || values.length > maximum) {
-    throw new RangeError(`${label} exceeds its resource limit of ${maximum} or is not an array. Pass "${label}": [] for none, or remove some.`);
+    throw invalidField(label, Array.isArray(values) ? `${values.length} entries` : values, `an array of at most ${maximum} entries, such as []`);
   }
   const seen = new Set();
   return values.map((value, index) => withFieldPrefix(`${label}[${index}]`, () => {
     identifier(value?.id);
     if (seen.has(value.id)) {
-      throw new RangeError(`Duplicate ${label} ID: ${value.id}. IDs must be unique: rename one, or remove the other.`);
+      throw invalidField('id', value.id, `an ID no other ${label} entry uses; rename one, or remove the other`);
     }
     seen.add(value.id);
     return validate(value);
@@ -222,11 +222,11 @@ function materialFrom(value) {
     ...(graphFactor('clearcoat', 0) && { clearcoat: 1 }), ...(graphFactor('transmission', 0) && { transmission: 1 }),
     metallic: defaultValue(value.metallic, graphFactor('metallic', 0)), roughness: defaultValue(value.roughness, graphFactor('roughness', 0.5)), emission: defaultValue(value.emission, graphFactor('emission', 0)) };
   if (!AGENT_SCENE_CAPABILITIES.materialTags.includes(result.tag)) {
-    throw new RangeError(`Material tag must be one of ${AGENT_SCENE_CAPABILITIES.materialTags.join(', ')}.`);
+    throw invalidField('tag', result.tag, `one of ${AGENT_SCENE_CAPABILITIES.materialTags.join(', ')}`);
   }
   if (value.map !== undefined) agentSceneModule('assets').applyMapSequence(value, result);
   if (value.pattern !== undefined) {
-    if (result.tag !== 'surface') throw new RangeError('Material pattern needs the surface tag.');
+    if (result.tag !== 'surface') throw invalidField('pattern', value.pattern?.type, 'a material with the surface tag; remove pattern or set tag to surface');
     result.pattern = agentSceneModule('patterns').normalizeMaterialPattern(value.pattern);
   }
   result.opacity = defaultValue(value.opacity, 1);
@@ -272,10 +272,10 @@ function materialFrom(value) {
   for (const component of emissiveColor) {
     const radiance = Math.fround(component) * Math.fround(result.emission);
     if (!Number.isFinite(Math.fround(radiance))) {
-      throw new RangeError('Emissive radiance exceeds Float32 range.');
+      throw invalidField('emission', result.emission, 'an emission that keeps color times emission within Float32 range, such as 2');
     }
     if (result.tag === 'unlit' && radiance > 65500) {
-      throw new RangeError('Unlit emissive radiance exceeds the half-float HDR target range.');
+      throw invalidField('emission', result.emission, 'an unlit emission that keeps color times emission at or below 65500, such as 2');
     }
   }
   return result;
@@ -302,7 +302,7 @@ function nodeFrom(value) {
   }
   result.rotation = result.rotation.map(component => component / length);
   if ((value.geometry !== undefined) !== (value.material !== undefined)) {
-    throw new TypeError(`Node ${value.id}: set both geometry and material, or neither for a group node. Name a geometry to draw it, or drop material to make it a group.`);
+    throw invalidField(value.geometry === undefined ? 'geometry' : 'material', value.geometry ?? value.material, `set together with ${value.geometry === undefined ? 'material' : 'geometry'} to draw a mesh, or drop both for a group node`, TypeError);
   }
   if (value.geometry !== undefined) {
     identifier(value.geometry);
@@ -310,25 +310,25 @@ function nodeFrom(value) {
   }
   if (value.asset !== undefined) {
     if (value.geometry !== undefined || value.skin !== undefined) {
-      throw new TypeError(`Node ${value.id}: an asset node is a group; drop geometry, material and skin.`);
+      throw invalidField('asset', value.geometry ?? value.skin, 'an asset node without geometry, material and skin; an asset node is a group', TypeError);
     }
     result.asset = agentSceneModule('assets').normalizeAssetPlacement(value.asset);
   }
   if (value.vegetation !== undefined) result.vegetation = agentSceneModule('vegetation').normalizeVegetation(value.vegetation, value);
   if (value.decal !== undefined && typeof value.decal !== 'boolean') {
-    throw new TypeError('decal must be boolean.');
+    throw invalidField('decal', value.decal, 'true or false', TypeError);
   }
   if (value.depthLayer !== undefined) {
     integer(value.depthLayer, 0, MAXIMUM_DEPTH_LAYER, 'depthLayer');
   }
   for (const flag of RENDER_FLAG_FIELDS) {
-    if (value[flag] !== undefined && typeof value[flag] !== 'boolean') throw new TypeError(`${flag} must be boolean.`);
-    if (flag !== 'visible' && value[flag] !== undefined && value.geometry === undefined) throw new TypeError(`Node ${value.id}: ${flag} belongs on a mesh node.`);
+    if (value[flag] !== undefined && typeof value[flag] !== 'boolean') throw invalidField(flag, value[flag], 'true or false', TypeError);
+    if (flag !== 'visible' && value[flag] !== undefined && value.geometry === undefined) throw invalidField(flag, value[flag], 'a flag on a mesh node with geometry and material; remove it from group nodes', TypeError);
   }
-  if (value.holdout === true && value.shadowCatcher === true) throw new TypeError(`Node ${value.id}: a node is a holdout or a shadow catcher, not both.`);
+  if (value.holdout === true && value.shadowCatcher === true) throw invalidField('shadowCatcher', value.shadowCatcher, 'false when holdout is true; a node is a holdout or a shadow catcher, not both', TypeError);
   if (value.skin !== undefined) {
     if (value.geometry === undefined) {
-      throw new TypeError('Only mesh nodes can have a skin.');
+      throw invalidField('skin', value.skin, 'a skin on a mesh node with geometry and material; remove skin from group nodes', TypeError);
     }
     knownKeys(value.skin, ['armature', 'maxInfluences', 'maxDistance'], 'skin');
     identifier(value.skin.armature);
@@ -336,7 +336,7 @@ function nodeFrom(value) {
       integer(value.skin.maxInfluences, 1, 4, 'skin maxInfluences');
     }
     if (value.skin.maxDistance !== undefined && !(Number.isFinite(value.skin.maxDistance) && value.skin.maxDistance > 0)) {
-      throw new RangeError('skin maxDistance must be a positive number of metres.');
+      throw invalidField('skin.maxDistance', value.skin.maxDistance, 'a positive number of metres, such as 0.5');
     }
   }
   return result;
@@ -360,7 +360,7 @@ export function applyCameraFields(camera, fields) {
 
 function rejectFovWithFocalLength(fields) {
   if (fields.fov !== undefined && fields.focalLength !== undefined) {
-    throw new RangeError('Give a camera fov or a focalLength, not both. Use focalLength (with sensorWidth) for a lens in millimetres, fov for degrees.');
+    throw invalidField('camera.focalLength', fields.focalLength, 'only one of fov (degrees) or focalLength (millimetres with sensorWidth), such as fov 45; remove the other');
   }
 }
 
@@ -370,12 +370,12 @@ function checkCameraLens(camera) {
   }
   const orthographic = camera.projection === 'orthographic';
   if (camera.orthoScale !== undefined) {
-    if (!orthographic) throw new RangeError('Camera orthoScale needs projection orthographic.');
+    if (!orthographic) throw invalidField('camera.orthoScale', camera.orthoScale, 'a field of an orthographic camera; set projection to orthographic, or remove orthoScale');
     if (!Number.isFinite(camera.orthoScale) || camera.orthoScale <= 0) throw invalidField('camera.orthoScale', camera.orthoScale, 'a positive view height in metres, such as 10');
   }
-  if (camera.sensorWidth !== undefined && camera.focalLength === undefined) throw new RangeError('Camera sensorWidth needs focalLength.');
+  if (camera.sensorWidth !== undefined && camera.focalLength === undefined) throw invalidField('camera.sensorWidth', camera.sensorWidth, 'a field used with focalLength, such as focalLength 35; add focalLength or remove sensorWidth');
   if (camera.focalLength !== undefined) {
-    if (orthographic) throw new RangeError('Camera focalLength needs a perspective projection; an orthographic camera is sized by orthoScale.');
+    if (orthographic) throw invalidField('camera.focalLength', camera.focalLength, 'a field of a perspective camera; an orthographic camera is sized by orthoScale, so remove focalLength');
     if (!Number.isFinite(camera.focalLength) || camera.focalLength <= 0 || camera.focalLength > 10000) throw invalidField('camera.focalLength', camera.focalLength, 'a lens length above 0 and up to 10000 millimetres, such as 35');
     if (camera.sensorWidth !== undefined && !(Number.isFinite(camera.sensorWidth) && camera.sensorWidth > 0 && camera.sensorWidth <= 1000)) throw invalidField('camera.sensorWidth', camera.sensorWidth, 'a width above 0 and up to 1000 millimetres, such as 36');
   }
@@ -418,7 +418,7 @@ function cameraFrom(value = {}) {
   const crossLength = Math.hypot(unitDirection[1] * result.up[2] - unitDirection[2] * result.up[1],
     unitDirection[2] * result.up[0] - unitDirection[0] * result.up[2], unitDirection[0] * result.up[1] - unitDirection[1] * result.up[0]);
   if (Math.fround(crossLength) === 0) {
-    throw new RangeError('Camera up must not be collinear with the view direction.');
+    throw invalidField('camera.up', result.up, `a direction not parallel to the view from eye to target, such as [0, 1, 0]`);
   }
   const view = mat4.lookAt(mat4.create(), result.eye, result.target, result.up);
   const projection = applyProjection(mat4.create(), result, 1);
@@ -450,22 +450,22 @@ function lineEnds(value) {
   const ends = [value.from, value.to];
   for (const end of ends) vector(end, 3, 'line end');
   if (ends[0].every((component, axis) => component === ends[1][axis])) {
-    throw new RangeError('A line needs two distinct end points.');
+    throw invalidField('to', value.to, `a point different from from ${JSON.stringify(value.from)}, such as [0, 1, 0]`);
   }
   return ends;
 }
 
 function geometryEstimate(value) {
   if (!Object.hasOwn(GEOMETRY_FIELDS, value.type)) {
-    throw new TypeError(`Unsupported geometry type: ${value.type}. Use one of ${Object.keys(GEOMETRY_FIELDS).join(', ')}.`);
+    throw invalidField('type', value.type, `one of ${Object.keys(GEOMETRY_FIELDS).join(', ')}`, TypeError);
   }
   knownKeys(value, ['id', 'type', ...GEOMETRY_FIELDS[value.type]], 'geometry');
   function detail(field, fallback, minimum, maximum) {
     return integer(value[field] ?? fallback, minimum, maximum, field);
   }
-  function points(input, size, minimum) {
+  function points(input, size, minimum, field = 'points') {
     if (!Array.isArray(input) || input.length < minimum || input.length > 4096) {
-      throw new RangeError('Geometry point count exceeds its limit.');
+      throw invalidField(field, Array.isArray(input) ? `${input.length} points` : input, `a list of ${minimum} to 4096 points of ${size} numbers, such as ${JSON.stringify(Array.from({ length: minimum }, (_, index) => Array.from({ length: size }, () => index)))}`);
     }
     for (const point of input) {
       vector(point, size, 'geometry point');
@@ -501,24 +501,24 @@ function geometryEstimate(value) {
     case 'torus':
       return (detail('segments', 96, 3, 2048) + 1) * (detail('sides', 24, 3, 128) + 1) + 2 * ((value.sides ?? 24) + 2);
     case 'lathe':
-      return (detail('segments', 64, 3, 2048) + 1) * points(value.profile, 2, 2);
+      return (detail('segments', 64, 3, 2048) + 1) * points(value.profile, 2, 2, 'profile');
     case 'tube':
-      points(value.path, 3, value.closed ? 3 : 2);
+      points(value.path, 3, value.closed ? 3 : 2, 'path');
       if (value.closed !== undefined && typeof value.closed !== 'boolean') {
-        throw new TypeError('closed must be boolean.');
+        throw invalidField('closed', value.closed, 'true or false', TypeError);
       }
       return (detail('segments', 64, 3, 2048) + 1) * (detail('radialSegments', 12, 3, 128) + 1);
     case 'curve': {
       const knots = value.points;
       if (!Array.isArray(knots) || knots.length < 2 || knots.length > CURVE_TEXT_LIMITS.maxCurvePoints) {
-        throw new RangeError('Geometry point count exceeds its limit.');
+        throw invalidField('points', Array.isArray(knots) ? `${knots.length} points` : knots, `a list of 2 to ${CURVE_TEXT_LIMITS.maxCurvePoints} points, such as [[0, 0, 0], [0, 1, 0]]`);
       }
-      const sides = value.profile === undefined ? detail('radialSegments', 8, 3, 128) : points(value.profile, 2, 3);
+      const sides = value.profile === undefined ? detail('radialSegments', 8, 3, 128) : points(value.profile, 2, 3, 'profile');
       const rings = (value.closed ? knots.length : knots.length - 1) * detail('resolution', 12, 1, 64) + 1;
       return rings * sides * 2 + 2 * (sides + 1);
     }
     case 'text': {
-      if (typeof value.text !== 'string') throw new TypeError('text must be a string.');
+      if (typeof value.text !== 'string') throw invalidField('text', value.text, 'a string, such as "Hello"', TypeError);
       const visible = [...value.text].filter(character => !/\s/.test(character)).length;
       const isDefaultFont = value.font === undefined || value.font === 'default';
       const perSegment = isDefaultFont ? CURVE_TEXT_LIMITS.verticesPerCharacterSegment : CURVE_TEXT_LIMITS.verticesPerCustomCharacterSegment;
@@ -529,11 +529,11 @@ function geometryEstimate(value) {
     case 'extrude': {
       const holes = value.holes ?? [];
       if (!Array.isArray(holes) || holes.length > 128) {
-        throw new RangeError('holes must contain at most 128 rings.');
+        throw invalidField('holes', Array.isArray(holes) ? `${holes.length} rings` : holes, 'a list of at most 128 rings of points, such as []');
       }
-      const count = points(value.contour, 2, 3) + holes.reduce((total, hole) => total + points(hole, 2, 3), 0);
+      const count = points(value.contour, 2, 3, 'contour') + holes.reduce((total, hole) => total + points(hole, 2, 3, 'holes'), 0);
       if (count > 4096) {
-        throw new RangeError('Extrude exceeds 4096 input points.');
+        throw invalidField('contour', `${count} points`, 'a contour and holes with at most 4096 points in total; simplify them');
       }
       const beveled = (value.bevel ?? 0) > 0 || (value.bevelThickness ?? value.bevel ?? 0) > 0;
       return 6 * (count + holes.length * 2 - 2) + 6 * count * (detail('steps', 1, 1, 256) + (beveled ? detail('bevelSegments', 3, 1, 32) * 2 : 0));
@@ -541,7 +541,7 @@ function geometryEstimate(value) {
     case 'mesh': {
       const base = value.base;
       if (!base || typeof base !== 'object' || Array.isArray(base) || base.type === 'mesh' || Object.hasOwn(base, 'id')) {
-        throw new TypeError('mesh base must be a primitive or profile geometry record without an id (box, cylinder, sphere, torus, lathe, extrude or tube).');
+        throw invalidField('base', base, 'a primitive or profile record without an id, such as { "type": "box" } (box, cylinder, sphere, torus, lathe, extrude or tube)', TypeError);
       }
       let estimate = geometryEstimate({ id: 'base', ...base });
       for (const edit of agentSceneModule('mesh').normalizeMeshEdits(value.edits ?? [])) {
@@ -551,7 +551,7 @@ function geometryEstimate(value) {
       for (const node of agentSceneModule('mesh').normalizeMeshStack(value.stack ?? [])) estimate *= node.op === 'array' ? node.count : 2;
       if (value.shapeKeys !== undefined) agentSceneModule('mesh').normalizeShapeKeys(value.shapeKeys);
       if (value.smoothAngle !== undefined && (value.smoothAngle < 0 || value.smoothAngle > 180)) {
-        throw new RangeError('smoothAngle is degrees from 0 to 180.');
+        throw invalidField('smoothAngle', value.smoothAngle, 'degrees from 0 to 180, such as 30');
       }
       // Edits can grow the mesh; the real size is checked against maxVertices after generation.
       return estimate * 2;
@@ -565,7 +565,7 @@ function hasInstancedNodes(nodes) {
 
 function cutterEstimate(cutter) {
   if (cutter.type === 'mesh' || Object.hasOwn(cutter, 'id')) {
-    throw new TypeError('A boolean cutter must be a primitive or profile record without an id (box, cylinder, sphere, torus, lathe, extrude or tube).');
+    throw invalidField('cutter', cutter, 'a primitive or profile record without an id, such as { "type": "box" } (box, cylinder, sphere, torus, lathe, extrude or tube)', TypeError);
   }
   return geometryEstimate({ id: 'cutter', ...cutter });
 }
@@ -625,7 +625,8 @@ function compile(recipe, geometries, localBounds, limits) {
   const materials = new Map(recipe.materials.map(material => [material.id, material]));
   const graph = createSceneGraph(recipe.nodes.map(node => {
     if (node.geometry !== undefined && (!geometries.has(node.geometry) || !materials.has(node.material))) {
-      throw new RangeError(`Node ${node.id} uses ${geometries.has(node.geometry) ? `material ${node.material}` : `geometry ${node.geometry}`}, which does not exist. Use one of: ${(geometries.has(node.geometry) ? [...materials.keys()] : [...geometries.keys()]).join(', ')}.`);
+      const missingField = geometries.has(node.geometry) ? 'material' : 'geometry';
+      throw invalidField(`nodes.${node.id}.${missingField}`, node[missingField], `one of ${(geometries.has(node.geometry) ? [...materials.keys()] : [...geometries.keys()]).join(', ')}`);
     }
     return { name: node.id, parent: node.parent,
       matrix: node.assetPart ? mat4.clone(node.assetPart.matrix) : mat4.fromRotationTranslationScale(mat4.create(), node.rotation, node.translation, node.scale),
@@ -678,7 +679,7 @@ function addArmatures(recipe, limits) {
   if (!Object.hasOwn(recipe, 'armatures')) {
     for (const node of recipe.nodes) {
       if (node.skin) {
-        throw new RangeError(`Node ${node.id} has a skin but the recipe has no armatures.`);
+        throw invalidField(`nodes.${node.id}.skin`, node.skin, 'a skin only when the recipe has armatures; add an armatures list or remove skin');
       }
     }
     return;
@@ -687,7 +688,7 @@ function addArmatures(recipe, limits) {
   const resolveBounds = (armature, nodeId) => {
     const node = userNodes.get(nodeId);
     if (!node?.geometry) {
-      throw new RangeError(`Armature ${armature.id} fit node ${JSON.stringify(String(nodeId).slice(0, 48))} must be a mesh node.`);
+      throw invalidField(`armatures.${armature.id}.fit`, nodeId, 'the ID of a mesh node with a geometry, such as one scene_inspect lists');
     }
     const definition = recipe.geometries.find(geometry => geometry.id === node.geometry);
     const bounds = boundsFor(generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000)), mat4.create());
@@ -699,15 +700,15 @@ function addArmatures(recipe, limits) {
   const derived = recipe.armatures.flatMap(armatureNodes);
   for (const node of derived) {
     if (userNodes.has(node.id)) {
-      throw new RangeError(`Armature node ${node.id} collides with a node of the same ID. Give the armature a prefix.`);
+      throw invalidField(`armatures.${node.id}`, node.id, 'a bone node ID no other node uses; give the armature a prefix, such as "rig-"');
     }
   }
   if (new Set(derived.map(node => node.id)).size !== derived.length) {
-    throw new RangeError('Two armatures generate the same node ID. Give one a prefix.');
+    throw invalidField('armatures', recipe.armatures.map(armature => armature.id), 'armatures that generate different node IDs; give one a prefix, such as "rig-"');
   }
   for (const node of recipe.nodes) {
     if (node.skin && !recipe.armatures.some(armature => armature.id === node.skin.armature)) {
-      throw new RangeError(`Node ${node.id} skin names armature ${node.skin.armature}, which is not in armatures.`);
+      throw invalidField(`nodes.${node.id}.skin.armature`, node.skin.armature, `one of ${recipe.armatures.map(armature => armature.id).join(', ')}`);
     }
   }
   recipe.nodes = [...derived, ...recipe.nodes];
@@ -740,7 +741,7 @@ function checkLightLinkNames(recipe) {
   }
   const unknown = agentSceneModule('lightLinking').unknownLightLinkNames(recipe.environment, recipe.nodes);
   if (unknown.length > 0) {
-    throw new RangeError(`Light links name nodes that do not exist (${unknown.slice(0, 4).join('; ')}). scene_inspect lists node IDs.`);
+    throw invalidField('environment.keyAffects', unknown.slice(0, 4), 'node IDs that exist in nodes in every affects list; scene_inspect lists them');
   }
 }
 
@@ -770,7 +771,7 @@ function normalizeRecipe(input, limits) {
   let recipe = copiedJson(input, limits.maxRecipeBytes);
   knownKeys(recipe, ['format', 'schemaVersion', 'geometries', 'materials', 'nodes', 'armatures', 'camera', 'environment', 'effects', 'shadow', 'motion', 'physics', 'cloth', 'timeline', 'particles', 'bake', 'postPasses'], 'recipe');
   if (recipe.format !== '67js.scene' || recipe.schemaVersion !== 1) {
-    throw new RangeError('Expected 67js.scene schemaVersion 1.');
+    throw invalidField(recipe.format !== '67js.scene' ? 'format' : 'schemaVersion', recipe.format !== '67js.scene' ? recipe.format : recipe.schemaVersion, recipe.format !== '67js.scene' ? '"67js.scene"' : '1');
   }
   // A scene with no mesh, or whose nodes all take the default material, has nothing to list: absent means empty.
   // Placed assets generate their own geometries, materials and part nodes each time; an exported or checkpointed recipe may still carry them.
@@ -792,14 +793,14 @@ function normalizeRecipe(input, limits) {
   recipe.materials = resources(withDefaultMaterial(recipe), limits.maxMaterials, 'materials', materialFrom);
   const distinctPatterns = new Set(recipe.materials.filter(material => material.pattern).map(material => JSON.stringify(material.pattern)));
   if (distinctPatterns.size > MAX_MATERIAL_PATTERNS) {
-    throw new RangeError(`A scene holds at most ${MAX_MATERIAL_PATTERNS} different material patterns; it has ${distinctPatterns.size}. Reuse one; tint with color.`);
+    throw invalidField('materials', `${distinctPatterns.size} different patterns`, `at most ${MAX_MATERIAL_PATTERNS} different material patterns; reuse one and tint it with color`);
   }
   recipe.nodes = withoutArmatureNodes(recipe.nodes);
   if (hasInstancedNodes(recipe.nodes)) recipe.nodes = agentSceneModule('mesh').expandInstancedNodes(recipe.nodes, {
     maxNodes: limits.maxNodes,
     resolveSurface: id => {
       const definition = recipe.geometries.find(geometry => geometry.id === id);
-      if (!definition) throw new RangeError(`Instances surface geometry ${JSON.stringify(id.slice(0, 48))} is not in geometries.`);
+      if (!definition) throw invalidField('instances.surface', id, `the ID of a geometry in geometries, such as ${recipe.geometries[0]?.id ?? 'ground'}`);
       return generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000));
     },
   });
@@ -817,7 +818,7 @@ function normalizeRecipe(input, limits) {
   }
   Object.assign(recipe, normalizeAgentLook(look));
   if (recipe.camera.fStop !== undefined && recipe.effects?.depthOfField.blur > 0) {
-    throw new RangeError('Camera fStop drives depth of field; set effects.depthOfField.blur to 0 or remove fStop.');
+    throw invalidField('camera.fStop', recipe.camera.fStop, 'a camera without effects.depthOfField.blur above 0; set blur to 0 or remove fStop');
   }
   checkLightLinkNames(recipe);
   if (Object.hasOwn(recipe, 'motion')) {
@@ -1097,10 +1098,10 @@ function meshGeometryTarget(candidate, operation, remedy) {
   identifier(operation.geometry);
   const target = candidate.geometries.find(geometry => geometry.id === operation.geometry);
   if (!target) {
-    throw new RangeError(`Geometry ID was not found: ${operation.geometry}. Known geometry IDs: ${[...candidate.geometries.map(known => known.id)].join(', ')}.`);
+    throw invalidField('geometry', operation.geometry, `one of ${[...candidate.geometries.map(known => known.id)].join(', ')}`);
   }
   if (target.type !== 'mesh') {
-    throw new TypeError(`Geometry ${operation.geometry} is a ${target.type}. ${remedy(target.type)}`);
+    throw invalidField('geometry', operation.geometry, `the ID of a mesh geometry, but it is a ${target.type}. ${remedy(target.type)}`, TypeError);
   }
   return target;
 }
@@ -1110,10 +1111,10 @@ function removeNode(candidate, operation) {
   identifier(operation.id);
   const recursive = operation.recursive === undefined ? false : operation.recursive;
   if (typeof recursive !== 'boolean') {
-    throw new TypeError('recursive must be boolean.');
+    throw invalidField('recursive', recursive, 'true or false', TypeError);
   }
   if (!candidate.nodes.some(node => node.id === operation.id)) {
-    throw new RangeError(`${operation.type} target was not found: ${operation.id}. scene_inspect lists the IDs.`);
+    throw invalidField('id', operation.id, 'the ID of a node in nodes; scene_inspect lists them');
   }
   const children = new Map();
   for (const node of candidate.nodes) {
@@ -1122,7 +1123,7 @@ function removeNode(candidate, operation) {
     children.set(node.parent, siblings);
   }
   if (!recursive && (children.get(operation.id)?.length ?? 0) > 0) {
-    throw new RangeError('Nonrecursive removal cannot remove a node with children. Remove children first or use recursive.');
+    throw invalidField('recursive', recursive, 'true for a node with children, such as true; or remove the children first');
   }
   const removed = new Set([operation.id]);
   const pending = [operation.id];
@@ -1160,7 +1161,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     identifier(id);
     const node = state.recipe.nodes.find(value => value.id === id);
     const geometry = node && state.geometries.get(node.geometry);
-    if (!geometry) throw new RangeError(`path ${label} ${id} is not a node with a drawn geometry. List node IDs with scene_inspect.`);
+    if (!geometry) throw invalidField(`path.${label}`, id, 'the ID of a node with a drawn geometry; scene_inspect lists node IDs');
     return { geometry, worldMatrix: state.graph.getNode(id).worldMatrix };
   }
 
@@ -1507,7 +1508,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
   function expected(options) {
     knownKeys(options, ['expectedRevision'], 'transaction options');
     if (!Number.isSafeInteger(options.expectedRevision) || options.expectedRevision !== revision) {
-      throw new RangeError('expectedRevision must match the current revision.');
+      throw invalidField('expectedRevision', options.expectedRevision, `the current revision, ${revision}; scene_inspect returns it`);
     }
   }
 
@@ -1535,10 +1536,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     },
     sampleMotion(time) {
       if (time !== null && (!Number.isFinite(time) || time < 0 || time > 3600)) {
-        throw new RangeError('Motion time must be null or within zero and 3600 seconds.');
+        throw invalidField('time', time, 'null or a number of seconds from 0 to 3600, such as 0.5');
       }
       if (time !== null && !state.motionSampler && !state.physicsSampler && !state.clothSampler && !state.particleSampler && !state.assetRuntime.animators.length && !state.sequences.length) {
-        throw new RangeError('This procedural recipe has no motion, physics, cloth or particles, and no placed asset clip.');
+        throw invalidField('time', time, 'null, because this recipe has no motion, physics, cloth, particles or placed asset clip to sample; add motion first');
       }
       const pose = stagePose(state, time);
       rebakeAtPose(pose);
@@ -1596,7 +1597,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     apply(inputOperations, options = {}) {
       expected(options);
       if (!Array.isArray(inputOperations) || inputOperations.length === 0 || inputOperations.length > limits.maxOperations) {
-        throw new RangeError('operations must contain 1 to maxOperations commands.');
+        throw invalidField('operations', Array.isArray(inputOperations) ? `${inputOperations.length} operations` : inputOperations, `a list of 1 to ${limits.maxOperations} operations, such as [{ "type": "set-camera", "fov": 50 }]`);
       }
       const operations = copiedJson(inputOperations, limits.maxRecipeBytes);
       const candidate = authoredRecipe(state.recipe);
@@ -1607,7 +1608,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         if (section) {
           knownKeys(operation, ['type', section], 'operation');
           if (!Object.hasOwn(operation, section)) {
-            throw new TypeError(`${operation.type} requires ${section}; use null to clear it.`);
+            throw invalidField(section, undefined, `a ${section} value, or null to clear it, in a ${operation.type} operation`, TypeError);
           }
           candidate[section] = operation[section];
           if (candidate.armatures === null) delete candidate.armatures;
@@ -1644,7 +1645,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
             nodeFrom(record);
           }
           if (candidate[collection].some(existing => existing.id === record.id)) {
-            throw new RangeError(`Duplicate ${collection} ID: ${record.id}. IDs must be unique: pick a new ID, or remove the existing one first.`);
+            throw invalidField(`${field}.id`, record.id, `an ID no ${collection} entry uses yet; pick a new ID, or remove the existing one first`);
           }
           candidate[collection].push(record);
           continue;
@@ -1653,10 +1654,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           knownKeys(operation, ['type', 'geometry', 'edits', 'replace'], 'operation');
           const target = meshGeometryTarget(candidate, operation, type => `Add a mesh geometry with base: { type: '${type}', ... } to edit it.`);
           if (operation.replace !== undefined && typeof operation.replace !== 'boolean') {
-            throw new TypeError('replace must be boolean.');
+            throw invalidField('replace', operation.replace, 'true or false', TypeError);
           }
           if (!Array.isArray(operation.edits)) {
-            throw new TypeError('edit-mesh needs an edits array.');
+            throw invalidField('edits', operation.edits, 'an array of mesh edits, such as [{ "op": "extrude" }]', TypeError);
           }
           target.edits = operation.replace ? operation.edits : [...(target.edits ?? []), ...operation.edits];
           agentSceneModule('mesh').normalizeMeshEdits(target.edits);
@@ -1669,7 +1670,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           agentSceneModule('mesh').normalizeMeshStack(stack);
           const applied = operation.apply ?? 0;
           if (!Number.isInteger(applied) || applied < 0 || applied > stack.length) {
-            throw new RangeError(`apply must be an integer from 0 to the stack length ${stack.length}.`);
+            throw invalidField('apply', applied, `a whole number from 0 to the stack length ${stack.length}, such as 0`);
           }
           // Applying moves the first nodes into the edit log, as Blender's Apply modifier does.
           target.edits = [...(target.edits ?? []), ...stack.slice(0, applied)];
@@ -1689,7 +1690,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           identifier(operation.id);
           const index = candidate[removal].findIndex(record => record.id === operation.id);
           if (index < 0) {
-            throw new RangeError(`${operation.type} target was not found: ${operation.id}. scene_inspect lists the IDs; add it first with an add operation.`);
+            throw invalidField('id', operation.id, `the ID of an existing ${removal} entry; scene_inspect lists them`);
           }
           candidate[removal].splice(index, 1);
           if (operation.type === 'remove-material') {
@@ -1709,11 +1710,11 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           fields = CAMERA_FIELDS;
           target = candidate.camera;
         } else {
-          throw new TypeError(`Unsupported operation type: ${operation.type}. Use one of ${AGENT_SCENE_CAPABILITIES.operations.join(', ')}.`);
+          throw invalidField('type', operation.type, `one of ${AGENT_SCENE_CAPABILITIES.operations.join(', ')}`, TypeError);
         }
         knownKeys(operation, ['type', ...(operation.type === 'set-camera' ? [] : ['id']), ...fields], 'operation');
         if (!target) {
-          throw new RangeError(`${operation.type} target was not found: ${operation.id}. scene_inspect lists the IDs; add it first with an add operation.`);
+          throw invalidField('id', operation.id, `the ID of an existing ${operation.type === 'set-node' ? 'node' : 'material'}; scene_inspect lists them, or add it first with an add operation`);
         }
         if (operation.type === 'set-camera') {
           applyCameraFields(target, operation);
@@ -1731,16 +1732,16 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       knownKeys(options, ['ids', 'limit', 'includeBounds', 'path'], 'inspection');
       const maximum = integer(options.limit ?? Math.min(64, limits.maxNodes), 1, limits.maxNodes, 'inspection limit');
       if (options.includeBounds !== undefined && typeof options.includeBounds !== 'boolean') {
-        throw new TypeError('includeBounds must be boolean.');
+        throw invalidField('includeBounds', options.includeBounds, 'true or false', TypeError);
       }
       if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > limits.maxNodes)) {
-        throw new RangeError('Inspection IDs exceed maxNodes.');
+        throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `a list of at most ${limits.maxNodes} node IDs, such as ["body"]`);
       }
       const selected = options.ids === undefined ? state.recipe.nodes.filter(node => !node.assetPart) : options.ids.map(id => {
         identifier(id);
         const node = state.recipe.nodes.find(value => value.id === id);
         if (!node) {
-          throw new RangeError(`Inspection ID was not found: ${id}. Call scene_inspect without ids to list node IDs.`);
+          throw invalidField('ids', id, 'IDs of existing nodes; call scene_inspect without ids to list them');
         }
         return node;
       });
@@ -1801,14 +1802,14 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       knownKeys(options, ['geometries'], 'mesh inspection');
       const requested = options.geometries ?? [...state.geometries.keys()];
       if (!Array.isArray(requested) || (options.geometries !== undefined && requested.length > MAX_MESH_REPORTS)) {
-        throw new RangeError(`Inspect at most ${MAX_MESH_REPORTS} geometry IDs per call.`);
+        throw invalidField('geometries', Array.isArray(requested) ? `${requested.length} IDs` : requested, `a list of at most ${MAX_MESH_REPORTS} geometry IDs, such as ["block"]`);
       }
       const selected = requested.slice(0, MAX_MESH_REPORTS);
       const meshes = selected.map(id => {
         identifier(id);
         const geometry = state.geometries.get(id);
         if (!geometry) {
-          throw new RangeError(`Geometry ID was not found: ${id}. Known IDs: ${[...state.geometries.keys()].join(', ')}.`);
+          throw invalidField('geometries', id, `one of ${[...state.geometries.keys()].join(', ')}`);
         }
         return { geometry: id, ...agentSceneModule('mesh').meshReport(geometry) };
       });
@@ -1816,7 +1817,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     },
     checkpoint() {
       if (checkpoints.size >= limits.maxCheckpoints) {
-        throw new RangeError('Checkpoint budget exhausted. Release a checkpoint.');
+        throw invalidField('checkpoints', `${checkpoints.size} saved`, `at most ${limits.maxCheckpoints} saved checkpoints; release one with scene_release_checkpoint first`);
       }
       const handle = Object.freeze({});
       checkpoints.set(handle, {
@@ -1832,13 +1833,13 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       expected(options);
       const checkpoint = checkpoints.get(handle);
       if (!checkpoint) {
-        throw new RangeError('Unknown or released checkpoint. Save one with scene_checkpoint, or use a checkpointId that scene_checkpoint returned and you have not released.');
+        throw invalidField('checkpointId', handle, 'a checkpointId that scene_checkpoint returned and you have not released');
       }
       return commit(stage(checkpoint.recipe, checkpoint), true);
     },
     releaseCheckpoint(handle) {
       if (!checkpoints.delete(handle)) {
-        throw new RangeError('Unknown or released checkpoint. Save one with scene_checkpoint, or use a checkpointId that scene_checkpoint returned and you have not released.');
+        throw invalidField('checkpointId', handle, 'a checkpointId that scene_checkpoint returned and you have not released');
       }
     },
   });

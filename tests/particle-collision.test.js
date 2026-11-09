@@ -142,7 +142,7 @@ test('collision input is validated and the capabilities describe it', () => {
   const rejects = (system, pattern) => assert.throws(() => createAgentScene(dropRecipe(system)), pattern);
   rejects({ bounce: 1.5 }, /bounce/);
   rejects({ friction: -1 }, /friction/);
-  rejects({ colliders: ['ghost'] }, /not found/);
+  rejects({ colliders: ['ghost'] }, /Particle collider node: got "ghost"; expected the ID of a node in nodes/);
   rejects({ colliders: ['sparks'] }, /own collider/);
   rejects({ colliders: 'slab' }, /colliders/);
   rejects({ alpha: [0, 2] }, /alpha/);

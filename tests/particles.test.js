@@ -145,7 +145,7 @@ test('set-particles adds, changes and clears the section, and restores through a
   assert.equal(scene.inspect().particles.systems[0].particles, 5);
   scene.apply([{ type: 'set-particles', particles: null }], { expectedRevision: scene.revision });
   assert.equal(scene.inspect().particles, undefined);
-  assert.throws(() => scene.apply([{ type: 'set-particles' }], { expectedRevision: scene.revision }), /requires particles/);
+  assert.throws(() => scene.apply([{ type: 'set-particles' }], { expectedRevision: scene.revision }), /particles: got undefined; expected a particles value, or null to clear it/);
 });
 
 test('the capabilities describe the limits that the validator enforces', () => {
@@ -166,40 +166,40 @@ test('hostile input is rejected with the limit in the message', () => {
   bad(system({ seed: -1 }), /seed must be an integer/);
   bad(system({ seed: 2 ** 32 }), /seed must be an integer/);
   bad(system({ seed: 1.5 }), /seed must be an integer/);
-  bad(system({ lifetime: 0 }), /lifetime must be a finite number/);
-  bad(system({ lifetime: 1e9 }), /lifetime must be a finite number/);
+  bad(system({ lifetime: 0 }), /Particle lifetime: got (0|1e\+9); expected a finite number from 0\.01 to 60/);
+  bad(system({ lifetime: 1e9 }), /lifetime: got .*expected a finite number/);
   bad(system({ lifetime: [2, 1] }), /minimum must not exceed/);
   bad(system({ lifetime: [1, 2, 3] }), /lifetime must be a number or/);
   bad(system({ speed: NaN }), /finite|count|speed|direction|rate/);
-  bad(system({ speed: -1 }), /speed must be a finite number/);
-  bad(system({ size: 0 }), /size must be a finite number/);
-  bad(system({ size: 1e30 }), /size must be a finite number/);
-  bad(system({ rate: 0 }), /rate must be a finite number/);
+  bad(system({ speed: -1 }), /speed: got .*expected a finite number/);
+  bad(system({ size: 0 }), /size: got .*expected a finite number/);
+  bad(system({ size: 1e30 }), /size: got .*expected a finite number/);
+  bad(system({ rate: 0 }), /rate: got .*expected a finite number/);
   bad(system({ rate: Infinity }), /finite|count|speed|direction|rate/);
-  bad(system({ spread: 181 }), /spread must be a finite number/);
-  bad(system({ drag: -1 }), /drag must be a finite number/);
-  bad(system({ drag: 1e9 }), /drag must be a finite number/);
-  bad(system({ floor: 1e9 }), /floor must be a finite number/);
+  bad(system({ spread: 181 }), /spread: got .*expected a finite number/);
+  bad(system({ drag: -1 }), /drag: got .*expected a finite number/);
+  bad(system({ drag: 1e9 }), /drag: got .*expected a finite number/);
+  bad(system({ floor: 1e9 }), /floor: got .*expected a finite number/);
   bad(system({ direction: [0, 0, 0] }), /zero vector/);
-  bad(system({ direction: [1, 2] }), /needs 3 numbers/);
+  bad(system({ direction: [1, 2] }), /expected three numbers/);
   bad(system({ direction: [1, 2, NaN] }), /finite|count|speed|direction|rate/);
   bad(system({ scale: 'huge' }), /scale must be one of/);
   bad(system({ emitter: { shape: 'cone' } }), /emitter shape must be one of/);
-  bad(system({ emitter: { radius: -1 } }), /radius must be a finite number/);
-  bad(system({ emitter: { position: [1e9, 0, 0] } }), /position must be a finite number/);
-  bad(system({ emitter: { jet: true } }), /Unknown or unsupported particle emitter field/);
-  bad(system({ colour: 'red' }), /Unknown or unsupported particle system field/);
-  bad({ systems: [{ node: 'sparks' }], extra: 1 }, /Unknown or unsupported particles field/);
+  bad(system({ emitter: { radius: -1 } }), /radius: got .*expected a finite number/);
+  bad(system({ emitter: { position: [1e9, 0, 0] } }), /position: got .*expected a finite number/);
+  bad(system({ emitter: { jet: true } }), /particle emitter\.\w+: got .*expected one of the fields/);
+  bad(system({ colour: 'red' }), /particle system\.\w+: got .*expected one of the fields/);
+  bad({ systems: [{ node: 'sparks' }], extra: 1 }, /particles\.\w+: got .*expected one of the fields/);
   bad({ systems: [] }, /at least one system/);
-  bad({ systems: 'many' }, /must be an array/);
+  bad({ systems: 'many' }, /expected an array/);
   bad({ systems: Array.from({ length: 5 }, () => ({ node: 'sparks' })) }, /at most 4/);
-  bad({ systems: [{ node: 'sparks' }, { node: 'sparks' }] }, /used twice in particles/);
-  bad({ gravity: [0, -1e9, 0], systems: [{ node: 'sparks' }] }, /gravity must be a finite number/);
-  bad({ wind: [1000, 0, 0], systems: [{ node: 'sparks' }] }, /wind must be a finite number/);
-  bad(system({ node: 'missing' }), /node was not found/);
-  bad(system({ node: '__proto__' }), /node was not found/);
+  bad({ systems: [{ node: 'sparks' }, { node: 'sparks' }] }, /expected a node used once in particles/);
+  bad({ gravity: [0, -1e9, 0], systems: [{ node: 'sparks' }] }, /gravity: got .*expected a finite number/);
+  bad({ wind: [1000, 0, 0], systems: [{ node: 'sparks' }] }, /wind: got .*expected a finite number/);
+  bad(system({ node: 'missing' }), /node: got .*expected the ID of a node in nodes/);
+  bad(system({ node: '__proto__' }), /node: got .*expected the ID of a node in nodes/);
   bad(null === 0 ? null : JSON.parse('{"systems":[{"node":"sparks","__proto__":{"count":5}}]}'), /Invalid JSON key|Unknown or unsupported/);
-  bad('systems', /must be a plain object/);
+  bad('systems', /expected an object/);
 });
 
 test('total particles and total vertices are bounded across systems', () => {
@@ -218,7 +218,7 @@ test('a particle node cannot carry motion or physics, or be a cloth sheet', () =
   assert.throws(() => createAgentScene(withMotion), /motion/);
   const withCloth = sparkRecipe(burst);
   withCloth.cloth = { duration: 1, sheets: [{ node: 'sparks' }] };
-  assert.throws(() => createAgentScene(withCloth), /used twice|cloth/i);
+  assert.throws(() => createAgentScene(withCloth), /Particle system node: got "sparks"; expected a node used once in particles/);
   const child = sparkRecipe(burst, [{ id: 'kid', geometry: 'speck', material: 'glow', parent: 'sparks' }]);
   child.particles.systems[0].node = 'kid';
   assert.throws(() => createAgentScene(child), /root node/);
@@ -245,7 +245,7 @@ test('a large burst seeks statelessly in fixed buffers, and a huge time is only 
   assert.equal(bufferSizes.size, 1, 'the particle buffers keep one size across seeks');
   scene.sampleMotion(3600);
   assert.ok(particlePositions(scene).every(Number.isFinite));
-  assert.throws(() => scene.sampleMotion(3601), /Motion time/);
+  assert.throws(() => scene.sampleMotion(3601), /time: got 3601; expected null or a number of seconds from 0 to 3600/);
 });
 
 test('the particle code stays unloaded for a scene without particles', async () => {
@@ -343,16 +343,16 @@ test('hair triangles face outward and the report counts strands', () => {
 
 test('hostile hair input is rejected', () => {
   const bad = (system, pattern) => assert.throws(() => createAgentScene(hairRecipe(system)), pattern);
-  bad({ surface: 'missing' }, /Hair surface node was not found/);
+  bad({ surface: 'missing' }, /Hair surface node: got "missing"; expected the ID of a node in nodes/);
   bad({ surface: 'fur' }, /different nodes/);
   bad({ segments: 9 }, /segments must be an integer from 1 to 8/);
   bad({ segments: 0 }, /segments must be an integer/);
   bad({ count: 2001 }, /count must be an integer/);
-  bad({ length: 0 }, /length must be a finite number/);
+  bad({ length: 0 }, /length: got .*expected a finite number/);
   bad({ length: [3, 1] }, /minimum must not exceed/);
-  bad({ width: 100 }, /width must be a finite number/);
-  bad({ droop: -1 }, /droop must be a finite number/);
-  bad({ sway: 11 }, /sway must be a finite number/);
+  bad({ width: 100 }, /width: got .*expected a finite number/);
+  bad({ droop: -1 }, /droop: got .*expected a finite number/);
+  bad({ sway: 11 }, /sway: got .*expected a finite number/);
 });
 
 test('hair limits the vertices it draws, and an empty surface is refused', () => {

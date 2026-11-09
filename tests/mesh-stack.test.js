@@ -135,7 +135,7 @@ test('recipe meshes evaluate stacks, reuse cached prefixes and apply nodes into 
   assert.deepEqual(exported.stack.map(node => node.op), ['array']);
   const [applied] = scene.inspectMeshes().meshes;
   assert.equal(applied.counts.faces, changed.counts.faces, 'applying a node does not change the result');
-  assert.throws(() => scene.apply([{ type: 'set-mesh-stack', geometry: 'wing', apply: 5 }], { expectedRevision: 2 }), /apply must be an integer from 0 to the stack length 1/);
+  assert.throws(() => scene.apply([{ type: 'set-mesh-stack', geometry: 'wing', apply: 5 }], { expectedRevision: 2 }), /apply: got 5; expected a whole number from 0 to the stack length 1/);
   assert.throws(() => scene.apply([{ type: 'set-mesh-stack', geometry: 'wing', stack: [{ op: 'translate', offset: [0, 1, 0] }] }], { expectedRevision: 2 }), /op must be one of mirror/);
   assert.equal(scene.revision, 2);
 });

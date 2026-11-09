@@ -290,7 +290,7 @@ test('mesh_inspect reports polygon counts, tags and lint for recipe geometries',
   assert.deepEqual(singular.structuredContent.meshes.map(mesh => mesh.geometry), ['cube']);
   const missing = await client.callTool({ name: 'mesh_inspect', arguments: { sessionId, geometries: ['nope'] } });
   assert.equal(missing.isError, true);
-  assert.match(missing.content[0].text, /Known IDs: cube, cable/);
+  assert.match(missing.content[0].text, /geometries: got "nope"; expected one of cube, cable/);
   await rejected(client, 'mesh_inspect', { sessionId, geometries: [] });
   await rejected(client, 'mesh_inspect', { sessionId, geometries: Array.from({ length: 17 }, (_, index) => `g${index}`) });
   await rejected(client, 'mesh_inspect', { sessionId, path: '../file' });
@@ -402,7 +402,7 @@ test('real SDK calls preserve atomic revisions, checkpoints, recipe snapshots an
   assert.equal((await call('scene_release_checkpoint', { sessionId, checkpointId: checkpoint.checkpointId })).structuredContent.released, true);
   const released = await call('scene_restore', { sessionId, checkpointId: checkpoint.checkpointId, expectedRevision: revision + 2 });
   assert.equal(released.isError, true);
-  assert.match(released.content[0].text, /released checkpoint/);
+  assert.match(released.content[0].text, /checkpointId: got .*expected a checkpointId that scene_checkpoint returned and you have not released/);
   assert.equal((await call('scene_dispose', { sessionId })).structuredContent.disposed, true);
   await boundary.server.close();
   await new Promise(resolve => setImmediate(resolve));
