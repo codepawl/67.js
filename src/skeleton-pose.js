@@ -157,11 +157,11 @@ const MIN_REST_BEND_FRACTION = 0.02;
  * Joint limits from { root: { x: [min, max], y, z }, middle: {...} } in degrees. Angles are the joint's turn away from its
  * rest rotation, in its own axes, as Euler XYZ (the order Blender uses). An axis left out is free.
  */
-function createJointLimits(definition, label, jointIndices, prepared) {
+function createJointLimits(definition, label, jointIndices, prepared, roleHint = 'root or middle') {
   if (definition === undefined) return [];
-  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new TypeError(`${label} limits must be { root, middle } with an x, y or z range each.`);
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new TypeError(`${label} limits must be { ${roleHint} } with an x, y or z range each.`);
   return Object.entries(definition).map(([role, axes]) => {
-    if (!Object.hasOwn(jointIndices, role)) throw new RangeError(`${label} limits: ${role} must be root or middle.`);
+    if (!Object.hasOwn(jointIndices, role)) throw new RangeError(`${label} limits: ${role} must be ${roleHint}.`);
     const unknownAxis = Object.keys(axes ?? {}).find(axis => !LIMIT_AXES.includes(axis));
     if (unknownAxis !== undefined) throw new RangeError(`${label} limits ${role}: ${unknownAxis} must be x, y or z.`);
     const ranges = LIMIT_AXES.map(axis => {
@@ -175,6 +175,67 @@ function createJointLimits(definition, label, jointIndices, prepared) {
     const index = jointIndices[role];
     return { index, name: prepared.joints[index].name, ranges };
   });
+}
+
+function resolveChainJoints(definition, label, prepared, resolveJoint) {
+  let joints;
+  let names;
+  if (definition.chain !== undefined) {
+    if (!Array.isArray(definition.chain) || definition.chain.length < 2 || definition.chain.length > 64) {
+      throw new RangeError(`${label} chain must list 2 to 64 joints from base to end.`);
+    }
+    names = definition.chain;
+    joints = names.map(name => resolveJoint(name, label));
+    joints.slice(1).forEach((joint, slot) => {
+      if (!isDescendant(prepared, joint, joints[slot])) {
+        throw new RangeError(`${label}: each chain joint must descend from the one before it.`);
+      }
+    });
+  } else if (definition.root !== undefined && definition.end !== undefined) {
+    const root = resolveJoint(definition.root, label);
+    const end = resolveJoint(definition.end, label);
+    if (!isDescendant(prepared, end, root)) {
+      throw new RangeError(`${label}: end must descend from root.`);
+    }
+    const chain = [];
+    let current = end;
+    while (current >= 0) {
+      chain.push(current);
+      if (current === root) break;
+      current = prepared.joints[current].parent;
+    }
+    joints = chain.reverse();
+    names = joints.map(index => prepared.joints[index].name);
+  } else {
+    throw new TypeError(`${label} needs chain (or root and end).`);
+  }
+  const segmentChildren = [];
+  for (let slot = 0; slot < joints.length - 1; slot++) {
+    const indices = [];
+    let current = joints[slot + 1];
+    while (current !== joints[slot]) {
+      indices.push(current);
+      current = prepared.joints[current].parent;
+    }
+    segmentChildren.push(indices);
+  }
+  return { joints, names, segmentChildren, stretchIndices: segmentChildren.flat() };
+}
+
+function normalizeStretch(value, defaultValue, label) {
+  if (value === undefined) return defaultValue;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new RangeError(`${label} stretch must be a boolean or a number from 0 to 1.`);
+  }
+  return value;
+}
+
+function checkedCurvePoints(points, label) {
+  if (!Array.isArray(points) || points.length < 2 || points.length > 64) {
+    throw new RangeError(`${label} curve must be 2 to 64 [x, y, z] points.`);
+  }
+  return points.map((point, index) => checkedVector(point, `${label} curve[${index}]`));
 }
 
 function roundedDegrees(radians) {
@@ -252,7 +313,8 @@ function bendWarnings(solver, state, prepared) {
 function createSolver(definition, position, prepared, resolveJoint) {
   const label = `IK ${position}`;
   const weight = weightFunction(definition?.weight ?? 1, `${label} weight`);
-  if (typeof definition?.target !== 'function') checkedVector(definition?.target, `${label} target`);
+  const solverType = definition?.type === 'ik' ? 'chain' : definition?.type === 'spline_ik' ? 'spline' : definition?.type;
+  if (solverType !== 'spline' && typeof definition?.target !== 'function') checkedVector(definition?.target, `${label} target`);
   if (definition.type === 'two-bone') {
     const root = resolveJoint(definition.root, label);
     const middle = resolveJoint(definition.middle, label);
@@ -291,7 +353,40 @@ function createSolver(definition, position, prepared, resolveJoint) {
     if (!Number.isFinite(maxAngle) || maxAngle <= 0) throw new RangeError(`${label} maxAngle must be a positive number of degrees.`);
     return { type: 'aim', label, weight, joints, forward, maxRadians: maxAngle * TO_RADIANS, target: definition.target };
   }
-  throw new RangeError(`${label} type must be two-bone or aim.`);
+  if (solverType === 'chain') {
+    const { joints, names, segmentChildren, stretchIndices } = resolveChainJoints(definition, label, prepared, resolveJoint);
+    if (definition.pole !== undefined && typeof definition.pole !== 'function') checkedVector(definition.pole, `${label} pole`);
+    const poleAngle = definition.poleAngle ?? 0;
+    if (!Number.isFinite(poleAngle) || poleAngle < -180 || poleAngle > 180) {
+      throw new RangeError(`${label} poleAngle must be degrees from -180 to 180.`);
+    }
+    const stretch = normalizeStretch(definition.stretch, 0, label);
+    const iterations = definition.iterations ?? 16;
+    if (!Number.isInteger(iterations) || iterations < 1 || iterations > 64) {
+      throw new RangeError(`${label} iterations must be a whole number from 1 to 64.`);
+    }
+    const limitJoints = {};
+    joints.slice(0, -1).forEach((index, slot) => {
+      limitJoints[names[slot]] = index;
+      limitJoints[prepared.joints[index].name] = index;
+    });
+    const limits = createJointLimits(definition.limits, label, limitJoints, prepared, 'a joint in the chain');
+    return {
+      type: 'chain', label, weight, joints, segmentChildren, stretchIndices,
+      target: definition.target, pole: definition.pole, poleRadians: poleAngle * TO_RADIANS,
+      stretch, iterations, limits, keepEndRotation: definition.keepEndRotation !== false,
+    };
+  }
+  if (solverType === 'spline') {
+    const { joints, segmentChildren, stretchIndices } = resolveChainJoints(definition, label, prepared, resolveJoint);
+    if (typeof definition.curve !== 'function') checkedCurvePoints(definition.curve, label);
+    const stretch = normalizeStretch(definition.stretch, 1, label);
+    return {
+      type: 'spline', label, weight, joints, segmentChildren, stretchIndices,
+      curve: definition.curve, stretch,
+    };
+  }
+  throw new RangeError(`${label} type must be two-bone, aim, chain or spline.`);
 }
 
 function resolvedPoint(value, time, reference, label) {
@@ -314,7 +409,7 @@ function createSolverContext(prepared, state, localRotations, localTranslations)
     quat.normalize(localRotations[index], quat.slerp(localRotations[index], localRotations[index], scratch, weight));
     update();
   }
-  return { state, prepared, localRotations, update, setWorldRotation };
+  return { state, prepared, localRotations, localTranslations, update, setWorldRotation };
 }
 
 /**
@@ -417,7 +512,206 @@ function solveAim(solver, time, context) {
   return { reached: error < 0.02, error };
 }
 
-const SOLVERS = { 'two-bone': solveTwoBone, aim: solveAim };
+function sampleCatmullRomCurve(points, parameter) {
+  const count = points.length;
+  if (count === 2) return vec3.lerp(new Float64Array(3), points[0], points[1], parameter);
+  const scaled = Math.max(0, Math.min(1, parameter)) * (count - 1);
+  const segment = Math.min(count - 2, Math.floor(scaled));
+  const localT = scaled - segment;
+  const localT2 = localT * localT;
+  const localT3 = localT2 * localT;
+  const p1 = points[segment];
+  const p2 = points[segment + 1];
+  const p0 = segment > 0 ? points[segment - 1] : [2 * p1[0] - p2[0], 2 * p1[1] - p2[1], 2 * p1[2] - p2[2]];
+  const p3 = segment + 2 < count ? points[segment + 2] : [2 * p2[0] - p1[0], 2 * p2[1] - p1[1], 2 * p2[2] - p1[2]];
+  const out = new Float64Array(3);
+  for (let axis = 0; axis < 3; axis++) {
+    const a0 = -0.5 * p0[axis] + 1.5 * p1[axis] - 1.5 * p2[axis] + 0.5 * p3[axis];
+    const a1 = p0[axis] - 2.5 * p1[axis] + 2 * p2[axis] - 0.5 * p3[axis];
+    const a2 = -0.5 * p0[axis] + 0.5 * p2[axis];
+    out[axis] = a0 * localT3 + a1 * localT2 + a2 * localT + p1[axis];
+  }
+  return out;
+}
+
+function buildSplineArcTable(points) {
+  const steps = 128;
+  const samples = Array.from({ length: steps + 1 }, (_, index) => sampleCatmullRomCurve(points, index / steps));
+  const lengths = new Float64Array(steps + 1);
+  for (let index = 1; index <= steps; index++) {
+    lengths[index] = lengths[index - 1] + vec3.distance(samples[index - 1], samples[index]);
+  }
+  const totalLength = lengths[steps];
+  const endTangent = vec3.subtract(new Float64Array(3), samples[steps], samples[steps - 1]);
+  if (vec3.length(endTangent) > NEAR_ZERO) vec3.normalize(endTangent, endTangent);
+  else endTangent[0] = 1;
+  function pointAtDistance(distance) {
+    if (distance <= 0 || totalLength <= NEAR_ZERO) return Float64Array.from(samples[0]);
+    if (distance >= totalLength) {
+      return vec3.scaleAndAdd(new Float64Array(3), samples[steps], endTangent, distance - totalLength);
+    }
+    let low = 0;
+    let high = steps;
+    while (low < high - 1) {
+      const mid = (low + high) >> 1;
+      if (lengths[mid] <= distance) low = mid;
+      else high = mid;
+    }
+    const span = lengths[high] - lengths[low];
+    const alpha = span > NEAR_ZERO ? (distance - lengths[low]) / span : 0;
+    return vec3.lerp(new Float64Array(3), samples[low], samples[high], alpha);
+  }
+  return { totalLength, endTangent, pointAtDistance };
+}
+
+/** Multi-bone IK chain solved by cyclic coordinate descent with optional pole plane, poleAngle, stretch and joint limits. */
+function solveChain(solver, time, context) {
+  const { state, prepared, localRotations, update, setWorldRotation } = context;
+  const weight = checkedWeight(solver.weight, time, `${solver.label} weight`);
+  const end = solver.joints[solver.joints.length - 1];
+  const target = resolvedPoint(solver.target, time, state.positions[end], `${solver.label} target`);
+  if (weight === 0) return { reached: true, error: 0, warnings: [], limited: [] };
+  const baseRotations = solver.joints.map(index => Float64Array.from(localRotations[index]));
+  const baseTranslations = solver.stretchIndices.map(index => Float64Array.from(context.localTranslations[index]));
+  const endRotation = Float64Array.from(state.rotations[end]);
+  let totalLength = 0;
+  for (let slot = 0; slot < solver.joints.length - 1; slot++) {
+    totalLength += vec3.distance(state.positions[solver.joints[slot]], state.positions[solver.joints[slot + 1]]);
+  }
+  const rootPos = Float64Array.from(state.positions[solver.joints[0]]);
+  const toTarget = vec3.subtract(new Float64Array(3), target, rootPos);
+  const targetDistance = vec3.length(toTarget);
+  if (targetDistance < NEAR_ZERO || totalLength < NEAR_ZERO) {
+    return { reached: false, error: vec3.distance(state.positions[end], target), warnings: [], limited: [] };
+  }
+  if (solver.stretch > 0 && targetDistance > totalLength) {
+    const scaleFactor = 1 + (targetDistance / totalLength - 1) * solver.stretch;
+    for (const index of solver.stretchIndices) {
+      vec3.scale(context.localTranslations[index], context.localTranslations[index], scaleFactor);
+    }
+    update();
+    totalLength *= scaleFactor;
+  }
+  const axis = vec3.scale(new Float64Array(3), toTarget, 1 / targetDistance);
+  if (solver.pole !== undefined) {
+    const midJoint = solver.joints[Math.floor(solver.joints.length / 2)];
+    const polePoint = resolvedPoint(solver.pole, time, state.positions[midJoint], `${solver.label} pole`);
+    const toPole = vec3.subtract(new Float64Array(3), polePoint, rootPos);
+    const polePerp = vec3.scaleAndAdd(new Float64Array(3), toPole, axis, -vec3.dot(toPole, axis));
+    if (vec3.length(polePerp) < NEAR_ZERO) vec3.copy(polePerp, perpendicularTo(axis));
+    else vec3.normalize(polePerp, polePerp);
+    if (solver.poleRadians !== 0) {
+      vec3.transformQuat(polePerp, polePerp, quat.setAxisAngle(new Float64Array(4), axis, solver.poleRadians));
+    }
+    const segmentCount = solver.joints.length - 1;
+    for (let slot = 0; slot < segmentCount; slot++) {
+      const joint = solver.joints[slot];
+      const nextJoint = solver.joints[slot + 1];
+      const curDir = vec3.subtract(new Float64Array(3), state.positions[nextJoint], state.positions[joint]);
+      const curLen = vec3.length(curDir);
+      if (curLen <= NEAR_ZERO) continue;
+      vec3.scale(curDir, curDir, 1 / curLen);
+      const arch = targetDistance < totalLength ? (0.5 - (slot + 0.5) / segmentCount) * 0.75 : 0;
+      const aimDir = vec3.normalize(new Float64Array(3), vec3.scaleAndAdd(new Float64Array(3), axis, polePerp, arch));
+      const turn = quat.rotationTo(new Float64Array(4), curDir, aimDir);
+      setWorldRotation(joint, quat.multiply(new Float64Array(4), turn, state.rotations[joint]), 1);
+    }
+  }
+  for (let iteration = 0; iteration < solver.iterations; iteration++) {
+    for (let slot = solver.joints.length - 2; slot >= 0; slot--) {
+      const joint = solver.joints[slot];
+      const jointPos = state.positions[joint];
+      const toEnd = vec3.subtract(new Float64Array(3), state.positions[end], jointPos);
+      const toGoal = vec3.subtract(new Float64Array(3), target, jointPos);
+      const endLen = vec3.length(toEnd);
+      const goalLen = vec3.length(toGoal);
+      if (endLen <= NEAR_ZERO || goalLen <= NEAR_ZERO) continue;
+      vec3.scale(toEnd, toEnd, 1 / endLen);
+      vec3.scale(toGoal, toGoal, 1 / goalLen);
+      const turn = quat.rotationTo(new Float64Array(4), toEnd, toGoal);
+      setWorldRotation(joint, quat.multiply(new Float64Array(4), turn, state.rotations[joint]), 1);
+    }
+    if (solver.limits.length && applyJointLimits(solver.limits, prepared, localRotations).length) update();
+    if (vec3.distance(state.positions[end], target) <= 1e-6) break;
+  }
+  const limited = applyJointLimits(solver.limits, prepared, localRotations);
+  if (limited.length) update();
+  if (solver.keepEndRotation) setWorldRotation(end, endRotation, 1);
+  if (weight < 1) {
+    solver.joints.forEach((index, slot) => {
+      quat.normalize(localRotations[index], quat.slerp(localRotations[index], baseRotations[slot], localRotations[index], weight));
+    });
+    solver.stretchIndices.forEach((index, slot) => {
+      vec3.lerp(context.localTranslations[index], baseTranslations[slot], context.localTranslations[index], weight);
+    });
+    update();
+  }
+  const error = vec3.distance(state.positions[end], target);
+  return { reached: error <= totalLength * 1e-3 + 1e-4, error, warnings: [], limited };
+}
+
+/** Spline IK along a Catmull-Rom curve, fitting each bone chord to its arc-length parameter along the curve. */
+function solveSpline(solver, time, context) {
+  const { state, localRotations, localTranslations, update, setWorldRotation } = context;
+  const weight = checkedWeight(solver.weight, time, `${solver.label} weight`);
+  const rawPoints = typeof solver.curve === 'function' ? solver.curve(time) : solver.curve;
+  const points = checkedCurvePoints(rawPoints, solver.label);
+  if (weight === 0) return { reached: true, error: 0 };
+  const baseRotations = solver.joints.map(index => Float64Array.from(localRotations[index]));
+  const baseTranslations = solver.stretchIndices.map(index => Float64Array.from(localTranslations[index]));
+  const segmentCount = solver.joints.length - 1;
+  const segmentLengths = new Float64Array(segmentCount);
+  const cumulative = new Float64Array(segmentCount + 1);
+  for (let slot = 0; slot < segmentCount; slot++) {
+    segmentLengths[slot] = vec3.distance(state.positions[solver.joints[slot]], state.positions[solver.joints[slot + 1]]);
+    cumulative[slot + 1] = cumulative[slot] + segmentLengths[slot];
+  }
+  const totalBoneLength = cumulative[segmentCount];
+  const table = buildSplineArcTable(points);
+  const spanLength = totalBoneLength + (table.totalLength - totalBoneLength) * solver.stretch;
+  const targets = Array.from({ length: segmentCount + 1 }, (_, slot) => {
+    const fraction = totalBoneLength > NEAR_ZERO ? cumulative[slot] / totalBoneLength : slot / segmentCount;
+    return table.pointAtDistance(fraction * spanLength);
+  });
+  for (let slot = 0; slot < segmentCount; slot++) {
+    const joint = solver.joints[slot];
+    const nextJoint = solver.joints[slot + 1];
+    const jointPos = state.positions[joint];
+    const goalVec = vec3.subtract(new Float64Array(3), targets[slot + 1], jointPos);
+    const goalLen = vec3.length(goalVec);
+    let curVec = vec3.subtract(new Float64Array(3), state.positions[nextJoint], jointPos);
+    let curLen = vec3.length(curVec);
+    if (solver.stretch > 0 && curLen > NEAR_ZERO && goalLen > NEAR_ZERO) {
+      const ratio = 1 + (goalLen / curLen - 1) * solver.stretch;
+      for (const childIndex of solver.segmentChildren[slot]) {
+        vec3.scale(localTranslations[childIndex], localTranslations[childIndex], ratio);
+      }
+      update();
+      curVec = vec3.subtract(new Float64Array(3), state.positions[nextJoint], state.positions[joint]);
+      curLen = vec3.length(curVec);
+    }
+    if (curLen > NEAR_ZERO && goalLen > NEAR_ZERO) {
+      vec3.scale(curVec, curVec, 1 / curLen);
+      vec3.scale(goalVec, goalVec, 1 / goalLen);
+      const turn = quat.rotationTo(new Float64Array(4), curVec, goalVec);
+      setWorldRotation(joint, quat.multiply(new Float64Array(4), turn, state.rotations[joint]), 1);
+    }
+  }
+  if (weight < 1) {
+    solver.joints.forEach((index, slot) => {
+      quat.normalize(localRotations[index], quat.slerp(localRotations[index], baseRotations[slot], localRotations[index], weight));
+    });
+    solver.stretchIndices.forEach((index, slot) => {
+      vec3.lerp(localTranslations[index], baseTranslations[slot], localTranslations[index], weight);
+    });
+    update();
+  }
+  const end = solver.joints[segmentCount];
+  const error = vec3.distance(state.positions[end], targets[segmentCount]);
+  return { reached: error <= Math.max(table.totalLength, totalBoneLength) * 1e-2 + 1e-4, error };
+}
+
+const SOLVERS = { 'two-bone': solveTwoBone, aim: solveAim, chain: solveChain, spline: solveSpline };
 
 const GLTF_TRACK_PROPERTIES = { position: 'translation', quaternion: 'rotation', scale: 'scale' };
 const GLTF_STEP_INTERPOLATION = 2300;
@@ -638,8 +932,12 @@ export function createSkeletonPose({ skin, rig = skin && createRigFromSkin(skin)
   const resolveJoint = jointResolver(rig, prepared);
   const compiledLayers = layers.map((layer, position) => createLayer(layer, position, prepared, resolveJoint));
   const solvers = ik.map((solver, position) => createSolver(solver, position, prepared, resolveJoint));
-  const solvedIndices = new Set(solvers.flatMap(solver => (solver.type === 'aim' ? solver.joints : [solver.root, solver.middle, solver.end])));
-  const translatedIndices = new Set(compiledLayers.flatMap(layer => layer.bindings.filter(binding => binding.property === 'translation').map(binding => binding.index)));
+  const solvedIndices = new Set(solvers.flatMap(solver => (solver.type === 'two-bone' ? [solver.root, solver.middle, solver.end] : solver.joints)));
+  const solverTranslated = solvers.flatMap(solver => (solver.stretch > 0 ? solver.stretchIndices : []));
+  const translatedIndices = new Set([
+    ...compiledLayers.flatMap(layer => layer.bindings.filter(binding => binding.property === 'translation').map(binding => binding.index)),
+    ...solverTranslated,
+  ]);
   const writtenIndices = new Set([...solvedIndices, ...translatedIndices, ...compiledLayers.flatMap(layer => layer.bindings.filter(binding => binding.property === 'rotation').map(binding => binding.index))]);
   const jointCount = rig.joints.length;
   const localRotations = prepared.restRotations.map(rotation => Float64Array.from(rotation));

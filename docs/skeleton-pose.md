@@ -107,6 +107,12 @@ perfectly straight limb has no defined bend for the next frame.
 
 The turn is the shortest rotation, so `aim` does not hold an up direction and can add a little roll.
 
+## Multi-bone Chain IK and Spline IK
+
+`{ type: 'chain', chain: ['b0', 'b1', 'b2', 'end'], target, pole, poleAngle, stretch, iterations, limits, keepEndRotation, weight }` (or `{ type: 'chain', root: 'b0', end: 'end', ... }`, alias `'ik'`) solves chains of two or more bones with cyclic coordinate descent (1 to 64 iterations, default 16). `pole` sets the bend plane and `poleAngle` (-180 to 180 degrees) turns that plane around the root-to-target line. `stretch` (boolean or 0 to 1, default 0) scales bone translations when the target is beyond the chain length, and `limits` clamps per-joint Euler XYZ ranges in degrees.
+
+`{ type: 'spline', chain: ['b0', 'b1', 'b2', 'end'], curve, stretch, weight }` (or `root` and `end`, alias `'spline_ik'`) fits the bone chain along a Catmull-Rom curve of 2 to 64 world points `[x, y, z]` (or a function `time => points`). `stretch` defaults to `true` (1), scaling each bone segment to its arc-length span along the curve; `false` (0) keeps rest bone lengths.
+
 ## Reading the result
 
 `pose.jointWorld(name)` returns `{ position, rotation }` after the last `apply`, in world space, for attaching props or
