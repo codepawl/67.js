@@ -403,7 +403,7 @@ function buildShadowFoliage(skeleton, preset, mode, seed, firstSetting) {
 function createMaterials(preset, mode, scannedBark, scannedLeaves) {
   const bark = createBarkMaterial(preset, scannedBark);
   if (mode === 'mesh') {
-    const foliage = { tag: 'foliage', color: preset.leaf.foliageColor.map(channel => channel * 1.5), roughness: 0.8, metallic: 0, emission: 0 };
+    const foliage = { tag: 'foliage', color: scaleVector(preset.leaf.foliageColor, 1.5), roughness: 0.8, metallic: 0, emission: 0 };
     return { bark, foliage, crown: foliage };
   }
   const cardMaterial = (texture) => ({
@@ -537,7 +537,7 @@ function grassMaterial(style, color) {
   if (style === 'cards') {
     return { tag: 'grass', color: [1, 1, 1], roughness: 0.9, metallic: 0, emission: 0, map: leafTextureDescriptor('grass', [80, 128, 40]), alphaMode: 'mask', alphaCutoff: 0.5, doubleSided: true };
   }
-  return { tag: 'grass', color: color.map(channel => Math.min(1, channel * 1.15)), roughness: 0.9, metallic: 0, emission: 0 };
+  return { tag: 'grass', color, roughness: 0.9, metallic: 0, emission: 0 };
 }
 
 function buildGrassBlades(random, blades, height, radius, widthScale) {
@@ -555,9 +555,8 @@ function buildGrassBlades(random, blades, height, radius, widthScale) {
       droop: 0.3 + random() * 0.4,
       canopyNormal: WORLD_UP,
       canopyBlend: 0.55,
-      colorBase: [0.5, 0.58, 0.45],
-      colorTip: [1.15, 1.15, 0.9],
-      brightness: 1 / 1.15,
+      colorBase: [0.43, 0.5, 0.39],
+      colorTip: [1, 1, 0.78],
     });
   }
   return builder.build();
@@ -580,7 +579,7 @@ function buildGrassCards(random, height, radius) {
       canopyNormal: WORLD_UP,
       canopyBlend: 0.6,
       colorBase: [0.6, 0.65, 0.55],
-      colorTip: [1.1, 1.1, 0.95],
+      colorTip: [1, 1, 0.95],
     });
   }
   return builder.build();
@@ -590,7 +589,7 @@ function buildGrassCards(random, height, radius) {
  * A tuft of grass. `style: 'blades'` (default) is real curved blade geometry with the swaying `grass` tag;
  * `'cards'` is three crossed alpha-masked cards. Level 1 has half the blades, wider.
  */
-export function createGrassClump({ blades = 16, height = 0.45, radius = 0.13, style = 'blades', color = [0.2, 0.34, 0.06], seed = 1 } = {}) {
+export function createGrassClump({ blades = 16, height = 0.45, radius = 0.13, style = 'blades', color = [0.23, 0.39, 0.07], seed = 1 } = {}) {
   if (!['blades', 'cards'].includes(style)) throw new RangeError('Grass style must be blades or cards.');
   const random = createRandom(seed * 6271 + 5);
   const material = grassMaterial(style, color);
