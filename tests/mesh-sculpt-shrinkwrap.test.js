@@ -166,7 +166,7 @@ test('shrinkwrap project follows a direction and honours placement and select', 
 
 test('shrinkwrap misses are an error or kept in place, and maxDistance bounds the search', () => {
   const far = sheet(4, 0.4, 5);
-  assert.throws(() => run(far, [{ op: 'shrinkwrap', target: SPHERE_TARGET, maxDistance: 1 }]), /Mesh edit 0 \(shrinkwrap\).*no surface/);
+  assert.throws(() => run(far, [{ op: 'shrinkwrap', target: SPHERE_TARGET, maxDistance: 1 }]), /^RangeError: edits\[0\]\.onMiss: got "error"; expected "keep", such as onMiss "keep", to leave vertices that find no surface in place/);
   const kept = run(far, [{ op: 'shrinkwrap', target: SPHERE_TARGET, maxDistance: 1, onMiss: 'keep' }]);
   assert.equal(kept.results[0].missedVertices, 25);
   assert.equal(kept.results[0].movedVertices, 0);

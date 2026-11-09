@@ -1,3 +1,4 @@
+import { invalidField } from './field-error.js';
 import { mat4 } from 'gl-matrix';
 import { normalizeDrive } from './agent-drive-schema.js';
 
@@ -35,46 +36,47 @@ const OVERRIDE_TAGS = ['surface', 'foliage', 'grass'];
 
 function knownKeys(value, allowed, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw invalidField(label, value, 'an object, such as {}', TypeError);
   }
   for (const key of Object.keys(value)) {
     if (!allowed.includes(key)) {
-      throw new TypeError(`Unknown ${label} field: ${key}. Allowed fields: ${allowed.join(', ')}.`);
+      throw invalidField(`${label}.${key}`, value[key], `no such field; use one of ${allowed.join(', ')}`, TypeError);
     }
   }
 }
 
 function colorVector(value, label) {
   if (!Array.isArray(value) || value.length !== 3 || value.some(component => !Number.isFinite(component) || component < 0)) {
-    throw new RangeError(`${label} must be three finite non-negative linear RGB numbers.`);
+    throw invalidField(label, value, 'an array of 3 linear RGB numbers of 0 or more, such as [0.5, 0.2, 0.1]');
   }
   return [...value];
 }
 
-function normalizeMaterialOverride(override) {
-  knownKeys(override, OVERRIDE_FIELDS, 'asset material override');
+function normalizeMaterialOverride(override, index) {
+  const path = `asset.materials[${index}]`;
+  knownKeys(override, OVERRIDE_FIELDS, path);
   if (typeof override.name !== 'string' || !override.name || override.name.length > 256) {
-    throw new TypeError('An asset material override needs the source material name. scene_inspect lists the names under assets.');
+    throw invalidField(`${path}.name`, override.name, 'the name of a source material, such as "paint"; scene_inspect lists the names under assets', TypeError);
   }
   const result = { name: override.name };
   if (override.tag !== undefined) {
-    if (!OVERRIDE_TAGS.includes(override.tag)) throw new RangeError(`asset material override tag must be one of ${OVERRIDE_TAGS.join(', ')}.`);
+    if (!OVERRIDE_TAGS.includes(override.tag)) throw invalidField(`${path}.tag`, override.tag, `one of ${OVERRIDE_TAGS.join(', ')}`);
     result.tag = override.tag;
   }
   for (const field of COLOR_FIELDS) {
-    if (override[field] !== undefined) result[field] = colorVector(override[field], field);
+    if (override[field] !== undefined) result[field] = colorVector(override[field], `${path}.${field}`);
   }
   for (const field of UNIT_FIELDS) {
     if (override[field] !== undefined) {
       if (!Number.isFinite(override[field]) || override[field] < 0 || override[field] > 1) {
-        throw new RangeError(`${field} must be a number from 0 to 1.`);
+        throw invalidField(`${path}.${field}`, override[field], 'a number from 0 to 1, such as 0.5');
       }
       result[field] = override[field];
     }
   }
   if (override.emission !== undefined) {
     if (!Number.isFinite(override.emission) || override.emission < 0) {
-      throw new RangeError('emission must be a finite non-negative number.');
+      throw invalidField(`${path}.emission`, override.emission, 'a number of 0 or more, such as 1');
     }
     result.emission = override.emission;
   }
@@ -83,39 +85,39 @@ function normalizeMaterialOverride(override) {
 
 /** Validate the `asset` field of a node. Returns the canonical form kept in the recipe. */
 export function normalizeAssetPlacement(value) {
-  knownKeys(value, PLACEMENT_FIELDS, 'asset placement');
+  knownKeys(value, PLACEMENT_FIELDS, 'asset');
   if (typeof value.id !== 'string' || !ASSET_ID.test(value.id.toLowerCase())) {
-    throw new TypeError('asset id must be the 64 hexadecimal characters of a catalog asset id; asset_catalog lists them.');
+    throw invalidField('asset.id', value.id, '64 hexadecimal characters, such as "ab12..." (a catalog asset id that asset_catalog lists)', TypeError);
   }
   const result = { id: value.id.toLowerCase() };
   if (value.materials !== undefined) {
     if (!Array.isArray(value.materials) || value.materials.length > ASSET_PLACEMENT_LIMITS.maxOverrides) {
-      throw new RangeError(`asset materials must list at most ${ASSET_PLACEMENT_LIMITS.maxOverrides} overrides.`);
+      throw invalidField('asset.materials', Array.isArray(value.materials) ? `${value.materials.length} overrides` : value.materials, `a list of at most ${ASSET_PLACEMENT_LIMITS.maxOverrides} overrides, such as [{ "name": "paint", "color": [1, 0, 0] }]`);
     }
-    const overrides = value.materials.map(normalizeMaterialOverride);
+    const overrides = value.materials.map((override, index) => normalizeMaterialOverride(override, index));
     if (new Set(overrides.map(override => override.name)).size !== overrides.length) {
-      throw new RangeError('asset material overrides must name distinct source materials.');
+      throw invalidField('asset.materials', `${overrides.length} overrides`, 'overrides that each name a different source material, such as one override per name');
     }
     result.materials = overrides;
   }
   if (value.clip !== undefined) {
-    knownKeys(value.clip, CLIP_FIELDS, 'asset clip');
+    knownKeys(value.clip, CLIP_FIELDS, 'asset.clip');
     const { index, start = 0, speed = 1, loop = true } = value.clip;
-    if (!Number.isInteger(index) || index < 0) throw new RangeError('asset clip index must be a non-negative integer.');
-    if (!Number.isFinite(start) || start < 0 || start > 3600) throw new RangeError('asset clip start must be seconds from 0 to 3600.');
-    if (!Number.isFinite(speed) || speed <= 0 || speed > 16) throw new RangeError('asset clip speed must be above 0 and at most 16.');
-    if (typeof loop !== 'boolean') throw new TypeError('asset clip loop must be boolean.');
+    if (!Number.isInteger(index) || index < 0) throw invalidField('asset.clip.index', index, 'a whole number of 0 or more, such as 0');
+    if (!Number.isFinite(start) || start < 0 || start > 3600) throw invalidField('asset.clip.start', start, 'seconds from 0 to 3600, such as 0');
+    if (!Number.isFinite(speed) || speed <= 0 || speed > 16) throw invalidField('asset.clip.speed', speed, 'a number above 0 and at most 16, such as 1');
+    if (typeof loop !== 'boolean') throw invalidField('asset.clip.loop', loop, 'true or false', TypeError);
     result.clip = { index, start, speed, loop };
   }
   if (value.crowd !== undefined) {
-    if (value.clip !== undefined || value.drive !== undefined) throw new TypeError('An asset placement plays a clip, drives along a path or fills a crowd, only one of them.');
+    if (value.clip !== undefined || value.drive !== undefined) throw invalidField('asset.crowd', value.crowd, 'only one of clip, drive or crowd; drop the others, such as keeping just the crowd', TypeError);
     result.crowd = crowdCode().normalizeCrowd(value.crowd);
   }
   if (value.drive !== undefined) {
-    if (value.clip !== undefined) throw new TypeError('An asset placement plays a clip or drives along a path, not both.');
-    result.drive = normalizeDrive(value.drive);
+    if (value.clip !== undefined) throw invalidField('asset.drive', value.drive, 'a drive or a clip, not both; drop one, such as keeping just the drive', TypeError);
+    result.drive = normalizeDrive(value.drive, 'asset.drive');
     if (result.drive.lights?.tailLights) {
-      throw new RangeError('Placed assets share their materials, so tail lights glow only in an asset recipe (motion.drive). Headlight and brake signals are still reported by scene_inspect.');
+      throw invalidField('asset.drive.lights.tailLights', value.drive.lights.tailLights, 'no tail lights on a placed asset, since placed assets share their materials; tail lights glow only in an asset recipe (motion.drive), such as motion.drive.lights.tailLights');
     }
   }
   return result;
@@ -222,7 +224,7 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
       throw new Error(`Asset ${assetId.slice(0, 12)} copy ${copy} is not loaded. The host loads it before createAgentScene or apply.`);
     }
     if (clip && !asset.animations[clip.index]) {
-      throw new RangeError(`Node ${node.id}: asset ${assetId.slice(0, 12)} has ${asset.animations.length} clips, so clip index ${clip.index} does not exist. scene_inspect lists them under assets.`);
+      throw invalidField(`nodes[${recipe.nodes.indexOf(node)}].asset.clip.index`, clip.index, `a clip index from 0 to ${asset.animations.length - 1}, since asset ${assetId.slice(0, 12)} has ${asset.animations.length} clips; scene_inspect lists them under assets`);
     }
     if (crowd) {
       const expanded = crowdCode().expandCrowd(recipe, node, asset, copy, outputCache, runtime, limits);
@@ -234,7 +236,7 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
     const materialNames = new Set(asset.parts.map(part => part.material.name).filter(Boolean));
     for (const override of overrides) {
       if (!materialNames.has(override.name)) {
-        throw new RangeError(`Node ${node.id}: asset has no material named ${JSON.stringify(override.name)}. Names: ${[...materialNames].slice(0, 16).map(name => JSON.stringify(name)).join(', ') || 'none, the asset materials are unnamed'}.`);
+        throw invalidField(`nodes[${recipe.nodes.indexOf(node)}].asset.materials[${overrides.indexOf(override)}].name`, override.name, `one of ${[...materialNames].slice(0, 16).map(name => JSON.stringify(name)).join(', ') || 'none, since the asset materials are unnamed'}`);
       }
     }
     const overrideByName = new Map(overrides.map(override => [override.name, override]));
@@ -271,7 +273,7 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
         ...(part.castShadow !== undefined ? { castShadow: part.castShadow } : {}),
       });
     });
-    const record = { node: node.id, assetId, copy, asset, partNodeIds, clip: clip ?? null, drive: drive ? createDrive(node.id, createAssetDrive, asset, drive) : null, drivePose: null };
+    const record = { node: node.id, assetId, copy, asset, partNodeIds, clip: clip ?? null, drive: drive ? createDrive(node.id, `nodes[${recipe.nodes.indexOf(node)}].asset.drive`, createAssetDrive, asset, drive) : null, drivePose: null };
     runtime.placements.push(record);
     if (clip || drive) runtime.animators.push(record);
   }
@@ -282,12 +284,12 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
   return runtime;
 }
 
-function createDrive(nodeId, createAssetDrive, asset, drive) {
+function createDrive(nodeId, fieldPath, createAssetDrive, asset, drive) {
   if (!createAssetDrive) throw new Error('This recipe drives a placed asset, which needs the drive code: await loadAgentSceneModules(recipe) before createAgentScene or apply.');
   try {
-    return createAssetDrive(asset, drive);
+    return createAssetDrive(asset, drive, { fieldPath });
   } catch (error) {
-    error.message = `Node ${nodeId} drive: ${error.message}`;
+    if (typeof error?.fieldPath !== 'string') error.message = `Node ${nodeId} drive: ${error.message}`;
     throw error;
   }
 }

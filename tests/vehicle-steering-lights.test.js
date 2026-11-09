@@ -212,8 +212,8 @@ test('legs and lights sample the same pose whatever order they are read in', () 
 
 test('bad steering, light and leg input produces specific errors', () => {
   const { rig } = createLitRig();
-  assert.throws(() => driveAlongPath(rig, [[0, 0, 0], [0, 0, 5]], { speed: 1, steering: 'both' }), /steering must be/);
+  assert.throws(() => driveAlongPath(rig, [[0, 0, 0], [0, 0, 5]], { speed: 1, steering: 'both' }), /^RangeError: steering: got "both"; expected one of ackermann, shared/);
   assert.throws(() => driveAlongLegs(rig, [], { speed: 1 }), /non-empty array of/);
-  assert.throws(() => driveAlongLegs(rig, [{ path: REVERSING_LEGS[0].path, direction: 'sideways' }], { speed: 1 }), /direction must be/);
-  assert.throws(() => createVehicleRig({ parts: [{ name: 'Wheel_FL', matrix: mat4.create() }], lights: { tailLights: [{ part: 0, signal: 'fog' }] } }), /at least two wheels|signal/);
+  assert.throws(() => driveAlongLegs(rig, [{ path: REVERSING_LEGS[0].path, direction: 'sideways' }], { speed: 1 }), /^RangeError: legs\[0\]\.direction: got "sideways"; expected one of forward, reverse/);
+  assert.throws(() => createVehicleRig({ parts: [{ name: 'Wheel_FL', matrix: mat4.create() }], lights: { tailLights: [{ part: 0, signal: 'fog' }] } }), /wheels: got 1; expected at least 2 wheels|signal/);
 });

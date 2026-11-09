@@ -75,9 +75,9 @@ test('a scene without physics never loads the ragdoll code path', () => {
 
 test('bad ragdoll sections fail with a message that names the fix', () => {
   const cases = [
-    [{ ragdoll: { armature: 'missing' } }, /armature was not found/],
-    [{ ragdoll: {} }, /armature was not found/],
-    [{ ragdoll: { armature: 'rig', color: 1 } }, /Unknown/],
+    [{ ragdoll: { armature: 'missing' } }, /^RangeError: physics\.ragdoll\.armature: got "missing"; expected the ID of a recipe armature, one of rig/],
+    [{ ragdoll: {} }, /^RangeError: physics\.ragdoll\.armature: got undefined; expected the ID of a recipe armature, one of rig/],
+    [{ ragdoll: { armature: 'rig', color: 1 } }, /^TypeError: physics\.ragdoll\.color: got 1; expected no such field; use one of armature, density/],
     [{ ragdoll: { armature: 'rig', density: 0 } }, /density/],
     [{ ragdoll: { armature: 'rig', layer: 16 } }, /layer/],
     [{ ragdoll: { armature: 'rig', friction: -1 } }, /friction/],
@@ -93,7 +93,7 @@ test('bad ragdoll sections fail with a message that names the fix', () => {
 test('a bone cannot have both a ragdoll and a pose track', () => {
   const recipe = ragdollWalker();
   recipe.motion = { duration: 1, tracks: [{ kind: 'node', id: 'leftUpperLeg', property: 'rotation', keyframes: [{ time: 0, value: [0, 0, 0, 1] }, { time: 1, value: [0, 0, 0, 1] }] }] };
-  assert.throws(() => createAgentScene(recipe), /Pick one/);
+  assert.throws(() => createAgentScene(recipe), /^RangeError: physics\.ragdoll\.armature: got "rig"; expected an armature whose bones have no motion translation or rotation track, but leftUpperLeg has one; pick the track or the ragdoll/);
 });
 
 test('an armature larger than the bone limit is refused before the solver runs', () => {
