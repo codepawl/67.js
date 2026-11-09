@@ -85,7 +85,7 @@ function jsonCopy(value, maximum = MAXIMUM_JSON_BYTES) {
 }
 
 function settingsFrom(input, clips, recipe) {
-  objectKeys(input, ['kind', 'width', 'height', 'fps', 'duration', 'animation', 'motion', 'rendererTime', 'passes', 'renderer', 'timeline', 'audio', 'encoder', 'transparent', 'format', 'region'], 'settings');
+  objectKeys(input, ['kind', 'width', 'height', 'fps', 'duration', 'animation', 'motion', 'rendererTime', 'passes', 'renderer', 'timeline', 'audio', 'encoder', 'transparent', 'format', 'multilayer', 'region'], 'settings');
   if (!['image', 'stills', 'video'].includes(input.kind)) throw new TypeError('kind must be image, stills or video.');
   const width = boundedNumber(input.width, 64, MAXIMUM_JOB_SIDE, 'width', true);
   const height = boundedNumber(input.height, 64, MAXIMUM_JOB_SIDE, 'height', true);
@@ -151,7 +151,7 @@ function settingsFrom(input, clips, recipe) {
 }
 
 /** The optional transparent, format and region settings, kept only when they differ from the defaults so old records read the same. */
-function outputOptionsFrom(input, { kind, width, height, renderer }) {
+function outputOptionsFrom(input, { kind, width, height, renderer, passes }) {
   const options = {};
   const tracerNote = 'The path tracer writes an opaque 8-bit PNG of the whole frame.';
   if (input.transparent !== undefined) {
@@ -165,6 +165,11 @@ function outputOptionsFrom(input, { kind, width, height, renderer }) {
     if (input.format !== 'png' && kind === 'video') throw new RangeError('A video is H.264: format needs kind image or stills.');
     if (input.format !== 'png' && renderer) throw new RangeError(`format cannot combine with renderer. ${tracerNote}`);
     if (input.format !== 'png') options.format = input.format;
+  }
+  if (input.multilayer !== undefined) {
+    if (typeof input.multilayer !== 'boolean') throw new TypeError('multilayer must be boolean.');
+    if (input.multilayer && (input.format !== 'exr' || !passes)) throw new RangeError('multilayer requires format exr and passes.');
+    if (input.multilayer) options.multilayer = true;
   }
   if (input.region !== undefined) {
     objectKeys(input.region, ['x', 'y', 'width', 'height'], 'region');
@@ -231,10 +236,11 @@ function passesFrom(passes, kind) {
 }
 
 /** Every artifact filename of a job, lit image first and then each requested pass, frame by frame. */
-export function artifactNames(kind, passes = [], format = 'png') {
+export function artifactNames(kind, passes = [], format = 'png', multilayer = false) {
   if (kind === 'video') return ['render.mp4'];
   const extension = format === 'exr' ? 'exr' : 'png';
   const stems = kind === 'image' ? ['render'] : Array.from({ length: 8 }, (_, index) => `frame-${index}`);
+  if (multilayer) return stems.map(stem => `${stem}.${extension}`);
   return stems.flatMap(stem => [`${stem}.${extension}`, ...passes.map(pass => `${stem}-${pass}.${extension}`)]);
 }
 
@@ -462,7 +468,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       boundedNumber(record.progress.maximumPendingFrames, 0, 1, 'persisted pending frames', true);
       if (record.metrics !== undefined) record.metrics = jsonCopy(record.metrics, 65536);
       if (record.reason !== undefined && (typeof record.reason !== 'string' || record.reason.length > 2048)) throw new Error('Invalid persisted job reason.');
-      const namesAllowed = artifactNames(settings.kind, settings.passes, settings.format);
+      const namesAllowed = artifactNames(settings.kind, settings.passes, settings.format, settings.multilayer);
       if (!Array.isArray(record.artifacts) || record.artifacts.length > namesAllowed.length) throw new Error('Invalid persisted artifacts.');
       const seen = new Set();
       for (const artifact of record.artifacts) {
@@ -526,7 +532,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       record.state = 'finalizing';
       await persist(job);
       objectKeys(completed, ['artifacts', 'metrics'], 'runner result');
-      const expected = artifactNames(record.settings.kind, record.settings.passes, record.settings.format);
+      const expected = artifactNames(record.settings.kind, record.settings.passes, record.settings.format, record.settings.multilayer);
       if (!Array.isArray(completed.artifacts) || completed.artifacts.length !== expected.length) throw new Error('Runner did not return the required fixed artifacts.');
       const directory = await directoryFor(record.jobId);
       const metrics = jsonCopy(completed.metrics ?? {}, 65536);

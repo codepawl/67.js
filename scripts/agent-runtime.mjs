@@ -23,7 +23,7 @@ import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
 import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
-import { encodeRenderOutput } from './render-output-encoders.mjs';
+import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
 import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, startVideoEncoderInPage } from './gpu-frame-reader.mjs';
 import { audioInputArguments, createAudioLibrary, measureStreamSeconds } from './job-audio.mjs';
@@ -583,6 +583,13 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return captureBytes;
         }
         // 16-bit PNG and EXR come from a float readback of the same frame (or of its pass), encoded here.
+        async function readFloatPass(pass) {
+          const read = await jobPage.evaluate(readInput => window.__agentPreview.readFloat(readInput),
+            { sessionId: jobId, source: pass ? 'pass' : 'frame', ...(region ? { region } : {}) });
+          const readBytes = Buffer.from(read.data, 'base64');
+          const pixels = new Float32Array(readBytes.buffer.slice(readBytes.byteOffset, readBytes.byteOffset + readBytes.length));
+          return { pixels, width: read.width, height: read.height };
+        }
         async function captureHighPrecisionBytes(pass) {
           const captureStarted = performance.now();
           const read = await jobPage.evaluate(readInput => window.__agentPreview.readFloat(readInput),
@@ -600,18 +607,39 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           await writeFile(join(directory, `${filename}.partial`), artifactBytes, { flag: 'wx' });
           artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: artifactMimeType });
         }
-        const bytes = highPrecision ? await captureHighPrecisionBytes(undefined) : await captureFrameBytes();
+        const bytes = settings.multilayer ? undefined : (highPrecision ? await captureHighPrecisionBytes(undefined) : await captureFrameBytes());
         if (encoder) {
           if (bytes) await encoder.writeFrame(bytes);
         }
         else {
           const stem = settings.kind === 'image' ? 'render' : `frame-${frame}`;
+          if (settings.multilayer) {
+            const captureStarted = performance.now();
+            const beautyRead = await readFloatPass(undefined);
+            const passPixels = {};
+            for (const pass of settings.passes ?? []) {
+              const passInfo = await jobPage.evaluate(input => window.__agentPreview.frame(input),
+                { ...frameInput, floatOutput: false, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE, passFloat: true });
+              passPixels[pass] = (await readFloatPass(pass)).pixels;
+              if (pass === 'depth') metrics.depthRangeMetres = RENDER_PASS_DEPTH_RANGE;
+              if (pass === 'objectId') {
+                metrics.objectNames = passInfo.objectNames.slice(0, MAXIMUM_OBJECT_NAMES);
+                metrics.objectNamesTruncated = passInfo.objectNames.length > MAXIMUM_OBJECT_NAMES;
+              }
+              if (pass === 'cryptomatte') metrics.cryptomatte = passInfo.cryptomatte;
+            }
+            const encodedBytes = encodeMultilayerExr({ width: beautyRead.width, height: beautyRead.height, beauty: beautyRead.pixels, passes: passPixels, hasAlpha: settings.transparent === true, depthRange: RENDER_PASS_DEPTH_RANGE });
+            metrics.captureSeconds += (performance.now() - captureStarted) / 1000;
+            if (encodedBytes.length > MAXIMUM_JOB_FRAME_BYTES * HIGH_PRECISION_FRAME_FACTOR) throw new Error('Rendered frame exceeded the high-precision size limit.');
+            await writeArtifact(`${stem}.exr`, encodedBytes);
+          } else {
           await writeArtifact(`${stem}.${artifactExtension}`, bytes);
           // Passes follow the lit image of the same instant, so each seek yields every file for that frame.
           for (const pass of settings.passes ?? []) {
             const passInfo = await jobPage.evaluate(input => window.__agentPreview.frame(input),
               { ...frameInput, floatOutput: false, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE, ...(highPrecision ? { passFloat: true } : {}) });
             await writeArtifact(`${stem}-${pass}.${artifactExtension}`, highPrecision ? await captureHighPrecisionBytes(pass) : await captureFrameBytes());
+            if (pass === 'cryptomatte') metrics.cryptomatte = passInfo.cryptomatte;
             if (pass === 'depth') metrics.depthRangeMetres = RENDER_PASS_DEPTH_RANGE;
             if (pass === 'objectId') {
               metrics.objectNames = passInfo.objectNames.slice(0, MAXIMUM_OBJECT_NAMES);
@@ -619,6 +647,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             }
           }
         }
+          }
         metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
         const heap = await session.send('Runtime.getHeapUsage');
         metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, heap.usedSize);

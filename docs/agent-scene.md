@@ -258,7 +258,7 @@ Give exactly one point source. `grid` is `{ counts: [nx, ny, nz], spacing: [dx, 
 on the triangles of a recipe geometry in proportion to their area; they are in that geometry's own space, so parent
 the group to the node that carries it. `seed` (default 0) fixes the placement. `where` is a number
 [field expression](mesh.md#field-expressions) over the points (position, normal, index): points where it is 0 are
-dropped. `curve` is `{ points, count, closed, fillet }`: `count` points at equal arc length along the polyline through `points` (2 to 256, the first and last on its ends unless `closed`), with `fillet` rounding every corner by that radius (reduced where it does not fit). `yaw` turns each instance randomly about up, `alignToNormal` (surface or curve) turns up to the surface normal or the direction of the curve, and `scale`
+dropped. `curve` is `{ points, count, length, closed, fillet }`: `count` points at equal arc length along the polyline through `points` (2 to 256, the first and last on its ends unless `closed`), or `length` spacing in metres between samples (not both `count` and `length`), with `fillet` rounding every corner by that radius (reduced where it does not fit). `yaw` turns each instance randomly about up, `alignToNormal` (surface or curve) turns up to the surface normal or the direction of the curve, and `scale`
 is a random uniform `[min, max]`. At most 2048 candidate points per node, and the scene's node limit still applies.
 The group's own scale applies to the spacing and the points, because they are in its space.
 
@@ -276,8 +276,7 @@ The group's own scale applies to the spacing and the points, because they are in
 - `variants`: 1 to 16 geometry ids or `{ geometry, material }`. Each point takes one at random, or the one `variant` (a number field, rounded down and wrapped) names. The node needs only a material when it lists variants.
 - `rotation`: vector field of extra Euler angles in radians, turned after `yaw` and `alignToNormal`. `size`: number or vector field, a scale per point, multiplied by the `scale` range and kept from 0.001 to 1000.
 - `at`: with a `surface` source, `"vertices"` (welded by position) or `"faces"` (centres, normal of the face) place on the mesh itself; `count` is then the most points allowed, and more is an error.
-
-Not yet: realizing the instances into one mesh.
+- `realize` (on `instances` or `place`): when `true`, merges the placed instances into one realized mesh per material under the group node, bounded by `maxVertices`.
 
 ### Placed catalog assets
 

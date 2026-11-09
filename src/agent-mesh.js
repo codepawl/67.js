@@ -5,6 +5,7 @@ import { lintMesh } from './mesh-lint.js';
 import { applyMeshEdits, evaluateMeshStack } from './mesh-recipe.js';
 import { extractRender } from './mesh-render.js';
 import { normalizeShapeKeys, shapeKeyTargets } from './mesh-shape-keys.js';
+import { realizedGeometry } from './mesh-instances.js';
 import { MESH_SMOOTH_ANGLE_DEFAULT } from './agent-scene-capabilities.js';
 
 export { MESH_SMOOTH_ANGLE_DEFAULT };
@@ -87,6 +88,13 @@ export function meshCacheStats() {
 export function generateMeshGeometry(baseGeometry, edits, {
   maxVertices, smoothAngle = MESH_SMOOTH_ANGLE_DEFAULT, resolveCutter, stack = [], cacheKey, shapeKeys = [],
 }) {
+  const realized = cacheKey && realizedGeometry(cacheKey);
+  if (realized) {
+    if (realized.positions.length / 3 > maxVertices) {
+      throw invalidField('edits', realized.positions.length / 3, `an edited mesh of at most ${maxVertices} render vertices (maxVertices); use fewer subdivisions or segments`);
+    }
+    return realized;
+  }
   const editsKey = cacheKey === undefined ? undefined : `${cacheKey}|edits|${JSON.stringify(edits)}`;
   let edited = editsKey === undefined ? undefined : evaluationCache.get(editsKey);
   if (!edited) {
