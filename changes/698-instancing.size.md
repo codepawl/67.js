@@ -1,0 +1,1 @@
+- scene:agent-scene+lazy: the placement module (Poisson spacing, density, variants, rotation and size fields, vertex and face points) loads only with instances, so scenes without them do not pay.

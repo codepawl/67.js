@@ -161,18 +161,18 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
 
 // Vertex colors and groups. Details stay here so the tool schemas stay small.
 export const MESH_ATTRIBUTE_NOTES = Object.freeze({
-  vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs (0 in a new group). One of weight (1), field (number expression) or gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] }. Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. Put it after shape edits: a stack node that rebuilds the mesh drops groups.',
+  vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field or gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] }. Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
   vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
 });
 
 // Shape keys on a recipe mesh. Details stay here so the tool schemas stay small.
 export const MESH_SHAPE_KEY_NOTES = Object.freeze({
-  shapeKeys: 'On a mesh geometry, at most 16: { name, offsets, value } or { name, edits, value }. offsets is a list of { select, offset: [x,y,z], falloff } moves like the translate edit; edits are mesh edits that only move vertices run on the finished mesh, after the stack. value (0, from 0 to 1) is the weight without motion. Each key becomes a glTF morph target. Animate it with a motion track { kind: "morph", id: <key name>, property: "weight", keyframes }; a GLB export writes targets, names (mesh.extras.targetNames) and weights.',
+  shapeKeys: 'On a mesh geometry, at most 16: { name, offsets, value } or { name, edits, value }. offsets is a list of { select, offset: [x,y,z], falloff } moves like the translate edit; edits are mesh edits that only move vertices run on the finished mesh, after the stack. value (0 to 1, default 0) is the weight. Each key becomes a glTF morph target. Animate it with a motion track { kind: "morph", id: <key name>, property: "weight", keyframes }; a GLB export writes them.',
 });
 
 // Organic shaping edits. Details stay here so the tool schemas stay small.
 export const MESH_SCULPT_NOTES = Object.freeze({
-  sculpt: 'strokes run in order on the vertices of the selected faces; other vertices stay, so a tag confines them. A stroke has type inflate (along the vertex normal), displace (along direction, needed) or smooth (strength 0 to 1), center and radius, strength in mesh units (negative pushes in). Falloff is smooth to zero at the radius.',
+  sculpt: 'strokes run in order on the vertices of the selected faces; other vertices stay, so a tag confines them. A stroke has type inflate (along the vertex normal), displace (along direction, needed) or smooth (strength 0 to 1), center and radius, strength in mesh units (negative pushes in).',
   shrinkwrap: 'target is a primitive record placed by translation, rotation and scale. mode nearest (default) moves each selected vertex to the closest point; project moves it along direction (needed) to the first hit. offset (default 0) stands it off along the normal, on the side it came from. maxDistance limits the search; onMiss error (default) or keep. For a decal, use enough grid cells to follow the curve, then solidify.',
 });
 
@@ -195,7 +195,10 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     rotation: 'rotate [v, axis, rad]; align [dir]: Euler of +Y to dir; transform [p, move, euler, size].',
     surfaces: 'nearest {surface, at, read distance|point|normal}; raycast {surface, at, direction, read hit|distance|point|normal, miss}. at defaults to position; rays go forward. surface: geometry id (instances where) or record (mesh edits). attr group + name reads a vertex group.',
   }),
-  instancing: Object.freeze({ sources: INSTANCE_SOURCES, maxCandidatePoints: MAX_INSTANCE_CANDIDATES }),
+  instancing: Object.freeze({
+    sources: INSTANCE_SOURCES, maxCandidatePoints: MAX_INSTANCE_CANDIDATES,
+    place: 'place {at vertices|faces, spacing, density 0-1, variants [id|{geometry, material}], variant, rotation Euler, size}; the last are fields.',
+  }),
   operations: Object.freeze([
     'set-node', 'set-material', 'set-camera', 'add-node', 'remove-node',
     'add-geometry', 'remove-geometry', 'add-material', 'remove-material',
