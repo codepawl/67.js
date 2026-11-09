@@ -1,4 +1,0 @@
-- goal:lit-box: 10 bytes for passing the exact-flush gap to resolveCoplanar so reversedDepth false keeps layering exact-flush pairs (#593)
-- goal:gltf-box: 16 bytes, same renderer line (#593)
-- goal:agent-scene: 13 bytes, same renderer line (#593)
-- scene:agent-scene+lazy: the exact-flush gap rule and layer settling in the coplanar addon; fixes flicker that resolveCoplanar caused (issue #593).

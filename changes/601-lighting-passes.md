@@ -1,1 +1,0 @@
-- render jobs: passes now include `diffuse`, `glossy`, `shadow`, `ao` and `mist` next to albedo, normal, emission, depth and objectId; diffuse + glossy + emission add back to the lit image, and `exr` keeps values above 1 (#601)

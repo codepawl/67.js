@@ -1,1 +1,0 @@
-- An irradiance grid bake runs on the kernel worker with its 90 s limit instead of the page's 20 s, so 8 grid bounces fit a hall like temple-hall (#543)

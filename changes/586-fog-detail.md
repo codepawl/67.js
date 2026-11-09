@@ -1,1 +1,0 @@
-- Volume fog takes `detailOctaves`, `detailAmount`, `warp` and `contrast` for wispier mist, `profileSoftness` for where a layer top starts to fade, and `keyScattering` to scale only the key light shafts (#586)

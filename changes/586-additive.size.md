@@ -1,9 +1,0 @@
-- entry:core: additive blend mode and per-instance opacity (one more instance float), about 256 bytes gzip; sparks, trails and glow need both.
-- scene:lit-box: the same renderer code, which lives in the core renderer.
-- goal:lit-box: 279 bytes for additive blending and per-part opacity; an agent-facing VFX capability (issue 586).
-- scene:gltf-box: the same renderer code.
-- scene:gltf-box+lazy: same code as scene:gltf-box.
-- goal:gltf-box: 275 bytes for the same capability.
-- scene:agent-scene: the same renderer code plus the recipe alphaMode list.
-- scene:agent-scene+lazy: same code as scene:agent-scene.
-- goal:agent-scene: 301 bytes for the same capability.

@@ -1,3 +1,0 @@
-- entry:fog-shader: the opt-in multiple scattering octaves and sun transmittance add one function set to the lazy fog shader (636 bytes gzip); a frame without volume fog never loads it.
-- scene:agent-scene+lazy: the fog shader's opt-in multiple scattering and sun transmittance, measured against Cycles in #543; off by default.
-- goal:agent-scene: six validated volume fog fields in agent-look (30 bytes gzip) so recipes can switch the opt-in fog scattering on.

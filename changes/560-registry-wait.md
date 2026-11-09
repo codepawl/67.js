@@ -1,1 +1,0 @@
-- The publish workflow waits up to five minutes for the registry to serve a new version instead of two. The 0.16.0 publish succeeded, but the registry took longer than two minutes, so the check failed and skipped the release page.

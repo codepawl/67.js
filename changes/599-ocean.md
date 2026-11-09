@@ -1,1 +1,0 @@
-- Ocean modifier: the `ocean` mesh edit and stack node turn a flat grid into a seeded sea (Phillips spectrum for the wind, `choppiness`, `size`, `seed`, `time`) and write the vertex group `foam` where the surface folds. The same seed and time give identical vertices. Part of #599.

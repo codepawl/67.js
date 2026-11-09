@@ -1,1 +1,0 @@
-- The changelog groups its entries under headings, and 0.16.0 is rewritten as a short summary

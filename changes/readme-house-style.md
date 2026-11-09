@@ -1,1 +1,0 @@
-- The README follows the same layout as the other CodePawl repos: a banner with the wordmark and three renders, flat-square badges, a showcase table, an install section that starts with a prompt to paste into an agent, and a License heading.

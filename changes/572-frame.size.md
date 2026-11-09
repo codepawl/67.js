@@ -1,7 +1,0 @@
-- entry:core: the offset matrix product and the joint check that remove per-joint copies and allocations from the skinned frame.
-- scene:gltf-box: the same skinning and glTF pose code; skinned update CPU about 0.1 ms less for eight characters.
-- scene:gltf-box+lazy: same code as scene:gltf-box.
-- goal:gltf-box: 485 bytes for a faster skinned frame, accepted by the lead under the trade-off rule (a measured speed-up, not a score).
-- scene:agent-scene: the same skinning code, which agent scenes import.
-- scene:agent-scene+lazy: same code as scene:agent-scene.
-- goal:agent-scene: about 200 bytes for the same skinned frame speed-up.

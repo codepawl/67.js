@@ -1,2 +1,0 @@
-- Recipe light bakes run on the native ray query tracer when `packages/render-native` is built: `bake.backend` is `native`, with the page's GPU kernel as the fallback (`bake.backendNote` says why). `bakeLightmapsAsync` takes `backend: "native"` with a `texelTracer`.
-- `renderer.maxSeconds` is honoured by `renderer.backend: "native"`: a trace that passes it fails the job instead of falling back.

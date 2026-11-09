@@ -1,1 +1,0 @@
-- Add a Blender 5.2 inventory script and a report that compares it with the ledger and agent surface, with a ranked list of missing features

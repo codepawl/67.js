@@ -1,1 +1,0 @@
-- motion.constraints: adds copy_transforms, limit_distance, limit_scale, stretch_to, locked_track, transformation and action, each one scene_motion call (#595)

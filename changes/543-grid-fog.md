@@ -1,1 +1,0 @@
-- bake.gridFog: true (with irradianceGrid) lets the irradiance grid scatter in the scene's volume fog, off by default, for sunlit closed rooms with fog (#543)

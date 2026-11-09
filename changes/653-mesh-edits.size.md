@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: 555 bytes gzip of message text and the small mesh-edit-field helper, so that a rejected mesh edit names the edit field, the value received and an example; nothing new runs unless an edit is rejected.

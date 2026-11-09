@@ -1,1 +1,0 @@
-- The same readable errors now cover vegetation (`nodes[3].vegetation.scatter.density: got 9; expected a number from 0.0001 to 4, such as 1.`), `environment.wind`, particles and hair, cloth sheets and colliders, and image sequence maps: each names the full field path, the value received and an accepted example or range (#653)

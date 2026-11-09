@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: the material graph gains opacity, clearcoat and transmission outputs and the layer, hue and curve nodes (about 1.3 KB gzip in the lazily loaded graph baker), so an agent can paint over rust or fade a part in one recipe.
