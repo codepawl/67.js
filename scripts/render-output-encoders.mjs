@@ -195,7 +195,7 @@ function objectIdentifier(pixels, offset) {
   return byteOf(pixels[offset]) + byteOf(pixels[offset + 1]) * 256 + byteOf(pixels[offset + 2]) * 65536;
 }
 
-function encodeExrPass({ pixels, width, height, pass, hasAlpha, depthRange }) {
+function exrChannelsForPass({ pixels, width, height, pass, hasAlpha, depthRange, prefix = '' }) {
   if (pass === 'depth' || pass === 'objectId') {
     const values = new Float32Array(width * height);
     for (let row = 0; row < height; row++) {
@@ -205,15 +205,32 @@ function encodeExrPass({ pixels, width, height, pass, hasAlpha, depthRange }) {
         values[row * width + column] = pass === 'depth' ? depthSteps(pixels, offset) / 65535 * depthRange : objectIdentifier(pixels, offset);
       }
     }
-    return encodeExr(width, height, [{ name: pass === 'depth' ? 'Z' : 'id', type: 'float', values }]);
+    return [{ name: `${prefix}${pass === 'depth' ? 'Z' : 'id'}`, type: 'float', values }];
   }
   const [red, green, blue, alpha] = planes(pixels, width, height, [0, 1, 2, 3]);
-  const channels = [{ name: 'R', type: 'half', values: red }, { name: 'G', type: 'half', values: green }, { name: 'B', type: 'half', values: blue }];
-  if (hasAlpha) channels.push({ name: 'A', type: 'half', values: alpha });
+  if (pass === 'uv') return [{ name: `${prefix}U`, type: 'half', values: red }, { name: `${prefix}V`, type: 'half', values: green }];
+  if (pass === 'velocity') return [{ name: `${prefix}X`, type: 'half', values: red }, { name: `${prefix}Y`, type: 'half', values: green }];
+  if (pass === 'position') return [{ name: `${prefix}X`, type: 'float', values: red }, { name: `${prefix}Y`, type: 'float', values: green }, { name: `${prefix}Z`, type: 'float', values: blue }];
+  const channels = [{ name: `${prefix}R`, type: 'half', values: red }, { name: `${prefix}G`, type: 'half', values: green }, { name: `${prefix}B`, type: 'half', values: blue }];
+  if (hasAlpha) channels.push({ name: `${prefix}A`, type: 'half', values: alpha });
+  return channels;
+}
+
+function encodeExrPass(options) {
+  return encodeExr(options.width, options.height, exrChannelsForPass(options));
+}
+
+export function encodeMultilayerExr({ width, height, beauty, passes = {}, hasAlpha = false, depthRange = 100 }) {
+  if (beauty.length !== width * height * 4) throw new RangeError('The beauty pixel count does not match the image size.');
+  const channels = [...exrChannelsForPass({ pixels: beauty, width, height, pass: undefined, hasAlpha, depthRange, prefix: 'Combined.' })];
+  for (const [pass, pixels] of Object.entries(passes)) {
+    if (pixels.length !== width * height * 4) throw new RangeError(`The ${pass} pixel count does not match the image size.`);
+    channels.push(...exrChannelsForPass({ pixels, width, height, pass, hasAlpha: false, depthRange, prefix: `${pass}.` }));
+  }
   return encodeExr(width, height, channels);
 }
 
-function encodePng16Pass({ pixels, width, height, pass, hasAlpha }) {
+function encodePng16Pass({ pixels, width, height, pass, hasAlpha, depthRange = 100 }) {
   const pixelCount = width * height;
   if (pass === 'depth' || pass === 'objectId') {
     const samples = new Uint16Array(pixelCount);
@@ -236,7 +253,13 @@ function encodePng16Pass({ pixels, width, height, pass, hasAlpha }) {
       const alpha = pixels[offset + 3];
       // The lit frame is premultiplied by alpha; a PNG stores straight colour.
       const scale = hasAlpha && alpha > 0 ? 1 / alpha : 1;
-      for (let component = 0; component < 3; component++) samples[target + component] = toSixteenBits(pixels[offset + component] * scale);
+      for (let component = 0; component < 3; component++) {
+        const raw = pixels[offset + component];
+        const mapped = pass === 'position' ? raw / depthRange * 0.5 + 0.5
+          : pass === 'velocity' ? (component < 2 ? raw * 0.5 + 0.5 : 0)
+          : raw * scale;
+        samples[target + component] = toSixteenBits(mapped);
+      }
       if (hasAlpha) samples[target + 3] = toSixteenBits(alpha);
     }
   }

@@ -2,6 +2,7 @@ import './support/load-agent-scene-modules.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { box, sphere } from '../src/geometry.js';
+import { createAgentScene } from '../src/agent-scene.js';
 import { expandInstancedNodes } from '../src/mesh-instances.js';
 
 const base = { id: 'rock', geometry: 'rockA', material: 'stone' };
@@ -119,4 +120,65 @@ test('bad place records name the field', () => {
     assert.throws(() => expand({ grid, place }), message, JSON.stringify(place));
   }
   assert.throws(() => expandInstancedNodes([{ id: 'bare', material: 'stone', instances: { grid } }], options), /geometry and material/);
+});
+
+test('curve source accepts length spacing or count, with fillet and closed loops', () => {
+  const open = children(expand({
+    curve: { points: [[0, 0, 0], [6, 0, 0], [6, 0, 4]], length: 2 },
+    alignToNormal: true,
+  }));
+  assert.equal(open.length, 6);
+  assert.deepEqual(open[0].translation, [0, 0, 0]);
+  assert.ok(Math.abs(open[5].translation[0] - 6) < 1e-9 && Math.abs(open[5].translation[2] - 4) < 1e-9);
+
+  const closed = children(expand({
+    curve: { points: [[0, 0, 0], [4, 0, 0], [4, 0, 4], [0, 0, 4]], length: 4, closed: true, fillet: 0.5 },
+  }));
+  assert.equal(closed.length, 4);
+
+  assert.throws(() => expand({ curve: { points: [[0, 0, 0], [2, 0, 0]], count: 3, length: 1 } }), /count or length/);
+  assert.throws(() => expand({ curve: { points: [[0, 0, 0], [2, 0, 0]] } }), /count or length/);
+  assert.throws(() => expand({ curve: { points: [[0, 0, 0], [2, 0, 0]], length: 0 } }), /curve length/);
+});
+
+test('realize merges instances into one mesh per material in expandInstancedNodes and createAgentScene', () => {
+  const cube = box(0, 1);
+  const cubeVerts = cube.positions.length / 3;
+  const cubeIndices = cube.indices.length;
+  const realized = children(expand({
+    grid: { counts: [4, 1, 1], spacing: [2, 0, 0] },
+    place: {
+      variants: ['rockA', { geometry: 'rockB', material: 'moss' }],
+      variant: { mod: [{ attr: 'index' }, 2] },
+      realize: true,
+    },
+  }, base, { ...options, resolveSurface: () => cube }));
+  assert.equal(realized.length, 2);
+  assert.equal(realized[0].material, 'stone');
+  assert.equal(realized[1].material, 'moss');
+  assert.equal(realized[0].realizedGeometry.positions.length / 3, cubeVerts * 2);
+  assert.equal(realized[0].realizedGeometry.indices.length, cubeIndices * 2);
+
+  assert.throws(() => expand({
+    grid: { counts: [10, 1, 1], spacing: [1, 1, 1] },
+    realize: true,
+  }, base, { ...options, maxVertices: cubeVerts * 2, resolveSurface: () => cube }), /Realized instances have/);
+  assert.throws(() => expand({ grid: { counts: [2, 1, 1], spacing: [1, 1, 1] }, realize: 'yes' }), /realize must be boolean/);
+  assert.throws(() => expand({ grid: { counts: [2, 1, 1], spacing: [1, 1, 1] }, place: { realize: 'yes' } }), /realize must be boolean/);
+
+  const scene = createAgentScene({
+    format: '67js.scene', schemaVersion: 1,
+    geometries: [{ id: 'post', type: 'box', bevel: 0, subdivisions: 1 }],
+    materials: [{ id: 'wood', color: [0.5, 0.3, 0.1] }],
+    nodes: [{
+      id: 'fence', geometry: 'post', material: 'wood',
+      instances: { curve: { points: [[0, 0, 0], [6, 0, 0]], length: 2 }, alignToNormal: true, realize: true },
+    }],
+  });
+  assert.equal(scene.parts.length, 1);
+  assert.equal(scene.parts[0].name, 'fence.0');
+  assert.equal(scene.parts[0].geometry.positions.length / 3, 24 * 4);
+  const afterEdit = scene.apply([{ type: 'set-node', id: 'fence', translation: [0, 1, 0] }], { expectedRevision: scene.revision });
+  assert.equal(afterEdit, 1);
+  assert.equal(scene.parts.length, 1);
 });
