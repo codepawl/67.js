@@ -145,7 +145,7 @@ test('set-particles adds, changes and clears the section, and restores through a
   assert.equal(scene.inspect().particles.systems[0].particles, 5);
   scene.apply([{ type: 'set-particles', particles: null }], { expectedRevision: scene.revision });
   assert.equal(scene.inspect().particles, undefined);
-  assert.throws(() => scene.apply([{ type: 'set-particles' }], { expectedRevision: scene.revision }), /requires particles/);
+  assert.throws(() => scene.apply([{ type: 'set-particles' }], { expectedRevision: scene.revision }), /particles: got undefined; expected a particles value/);
 });
 
 test('the capabilities describe the limits that the validator enforces', () => {
@@ -157,65 +157,65 @@ test('the capabilities describe the limits that the validator enforces', () => {
 test('hostile input is rejected with the limit in the message', () => {
   const system = overrides => ({ systems: [{ node: 'sparks', ...overrides }] });
   const bad = (particles, pattern, nodes) => assert.throws(() => createAgentScene(sparkRecipe(particles, nodes)), pattern);
-  bad(system({ count: 2001 }), /count must be an integer from 1 to 2000/);
-  bad(system({ count: 1e9 }), /count must be an integer/);
-  bad(system({ count: 0 }), /count must be an integer/);
-  bad(system({ count: 1.5 }), /count must be an integer/);
+  bad(system({ count: 2001 }), /systems\[0\]\.count: got 2001; expected a whole number from 1 to 2000/);
+  bad(system({ count: 1e9 }), /\.count: got .*; expected a whole number from 1 to 2000/);
+  bad(system({ count: 0 }), /\.count: got .*; expected a whole number from 1 to 2000/);
+  bad(system({ count: 1.5 }), /\.count: got .*; expected a whole number from 1 to 2000/);
   bad(system({ count: Infinity }), /finite|count|speed|direction|rate/);
-  bad(system({ count: '10' }), /count must be an integer/);
-  bad(system({ seed: -1 }), /seed must be an integer/);
-  bad(system({ seed: 2 ** 32 }), /seed must be an integer/);
-  bad(system({ seed: 1.5 }), /seed must be an integer/);
-  bad(system({ lifetime: 0 }), /lifetime must be a finite number/);
-  bad(system({ lifetime: 1e9 }), /lifetime must be a finite number/);
-  bad(system({ lifetime: [2, 1] }), /minimum must not exceed/);
-  bad(system({ lifetime: [1, 2, 3] }), /lifetime must be a number or/);
+  bad(system({ count: '10' }), /\.count: got .*; expected a whole number from 1 to 2000/);
+  bad(system({ seed: -1 }), /\.seed: got .*; expected a whole number from 0 to 4294967295/);
+  bad(system({ seed: 2 ** 32 }), /\.seed: got .*; expected a whole number from 0 to 4294967295/);
+  bad(system({ seed: 1.5 }), /\.seed: got .*; expected a whole number from 0 to 4294967295/);
+  bad(system({ lifetime: 0 }), /\.lifetime: got .*; expected a number from 0\.01 to 60/);
+  bad(system({ lifetime: 1e9 }), /\.lifetime: got .*; expected a number from 0\.01 to 60/);
+  bad(system({ lifetime: [2, 1] }), /\.(lifetime|length): got \[.*; expected \[minimum, maximum\] with the minimum not above the maximum/);
+  bad(system({ lifetime: [1, 2, 3] }), /\.lifetime: got \[1,2,3\]; expected a number or \[minimum, maximum\]/);
   bad(system({ speed: NaN }), /finite|count|speed|direction|rate/);
-  bad(system({ speed: -1 }), /speed must be a finite number/);
-  bad(system({ size: 0 }), /size must be a finite number/);
-  bad(system({ size: 1e30 }), /size must be a finite number/);
-  bad(system({ rate: 0 }), /rate must be a finite number/);
+  bad(system({ speed: -1 }), /\.speed: got -1; expected a number from 0 to 1000/);
+  bad(system({ size: 0 }), /\.size: got .*; expected a number from 0\.0001 to 100/);
+  bad(system({ size: 1e30 }), /\.size: got .*; expected a number from 0\.0001 to 100/);
+  bad(system({ rate: 0 }), /\.rate: got 0; expected a number from 0\.01 to 200000/);
   bad(system({ rate: Infinity }), /finite|count|speed|direction|rate/);
-  bad(system({ spread: 181 }), /spread must be a finite number/);
-  bad(system({ drag: -1 }), /drag must be a finite number/);
-  bad(system({ drag: 1e9 }), /drag must be a finite number/);
-  bad(system({ floor: 1e9 }), /floor must be a finite number/);
-  bad(system({ direction: [0, 0, 0] }), /zero vector/);
-  bad(system({ direction: [1, 2] }), /needs 3 numbers/);
+  bad(system({ spread: 181 }), /\.spread: got 181; expected a number from 0 to 180/);
+  bad(system({ drag: -1 }), /\.drag: got .*; expected a number from 0 to 100/);
+  bad(system({ drag: 1e9 }), /\.drag: got .*; expected a number from 0 to 100/);
+  bad(system({ floor: 1e9 }), /\.floor: got 1000000000; expected a number from -10000 to 10000/);
+  bad(system({ direction: [0, 0, 0] }), /\.direction: got \[0,0,0\]; expected a direction that is not the zero vector/);
+  bad(system({ direction: [1, 2] }), /\.direction: got \[1,2\]; expected an array of 3 numbers/);
   bad(system({ direction: [1, 2, NaN] }), /finite|count|speed|direction|rate/);
-  bad(system({ scale: 'huge' }), /scale must be one of/);
-  bad(system({ emitter: { shape: 'cone' } }), /emitter shape must be one of/);
-  bad(system({ emitter: { radius: -1 } }), /radius must be a finite number/);
-  bad(system({ emitter: { position: [1e9, 0, 0] } }), /position must be a finite number/);
-  bad(system({ emitter: { jet: true } }), /Unknown or unsupported particle emitter field/);
-  bad(system({ colour: 'red' }), /Unknown or unsupported particle system field/);
-  bad({ systems: [{ node: 'sparks' }], extra: 1 }, /Unknown or unsupported particles field/);
-  bad({ systems: [] }, /at least one system/);
-  bad({ systems: 'many' }, /must be an array/);
-  bad({ systems: Array.from({ length: 5 }, () => ({ node: 'sparks' })) }, /at most 4/);
-  bad({ systems: [{ node: 'sparks' }, { node: 'sparks' }] }, /used twice in particles/);
-  bad({ gravity: [0, -1e9, 0], systems: [{ node: 'sparks' }] }, /gravity must be a finite number/);
-  bad({ wind: [1000, 0, 0], systems: [{ node: 'sparks' }] }, /wind must be a finite number/);
-  bad(system({ node: 'missing' }), /node was not found/);
-  bad(system({ node: '__proto__' }), /node was not found/);
+  bad(system({ scale: 'huge' }), /\.scale: got "huge"; expected one of constant, shrink, grow/);
+  bad(system({ emitter: { shape: 'cone' } }), /\.emitter\.shape: got "cone"; expected one of point, box, sphere, disc/);
+  bad(system({ emitter: { radius: -1 } }), /\.emitter\.radius: got -1; expected a number from 0 to 10000/);
+  bad(system({ emitter: { position: [1e9, 0, 0] } }), /\.emitter\.position\[0\]: got 1000000000; expected a number from -10000 to 10000/);
+  bad(system({ emitter: { jet: true } }), /\.emitter\.jet: got true; expected no such field/);
+  bad(system({ colour: 'red' }), /\.colour: got "red"; expected no such field/);
+  bad({ systems: [{ node: 'sparks' }], extra: 1 }, /particles\.extra: got 1; expected no such field/);
+  bad({ systems: [] }, /particles\.systems: got \[\]; expected at least one system/);
+  bad({ systems: 'many' }, /particles\.systems: got "many"; expected an array of at most 4 entries/);
+  bad({ systems: Array.from({ length: 5 }, () => ({ node: 'sparks' })) }, /particles\.systems: got "5 entries"; expected an array of at most 4 entries/);
+  bad({ systems: [{ node: 'sparks' }, { node: 'sparks' }] }, /particles\.systems\[1\]\.node: got "sparks"; expected a node that particles uses once/);
+  bad({ gravity: [0, -1e9, 0], systems: [{ node: 'sparks' }] }, /particles\.gravity\[1\]: got -1000000000; expected a number from -1000 to 1000/);
+  bad({ wind: [1000, 0, 0], systems: [{ node: 'sparks' }] }, /particles\.wind\[0\]: got 1000; expected a number from -100 to 100/);
+  bad(system({ node: 'missing' }), /\.node: got .*; expected the ID of a node in the recipe/);
+  bad(system({ node: '__proto__' }), /\.node: got .*; expected the ID of a node in the recipe/);
   bad(null === 0 ? null : JSON.parse('{"systems":[{"node":"sparks","__proto__":{"count":5}}]}'), /Invalid JSON key|Unknown or unsupported/);
-  bad('systems', /must be a plain object/);
+  bad('systems', /particles: got "systems"; expected a plain object/);
 });
 
 test('total particles and total vertices are bounded across systems', () => {
   const nodes = ['b', 'c', 'd'].map(id => ({ id, geometry: 'speck', material: 'glow' }));
   const systems = ['sparks', 'b', 'c'].map(node => ({ node, count: 1500 }));
-  assert.throws(() => createAgentScene(sparkRecipe({ systems }, nodes)), /4000 in total/);
+  assert.throws(() => createAgentScene(sparkRecipe({ systems }, nodes)), /particles\.systems: got "4500 particles in total"; expected counts that add up to at most 4000/);
   const heavy = sparkRecipe({ systems: [{ node: 'sparks', count: 10 }] });
   heavy.nodes[0].geometry = 'ball';
   heavy.particles.systems[0].count = 40;
-  assert.throws(() => createAgentScene(heavy), /would draw \d+ vertices.*limit is 100000/);
+  assert.throws(() => createAgentScene(heavy), /particles\.systems: got "\d+ vertices on node sparks"; expected shape vertices times count of at most 100000/);
 });
 
 test('a particle node cannot carry motion or physics, or be a cloth sheet', () => {
   const withMotion = sparkRecipe(burst);
   withMotion.motion = { duration: 1, loop: false, tracks: [{ id: 'sparks', kind: 'node', property: 'translation', keyframes: [{ time: 0, value: [0, 0, 0] }, { time: 1, value: [1, 0, 0] }] }] };
-  assert.throws(() => createAgentScene(withMotion), /motion/);
+  assert.throws(() => createAgentScene(withMotion), /particles\.systems\[0\]\.node: got "sparks"; expected a node that stays where it is/);
   const withCloth = sparkRecipe(burst);
   withCloth.cloth = { duration: 1, sheets: [{ node: 'sparks' }] };
   assert.throws(() => createAgentScene(withCloth), /used twice|cloth/i);
@@ -245,7 +245,7 @@ test('a large burst seeks statelessly in fixed buffers, and a huge time is only 
   assert.equal(bufferSizes.size, 1, 'the particle buffers keep one size across seeks');
   scene.sampleMotion(3600);
   assert.ok(particlePositions(scene).every(Number.isFinite));
-  assert.throws(() => scene.sampleMotion(3601), /Motion time/);
+  assert.throws(() => scene.sampleMotion(3601), /time: got 3601; expected null or a number of seconds/);
 });
 
 test('the particle code stays unloaded for a scene without particles', async () => {
@@ -343,23 +343,23 @@ test('hair triangles face outward and the report counts strands', () => {
 
 test('hostile hair input is rejected', () => {
   const bad = (system, pattern) => assert.throws(() => createAgentScene(hairRecipe(system)), pattern);
-  bad({ surface: 'missing' }, /Hair surface node was not found/);
-  bad({ surface: 'fur' }, /different nodes/);
-  bad({ segments: 9 }, /segments must be an integer from 1 to 8/);
-  bad({ segments: 0 }, /segments must be an integer/);
-  bad({ count: 2001 }, /count must be an integer/);
-  bad({ length: 0 }, /length must be a finite number/);
-  bad({ length: [3, 1] }, /minimum must not exceed/);
-  bad({ width: 100 }, /width must be a finite number/);
-  bad({ droop: -1 }, /droop must be a finite number/);
-  bad({ sway: 11 }, /sway must be a finite number/);
+  bad({ surface: 'missing' }, /particles\.systems\[0\]\.surface: got "missing"; expected the ID of a node in the recipe/);
+  bad({ surface: 'fur' }, /\.surface: got "fur"; expected a node other than the hair node/);
+  bad({ segments: 9 }, /\.segments: got 9; expected a whole number from 1 to 8/);
+  bad({ segments: 0 }, /\.segments: got 0; expected a whole number from 1 to 8/);
+  bad({ count: 2001 }, /\.count: got .*; expected a whole number from 1 to 2000/);
+  bad({ length: 0 }, /\.length: got 0; expected a number from 0\.001 to 100/);
+  bad({ length: [3, 1] }, /\.(lifetime|length): got \[.*; expected \[minimum, maximum\] with the minimum not above the maximum/);
+  bad({ width: 100 }, /\.width: got 100; expected a number from 0\.0001 to 10/);
+  bad({ droop: -1 }, /\.droop: got -1; expected a number from 0 to 10/);
+  bad({ sway: 11 }, /\.sway: got 11; expected a number from 0 to 10/);
 });
 
 test('hair limits the vertices it draws, and an empty surface is refused', () => {
   const crowded = hairRecipe({ count: 2000, segments: 8 });
   crowded.particles.systems.push({ type: 'hair', node: 'extra', surface: 'head', count: 2000, segments: 8 });
   crowded.nodes.push({ id: 'extra', geometry: 'strands', material: 'fur' });
-  assert.throws(() => createAgentScene(crowded), /vertices.*limit is 100000/);
+  assert.throws(() => createAgentScene(crowded), /particles\.systems: got "\d+ vertices on node extra"; expected shape vertices times count of at most 100000/);
   const flat = hairRecipe({});
   flat.nodes[0].scale = [0, 0, 0];
   assert.throws(() => createAgentScene(flat), /no triangle with area|scale/);

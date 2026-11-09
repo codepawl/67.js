@@ -117,13 +117,13 @@ try {
   ] })).structuredContent;
   assert.equal(enlarged.renderSucceeded, true);
   assert.equal((await call('scene_inspect', { sessionId })).structuredContent.counts.parts, 20);
-  assert.equal(enlarged.render.geometryBuffers, 8);
+  assert.equal(enlarged.render.geometryBuffers, before.metadata.geometryBuffers + 1);
   const topology = await look(sessionId, 'topology');
   assert.notDeepEqual(topology.bytes, before.bytes);
   await call('scene_restore', { sessionId, checkpointId: checkpoint.checkpointId, expectedRevision: 4 });
   const topologyRestored = await look(sessionId, 'topology-restored');
   assert.deepEqual(topologyRestored.bytes, before.bytes);
-  assert.equal(topologyRestored.metadata.geometryBuffers, 7);
+  assert.equal(topologyRestored.metadata.geometryBuffers, before.metadata.geometryBuffers);
   const removed = (await call('scene_apply', { sessionId, expectedRevision: 5, operations: [
     { type: 'remove-node', id: 'lamp', recursive: true },
     ...fixture.geometries.map(geometry => ({ type: 'remove-geometry', id: geometry.id })),

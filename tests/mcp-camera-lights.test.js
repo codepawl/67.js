@@ -94,17 +94,17 @@ test('scene_create and set-camera take orthographic, shift, focal length and f-s
 
 test('a camera takes fov or focalLength, never both, and checks each lens field', () => {
   const make = camera => createAgentScene(baseRecipe({ camera }));
-  assert.throws(() => make({ fov: 40, focalLength: 50 }), /fov or a focalLength, not both/);
-  assert.throws(() => make({ sensorWidth: 36 }), /sensorWidth needs focalLength/);
-  assert.throws(() => make({ projection: 'orthographic', focalLength: 50 }), /perspective projection/);
-  assert.throws(() => make({ orthoScale: 4 }), /needs projection orthographic/);
+  assert.throws(() => make({ fov: 40, focalLength: 50 }), /camera\.focalLength: got 50; expected only one of fov \(degrees\) or focalLength/);
+  assert.throws(() => make({ sensorWidth: 36 }), /camera\.sensorWidth: got 36; expected a field used with focalLength/);
+  assert.throws(() => make({ projection: 'orthographic', focalLength: 50 }), /camera\.focalLength: got 50; expected a field of a perspective camera/);
+  assert.throws(() => make({ orthoScale: 4 }), /camera\.orthoScale: got 4; expected a field of an orthographic camera/);
   assert.throws(() => make({ projection: 'orthographic', orthoScale: 0 }), /camera\.orthoScale: got 0; expected a positive view height/);
   assert.throws(() => make({ projection: 'fisheye' }), /perspective or orthographic/);
   assert.throws(() => make({ shift: [2, 0] }), /shift/);
   assert.throws(() => make({ fStop: 0.1 }), /fStop/);
-  assert.throws(() => createAgentScene(baseRecipe({ camera: { fStop: 2 }, effects: { depthOfField: { blur: 0.5 } } })), /fStop drives depth of field/);
+  assert.throws(() => createAgentScene(baseRecipe({ camera: { fStop: 2 }, effects: { depthOfField: { blur: 0.5 } } })), /camera\.fStop: got 2; expected a camera without effects\.depthOfField\.blur above 0/);
   const scene = createAgentScene(baseRecipe({ camera: { fov: 40 } }));
-  assert.throws(() => scene.apply([{ type: 'set-camera', fov: 40, focalLength: 50 }], { expectedRevision: 0 }), /not both/);
+  assert.throws(() => scene.apply([{ type: 'set-camera', fov: 40, focalLength: 50 }], { expectedRevision: 0 }), /camera\.focalLength: got 50; expected only one of fov/);
   scene.apply([{ type: 'set-camera', focalLength: 85 }], { expectedRevision: 0 });
   assert.equal(scene.camera.fov, undefined);
   scene.apply([{ type: 'set-camera', fov: 30 }], { expectedRevision: 1 });

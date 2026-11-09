@@ -90,13 +90,13 @@ test('a band around a cylinder extrudes along normals as one joined hoop', () =>
       assert.ok(Math.abs(radius - 1.1) < 0.01, `cap vertex radius ${radius}`);
     }
   }
-  assert.throws(() => normalizeMeshEdits([{ op: 'extrude_face_region', offset: 1, alongNormals: true, direction: [0, 1, 0] }]), /cannot be combined/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'extrude_individual', offset: 1, alongNormals: true }]), /does not take alongNormals/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'extrude_face_region', offset: 1, alongNormals: true, direction: [0, 1, 0] }]), /edits\[0\]\.direction: got \[0,1,0\]; expected left out when alongNormals is true/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'extrude_individual', offset: 1, alongNormals: true }]), /edits\[0\]\.alongNormals: got true; expected one of the fields extrude_individual takes/);
 });
 
 test('loop cut validation and errors are explicit', () => {
-  assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut' }]), /edges must be a rule that picks the ring/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut', edges: { along: [0, 1, 0] }, cuts: 2, factor: 0.3 }]), /factor applies only to a single cut/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut' }]), /edits\[0\]\.edges: got undefined; expected a rule that picks the ring/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut', edges: { along: [0, 1, 0] }, cuts: 2, factor: 0.3 }]), /edits\[0\]\.factor: got 0\.3; expected left out when cuts is above 1/);
   assert.throws(() => normalizeMeshEdits([{ op: 'loop_cut', edges: { along: [0, 1, 0] }, factor: 1 }]), /edits\[0\]\.factor: got 1; expected a number above 0 and below 1/);
   assert.throws(() => loopCut(cube(), { along: [1, 1, 1], maxAngle: 1 }), /selects no edges/);
   assert.throws(() => loopCut(cube(), { all: true }), /rings cross/);

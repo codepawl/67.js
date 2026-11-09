@@ -116,5 +116,5 @@ test('agent recipes accept cone, icoSphere, circle, line and plane in one record
   assert.ok(Math.abs(nodeBounds('sheet').max[0] - 0.5) < 1e-6);
   assert.deepEqual(createAgentScene(session.exportRecipe()).inspect(), session.inspect());
   assert.equal(session.exportRecipe().geometries.find(geometry => geometry.id === 'sheet').type, 'grid');
-  assert.throws(() => sceneWith([{ id: 'same', type: 'line', from: [1, 1, 1], to: [1, 1, 1] }]), /distinct/);
+  assert.throws(() => sceneWith([{ id: 'same', type: 'line', from: [1, 1, 1], to: [1, 1, 1] }]), /geometries\[0\]\.to: got \[1,1,1\]; expected a point different from from \[1,1,1\]/);
 });

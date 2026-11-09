@@ -82,14 +82,14 @@ test('shader arithmetic rejects cancelling product overflow and nonfinite emissi
   const before = session.exportRecipe();
   const matrix = Array.from(session.parts[0].matrix);
   assert.throws(() => session.apply([{ type: 'set-node', id: 'root', scale: [1e20, 1e-20, 1] }], { expectedRevision: 0 }), /world geometry bounds/);
-  assert.throws(() => session.apply([{ type: 'set-material', id: 'finish', emission: 1e30, emissiveColor: [1e30, 0, 0] }], { expectedRevision: 0 }), /Emissive radiance/);
+  assert.throws(() => session.apply([{ type: 'set-material', id: 'finish', emission: 1e30, emissiveColor: [1e30, 0, 0] }], { expectedRevision: 0 }), /materials\[0\]\.emission: got 1e\+30; expected an emission that keeps color times emission within Float32 range/);
   assert.deepEqual(session.exportRecipe(), before);
   assert.deepEqual(Array.from(session.parts[0].matrix), matrix);
   assert.equal(session.revision, 0);
   input.materials[0].tag = 'unlit';
   input.materials[0].emission = 70000;
   input.materials[0].emissiveColor = [1, 0, 0];
-  assert.throws(() => createAgentScene(input), /half-float HDR/);
+  assert.throws(() => createAgentScene(input), /materials\[0\]\.emission: got 70000; expected an unlit emission that keeps color times emission at or below 65500/);
 });
 
 test('recipes author liquid, foam and blended glass with batch-safe material handles', () => {
@@ -243,16 +243,16 @@ test('checkpoints are private, bounded, session-specific and releaseable', () =>
   const session = createAgentScene(recipe(), { maxCheckpoints: 1 });
   const checkpoint = session.checkpoint();
   assert.ok(Object.isFrozen(checkpoint));
-  assert.throws(() => session.checkpoint(), /budget/);
+  assert.throws(() => session.checkpoint(), /checkpoints: got "1 saved"; expected at most 1 saved checkpoints/);
   const foreign = createAgentScene(recipe()).checkpoint();
-  assert.throws(() => session.restore(foreign, { expectedRevision: 0 }), /Unknown/);
-  assert.throws(() => session.releaseCheckpoint(foreign), /Unknown/);
+  assert.throws(() => session.restore(foreign, { expectedRevision: 0 }), /checkpointId: got \{\}; expected a checkpointId that scene_checkpoint returned/);
+  assert.throws(() => session.releaseCheckpoint(foreign), /checkpointId: got \{\}; expected a checkpointId that scene_checkpoint returned/);
   session.apply([{ type: 'set-node', id: 'root', translation: [8, 0, 0] }], { expectedRevision: 0 });
   assert.throws(() => session.restore(checkpoint, { expectedRevision: 0 }), /expectedRevision/);
   session.restore(checkpoint, { expectedRevision: 1 });
   session.releaseCheckpoint(checkpoint);
-  assert.throws(() => session.restore(checkpoint, { expectedRevision: 2 }), /released/);
-  assert.throws(() => session.releaseCheckpoint(checkpoint), /released/);
+  assert.throws(() => session.restore(checkpoint, { expectedRevision: 2 }), /checkpointId: got \{\}; .*you have not released/);
+  assert.throws(() => session.releaseCheckpoint(checkpoint), /checkpointId: got \{\}; .*you have not released/);
   assert.ok(session.checkpoint());
 });
 
@@ -278,7 +278,7 @@ test('finite matrices still reject world geometry overflow using cached local bo
 });
 
 test('recipe boundary rejects malformed JSON, unknown keys and oversized geometry before generation', () => {
-  assert.throws(() => createAgentScene({ ...recipe(), eval: 'code' }), /Unknown/);
+  assert.throws(() => createAgentScene({ ...recipe(), eval: 'code' }), /recipe\.eval: got "code"; expected one of the fields format/);
   assert.throws(() => createAgentScene(recipe(), { maxNodes: 4097 }), /4096/);
   assert.throws(() => createAgentScene(recipe(), { maxRecipeBytes: 100 }), /maxRecipeBytes/);
   assert.throws(() => createAgentScene(recipe(), { maxGeometryBytes: 100 }), /preflight/);
@@ -302,22 +302,22 @@ test('recipe boundary rejects malformed JSON, unknown keys and oversized geometr
 });
 
 test('command and resource budgets, bounded inspection and missing IDs report failures', () => {
-  assert.throws(() => createAgentScene(recipe(), { maxNodes: 2 }), /resource limit/);
+  assert.throws(() => createAgentScene(recipe(), { maxNodes: 2 }), /nodes: got "3 entries"; expected an array of at most 2 entries/);
   const extra = recipe();
   extra.geometries.push({ id: 'sphere', type: 'sphere', segments: 8, rings: 4 });
-  assert.throws(() => createAgentScene(extra, { maxGeometries: 1 }), /resource limit/);
+  assert.throws(() => createAgentScene(extra, { maxGeometries: 1 }), /geometries: got "2 entries"; expected an array of at most 1 entries/);
   const duplicate = recipe();
   duplicate.nodes[2].id = 'root';
-  assert.throws(() => createAgentScene(duplicate), /Duplicate/);
+  assert.throws(() => createAgentScene(duplicate), /nodes\[2\]\.id: got "root"; expected an ID no other nodes entry uses/);
   const session = createAgentScene(recipe(), { maxOperations: 1 });
-  assert.throws(() => session.apply([{ type: 'set-camera', fov: 60 }, { type: 'set-camera', fov: 70 }], { expectedRevision: 0 }), /maxOperations/);
-  assert.throws(() => session.apply([], { expectedRevision: 0 }), /commands/);
+  assert.throws(() => session.apply([{ type: 'set-camera', fov: 60 }, { type: 'set-camera', fov: 70 }], { expectedRevision: 0 }), /operations: got "2 operations"; expected a list of 1 to 1 operations/);
+  assert.throws(() => session.apply([], { expectedRevision: 0 }), /operations: got "0 operations"; expected a list of 1 to 1 operations/);
   const inspection = session.inspect({ limit: 1 });
   assert.equal(inspection.nodes.length, 1);
   assert.equal(inspection.truncated, true);
   assert.equal(inspection.counts.nodes, 3);
-  assert.throws(() => session.inspect({ ids: ['missing'] }), /not found/);
-  assert.throws(() => session.inspect({ includeBounds: 'yes' }), /boolean/);
+  assert.throws(() => session.inspect({ ids: ['missing'] }), /ids: got "missing"; expected IDs of existing nodes/);
+  assert.throws(() => session.inspect({ includeBounds: 'yes' }), /includeBounds: got "yes"; expected true or false/);
   assert.equal(session.revision, 0);
 });
 
@@ -358,7 +358,7 @@ test('all seven generators remain within conservative aggregate vertex and byte 
   assert.notEqual(session.parts[0], originalBox);
   assert.equal(session.parts[0].geometry, session.parts[2].geometry);
   assert.equal(session.topologyRevision, 1);
-  assert.throws(() => session.apply([{ type: 'set-material', id: 'material', tag: 'unlit' }], { expectedRevision: 1 }), /Unknown/);
+  assert.throws(() => session.apply([{ type: 'set-material', id: 'material', tag: 'unlit' }], { expectedRevision: 1 }), /operation\.tag: got "unlit"; expected one of the fields type, id/);
 });
 
 function emptyRecipe() {
@@ -449,7 +449,7 @@ test('node deletion distinguishes nonrecursive rejection from explicit subtree r
   const session = createAgentScene(input);
   assert.throws(() => session.apply([
     { type: 'remove-node', id: 'root' }, { type: 'remove-node', id: 'child', recursive: true },
-  ], { expectedRevision: 0 }), /Nonrecursive/);
+  ], { expectedRevision: 0 }), /recursive: got false; expected true for a node with children/);
   session.apply([{ type: 'remove-node', id: 'root', recursive: true }], { expectedRevision: 0 });
   assert.deepEqual(session.exportRecipe().nodes.map(node => node.id), ['other']);
   assert.deepEqual(session.parts.map(part => part.name), ['other']);
@@ -624,7 +624,7 @@ test('an existing default material is reused and a node with only a material sti
   const orphan = recipe();
   delete orphan.nodes[1].geometry;
   orphan.nodes[1].material = 'finish';
-  assert.throws(() => createAgentScene(orphan), /Name a geometry to draw it, or drop material/);
+  assert.throws(() => createAgentScene(orphan), /nodes\[1\]\.geometry: got "finish"; expected set together with material/);
 });
 
 test('a recipe without a materials or geometries list reads them as empty, and the export lists them', () => {

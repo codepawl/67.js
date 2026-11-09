@@ -111,9 +111,9 @@ test('the edited crate unwraps into flat panels and renders with uvs', () => {
 
 test('uv_unwrap validates its fields and works as an unnamed stack node', () => {
   assert.deepEqual(normalizeMeshEdits([{ op: 'uv_unwrap' }])[0], { op: 'uv_unwrap', seams: { angle: 60 }, margin: 0.01, maxDistortion: 0.25 });
-  assert.throws(() => normalizeMeshEdits([{ op: 'uv_unwrap', seams: [1] }]), /seams must be an edge rule/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'uv_unwrap', seams: [1] }]), /edits\[0\]\.seams: got \[1\]; expected an edge rule/);
   assert.throws(() => normalizeMeshEdits([{ op: 'uv_unwrap', margin: 0.5 }]), /margin/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'uv_unwrap', name: 'x' }]), /does not take name/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'uv_unwrap', name: 'x' }]), /edits\[0\]\.name: got "x"; expected one of the fields uv_unwrap takes/);
   assert.equal(normalizeMeshStack([{ op: 'uv_unwrap' }])[0].name, undefined);
   const scene = createAgentScene({
     format: '67js.scene', schemaVersion: 1,

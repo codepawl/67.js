@@ -133,7 +133,7 @@ test('bevel on an open surface keeps the opening as the only problem, and valida
   assert.equal(beveled.bevelEdges, 8, 'only edges with two faces bevel');
   assert.throws(() => normalizeMeshEdits([{ op: 'bevel', width: 0 }]), /edits\[0\]\.width: got 0; expected a number above 0/);
   assert.throws(() => normalizeMeshEdits([{ op: 'bevel', width: 0.1, segments: 40 }]), /edits\[0\]\.segments: got 40; expected a whole number from 1 to 16/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'bevel', width: 0.1, edges: [] }]), /edges must be a rule/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'bevel', width: 0.1, edges: [] }]), /edits\[0\]\.edges: got \[\]; expected an edge rule/);
   assert.deepEqual(normalizeMeshEdits([{ op: 'bevel', width: 0.1 }])[0].edges, { angle: 30 });
 });
 

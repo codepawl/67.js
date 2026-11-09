@@ -1,6 +1,7 @@
 import { createMeshData } from './mesh-data.js';
 import { faceNormals, cornerNormals } from './mesh-normals.js';
 import { edgeCornerTable, cornerFaces } from './mesh-topology.js';
+import { editBoolean } from './mesh-edit-field.js';
 
 // Modifiers that decide how a mesh is shaded without moving it. smooth_by_angle writes the edge attributes `sharp` and
 // `smooth` that corner normals read, weighted_normal writes one normal per corner that the render extraction uses as is.
@@ -80,8 +81,7 @@ export function weightedNormals(mesh, { angle, weight }) {
 export function normalizeNormalEdit(edit, normalized, index, { finiteNumber }) {
   normalized.angle = edit.angle === undefined ? DEFAULT_NORMAL_ANGLE : finiteNumber(edit.angle, index, 'angle', { minimum: 0, maximum: 180 });
   if (edit.op === 'smooth_by_angle') {
-    normalized.ignoreSharp = edit.ignoreSharp ?? false;
-    if (typeof normalized.ignoreSharp !== 'boolean') throw new TypeError(`Mesh edit ${index} (ignoreSharp must be a boolean)`);
+    normalized.ignoreSharp = editBoolean(edit.ignoreSharp, index, 'ignoreSharp') ?? false;
     return;
   }
   normalized.weight = edit.weight === undefined ? WEIGHT_REFERENCE : finiteNumber(edit.weight, index, 'weight', { minimum: 1, maximum: MAXIMUM_NORMAL_WEIGHT });

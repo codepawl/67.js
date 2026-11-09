@@ -81,6 +81,6 @@ test('scene_inspect path returns translation keyframes around the hole of a reci
     assert.ok(!(value[0] > -8.8 && value[0] < -5.2 && value[2] > -8.8 && value[2] < -5.2), `${value} is inside the rock`);
   }
   assert.throws(() => scene.inspect({ path: { ground: 'ground', from: [0, 0], to: [15, 15] } }), /a hole/);
-  assert.throws(() => scene.inspect({ path: { ground: 'nowhere', from: [0, 0], to: [15, 15] } }), /not a node/);
+  assert.throws(() => scene.inspect({ path: { ground: 'nowhere', from: [0, 0], to: [15, 15] } }), /path\.ground: got "nowhere"; expected the ID of a node with a drawn geometry/);
   assert.throws(() => scene.inspect({ path: { ground: 'ground', from: [-15, -15], to: [15, 15], seconds: 2, speed: 1 } }), /path\.speed: got 1; expected speed or seconds, not both/);
 });

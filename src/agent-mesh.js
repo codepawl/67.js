@@ -1,5 +1,6 @@
 import { meshFromGeometry } from './mesh-convert.js';
 import { facesWithTag } from './mesh-data.js';
+import { invalidField } from './field-error.js';
 import { lintMesh } from './mesh-lint.js';
 import { applyMeshEdits, evaluateMeshStack } from './mesh-recipe.js';
 import { extractRender } from './mesh-render.js';
@@ -100,7 +101,7 @@ export function generateMeshGeometry(baseGeometry, edits, {
   const evaluated = evaluateMeshStack(edited.mesh, stack, { maxVertices, maxFaces: maxVertices, cache: evaluationCache, cacheKey: editsKey });
   const { geometry, renderVertexSource } = extractRender(evaluated.mesh, { sharpAngle: smoothAngle * Math.PI / 180 });
   if (geometry.positions.length / 3 > maxVertices) {
-    throw new RangeError(`The edited mesh needs ${geometry.positions.length / 3} render vertices, over maxVertices ${maxVertices}.`);
+    throw invalidField('edits', geometry.positions.length / 3, `an edited mesh of at most ${maxVertices} render vertices (maxVertices); use fewer subdivisions or segments`);
   }
   const keys = normalizeShapeKeys(shapeKeys);
   if (keys.length) {
@@ -124,7 +125,7 @@ export function registerEditedMesh(geometry, mesh, results) {
 export function taggedFacePositions(geometry, tag) {
   const polygon = polygonMeshes.get(geometry);
   if (!polygon) {
-    throw new RangeError('this part is a plain shape with no tagged faces. Use a mesh geometry and tag faces with a mesh_edit tag op, or drop region.');
+    throw invalidField('region', tag, 'a tag on a mesh geometry; tag faces with a mesh_edit tag op, or drop region');
   }
   const { mesh } = polygon;
   const positions = [];
@@ -135,7 +136,7 @@ export function taggedFacePositions(geometry, tag) {
     }
   }
   if (positions.length === 0) {
-    throw new RangeError(`tag ${tag} is on no faces. Tag some faces, or use another region.`);
+    throw invalidField('region', tag, 'a tag that is on some faces; tag faces with a mesh_edit tag op, or use another region');
   }
   return { positions: Float32Array.from(positions) };
 }
