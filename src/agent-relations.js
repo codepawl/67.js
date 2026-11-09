@@ -1,4 +1,5 @@
 import { mat4, vec3 } from 'gl-matrix';
+import { invalidField } from './field-error.js';
 
 // Relations place a part against another part's bounds, so a resized body keeps its handle where it belongs.
 // A node lists relations; each one fixes the node's world bounds on one or more axes from the bounds of another
@@ -27,32 +28,33 @@ function sideAxis(side) {
   return axisIndex(side[1]);
 }
 
-function describe(nodeId, index, relation) {
-  return `Relation ${index} of node ${JSON.stringify(nodeId.slice(0, 48))} (${relation.kind} to ${JSON.stringify(String(relation.to).slice(0, 48))})`;
+function relationPath(nodeIndex, index) {
+  return `nodes[${nodeIndex}].relations[${index}]`;
 }
 
-function normalizeRelation(node, index, relation) {
+function normalizeRelation(nodeIndex, index, relation) {
+  const path = relationPath(nodeIndex, index);
   if (!relation || typeof relation !== 'object' || Array.isArray(relation)) {
-    throw new TypeError(`Relation ${index} of node ${node.id} must be an object such as { "kind": "attach", "to": "body", "side": "+x" }.`);
+    throw invalidField(path, relation, 'an object such as { "kind": "attach", "to": "body", "side": "+x" }', TypeError);
   }
   if (!RELATION_KINDS.includes(relation.kind)) {
-    throw new TypeError(`Relation ${index} of node ${node.id} has kind ${JSON.stringify(String(relation.kind).slice(0, 48))}. Use one of ${RELATION_KINDS.join(', ')}.`);
+    throw invalidField(`${path}.kind`, relation.kind, `one of ${RELATION_KINDS.join(', ')}`, TypeError);
   }
   const allowed = ['kind', 'to', 'region', ...(KIND_FIELDS[relation.kind] ?? [])];
   for (const key of Object.keys(relation)) {
     if (!allowed.includes(key)) {
-      throw new TypeError(`${describe(node.id, index, relation)} has unknown field ${JSON.stringify(key.slice(0, 48))}. A ${relation.kind} relation takes: ${allowed.join(', ')}.`);
+      throw invalidField(`${path}.${key.slice(0, 48)}`, relation[key], `a field a ${relation.kind} relation takes: ${allowed.join(', ')}`, TypeError);
     }
   }
   if (typeof relation.to !== 'string' || !relation.to) {
-    throw new TypeError(`${describe(node.id, index, relation)} needs "to", the ID of the part it is placed against.`);
+    throw invalidField(`${path}.to`, relation.to, 'the ID of the part it is placed against, such as "body"', TypeError);
   }
   if (relation.region !== undefined && (typeof relation.region !== 'string' || !relation.region || relation.region.length > 128)) {
-    throw new TypeError(`${describe(node.id, index, relation)} region must be a mesh tag name of at most 128 characters.`);
+    throw invalidField(`${path}.region`, relation.region, 'a mesh tag name of 1 to 128 characters, such as "top"', TypeError);
   }
   const offset = relation.offset ?? 0;
   if (!Number.isFinite(offset) || Math.abs(offset) > RELATION_LIMITS.maxOffset) {
-    throw new RangeError(`${describe(node.id, index, relation)} offset must be a finite number of metres within +-${RELATION_LIMITS.maxOffset}.`);
+    throw invalidField(`${path}.offset`, relation.offset, `a finite number of metres within +-${RELATION_LIMITS.maxOffset}, such as 0.1`);
   }
   const result = { kind: relation.kind, to: relation.to };
   if (relation.region !== undefined) {
@@ -63,13 +65,13 @@ function normalizeRelation(node, index, relation) {
   }
   if (KIND_FIELDS[relation.kind].includes('side')) {
     if (!RELATION_SIDES.includes(relation.side)) {
-      throw new TypeError(`${describe(node.id, index, relation)} needs side, one of ${RELATION_SIDES.join(', ')}: the face of "${relation.to}" it sits against.`);
+      throw invalidField(`${path}.side`, relation.side, `one of ${RELATION_SIDES.join(', ')}, the face of "${relation.to}" it sits against`, TypeError);
     }
     result.side = relation.side;
   }
   if (relation.kind === 'align') {
     if (!AXES.includes(relation.axis) || !ANCHORS.includes(relation.at)) {
-      throw new TypeError(`${describe(node.id, index, relation)} needs axis (x, y or z) and at (${ANCHORS.join(', ')}).`);
+      throw invalidField(AXES.includes(relation.axis) ? `${path}.at` : `${path}.axis`, AXES.includes(relation.axis) ? relation.at : relation.axis, AXES.includes(relation.axis) ? `one of ${ANCHORS.join(', ')}` : 'x, y or z', TypeError);
     }
     result.axis = relation.axis;
     result.at = relation.at;
@@ -77,7 +79,7 @@ function normalizeRelation(node, index, relation) {
   if (relation.kind === 'centered') {
     const axes = relation.axes ?? AXES;
     if (!Array.isArray(axes) || axes.length === 0 || axes.length > 3 || axes.some(axis => !AXES.includes(axis)) || new Set(axes).size !== axes.length) {
-      throw new TypeError(`${describe(node.id, index, relation)} axes must list each of x, y, z at most once, or be left out for all three.`);
+      throw invalidField(`${path}.axes`, relation.axes, 'a list of x, y, z with each at most once, such as ["x", "z"], or left out for all three', TypeError);
     }
     result.axes = [...axes].sort();
   }
@@ -110,8 +112,8 @@ function dependencyOrder(nodesById, relatedIds) {
     }
     const position = path.indexOf(nodeId);
     if (position !== -1) {
-      const cycle = [...path.slice(position), nodeId].map(id => JSON.stringify(id.slice(0, 48))).join(' -> ');
-      throw new RangeError(`Relations form a cycle: ${cycle} (each part waits for the next, parents included). Remove one relation in the loop with set-node relations, or place one part with translation instead.`);
+      const cycle = [...path.slice(position), nodeId].map(id => id.slice(0, 48));
+      throw invalidField(`nodes[${[...nodesById.keys()].indexOf(nodeId)}].relations`, cycle, 'relations that form no loop, since each part waits for the next in the list, parents included; remove one relation in the loop with set-node relations, or place one part with translation');
     }
     path.push(nodeId);
     const node = nodesById.get(nodeId);
@@ -152,10 +154,11 @@ export function normalizeRelations(nodes) {
   const resultById = indexNodes(result);
   let relatedCount = 0;
   for (const node of related) {
+    const nodeIndex = nodes.indexOf(node);
     if (!Array.isArray(node.relations) || node.relations.length > RELATION_LIMITS.maxPerNode) {
-      throw new RangeError(`Node ${node.id} relations must be an array of at most ${RELATION_LIMITS.maxPerNode} entries. Merge or drop relations.`);
+      throw invalidField(`nodes[${nodeIndex}].relations`, node.relations, `an array of at most ${RELATION_LIMITS.maxPerNode} relations; merge or drop some`);
     }
-    const normalized = node.relations.map((relation, index) => normalizeRelation(node, index, relation));
+    const normalized = node.relations.map((relation, index) => normalizeRelation(nodeIndex, index, relation));
     const target = resultById.get(node.id);
     if (normalized.length === 0) {
       delete target.relations;
@@ -163,26 +166,26 @@ export function normalizeRelations(nodes) {
     }
     relatedCount++;
     if (relatedCount > RELATION_LIMITS.maxNodes) {
-      throw new RangeError(`At most ${RELATION_LIMITS.maxNodes} nodes can carry relations. Group repeated parts or place the rest with translation.`);
+      throw invalidField(`nodes[${nodeIndex}].relations`, node.relations, `relations on at most ${RELATION_LIMITS.maxNodes} nodes; group repeated parts or place the rest with translation`);
     }
     if (node.geometry === undefined) {
-      throw new TypeError(`Node ${node.id} is a group, and relations place mesh nodes. Put the relations on a mesh node inside the group.`);
+      throw invalidField(`nodes[${nodeIndex}].relations`, node.relations, 'relations on a mesh node, since this node is a group; put them on a mesh node inside the group', TypeError);
     }
     const decided = new Map();
     normalized.forEach((relation, index) => {
       const referenced = nodesById.get(relation.to);
       if (relation.to === node.id) {
-        throw new RangeError(`${describe(node.id, index, relation)} points at its own node. Point "to" at another part.`);
+        throw invalidField(`${relationPath(nodeIndex, index)}.to`, relation.to, 'the ID of another part, such as "body", not its own node');
       }
       if (!referenced) {
-        throw new RangeError(`${describe(node.id, index, relation)}: no node has that ID. Use a node ID from scene_inspect, or drop the relation.`);
+        throw invalidField(`${relationPath(nodeIndex, index)}.to`, relation.to, 'the ID of a node in this recipe; list them with scene_inspect, or drop the relation');
       }
       if (referenced.geometry === undefined) {
-        throw new RangeError(`${describe(node.id, index, relation)}: the target is a group with no geometry. Point "to" at a mesh node.`);
+        throw invalidField(`${relationPath(nodeIndex, index)}.to`, relation.to, 'the ID of a mesh node, such as a box, since this one is a group with no geometry');
       }
       for (const axis of relationAxes(relation)) {
         if (decided.has(axis)) {
-          throw new RangeError(`${describe(node.id, index, relation)} decides the ${AXES[axis]} axis, which relation ${decided.get(axis)} already decides. Keep one relation per axis.`);
+          throw invalidField(`${relationPath(nodeIndex, index)}.kind`, relation.kind, `a relation that leaves the ${AXES[axis]} axis to relation ${decided.get(axis)}, which already decides it; keep one relation per axis`);
         }
         decided.set(axis, index);
       }
@@ -270,6 +273,7 @@ export function solveRelations(nodes, worldBounds) {
   const cache = new Map();
   for (const nodeId of dependencyOrder(nodesById, new Set(related.map(node => node.id)))) {
     const node = nodesById.get(nodeId);
+    const nodeIndex = nodes.findIndex(candidate => candidate.id === nodeId);
     const delta = [0, 0, 0];
     const selfBounds = worldBounds(node, worldMatrixOf(nodeId, nodesById, cache), undefined);
     node.relations.forEach((relation, index) => {
@@ -278,7 +282,7 @@ export function solveRelations(nodes, worldBounds) {
       try {
         targetBounds = worldBounds(target, worldMatrixOf(target.id, nodesById, cache), relation.region);
       } catch (error) {
-        throw new RangeError(`${describe(nodeId, index, relation)} cannot be satisfied: ${error.message}`);
+        throw invalidField(`${relationPath(nodeIndex, index)}.${relation.region === undefined ? 'to' : 'region'}`, relation.region ?? relation.to, `a target that can be measured (${error.message})`);
       }
       for (const constraint of constraintsFor(relation, selfBounds, targetBounds)) {
         delta[constraint.axis] = constraint.delta;
@@ -287,13 +291,13 @@ export function solveRelations(nodes, worldBounds) {
     const parentWorld = node.parent !== null && nodesById.has(node.parent) ? worldMatrixOf(node.parent, nodesById, cache) : mat4.create();
     const inverse = mat4.invert(mat4.create(), parentWorld);
     if (!inverse) {
-      throw new RangeError(`Node ${nodeId} sits under a parent with a singular transform, so its relations cannot be solved. Fix the parent scale.`);
+      throw invalidField(`nodes[${nodes.findIndex(candidate => candidate.id === node.parent)}].scale`, nodesById.get(node.parent).scale, `a scale with no zero axis, since the relations of nodes[${nodeIndex}] cannot be solved under it, such as [1, 1, 1]`);
     }
     const local = vec3.transformMat4(vec3.create(), delta, inverse);
     const origin = vec3.transformMat4(vec3.create(), [0, 0, 0], inverse);
     node.translation = node.translation.map((value, axis) => value + local[axis] - origin[axis]);
     if (!node.translation.every(Number.isFinite)) {
-      throw new RangeError(`Relations on node ${nodeId} produce a translation outside the number range. Reduce offsets or part sizes.`);
+      throw invalidField(`nodes[${nodeIndex}].translation`, node.translation, 'finite numbers, but its relations produce a translation outside the number range; reduce offsets or part sizes');
     }
     cache.clear();
   }

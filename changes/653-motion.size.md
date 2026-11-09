@@ -1,0 +1,1 @@
+- scene:agent-scene+lazy: 955 bytes gzip of message text in the motion, clip layer, relation, branch, path query and crowd validators; nothing new runs unless a recipe is rejected, and an agent fixes the input in one retry.

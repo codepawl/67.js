@@ -66,9 +66,9 @@ test('a walk from one humanoid file plays on another with different names, propo
 });
 
 test('a layer from an unavailable clip, or between rigs without humanoid bones, says what is wrong', async () => {
-  await assert.rejects(createTarget({ duration: 1, layers: [{ from: { asset: 'ee'.repeat(32), clip: 0 } }] }), /not a catalog asset available/);
-  await assert.rejects(createTarget({ duration: 1, layers: [{ from: { asset: SOURCE_ID, clip: 5 } }] }), /from\.clip must be the index/);
-  await assert.rejects(createTarget({ duration: 1, layers: [{ from: { asset: SOURCE_ID, clip: 0 }, clip: 0 }] }), /takes from or clip/);
+  await assert.rejects(createTarget({ duration: 1, layers: [{ from: { asset: 'ee'.repeat(32), clip: 0 } }] }), /from\.asset: got .*expected the ID of a catalog asset/);
+  await assert.rejects(createTarget({ duration: 1, layers: [{ from: { asset: SOURCE_ID, clip: 5 } }] }), /from\.clip: got 5; expected the index of a clip in that asset, from 0 to 0/);
+  await assert.rejects(createTarget({ duration: 1, layers: [{ from: { asset: SOURCE_ID, clip: 0 }, clip: 0 }] }), /from: got .*expected from or clip, not both/);
   const broken = await createTarget(undefined, { names: { ...UNREAL_LIKE, leftLowerArm: 'misc', leftHand: 'misc2' } });
   const revision = hierarchyOf(broken).revision;
   assert.throws(() => broken.scene.apply([{ type: 'set-motion', motion: motionOf() }], { expectedRevision: revision }), /not humanoid to the bone map. Missing bones: leftLowerArm/);
@@ -121,6 +121,6 @@ test('keyed morph weights blink and open the jaw by target name, and seeking rep
   target.scene.sampleMotion(0.6);
   assert.deepEqual(face(), atBlink, 'seeking back repeats the earlier weights');
   assert.deepEqual(hierarchyOf(target).morphTargetNames, FACE_TARGETS);
-  await assert.rejects(createTarget({ duration: 1, tracks: [{ kind: 'morph', id: 'cheekPuff', property: 'weight', keyframes: [{ time: 0, value: 1 }] }] }), /Morph targets of this asset: eyeBlinkLeft/);
+  await assert.rejects(createTarget({ duration: 1, tracks: [{ kind: 'morph', id: 'cheekPuff', property: 'weight', keyframes: [{ time: 0, value: 1 }] }] }), /motion\.tracks\[0\]\.id: got "cheekPuff"; expected the ID of a morph in this recipe; morph targets of this asset: eyeBlinkLeft/);
   await assert.rejects(createTarget({ duration: 1, tracks: [{ kind: 'morph', id: 'jawOpen', property: 'weight', keyframes: [{ time: 0, value: 2 }] }] }), /morph weight from 0 to 1/);
 });
