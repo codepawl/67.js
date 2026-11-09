@@ -142,6 +142,6 @@ test('recipe meshes evaluate stacks, reuse cached prefixes and apply nodes into 
 
 test('an array over the budget fails before it allocates, and names the fix', () => {
   const edits = [{ op: 'array', count: 200 }];
-  assert.throws(() => applyMeshEdits(cube(), edits, { maxVertices: 100, maxFaces: 100 }), /would make 1600 vertices .* Lower count/);
+  assert.throws(() => applyMeshEdits(cube(), edits, { maxVertices: 100, maxFaces: 100 }), /edits\[0\]\.count: got 200; expected a count that keeps the mesh within 100 vertices and 100 faces \(this edit would make 1600 vertices/);
   assert.throws(() => evaluateMeshStack(cube(), edits, { maxVertices: 100, maxFaces: 100 }), /would make 1600 vertices/);
 });

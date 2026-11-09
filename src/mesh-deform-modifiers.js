@@ -1,5 +1,7 @@
 import { withPositions } from './mesh-field-edits.js';
 import { vertexNormals } from './mesh-normals.js';
+import { invalidField } from './field-error.js';
+import { editField, editInteger, editBoolean, editAxis } from './mesh-edit-field.js';
 
 // Modifiers that only move vertices, each from a few numbers: lattice (a coarse grid of moved control points), curve (bend
 // along a path), hook (pull the vertices near a point) and wave (a travelling ripple). Every list is bounded, and the
@@ -150,7 +152,7 @@ function sampleCurve(path, upAxis) {
   for (let index = 1; index < points.length; index++) {
     distances.push(distances[index - 1] + Math.hypot(...points[index].map((value, axis) => value - points[index - 1][axis])));
   }
-  if (!(distances.at(-1) > MINIMUM_SPAN)) throw new RangeError('curve path has no length. Give points that are apart.');
+  if (!(distances.at(-1) > MINIMUM_SPAN)) throw invalidField('path', path, 'points that are apart, such as [[0, 0, 0], [0, 0, 2]]');
   const tangents = points.map((point, index) => {
     const ahead = points[Math.min(index + 1, points.length - 1)];
     const behind = points[Math.max(index - 1, 0)];
@@ -216,31 +218,31 @@ export function curveDeform(mesh, { path, axis }) {
 }
 
 function checkedVector(value, index, label, finiteNumber) {
-  if (!Array.isArray(value) || value.length !== 3) throw new TypeError(`Mesh edit ${index} (${label} needs three numbers)`);
+  if (!Array.isArray(value) || value.length !== 3) throw editField(index, label, value, 'an array of three numbers, such as [0, 1, 0]');
   return value.map(component => finiteNumber(component, index, label));
 }
 
-function normalizeLattice(edit, normalized, index, { finiteNumber, integerInRange }) {
+function normalizeLattice(edit, normalized, index, { finiteNumber }) {
   const divisions = edit.divisions ?? [2, 2, 2];
-  if (!Array.isArray(divisions) || divisions.length !== 3) throw new TypeError(`Mesh edit ${index} (divisions needs three integers from 2 to ${MAX_LATTICE_DIVISIONS})`);
-  normalized.divisions = divisions.map(count => integerInRange(count, index, 'divisions', 2, MAX_LATTICE_DIVISIONS));
+  if (!Array.isArray(divisions) || divisions.length !== 3) throw editField(index, 'divisions', divisions, `an array of three whole numbers from 2 to ${MAX_LATTICE_DIVISIONS}, such as [2, 2, 2]`);
+  normalized.divisions = divisions.map(count => editInteger(count, index, 'divisions', 2, MAX_LATTICE_DIVISIONS));
   const moves = edit.moves ?? [];
-  if (!Array.isArray(moves) || moves.length > MAX_LATTICE_MOVES) throw new RangeError(`Mesh edit ${index} (moves is a list of at most ${MAX_LATTICE_MOVES} of { point, offset })`);
+  if (!Array.isArray(moves) || moves.length > MAX_LATTICE_MOVES) throw editField(index, 'moves', moves, `a list of at most ${MAX_LATTICE_MOVES} moves, such as [{ "point": [0, 0, 0], "offset": [0, 0, 1] }]`, RangeError);
   normalized.moves = moves.map((move, moveIndex) => {
-    if (!move || typeof move !== 'object' || Array.isArray(move)) throw new TypeError(`Mesh edit ${index} (moves[${moveIndex}] must be { point, offset })`);
-    if (!Array.isArray(move.point) || move.point.length !== 3) throw new TypeError(`Mesh edit ${index} (moves[${moveIndex}].point needs three grid indices)`);
-    const point = move.point.map((cell, axis) => integerInRange(cell, index, `moves[${moveIndex}].point`, 0, normalized.divisions[axis] - 1));
+    if (!move || typeof move !== 'object' || Array.isArray(move)) throw editField(index, `moves[${moveIndex}]`, move, 'an object such as { "point": [0, 0, 0], "offset": [0, 0, 1] }');
+    if (!Array.isArray(move.point) || move.point.length !== 3) throw editField(index, `moves[${moveIndex}].point`, move.point, 'three grid indices, such as [0, 1, 0]');
+    const point = move.point.map((cell, axis) => editInteger(cell, index, `moves[${moveIndex}].point`, 0, normalized.divisions[axis] - 1));
     return { point, offset: checkedVector(move.offset, index, `moves[${moveIndex}].offset`, finiteNumber) };
   });
 }
 
 function normalizeCurve(edit, normalized, index, { finiteNumber }) {
   if (!Array.isArray(edit.path) || edit.path.length < 2 || edit.path.length > MAX_CURVE_POINTS) {
-    throw new TypeError(`Mesh edit ${index} (path needs 2 to ${MAX_CURVE_POINTS} points of three numbers)`);
+    throw editField(index, 'path', edit.path, `an array of 2 to ${MAX_CURVE_POINTS} points of three numbers, such as [[0, 0, 0], [0, 0, 2]]`);
   }
   normalized.path = edit.path.map(point => checkedVector(point, index, 'path', finiteNumber));
   normalized.axis = edit.axis ?? 'x';
-  if (!Object.hasOwn(AXIS_NAMES, normalized.axis)) throw new TypeError(`Mesh edit ${index} (axis must be x, y or z)`);
+  editAxis(normalized.axis, index);
 }
 
 function normalizeHook(edit, normalized, index, { finiteNumber }) {
@@ -249,7 +251,7 @@ function normalizeHook(edit, normalized, index, { finiteNumber }) {
   normalized.translation = checkedVector(edit.translation ?? [0, 0, 0], index, 'translation', finiteNumber);
   normalized.strength = edit.strength === undefined ? 1 : finiteNumber(edit.strength, index, 'strength', { minimum: 0, maximum: 1 });
   normalized.falloff = edit.falloff ?? 'smooth';
-  if (!HOOK_FALLOFFS.includes(normalized.falloff)) throw new TypeError(`Mesh edit ${index} (falloff must be one of ${HOOK_FALLOFFS.join(', ')})`);
+  if (!HOOK_FALLOFFS.includes(normalized.falloff)) throw editField(index, 'falloff', normalized.falloff, `one of ${HOOK_FALLOFFS.join(', ')}`);
 }
 
 function normalizeWave(edit, normalized, index, { finiteNumber }) {
@@ -260,13 +262,14 @@ function normalizeWave(edit, normalized, index, { finiteNumber }) {
   normalized.time = edit.time === undefined ? 0 : finiteNumber(edit.time, index, 'time', { minimum: -1e6, maximum: 1e6 });
   normalized.timeOffset = edit.timeOffset === undefined ? 0 : finiteNumber(edit.timeOffset, index, 'timeOffset', { minimum: -1e6, maximum: 1e6 });
   const start = edit.start ?? [0, 0];
-  if (!Array.isArray(start) || start.length !== 2) throw new TypeError(`Mesh edit ${index} (start needs two numbers, x and y)`);
+  if (!Array.isArray(start) || start.length !== 2) throw editField(index, 'start', start, 'an array of two numbers, x and y, such as [0, 0]');
   normalized.start = start.map(value => finiteNumber(value, index, 'start'));
   normalized.cyclic = edit.cyclic ?? true;
   normalized.normal = edit.normal ?? false;
-  if (typeof normalized.cyclic !== 'boolean' || typeof normalized.normal !== 'boolean') throw new TypeError(`Mesh edit ${index} (cyclic and normal must be booleans)`);
+  editBoolean(normalized.cyclic, index, 'cyclic');
+  editBoolean(normalized.normal, index, 'normal');
   normalized.axes = edit.axes ?? 'xy';
-  if (!WAVE_AXES.includes(normalized.axes)) throw new TypeError(`Mesh edit ${index} (axes must be one of ${WAVE_AXES.join(', ')})`);
+  if (!WAVE_AXES.includes(normalized.axes)) throw editField(index, 'axes', normalized.axes, `one of ${WAVE_AXES.join(', ')}`);
 }
 
 const NORMALIZERS = Object.freeze({ lattice: normalizeLattice, curve: normalizeCurve, hook: normalizeHook, wave: normalizeWave });

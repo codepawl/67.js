@@ -2,6 +2,7 @@ import { createMeshData, GROUP_PREFIX, vertexGroupNames } from './mesh-data.js';
 import { evaluateField, meshFieldContext } from './mesh-fields.js';
 import { selectedVertices } from './mesh-field-edits.js';
 import { selectFaces } from './mesh-select.js';
+import { editField } from './mesh-edit-field.js';
 
 // Vertex colors (the corner attribute "color", three floats in 0 to 1) and vertex groups (the point attributes
 // "group:<name>", one weight in 0 to 1 per vertex). Both are set by one value, a field expression or a gradient along
@@ -12,34 +13,31 @@ export const MAX_VERTEX_GROUPS = 32;
 const COLOR_ATTRIBUTE = 'color';
 const AXIS_OFFSETS = Object.freeze({ x: 0, y: 1, z: 2 });
 
-function editError(index, message) {
-  return new TypeError(`Mesh edit ${index} (${message})`);
-}
-
 function unitNumber(value, index, label, finiteNumber) {
   return finiteNumber(value, index, label, { minimum: 0, maximum: 1 });
 }
 
 function normalizeGradient(gradient, normalized, index, { finiteNumber, valuesKey, readValue }) {
+  const example = valuesKey === 'weights' ? '[0, 1]' : '[[1, 0, 0], [0, 0, 1]]';
   if (!gradient || typeof gradient !== 'object' || Array.isArray(gradient)) {
-    throw editError(index, `gradient must be { axis, range: [low, high], ${valuesKey}: [atLow, atHigh] }`);
+    throw editField(index, 'gradient', gradient, `an object such as { "axis": "z", "range": [0, 1], "${valuesKey}": ${example} }`);
   }
   for (const key of Object.keys(gradient)) {
-    if (!['axis', 'range', valuesKey].includes(key)) throw editError(index, `gradient does not take ${key}; fields: axis, range, ${valuesKey}`);
+    if (!['axis', 'range', valuesKey].includes(key)) throw editField(index, `gradient.${key}`, gradient[key], `one of the gradient fields axis, range, ${valuesKey}; remove "${key}"`);
   }
-  if (!GRADIENT_AXES.includes(gradient.axis)) throw editError(index, `gradient.axis must be one of ${GRADIENT_AXES.join(', ')}`);
-  if (!Array.isArray(gradient.range) || gradient.range.length !== 2) throw editError(index, 'gradient.range needs two numbers, low then high');
+  if (!GRADIENT_AXES.includes(gradient.axis)) throw editField(index, 'gradient.axis', gradient.axis, `one of ${GRADIENT_AXES.join(', ')}`);
+  if (!Array.isArray(gradient.range) || gradient.range.length !== 2) throw editField(index, 'gradient.range', gradient.range, 'an array of two numbers, low then high, such as [0, 1]');
   const range = gradient.range.map(value => finiteNumber(value, index, 'gradient.range'));
-  if (!(range[0] < range[1])) throw editError(index, 'gradient.range must have low below high');
+  if (!(range[0] < range[1])) throw editField(index, 'gradient.range', range, 'two numbers with low below high, such as [0, 1]');
   if (!Array.isArray(gradient[valuesKey]) || gradient[valuesKey].length !== 2) {
-    throw editError(index, `gradient.${valuesKey} needs two entries, the value at the low end then at the high end`);
+    throw editField(index, `gradient.${valuesKey}`, gradient[valuesKey], `an array of two entries, the value at the low end then at the high end, such as ${example}`);
   }
   normalized.gradient = { axis: gradient.axis, range, [valuesKey]: gradient[valuesKey].map((value, side) => readValue(value, `gradient.${valuesKey}[${side}]`)) };
 }
 
 function rejectSecondSource(edit, index, sources) {
   const given = sources.filter(source => edit[source] !== undefined);
-  if (given.length > 1) throw editError(index, `give only one of ${sources.join(', ')}`);
+  if (given.length > 1) throw editField(index, given[1], edit[given[1]], `left out, because only one of ${sources.join(', ')} is allowed, such as keeping ${given[0]}`);
   return given[0];
 }
 
@@ -60,7 +58,7 @@ export function normalizeVertexGroupEdit(edit, normalized, index, { finiteNumber
 /** Validate a vertex_color edit: color [r, g, b], a vector field or a two-color gradient (default white). */
 export function normalizeVertexColorEdit(edit, normalized, index, { finiteNumber, checkedField }) {
   const readColor = (value, label) => {
-    if (!Array.isArray(value) || value.length !== 3) throw editError(index, `${label} needs three numbers from 0 to 1`);
+    if (!Array.isArray(value) || value.length !== 3) throw editField(index, label, value, 'an array of three numbers from 0 to 1, such as [1, 0.5, 0]');
     return value.map(channel => unitNumber(channel, index, label, finiteNumber));
   };
   const source = rejectSecondSource(edit, index, ['color', 'field', 'gradient']);

@@ -2,6 +2,7 @@ import { withPositions } from './mesh-field-edits.js';
 import { mergeByDistance } from './mesh-ops.js';
 import { triangulateFaces, splitSharpEdges } from './mesh-restructure.js';
 import { MODIFIER_OPERATIONS } from './mesh-operations.js';
+import { editField, editInteger, editAxis } from './mesh-edit-field.js';
 import { normalizeGeneratorEdit, GENERATOR_RUNNERS } from './mesh-generator-modifiers.js';
 import { normalizeNormalEdit, NORMAL_RUNNERS } from './mesh-normal-modifiers.js';
 import { isDeformModifier, normalizeDeformEdit, runDeformEdit } from './mesh-deform-modifiers.js';
@@ -18,37 +19,30 @@ export function isModifierOperation(operation) {
   return Object.hasOwn(MODIFIER_OPERATIONS, operation);
 }
 
-function integerInRange(value, index, label, minimum, maximum) {
-  if (!Number.isInteger(value) || value < minimum || value > maximum) {
-    throw new TypeError(`Mesh edit ${index} (${label} must be an integer from ${minimum} to ${maximum})`);
-  }
-  return value;
-}
-
-function rejectField(edit, index, field, reason) {
-  if (edit[field] !== undefined) throw new TypeError(`Mesh edit ${index} (${edit.op} ${edit.mode ?? ''} does not take ${field}: ${reason})`);
+function rejectField(edit, index, field, usedInstead) {
+  if (edit[field] !== undefined) throw editField(index, field, edit[field], `left out, because ${edit.op} ${edit.mode} takes ${usedInstead}`);
 }
 
 function normalizeSimpleDeform(edit, normalized, index, finiteNumber) {
   if (!SIMPLE_DEFORM_MODES.includes(edit.mode)) {
-    throw new TypeError(`Mesh edit ${index} (mode must be one of ${SIMPLE_DEFORM_MODES.join(', ')})`);
+    throw editField(index, 'mode', edit.mode, `one of ${SIMPLE_DEFORM_MODES.join(', ')}`);
   }
   normalized.mode = edit.mode;
   normalized.axis = edit.axis ?? 'z';
-  if (!Object.hasOwn(AXIS_NAMES, normalized.axis)) throw new TypeError(`Mesh edit ${index} (axis must be x, y or z)`);
+  editAxis(normalized.axis, index);
   if (edit.mode === 'twist' || edit.mode === 'bend') {
-    rejectField(edit, index, 'factor', 'it uses angle in degrees');
+    rejectField(edit, index, 'factor', 'angle in degrees, such as "angle": 45');
     normalized.angle = edit.angle === undefined ? 45 : finiteNumber(edit.angle, index, 'angle', { minimum: -3600, maximum: 3600 });
     return;
   }
-  rejectField(edit, index, 'angle', 'it uses factor');
+  rejectField(edit, index, 'angle', 'factor, such as "factor": 0.5');
   normalized.factor = edit.factor === undefined ? 0.5 : finiteNumber(edit.factor, index, 'factor', { minimum: -10, maximum: 10 });
 }
 
 /** Fill in `normalized` for a modifier edit, throwing a TypeError that names the edit when a field is wrong. */
 export function normalizeModifierEdit(edit, normalized, index, { finiteNumber, checkedField }) {
   if (Object.hasOwn(GENERATOR_RUNNERS, edit.op)) {
-    normalizeGeneratorEdit(edit, normalized, index, { finiteNumber, integerInRange, checkedField });
+    normalizeGeneratorEdit(edit, normalized, index, { finiteNumber, checkedField });
     return;
   }
   if (Object.hasOwn(NORMAL_RUNNERS, edit.op)) {
@@ -56,7 +50,7 @@ export function normalizeModifierEdit(edit, normalized, index, { finiteNumber, c
     return;
   }
   if (isDeformModifier(edit.op)) {
-    normalizeDeformEdit(edit, normalized, index, { finiteNumber, integerInRange });
+    normalizeDeformEdit(edit, normalized, index, { finiteNumber });
     return;
   }
   switch (edit.op) {
@@ -64,14 +58,14 @@ export function normalizeModifierEdit(edit, normalized, index, { finiteNumber, c
       normalized.distance = edit.distance === undefined ? 0.001 : finiteNumber(edit.distance, index, 'distance', { minimum: 0, maximum: 1e3, exclusiveMinimum: true });
       break;
     case 'triangulate':
-      normalized.minVertices = edit.minVertices === undefined ? 4 : integerInRange(edit.minVertices, index, 'minVertices', 4, 4096);
+      normalized.minVertices = edit.minVertices === undefined ? 4 : editInteger(edit.minVertices, index, 'minVertices', 4, 4096);
       break;
     case 'edge_split':
       normalized.angle = edit.angle === undefined ? 30 : finiteNumber(edit.angle, index, 'angle', { minimum: 0, maximum: 180 });
       break;
     case 'smooth':
       normalized.factor = edit.factor === undefined ? 0.5 : finiteNumber(edit.factor, index, 'factor', { minimum: -2, maximum: 2 });
-      normalized.iterations = edit.iterations === undefined ? 1 : integerInRange(edit.iterations, index, 'iterations', 1, MAX_SMOOTH_ITERATIONS);
+      normalized.iterations = edit.iterations === undefined ? 1 : editInteger(edit.iterations, index, 'iterations', 1, MAX_SMOOTH_ITERATIONS);
       break;
     case 'simple_deform':
       normalizeSimpleDeform(edit, normalized, index, finiteNumber);

@@ -130,7 +130,7 @@ test('set_position moves vertices by a field and leaves the rest alone', () => {
   const stretched = applyMeshEdits(mesh, [{ op: 'set_position', position: { vec: [{ attr: 'position', component: 'x' }, { mul: [{ attr: 'position', component: 'y' }, 2] }, { attr: 'position', component: 'z' }] } }]).mesh;
   assert.equal(stretched.positions[1], mesh.positions[1] * 2);
   assert.equal(stretched.faceCount, mesh.faceCount);
-  assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position' }]), /position or an offset/);
+  assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position' }]), /edits\[0\]\.position: got undefined; expected a vector field expression/);
   assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position', offset: 1 }]), /vector/);
   assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position', offset: { eval: 'x' } }]), /unknown operator/);
 });

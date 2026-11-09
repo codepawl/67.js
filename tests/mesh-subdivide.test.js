@@ -93,14 +93,14 @@ test('a crease of sharpness 1 holds for one level only', () => {
 });
 
 test('the budget is checked before the mesh grows', () => {
-  assert.throws(() => applyMeshEdits(cube(), [{ op: 'subdivide', levels: 4 }], { maxFaces: 1000 }), /subdivide\) would make \d+ vertices and 1536 faces/);
+  assert.throws(() => applyMeshEdits(cube(), [{ op: 'subdivide', levels: 4 }], { maxFaces: 1000 }), /edits\[0\]\.levels: got 4; .*\(this edit would make \d+ vertices and 1536 faces\)/);
   assert.throws(() => evaluateMeshStack(cube(), [{ op: 'subdivide', levels: 4 }], { maxVertices: 100 }), RangeError);
 });
 
 test('the recipe rejects levels out of range and a sharpness without a crease', () => {
   assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', levels: 5 }]), /edits\[0\]\.levels: got 5; expected a whole number from 1 to 4/);
   assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', levels: 0 }]), /levels/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', sharpness: 2 }]), /sharpness needs a crease rule/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'subdivide', sharpness: 2 }]), /edits\[0\]\.sharpness: got 2; expected left out unless a crease rule is given/);
   assert.throws(() => applyMeshEdits(cube(), [{ op: 'subdivide', crease: { angle: 179 } }]), /selects no edges/);
 });
 

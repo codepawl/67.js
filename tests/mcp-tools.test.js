@@ -319,7 +319,7 @@ test('mesh_edit builds a mesh from a base and an edit log through the SDK', asyn
   const none = await client.callTool({ name: 'mesh_edit', arguments: { sessionId, expectedRevision: 1, geometry: 'cube',
     edits: [{ op: 'delete', select: { tag: 'lid.rim' } }, { op: 'delete', select: { tag: 'lid.rim' } }] } });
   assert.equal(none.isError, true);
-  assert.match(none.content[0].text, /Unknown tag lid\.rim|selects no faces/);
+  assert.match(none.content[0].text, /Unknown tag lid\.rim|edits\[3\]\.select: got \{"tag":"lid\.rim"\}; expected a rule that matches at least one face/);
   const exported = await client.callTool({ name: 'scene_export_recipe', arguments: { sessionId } });
   assert.equal(exported.structuredContent.recipe.geometries[0].edits.length, 2, 'failed edits leave the log unchanged');
   const replaced = await client.callTool({ name: 'mesh_edit', arguments: { sessionId, expectedRevision: 1, geometry: 'cube', replace: true,
