@@ -164,3 +164,13 @@ test('recipe motion tracks keep modifiers, sample them at the same times in ever
   assert.ok(Math.abs(forward[1].cube[0] - 1.5) <= 0.1);
   assert.ok(Math.abs(forward[2].eye[0] - 2.5) < 1e-6);
 });
+
+test('stepped lands on the new step at frame times that are inexact in binary', () => {
+  for (const step of [1 / 30, 0.1]) {
+    const stepped = sampler({ modifiers: [{ type: 'stepped', step }] }, [{ time: 0, value: 0 }, { time: 4, value: 4 }]);
+    for (let stepIndex = 0; stepIndex * step < 3.9; stepIndex += 1) {
+      const expected = stepIndex * step;
+      assert.ok(Math.abs(stepped(expected) - expected) < 1e-9, `step ${step} index ${stepIndex}`);
+    }
+  }
+});

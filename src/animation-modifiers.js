@@ -144,7 +144,7 @@ export function remapTime(effects, keyframes, time, offsets) {
   let remapped = time;
   for (const modifier of effects.timeModifiers) {
     if (modifier.type === 'stepped') {
-      remapped = Math.floor((remapped - modifier.offset) / modifier.step) * modifier.step + modifier.offset;
+      remapped = Math.floor((remapped - modifier.offset) / modifier.step + 1e-9) * modifier.step + modifier.offset;
       continue;
     }
     if (length <= 0 || remapped >= firstTime && remapped <= firstTime + length) continue;
