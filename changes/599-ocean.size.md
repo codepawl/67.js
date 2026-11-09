@@ -1,0 +1,4 @@
+- entry:mesh: the ocean modifier is about 1.2 KB gzip of mesh code that agents cannot get any other way.
+- scene:agent-scene+lazy: the ocean modifier lives in the lazy part, which holds the whole mesh engine.
+- goal:agent-scene: the ocean modifier adds its validated field list and note to the agent-scene core (55 bytes gzip); the wave code is in the lazy mesh part.
+- scene:agent-scene: 112 bytes for the ocean modifier's validated field list and its note, once main's note trims overlapped the ones this pull request had made; the ocean is the only way for an agent to make an open sea.
