@@ -1,0 +1,1 @@
+- Errors for motion tracks and IK, clip layers, part relations, branches, path queries and crowds now name the field, the value and an example: `nodes[1].relations[0].side: got "+w"; expected one of +x, -x, +y, -y, +z, -z, the face of "a" it sits against.` The shared motion helpers (`bounded`, `denseArray`, `knownKeys`) keep their wording for now (#653)

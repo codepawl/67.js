@@ -314,28 +314,40 @@ function syncMeshBlend(record) {
   record.renderer.meshBlend.radii = radii;
 }
 
-function status(record) {
+function renderStatus(record) {
   const render = renderInfo(record.renderer);
   record.lastRender = render;
   return {
     sessionId: record.sessionId,
     revision: record.scene.revision,
     topologyRevision: record.scene.topologyRevision,
-    inspection: record.scene.inspect(),
     render,
   };
+}
+
+function status(record) {
+  const { sessionId, revision, topologyRevision, render } = renderStatus(record);
+  return { sessionId, revision, topologyRevision, inspection: record.scene.inspect(), render };
+}
+
+// The answer to an edit stays short: it holds no node list, because every answer stays in the agent's context.
+// An agent that needs the node list calls scene_inspect. The scene's own warnings (closed room without a bake, stale bake,
+// coplanar overlap, ignored material fields) still ride along, only when there are any.
+function sceneDiagnostics(record) {
+  const { diagnostics } = record.scene.inspect();
+  return diagnostics?.length ? { diagnostics } : {};
 }
 
 function mutationStatus(record) {
   try {
     draw(record);
-    return { ...status(record), committed: true, renderSucceeded: true };
+    return { ...renderStatus(record), ...sceneDiagnostics(record), committed: true, renderSucceeded: true };
   } catch (error) {
     return {
       sessionId: record.sessionId,
       revision: record.scene.revision,
-      inspection: record.scene.inspect(),
       render: record.lastRender ?? null,
+      ...sceneDiagnostics(record),
       committed: true,
       renderSucceeded: false,
       renderError: error.message,

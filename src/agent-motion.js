@@ -110,14 +110,14 @@ function normalizedKeyframe(keyframe, track, duration, interpolation) {
   validateValue(track.kind, track.property, result.value, 'value');
   const easing = normalizeKeyframeEasing(keyframe);
   if (easing && interpolation !== 'LINEAR' && interpolation !== 'SMOOTH') {
-    throw new RangeError(`Keyframe easing needs LINEAR or SMOOTH interpolation, not ${interpolation}.`);
+    throw invalidField('easing', keyframe.easing, `a field left out unless the track interpolation is LINEAR or SMOOTH, not ${interpolation}`);
   }
   Object.assign(result, easing);
   if (interpolation === 'CUBICSPLINE') {
     result.inTangent = valueFrom(keyframe.inTangent, size, 'Incoming tangent');
     result.outTangent = valueFrom(keyframe.outTangent, size, 'Outgoing tangent');
   } else if (Object.hasOwn(keyframe, 'inTangent') || Object.hasOwn(keyframe, 'outTangent')) {
-    throw new TypeError('Tangents require CUBICSPLINE interpolation.');
+    throw invalidField(Object.hasOwn(keyframe, 'inTangent') ? 'inTangent' : 'outTangent', keyframe.inTangent ?? keyframe.outTangent, `a field left out unless the track interpolation is CUBICSPLINE, such as "interpolation": "CUBICSPLINE" (this track is ${interpolation})`, TypeError);
   }
   return result;
 }
@@ -132,25 +132,25 @@ function checkLookTarget(track, recipe) {
   const { kind, id, property } = track;
   if (!LOOK_KINDS.has(kind)) return;
   if (!recipe.environment || !recipe.effects) {
-    throw new RangeError(`Motion ${kind} tracks move the lights, sky and effects of a scene recipe; an imported asset has none.`);
+    throw invalidField(`motion.tracks.${kind}`, kind, 'a node, material, morph or camera track, since lights, sky and effects belong to a scene recipe and an imported asset has none');
   }
   if (kind === 'light') {
     const ids = lightIds(recipe.environment);
     if (!ids.includes(id)) {
-      throw new RangeError(`Motion light was not found: ${JSON.stringify(id)}. Lights of this scene: ${ids.join(', ') || 'none'}. The sun is a sun track.`);
+      throw invalidField('motion.tracks.id', id, `one of the lights of this scene: ${ids.join(', ') || 'none yet'}; the sun is a sun track, such as "point:0"`);
     }
     if (property === 'direction' && !LIGHT_DIRECTION_TYPES.has(id.split(':')[0])) {
-      throw new RangeError(`Motion light ${id} has no direction; only spot and area lights do. A point light takes position, color and intensity.`);
+      throw invalidField('motion.tracks.property', `${id}.direction`, 'a property the light has; only spot and area lights have a direction, and a point light takes position, color and intensity');
     }
   }
   if (kind === 'effects' && property === 'focusDistance' && !(recipe.effects.depthOfField?.blur > 0)) {
-    throw new RangeError('Motion focusDistance needs effects.depthOfField.blur above 0. A camera with an fStop focuses on its target, so move the camera target track instead.');
+    throw invalidField('motion.tracks.property', 'effects.focusDistance', 'a track only when effects.depthOfField.blur is above 0, such as blur 2; a camera with an fStop focuses on its target, so move the camera target track instead');
   }
 }
 
 function nodeIdFrom(value, nodes, label) {
   if (typeof value !== 'string' || !nodes.has(value)) {
-    throw new RangeError(`${label} must be a node ID in this recipe; got ${JSON.stringify(value)}.`);
+    throw invalidField(label, value, 'a node ID in this recipe, such as "arm"');
   }
   return value;
 }
@@ -160,15 +160,15 @@ function ikKeyframes(input, size, duration, label) {
   knownKeys(input, ['keyframes', 'interpolation'], label);
   const interpolation = input.interpolation ?? 'LINEAR';
   if (!['LINEAR', 'STEP', 'SMOOTH'].includes(interpolation)) {
-    throw new RangeError(`${label} interpolation must be LINEAR, STEP or SMOOTH.`);
+    throw invalidField(`${label}.interpolation`, interpolation, 'LINEAR, STEP or SMOOTH');
   }
-  denseArray(input.keyframes, 64, `${label} keyframes`);
+  denseArray(input.keyframes, 64, `${label}.keyframes`);
   if (!input.keyframes.length) {
-    throw new RangeError(`${label} needs at least one keyframe.`);
+    throw invalidField(`${label}.keyframes`, input.keyframes, 'at least one keyframe, such as [{ "time": 0, "value": [0, 1, 0] }]');
   }
   const keyframes = input.keyframes.map(keyframe => {
-    knownKeys(keyframe, ['time', 'value'], `${label} keyframe`);
-    return { time: bounded(keyframe.time, 0, duration, 'Keyframe time'), value: valueFrom(keyframe.value, size, `${label} value`) };
+    knownKeys(keyframe, ['time', 'value'], `${label}.keyframe`);
+    return { time: bounded(keyframe.time, 0, duration, 'Keyframe time'), value: valueFrom(keyframe.value, size, `${label}.value`) };
   });
   return { interpolation, keyframes };
 }
@@ -179,12 +179,12 @@ function ikPoint(input, nodes, duration, label) {
   }
   if (input && Object.hasOwn(input, 'node')) {
     knownKeys(input, ['node'], label);
-    return { node: nodeIdFrom(input.node, nodes, `${label} node`) };
+    return { node: nodeIdFrom(input.node, nodes, `${label}.node`) };
   }
   if (input && Object.hasOwn(input, 'keyframes')) {
     return ikKeyframes(input, 3, duration, label);
   }
-  throw new TypeError(`${label} must be [x, y, z], { "node": id } or { "keyframes": [{ "time", "value" }] }.`);
+  throw invalidField(label, input, '[x, y, z], { "node": id } or { "keyframes": [{ "time", "value" }] }, such as [0, 1, 0]', TypeError);
 }
 
 function ikWeight(input, duration, label) {
@@ -204,12 +204,12 @@ function jointLimits(input, label) {
   knownKeys(input, ['root', 'middle'], label);
   const limits = {};
   for (const joint of Object.keys(input)) {
-    knownKeys(input[joint], ['x', 'y', 'z'], `${label} ${joint}`);
+    knownKeys(input[joint], ['x', 'y', 'z'], `${label}.${joint}`);
     limits[joint] = {};
     for (const axis of Object.keys(input[joint])) {
-      const range = valueFrom(input[joint][axis], 2, `${label} ${joint}.${axis}`);
+      const range = valueFrom(input[joint][axis], 2, `${label}.${joint}.${axis}`);
       if (range[0] > range[1] || range[0] < -180 || range[1] > 180) {
-        throw new RangeError(`${label} ${joint}.${axis} must be [min, max] degrees within -180 and 180, min first.`);
+        throw invalidField(`${label}.${joint}.${axis}`, input[joint][axis], '[min, max] degrees within -180 and 180, min first, such as [-90, 90]');
       }
       limits[joint][axis] = range;
     }
@@ -218,63 +218,63 @@ function jointLimits(input, label) {
 }
 
 function normalizeIkSolver(input, position, nodes, visibleNodes, duration) {
-  const label = `Motion ik ${position}`;
+  const label = `motion.ik[${position}]`;
   if (input?.type === 'two-bone') {
     knownKeys(input, ['type', 'root', 'middle', 'end', 'target', 'pole', 'weight', 'keepEndRotation', 'limits', 'bendToward'], label);
     const solver = {
       type: 'two-bone',
-      root: nodeIdFrom(input.root, nodes, `${label} root`),
-      middle: nodeIdFrom(input.middle, nodes, `${label} middle`),
-      end: nodeIdFrom(input.end, nodes, `${label} end`),
-      target: ikPoint(input.target, visibleNodes, duration, `${label} target`),
-      weight: ikWeight(input.weight, duration, `${label} weight`),
+      root: nodeIdFrom(input.root, nodes, `${label}.root`),
+      middle: nodeIdFrom(input.middle, nodes, `${label}.middle`),
+      end: nodeIdFrom(input.end, nodes, `${label}.end`),
+      target: ikPoint(input.target, visibleNodes, duration, `${label}.target`),
+      weight: ikWeight(input.weight, duration, `${label}.weight`),
     };
     if (input.pole !== undefined) {
-      solver.pole = ikPoint(input.pole, visibleNodes, duration, `${label} pole`);
+      solver.pole = ikPoint(input.pole, visibleNodes, duration, `${label}.pole`);
     }
     if (input.keepEndRotation !== undefined) {
       if (typeof input.keepEndRotation !== 'boolean') {
-        throw new TypeError(`${label} keepEndRotation must be boolean.`);
+        throw invalidField(`${label}.keepEndRotation`, input.keepEndRotation, 'true or false', TypeError);
       }
       solver.keepEndRotation = input.keepEndRotation;
     }
     if (input.limits !== undefined) {
-      solver.limits = jointLimits(input.limits, `${label} limits`);
+      solver.limits = jointLimits(input.limits, `${label}.limits`);
     }
     if (input.bendToward !== undefined) {
-      solver.bendToward = valueFrom(input.bendToward, 3, `${label} bendToward`);
+      solver.bendToward = valueFrom(input.bendToward, 3, `${label}.bendToward`);
     }
     return solver;
   }
   if (input?.type === 'aim') {
     knownKeys(input, ['type', 'joint', 'joints', 'forward', 'worldForward', 'target', 'maxAngle', 'weight'], label);
     if (input.forward !== undefined && input.worldForward !== undefined) {
-      throw new TypeError(`${label} takes forward or worldForward, not both.`);
+      throw invalidField(`${label}.worldForward`, input.worldForward, 'forward or worldForward, not both; leave one out', TypeError);
     }
     if ((input.joint === undefined) === (input.joints === undefined)) {
-      throw new TypeError(`${label} needs joint, or joints listed from the base of the chain to the aiming node.`);
+      throw invalidField(`${label}.joint`, input.joint, 'joint, or joints listed from the base of the chain to the aiming node, such as { "joint": "head" }', TypeError);
     }
-    const names = input.joints === undefined ? [input.joint] : denseArray(input.joints, 16, `${label} joints`);
+    const names = input.joints === undefined ? [input.joint] : denseArray(input.joints, 16, `${label}.joints`);
     if (!names.length) {
-      throw new RangeError(`${label} joints cannot be empty.`);
+      throw invalidField(`${label}.joints`, input.joints, 'at least one node ID, such as ["neck", "head"]');
     }
     const solver = {
       type: 'aim',
-      joints: names.map(name => nodeIdFrom(name, nodes, `${label} joint`)),
-      target: ikPoint(input.target, visibleNodes, duration, `${label} target`),
-      weight: ikWeight(input.weight, duration, `${label} weight`),
+      joints: names.map(name => nodeIdFrom(name, nodes, `${label}.joint`)),
+      target: ikPoint(input.target, visibleNodes, duration, `${label}.target`),
+      weight: ikWeight(input.weight, duration, `${label}.weight`),
     };
     if (input.worldForward !== undefined) {
-      solver.worldForward = valueFrom(input.worldForward, 3, `${label} worldForward`);
+      solver.worldForward = valueFrom(input.worldForward, 3, `${label}.worldForward`);
     } else {
-      solver.forward = valueFrom(input.forward ?? [0, 0, 1], 3, `${label} forward`);
+      solver.forward = valueFrom(input.forward ?? [0, 0, 1], 3, `${label}.forward`);
     }
     if (input.maxAngle !== undefined) {
-      solver.maxAngle = bounded(input.maxAngle, 0.001, 180, `${label} maxAngle`);
+      solver.maxAngle = bounded(input.maxAngle, 0.001, 180, `${label}.maxAngle`);
     }
     return solver;
   }
-  throw new RangeError(`${label} type must be two-bone or aim.`);
+  throw invalidField(`${label}.type`, input?.type, 'one of two-bone or aim');
 }
 
 function solverNodes(solver) {
@@ -308,11 +308,11 @@ function checkIkScales(ik, tracks, recipe) {
   }
   for (const id of uniformRequired) {
     if (scaledByTrack.has(id)) {
-      throw new RangeError(`Motion ik: node ${id} has IK nodes below it, so it cannot have a scale track.`);
+      throw invalidField('motion.tracks', `node ${id} scale`, `no scale track on node ${id}, since IK nodes sit below it; drop the track or put the size on a child node`);
     }
     const scale = nodesById.get(id).scale ?? [1, 1, 1];
     if (Math.max(...scale) - Math.min(...scale) > 1e-3 * Math.max(...scale)) {
-      throw new RangeError(`Motion ik: node ${id} has non-uniform scale ${JSON.stringify(scale)}. It has IK nodes below it, so keep it at uniform scale and put the size on a child node with the geometry.`);
+      throw invalidField(`nodes.${id}.scale`, scale, 'a uniform scale such as [1, 1, 1], since IK nodes sit below it; put the size on a child node with the geometry');
     }
   }
 }
@@ -345,7 +345,7 @@ function ikKeyframeCount(ik) {
 /** The canonical drive entry and the drive built from it, which proves the wheels, path and speeds are usable. */
 function normalizedDrive(input, recipe) {
   if (!recipe.normalizeDrive) {
-    throw new RangeError('motion.drive moves an imported asset recipe. For an asset placed in a scene, give the placement a drive: { asset: { id, drive } }.');
+    throw invalidField('motion.drive', input, 'a field left out in a scene recipe, since it moves an imported asset recipe; for an asset placed in a scene, give the placement a drive: { asset: { id, drive } }');
   }
   const canonical = recipe.normalizeDrive(input, 'motion.drive');
   return { canonical, built: recipe.buildDrive(canonical) };
@@ -366,7 +366,7 @@ export function normalizeAgentMotion(input, recipe) {
   const inputTracks = input.tracks ?? [];
   denseArray(inputTracks, 128, 'Motion tracks');
   if (!inputTracks.length && !input.layers?.length && !input.ik?.length && !input.constraints?.length && !input.drivers?.length && !drive) {
-    throw new RangeError('Motion needs at least one track, IK solver, constraint or driver. Use null to clear it.');
+    throw invalidField('motion', input, 'at least one track, IK solver, constraint or driver, such as { "duration": 1, "tracks": [...] }; use null to clear it');
   }
   const nodes = new Set((recipe.nodes ?? []).map(node => node.id));
   const materials = new Set((recipe.materials ?? []).map(material => material.id));
@@ -382,16 +382,16 @@ export function normalizeAgentMotion(input, recipe) {
     }
     if (SINGLETON_KINDS.has(track.kind)) {
       if (Object.hasOwn(track, 'id')) {
-        throw new TypeError(`${track.kind[0].toUpperCase()}${track.kind.slice(1)} tracks cannot have an ID.`);
+        throw invalidField(`motion.tracks[${index}].id`, track.id, `a field left out, since ${track.kind} tracks have no ID, such as { "kind": "${track.kind}", "property": ..., "keyframes": [...] }`, TypeError);
       }
     } else {
       if (typeof track.id !== 'string' || !track.id.trim() || track.id.length > 128) {
-        throw new TypeError('Motion target IDs need 1 to 128 characters.');
+        throw invalidField(`motion.tracks[${index}].id`, track.id, 'an ID of 1 to 128 characters, such as "body"', TypeError);
       }
       const references = track.kind === 'node' ? nodes : track.kind === 'morph' ? morphTargets : materials;
       if (track.kind !== 'light' && !references.has(track.id)) {
-        const hint = track.kind === 'morph' ? ` Morph targets of this asset: ${[...morphTargets].slice(0, 24).join(', ') || 'none'}.` : '';
-        throw new RangeError(`Motion target was not found: ${track.id}.${hint}`);
+        const hint = track.kind === 'morph' ? `; morph targets of this asset: ${[...morphTargets].slice(0, 24).join(', ') || 'none'}` : '';
+        throw invalidField(`motion.tracks[${index}].id`, track.id, `the ID of a ${track.kind} in this recipe, such as ${JSON.stringify([...references][0] ?? 'body')}${hint}`);
       }
     }
     checkLookTarget(track, recipe);
@@ -407,7 +407,7 @@ export function normalizeAgentMotion(input, recipe) {
     denseArray(track.keyframes, 64, 'Motion keyframes');
     keyframeCount += track.keyframes.length;
     if (keyframeCount > 2048) {
-      throw new RangeError('Motion exceeds 2048 total keyframes.');
+      throw invalidField(`motion.tracks[${index}].keyframes`, track.keyframes.length, `fewer keyframes, since a motion holds at most 2048 in total and this track reaches ${keyframeCount}`);
     }
     const keyframes = track.keyframes.map((keyframe, keyframeIndex) => withFieldPrefix(`motion.tracks[${index}].keyframes[${keyframeIndex}]`, () => normalizedKeyframe(keyframe, track, duration, interpolation)));
     const clip = createAnimationClip({
@@ -434,13 +434,13 @@ export function normalizeAgentMotion(input, recipe) {
     result.layers = normalizeClipLayers(input.layers, recipe.clipLayerContext);
   }
   if (input.footLock !== undefined) {
-    if (!result.layers?.length) throw new RangeError('Motion footLock plants the feet of the clips in motion.layers, so it needs layers.');
+    if (!result.layers?.length) throw invalidField('motion.footLock', input.footLock, 'a field left out unless motion.layers has layers, since it plants the feet of their clips, such as layers [{ "clip": 0 }]');
     result.footLock = normalizeFootLock(input.footLock);
   }
   if (input.ik !== undefined) {
     result.ik = normalizeIk(input.ik, recipe, tracks, duration);
     if (keyframeCount + ikKeyframeCount(result.ik) > 2048) {
-      throw new RangeError('Motion exceeds 2048 total keyframes.');
+      throw invalidField('motion.ik', input.ik, `fewer keyframes, since a motion holds at most 2048 in total and tracks plus IK reach ${keyframeCount + ikKeyframeCount(result.ik)}`);
     }
   }
   const visibleIds = new Set(ikHierarchy(recipe).map(node => node.id));
@@ -451,7 +451,7 @@ export function normalizeAgentMotion(input, recipe) {
     result.drivers = normalizeDrivers(input.drivers, nodes, materials, visibleIds);
     for (const { target } of result.drivers) {
       if (identities.has(JSON.stringify([target.kind, target.id, target.property]))) {
-        throw new RangeError(`Motion driver for ${target.id} ${target.property} clashes with a track on the same property.`);
+        throw invalidField('motion.drivers', `${target.id} ${target.property}`, `a property no track animates, since a track on ${target.kind} ${target.id} already moves ${target.property}; drop the track or the driver`);
       }
     }
   }
@@ -563,16 +563,16 @@ function createIkEvaluator(motion, recipe, stagedNodeTracks) {
   };
 }
 
-function validateRadiance(material) {
+function validateRadiance(material, materialId) {
   const emission = material.emission ?? 0;
   const color = material.emissiveColor ?? material.color ?? [0.5, 0.5, 0.5];
   for (const component of color) {
     const radiance = Math.fround(component) * Math.fround(emission);
     if (!Number.isFinite(Math.fround(radiance))) {
-      throw new RangeError('Motion emissive radiance exceeds Float32 range.');
+      throw invalidField(`materials.${materialId}.emission`, emission, 'a value that keeps emissiveColor times emission inside Float32 range, such as 5');
     }
     if (material.tag === 'unlit' && radiance > 65500) {
-      throw new RangeError('Motion unlit radiance exceeds the HDR range.');
+      throw invalidField(`materials.${materialId}.emission`, emission, 'a value that keeps an unlit emissiveColor times emission at or below 65500, such as 5');
     }
   }
 }
@@ -716,7 +716,7 @@ export function compileAgentMotion(input, recipe) {
   const stagedCamera = cameraPath ? { eye: new Float32Array(3), target: new Float32Array(3), up: new Float32Array(3) } : null;
   if (cameraPath) {
     if (cameraInput.focalLength !== undefined && cameraTracks.some(track => track.property === 'fov')) {
-      throw new RangeError('A camera with a focalLength cannot have a fov track. Give the camera a fov, or leave fov out of the motion.');
+      throw invalidField('motion.tracks.property', 'camera.fov', 'a camera track other than fov, since the camera has a focalLength; give the camera a fov instead, or leave fov out of the motion');
     }
     output.camera = {
       eye: new Float32Array(3), target: new Float32Array(3), up: new Float32Array(3),
@@ -807,8 +807,8 @@ export function compileAgentMotion(input, recipe) {
         materialSamples.get(target.id)[target.property] = value;
         drivenValues.push({ target, value });
       }
-      for (const material of materialSamples.values()) {
-        validateRadiance(material);
+      for (const [materialId, material] of materialSamples) {
+        validateRadiance(material, materialId);
       }
       if (cameraPath) {
         cameraPath.sample(time, stagedCamera);
@@ -817,7 +817,7 @@ export function compileAgentMotion(input, recipe) {
         }
         if (Math.fround(stagedCamera.fov) <= 0 || Math.fround(stagedCamera.fov) >= 180 ||
             Math.fround(stagedCamera.near) <= 0 || Math.fround(stagedCamera.far) <= Math.fround(stagedCamera.near)) {
-          throw new RangeError('Sampled camera lens is invalid at Float32 precision.');
+          throw invalidField('motion.tracks.camera', { fov: stagedCamera.fov, near: stagedCamera.near, far: stagedCamera.far }, 'a lens with fov above 0 and below 180, near above 0 and far above near, such as fov 50, near 0.1, far 100; check the fov, near and far tracks');
         }
       }
       // Publish only after every track, material product, camera pose, IK solve and constraint passes.

@@ -105,7 +105,7 @@ Known gaps, checked by `npm run check:tool-schemas`:
 10. Call `scene_export_recipe` to retain the canonical recipe.
 11. Call `scene_dispose` to release the scene before creating another one.
 
-`scene_create`, `scene_apply`, and `scene_restore` return the session ID, current revision, inspection, and render status.
+`scene_create` returns the session ID, current revision, inspection, and render status. `scene_apply` and `scene_restore` return the same without the inspection, so an edit answer stays small; call `scene_inspect` to read the nodes.
 `scene_checkpoint` returns a checkpoint UUID scoped to its session UUID.
 A restore increments revision and keeps the checkpoint available.
 A stale revision or invalid command produces an error without publishing partial edits.
@@ -126,7 +126,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `scene_asset_catalog` | None | Configured catalog and content-bound GLB, image, `.hdr` (kind `environment`) and `.cube` (kind `look`) IDs; an ID goes in `environment.hdri` or `environment.look`, see [agent-look](agent-look.md#catalog-hdris-and-looks) |
 | `scene_create_asset` | `recipe` using `67js.asset` | Imported scene ID, revision, inspection and render status |
 | `scene_inspect` | `sessionId`, optional `ids`, `limit`, `includeBounds` | Compact node records and revision |
-| `scene_apply` | `sessionId`, `expectedRevision`, `operations` | Updated revision, inspection, and render status |
+| `scene_apply` | `sessionId`, `expectedRevision`, `operations` | Updated revision, render status, results and diff |
 | `scene_walkmap` | `sessionId` or `assetId` (query a big catalog GLB), `min`, `max`, optional `cellSize`, `clearance`, `keepOut`, `streetY`, `includeCells` | Grid rows of `.` walkable, `x` blocked and `#` no surface, with counts; ground height and headroom per cell with `includeCells`. See [scene-query.md](scene-query.md) |
 | `mesh_inspect` | `sessionId`, optional `geometries` (up to 16 IDs) | Per geometry: polygon counts, face sizes, parts, face tags, bounds and lint problems with fixes |
 | `mesh_edit` | `sessionId`, `expectedRevision`, `geometry`, `edits`, optional `replace` | Updated revision, render status and the mesh report with per-edit results |
@@ -134,7 +134,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `scene_look` | `sessionId`, optional `width`, `height`, `motionTime`, `labels` | PNG image and metadata |
 | `scene_review` | `sessionId`, `expectedRevision`, `shots` (each with an optional `branch`), optional `width`, `height`, `labels` | Labeled PNG grid and metadata from an isolated snapshot |
 | `scene_checkpoint` | `sessionId` | Checkpoint ID, session ID, and revision |
-| `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId` or a `branch` | Updated revision, inspection, and render status |
+| `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId` or a `branch` | Updated revision and render status |
 | `scene_release_checkpoint` | `sessionId`, `checkpointId` | Release confirmation |
 | `scene_export_recipe` | `sessionId` | Canonical recipe and revision |
 | `scene_export_glb` | `sessionId`, optional `clip`, `motionTime`, `maxTextureSize` | A GLB file under `<jobs>/exports/` with a server-chosen name: path, bytes, SHA-256. See [GLB export](export-glb.md) |

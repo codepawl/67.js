@@ -95,7 +95,7 @@ test('shape keys that change the vertex count, repeat a name or sit on a missing
   assert.throws(() => createAgentScene(both), /exactly one of edits or offsets/);
   const unknownTrack = structuredClone(mesh);
   unknownTrack.motion.tracks[0].id = 'smile';
-  assert.throws(() => createAgentScene(unknownTrack), /Motion target was not found: smile/);
+  assert.throws(() => createAgentScene(unknownTrack), /motion\.tracks\[0\]\.id: got "smile"; expected the ID of a morph/);
 });
 
 test('the starting value of a key is the weight without motion, and a GLB export writes the morph targets', () => {

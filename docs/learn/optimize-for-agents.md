@@ -66,7 +66,7 @@ Rules that follow from this:
 Every call is a turn. These habits remove turns:
 
 - **Batch edits.** One `scene_apply` takes up to 256 operations. Adding four legs in one call took one call and 49 ms in the local test. A call for each leg takes four.
-- **Skip the inspect after an edit.** `scene_create`, `scene_apply` and `scene_restore` return the revision, an inspection of the nodes and the render status. A `scene_inspect` call right after them repeats that.
+- **Read the answer, not the scene.** `scene_apply` returns the revision, the render status, a result for each operation and a diff of the IDs it changed. Call `scene_inspect` only when you need node bounds or counts.
 - **Edit, do not rewrite.** A small mesh change as a `mesh_edit` call is 187 bytes. The same change as a new `scene_create` is 1,202 bytes, plus 52 bytes to dispose the old scene. The gap grows with the size of the scene.
 - **Leave out `sessionId`.** One scene exists at a time. Every tool uses the active scene when the field is missing.
 - **Send the right revision.** A stale `expectedRevision` costs a failed call and a retry. Pass the `revision` from the last result.

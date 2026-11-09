@@ -160,21 +160,21 @@ test('recipes export and reload with their ik', () => {
 test('mistakes say what to pass', () => {
   const create = (ik, overrides) => createAgentScene(armRecipe({ duration: 1, tracks: [], ik }, overrides));
   assert.throws(() => createAgentScene(armRecipe({ duration: 1, tracks: [] })), /at least one track, IK solver, constraint or driver/);
-  assert.throws(() => create([{ type: 'fabrik', target: [0, 0, 0] }]), /type must be two-bone or aim/);
-  assert.throws(() => create([armIk([0, 0, 0], { root: 'nope' })]), /root must be a node ID/);
-  assert.throws(() => create([armIk({ node: 'nope' })]), /target node must be a node ID/);
-  assert.throws(() => create([armIk('here')]), /target must be \[x, y, z\]/);
+  assert.throws(() => create([{ type: 'fabrik', target: [0, 0, 0] }]), /motion\.ik\[0\]\.type: got "fabrik"; expected one of two-bone or aim/);
+  assert.throws(() => create([armIk([0, 0, 0], { root: 'nope' })]), /motion\.ik\[0\]\.root: got "nope"; expected a node ID in this recipe/);
+  assert.throws(() => create([armIk({ node: 'nope' })]), /motion\.ik\[0\]\.target\.node: got "nope"; expected a node ID/);
+  assert.throws(() => create([armIk('here')]), /motion\.ik\[0\]\.target: got "here"; expected \[x, y, z\]/);
   assert.throws(() => create([armIk([0, 0, 0], { end: 'ball' })]), /end must descend from middle/);
   assert.throws(() => create([armIk([0, 0, 0], { weight: 3 })]), /weight: got 3; expected a number from/);
-  assert.throws(() => create([{ type: 'aim', target: [0, 0, 0] }]), /needs joint, or joints/);
-  assert.throws(() => create([armIk([0, 0, 0])], { elbow: { scale: [1, 2, 1] } }), /non-uniform scale.*child node/);
+  assert.throws(() => create([{ type: 'aim', target: [0, 0, 0] }]), /joint: got undefined; expected joint, or joints/);
+  assert.throws(() => create([armIk([0, 0, 0])], { elbow: { scale: [1, 2, 1] } }), /nodes\.elbow\.scale: got \[1,2,1\]; expected a uniform scale.*child node/);
   assert.doesNotThrow(() => create([armIk([0.4, 1.5, 0.3])], { tip: { scale: [0.1, 0.2, 0.3] } }));
   assert.doesNotThrow(() => create([{ type: 'aim', joint: 'lamp', target: [0, 0, 0] }], { lamp: { scale: [0.2, 0.2, 0.3] } }));
   assert.throws(() => createAgentScene(armRecipe({
     duration: 1,
     tracks: [{ kind: 'node', id: 'elbow', property: 'scale', keyframes: [{ time: 0, value: [1, 1, 1] }] }],
     ik: [armIk([0, 0, 0])],
-  })), /cannot have a scale track/);
+  })), /no scale track on node/);
   assert.throws(() => create([{ type: 'aim', joint: 'lamp', target: [0, 0, 0], forward: [0, 0, 1], worldForward: [0, 0, 1] }]), /forward or worldForward, not both/);
   assert.deepEqual([...AGENT_SCENE_CAPABILITIES.motionIk], ['two-bone', 'aim']);
 });

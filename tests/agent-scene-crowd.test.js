@@ -97,9 +97,9 @@ test('far instances change pose only farRate times a second while near ones chan
 
 test('crowd settings are validated and the clip must exist', async () => {
   await assert.rejects(crowdScene({ count: 0 }), /count/);
-  await assert.rejects(crowdScene({ bogus: 1 }), /Unknown crowd field/);
-  await assert.rejects(crowdScene({ farDistance: 5 }), /go together/);
-  await assert.rejects(crowdScene({ clip: 99 }), /does not exist/);
+  await assert.rejects(crowdScene({ bogus: 1 }), /crowd\.bogus: got 1; expected a known field/);
+  await assert.rejects(crowdScene({ farDistance: 5 }), /crowd\.farRate: got undefined; expected both farDistance and farRate, or neither/);
+  await assert.rejects(crowdScene({ clip: 99 }), /nodes\.people\.asset\.crowd\.clip: got 99; expected a clip index from 0 to 13/);
 });
 
 test('a crowd keeps its baked parts across an edit that does not touch it', async () => {

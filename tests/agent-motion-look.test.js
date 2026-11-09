@@ -83,15 +83,15 @@ test('a scene with no look tracks reads the authored environment and effects', (
 test('unknown lights, properties and ill-fitting targets name the valid ones', () => {
   const failure = (track, pattern) => assert.throws(() => createAgentScene(sceneRecipe([track])), pattern);
   failure({ kind: 'light', id: 'point:3', property: 'color', keyframes: keys([1, 1, 1], [0, 0, 0]) }, /point:3.*point:0, spot:0, area:0/);
-  failure({ kind: 'light', id: 'point:0', property: 'direction', keyframes: keys([0, -1, 0], [0, 1, 0]) }, /point light has no direction|point:0 has no direction/);
+  failure({ kind: 'light', id: 'point:0', property: 'direction', keyframes: keys([0, -1, 0], [0, 1, 0]) }, /motion\.tracks\.property: got "point:0\.direction"; expected a property the light has; only spot and area lights/);
   failure({ kind: 'light', id: 'point:0', property: 'radius', keyframes: keys(1, 2) }, /light properties: position, direction, color, intensity/);
   failure({ kind: 'sun', property: 'angle', keyframes: keys(1, 2) }, /sun properties: direction, color, intensity/);
-  failure({ kind: 'sun', id: 'x', property: 'intensity', keyframes: keys(1, 2) }, /Sun tracks cannot have an ID/);
+  failure({ kind: 'sun', id: 'x', property: 'intensity', keyframes: keys(1, 2) }, /motion\.tracks\[0\]\.id: got "x"; expected a field left out, since sun tracks have no ID/);
   failure({ kind: 'environment', property: 'skyTop', keyframes: keys([0, 0, 0], [2, 0, 0]) }, /environment skyTop values from 0 to 1/);
   failure({ kind: 'sun', property: 'direction', keyframes: keys([0, 0, 0], [0, 1, 0]) }, /keyframes\[0\]\.value: got \[0,0,0\]; expected a direction that is not all zero/);
   failure({ kind: 'effects', property: 'exposure', keyframes: keys(1, 99) }, /effects exposure values from 0.01 to 16/);
   assert.throws(() => createAgentScene(sceneRecipe([{ kind: 'effects', property: 'focusDistance', keyframes: keys(1, 2) }],
-    { effects: {} })), /focusDistance needs effects.depthOfField.blur above 0/);
+    { effects: {} })), /effects\.focusDistance"; expected a track only when effects\.depthOfField\.blur is above 0/);
 });
 
 test('a sunset changes the sun and sky between two frames of a render', async (context) => {
