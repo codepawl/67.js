@@ -65,9 +65,9 @@ test('hook pulls the vertices inside the radius by the falloff weight and none o
   near(raised[0], 2.5, 'the one vertex at the centre moves the whole translation');
   const soft = run(cube(), { op: 'hook', center: [0.5, 0.5, 0.5], radius: 1.2, translation: [0, 0, 1], strength: 0.5 });
   assert.ok(soft.positions[2 + 3 * 6] > 0.5 && soft.positions[2 + 3 * 6] < 1.1);
-  assert.throws(() => normalizeMeshEdits([{ op: 'hook', radius: 0 }]), /radius must be a number above 0/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'hook', radius: 0 }]), /edits\[0\]\.radius: got 0; expected a number above 0/);
   assert.throws(() => normalizeMeshEdits([{ op: 'hook', falloff: 'sharp' }]), /falloff must be one of smooth, linear, constant/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'hook', strength: 2 }]), /strength must be a number from 0 to 1/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'hook', strength: 2 }]), /edits\[0\]\.strength: got 2; expected a number from 0 to 1/);
 });
 
 test('wave lifts vertices inside its ring along z, moves with time and can follow the normal', () => {
@@ -83,7 +83,7 @@ test('wave lifts vertices inside its ring along z, moves with time and can follo
   const alongNormal = run(flat, { op: 'wave', normal: true });
   assert.ok(Math.abs(alongNormal.positions[2]) > 0 && alongNormal.positions[0] === 0);
   assert.throws(() => normalizeMeshEdits([{ op: 'wave', axes: 'z' }]), /axes must be one of xy, x, y/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'wave', narrowness: 51 }]), /narrowness must be a number from 0 to 50/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'wave', narrowness: 51 }]), /edits\[0\]\.narrowness: got 51; expected a number from 0 to 50/);
   assert.throws(() => normalizeMeshEdits([{ op: 'wave', start: [1] }]), /start needs two numbers/);
 });
 

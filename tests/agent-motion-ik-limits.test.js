@@ -52,7 +52,7 @@ test('limits and bendToward are validated', () => {
   assert.throws(() => build(arm({ limits: { tip: { z: [0, 1] } } })), /Unknown or unsupported/);
   assert.throws(() => build(arm({ limits: { middle: { z: [10, -10] } } })), /min first/);
   assert.throws(() => build(arm({ limits: { middle: { w: [0, 1] } } })), /Unknown or unsupported/);
-  assert.throws(() => build(arm({ bendToward: [0, 1] })), /3 components/);
+  assert.throws(() => build(arm({ bendToward: [0, 1] })), /an array of 3 numbers/);
 });
 
 const bytes = readFileSync(new URL('./fixtures/RobotExpressive.glb', import.meta.url));

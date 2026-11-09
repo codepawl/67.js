@@ -87,9 +87,9 @@ test('unknown lights, properties and ill-fitting targets name the valid ones', (
   failure({ kind: 'light', id: 'point:0', property: 'radius', keyframes: keys(1, 2) }, /light properties: position, direction, color, intensity/);
   failure({ kind: 'sun', property: 'angle', keyframes: keys(1, 2) }, /sun properties: direction, color, intensity/);
   failure({ kind: 'sun', id: 'x', property: 'intensity', keyframes: keys(1, 2) }, /Sun tracks cannot have an ID/);
-  failure({ kind: 'environment', property: 'skyTop', keyframes: keys([0, 0, 0], [2, 0, 0]) }, /skyTop must stay within 0 and 1/);
-  failure({ kind: 'sun', property: 'direction', keyframes: keys([0, 0, 0], [0, 1, 0]) }, /direction needs a length/);
-  failure({ kind: 'effects', property: 'exposure', keyframes: keys(1, 99) }, /exposure must stay within/);
+  failure({ kind: 'environment', property: 'skyTop', keyframes: keys([0, 0, 0], [2, 0, 0]) }, /environment skyTop values from 0 to 1/);
+  failure({ kind: 'sun', property: 'direction', keyframes: keys([0, 0, 0], [0, 1, 0]) }, /keyframes\[0\]\.value: got \[0,0,0\]; expected a direction that is not all zero/);
+  failure({ kind: 'effects', property: 'exposure', keyframes: keys(1, 99) }, /effects exposure values from 0.01 to 16/);
   assert.throws(() => createAgentScene(sceneRecipe([{ kind: 'effects', property: 'focusDistance', keyframes: keys(1, 2) }],
     { effects: {} })), /focusDistance needs effects.depthOfField.blur above 0/);
 });

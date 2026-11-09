@@ -87,7 +87,7 @@ test('open ground and a room with no sun get no lights', () => {
 
 test('environment.sunBounce that is not a number of 0 or more is refused', () => {
   for (const value of ['strong', true, -1, null]) {
-    assert.throws(() => createAgentScene(roomWithOpening({ sunBounce: value })), /sunBounce must be a number/);
+    assert.throws(() => createAgentScene(roomWithOpening({ sunBounce: value })), /environment\.sunBounce: got .*; expected a number of 0 or more/);
   }
   assert.equal(createAgentScene(roomWithOpening({ sunBounce: 2 })).environment.sunBounce, 2);
 });

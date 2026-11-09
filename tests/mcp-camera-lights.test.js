@@ -98,7 +98,7 @@ test('a camera takes fov or focalLength, never both, and checks each lens field'
   assert.throws(() => make({ sensorWidth: 36 }), /sensorWidth needs focalLength/);
   assert.throws(() => make({ projection: 'orthographic', focalLength: 50 }), /perspective projection/);
   assert.throws(() => make({ orthoScale: 4 }), /needs projection orthographic/);
-  assert.throws(() => make({ projection: 'orthographic', orthoScale: 0 }), /must be positive/);
+  assert.throws(() => make({ projection: 'orthographic', orthoScale: 0 }), /camera\.orthoScale: got 0; expected a positive view height/);
   assert.throws(() => make({ projection: 'fisheye' }), /perspective or orthographic/);
   assert.throws(() => make({ shift: [2, 0] }), /shift/);
   assert.throws(() => make({ fStop: 0.1 }), /fStop/);

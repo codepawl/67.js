@@ -132,8 +132,8 @@ test('bake.gridFog is a boolean that needs the grid, and is not stored when off'
   assert.equal(normalizeAgentBake({ irradianceGrid: true, gridFog: true }).gridFog, true);
   assert.equal(Object.hasOwn(normalizeAgentBake({ irradianceGrid: true, gridFog: false }), 'gridFog'), false);
   assert.equal(Object.hasOwn(normalizeAgentBake({ irradianceGrid: true }), 'gridFog'), false);
-  assert.throws(() => normalizeAgentBake({ gridFog: true }), /needs bake\.irradianceGrid/);
-  assert.throws(() => normalizeAgentBake({ irradianceGrid: true, gridFog: 'yes' }), /boolean/);
+  assert.throws(() => normalizeAgentBake({ gridFog: true }), /bake\.gridFog: got true; expected true only together with bake\.irradianceGrid/);
+  assert.throws(() => normalizeAgentBake({ irradianceGrid: true, gridFog: 'yes' }), /bake\.gridFog: got "yes"; expected true or false/);
 });
 
 test('the grid scatters in the fog only when the lighting carries the fog', () => {

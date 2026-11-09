@@ -145,7 +145,7 @@ test('displace moves a sphere along its normals by (field - midlevel) * strength
   }
   const raised = applyMeshEdits(cube(), [{ op: 'displace', field: 1, strength: 0.4, midlevel: 0, direction: 'y' }]).mesh;
   assert.ok(Math.abs(raised.positions[1] - (cube().positions[1] + 0.4)) < 1e-6);
-  assert.throws(() => applyMeshEdits(mesh, [{ op: 'displace', field: 1, direction: 'sideways' }]), /direction must be/);
+  assert.throws(() => applyMeshEdits(mesh, [{ op: 'displace', field: 1, direction: 'sideways' }]), /direction: got "sideways"; expected one of/);
 });
 
 test('noise is smooth, stays in 0 to 1 and changes with the seed', () => {
