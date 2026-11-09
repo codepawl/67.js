@@ -1,1 +1,0 @@
-- Per-object motion blur: `effects.motionBlur.objects` (0 to 1, off by default) smears each part that moves during the shutter along its own screen path, while the still background stays sharp; it replaces camera motion blur on that frame and loads on demand (#600)

@@ -1,23 +1,36 @@
 {
   "name": "67js",
-  "owner": { "name": "CodePawl", "url": "https://67js.codepawl.com" },
-  "metadata": { "description": "67js, a 3D engine an AI agent drives through MCP." },
+  "owner": {
+    "name": "CodePawl",
+    "url": "https://67js.codepawl.com"
+  },
+  "metadata": {
+    "description": "67js, a 3D engine an AI agent drives through MCP."
+  },
   "plugins": [
     {
       "name": "67js",
       "source": "./skills",
       "strict": false,
       "description": "The 67js MCP server and the build-67js-scene and render-67js-media skills.",
-      "version": "0.16.0",
+      "version": "0.17.0",
       "category": "development",
       "homepage": "https://67js.codepawl.com",
       "repository": "https://github.com/codepawl/67.js",
       "license": "MIT",
-      "skills": ["./build-67js-scene", "./render-67js-media"],
+      "skills": [
+        "./build-67js-scene",
+        "./render-67js-media"
+      ],
       "mcpServers": {
         "67js": {
           "command": "npx",
-          "args": ["-y", "-p", "@codepawlhq/67js", "67js-mcp"]
+          "args": [
+            "-y",
+            "-p",
+            "@codepawlhq/67js",
+            "67js-mcp"
+          ]
         }
       }
     }

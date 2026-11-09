@@ -1,1 +1,0 @@
-- `environment.sky: { type: 'physical', sunElevation, sunRotation, turbidity, groundAlbedo, aerialPerspective }` drives the key light direction and colour, the sky map, the background gradient and the distance haze from one sun, so a time of day is one parameter. Recipes without `sky` render byte for byte as before. (#705)

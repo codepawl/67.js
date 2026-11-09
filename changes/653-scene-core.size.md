@@ -1,3 +1,0 @@
-- scene:agent-scene: error text grows by 388 bytes gzip in the core bundle and 595 bytes with the lazy modules (field path, value received and an example in the scene, operation, camera, geometry, cloth, particle and terrain messages); nothing new runs unless a recipe is rejected, and an agent fixes the input in one retry.
-- scene:agent-scene+lazy: the same message text, 595 bytes gzip with the shared recipe checks, terrain and mesh modules; nothing new runs unless a recipe is rejected.
-- goal:agent-scene: 388 bytes gzip of message text only, so that agent errors name the field, the value and an example; this is the issue's goal and nothing new runs unless a recipe is rejected.

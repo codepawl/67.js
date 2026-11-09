@@ -1,1 +1,0 @@
-- Force fields: a `fields` list on the recipe `particles` and `cloth` sections accelerates particles, hair and cloth through one shared evaluation, with wind, turbulence, vortex, drag and magnet types, `strength`, `falloff`, `radius` and `seed`. The same seed gives the same frames (#598).

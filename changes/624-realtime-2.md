@@ -1,1 +1,0 @@
-- Real-time WebGPU path tracer (#624): `update({ parts })` with the same part count keeps the history and the radiance cache, follows a part that only moved or turned (its matrix changed) through a per-part motion table, and rejects history on a part whose geometry changed, so a moving object leaves no trail; `followPartMotion: false` turns the following off for comparison

@@ -1,1 +1,0 @@
-- The README opens on a Bistro street render under a Poly Haven sky, with two more Bistro views and the three showcase worlds below it. The Bistro scene is credited under CC BY 4.0.

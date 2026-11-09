@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: the surface inputs and the BVH query wrapper load only with the mesh chunk and buy scatter that avoids paths and follows terrain, plus density maps stored as vertex groups; the core bundle shrinks by 4 bytes because new capability text is paid for by shorter notes.

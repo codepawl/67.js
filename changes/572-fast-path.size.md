@@ -1,9 +1,0 @@
-- entry:core: the updateParts checks option, so trusted animation skips per-frame pose checks.
-- scene:lit-box: the same updateParts option, which lives in the core renderer.
-- goal:lit-box: 73 bytes for the checks option; accepted by the lead under the trade-off rule.
-- scene:gltf-box: the applyAnimation checks option and the same-clip path; skinned update CPU 1.6 ms to 0.9 ms trusted.
-- scene:gltf-box+lazy: same code as scene:gltf-box.
-- goal:gltf-box: 196 bytes for that speed-up; accepted on the same grounds.
-- scene:agent-scene+lazy: the same skinning and glTF pose code, which agent scenes import.
-- goal:agent-scene: about 100 bytes for the same animation speed-up; accepted on the same grounds.
-- scene:agent-scene: the same skinning and glTF pose code, which agent scenes import.

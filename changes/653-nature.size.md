@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: about 700 bytes gzip of message text in the vegetation, particle, hair, cloth and image sequence validators; nothing new runs unless a recipe is rejected, and an agent fixes the input in one retry.

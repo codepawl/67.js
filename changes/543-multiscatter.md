@@ -1,1 +1,0 @@
-- Volume fog: opt-in `scatterOctaves`, `multiScatter`, `multiExtinction`, `multiAnisotropy`, `keyTransmittance` and `surfaceTransmittance` approximate multiple scattering of the sun in the haze and dim the sun by the haze between it and a point or surface. Off by default; the scenes without them render the same (#543)

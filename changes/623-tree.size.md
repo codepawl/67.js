@@ -1,7 +1,0 @@
-- entry:path-tracer: the light tree builder and walk (about 1.7 KB gzip) let the CPU reference match the GPU light tree; it is the only way to draw many lights with fewer shadow rays
-- entry:path-tracer+lazy: the light tree builder and walk, plus the GLSL walk in the lazy kernel
-- entry:path-tracer-progressive: the light tree builder and the GLSL walk of the GPU kernel (about 2.2 KB gzip)
-- entry:path-tracer-progressive+lazy: the light tree builder and the GLSL walk of the GPU kernel
-- entry:path-tracer-realtime: the shared GPU kernel source carries the light tree walk, a branch the real-time path leaves off
-- entry:path-tracer-realtime+lazy: the shared GPU kernel source carries the light tree walk
-- entry:light-bake-gpu+lazy: the shared GPU kernel source carries the light tree walk, a branch the bake leaves off

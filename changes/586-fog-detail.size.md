@@ -1,8 +1,0 @@
-- entry:fog-shader: the six detail fields' validation and defaults, the warp, extra octave, contrast, layer top and key scattering GLSL, which a detail-free fog compiles out.
-- scene:agent-scene: the same fog-shader code, which this scene bundles, plus the six recipe field names.
-- goal:agent-scene: about 460 bytes, almost all the fog-shader code above; accepted under the trade-off rule.
-- scene:agent-scene+lazy: the same fog-shader code in the lazy build.
-- goal:lit-box: 49 bytes in the core (a spread of unknown fog fields and one post step line); the detail code itself lives in the fog addon.
-- goal:gltf-box: 48 bytes for the same core change.
-- tool:scene_create: six bounded volumeFog detail fields (detailOctaves, detailAmount, warp, contrast, profileSoftness, keyScattering) so agents can shape ground mist (issue #586)
-- tool-total: same six fields

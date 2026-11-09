@@ -16,7 +16,7 @@ assert.equal(release.version, metadata.version);
 assert.equal(release.packageName, metadata.name);
 assert.equal(release.packageAlias, '67js');
 assert.equal(release.integrity, `sha512-${createHash('sha512').update(binary).digest('base64')}`);
-assert.ok(binary.length < 1024 * 1024, 'Library and optional addon wrappers must fit within a 1 MiB archive.');
+assert.ok(binary.length <= sizeBudgets.archiveBytes, `Library and optional addon wrappers must fit within the archive budget of ${sizeBudgets.archiveBytes} bytes.`);
 assert.ok((await readFile('build/67.module.js')).length < 150000, 'The core must exclude the optional asset decoder.');
 // The archive is measured against the base branch like a bundle. The release ceiling in budgets.json is reported, and
 // npm run smoke:package -- --absolute enforces it.

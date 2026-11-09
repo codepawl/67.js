@@ -1,1 +1,0 @@
-- Parts with a mirrored (negative-determinant) matrix, such as a flipped billboard, now render with the right side lit and culled instead of ghosted or pale; the renderer batches them apart and glTF no longer flips winding itself (#680, #681)

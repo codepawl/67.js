@@ -1,1 +1,0 @@
-The scene skill points agents at the scene_capabilities topics for field detail, drops the notes for the fixed fog schema (#661) and packaged catalog (#664) gaps, and its HDRI, look and fog eval checks the shipped names and 3 scatter octaves again.

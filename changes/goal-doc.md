@@ -1,1 +1,0 @@
-- The goal and its scope now live in docs/goal.md instead of a tracking issue
