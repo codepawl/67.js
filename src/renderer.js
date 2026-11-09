@@ -2397,6 +2397,7 @@ export class Renderer67 {
     this.context.deleteTexture(this.shadowTexture);
     this.context.deleteFramebuffer(this.shadowFramebuffer);
     this.context.deleteProgram(this.program);
+    if (this.liquidProgram) this.context.deleteProgram(this.liquidProgram);
     this.context.deleteProgram(this.depthProgram);
     if (this.postProgram) this.context.deleteProgram(this.postProgram);
     // A program still linking must finish first: deleting it mid-link leaves a GL error that the next renderer on this context sees.

@@ -496,8 +496,12 @@ test('skin palette and influence textures cache by pose and geometry identity an
   renderer.buffers = [];
   renderer.textures = new Map();
   renderer.partLocations = new Map();
+  renderer.liquidProgram = 'liquidProgram';
+  const deletedPrograms = [];
+  renderer.context.deleteProgram = (program) => { if (program) deletedPrograms.push(program); };
   renderer.dispose();
   assert.deepEqual(deleted, [palette.texture, influences.texture]);
+  assert.deepEqual(deletedPrograms, ['liquidProgram']);
   assert.equal(renderer.skinTextures.size, 0);
   assert.equal(renderer.influenceTextures.size, 0);
 });
