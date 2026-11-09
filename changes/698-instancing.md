@@ -1,0 +1,1 @@
+- Instancing: `instances` takes a `place` record with Poisson-disk `spacing`, a `density` field, `variants` of geometry and material picked at random or by a `variant` field, per-point `rotation` and `size` fields, and `at: "vertices"` or `"faces"` on a surface source to place on a mesh's own vertices and face centres. All of it is seeded (#698).

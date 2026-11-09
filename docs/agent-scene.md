@@ -262,6 +262,23 @@ dropped. `curve` is `{ points, count, closed, fillet }`: `count` points at equal
 is a random uniform `[min, max]`. At most 2048 candidate points per node, and the scene's node limit still applies.
 The group's own scale applies to the spacing and the points, because they are in its space.
 
+`place` shapes the points once the source made them, and every choice is seeded and repeatable:
+
+```text
+"place": { "spacing": 1.4,
+           "density": { "saturate": { "sub": [1.4, { "mul": [0.1, { "length": [{ "attr": "position" }] }] }] } },
+           "variants": ["rockRound", "rockTall", { "geometry": "rockBlock", "material": "moss" }],
+           "size": { "vec": [1, { "add": [0.6, { "mul": [0.5, { "fract": { "mul": [{ "attr": "index" }, 0.37] } }] }] }, 1] } }
+```
+
+- `spacing`: Poisson-disk minimum distance. Points are kept in order, so a point is dropped when a kept one is closer; give enough candidates (`count`) to fill the area. Runs after `where` and `density`.
+- `density`: number field, the chance (0 to 1) that a point stays. Same seed, same points.
+- `variants`: 1 to 16 geometry ids or `{ geometry, material }`. Each point takes one at random, or the one `variant` (a number field, rounded down and wrapped) names. The node needs only a material when it lists variants.
+- `rotation`: vector field of extra Euler angles in radians, turned after `yaw` and `alignToNormal`. `size`: number or vector field, a scale per point, multiplied by the `scale` range and kept from 0.001 to 1000.
+- `at`: with a `surface` source, `"vertices"` (welded by position) or `"faces"` (centres, normal of the face) place on the mesh itself; `count` is then the most points allowed, and more is an error.
+
+Not yet: realizing the instances into one mesh.
+
 ### Placed catalog assets
 
 A node with an `asset` field places a GLB from the `--assets` catalog inside the recipe, so one scene holds terrain, lights, procedural meshes and imported models (`scene_create_asset` opens one asset alone). The node is a group: its transform places the asset, and its parts become generated child nodes named `<node>/<part index>` that `scene_inspect` and `scene_export_recipe` leave out.
