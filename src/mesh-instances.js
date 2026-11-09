@@ -1,12 +1,12 @@
 import { quat } from 'gl-matrix';
 import { INSTANCE_SOURCES, MAX_INSTANCE_CANDIDATES } from './mesh-operations.js';
 import { evaluateField, pointSetContext, seededRandom } from './mesh-fields.js';
-import { MAX_CURVE_POINTS, filletCurve, resampleCurve } from './curve-operations.js';
+import { MAX_CURVE_POINTS, curveLength, filletCurve, resampleCurve } from './curve-operations.js';
 import { createTriangleSurfaceIndex } from './mesh-query.js';
 import './mesh-field-surfaces.js';
 import './field-rotation.js';
 import {
-  checkedPlace, clampedSize, eulerQuaternion, meshPoints, pickVariant, thinByDensity, thinBySpacing,
+  checkedPlace, clampedSize, eulerQuaternion, mergeRealizedInstances, meshPoints, pickVariant, thinByDensity, thinBySpacing,
 } from './mesh-instance-placement.js';
 
 // Instance on points: a node with an `instances` record becomes a group node plus one child node per point, all
@@ -28,10 +28,29 @@ import {
 export { MAX_INSTANCE_CANDIDATES };
 const MAX_COORDINATE = 1e6;
 const SOURCES = INSTANCE_SOURCES;
-const INSTANCE_FIELDS = Object.freeze([...SOURCES, 'seed', 'where', 'yaw', 'alignToNormal', 'scale', 'place']);
+const INSTANCE_FIELDS = Object.freeze([...SOURCES, 'seed', 'where', 'yaw', 'alignToNormal', 'scale', 'place', 'realize']);
 const MAX_SEED = 0x7fffffff;
 const CURVE_FILLET_SEGMENTS = 8;
 const UP = Object.freeze([0, 1, 0]);
+const REALIZED_MAX_ENTRIES = 128;
+const realizedGeometries = new Map();
+
+export function realizedGeometry(key) {
+  return realizedGeometries.get(key);
+}
+
+export function realizedVertexCount(key) {
+  const geometry = realizedGeometries.get(key);
+  return geometry ? geometry.positions.length / 3 : 0;
+}
+
+function storeRealizedGeometry(key, geometry) {
+  if (realizedGeometries.has(key)) realizedGeometries.delete(key);
+  realizedGeometries.set(key, geometry);
+  while (realizedGeometries.size > REALIZED_MAX_ENTRIES) {
+    realizedGeometries.delete(realizedGeometries.keys().next().value);
+  }
+}
 
 const CHANNEL_SCATTER = 20;
 const CHANNEL_YAW = 10;
@@ -155,18 +174,30 @@ export function surfacePoints(geometry, count, seed) {
 // Points at equal arc length along a polyline, optionally with rounded corners; the "normal" of each point is the
 // direction of travel, so alignToNormal turns up along the curve.
 function curvePoints(source) {
-  plainRecord(source, 'curve', ['points', 'count', 'closed', 'fillet']);
+  plainRecord(source, 'curve', ['points', 'count', 'length', 'closed', 'fillet']);
   if (!Array.isArray(source.points) || source.points.length < 2 || source.points.length > MAX_CURVE_POINTS) {
     throw instanceError(`curve points are 2 to ${MAX_CURVE_POINTS} positions.`);
   }
   const corners = source.points.map(point => coordinates(point, 'curve point'));
   const closed = source.closed === true;
   if (source.closed !== undefined && typeof source.closed !== 'boolean') throw instanceError('curve closed must be boolean.');
-  const count = wholeNumber(source.count, closed ? 3 : 2, MAX_INSTANCE_CANDIDATES, 'curve count');
+  if ((source.count === undefined) === (source.length === undefined)) {
+    throw instanceError('curve needs count or length, not both.');
+  }
+  if (source.length !== undefined && !(typeof source.length === 'number' && Number.isFinite(source.length) && source.length > 0 && source.length <= MAX_COORDINATE)) {
+    throw instanceError('curve length is a spacing above 0.');
+  }
   if (source.fillet !== undefined && !(typeof source.fillet === 'number' && source.fillet > 0 && source.fillet <= MAX_COORDINATE)) {
     throw instanceError('curve fillet is a radius above 0.');
   }
   const path = source.fillet === undefined ? corners : filletCurve(corners, source.fillet, CURVE_FILLET_SEGMENTS, closed);
+  const minimumCount = closed ? 3 : 2;
+  const rawCount = source.count !== undefined
+    ? source.count
+    : closed
+      ? Math.max(minimumCount, Math.round(curveLength(path, true) / source.length))
+      : Math.max(minimumCount, Math.floor(curveLength(path, false) / source.length) + 1);
+  const count = wholeNumber(rawCount, minimumCount, MAX_INSTANCE_CANDIDATES, 'curve count');
   const samples = resampleCurve(path, count, closed);
   const positions = new Float64Array(count * 3);
   const normals = new Float64Array(count * 3);
@@ -234,7 +265,7 @@ function instanceScale(spec, seed, candidate, sizes) {
 function checkedSpec(spec) {
   plainRecord(spec, 'instances', INSTANCE_FIELDS);
   const seed = spec.seed === undefined ? 0 : wholeNumber(spec.seed, 0, MAX_SEED, 'seed');
-  for (const flag of ['yaw', 'alignToNormal']) {
+  for (const flag of ['yaw', 'alignToNormal', 'realize']) {
     if (spec[flag] !== undefined && typeof spec[flag] !== 'boolean') throw instanceError(`${flag} must be boolean.`);
   }
   if (spec.alignToNormal && !Object.hasOwn(spec, 'surface') && !Object.hasOwn(spec, 'curve')) throw instanceError('alignToNormal needs a surface or curve source, because only those have normals.');
@@ -263,7 +294,7 @@ function placementFields(spec, place, points, resolveSurface) {
  * returns the render geometry ({ positions, normals, indices }) for a surface source. Nodes without `instances` pass
  * through untouched.
  */
-export function expandInstancedNodes(nodes, { resolveSurface, maxNodes }) {
+export function expandInstancedNodes(nodes, { resolveSurface, maxNodes, maxVertices }, geometries) {
   if (!Array.isArray(nodes)) return nodes;
   const expanded = [];
   for (const node of nodes) {
@@ -279,13 +310,48 @@ export function expandInstancedNodes(nodes, { resolveSurface, maxNodes }) {
     const points = candidatePoints(spec, seed, resolveSurface, place);
     const fields = placementFields(spec, place, points, resolveSurface);
     expanded.push(group);
-    for (const [slot, candidate] of keptIndices(spec, place, points, fields, seed).entries()) {
+    const placements = keptIndices(spec, place, points, fields, seed).map((candidate, slot) => {
       const variant = place.variants ? pickVariant(place.variants, fields.variant?.values, candidate, seed) : { geometry, material };
-      expanded.push({
-        id: `${node.id}.${slot}`, parent: node.id, geometry: variant.geometry, material: variant.material ?? material,
+      return {
+        slot, geometry: variant.geometry, material: variant.material ?? material,
         translation: [points.positions[candidate * 3], points.positions[candidate * 3 + 1], points.positions[candidate * 3 + 2]],
         rotation: instanceRotation(spec, seed, candidate, points.normals, fields.rotation?.values),
         scale: instanceScale(spec, seed, candidate, fields.size),
+      };
+    });
+    if (spec.realize || place.realize) {
+      const byMaterial = new Map();
+      for (const item of placements) {
+        if (!byMaterial.has(item.material)) byMaterial.set(item.material, []);
+        byMaterial.get(item.material).push({
+          geometry: resolveSurface(item.geometry),
+          translation: item.translation, rotation: item.rotation, scale: item.scale,
+        });
+      }
+      let groupIndex = 0;
+      for (const [materialId, entries] of byMaterial) {
+        const merged = mergeRealizedInstances(entries, maxVertices);
+        const childId = `${node.id}.${groupIndex}`;
+        const geometryId = `${node.id}.realized.${groupIndex}`;
+        let subdivisions = 1;
+        while (subdivisions <= 128 && realizedGeometries.has(JSON.stringify({ type: 'box', bevel: 0, subdivisions }))) subdivisions++;
+        const base = { type: 'box', bevel: 0, subdivisions };
+        storeRealizedGeometry(JSON.stringify(base), merged);
+        const registered = geometries?.push({ id: geometryId, type: 'mesh', base });
+        expanded.push({
+          id: childId, parent: node.id, geometry: geometryId, material: materialId,
+          translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1],
+          ...(typeof registered === 'number' ? {} : { realizedGeometry: merged }),
+        });
+        groupIndex++;
+        if (expanded.length > maxNodes) throw new RangeError(`Instances expand past the limit of ${maxNodes} nodes.`);
+      }
+      continue;
+    }
+    for (const item of placements) {
+      expanded.push({
+        id: `${node.id}.${item.slot}`, parent: node.id, geometry: item.geometry, material: item.material,
+        translation: item.translation, rotation: item.rotation, scale: item.scale,
       });
       if (expanded.length > maxNodes) throw new RangeError(`Instances expand past the limit of ${maxNodes} nodes.`);
     }
