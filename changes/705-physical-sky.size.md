@@ -1,0 +1,1 @@
+- scene:agent-scene+lazy: the physical sky model, its sky map and the recipe fields load only for a recipe that names environment.sky; the core entry shrank by 20 bytes.

@@ -16,7 +16,7 @@ const MAX_LOOK_ARRAY_ENTRIES = Math.max(MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_A
 
 const ENVIRONMENT_FIELDS = [
   'world', 'ground', 'setup', 'hdri', 'environmentIntensity', 'environmentRotation', 'lightDirection', 'keyColor', 'keyIntensity', 'fillIntensity', 'ambientIntensity',
-  'daylight', 'pointLights', 'spotLights', 'areaLights', 'skyTop', 'skyBottom', 'fogColor', 'fogDensity', 'volumeFog', 'liquid', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'wind',
+  'daylight', 'pointLights', 'spotLights', 'areaLights', 'skyTop', 'skyBottom', 'fogColor', 'fogDensity', 'volumeFog', 'liquid', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'wind', 'sky',
 ];
 const EFFECT_FIELDS = ['exposure', 'saturation', 'contrast', 'temperature', 'vignette', 'grain', 'ambientOcclusion', 'ambientOcclusionRadius', 'bloom', 'depthOfField', 'motionBlur'];
 const SHADOW_FIELDS = ['target', 'extent', 'distance', 'near', 'far'];
@@ -347,6 +347,9 @@ function environmentFrom(input = {}) {
     knownKeys(input.liquid, Object.keys(LIQUID_OPTICS), 'liquid');
     environment.liquid = copiedJson(resolveLiquidOptics(copiedJson(input.liquid)));
   }
+  if (input.sky !== undefined && input.sky !== null) {
+    agentSceneModule('physicalSky').applyPhysicalSky(input.sky, environment, invalidField);
+  }
   lightShapeSupport.normalize?.(input, environment);
   updateLightingState(createLightingState(), environment, { world });
   return environment;
@@ -365,6 +368,9 @@ export function environmentPatchWithSetup(patch) {
 
 /** The procedural environment map that lights a normalized environment; the same object returns while inputs hold. */
 export function agentEnvironmentMap(environment) {
+  if (environment.sky) {
+    return agentSceneModule('physicalSky').createPhysicalSkyMap(environment);
+  }
   if (environment.hdri) {
     return createCatalogEnvironmentMap(environment.hdri, { intensity: environment.environmentIntensity, rotation: environment.environmentRotation, showBackground: environment.world });
   }
