@@ -803,7 +803,7 @@ function normalizeRecipe(input, limits) {
       if (!definition) throw invalidField('instances.surface', id, `the ID of a geometry in geometries, such as ${recipe.geometries[0]?.id ?? 'ground'}`);
       return generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000));
     },
-  });
+  }, recipe.geometries);
   recipe.nodes = resources(recipe.nodes, limits.maxNodes, 'nodes', nodeFrom);
   addArmatures(recipe, limits);
   if (recipe.nodes.some(node => node.relations !== undefined)) {

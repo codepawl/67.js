@@ -1,4 +1,4 @@
-import { quat } from 'gl-matrix';
+import { quat, vec3 } from 'gl-matrix';
 import { seededRandom } from './mesh-fields.js';
 
 // The `place` record of an `instances` spec: what keeps, shapes and varies the points once a source made them.
@@ -13,8 +13,9 @@ import { seededRandom } from './mesh-fields.js';
 //
 // Every choice is a pure function of the point index and the seed, so a scene builds the same way each time.
 
-export const PLACE_FIELDS = Object.freeze(['at', 'spacing', 'density', 'variants', 'variant', 'rotation', 'size']);
+export const PLACE_FIELDS = Object.freeze(['at', 'spacing', 'density', 'variants', 'variant', 'rotation', 'size', 'realize']);
 export const MAX_VARIANTS = 16;
+export const MAX_REALIZED_VERTICES = 250_000;
 const MAX_SPACING = 1e6;
 const MIN_SIZE = 0.001;
 const MAX_SIZE = 1000;
@@ -38,6 +39,7 @@ export function checkedPlace(place) {
   if (place.spacing !== undefined && !(typeof place.spacing === 'number' && place.spacing > 0 && place.spacing <= MAX_SPACING)) {
     throw placeError('spacing is a distance above 0.');
   }
+  if (place.realize !== undefined && typeof place.realize !== 'boolean') throw placeError('realize must be boolean.');
   if (place.variant !== undefined && place.variants === undefined) throw placeError('variant needs a variants list.');
   const variants = place.variants === undefined ? null : variantList(place.variants);
   return { ...place, variants };
@@ -153,4 +155,62 @@ export function eulerQuaternion(angleX, angleY, angleZ) {
 export function clampedSize(values, index, perAxis) {
   const pick = axis => Math.min(MAX_SIZE, Math.max(MIN_SIZE, values[perAxis ? index * 3 + axis : index]));
   return [pick(0), pick(1), pick(2)];
+}
+
+/**
+ * Merge transformed copies of render geometries into one combined render geometry ({ positions, normals, indices,
+ * ...(uvs), ...(colors) }), checked against `maxVertices` before allocating buffers.
+ */
+export function mergeRealizedInstances(entries, maxVertices = MAX_REALIZED_VERTICES) {
+  const totalVertices = entries.reduce((sum, entry) => sum + entry.geometry.positions.length / 3, 0);
+  if (totalVertices > maxVertices) {
+    throw new RangeError(`Realized instances have ${totalVertices} vertices, over the limit of ${maxVertices}.`);
+  }
+  const totalIndices = entries.reduce((sum, entry) => sum + entry.geometry.indices.length, 0);
+  const hasUvs = entries.some(entry => entry.geometry.uvs?.length);
+  const hasColors = entries.some(entry => entry.geometry.colors?.length);
+  const positions = new Float32Array(totalVertices * 3);
+  const normals = new Float32Array(totalVertices * 3);
+  const indices = new Uint32Array(totalIndices);
+  const uvs = hasUvs ? new Float32Array(totalVertices * 2) : null;
+  const colors = hasColors ? new Float32Array(totalVertices * 3) : null;
+  if (colors) colors.fill(1);
+  const point = [0, 0, 0];
+  const normal = [0, 0, 0];
+  let vertexBase = 0;
+  let indexBase = 0;
+  for (const { geometry, translation, rotation, scale } of entries) {
+    const vertexCount = geometry.positions.length / 3;
+    for (let vertex = 0; vertex < vertexCount; vertex++) {
+      const sourceOffset = vertex * 3;
+      const targetOffset = (vertexBase + vertex) * 3;
+      point[0] = geometry.positions[sourceOffset] * scale[0];
+      point[1] = geometry.positions[sourceOffset + 1] * scale[1];
+      point[2] = geometry.positions[sourceOffset + 2] * scale[2];
+      vec3.transformQuat(point, point, rotation);
+      positions[targetOffset] = point[0] + translation[0];
+      positions[targetOffset + 1] = point[1] + translation[1];
+      positions[targetOffset + 2] = point[2] + translation[2];
+      normal[0] = geometry.normals[sourceOffset] / scale[0];
+      normal[1] = geometry.normals[sourceOffset + 1] / scale[1];
+      normal[2] = geometry.normals[sourceOffset + 2] / scale[2];
+      vec3.transformQuat(normal, normal, rotation);
+      const normalLength = Math.hypot(normal[0], normal[1], normal[2]) || 1;
+      normals[targetOffset] = normal[0] / normalLength;
+      normals[targetOffset + 1] = normal[1] / normalLength;
+      normals[targetOffset + 2] = normal[2] / normalLength;
+    }
+    if (uvs && geometry.uvs?.length === vertexCount * 2) uvs.set(geometry.uvs, vertexBase * 2);
+    if (colors && geometry.colors?.length === vertexCount * 3) colors.set(geometry.colors, vertexBase * 3);
+    for (let cursor = 0; cursor < geometry.indices.length; cursor++) {
+      indices[indexBase + cursor] = vertexBase + geometry.indices[cursor];
+    }
+    vertexBase += vertexCount;
+    indexBase += geometry.indices.length;
+  }
+  return {
+    positions, normals, indices,
+    ...(uvs ? { uvs } : {}),
+    ...(colors ? { colors } : {}),
+  };
 }
