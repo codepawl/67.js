@@ -33,6 +33,7 @@ To move to a new Blender release, run `node scripts/parity-manual-snapshot.mjs`.
 | Manual path | Status | What exists, or why not | Evidence | Issues |
 | --- | --- | --- | --- | --- |
 | User Interface | out of scope | Interface for a person with a mouse. Agents use MCP tools. | | |
+| Editors > Graph Editor > F-Curves | partial | Per track extrapolation `constant` or `linear` (slope of the end segment, not for rotation) and up to 8 modifiers: `cycles` (repeat, offset, mirror, counts), `stepped`, `noise`, `generator`, `limits` and `envelope`, seeded and the same at every sample time. Noise is smooth value noise, not Blender's, so values differ; no blend modes, no frame range or influence per modifier, no Bezier-handle slope, and glTF export keeps only the keyframes. The editor itself is out of scope. | [animation-modifiers](../tests/animation-modifiers.test.js) | #690 |
 | Editors | out of scope | Interface for a person with a mouse. Agents use MCP tools, and people review images. | | |
 | Scenes & Objects > Scenes | partial | One recipe holds one scene with its camera and environment. There are no scene units or linked scenes. | | |
 | Scenes & Objects > Objects > Object Types | partial | Mesh nodes and empty nodes exist, and `curve` and `text` geometry make curve-like and text objects as meshes. Lights are environment settings. Metaballs and NURBS surfaces are out of scope. | [curve-text](../tests/curve-text.test.js), [Blender comparison](../tests/blender-curve-text.test.js) | #45 |

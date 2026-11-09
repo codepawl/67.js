@@ -1,1 +1,3 @@
 - scene:agent-scene+lazy: the placement module (Poisson spacing, density, variants, rotation and size fields, vertex and face points) loads only with instances, so scenes without them do not pay.
+- entry:agent-asset: the asset entry carries the agent scene's lazy mesh engine, so the Poisson spacing, density, variant and per-point placement code rides in it; it is the only way for an agent to scatter mixed variants without overlaps.
+- goal:agent-scene: 32 bytes for the `place` capability note after main's note trims overlapped the ones this pull request had made to pay for it.
