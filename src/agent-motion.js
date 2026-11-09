@@ -200,8 +200,19 @@ function ikWeight(input, duration, label) {
 }
 
 /** { root: { x: [min, max], y, z }, middle: {...} } in degrees, the turn away from the rest rotation in the joint's own axes. */
-function jointLimits(input, label) {
-  knownKeys(input, ['root', 'middle'], label);
+function jointLimits(input, label, allowedJoints = null) {
+  if (allowedJoints) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw invalidField(label, input, 'an object mapping joint node IDs to { x, y, z } degree ranges', TypeError);
+    }
+    for (const joint of Object.keys(input)) {
+      if (!allowedJoints.has(joint)) {
+        throw invalidField(`${label}.${joint}`, joint, 'a node ID in the chain');
+      }
+    }
+  } else {
+    knownKeys(input, ['root', 'middle'], label);
+  }
   const limits = {};
   for (const joint of Object.keys(input)) {
     knownKeys(input[joint], ['x', 'y', 'z'], `${label}.${joint}`);
@@ -215,6 +226,50 @@ function jointLimits(input, label) {
     }
   }
   return limits;
+}
+
+function normalizeIkChainSpec(input, nodes, label) {
+  if (input.chain !== undefined && (input.root !== undefined || input.end !== undefined)) {
+    throw invalidField(`${label}.chain`, input.chain, 'chain, or root and end, not both', TypeError);
+  }
+  if (input.chain !== undefined) {
+    const names = denseArray(input.chain, 16, `${label}.chain`);
+    if (names.length < 2) {
+      throw invalidField(`${label}.chain`, input.chain, '2 to 16 node IDs from base to end, such as ["b0", "b1", "b2", "tip"]');
+    }
+    return { chain: names.map((name, slot) => nodeIdFrom(name, nodes, `${label}.chain[${slot}]`)) };
+  }
+  if (input.root !== undefined && input.end !== undefined) {
+    return {
+      root: nodeIdFrom(input.root, nodes, `${label}.root`),
+      end: nodeIdFrom(input.end, nodes, `${label}.end`),
+    };
+  }
+  throw invalidField(`${label}.chain`, input.chain, 'chain: [nodeIds], or root and end node IDs', TypeError);
+}
+
+function normalizeIkStretch(value, label) {
+  if (typeof value === 'boolean') return value;
+  return bounded(value, 0, 1, label);
+}
+
+function normalizeIkCurve(input, visibleNodes, label) {
+  if (Array.isArray(input)) {
+    denseArray(input, 64, label);
+    if (input.length < 2) {
+      throw invalidField(label, input, '2 to 64 [x, y, z] points');
+    }
+    return input.map((point, index) => valueFrom(point, 3, `${label}[${index}]`));
+  }
+  if (input && typeof input === 'object' && Object.hasOwn(input, 'nodes')) {
+    knownKeys(input, ['nodes'], label);
+    const ids = denseArray(input.nodes, 64, `${label}.nodes`);
+    if (ids.length < 2) {
+      throw invalidField(`${label}.nodes`, input.nodes, '2 to 64 node IDs');
+    }
+    return { nodes: ids.map((id, index) => nodeIdFrom(id, visibleNodes, `${label}.nodes[${index}]`)) };
+  }
+  throw invalidField(label, input, '2 to 64 [x, y, z] points or { "nodes": [ids] }', TypeError);
 }
 
 function normalizeIkSolver(input, position, nodes, visibleNodes, duration) {
@@ -274,15 +329,68 @@ function normalizeIkSolver(input, position, nodes, visibleNodes, duration) {
     }
     return solver;
   }
-  throw invalidField(`${label}.type`, input?.type, 'one of two-bone or aim');
+  if (input?.type === 'chain' || input?.type === 'ik') {
+    knownKeys(input, ['type', 'chain', 'root', 'end', 'target', 'pole', 'poleAngle', 'stretch', 'iterations', 'limits', 'keepEndRotation', 'weight'], label);
+    const spec = normalizeIkChainSpec(input, nodes, label);
+    const solver = {
+      type: 'chain',
+      ...spec,
+      target: ikPoint(input.target, visibleNodes, duration, `${label}.target`),
+      weight: ikWeight(input.weight, duration, `${label}.weight`),
+    };
+    if (input.pole !== undefined) {
+      solver.pole = ikPoint(input.pole, visibleNodes, duration, `${label}.pole`);
+    }
+    if (input.poleAngle !== undefined) {
+      solver.poleAngle = bounded(input.poleAngle, -180, 180, `${label}.poleAngle`);
+    }
+    if (input.stretch !== undefined) {
+      solver.stretch = normalizeIkStretch(input.stretch, `${label}.stretch`);
+    }
+    if (input.iterations !== undefined) {
+      if (!Number.isInteger(input.iterations)) {
+        throw invalidField(`${label}.iterations`, input.iterations, 'a whole number of iterations from 1 to 64, such as 16', TypeError);
+      }
+      solver.iterations = bounded(input.iterations, 1, 64, `${label}.iterations`);
+    }
+    if (input.keepEndRotation !== undefined) {
+      if (typeof input.keepEndRotation !== 'boolean') {
+        throw invalidField(`${label}.keepEndRotation`, input.keepEndRotation, 'true or false', TypeError);
+      }
+      solver.keepEndRotation = input.keepEndRotation;
+    }
+    if (input.limits !== undefined) {
+      const allowed = spec.chain ? new Set(spec.chain.slice(0, -1)) : nodes;
+      solver.limits = jointLimits(input.limits, `${label}.limits`, allowed);
+    }
+    return solver;
+  }
+  if (input?.type === 'spline' || input?.type === 'spline_ik') {
+    knownKeys(input, ['type', 'chain', 'root', 'end', 'curve', 'stretch', 'weight'], label);
+    const spec = normalizeIkChainSpec(input, nodes, label);
+    const solver = {
+      type: 'spline',
+      ...spec,
+      curve: normalizeIkCurve(input.curve, visibleNodes, `${label}.curve`),
+      weight: ikWeight(input.weight, duration, `${label}.weight`),
+    };
+    if (input.stretch !== undefined) {
+      solver.stretch = normalizeIkStretch(input.stretch, `${label}.stretch`);
+    }
+    return solver;
+  }
+  throw invalidField(`${label}.type`, input?.type, 'one of two-bone, aim, chain or spline');
 }
 
 function solverNodes(solver) {
-  return solver.type === 'two-bone' ? [solver.root, solver.middle, solver.end] : solver.joints;
+  if (solver.type === 'two-bone') return [solver.root, solver.middle, solver.end];
+  if (solver.type === 'aim') return solver.joints;
+  return solver.chain ?? [solver.root, solver.end];
 }
 
 function pointNodes(solver) {
-  return [solver.target, solver.pole].filter(point => point?.node).map(point => point.node);
+  const points = [solver.target, solver.pole].filter(point => point?.node).map(point => point.node);
+  return solver.curve?.nodes ? [...points, ...solver.curve.nodes] : points;
 }
 
 function ancestorsOf(id, nodesById) {
@@ -488,7 +596,7 @@ function ikRig(ik, recipe) {
 function ikChannelClip(ik, duration, loop) {
   const tracks = [];
   ik.forEach((solver, position) => {
-    if (solver.target.keyframes) tracks.push({ target: `target ${position}`, property: 'translation', interpolation: solver.target.interpolation, keyframes: solver.target.keyframes });
+    if (solver.target?.keyframes) tracks.push({ target: `target ${position}`, property: 'translation', interpolation: solver.target.interpolation, keyframes: solver.target.keyframes });
     if (solver.pole?.keyframes) tracks.push({ target: `pole ${position}`, property: 'translation', interpolation: solver.pole.interpolation, keyframes: solver.pole.keyframes });
     if (solver.weight.keyframes) tracks.push({ target: `weight ${position}`, property: 'value', interpolation: solver.weight.interpolation, keyframes: solver.weight.keyframes });
   });
@@ -510,12 +618,29 @@ function createIkEvaluator(motion, recipe, stagedNodeTracks) {
   };
   const definitions = motion.ik.map((solver, position) => {
     const weightOutput = solver.weight.keyframes ? channelOutput(`weight ${position}`) : null;
-    const common = {
-      target: pointReader(solver.target, `target ${position}`),
-      weight: weightOutput ? () => Math.min(1, Math.max(0, weightOutput[0])) : solver.weight,
-    };
+    const weight = weightOutput ? () => Math.min(1, Math.max(0, weightOutput[0])) : solver.weight;
+    if (solver.type === 'spline') {
+      const curve = Array.isArray(solver.curve)
+        ? solver.curve
+        : () => solver.curve.nodes.map(nodeId => pose.jointWorld(nodeId).position);
+      return {
+        type: 'spline',
+        ...(solver.chain ? { chain: solver.chain } : { root: solver.root, end: solver.end }),
+        curve, stretch: solver.stretch, weight,
+      };
+    }
+    const common = { target: pointReader(solver.target, `target ${position}`), weight };
     if (solver.type === 'aim') {
       return { ...common, type: 'aim', joints: solver.joints, forward: solver.forward, worldForward: solver.worldForward, maxAngle: solver.maxAngle };
+    }
+    if (solver.type === 'chain') {
+      return {
+        ...common, type: 'chain',
+        ...(solver.chain ? { chain: solver.chain } : { root: solver.root, end: solver.end }),
+        ...(solver.pole ? { pole: pointReader(solver.pole, `pole ${position}`) } : {}),
+        poleAngle: solver.poleAngle, stretch: solver.stretch, iterations: solver.iterations,
+        limits: solver.limits, keepEndRotation: solver.keepEndRotation,
+      };
     }
     return {
       ...common, type: 'two-bone', root: solver.root, middle: solver.middle, end: solver.end,
@@ -526,11 +651,15 @@ function createIkEvaluator(motion, recipe, stagedNodeTracks) {
   pose = createSkeletonPose({ rig, ik: definitions });
   const indexById = new Map(rig.joints.map((joint, index) => [joint.name, index]));
   const baseBindings = rig.joints.map((joint, index) => ({ index, tracks: stagedNodeTracks.get(joint.name) }));
-  const solvedIds = new Set(motion.ik.flatMap(solver => {
-    if (solver.type === 'aim') return solver.joints;
-    return solver.keepEndRotation === false ? [solver.root, solver.middle] : [solver.root, solver.middle, solver.end];
-  }));
+  const skippedEnds = new Set(
+    motion.ik
+      .filter(solver => (solver.type === 'two-bone' || solver.type === 'chain') && solver.keepEndRotation === false)
+      .map(solver => solver.end ?? solver.chain[solver.chain.length - 1])
+  );
+  const solvedIds = new Set(pose.solvedJointNames.filter(id => !skippedEnds.has(id)));
   const staged = new Map([...solvedIds].map(id => [id, new Float64Array(4)]));
+  const translatedIds = pose.writtenJoints.filter(entry => entry.translation).map(entry => rig.joints[entry.index].name);
+  const stagedTranslations = new Map(translatedIds.map(id => [id, new Float64Array(3)]));
   function setBaseFromTracks(localRotations, localTranslations) {
     for (const { index, tracks } of baseBindings) {
       if (tracks?.rotation) localRotations[index].set(tracks.rotation);
@@ -539,6 +668,7 @@ function createIkEvaluator(motion, recipe, stagedNodeTracks) {
   }
   return {
     staged,
+    stagedTranslations,
     /** Solve for a time. `nodePoses` is a staged { id, translation, rotation } list; without it the base is the tracks. */
     solve(time, nodePoses) {
       channelSampler?.sample(time);
@@ -557,6 +687,9 @@ function createIkEvaluator(motion, recipe, stagedNodeTracks) {
       for (const [id, rotation] of staged) {
         rotation.set(pose.localRotation(indexById.get(id)));
         if (!rotation.every(Number.isFinite)) throw new RangeError(`Motion ik produced an invalid rotation for node ${id}.`);
+      }
+      for (const [id, translation] of stagedTranslations) {
+        translation.set(pose.localTranslation(indexById.get(id)));
       }
       return pose.ikResults;
     },
@@ -678,6 +811,11 @@ export function compileAgentMotion(input, recipe) {
       const nodePatch = output.nodes.get(id);
       if (!nodePatch.rotation) nodePatch.rotation = new Float64Array(4);
     }
+    for (const id of ikEvaluator.stagedTranslations.keys()) {
+      if (!output.nodes.has(id)) output.nodes.set(id, {});
+      const nodePatch = output.nodes.get(id);
+      if (!nodePatch.translation) nodePatch.translation = new Float64Array(3);
+    }
   }
   if (constraintEvaluator && !ikUsesStagedPose) {
     for (const id of constrainedNodeIds(motion)) {
@@ -732,6 +870,7 @@ export function compileAgentMotion(input, recipe) {
   function poseBases() {
     const bases = trackBases();
     for (const [id, rotation] of ikEvaluator?.staged ?? []) bases.set(id, { ...bases.get(id), rotation });
+    for (const [id, translation] of ikEvaluator?.stagedTranslations ?? []) bases.set(id, { ...bases.get(id), translation });
     return bases;
   }
   return Object.freeze({
@@ -749,6 +888,10 @@ export function compileAgentMotion(input, recipe) {
         for (const [id, rotation] of ikEvaluator.staged) {
           overrides.set(id, { rotation: Array.from(rotation) });
           bases.set(id, { ...bases.get(id), rotation });
+        }
+        for (const [id, translation] of ikEvaluator.stagedTranslations) {
+          overrides.set(id, { ...overrides.get(id), translation: Array.from(translation) });
+          bases.set(id, { ...bases.get(id), translation });
         }
       }
       if (constraintEvaluator) {
@@ -830,6 +973,7 @@ export function compileAgentMotion(input, recipe) {
       }
       if (ikEvaluator && !ikUsesStagedPose) {
         for (const [id, rotation] of ikEvaluator.staged) output.nodes.get(id).rotation.set(rotation);
+        for (const [id, translation] of ikEvaluator.stagedTranslations) output.nodes.get(id).translation.set(translation);
       }
       if (evaluated && !ikUsesStagedPose) {
         for (const [id, frame] of evaluated.nodes) {

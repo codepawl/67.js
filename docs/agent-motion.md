@@ -112,6 +112,10 @@ A `two-bone` solver takes `root`, `middle` and `end` node IDs, each a descendant
 point the middle node bends toward; give one, because a straight limb has no bend direction of its own. `keepEndRotation`
 defaults to `true`, so a gripper or foot keeps its world rotation.
 
+A `chain` solver (alias `ik`) takes `chain` (2 to 16 node IDs from base to end) or `root` and `end`, `target`, optional `pole`, `poleAngle` (-180 to 180 degrees), `stretch` (boolean or 0 to 1), `iterations` (1 to 64, default 16), `limits` (joint node ID to `{ x, y, z }` degree ranges), `keepEndRotation` and `weight`.
+
+A `spline` solver (alias `spline_ik`) takes `chain` (or `root` and `end`), `curve` (2 to 64 `[x, y, z]` points or `{ "nodes": [ids] }` whose world positions define the Catmull-Rom spline), optional `stretch` (boolean or 0 to 1, default `true`) and `weight`.
+
 An `aim` solver takes `joint`, or `joints` from the base of a chain to the aiming node, which then share the turn.
 `worldForward` is the world direction the character faces at rest, which is the one to use on imported rigs because their
 bone axes vary. Otherwise `forward` is the aiming node's local axis (default `[0, 0, 1]`). `maxAngle` limits the whole
