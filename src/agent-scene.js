@@ -1618,7 +1618,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           knownKeys(operation, ['type', lookField], 'operation');
           const patch = operation[lookField];
           // Spot and area lights, cascades and sun links are absent from a recipe until it sets them.
-          const optionalFields = lookField === 'environment' ? ['ground', 'spotLights', 'areaLights', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'hdri'] : lookField === 'effects' ? postStepSupport.fields : [];
+          const optionalFields = lookField === 'environment' ? ['ground', 'spotLights', 'areaLights', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'hdri', 'sky'] : lookField === 'effects' ? postStepSupport.fields : [];
           knownKeys(patch, [...Object.keys(candidate[lookField]), ...optionalFields], lookField);
           const nestedField = lookField === 'environment' ? 'volumeFog' : 'bloom';
           const merged = { ...candidate[lookField], ...(lookField === 'environment' ? environmentPatchWithSetup(patch) : patch) };
@@ -1627,6 +1627,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
             knownKeys(patch[nestedField], nestedKeys, nestedField);
             merged[nestedField] = { ...candidate[lookField][nestedField], ...patch[nestedField] };
           }
+          if (patch.sky) merged.sky = { ...candidate[lookField].sky, ...patch.sky };
           candidate[lookField] = merged;
           continue;
         }

@@ -53,6 +53,10 @@ export function normalizeModifierEdit(edit, normalized, index, { finiteNumber, c
     normalizeDeformEdit(edit, normalized, index, { finiteNumber });
     return;
   }
+  if (Object.hasOwn(REGISTERED_NORMALIZERS, edit.op)) {
+    REGISTERED_NORMALIZERS[edit.op](edit, normalized, index, { finiteNumber, integerInRange });
+    return;
+  }
   switch (edit.op) {
     case 'weld':
       normalized.distance = edit.distance === undefined ? 0.001 : finiteNumber(edit.distance, index, 'distance', { minimum: 0, maximum: 1e3, exclusiveMinimum: true });
@@ -180,6 +184,11 @@ function simpleDeformPositions(mesh, { mode, axis, angle, factor }) {
 /** Run a modifier edit. Returns { mesh, result } where result holds the counts to report. */
 // Modifiers that other modules supply (mesh-hull-modifiers.js registers itself), so a bundle that never runs one does not carry its code.
 const REGISTERED_RUNNERS = Object.create(null);
+const REGISTERED_NORMALIZERS = Object.create(null);
+
+export function registerModifierNormalizer(operation, normalizer) {
+  REGISTERED_NORMALIZERS[operation] = normalizer;
+}
 
 export function registerModifierRunner(operation, runner) {
   REGISTERED_RUNNERS[operation] = runner;
