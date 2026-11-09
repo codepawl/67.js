@@ -125,3 +125,76 @@ test('the newer types accept their fields in args, the shape the MCP schema uses
 test('scene_capabilities lists every constraint type', () => {
   assert.deepEqual([...AGENT_SCENE_CAPABILITIES.motionConstraints].sort(), [...CONSTRAINT_TYPES].sort());
 });
+
+test('maintain_volume, damped_track, pivot, follow_path, clamp_to, shrinkwrap and armature constraints work deterministically', () => {
+  // maintain_volume
+  const vol = sampled([{ ...owner, scale: [1, 4, 1] }], { type: 'maintain_volume', freeAxis: 'y', volume: 1 });
+  assertClose([column(vol, 0)[0], column(vol, 1)[1], column(vol, 2)[2]], [0.5, 4, 0.5], 'maintain_volume');
+
+  // damped_track
+  const damped = sampled([owner, targetAt([0, 0, 5])], { type: 'damped_track', target: 'target', trackAxis: '+y' });
+  assertClose(column(damped, 1), [0, 0, 1], 'damped_track +y aims at +z');
+
+  // pivot
+  const rotatedOwner = { id: 'owner', translation: [0, 0, 0], rotation: Array.from(quaternionFromEuler(new Float64Array(4), 0, 0, 90 * DEGREES)) };
+  const pivoted = sampled([rotatedOwner, targetAt([1, 0, 0])], { type: 'pivot', target: 'target', offset: [0, 0, 0] });
+  assertClose(translationOf(pivoted), [1, -1, 0], 'pivot 90 deg around [1,0,0]');
+
+  // follow_path
+  const pathScene = createAgentScene({
+    format: '67js.scene', schemaVersion: 1,
+    geometries: [{ id: 'box', type: 'box', bevel: 0 }],
+    materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
+    nodes: [{ id: 'owner', geometry: 'box', material: 'paint' }],
+    motion: {
+      duration: 1, tracks: [],
+      constraints: [{ type: 'follow_path', node: 'owner', points: [[0, 0, 0], [0, 0, 4]], followCurve: true, forwardAxis: '+z', upAxis: 'y', duration: 1 }],
+    },
+  });
+  pathScene.sampleMotion(0.5);
+  const pathMat = pathScene.parts[0].matrix;
+  assertClose(translationOf(pathMat), [0, 0, 2], 'follow_path midpoint');
+  assertClose(column(pathMat, 2), [0, 0, 1], 'follow_path tangent +z');
+
+  // clamp_to
+  const clamped = sampled([{ ...owner, translation: [3, 5, 0] }], { type: 'clamp_to', points: [[0, 0, 0], [4, 2, 0]], mainAxis: 'x' });
+  assertClose(translationOf(clamped), [3, 1.5, 0], 'clamp_to along x');
+
+  // shrinkwrap nearest & project
+  const nearest = sampled([{ ...owner, translation: [0, 5, 0] }, { id: 'target', translation: [0, 0, 0], scale: [2, 2, 2] }], { type: 'shrinkwrap', target: 'target', mode: 'nearest', distance: 0.5 });
+  assertClose(translationOf(nearest), [0, 1.5, 0], 'shrinkwrap nearest');
+  const projected = sampled([{ ...owner, translation: [0.5, 5, 0] }, { id: 'target', translation: [0, 0, 0], scale: [2, 2, 2] }], { type: 'shrinkwrap', target: 'target', mode: 'project', projectAxis: '-y', distance: 0.2 });
+  assertClose(translationOf(projected), [0.5, 1.2, 0], 'shrinkwrap project');
+
+  // armature constraint
+  const armScene = createAgentScene({
+    format: '67js.scene', schemaVersion: 1,
+    geometries: [{ id: 'box', type: 'box', bevel: 0 }],
+    materials: [{ id: 'paint', color: [0.6, 0.6, 0.6] }],
+    nodes: [
+      { id: 'owner', geometry: 'box', material: 'paint', translation: [0, 0, 0] },
+      { id: 'b1', geometry: 'box', material: 'paint', translation: [0, 0, 0] },
+      { id: 'b2', geometry: 'box', material: 'paint', translation: [0, 0, 0] },
+    ],
+    motion: {
+      duration: 1,
+      tracks: [
+        { kind: 'node', id: 'b1', property: 'translation', keyframes: [{ time: 0, value: [0, 0, 0] }, { time: 1, value: [4, 0, 0] }] },
+        { kind: 'node', id: 'b2', property: 'translation', keyframes: [{ time: 0, value: [0, 0, 0] }, { time: 1, value: [0, 4, 0] }] },
+      ],
+      constraints: [{ type: 'armature', node: 'owner', targets: [{ target: 'b1', weight: 0.75 }, { target: 'b2', weight: 0.25 }] }],
+    },
+  });
+  armScene.sampleMotion(1);
+  assertClose(translationOf(armScene.parts.find(p => p.name === 'owner').matrix), [3, 1, 0], 'armature weighted blend');
+
+  // floor useRotation and transformation mix
+  const tiltedFloor = { id: 'target', translation: [0, 0, 0], rotation: Array.from(quaternionFromEuler(new Float64Array(4), 0, 0, -45 * DEGREES)) };
+  const floored = sampled([{ ...owner, translation: [0, -1, 0] }, tiltedFloor], { type: 'floor', target: 'target', axis: '+y', useRotation: true });
+  assert.ok(floored[13] > -0.6, 'tilted floor lifts owner');
+
+  const added = sampled([{ ...owner, translation: [1, 2, 3] }, targetAt([5, 0, 0])], {
+    type: 'transformation', target: 'target', fromMax: [10, 10, 10], toMax: [2, 0, 0], mix: 'add',
+  });
+  assertClose(translationOf(added), [2, 2, 3], 'transformation add');
+});
