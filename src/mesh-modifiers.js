@@ -54,7 +54,7 @@ export function normalizeModifierEdit(edit, normalized, index, { finiteNumber, c
     return;
   }
   if (Object.hasOwn(REGISTERED_NORMALIZERS, edit.op)) {
-    REGISTERED_NORMALIZERS[edit.op](edit, normalized, index, { finiteNumber, integerInRange });
+    REGISTERED_NORMALIZERS[edit.op](edit, normalized, index, { finiteNumber, integerInRange: editInteger });
     return;
   }
   switch (edit.op) {
