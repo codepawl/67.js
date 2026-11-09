@@ -77,3 +77,44 @@ test('set-environment changes one sky field and keeps the others', () => {
   assert.equal(sky.turbidity, 5);
   assert.ok(Math.abs(lightDirection[1] - Math.sin(10 * Math.PI / 180)) < 1e-9);
 });
+
+test('ozone deepens twilight blue and sunDisc adds the solar disc to the sky map', () => {
+  const noOzone = skyEnvironment({ sunElevation: 4, ozone: 0 });
+  const heavyOzone = skyEnvironment({ sunElevation: 4, ozone: 6 });
+  assert.ok(heavyOzone.keyColor[0] < noOzone.keyColor[0]);
+  assert.ok(heavyOzone.skyTop[2] / Math.max(heavyOzone.skyTop[0], 1e-6) > noOzone.skyTop[2] / Math.max(noOzone.skyTop[0], 1e-6));
+
+  const withDisc = agentEnvironmentMap(skyEnvironment({ sunElevation: 30, sunDisc: true }));
+  const withoutDisc = agentEnvironmentMap(skyEnvironment({ sunElevation: 30, sunDisc: false }));
+  const peak = values => Math.max(...values);
+  assert.ok(peak(withDisc.data) > peak(withoutDisc.data) * 1.2);
+  assert.throws(() => skyEnvironment({ ozone: -1 }), /environment\.sky\.ozone/);
+  assert.throws(() => skyEnvironment({ sunDisc: 1 }), /environment\.sky\.sunDisc/);
+});
+
+test('environment motion tracks animate physical sky sunElevation, sunRotation and turbidity', () => {
+  const session = createAgentScene({
+    format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
+    environment: { sky: { type: 'physical', sunElevation: 60, sunRotation: 0, turbidity: 2 } },
+    motion: {
+      duration: 2,
+      tracks: [
+        { kind: 'environment', property: 'sunElevation', keyframes: [{ time: 0, value: 60 }, { time: 2, value: 5 }] },
+        { kind: 'environment', property: 'sunRotation', keyframes: [{ time: 0, value: 0 }, { time: 2, value: 90 }] },
+        { kind: 'environment', property: 'turbidity', keyframes: [{ time: 0, value: 2 }, { time: 2, value: 8 }] },
+      ],
+    },
+  });
+  session.sampleMotion(2);
+  const sampled = session.environment;
+  assert.equal(sampled.sky.sunElevation, 5);
+  assert.equal(sampled.sky.sunRotation, 90);
+  assert.equal(sampled.sky.turbidity, 8);
+  assert.ok(Math.abs(sampled.lightDirection[1] - Math.sin(5 * Math.PI / 180)) < 1e-6);
+  assert.ok(sampled.fogDensity > 0.0025 * 2);
+
+  assert.throws(() => createAgentScene({
+    format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
+    motion: { duration: 1, tracks: [{ kind: 'environment', property: 'sunElevation', keyframes: [{ time: 0, value: 45 }] }] },
+  }), /environment\.sky/);
+});

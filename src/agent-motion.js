@@ -9,6 +9,9 @@ import { normalizeClipLayers } from './agent-clip-layers.js';
 import { normalizeKeyframeEasing } from './easing.js';
 import { normalizeFootLock } from './foot-lock.js';
 import { bounded, denseArray, finite, knownKeys, valueFrom } from './motion-validation.js';
+import { agentSceneModule } from './agent-scene-modules.js';
+
+const PHYSICAL_SKY_TRACK_PROPERTIES = new Set(['sunElevation', 'sunRotation', 'turbidity', 'groundAlbedo', 'aerialPerspective', 'ozone']);
 
 const PROPERTIES = {
   // visible is 1 or 0 and defaults to STEP interpolation; a hidden node and its children draw and cast nothing.
@@ -23,7 +26,11 @@ const PROPERTIES = {
   sun: { direction: 3, color: 3, intensity: 1 },
   // Sky, fog and ambient values of the environment. volumeFogDensity is environment.volumeFog.density; environmentIntensity and
   // environmentRotation (radians) dim and turn the sky map that shows when environment.world is true.
-  environment: { skyTop: 3, skyBottom: 3, fogColor: 3, fogDensity: 1, volumeFogDensity: 1, ambientIntensity: 1, fillIntensity: 1, environmentIntensity: 1, environmentRotation: 1 },
+  environment: {
+    skyTop: 3, skyBottom: 3, fogColor: 3, fogDensity: 1, volumeFogDensity: 1,
+    ambientIntensity: 1, fillIntensity: 1, environmentIntensity: 1, environmentRotation: 1,
+    sunElevation: 1, sunRotation: 1, turbidity: 1, groundAlbedo: 1, aerialPerspective: 1, ozone: 1,
+  },
   // Frame effects: exposure, and the focus distance of the depth of field (needs effects.depthOfField.blur above 0).
   effects: { exposure: 1, focusDistance: 1 },
 };
@@ -38,6 +45,7 @@ const LOOK_RANGES = {
   environment: {
     skyTop: [0, 1], skyBottom: [0, 1], fogColor: [0, 1], fogDensity: [0, 10], volumeFogDensity: [0, 1000],
     ambientIntensity: [0, 100], fillIntensity: [0, 100], environmentIntensity: [0, 100], environmentRotation: [-100, 100],
+    sunElevation: [-90, 90], sunRotation: [-360, 360], turbidity: [1, 10], groundAlbedo: [0, 1], aerialPerspective: [0, 4], ozone: [0, 10],
   },
   effects: { exposure: [0.01, 16], focusDistance: [0.01, 100000] },
 };
@@ -145,6 +153,9 @@ function checkLookTarget(track, recipe) {
   }
   if (kind === 'effects' && property === 'focusDistance' && !(recipe.effects.depthOfField?.blur > 0)) {
     throw invalidField('motion.tracks.property', 'effects.focusDistance', 'a track only when effects.depthOfField.blur is above 0, such as blur 2; a camera with an fStop focuses on its target, so move the camera target track instead');
+  }
+  if (kind === 'environment' && PHYSICAL_SKY_TRACK_PROPERTIES.has(property) && recipe.environment.sky?.type !== 'physical') {
+    throw invalidField('motion.tracks.property', `environment.${property}`, 'a track only when environment.sky is { "type": "physical" }');
   }
 }
 
@@ -597,6 +608,16 @@ export function motionEnvironment(environment, sampled) {
   }
   if (sampled.environment) {
     const { volumeFogDensity, ...fields } = copiedPatch(sampled.environment);
+    const skyPatch = {};
+    for (const property of PHYSICAL_SKY_TRACK_PROPERTIES) {
+      if (fields[property] !== undefined) {
+        skyPatch[property] = fields[property];
+        delete fields[property];
+      }
+    }
+    if (environment.sky && Object.keys(skyPatch).length > 0) {
+      agentSceneModule('physicalSky').applyPhysicalSky({ ...environment.sky, ...skyPatch }, environment, invalidField);
+    }
     Object.assign(environment, fields);
     if (volumeFogDensity !== undefined) environment.volumeFog.density = volumeFogDensity;
   }

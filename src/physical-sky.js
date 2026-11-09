@@ -5,24 +5,29 @@ import { createEnvironmentMap } from './environment.js';
 // The normalized recipe stores the resolved sun, so the key light, the sky map, the background gradient and the
 // aerial perspective of distant geometry always agree.
 
-export const PHYSICAL_SKY_FIELDS = Object.freeze(['type', 'sunElevation', 'sunRotation', 'turbidity', 'groundAlbedo', 'aerialPerspective']);
+export const PHYSICAL_SKY_FIELDS = Object.freeze(['type', 'sunElevation', 'sunRotation', 'turbidity', 'groundAlbedo', 'aerialPerspective', 'ozone', 'sunDisc']);
 
-const DEFAULTS = Object.freeze({ sunElevation: 45, sunRotation: 0, turbidity: 3, groundAlbedo: 0.3, aerialPerspective: 1 });
+const DEFAULTS = Object.freeze({ sunElevation: 45, sunRotation: 0, turbidity: 3, groundAlbedo: 0.3, aerialPerspective: 1, ozone: 1, sunDisc: true });
 const LIMITS = Object.freeze({
   sunElevation: [-90, 90, 'degrees above the horizon, such as 15'],
   sunRotation: [-360, 360, 'degrees clockwise from -Z seen from above, such as 120'],
   turbidity: [1, 10, 'haze from 1 (very clear) to 10 (thick haze), such as 3'],
   groundAlbedo: [0, 1, 'a reflectance from 0 to 1, such as 0.3'],
   aerialPerspective: [0, 4, 'a scale from 0 (none) to 4, such as 1'],
+  ozone: [0, 10, 'ozone absorption from 0 (none) to 10, such as 1'],
 });
 
 const MAP_WIDTH = 128;
 const MAP_HEIGHT = 64;
-// Per-channel (red, green, blue) optical depth of the air at the zenith, and the aerosol depth per unit turbidity.
+// Per-channel (red, green, blue) optical depth of the air at the zenith, the aerosol depth per unit turbidity, and the
+// Chappuis-band ozone absorption depth per unit ozone (strong in orange-green, weak in blue).
 const RAYLEIGH_DEPTH = [0.04, 0.1, 0.24];
 const AEROSOL_DEPTH_PER_TURBIDITY = [0.0125, 0.015, 0.0175];
+const OZONE_DEPTH = [0.02, 0.014, 0.0005];
 const SUN_STRENGTH = 3.4;
 const SKY_STRENGTH = 2.2;
+const SUN_DISC_STRENGTH = 18;
+const SUN_DISC_COSINE = 0.9994;
 const MAXIMUM_AIR_MASS = 20;
 const AEROSOL_ANISOTROPY = 0.76;
 
@@ -40,6 +45,11 @@ export function resolvePhysicalSky(input, fail) {
     }
     resolved[field] = value;
   }
+  const sunDisc = input.sunDisc ?? DEFAULTS.sunDisc;
+  if (typeof sunDisc !== 'boolean') {
+    throw fail('environment.sky.sunDisc', sunDisc, 'true or false');
+  }
+  resolved.sunDisc = sunDisc;
   return resolved;
 }
 
@@ -48,8 +58,8 @@ function airMass(elevationRadians) {
   return Math.min(MAXIMUM_AIR_MASS, 1 / (Math.sin(Math.max(elevationRadians, 0)) + 0.15 * Math.pow(degrees + 3.885, -1.253)));
 }
 
-function opticalDepth(turbidity) {
-  return RAYLEIGH_DEPTH.map((rayleigh, channel) => rayleigh + AEROSOL_DEPTH_PER_TURBIDITY[channel] * turbidity);
+function opticalDepth(turbidity, ozone = 1) {
+  return RAYLEIGH_DEPTH.map((rayleigh, channel) => rayleigh + AEROSOL_DEPTH_PER_TURBIDITY[channel] * turbidity + OZONE_DEPTH[channel] * ozone);
 }
 
 /** The unit direction toward the sun; azimuth turns clockwise seen from above, from -Z. */
@@ -62,14 +72,15 @@ export function physicalSunDirection(sky) {
 function sunColor(sky) {
   const elevation = sky.sunElevation * Math.PI / 180;
   const mass = airMass(elevation);
-  const depth = opticalDepth(sky.turbidity);
+  const depth = opticalDepth(sky.turbidity, sky.ozone ?? 1);
   // The disc sinks under the horizon over about three degrees.
   const setting = Math.min(1, Math.max(0, (sky.sunElevation + 1) / 3));
   return depth.map(channelDepth => SUN_STRENGTH * Math.exp(-channelDepth * mass) * setting);
 }
 
 function skyRadiance(sky, direction, sun) {
-  const depth = opticalDepth(sky.turbidity);
+  const ozone = sky.ozone ?? 1;
+  const depth = opticalDepth(sky.turbidity, ozone);
   const fullSunMass = airMass(Math.asin(Math.max(-1, Math.min(1, sun[1]))));
   const sunCosine = direction[0] * sun[0] + direction[1] * sun[1] + direction[2] * sun[2];
   const rayleighPhase = 0.75 * (1 + sunCosine * sunCosine);
@@ -82,11 +93,11 @@ function skyRadiance(sky, direction, sun) {
     const rayleigh = RAYLEIGH_DEPTH[channel];
     const aerosol = AEROSOL_DEPTH_PER_TURBIDITY[channel] * sky.turbidity;
     const scattered = (rayleigh * rayleighPhase + aerosol * aerosolPhase * 1.5) / (rayleigh + aerosol);
-    const inScatter = 1 - Math.exp(-channelDepth * viewMass);
+    const inScatter = 1 - Math.exp(-(rayleigh + aerosol) * viewMass);
     // Light scattered near the sun and low in the sky crossed the whole air mass toward the sun; the rest of the sky saw a short path.
     const nearSun = Math.max(0, sunCosine) ** 2 * (1 - Math.max(0, direction[1]));
     const sunMass = Math.min(4, fullSunMass) * (1 - nearSun) + fullSunMass * nearSun;
-    const lightReaching = Math.exp(-channelDepth * sunMass * 0.45);
+    const lightReaching = Math.exp(-channelDepth * sunMass * 0.45 - OZONE_DEPTH[channel] * ozone * viewMass * 0.35);
     return SKY_STRENGTH * scattered * inScatter * lightReaching * setting;
   });
 }
@@ -138,14 +149,19 @@ const MAXIMUM_CACHED_MAPS = 8;
 
 function buildMapData(sky) {
   const { sun, color, zenith } = colorAtZenithAndHorizon(sky);
+  const drawDisc = sky.sunDisc !== false && sky.sunElevation > -1.5;
   const data = new Float32Array(MAP_WIDTH * MAP_HEIGHT * 3);
   for (let row = 0; row < MAP_HEIGHT; row++) {
     const polar = ((row + 0.5) / MAP_HEIGHT) * Math.PI;
     for (let column = 0; column < MAP_WIDTH; column++) {
       const azimuth = ((column + 0.5) / MAP_WIDTH - 0.5) * 2 * Math.PI;
       const direction = [Math.sin(polar) * Math.sin(azimuth), Math.cos(polar), -Math.sin(polar) * Math.cos(azimuth)];
+      const sunCosine = direction[0] * sun[0] + direction[1] * sun[1] + direction[2] * sun[2];
+      const discWeight = drawDisc && direction[1] > 0 && sunCosine > SUN_DISC_COSINE
+        ? ((sunCosine - SUN_DISC_COSINE) / (1 - SUN_DISC_COSINE)) ** 2 * SUN_DISC_STRENGTH
+        : 0;
       const radiance = direction[1] >= 0
-        ? skyRadiance(sky, direction, sun)
+        ? skyRadiance(sky, direction, sun).map((component, channel) => component + color[channel] * discWeight)
         : groundRadiance(sky, color, zenith, sun).map((component, channel) => component + skyRadiance(sky, [direction[0], 0, direction[2]], sun)[channel] * 0.35 * (1 - sky.groundAlbedo));
       data.set(radiance, (row * MAP_WIDTH + column) * 3);
     }
