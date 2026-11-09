@@ -23,7 +23,138 @@ export const GEOMETRY_PROBLEMS = Object.freeze({
   'thin-wall': { severity: 'warning', fix: 'The wall behind these faces (sample is face indices) is under 0.5% of the mesh size thick. Thicken it with solidify, or move the faces apart.' },
   'floating-part': { severity: 'warning', fix: 'This part (sample is part indices) touches no other part. Translate it onto its neighbour, or ignore this if it is meant to stand alone.' },
   asymmetric: { severity: 'warning', fix: 'The mesh is mirror-symmetric except for the vertices in sample. Rebuild one half and mirror it, or set_position those vertices to their partners.' },
+  'non-planar-quad': { severity: 'warning', fix: 'These quads (sample is face indices) fold by more than 45 degrees across their diagonal and pinch shading. Triangulate them, or flatten their corners.' },
+  'skewed-quad': { severity: 'warning', fix: 'These quads (sample is face indices) have a corner over 60 degrees from a right angle. Dissolve or slide edges so corners stay near 90 degrees.' },
 });
+
+const NON_PLANAR_QUAD_DEGREES = 45;
+const SKEWED_QUAD_DEGREES = 60;
+
+function roundMetric(value) {
+  return Math.round(value * 1e4) / 1e4;
+}
+
+/**
+ * Interior vertex valence and quad shape quality (corner angle deviation from 90 degrees, aspect ratio and diagonal fold).
+ * Boundary vertices are excluded from pole counts because an open rim naturally has degree 2 or 3.
+ */
+export function meshTopologyMetrics(mesh, table = edgeCornerTable(mesh), problems = null) {
+  const degree = new Uint32Array(mesh.vertexCount);
+  const boundaryVertex = new Uint8Array(mesh.vertexCount);
+  for (let edge = 0; edge < mesh.edgeCount; edge++) {
+    const first = mesh.edgeVertices[edge * 2];
+    const second = mesh.edgeVertices[edge * 2 + 1];
+    degree[first]++;
+    degree[second]++;
+    if (table.edgeOffsets[edge + 1] - table.edgeOffsets[edge] !== 2) {
+      boundaryVertex[first] = 1;
+      boundaryVertex[second] = 1;
+    }
+  }
+  let regular = 0;
+  let valence3 = 0;
+  let valence5 = 0;
+  let valence6Plus = 0;
+  for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
+    if (degree[vertex] === 0 || boundaryVertex[vertex]) continue;
+    if (degree[vertex] === 4) regular++;
+    else if (degree[vertex] === 3) valence3++;
+    else if (degree[vertex] === 5) valence5++;
+    else if (degree[vertex] >= 6) valence6Plus++;
+  }
+  const positions = mesh.positions;
+  let quadCount = 0;
+  let meanAngleDeviation = 0;
+  let maxAngleDeviation = 0;
+  let maxAspectRatio = 1;
+  let maxWarpAngle = 0;
+  for (let face = 0; face < mesh.faceCount; face++) {
+    const start = mesh.faceOffsets[face];
+    if (mesh.faceOffsets[face + 1] - start !== 4) continue;
+    quadCount++;
+    const v0 = mesh.cornerVertices[start] * 3;
+    const v1 = mesh.cornerVertices[start + 1] * 3;
+    const v2 = mesh.cornerVertices[start + 2] * 3;
+    const v3 = mesh.cornerVertices[start + 3] * 3;
+    const corners = [v0, v1, v2, v3];
+    let shortestEdge = Infinity;
+    let longestEdge = 0;
+    let faceMaxDeviation = 0;
+    let faceDeviationSum = 0;
+    for (let index = 0; index < 4; index++) {
+      const current = corners[index];
+      const next = corners[(index + 1) & 3];
+      const previous = corners[(index + 3) & 3];
+      const nextX = positions[next] - positions[current];
+      const nextY = positions[next + 1] - positions[current + 1];
+      const nextZ = positions[next + 2] - positions[current + 2];
+      const prevX = positions[previous] - positions[current];
+      const prevY = positions[previous + 1] - positions[current + 1];
+      const prevZ = positions[previous + 2] - positions[current + 2];
+      const edgeLength = Math.hypot(nextX, nextY, nextZ);
+      if (edgeLength < shortestEdge) shortestEdge = edgeLength;
+      if (edgeLength > longestEdge) longestEdge = edgeLength;
+      const crossLength = Math.hypot(nextY * prevZ - nextZ * prevY, nextZ * prevX - nextX * prevZ, nextX * prevY - nextY * prevX);
+      const angle = Math.atan2(crossLength, nextX * prevX + nextY * prevY + nextZ * prevZ) * 180 / Math.PI;
+      const deviation = Math.abs(angle - 90);
+      faceDeviationSum += deviation;
+      if (deviation > faceMaxDeviation) faceMaxDeviation = deviation;
+    }
+    meanAngleDeviation += faceDeviationSum / 4;
+    if (faceMaxDeviation > maxAngleDeviation) maxAngleDeviation = faceMaxDeviation;
+    if (shortestEdge > 1e-12) {
+      const aspect = longestEdge / shortestEdge;
+      if (aspect > maxAspectRatio) maxAspectRatio = aspect;
+    }
+    const diagX = positions[v2] - positions[v0];
+    const diagY = positions[v2 + 1] - positions[v0 + 1];
+    const diagZ = positions[v2 + 2] - positions[v0 + 2];
+    const e01x = positions[v1] - positions[v0];
+    const e01y = positions[v1 + 1] - positions[v0 + 1];
+    const e01z = positions[v1 + 2] - positions[v0 + 2];
+    const e03x = positions[v3] - positions[v0];
+    const e03y = positions[v3 + 1] - positions[v0 + 1];
+    const e03z = positions[v3 + 2] - positions[v0 + 2];
+    const n1x = e01y * diagZ - e01z * diagY;
+    const n1y = e01z * diagX - e01x * diagZ;
+    const n1z = e01x * diagY - e01y * diagX;
+    const n2x = diagY * e03z - diagZ * e03y;
+    const n2y = diagZ * e03x - diagX * e03z;
+    const n2z = diagX * e03y - diagY * e03x;
+    const len1 = Math.hypot(n1x, n1y, n1z);
+    const len2 = Math.hypot(n2x, n2y, n2z);
+    let warpAngle = 0;
+    if (len1 > 1e-12 && len2 > 1e-12) {
+      const cosine = Math.max(-1, Math.min(1, (n1x * n2x + n1y * n2y + n1z * n2z) / (len1 * len2)));
+      warpAngle = Math.acos(cosine) * 180 / Math.PI;
+      if (warpAngle > maxWarpAngle) maxWarpAngle = warpAngle;
+    }
+    if (problems) {
+      if (warpAngle > NON_PLANAR_QUAD_DEGREES) addQualityProblem(problems, 'non-planar-quad', face);
+      const touchesHighPole = [v0, v1, v2, v3].some(offset => degree[offset / 3] >= 6);
+      if (faceMaxDeviation > SKEWED_QUAD_DEGREES && !touchesHighPole) addQualityProblem(problems, 'skewed-quad', face);
+    }
+  }
+  return {
+    valence: { regular, poles3: valence3, poles5: valence5, poles6Plus: valence6Plus },
+    quadQuality: {
+      meanAngleError: quadCount ? roundMetric(meanAngleDeviation / quadCount) : 0,
+      maxAngleError: roundMetric(maxAngleDeviation),
+      maxAspect: roundMetric(maxAspectRatio),
+      maxWarp: roundMetric(maxWarpAngle),
+    },
+  };
+}
+
+function addQualityProblem(problems, kind, element) {
+  let problem = problems.get(kind);
+  if (!problem) {
+    problem = { kind, ...GEOMETRY_PROBLEMS[kind], count: 0, sample: [] };
+    problems.set(kind, problem);
+  }
+  problem.count++;
+  if (problem.sample.length < SAMPLE_LIMIT) problem.sample.push(element);
+}
 
 function addProblem(problems, kind, element) {
   let problem = problems.get(kind);
@@ -161,6 +292,7 @@ export function lintMesh(mesh, { geometry = false } = {}) {
     if (insideOtherPart(mesh, facePart, part)) cavities++;
     else addProblem(problems, 'inverted-part', part);
   }
+  const topology = meshTopologyMetrics(mesh, table, geometry ? problems : null);
   const problemList = [...problems.values()];
   let skippedChecks;
   if (geometry) {
@@ -168,13 +300,32 @@ export function lintMesh(mesh, { geometry = false } = {}) {
     for (const found of spatial.problems) problemList.push({ ...found, ...GEOMETRY_PROBLEMS[found.kind] });
     if (spatial.skipped.length) skippedChecks = spatial.skipped;
   }
+  const ok = !problemList.some(problem => problem.severity === 'error');
   return {
-    ok: !problemList.some(problem => problem.severity === 'error'),
+    ok,
     counts: { vertices: mesh.vertexCount, edges: mesh.edgeCount, faces: mesh.faceCount, corners: mesh.cornerCount },
     parts: { count: partCount, closed: closedParts, cavities },
+    valence: topology.valence,
+    quadQuality: topology.quadQuality,
+    topologyScore: computeTopologyScore(mesh, ok, topology),
     tags: tagCounts(mesh),
     bounds,
     problems: problemList,
     ...(skippedChecks ? { skippedChecks } : {}),
   };
+}
+
+function computeTopologyScore(mesh, ok, { valence, quadQuality }) {
+  if (!ok || mesh.faceCount === 0) return 0;
+  let quadCount = 0;
+  for (let face = 0; face < mesh.faceCount; face++) {
+    if (mesh.faceOffsets[face + 1] - mesh.faceOffsets[face] === 4) quadCount++;
+  }
+  const quadShare = quadCount / mesh.faceCount;
+  const interiorVertices = valence.regular + valence.poles3 + valence.poles5 + valence.poles6Plus;
+  const regularShare = interiorVertices > 0 ? (valence.regular + 0.5 * valence.poles3 + 0.5 * valence.poles5) / interiorVertices : 1;
+  const angleHealth = Math.max(0, 1 - quadQuality.meanAngleError / 60);
+  const warpHealth = Math.max(0, 1 - quadQuality.maxWarp / 90);
+  const shapeHealth = (angleHealth + warpHealth) / 2;
+  return roundMetric(0.5 * quadShare + 0.25 * regularShare + 0.25 * shapeHealth);
 }
