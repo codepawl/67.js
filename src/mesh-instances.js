@@ -5,6 +5,9 @@ import { MAX_CURVE_POINTS, filletCurve, resampleCurve } from './curve-operations
 import { createTriangleSurfaceIndex } from './mesh-query.js';
 import './mesh-field-surfaces.js';
 import './field-rotation.js';
+import {
+  checkedPlace, clampedSize, eulerQuaternion, meshPoints, pickVariant, thinByDensity, thinBySpacing,
+} from './mesh-instance-placement.js';
 
 // Instance on points: a node with an `instances` record becomes a group node plus one child node per point, all
 // sharing the node's geometry and material, so the renderer draws them in one instanced call. Points come from a
@@ -16,13 +19,16 @@ import './field-rotation.js';
 //                    "where": { "gt": [{ "attr": "position", "component": "x" }, 0] },
 //                    "yaw": true, "alignToNormal": false, "scale": [0.7, 1.3] } }
 //
+// "place" adds Poisson spacing, a density field, variants, and per-point rotation and size from fields; see
+// mesh-instance-placement.js. `place.at` makes a surface source give its vertices or face centres.
+//
 // Points are in the group's own space: the group takes the node's translation, rotation and scale, and its parent.
 // Put the group under the node that carries the surface geometry to place instances on that node's surface.
 
 export { MAX_INSTANCE_CANDIDATES };
 const MAX_COORDINATE = 1e6;
 const SOURCES = INSTANCE_SOURCES;
-const INSTANCE_FIELDS = Object.freeze([...SOURCES, 'seed', 'where', 'yaw', 'alignToNormal', 'scale']);
+const INSTANCE_FIELDS = Object.freeze([...SOURCES, 'seed', 'where', 'yaw', 'alignToNormal', 'scale', 'place']);
 const MAX_SEED = 0x7fffffff;
 const CURVE_FILLET_SEGMENTS = 8;
 const UP = Object.freeze([0, 1, 0]);
@@ -171,7 +177,7 @@ function curvePoints(source) {
   return { positions, normals };
 }
 
-function candidatePoints(spec, seed, resolveSurface) {
+function candidatePoints(spec, seed, resolveSurface, place) {
   const sourceName = SOURCES.filter(name => Object.hasOwn(spec, name));
   if (sourceName.length !== 1) throw instanceError(`give exactly one point source: ${SOURCES.join(', ')}.`);
   if (sourceName[0] === 'grid') return gridPoints(spec.grid);
@@ -180,29 +186,32 @@ function candidatePoints(spec, seed, resolveSurface) {
   const source = plainRecord(spec.surface, 'surface', ['geometry', 'count']);
   const count = wholeNumber(source.count, 1, MAX_INSTANCE_CANDIDATES, 'surface count');
   if (typeof source.geometry !== 'string') throw instanceError('surface needs a geometry id.');
+  if (place.at) return meshPoints(resolveSurface(source.geometry), place.at, count);
   return surfacePoints(resolveSurface(source.geometry), count, seed);
 }
 
-function keptIndices(spec, points, resolveSurface) {
+// Evaluate a field expression over every candidate point; a missing expression gives null.
+function pointField(expression, points, resolveSurface, kind) {
+  if (expression === undefined) return null;
   const count = points.positions.length / 3;
-  const kept = [];
-  if (spec.where === undefined) {
-    for (let index = 0; index < count; index++) kept.push(index);
-    return kept;
-  }
   const normals = points.normals ?? Float64Array.from({ length: count * 3 }, (unused, position) => UP[position % 3]);
   const loadSurface = surface => {
-    if (typeof surface !== 'string') throw instanceError('a where field reads a surface by its geometry id.');
+    if (typeof surface !== 'string') throw instanceError('a field reads a surface by its geometry id.');
     return createTriangleSurfaceIndex(resolveSurface(surface));
   };
-  const { values } = evaluateField(spec.where, pointSetContext(points.positions, normals, loadSurface), { kind: 'scalar' });
-  for (let index = 0; index < count; index++) {
-    if (values[index] !== 0) kept.push(index);
-  }
+  return evaluateField(expression, pointSetContext(points.positions, normals, loadSurface), kind ? { kind } : {});
+}
+
+function keptIndices(spec, place, points, fields, seed) {
+  const count = points.positions.length / 3;
+  let kept = Array.from({ length: count }, (unused, index) => index);
+  if (fields.where) kept = kept.filter(index => fields.where.values[index] !== 0);
+  if (fields.density) kept = thinByDensity(kept, fields.density.values, seed);
+  if (place.spacing) kept = thinBySpacing(kept, points.positions, place.spacing);
   return kept;
 }
 
-function instanceRotation(spec, seed, candidate, normals) {
+function instanceRotation(spec, seed, candidate, normals, turns) {
   const rotation = quat.create();
   if (spec.alignToNormal && normals) {
     const normal = [normals[candidate * 3], normals[candidate * 3 + 1], normals[candidate * 3 + 2]];
@@ -212,12 +221,14 @@ function instanceRotation(spec, seed, candidate, normals) {
     const turn = quat.setAxisAngle(quat.create(), UP, seededRandom(candidate, CHANNEL_YAW, seed) * Math.PI * 2);
     quat.multiply(rotation, rotation, turn);
   }
+  if (turns) quat.multiply(rotation, rotation, eulerQuaternion(turns[candidate * 3], turns[candidate * 3 + 1], turns[candidate * 3 + 2]));
   return Array.from(rotation);
 }
 
-function instanceScale(spec, seed, candidate) {
-  if (spec.scale === undefined) return 1;
-  return spec.scale[0] + (spec.scale[1] - spec.scale[0]) * seededRandom(candidate, CHANNEL_SCALE, seed);
+function instanceScale(spec, seed, candidate, sizes) {
+  const uniform = spec.scale === undefined ? 1 : spec.scale[0] + (spec.scale[1] - spec.scale[0]) * seededRandom(candidate, CHANNEL_SCALE, seed);
+  if (!sizes) return [uniform, uniform, uniform];
+  return clampedSize(sizes.values, candidate, sizes.kind === 'vector').map(size => size * uniform);
 }
 
 function checkedSpec(spec) {
@@ -236,6 +247,17 @@ function checkedSpec(spec) {
   return seed;
 }
 
+// The fields a spec reads, evaluated once over all candidate points.
+function placementFields(spec, place, points, resolveSurface) {
+  return {
+    where: pointField(spec.where, points, resolveSurface, 'scalar'),
+    density: pointField(place.density, points, resolveSurface, 'scalar'),
+    variant: pointField(place.variant, points, resolveSurface, 'scalar'),
+    rotation: pointField(place.rotation, points, resolveSurface, 'vector'),
+    size: pointField(place.size, points, resolveSurface),
+  };
+}
+
 /**
  * Replace each node that has an `instances` record with a group node and its instance children. `resolveSurface(id)`
  * returns the render geometry ({ positions, normals, indices }) for a surface source. Nodes without `instances` pass
@@ -250,17 +272,20 @@ export function expandInstancedNodes(nodes, { resolveSurface, maxNodes }) {
       continue;
     }
     const { instances: spec, geometry, material, ...group } = node;
-    if (typeof geometry !== 'string' || typeof material !== 'string') throw instanceError(`node ${JSON.stringify(String(node.id).slice(0, 48))} needs geometry and material ids to instance.`);
+    const place = checkedPlace(spec?.place);
+    if (typeof material !== 'string' || (typeof geometry !== 'string' && !place.variants)) throw instanceError(`node ${JSON.stringify(String(node.id).slice(0, 48))} needs geometry and material ids to instance.`);
     const seed = checkedSpec(spec);
-    const points = candidatePoints(spec, seed, resolveSurface);
+    if (place.at && !Object.hasOwn(spec, 'surface')) throw instanceError('place.at needs a surface source.');
+    const points = candidatePoints(spec, seed, resolveSurface, place);
+    const fields = placementFields(spec, place, points, resolveSurface);
     expanded.push(group);
-    for (const [slot, candidate] of keptIndices(spec, points, resolveSurface).entries()) {
-      const scale = instanceScale(spec, seed, candidate);
+    for (const [slot, candidate] of keptIndices(spec, place, points, fields, seed).entries()) {
+      const variant = place.variants ? pickVariant(place.variants, fields.variant?.values, candidate, seed) : { geometry, material };
       expanded.push({
-        id: `${node.id}.${slot}`, parent: node.id, geometry, material,
+        id: `${node.id}.${slot}`, parent: node.id, geometry: variant.geometry, material: variant.material ?? material,
         translation: [points.positions[candidate * 3], points.positions[candidate * 3 + 1], points.positions[candidate * 3 + 2]],
-        rotation: instanceRotation(spec, seed, candidate, points.normals),
-        scale: [scale, scale, scale],
+        rotation: instanceRotation(spec, seed, candidate, points.normals, fields.rotation?.values),
+        scale: instanceScale(spec, seed, candidate, fields.size),
       });
       if (expanded.length > maxNodes) throw new RangeError(`Instances expand past the limit of ${maxNodes} nodes.`);
     }

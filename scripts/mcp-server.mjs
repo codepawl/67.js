@@ -75,6 +75,7 @@ const instanceSpec = z.strictObject({
   curve: z.strictObject({ points: z.array(vector3).min(2).max(256), count: instanceCount, closed: z.boolean().optional(), fillet: z.number().positive().optional() }).optional().describe('Equal steps along a polyline; fillet is a corner radius.'),
   seed: z.number().int().min(0).max(2147483647).optional(),
   where: fieldExpression.optional().describe('Number expression over the points (position, normal, index); points where it is 0 are dropped.'),
+  place: z.record(z.string(), z.unknown()).optional().describe('scene_capabilities instancing.'),
   yaw: z.boolean().optional().describe('Random turn about up.'),
   alignToNormal: z.boolean().optional().describe('Surface or curve: turn up to the normal or direction.'),
   scale: z.tuple([z.number().min(0.001).max(1000), z.number().min(0.001).max(1000)]).optional().describe('Random uniform scale range [min, max].'),

@@ -1,4 +1,5 @@
 import { createAnimationClip, compileAnimationSampler } from './animation.js';
+import { trackEffectsDescription } from './animation-modifiers.js';
 import { invalidField, withFieldPrefix } from './field-error.js';
 import { createCameraPath } from './camera-path.js';
 import { CAMERA_LENS_FIELDS } from './camera.js';
@@ -346,7 +347,7 @@ function normalizedDrive(input, recipe) {
   if (!recipe.normalizeDrive) {
     throw new RangeError('motion.drive moves an imported asset recipe. For an asset placed in a scene, give the placement a drive: { asset: { id, drive } }.');
   }
-  const canonical = recipe.normalizeDrive(input);
+  const canonical = recipe.normalizeDrive(input, 'motion.drive');
   return { canonical, built: recipe.buildDrive(canonical) };
 }
 
@@ -374,7 +375,7 @@ export function normalizeAgentMotion(input, recipe) {
   const identities = new Set();
   let keyframeCount = 0;
   const tracks = inputTracks.map((track, index) => {
-    knownKeys(track, ['kind', 'id', 'property', 'interpolation', 'keyframes'], 'motion track');
+    knownKeys(track, ['kind', 'id', 'property', 'interpolation', 'keyframes', 'extrapolation', 'modifiers'], 'motion track');
     if (!Object.hasOwn(PROPERTIES, track.kind) || !Object.hasOwn(PROPERTIES[track.kind], track.property)) {
       const known = Object.hasOwn(PROPERTIES, track.kind) ? ` ${track.kind} properties: ${Object.keys(PROPERTIES[track.kind]).join(', ')}.` : ` Kinds: ${Object.keys(PROPERTIES).join(', ')}.`;
       throw invalidField(`motion.tracks[${index}].property`, `${track.kind}.${track.property}`, `a kind and property pair.${known}`);
@@ -411,7 +412,7 @@ export function normalizeAgentMotion(input, recipe) {
     const keyframes = track.keyframes.map((keyframe, keyframeIndex) => withFieldPrefix(`motion.tracks[${index}].keyframes[${keyframeIndex}]`, () => normalizedKeyframe(keyframe, track, duration, interpolation)));
     const clip = createAnimationClip({
       duration, loop,
-      tracks: [{ target: String(index), property: coreProperty(track), interpolation, keyframes }],
+      tracks: [{ target: String(index), property: coreProperty(track), interpolation, keyframes, extrapolation: track.extrapolation, modifiers: track.modifiers }],
     });
     const result = {
       kind: track.kind,
@@ -419,6 +420,7 @@ export function normalizeAgentMotion(input, recipe) {
       interpolation,
       keyframes: clip.tracks[0].keyframes.map(keyframe => copiedKeyframe(keyframe, interpolation)),
     };
+    if (clip.tracks[0].effects) Object.assign(result, trackEffectsDescription(clip.tracks[0].effects));
     if (!SINGLETON_KINDS.has(track.kind)) {
       result.id = track.id;
     }
@@ -634,6 +636,8 @@ export function compileAgentMotion(input, recipe) {
       property: coreProperty(track),
       interpolation: track.interpolation,
       keyframes: track.keyframes,
+      extrapolation: track.extrapolation,
+      modifiers: track.modifiers,
     })),
   });
   const sampler = compileAnimationSampler(clip);
@@ -706,7 +710,7 @@ export function compileAgentMotion(input, recipe) {
     loop: motion.loop,
   };
   for (const track of cameraTracks) {
-    cameraInput[track.property] = { interpolation: track.interpolation, keyframes: track.keyframes };
+    cameraInput[track.property] = { interpolation: track.interpolation, keyframes: track.keyframes, extrapolation: track.extrapolation, modifiers: track.modifiers };
   }
   const cameraPath = cameraTracks.length ? createCameraPath(cameraInput) : null;
   const stagedCamera = cameraPath ? { eye: new Float32Array(3), target: new Float32Array(3), up: new Float32Array(3) } : null;
