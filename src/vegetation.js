@@ -267,7 +267,7 @@ function addMeshLeaves(builder, skeleton, spec, site, scale, random) {
       canopyBlend: 0.45,
       colorBase: LEAF_COLOR_BASE,
       colorTip: LEAF_COLOR_TIP,
-      brightness: brightness * (0.9 + random() * 0.2),
+      brightness: brightness * (0.9 + random() * 0.2) / 1.5,
     });
   }
 }
@@ -337,7 +337,7 @@ function addCrownClumps(builder, skeleton, spec, mode, random, widthScale = 1) {
     const shading = crownShading(skeleton, center);
     const radius = cellSize * (0.55 + 0.1 * Math.min(sites.length, 5)) * widthScale * (spec.clumpScale ?? 1);
     if (mode === 'mesh') {
-      addBlob(builder, center, radius, shading);
+      addBlob(builder, center, radius, { brightness: shading.brightness / 1.5 });
       continue;
     }
     for (let card = 0; card < 3; card++) {
@@ -403,7 +403,7 @@ function buildShadowFoliage(skeleton, preset, mode, seed, firstSetting) {
 function createMaterials(preset, mode, scannedBark, scannedLeaves) {
   const bark = createBarkMaterial(preset, scannedBark);
   if (mode === 'mesh') {
-    const foliage = { tag: 'foliage', color: preset.leaf.foliageColor, roughness: 0.8, metallic: 0, emission: 0 };
+    const foliage = { tag: 'foliage', color: preset.leaf.foliageColor.map(channel => channel * 1.5), roughness: 0.8, metallic: 0, emission: 0 };
     return { bark, foliage, crown: foliage };
   }
   const cardMaterial = (texture) => ({
@@ -429,16 +429,18 @@ function createMaterials(preset, mode, scannedBark, scannedLeaves) {
 // A level's mean is taken over the leaf its vertices stand for, not over the vertices, because a clump has few vertices for a lot of leaf.
 
 function bakeCrownSkyVisibility(levels, species) {
-  const foliageOf = level => level.parts.find(part => part.role === 'foliage').geometry;
+  const foliageOf = level => level.parts[1].geometry;
   const coverageOf = geometry => vertexCoverage(geometry.positions, geometry.indices);
   let field = null;
   for (const [levelIndex, level] of levels.entries()) {
-    const geometry = foliageOf(level);
+    const part = level.parts[1];
+    const { geometry } = part;
     if (geometry.positions.length === 0) continue;
     const gain = TREE_LEVEL_GAINS[species]?.[levelIndex];
     if (gain) {
       const colorGain = gain.color * leafAreaCorrection(geometry, foliageOf(levels[0]), gain.area, TREE_LEVEL_GAINS[species].areaExponent);
-      geometry.colors = geometry.colors.map(channel => channel * colorGain);
+      if (part.material.map) geometry.colors = geometry.colors.map(channel => channel * colorGain);
+      else part.material = { ...part.material, color: part.material.color.map(channel => Math.min(1, channel * colorGain)) };
     }
     let skyVisibility = null;
     Object.defineProperty(geometry, 'skyVisibility', {
@@ -535,7 +537,7 @@ function grassMaterial(style, color) {
   if (style === 'cards') {
     return { tag: 'grass', color: [1, 1, 1], roughness: 0.9, metallic: 0, emission: 0, map: leafTextureDescriptor('grass', [80, 128, 40]), alphaMode: 'mask', alphaCutoff: 0.5, doubleSided: true };
   }
-  return { tag: 'grass', color, roughness: 0.9, metallic: 0, emission: 0 };
+  return { tag: 'grass', color: color.map(channel => Math.min(1, channel * 1.15)), roughness: 0.9, metallic: 0, emission: 0 };
 }
 
 function buildGrassBlades(random, blades, height, radius, widthScale) {
@@ -555,6 +557,7 @@ function buildGrassBlades(random, blades, height, radius, widthScale) {
       canopyBlend: 0.55,
       colorBase: [0.5, 0.58, 0.45],
       colorTip: [1.15, 1.15, 0.9],
+      brightness: 1 / 1.15,
     });
   }
   return builder.build();
@@ -719,7 +722,7 @@ function instanceParts(instance, levelIndex, label) {
       geometry: part.geometry,
       shadowLods: part.shadowLods,
       matrix: instance.matrix,
-      material: part.tintable ? { ...part.material, color: part.material.color.map((channel, axis) => channel * instance.tint[axis]) } : part.material,
+      material: part.tintable ? { ...part.material, color: part.material.color.map((channel, axis) => Math.min(1, channel * instance.tint[axis])) } : part.material,
     }));
   }
   return instance.partsByLevel[levelIndex];
