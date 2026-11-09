@@ -86,8 +86,13 @@ rebuilding the topology.
 
 ## Lint
 
-`lintMesh(mesh)` returns `{ ok, counts, parts, tags, bounds, problems }`. Each problem has `kind`, `severity`,
-`count`, up to eight sample indices and a suggested `fix`:
+`lintMesh(mesh, { geometry = false })` returns `{ ok, counts, parts, valence, quadQuality, topologyScore, tags, bounds, problems }`:
+
+- `valence` counts interior vertices by edge degree: `{ regular, poles3, poles5, poles6Plus }` (boundary vertices on open rims are left out).
+- `quadQuality` summarizes quad faces: `{ meanAngleError, maxAngleError, maxAspect, maxWarp }` (angles in degrees from $90^\circ$ and across the quad diagonal).
+- `topologyScore` is a normalized score in $[0, 1]$ (`0` when `ok` is `false`) combining quad share, interior regular/pole valence and quad angle/planarity health.
+
+Each problem has `kind`, `severity`, `count`, up to eight sample indices and a suggested `fix`:
 
 | Kind | Severity | Sample indices |
 | --- | --- | --- |
@@ -97,8 +102,10 @@ rebuilding the topology.
 | `degenerate-face` | error | faces with near-zero area |
 | `boundary-edge` | warning | edges with one face (open surfaces) |
 | `loose-vertex` | warning | vertices used by no face |
+| `non-planar-quad` | warning (`geometry: true`) | quads folded by more than 45 degrees across their diagonal |
+| `skewed-quad` | warning (`geometry: true`) | quads with a corner more than 60 degrees from a right angle (outside radial pole fans) |
 
-`ok` is false when any error is present. Self-intersections and wall thickness are not checked yet.
+`ok` is false when any error is present. With `geometry: true`, spatial checks (`intersecting-parts`, `self-intersection`, `thin-wall`, `floating-part`, `asymmetric`) and quad distortion warnings are included.
 
 ## Selection and edits
 

@@ -391,6 +391,9 @@ export async function measureRecipe(recipe) {
   const problemKinds = new Set();
   let uvParts = 0;
   let worstUvStretch = 0;
+  let topologyScoreSum = 0;
+  const valence = { regular: 0, poles3: 0, poles5: 0, poles6Plus: 0 };
+  const quadQuality = { meanAngleError: 0, maxAngleError: 0, maxAspect: 1, maxWarp: 0 };
   for (const geometry of geometries) {
     for (let vertex = 0; vertex < geometry.positions.length / 3; vertex++) {
       for (let axis = 0; axis < 3; axis++) {
@@ -410,11 +413,24 @@ export async function measureRecipe(recipe) {
     parts += report.parts.count;
     closedParts += report.parts.closed;
     eulerCharacteristic += report.counts.vertices - report.counts.edges + report.counts.faces;
+    topologyScoreSum += report.topologyScore;
+    valence.regular += report.valence.regular;
+    valence.poles3 += report.valence.poles3;
+    valence.poles5 += report.valence.poles5;
+    valence.poles6Plus += report.valence.poles6Plus;
+    quadQuality.meanAngleError += report.quadQuality.meanAngleError;
+    quadQuality.maxAngleError = Math.max(quadQuality.maxAngleError, report.quadQuality.maxAngleError);
+    quadQuality.maxAspect = Math.max(quadQuality.maxAspect, report.quadQuality.maxAspect);
+    quadQuality.maxWarp = Math.max(quadQuality.maxWarp, report.quadQuality.maxWarp);
     // Spatial warnings are advice, not pass or fail: a mug handle is meant to break symmetry.
     const gradedProblems = report.problems.filter(problem => !(problem.kind in GEOMETRY_PROBLEMS));
     for (const problem of gradedProblems) problemKinds.add(problem.kind);
     lintProblems += gradedProblems.length;
   }
+  if (usedGeometries.length > 0) {
+    quadQuality.meanAngleError = Math.round(quadQuality.meanAngleError / usedGeometries.length * 1e4) / 1e4;
+  }
+  const topologyScore = usedGeometries.length > 0 ? Math.round(topologyScoreSum / usedGeometries.length * 1e4) / 1e4 : 0;
   const allClosed = closedParts === parts;
   return {
     nodes: geometries.length,
@@ -433,6 +449,9 @@ export async function measureRecipe(recipe) {
     size: [0, 1, 2].map(axis => bounds.max[axis] - bounds.min[axis]),
     lintProblems,
     problemKinds: [...problemKinds],
+    valence,
+    quadQuality,
+    topologyScore,
     uv: { parts: uvParts, of: geometries.length, stretch: worstUvStretch },
     tips: countTips(geometries, bounds),
     section: (axis, at) => sectionLoops(geometries, axis, at),
