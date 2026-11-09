@@ -467,13 +467,13 @@ export function createVehicleRig({ parts, graph, asset, body, wheels = 'auto', f
   });
 }
 
-function validatePoint(point, index) {
+function validatePoint(point, index, pathField) {
   if ((!Array.isArray(point) && !ArrayBuffer.isView(point)) || point.length !== 3 || !Array.from(point).every(Number.isFinite)) {
-    throw invalidField(`path[${index}]`, point, 'an array of 3 finite numbers, such as [0, 0, 10]', TypeError);
+    throw invalidField(`${pathField}[${index}]`, point, 'an array of 3 finite numbers, such as [0, 0, 10]', TypeError);
   }
 }
 
-function pointsFromPath(path, pathSamples) {
+function pointsFromPath(path, pathSamples, pathField) {
   if (Array.isArray(path)) return path.map(point => Array.from(point));
   if (path && typeof path.sample === 'function' && Number.isFinite(path.duration) && path.duration > 0) {
     const points = [];
@@ -482,7 +482,7 @@ function pointsFromPath(path, pathSamples) {
     }
     return points;
   }
-  throw invalidField('path', path, 'an array of [x, y, z] points, such as [[0, 0, 0], [0, 0, 10]], or a camera path with duration and sample(time)', TypeError);
+  throw invalidField(pathField, path, 'an array of [x, y, z] points, such as [[0, 0, 0], [0, 0, 10]], or a camera path with duration and sample(time)', TypeError);
 }
 
 function removeRepeatedPoints(points) {
@@ -521,13 +521,13 @@ function splinePolyline(points) {
   return polyline;
 }
 
-function resampleUniformly(polyline) {
+function resampleUniformly(polyline, pathField) {
   const lengths = [0];
   for (let index = 1; index < polyline.length; index++) {
     lengths.push(lengths[index - 1] + vec3.distance(polyline[index - 1], polyline[index]));
   }
   const total = lengths.at(-1);
-  if (!(total > 1e-6)) throw invalidField('path', 'a path of zero length', 'points that are not all the same, such as [[0, 0, 0], [0, 0, 10]]');
+  if (!(total > 1e-6)) throw invalidField(pathField, 'a path of zero length', 'points that are not all the same, such as [[0, 0, 0], [0, 0, 10]]');
   const intervals = Math.max(2, Math.ceil(total / Math.max(PATH_SPACING_METRES, total / MAX_PATH_SAMPLES)));
   const spacing = total / intervals;
   const positions = [];
@@ -552,12 +552,12 @@ function smoothed(values, radius) {
   });
 }
 
-function buildPathTable(path, pathSamples) {
-  const points = pointsFromPath(path, pathSamples);
-  points.forEach((point, index) => validatePoint(point, index));
+function buildPathTable(path, pathSamples, pathField) {
+  const points = pointsFromPath(path, pathSamples, pathField);
+  points.forEach((point, index) => validatePoint(point, index, pathField));
   const distinct = removeRepeatedPoints(points);
-  if (distinct.length < 2) throw invalidField('path', `${distinct.length} distinct point`, 'at least 2 distinct points, such as [[0, 0, 0], [0, 0, 10]]');
-  const { positions, spacing, length } = resampleUniformly(splinePolyline(distinct));
+  if (distinct.length < 2) throw invalidField(pathField, `${distinct.length} distinct point`, 'at least 2 distinct points, such as [[0, 0, 0], [0, 0, 10]]');
+  const { positions, spacing, length } = resampleUniformly(splinePolyline(distinct), pathField);
   const headings = [];
   const slopes = [];
   positions.forEach((_, index) => {
@@ -762,10 +762,10 @@ function suspensionOffsets(rig, bodyMatrix, groundHeight, travel) {
  * `maxLateralAcceleration`. The vehicle holds the path end once it arrives.
  */
 export function driveAlongPath(rig, path, options = {}) {
-  return driveAlongLegs(rig, [{ path }], options);
+  return driveAlongLegs(rig, [{ path }], options, () => 'path');
 }
 
-function buildLegs(legDescriptions, settings) {
+function buildLegs(legDescriptions, settings, pathFieldOf) {
   const legs = [];
   legDescriptions.forEach((description, index) => {
     const { path, direction = 'forward', pause = 0 } = description ?? {};
@@ -774,7 +774,7 @@ function buildLegs(legDescriptions, settings) {
     const previous = legs.at(-1);
     const sign = direction === 'reverse' ? -1 : 1;
     const startTime = previous ? previous.endTime + pause : settings.startTime;
-    const table = buildPathTable(path, settings.pathSamples);
+    const table = buildPathTable(path, settings.pathSamples, pathFieldOf(index));
     // Every leg stops at both ends except the outer ones, which keep startSpeed and endSpeed.
     const motion = createMotion(table, {
       ...settings,
@@ -807,11 +807,11 @@ function buildLegs(legDescriptions, settings) {
  * The vehicle stops at the end of every leg. A reverse leg's path is the way the car travels; the car keeps facing the other way.
  * `pose.distance` and `pose.speed` are signed along the car's forward axis, so they fall while reversing.
  */
-export function driveAlongLegs(rig, legDescriptions, options = {}) {
+export function driveAlongLegs(rig, legDescriptions, options = {}, pathFieldOf = index => `legs[${index}].path`) {
   if (!rig || !rig.wheels || !rig.restFrame) throw new TypeError('driveAlongPath needs a rig from createVehicleRig.');
   if (!Array.isArray(legDescriptions) || legDescriptions.length === 0) throw invalidField('legs', legDescriptions, 'a non-empty array of { path, direction, pause }, such as [{ "path": [[0, 0, 0], [0, 0, 10]] }]', TypeError);
   const settings = resolveDriveOptions(rig, options);
-  const legs = buildLegs(legDescriptions, settings);
+  const legs = buildLegs(legDescriptions, settings, pathFieldOf);
   const duration = legs.at(-1).endTime;
   const length = legs.reduce((total, leg) => total + leg.table.length, 0);
   const legAt = time => legs.findLast(leg => leg.startTime <= time) ?? legs[0];

@@ -35,7 +35,7 @@ function buildAssetDrive(asset, drive, materialIds) {
       throw invalidField(`lights.tailLights[${index}].material`, tail.material, `the id of a material in the asset, one of ${[...materialIds].slice(0, 5).join(', ')}`);
     }
   }
-  const vehicle = driveAlongLegs(rig, (legs ?? [{ path }]).map(leg => ({ ...leg, path: resolvePath(leg.path) })), driveOptions);
+  const vehicle = driveAlongLegs(rig, (legs ?? [{ path }]).map(leg => ({ ...leg, path: resolvePath(leg.path) })), driveOptions, legs ? undefined : () => 'path');
   const tailLights = lights.tailLights ?? [];
   return Object.freeze({
     rig,

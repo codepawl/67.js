@@ -114,6 +114,8 @@ const CASES = [
   ['drive speed below zero', badAsset(recipe => { recipe.motion = { drive: { path: DRIVE_PATH, speed: -3 } }; }), 'motion.drive.speed', '-3'],
   ['drive steering unknown', badAsset(recipe => { recipe.motion = { drive: { path: DRIVE_PATH, speed: 3, steering: 'both' } }; }), 'motion.drive.steering', '"both"'],
   ['drive path with one point', badAsset(recipe => { recipe.motion = { drive: { path: [[0, 0, 0]], speed: 3 } }; }), 'motion.drive.path', '"1 points"'],
+  ['drive leg with a repeated point', badAsset(recipe => { recipe.motion = { drive: { legs: [{ path: DRIVE_PATH }, { path: [[1, 0, 0], [1, 0, 0]] }], speed: 3 } }; }), 'motion.drive.legs[1].path', '"1 distinct point"'],
+  ['drive leg with a bad point', badAsset(recipe => { recipe.motion = { drive: { legs: [{ path: DRIVE_PATH }, { path: [[0, 0, 0], [0, 'x', 5]] }], speed: 3 } }; }), 'motion.drive.legs[1].path[1]', '[0,"x",5]'],
   ['drive tail light signal unknown', badAsset(recipe => { recipe.motion = { drive: { path: DRIVE_PATH, speed: 3, lights: { tailLights: [{ material: 'material-1', signal: 'fog' }] } } }; }), 'motion.drive.lights.tailLights[0].signal', '"fog"'],
   ['asset root scale zero', badAsset(recipe => { recipe.root = { scale: [0, 1, 1] }; }), 'root.scale', '[0,1,1]'],
   ['asset id not hexadecimal', badAsset(recipe => { recipe.assetId = 'zz'; }), 'assetId', '"zz"'],
