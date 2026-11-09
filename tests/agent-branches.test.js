@@ -38,9 +38,9 @@ test('branch reads return copies, so a caller cannot edit stored recipes', () =>
 test('the branch count is capped, a name can be reused at the cap, and unknown names fail clearly', () => {
   const store = createBranchStore();
   for (let index = 0; index < BRANCH_LIMITS.maximumBranches; index++) store.fork(`b${index}`, forkInput(`r${index}`));
-  assert.throws(() => store.fork('extra', forkInput('x')), /At most 8 branches/);
+  assert.throws(() => store.fork('extra', forkInput('x')), /branch: got "extra"; expected a name that is already a branch/);
   store.fork('b0', forkInput('replacement'));
-  assert.throws(() => store.get('missing'), /Unknown branch: missing/);
+  assert.throws(() => store.get('missing'), /branch: got "missing"; expected one of the known branches/);
   assert.throws(() => store.get('Bad Name'), TypeError);
   store.clear();
   assert.deepEqual(store.names(), []);

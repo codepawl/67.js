@@ -96,7 +96,7 @@ test('final batch reference validation prevents dangling tracks and permits atom
   scene.sampleMotion(1);
   const before = pose(scene);
   const canonical = scene.exportRecipe();
-  assert.throws(() => scene.apply([{ type: 'remove-node', id: 'hinge', recursive: true }], { expectedRevision: 0 }), /target/);
+  assert.throws(() => scene.apply([{ type: 'remove-node', id: 'hinge', recursive: true }], { expectedRevision: 0 }), /motion\.tracks\[0\]\.id: got "hinge"/);
   assert.deepEqual(pose(scene), before);
   assert.deepEqual(scene.exportRecipe(), canonical);
   assert.throws(() => scene.apply([{ type: 'set-motion' }], { expectedRevision: 0 }), /requires motion/);
