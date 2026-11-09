@@ -33,7 +33,7 @@ function nameGlbMaterials(glb, names) {
 // An imported tree: the addon's mesh-leaf tree written as a GLB, so its materials are plain named glTF materials.
 const tree = createTree({ species: 'broadleaf', leaves: 'mesh', height: 8 }, 4);
 const importedParts = tree.levels[1].parts.map(part => ({
-  name: part.role, geometry: { ...part.geometry, colors: part.geometry.colors?.map(channel => Math.min(1, channel)) }, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+  name: part.role, geometry: part.geometry, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
   material: { ...part.material, tag: 'surface' },
 }));
 await writeFile(`${proofFolder}/imported-tree.glb`, nameGlbMaterials(exportGlb(importedParts), ['Bark', 'Leaves']));

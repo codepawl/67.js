@@ -267,7 +267,7 @@ function addMeshLeaves(builder, skeleton, spec, site, scale, random) {
       canopyBlend: 0.45,
       colorBase: LEAF_COLOR_BASE,
       colorTip: LEAF_COLOR_TIP,
-      brightness: brightness * (0.9 + random() * 0.2),
+      brightness: brightness * (0.9 + random() * 0.2) / 1.5,
     });
   }
 }
@@ -293,7 +293,7 @@ function addCards(builder, skeleton, spec, site, scale, random) {
   }
 }
 
-function addBlob(builder, center, radius, shading) {
+function addBlob(builder, center, radius, brightness = 1) {
   const segments = 8;
   const rings = 5;
   const firstVertex = builder.vertexCount;
@@ -304,7 +304,7 @@ function addBlob(builder, center, radius, shading) {
       const direction = [Math.sin(polar) * Math.cos(azimuth), Math.cos(polar), Math.sin(polar) * Math.sin(azimuth)];
       const jitter = 1 + (valueNoise(direction[0] * 2 + center[0], direction[2] * 2 + center[2], 3) - 0.5) * 0.5;
       const position = [center[0] + direction[0] * radius * jitter, center[1] + direction[1] * radius * 0.8 * jitter, center[2] + direction[2] * radius * jitter];
-      const color = LEAF_COLOR_BASE.map(channel => channel * shading.brightness);
+      const color = scaleVector(LEAF_COLOR_BASE, brightness);
       builder.addVertex(position, direction, segment / segments, ring / rings, color);
     }
   }
@@ -337,7 +337,7 @@ function addCrownClumps(builder, skeleton, spec, mode, random, widthScale = 1) {
     const shading = crownShading(skeleton, center);
     const radius = cellSize * (0.55 + 0.1 * Math.min(sites.length, 5)) * widthScale * (spec.clumpScale ?? 1);
     if (mode === 'mesh') {
-      addBlob(builder, center, radius, shading);
+      addBlob(builder, center, radius, shading.brightness / 1.5);
       continue;
     }
     for (let card = 0; card < 3; card++) {
@@ -403,7 +403,7 @@ function buildShadowFoliage(skeleton, preset, mode, seed, firstSetting) {
 function createMaterials(preset, mode, scannedBark, scannedLeaves) {
   const bark = createBarkMaterial(preset, scannedBark);
   if (mode === 'mesh') {
-    const foliage = { tag: 'foliage', color: preset.leaf.foliageColor, roughness: 0.8, metallic: 0, emission: 0 };
+    const foliage = { tag: 'foliage', color: scaleVector(preset.leaf.foliageColor, 1.5), roughness: 0.8, metallic: 0, emission: 0 };
     return { bark, foliage, crown: foliage };
   }
   const cardMaterial = (texture) => ({
@@ -429,16 +429,18 @@ function createMaterials(preset, mode, scannedBark, scannedLeaves) {
 // A level's mean is taken over the leaf its vertices stand for, not over the vertices, because a clump has few vertices for a lot of leaf.
 
 function bakeCrownSkyVisibility(levels, species) {
-  const foliageOf = level => level.parts.find(part => part.role === 'foliage').geometry;
+  const foliageOf = level => level.parts[1].geometry;
   const coverageOf = geometry => vertexCoverage(geometry.positions, geometry.indices);
   let field = null;
   for (const [levelIndex, level] of levels.entries()) {
-    const geometry = foliageOf(level);
+    const part = level.parts[1];
+    const { geometry } = part;
     if (geometry.positions.length === 0) continue;
     const gain = TREE_LEVEL_GAINS[species]?.[levelIndex];
     if (gain) {
       const colorGain = gain.color * leafAreaCorrection(geometry, foliageOf(levels[0]), gain.area, TREE_LEVEL_GAINS[species].areaExponent);
-      geometry.colors = geometry.colors.map(channel => channel * colorGain);
+      if (part.material.map) geometry.colors = geometry.colors.map(channel => channel * colorGain);
+      else part.material = { ...part.material, color: part.material.color.map(channel => Math.min(1, channel * colorGain)) };
     }
     let skyVisibility = null;
     Object.defineProperty(geometry, 'skyVisibility', {
@@ -553,8 +555,8 @@ function buildGrassBlades(random, blades, height, radius, widthScale) {
       droop: 0.3 + random() * 0.4,
       canopyNormal: WORLD_UP,
       canopyBlend: 0.55,
-      colorBase: [0.5, 0.58, 0.45],
-      colorTip: [1.15, 1.15, 0.9],
+      colorBase: [0.43, 0.5, 0.39],
+      colorTip: [1, 1, 0.78],
     });
   }
   return builder.build();
@@ -577,7 +579,7 @@ function buildGrassCards(random, height, radius) {
       canopyNormal: WORLD_UP,
       canopyBlend: 0.6,
       colorBase: [0.6, 0.65, 0.55],
-      colorTip: [1.1, 1.1, 0.95],
+      colorTip: [1, 1, 0.95],
     });
   }
   return builder.build();
@@ -587,7 +589,7 @@ function buildGrassCards(random, height, radius) {
  * A tuft of grass. `style: 'blades'` (default) is real curved blade geometry with the swaying `grass` tag;
  * `'cards'` is three crossed alpha-masked cards. Level 1 has half the blades, wider.
  */
-export function createGrassClump({ blades = 16, height = 0.45, radius = 0.13, style = 'blades', color = [0.2, 0.34, 0.06], seed = 1 } = {}) {
+export function createGrassClump({ blades = 16, height = 0.45, radius = 0.13, style = 'blades', color = [0.23, 0.39, 0.07], seed = 1 } = {}) {
   if (!['blades', 'cards'].includes(style)) throw new RangeError('Grass style must be blades or cards.');
   const random = createRandom(seed * 6271 + 5);
   const material = grassMaterial(style, color);
@@ -619,7 +621,7 @@ function buildFlowerPatch(random, flowers, height, petalColor) {
         rows: [[0, 0.5], [0.5, 1], [1, 0.5]], canopyNormal: WORLD_UP, canopyBlend: 0.5, colorBase: petalColor, colorTip: petalColor,
       });
     }
-    addBlob(builder, addScaled(top, WORLD_UP, 0.004), 0.014, { brightness: 1 });
+    addBlob(builder, addScaled(top, WORLD_UP, 0.004), 0.014);
   }
   return builder.build();
 }
@@ -719,7 +721,7 @@ function instanceParts(instance, levelIndex, label) {
       geometry: part.geometry,
       shadowLods: part.shadowLods,
       matrix: instance.matrix,
-      material: part.tintable ? { ...part.material, color: part.material.color.map((channel, axis) => channel * instance.tint[axis]) } : part.material,
+      material: part.tintable ? { ...part.material, color: part.material.color.map((channel, axis) => Math.min(1, channel * instance.tint[axis])) } : part.material,
     }));
   }
   return instance.partsByLevel[levelIndex];
