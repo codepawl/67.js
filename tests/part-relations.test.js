@@ -136,7 +136,7 @@ test('cycles, unknown parts and self references are rejected with the next actio
   ], /relations\[0\]\.to: got "ghost"; expected the ID of a node in this recipe; list them with scene_inspect/);
   rejects([
     { id: 'a', relations: [{ kind: 'centered', to: 'a' }] },
-  ], /relations\[0\]\.to: got "a"; expected the ID of another part, not its own node/);
+  ], /relations\[0\]\.to: got "a"; expected the ID of another part, such as "body", not its own node/);
   rejects([
     { id: 'a', relations: [{ kind: 'attach', to: 'loop', side: '+x' }] },
     { id: 'a2', relations: [{ kind: 'attach', to: 'a', side: '+x' }] },
@@ -154,7 +154,7 @@ test('a part cannot be placed against its own child, which would move with it', 
 test('group nodes, group targets and two relations on one axis are rejected', () => {
   const noGeometry = recipeWith([{ id: 'g' }, { id: 'a', relations: [{ kind: 'centered', to: 'g' }] }]);
   noGeometry.nodes[0] = { id: 'g' };
-  assert.throws(() => createAgentScene(noGeometry), /relations\[0\]\.to: got "g"; expected the ID of a mesh node, since this one is a group with no geometry/);
+  assert.throws(() => createAgentScene(noGeometry), /relations\[0\]\.to: got "g"; expected the ID of a mesh node, such as a box, since this one is a group with no geometry/);
   noGeometry.nodes[0] = { id: 'g', geometry: 'cube', material: 'grey' };
   noGeometry.nodes[1] = { id: 'a', relations: [{ kind: 'centered', to: 'g' }] };
   assert.throws(() => createAgentScene(noGeometry), /nodes\[1\]\.relations: got .*; expected relations on a mesh node, since this node is a group/);

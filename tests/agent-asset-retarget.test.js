@@ -121,6 +121,6 @@ test('keyed morph weights blink and open the jaw by target name, and seeking rep
   target.scene.sampleMotion(0.6);
   assert.deepEqual(face(), atBlink, 'seeking back repeats the earlier weights');
   assert.deepEqual(hierarchyOf(target).morphTargetNames, FACE_TARGETS);
-  await assert.rejects(createTarget({ duration: 1, tracks: [{ kind: 'morph', id: 'cheekPuff', property: 'weight', keyframes: [{ time: 0, value: 1 }] }] }), /motion\.tracks\[0\]\.id: got "cheekPuff"; expected the ID of a morph in this recipe; morph targets of this asset: eyeBlinkLeft/);
+  await assert.rejects(createTarget({ duration: 1, tracks: [{ kind: 'morph', id: 'cheekPuff', property: 'weight', keyframes: [{ time: 0, value: 1 }] }] }), /motion\.tracks\[0\]\.id: got "cheekPuff"; expected the ID of a morph in this recipe, such as "eyeBlinkLeft"; morph targets of this asset: eyeBlinkLeft/);
   await assert.rejects(createTarget({ duration: 1, tracks: [{ kind: 'morph', id: 'jawOpen', property: 'weight', keyframes: [{ time: 0, value: 2 }] }] }), /morph weight from 0 to 1/);
 });
