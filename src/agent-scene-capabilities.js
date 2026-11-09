@@ -259,13 +259,13 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   renderFlags: Object.freeze({ nodeFields: Object.freeze(['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher']), motion: 'node track property visible: 1 or 0, STEP', note: 'visible:false hides a node and children; holdout and shadowCatcher need a transparent canvas (Renderer67 transparent:true); flags split batches.' }),
   depthBias: Object.freeze({ nodeFields: Object.freeze(['decal', 'depthLayer']), maxDepthLayer: 4, environment: 'environment.resolveCoplanar', modes: Object.freeze(['offset']), warning: 'coplanar-overlap', note: 'decal wins over the surface below; depthLayer stacks decals; resolveCoplanar offset biases the smaller part of a flagged pair.' }),
   proceduralMotion: true,
-  motionIk: Object.freeze(['two-bone', 'aim']),
+  motionIk: Object.freeze(['two-bone', 'aim', 'chain', 'spline']),
   // Authored rigs: armatures expand into bone nodes, and a node `skin` binds a mesh with automatic weights (four influences).
   // Node relations place a mesh node against other mesh nodes (world bounds), solved again after every edit.
   relations: Object.freeze({
     maxPerNode: 8, maxNodes: 256, sides: Object.freeze(['+x', '-x', '+y', '-y', '+z', '-z']),
     kinds: Object.freeze({
-      attach: 'to, side, offset: touch the face of the target on side and centre on the other axes; offset is the distance, negative sinks in',
+      attach: 'to, side, offset: touch the target face on side and centre on the other axes; offset is distance, negative sinks in',
       gap: 'to, side, offset: as attach on that axis only',
       flush: 'to, side, offset: own face on side level with the same face of the target',
       align: 'to, axis, at (min, center, max), offset: anchor on one axis',

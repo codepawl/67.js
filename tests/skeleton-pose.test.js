@@ -315,7 +315,7 @@ test('joints resolve by name or humanoid bone, and mistakes say what to pass', (
   assert.throws(() => createSkeletonPose(), /needs a skin or a rig/);
   assert.throws(() => createSkeletonPose({ rig, layers: [{}] }), /Layer 0 needs a clip/);
   assert.throws(() => createSkeletonPose({ rig, layers: [{ clip: rotationClip('nothing', 10) }] }), /no clip track names a joint/);
-  assert.throws(() => createSkeletonPose({ rig, ik: [{ type: 'fabrik', target: [0, 0, 0] }] }), /type must be two-bone or aim/);
+  assert.throws(() => createSkeletonPose({ rig, ik: [{ type: 'fabrik', target: [0, 0, 0] }] }), /type must be two-bone, aim, chain or spline/);
   assert.throws(() => createSkeletonPose({ rig, ik: [{ type: 'two-bone', root: 'leftFoot', middle: 'leftLowerLeg', end: 'leftUpperLeg', target: [0, 0, 0] }] }), /end must descend from middle/);
   assert.throws(() => createSkeletonPose({ rig, ik: [{ type: 'aim', joint: 'head' }] }), /target must be three finite numbers/);
   const badTarget = createSkeletonPose({ rig, ik: [{ type: 'aim', joint: 'head', target: () => [Number.NaN, 0, 0] }] });
@@ -345,4 +345,65 @@ test('on a skin with real bind matrices, rest is the identity palette and IK mov
   const footIndex = rig.joints.findIndex(joint => joint.name === NAMES.leftFoot);
   const footVertex = vec3.transformMat4(new Float64Array(3), rest.jointWorld('leftFoot').position, skin.jointMatrices.subarray(footIndex * 16, footIndex * 16 + 16));
   assertClose(footVertex, target, 1e-5, 'bound vertex');
+});
+
+test('multi-bone chain IK and spline IK solve long chains with pole, poleAngle, stretch, limits and curves', () => {
+  const tentacleRig = {
+    joints: [
+      { name: 'b0', parent: -1, translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+      { name: 'b1', parent: 0, translation: [1, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+      { name: 'b2', parent: 1, translation: [1, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+      { name: 'b3', parent: 2, translation: [1, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+      { name: 'tip', parent: 3, translation: [1, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+    ],
+  };
+  const target = [2.2, 1.4, 0.5];
+  const chainPose = createSkeletonPose({
+    rig: tentacleRig,
+    ik: [{
+      type: 'chain',
+      chain: ['b0', 'b1', 'b2', 'b3', 'tip'],
+      target,
+      pole: [1, 3, 0],
+      poleAngle: 15,
+      iterations: 24,
+      limits: { b0: { z: [-80, 80] } },
+    }],
+  });
+  chainPose.apply(0);
+  assert.equal(chainPose.ikResults[0].reached, true);
+  assertClose(chainPose.jointWorld('tip').position, target, 1e-2);
+
+  // Root and end shorthand + stretch beyond rest length (4.0 m -> 5.0 m).
+  const stretchTarget = [5, 0, 0];
+  const stretched = createSkeletonPose({
+    rig: tentacleRig,
+    ik: [{ type: 'chain', root: 'b0', end: 'tip', target: stretchTarget, stretch: 1, weight: 0.5 }],
+  });
+  stretched.apply(0);
+  assertClose(stretched.jointWorld('tip').position, [4.5, 0, 0], 1e-3);
+
+  // Spline IK fits joints along a 4-point curve with and without stretch.
+  const curve = [[0, 0, 0], [1.5, 1, 0], [3, 1, 0], [4.5, 0, 0]];
+  const splinePose = createSkeletonPose({
+    rig: tentacleRig,
+    ik: [{ type: 'spline', chain: ['b0', 'b1', 'b2', 'b3', 'tip'], curve, stretch: true }],
+  });
+  splinePose.apply(0);
+  assert.equal(splinePose.ikResults[0].reached, true);
+  assertClose(splinePose.jointWorld('tip').position, [4.5, 0, 0], 1e-2);
+
+  const unstretchedSpline = createSkeletonPose({
+    rig: tentacleRig,
+    ik: [{ type: 'spline', root: 'b0', end: 'tip', curve: () => [[0, 0, 0], [6, 0, 0]], stretch: false, weight: 0.5 }],
+  });
+  unstretchedSpline.apply(0);
+  assertClose(unstretchedSpline.jointWorld('tip').position, [4, 0, 0], 1e-2);
+
+  assert.throws(() => createSkeletonPose({ rig: tentacleRig, ik: [{ type: 'chain', chain: ['b0'], target: [1, 0, 0] }] }), /chain must list 2 to 64 joints/);
+  assert.throws(() => createSkeletonPose({ rig: tentacleRig, ik: [{ type: 'chain', target: [1, 0, 0] }] }), /needs chain/);
+  assert.throws(() => createSkeletonPose({ rig: tentacleRig, ik: [{ type: 'chain', root: 'b0', end: 'tip', target: [1, 0, 0], poleAngle: 200 }] }), /poleAngle/);
+  assert.throws(() => createSkeletonPose({ rig: tentacleRig, ik: [{ type: 'chain', root: 'b0', end: 'tip', target: [1, 0, 0], stretch: 2 }] }), /stretch/);
+  assert.throws(() => createSkeletonPose({ rig: tentacleRig, ik: [{ type: 'chain', root: 'b0', end: 'tip', target: [1, 0, 0], iterations: 0 }] }), /iterations/);
+  assert.throws(() => createSkeletonPose({ rig: tentacleRig, ik: [{ type: 'spline', root: 'b0', end: 'tip', curve: [[0, 0, 0]] }] }), /curve must be 2 to 64/);
 });
