@@ -290,8 +290,8 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   if (objectMotion) {
     // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
     const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
-    installObjectMotionBlur(record.renderer);
-    record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
+    if (!frame.pass) installObjectMotionBlur(record.renderer);
+    if (!frame.pass) record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
     frame.objectMotion = packObjectMotion(record.renderer, objectMotion.current, objectMotion.previous);
   }
   record.renderer.render(frame);
@@ -429,8 +429,8 @@ function withCameraOverrides(camera, overrides) {
 }
 
 // The camera at the start of the shutter interval, sampled from time so the same seek always gives the same blur.
-function previousCameraFor(record, motionTime) {
-  const shutter = record.scene.effects.motionBlur.shutter;
+function previousCameraFor(record, motionTime, forVelocity = false) {
+  const shutter = record.scene.effects.motionBlur.shutter || (forVelocity ? 1 / 24 : 0);
   if (shutter <= 0 || motionTime === undefined || record.asset) return undefined;
   record.scene.sampleMotion(Math.max(0, motionTime - shutter));
   const previousCamera = record.scene.camera;
@@ -440,9 +440,10 @@ function previousCameraFor(record, motionTime) {
 
 // The parts' world matrices now and at the start of the shutter, sampled from time like the previous camera. Only a scene that
 // asks for object blur (and has motion to sample) pays for it; an imported asset animates by skin, which this does not follow.
-function objectMotionFor(record, motionTime) {
-  const { shutter, objects } = record.scene.effects.motionBlur;
-  if (!(shutter > 0 && objects > 0) || motionTime === undefined || record.asset) return undefined;
+function objectMotionFor(record, motionTime, forVelocity = false) {
+  const { shutter: blurShutter, objects } = record.scene.effects.motionBlur;
+  const shutter = blurShutter || (forVelocity ? 1 / 24 : 0);
+  if (!(shutter > 0 && (objects > 0 || forVelocity)) || motionTime === undefined || record.asset) return undefined;
   const { sampleWorldMatrices } = agentSceneModule('objectMotionBlur');
   const current = sampleWorldMatrices(record.scene.parts);
   record.scene.sampleMotion(Math.max(0, motionTime - shutter));
@@ -814,9 +815,10 @@ window.__agentPreview = {
       record.scene.sampleMotion(motionTime);
     }
     const shotCamera = cameraOverrides ? withCameraOverrides(record.scene.camera, cameraOverrides) : undefined;
-    const sampledPreviousCamera = pass ? undefined : previousCameraFor(record, motionTime);
+    const forVelocity = pass === 'velocity';
+    const sampledPreviousCamera = (!pass || forVelocity) ? previousCameraFor(record, motionTime, forVelocity) : undefined;
     const previousCamera = sampledPreviousCamera && cameraOverrides ? withCameraOverrides(sampledPreviousCamera, cameraOverrides) : sampledPreviousCamera;
-    const objectMotion = pass ? undefined : objectMotionFor(record, motionTime);
+    const objectMotion = (!pass || forVelocity) ? objectMotionFor(record, motionTime, forVelocity) : undefined;
     const exposure = record.scene.effects.exposure * brightness;
     const shotEffects = depthOfFieldOverrides
       ? { ...record.scene.effects, depthOfField: { ...record.scene.effects.depthOfField, ...depthOfFieldOverrides } }
@@ -827,7 +829,9 @@ window.__agentPreview = {
     // The first lit frame of a job is checked; a pass or a fade has no exposure to judge.
     const checkLitFrame = diagnose && !pass && !floatOutput && brightness === 1;
     const info = renderInfo(record.renderer, pass ? [] : viewProblems(record, shotCamera ?? record.scene.camera, checkLitFrame ? record.scene.effects.exposure : undefined));
-    return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() } : info;
+    return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() }
+      : pass === 'cryptomatte' ? { ...info, cryptomatte: record.renderer.passSupport.cryptomatteManifest() }
+      : info;
   },
   // Reads the last frame as RGBA float32, rows bottom to top, cropped to `region` (pixels from the top left): the lit image
   // when it was drawn with floatOutput, a pass when it was drawn with passFloat. Base64 of the float bytes.

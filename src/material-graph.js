@@ -529,13 +529,14 @@ function writeColor(data, offset, channels) {
 export function bakeMaterialGraph(graph, { resolution, bump }) {
   const compiled = compileMaterialGraph(graph);
   checkMaterialGraphWork(compiled, resolution);
-  const { color, roughness, metallic, emission, height, opacity, clearcoat, transmission } = compiled.outputs;
+  const { color, roughness, metallic, emission, height, opacity, clearcoat, transmission, aov } = compiled.outputs;
   const pixelCount = resolution * resolution;
   // Opacity travels in the alpha of the base texture, so an opacity-only graph still gets a (white) base texture.
   const colorData = color || opacity ? new Uint8ClampedArray(pixelCount * 4).fill(255) : null;
   const clearcoatData = clearcoat ? new Uint8ClampedArray(pixelCount * 4) : null;
   const transmissionData = transmission ? new Uint8ClampedArray(pixelCount * 4) : null;
   const emissionData = emission ? new Uint8ClampedArray(pixelCount * 4) : null;
+  const aovData = aov ? new Uint8ClampedArray(pixelCount * 4) : null;
   const surfaceData = roughness || metallic ? new Uint8ClampedArray(pixelCount * 4) : null;
   for (let row = 0; row < resolution; row++) {
     for (let column = 0; column < resolution; column++) {
@@ -548,6 +549,11 @@ export function bakeMaterialGraph(graph, { resolution, bump }) {
       if (clearcoat) writeMask(clearcoatData, offset, clearcoat.evaluate(u, v));
       if (transmission) writeMask(transmissionData, offset, transmission.evaluate(u, v));
       if (emission) writeColor(emissionData, offset, sampleChannels(emission, u, v));
+      if (aov) {
+        const channels = sampleChannels(aov, u, v);
+        for (let channel = 0; channel < 3; channel++) aovData[offset + channel] = unitByte(channels[channel]);
+        aovData[offset + 3] = 255;
+      }
       if (surfaceData) {
         surfaceData[offset] = 255;
         surfaceData[offset + 1] = roughness ? Math.round(clampUnit(finiteOrZero(roughness.evaluate(u, v))) * 255) : 255;
@@ -564,6 +570,7 @@ export function bakeMaterialGraph(graph, { resolution, bump }) {
     // The rasterizer binds clearcoatTexture from layerMaps; transmission has no layer slot, so the tracer reads transmissionMap.
     layerMaps: clearcoatData ? { clearcoatTexture: descriptor(clearcoatData, 'linear') } : undefined,
     transmissionMap: descriptor(transmissionData, 'linear'),
+    aovMap: descriptor(aovData, 'linear'),
     normalMap: descriptor(height ? normalMapFromHeightFunction((u, v) => finiteOrZero(height.evaluate(u, v)), resolution, bump) : null, 'linear'),
   };
 }

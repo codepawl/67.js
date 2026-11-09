@@ -105,7 +105,7 @@ and a click placed on a cut in a WAV lands on the decoded cut frame within a fra
 
 ## Render passes
 
-`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao` and `mist`.
+`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao`, `mist`, `position`, `velocity`, `uv`, `transmission`, `volume`, `environment`, `cryptomatte` and `aov`.
 Each frame writes its lit image and then one PNG per pass: `render.png` and `render-<pass>.png` for an image, `frame-N.png` and `frame-N-<pass>.png` for stills.
 Passes are raw data at the lit image's size: no tone mapping, grading, bloom, depth of field or antialiasing, so values stay exact at silhouettes.
 Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky and the environment background do not.
@@ -122,6 +122,14 @@ Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky
 | `shadow` | Sun shadow visibility, 1 lit and 0 shadowed. Background 1 |
 | `ao` | Ambient occlusion the shader applies (occlusion map, vertex sky visibility, room term). Background 1 |
 | `mist` | Fog amount `1 - exp(-distance * fogDensity)`. Background 1 |
+| `position` | World-space XYZ in metres (float in `exr`, mapped over `±100 m` into `0..1` in `png` and `png16`). Background 0 |
+| `velocity` | Screen-space motion vector `(dx, dy)` in normalized screen coordinates from camera and object motion (signed in `exr`, `vel * 0.5 + 0.5` in `png` and `png16`). Background 0 |
+| `uv` | Primary texture coordinate `(U, V)` in red and green (`U, V` channels in `exr`). Background 0 |
+| `transmission` | Transmitted light for materials with `transmission > 0`, scaled by `transmissionMap`. Background 0 |
+| `volume` | Volumetric / fog scattering contribution along the view ray. Background 0 |
+| `environment` | Image-based / sky environment lighting contribution times exposure. Background 0 |
+| `cryptomatte` | Deterministic float hash per object in red, per material in green and coverage `1` in blue (`metrics.cryptomatte` holds the `{ objects, materials }` manifest). Background 0 |
+| `aov` | Custom material AOV from `material.aov` (`0..1` scalar or RGB) and/or a material graph's `aov` output. Background 0 |
 
 The lighting passes hold linear values above 1, so write them as `exr` (a `png` or `png16` file clamps at 1). They add back to the lit image: `diffuse + glossy + emission * exposure` is the radiance before fog, and with an open world the lit image is that radiance mixed toward the fog colour by `mist`, then tone mapped. `tests/lighting-passes.test.js` checks the sum against the beauty frame (mean difference under 1.5 display levels, under 2% of samples off by more than 4). Not covered: unlit parts, the editor floor, parts that a probe or irradiance grid changes after the sky term, and anything the lit image adds after the shader (bloom, grading, depth of field).
 
@@ -140,6 +148,7 @@ Four optional settings, each off by default. A job without them writes the same 
 | --- | --- |
 | `transparent: true` | `image` and `stills`: the lit image keeps alpha (a PNG of colour type 6). The sky, the environment background and the automatic ground are not drawn, so give the scene its own ground or a `shadowCatcher` node (see `renderFlags` in `scene_capabilities`). Volume fog is refused. Passes ignore it. |
 | `format` | `image` and `stills`: `png` (8-bit, default), `png16` or `exr`. The lit image is drawn into a half-float target and read back, so the file holds the same graded display colour as the 8-bit PNG (within one 8-bit step) with 16-bit steps. |
+| `multilayer: true` | With `format: "exr"` and `passes`: writes one OpenEXR file per frame (`render.exr` or `frame-N.exr`) containing `Combined.R/G/B(/A)` and `<pass>.<channel>` for every requested pass (`depth.Z`, `objectId.id`, `position.X/Y/Z`, `velocity.X/Y`, `uv.U/V`, `<pass>.R/G/B`). |
 | `region: { x, y, width, height }` | Pixels from the top left, each side at least 16. The frame is rendered whole and the crop is kept, so the look is the same as the full frame. Works for `image`, `stills` and `video` (a video region has even sides). Not with `renderer`. |
 | `fps` | Up to 60 for video, within the 900 frame limit. |
 

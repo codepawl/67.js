@@ -418,7 +418,7 @@ export function groupParts(parts, batching = true) {
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
-    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material)]) {
+    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)]) {
       if (!maps.has(value)) maps.set(value, new Map());
       maps = maps.get(value);
     }
@@ -2311,15 +2311,17 @@ export class Renderer67 {
     this.applyEnvironmentUniforms(environmentMap);
     context.uniform1f(this.uniforms.renderPassMode, passMode);
     context.uniform1f(this.uniforms.renderPassDepthRange, frame.passDepthRange ?? 100);
+    if (passMode > 5) this.passSupport.bindFrame(frame, environment, volume);
     let objectBase = 0;
     for (const batch of this.batches) {
       if (this.benchmark) {
         this.drawBatch(batch, true);
-      } else if (this.drawsInOpaqueLoop(batch) && !(mirrorTarget && batch.mapState[20])) {
+      } else if ((passMode > 5 ? this.passSupport.drawsInPass(batch, passMode) : this.drawsInOpaqueLoop(batch)) && !(mirrorTarget && batch.mapState[20])) {
         context.uniform1f(this.uniforms.renderPassObjectBase, objectBase);
         objectBase += batch.instanceCount;
         // Object IDs are the instance ordinal, which culling and level selection renumber, so that pass draws every instance.
-        this.drawAlphaBatch(batch, true, passMode !== OBJECT_ID_PASS_MODE);
+        if (passMode > 5) this.passSupport.drawBatch(batch, passMode, frame, objectBase - batch.instanceCount);
+        else this.drawAlphaBatch(batch, true, passMode !== OBJECT_ID_PASS_MODE);
       }
     }
     this.applyDepthLayer(0);
