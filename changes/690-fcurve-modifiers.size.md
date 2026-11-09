@@ -1,0 +1,2 @@
+- entry:agent-asset: track modifiers and extrapolation (noise, cycles, envelope and four more) load with the motion code, which agents use for camera shake and looping walks
+- scene:agent-scene+lazy: the same lazy motion code; the eager agent-scene bundle stays within its allowance

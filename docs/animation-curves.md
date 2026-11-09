@@ -82,3 +82,31 @@ Transform-only targets retain their original material objects.
 
 Explicit tangent data keeps the existing track model and permits deterministic sampling without external callback state.
 This unit does not add a mixer, skeletal animation, morph targets or glTF importer changes.
+
+## Extrapolation and modifiers
+
+A track in a recipe `motion` takes `extrapolation` and `modifiers`, after Blender's F-curve modifiers. Every sampler reads them the same way: `sampleMotion`, camera paths and render jobs. Each result depends only on the track and the time, so a seek backwards and a render give the same values. A clip that does not loop passes times past its duration to the tracks, so extrapolation and cycles work there; a looping clip wraps the time first.
+
+- `extrapolation`: `constant` (default) holds the first and last value. `linear` continues the slope of the first or last segment. Not for rotation.
+- Time modifiers run first, in listed order. `cycles` takes `before` and `after` (`repeat`, `offset`, `mirror` or `none`, default `repeat`) and `beforeCount` and `afterCount` (0 is forever; after the count the curve holds). `offset` adds the change from the first to the last key each cycle. `stepped` takes `step` seconds and `offset` and holds the curve for each step.
+- Value modifiers run next, in listed order, on every component. `noise` adds smooth seeded noise: `scale` seconds per wobble, `strength`, `phase`, `seed`; each component gets its own noise. `generator` takes `coefficients` of a polynomial of time, lowest power first, and replaces the value, or adds with `additive: true`. `limits` clamps to `min` and `max`. `envelope` maps `referenceMin` to `referenceMax` (default -1 to 1) onto a `min` and `max` that change over `points: [{time, min, max}]`.
+- Rotation tracks take only `cycles` (not `offset`) and `stepped`. At most 8 modifiers a track. Bad fields name the accepted ones.
+- Library use: `createAnimationClip` accepts the same fields once `animation-modifiers.js` is imported; GLB export writes the keyframes only.
+
+Camera shake: hold a camera still and add noise to its eye, with a faster, weaker noise on the target.
+
+```json
+{
+  "duration": 4,
+  "tracks": [
+    { "kind": "camera", "property": "eye",
+      "keyframes": [{ "time": 0, "value": [0, 1.6, 5] }],
+      "modifiers": [{ "type": "noise", "scale": 0.12, "strength": 0.03, "seed": 11 }] },
+    { "kind": "camera", "property": "target",
+      "keyframes": [{ "time": 0, "value": [0, 1.5, 0] }],
+      "modifiers": [{ "type": "noise", "scale": 0.07, "strength": 0.015, "seed": 12 }] }
+  ]
+}
+```
+
+A walk that travels: two keys on `translation` with `{ "type": "cycles", "before": "offset", "after": "offset" }` carry on forward past the last key by one stride per cycle. Stop motion: `{ "type": "stepped", "step": 0.0833 }` samples at 12 frames a second.
