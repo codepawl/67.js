@@ -70,7 +70,7 @@ test('material overrides name the source material and stay shared between placem
   assert.equal(material('red-a'), material('red-b'));
   assert.notEqual(material('red-a'), material('plain'));
   assert.throws(() => createAgentScene(recipe([{ id: 'bad', asset: { id: ASSET_ID, materials: [{ name: 'Nope', color: [1, 0, 0] }] } }]), {}, { assets: new Map([[assetCopyKey(ASSET_ID, 0), null]]) }), /not loaded/);
-  await assert.rejects(async () => createAgentScene(recipe([{ id: 'bad', asset: { id: ASSET_ID, materials: [{ name: 'Nope', color: [1, 0, 0] }] } }]), {}, { assets: await loadedAssets() }), /no material named "Nope"/);
+  await assert.rejects(async () => createAgentScene(recipe([{ id: 'bad', asset: { id: ASSET_ID, materials: [{ name: 'Nope', color: [1, 0, 0] }] } }]), {}, { assets: await loadedAssets() }), /^RangeError: nodes\[1\]\.asset\.materials\[0\]\.name: got "Nope"; expected one of "Skin"/);
 });
 
 test('a placed clip plays on its own time offset and a seek gives the same frame', async () => {

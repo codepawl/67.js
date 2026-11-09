@@ -162,5 +162,5 @@ test('an imported tree with a foliage override gets the swaying tag and shares i
   assert.equal(material('a').tag, 'foliage');
   assert.equal(material('a'), material('b'));
   assert.notEqual(material('plain').tag, 'foliage');
-  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ id: 'a', asset: { id, materials: [{ name: 'Leaves', tag: 'water' }] } }] }, {}, { assets }), /tag must be one of/);
+  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ id: 'a', asset: { id, materials: [{ name: 'Leaves', tag: 'water' }] } }] }, {}, { assets }), /^RangeError: nodes\[0\]\.asset\.materials\[0\]\.tag: got "water"; expected one of surface, foliage, grass/);
 });

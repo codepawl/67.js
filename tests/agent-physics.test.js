@@ -84,12 +84,12 @@ test('masks and layers decide what a body falls through', () => {
 
 test('bad physics sections fail with a message that names the fix', () => {
   const cases = [
-    [{ duration: 3, bodies: [{ node: 'missing' }] }, /not found/],
+    [{ duration: 3, bodies: [{ node: 'missing' }] }, /^RangeError: physics\.bodies\[0\]\.node: got "missing"; expected the ID of a recipe node, one of /],
     [{ duration: 0, bodies: [{ node: 'ball' }] }, /duration/],
     [{ duration: 3, bodies: [] }, /at least one body/],
     [{ duration: 3, bodies: [{ node: 'ball', shape: 'trimesh' }] }, /dynamic/],
-    [{ duration: 3, bodies: [{ node: 'ball' }, { node: 'ball' }] }, /more than one/],
-    [{ duration: 3, bodies: [{ node: 'ball', color: 1 }] }, /Unknown/],
+    [{ duration: 3, bodies: [{ node: 'ball' }, { node: 'ball' }] }, /^RangeError: physics\.bodies\[1\]\.node: got "ball"; expected a node with one physics body only/],
+    [{ duration: 3, bodies: [{ node: 'ball', color: 1 }] }, /^TypeError: physics\.bodies\[0\]\.color: got 1; expected no such field; use one of node, type, shape/],
     [{ duration: 3, bodies: [{ node: 'ball' }], joints: [{ type: 'fixed', bodyA: 'ball', bodyB: 'floor' }] }, /physics body/],
     [{ duration: 3, bodies: [{ node: 'ball', layer: 16 }] }, /layer/],
   ];
@@ -101,7 +101,7 @@ test('bad physics sections fail with a message that names the fix', () => {
 test('a node cannot have both a physics body and a motion track on its pose', () => {
   const input = recipe({ duration: 3, bodies: [{ node: 'ball' }] });
   input.motion = { duration: 1, tracks: [{ kind: 'node', id: 'ball', property: 'translation', keyframes: [{ time: 0, value: [0, 0, 0] }, { time: 1, value: [1, 0, 0] }] }] };
-  assert.throws(() => createAgentScene(input), /Pick one/);
+  assert.throws(() => createAgentScene(input), /^RangeError: physics\.bodies\[0\]\.node: got "[^"]+"; expected a node without a motion translation or rotation track; pick the track or the body, not both/);
 });
 
 test('a trimesh over the triangle limit is refused before it is copied', () => {

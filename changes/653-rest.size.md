@@ -1,0 +1,3 @@
+- entry:vehicle: 592 bytes gzip of message text in the vehicle kit (wheel, path, speed and light errors now name the field, the value and an example); nothing new runs unless a drive is rejected.
+- scene:agent-scene+lazy: 1.5 KB gzip of message text in the physics, drive, asset, placement and shrinkwrap validators; nothing new runs unless a recipe is rejected, and an agent fixes the input in one retry.
+- goal:agent-scene: 11 bytes gzip in the core bundle (message text only); the rest of the new text sits in lazy modules.

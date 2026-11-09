@@ -42,6 +42,17 @@ function editField(index, field, value, expected) {
   return invalidField(`edits[${index}].${field}`, value, expected, TypeError);
 }
 
+// A failure inside an edit keeps its field path when it has one, so the agent sees edits[2].maxDistance, and otherwise
+// gets the edit position and name in front of the message.
+function editFailure(error, index, label) {
+  if (typeof error?.fieldPath === 'string' && error.message.startsWith(error.fieldPath)) {
+    error.message = `edits[${index}].${error.message}`;
+    error.fieldPath = `edits[${index}].${error.fieldPath}`;
+    return error;
+  }
+  return new error.constructor(`Mesh edit ${index} (${label}): ${error.message}`);
+}
+
 function editError(index, message) {
   return new TypeError(`Mesh edit ${index} (${message})`);
 }
@@ -320,7 +331,7 @@ function checkArrayBudget(mesh, edit, limits, index) {
     try {
       checkSculptBudget(mesh, edit.strokes.length);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (sculpt): ${error.message}`);
+      throw editFailure(error, index, `sculpt`);
     }
     return;
   }
@@ -332,7 +343,7 @@ function checkArrayBudget(mesh, edit, limits, index) {
     try {
       remeshGridSize(mesh, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (remesh): ${error.message}`);
+      throw editFailure(error, index, `remesh`);
     }
     return;
   }
@@ -395,7 +406,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = runModifierEdit(current, edit, limits);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     Object.assign(result, outcome.result);
     return { mesh: outcome.mesh, result };
@@ -406,14 +417,14 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       cutter = transformMesh(resolveCutter(edit.cutter), edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (boolean cutter): ${error.message}`);
+      throw editFailure(error, index, `boolean cutter`);
     }
     const cutTag = `${edit.name}.cut`;
     let outcome;
     try {
       outcome = meshBoolean(current, cutter, edit.operation, { cutTag });
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (boolean ${edit.operation}): ${error.message}`);
+      throw editFailure(error, index, `boolean ${edit.operation}`);
     }
     result.operation = edit.operation;
     result.tags = { [cutTag]: outcome.cutterFaces };
@@ -430,7 +441,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = loopCut(current, edit.edges, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (loop_cut): ${error.message}`);
+      throw editFailure(error, index, `loop_cut`);
     }
     result.rings = outcome.rings;
     result.closedRings = outcome.closedRings;
@@ -443,7 +454,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = bevelEdges(current, edit.edges, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (bevel): ${error.message}`);
+      throw editFailure(error, index, `bevel`);
     }
     result.edges = outcome.bevelEdges;
     result.width = outcome.width;
@@ -456,7 +467,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = runCutEdit(current, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     Object.assign(result, outcome.result);
     const tags = tagSummary(outcome.mesh, edit.name);
@@ -468,7 +479,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = edit.op === 'set_position' ? setPosition(current, edit, loadSurface) : displaceMesh(current, edit, loadSurface);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     result.movedVertices = outcome.movedVertices;
     return { mesh: outcome.mesh, result };
@@ -478,7 +489,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = edit.op === 'vertex_group' ? setVertexGroup(current, edit, loadSurface) : setVertexColor(current, edit, loadSurface);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     if (edit.op === 'vertex_group') {
       result.group = edit.name;
@@ -493,7 +504,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = edit.op === 'sculpt' ? sculptMesh(current, edit) : runShrinkwrap(current, edit, resolveCutter);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     result.movedVertices = outcome.movedVertices;
     if (outcome.missedVertices) result.missedVertices = outcome.missedVertices;
@@ -504,7 +515,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       subdivided = subdivideMesh(current, { levels: edit.levels, crease: edit.crease, sharpness: edit.sharpness });
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (subdivide): ${error.message}`);
+      throw editFailure(error, index, `subdivide`);
     }
     result.levels = edit.levels;
     return { mesh: subdivided, result };
@@ -514,7 +525,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = decimateMesh(current, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (decimate): ${error.message}`);
+      throw editFailure(error, index, `decimate`);
     }
     result.triangles = outcome.triangles;
     if (!outcome.reachedTarget) result.stoppedEarly = true;
@@ -525,7 +536,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = remeshMesh(current, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (remesh): ${error.message}`);
+      throw editFailure(error, index, `remesh`);
     }
     result.voxelSize = Number(outcome.voxelSize.toPrecision(5));
     return { mesh: outcome.mesh, result };
@@ -539,7 +550,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
       if (error instanceof KernelDeferred) {
         throw error;
       }
-      throw new error.constructor(`Mesh edit ${index} (uv_unwrap): ${error.message}`);
+      throw editFailure(error, index, `uv_unwrap`);
     }
     result.islands = outcome.islands;
     result.seamEdges = outcome.seamEdges;
@@ -559,7 +570,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
   try {
     mask = selectFaces(current, edit.select);
   } catch (error) {
-    throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+    throw editFailure(error, index, `${edit.op}`);
   }
   const selected = countSelected(mask);
   if (selected === 0) throw new RangeError(`Mesh edit ${index} (${edit.op}) selects no faces. Check the rule with mesh_inspect tags and counts.`);
