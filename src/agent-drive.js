@@ -1,4 +1,5 @@
 import { createCameraPath } from './camera-path.js';
+import { invalidField, withFieldPrefix } from './field-error.js';
 import { createVehicleRig, driveAlongLegs, createVehicleNodeOverrides } from './vehicle.js';
 
 // The `drive` entry of an asset recipe's motion and of a placed asset: a car driven along a path by the vehicle kit.
@@ -18,15 +19,21 @@ function rounded(value) {
  * Builds the rig and the drive for a decoded asset. `materialIds` are the ids a tail light may drive.
  * `sample(time)` returns the pose, the node overrides that put the asset in it, and the tail-light emission per material.
  */
-export function createAssetDrive(asset, drive, { materialIds = null } = {}) {
+export function createAssetDrive(asset, drive, { materialIds = null, fieldPath = 'motion.drive' } = {}) {
+  return withFieldPrefix(fieldPath, () => buildAssetDrive(asset, drive, materialIds));
+}
+
+function buildAssetDrive(asset, drive, materialIds) {
   const { path, legs, wheels, body, forwardAxis, wheelbase, lights = {}, ...driveOptions } = drive;
   const rig = createVehicleRig({
     asset, wheels, body, forwardAxis, wheelbase,
     maxSteerAngle: driveOptions.maxSteerAngle,
     lights: { headlights: lights.headlights },
   });
-  for (const tail of lights.tailLights ?? []) {
-    if (materialIds && !materialIds.has(tail.material)) throw new RangeError(`Tail light material was not found: ${tail.material}.`);
+  for (const [index, tail] of (lights.tailLights ?? []).entries()) {
+    if (materialIds && !materialIds.has(tail.material)) {
+      throw invalidField(`lights.tailLights[${index}].material`, tail.material, `the id of a material in the asset, one of ${[...materialIds].slice(0, 5).join(', ')}`);
+    }
   }
   const vehicle = driveAlongLegs(rig, (legs ?? [{ path }]).map(leg => ({ ...leg, path: resolvePath(leg.path) })), driveOptions);
   const tailLights = lights.tailLights ?? [];

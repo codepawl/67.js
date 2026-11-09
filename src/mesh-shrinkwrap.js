@@ -1,3 +1,4 @@
+import { invalidField } from './field-error.js';
 import { createMeshQueryIndex } from './mesh-query.js';
 import { triangulatedSurface } from './mesh-surface-distance.js';
 import { selectedVertices, withPositions } from './mesh-field-edits.js';
@@ -37,13 +38,13 @@ export function shrinkwrapMesh(mesh, target, edit) {
     for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
       if (!flags[vertex]) continue;
       const remainingTests = MAX_SHRINKWRAP_TRIANGLE_TESTS - triangleTests;
-      if (remainingTests <= 0) throw new RangeError('Shrinkwrap searched too many triangles. Select fewer faces or use a simpler target.');
+      if (remainingTests <= 0) throw invalidField('select', 'a selection that needs too many triangle tests', 'fewer faces or a simpler target, such as a smaller select');
       const origin = Array.from(mesh.positions.subarray(vertex * 3, vertex * 3 + 3));
       const found = findSurface(index, origin, edit, remainingTests);
       triangleTests += found.triangleTests;
       if (!found.hit) {
         missedVertices++;
-        if (onMiss === 'error') throw new RangeError(`Shrinkwrap found no surface for vertex ${vertex}. Raise maxDistance, change the direction, or set onMiss to keep.`);
+        if (onMiss === 'error') throw invalidField('onMiss', onMiss, `"keep", such as onMiss "keep", to leave vertices that find no surface in place (vertex ${vertex} found none); or raise maxDistance, or change the direction`);
         continue;
       }
       const side = standOffSide(found.hit.normal, edit);

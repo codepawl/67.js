@@ -149,10 +149,10 @@ test('the brake signal is on only while the car slows, and the tail lamp glows w
 test('a bad drive names the problem', async () => {
   await withCar(asset => {
     assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE })), /exactly one of speed/);
-    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3, banana: 1 })), /Unknown drive field: banana/);
-    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3, wheels: [{ node: 'Wheel_FL' }, { node: 'Nope' }] })), /was not found: Nope/);
-    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3, lights: { tailLights: [{ material: 'material-99', signal: 'brake' }] } })), /Tail light material was not found/);
-    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3 })).apply([{ type: 'set-motion', motion: { duration: 5, drive: { legs: [{ path: CURVE, direction: 'sideways' }], speed: 3 } } }], { expectedRevision: 0 }), /direction must be forward or reverse/);
+    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3, banana: 1 })), /^TypeError: motion\.drive\.banana: got 1; expected no such field; use one of path, legs, speed/);
+    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3, wheels: [{ node: 'Wheel_FL' }, { node: 'Nope' }] })), /^RangeError: motion\.drive\.wheels\[1\]\.node: got "Nope"; expected the name of a node in the asset, such as/);
+    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3, lights: { tailLights: [{ material: 'material-99', signal: 'brake' }] } })), /^RangeError: motion\.drive\.lights\.tailLights\[0\]\.material: got "material-99"; expected the id of a material in the asset, one of /);
+    assert.throws(() => createAgentAssetScene(asset, assetRecipe({ path: CURVE, speed: 3 })).apply([{ type: 'set-motion', motion: { duration: 5, drive: { legs: [{ path: CURVE, direction: 'sideways' }], speed: 3 } } }], { expectedRevision: 0 }), /^RangeError: motion[.]drive[.]legs.0.[.]direction: got "sideways"; expected one of forward, reverse/);
   });
 });
 

@@ -346,7 +346,7 @@ function normalizedDrive(input, recipe) {
   if (!recipe.normalizeDrive) {
     throw new RangeError('motion.drive moves an imported asset recipe. For an asset placed in a scene, give the placement a drive: { asset: { id, drive } }.');
   }
-  const canonical = recipe.normalizeDrive(input);
+  const canonical = recipe.normalizeDrive(input, 'motion.drive');
   return { canonical, built: recipe.buildDrive(canonical) };
 }
 

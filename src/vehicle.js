@@ -1,4 +1,5 @@
 import { mat4, vec3 } from 'gl-matrix';
+import { invalidField } from './field-error.js';
 
 // Local vehicle frame: x is left, y is up, z is forward, origin on the ground under the wheel centroid.
 const FORWARD_AXES = Object.freeze({
@@ -37,8 +38,8 @@ function createMatrix() {
   return mat4.identity(new Float64Array(16));
 }
 
-function assertFinitePositive(value, message) {
-  if (!Number.isFinite(value) || value <= 0) throw new RangeError(message);
+function assertFinitePositive(value, path, example = '1') {
+  if (!Number.isFinite(value) || value <= 0) throw invalidField(path, value, `a finite number above 0, such as ${example}`);
 }
 
 function clamp(value, minimum, maximum) {
@@ -186,15 +187,15 @@ function createSource({ parts, graph, asset }) {
   return createAssetSource(asset);
 }
 
-function resolveEntry(source, reference) {
+function resolveEntry(source, reference, path = 'target') {
   if (source.byKey.has(reference)) return source.byKey.get(reference);
   if (Number.isInteger(reference) && source.kind === 'parts' && source.entries[reference]) return source.entries[reference];
   if (typeof reference === 'string') {
     const matches = source.entries.filter(entry => entry.label === reference);
     if (matches.length === 1) return matches[0];
-    if (matches.length > 1) throw new RangeError(`Vehicle ${source.kind} name is ambiguous: ${reference}`);
+    if (matches.length > 1) throw invalidField(path, reference, `a ${source.kind} name that is used once; this name matches ${matches.length}, such as an id from scene_inspect`);
   }
-  throw new RangeError(`Vehicle ${source.kind} was not found: ${String(reference?.name ?? reference)}`);
+  throw invalidField(path, reference?.name ?? reference, `the name of a ${source.kind === 'parts' ? 'part' : 'node'} in the asset, such as one scene_inspect lists`);
 }
 
 function collectMeshes(source, entry, meshes = []) {
@@ -280,20 +281,21 @@ function detectWheelGroups(source, forward) {
 }
 
 function normalizeWheelSpec(source, spec, index) {
+  const path = `wheels[${index}]`;
   const references = spec.targets ?? spec.parts ?? spec.nodes ?? [spec.target ?? spec.part ?? spec.node];
   if (!Array.isArray(references) || references.length === 0 || references.includes(undefined)) {
-    throw new TypeError(`Wheel ${index} needs a part, node or targets list.`);
+    throw invalidField(`${path}.node`, spec.node, 'a node, part or targets list, such as "wheel-0"', TypeError);
   }
-  const entries = references.map(reference => resolveEntry(source, reference));
-  return { id: spec.id ?? entries[0].label, entries, axle: spec.axle, side: spec.side, spec };
+  const entries = references.map(reference => resolveEntry(source, reference, `${path}.node`));
+  return { id: spec.id ?? entries[0].label, index, entries, axle: spec.axle, side: spec.side, spec };
 }
 
 function describeWheels(source, wheelOption, forward) {
   if (wheelOption === undefined || wheelOption === 'auto') {
     const { groups, rejected } = detectWheelGroups(source, forward);
-    return { described: groups.map(group => ({ id: group.id, entries: group.entries, axle: group.axle, side: group.side, spec: {} })), rejected };
+    return { described: groups.map((group, index) => ({ id: group.id, index, entries: group.entries, axle: group.axle, side: group.side, spec: {} })), rejected };
   }
-  if (!Array.isArray(wheelOption)) throw new TypeError("wheels must be an array of wheel descriptions or 'auto'.");
+  if (!Array.isArray(wheelOption)) throw invalidField('wheels', wheelOption, `"auto", or an array of wheel descriptions, such as "auto"`, TypeError);
   return { described: wheelOption.map((spec, index) => normalizeWheelSpec(source, spec, index)), rejected: [] };
 }
 
@@ -303,12 +305,12 @@ function measureDescribedWheel(source, described, forward) {
   const center = described.spec.center ?? measured?.center;
   const radius = described.spec.radius ?? measured?.radius;
   if (!center || radius === undefined) {
-    throw new RangeError(`Wheel ${described.id} needs a radius and center, or geometry to measure them from.`);
+    throw invalidField(`wheels[${described.index}].radius`, radius, 'a radius with a center, or geometry to measure them from, such as 0.35');
   }
   if (center.length !== 3 || !Array.from(center).every(Number.isFinite)) {
-    throw new RangeError(`Wheel ${described.id} center must be three finite numbers.`);
+    throw invalidField(`wheels[${described.index}].center`, center, 'an array of 3 finite numbers, such as [0.8, 0.35, 1.2]');
   }
-  assertFinitePositive(radius, `Wheel ${described.id} radius must be positive and finite.`);
+  assertFinitePositive(radius, `wheels[${described.index}].radius`, '0.35');
   return { ...described, center: Array.from(center), radius };
 }
 
@@ -332,10 +334,10 @@ function resolveWheelLayout(measuredWheels, forward) {
     const centerLocal = vec3.transformMat4(vec3.create(), wheel.center, inverseRestFrame);
     const side = wheel.side ?? (Math.abs(centerLocal[0]) < 1e-4 ? 'center' : centerLocal[0] > 0 ? 'left' : 'right');
     const axle = wheel.axle ?? (centerLocal[2] >= 0 ? 'front' : 'rear');
-    if (!['left', 'right', 'center'].includes(side)) throw new RangeError(`Wheel ${wheel.id} side must be left, right or center.`);
-    if (!['front', 'rear'].includes(axle)) throw new RangeError(`Wheel ${wheel.id} axle must be front or rear.`);
+    if (!['left', 'right', 'center'].includes(side)) throw invalidField(`wheels[${wheel.index}].side`, side, 'one of left, right, center');
+    if (!['front', 'rear'].includes(axle)) throw invalidField(`wheels[${wheel.index}].axle`, axle, 'one of front, rear');
     const spinSign = wheel.spec.spinSign ?? 1;
-    if (spinSign !== 1 && spinSign !== -1) throw new RangeError(`Wheel ${wheel.id} spinSign must be 1 or -1.`);
+    if (spinSign !== 1 && spinSign !== -1) throw invalidField(`wheels[${wheel.index}].spinSign`, spinSign, 'one of 1, -1');
     return {
       id: wheel.id || `wheel-${index}`,
       entries: wheel.entries,
@@ -352,7 +354,7 @@ function resolveWheelLayout(measuredWheels, forward) {
 
 function resolveWheelbase(wheels, wheelbaseOption) {
   if (wheelbaseOption !== undefined) {
-    assertFinitePositive(wheelbaseOption, 'wheelbase must be positive and finite.');
+    assertFinitePositive(wheelbaseOption, 'wheelbase', '2.7');
     return wheelbaseOption;
   }
   const front = wheels.filter(wheel => wheel.axle === 'front');
@@ -362,27 +364,27 @@ function resolveWheelbase(wheels, wheelbaseOption) {
     if (distance > 1e-6) return distance;
   }
   if (wheels.some(wheel => wheel.steerable)) {
-    throw new RangeError('Cannot measure the wheelbase from the wheels. Pass wheelbase in metres or mark axles front and rear.');
+    throw invalidField('wheelbase', undefined, 'a wheelbase in metres, such as 2.7, or wheels marked with axle front and rear so it can be measured');
   }
   return 0;
 }
 
 function resolveBodyEntries(source, bodyOption, wheels) {
   if (bodyOption !== undefined) {
-    if (!Array.isArray(bodyOption) || bodyOption.length === 0) throw new TypeError('body must be a non-empty array of parts or nodes.');
-    return bodyOption.map(reference => resolveEntry(source, reference));
+    if (!Array.isArray(bodyOption) || bodyOption.length === 0) throw invalidField('body', bodyOption, 'a non-empty array of parts or nodes, such as ["body"]', TypeError);
+    return bodyOption.map((reference, index) => resolveEntry(source, reference, `body[${index}]`));
   }
   const wheelKeys = new Set(wheels.flatMap(wheel => wheel.entries.map(entry => entry.key)));
   const bodyEntries = source.entries.filter(entry => !wheelKeys.has(entry.key) && !isDescendantOfAny(source, entry, wheelKeys) &&
     (source.kind === 'parts' || entry.parentKey === null));
-  if (bodyEntries.length === 0) throw new RangeError('No body parts remain after removing the wheels. Pass body explicitly.');
+  if (bodyEntries.length === 0) throw invalidField('body', undefined, 'a list of the body nodes, such as ["body"], since no body parts remain after removing the wheels');
   return bodyEntries;
 }
 
 function assertNoPivot(entries) {
   for (const entry of entries) {
     if (entry.pivot && entry.pivot.some(component => component !== 0)) {
-      throw new RangeError(`Vehicle node ${entry.label} has a nonzero pivot, which vehicle poses do not support.`);
+      throw invalidField('body', entry.label, 'nodes with a zero pivot, since vehicle poses do not support a nonzero one; pick another node');
     }
   }
 }
@@ -393,8 +395,8 @@ function transformDirection(matrix, origin, direction) {
   return vec3.normalize(tip, vec3.subtract(tip, tip, base));
 }
 
-function assertVector3(value, message) {
-  if (!value || value.length !== 3 || !Array.from(value).every(Number.isFinite)) throw new TypeError(message);
+function assertVector3(value, path) {
+  if (!value || value.length !== 3 || !Array.from(value).every(Number.isFinite)) throw invalidField(path, value, 'an array of 3 finite numbers, such as [0.5, 0.6, 2]', TypeError);
 }
 
 /**
@@ -403,9 +405,9 @@ function assertVector3(value, message) {
  */
 function resolveLights(source, lights = {}, inverseRestFrame, forward) {
   const headlights = (lights.headlights ?? []).map((light, index) => {
-    assertVector3(light.position, `Headlight ${index} needs a position of three finite numbers.`);
+    assertVector3(light.position, `lights.headlights[${index}].position`);
     const direction = light.direction ?? forward;
-    assertVector3(direction, `Headlight ${index} direction must be three finite numbers.`);
+    assertVector3(direction, `lights.headlights[${index}].direction`);
     const position = vec3.transformMat4(vec3.create(), light.position, inverseRestFrame);
     return {
       id: light.id ?? `headlight-${index}`,
@@ -414,14 +416,14 @@ function resolveLights(source, lights = {}, inverseRestFrame, forward) {
     };
   });
   const tailLights = (lights.tailLights ?? []).map((light, index) => {
-    if (light.signal !== 'brake' && light.signal !== 'reverse') throw new RangeError(`Tail light ${index} signal must be brake or reverse.`);
+    if (light.signal !== 'brake' && light.signal !== 'reverse') throw invalidField(`lights.tailLights[${index}].signal`, light.signal, 'one of brake, reverse');
     const references = light.targets ?? light.parts ?? light.nodes ?? [light.target ?? light.part ?? light.node];
     if (!Array.isArray(references) || references.length === 0 || references.includes(undefined)) {
-      throw new TypeError(`Tail light ${index} needs a part, node or targets list.`);
+      throw invalidField(`lights.tailLights[${index}].node`, light.node, 'a node, part or targets list, such as "tail"', TypeError);
     }
     const { off = 0, on = 4 } = light;
-    if (!Number.isFinite(off) || !Number.isFinite(on) || off < 0 || on < 0) throw new RangeError(`Tail light ${index} off and on must be zero or positive.`);
-    const entries = references.map(reference => resolveEntry(source, reference));
+    if (!Number.isFinite(off) || !Number.isFinite(on) || off < 0 || on < 0) throw invalidField(`lights.tailLights[${index}].${Number.isFinite(off) && off >= 0 ? 'on' : 'off'}`, Number.isFinite(off) && off >= 0 ? on : off, 'a number of 0 or more, such as 4');
+    const entries = references.map(reference => resolveEntry(source, reference, `lights.tailLights[${index}].node`));
     return { id: light.id ?? entries[0].label, signal: light.signal, entries, off, on };
   });
   return { headlights: Object.freeze(headlights), tailLights: Object.freeze(tailLights) };
@@ -434,12 +436,12 @@ function resolveLights(source, lights = {}, inverseRestFrame, forward) {
  */
 export function createVehicleRig({ parts, graph, asset, body, wheels = 'auto', forwardAxis = '+z', wheelbase, maxSteerAngle = DEFAULT_MAX_STEER_ANGLE, lights } = {}) {
   const forward = FORWARD_AXES[forwardAxis];
-  if (!forward) throw new RangeError('forwardAxis must be one of +x, -x, +z or -z.');
-  assertFinitePositive(maxSteerAngle, 'maxSteerAngle must be positive radians.');
+  if (!forward) throw invalidField('forwardAxis', forwardAxis, 'one of +x, -x, +z, -z');
+  assertFinitePositive(maxSteerAngle, 'maxSteerAngle', '0.6');
   const source = createSource({ parts, graph, asset });
   const { described, rejected } = describeWheels(source, wheels, forward);
   if (described.length < 2) {
-    throw new RangeError(`A vehicle rig needs at least two wheels, found ${described.length}. Pass wheels explicitly or check findWheelCandidates.`);
+    throw invalidField('wheels', described.length, 'at least 2 wheels, such as "auto" on a car with 4 wheel nodes, or a list of wheel nodes');
   }
   const measuredWheels = described.map(item => measureDescribedWheel(source, item, forward));
   const layout = resolveWheelLayout(measuredWheels, forward);
@@ -467,7 +469,7 @@ export function createVehicleRig({ parts, graph, asset, body, wheels = 'auto', f
 
 function validatePoint(point, index) {
   if ((!Array.isArray(point) && !ArrayBuffer.isView(point)) || point.length !== 3 || !Array.from(point).every(Number.isFinite)) {
-    throw new TypeError(`Path point ${index} must be three finite numbers.`);
+    throw invalidField(`path[${index}]`, point, 'an array of 3 finite numbers, such as [0, 0, 10]', TypeError);
   }
 }
 
@@ -480,7 +482,7 @@ function pointsFromPath(path, pathSamples) {
     }
     return points;
   }
-  throw new TypeError('Path must be an array of [x, y, z] points or a camera path with duration and sample(time).');
+  throw invalidField('path', path, 'an array of [x, y, z] points, such as [[0, 0, 0], [0, 0, 10]], or a camera path with duration and sample(time)', TypeError);
 }
 
 function removeRepeatedPoints(points) {
@@ -525,7 +527,7 @@ function resampleUniformly(polyline) {
     lengths.push(lengths[index - 1] + vec3.distance(polyline[index - 1], polyline[index]));
   }
   const total = lengths.at(-1);
-  if (!(total > 1e-6)) throw new RangeError('Path has zero length.');
+  if (!(total > 1e-6)) throw invalidField('path', 'a path of zero length', 'points that are not all the same, such as [[0, 0, 0], [0, 0, 10]]');
   const intervals = Math.max(2, Math.ceil(total / Math.max(PATH_SPACING_METRES, total / MAX_PATH_SAMPLES)));
   const spacing = total / intervals;
   const positions = [];
@@ -552,9 +554,9 @@ function smoothed(values, radius) {
 
 function buildPathTable(path, pathSamples) {
   const points = pointsFromPath(path, pathSamples);
-  points.forEach(validatePoint);
+  points.forEach((point, index) => validatePoint(point, index));
   const distinct = removeRepeatedPoints(points);
-  if (distinct.length < 2) throw new RangeError('Path needs at least two distinct points.');
+  if (distinct.length < 2) throw invalidField('path', `${distinct.length} distinct point`, 'at least 2 distinct points, such as [[0, 0, 0], [0, 0, 10]]');
   const { positions, spacing, length } = resampleUniformly(splinePolyline(distinct));
   const headings = [];
   const slopes = [];
@@ -595,7 +597,7 @@ function createSpeedProfile(table, options) {
   const times = new Float64Array(count);
   for (let index = 1; index < count; index++) {
     const meanSpeed = (speeds[index - 1] + speeds[index]) / 2;
-    if (meanSpeed < 1e-9) throw new RangeError('The speed profile never leaves rest. Raise acceleration or startSpeed.');
+    if (meanSpeed < 1e-9) throw invalidField('acceleration', 'a speed profile that never leaves rest', 'a higher acceleration or startSpeed, such as acceleration 3');
     times[index] = times[index - 1] + table.spacing / meanSpeed;
   }
   return { speeds, times, duration: times[count - 1] };
@@ -767,8 +769,8 @@ function buildLegs(legDescriptions, settings) {
   const legs = [];
   legDescriptions.forEach((description, index) => {
     const { path, direction = 'forward', pause = 0 } = description ?? {};
-    if (direction !== 'forward' && direction !== 'reverse') throw new RangeError(`Leg ${index} direction must be forward or reverse.`);
-    if (!Number.isFinite(pause) || pause < 0) throw new RangeError(`Leg ${index} pause must be zero or positive seconds.`);
+    if (direction !== 'forward' && direction !== 'reverse') throw invalidField(`legs[${index}].direction`, direction, 'one of forward, reverse');
+    if (!Number.isFinite(pause) || pause < 0) throw invalidField(`legs[${index}].pause`, pause, 'seconds of 0 or more, such as 2');
     const previous = legs.at(-1);
     const sign = direction === 'reverse' ? -1 : 1;
     const startTime = previous ? previous.endTime + pause : settings.startTime;
@@ -807,7 +809,7 @@ function buildLegs(legDescriptions, settings) {
  */
 export function driveAlongLegs(rig, legDescriptions, options = {}) {
   if (!rig || !rig.wheels || !rig.restFrame) throw new TypeError('driveAlongPath needs a rig from createVehicleRig.');
-  if (!Array.isArray(legDescriptions) || legDescriptions.length === 0) throw new TypeError('legs must be a non-empty array of { path, direction, pause }.');
+  if (!Array.isArray(legDescriptions) || legDescriptions.length === 0) throw invalidField('legs', legDescriptions, 'a non-empty array of { path, direction, pause }, such as [{ "path": [[0, 0, 0], [0, 0, 10]] }]', TypeError);
   const settings = resolveDriveOptions(rig, options);
   const legs = buildLegs(legDescriptions, settings);
   const duration = legs.at(-1).endTime;
@@ -891,27 +893,28 @@ function resolveDriveOptions(rig, options) {
     bounceFrequency = 1.6, dampingRatio = 0.45, suspensionTravel = 0.2, pathSamples = 400,
     steering = 'ackermann', fullBrakeDeceleration = braking,
   } = options;
-  if (steering !== 'ackermann' && steering !== 'shared') throw new RangeError("steering must be 'ackermann' or 'shared'.");
-  assertFinitePositive(fullBrakeDeceleration, 'fullBrakeDeceleration must be positive and finite.');
+  if (steering !== 'ackermann' && steering !== 'shared') throw invalidField('steering', steering, 'one of ackermann, shared');
+  assertFinitePositive(fullBrakeDeceleration, 'fullBrakeDeceleration', '4');
   if ((speed === undefined) === (cruiseSpeed === undefined)) {
-    throw new TypeError('Give exactly one of speed (constant) or cruiseSpeed (with acceleration and braking).');
+    throw invalidField(speed === undefined ? 'speed' : 'cruiseSpeed', speed ?? cruiseSpeed, 'exactly one of speed (constant) or cruiseSpeed (with acceleration and braking), such as speed 8', TypeError);
   }
-  if (speed !== undefined) assertFinitePositive(speed, 'speed must be positive and finite.');
+  if (speed !== undefined) assertFinitePositive(speed, 'speed', '8');
   if (cruiseSpeed !== undefined) {
-    assertFinitePositive(cruiseSpeed, 'cruiseSpeed must be positive and finite.');
-    assertFinitePositive(acceleration, 'acceleration must be positive and finite.');
-    assertFinitePositive(braking, 'braking must be positive and finite.');
+    assertFinitePositive(cruiseSpeed, 'cruiseSpeed', '8');
+    assertFinitePositive(acceleration, 'acceleration', '3');
+    assertFinitePositive(braking, 'braking', '4');
   }
-  if (!Number.isFinite(startTime) || startTime < 0) throw new RangeError('startTime must be zero or positive.');
+  if (!Number.isFinite(startTime) || startTime < 0) throw invalidField('startTime', startTime, 'seconds of 0 or more, such as 0');
   if (groundHeight !== undefined && typeof groundHeight !== 'function') throw new TypeError('groundHeight must be a function (x, z) => height.');
-  assertFinitePositive(maxSteerAngle, 'maxSteerAngle must be positive radians.');
-  assertFinitePositive(bounceFrequency, 'bounceFrequency must be positive.');
-  assertFinitePositive(dampingRatio, 'dampingRatio must be positive.');
+  assertFinitePositive(maxSteerAngle, 'maxSteerAngle', '0.6');
+  assertFinitePositive(bounceFrequency, 'bounceFrequency', '1.6');
+  assertFinitePositive(dampingRatio, 'dampingRatio', '0.45');
   if (!Number.isFinite(startSpeed) || startSpeed < 0 || !Number.isFinite(endSpeed) || endSpeed < 0) {
-    throw new RangeError('startSpeed and endSpeed must be zero or positive.');
+    const badSpeedField = !Number.isFinite(startSpeed) || startSpeed < 0 ? 'startSpeed' : 'endSpeed';
+    throw invalidField(badSpeedField, badSpeedField === 'startSpeed' ? startSpeed : endSpeed, 'a speed of 0 or more, such as 0');
   }
-  if (!(maxLateralAcceleration > 0)) throw new RangeError('maxLateralAcceleration must be positive.');
-  if (!Number.isInteger(pathSamples) || pathSamples < 8) throw new RangeError('pathSamples must be an integer of at least 8.');
+  if (!(maxLateralAcceleration > 0)) throw invalidField('maxLateralAcceleration', maxLateralAcceleration, 'a number above 0, such as 6');
+  if (!Number.isInteger(pathSamples) || pathSamples < 8) throw invalidField('pathSamples', pathSamples, 'a whole number of 8 or more, such as 400');
   return {
     speed, cruiseSpeed, acceleration, braking, startSpeed, endSpeed, maxLateralAcceleration, startTime, groundHeight,
     maxSteerAngle, rollGain, pitchGain, bounceFrequency, dampingRatio, suspensionTravel, pathSamples, steering, fullBrakeDeceleration,
