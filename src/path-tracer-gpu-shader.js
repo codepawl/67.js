@@ -104,6 +104,22 @@ int chooseEmitterByTree(vec3 normal, out float probability) {
   probability = uniformShare;
   int lightIndex = emitter - firstLightEmitter;
   if (lightIndex < 0 || lightIndex >= uLightCount) return emitter;
+  // The tree weighs a node by every light under it, linked or not, so a receiver with light linking draws uniformly among the lights it can see.
+  int linkedCount = 0;
+  for (int index = 0; index < uLightCount; index++) {
+    if (reaches(int(fetchData(uLights, index * LIGHT_TEXELS + 1).w))) linkedCount++;
+  }
+  if (linkedCount < uLightCount) {
+    if (linkedCount == 0) return -1;
+    int skip = min(int(floor(nextRandom() * float(linkedCount))), linkedCount - 1);
+    probability = float(uLightCount) * uniformShare / float(linkedCount);
+    for (int index = 0; index < uLightCount; index++) {
+      if (!reaches(int(fetchData(uLights, index * LIGHT_TEXELS + 1).w))) continue;
+      if (skip == 0) return firstLightEmitter + index;
+      skip--;
+    }
+    return -1;
+  }
   int node = 0;
   float pathProbability = 1.0;
   for (int step = 0; step < 64; step++) {
