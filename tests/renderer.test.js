@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4, mat3 } from 'gl-matrix';
-import { Renderer67, groupParts, textureDescriptorInfo } from '../src/renderer.js';
+import { Renderer67, groupParts, shaderFeatureRepresentatives, textureDescriptorInfo } from '../src/renderer.js';
 import { resolveLiquidOptics } from '../src/liquid-optics.js';
 import { createSkinPose } from '../src/skinning.js';
 import { materialLayerState } from '../src/material-layers.js';
@@ -44,6 +44,30 @@ test('batching shares geometry only when texture descriptor identities also matc
   assert.equal(groups.length, 3);
   assert.equal(groups[0].length, 2);
   assert.equal(groupParts(parts, false).length, 4);
+});
+
+test('parts sharing one material object group by geometry exactly as parts with equal copies of it', () => {
+  const geometryA = {};
+  const geometryB = {};
+  const sharedMaterial = { color: [0.1, 0.2, 0.3], metallic: 0.5, roughness: 0.3, emission: 0 };
+  const shared = [geometryA, geometryA, geometryB, geometryA].map((geometry, index) => ({ name: 'shared' + index, geometry, matrix: mat4.create(), material: sharedMaterial }));
+  const copied = shared.map(item => ({ ...item, material: { ...sharedMaterial } }));
+  const sizesOf = groups => groups.map(group => group.length);
+  assert.deepEqual(sizesOf(groupParts(shared)), [3, 1]);
+  assert.deepEqual(sizesOf(groupParts(copied)), sizesOf(groupParts(shared)));
+});
+
+test('shaderFeatureRepresentatives keeps one part per new shader feature and an instanced pair', () => {
+  const textured = { name: 'textured', geometry: {}, matrix: mat4.create(), material: { color: [1, 1, 1], map: {} } };
+  const plainGeometry = {};
+  const plainFirst = part('plain first', plainGeometry);
+  const plainSecond = part('plain second', plainGeometry);
+  const plainThird = part('plain third', {});
+  const chosen = shaderFeatureRepresentatives([plainFirst, textured, plainSecond, plainThird]);
+  assert.ok(chosen.includes(textured));
+  assert.ok(chosen.includes(plainFirst) && chosen.includes(plainSecond));
+  assert.equal(chosen.includes(plainThird), false);
+  assert.deepEqual(shaderFeatureRepresentatives([]), []);
 });
 
 test('liquid and foam parts form their own batches and validate their optics', () => {

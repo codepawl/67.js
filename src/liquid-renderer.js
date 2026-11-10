@@ -1,4 +1,4 @@
-import { startProgram, finishProgram } from './gl-program.js';
+import { compileProgram } from './gl-program.js';
 import { resolveLiquidOptics } from './liquid-optics.js';
 
 // The renderer's liquid and foam pass, kept apart from renderer.js so a scene without liquid or foam does not carry it.
@@ -17,7 +17,7 @@ const LIQUID_UNIFORMS = [
 function ensureLiquidProgram(renderer, environmentSpecularUnit, vertexSource, fragmentSource) {
   if (renderer.liquidProgram) return;
   const context = renderer.context;
-  renderer.liquidProgram = finishProgram(context, startProgram(context, vertexSource, renderer.withViewTransform(fragmentSource, 'liquid')));
+  renderer.liquidProgram = compileProgram(context, vertexSource, renderer.withViewTransform(fragmentSource, 'liquid'));
   renderer.liquidUniforms = Object.fromEntries(LIQUID_UNIFORMS.map(name => [name, context.getUniformLocation(renderer.liquidProgram, name)]));
   context.useProgram(renderer.liquidProgram);
   context.uniform1i(renderer.liquidUniforms.skinInfluences, 6);
