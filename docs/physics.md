@@ -440,6 +440,14 @@ A recipe `cloth` section records deformable sheets with a position-based solver 
 - A seek replaces the sheet's part, so the renderer sees a topology change (`topologyRevision`); the MCP preview uses `replaceParts` and `scene_look` with `motionTime` repeats the same PNG bytes (`npm run smoke:agent-cloth`).
 - `scene_inspect` returns a `cloth` report: particles, triangles, pinned count and the final bounds of each sheet.
 
+Soft body films (`scripts/soft-body-film.mjs`, `tests/soft-body-film.test.js`): a jelly cube landing and a flag lowered into folds on itself, each one recipe that the test bakes twice and the preview script renders.
+
+- Jelly cube: a rounded box 0.5 m across (384 particles) dropped from 1.95 m, `softBody { shape: 0.15, pressure: 1 }`. It first rests on the floor at frame 48 (0.8 s) and is dented 0.0503 m (10 percent of its height) at frame 49, one step later, while its width grows from 0.5 m to 0.547 m; the frame before contact has no dent.
+- Flag: a 24 by 24 grid, 1 m tall, hung by its top edge from a pole (`pinTo`) that drops 2.35 m, so the cloth piles on the floor with `selfCollision: true`. The pile is 0.547 m tall. The closest pair of particles not joined by an edge ends 7.9 mm apart; the same film without self collision ends 0.5 mm apart (layers merged).
+- Both films bake to the same bytes in every frame across two runs; the test compares every frame's vertex buffer.
+- Frame time, in milliseconds per solver step (the bake is one call, so this is its total over the steps, on a machine shared with other sessions, so read it as a range): jelly 2.5 to 6.8 ms a step over 120 steps, flag 20 to 37 ms a step over 150 steps (5.5 ms a step without self collision, 625 particles). Sampling a recorded frame for playback costs about 1 to 1.5 ms.
+- `node scripts/render-soft-body-film.mjs <folder>` (run it through gpu-lock) writes a 480 by 270 preview MP4 of each film, stills at contact and at the deepest dent, and `soft-body-film.json` with the same numbers. It needs `npm run build:lib` first. No default changes.
+
 Blender comparison (`scripts/blender-cloth.py`, Blender 5.2.2, default stiffness, mass set from the same kg/m2; `tests/cloth-blender.test.js`):
 
 | Case | Result |
