@@ -25,7 +25,7 @@ Closes #
 
 ## Tool schema or skill bench
 
-<!-- Only when you change an MCP tool, its schema or a skill. Paste the table from `bench/agent-modeling/compare-bench.mjs`. Without a Claude Code login, write that and a maintainer runs it. CONTRIBUTING.md#tool-schema-and-skill-changes. Delete this section otherwise. -->
+<!-- Only when you change an MCP tool, its schema or a skill. Paste the table from `bench/agent-modeling/compare-bench.mjs`. Without a Claude Code login, write "I have no Claude Code login; a maintainer runs the bench." If the tool schemas did not change, write "The tool schemas are unchanged." CONTRIBUTING.md#tool-schema-and-skill-changes. Delete this section otherwise. -->
 
 ## Size or tool cost
 

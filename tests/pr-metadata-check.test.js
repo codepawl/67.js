@@ -94,7 +94,7 @@ test('a local path in the body is a contributor fix, for every kind of path', ()
 });
 
 test('a tool schema or skill change needs a bench table, or a note that there is no Claude Code login', () => {
-  const files = [file('src/agent-tools.js'), file('changes/12.md')];
+  const files = [file('scripts/mcp-server.mjs'), file('changes/12.md')];
   assert.deepEqual(fixIds({ pr: pullRequest(), files }), ['missing-bench-table']);
   const table = `${goodBody}\n| task | before | after |\n| --- | --- | --- |\n| haiku bench | 20/28 | 22/28 |\n`;
   assert.deepEqual(fixIds({ pr: pullRequest({ body: table }), files }), []);
@@ -103,6 +103,37 @@ test('a tool schema or skill change needs a bench table, or a note that there is
   assert.deepEqual(result.contributorFixes, []);
   assert.ok(result.maintainerTodos.some(todo => todo.includes('agent bench')));
   assert.deepEqual(fixIds({ pr: pullRequest(), files: [file('skills/x/SKILL.md'), file('changes/12.md')] }), ['missing-bench-table']);
+});
+
+test('natural ways to say there is no bench run are accepted', () => {
+  const files = [file('scripts/mcp-server.mjs'), file('changes/12.md')];
+  const sentences = [
+    'I have no Claude Code login; a maintainer runs the bench.',
+    'I do not have a Claude Code login, please run the bench.',
+    "I don't have a Claude Code login.",
+    'I cannot run the bench, a maintainer can run it.',
+    "I can't run the bench.",
+    'No access to Claude Code.',
+    'A maintainer can run the bench for me.',
+    'The tool schemas are unchanged.',
+  ];
+  for (const sentence of sentences) {
+    const body = [goodBody, sentence, ''].join("\n");
+    assert.deepEqual(fixIds({ pr: pullRequest({ body }), files }), [], sentence);
+  }
+});
+
+test('detail text in src/agent-scene-capabilities.js alone needs no bench table', () => {
+  const files = [file('src/agent-scene-capabilities.js'), file('changes/12.md')];
+  assert.deepEqual(fixIds({ pr: pullRequest(), files }), []);
+});
+
+test('a section named Ran, or a fenced block, counts as how I checked it', () => {
+  const ran = ['## What changed', '', 'Adds a thing.', '', 'Closes #12', '', '## Ran', '', 'npm run preflight passed, 14 checks ok.', ''].join('\n');
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: ran }), files: shippedFiles }), []);
+  const fence = '`'.repeat(3);
+  const fenced = ['## What changed', '', 'Closes #12', '', fence, 'node --test tests/a.test.js', '# pass 4', fence, ''].join('\n');
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: fenced }), files: shippedFiles }), []);
 });
 
 test('look paths are detected by whole name parts', () => {
@@ -172,7 +203,7 @@ test('sectionOf reads a section up to the next heading', () => {
 
 const someFix = [{ id: 'x', message: 'Fix x.', docsAnchor: 'link-the-issue' }];
 
-test('the clock starts at the first failure, reminds once at 48 hours and closes at 72', () => {
+test('the clock starts at the first failure, reminds once at 5 days and closes at 7', () => {
   const start = Date.parse('2026-11-01T00:00:00.000Z');
   const base = { contributorFixes: someFix, exempt: false, draft: false, labels: [] };
   const first = decideActions({ ...base, now: start, previousState: null });
@@ -183,8 +214,8 @@ test('the clock starts at the first failure, reminds once at 48 hours and closes
   assert.ok(!early.remind);
   const reminder = decideActions({ ...base, now: start + REMINDER_AFTER_HOURS * HOUR_MS, previousState: state });
   assert.ok(reminder.remind && !reminder.close);
-  assert.equal(reminder.closeDate, '2026-11-04');
-  const again = decideActions({ ...base, now: start + 50 * HOUR_MS, previousState: reminder.statusState });
+  assert.equal(reminder.closeDate, '2026-11-08');
+  const again = decideActions({ ...base, now: start + (REMINDER_AFTER_HOURS + 2) * HOUR_MS, previousState: reminder.statusState });
   assert.ok(!again.remind);
   const closing = decideActions({ ...base, now: start + CLOSE_AFTER_HOURS * HOUR_MS, previousState: reminder.statusState });
   assert.ok(closing.close);
@@ -220,7 +251,8 @@ test('the marker round trips and the comment stays warm and short', () => {
   assert.match(comment, /^<!-- pr-metadata-status firstFailedAt=2026-11-01T00:00:00.000Z -->/);
   assert.match(comment, /Thank you/);
   assert.match(comment, /CONTRIBUTING\.md#link-the-issue/);
-  assert.match(comment, /2026-11-04/);
+  assert.match(comment, /2026-11-08/);
+  assert.match(comment, /first answer within about 7 days/);
 });
 
 function fakeGitHub({ pullRequest: pr, files = [], comments = [], events = [] }) {
@@ -271,10 +303,10 @@ test('the runner posts one friendly comment for a new pull request and labels it
   assert.ok(!names.includes('closePullRequest'));
 });
 
-test('the runner closes a pull request that stayed unfixed for 72 hours, and never an owner one', async () => {
+test('the runner closes a pull request that stayed unfixed for 7 days, and never an owner one', async () => {
   const marker = buildMarker('pr-metadata-status', { firstFailedAt: '2026-11-01T00:00:00.000Z' });
   const comments = [{ id: 9, user: { login: 'github-actions[bot]' }, body: `${marker}\nold` }];
-  const now = Date.parse('2026-11-05T00:00:00Z');
+  const now = Date.parse('2026-11-09T00:00:00Z');
   const contributor = fakeGitHub({ pullRequest: apiPullRequest(), files: [{ filename: 'src/scene.js' }], comments });
   await checkOnePullRequest({ github: contributor, repo: {}, number: 5, now, reopened: false, dryRun: false, log() {} });
   assert.ok(contributor.calls.some(call => call.name === 'closePullRequest'));

@@ -1,14 +1,14 @@
 // The time rules and the wording of the `PR metadata` bot. Pure, so tests call it without GitHub.
 // The bot keeps one status comment per pull request and finds it by a hidden marker. The marker also holds the time of the
-// first failing comment, which starts the 72 hour clock, and the time of the one reminder.
+// first failing comment, which starts the 7 day clock, and the time of the one reminder.
 import { NEEDS_OWNER_DECISION_LABEL } from './pr-metadata-check.mjs';
 
 export const STATUS_MARKER = 'pr-metadata-status';
 export const REMINDER_MARKER = 'pr-metadata-reminder';
 export const CLOSE_MARKER = 'pr-metadata-closed';
 export const HOUR_MS = 60 * 60 * 1000;
-export const REMINDER_AFTER_HOURS = 48;
-export const CLOSE_AFTER_HOURS = 72;
+export const REMINDER_AFTER_HOURS = 120;
+export const CLOSE_AFTER_HOURS = 168;
 
 const guideUrl = 'https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.md';
 
@@ -49,7 +49,7 @@ export function renderStatusComment({ contributorFixes, firstFailedAt, reminderS
   const closeDate = formatDate(Date.parse(firstFailedAt) + CLOSE_AFTER_HOURS * HOUR_MS);
   const deadline = exempt
     ? 'This is a maintainer pull request, so it will not close by itself.'
-    : `If these are still open on ${closeDate}, we close the pull request so the queue stays clear. You can reopen it any time after you fix them.`;
+    : `There is no rush. A maintainer gives a first answer within about 7 days, and the clock counts only the items above, which are on your side. If they are still open at the end of ${closeDate} (UTC, weekends count), we close the pull request so the queue stays clear. You can reopen it any time after you fix them.`;
   return [
     marker,
     'Thank you for the pull request. A few small things are missing before a maintainer can review it:',
@@ -65,7 +65,7 @@ export function renderStatusComment({ contributorFixes, firstFailedAt, reminderS
 export function renderReminderComment({ contributorFixes, closeDate }) {
   return [
     buildMarker(REMINDER_MARKER),
-    `A small reminder: these items are still open, and we close the pull request on ${closeDate} if they stay that way.`,
+    `A small reminder: these items are still open, and we close the pull request at the end of ${closeDate} (UTC) if they stay that way.`,
     '',
     bulletsOf(contributorFixes),
     '',
@@ -76,7 +76,7 @@ export function renderReminderComment({ contributorFixes, closeDate }) {
 export function renderCloseComment() {
   return [
     buildMarker(CLOSE_MARKER),
-    'Thank you for the work on this. We are closing the pull request because the items above stayed open for 3 days. Nothing is lost.',
+    'Thank you for the work on this. We are closing the pull request because the items above stayed open for 7 days. Nothing is lost and there is no rush: reopen it whenever you are ready.',
     '',
     `Once they are fixed, reopen it and the check runs again. Details are in the [contributing guide](${guideUrl}).`,
   ].join('\n');

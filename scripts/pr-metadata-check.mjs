@@ -16,7 +16,9 @@ const OWNER_LOGIN = 'anxuanng';
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
 const shippedPathPattern = /^(src|bin|packages|skills)\//;
-const toolOrSkillPathPattern = /^(src\/(agent-|mcp)|bin\/|skills\/)/;
+// Only skills and the file that defines the MCP tool schemas need a bench table. Detail text in src/agent-scene-capabilities.js
+// is not a schema, and the tool cost gate already covers schema growth.
+const toolOrSkillPathPattern = /^(skills\/|scripts\/mcp-server\.mjs$)/;
 const lightPathPattern = /^(docs\/|\.github\/|tests\/|changes\/)|\.md$/;
 // A look change touches shaders, lighting, materials, the default render or a post step. A name part must stand alone, so
 // "flight" and "highlight" do not match "light".
@@ -30,7 +32,13 @@ const localPathPatterns = [
   /(?:^|[\s`"'(=])\/Users\/[A-Za-z0-9._-]+/,
 ];
 const imagePattern = /!\[[^\]]*\]\([^)]+\)|<img\b|github\.com\/user-attachments\//i;
-const benchOptOutPattern = /(?:no|without)\b[^.\n]*claude code login|maintainer\b[^.\n]*\b(?:run|runs)\b[^.\n]*\bbench/i;
+// Accepts the natural ways to say "I cannot run the bench": no login, no access, cannot run it, a maintainer runs it.
+const benchOptOutPattern = /(?:\bno|\bwithout|not have|n't have|\bcannot|can't|can not|\bunable to)\b[^.\n]*\b(?:claude code|bench)\b|\bmaintainers?\b[^.\n]*\b(?:run|runs|running)\b[^.\n]*\bbench|\bbench\b[^.\n]*\bmaintainers?\b[^.\n]*\brun/i;
+// A body that says the tool schemas did not change needs no bench table.
+const schemasUnchangedPattern = /\bschemas?\b[^.\n]*\b(?:unchanged|not changed|did not change|do not change|don't change|are the same|stay the same)\b|\bno (?:tool )?schema changes?\b|\bunchanged\b[^.\n]*\bschemas?\b/i;
+const checkedHeadings = ['How I checked it', 'Ran', 'Checks', 'Tests', 'Verification', 'How I tested it'];
+const fencedBlockPattern = /```/;
+const commandLinePattern = /^\s*(?:[$>]\s*)?(?:npm|node|npx)\s+\S/m;
 
 function stripHtmlComments(text) {
   return text.replace(/<!--[\s\S]*?-->/g, '');
@@ -58,6 +66,12 @@ function hasContent(sectionText) {
     .join('\n')
     .trim();
   return meaningful.length >= 10;
+}
+
+// The checks are described when a section under an equivalent heading has content, or the body shows a fenced block or a command line.
+function describesChecks(body, visibleBody) {
+  if (checkedHeadings.some(heading => hasContent(sectionOf(body, heading)))) return true;
+  return fencedBlockPattern.test(visibleBody) || commandLinePattern.test(visibleBody);
 }
 
 function normalizePath(path) {
@@ -110,10 +124,10 @@ function contributorFixesFor(pr, files, light) {
       'link-the-issue',
     ));
   }
-  if (!hasContent(sectionOf(body, 'How I checked it'))) {
+  if (!describesChecks(body, visibleBody)) {
     fixes.push(fix(
       'empty-how-checked',
-      'Under **How I checked it**, paste the commands you ran and what they printed, such as `npm run preflight` and its last lines.',
+      'Under **How I checked it** (or **Ran**), paste the commands you ran and what they printed, such as `npm run preflight` and its last lines.',
       'describe-how-you-checked-it',
     ));
   }
@@ -131,11 +145,11 @@ function contributorFixesFor(pr, files, light) {
 
   const touchesToolOrSkill = paths.some(path => toolOrSkillPathPattern.test(path));
   const hasBenchTable = /^\s*\|\s*:?-{3,}/m.test(visibleBody) && /bench|haiku|sonnet/i.test(visibleBody);
-  const benchOptOut = benchOptOutPattern.test(visibleBody);
+  const benchOptOut = benchOptOutPattern.test(visibleBody) || schemasUnchangedPattern.test(visibleBody);
   if (touchesToolOrSkill && !hasBenchTable && !benchOptOut) {
     fixes.push(fix(
       'missing-bench-table',
-      'This changes an MCP tool or a skill, so paste the agent bench table in the description. Without a Claude Code login, say so and a maintainer will run it.',
+      'This changes an MCP tool or a skill, so paste the agent bench table in the description. Without a Claude Code login, write "I have no Claude Code login; a maintainer runs the bench." and a maintainer will run it. If the tool schemas did not change, write "The tool schemas are unchanged."',
       'tool-schema-and-skill-changes',
     ));
   }

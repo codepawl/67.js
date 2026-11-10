@@ -39,7 +39,7 @@ The `Test` workflow runs this check on every pull request, so `git push --no-ver
 
 ### Describe how you checked it
 
-Under **How I checked it**, paste the commands you ran and what they printed. A line such as `npm run preflight: 14 checks ok` is enough. This applies to agents too: show the commands and their results.
+Under **How I checked it** (or **Ran**, **Checks**, **Tests**, **Verification**), paste the commands you ran and what they printed. A line such as `npm run preflight: 14 checks ok` is enough. This applies to agents too: show the commands and their results.
 
 ### Keep private data out
 
@@ -89,7 +89,7 @@ node bench/agent-modeling/bench.mjs --models haiku --runs 3 --label <branch> --b
 node bench/agent-modeling/compare-bench.mjs bench/agent-modeling/results/bench-baseline.json bench/agent-modeling/results/bench-<branch>.json
 ```
 
-Paste the table into the pull request. The bench runs through a Claude Code login. Without one, say so in the pull request and a maintainer runs it. [bench/agent-modeling/README.md](bench/agent-modeling/README.md) has the details.
+Paste the table into the pull request. The bench runs through a Claude Code login. Without one, write "I have no Claude Code login; a maintainer runs the bench." in the pull request and a maintainer runs it. If the tool schemas did not change, write "The tool schemas are unchanged." Only `skills/` and `scripts/mcp-server.mjs` trigger this check. [bench/agent-modeling/README.md](bench/agent-modeling/README.md) has the details.
 
 ### Look changes
 
@@ -127,8 +127,8 @@ The `PR metadata` workflow checks each pull request against this guide. It posts
 
 Docs-only, CI-only and test-only pull requests skip everything except the local path check.
 
-- The comment updates itself when you fix an item. One reminder follows when 24 hours are left.
-- If an item is still open 72 hours after the first comment, the bot closes the pull request. It invites you to reopen it once the item is fixed, and reopening starts the time again.
+- The comment updates itself when you fix an item. One reminder follows after 5 days.
+- A maintainer gives a first answer within about 7 days. That reply time is separate from the bot clock, which counts only items on your side. If an item is still open 7 days after the first comment (the end of that UTC day, weekends included), the bot closes the pull request. It invites you to reopen it once the item is fixed, and reopening starts the time again.
 - Pull requests from the owner, members, collaborators and bots never close by themselves. Drafts and pull requests labelled `needs-owner-decision` do not close either.
 - Labels and the milestone never count against you. The bot adds `needs-triage` when they are missing and `status:needs-author` while something of yours is missing.
 
