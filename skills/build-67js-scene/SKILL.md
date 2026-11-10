@@ -14,7 +14,7 @@ Start the server with `npx --package @codepawlhq/67js 67js-mcp --backend gpu --a
 
 1. `scene_capabilities`: with no arguments it returns a short index of features, limits and topic names. Pass
    `topic` for the field list of one feature (`environment`, `materialFields`, `geometries`, `meshEdit.bevel`,
-   `motion`). Tool schemas list only common fields, so read the topic before a feature you have not used.
+   `motion`) or `examples.scene_apply` for a complete call of a hard tool. Tool schemas list only common fields, so read the topic before a feature you have not used.
 2. `scene_create` with a `recipe`: `{ "format": "67js.scene", "schemaVersion": 1, "geometries": [], "materials": [], "nodes": [] }`
    plus optional `camera`, `environment`, `effects`, `shadow`, `motion`, `bake`, `timeline`.
 3. `scene_inspect`: node IDs, bounds, `diagnostics`, current `revision`.

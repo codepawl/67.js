@@ -82,7 +82,7 @@ const headless = createInput({ sources: [replay], actions, axes }); // same bind
 // headless.fixedUpdate() each step; replay.finished turns true after the last sample
 ```
 
-Use an input without live sources for the replay, or live devices mix in. When the recording ends the replay releases what it set. A recording holds up to 100000 events; past that `truncated` is true. Recording is only as deterministic as the game: it stores input, not game state.
+Use an input without live sources for the replay, or live devices mix in. A source that resets a pulse after a sample (a touch tap, a pinch, a mouse delta) is recorded so the reset belongs to the next sample, and replay gives the same pressed, held and released edges and axis values at every sample. When the recording ends, or the replay is unregistered, it releases and frees what it set; only a source that declares `writesAnyControl: true` may write controls under other sources' names. Control names must look like `source/name`, and a recording may touch up to 128 distinct controls. A recording holds up to 100000 events; past that `truncated` is true. Recording is only as deterministic as the game: it stores input, not game state.
 
 `input.onControlChange(listener)` and `input.onSample(listener)` are the hooks it uses; each returns a function that removes the listener. A custom source can write any full control name with `emit.control("keyboard/Space", 1)`.
 

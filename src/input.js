@@ -130,10 +130,23 @@ export function createInput(options = {}) {
     if (sources.size >= INPUT_LIMITS.maximumSources) {
       throw new RangeError(`Input already has ${INPUT_LIMITS.maximumSources} sources. Unregister one before adding "${name}".`);
     }
+    const foreignControls = new Set();
     const emit = (controlName, value) => setControl(`${name}/${controlName}`, value);
-    emit.releaseAll = () => releaseControls(name);
-    emit.control = setControl; // writes any full control name, for sources such as a replay that restore recorded controls
-    const entry = { source, emit, attached: false };
+    emit.releaseAll = () => {
+      releaseControls(name);
+      for (const controlName of foreignControls) {
+        if (controls.has(controlName)) setControl(controlName, 0);
+      }
+    };
+    if (source.writesAnyControl === true) {
+      // Only a source that declares writesAnyControl (a replay) may write full control names. They are tracked so
+      // releaseAll and unregisterSource clean them up.
+      emit.control = (controlName, value) => {
+        foreignControls.add(controlName);
+        setControl(controlName, value);
+      };
+    }
+    const entry = { source, emit, attached: false, foreignControls };
     sources.set(name, entry);
     if (started) attach(entry);
     return api;
@@ -144,9 +157,9 @@ export function createInput(options = {}) {
     if (entry === undefined) throw new RangeError(`No input source named "${String(name)}". Registered: ${[...sources.keys()].join(', ') || 'none'}.`);
     entry.source.dispose?.();
     sources.delete(name);
-    releaseControls(name);
+    entry.emit.releaseAll();
     for (const controlName of [...controls.keys()]) {
-      if (controlName.startsWith(`${name}/`)) controls.delete(controlName);
+      if (controlName.startsWith(`${name}/`) || entry.foreignControls.has(controlName)) controls.delete(controlName);
     }
     return api;
   }
@@ -209,9 +222,11 @@ export function createInput(options = {}) {
       control.pressedLatch = false;
       control.releasedLatch = false;
     }
-    for (const entry of sources.values()) entry.source.endSample?.(entry.emit);
     snapshot = { actions, axes };
+    // Listeners hear the sample end before sources reset their pulses, so a reset (a tap going back to 0) is
+    // recorded under the next sample number, the way a live game sees it.
     for (const listener of [...sampleListeners]) listener();
+    for (const entry of sources.values()) entry.source.endSample?.(entry.emit);
   }
 
   function actionState(name) {

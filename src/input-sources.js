@@ -5,6 +5,7 @@
 export const INPUT_SOURCE_LIMITS = Object.freeze({
   maximumTouchSticks: 4,
   maximumRecordedEvents: 100000,
+  maximumReplayControls: 128,
 });
 
 function describe(value) {
@@ -283,6 +284,8 @@ export function recordInput(input) {
   };
 }
 
+const RECORDED_CONTROL_NAME = /^[^/\s]+\/\S+$/;
+
 function validateRecording(recording) {
   const valid = recording !== null && typeof recording === 'object' && recording.version === 1
     && Array.isArray(recording.events) && Number.isInteger(recording.samples) && recording.samples >= 0;
@@ -291,13 +294,18 @@ function validateRecording(recording) {
     throw new RangeError(`A recording holds up to ${INPUT_SOURCE_LIMITS.maximumRecordedEvents} events, got ${recording.events.length}.`);
   }
   let previousSample = 0;
+  const controlNames = new Set();
   recording.events.forEach((event, index) => {
     const wellFormed = Array.isArray(event) && event.length === 3 && Number.isInteger(event[0]) && event[0] >= previousSample
-      && typeof event[1] === 'string' && event[1] !== '' && Number.isFinite(event[2]);
+      && typeof event[1] === 'string' && RECORDED_CONTROL_NAME.test(event[1]) && Number.isFinite(event[2]);
     if (!wellFormed) {
       throw new TypeError(`Recording event ${index} must be [sampleIndex, "source/control", value] with sample indexes that do not go down, got ${JSON.stringify(event)}.`);
     }
     previousSample = event[0];
+    controlNames.add(event[1]);
+    if (controlNames.size > INPUT_SOURCE_LIMITS.maximumReplayControls) {
+      throw new RangeError(`A recording may touch up to ${INPUT_SOURCE_LIMITS.maximumReplayControls} distinct controls, event ${index} adds another.`);
+    }
   });
 }
 
@@ -312,6 +320,7 @@ export function replaySource(recording, options = {}) {
   let sampleIndex = 0;
   return {
     name: options.name ?? 'replay',
+    writesAnyControl: true, // input lets only this kind of source write full control names, and releases them on unregister
     get finished() {
       return !loop && sampleIndex > recording.samples;
     },

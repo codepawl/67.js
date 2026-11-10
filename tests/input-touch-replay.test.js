@@ -5,6 +5,7 @@ import {
   deviceMotionSource,
   gamepadSource,
   keyboardSource,
+  mouseSource,
   recordInput,
   replaySource,
   touchSource,
@@ -201,47 +202,162 @@ const demoBindings = {
   },
 };
 
-test('the same demo plays from keyboard, gamepad, touch and a scripted replay', () => {
+const demoSteps = 3;
+
+function recordedDemo(createSources, perform) {
+  const input = createInput({ sources: createSources(), ...demoBindings });
+  input.init();
+  const recorder = recordInput(input);
+  perform();
+  const played = playDemo(input, demoSteps);
+  return { played, recording: JSON.parse(JSON.stringify(recorder.stop())) };
+}
+
+test('the same demo plays from keyboard, gamepad, touch and a scripted replay of keyboard or touch', () => {
   const keyboardTarget = createFakeTarget();
-  const keyboardInput = createInput({ sources: [keyboardSource({ target: keyboardTarget, blurTarget: createFakeTarget() })], ...demoBindings });
-  keyboardInput.init();
-  keyboardTarget.dispatch('keydown', { code: 'KeyD' });
-  keyboardTarget.dispatch('keydown', { code: 'Space' });
-  const fromKeyboard = playDemo(keyboardInput, 3);
+  const keyboard = recordedDemo(
+    () => [keyboardSource({ target: keyboardTarget, blurTarget: createFakeTarget() })],
+    () => {
+      keyboardTarget.dispatch('keydown', { code: 'KeyD' });
+      keyboardTarget.dispatch('keydown', { code: 'Space' });
+      keyboardTarget.dispatch('keyup', { code: 'Space' }); // pressed and released inside one sample
+    },
+  );
 
   const pad = { index: 0, buttons: [{ pressed: true, value: 1 }], axes: [1] };
   const gamepadInput = createInput({ sources: [gamepadSource({ getGamepads: () => [pad] })], ...demoBindings });
   gamepadInput.init();
-  const fromGamepad = playDemo(gamepadInput, 3);
+  const fromGamepad = playDemo(gamepadInput, demoSteps);
 
   const touchTarget = createFakeTarget();
-  const touchInputInstance = createInput({ sources: [touchSource({ target: touchTarget, blurTarget: createFakeTarget(), sticks: [leftStick] })], ...demoBindings });
-  touchInputInstance.init();
-  touchTarget.dispatch('pointerdown', touch(1, 100, 200));
-  touchTarget.dispatch('pointermove', touch(1, 200, 200));
-  const fromTouch = playDemo(touchInputInstance, 3);
+  const fromTouch = recordedDemo(
+    () => [touchSource({ target: touchTarget, blurTarget: createFakeTarget(), sticks: [leftStick] })],
+    () => {
+      touchTarget.dispatch('pointerdown', touch(1, 100, 200));
+      touchTarget.dispatch('pointermove', touch(1, 200, 200));
+      touchTarget.dispatch('pointerdown', touch(2, 600, 200, 1000));
+      touchTarget.dispatch('pointerup', touch(2, 602, 200, 1100));
+    },
+  );
 
-  assert.deepEqual(fromKeyboard, { x: 3, jumps: 1 });
-  assert.deepEqual(fromGamepad, fromKeyboard);
-  assert.equal(fromTouch.x, 3);
+  const expected = { x: 3, jumps: 1 };
+  assert.deepEqual(keyboard.played, expected);
+  assert.deepEqual(fromGamepad, expected);
+  assert.deepEqual(fromTouch.played, expected);
 
-  const recordingTarget = createFakeTarget();
-  const recordedInput = createInput({ sources: [keyboardSource({ target: recordingTarget, blurTarget: createFakeTarget() })], ...demoBindings });
-  recordedInput.init();
-  const recorder = recordInput(recordedInput);
-  recordingTarget.dispatch('keydown', { code: 'KeyD' });
-  recordingTarget.dispatch('keydown', { code: 'Space' });
-  recordingTarget.dispatch('keyup', { code: 'Space' }); // pressed and released inside one sample
-  const live = playDemo(recordedInput, 2);
-  recordingTarget.dispatch('keyup', { code: 'KeyD' });
-  playDemo(recordedInput, 2);
+  for (const live of [keyboard, fromTouch]) {
+    const replayInput = createInput({ sources: [replaySource(live.recording)], ...demoBindings });
+    replayInput.init();
+    assert.deepEqual(playDemo(replayInput, demoSteps), live.played);
+  }
+});
+
+const parityBindings = {
+  actions: { tap: ['touch/tap'], swipeRight: ['touch/swipeRight'], shoot: ['mouse/button0'] },
+  axes: {
+    zoom: { bindings: ['touch/pinch'], deadZone: 0 },
+    moveX: { bindings: ['touch/leftX'], deadZone: 0 },
+    lookX: { bindings: ['mouse/deltaX'], deadZone: 0 },
+  },
+};
+
+function snapshotOf(input) {
+  return {
+    actions: Object.keys(parityBindings.actions).map(name => [input.isHeld(name), input.wasPressed(name), input.wasReleased(name)]),
+    axes: Object.keys(parityBindings.axes).map(name => input.getAxis(name)),
+  };
+}
+
+test('replay reproduces what the game saw at every sample, including pulses that sources reset after a sample', () => {
+  const touchTarget = createFakeTarget();
+  const mouseTarget = createFakeTarget();
+  const live = createInput({
+    sources: [
+      touchSource({ target: touchTarget, blurTarget: createFakeTarget(), sticks: [leftStick] }),
+      mouseSource({ target: mouseTarget, blurTarget: createFakeTarget() }),
+    ],
+    ...parityBindings,
+  });
+  live.init();
+  const recorder = recordInput(live);
+  const script = [
+    () => {
+      touchTarget.dispatch('pointerdown', touch(2, 600, 200, 1000));
+      touchTarget.dispatch('pointerup', touch(2, 602, 200, 1100));
+    },
+    () => {},
+    () => {
+      touchTarget.dispatch('pointerdown', touch(3, 500, 300, 2000));
+      touchTarget.dispatch('pointermove', touch(3, 600, 300, 2100));
+      touchTarget.dispatch('pointerup', touch(3, 650, 300, 2150));
+      mouseTarget.dispatch('pointerdown', { button: 0 });
+      mouseTarget.dispatch('pointermove', { clientX: 10, clientY: 20, movementX: 4, movementY: 0 });
+    },
+    () => {
+      touchTarget.dispatch('pointerdown', touch(6, 500, 200));
+      touchTarget.dispatch('pointerdown', touch(7, 600, 200));
+      touchTarget.dispatch('pointermove', touch(7, 700, 200));
+      mouseTarget.dispatch('pointerup', { button: 0 });
+    },
+    () => {
+      touchTarget.dispatch('pointerdown', touch(1, 100, 200));
+      touchTarget.dispatch('pointermove', touch(1, 200, 200));
+    },
+    () => {},
+    () => {},
+  ];
+  const liveSnapshots = [];
+  for (const act of script) {
+    act();
+    live.sample();
+    liveSnapshots.push(snapshotOf(live));
+  }
   const recording = JSON.parse(JSON.stringify(recorder.stop()));
+  assert.equal(liveSnapshots[0].actions[0][1], true, 'the tap pressed in sample 0');
+  assert.equal(liveSnapshots[3].axes[0], 1, 'the pinch read 1 in sample 3');
 
-  const replayInput = createInput({ sources: [replaySource(recording)], ...demoBindings });
+  const replayInput = createInput({ sources: [replaySource(recording)], ...parityBindings });
   replayInput.init();
-  const replayed = playDemo(replayInput, 2);
-  assert.deepEqual(replayed, live);
-  assert.deepEqual(live, { x: 2, jumps: 1 });
+  const replaySnapshots = script.map(() => {
+    replayInput.sample();
+    return snapshotOf(replayInput);
+  });
+  assert.deepEqual(replaySnapshots, liveSnapshots);
+});
+
+test('a source reset after a sample is logged under the next sample number', () => {
+  const target = createFakeTarget();
+  const tapping = createInput({ sources: [touchSource({ target, blurTarget: createFakeTarget() })] });
+  tapping.init();
+  const tapRecorder = recordInput(tapping);
+  target.dispatch('pointerdown', touch(2, 600, 200, 1000));
+  target.dispatch('pointerup', touch(2, 602, 200, 1100));
+  tapping.sample();
+  tapping.sample();
+  assert.deepEqual(tapRecorder.stop().events, [[0, 'touch/tap', 1], [1, 'touch/tap', 0]]);
+});
+
+test('unregistering a replay releases and frees the controls it wrote, and only replays may write foreign controls', () => {
+  const recording = { version: 1, samples: 5, truncated: false, events: [[0, 'keyboard/KeyW', 1]] };
+  const input = createInput({ sources: [replaySource(recording)], actions: { forward: ['keyboard/KeyW'] } });
+  input.init();
+  input.sample();
+  assert.equal(input.isHeld('forward'), true);
+  input.unregisterSource('replay');
+  input.sample();
+  assert.equal(input.isHeld('forward'), false, 'released');
+
+  let seenEmit = null;
+  const plain = createInput({ sources: [{ name: 'plain', attach(emit) { seenEmit = emit; } }] });
+  plain.init();
+  assert.equal(seenEmit.control, undefined, 'a plain source cannot write another source\'s controls');
+});
+
+test('a recording must name controls as source/name and touch a bounded number of them', () => {
+  assert.throws(() => replaySource({ version: 1, samples: 1, events: [[0, 'nosource', 1]] }), /Recording event 0 must be/);
+  assert.throws(() => replaySource({ version: 1, samples: 1, events: [[0, '/name', 1]] }), /Recording event 0 must be/);
+  const many = Array.from({ length: 129 }, (_, index) => [0, `script/c${index}`, 1]);
+  assert.throws(() => replaySource({ version: 1, samples: 1, events: many }), /up to 128 distinct controls/);
 });
 
 test('replay releases what it held when the recording ends, can loop, and rejects bad recordings', () => {
