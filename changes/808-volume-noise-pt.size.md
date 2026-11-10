@@ -1,0 +1,2 @@
+- scene:agent-scene+lazy: 219 bytes gzip for a second value noise in the local volume shader and its CPU port, so the rasterizer and the path tracer draw one noisy volume instead of two different clouds; the fog's sine hash cannot be reused because a GPU's sine error changes the pattern
+- goal:agent-scene: 26 bytes gzip, the CPU path tracer's noise port, which makes a noisy local volume match between renderers (worst region difference 0.003)

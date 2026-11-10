@@ -1,0 +1,398 @@
+[
+ {
+  "trap": "plaque-2m",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "plaque-20m",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "plaque-200m",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "stacked-slabs",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 66876
+ },
+ {
+  "trap": "kitbash-duplicates",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "decal-grazing-2deg",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 664
+ },
+ {
+  "trap": "walls-16mm-1km-5deg",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 422
+ },
+ {
+  "trap": "panel-15mm-176m",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 31064
+ },
+ {
+  "trap": "stack-30-exact",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "instanced-flush",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 13848
+ },
+ {
+  "trap": "plaque-closeup-0.5m",
+  "configuration": "reversed1",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 18365,
+  "contested": 915208
+ },
+ {
+  "trap": "plaque-2m",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "plaque-20m",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "plaque-200m",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "stacked-slabs",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 66876
+ },
+ {
+  "trap": "kitbash-duplicates",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "decal-grazing-2deg",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 664
+ },
+ {
+  "trap": "walls-16mm-1km-5deg",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 422
+ },
+ {
+  "trap": "panel-15mm-176m",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 31064
+ },
+ {
+  "trap": "stack-30-exact",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 0
+ },
+ {
+  "trap": "instanced-flush",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 13848
+ },
+ {
+  "trap": "plaque-closeup-0.5m",
+  "configuration": "reversed0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 18359,
+  "contested": 915208
+ },
+ {
+  "trap": "plaque-2m",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 337656,
+  "wrong": 0,
+  "contested": 337656
+ },
+ {
+  "trap": "plaque-20m",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 3014,
+  "wrong": 0,
+  "contested": 3014
+ },
+ {
+  "trap": "plaque-200m",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 12,
+  "wrong": 0,
+  "contested": 12
+ },
+ {
+  "trap": "stacked-slabs",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 24544,
+  "wrong": 9,
+  "contested": 69431
+ },
+ {
+  "trap": "kitbash-duplicates",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 140238,
+  "wrong": 0,
+  "contested": 140238
+ },
+ {
+  "trap": "decal-grazing-2deg",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 664
+ },
+ {
+  "trap": "walls-16mm-1km-5deg",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 422
+ },
+ {
+  "trap": "panel-15mm-176m",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 31064
+ },
+ {
+  "trap": "stack-30-exact",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 123566,
+  "wrong": 0,
+  "contested": 123566
+ },
+ {
+  "trap": "instanced-flush",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 0,
+  "tied": 6431,
+  "wrong": 0,
+  "contested": 20279
+ },
+ {
+  "trap": "plaque-closeup-0.5m",
+  "configuration": "reversed1-offset0",
+  "depth": "reversed-Z, 32-bit float",
+  "swapped": 389,
+  "tied": 0,
+  "wrong": 18751,
+  "contested": 916408
+ },
+ {
+  "trap": "plaque-2m",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 337656,
+  "wrong": 0,
+  "contested": 337656
+ },
+ {
+  "trap": "plaque-20m",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 3014,
+  "wrong": 0,
+  "contested": 3014
+ },
+ {
+  "trap": "plaque-200m",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 12,
+  "wrong": 0,
+  "contested": 12
+ },
+ {
+  "trap": "stacked-slabs",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 24544,
+  "wrong": 22,
+  "contested": 69431
+ },
+ {
+  "trap": "kitbash-duplicates",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 140238,
+  "wrong": 0,
+  "contested": 140238
+ },
+ {
+  "trap": "decal-grazing-2deg",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 664
+ },
+ {
+  "trap": "walls-16mm-1km-5deg",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 422
+ },
+ {
+  "trap": "panel-15mm-176m",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 0,
+  "wrong": 0,
+  "contested": 31064
+ },
+ {
+  "trap": "stack-30-exact",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 123566,
+  "wrong": 0,
+  "contested": 123566
+ },
+ {
+  "trap": "instanced-flush",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 0,
+  "tied": 6431,
+  "wrong": 0,
+  "contested": 20279
+ },
+ {
+  "trap": "plaque-closeup-0.5m",
+  "configuration": "reversed0-offset0",
+  "depth": "24-bit, standard",
+  "swapped": 208405,
+  "tied": 0,
+  "wrong": 226801,
+  "contested": 916408
+ }
+]

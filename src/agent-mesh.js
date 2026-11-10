@@ -80,13 +80,35 @@ export function meshCacheStats() {
   return { hits: evaluationCache.hits, misses: evaluationCache.misses, entries: evaluationCache.entries.size, bytes: evaluationCache.bytes };
 }
 
+const foamGeometries = new WeakMap();
+
+/**
+ * The geometry a water part draws: when it carries the ocean's `foam` vertex group, a copy whose sky visibility channel holds
+ * 1 - foam, which the water shader reads as the foam mask (a plain water part keeps 1, so no foam). One copy per geometry.
+ */
+export function waterFoamGeometry(geometry, material) {
+  const foam = material.tag === 'water' ? geometry.vertexGroups?.foam : undefined;
+  if (!foam || geometry.skyVisibility) return geometry;
+  if (!foamGeometries.has(geometry)) foamGeometries.set(geometry, { ...geometry, skyVisibility: Float32Array.from(foam, weight => 1 - weight) });
+  return foamGeometries.get(geometry);
+}
+
+/** Degrees of the smoothing default for ocean output. Choppiness folds the surface, and the default 30 would split its normals. */
+export const OCEAN_SMOOTH_ANGLE_DEFAULT = 180;
+
+/** The smoothAngle a mesh gets when the recipe sets none: 180 for a sea (an ocean edit or stack node), else the shared default. */
+export function defaultSmoothAngle(edits = [], stack = []) {
+  const makesOcean = operation => operation?.op === 'ocean';
+  return edits.some(makesOcean) || stack.some(makesOcean) ? OCEAN_SMOOTH_ANGLE_DEFAULT : MESH_SMOOTH_ANGLE_DEFAULT;
+}
+
 /**
  * Build render geometry for a recipe `mesh` geometry: convert the base, run the edit log, evaluate the modifier
  * stack, and extract triangles with edges sharper than smoothAngle (degrees) kept hard, as Blender's auto smooth
  * does. `cacheKey` identifies the base; the edit result and every stack prefix are cached under it.
  */
 export function generateMeshGeometry(baseGeometry, edits, {
-  maxVertices, smoothAngle = MESH_SMOOTH_ANGLE_DEFAULT, resolveCutter, stack = [], cacheKey, shapeKeys = [],
+  maxVertices, stack = [], smoothAngle = defaultSmoothAngle(edits, stack), resolveCutter, cacheKey, shapeKeys = [],
 }) {
   const realized = cacheKey && realizedGeometry(cacheKey);
   if (realized) {
