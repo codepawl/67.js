@@ -274,3 +274,28 @@ test('ranks settle in chains, and a stack deeper than the ranks is reported inst
   const onOnePlane = Array.from({ length: 20 }, (unused, index) => gridPart(`plane${index}`, 20 - index, 1, 0));
   assert.deepEqual(resolveFlushParts(onOnePlane).leftovers, [], 'on one plane the hidden faces are cut away, however deep the stack');
 });
+
+// #839: a part whose geometry holds a NaN vertex that no triangle uses has NaN bounds but real triangles. Two of them landed in
+// one plane bucket, the priority bin index became NaN and the bin lookup threw "Cannot read properties of undefined (reading
+// 'push')" partway through a clip, once enough instances had spawned.
+function particleWithStrayVertex(name, x) {
+  const part = gridPart(name, 0.2, 1, 0);
+  const positions = new Float32Array(part.geometry.positions.length + 3);
+  positions.set(part.geometry.positions);
+  positions.fill(Number.NaN, part.geometry.positions.length);
+  return movedPart({ ...part, geometry: { ...part.geometry, positions } }, name, x, 3);
+}
+
+test('parts with non-finite bounds are skipped, and the finite parts report as before at every instance count', () => {
+  const floor = gridPart('floor', 20, 4, 0);
+  const marking = gridPart('marking', 2, 1, 0.0004);
+  const particle = gridPart('particle', 0.2, 1, 0);
+  for (const count of [10, 94, 400]) {
+    const finite = Array.from({ length: count }, (unused, index) => movedPart(particle, `particle${index}`, index * 0.3, 3));
+    const broken = [particleWithStrayVertex('brokenOne', 0), particleWithStrayVertex('brokenTwo', 0.1)];
+    const withBroken = findCoplanarOverlaps([floor, marking, ...finite, ...broken]);
+    const without = findCoplanarOverlaps([floor, marking, ...finite]);
+    assert.deepEqual(withBroken.overlaps.map(overlap => overlap.smaller.name), without.overlaps.map(overlap => overlap.smaller.name));
+    assert.ok(withBroken.overlaps.some(overlap => overlap.smaller.name === 'marking'));
+  }
+});

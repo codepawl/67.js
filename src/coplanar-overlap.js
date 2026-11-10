@@ -343,11 +343,15 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
     // report as a pair, and the rest are left out, so a stack of n costs 2 parts and not n * n / 2 pairs.
     const stack = stacks.get(part.geometry) ?? new Map();
     stacks.set(part.geometry, stack);
+    // A NaN or infinite bound (a stray vertex, a pose that overflowed) cannot be placed in space; its box would turn the
+    // priority bin index into NaN. Such a part has no place to fight in, so it is left out.
+    const bounds = worldBounds(part);
+    if (!bounds.every(Number.isFinite)) continue;
     const pose = Array.prototype.join.call(part.matrix, ',');
     const copies = stack.get(pose) ?? 0;
     if (copies >= 2) continue;
     stack.set(pose, copies + 1);
-    entries.push({ part, bounds: worldBounds(part) });
+    entries.push({ part, bounds });
   }
   const budget = { work: 0, limit: workBudget };
   const scanBudget = { triangles: triangleBudget, exhausted: false };
