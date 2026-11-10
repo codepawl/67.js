@@ -1,11 +1,18 @@
-// Turns the pairs of flush-search.js into a draw rank per triangle (issue #751). The triangle in front along the shared
-// normal gets the higher rank, and the renderer pulls each rank a little closer in depth only, so the same triangle wins
-// every frame and at every distance. Ranks are per triangle, not per part: a whole-part offset moved faces that had no
-// conflict and made things worse (issue #593).
+// Settles the pairs of flush-search.js (issue #751). Two faces on one plane: the hidden one is cut away where the other
+// covers it (flush-clip.js), so nothing is left to fight. Two faces a small gap apart: the one in front along the shared
+// normal gets the higher draw rank, and the renderer pulls each rank a little closer in depth only, so the same triangle
+// wins every frame and at every distance. Ranks are per triangle, not per part: a whole-part offset moved faces that had
+// no conflict and made things worse (issue #593).
+import { mat4 } from 'gl-matrix';
 import { depthLayerOf, MAXIMUM_FLUSH_RANK, setFlushOrder } from './depth-layer.js';
-import { findFlushPairs } from './flush-search.js';
+import { clipFlushOverlaps, FLUSH_CUT_MINIMUM_AREA, FLUSH_CUT_STRIDE, sameNumbers } from './flush-clip.js';
+import { findFlushPairs, float32Step, worldBounds } from './flush-search.js';
 
 const COLLAPSED_AXIS_SHARE = 1e-3;
+const CACHED_ORDERS_PER_GEOMETRY = 8;
+
+// Kept between runs, so a part whose ranks and cuts did not change keeps its order object and the renderer keeps its batch.
+const ordersByGeometry = new WeakMap();
 
 // Which triangle of a pair draws in front. A real gap decides; on one plane the smaller triangle is the detail (a plaque,
 // a trim, a duplicate face) and wins, then the later one.
@@ -15,35 +22,124 @@ function frontOf(pair, areas) {
   return pair.second;
 }
 
-// Rank = the longest chain of triangles behind this one. Each pass lifts the front triangle of every pair above its back
-// triangle; a chain longer than the top rank (or a cycle of slightly tilted planes) stops there and is marked.
-function rankTriangles(count, edges) {
+// Lifts the front triangle of every pair above its back triangle, once. Returns whether a rank moved.
+function liftFronts(ranks, edges, overflow) {
+  let moved = false;
+  for (let edge = 0; edge < edges.length; edge += 2) {
+    const front = edges[edge + 1];
+    const wanted = ranks[edges[edge]] + 1;
+    if (wanted <= ranks[front]) continue;
+    if (wanted > MAXIMUM_FLUSH_RANK) {
+      if (overflow) overflow[front] = 1;
+      continue;
+    }
+    ranks[front] = wanted;
+    moved = true;
+  }
+  return moved;
+}
+
+// Rank = the longest chain of triangles behind this one. A chain longer than the top rank (or a cycle of slightly tilted
+// planes) stops there and is marked. `seamEdges` are pairs that were cut: what is left of them shares only the hair of
+// overlap a cut leaves, so they take a rank where one is free and are dropped without a mark where the ranks ran out.
+function rankTriangles(count, edges, seamEdges) {
   const ranks = new Uint8Array(count);
   const overflow = new Uint8Array(count);
-  let moved = true;
-  for (let pass = 0; moved && pass <= MAXIMUM_FLUSH_RANK + 1; pass++) {
-    moved = false;
-    for (let edge = 0; edge < edges.length; edge += 2) {
-      const front = edges[edge + 1];
-      const wanted = ranks[edges[edge]] + 1;
-      if (wanted <= ranks[front]) continue;
-      if (wanted > MAXIMUM_FLUSH_RANK) {
-        overflow[front] = 1;
-        continue;
-      }
-      ranks[front] = wanted;
-      moved = true;
-    }
+  for (let pass = 0; pass <= MAXIMUM_FLUSH_RANK + 1 && liftFronts(ranks, edges, overflow); pass++);
+  for (let pass = 0; pass <= MAXIMUM_FLUSH_RANK + 1; pass++) {
+    const seamMoved = liftFronts(ranks, seamEdges, null);
+    const moved = liftFronts(ranks, edges, null);
+    if (!seamMoved && !moved) break;
   }
   return { ranks, overflow };
 }
 
-function sameRanks(first, second) {
-  if (first.length !== second.length) return false;
-  for (let index = 0; index < first.length; index++) {
-    if (first[index] !== second[index]) return false;
+// Whether the back triangle of a pair can be cut away under the front one: they lie on one plane and face the same way, the
+// front one hides what is under it, and no side of the back one stays in view where the front one is culled.
+function canCut(pair, frontPart, backPart) {
+  if (!pair.flush || pair.opposite || pair.area < FLUSH_CUT_MINIMUM_AREA) return false;
+  if ((frontPart.material?.alphaMode ?? 'opaque') !== 'opaque') return false;
+  return backPart.material?.doubleSided !== true || frontPart.material?.doubleSided === true;
+}
+
+function columnLength(matrix, column) {
+  return Math.hypot(matrix[column], matrix[column + 1], matrix[column + 2]);
+}
+
+// The float32 step of the world coordinates a part is drawn at, in the units of its geometry.
+function coordinateStep(part) {
+  const largest = worldBounds(part).reduce((most, value) => Math.max(most, Math.abs(value)), 0);
+  return float32Step(largest) / Math.min(columnLength(part.matrix, 0), columnLength(part.matrix, 4), columnLength(part.matrix, 8));
+}
+
+// The cuts of one part for clipFlushOverlaps, sorted by the triangle that is cut; null when the part's matrix has no inverse.
+// A winner in the same part is read from the geometry, so instances of one geometry get the same cuts and share the result.
+function cutRecords(found, partIndex, cutPairs) {
+  const part = found.parts[partIndex];
+  const { positions, indices } = part.geometry;
+  const inverse = mat4.invert(new Float64Array(16), part.matrix);
+  if (!inverse) return null;
+  cutPairs.sort((one, other) => found.local[one.back] - found.local[other.back] || one.front - other.front);
+  const cuts = new Float64Array(cutPairs.length * FLUSH_CUT_STRIDE);
+  cutPairs.forEach(({ back, front }, index) => {
+    const offset = index * FLUSH_CUT_STRIDE;
+    cuts[offset] = found.local[back];
+    for (let corner = 0; corner < 3; corner++) {
+      const target = offset + 1 + corner * 3;
+      if (found.owner[front] === partIndex) {
+        const vertex = indices[found.local[front] * 3 + corner] * 3;
+        cuts.set(positions.subarray(vertex, vertex + 3), target);
+        continue;
+      }
+      const x = found.corners[front * 9 + corner * 3];
+      const y = found.corners[front * 9 + corner * 3 + 1];
+      const z = found.corners[front * 9 + corner * 3 + 2];
+      cuts[target] = inverse[0] * x + inverse[4] * y + inverse[8] * z + inverse[12];
+      cuts[target + 1] = inverse[1] * x + inverse[5] * y + inverse[9] * z + inverse[13];
+      cuts[target + 2] = inverse[2] * x + inverse[6] * y + inverse[10] * z + inverse[14];
+    }
+  });
+  return cuts;
+}
+
+// A part's geometry with its hidden flush faces cut away, as `{ geometry, sources }` of clipFlushOverlaps. A part that
+// cannot be cut, or that would lose every triangle, keeps its geometry and its pairs are ranked instead. A pair whose back
+// triangle is still partly there goes to `seamEdges`.
+function clipPart(found, partIndex, cutPairs, edges, seamEdges) {
+  const part = found.parts[partIndex];
+  const uncut = { geometry: part.geometry, sources: null };
+  if (cutPairs.length === 0) return uncut;
+  const cuts = cutRecords(found, partIndex, cutPairs);
+  const clipped = cuts ? clipFlushOverlaps(part.geometry, cuts, coordinateStep(part)) : uncut;
+  if (!cuts || clipped.geometry.indices.length === 0) {
+    for (const { back, front } of cutPairs) edges.push(back, front);
+    return uncut;
   }
-  return true;
+  if (!clipped.sources) return clipped;
+  const left = new Uint8Array(part.geometry.indices.length / 3);
+  for (const source of clipped.sources) left[source] = 1;
+  for (const { back, front } of cutPairs) {
+    if (left[found.local[back]]) seamEdges.push(back, front);
+  }
+  return clipped;
+}
+
+// The order a part draws with, or null when it has neither a cut nor a rank. `triangleRanks` counts the uncut triangles.
+function flushOrderFor({ geometry, sources }, triangleRanks) {
+  if (!sources && !triangleRanks) return null;
+  let drawnRanks = triangleRanks;
+  if (sources) drawnRanks = triangleRanks ? Uint8Array.from(sources, source => triangleRanks[source]) : new Uint8Array(sources.length);
+  const orders = ordersByGeometry.get(geometry) ?? [];
+  ordersByGeometry.set(geometry, orders);
+  let order = orders.find(candidate => sameNumbers(candidate.triangleRanks, drawnRanks));
+  if (!order) {
+    order = createFlushOrder(geometry.indices, drawnRanks);
+    // A cut part draws its cut vertices; the order's indices are that geometry's triangles, sorted by rank.
+    if (sources) order.geometry = { ...geometry, indices: order.indices };
+    orders.push(order);
+    if (orders.length > CACHED_ORDERS_PER_GEOMETRY) orders.shift();
+  }
+  return order;
 }
 
 // The geometry's indices sorted by rank (triangles of one rank keep their order) and the index range of each rank.
@@ -74,11 +170,13 @@ function hasCollapsedAxis(matrix) {
 }
 
 /**
- * Finds the near-coplanar triangles of `parts` and stores a ranked draw order beside every part that needs one
- * (`flushOrderOf(part)` in depth-layer.js); parts, geometries and matrices are left as they are. Parts that share a geometry
- * and agree on every rank share one order, so they still batch. Returns `{ ranked, leftovers }`: the number of parts with an
- * order, and what could not be settled as `{ reason, part, triangles }` with reason `rank-overflow` (a stack deeper than 15
- * faces), `double-sided-gap`, `unchecked` (past the search budget) or `collapsed-node` (an axis scaled to nothing).
+ * Finds the near-coplanar triangles of `parts` and stores a draw order beside every part that needs one (`flushOrderOf(part)`
+ * in depth-layer.js); parts, geometries and matrices are left as they are. An order holds the triangles sorted by rank and,
+ * for a part with faces cut away, the cut `geometry` they index. Parts that share a geometry and agree on every cut and rank
+ * share one order, so they still batch. Returns `{ ranked, leftovers }`: the number of parts with an order, and what
+ * could not be settled as `{ reason, part, triangles }` with reason
+ * `rank-overflow` (more than 16 faces a small gap apart), `double-sided-gap`, `unchecked` (past the search budget) or
+ * `collapsed-node` (an axis scaled to nothing).
  */
 export function resolveFlush(parts, options) {
   const found = findFlushPairs(parts, options);
@@ -91,6 +189,8 @@ export function resolveFlush(parts, options) {
     leftovers.set(key, entry);
   };
   const edges = [];
+  const seamEdges = [];
+  const cutPairs = found.parts.map(() => []);
   for (const pair of pairs) {
     const firstPart = found.parts[owner[pair.first]];
     const secondPart = found.parts[owner[pair.second]];
@@ -102,9 +202,12 @@ export function resolveFlush(parts, options) {
       continue;
     }
     const front = frontOf(pair, areas);
-    edges.push(front === pair.first ? pair.second : pair.first, front);
+    const back = front === pair.first ? pair.second : pair.first;
+    if (canCut(pair, found.parts[owner[front]], found.parts[owner[back]])) cutPairs[owner[back]].push({ back, front });
+    else edges.push(back, front);
   }
-  const { ranks, overflow } = rankTriangles(count, edges);
+  const clippedParts = found.parts.map((part, partIndex) => clipPart(found, partIndex, cutPairs[partIndex], edges, seamEdges));
+  const { ranks, overflow } = rankTriangles(count, edges, seamEdges);
   const partRanks = found.parts.map(() => null);
   for (let id = 0; id < count; id++) {
     if (overflow[id]) note('rank-overflow', found.parts[owner[id]]);
@@ -112,24 +215,13 @@ export function resolveFlush(parts, options) {
     partRanks[owner[id]] ??= new Uint8Array(found.parts[owner[id]].geometry.indices.length / 3);
     partRanks[owner[id]][local[id]] = ranks[id];
   }
-  const ordersByGeometry = new Map();
   const searched = new Map(found.parts.map((part, index) => [part, index]));
   let ranked = 0;
   for (const part of parts) {
-    const triangleRanks = searched.has(part) ? partRanks[searched.get(part)] : null;
-    if (!triangleRanks) {
-      setFlushOrder(part, null);
-      continue;
-    }
-    const orders = ordersByGeometry.get(part.geometry) ?? [];
-    ordersByGeometry.set(part.geometry, orders);
-    let order = orders.find(candidate => sameRanks(candidate.triangleRanks, triangleRanks));
-    if (!order) {
-      order = createFlushOrder(part.geometry.indices, triangleRanks);
-      orders.push(order);
-    }
+    const partIndex = searched.get(part);
+    const order = partIndex === undefined ? null : flushOrderFor(clippedParts[partIndex], partRanks[partIndex]);
     setFlushOrder(part, order);
-    ranked++;
+    if (order) ranked++;
   }
   for (const part of found.unchecked) note('unchecked', part, part.geometry.indices.length / 3);
   if (found.truncated) note('unchecked', { name: 'scene' }, 0);

@@ -46,7 +46,7 @@ async function probeTraps() {
       await page.waitForTimeout(300);
       const outcome = await page.evaluate(async () => ({ probe: await window.flicker.probe(), info: window.flicker.info }));
       await page.screenshot({ path: path.join(outputFolder, `${prefix}-${trap}-${label}.png`) });
-      results.push({ trap, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, moved: outcome.probe.totalChanged, depth: outcome.info.depthMode });
+      results.push({ trap, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, moved: outcome.probe.totalChanged, ...(outcome.probe.open === undefined ? {} : { open: outcome.probe.open }), depth: outcome.info.depthMode });
       console.log(JSON.stringify(results.at(-1)));
     }
   }
@@ -64,6 +64,7 @@ try {
     for (const configuration of configurations) {
       await open(configuration);
       await page.waitForTimeout(1500);
+      console.log(JSON.stringify({ flush: await page.evaluate(() => window.flicker.info.flush) }));
       const label = Object.entries(configuration).map(([key, value]) => `${key}${value}`).join('-');
       for (const spot of spots) {
         const outcome = await page.evaluate(async ({ eye, target }) => {

@@ -34,6 +34,19 @@ function ranksOf(part) {
   return order ? Array.from(order.triangleRanks) : null;
 }
 
+// The area a part draws: its cut geometry when it has one.
+function drawnArea(part) {
+  const { positions, indices } = flushOrderOf(part)?.geometry ?? part.geometry;
+  let area = 0;
+  for (let index = 0; index < indices.length; index += 3) {
+    const [first, second, third] = [indices[index] * 3, indices[index + 1] * 3, indices[index + 2] * 3];
+    const edgeOne = [0, 1, 2].map(axis => positions[second + axis] - positions[first + axis]);
+    const edgeTwo = [0, 1, 2].map(axis => positions[third + axis] - positions[first + axis]);
+    area += Math.hypot(edgeOne[1] * edgeTwo[2] - edgeOne[2] * edgeTwo[1], edgeOne[2] * edgeTwo[0] - edgeOne[0] * edgeTwo[2], edgeOne[0] * edgeTwo[1] - edgeOne[1] * edgeTwo[0]) / 2;
+  }
+  return area;
+}
+
 test('the surface in front along the normal gets the higher rank, whatever the part order or size', () => {
   const wall = partOf('wall', [quadCorners(0, 0, 4, 4, 0)]);
   const plaque = partOf('plaque', [quadCorners(1, 1, 1, 1, 0.001)]);
@@ -57,17 +70,43 @@ test('the surface in front along the normal gets the higher rank, whatever the p
   assert.equal(flushOrderOf(ceiling), null);
 });
 
-test('on one plane the smaller face wins, then the later one, and chains count up', () => {
+test('on one plane the smaller face wins, then the later one, and the face under it is cut away instead of ranked', () => {
   const kitbash = partOf('kitbash', [quadCorners(0, 0, 10, 1, 0), quadCorners(0, 0, 5, 1, 0), quadCorners(0, 0, 2, 1, 0)]);
-  resolveFlush([kitbash]);
-  assert.deepEqual(ranksOf(kitbash), [0, 0, 1, 1, 2, 2]);
+  assert.deepEqual(resolveFlush([kitbash]), { ranked: 1, leftovers: [] });
+  assert.equal(Math.max(...ranksOf(kitbash)), 2, 'the faces keep their order for the hair of overlap a cut leaves');
+  assert.ok(Math.abs(drawnArea(kitbash) - 10) < 1e-3, 'the three faces draw the area of their union once');
   const twin = partOf('twin', [quadCorners(0, 0, 1, 1, 0), quadCorners(0, 0, 1, 1, 0)]);
   resolveFlush([twin]);
-  assert.deepEqual(ranksOf(twin), [0, 0, 1, 1]);
+  assert.deepEqual(Array.from(flushOrderOf(twin).geometry.indices), [4, 5, 6, 4, 6, 7], 'the earlier twin is dropped whole');
+  const tiny = partOf('tiny', [quadCorners(0, 0, 0.009, 0.009, 0), quadCorners(0, 0, 0.009, 0.009, 0)]);
+  resolveFlush([tiny]);
+  assert.deepEqual(ranksOf(tiny), [0, 0, 1, 1], 'a shared area under 1 cm2 is ranked, not cut');
+  assert.equal(flushOrderOf(tiny).geometry, undefined);
+});
+
+test('a face is only cut under a face that hides it from every side it shows', () => {
+  const glass = partOf('glass', [quadCorners(1, 1, 1, 1, 0)], { material: { alphaMode: 'blend' } });
+  const wall = partOf('wall', [quadCorners(0, 0, 4, 4, 0)]);
+  resolveFlush([wall, glass]);
+  assert.equal(flushOrderOf(wall), null, 'the wall stays whole behind a blended face');
+  assert.deepEqual(ranksOf(glass), [1, 1]);
+  const leaf = partOf('leaf', [quadCorners(0, 0, 4, 4, 0)], { material: { doubleSided: true } });
+  const patch = partOf('patch', [quadCorners(1, 1, 1, 1, 0)]);
+  resolveFlush([leaf, patch]);
+  assert.equal(flushOrderOf(leaf), null, 'the back of a double-sided face shows where a one-sided patch is culled');
+  assert.deepEqual(ranksOf(patch), [1, 1]);
+});
+
+test('a part hidden whole keeps its geometry and is ranked under what hides it', () => {
+  const lower = partOf('lower', [quadCorners(0, 0, 1, 1, 0)]);
+  const upper = partOf('upper', [quadCorners(0, 0, 1, 1, 0)]);
+  assert.deepEqual(resolveFlush([lower, upper]), { ranked: 1, leftovers: [] });
+  assert.equal(flushOrderOf(lower), null);
+  assert.deepEqual(ranksOf(upper), [1, 1]);
 });
 
 test('the ranked order holds every triangle once, sorted by rank, and leaves the geometry alone', () => {
-  const kitbash = partOf('kitbash', [quadCorners(0, 0, 2, 1, 0), quadCorners(0, 0, 10, 1, 0), quadCorners(0, 0, 5, 1, 0)]);
+  const kitbash = partOf('kitbash', [quadCorners(0, 0, 2, 1, 0.002), quadCorners(0, 0, 10, 1, 0), quadCorners(0, 0, 5, 1, 0.001)]);
   const original = Array.from(kitbash.geometry.indices);
   const geometry = kitbash.geometry;
   resolveFlush([kitbash]);
@@ -78,15 +117,26 @@ test('the ranked order holds every triangle once, sorted by rank, and leaves the
   assert.deepEqual(Array.from(order.indices), [4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 0, 1, 2, 0, 2, 3]);
 });
 
-test('a stack of 20 faces fills the 16 ranks and reports the rest as rank-overflow', () => {
-  const stack = partOf('stack', Array.from({ length: 20 }, (unused, index) => quadCorners(0, 0, 20 - index, 1, 0)));
+test('a stack of 20 or 30 faces on one plane is cut down to what shows and reports nothing', () => {
+  for (const depth of [20, 30]) {
+    const staggered = partOf('staggered', Array.from({ length: depth }, (unused, index) => quadCorners(0, 0, depth - index, 1, 0)));
+    assert.deepEqual(resolveFlush([staggered]), { ranked: 1, leftovers: [] });
+    assert.ok(Math.abs(drawnArea(staggered) - depth) < 1e-2);
+    const exact = partOf('exact', Array.from({ length: depth }, () => quadCorners(0, 0, 3, 2, 0)));
+    assert.deepEqual(resolveFlush([exact]), { ranked: 1, leftovers: [] });
+    assert.deepEqual(Array.from(flushOrderOf(exact).geometry.indices), [0, 1, 2, 0, 2, 3].map(index => index + (depth - 1) * 4), 'only the last face is drawn');
+  }
+});
+
+test('a stack of 20 faces half a millimetre apart fills the 16 ranks and reports the rest as rank-overflow', () => {
+  const stack = partOf('stack', Array.from({ length: 20 }, (unused, index) => quadCorners(0, 0, 20 - index, 1, index * 0.0005)));
   const { ranked, leftovers } = resolveFlush([stack]);
   assert.equal(ranked, 1);
   assert.deepEqual(leftovers, [{ reason: 'rank-overflow', part: 'stack', triangles: 8 }]);
   const ranks = ranksOf(stack);
   assert.equal(Math.max(...ranks), MAXIMUM_FLUSH_RANK);
   assert.deepEqual(ranks.slice(0, 32), Array.from({ length: 32 }, (unused, index) => index >> 1));
-  const shallow = partOf('shallow', Array.from({ length: 16 }, (unused, index) => quadCorners(0, 0, 20 - index, 1, 0)));
+  const shallow = partOf('shallow', Array.from({ length: 16 }, (unused, index) => quadCorners(0, 0, 20 - index, 1, index * 0.0005)));
   assert.deepEqual(resolveFlush([shallow]).leftovers, []);
 });
 
@@ -95,25 +145,41 @@ test('untouched parts keep their identity and get no order; a stale order is dro
   const plaque = partOf('plaque', [quadCorners(1, 1, 1, 1, 0)]);
   const far = partOf('far', [quadCorners(0, 0, 4, 4, 30)]);
   const parts = [wall, plaque, far];
-  assert.equal(resolveFlush(parts).ranked, 1);
-  assert.equal(flushOrderOf(wall), null);
+  const wallGeometry = wall.geometry;
+  const wallIndices = Array.from(wall.geometry.indices);
+  assert.equal(resolveFlush(parts).ranked, 2);
+  const cut = flushOrderOf(wall);
+  assert.ok(cut.geometry, 'the wall is cut under the plaque');
+  assert.ok(Math.abs(drawnArea(wall) - 15) < 1e-4);
+  assert.equal(wall.geometry, wallGeometry, 'the cut geometry sits beside the part');
+  assert.deepEqual(Array.from(wall.geometry.indices), wallIndices);
+  assert.deepEqual(ranksOf(plaque), [1, 1]);
+  assert.equal(flushOrderOf(plaque).geometry, undefined);
   assert.equal(flushOrderOf(far), null);
   assert.equal(plaque.depthLayer, undefined);
-  assert.deepEqual(Object.keys(plaque), ['name', 'geometry', 'matrix', 'material']);
-  assert.equal(resolveFlush([plaque, far]).ranked, 0, 'without the wall nothing lies under the plaque');
-  assert.equal(flushOrderOf(plaque), null);
+  assert.deepEqual(Object.keys(wall), ['name', 'geometry', 'matrix', 'material']);
+  assert.equal(resolveFlush(parts).ranked, 2);
+  assert.equal(flushOrderOf(wall), cut, 'the same cuts give the same order, so the renderer keeps its batch');
+  assert.equal(resolveFlush([wall, far]).ranked, 0, 'without the plaque nothing covers the wall');
+  assert.equal(flushOrderOf(wall), null);
 });
 
 test('instances that agree share one order, so they still batch; one that differs gets none', () => {
   const floor = partOf('floor', [quadCorners(0, 0, 20, 4, 0)], { material: { tag: 'floor' } });
   const tile = partOf('tile', [quadCorners(0, 0, 1, 1, 0)]);
-  const onFloorOne = { ...tile, name: 'onFloorOne', matrix: new Float32Array(movedTo(1, 0, 1)) };
-  const onFloorTwo = { ...tile, name: 'onFloorTwo', matrix: new Float32Array(movedTo(5, 0, 1)) };
+  const onFloorOne = { ...tile, name: 'onFloorOne', matrix: new Float32Array(movedTo(1, 0.001, 1)) };
+  const onFloorTwo = { ...tile, name: 'onFloorTwo', matrix: new Float32Array(movedTo(5, 0.001, 1)) };
   const lifted = { ...tile, name: 'lifted', matrix: new Float32Array(movedTo(9, 1, 1)) };
   assert.equal(resolveFlush([floor, onFloorOne, onFloorTwo, lifted]).ranked, 2);
   assert.ok(flushOrderOf(onFloorOne));
   assert.equal(flushOrderOf(onFloorOne), flushOrderOf(onFloorTwo));
   assert.equal(flushOrderOf(lifted), null);
+  // Faces cut inside one geometry are the same cut in every instance, wherever it stands.
+  const doubled = partOf('doubled', [quadCorners(0, 0, 2, 2, 0), quadCorners(0.5, 0.5, 1, 1, 0)]);
+  const copy = { ...doubled, name: 'copy', matrix: new Float32Array(movedTo(40, 3, -7)) };
+  assert.equal(resolveFlush([doubled, copy]).ranked, 2);
+  assert.ok(flushOrderOf(doubled).geometry);
+  assert.equal(flushOrderOf(doubled), flushOrderOf(copy));
 });
 
 test('a decal or another depthLayer already clears the pair, so no rank is spent', () => {

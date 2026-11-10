@@ -4,6 +4,7 @@ import { vec3 } from 'gl-matrix';
 import { Renderer67 } from '../../src/index.js';
 import { parseGltf } from '../../src/gltf.js';
 import { resolveFlushParts } from '../../src/coplanar-overlap.js';
+import { flushOrderOf } from '../../src/depth-layer.js';
 import { TRAPS } from './traps.js';
 
 // One flat colour per part, no textures, so a pixel's colour says which part owns it and a changed colour is a changed owner.
@@ -36,6 +37,7 @@ function measureBounds(parts) {
 const JITTER_PIXELS = 0.125;
 const CHANGE_THRESHOLD = 24;
 const EDGE_THRESHOLD = 48;
+const OPEN_THRESHOLD = 10;
 const FIELD_OF_VIEW = 45;
 
 const canvas = document.querySelector('#viewport');
@@ -119,6 +121,25 @@ async function loadScene() {
   return TRAPS[trapName]();
 }
 
+// What the flush pass did to the scene: how long it took, what it could not settle and how much it cut.
+let flushReport = null;
+function resolveAndReport(parts) {
+  const started = performance.now();
+  const resolved = resolveFlushParts(parts);
+  const cutParts = parts.filter(part => flushOrderOf(part)?.geometry);
+  const count = (geometry, field, size) => geometry[field].length / size;
+  flushReport = {
+    milliseconds: Math.round(performance.now() - started),
+    ranked: resolved.ranked,
+    leftovers: resolved.leftovers,
+    cutParts: cutParts.length,
+    trianglesBefore: cutParts.reduce((sum, part) => sum + count(part.geometry, 'indices', 3), 0),
+    trianglesAfter: cutParts.reduce((sum, part) => sum + count(flushOrderOf(part).geometry, 'indices', 3), 0),
+    verticesAdded: cutParts.reduce((sum, part) => sum + count(flushOrderOf(part).geometry, 'positions', 3) - count(part.geometry, 'positions', 3), 0),
+  };
+  return resolved;
+}
+
 async function build() {
   if (!glbBytes && !trapName) return;
   setStatus('wait', 'Building the scene');
@@ -131,7 +152,7 @@ async function build() {
   renderer = new Renderer67(canvas, loaded.parts, {
     ground: false, hdr: true, samples: 4, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
     reversedDepth: options.reversed ? 'auto' : false,
-    resolveCoplanar: options.offset ? resolveFlushParts : false,
+    resolveCoplanar: options.offset ? resolveAndReport : false,
   });
   window.flickerRenderer = renderer;
   window.flickerParts = loaded.parts;
@@ -216,9 +237,28 @@ async function probe() {
   paint.putImageData(image, 0, 0);
   renderer.render(frameFor(0));
   lastProbe = { changed, clearOfEdges, totalChanged, total: width * height, fraction: changed / (width * height), width, height };
+  if (trapName && TRAPS[trapName]().countOpen) lastProbe.open = countOpenPixels(first, width, height);
   setStatus(changed === 0 ? 'ok' : 'bad', changed === 0 ? 'No flicker in this view' : `${changed} pixels flicker`);
   updateReadout();
   return lastProbe;
+}
+
+// Pixels that let the backdrop through a seam: a channel is brighter or darker than in all eight pixels around it. A face is
+// lit smoothly and an anti-aliased edge lies between the colours on its two sides, so neither stands out like that.
+function countOpenPixels(data, width, height) {
+  let open = 0;
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const index = (y * width + x) * 4;
+      const neighbours = [-1, 0, 1].flatMap(row => [-1, 0, 1].map(column => index + (row * width + column) * 4)).filter(neighbour => neighbour !== index);
+      const standsOut = [0, 1, 2].some(channel => {
+        const values = neighbours.map(neighbour => data[neighbour + channel]);
+        return data[index + channel] > Math.max(...values) + OPEN_THRESHOLD || data[index + channel] < Math.min(...values) - OPEN_THRESHOLD;
+      });
+      if (standsOut) open++;
+    }
+  }
+  return open;
 }
 
 function colourDistance(a, b, index, otherIndex = index) {
@@ -372,7 +412,7 @@ requestAnimationFrame(tick);
 document.querySelector('#speedValue').textContent = '';
 window.flicker = {
   setCamera, probe, build, options, frameWholeScene,
-  get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.() }; },
+  get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.(), flush: flushReport }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
   traps: Object.keys(TRAPS),
   ready: trapName ? loadTrap().catch(error => setStatus('bad', error.message)) : parameters.get('asset')

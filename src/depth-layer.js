@@ -5,8 +5,9 @@ export const RANKS_PER_LAYER = 16;
 /** Highest rank the flush search gives a triangle; a deeper stack is reported as `rank-overflow`. */
 export const MAXIMUM_FLUSH_RANK = RANKS_PER_LAYER - 1;
 
-// The draw order flush-resolve.js found for a part: `{ indices, ranges: [{ start, count, rank }] }`, the part's triangles
-// sorted by rank. It is kept beside the part so the part object, its geometry and its identity for updateParts stay as the
+// The draw order flush-resolve.js found for a part: `{ indices, ranges: [{ start, count, rank }], geometry? }`, the part's
+// triangles sorted by rank. A part with hidden flush faces cut away also has `geometry`, the cut geometry those indices
+// belong to. It is kept beside the part so the part object, its geometry and its identity for updateParts stay as the
 // caller made them.
 const flushOrders = new WeakMap();
 

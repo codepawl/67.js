@@ -350,7 +350,11 @@ function validateLods(part, levels) {
 
 /** Every geometry a part can draw: its own, the levels of `lods` and the levels of `shadowLods`. */
 function partGeometries(part) {
-  return [part.geometry, ...(part.lods ?? []).map(level => level.geometry), ...(part.shadowLods ?? []).map(level => level.geometry)];
+  const drawn = [part.geometry, ...(part.lods ?? []).map(level => level.geometry), ...(part.shadowLods ?? []).map(level => level.geometry)];
+  // A part with hidden flush faces cut away draws its cut geometry, which lives and is released like any other.
+  const clipped = flushOrderOf(part)?.geometry;
+  if (clipped) drawn.push(clipped);
+  return drawn;
 }
 
 /** The state of one list of levels: errors, geometries, the draw of each level once it is first needed, and a selection. */
@@ -1021,11 +1025,12 @@ export class Renderer67 {
   levelDraw(batch, level, levelSet = batch) {
     if (levelSet.levelDraws[level]) return levelSet.levelDraws[level];
     const context = this.context;
-    const geometry = levelSet.levelGeometries[level];
+    const ranked = levelSet === batch && level === 0;
+    const geometry = (ranked && batch.flushOrder?.geometry) || levelSet.levelGeometries[level];
     const vertexArray = context.createVertexArray();
     context.bindVertexArray(vertexArray);
     this.bindGeometryAttributes(geometry, batch.parts[0].material);
-    if (batch.flushIndexBuffer && levelSet === batch && level === 0) context.bindBuffer(context.ELEMENT_ARRAY_BUFFER, batch.flushIndexBuffer);
+    if (batch.flushIndexBuffer && ranked) context.bindBuffer(context.ELEMENT_ARRAY_BUFFER, batch.flushIndexBuffer);
     const instanceBuffer = context.createBuffer();
     this.buffers.push(instanceBuffer);
     context.bindBuffer(context.ARRAY_BUFFER, instanceBuffer);
@@ -1095,10 +1100,11 @@ export class Renderer67 {
     const context = this.context;
     const geometry = parts[0].geometry;
     context.bindVertexArray(vertexArray);
-    this.bindGeometryAttributes(geometry, parts[0].material);
-    // The ranked order replaces the geometry's index buffer in this vertex array only; the vertex buffers stay shared.
     const flushOrder = flushOrderOf(parts[0]);
-    const flushIndexBuffer = flushOrder ? this.uploadBuffer(context.ELEMENT_ARRAY_BUFFER, flushOrder.indices) : null;
+    // A cut geometry carries the ranked order as its own indices. Without cuts the ranked order replaces the geometry's
+    // index buffer in this vertex array only; the vertex buffers stay shared.
+    this.bindGeometryAttributes(flushOrder?.geometry ?? geometry, parts[0].material);
+    const flushIndexBuffer = flushOrder && !flushOrder.geometry ? this.uploadBuffer(context.ELEMENT_ARRAY_BUFFER, flushOrder.indices) : null;
     const stride = INSTANCE_STRIDE;
     const instanceData = new Float32Array(parts.length * stride);
     const normalMatrix = mat3.create();
@@ -1126,7 +1132,7 @@ export class Renderer67 {
     const [alphaMode, alphaCutoff, opacity, doubleSided] = materialAlphaState(parts[0].material);
     const layerState = materialLayerState(parts[0].material);
     const culling = this.createCullingState(parts);
-    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
+    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: flushOrder?.indices.length ?? geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
     if (parts[0].lods) culling.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level));
     culling.shadowLevels?.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level, batch.shadowLevels));
     parts.forEach((part, index) => this.partLocations.set(part, { batch, index, geometry: part.geometry, map, mapState, layerState, skin, jointMatrices: skin?.jointMatrices, skinIndices: geometry.skinIndices, skinWeights: geometry.skinWeights, morph, morphWeights: morph?.weights, morphTargets: geometry.morphTargets, normalMatrix: mat3.create(), committedMatrix: batch.instanceData.subarray(index * INSTANCE_STRIDE, index * INSTANCE_STRIDE + 16) }));

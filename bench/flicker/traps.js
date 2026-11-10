@@ -142,6 +142,31 @@ function instancedFlush() {
   };
 }
 
+// A plaque flush on a wall, turned off the axes and far from round coordinates, seen from half a metre at the corner of the
+// plaque: the wall is cut around the plaque there. A white backdrop stands behind the dark wall, so a seam a cut left open
+// shows as a pixel that is neither face (`countOpen` asks the probe for that count).
+function plaqueCloseUp() {
+  const length = Math.hypot(0.83, 0.07, -0.55);
+  const right = [0.83 / length, 0.07 / length, -0.55 / length];
+  const sideways = cross(right, [0, 1, 0]);
+  const normal = sideways.map(value => value / Math.hypot(...sideways));
+  const up = cross(normal, right);
+  const along = (origin, alongRight, alongUp, alongNormal = 0) => origin.map((value, axis) => value + right[axis] * alongRight + up[axis] * alongUp + normal[axis] * alongNormal);
+  const centre = [137.37, 21.93, -64.11];
+  const plaqueCentre = along(centre, 0.31, 0.17);
+  const corner = along(plaqueCentre, 0.65, 0.35);
+  return {
+    parts: [
+      part('backdrop', [quad(along(centre, 0, 0, -0.3), right, up, 30, 30, [1, 1, 1])]),
+      part('wall', [quad(centre, right, up, 9.7, 3.9, [0.05, 0.2, 0.05])]),
+      part('plaque', [quad(plaqueCentre, right, up, 1.3, 0.7, [0.05, 0.05, 0.25])]),
+    ],
+    eye: along(corner, 0.04, -0.03, 0.5),
+    target: corner,
+    countOpen: true,
+  };
+}
+
 export const TRAPS = {
   'plaque-2m': () => plaqueOnWall(2),
   'plaque-20m': () => plaqueOnWall(20),
@@ -152,4 +177,5 @@ export const TRAPS = {
   'walls-16mm-1km-5deg': gappedWalls,
   'stack-30-exact': exactStack,
   'instanced-flush': instancedFlush,
+  'plaque-closeup-0.5m': plaqueCloseUp,
 };

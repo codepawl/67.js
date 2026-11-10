@@ -71,10 +71,14 @@ export function boundsDiagonal(bounds) {
   return Math.hypot(bounds[3] - bounds[0], bounds[4] - bounds[1], bounds[5] - bounds[2]);
 }
 
+/** The distance between neighbouring float32 values at this magnitude. */
+export function float32Step(magnitude) {
+  return 2 ** (Math.floor(Math.log2(Math.max(magnitude, 1e-30))) - 23);
+}
+
 /** Planes closer than this (metres) are one plane: 0.1 mm, or eight float32 steps of the largest coordinate when that is more. */
 export function flushTolerance(largestCoordinate) {
-  const step = 2 ** (Math.floor(Math.log2(Math.max(largestCoordinate, 1e-30))) - 23);
-  return Math.max(1e-4, 8 * step);
+  return Math.max(1e-4, 8 * float32Step(largestCoordinate));
 }
 
 /** Same-facing planes up to this far apart (metres) can still fight far from the camera; `diagonal` spans both parts. */
@@ -460,8 +464,8 @@ function testCell(cell, boxes, reach, testPair) {
 
 /**
  * Pairs of triangles that draw the same plane in the same place. A part is `{ name, geometry: { positions, indices }, matrix,
- * material? }`; deforming parts (isDeformingPart) are left out. Returns `{ parts, count, owner, local, areas, pairs, unchecked,
- * truncated }`: `pairs` holds `{ first, second, gap, area, opposite, flush }` with triangle ids below `count`, `owner[id]` the
+ * material? }`; deforming parts (isDeformingPart) are left out. Returns `{ parts, count, owner, local, areas, corners, pairs,
+ * unchecked, truncated }`: `corners` holds nine world coordinates per triangle, `pairs` holds `{ first, second, gap, area, opposite, flush }` with triangle ids below `count`, `owner[id]` the
  * index into `parts` and `local[id]` the triangle inside that part's geometry. `gap` is in metres along the first triangle's
  * normal, positive when the second triangle is in front of it; `flush` says the gap is within rounding (flushTolerance), so the
  * two lie on one plane; `opposite` marks a pair that faces opposite ways (one part is double sided). `unchecked` lists parts
@@ -470,7 +474,7 @@ function testCell(cell, boxes, reach, testPair) {
 export function findFlushPairs(parts, { triangleBudget = DEFAULT_TRIANGLE_BUDGET, pairBudget = DEFAULT_PAIR_BUDGET } = {}) {
   const { entries, unchecked } = withinTriangleBudget(searchableParts(parts), triangleBudget);
   const table = readTriangles(entries);
-  const result = { parts: entries.map(entry => entry.part), count: table.count, owner: table.owner, local: table.local, areas: table.areas, pairs: [], unchecked, truncated: false };
+  const result = { parts: entries.map(entry => entry.part), count: table.count, owner: table.owner, local: table.local, areas: table.areas, corners: table.corners, pairs: [], unchecked, truncated: false };
   if (table.count < 2) return result;
   const sceneBounds = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
   for (const { bounds } of entries) {

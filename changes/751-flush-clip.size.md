@@ -1,0 +1,10 @@
+- entry:coplanar-overlap: cutting hidden flush faces (flush-clip.js: subtract the covering triangle, interpolate the vertex arrays, give every seam vertex to both sides of its edge); an addon chunk, loaded by agent scenes and by renderers that pass resolveCoplanar; it is what settles stacks deeper than the 16 ranks and gives the path tracer one face per plane
+- entry:core: the renderer draws a cut geometry beside the part and the path tracer reads it (a few lines in renderer.js and path-tracer-scene.js)
+- scene:lit-box: same core growth; accepted for flicker-free rendering
+- scene:gltf-box: same core growth; accepted for flicker-free rendering
+- scene:gltf-box+lazy: same core growth; accepted for flicker-free rendering
+- scene:agent-scene: same core growth; accepted for flicker-free rendering
+- scene:agent-scene+lazy: the core growth plus the larger flush chunk; it is the fix, so it has to load
+- goal:lit-box: the growth is the cut-geometry lookup in the core; accepted for flicker-free rendering
+- goal:gltf-box: the growth is the cut-geometry lookup in the core; accepted for flicker-free rendering
+- goal:agent-scene: the growth is the cut-geometry lookup in the core; accepted for flicker-free rendering
