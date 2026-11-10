@@ -367,13 +367,13 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
     vec3 crestNormal = normal;
     normal = normalize(normal + rippleTilt);
     // The body is deeper at grazing angles; the foam mask (the ocean's, stored as 1 - foam in the sky visibility channel) turns it white.
-    // Streaks: the mask is broken up by noise stretched along the crest, so a patch has lacy edges and holes rather than a soft blob.
+    // Streaks: only the heaviest half of the ocean's foam counts (about 5% of a rough sea), and noise breaks it up by noise stretched along the crest, so a patch has lacy edges and holes rather than a soft blob.
     vec2 crestAcross = normalize(crestNormal.xz + vec2(0.0001));
     vec2 crestAlong = vec2(-crestAcross.y, crestAcross.x);
     vec2 streakPosition = vec2(dot(worldPosition.xz, crestAlong) * 0.6, dot(worldPosition.xz, crestAcross) * 3.2);
     float streaks = terrainNoise(streakPosition).x * 0.6 + terrainNoise(streakPosition * 2.9 + 7.3).x * 0.4;
-    float foamMask = clamp(1.0 - vertexSkyVisibility, 0.0, 1.0);
-    waterFoam = smoothstep(0.55, 0.72, foamMask * 1.1 + (streaks - 0.5) * 0.8);
+    float foamMask = clamp(2.0 * (1.0 - vertexSkyVisibility) - 1.0, 0.0, 1.0);
+    waterFoam = smoothstep(0.4, 0.58, foamMask * 1.25 + (streaks - 0.5) * 0.7);
     float grazing = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
     color = mix(color, vec3(0.04, 0.12, 0.16), grazing * 0.85);
     color = mix(color, vec3(0.92, 0.95, 0.97), waterFoam);

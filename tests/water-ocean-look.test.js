@@ -49,8 +49,24 @@ test('ocean output smooths over 180 degrees unless the recipe says otherwise', (
 
 test('the water shader reads the foam mask, a fresnel sky and a sun glint', () => {
   const shader = createFragmentShader(['water', 'vertexColors']);
-  assert.match(shader, /waterFoam = smoothstep\(0\.15, 0\.85, clamp\(1\.0 - vertexSkyVisibility/);
+  assert.match(shader, /float foamMask = clamp\(2\.0 \* \(1\.0 - vertexSkyVisibility\)/);
   assert.match(shader, /float reflectivity = \(0\.02 \+ 0\.98 \* pow\(1\.0 - cosine, 5\.0\)\)/);
-  assert.match(shader, /pow\(max\(dot\(normal, halfVector\), 0\.0\), 900\.0\)/);
+  assert.match(shader, /pow\(max\(dot\(normal, halfVector\), 0\.0\), glintSharpness\)/);
   assert.match(shader, /normal = normalize\(normal \+ rippleTilt\)/);
+});
+
+test('the ocean foam of a rough sea reaches the water material as 1 - foam', () => {
+  const water = createAgentScene(seaRecipe({ tag: 'water' })).parts[0].geometry;
+  const foam = water.vertexGroups.foam;
+  const whitecaps = foam.filter(weight => weight > 0.05).length;
+  assert.ok(whitecaps > 0, 'a rough sea has vertices with foam');
+  assert.ok(Math.min(...water.skyVisibility) < 0.95, 'the foam reaches the shader as a lower sky visibility');
+  assert.equal(water.skyVisibility.filter(value => value < 0.95).length, whitecaps);
+});
+
+test('wind ripples break the glint into facets and the foam into streaks', () => {
+  const shader = createFragmentShader(['water', 'vertexColors']);
+  assert.match(shader, /vec2 waterDetailSlope\(/);
+  assert.match(shader, /rippleTilt\.xz \+= detailSlope/);
+  assert.match(shader, /waterFoam = smoothstep\(0\.4, 0\.58, foamMask/);
 });
