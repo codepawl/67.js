@@ -1,6 +1,6 @@
 // Splits the first path traced draw of a fresh page into phases (issue #861). One fresh browser page per run, so nothing is warm.
 //   node bench/reference/cold-draw.mjs <scene id or recipe.json> [--runs 1] [--width 960] [--height 540]
-// Run it behind the GPU lock: bash ~/.agents/tools/gpu-lock.sh node bench/reference/cold-draw.mjs lit-interior
+// Run it behind the GPU lock (the card is held for minutes), for example with GPU_LOCK_WEIGHT=heavy.
 import { readFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
 import { chromium } from 'playwright';
