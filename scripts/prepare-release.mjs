@@ -53,7 +53,7 @@ const sourceDocuments = [
   'vehicle.md',
   'vegetation.md', 'terrain.md', 'grass.md', 'clutter.md', 'light-bake.md', 'path-tracer.md', 'gaussian-splats.md',
   'camera-path.md', 'lighting.md', 'volumetric.md', 'film-physics.md',
-  'runtime.md', 'input.md', 'player.md', 'audio.md', 'surface-attachment.md', 'agent-scene.md', 'mcp.md', 'agent-look.md', 'agent-asset.md', 'agent-render-jobs.md', 'agent-motion.md', 'agent-character-motion.md', 'agent-review.md',
+  'runtime.md', 'streaming.md', 'input.md', 'player.md', 'audio.md', 'animation-graph.md', 'surface-attachment.md', 'agent-scene.md', 'mcp.md', 'agent-look.md', 'agent-asset.md', 'agent-render-jobs.md', 'agent-motion.md', 'agent-character-motion.md', 'agent-review.md',
 ];
 for (const name of sourceDocuments) {
   await copyFile(resolve(root, 'docs', name), resolve(root, 'public', name));

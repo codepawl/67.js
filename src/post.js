@@ -78,6 +78,7 @@ void main() {
     color *= mix(1.0, visibility / 9.0, occlusionStrength * directShare);
   }
   if (POST_BLOOM) color += texture(bloomTexture, textureCoordinate).rgb * bloomStrength;
+  if (POST_LOCAL) color = localVolumes(color);
   if (POST_VOLUME) color = volumeFog(color);
   if (hdrEnabled > 0.5) {
     color = clamp((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
@@ -165,6 +166,7 @@ const POST_STEP_CONDITIONS = {
   field: ['POST_FIELD', 'true'],
   detail: ['POST_DETAIL', 'true'],
   lights: ['POST_LIGHTS', 'volumeLightCount > 0'],
+  local: ['POST_LOCAL', 'localVolumeCount > 0'],
   explosion: ['POST_EXPLOSION', 'volumeExplosion > 0.5'],
   finish: ['POST_FINISH', 'true'],
 };
@@ -172,11 +174,12 @@ const POST_STEP_CONDITIONS = {
 // The program with every step is the one a frame draws while a variant builds. It leaves out the steps below: the fog sky grid,
 // field and lights exist only inside a fog, and the volume fog and explosion code load from fog-shader.js and explosion-shader.js
 // only for a renderer that draws them.
-export const POST_STEPS_WITH_OPTIONAL_CODE = Object.freeze(['volume', 'sky', 'field', 'detail', 'lights', 'explosion']);
+export const POST_STEPS_WITH_OPTIONAL_CODE = Object.freeze(['volume', 'sky', 'field', 'detail', 'lights', 'local', 'explosion']);
 export const POST_STEPS = Object.freeze(Object.keys(POST_STEP_CONDITIONS).filter(step => !POST_STEPS_WITH_OPTIONAL_CODE.includes(step)));
 
 const EXPLOSION_STUB = 'vec3 explosion(vec3 background) { return background; }';
 const VOLUME_FOG_STUB = 'vec3 volumeFog(vec3 background) { return background; }';
+const LOCAL_VOLUMES_STUB = 'vec3 localVolumes(vec3 background) { return background; }';
 
 function explosionFunctionFor(enabledSteps) {
   if (!enabledSteps.has('explosion')) return EXPLOSION_STUB;
@@ -186,9 +189,23 @@ function explosionFunctionFor(enabledSteps) {
 }
 
 function fogCodeFor(enabledSteps) {
-  if (!enabledSteps.has('volume')) return { declarations: '', functions: VOLUME_FOG_STUB };
-  const code = requireFeatureCode('volumeFog');
-  return { declarations: code.postDeclarations, functions: code.postFunctions };
+  let declarations = '';
+  let functions = '';
+  if (enabledSteps.has('volume')) {
+    const code = requireFeatureCode('volumeFog');
+    declarations += code.postDeclarations;
+    functions += code.postFunctions;
+  } else {
+    functions += VOLUME_FOG_STUB;
+  }
+  if (enabledSteps.has('local')) {
+    const code = requireFeatureCode('volumeFog');
+    declarations += code.localDeclarations;
+    functions += code.localFunctions;
+  } else {
+    functions += LOCAL_VOLUMES_STUB;
+  }
+  return { declarations, functions };
 }
 
 /** The post pass with only the listed steps compiled in; every step is switched by its uniform, as before. */

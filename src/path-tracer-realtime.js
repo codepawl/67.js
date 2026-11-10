@@ -1,4 +1,4 @@
-import { buildTraceScene } from './path-tracer-scene.js';
+import { buildTraceScene, refuseLocalVolumes } from './path-tracer-scene.js';
 import { createCamera } from './path-tracer.js';
 import { getContext, getKernel, releaseResources, setSceneUniforms, uploadScene } from './path-tracer-gpu.js';
 import { sceneUsesSubsurface } from './path-tracer-gpu-pack.js';
@@ -66,6 +66,7 @@ export async function createRealtimeTracer(scene, rawOptions = {}) {
   const loadScene = (parts, environment) => {
     releaseResources(gl);
     traceScene = buildTraceScene(parts, environment);
+    refuseLocalVolumes(traceScene, 'the WebGL realtime path tracer');
     const kernel = getKernel(sceneUsesSubsurface(traceScene.materials), false, options);
     program = kernel.program;
     compileSeconds = kernel.compileSeconds;

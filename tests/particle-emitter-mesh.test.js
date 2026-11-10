@@ -149,7 +149,7 @@ test('orient normal turns the instance up axis onto the surface normal', () => {
 test('bad emitter input names the field and what to pass', () => {
   const failure = (system, pattern) => assert.throws(() => createAgentScene(recipe(system)), pattern);
   failure({ emitter: { shape: 'mesh' } }, /particles\.systems\[0\]\.emitter\.mesh[\s\S]*ID of a node/);
-  failure({ emitter: { shape: 'mesh', mesh: 'wall', from: 'inside' } }, /emitter\.from[\s\S]*surface, vertices, volume/);
+  failure({ emitter: { shape: 'mesh', mesh: 'wall', from: 'inside' } }, /emitter\.from[\s\S]*surface, vertices, edges, volume/);
   failure({ emitter: { shape: 'point', mesh: 'wall' } }, /emitter\.mesh[\s\S]*shape is "mesh"/);
   failure({ emitter: { shape: 'mesh', mesh: 'wall', from: 'volume', normalSpeed: 1 } }, /normalSpeed[\s\S]*volume/);
   failure({ emitter: { shape: 'point' }, orient: 'normal' }, /orient[\s\S]*"mesh"/);
@@ -204,5 +204,72 @@ test('a vertex group that is missing, nameless or aimed at a volume names the fi
   const failure = (emitter, pattern) => assert.throws(() => createAgentScene(rimWallRecipe({ emitter: { shape: 'mesh', mesh: 'rimwall', ...emitter } })), pattern);
   failure({ group: 'hem' }, /emitter\.group[\s\S]*known groups: rim/);
   failure({ group: '' }, /emitter\.group[\s\S]*name of a vertex group/);
-  failure({ group: 'rim', from: 'volume' }, /emitter\.group[\s\S]*"surface" or "vertices"/);
+  failure({ group: 'rim', from: 'volume' }, /emitter\.group[\s\S]*"surface", "vertices" or "edges"/);
+});
+
+// A beam 4 long and 1 by 1 across: its 12 edges are four of length 4 and eight of length 1.
+const BEAM_LENGTH = 4;
+
+function beamCentres(emitter, extraSystem = {}) {
+  const base = recipe({ emitter: { shape: 'mesh', mesh: 'beam', ...emitter }, ...extraSystem });
+  base.nodes.push({ id: 'beam', geometry: 'cube', material: 'paint', translation: WALL_CENTER, scale: [BEAM_LENGTH, 1, 1] });
+  const scene = createAgentScene(base);
+  scene.sampleMotion(0);
+  return particleCentres(sparksGeometry(scene), 24);
+}
+
+// How many of the three axes a point sits at the outer face of the beam on (2 means it lies on an edge).
+function extremeAxes(point) {
+  const halfSizes = [BEAM_LENGTH / 2, 0.5, 0.5];
+  return point.filter((value, axis) => Math.abs(Math.abs(value - WALL_CENTER[axis]) - halfSizes[axis]) < TOLERANCE).length;
+}
+
+test('sharp edge points lie on the cube edges and split by edge length', () => {
+  const centres = beamCentres({ from: 'edges', sharpAngle: 30 }, { count: 2000 });
+  assert.equal(centres.length, 2000);
+  for (const centre of centres) assert.ok(extremeAxes(centre) >= 2, `point ${centre} is off every beam edge`);
+  // Edges along x are 16 of the 24 units of edge length.
+  const alongLength = centres.filter(centre => Math.abs(centre[1] - WALL_CENTER[1]) > 0.49 && Math.abs(centre[2] - WALL_CENTER[2]) > 0.49).length;
+  assert.ok(Math.abs(alongLength / centres.length - 16 / 24) < 0.04, `${alongLength} of ${centres.length} on the long edges`);
+});
+
+test('without a sharp angle the flat diagonals take edges too, and an angle nothing exceeds leaves no edge', () => {
+  const offEdge = centres => centres.filter(centre => extremeAxes(centre) < 2).length;
+  assert.ok(offEdge(beamCentres({ from: 'edges' }, { count: 400 })) > 0, 'face diagonals are edges of the triangles');
+  assert.throws(() => beamCentres({ from: 'edges', sharpAngle: 180 }), /emitter\.mesh[\s\S]*edge/);
+});
+
+test('an edge group keeps sparks on the painted rim, and sharp edges narrow it further', () => {
+  const topHeight = WALL_CENTER[1] + WALL_SCALE * 0.5;
+  const grouped = rimCentres({ emitter: { shape: 'mesh', mesh: 'rimwall', from: 'edges', group: 'rim' }, count: 300 });
+  for (const centre of grouped) assert.ok(Math.abs(centre[1] - topHeight) < TOLERANCE, `y ${centre[1]}`);
+  const rim = rimCentres({ emitter: { shape: 'mesh', mesh: 'rimwall', from: 'edges', group: 'rim', sharpAngle: 30 }, count: 300 });
+  for (const centre of rim) {
+    assert.ok(Math.abs(centre[1] - topHeight) < TOLERANCE);
+    const distances = [0, 2].map(axis => Math.abs(Math.abs(centre[axis] - WALL_CENTER[axis]) - WALL_SCALE * 0.5));
+    assert.ok(Math.min(...distances) < TOLERANCE, `point ${centre} is inside the top face, off the rim`);
+  }
+});
+
+test('edge points repeat on every run and change with the seed', () => {
+  const emitter = { from: 'edges', sharpAngle: 30 };
+  const first = beamCentres(emitter, { count: 50 });
+  assert.deepEqual(first, beamCentres(emitter, { count: 50 }));
+  assert.notDeepEqual(first, beamCentres(emitter, { count: 50, seed: 6 }));
+});
+
+test('sparks from an edge group and leaves picked from 3 meshes work in one scene, with the same bytes each run', () => {
+  const build = () => {
+    const scene = createAgentScene(rimWallRecipe({ emitter: { shape: 'mesh', mesh: 'rimwall', from: 'edges', group: 'rim', sharpAngle: 30, normalSpeed: 1 }, instances: ['sparks', 'leaf', 'thorn'], orient: 'normal', count: 40, size: 0.1 }));
+    scene.sampleMotion(0.5);
+    return Array.from(sparksGeometry(scene).positions);
+  };
+  assert.deepEqual(build(), build());
+});
+
+test('a sharp angle off edges or out of range names the field and what to pass', () => {
+  const failure = (emitter, pattern) => assert.throws(() => createAgentScene(recipe({ emitter: { shape: 'mesh', mesh: 'wall', ...emitter } })), pattern);
+  failure({ from: 'surface', sharpAngle: 30 }, /emitter\.sharpAngle[\s\S]*"edges"/);
+  failure({ from: 'edges', sharpAngle: 200 }, /emitter\.sharpAngle[\s\S]*180/);
+  failure({ from: 'edges', sharpAngle: 'sharp' }, /emitter\.sharpAngle/);
 });
