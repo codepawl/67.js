@@ -67,6 +67,40 @@ A rig follows a `subject`: a controller's `state` or any `{ position: [x, y, z],
 
 All three take `lookX` and `lookY` axis names (set one to `null` to turn it off), `lookSpeed` in radians per second, and `minimumPitch` and `maximumPitch`.
 
+## Vehicle and flight controllers
+
+Both read the same input names as the character controller, use the same `mover` seam, `node`, `position`, `yaw`, `teleport` and `positionAt`, and expose `state` for animation and audio.
+
+`createVehicleController(options)`: an arcade car. `moveForward` is the throttle (negative reverses), `moveX` steers and the `jump` action brakes (rename them with `throttle`, `steer`, `brake`). Steering is a bicycle model: yaw rate is `speed / wheelbase * tan(steer)`. A wall removes the speed it blocks. Options: `maximumSpeed` (20), `reverseSpeed` (6), `acceleration` (12), `brakeDeceleration` (25), `coastDeceleration` (4), `wheelbase` (2.5), `maximumSteer` (0.6 rad), `steerSeconds` (0.15), `gravity`, `radius` (1), `height`, `stepHeight` (0.4). State: `forwardSpeed` (signed), `speed`, `steer` (-1 to 1, for wheel animation with [createVehicleRig](vehicle.md)), `yaw`, `grounded`, `airborne`, `braking`.
+
+`createFlightController(options)`: free flight along the nose. `moveX` yaws, `moveForward` pitches (positive climbs), `run` boosts and `jump` brakes (`yawAxis`, `pitchAxis`, `boost`, `brake`). Speed eases between `brakeSpeed` (6), `cruiseSpeed` (14) and `boostSpeed` (24); pitch levels out after `levelSeconds` (0.6) with no input and is limited to `maximumPitch` (1.2). A wall stops it, the ground is skimmed, and a box that starts above its height is flown under. State: `pitch`, `roll` (bank, for animation), `speed`, `velocity`, `boosting`, `grounded`.
+
+## More camera rigs
+
+- `createOrbitCamera`: free look around the subject at `distance` (6). Name a `zoom` axis to change the distance between `minimumDistance` (1) and `maximumDistance` (50) at `zoomSpeed` (8) units per second.
+- `createChaseCamera`: behind the subject like the follow rig, but the yaw swings round to `subject.yaw` over `yawFollowSeconds` (0.3). Use it for cars and flyers. It does not take look input unless you name `lookX`.
+- `createSideScrollerCamera`: `distance` (10) away on +Z looking along -Z, at the subject's height plus `lookHeight` (1), leading the subject by up to `lookAhead` (2) units along its horizontal `velocity`.
+
+### Camera collision
+
+`createCameraClip({ obstacles, ground, padding })` returns a `clipEye(target, eye)` for any orbiting rig. It pulls the eye along the line to the target until it is `padding` (0.25) outside every obstacle box and above the ground, so the camera never ends up inside a wall or under the floor. A body pressed within `padding` of a wall leaves the camera at the target.
+
+```js
+const clip = createCameraClip({ obstacles, ground });
+const camera = createChaseCamera({ subject: car.state, clipEye: clip });
+```
+
+## Custom kinds and swapping
+
+`registerController(kind, factory)` and `registerCameraRig(kind, factory)` add a kind (up to 64 names, built-ins cannot be replaced). A controller factory returns a runtime system with `state.position` and a `fixedUpdate` or `update` function; a rig factory returns a system with `subject` and `pose(context) => { eye, target, up }`. `createController(kind, options)` and `createCameraRigOfKind(kind, options)` build one by name; `listControllerKinds()` and `listCameraRigKinds()` list them (`character`, `vehicle`, `flight`; `follow`, `firstPerson`, `topDown`, `orbit`, `chase`, `sideScroller`).
+
+`replaceController(runtime, name, kind, options)` swaps the controller system for another kind at the same position and yaw. `replaceCameraRig(runtime, name, kind, options)` swaps the rig and keeps its subject and yaw. After a controller swap, point the rig at the new `state`:
+
+```js
+const car = replaceController(runtime, 'player', 'vehicle', { input });
+replaceCameraRig(runtime, 'camera', 'chase', { subject: car.state, input });
+```
+
 ## Swapping
 
 Both swap with `runtime.replaceSystem(name, system)`. A new rig starts at the subject's yaw. A new controller starts where you put it, so pass the old `state.position`:

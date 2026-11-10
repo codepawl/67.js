@@ -1,0 +1,1 @@
+- `67js/addons/player` adds vehicle and free-flight controllers, orbit, chase and side-scroller camera rigs, `createCameraClip` (camera pull-in against walls and ground), and a registry (`registerController`, `registerCameraRig`, `replaceController`, `replaceCameraRig`) for custom kinds and runtime swaps (#772)
