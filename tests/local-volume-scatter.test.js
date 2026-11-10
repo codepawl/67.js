@@ -12,7 +12,7 @@ import { freePort } from './helpers/free-port.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { applyViewTransform } from '../src/view-transform.js';
 import { encodePng } from '../src/export-png.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH } from '../src/local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from '../src/local-volumes.js';
 import { createLocalVolumeCrossing, meanEnvironmentRadiance } from '../src/path-tracer-volume.js';
 
 const REGION_TOLERANCE = 0.01;
@@ -93,6 +93,19 @@ test('the key light of a thin volume is the phase function times the key gain, a
   assert.ok(lit > shaded * 2.5, `lit side ${lit} against shaded side ${shaded}`);
 });
 
+test('the light falls off steadily across the box from the sunward side, with no bright rim at the middle or the shaded side', () => {
+  const columns = [-1.2, -0.6, 0, 0.6, 1.2].map(x => downRay(SMOKE_BOX, FULL_SUN, x).emitted[1]);
+  for (let index = 1; index < columns.length; index++) assert.ok(columns[index] > columns[index - 1], `light at column ${index} (${columns[index]}) is not above column ${index - 1} (${columns[index - 1]})`);
+  assert.ok(columns[4] > columns[0] * 2.5, `sunward column ${columns[4]} against shaded column ${columns[0]}`);
+});
+
+test('a sun straight overhead still lights the volume: the flattened direction keeps a direction', () => {
+  const overhead = { sun: { direction: [0, 1, 0], color: SUN_COLOR }, ambient: [0, 0, 0], sunVisibility: () => 1 };
+  const emitted = downRay(SMOKE_BOX, overhead, 0).emitted;
+  assert.ok(emitted.every(value => Number.isFinite(value) && value > 0), `overhead sun gave ${emitted}`);
+  assert.ok(LOCAL_VOLUME_SUN_FLATTEN > 0 && LOCAL_VOLUME_SUN_FLATTEN < 1);
+});
+
 test('the light depth of a noisy volume is its smooth envelope, so the noise does not speckle the shading', () => {
   const [noisy] = resolveLocalVolumes([{ ...SMOKE_BOX, noiseAmount: 0.9, noiseScale: 2.2 }]);
   const [smooth] = resolveLocalVolumes([{ ...SMOKE_BOX }]);
@@ -105,7 +118,7 @@ test('the light depth of a noisy volume is its smooth envelope, so the noise doe
 function skyShare(volume) {
   const sky = { sun: null, ambient: [SKY_LEVEL, SKY_LEVEL, SKY_LEVEL], sunVisibility: () => 1 };
   const result = downRay({ ...volume, falloff: 0 }, sky, 0);
-  return result.emitted[1] / ((1 - result.throughput[1]) * 0.8 * SKY_LEVEL);
+  return result.emitted[1] / ((1 - result.throughput[1]) * 0.8 * SKY_LEVEL * LOCAL_VOLUME_SKY_GAIN);
 }
 
 test('the sky lights a thin volume at full strength and a thick one less, through its own depth', () => {
@@ -118,7 +131,7 @@ test('the sky lights a thin volume at full strength and a thick one less, throug
 test('a shaded volume with only the sky around it returns less than the open sky and no sun', () => {
   const sky = { sun: null, ambient: [SKY_LEVEL, SKY_LEVEL, SKY_LEVEL], sunVisibility: () => 1 };
   const result = downRay({ ...SMOKE_BOX, falloff: 0 }, sky, 0);
-  assert.ok(result.emitted[1] > 0 && result.emitted[1] < 0.8 * (1 - result.throughput[1]) * SKY_LEVEL);
+  assert.ok(result.emitted[1] > 0 && result.emitted[1] < 0.8 * (1 - result.throughput[1]) * SKY_LEVEL * LOCAL_VOLUME_SKY_GAIN);
   const blocked = downRay(SMOKE_BOX, { ...FULL_SUN, sunVisibility: () => 0 }, 1.2);
   assert.deepEqual(blocked.emitted, [0, 0, 0]);
 });

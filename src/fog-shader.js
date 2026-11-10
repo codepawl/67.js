@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH } from './local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
@@ -225,14 +225,18 @@ vec3 localVolumeSkyLight(int index, vec3 position) {
   open += exp(-localVolumeDepth(index, position, vec3(-1.0, 0.0, 0.0), 1));
   open += exp(-localVolumeDepth(index, position, vec3(0.0, 0.0, 1.0), 1));
   open += exp(-localVolumeDepth(index, position, vec3(0.0, 0.0, -1.0), 1));
-  return localSkyAmbient * (open * 0.2);
+  return localSkyAmbient * (open * ${(0.2 * LOCAL_VOLUME_SKY_GAIN).toFixed(3)});
 }
 // The light a scattering volume receives at a point: the sky term and the key light through the shadow map, each through the volume's own depth.
 vec3 localVolumeInScatter(int index, vec3 position, vec3 direction) {
   vec3 towardSun = normalize(volumeLightDirection);
   float visibility = keyVisibility(position);
   vec3 sunLight = vec3(0.0);
-  if (visibility > 0.001) sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility * ${LOCAL_VOLUME_KEY_GAIN.toFixed(1)}) * exp(-localVolumeDepth(index, position, towardSun, 3) * ${LOCAL_VOLUME_SHADOW_STRENGTH.toFixed(1)});
+  if (visibility > 0.001) {
+    vec3 lightDirection = normalize(vec3(towardSun.x, towardSun.y * ${LOCAL_VOLUME_SUN_FLATTEN.toFixed(3)}, towardSun.z));
+    vec3 lightDepth = localVolumeDepth(index, position, lightDirection, 3) * ${LOCAL_VOLUME_SHADOW_STRENGTH.toFixed(3)};
+    sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility * ${LOCAL_VOLUME_KEY_GAIN.toFixed(3)}) * exp(-lightDepth);
+  }
   return localVolumeSkyLight(index, position) + sunLight;
 }
 vec3 localVolumes(vec3 background) {

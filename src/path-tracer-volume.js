@@ -1,5 +1,5 @@
 import { resolveVolumeFog } from './volumetric.js';
-import { localVolumeInterval, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH } from './local-volumes.js';
+import { localVolumeInterval, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { countOpenEdges } from './local-volume-parts.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
@@ -203,6 +203,7 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
   const sunDepth = new Float64Array(3);
   const sunLight = new Float64Array(3);
   const skyLight = new Float64Array(3);
+  const flattenedDirection = new Float64Array(3);
 
   // Writes the sky term of a point inside a scattering volume: the mean sky radiance times what the volume's own depth leaves open in five directions.
   function writeSkyLight(volume, x, y, z) {
@@ -211,7 +212,7 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
       writeOpticalDepth(volume, x, y, z, direction, SKY_DEPTH_TAPS, span, sunDepth);
       for (let channel = 0; channel < 3; channel++) skyLight[channel] += Math.exp(-sunDepth[channel]) / SKY_DIRECTIONS.length;
     }
-    for (let channel = 0; channel < 3; channel++) skyLight[channel] *= lighting.ambient[channel];
+    for (let channel = 0; channel < 3; channel++) skyLight[channel] *= lighting.ambient[channel] * LOCAL_VOLUME_SKY_GAIN;
   }
 
   // Adds the light one step of a scattering volume sends back along the ray: scatter * (1 - exp(-extinction * width)) * (sky + sun).
@@ -220,10 +221,16 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
     sunLight.fill(0);
     const sun = lighting.sun;
     if (sun && lighting.sunVisibility(x, y, z) > 0) {
-      writeOpticalDepth(volume, x, y, z, sun.direction, SUN_DEPTH_TAPS, span, sunDepth);
+      const flattenedLength = Math.hypot(sun.direction[0], sun.direction[1] * LOCAL_VOLUME_SUN_FLATTEN, sun.direction[2]);
+      flattenedDirection[0] = sun.direction[0] / flattenedLength;
+      flattenedDirection[1] = sun.direction[1] * LOCAL_VOLUME_SUN_FLATTEN / flattenedLength;
+      flattenedDirection[2] = sun.direction[2] / flattenedLength;
+      writeOpticalDepth(volume, x, y, z, flattenedDirection, SUN_DEPTH_TAPS, span, sunDepth);
       const cosine = sun.direction[0] * directionX + sun.direction[1] * directionY + sun.direction[2] * directionZ;
       const phase = henyeyGreensteinPhase(0, cosine);
-      for (let channel = 0; channel < 3; channel++) sunLight[channel] = sun.color[channel] * phase * LOCAL_VOLUME_KEY_GAIN * Math.exp(-sunDepth[channel] * LOCAL_VOLUME_SHADOW_STRENGTH);
+      for (let channel = 0; channel < 3; channel++) {
+        sunLight[channel] = sun.color[channel] * phase * LOCAL_VOLUME_KEY_GAIN * Math.exp(-sunDepth[channel] * LOCAL_VOLUME_SHADOW_STRENGTH);
+      }
     }
     for (let channel = 0; channel < 3; channel++) {
       const scattered = volume.scatter * (1 - Math.exp(-volume.absorption[channel] * volume.density * width));
