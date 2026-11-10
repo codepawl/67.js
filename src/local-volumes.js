@@ -1,4 +1,5 @@
 import { finiteRange } from './volumetric.js';
+import { localVolumeNoiseFactor } from './local-volume-noise.js';
 
 // Local volumes: up to MAX_LOCAL_VOLUMES boxes, spheres or parts (shape "mesh") that absorb and emit light, for candle haze, smoke puffs and glowing
 // fog in one place. They sit beside environment.volumeFog (the one scattering volume) and need no fog. The post pass marches
@@ -94,7 +95,7 @@ export function packLocalVolumes(volumes, buffers) {
   return buffers;
 }
 
-/** The density factor of a volume at a point, 0 to 1, without noise: 1 at the core, fading over the outer `falloff` share. */
+/** The density factor of a volume at a point: 1 at the core, fading over the outer `falloff` share, times the noise factor (up to 2) when `noiseAmount` is above 0, as the post shader does. */
 export function localVolumeProfile(volume, x, y, z) {
   if (volume.shape === 'mesh') return 1;
   let offsetX = x - volume.center[0];
@@ -112,9 +113,13 @@ export function localVolumeProfile(volume, x, y, z) {
     ? Math.hypot(offsetX, offsetY, offsetZ) / volume.radius
     : Math.max(Math.abs(offsetX) / (volume.size[0] / 2), Math.abs(offsetY) / (volume.size[1] / 2), Math.abs(offsetZ) / (volume.size[2] / 2));
   if (distance >= 1) return 0;
-  if (volume.falloff === 0) return 1;
-  const ratio = Math.min(1, Math.max(0, (distance - (1 - volume.falloff)) / volume.falloff));
-  return 1 - ratio * ratio * (3 - 2 * ratio);
+  let profile = 1;
+  if (volume.falloff > 0) {
+    const ratio = Math.min(1, Math.max(0, (distance - (1 - volume.falloff)) / volume.falloff));
+    profile = 1 - ratio * ratio * (3 - 2 * ratio);
+  }
+  if (volume.noiseAmount > 0) profile *= localVolumeNoiseFactor(volume, x, y, z);
+  return profile;
 }
 
 /** Where a ray is inside a volume, as distances along it: writes `[entry, exit]` into `out`, clipped to `[0, limit]`, and returns true; false when it misses. */

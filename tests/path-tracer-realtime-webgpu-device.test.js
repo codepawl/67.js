@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createRealtimeTracer } from '../src/path-tracer-realtime.js';
+import { createWebGpuRealtimeTracer } from '../src/path-tracer-realtime-webgpu.js';
+import { resolveRealtimeOptions } from '../src/path-tracer-realtime-options.js';
 
 // A device that records what the real-time tracer asks of it, so the frame logic runs in Node without a GPU.
 const usageFlags = { MAP_READ: 1, COPY_SRC: 2, COPY_DST: 4, UNIFORM: 8, STORAGE: 16, RENDER_ATTACHMENT: 32, COMPUTE: 64 };
@@ -156,5 +158,18 @@ test('an update that only moves a part keeps the history and sends the part moti
   assert.equal(moved[12], 1, 'the part is rigid');
   assert.equal(moved[3], -0.5, 'a point of this frame was half a unit back along x');
   assert.equal(still[12], 0, 'then the part is still');
+  tracer.dispose();
+});
+
+test('the WebGPU real-time tracer refuses local volumes at creation and on update, naming the field', async () => {
+  installGpu(async () => fakeAdapter);
+  const volumes = [{ shape: 'sphere', center: [0, 1, 0], radius: 1 }];
+  const options = resolveRealtimeOptions({ backend: 'webgpu', width: 64, height: 32 });
+  await assert.rejects(
+    () => createWebGpuRealtimeTracer({ ...scene, environment: { localVolumes: volumes } }, options, fakeCanvas),
+    /environment\.localVolumes is traced by the CPU path tracer only; the WebGPU realtime path tracer cannot draw them/,
+  );
+  const tracer = await createWebGpuRealtimeTracer(scene, options, fakeCanvas);
+  await assert.rejects(() => tracer.update({ parts: scene.parts, environment: { localVolumes: volumes } }), /environment\.localVolumes is traced by the CPU path tracer only/);
   tracer.dispose();
 });

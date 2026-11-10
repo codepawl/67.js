@@ -38,7 +38,7 @@ test('packing scales absorption by density and emission by strength, and the pro
   assert.deepEqual(Array.from(buffers.absorption.slice(0, 4)), [3, 1.5, 0, 0.25]);
   assert.deepEqual(Array.from(buffers.emission.slice(0, 4)), [4, 0, 0, 2]);
   assert.equal(buffers.steps[0], 10);
-  const [volume] = volumes;
+  const [volume] = resolveLocalVolumes([{ ...volumes[0], noiseAmount: 0 }]);
   assert.equal(localVolumeProfile(volume, 1, 2, 3), 1);
   assert.equal(localVolumeProfile(volume, 3, 2, 3), 0);
   assert.equal(localVolumeProfile(volume, 1 + 1.5, 2, 3), 0.5);
@@ -187,9 +187,11 @@ test('the path tracer attenuates by exp(-density * thickness) and adds emission 
   assert.equal(nothing, clear);
 });
 
-test('the path tracer refuses local volumes on a GPU backend instead of dropping them', async () => {
-  await assert.rejects(
-    renderPathTracedImage({ parts: ground(1), environment: { localVolumes: [{ shape: 'sphere', center: [0, 1, 0], radius: 1 }] }, camera: LOOKING_DOWN }, { ...IMAGE, backend: 'gpu' }),
-    /localVolumes is traced by the CPU path tracer only/,
-  );
+test('the path tracer refuses local volumes on every non-CPU backend instead of dropping them', async () => {
+  for (const backend of ['gpu', 'webgpu']) {
+    await assert.rejects(
+      renderPathTracedImage({ parts: ground(1), environment: { localVolumes: [{ shape: 'sphere', center: [0, 1, 0], radius: 1 }] }, camera: LOOKING_DOWN }, { ...IMAGE, backend }),
+      new RegExp(`environment\.localVolumes is traced by the CPU path tracer only; backend "${backend}" cannot draw them`),
+    );
+  }
 });
