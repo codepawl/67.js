@@ -836,6 +836,22 @@ fn chooseEmitter(normal: vec3<f32>) -> i32 {
   let lightIndex = emitter - firstLightEmitter;
   let lightCount = params.sizeBouncesLights.w;
   if (lightIndex < 0 || lightIndex >= lightCount) { return emitter; }
+  // The tree weighs a node by every light under it, linked or not, so a receiver with light linking draws uniformly among the lights it can see.
+  var linkedCount = 0;
+  for (var index = 0; index < lightCount; index++) {
+    if (reaches(i32(lights[index * LIGHT_TEXELS + 1].w))) { linkedCount++; }
+  }
+  if (linkedCount < lightCount) {
+    if (linkedCount == 0) { return -1; }
+    var skip = min(i32(floor(nextRandom() * f32(linkedCount))), linkedCount - 1);
+    selectionProbability = f32(lightCount) * uniformShare / f32(linkedCount);
+    for (var index = 0; index < lightCount; index++) {
+      if (!reaches(i32(lights[index * LIGHT_TEXELS + 1].w))) { continue; }
+      if (skip == 0) { return firstLightEmitter + index; }
+      skip--;
+    }
+    return -1;
+  }
   var node = 0;
   var pathProbability = 1.0;
   for (var step = 0; step < 64; step++) {
