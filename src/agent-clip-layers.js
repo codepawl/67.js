@@ -1,6 +1,7 @@
 import { bounded, denseArray, knownKeys } from './motion-validation.js';
 import { retargetReport } from './agent-retarget.js';
 import { invalidField } from './field-error.js';
+import { STRIP_BLENDS, STRIP_EXTENDS } from './clip-strip.js';
 
 // Clip layers for an imported asset's motion: play clips the file ships, blend them over each other, and limit each to
 // some bones. Agent input is untrusted plain data, so everything here is named, bounded and checked against the asset.
@@ -11,6 +12,11 @@ const MAX_BONE_MAP_ENTRIES = 64;
 const MAX_NAME_LENGTH = 128;
 const MAX_LAYER_SPEED = 8;
 const MAX_LAYER_OFFSET = 30;
+const MAX_STRIP_TIME = 600;
+const MIN_STRIP_SCALE = 0.05;
+const MAX_STRIP_SCALE = 20;
+const MIN_STRIP_REPEAT = 0.05;
+const MAX_STRIP_REPEAT = 100;
 
 /**
  * What the layers are checked against: `clips` (`{ duration, targets }` per clip, the node names its tracks move) and
@@ -94,10 +100,52 @@ function normalizedSource(input, context, label, path) {
   return { from: { asset: input.asset.toLowerCase(), clip: input.clip }, clip };
 }
 
+function oneOf(value, allowed, path) {
+  if (!allowed.includes(value)) throw invalidField(path, value, `one of ${allowed.join(', ')}`);
+  return value;
+}
+
+/**
+ * A strip places the layer's clip on the motion timeline. `end` and `repeat` both say how long it plays, so one at
+ * most; `end` becomes a (maybe fractional) repeat count of the stretched clip.
+ */
+function normalizedStrip(input, layer, clip, position) {
+  const label = `Motion layer ${position} strip`;
+  const path = `motion.layers[${position}].strip`;
+  knownKeys(input, ['start', 'end', 'scale', 'repeat', 'blendIn', 'blendOut', 'extend', 'blend'], label);
+  for (const field of ['speed', 'offset', 'loop']) {
+    if (layer[field] !== undefined) throw invalidField(`motion.layers[${position}].${field}`, layer[field], 'a field left out, since a strip times the clip with its own start, scale and repeat');
+  }
+  if (!(clip.duration > 0)) throw invalidField(`${path}`, input, 'a field left out, since this clip has no length to place');
+  if (input.end !== undefined && input.repeat !== undefined) throw invalidField(`${path}.end`, input.end, 'end or repeat, not both: end stops the strip at a time, repeat counts its cycles');
+  const strip = {
+    start: bounded(input.start ?? 0, -MAX_STRIP_TIME, MAX_STRIP_TIME, `${label} start`),
+    scale: bounded(input.scale ?? 1, MIN_STRIP_SCALE, MAX_STRIP_SCALE, `${label} scale`),
+  };
+  if (input.end !== undefined) {
+    const end = bounded(input.end, -MAX_STRIP_TIME, MAX_STRIP_TIME, `${label} end`);
+    if (end <= strip.start) throw invalidField(`${path}.end`, end, `a time after start ${strip.start}`);
+    strip.repeat = (end - strip.start) / (clip.duration * strip.scale);
+  } else {
+    strip.repeat = input.repeat ?? 1;
+  }
+  bounded(strip.repeat, MIN_STRIP_REPEAT, MAX_STRIP_REPEAT, input.end !== undefined ? `${label} end (as ${strip.repeat} repeats of the clip)` : `${label} repeat`);
+  const length = clip.duration * strip.scale * strip.repeat;
+  strip.blendIn = bounded(input.blendIn ?? 0, 0, length, `${label} blendIn`);
+  strip.blendOut = bounded(input.blendOut ?? 0, 0, length, `${label} blendOut`);
+  if (strip.blendIn + strip.blendOut > length) {
+    throw invalidField(`${path}.blendOut`, strip.blendOut, `at most ${length - strip.blendIn} seconds, since blendIn ${strip.blendIn} and blendOut share the strip's ${length} seconds`);
+  }
+  strip.extend = oneOf(input.extend ?? 'nothing', STRIP_EXTENDS, `${path}.extend`);
+  strip.blend = oneOf(input.blend ?? 'replace', STRIP_BLENDS, `${path}.blend`);
+  if (strip.blend === 'add' && layer.additive === false) throw invalidField(`motion.layers[${position}].additive`, false, 'a field left out, since strip blend "add" makes the layer additive');
+  return strip;
+}
+
 function normalizedLayer(input, position, context, resolveNode) {
   const label = `Motion layer ${position}`;
   const path = `motion.layers[${position}]`;
-  knownKeys(input, ['clip', 'from', 'scale', 'rootMotion', 'loop', 'weight', 'speed', 'offset', 'additive', 'reference', 'mask', 'bones', 'morph'], label);
+  knownKeys(input, ['clip', 'from', 'scale', 'rootMotion', 'loop', 'weight', 'speed', 'offset', 'additive', 'reference', 'mask', 'bones', 'morph', 'strip'], label);
   const layer = {};
   let clip;
   if (input.from !== undefined) {
@@ -125,6 +173,10 @@ function normalizedLayer(input, position, context, resolveNode) {
   if (input.speed !== undefined) layer.speed = bounded(input.speed, 0.05, MAX_LAYER_SPEED, `${label} speed`);
   if (input.offset !== undefined) layer.offset = bounded(input.offset, -MAX_LAYER_OFFSET, MAX_LAYER_OFFSET, `${label} offset`);
   if (input.reference !== undefined) layer.reference = bounded(input.reference, 0, clip.duration, `${label} reference`);
+  if (input.strip !== undefined) {
+    layer.strip = normalizedStrip(input.strip, layer, clip, position);
+    if (layer.strip.blend === 'add') layer.additive = true;
+  }
   if (input.mask !== undefined) layer.mask = normalizedMask(input.mask, resolveNode, position);
   if (input.bones !== undefined) layer.bones = normalizedBoneMap(input.bones, clip, resolveNode, position);
   return layer;

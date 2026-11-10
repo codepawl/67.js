@@ -6,6 +6,7 @@ import { fitPerspectiveDistance } from './camera.js';
 import { validateSkinGeometry, validateSkinPose } from './skinning.js';
 import { validateMorphGeometry, validateMorphTransform } from './morph.js';
 import * as agentMotion from './agent-motion.js';
+import { compileClipStrip } from './clip-strip.js';
 import { clipLayerContextFromAsset, retargetSourceFromAsset } from './agent-clip-layers.js';
 import { retargetAssetClip, retargetReport } from './agent-retarget.js';
 import { createFootLock } from './foot-lock.js';
@@ -592,16 +593,29 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     return [...byPart].map(([part, weights]) => ({ part, weights }));
   }
 
+  /**
+   * A strip times its layer: the fade envelope multiplies the layer's weight and the strip maps motion time to clip
+   * time. The clip holds its ends, since the strip does the repeating.
+   */
+  function stripTiming(layer) {
+    if (!layer.strip) return { loop: layer.loop !== false, timing: {} };
+    const duration = layer.from ? clipLayerContext.external.get(layer.from.asset).clips[layer.from.clip].duration : asset.animations[layer.clip].duration;
+    const compiled = compileClipStrip(layer.strip, duration);
+    const base = layer.weight ?? 1;
+    return { loop: false, timing: { weight: time => base * compiled.weight(time), clipTime: compiled.clipTime } };
+  }
+
   /** Layers of the motion as definitions for the pose code: decoded clips, renamed by `bones`, with their morph tracks. */
   function layerDefinitions(layers) {
     return layers.map(layer => {
-      const loop = layer.loop !== false;
-      if (layer.from) return { clip: retargetedLayerClip(layer, loop), weight: layer.weight, speed: layer.speed, offset: layer.offset, additive: layer.additive, reference: layer.reference, mask: layer.mask };
+      const { loop, timing } = stripTiming(layer);
+      const common = { weight: layer.weight, speed: layer.speed, offset: layer.offset, additive: layer.additive, reference: layer.reference, mask: layer.mask, ...timing };
+      if (layer.from) return { clip: retargetedLayerClip(layer, loop), ...common };
       const animation = asset.animations[layer.clip];
       return {
         clip: clipFromGltfAnimation(animation, { loop, rename: layer.bones }),
         ...(layer.morph === false ? {} : { morphs: morphClipFromGltfAnimation(animation, { loop }) }),
-        weight: layer.weight, speed: layer.speed, offset: layer.offset, additive: layer.additive, reference: layer.reference, mask: layer.mask,
+        ...common,
       };
     });
   }

@@ -87,8 +87,9 @@ function createLayer(definition, position, prepared, resolveJoint) {
   const speed = definition.speed ?? 1;
   const offset = definition.offset ?? 0;
   if (!Number.isFinite(speed) || !Number.isFinite(offset)) throw new RangeError(`${label} speed and offset must be finite.`);
+  if (definition.clipTime !== undefined && typeof definition.clipTime !== 'function') throw new TypeError(`${label} clipTime must be a function from motion time to clip time.`);
   return {
-    label, sampler, bindings, additive, references, speed, offset,
+    label, sampler, bindings, additive, references, speed, offset, clipTime: definition.clipTime,
     weight: weightFunction(definition.weight ?? 1, `${label} weight`),
     mask: maskWeights(prepared, resolveJoint, definition.mask),
   };
@@ -104,10 +105,17 @@ function applyAdditiveRotation(rotation, sample, reference, weight) {
   quat.normalize(rotation, quat.multiply(rotation, rotation, scratchDelta));
 }
 
+/** Clip time of a layer: its `clipTime(time)` when it has one (a strip), else `time * speed + offset`. */
+function layerClipTime(layer, time) {
+  const clipTime = layer.clipTime ? layer.clipTime(time) : time * layer.speed + layer.offset;
+  if (!Number.isFinite(clipTime)) throw new RangeError(`${layer.label} clip time must be finite at time ${time}.`);
+  return clipTime;
+}
+
 function applyLayer(layer, time, localRotations, localTranslations) {
   const layerWeight = checkedWeight(layer.weight, time, `${layer.label} weight`);
   if (layerWeight === 0) return;
-  layer.sampler.sample(time * layer.speed + layer.offset);
+  layer.sampler.sample(layerClipTime(layer, time));
   layer.bindings.forEach((binding, slot) => {
     const weight = layerWeight * layer.mask[binding.index];
     if (weight === 0) return;
@@ -807,7 +815,8 @@ function createMorphLayers(asset, nodes, layers, rig) {
     }
     return {
       morphs: layer.morphs, partIndices, mask, owners, additive: layer.additive === true,
-      speed: layer.speed ?? 1, offset: layer.offset ?? 0, weight: weightFunction(layer.weight ?? 1, 'Morph layer weight'),
+      speed: layer.speed ?? 1, offset: layer.offset ?? 0, clipTime: layer.clipTime, label: 'Morph layer',
+      weight: weightFunction(layer.weight ?? 1, 'Morph layer weight'),
       reference: layer.reference ?? 0,
     };
   });
@@ -819,7 +828,7 @@ function evaluateMorphLayers(morphLayers, time) {
   for (const layer of morphLayers) {
     const layerWeight = checkedWeight(layer.weight, time, 'Morph layer weight');
     if (layerWeight === 0) continue;
-    const layerTime = time * layer.speed + layer.offset;
+    const layerTime = layerClipTime(layer, time);
     for (const track of layer.morphs.tracks) {
       const sampled = Array.from(track.interpolant.evaluate(morphClipTime(layer.morphs, layerTime)));
       const reference = layer.additive ? Array.from(track.interpolant.evaluate(morphClipTime(layer.morphs, layer.reference))) : null;

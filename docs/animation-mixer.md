@@ -80,6 +80,33 @@ Mixer matrices must be affine transforms with positive scale and no shear.
 Tracked material properties must start in their valid domains. Missing emission defaults to zero.
 The mixer owns registered properties during playback, so external writes do not change its captured base pose.
 
+## Clip strips
+
+A recipe's `motion.layers` entry for an imported asset takes a `strip`, which places its clip on the motion timeline as an animation editor does. The mixer class above works on rigid parts; strips work on the skeleton and morph weights of an asset, through the same layers.
+
+| Field | Meaning |
+| --- | --- |
+| `start` | Motion time in seconds where the strip begins, -600 to 600, default 0 |
+| `scale` | Stretches the clip in time: 2 plays it at half speed. 0.05 to 20, default 1 |
+| `repeat` | Cycles of the stretched clip, 0.05 to 100, fractions allowed, default 1. The strip ends at `start + clip duration * scale * repeat` |
+| `end` | Instead of `repeat`: the time the strip stops, which sets a fractional repeat. Give one of the two |
+| `blendIn`, `blendOut` | Linear fade of the weight over this many seconds at the start and the end. Together at most the strip's length |
+| `extend` | What the strip does outside its span: `nothing` (default), `hold` (first pose before, last pose after) or `holdForward` (last pose after only). A hold keeps the weight the strip has at that end, so a strip with `blendOut` fades away and stays gone |
+| `blend` | `replace` (default) blends over the pose below by the weight; `add` adds the clip's change from its `reference` time, like `additive` |
+
+The strip's fade multiplies the layer's `weight`. The strip owns the timing, so a layer with a `strip` takes no `speed`, `offset` or `loop`. Each cycle plays the clip from its first to its last pose, and the clip holds its ends. Layers apply in order, so a later strip blends over an earlier one.
+
+To crossfade, overlap two strips: the later one has a `blendIn` equal to the overlap, and the earlier one ends when the fade is complete, with no `blendOut`. A walk repeated three times, then fading into an idle:
+
+```json
+"layers": [
+  { "clip": 10, "strip": { "repeat": 3 } },
+  { "clip": 2, "strip": { "start": 2.375, "blendIn": 0.5 } }
+]
+```
+
+Sampling is a pure function of the time, so a seek equals playing. A motion holds at most 8 layers, so at most 8 strips. Every field is bounded and refused with its path and the range to pass. In code, a skeleton pose layer takes a `clipTime(time)` function beside its `weight(time)` function for the same effect ([skeleton pose](skeleton-pose.md)).
+
 ## API design choice
 
 | Shape | Evaluation | Tradeoff |
