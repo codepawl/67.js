@@ -105,7 +105,7 @@ and a click placed on a cut in a WAV lands on the decoded cut frame within a fra
 
 ## Render passes
 
-`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao`, `mist`, `position`, `velocity`, `uv`, `transmission`, `volume`, `environment`, `cryptomatte` and `aov`.
+`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao`, `mist`, `position`, `velocity`, `uv`, `transmission`, `volume`, `environment`, `cryptomatte`, `aov` and `wireframe`.
 Each frame writes its lit image and then one PNG per pass: `render.png` and `render-<pass>.png` for an image, `frame-N.png` and `frame-N-<pass>.png` for stills.
 Passes are raw data at the lit image's size: no tone mapping, grading, bloom, depth of field or antialiasing, so values stay exact at silhouettes.
 Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky and the environment background do not.
@@ -130,6 +130,24 @@ Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky
 | `environment` | Image-based / sky environment lighting contribution times exposure. Background 0 |
 | `cryptomatte` | Deterministic float hash per object in red, per material in green and coverage `1` in blue (`metrics.cryptomatte` holds the `{ objects, materials }` manifest). Background 0 |
 | `aov` | Custom material AOV from `material.aov` (`0..1` scalar or RGB) and/or a material graph's `aov` output. Background 0 |
+| `wireframe` | The `diffuse` surface with every polygon edge drawn over it, for reviewing topology; see below. Background light grey |
+
+### Wireframe pass
+
+The wireframe pass shows the topology of the mesh a part really has, without changing its geometry or vertex count. It draws the polygon edges of each part (a recipe mesh's own quads and n-gons, or the welded, quad-joined view of other geometry, the same view `mesh_inspect` reads), so the diagonals that triangulation adds inside a planar quad are never drawn and a quad reads as a quad. Edges hidden behind a surface stay hidden.
+
+| Edge colour | Meaning | `mesh_inspect` problem |
+| --- | --- | --- |
+| dark | Regular edge: two faces, wound the same way round it | |
+| orange | Boundary edge: one face, an open rim | `boundary-edge` |
+| red | Non-manifold edge: three or more faces | `non-manifold-edge` |
+| cyan | Flipped edge: two faces that run the same way along it, so one normal points the wrong way | `inconsistent-winding` |
+| magenta | Edge of a degenerate (zero-area) face | `degenerate-face` |
+
+Fault edges are drawn about twice as wide as regular ones. An edge with several faults shows the most urgent one: non-manifold, then degenerate, then flipped, then boundary.
+The job metrics carry `metrics.wireframe`: `edges` (the count of each kind over the drawn parts), `faultyParts` (up to 20 parts, worst first, each with its fault counts so a coloured edge maps to a node name), `faultyPartsOmitted`, `partsOmitted` and `partsSkipped`, and `truncated`.
+Output is bounded: a mesh contributes at most 200,000 edges and a frame at most 1,000,000. Fault edges are kept before regular ones, a part past the frame limit is left out and counted in `partsOmitted`, and a part with no polygon view (every triangle collapses) is counted in `partsSkipped`.
+The pass is 8-bit like the others, works with `png16` and `exr` and packs into a `multilayer` EXR. It shows rest geometry: skinning and morph targets are not applied to the edges.
 
 The lighting passes hold linear values above 1, so write them as `exr` (a `png` or `png16` file clamps at 1). They add back to the lit image: `diffuse + glossy + emission * exposure` is the radiance before fog, and with an open world the lit image is that radiance mixed toward the fog colour by `mist`, then tone mapped. `tests/lighting-passes.test.js` checks the sum against the beauty frame (mean difference under 1.5 display levels, under 2% of samples off by more than 4). Not covered: unlit parts, the editor floor, parts that a probe or irradiance grid changes after the sky term, and anything the lit image adds after the shader (bloom, grading, depth of field).
 

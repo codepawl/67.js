@@ -1967,8 +1967,14 @@ export class Renderer67 {
     context.drawArrays(context.TRIANGLES, 0, 3);
   }
 
+  // True when the frame draws local volumes. An empty list costs nothing; anything else is checked here, before a program is bound.
+  prepareLocalVolumes(input) {
+    if (input === undefined || (Array.isArray(input) && input.length === 0)) return false;
+    return requireFeatureCode('volumeFog').support.prepareLocalVolumes(this, input) > 0;
+  }
+
   // The post steps this frame uses. A step that is off costs nothing in a program that has it compiled out.
-  postStepsOf(frame, effects, volume, occluded, fogSky) {
+  postStepsOf(frame, effects, volume, occluded, fogSky, localVolumes) {
     const steps = [];
     if (this.transparent) steps.push('transparent');
     if (occluded) steps.push('occlusion');
@@ -1977,6 +1983,7 @@ export class Renderer67 {
     if (volume.density > 0 && volume.field) steps.push('field');
     if (volume.density > 0 && requireFeatureCode('volumeFog').support.usesDetail(volume)) steps.push('detail');
     if (volume.density > 0 && this.fogLightBuffers?.count > 0) steps.push('lights');
+    if (localVolumes) steps.push('local');
     if (fogSky) steps.push('sky');
     if (frame.volumeExplosion) steps.push('explosion');
     const gradesColor = effects.saturation !== 1 || effects.contrast !== 1 || effects.temperature !== 0;
@@ -2035,9 +2042,10 @@ export class Renderer67 {
     context.bindVertexArray(null);
     const fogSky = this.fogSkyVisibility?.(this.sceneParts, volume, context, environment);
     const fogSupport = volume.density > 0 ? requireFeatureCode('volumeFog').support : null;
+    const localVolumes = this.prepareLocalVolumes(environment.localVolumes);
     if (fogSupport) fogSupport.packLights(this);
     else if (this.fogLightBuffers) this.fogLightBuffers.count = 0;
-    const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky));
+    const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky, localVolumes));
     context.useProgram(post.program);
     if (this.look) viewTransformShader.bindLook(this, post.program);
     context.activeTexture(context.TEXTURE0);
@@ -2056,6 +2064,7 @@ export class Renderer67 {
     context.bindTexture(context.TEXTURE_2D, this.depthTexture ?? this.whiteTexture);
     context.uniform1i(post.uniforms.sceneDepth, 1);
     fogSupport?.bindUniforms(this, post, volume, environment, frame);
+    if (localVolumes) requireFeatureCode('volumeFog').support.bindLocalVolumes(this, post, frame);
     context.activeTexture(context.TEXTURE2);
     context.bindTexture(context.TEXTURE_2D, effects.bloom.strength > 0 ? this.bloomTargets[1].texture : this.whiteTexture);
     context.uniform1i(post.uniforms.bloomTexture, 2);

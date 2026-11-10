@@ -175,6 +175,10 @@ export function createCharacterController(options = {}) {
     jump: options.jump ?? 'jump',
     run: options.run ?? 'run',
   };
+  const rootMotion = options.rootMotion;
+  if (rootMotion !== undefined && typeof rootMotion !== 'function') {
+    throw new TypeError(`${owner} rootMotion must be a function () => [x, z] giving the travel of the last animation step, such as () => graph.rootMotion.delta, got ${describe(rootMotion)}.`);
+  }
   const faceCamera = options.faceCamera ?? false;
   const cameraYaw = options.cameraYaw ?? 0;
   if (typeof cameraYaw !== 'function' && !Number.isFinite(cameraYaw)) {
@@ -194,6 +198,7 @@ export function createCharacterController(options = {}) {
     grounded: false,
     airborne: true,
     speed: 0,
+    intentSpeed: 0,
     running: false,
   };
 
@@ -217,6 +222,17 @@ export function createCharacterController(options = {}) {
     state.yaw = wrapAngle(state.yaw + clamp(difference, -maximumTurn, maximumTurn));
   }
 
+  // On the ground the animation moves the body: its travel, turned from the body's frame to the world, replaces the speed-based step.
+  function applyRootMotion(displacement) {
+    const travel = rootMotion();
+    const valid = Array.isArray(travel) && travel.length === 2 && travel.every(Number.isFinite);
+    if (!valid) throw new TypeError(`${owner} rootMotion must return [x, z] as finite numbers, such as graph.rootMotion.delta, got ${JSON.stringify(travel)}.`);
+    const forward = forwardDirection(state.yaw);
+    const right = rightDirection(state.yaw);
+    displacement[0] = right[0] * travel[0] - forward[0] * travel[1];
+    displacement[2] = right[2] * travel[0] - forward[2] * travel[1];
+  }
+
   function advance(stepSeconds) {
     state.previousPosition = [...state.position];
     const sideInput = input.getAxis(names.moveX);
@@ -231,6 +247,7 @@ export function createCharacterController(options = {}) {
     const wantedX = (forward[0] * forwardInput + right[0] * sideInput) * intentScale * topSpeed;
     const wantedZ = (forward[2] * forwardInput + right[2] * sideInput) * intentScale * topSpeed;
 
+    state.intentSpeed = Math.hypot(wantedX, wantedZ);
     const control = state.grounded ? 1 : settings.airControl;
     const maximumChange = settings.acceleration * control * stepSeconds;
     const changeX = wantedX - state.velocity[0];
@@ -258,6 +275,7 @@ export function createCharacterController(options = {}) {
       grounded: state.grounded,
     };
     const displacement = state.velocity.map(component => component * stepSeconds);
+    if (rootMotion && state.grounded) applyRootMotion(displacement);
     const result = readMoveResult(owner, mover.move(body, displacement, stepSeconds));
     state.velocity[0] = (result.position[0] - state.position[0]) / stepSeconds;
     state.velocity[2] = (result.position[2] - state.position[2]) / stepSeconds;

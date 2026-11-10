@@ -1,0 +1,1 @@
+- Mesh particle emitters take `from: "edges"`, with an optional `group` and `sharpAngle`, so sparks spread along a rim by edge length (#695)
