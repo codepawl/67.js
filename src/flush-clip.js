@@ -11,7 +11,7 @@ import { float32Step } from './flush-search.js';
 export const FLUSH_CUT_STRIDE = 10;
 /** Shared area (square metres) under which a pair is ranked instead of cut: 1 cm2. */
 export const FLUSH_CUT_MINIMUM_AREA = 1e-4;
-const PER_VERTEX_FIELDS = ['positions', 'normals', 'uvs', 'lightUvs', 'colors', 'skyVisibility'];
+const PER_VERTEX_FIELDS = ['positions', 'normals', 'uvs', 'lightUvs', 'colors', 'skyVisibility', 'surfaceMasks'];
 const MARGIN_STEPS = 4;
 const DEGENERATE_AREA_SHARE = 1e-12;
 const CACHED_CUTS_PER_GEOMETRY = 8;

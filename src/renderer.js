@@ -18,6 +18,7 @@ import { resolveVolumeFog, validateFogField } from './volumetric.js';
 import { requireEnvironmentSupport } from './environment-shading.js';
 import { materialLayerState, materialLayerValue } from './material-layers.js';
 import { MaterialSnapshot } from './material-snapshot.js';
+import { wearUniformValues } from './material-wear.js';
 import { fittedFogDensity } from './fog-fit.js';
 import { InstanceSelection, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from './render-culling.js';
 import { resolveShadowLight, shadowBiasPerSlope } from './shadow-light.js';
@@ -130,12 +131,13 @@ function shaderFeaturesOfParts(parts) {
     if (material.lightMask !== undefined) features.add('lightLinking');
     if ((material.alphaMode ?? 'opaque') !== 'opaque') features.add('alphaMode');
     if (material.subsurface?.weight > 0) features.add('subsurface');
+    if (material.wear) features.add('surfaceWear');
     if (material.snippet) features.add(material.snippet.feature);
     if (materialLayerValue(material, 'clearcoat') > 0) features.add('clearcoat');
     if (materialLayerValue(material, 'sheenColor').some(channel => channel !== 0)) features.add('sheen');
     if (TAG_SHADER_FEATURES.has(material.tag)) features.add(material.tag);
     // Without vertex colours the tint and sky visibility are the constants of the unbound attribute, so no varying carries them.
-    if ([part.geometry, ...(part.lods ?? []).map(level => level.geometry)].some(geometry => geometry.colors || geometry.skyVisibility)) features.add('vertexColors');
+    if ([part.geometry, ...(part.lods ?? []).map(level => level.geometry)].some(geometry => geometry.colors || vertexAlpha(geometry))) features.add('vertexColors');
   }
   return features;
 }
@@ -218,7 +220,7 @@ function materialMapState(material) {
   const occlusionStrength = material.occlusionStrength ?? 1;
   if (material.layers || material.splat) requireSplatSupport().validate(material);
   if (material.layers && PROCEDURAL_MATERIAL_TAGS.has(material.tag)) throw new Error('Splat layers require a standard PBR material tag.');
-  return [...MATERIAL_MAPS.map(field => material[field] ?? null), normalScale[0], normalScale[1], occlusionStrength, ...mossState(material), material.boxMapScale ?? 0, material.boxMapAxis ?? 1, ...lightMapState(material), material.layers ?? null, material.splat ?? null, material.layerMaps ?? null, material.environmentProbe ?? null, material.waterReflection ?? null, material.irradianceGrid ?? null];
+  return [...MATERIAL_MAPS.map(field => material[field] ?? null), normalScale[0], normalScale[1], occlusionStrength, ...mossState(material), material.boxMapScale ?? 0, material.boxMapAxis ?? 1, ...lightMapState(material), material.layers ?? null, material.splat ?? null, material.layerMaps ?? null, material.environmentProbe ?? null, material.waterReflection ?? null, material.irradianceGrid ?? null, material.wear ?? null];
 }
 
 // A baked light map reads the second UV set, so it is only drawn for parts that cannot be skinned or morphed.
@@ -541,23 +543,28 @@ function interleaveUvSets(geometry) {
   return combined;
 }
 
-// Sky visibility rides in the fourth component of the vertex colour attribute, so the attribute layout stays the same.
+// Sky visibility, or the packed surface wear masks of a material with `wear`, rides in the fourth component of the vertex
+// colour attribute, so the attribute layout stays the same.
+function vertexAlpha(geometry) {
+  return geometry.surfaceMasks ?? geometry.skyVisibility;
+}
+
 function interleaveColorsWithSkyVisibility(geometry) {
-  const vertexCount = geometry.skyVisibility.length;
+  const vertexCount = vertexAlpha(geometry).length;
   const combined = new Float32Array(vertexCount * 4);
   for (let vertex = 0; vertex < vertexCount; vertex++) {
     for (let channel = 0; channel < 3; channel++) {
       combined[vertex * 4 + channel] = geometry.colors ? geometry.colors[vertex * 3 + channel] : 1;
     }
-    combined[vertex * 4 + 3] = geometry.skyVisibility[vertex];
+    combined[vertex * 4 + 3] = vertexAlpha(geometry)[vertex];
   }
   return combined;
 }
 
 function geometryBufferBytes(geometry) {
   const plainBytes = ['positions', 'normals', 'colors', 'indices'].reduce((total, field) => total + (geometry[field]?.byteLength ?? 0), uvBufferBytes(geometry));
-  if (!geometry.skyVisibility) return plainBytes;
-  return plainBytes - (geometry.colors?.byteLength ?? 0) + geometry.skyVisibility.length * 16;
+  if (!vertexAlpha(geometry)) return plainBytes;
+  return plainBytes - (geometry.colors?.byteLength ?? 0) + vertexAlpha(geometry).length * 16;
 }
 
 function validateReplacementGeometry(geometry) {
@@ -919,7 +926,7 @@ export class Renderer67 {
 
   finishMainProgram(pendingProgram) {
     this.program = finishProgram(this.context, pendingProgram);
-    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', 'tintShadowMap', 'tintBlind', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
+    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', 'wearEnabled', 'wearMetal', 'wearDirt', 'wearShape', 'wearDirtShape', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', 'tintShadowMap', 'tintBlind', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
       this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     }
@@ -1047,6 +1054,18 @@ export class Renderer67 {
     }
   }
 
+  /** Sets the surface wear uniforms of a batch; a material without wear turns the term off. */
+  bindSurfaceWear(wear) {
+    const { context, uniforms } = this;
+    context.uniform1f(uniforms.wearEnabled, wear ? 1 : 0);
+    if (!wear) return;
+    const values = wearUniformValues(wear);
+    context.uniform4fv(uniforms.wearMetal, values.metal);
+    context.uniform4fv(uniforms.wearDirt, values.dirt);
+    context.uniform4fv(uniforms.wearShape, values.shape);
+    context.uniform2fv(uniforms.wearDirtShape, values.dirtShape);
+  }
+
   /** Binds the geometry's vertex buffers and attributes into the bound vertex array. */
   bindGeometryAttributes(geometry, material) {
     const context = this.context;
@@ -1057,10 +1076,10 @@ export class Renderer67 {
         if (geometry[field]) {
           const target = field === 'indices' ? context.ELEMENT_ARRAY_BUFFER : context.ARRAY_BUFFER;
           const values = field === 'uvs' && geometry.lightUvs ? interleaveUvSets(geometry) : geometry[field];
-          geometryBuffers.set(field, this.uploadBuffer(target, field === 'colors' && geometry.skyVisibility ? interleaveColorsWithSkyVisibility(geometry) : values));
+          geometryBuffers.set(field, this.uploadBuffer(target, field === 'colors' && vertexAlpha(geometry) ? interleaveColorsWithSkyVisibility(geometry) : values));
         }
       }
-      if (geometry.skyVisibility && !geometry.colors) geometryBuffers.set('colors', this.uploadBuffer(context.ARRAY_BUFFER, interleaveColorsWithSkyVisibility(geometry)));
+      if (vertexAlpha(geometry) && !geometry.colors) geometryBuffers.set('colors', this.uploadBuffer(context.ARRAY_BUFFER, interleaveColorsWithSkyVisibility(geometry)));
       if (geometry.lightUvs && !geometry.uvs) geometryBuffers.set('uvs', this.uploadBuffer(context.ARRAY_BUFFER, interleaveUvSets(geometry)));
       this.geometryBuffers.set(geometry, geometryBuffers);
     }
@@ -1082,11 +1101,11 @@ export class Renderer67 {
       context.vertexAttrib2f(13, -1, -1);
     }
     if (geometry.colors && geometry.colors.length !== geometry.positions.length) throw new Error('Geometry colors must contain RGB for every vertex.');
-    if (geometry.skyVisibility && geometry.skyVisibility.length !== geometry.positions.length / 3) throw new Error('Geometry skyVisibility must hold one value for every vertex.');
-    if (geometry.colors || geometry.skyVisibility) {
+    if (vertexAlpha(geometry) && vertexAlpha(geometry).length !== geometry.positions.length / 3) throw new Error('Geometry skyVisibility must hold one value for every vertex.');
+    if (geometry.colors || vertexAlpha(geometry)) {
       context.bindBuffer(context.ARRAY_BUFFER, geometryBuffers.get('colors'));
       context.enableVertexAttribArray(14);
-      context.vertexAttribPointer(14, geometry.skyVisibility ? 4 : 3, context.FLOAT, false, 0, 0);
+      context.vertexAttribPointer(14, vertexAlpha(geometry) ? 4 : 3, context.FLOAT, false, 0, 0);
     } else {
       context.disableVertexAttribArray(14);
       context.vertexAttrib3f(14, 1, 1, 1);
@@ -1242,7 +1261,7 @@ export class Renderer67 {
     const [alphaMode, alphaCutoff, opacity, doubleSided] = materialAlphaState(parts[0].material);
     const layerState = materialLayerState(parts[0].material);
     const culling = this.createCullingState(parts);
-    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: flushOrder?.indices.length ?? geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), tintedShadow: castsTintedShadow(parts[0]), tintBlind: Boolean(splat) || Object.keys(parts[0].material.layerMaps ?? {}).length >= 3, receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
+    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, wear: parts[0].material.wear ?? null, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: flushOrder?.indices.length ?? geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), tintedShadow: castsTintedShadow(parts[0]), tintBlind: Boolean(splat) || Object.keys(parts[0].material.layerMaps ?? {}).length >= 3, receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
     if (parts[0].lods) culling.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level));
     culling.shadowLevels?.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level, batch.shadowLevels));
     parts.forEach((part, index) => this.partLocations.set(part, { batch, index, geometry: part.geometry, map, mapState, layerState, skin, jointMatrices: skin?.jointMatrices, skinIndices: geometry.skinIndices, skinWeights: geometry.skinWeights, morph, morphWeights: morph?.weights, morphTargets: geometry.morphTargets, normalMatrix: mat3.create(), committedMatrix: batch.instanceData.subarray(index * INSTANCE_STRIDE, index * INSTANCE_STRIDE + 16) }));
@@ -2449,6 +2468,7 @@ export class Renderer67 {
       this.context.uniform2f(this.uniforms.normalScale, batch.mapState[5], batch.mapState[6]);
       this.context.uniform1f(this.uniforms.occlusionStrength, batch.mapState[7]);
       this.context.uniform4f(this.uniforms.materialMoss, batch.mapState[8], batch.mapState[9], batch.mapState[10], batch.mapState[11]);
+      this.bindSurfaceWear(batch.wear);
       const layers = batch.layerState;
       this.context.uniform3f(this.uniforms.materialDielectric, layers[0], layers[1], layers[2]);
       this.context.uniform2f(this.uniforms.materialCoat, layers[3], layers[4]);
