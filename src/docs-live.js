@@ -64,6 +64,7 @@ const addonLoaders = import.meta.glob([
   './cloth.js',
   './runtime.js',
   './input.js',
+  './physics-runtime.js',
   './update-part-vertices.js',
 ]);
 const moduleCache = new Map();
