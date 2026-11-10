@@ -318,6 +318,26 @@ vec3 terrainNoise(vec2 position) {
     mix(lowerRight - lowerLeft, upperRight - upperLeft, blend.y) * derivative.x,
     (upper - lower) * derivative.y);
 }
+
+// Wind ripples the mesh is too coarse to carry: six travelling waves from 2.6 m down to 0.2 m, about 0.12 rms slope in all, which
+// is what breaks a sun glint into facets. A wave fades out once a pixel is wider than a quarter of its length, so far water does
+// not shimmer; the slope variance the faded waves took with them comes back as lostVariance, to widen the glint instead.
+vec2 waterDetailSlope(vec2 position, float footprint, out float lostVariance) {
+  vec2 slope = vec2(0.0);
+  lostVariance = 0.0;
+  float wavenumber = 2.4;
+  float angle = 0.4;
+  for (int index = 0; index < 6; index++) {
+    float visible = 1.0 - smoothstep(0.08, 0.25, footprint * wavenumber / 6.2831853);
+    float phase = dot(position, vec2(cos(angle), sin(angle))) * wavenumber + time * sqrt(9.81 * wavenumber) + float(index) * 1.7;
+    float amplitude = 0.11 * pow(wavenumber / 2.4, -0.5);
+    slope += vec2(cos(angle), sin(angle)) * cos(phase) * amplitude * visible;
+    lostVariance += 0.5 * amplitude * amplitude * (1.0 - visible);
+    wavenumber *= 1.65;
+    angle += 2.399963;
+  }
+  return slope;
+}
 `,
   worldMossFunction: `// Moss is its own material over the base, not a tint: fully rough, a soft sheen at grazing angles and light that wraps
 // through it. Two masks, as in offline moss shading: a sharp one decides where moss is shaded, and a blurred one lifts
@@ -333,6 +353,7 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
 
 `,
   worldSurface: `  float waterFoam = 0.0;
+  float waterLostVariance = 0.0;
   if (TAG_WATER) {
     // Small ripples tilt the surface's own normal, so a sea mesh keeps its waves; a flat sheet (normal up) gets the same ripples as before.
     vec3 rippleTilt = vec3(-cos(worldPosition.x * 1.4 + time * 0.8) * 0.035, 0.0, -cos(worldPosition.z * 1.8 - time) * 0.036);
@@ -340,9 +361,19 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
     float age = time - rippleTime;
     float wave = sin(radius * 11.0 - age * 8.0) * exp(-abs(radius - age * 1.4) * 1.5) * exp(-age * 0.7) * step(0.0, age);
     rippleTilt.xz += normalize(worldPosition.xz - waterRipple.xz + 0.001) * wave * 0.07;
+    float footprint = length(fwidth(worldPosition.xz));
+    vec2 detailSlope = waterDetailSlope(worldPosition.xz, footprint, waterLostVariance);
+    rippleTilt.xz += detailSlope;
+    vec3 crestNormal = normal;
     normal = normalize(normal + rippleTilt);
     // The body is deeper at grazing angles; the foam mask (the ocean's, stored as 1 - foam in the sky visibility channel) turns it white.
-    waterFoam = smoothstep(0.15, 0.85, clamp(1.0 - vertexSkyVisibility, 0.0, 1.0));
+    // Streaks: the mask is broken up by noise stretched along the crest, so a patch has lacy edges and holes rather than a soft blob.
+    vec2 crestAcross = normalize(crestNormal.xz + vec2(0.0001));
+    vec2 crestAlong = vec2(-crestAcross.y, crestAcross.x);
+    vec2 streakPosition = vec2(dot(worldPosition.xz, crestAlong) * 0.6, dot(worldPosition.xz, crestAcross) * 3.2);
+    float streaks = terrainNoise(streakPosition).x * 0.6 + terrainNoise(streakPosition * 2.9 + 7.3).x * 0.4;
+    float foamMask = clamp(1.0 - vertexSkyVisibility, 0.0, 1.0);
+    waterFoam = smoothstep(0.55, 0.72, foamMask * 1.1 + (streaks - 0.5) * 0.8);
     float grazing = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
     color = mix(color, vec3(0.04, 0.12, 0.16), grazing * 0.85);
     color = mix(color, vec3(0.92, 0.95, 0.97), waterFoam);
@@ -413,7 +444,8 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
     radiance = mix(radiance * 0.6, skyColor * ambientIntensity, clamp(reflectivity, 0.0, 1.0));
     // Sun glint: a narrow lobe around the mirror direction, the width of open water slopes, bright enough to bloom.
     vec3 halfVector = normalize(normalize(lightDirection) + viewDirection);
-    float glintShape = pow(max(dot(normal, halfVector), 0.0), 900.0);
+    float glintSharpness = 1.0 / (1.0 / 900.0 + waterLostVariance);
+    float glintShape = pow(max(dot(normal, halfVector), 0.0), glintSharpness) * (glintSharpness + 2.0) / 902.0;
     float glintFresnel = 0.02 + 0.98 * pow(1.0 - max(dot(halfVector, viewDirection), 0.0), 5.0);
     radiance += vec3(1.0, 0.9, 0.7) * glintShape * (0.5 + 40.0 * glintFresnel) * 6.0 * keyResponse * (1.0 - waterFoam);
     radiance += vec3(0.85, 0.9, 0.95) * waterFoam * (max(dot(normal, normalize(lightDirection)), 0.0) * keyResponse + 0.35 * daylight * ambientIntensity);
