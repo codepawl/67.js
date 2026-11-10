@@ -1,0 +1,1 @@
+- entry:streaming: priority-aware eviction and the worker loader let a game keep key assets resident and decode off the main thread; 506 B gzip
