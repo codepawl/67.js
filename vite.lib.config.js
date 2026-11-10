@@ -112,6 +112,7 @@ export default defineConfig({
         audio: 'src/audio.js',
         'animation-graph': 'src/animation-graph.js',
         player: 'src/player.js',
+        'game-rules': 'src/game-rules.js',
         streaming: 'src/streaming.js',
         netcode: 'src/netcode.js',
         'update-part-vertices':'src/update-part-vertices.js',

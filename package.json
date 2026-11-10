@@ -49,6 +49,7 @@
     "docs/audio.md",
     "docs/animation-graph.md",
     "docs/player.md",
+    "docs/game-rules.md",
     "docs/scene-query.md",
     "docs/user-passes.md",
     "docs/skeleton-pose.md",
@@ -133,6 +134,7 @@
     "./addons/audio": "./build/audio.js",
     "./addons/animation-graph": "./build/animation-graph.js",
     "./addons/player": "./build/player.js",
+    "./addons/game-rules": "./build/game-rules.js",
     "./addons/update-part-vertices": "./build/update-part-vertices.js",
     "./package.json": "./package.json"
   },

@@ -346,16 +346,23 @@ function sceneDiagnostics(record) {
   return diagnostics?.length ? { diagnostics } : {};
 }
 
+// An edit that released old undo steps to fit the vertex budget says so, so the agent does not rely on them.
+function undoReleaseNote(record) {
+  const released = record.scene.releasedRevisions ?? 0;
+  return released > 0 ? { undoNote: `Released ${released} oldest undo revision${released === 1 ? '' : 's'} to fit maxVertices; newer ones still undo.` } : {};
+}
+
 function mutationStatus(record) {
   try {
     draw(record);
-    return { ...renderStatus(record), ...sceneDiagnostics(record), committed: true, renderSucceeded: true };
+    return { ...renderStatus(record), ...sceneDiagnostics(record), ...undoReleaseNote(record), committed: true, renderSucceeded: true };
   } catch (error) {
     return {
       sessionId: record.sessionId,
       revision: record.scene.revision,
       render: record.lastRender ?? null,
       ...sceneDiagnostics(record),
+      ...undoReleaseNote(record),
       committed: true,
       renderSucceeded: false,
       renderError: error.message,
