@@ -1,0 +1,3 @@
+- scene:agent-scene: the image node of the material graph (bilinear sampler, asset check) lets a graph read a catalog image.
+- scene:agent-scene+lazy: the same node, counted again in the lazy build.
+- goal:agent-scene: the image node is an agent-facing capability (textures from catalog images in a graph) that needs a sampler in the baked graph; 139 bytes gzip.

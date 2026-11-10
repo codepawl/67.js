@@ -52,7 +52,7 @@ export const MAX_MATERIAL_PATTERNS = 16;
 // expression limits; maxWork is work units per pixel times pixels, so a costly graph needs a smaller texture.
 export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height', 'opacity', 'clearcoat', 'transmission', 'aov']);
 export const MATERIAL_GRAPH_OPERATORS = Object.freeze([
-  'uv', 'coord', 'mapping', 'vec', 'ramp', 'noise', 'whiteNoise', 'brick', 'voronoi', 'wave', 'checker', 'gradient',
+  'uv', 'coord', 'mapping', 'vec', 'ramp', 'image', 'noise', 'whiteNoise', 'brick', 'voronoi', 'wave', 'checker', 'gradient',
   'add', 'sub', 'mul', 'div', 'min', 'max', 'pow', 'abs', 'floor', 'fract', 'sqrt', 'invert', 'clamp', 'smoothstep', 'mix',
   'layer', 'hue', 'curve',
 ]);
@@ -79,11 +79,12 @@ export const MATERIAL_GRAPH_NODES = Object.freeze({
     checker: '{"checker":{"count":8}} (even)',
     gradient: '{"gradient":{"type":"u"|"v"|"radial"}}',
     whiteNoise: '{"whiteNoise":{"scale":16,"seed":1,"output":"value"|"color"}} one random value per cell, tiles.',
+    image: '{"image":{"asset":"<64 hex catalog image asset ID>","output":"color"|"alpha"}} bilinear, repeats; color is linear RGB, decoded from sRGB. The host decodes catalog images (scene_asset_catalog); no URLs.',
     brick: '{"brick":{"columns":8,"rows":4,"mortar":0.05,"offset":0.5,"seed":1,"output":"mortar"|"edge"|"cell"}} running bond; rows even.',
     note: 'Each takes "at", a vector such as {"uv":"both"}. Scales are whole numbers 1-64.',
   }),
   uv: '{"uv":"u"|"v"|"both"} coordinates.',
-  coordinates: '{"coord":"generated"|"object"|"world"} vector of where the texel sits: generated is the unit tile, object and world are metres across the tile (u * size); the third axis is 0 because a baked texture is projected. {"mapping":{"vector":node,"scale":n|[x,y,z],"offset":[x,y,z],"rotate":radians}} scales, turns around Z and moves a vector (default: generated). Feed either to "at". Meshes without UVs use box mapping; vertex_color already multiplies the baked colour. Not in graphs yet: AO, bevel, curvature, fresnel, image.',
+  coordinates: '{"coord":"generated"|"object"|"world"} vector of where the texel sits: generated is the unit tile, object and world are metres across the tile (u * size); the third axis is 0 because a baked texture is projected. {"mapping":{"vector":node,"scale":n|[x,y,z],"offset":[x,y,z],"rotate":radians}} scales, turns around Z and moves a vector (default: generated). Feed either to "at". Meshes without UVs use box mapping; vertex_color already multiplies the baked colour. Not in graphs yet: AO, bevel, curvature, fresnel, vertexGroup (per-pixel or per-vertex data a bake does not have).',
   ramp: '{"ramp":{"value":node,"stops":[[0,[r,g,b]],[1,[r,g,b]]]}} 2-8 stops rising from 0 to 1.',
   mixing: '{"layer":{"base","top","mask","edge","softness"}}; {"hue":{"color","shift","saturation","value"}}; {"curve":{"value","points":[[x,y]]}}.',
   maths: 'add sub mul div min max pow take [a,b]; abs floor fract sqrt invert take one node; clamp smoothstep mix take [a,b,c]; {"vec":[r,g,b]}.',
