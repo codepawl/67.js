@@ -171,8 +171,10 @@ export function normalizeMeshEdits(edits) {
       case 'boolean': {
         if (!BOOLEAN_OPERATIONS.includes(edit.operation)) throw editField(index, 'operation', edit.operation, `one of ${BOOLEAN_OPERATIONS.join(', ')}`);
         normalized.operation = edit.operation;
-        if (!edit.cutter || typeof edit.cutter !== 'object' || Array.isArray(edit.cutter) || typeof edit.cutter.type !== 'string') {
-          throw editField(index, 'cutter', edit.cutter, 'a primitive record such as { "type": "cylinder", "segments": 32 }');
+        const isRecord = edit.cutter && typeof edit.cutter === 'object' && !Array.isArray(edit.cutter);
+        const namesGeometry = isRecord && Object.hasOwn(edit.cutter, 'geometry');
+        if (!isRecord || (!namesGeometry && typeof edit.cutter.type !== 'string')) {
+          throw editField(index, 'cutter', edit.cutter, 'a primitive record such as { "type": "cylinder", "segments": 32 } or a recipe geometry such as { "geometry": "tool" }');
         }
         normalized.cutter = edit.cutter;
         normalizePlacement(edit, normalized, index);
