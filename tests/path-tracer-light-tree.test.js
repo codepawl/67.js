@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { box } from '../src/geometry.js';
+import { POINT_FIRST_BIT } from '../src/light-link-bits.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { packLightTree } from '../src/path-tracer-gpu-pack.js';
 import { buildFragmentSource } from '../src/path-tracer-gpu-shader.js';
@@ -168,4 +169,39 @@ test('the WebGPU kernels carry the tree walk', async () => {
     assert.ok(source.includes('fn chooseEmitter'));
     assert.ok(source.includes('lightsFromEveryEmitter'));
   }
+});
+
+// Twenty point lights, only the first of which reaches the floor: the other nineteen hang close above it, so a walk that ignores
+// the link set spends nearly every draw on a light the floor cannot see.
+function linkedReceiverScene() {
+  const farLight = pointLight([0, 4, 0], 40);
+  const nearLights = Array.from({ length: 19 }, (_, index) => pointLight([(index % 5) * 1.4 - 2.8, 0.6, Math.floor(index / 5) * 1.4 - 2], 3));
+  const scene = manyLightScene(1);
+  scene.environment.pointLights = [farLight, ...nearLights];
+  scene.parts[0].material.lightMask = 1 << POINT_FIRST_BIT;
+  return scene;
+}
+
+function rootMeanSquareError(linear, reference) {
+  let sum = 0;
+  for (let index = 0; index < linear.length; index++) sum += (linear[index] - reference[index]) ** 2;
+  return Math.sqrt(sum / linear.length);
+}
+
+test('the light tree draws only the lights a linked receiver can see, with the mean of the uniform draw and no more noise', async () => {
+  const base = { width: 24, height: 18, bounces: 1, denoise: false, threads: 1 };
+  const reference = await renderPathTracedImage(linkedReceiverScene(), { ...base, samples: 256, seed: 99 });
+  const uniform = await renderPathTracedImage(linkedReceiverScene(), { ...base, samples: 8, lightSelection: 'uniform' });
+  const tree = await renderPathTracedImage(linkedReceiverScene(), { ...base, samples: 8, lightSelection: 'tree' });
+  const treeError = rootMeanSquareError(tree.linear, reference.linear);
+  const uniformError = rootMeanSquareError(uniform.linear, reference.linear);
+  assert.ok(treeError <= uniformError * 1.1, `tree error ${treeError} against uniform error ${uniformError}`);
+  const ratio = meanRadiance(tree.linear) / meanRadiance(reference.linear);
+  assert.ok(Math.abs(ratio - 1) < 0.05, `mean ratio ${ratio}`);
+});
+
+test('the GPU kernels limit the tree walk to the lights the hit part is linked to', async () => {
+  assert.ok(buildFragmentSource({ lightTree: true }).includes('linkedCount'));
+  const { buildMegakernelSource, WAVEFRONT_SOURCE } = await import('../src/path-tracer-webgpu-kernel.js');
+  for (const source of [buildMegakernelSource(), WAVEFRONT_SOURCE]) assert.ok(source.includes('linkedCount'));
 });
