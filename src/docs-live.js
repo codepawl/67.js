@@ -63,6 +63,7 @@ const addonLoaders = import.meta.glob([
   './texture-update.js',
   './cloth.js',
   './runtime.js',
+  './input.js',
   './update-part-vertices.js',
 ]);
 const moduleCache = new Map();
