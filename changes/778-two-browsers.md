@@ -1,0 +1,1 @@
+- Add `createBroadcastChannelTransport` to `67js/addons/netcode`, so tabs of one browser play together with no server, with a two-player sample page, a reference WebSocket relay (`scripts/netcode-relay.mjs`) and a headless Chrome test that plays two pages over both transports with 50 ms injected latency (#778)

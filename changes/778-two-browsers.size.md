@@ -1,0 +1,1 @@
+- netcode: about 0.7 KB gzip for a BroadcastChannel transport, the second transport the two-browser sample needs; the main bundles do not change.

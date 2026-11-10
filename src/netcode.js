@@ -823,6 +823,82 @@ export function createLoopbackNetwork(options = {}) {
   };
 }
 
+// Wraps a BroadcastChannel-like object ({ postMessage, addEventListener, close }) so tabs, windows and workers of one
+// browser can play together with no server. Every peer hears the channel; a message names its sender and, when sent to one
+// peer, its target. Peers find each other by a hello that the other side answers once, and leave with a goodbye on close().
+export function createBroadcastChannelTransport(channel, options = {}) {
+  if (channel === null || typeof channel !== 'object' || typeof channel.postMessage !== 'function' || typeof channel.addEventListener !== 'function') {
+    throw new TypeError('createBroadcastChannelTransport needs a BroadcastChannel-like object with postMessage(value) and addEventListener(type, listener), such as new BroadcastChannel("my-game").');
+  }
+  const id = requireName(options.id, 'createBroadcastChannelTransport id');
+  const maximumMessageBytes = boundedInteger(options.maximumMessageBytes ?? NETCODE_LIMITS.defaultMessageBytes, 'createBroadcastChannelTransport maximumMessageBytes', 256, NETCODE_LIMITS.maximumMessageBytes);
+  const listeners = new Set();
+  const knownPeers = new Set();
+  const stats = { sent: 0, received: 0, rejected: 0 };
+
+  function learnPeer(peerId) {
+    if (knownPeers.has(peerId)) return true;
+    if (knownPeers.size >= NETCODE_LIMITS.maximumPeers) return false;
+    knownPeers.add(peerId);
+    return true;
+  }
+
+  function onMessage(event) {
+    const packet = event?.data;
+    if (!isPlainObject(packet) || typeof packet.from !== 'string' || packet.from === '' || packet.from.length > NETCODE_LIMITS.maximumNameLength) {
+      stats.rejected += 1;
+      return;
+    }
+    const peerId = packet.from;
+    const isForMe = packet.to === undefined || packet.to === id;
+    if (peerId === id || !isForMe) return;
+    if (packet.left === true) {
+      knownPeers.delete(peerId);
+      return;
+    }
+    const isNew = !knownPeers.has(peerId);
+    if (!learnPeer(peerId)) {
+      stats.rejected += 1;
+      return;
+    }
+    if (packet.hello === true) {
+      if (isNew && packet.to === undefined) channel.postMessage({ from: id, to: peerId, hello: true });
+      return;
+    }
+    stats.received += 1;
+    for (const listener of [...listeners]) listener(peerId, packet.data);
+  }
+
+  channel.addEventListener('message', onMessage);
+  channel.postMessage({ from: id, hello: true });
+
+  return {
+    id,
+    peers: () => [...knownPeers],
+    send(peerId, message) {
+      const text = JSON.stringify(message);
+      if (text === undefined || text.length > maximumMessageBytes) {
+        throw new RangeError(`BroadcastChannel transport send: a message must be JSON of at most ${maximumMessageBytes} characters, got ${text === undefined ? 'a value JSON cannot hold' : text.length}.`);
+      }
+      channel.postMessage({ from: id, to: peerId, data: JSON.parse(text) });
+      stats.sent += 1;
+    },
+    receive(callback) {
+      if (typeof callback !== 'function') throw new TypeError('transport.receive needs a callback (peerId, message) => void.');
+      listeners.add(callback);
+      return () => listeners.delete(callback);
+    },
+    close() {
+      channel.postMessage({ from: id, left: true });
+      channel.removeEventListener?.('message', onMessage);
+      listeners.clear();
+      knownPeers.clear();
+      channel.close?.();
+    },
+    get stats() { return { ...stats }; },
+  };
+}
+
 // Wraps a socket-like object ({ send(text), addEventListener, readyState, close }) and opens nothing itself.
 // By default the socket is a line to one peer (`remoteId`). With `multiplexed: true` it talks through a relay that
 // wraps each message as { to, data } going out and { from, data } coming in, so a server or host can hear many clients.
