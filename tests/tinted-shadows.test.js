@@ -76,3 +76,19 @@ test('the tint code is compiled in only for renderers that have a tinting caster
   assert.match(createFragmentShader(['tintedShadows']), /#define USES_TINTED_SHADOWS \(true\)/);
   assert.match(createFragmentShader([]), /#define USES_TINTED_SHADOWS false/);
 });
+
+test('the shadow program never samples the sun map it is rendering into (that feedback loop dropped every opaque caster)', () => {
+  const { renderer, calls } = tintRenderer([opaqueBatch, glassBatch]);
+  renderer.depthAlphaUniforms = { opaqueShadow: 'opaqueShadow' };
+  renderer.depthWindUniforms = {};
+  renderer.drawShadowCasters = Renderer67.prototype.drawShadowCasters;
+  renderer.drawShadowCasters(renderer.lightProjection, 2048, true);
+  const unitSet = calls.find(([name, location]) => name === 'uniform1i' && location === 'opaqueShadow');
+  assert.ok(unitSet, 'the sampler is pointed away from its default unit 0');
+  assert.notEqual(unitSet[2], 0);
+  renderer.drawTintedShadows();
+  const bound = calls.filter(([name]) => name === 'bindTexture').map(call => call[2]);
+  assert.ok(bound.length > 0);
+  const unitBeforeBind = calls.findIndex(([name, unit]) => name === 'activeTexture' && unit - 1 === unitSet[2]);
+  assert.ok(unitBeforeBind >= 0, 'the tint draw binds the sun map on the sampler unit');
+});

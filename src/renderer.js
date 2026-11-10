@@ -148,6 +148,9 @@ const LOCAL_SHADOW_UNIT = 15;
 // layer textures or splat layers also reads, so those parts are blind to the tint (batch.tintBlind).
 const TINT_UNIT = 13;
 const TINT_MAP_SIZE = 1024;
+// The shadow program's opaqueShadow sampler reads the sun map on this unit in the tint draw. Unit 0 would read the map while
+// the opaque pass renders into it, a feedback loop that drops every opaque shadow caster.
+const OPAQUE_SHADOW_UNIT = 2;
 const LIGHT_UNIFORMS = ['pointLightCount', 'pointLightPositions[0]', 'pointLightColors[0]', 'pointLightRadii[0]', 'pointLightShadowTiles[0]',
   'spotLightCount', 'spotLightPositions[0]', 'spotLightColors[0]', 'spotLightDirections[0]', 'spotLightParameters[0]',
   'areaLightCount', 'areaLightPositions[0]', 'areaLightColors[0]', 'areaLightNormals[0]', 'areaLightTangents[0]',
@@ -1520,11 +1523,11 @@ export class Renderer67 {
     if (!this.tintFramebuffer) this.allocateTintTarget();
     context.bindFramebuffer(context.FRAMEBUFFER, this.tintFramebuffer);
     context.viewport(0, 0, TINT_MAP_SIZE, TINT_MAP_SIZE);
-    context.activeTexture(context.TEXTURE0);
+    context.activeTexture(context.TEXTURE0 + OPAQUE_SHADOW_UNIT);
     context.bindTexture(context.TEXTURE_2D, this.shadowTexture);
+    context.activeTexture(context.TEXTURE0);
     context.useProgram(this.depthProgram);
     const uniforms = this.depthAlphaUniforms;
-    context.uniform1i(uniforms.opaqueShadow, 0);
     context.uniform1f(uniforms.tintMapSize, TINT_MAP_SIZE);
     context.uniform1f(uniforms.tintBias, this.shadowBiasPerSlope * 2);
     context.uniform1f(uniforms.tintPass, 1);
@@ -1588,7 +1591,10 @@ export class Renderer67 {
     context.uniform1f(this.depthWindUniforms.wind, this.windState.strength);
     // The base map sampler must not alias the shadow texture on unit 0 while that texture is the render target.
     context.uniform1i(this.depthAlphaUniforms.baseMap, 1);
-    if (this.tintedShadowsActive) context.uniform1f(this.depthAlphaUniforms.tintPass, 0);
+    if (this.tintedShadowsActive) {
+      context.uniform1f(this.depthAlphaUniforms.tintPass, 0);
+      context.uniform1i(this.depthAlphaUniforms.opaqueShadow, OPAQUE_SHADOW_UNIT);
+    }
     context.enable(context.POLYGON_OFFSET_FILL);
     context.polygonOffset(1, 1);
     for (const batch of this.batches) {
