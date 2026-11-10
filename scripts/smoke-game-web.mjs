@@ -9,7 +9,7 @@ import { chromium } from 'playwright-core';
 
 // Proves the game path end to end: an agent builds a creature that runs and jumps to collect 3 coins and reach a goal using
 // only MCP tools, exports it as a static web build, and a recorded input replay wins the game in headless Chrome on the GPU.
-// Run it through the GPU lock: bash ~/.agents/tools/gpu-lock.sh node scripts/smoke-game-web.mjs
+// Run it through your GPU lock if the machine is shared: node scripts/smoke-game-web.mjs
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const CHROME_PATH = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
