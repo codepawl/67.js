@@ -66,6 +66,8 @@ function recipe() {
       { id: 'near-ball', geometry: 'sphere', material: 'glow', translation: [-0.6, 0.5, 1.5], scale: [1, 1, 1] },
       { id: 'far-block', geometry: 'box', material: 'red', translation: [1.4, 0.5, -3], scale: [1, 1, 1] },
     ],
+    // The ball dips below the floor slab, which would add the automatic floor as a fourth object.
+    environment: { ground: false },
     camera: { eye: [0, 1.6, 6], target: [0, 0.5, 0], fov: 40 },
     effects: { depthOfField: { blur: 0.8, focusDistance: 4.5 }, motionBlur: { shutter: 0.25 } },
     motion: { duration: 2, tracks: [{ kind: 'camera', property: 'eye', keyframes: [
