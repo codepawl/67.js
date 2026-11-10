@@ -106,6 +106,9 @@ export function axisRange(vertices, axis) {
 export function measureLanding(frames, restHeight) {
   const lowest = frame => axisRange(frame, 1).low;
   const contact = frames.findIndex(frame => lowest(frame) <= FLOOR_THICKNESS + 1e-3);
+  if (contact === -1) {
+    throw new Error(`measureLanding: the body never reached the floor within ${frames.length} frames; pass a longer film or lower the drop.`);
+  }
   let deepest = contact;
   let deepestHeight = Infinity;
   for (let frame = contact; frame < frames.length; frame++) {

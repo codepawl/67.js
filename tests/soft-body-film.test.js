@@ -51,6 +51,11 @@ test('a jelly cube landing is byte-identical across two bakes and dents on conta
   context.diagnostic(`jelly cube: bake ${milliseconds(bake)} ms for ${JELLY_FRAMES} steps (${milliseconds(bake / JELLY_FRAMES)} ms a step, ${FILM_FRAMES_PER_SECOND} steps a second)`);
 });
 
+test('measureLanding names the problem when the body never reaches the floor', () => {
+  const airborne = [new Float32Array([0, 5, 0, 1, 6, 1])];
+  assert.throws(() => measureLanding(airborne, 1), /never reached the floor within 1 frames/);
+});
+
 test('a flag lowered into folds is byte-identical across two bakes and keeps its layers apart', context => {
   const first = recordFilm(foldingFlagRecipe(), 'flag', FLAG_FRAMES);
   const second = recordFilm(foldingFlagRecipe(), 'flag', FLAG_FRAMES);
