@@ -4,6 +4,7 @@ import { vec3 } from 'gl-matrix';
 import { Renderer67 } from '../../src/index.js';
 import { parseGltf } from '../../src/gltf.js';
 import { resolveFlushParts } from '../../src/coplanar-overlap.js';
+import { TRAPS } from './traps.js';
 
 // One flat colour per part, no textures, so a pixel's colour says which part owns it and a changed colour is a changed owner.
 function paintPartsByOwner(parts) {
@@ -52,9 +53,10 @@ const ICONS = {
 const options = {
   reversed: parameters.get('reversed') !== '0',
   nearFit: parameters.get('nearFit') !== '0',
-  offset: parameters.get('offset') === '1',
+  offset: parameters.get('offset') !== '0',
   ids: parameters.get('ids') === '1',
 };
+const trapName = parameters.get('trap');
 const camera = { pivot: [0, 0, 0], yaw: 0.8, pitch: -0.5, distance: 10 };
 let mode = 'orbit';
 let glbBytes = null;
@@ -105,13 +107,24 @@ function frameFor(jitterPixels = 0) {
   return frame;
 }
 
+// A trap scene (traps.js) brings its own colour per face and its own camera.
+async function loadScene() {
+  if (!trapName) {
+    const loaded = await parseGltf(glbBytes.slice(0));
+    if (options.ids) paintPartsByOwner(loaded.parts);
+    return loaded;
+  }
+  if (!TRAPS[trapName]) throw new Error(`Unknown trap ${trapName}. Use one of: ${Object.keys(TRAPS).join(', ')}.`);
+  options.ids = true;
+  return TRAPS[trapName]();
+}
+
 async function build() {
-  if (!glbBytes) return;
+  if (!glbBytes && !trapName) return;
   setStatus('wait', 'Building the scene');
   renderer?.dispose();
   renderer = null;
-  const loaded = await parseGltf(glbBytes.slice(0));
-  if (options.ids) paintPartsByOwner(loaded.parts);
+  const loaded = await loadScene();
   bounds = measureBounds(loaded.parts);
   const size = bounds.maximum.map((value, axis) => value - bounds.minimum[axis]);
   extent = Math.max(...size);
@@ -331,6 +344,12 @@ async function loadFromUrl(url) {
   frameWholeScene();
 }
 
+async function loadTrap() {
+  assetName = trapName;
+  await build();
+  setCamera(TRAPS[trapName]());
+}
+
 bindControls();
 requestAnimationFrame(tick);
 document.querySelector('#speedValue').textContent = '';
@@ -338,7 +357,8 @@ window.flicker = {
   setCamera, probe, build, options, frameWholeScene,
   get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.() }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
-  ready: parameters.get('asset')
+  traps: Object.keys(TRAPS),
+  ready: trapName ? loadTrap().catch(error => setStatus('bad', error.message)) : parameters.get('asset')
     ? loadFromUrl(parameters.get('asset')).catch(error => setStatus('bad', error.message))
     : Promise.resolve(),
 };

@@ -10,7 +10,7 @@ import { fittedNearPlane, sceneBoundsOfParts } from './near-plane-fit.js';
 import { installReversedDepth, prepareCameraRelativeProgram } from './reversed-depth.js';
 import { resolveEffects } from './effects.js';
 import { frameDiagnostics } from './frame-diagnostics.js';
-import { depthLayerOf } from './depth-layer.js';
+import { depthLayerOf, flushOrderOf, RANKS_PER_LAYER } from './depth-layer.js';
 import { createLightingState, updateLightingState } from './lighting.js';
 import { RenderTargetLedger } from './render-target-ledger.js';
 import { SHADOW_ATLAS_WIDTH, SHADOW_TILE_SIZE, SHADOW_TILES_PER_ROW, tileViewport, writeShadowTile } from './local-shadows.js';
@@ -48,6 +48,13 @@ const PROCEDURAL_MATERIAL_TAGS = new Set(['water', 'foliage', 'grass', 'terrain'
 
 // Tags whose vertices sway in the wind; the shadow pass must be redrawn when time moves.
 const SWAYING_TAGS = new Set(['foliage', 'grass']);
+// One depth rank (applyDepthRank): 0.1 mm, plus 2^-19 of the distance (2 mm at 1 km), plus a quarter of a subpixel of
+// slope. On the 24-bit fallback a rank also moves two depth steps, since that buffer cannot hold the metric step far away.
+const FLUSH_STEP = 1e-4;
+const FLUSH_RELATIVE_STEP = 2 ** -19;
+const FLUSH_CLIP_STEP = 2 ** -22;
+const FLUSH_SLOPE_STEP = 4 / 256;
+const clipPerMetreScratch = new Float32Array(4);
 // Tags whose vertex shader moves vertices away from the instance matrix, so a bounding sphere would not hold.
 const DEFORMING_TAGS = new Set(['foliage', 'grass', 'water', 'fire', 'smoke']);
 // The farthest a vertex of a swaying tag moves in the world, per unit of wind strength (windOffset in shaders.js): foliage
@@ -420,7 +427,7 @@ export function groupParts(parts, batching = true) {
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
-    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)]) {
+    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)]) {
       if (!maps.has(value)) maps.set(value, new Map());
       maps = maps.get(value);
     }
@@ -612,9 +619,9 @@ export class Renderer67 {
     // The shadow map the constructor draws uses no assembly, so a first frame with none does not draw it again.
     this.assemblyAmount = 0;
     // `resolveCoplanar` is resolveFlushParts from the coplanar-overlap addon, passed in so the search stays out of the core bundle.
+    // It ranks near-coplanar triangles (flushOrderOf in depth-layer.js) before the parts are grouped into batches.
     if (resolveCoplanar && typeof resolveCoplanar !== 'function') throw new TypeError('resolveCoplanar is resolveFlushParts from 67js/addons/coplanar-overlap.');
-    // Exact-flush pairs are left to a float depth buffer, so they are layered only when reversed depth is switched off.
-    if (resolveCoplanar && !benchmark) resolveCoplanar(parts, reversedDepth === false && { minimumGap: 0 });
+    if (resolveCoplanar && !benchmark) resolveCoplanar(parts);
     this.fitParts = this.groundPart ? [...parts, this.groundPart] : parts;
     const groups = groupParts(this.fitParts, batching);
     const textureLimit = this.context.getParameter(this.context.MAX_TEXTURE_SIZE);
@@ -798,7 +805,7 @@ export class Renderer67 {
 
   finishMainProgram(pendingProgram) {
     this.program = finishProgram(this.context, pendingProgram);
-    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
+    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
       this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     }
@@ -1018,6 +1025,7 @@ export class Renderer67 {
     const vertexArray = context.createVertexArray();
     context.bindVertexArray(vertexArray);
     this.bindGeometryAttributes(geometry, batch.parts[0].material);
+    if (batch.flushIndexBuffer && levelSet === batch && level === 0) context.bindBuffer(context.ELEMENT_ARRAY_BUFFER, batch.flushIndexBuffer);
     const instanceBuffer = context.createBuffer();
     this.buffers.push(instanceBuffer);
     context.bindBuffer(context.ARRAY_BUFFER, instanceBuffer);
@@ -1051,7 +1059,7 @@ export class Renderer67 {
     });
   }
 
-  drawSelectedLevels(batch, selection, levelSet = batch) {
+  drawSelectedLevels(batch, selection, levelSet = batch, flushRanges = null) {
     const context = this.context;
     const stride = INSTANCE_STRIDE;
     for (let level = 0; level < selection.counts.length; level++) {
@@ -1066,8 +1074,21 @@ export class Renderer67 {
       context.bindBuffer(context.ARRAY_BUFFER, draw.instanceBuffer);
       context.bufferSubData(context.ARRAY_BUFFER, 0, this.selectionScratch, 0, count * stride);
       context.bindVertexArray(draw.vertexArray);
-      context.drawElementsInstanced(context.TRIANGLES, draw.indexCount, context.UNSIGNED_INT, 0, count);
+      // Only level 0 holds the ranked index order; the simpler levels draw far away, as one range.
+      if (flushRanges && level === 0) this.drawFlushRanges(batch, flushRanges, count);
+      else context.drawElementsInstanced(context.TRIANGLES, draw.indexCount, context.UNSIGNED_INT, 0, count);
     }
+  }
+
+  /** Draws a batch rank by rank from its ranked index order (flush-resolve.js), each rank a little closer in depth. */
+  drawFlushRanges(batch, ranges, instanceCount) {
+    const context = this.context;
+    const base = (batch.depthLayer ?? 0) * RANKS_PER_LAYER;
+    for (const range of ranges) {
+      this.applyDepthRank(base + range.rank);
+      context.drawElementsInstanced(context.TRIANGLES, range.count, context.UNSIGNED_INT, range.start * 4, instanceCount);
+    }
+    this.applyDepthRank(base);
   }
 
   uploadBatchData(parts, vertexArray) {
@@ -1075,6 +1096,9 @@ export class Renderer67 {
     const geometry = parts[0].geometry;
     context.bindVertexArray(vertexArray);
     this.bindGeometryAttributes(geometry, parts[0].material);
+    // The ranked order replaces the geometry's index buffer in this vertex array only; the vertex buffers stay shared.
+    const flushOrder = flushOrderOf(parts[0]);
+    const flushIndexBuffer = flushOrder ? this.uploadBuffer(context.ELEMENT_ARRAY_BUFFER, flushOrder.indices) : null;
     const stride = INSTANCE_STRIDE;
     const instanceData = new Float32Array(parts.length * stride);
     const normalMatrix = mat3.create();
@@ -1102,7 +1126,7 @@ export class Renderer67 {
     const [alphaMode, alphaCutoff, opacity, doubleSided] = materialAlphaState(parts[0].material);
     const layerState = materialLayerState(parts[0].material);
     const culling = this.createCullingState(parts);
-    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), pass: renderPass(parts[0].material) };
+    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
     if (parts[0].lods) culling.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level));
     culling.shadowLevels?.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level, batch.shadowLevels));
     parts.forEach((part, index) => this.partLocations.set(part, { batch, index, geometry: part.geometry, map, mapState, layerState, skin, jointMatrices: skin?.jointMatrices, skinIndices: geometry.skinIndices, skinWeights: geometry.skinWeights, morph, morphWeights: morph?.weights, morphTargets: geometry.morphTargets, normalMatrix: mat3.create(), committedMatrix: batch.instanceData.subarray(index * INSTANCE_STRIDE, index * INSTANCE_STRIDE + 16) }));
@@ -1131,7 +1155,7 @@ export class Renderer67 {
       const mapState = materialMapState(first.material);
       const sameParts = batch?.parts.length === group.length && batch.parts.every((part, index) => part === group[index]);
       const alphaState = materialAlphaState(first.material);
-      const sameState = location?.geometry === first.geometry && batch?.castShadow === castsShadow(first) && batch.receivesShadow === receivesShadow(first) && batch.compositeMode === compositeModeOf(first) && (batch.depthLayer ?? 0) === depthLayerOf(first) &&
+      const sameState = location?.geometry === first.geometry && batch?.castShadow === castsShadow(first) && batch.receivesShadow === receivesShadow(first) && batch.compositeMode === compositeModeOf(first) && (batch.depthLayer ?? 0) === depthLayerOf(first) && (batch.flushOrder ?? null) === flushOrderOf(first) &&
         batch.floor === (first.material.tag === 'floor') && batchPass(batch) === renderPass(first.material) &&
         [batch.alphaMode, batch.alphaCutoff, batch.opacity, batch.doubleSided].every((value, index) => value === alphaState[index]) &&
         batch.mapState.every((value, index) => value === mapState[index]) &&
@@ -1207,6 +1231,7 @@ export class Renderer67 {
       if (!retained.has(batch)) {
         this.context.deleteVertexArray(batch.vertexArray);
         releasedBuffers.add(batch.instanceBuffer);
+        if (batch.flushIndexBuffer) releasedBuffers.add(batch.flushIndexBuffer);
         this.releaseLevelDraws(batch, releasedBuffers);
       }
     }
@@ -2008,7 +2033,7 @@ export class Renderer67 {
       }
       return;
     }
-    this.applyDepthLayer(batch.depthLayer);
+    this.applyDepthRank((batch.depthLayer ?? 0) * RANKS_PER_LAYER);
     const useCoverage = masked && this.samples > 1 && !this.benchmark && !this.renderingPass;
     if (useCoverage) {
       context.enable(context.SAMPLE_ALPHA_TO_COVERAGE);
@@ -2023,15 +2048,31 @@ export class Renderer67 {
     context.uniform1f(uniforms.doubleSided, batch.doubleSided ? 1 : 0);
   }
 
-  /** Sets the scoped polygon offset of a depth layer for the colour pass; layer 0 is the plain depth test. */
-  applyDepthLayer(layer) {
+  /**
+   * Pulls what draws next `rank` steps toward the eye, in depth only, for the colour pass; rank 0 is the plain depth test.
+   * A step is a view-space distance (FLUSH_STEP metres plus FLUSH_RELATIVE_STEP of the depth), so it separates two faces the
+   * same way on every depth format, plus a slope-only polygon offset for the depth the rasteriser's snapping adds on a
+   * grazing face. `towardEye` is the sign of nearer depth values: -1 for standard depth, 1 for reversed depth.
+   */
+  applyDepthRank(rank, towardEye = -1) {
     const context = this.context;
-    if (layer) {
+    context.uniform3f(this.uniforms.flushBias, rank * FLUSH_STEP, rank * FLUSH_RELATIVE_STEP, towardEye < 0 && rank ? -rank * FLUSH_CLIP_STEP : 0);
+    if (rank) {
       context.enable(context.POLYGON_OFFSET_FILL);
-      context.polygonOffset(-layer, -layer * 4);
+      context.polygonOffset(towardEye * rank * FLUSH_SLOPE_STEP, 0);
     } else {
       context.disable(context.POLYGON_OFFSET_FILL);
     }
+  }
+
+  /** Tells the main program how clip space moves per metre along the view direction, for the depth ranks. */
+  setFlushProjection(viewProjection) {
+    const view = this.view;
+    const forward = [-view[2], -view[6], -view[10]];
+    for (let row = 0; row < 4; row++) {
+      clipPerMetreScratch[row] = viewProjection[row] * forward[0] + viewProjection[4 + row] * forward[1] + viewProjection[8 + row] * forward[2];
+    }
+    this.context.uniform4fv(this.uniforms.clipPerMetre, clipPerMetreScratch);
   }
 
   /** Reorders a blend batch's instances back to front for this eye; translation columns stand in for object centers. */
@@ -2102,7 +2143,7 @@ export class Renderer67 {
       for (const batch of addBatches) this.drawAlphaBatch(batch, true);
     }
     context.depthMask(true);
-    this.applyDepthLayer(0);
+    this.applyDepthRank(0);
     context.disable(context.BLEND);
     context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
     context.enable(context.CULL_FACE);
@@ -2190,11 +2231,14 @@ export class Renderer67 {
     if (textured && !this.benchmark && this.shaderFeatures?.has('instanced') === false)this.setSingleInstanceUniforms(batch.instanceData);
     // A reflecting matrix reverses screen winding: clockwise triangles are the front faces of a mirrored batch.
     if (batch.mirrored) this.context.frontFace(this.context.CW);
+    // The shadow pass (not textured) draws the whole index buffer; its order does not matter there.
+    const flushRanges = textured && !this.benchmark ? batch.flushOrder?.ranges ?? null : null;
     if (selection && !selection.isEverything) {
-      this.drawSelectedLevels(batch, selection, levelSet);
+      this.drawSelectedLevels(batch, selection, levelSet, levelSet === batch ? flushRanges : null);
     } else {
       this.context.bindVertexArray(batch.vertexArray);
-      this.context.drawElementsInstanced(this.context.TRIANGLES, batch.indexCount, this.context.UNSIGNED_INT, 0, batch.instanceCount);
+      if (flushRanges) this.drawFlushRanges(batch, flushRanges, batch.instanceCount);
+      else this.context.drawElementsInstanced(this.context.TRIANGLES, batch.indexCount, this.context.UNSIGNED_INT, 0, batch.instanceCount);
     }
     if (batch.mirrored) this.context.frontFace(this.context.CCW);
   }
@@ -2286,6 +2330,7 @@ export class Renderer67 {
     context.enable(context.CULL_FACE);
     context.useProgram(this.program);
     context.uniformMatrix4fv(this.uniforms.viewProjection, false, this.viewProjection);
+    this.setFlushProjection(this.viewProjection);
     context.uniformMatrix4fv(this.uniforms.lightProjection, false, this.lightProjection);
     context.uniform1f(this.uniforms.shadowBiasPerSlope, this.shadowBiasPerSlope);
     context.uniform3fv(this.uniforms.eye, eye);
@@ -2336,7 +2381,7 @@ export class Renderer67 {
         else this.drawAlphaBatch(batch, true, passMode !== OBJECT_ID_PASS_MODE);
       }
     }
-    this.applyDepthLayer(0);
+    this.applyDepthRank(0);
     context.disable(context.SAMPLE_ALPHA_TO_COVERAGE);
     context.enable(context.CULL_FACE);
     context.bindVertexArray(null);

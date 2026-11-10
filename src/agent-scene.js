@@ -1458,26 +1458,37 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     return share !== null && share >= CLOSED_ROOM_SHARE ? [closedRoomDiagnostic(share, isLitByLampsOnly(state.recipe.environment))] : [];
   }
 
-  // environment.resolveCoplanar 'offset' puts the smaller part of each coplanar pair on the next depth layer, so the
-  // renderer draws it with a polygon offset. Geometry never moves. The result is kept while the parts are the same objects.
-  let coplanarCache = null;
+  // Near-coplanar triangles are ranked at draw time (issue #751) unless environment.resolveCoplanar is false, once the
+  // coplanar code is loaded. The ranks sit beside the parts, so the parts and their geometry stay as they are. The search
+  // runs again only when the parts are new objects.
+  let flushCache = null;
   function stageCoplanarOffsets(recipe, parts) {
-    if (recipe.environment.resolveCoplanar !== 'offset') {
+    if (!agentSceneModuleLoaded('coplanar')) {
       return parts;
     }
-    if (coplanarCache?.parts === parts) {
-      return coplanarCache.resolved;
+    const coplanar = agentSceneModule('coplanar');
+    if (recipe.environment.resolveCoplanar === false) {
+      if (flushCache) {
+        coplanar.clearFlushParts(flushCache.parts);
+      }
+      flushCache = null;
+      return parts;
     }
-    const resolved = Object.freeze(agentSceneModule('coplanar').resolveCoplanarParts(parts));
-    coplanarCache = { parts, resolved };
-    return resolved;
+    if (flushCache?.parts !== parts) {
+      flushCache = { parts, ...coplanar.resolveFlushParts(parts) };
+    }
+    return parts;
   }
 
-  // scene_inspect names coplanar pairs: the check is bounded, runs on inspect only, once the coplanar code is loaded, and is kept until the scene changes.
+  // scene_inspect names what the ranking could not settle. A scene that opted out gets the pairs of parts that fight instead:
+  // that check is bounded, runs on inspect only and is kept until the scene changes.
   let coplanarReportCache = null;
   function coplanarProblems() {
     if (!agentSceneModuleLoaded('coplanar')) {
       return [];
+    }
+    if (state.recipe.environment.resolveCoplanar !== false) {
+      return agentSceneModule('coplanar').flushLeftoverDiagnostics(flushCache?.leftovers ?? []);
     }
     if (coplanarReportCache?.revision !== revision) {
       const coplanar = agentSceneModule('coplanar');
@@ -1819,6 +1830,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         ...(state.recipe.armatures ? { rig: rigReport(state.recipe, state.skinBindings) } : {}),
         boundsSpace: 'authored-base-world',
         ...(diagnostics.length ? { diagnostics } : {}),
+        ...(flushCache?.ranked ? { flush: { ranked: flushCache.ranked } } : {}),
         counts: {
           nodes: state.recipe.nodes.length, parts: state.parts.length,
           geometries: state.geometries.size, materials: state.recipe.materials.length,

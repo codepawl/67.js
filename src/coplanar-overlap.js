@@ -1,7 +1,11 @@
-import { depthLayerOf, MAXIMUM_DEPTH_LAYER, setFlushDepthLayers } from './depth-layer.js';
+import { depthLayerOf, flushOrderOf, setFlushOrder } from './depth-layer.js';
+import { resolveFlush } from './flush-resolve.js';
+import { boundsDiagonal as diagonal, determinantSign, worldBounds } from './flush-search.js';
 
-// The renderer runs resolveFlushParts once on the parts it is built with; the diagnostics and resolveCoplanar use the same search.
-// Finds pairs of parts that draw the same plane in the same place, which z-fight: a sign flush with a wall, a road marking
+// Two jobs. resolveFlushParts ranks near-coplanar triangles so they stop z-fighting (flush-search.js, flush-resolve.js); the
+// renderer runs it once on the parts it is built with, and the agent scene whenever its parts change. findCoplanarOverlaps is
+// the report for a scene that opted out: it names the pairs of parts that fight and how to fix them.
+// It finds pairs of parts that draw the same plane in the same place, which z-fight: a sign flush with a wall, a road marking
 // on asphalt, two boxes whose visible faces coincide. The work is bounded: a grid over part bounds, then triangles only
 // inside the shared box of a pair, with a fixed budget for the whole scene (`truncated` says it ran out).
 // Only faces that look the same way count, since a face against a floor looks away from it and is culled. A part with a
@@ -11,8 +15,6 @@ import { depthLayerOf, MAXIMUM_DEPTH_LAYER, setFlushDepthLayers } from './depth-
 export const COPLANAR_TOLERANCE = 0.001;
 /** Overlaps smaller than this (square metres) are edge contact, not a fight. */
 export const COPLANAR_MINIMUM_AREA = 1e-4;
-/** Pairs on one plane to within this distance (metres) are left to the depth buffer by resolveFlushParts. */
-export const EXACT_FLUSH_DISTANCE = 1e-6;
 /** The distance suggested in the fix text, in metres. */
 export const SUGGESTED_OFFSET = 0.002;
 const DEFAULT_WORK_BUDGET = 1_000_000;
@@ -22,47 +24,6 @@ const PRIORITY_BINS = 12;
 const MAXIMUM_LISTED_PAIRS = 3_000_000;
 const SAME_FACING = Math.cos(Math.PI / 180);
 const REPORTED_PAIRS = 8;
-
-const localBoundsByGeometry = new WeakMap();
-
-function localBounds(geometry) {
-  let bounds = localBoundsByGeometry.get(geometry);
-  if (bounds) return bounds;
-  bounds = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-  const { positions } = geometry;
-  for (let offset = 0; offset < positions.length; offset += 3) {
-    for (let axis = 0; axis < 3; axis++) {
-      bounds[axis] = Math.min(bounds[axis], positions[offset + axis]);
-      bounds[3 + axis] = Math.max(bounds[3 + axis], positions[offset + axis]);
-    }
-  }
-  localBoundsByGeometry.set(geometry, bounds);
-  return bounds;
-}
-
-function worldBounds(part) {
-  const local = localBounds(part.geometry);
-  const matrix = part.matrix;
-  const bounds = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-  for (let corner = 0; corner < 8; corner++) {
-    const x = corner & 1 ? local[3] : local[0];
-    const y = corner & 2 ? local[4] : local[1];
-    const z = corner & 4 ? local[5] : local[2];
-    for (let axis = 0; axis < 3; axis++) {
-      const value = matrix[axis] * x + matrix[4 + axis] * y + matrix[8 + axis] * z + matrix[12 + axis];
-      bounds[axis] = Math.min(bounds[axis], value);
-      bounds[3 + axis] = Math.max(bounds[3 + axis], value);
-    }
-  }
-  return bounds;
-}
-
-function determinantSign(matrix) {
-  const determinant = matrix[0] * (matrix[5] * matrix[10] - matrix[6] * matrix[9])
-    - matrix[4] * (matrix[1] * matrix[10] - matrix[2] * matrix[9])
-    + matrix[8] * (matrix[1] * matrix[6] - matrix[2] * matrix[5]);
-  return determinant < 0 ? -1 : 1;
-}
 
 // A plane is hashed by its normal (sign folded, 0.01 steps) and its offset (buckets of twice the tolerance). Two triangles
 // on one plane share a bucket or sit in neighbouring buckets (the offset is the lowest part of the key), so candidate pairs
@@ -239,12 +200,9 @@ function boundsOverlapRegion(first, second, tolerance) {
   return region;
 }
 
-function diagonal(bounds) {
-  return Math.hypot(bounds[3] - bounds[0], bounds[4] - bounds[1], bounds[5] - bounds[2]);
-}
-
+// A pair on different layers is a whole layer of ranks apart, and a part with a ranked order was settled by resolveFlushParts.
 function resolvedByLayer(first, second) {
-  return depthLayerOf(first) !== depthLayerOf(second);
+  return depthLayerOf(first) !== depthLayerOf(second) || Boolean(flushOrderOf(first) || flushOrderOf(second));
 }
 
 // Whether the boxes of two triangles touch, a cheap test before the plane and area checks.
@@ -438,7 +396,7 @@ export function coplanarOverlapDiagnostics({ overlaps, truncated }) {
     parts: [smaller.name, larger.name],
     area: Math.round(area * 10000) / 10000,
     message: `${smaller.name} and ${larger.name} draw the same plane (${metres(distance * 1000)} mm apart, ${metres(area)} m2 overlap) and will flicker (z-fighting).`,
-    fix: `Move ${smaller.name} ${metres(SUGGESTED_OFFSET * 1000)} mm along its normal [${normal.map(component => Math.round(component * 1000) / 1000).join(', ')}], or set decal: true on ${smaller.name}, or set environment.resolveCoplanar to 'offset' to bias it at draw time without moving it.`,
+    fix: `Move ${smaller.name} ${metres(SUGGESTED_OFFSET * 1000)} mm along its normal [${normal.map(component => Math.round(component * 1000) / 1000).join(', ')}], or set decal: true on ${smaller.name}, or drop resolveCoplanar: false from the environment so the faces are ranked at draw time without moving.`,
   }));
   if (overlaps.length > REPORTED_PAIRS || (truncated && overlaps.length)) {
     problems.push({
@@ -446,38 +404,10 @@ export function coplanarOverlapDiagnostics({ overlaps, truncated }) {
       severity: 'warning',
       target: 'scene',
       message: truncated ? `${overlaps.length} coplanar pairs found before the check hit its work budget; more may exist.` : `${overlaps.length - REPORTED_PAIRS} more coplanar pairs.`,
-      fix: "Set environment.resolveCoplanar to 'offset' to bias every smaller part at draw time.",
+      fix: 'Drop resolveCoplanar: false from the environment so every flush face is ranked at draw time.',
     });
   }
   return problems;
-}
-
-/**
- * The layer each smaller part of a pair should draw on, as a Map from part to layer. A part that is the smaller one against
- * a part already on layer n gets n + 1. Parts that set their own layer are left alone.
- * A chain deeper than MAXIMUM_DEPTH_LAYER would pile parts on the top layer, where they fight each other again at the largest
- * offset, so a part that cannot clear its larger part stays where it is. Layers are settled by repeating until nothing moves,
- * because parts of equal size have no order that a single sweep could follow.
- * A pair closer than `minimumGap` (metres, default 0: every pair counts) is skipped. resolveFlushParts passes
- * EXACT_FLUSH_DISTANCE: such a pair lies on one plane to within rounding, which a float depth buffer (reversed depth, the
- * default) already breaks the same way every frame, while an offset moves the whole part and made the metro film flicker far
- * more (issue #593: 5 to 7633 flagged pixels), so only pairs with a real gap get a layer there.
- */
-export function coplanarLayers(overlaps, { minimumGap = 0 } = {}) {
-  const layers = new Map();
-  for (let pass = 0; pass <= MAXIMUM_DEPTH_LAYER + 1; pass++) {
-    let moved = false;
-    for (const { smaller, larger, distance } of overlaps) {
-      if (distance < minimumGap) continue;
-      if (smaller.decal !== undefined || smaller.depthLayer !== undefined) continue;
-      const wanted = (layers.get(larger) ?? depthLayerOf(larger)) + 1;
-      if (wanted > MAXIMUM_DEPTH_LAYER || wanted <= (layers.get(smaller) ?? 0)) continue;
-      layers.set(smaller, wanted);
-      moved = true;
-    }
-    if (!moved) break;
-  }
-  return layers;
 }
 
 /**
@@ -500,21 +430,47 @@ export function installCoplanarDiagnostics(renderer, onOverlaps = null) {
 }
 
 /**
- * Puts the smaller part of each coplanar pair on the next depth layer (a polygon offset at draw time, geometry never moves),
- * for the parts of one scene. The renderer calls it once when it is built; a part that sets `decal` or `depthLayer` keeps its own.
- * Pairs on one plane to within `minimumGap` (default EXACT_FLUSH_DISTANCE) are left to the depth buffer; the renderer passes
- * `{ minimumGap: 0 }` when `reversedDepth` is false. With 'auto', a scene whose far / near ratio stays low never switches
- * reversed depth on, and there exact-flush pairs rely on the plain depth buffer.
+ * Ranks the near-coplanar triangles of one scene's parts, inside a part and across parts, so the face in front wins at every
+ * distance (a depth-only bias at draw time; geometry, parts and matrices are untouched). The renderer calls it once when it is
+ * built, as its `resolveCoplanar` option. Returns `{ ranked, leftovers }` (see resolveFlush in flush-resolve.js).
  */
-export function resolveFlushParts(parts, { minimumGap = EXACT_FLUSH_DISTANCE } = {}) {
-  const layers = coplanarLayers(findCoplanarOverlaps(parts).overlaps, { minimumGap });
-  setFlushDepthLayers(layers);
-  return layers.size;
+export function resolveFlushParts(parts, options) {
+  return resolveFlush(parts, options);
 }
 
-/** `parts` with `depthLayer` set on the smaller part of each coplanar pair; other parts are returned as they are. */
-export function resolveCoplanarParts(parts) {
-  const layers = coplanarLayers(findCoplanarOverlaps(parts).overlaps);
-  if (layers.size === 0) return parts;
-  return parts.map(part => (layers.has(part) ? Object.freeze({ ...part, depthLayer: layers.get(part) }) : part));
+/** Drops the ranks resolveFlushParts gave these parts, for a scene that switches the resolution off. */
+export function clearFlushParts(parts) {
+  for (const part of parts) setFlushOrder(part, null);
+}
+
+const LEFTOVER_TEXT = {
+  'rank-overflow': {
+    message: (part, triangles) => `${part}: ${triangles} triangles sit in stacks deeper than 15 near-coplanar faces and may flicker far away.`,
+    fix: 'Remove the duplicate faces in the asset.',
+  },
+  'double-sided-gap': {
+    message: (part, triangles) => `${part}: ${triangles} pairs of double-sided faces lie a small gap apart, facing opposite ways, and may flicker far away.`,
+    fix: 'Make the material single sided, or move the faces farther apart.',
+  },
+  unchecked: {
+    message: part => `${part} was not checked for flush faces: the scene is past the search budget.`,
+    fix: 'Split the scene, or set decal: true on the parts that lie flush on others.',
+  },
+  'collapsed-node': {
+    message: part => `${part} has an axis scaled to nothing, so its faces fold onto one plane and flicker.`,
+    fix: 'Hide the node instead of scaling it to zero.',
+  },
+};
+
+/** Warnings in the shape of `agent-diagnostics.js` for what resolveFlushParts could not settle, the largest first. */
+export function flushLeftoverDiagnostics(leftovers) {
+  const largestFirst = [...leftovers].sort((first, second) => second.triangles - first.triangles);
+  return largestFirst.slice(0, REPORTED_PAIRS).map(({ reason, part, triangles }) => ({
+    kind: 'coplanar-overlap',
+    severity: 'warning',
+    target: part,
+    reason,
+    message: LEFTOVER_TEXT[reason].message(part, triangles),
+    fix: LEFTOVER_TEXT[reason].fix,
+  }));
 }

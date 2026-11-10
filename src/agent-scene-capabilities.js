@@ -255,9 +255,9 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     field: 'environment.viewTransform', names: VIEW_TRANSFORM_NAMES, default: 'aces', look: 'environment.look', looks: LOOK_NAMES,
     choose: 'agx for lit scenes and Blender comparisons, neutral for product and brand colour, aces for contrast; needs loadAgentSceneModules',
   }),
-  // Flush surfaces flicker (z-fighting). scene_inspect and renderer.diagnostics warn with coplanar-overlap; these fix it at draw time.
+  // Flush surfaces flicker (z-fighting). They are ranked at draw time by default; coplanar-overlap warns about what is left.
   renderFlags: Object.freeze({ nodeFields: Object.freeze(['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher']), motion: 'node track property visible: 1 or 0, STEP', note: 'visible:false hides a node and children; holdout and shadowCatcher need a transparent canvas (Renderer67 transparent:true); flags split batches.' }),
-  depthBias: Object.freeze({ nodeFields: Object.freeze(['decal', 'depthLayer']), maxDepthLayer: 4, environment: 'environment.resolveCoplanar', modes: Object.freeze(['offset']), warning: 'coplanar-overlap', note: 'decal wins over the surface below; depthLayer stacks decals; resolveCoplanar offset biases the smaller part of a flagged pair.' }),
+  depthBias: Object.freeze({ nodeFields: Object.freeze(['decal', 'depthLayer']), maxDepthLayer: 4, environment: 'environment.resolveCoplanar', modes: Object.freeze(['offset', false]), default: 'offset', warning: 'coplanar-overlap', note: 'Automatic: flush or near-flush faces, inside one mesh or across parts, are ranked per triangle at draw time, the front face wins, geometry never moves; no field needed. resolveCoplanar false opts out. decal wins over the surface below; depthLayer stacks decals. scene_inspect flush.ranked counts ranked parts. A coplanar-overlap warning carries reason rank-overflow (over 15 stacked faces: remove duplicates), double-sided-gap, unchecked or collapsed-node.' }),
   proceduralMotion: true,
   motionIk: Object.freeze(['two-bone', 'aim', 'chain', 'spline']),
   // Authored rigs: armatures expand into bone nodes, and a node `skin` binds a mesh with automatic weights (four influences).
