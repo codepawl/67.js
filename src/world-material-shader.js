@@ -330,16 +330,16 @@ vec2 waterDetailSlope(vec2 position, float footprint, out float lostVariance) {
   float wavenumber = 2.1;
   float angle = 0.4;
   for (int index = 0; index < 8; index++) {
-    float visible = 1.0 - smoothstep(0.08, 0.25, footprint * wavenumber / 6.2831853);
+    float visible = 1.0 - smoothstep(0.06, 0.2, footprint * wavenumber / 6.2831853);
     vec2 direction = vec2(cos(angle), sin(angle));
-    float drift = terrainNoise(position * 0.21 + float(index) * 9.17).x;
-    float strength = 0.35 + 1.3 * terrainNoise(position * 0.13 + float(index) * 23.9 + 4.0).x;
-    float phase = dot(position, direction) * wavenumber + time * sqrt(9.81 * wavenumber) + float(index) * 1.7 + drift * 0.5;
+    float drift = terrainNoise(position * wavenumber * 0.09 + float(index) * 9.17).x - 0.5;
+    float strength = 0.15 + 1.7 * terrainNoise(position * wavenumber * 0.06 + float(index) * 23.9 + 4.0).x;
+    float phase = dot(position, direction) * wavenumber + time * sqrt(9.81 * wavenumber) + float(index) * 1.7 + drift * 5.0;
     float amplitude = 0.085 * pow(wavenumber / 2.1, -0.3) * strength;
     slope += direction * cos(phase) * amplitude * visible;
     lostVariance += 0.5 * amplitude * amplitude * (1.0 - visible);
     wavenumber *= 1.7320508;
-    angle += 2.399963 + 0.08 * drift;
+    angle += 2.399963;
   }
   return slope;
 }
@@ -458,7 +458,7 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
     radiance = mix(radiance * 0.6 + color * ambientIntensity * daylight * 1.7, skyColor * ambientIntensity, clamp(reflectivity, 0.0, 1.0));
     // Sun glint: a narrow lobe around the mirror direction, the width of open water slopes, bright enough to bloom.
     vec3 halfVector = normalize(normalize(lightDirection) + viewDirection);
-    float glintSharpness = 1.0 / (1.0 / 500.0 + waterLostVariance);
+    float glintSharpness = 1.0 / (1.0 / 500.0 + 0.35 * waterLostVariance);
     float glintShape = pow(max(dot(normal, halfVector), 0.0), glintSharpness);
     float glintFresnel = 0.02 + 0.98 * pow(1.0 - max(dot(halfVector, viewDirection), 0.0), 5.0);
     radiance += vec3(1.0, 0.9, 0.7) * glintShape * (0.5 + 40.0 * glintFresnel) * 6.0 * keyResponse * (1.0 - waterFoam);

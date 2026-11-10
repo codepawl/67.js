@@ -118,3 +118,15 @@ test('environment motion tracks animate physical sky sunElevation, sunRotation a
     motion: { duration: 1, tracks: [{ kind: 'environment', property: 'sunElevation', keyframes: [{ time: 0, value: 45 }] }] },
   }), /environment\.sky/);
 });
+
+test('the sky map has no step at the horizon: haze fills the first degrees below it', () => {
+  const map = agentEnvironmentMap(skyEnvironment({ sunElevation: 9, turbidity: 2 }));
+  const column = Math.floor(map.width / 2);
+  const radianceAt = row => map.data[(row * map.width + column) * 3 + 1];
+  const horizonRow = map.height / 2;
+  const above = radianceAt(horizonRow - 1);
+  const below = radianceAt(horizonRow);
+  assert.ok(Math.abs(above - below) / above < 0.03, `radiance steps from ${above} to ${below} across the horizon`);
+  const deepBelow = radianceAt(horizonRow + Math.round(map.height / 12));
+  assert.ok(Math.abs(deepBelow - below) / below > 0.1, 'well below the horizon the ground colour takes over');
+});

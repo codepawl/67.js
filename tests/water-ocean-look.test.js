@@ -69,5 +69,7 @@ test('wind ripples break the glint into facets and the foam into streaks', () =>
   assert.match(shader, /vec2 waterDetailSlope\(/);
   assert.match(shader, /float foamBand = 0\.13 \+ 1\.5 \* fwidth\(foamDensity\)/);
   assert.match(shader, /rippleTilt\.xz \+= detailSlope/);
+  assert.match(shader, /terrainNoise\(position \* wavenumber \* 0\.09/);
+  assert.match(shader, /1\.0 \/ \(1\.0 \/ 500\.0 \+ 0\.35 \* waterLostVariance\)/);
   assert.match(shader, /terrainNoise\(crestPosition \* vec2\(3\.1, 14\.0\)/);
 });
