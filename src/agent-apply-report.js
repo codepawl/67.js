@@ -108,6 +108,9 @@ function describeOperation(working, operation, maxText) {
     else working[name] = structuredClone(next);
     return { changed: operation[name] === null ? `cleared ${name}` : `set ${name}` };
   }
+  if (type === 'bake-motion') {
+    return { changed: `baked ${shortList(operation.nodes ?? [], maxText)} to keys` };
+  }
   if (type === 'edit-mesh') {
     const count = Array.isArray(operation.edits) ? operation.edits.length : 0;
     if (count === 0 && !operation.replace) return { warning: 'no change, no edits given' };

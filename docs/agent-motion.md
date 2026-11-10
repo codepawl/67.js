@@ -415,7 +415,7 @@ It can contain at most 128 tracks, 64 keys per track, and 2048 keys in total.
 Values and tangents must remain finite at Float32 precision.
 The scene integration must also enforce its total recipe byte budget.
 
-1. Run `node --test tests/agent-motion.test.js`.
+1. Run `node --test tests/agent-motion.test.js tests/motion-bake.test.js`.
 
 The CPU tests cover curves, looping, references, bounds, backward seeks, retained buffers, and failed sample publication.
 Native rendering and published MCP verification belong to the integration layer.
