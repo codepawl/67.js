@@ -47,6 +47,7 @@ async function probeInPage(page) {
   const { box } = await import('/src/geometry.js');
   const { Renderer67 } = await import('/src/renderer.js');
   const { createProgressiveTracer } = await import('/src/path-tracer-progressive.js');
+  const { createRealtimeTracer } = await import('/src/path-tracer-realtime.js');
   await import('/src/fog-shader.js');
   const wall = { geometry: box(0, 1), matrix: new Float32Array([4, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0.2, 0, 0, 0, -0.1, 1]), material: { tag: 'unlit', color: [0.4, 0.4, 0.4], metallic: 0, roughness: 1, emission: 0 } };
   const volume = [{ shape: 'sphere', center: [0, 0, 1], radius: 1 }];
@@ -82,10 +83,17 @@ async function probeInPage(page) {
   } catch (failure) {
     result.progressive = failure.message;
   }
+  try {
+    const tracer = await createRealtimeTracer({ parts: [wall], environment: { localVolumes: volume }, camera: { eye: [0, 0, 5], target: [0, 0, 0], fov: 40 } }, { backend: 'gpu', width: 64, height: 64 });
+    tracer.dispose();
+    result.realtime = null;
+  } catch (failure) {
+    result.realtime = failure.message;
+  }
   return result;
 }
 
-test('the renderer rejects a bad localVolumes value before it binds a post program, and the progressive tracer refuses volumes', async (context) => {
+test('the renderer rejects a bad localVolumes value before it binds a post program, and the progressive and WebGL real-time tracers refuse volumes', async (context) => {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -114,6 +122,7 @@ test('the renderer rejects a bad localVolumes value before it binds a post progr
     assert.equal(outcome.noDepth.choseProgram, false);
     assert.equal(outcome.valid.message, null);
     assert.match(outcome.progressive, /CPU path tracer only; the progressive path tracer cannot draw them/);
+    assert.match(outcome.realtime, /environment.localVolumes is traced by the CPU path tracer only; the WebGL realtime path tracer cannot draw them/);
   } finally {
     await browser?.close();
     server.kill();
