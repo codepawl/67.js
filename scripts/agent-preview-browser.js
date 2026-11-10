@@ -824,12 +824,14 @@ window.__agentPreview = {
       ? { ...record.scene.effects, depthOfField: { ...record.scene.effects.depthOfField, ...depthOfFieldOverrides } }
       : undefined;
     const outputFramebuffer = floatOutput && !pass ? record.floatModule.outputFor(record, canvas).framebuffer : undefined;
-    draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
+    const drawFrame = () => draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
       ...(brightness === 1 ? {} : { exposure }), ...(shotEffects ? { effects: shotEffects } : {}) });
+    const wireframe = pass === 'wireframe' ? record.wireframeModule.withWireframe(record.renderer, drawFrame) : drawFrame();
     // The first lit frame of a job is checked; a pass or a fade has no exposure to judge.
     const checkLitFrame = diagnose && !pass && !floatOutput && brightness === 1;
     const info = renderInfo(record.renderer, pass ? [] : viewProblems(record, shotCamera ?? record.scene.camera, checkLitFrame ? record.scene.effects.exposure : undefined));
-    return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() }
+    return pass === 'wireframe' ? { ...info, wireframe }
+      : pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() }
       : pass === 'cryptomatte' ? { ...info, cryptomatte: record.renderer.passSupport.cryptomatteManifest() }
       : info;
   },
@@ -838,6 +840,10 @@ window.__agentPreview = {
   // 16-bit PNG and EXR output load their module here, so a scene that never asks for them does not carry it.
   async prepareFloatOutput({ sessionId }) {
     requireSession(sessionId).floatModule = await import('../src/float-output.js');
+  },
+  // The wireframe pass draws its edges with this module, loaded here so a scene that never asks for it does not carry it.
+  async prepareWireframe({ sessionId }) {
+    requireSession(sessionId).wireframeModule = await import('../src/wireframe-pass.js');
   },
   readFloat({ sessionId, source, region }) {
     const record = requireSession(sessionId);

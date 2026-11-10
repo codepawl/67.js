@@ -98,8 +98,8 @@ export const LIGHTING_SETUP_NAMES = Object.freeze(['daylight', 'overcast', 'suns
 export const DEFAULT_LIGHTING_SETUP = 'daylight';
 export const DEFAULT_AMBIENT_OCCLUSION = 0;
 
-// Render passes a render job can write next to the lit image (see RENDER_PASS_MODES in renderer.js, which must list the same names).
-export const RENDER_PASS_NAMES = Object.freeze(['albedo', 'normal', 'emission', 'depth', 'objectId', 'diffuse', 'glossy', 'shadow', 'ao', 'mist', 'position', 'velocity', 'uv', 'transmission', 'volume', 'environment', 'cryptomatte', 'aov']);
+// Render passes a render job can write next to the lit image (see RENDER_PASS_MODES in render-passes.js, which lists the same names, wireframe being drawn as its diffuse mode).
+export const RENDER_PASS_NAMES = Object.freeze(['albedo', 'normal', 'emission', 'depth', 'objectId', 'diffuse', 'glossy', 'shadow', 'ao', 'mist', 'position', 'velocity', 'uv', 'transmission', 'volume', 'environment', 'cryptomatte', 'aov', 'wireframe']);
 // Video encoders a render job can choose (nvenc is h264_nvenc and fails the job when the GPU or ffmpeg lacks it), the
 // longest video, and the audio file names a job may mix in from the --audio folder: one path segment with a known
 // extension, no drive or protocol syntax.
@@ -237,7 +237,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   alphaModes: RECIPE_ALPHA_MODES,
   materialPatterns: MATERIAL_PATTERN_TYPES, maxMaterialPatterns: MAX_MATERIAL_PATTERNS,
   materialMappings: MATERIAL_MAPPINGS,
-  renderPasses: Object.freeze({ names: RENDER_PASS_NAMES, files: 'render-<pass>.png/.exr or frame-N-<pass>.png/.exr (multilayer: true packs all into render.exr)', depth: `16 bits in red and green over ${RENDER_PASS_DEPTH_RANGE} m`, objectId: '24 bits in RGB; metrics.objectNames lists parts', cryptomatte: 'R object hash, G material hash, B coverage; metrics.cryptomatte holds manifests', aov: 'material.aov or pattern.graph.aov linear RGB' }),
+  renderPasses: Object.freeze({ names: RENDER_PASS_NAMES, files: 'render-<pass>.png/.exr or frame-N-<pass>.png/.exr (multilayer: true packs all into render.exr)', depth: `16 bits in red and green over ${RENDER_PASS_DEPTH_RANGE} m`, objectId: '24 bits in RGB; metrics.objectNames lists parts', cryptomatte: 'R object hash, G material hash, B coverage; metrics.cryptomatte holds manifests', aov: 'material.aov or pattern.graph.aov linear RGB', wireframe: 'polygon edges over diffuse; open orange, non-manifold red, flipped cyan, degenerate magenta; metrics.wireframe' }),
   // Recipe timeline (src/film-timeline.js), rendered with settings.timeline; the rest is in docs/agent-render-jobs.md.
   filmTimeline: Object.freeze({
     maxShots: 64, maxTotalSeconds: 60, maxShotSeconds: 30,
