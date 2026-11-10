@@ -200,9 +200,18 @@ float localVolumeProfile(int index, vec3 position, bool withNoise) {
   vec3 offset = position - localVolumeCenters[index].xyz;
   if (localVolumeCenters[index].w < 0.5) offset = localVolumeLocal(index, offset);
   vec3 halfSize = localVolumeExtents[index].xyz;
-  float distanceRatio = localVolumeCenters[index].w > 0.5 ? length(offset) / halfSize.x : max(max(abs(offset.x) / halfSize.x, abs(offset.y) / halfSize.y), abs(offset.z) / halfSize.z);
   float falloff = localVolumeExtents[index].w;
-  float profile = falloff > 0.0 ? 1.0 - smoothstep(1.0 - falloff, 1.0, distanceRatio) : 1.0 - step(1.0, distanceRatio);
+  float profile;
+  if (localVolumeCenters[index].w > 0.5) {
+    float distanceRatio = length(offset) / halfSize.x;
+    profile = falloff > 0.0 ? 1.0 - smoothstep(1.0 - falloff, 1.0, distanceRatio) : 1.0 - step(1.0, distanceRatio);
+  } else {
+    vec3 ratios = abs(offset) / halfSize;
+    // The distance past the core box is round at the corners; the plain largest ratio fades along boxes with mitred creases (local-volumes.js repeats it).
+    float fadeDistance = length(max(ratios - (1.0 - falloff), 0.0));
+    profile = falloff > 0.0 ? 1.0 - smoothstep(0.0, 1.0, fadeDistance / falloff) : 1.0 - step(1.0, max(max(ratios.x, ratios.y), ratios.z));
+    if (max(max(ratios.x, ratios.y), ratios.z) >= 1.0) profile = 0.0;
+  }
   float noiseAmount = localVolumeAbsorption[index].w;
   if (withNoise && noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
   return profile;

@@ -144,7 +144,11 @@ test('the mean of an environment map weights each row by its solid angle', () =>
 
 test('the light of a heavily faded box still falls off steadily from the sunward side: its skin is shaded like its body, not lit as a rim', () => {
   const faded = { ...SMOKE_BOX, falloff: 0.9, size: [3, 3, 3], center: [0, 1.5, 0] };
-  const columns = [-1.2, -0.6, 0, 0.6, 1.2].map(x => downRay(faded, FULL_SUN, x).emitted[1]);
+  // The light per unit the column extinguishes: a column near the round-faded side holds less smoke, which is not a dimmer light.
+  const columns = [-1.2, -0.6, 0, 0.6, 1.2].map(x => {
+    const column = downRay(faded, FULL_SUN, x);
+    return column.emitted[1] / (1 - column.throughput[1]);
+  });
   for (let index = 1; index < columns.length; index++) assert.ok(columns[index] > columns[index - 1], `light at column ${index} (${columns[index]}) is not above column ${index - 1} (${columns[index - 1]})`);
   const skinShare = LOCAL_VOLUME_LIGHT_DEPTH_SATURATION;
   assert.ok(skinShare > 1, 'the faded skin counts at more than its own density toward the light depth');
@@ -367,4 +371,17 @@ test('the rasterizer and the CPU path tracer light a smoke box alike, and the si
     await browser?.close();
     server.kill();
   }
+});
+
+test('a box fades out round at its corners, so the faded skin shows no mitred crease along the box diagonals', () => {
+  const [box] = resolveLocalVolumes([{ shape: 'box', center: [0, 0, 0], size: [2, 2, 2], falloff: 0.5, noiseAmount: 0 }]);
+  const fadeRatio = 0.6;
+  const expectedOnAxis = 1 - fadeRatio * fadeRatio * (3 - 2 * fadeRatio);
+  assert.ok(Math.abs(localVolumeProfile(box, 0.8, 0, 0) - expectedOnAxis) < 1e-12, 'the fade along an axis is the plain smoothstep');
+  assert.equal(localVolumeProfile(box, 0.5, 0.5, 0.5), 1, 'the core box is full density');
+  const alongEdge = localVolumeProfile(box, 0.8, 0.8, 0);
+  assert.ok(alongEdge < expectedOnAxis, `the edge ${alongEdge} fades sooner than the face ${expectedOnAxis}`);
+  assert.equal(localVolumeProfile(box, 0.95, 0.95, 0.95), 0, 'the corner is clear before the box ends');
+  const diagonal = [0.5, 0.6, 0.7, 0.8].map(value => localVolumeProfile(box, value, value, 0));
+  for (let index = 1; index < diagonal.length; index++) assert.ok(diagonal[index] < diagonal[index - 1], 'the profile falls steadily along the diagonal');
 });

@@ -102,7 +102,7 @@ export function packLocalVolumes(volumes, buffers) {
  * and reads about as bright as a surface in the same sun, which one isotropic scatter (1 / 4 pi of the key colour) leaves far too dark; the gain keeps the
  * sunlit side clearly above the shaded side. The rasterizer and the CPU path tracer both apply it.
  */
-export const LOCAL_VOLUME_KEY_GAIN = 4;
+export const LOCAL_VOLUME_KEY_GAIN = 3;
 
 /**
  * How much the faded outer share of a volume counts toward the depth the light crosses: the profile used for the sun and sky depth is
@@ -129,6 +129,11 @@ export const LOCAL_VOLUME_SKY_GAIN = 0.5;
  */
 export const LOCAL_VOLUME_SUN_FLATTEN = 0.1;
 
+function fadeProfile(ratio) {
+  const clamped = Math.min(1, Math.max(0, ratio));
+  return 1 - clamped * clamped * (3 - 2 * clamped);
+}
+
 /** The density factor of a volume at a point: 1 at the core, fading over the outer `falloff` share, times the noise factor (up to 2) when `noiseAmount` is above 0, as the post shader does. */
 export function localVolumeProfile(volume, x, y, z, withNoise = true) {
   if (volume.shape === 'mesh') return 1;
@@ -143,14 +148,22 @@ export function localVolumeProfile(volume, x, y, z, withNoise = true) {
     offsetX = alongX;
     offsetY = alongY;
   }
-  const distance = volume.shape === 'sphere'
-    ? Math.hypot(offsetX, offsetY, offsetZ) / volume.radius
-    : Math.max(Math.abs(offsetX) / (volume.size[0] / 2), Math.abs(offsetY) / (volume.size[1] / 2), Math.abs(offsetZ) / (volume.size[2] / 2));
-  if (distance >= 1) return 0;
   let profile = 1;
-  if (volume.falloff > 0) {
-    const ratio = Math.min(1, Math.max(0, (distance - (1 - volume.falloff)) / volume.falloff));
-    profile = 1 - ratio * ratio * (3 - 2 * ratio);
+  if (volume.shape === 'sphere') {
+    const distance = Math.hypot(offsetX, offsetY, offsetZ) / volume.radius;
+    if (distance >= 1) return 0;
+    if (volume.falloff > 0) profile = fadeProfile((distance - (1 - volume.falloff)) / volume.falloff);
+  } else {
+    const ratioX = Math.abs(offsetX) / (volume.size[0] / 2);
+    const ratioY = Math.abs(offsetY) / (volume.size[1] / 2);
+    const ratioZ = Math.abs(offsetZ) / (volume.size[2] / 2);
+    if (Math.max(ratioX, ratioY, ratioZ) >= 1) return 0;
+    if (volume.falloff > 0) {
+      // The distance past the core box, which is round at the corners: the plain largest ratio fades along boxes with mitred creases.
+      const core = 1 - volume.falloff;
+      const fadeDistance = Math.hypot(Math.max(ratioX - core, 0), Math.max(ratioY - core, 0), Math.max(ratioZ - core, 0));
+      profile = fadeProfile(fadeDistance / volume.falloff);
+    }
   }
   if (withNoise && volume.noiseAmount > 0) profile *= localVolumeNoiseFactor(volume, x, y, z);
   return profile;
