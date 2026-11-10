@@ -2,8 +2,9 @@ import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
 import { SUN_BIT, POINT_FIRST_BIT, SPOT_FIRST_BIT, AREA_FIRST_BIT } from './light-link-bits.js';
 import { boxProjectedGeometry, columnLengths } from './export-box-uv.js';
-import { resolveTraceVolume } from './path-tracer-volume.js';
+import { resolveTraceVolume, prepareMeshVolume } from './path-tracer-volume.js';
 import { resolveLocalVolumes } from './local-volumes.js';
+import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { resolveTraceSubsurface } from './path-tracer-subsurface.js';
 import { lightShapeSupport } from './shader-registry.js';
 import { flushOrderOf } from './depth-layer.js';
@@ -310,7 +311,19 @@ export function refuseLocalVolumes(scene, tracerName) {
   throw new RangeError(`environment.localVolumes is traced by the CPU path tracer only; ${tracerName} cannot draw them. Use backend "cpu" or remove the volumes.`);
 }
 
-export function buildTraceScene(parts, environment = {}) {
+// The volumes of the trace, and the hidden parts that only bound a mesh volume: the rasterizer does not draw a part with
+// `visible: false`, and the trace leaves it out of the geometry too, so a part can shape smoke without becoming a wall.
+function resolveTraceLocalVolumes(input, parts) {
+  if (!input?.length) return { volumes: null, boundsOnlyParts: [] };
+  const resolved = resolveLocalVolumes(input, 'environment.localVolumes');
+  const meshPartNames = new Set(resolved.filter(volume => volume.shape === 'mesh').map(volume => volume.part));
+  const volumes = bindLocalVolumeParts(resolved, parts).map((volume, index) => (volume.part ? prepareMeshVolume(volume, `environment.localVolumes[${index}]`) : volume));
+  return { volumes, boundsOnlyParts: parts.filter(part => meshPartNames.has(part.name) && part.visible === false) };
+}
+
+export function buildTraceScene(allParts, environment = {}) {
+  const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts);
+  const parts = boundsOnlyParts.length ? allParts.filter(part => !boundsOnlyParts.includes(part)) : allParts;
   if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_TRACE_PARTS) throw new RangeError(`A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
   const geometry = flattenParts(parts);
   const bvh = buildTriangleBvh(geometry.positions, geometry.indices);
@@ -323,7 +336,7 @@ export function buildTraceScene(parts, environment = {}) {
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),
     volume: resolveTraceVolume(environment.volumeFog),
-    localVolumes: environment.localVolumes?.length ? resolveLocalVolumes(environment.localVolumes, 'environment.localVolumes') : null,
+    localVolumes,
     surfaceOffset: extent * 1e-5,
     farDistance: extent * 1e4,
   });

@@ -1,4 +1,5 @@
 import { mat4 } from 'gl-matrix';
+import { createSlicer } from './cooperative.js';
 import { COMPONENT_TYPES, attributeFloats, createAccessorReader } from './gltf-accessors.js';
 import { createClips } from './gltf-animation.js';
 import { layerTextureReferences } from './gltf-layers.js';
@@ -138,6 +139,7 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
     return index === 0 ? glbBinary : null;
   }
 
+  const checkpoint = createSlicer();
   const reader = createAccessorReader(document, bufferBytes, decoders.meshopt);
   await reader.prepare();
 
@@ -295,11 +297,11 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
         if (!decoded) throw new Error(`Draco geometry is missing ${semantic}.`);
         attributes[name] = decodedAttribute(decoded, document.accessors[accessorIndex]?.normalized === true);
       } else {
-        attributes[name] = reader.readAccessor(accessorIndex);
+        attributes[name] = await reader.readAccessorInSlices(accessorIndex, checkpoint);
       }
     }
     let index = null;
-    if (primitive.indices !== undefined) index = dracoGeometry ? decodedAttribute(dracoGeometry.getIndex()) : reader.readAccessor(primitive.indices);
+    if (primitive.indices !== undefined) index = dracoGeometry ? decodedAttribute(dracoGeometry.getIndex()) : await reader.readAccessorInSlices(primitive.indices, checkpoint);
     const targets = primitive.targets ?? [];
     const source = {
       uuid: key,

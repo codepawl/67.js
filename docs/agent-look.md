@@ -142,7 +142,7 @@ Sky colors use display RGB, matching the renderer's existing environment contrac
 | `fogColor` | `[0.35, 0.43, 0.43]` | Components from `0` to `1` |
 | `fogDensity` | `null` | `0` to `10`. `null` fits the density to the scene: `0.006`, or `1.2` divided by the scene diagonal in metres when that is smaller, so a 900 m scene keeps 30 percent of its contrast at the far side. Set `0` for no fog |
 | `volumeFog` | Complete defaults below | One bounded world volume |
-| `localVolumes` | Absent | Up to 8 box or sphere volumes that absorb and emit light; see [volume fog](https://67js.codepawl.com/volumetric.md#local-volumes) |
+| `localVolumes` | Absent | Up to 8 box, sphere or mesh (a part) volumes that absorb and emit light; see [volume fog](https://67js.codepawl.com/volumetric.md#local-volumes) |
 
 Directional key radiance equals `keyColor * keyIntensity`.
 Zero intensity disables that lighting contribution.
