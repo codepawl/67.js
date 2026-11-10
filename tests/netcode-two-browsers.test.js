@@ -14,10 +14,11 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SERVED_FOLDERS = ['/src/', '/scripts/netcode-sample.'];
 const MIME_TYPES = { '.js': 'text/javascript', '.html': 'text/html' };
 const INJECTED_LATENCY_MILLISECONDS = 50;
-const MOVE_DISTANCE = 0.25;
+// About a pixel on the 30 px per unit sample canvas, so the clock stops at the first visible movement, not 50 ms into it.
+const MOVE_DISTANCE = 0.05;
 const CONVERGENCE_TOLERANCE = 0.05;
-// Measured on a loaded 28-thread machine: host to client about 205 ms, client to host about 130 ms, on both transports. The bound leaves room for load.
-const MAXIMUM_LAG_MILLISECONDS = 450;
+// Measured on a loaded 28-thread machine: about 95 ms each way on both transports. The bound leaves room for load.
+const MAXIMUM_LAG_MILLISECONDS = 250;
 
 function startStaticServer() {
   const server = createServer(async (request, response) => {
@@ -114,7 +115,7 @@ for (const transport of ['broadcast', 'websocket']) {
           assert.ok(difference <= CONVERGENCE_TOLERANCE, `${id} axis ${axis} differs by ${difference} between the pages`);
         }
       }
-      assert.ok(Math.abs(positions.host.alice[0] + 3) > 1, 'the host player moved');
+      assert.ok(Math.hypot(positions.host.alice[0] + 3, positions.host.alice[2]) > 0.3, 'the host player moved');
       assert.ok(result.hostToClientLag > INJECTED_LATENCY_MILLISECONDS && result.hostToClientLag < MAXIMUM_LAG_MILLISECONDS, `host to client lag ${result.hostToClientLag} ms`);
       assert.ok(result.clientToHostLag > INJECTED_LATENCY_MILLISECONDS && result.clientToHostLag < MAXIMUM_LAG_MILLISECONDS, `client to host lag ${result.clientToHostLag} ms`);
       assert.equal(positions.host.stats.rejectedMessages, 0);

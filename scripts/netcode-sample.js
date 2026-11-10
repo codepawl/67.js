@@ -12,6 +12,8 @@ const HOST_ID = 'alice';
 const CLIENT_ID = 'bob';
 const WORLD_HALF_SIZE = 8;
 const FIXED_RATE = 50;
+const SNAPSHOT_EVERY_TICKS = 1;
+const INTERPOLATION_DELAY_SECONDS = 0.04;
 const KEY_DIRECTIONS = {
   ArrowLeft: [-1, 0], KeyA: [-1, 0],
   ArrowRight: [1, 0], KeyD: [1, 0],
@@ -27,10 +29,25 @@ function openWebSocket(relayUrl, playerId) {
   });
 }
 
-// Delays what a transport sends, to feel a slow connection on one machine.
-function withInjectedLatency(transport, delayMilliseconds) {
+// Delays what a transport sends, to feel a slow connection on one machine. Everything else, including the live `stats`
+// getter, is read from the real transport, and delayed sends that have not left yet are dropped when it closes.
+export function withInjectedLatency(transport, delayMilliseconds) {
   if (delayMilliseconds <= 0) return transport;
-  return { ...transport, send: (peerId, message) => { setTimeout(() => transport.send(peerId, message), delayMilliseconds); } };
+  const pendingTimers = new Set();
+  const delayed = Object.create(transport);
+  delayed.send = (peerId, message) => {
+    const timer = setTimeout(() => {
+      pendingTimers.delete(timer);
+      transport.send(peerId, message);
+    }, delayMilliseconds);
+    pendingTimers.add(timer);
+  };
+  delayed.close = () => {
+    for (const timer of pendingTimers) clearTimeout(timer);
+    pendingTimers.clear();
+    transport.close();
+  };
+  return delayed;
 }
 
 async function createSampleTransport(options, playerId, remoteId) {
@@ -73,7 +90,8 @@ function drawPlayers(canvas, netcode, localId) {
   }
 }
 
-// options: { role: 'host' | 'client', transport: 'broadcast' | 'websocket', relayUrl, delayMilliseconds, canvas }
+// options: { role: 'host' | 'client', transport: 'broadcast' | 'websocket', relayUrl, delayMilliseconds, canvas,
+//            snapshotEveryTicks, interpolationDelaySeconds }
 export async function startSample(options) {
   const isHost = options.role === 'host';
   const playerId = isHost ? HOST_ID : CLIENT_ID;
@@ -86,9 +104,16 @@ export async function startSample(options) {
   window.addEventListener('keydown', event => { if (event.code in KEY_DIRECTIONS) pressedKeys.add(event.code); });
   window.addEventListener('keyup', event => pressedKeys.delete(event.code));
 
+  // A snapshot every tick (20 ms) and a 40 ms interpolation delay: the drawn remote player trails by two snapshot intervals.
+  const timing = {
+    snapshotEveryTicks: options.snapshotEveryTicks ?? SNAPSHOT_EVERY_TICKS,
+    interpolationDelaySeconds: options.interpolationDelaySeconds ?? INTERPOLATION_DELAY_SECONDS,
+  };
   const netcode = createNetcode(isHost
-    ? { role: 'authority', authority: 'host', transport, readInput }
-    : { role: 'client', serverId: HOST_ID, localEntityId: CLIENT_ID, transport, readInput });
+    ? { role: 'authority', authority: 'host', transport, readInput, ...timing }
+    : { role: 'client', serverId: HOST_ID, localEntityId: CLIENT_ID, transport, readInput, ...timing });
+  // A closed page tells the other one it left, so nobody keeps sending to a tab that is gone.
+  window.addEventListener('pagehide', () => transport.close());
   if (isHost) {
     netcode.addEntity(HOST_ID, { owner: HOST_ID, tag: 'player', state: { position: [-3, 0, 0] } });
     netcode.addEntity(CLIENT_ID, { owner: CLIENT_ID, tag: 'player', state: { position: [3, 0, 0] } });

@@ -19,6 +19,8 @@
     transport: query.get('transport') ?? 'broadcast',
     relayUrl: query.get('relay') ?? 'ws://127.0.0.1:8787/',
     delayMilliseconds: Number(query.get('delay') ?? 0),
+    snapshotEveryTicks: query.has('snap') ? Number(query.get('snap')) : undefined,
+    interpolationDelaySeconds: query.has('interp') ? Number(query.get('interp')) : undefined,
     canvas: document.getElementById('game'),
   }).then(sample => { window.sample = sample; return sample; });
 </script>

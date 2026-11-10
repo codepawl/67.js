@@ -84,3 +84,40 @@ test('netcode over BroadcastChannel transports syncs a client to a host', () => 
   assert.ok(Math.abs(hostPosition[0] - clientPosition[0]) < 0.3);
   assert.ok(hostPosition[0] > 5);
 });
+
+test('a BroadcastChannel transport forgets a peer that went silent and learns it again when it speaks', () => {
+  let clockMilliseconds = 0;
+  const openChannel = createFakeBroadcastBus();
+  const host = createBroadcastChannelTransport(openChannel(), { id: 'host', peerTimeoutMilliseconds: 1000, now: () => clockMilliseconds });
+  const vanished = createBroadcastChannelTransport(openChannel(), { id: 'vanished' });
+  const talkative = createBroadcastChannelTransport(openChannel(), { id: 'talkative' });
+  assert.deepEqual(host.peers().sort(), ['talkative', 'vanished']);
+
+  clockMilliseconds = 800;
+  talkative.send('host', { ping: 1 });
+  clockMilliseconds = 1500;
+  assert.deepEqual(host.peers(), ['talkative'], 'the silent tab is dropped, the one heard at 800 ms stays');
+
+  vanished.send('host', { back: true });
+  assert.deepEqual(host.peers().sort(), ['talkative', 'vanished']);
+
+  clockMilliseconds = 10000;
+  assert.deepEqual(host.peers(), [], 'both are silent by now');
+  assert.throws(() => createBroadcastChannelTransport(openChannel(), { id: 'bad', peerTimeoutMilliseconds: 1 }), /peerTimeoutMilliseconds/);
+  assert.throws(() => createBroadcastChannelTransport(openChannel(), { id: 'bad', now: 5 }), /now must be a function/);
+});
+
+test('a full peer table makes room by dropping silent peers before it refuses a new one', () => {
+  let clockMilliseconds = 0;
+  const openChannel = createFakeBroadcastBus();
+  const host = createBroadcastChannelTransport(openChannel(), { id: 'host', peerTimeoutMilliseconds: 1000, now: () => clockMilliseconds });
+  const oldChannel = openChannel();
+  for (let index = 0; index < 32; index += 1) oldChannel.postMessage({ from: `old-${index}`, hello: true });
+  assert.equal(host.peers().length, 32);
+  oldChannel.postMessage({ from: 'refused', hello: true });
+  assert.equal(host.peers().includes('refused'), false, 'a full table refuses while everyone is fresh');
+
+  clockMilliseconds = 5000;
+  oldChannel.postMessage({ from: 'newcomer', hello: true });
+  assert.deepEqual(host.peers(), ['newcomer']);
+});

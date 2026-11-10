@@ -26,6 +26,8 @@ export const NETCODE_LIMITS = Object.freeze({
   defaultMessageBytes: 65536,
 });
 
+const DEFAULT_PEER_TIMEOUT_MILLISECONDS = 5000;
+
 const DEFAULTS = Object.freeze({
   snapshotEveryTicks: 2,
   inputRedundancy: 3,
@@ -832,14 +834,28 @@ export function createBroadcastChannelTransport(channel, options = {}) {
   }
   const id = requireName(options.id, 'createBroadcastChannelTransport id');
   const maximumMessageBytes = boundedInteger(options.maximumMessageBytes ?? NETCODE_LIMITS.defaultMessageBytes, 'createBroadcastChannelTransport maximumMessageBytes', 256, NETCODE_LIMITS.maximumMessageBytes);
+  const peerTimeoutMilliseconds = boundedNumber(options.peerTimeoutMilliseconds ?? DEFAULT_PEER_TIMEOUT_MILLISECONDS, 'createBroadcastChannelTransport peerTimeoutMilliseconds', 50, 3600000);
+  const now = options.now ?? Date.now;
+  if (typeof now !== 'function') throw new TypeError('createBroadcastChannelTransport now must be a function that returns milliseconds, such as performance.now.');
   const listeners = new Set();
-  const knownPeers = new Set();
+  const knownPeers = new Map();
   const stats = { sent: 0, received: 0, rejected: 0 };
 
+  // A peer that closed its page without saying goodbye is forgotten once it has been silent for the timeout.
+  // Netcode peers speak every tick, so a live one is heard again at once and re-learned if it was dropped.
+  function forgetSilentPeers() {
+    const oldestAllowed = now() - peerTimeoutMilliseconds;
+    for (const [peerId, lastHeardAt] of knownPeers) {
+      if (lastHeardAt < oldestAllowed) knownPeers.delete(peerId);
+    }
+  }
+
   function learnPeer(peerId) {
-    if (knownPeers.has(peerId)) return true;
-    if (knownPeers.size >= NETCODE_LIMITS.maximumPeers) return false;
-    knownPeers.add(peerId);
+    if (!knownPeers.has(peerId)) {
+      forgetSilentPeers();
+      if (knownPeers.size >= NETCODE_LIMITS.maximumPeers) return false;
+    }
+    knownPeers.set(peerId, now());
     return true;
   }
 
@@ -874,7 +890,10 @@ export function createBroadcastChannelTransport(channel, options = {}) {
 
   return {
     id,
-    peers: () => [...knownPeers],
+    peers() {
+      forgetSilentPeers();
+      return [...knownPeers.keys()];
+    },
     send(peerId, message) {
       const text = JSON.stringify(message);
       if (text === undefined || text.length > maximumMessageBytes) {
