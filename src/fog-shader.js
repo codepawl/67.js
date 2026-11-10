@@ -78,6 +78,7 @@ function bindFieldAndLights(renderer, post, volume) {
 // with the local step compiled in, and a program without it never reaches this function.
 function bindLocalVolumes(renderer, post, volumes, frame) {
   const context = renderer.context;
+  if (!renderer.depth || !renderer.hdr || renderer.transparent || renderer.benchmark) throw new Error('Local volumes require depth:true, active HDR and an opaque canvas');
   const buffers = (renderer.localVolumeBuffers ??= createLocalVolumeBuffers());
   packLocalVolumes(resolveLocalVolumes(volumes, 'environment.localVolumes'), buffers);
   const locate = name => (post.uniforms[name] ??= context.getUniformLocation(post.program, name));

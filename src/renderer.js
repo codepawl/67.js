@@ -2282,10 +2282,6 @@ export class Renderer67 {
       const lightLength = direction?.length === 3 ? Math.hypot(...direction) : NaN;
       if (!Number.isFinite(lightLength) || lightLength < 1e-6 || !Array.from(direction).every(component => typeof component === 'number' && Math.abs(component) <= 1e6)) throw new RangeError('Volume light direction must have a finite nonzero length and bounded components');
     }
-    if (environment.localVolumes?.length) {
-      requireFeatureCode('volumeFog');
-      if (!this.depth || !this.hdr || this.transparent || this.benchmark) throw new Error('Local volumes require depth:true, active HDR and an opaque canvas');
-    }
     updateLightingState(this.lighting, environment, { world: this.world });
     this.syncViewTransform(environment);
     // The shadow view follows the sun, so a moved sun redraws the map.
