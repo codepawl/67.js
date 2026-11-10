@@ -1,5 +1,5 @@
 import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS } from './agent-scene-capabilities.js';
-import { bakeMaterialGraph, normalizeMaterialGraph } from './material-graph.js';
+import { bakeMaterialGraph, graphImageAssets, normalizeMaterialGraph } from './material-graph.js';
 import { runKernel } from './kernel-offload.js';
 
 // Procedural surface patterns for recipe materials: seeded, tileable and baked on the CPU into the same texture
@@ -222,12 +222,12 @@ export function normalizeMaterialPattern(value) {
 
 
 /** Bake a normalized pattern into { map, normalMap, metallicRoughnessMap } texture descriptors. Deterministic. */
-export function bakeMaterialPattern(pattern) {
+export function bakeMaterialPattern(pattern, images) {
   const placement = {
     boxMapScale: pattern.mapping === 'uv' ? 0 : 1 / pattern.size,
     boxMapAxis: ['x', 'y', 'z'].indexOf(pattern.axis),
   };
-  if (pattern.type === GRAPH_TYPE) return { ...bakeMaterialGraph(pattern.graph, pattern), ...placement };
+  if (pattern.type === GRAPH_TYPE) return { ...bakeMaterialGraph(pattern.graph, pattern, images), ...placement };
   const { resolution, type, seed, count, colors, bump } = pattern;
   if (!Object.hasOwn(PATTERN_SAMPLERS, type)) throw patternError(`type must be one of ${MATERIAL_PATTERN_TYPES.join(', ')}.`);
   const sampler = PATTERN_SAMPLERS[type];
@@ -272,7 +272,8 @@ const MAX_BAKED_PATTERNS = 32;
 const bakedByPatternObject = new WeakMap();
 
 /** The baked textures of a pattern, shared by every material with the same definition. */
-export function materialPatternTextures(pattern) {
+export function materialPatternTextures(pattern, imagePool) {
+  const images = pattern.graph && graphImageAssets(pattern.graph).length ? imagePool : undefined;
   const remembered = bakedByPatternObject.get(pattern);
   if (remembered) return remembered;
   const key = JSON.stringify(pattern);
@@ -280,7 +281,7 @@ export function materialPatternTextures(pattern) {
   if (baked) {
     bakedPatterns.delete(key);
   } else {
-    baked = runKernel('pattern', [pattern], bakeMaterialPattern);
+    baked = runKernel('pattern', images ? [pattern, images] : [pattern], bakeMaterialPattern);
     if (bakedPatterns.size >= MAX_BAKED_PATTERNS) bakedPatterns.delete(bakedPatterns.keys().next().value);
   }
   bakedPatterns.set(key, baked);
