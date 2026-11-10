@@ -468,7 +468,7 @@ function rotateToSmallestBox(points) {
   return points.map(([x, y]) => [x * cosine - y * sine, x * sine + y * cosine]);
 }
 
-function bounds2d(points) {
+export function bounds2d(points) {
   let minimumX = Infinity;
   let maximumX = -Infinity;
   let minimumY = Infinity;
@@ -557,11 +557,11 @@ function shelfLayout(placed, rowWidth, gap) {
 
 /**
  * Pack islands into the unit square: each lies landscape, tallest first, in shelves; several row widths are tried and
- * the most compact kept. Sets item.offset and returns the scale from island units to UV.
+ * the most compact kept (rotate false keeps each island upright). Sets item.offset and returns the scale from island units to UV.
  */
-function packIslands(placed, margin) {
+export function packIslands(placed, margin, rotate = true) {
   for (const item of placed) {
-    if (item.box.height > item.box.width) {
+    if (rotate && item.box.height > item.box.width) {
       item.points = item.points.map(([u, v]) => [v, -u]);
       item.box = bounds2d(item.points);
     }

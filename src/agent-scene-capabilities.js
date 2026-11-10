@@ -166,6 +166,12 @@ export const MESH_ATTRIBUTE_NOTES = Object.freeze({
   vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
 });
 
+// UV projection and packing edits. Details stay here so the tool schemas stay small.
+export const MESH_UV_NOTES = Object.freeze({
+  uv_project: 'mode cube (each face by its dominant axis), cylinder (sides wrap around axis, caps flat) or sphere (longitude and latitude); axis x|y|z (y) for the last two, measured from the bounds centre; wrapped faces cut opposite the first radial axis. pack true (default) packs into 0..1 with one scale for every island so texel density is even; false leaves uv in mesh units for a later uv_pack. margin 0-0.2 (0.01); rotate true lays tall islands on their side. Reports islands. Texel density: cube exact, cylinder within about 15 percent, sphere stretches toward the poles.',
+  uv_pack: 'repacks the islands already in uv (faces joined across edges whose two ends share uv) into 0..1 with one scale. margin 0-0.2 (0.01), rotate true. Needs uv from uv_unwrap or uv_project. Reports islands.',
+});
+
 // Shape keys on a recipe mesh. Details stay here so the tool schemas stay small.
 export const MESH_SHAPE_KEY_NOTES = Object.freeze({
   shapeKeys: 'On a mesh geometry, at most 16: { name, offsets, value } or { name, edits, value }. offsets is a list of { select, offset: [x,y,z], falloff } moves like the translate edit; edits are vertex-moving mesh edits run after the stack. value (0, 0 to 1) is the weight without motion. Each key becomes a glTF morph target. Animate it with a motion track { kind: "morph", id: <key name>, property: "weight", keyframes }.',
@@ -189,6 +195,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   meshModifiers: MESH_MODIFIER_NOTES,
   meshSculpt: MESH_SCULPT_NOTES,
   meshAttributes: MESH_ATTRIBUTE_NOTES,
+  meshUv: MESH_UV_NOTES,
   meshShapeKeys: MESH_SHAPE_KEY_NOTES,
   fieldExpressions: Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,

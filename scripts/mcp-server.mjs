@@ -438,6 +438,8 @@ const stackNodes = [
     margin: bounded(0, 0.2).optional().describe('Gap between islands and around the square, as a fraction of it. Defaults to 0.01.'),
     maxDistortion: bounded(0, 100).optional().describe('Islands stretching more than this (mean |area ratio - 1|) are split into charts by facing axis. Defaults to 0.25.'),
   }).describe('Conformal UV unwrap into the corner attribute uv, packed into 0..1. Put it last (or as the last stack node): later edits do not keep UVs exact. The result reports islands, flipped triangles and areaDistortion.'),
+  z.strictObject({ op: z.literal('uv_project'), mode: z.enum(['cube', 'cylinder', 'sphere']), axis: z.enum(['x', 'y', 'z']).optional(), pack: z.boolean().optional(), margin: bounded(0, 0.2).optional(), rotate: z.boolean().optional() }).describe('Cube, cylinder or sphere uv projection, packed into 0..1. Detail: scene_capabilities meshUv.'),
+  z.strictObject({ op: z.literal('uv_pack'), margin: bounded(0, 0.2).optional(), rotate: z.boolean().optional() }).describe('Pack the existing uv islands into 0..1 with one scale.'),
   z.strictObject({
     op: z.literal('subdivide'),
     levels: z.number().int().min(1).max(4).optional().describe('Catmull-Clark levels; each multiplies the faces by about 4 (n-gons become n quads). Defaults to 1.'),
