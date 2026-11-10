@@ -61,7 +61,6 @@ out vec4 outputColor;
 void main() { outputColor = vec4(colors[int(edgeKind + 0.5)], 1.0); }`;
 
 const programs = new WeakMap();
-const meshBuffers = new WeakMap();
 
 function programFor(renderer) {
   let program = programs.get(renderer);
@@ -80,14 +79,10 @@ function programFor(renderer) {
   return program;
 }
 
-// One instanced vertex array per geometry: each segment is an instance of the six corners of a screen-space quad.
-function buffersFor(renderer, geometry) {
-  let perContext = meshBuffers.get(renderer);
-  if (!perContext) {
-    perContext = new WeakMap();
-    meshBuffers.set(renderer, perContext);
-  }
-  let entry = perContext.get(geometry);
+// One instanced vertex array per geometry for the frame being drawn: each segment is an instance of the six corners of a
+// screen-space quad. The entries live in `frameEntries` and drawWireframe deletes their GL objects when the frame is done.
+function buffersFor(renderer, geometry, frameEntries) {
+  let entry = frameEntries.get(geometry);
   if (entry) return entry;
   let wireframe;
   try {
@@ -96,7 +91,7 @@ function buffersFor(renderer, geometry) {
     // Geometry that has no polygon view (every triangle collapses, no triangles) is listed as skipped instead of failing the job.
     if (!(error instanceof RangeError || error instanceof TypeError)) throw error;
     entry = { unreadable: true, count: 0 };
-    perContext.set(geometry, entry);
+    frameEntries.set(geometry, entry);
     return entry;
   }
   const context = renderer.context;
@@ -111,13 +106,21 @@ function buffersFor(renderer, geometry) {
     context.vertexAttribPointer(location, size, context.FLOAT, false, stride, offset);
     context.vertexAttribDivisor(location, 1);
   }
-  entry = { vertexArray, count: wireframe.count, counts: wireframe.counts, truncated: wireframe.truncated };
-  perContext.set(geometry, entry);
+  entry = { buffer, vertexArray, count: wireframe.count, counts: wireframe.counts, truncated: wireframe.truncated };
+  frameEntries.set(geometry, entry);
   return entry;
 }
 
 function drawnParts(renderer) {
   return renderer.batches.filter(batch => renderer.drawsInOpaqueLoop(batch)).flatMap(batch => batch.parts);
+}
+
+function releaseEntries(context, frameEntries) {
+  for (const entry of frameEntries.values()) {
+    if (!entry.vertexArray) continue;
+    context.deleteVertexArray(entry.vertexArray);
+    context.deleteBuffer(entry.buffer);
+  }
 }
 
 function faultCounts(counts) {
@@ -150,27 +153,32 @@ function drawWireframe(renderer) {
   let partsOmitted = 0;
   let partsSkipped = 0;
   let truncated = false;
-  for (const part of drawnParts(renderer)) {
-    const entry = buffersFor(renderer, part.geometry);
-    if (entry.unreadable) {
-      partsSkipped++;
-      continue;
+  const frameEntries = new Map();
+  try {
+    for (const part of drawnParts(renderer)) {
+      const entry = buffersFor(renderer, part.geometry, frameEntries);
+      if (entry.unreadable) {
+        partsSkipped++;
+        continue;
+      }
+      if (drawn + entry.count > MAXIMUM_WIREFRAME_FRAME_SEGMENTS) {
+        partsOmitted++;
+        continue;
+      }
+      drawn += entry.count;
+      truncated ||= entry.truncated;
+      for (const name of WIREFRAME_KINDS) totals[name] += entry.counts[name];
+      const faults = faultCounts(entry.counts);
+      if (Object.values(faults).some(count => count > 0)) faulty.push({ part: part.name, ...faults });
+      mat4.multiply(modelViewProjection, viewProjection, part.matrix);
+      context.uniformMatrix4fv(program.modelViewProjection, false, modelViewProjection);
+      context.bindVertexArray(entry.vertexArray);
+      context.drawArraysInstanced(context.TRIANGLES, 0, 6, entry.count);
     }
-    if (drawn + entry.count > MAXIMUM_WIREFRAME_FRAME_SEGMENTS) {
-      partsOmitted++;
-      continue;
-    }
-    drawn += entry.count;
-    truncated ||= entry.truncated;
-    for (const name of WIREFRAME_KINDS) totals[name] += entry.counts[name];
-    const faults = faultCounts(entry.counts);
-    if (Object.values(faults).some(count => count > 0)) faulty.push({ part: part.name, ...faults });
-    mat4.multiply(modelViewProjection, viewProjection, part.matrix);
-    context.uniformMatrix4fv(program.modelViewProjection, false, modelViewProjection);
-    context.bindVertexArray(entry.vertexArray);
-    context.drawArraysInstanced(context.TRIANGLES, 0, 6, entry.count);
+  } finally {
+    context.bindVertexArray(null);
+    releaseEntries(context, frameEntries);
   }
-  context.bindVertexArray(null);
   context.depthMask(true);
   context.depthFunc(reversed ? context.GREATER : context.LESS);
   context.enable(context.CULL_FACE);

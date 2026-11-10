@@ -101,6 +101,19 @@ test('the report names at most the worst parts and says how many it left out', (
   assert.equal(report.faultyPartsOmitted, 3);
 });
 
+test('the buffers and vertex arrays a frame creates are deleted when the frame is done', () => {
+  const calls = [];
+  const geometry = openBoxGeometry();
+  const parts = [{ name: 'a', geometry, matrix: identity() }, { name: 'b', geometry, matrix: identity() }, { name: 'c', geometry: openBoxGeometry(), matrix: identity() }];
+  const renderer = rendererWith(parts, calls);
+  withWireframe(renderer, () => renderer.passSupport.copyToCanvas());
+  const count = name => calls.filter(call => call[0] === name).length;
+  assert.equal(count('createBuffer'), 2, 'One buffer per distinct geometry, shared by parts that use it.');
+  assert.equal(count('deleteBuffer'), count('createBuffer'));
+  assert.equal(count('deleteVertexArray'), count('createVertexArray'));
+  assert.ok(count('deleteVertexArray') > 0);
+});
+
 test('a frame that never reaches the canvas copy is an error, and the overlay is removed', () => {
   const renderer = rendererWith([], []);
   assert.throws(() => withWireframe(renderer, () => {}), /drew no frame/);

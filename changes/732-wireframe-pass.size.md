@@ -1,1 +1,2 @@
 - goal:agent-scene: 60 bytes gzip for the pass name and its one-line colour legend in scene_capabilities, which an agent needs to read the wireframe picture; the drawing code loads only for a job that asks for the pass
+- scene:agent-scene+lazy: 76 bytes gzip, the same pass name and colour legend in scene_capabilities plus the one-line entry in render-passes that lets an addon finish the pass; an agent needs both to read the wireframe picture, and the drawing code is a separate lazy module
