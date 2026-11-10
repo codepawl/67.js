@@ -86,4 +86,4 @@ A transport is a plain object `{ id, peers(), send(peerId, message), receive(cal
 
 ## Not yet
 
-WebRTC and WebTransport transports, peer-to-peer authority and a physics-prop sample come in later slices of #778. Use the same `fixedRate` on the authority and every client.
+WebRTC and WebTransport transports, peer-to-peer authority and a physics-prop sample come in later work on #778. Use the same `fixedRate` on the authority and every client.

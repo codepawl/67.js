@@ -36,7 +36,10 @@ export async function startNetcodeRelay(options = {}) {
     else setTimeout(send, latencyMilliseconds);
   }
 
+  server.on('error', () => {});
+
   server.on('connection', (socket, request) => {
+    socket.on('error', () => socket.terminate());
     const peerId = new URL(request.url ?? '/', 'http://relay').searchParams.get('id');
     const validId = typeof peerId === 'string' && peerId !== '' && peerId.length <= MAXIMUM_NAME_LENGTH;
     if (!validId || clients.has(peerId) || clients.size >= MAXIMUM_PEERS) {

@@ -156,3 +156,31 @@ test('the relay forwards to the named player, announces a leaver and refuses a r
   await assert.rejects(startNetcodeRelay({ port: 70000 }), /port must be an integer/);
   await assert.rejects(startNetcodeRelay({ latencyMilliseconds: -1 }), /latencyMilliseconds/);
 });
+
+test('the relay survives an oversize frame and keeps forwarding for other players', async () => {
+  const relay = await startNetcodeRelay({ port: 0 });
+  const open = id => new Promise((resolve, reject) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${relay.port}/?id=${id}`);
+    socket.once('open', () => resolve(socket));
+    socket.once('error', reject);
+  });
+  const nextMessage = socket => new Promise(resolve => socket.once('message', data => resolve(JSON.parse(data.toString()))));
+  try {
+    const sender = await open('sender');
+    const receiver = await open('receiver');
+    const offender = await open('offender');
+    offender.on('error', () => {});
+    const offenderClosed = new Promise(resolve => offender.once('close', () => resolve()));
+    offender.send('x'.repeat(70000));
+    await offenderClosed;
+
+    const arrival = nextMessage(receiver);
+    sender.send(JSON.stringify({ to: 'receiver', data: { still: 'alive' } }));
+    assert.deepEqual(await arrival, { from: 'sender', data: { still: 'alive' } });
+    assert.deepEqual(relay.peerIds.sort(), ['receiver', 'sender']);
+    sender.close();
+    receiver.close();
+  } finally {
+    await relay.close();
+  }
+});
