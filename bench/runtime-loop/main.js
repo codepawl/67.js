@@ -146,7 +146,7 @@ let rigKind = Object.hasOwn(RIG_FACTORIES, requestedRig ?? '') || requestedRig =
 // Only own keys: a name like "toString" from the URL or a button must not reach the prototype.
 function createRig(kind) {
   if (!Object.hasOwn(RIG_FACTORIES, kind)) throw new Error(`Unknown camera rig "${kind}"; use follow, firstPerson, topDown or static.`);
-  return createRig(kind);
+  return RIG_FACTORIES[kind]();
 }
 
 const canvas = document.querySelector('canvas');
