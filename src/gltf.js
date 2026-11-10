@@ -1,7 +1,8 @@
 import { mat4 } from 'gl-matrix';
 import { applyClip } from './gltf-animation.js';
 import { GLTF_LAYER_EXTENSIONS, layerTextureReferences, materialLayersFromGltf } from './gltf-layers.js';
-import { attributeFloats } from './gltf-accessors.js';
+import { attributeFloatsInSlices } from './gltf-accessors.js';
+import { createSlicer, forEachChunk } from './cooperative.js';
 import { describeCompressedImage } from './compressed-texture.js';
 export { ktx2WorkerConfigFor } from './compressed-texture.js';
 import { decodeGltf, isLinePrimitive, overLimit, textureSourceIndex, throwOverruns, unusablePrimitives } from './gltf-decode.js';
@@ -38,7 +39,6 @@ const LAYER_SHADER_EXTENSIONS = Object.freeze(['KHR_materials_anisotropy', 'KHR_
 
 // The shader code for anisotropy, iridescence and transmission is not in the core bundle; a file that uses one brings it in.
 const CONVERSION_SLICE_MILLISECONDS = 8;
-const yieldToPage = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise(resolve => setTimeout(resolve, 0)));
 
 async function loadLayerShadersFor(document) {
   const usesLayerShaders = (document.materials ?? []).some(material => LAYER_SHADER_EXTENSIONS.some(extension => material?.extensions?.[extension]) || layerTextureReferences(material).length > 0 || materialUvTransforms(material ?? {}).normalRelative);
@@ -799,23 +799,29 @@ function planTextureScaling(imageDefinitions, imageSizes, maxTexturePixels, colo
   return { targetByImageIndex, scaledTextures };
 }
 
-function copyAttribute(attribute, size) {
+async function copyAttribute(attribute, size, checkpoint) {
   if (attribute.itemSize !== size) throw new Error(`Expected a ${size}-component mesh attribute.`);
-  const values = attributeFloats(attribute);
-  if (!values.every(Number.isFinite)) throw new Error('Mesh attributes must contain finite values.');
+  const values = await attributeFloatsInSlices(attribute, checkpoint);
+  let allFinite = true;
+  await forEachChunk(values.length, checkpoint, (from, to) => {
+    for (let index = from; index < to; index++) allFinite &&= Number.isFinite(values[index]);
+  });
+  if (!allFinite) throw new Error('Mesh attributes must contain finite values.');
   return values;
 }
 
 /** Like copyAttribute, but a NaN or Infinity becomes 0 and is reported through `onNonFinite(count)` instead of refusing the file. */
-function copyAttributeZeroingNonFinite(attribute, size, onNonFinite) {
+async function copyAttributeZeroingNonFinite(attribute, size, onNonFinite, checkpoint) {
   if (attribute.itemSize !== size) throw new Error(`Expected a ${size}-component mesh attribute.`);
-  const values = attributeFloats(attribute);
+  const values = await attributeFloatsInSlices(attribute, checkpoint);
   let nonFiniteCount = 0;
-  for (let index = 0; index < values.length; index++) {
-    if (Number.isFinite(values[index])) continue;
-    values[index] = 0;
-    nonFiniteCount++;
-  }
+  await forEachChunk(values.length, checkpoint, (from, to) => {
+    for (let index = from; index < to; index++) {
+      if (Number.isFinite(values[index])) continue;
+      values[index] = 0;
+      nonFiniteCount++;
+    }
+  });
   if (nonFiniteCount) onNonFinite(nonFiniteCount);
   return values;
 }
@@ -878,34 +884,38 @@ function hasTriangleWithArea(positions, indices) {
   return false;
 }
 
-function convertGeometry(source, primitive, secondUvSet, onIgnoredVertexAlpha, onRepair) {
+async function convertGeometry(source, primitive, secondUvSet, onIgnoredVertexAlpha, onRepair, checkpoint) {
   const { position, normal, uv, uv1, color, skinIndex, skinWeight } = source.attributes;
   const zeroedBy = label => count => onRepair(`${count} non-finite ${label} value(s) were set to 0`);
-  const positions = copyAttributeZeroingNonFinite(position, 3, zeroedBy('POSITION'));
+  const positions = await copyAttributeZeroingNonFinite(position, 3, zeroedBy('POSITION'), checkpoint);
   const indices = new Uint32Array(source.index?.count ?? position.count);
-  for (let index = 0; index < indices.length; index++) {
-    const value = source.index ? source.index.array[index] : index;
-    if (!Number.isInteger(value) || value < 0 || value >= position.count) throw new UnusablePrimitiveError('an index is out of range of its POSITION accessor');
-    indices[index] = value;
-  }
+  await forEachChunk(indices.length, checkpoint, (from, to) => {
+    for (let index = from; index < to; index++) {
+      const value = source.index ? source.index.array[index] : index;
+      if (!Number.isInteger(value) || value < 0 || value >= position.count) throw new UnusablePrimitiveError('an index is out of range of its POSITION accessor');
+      indices[index] = value;
+    }
+  });
   if (normal && normal.count !== position.count) throw new Error('NORMAL and POSITION counts must match.');
   if (!hasTriangleWithArea(positions, indices)) throw new UnusablePrimitiveError('every triangle has zero area');
-  const normals = normal ? copyAttribute(normal, 3) : computeVertexNormals(positions, indices);
+  const normals = normal ? await copyAttribute(normal, 3, checkpoint) : computeVertexNormals(positions, indices);
   const geometry = { positions, normals, indices };
   const repairedNormals = [];
-  for (let offset = 0; offset < normals.length; offset += 3) {
-    const length = Math.hypot(...normals.subarray(offset, offset + 3));
-    if (length < 1e-8 && !normal) {
-      // A vertex that no triangle with area touches has no generated normal; it draws nothing, so any unit vector will do.
-      normals[offset + 1] = 1;
-      continue;
+  await forEachChunk(normals.length, checkpoint, (from, to) => {
+    for (let offset = from; offset < to; offset += 3) {
+      const length = Math.hypot(normals[offset], normals[offset + 1], normals[offset + 2]);
+      if (length < 1e-8 && !normal) {
+        // A vertex that no triangle with area touches has no generated normal; it draws nothing, so any unit vector will do.
+        normals[offset + 1] = 1;
+        continue;
+      }
+      if (length < 1e-8) {
+        repairedNormals.push(offset);
+        continue;
+      }
+      for (let axis = 0; axis < 3; axis++) normals[offset + axis] /= length;
     }
-    if (length < 1e-8) {
-      repairedNormals.push(offset);
-      continue;
-    }
-    for (let axis = 0; axis < 3; axis++) normals[offset + axis] /= length;
-  }
+  });
   if (repairedNormals.length) {
     // An authored normal of zero length cannot light anything: use the face normal of the triangles at that vertex, or up.
     const faceNormals = computeVertexNormals(positions, indices);
@@ -916,28 +926,29 @@ function convertGeometry(source, primitive, secondUvSet, onIgnoredVertexAlpha, o
     onRepair(`${repairedNormals.length} vertex normal(s) had zero length and were rebuilt from the triangles`);
   }
   if (primitive.targets?.length) {
-    geometry.morphTargets = primitive.targets.map((target, index) => {
+    geometry.morphTargets = [];
+    for (const [index, target] of primitive.targets.entries()) {
       const channels = {};
-      if (target.POSITION !== undefined) channels.positions = copyAttributeZeroingNonFinite(source.morphPositions[index], 3, zeroedBy('morph POSITION'));
-      if (target.NORMAL !== undefined && normal) channels.normals = copyAttribute(source.morphNormals[index], 3);
+      if (target.POSITION !== undefined) channels.positions = await copyAttributeZeroingNonFinite(source.morphPositions[index], 3, zeroedBy('morph POSITION'), checkpoint);
+      if (target.NORMAL !== undefined && normal) channels.normals = await copyAttribute(source.morphNormals[index], 3, checkpoint);
       // Without a base NORMAL the authored deltas have nothing to add to: derive them from the morphed positions.
       if (!normal && channels.positions) channels.normals = computeMorphNormalDeltas(positions, indices, normals, channels.positions);
-      return channels;
-    });
+      geometry.morphTargets.push(channels);
+    }
     if (!normal && geometry.morphTargets.some(channels => channels.normals)) {
       onRepair('it has morph targets but no base NORMAL; base and per-target normals are generated from the triangles');
     }
   }
   if (uv && uv.count !== position.count) throw new Error('TEXCOORD_0 and POSITION counts must match.');
-  if (uv) geometry.uvs = copyAttribute(uv, 2);
+  if (uv) geometry.uvs = await copyAttribute(uv, 2, checkpoint);
   // The renderer's second UV set is geometry.lightUvs, the one light maps use.
   if (secondUvSet) {
     if (!uv1 || uv1.count !== position.count) throw new Error('TEXCOORD_1 and POSITION counts must match.');
-    geometry.lightUvs = copyAttribute(uv1, 2);
+    geometry.lightUvs = await copyAttribute(uv1, 2, checkpoint);
   }
-  if (color) geometry.colors = convertVertexColors(color, position.count, onIgnoredVertexAlpha);
-  if (skinIndex) geometry.skinIndices = new Uint16Array(copyAttribute(skinIndex, 4));
-  if (skinWeight) geometry.skinWeights = copyAttribute(skinWeight, 4);
+  if (color) geometry.colors = await convertVertexColors(color, position.count, onIgnoredVertexAlpha, checkpoint);
+  if (skinIndex) geometry.skinIndices = new Uint16Array(await copyAttribute(skinIndex, 4, checkpoint));
+  if (skinWeight) geometry.skinWeights = await copyAttribute(skinWeight, 4, checkpoint);
   return geometry;
 }
 
@@ -1110,11 +1121,11 @@ function worldMatrixOf(node, instanceMatrix, target) {
 }
 
 /** Keeps the RGB of COLOR_0. The alpha of an RGBA attribute is dropped, and onIgnoredVertexAlpha hears of it when it is below one. */
-function convertVertexColors(attribute, vertexCount, onIgnoredVertexAlpha) {
+async function convertVertexColors(attribute, vertexCount, onIgnoredVertexAlpha, checkpoint) {
   if (attribute.count !== vertexCount || ![3, 4].includes(attribute.itemSize)) {
     throw new Error('COLOR_0 requires matching RGB or RGBA vertex values.');
   }
-  const values = copyAttribute(attribute, attribute.itemSize);
+  const values = await copyAttribute(attribute, attribute.itemSize, checkpoint);
   const colors = new Float32Array(vertexCount * 3);
   let alphaBelowOne = false;
   for (let vertex = 0; vertex < vertexCount; vertex++) {
@@ -1274,7 +1285,8 @@ export async function parseGltf(data, options = {}) {
     const pendingNodeMatrix = new Float32Array(16);
     const keyedNodeIndices = nodesKeyedInClips(document);
     let actualVertices = 0;
-    const visitNode = node => {
+    const checkpoint = createSlicer(CONVERSION_SLICE_MILLISECONDS);
+    const visitNode = async node => {
       nodes.push(node);
       const sourceNodeIndex = node.association?.nodes;
       if (sourceNodeIndex !== undefined && document.nodes?.[sourceNodeIndex]?.extensions?.KHR_lights_punctual) {
@@ -1313,7 +1325,7 @@ export async function parseGltf(data, options = {}) {
               const warning = `Repaired ${primitiveLabel(document, association.meshes, association.primitives)}: ${reason}.`;
               if (!warnings.includes(warning)) warnings.push(warning);
             };
-            const converted = convertGeometry(node.geometry, primitive, secondUvSet, () => meshNamesWithIgnoredAlpha.add(node.name), onRepair);
+            const converted = await convertGeometry(node.geometry, primitive, secondUvSet, () => meshNamesWithIgnoredAlpha.add(node.name), onRepair, checkpoint);
             if (converted.uvs) bakeUvTransform(converted.uvs, uvTransform);
             geometries.set(geometryKey, converted);
           } catch (error) {
@@ -1367,13 +1379,9 @@ export async function parseGltf(data, options = {}) {
     // Converting a large scene is one long block; handing the thread back every few milliseconds keeps the page responding. Same nodes, same order.
     const traversed = [];
     gltf.scene.traverse(node => traversed.push(node));
-    let sliceStart = performance.now();
     for (const node of traversed) {
-      visitNode(node);
-      if (performance.now() - sliceStart > CONVERSION_SLICE_MILLISECONDS) {
-        await yieldToPage();
-        sliceStart = performance.now();
-      }
+      await visitNode(node);
+      await checkpoint();
     }
     const toleratedNodes = Object.assign(new Set(), { collecting: true });
     validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform, toleratedNodes);

@@ -564,7 +564,7 @@ function allFinite(values) {
 }
 
 export class Renderer67 {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false } = {}) {
     this.canvas = canvas;
     this.sceneParts = parts;
     // `skyOpenness` from closed-room.js is passed in, which keeps the ray code out of scenes without volume fog.
@@ -743,6 +743,7 @@ export class Renderer67 {
     // The driver links the programs on its own threads while the textures and buffers upload; only then is the link result read.
     groups.forEach((group) => this.batches.push(this.uploadBatch(group)));
     this.pendingConstruction = { pending, parts, environment };
+    this.deferEnvironmentPrefilter = deferEnvironmentPrefilter;
     if (!deferProgramLink) this.finishConstruction();
   }
 
@@ -1817,7 +1818,7 @@ export class Renderer67 {
       context.uniform1i(this.liquidUniforms.environmentSpecular, ENVIRONMENT_SPECULAR_UNIT);
     }
     this.bindEnvironmentTextures(this.whiteTexture, this.whiteTexture);
-    if (!this.benchmark && map) this.prepareEnvironment(map);
+    if (!this.benchmark && map && !this.deferEnvironmentPrefilter) this.prepareEnvironment(map);
   }
 
   bindEnvironmentTextures(specularTexture, brdfTexture) {
@@ -1834,6 +1835,22 @@ export class Renderer67 {
     if (this.environmentResources?.data === map.data && this.environmentResources.irradianceSource === map.irradianceSource) return false;
     requireEnvironmentSupport().estimateBytes(map, this.capabilities.maximumTextureSize);
     const resources = requireEnvironmentSupport().createResources(this.context, map, { compileProgram: (context, vertexSource, fragmentSource) => this.compileEnvironmentProgram(context, vertexSource, fragmentSource), fullscreenVertex });
+    this.environmentResources?.dispose();
+    this.environmentResources = resources;
+    this.textureBytes += resources.bytes - this.environmentBytes;
+    this.environmentBytes = resources.bytes;
+    return true;
+  }
+
+  /**
+   * Prefilters the map in steps, awaiting `checkpoint()` between them, for a renderer built with `deferEnvironmentPrefilter: true`.
+   * Call it before the first render: the steps leave GL state mid-pass, so no frame may draw on this context until it resolves.
+   */
+  async prepareEnvironmentInSlices(map, checkpoint) {
+    requireEnvironmentSupport().assertMap(map);
+    if (this.environmentResources?.data === map.data && this.environmentResources.irradianceSource === map.irradianceSource) return false;
+    requireEnvironmentSupport().estimateBytes(map, this.capabilities.maximumTextureSize);
+    const resources = await requireEnvironmentSupport().createResourcesInSlices(this.context, map, { compileProgram: (context, vertexSource, fragmentSource) => this.compileEnvironmentProgram(context, vertexSource, fragmentSource), fullscreenVertex }, checkpoint);
     this.environmentResources?.dispose();
     this.environmentResources = resources;
     this.textureBytes += resources.bytes - this.environmentBytes;

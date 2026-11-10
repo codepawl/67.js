@@ -14,3 +14,6 @@
 - entry:user-pass: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
 - entry:reversed-depth: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
 - entry:liquid-shader: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
+- entry:hdri: the sliced Radiance decode and the stepped sky prefilter (generators with a checkpoint between rows and GL steps) cost 298 bytes gzip, for a measured drop in first live frame on the home hero loop from 1.7 to 2.2 s down to 1.4 to 1.6 s
+- entry:gltf: sliced accessor copy and geometry conversion, 826 bytes gzip, so a large model converts in 8 ms slices instead of one block
+- entry:core: the shared slicer, sliced prefilter steps and renderer hook, 1115 bytes gzip

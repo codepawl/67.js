@@ -9,13 +9,14 @@ import { createCascadedShadows } from '../../cascaded-shadows.js';
 import { applyWaterReflection, attachWaterReflection } from '../../water-reflection.js';
 import { readPartRanks } from '../../showcase-download.js';
 import { prepareEffects } from './effects.js';
+import { createSlicer, yieldToPage } from '../../cooperative.js';
 
 // The water mirror is off in the loop: once the camera moves between two draws the port world drew only its sky (the same happens
 // on hero-b.html?scene=port when the camera is set by hand; with the mirror off every pose draws). Turn it on again when that is fixed.
 const WATER_MIRROR_ENABLED = false;
 
 // Lets the page draw and handle input between the phases of a build, so one phase never queues behind another.
-const yieldToMain = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise(resolve => setTimeout(resolve, 0)));
+const yieldToMain = yieldToPage;
 
 async function fetchBlob(url) {
   const response = await fetch(url);
@@ -131,6 +132,7 @@ export async function buildWorld(download, canvas, overrides = {}) {
     ...overrides,
     pixelRatio: Math.min(devicePixelRatio, 1.25),
     deferProgramLink: true,
+    deferEnvironmentPrefilter: true,
     ...effects?.rendererOptions,
     ...(options.shadowCascades ? { shadowCascades: createCascadedShadows(options.shadowCascades) } : {}),
     environment: { ...options.environment, map: environmentMap, ...(effects?.volumeFog ? { volumeFog: effects.volumeFog } : {}) },
@@ -142,6 +144,9 @@ export async function buildWorld(download, canvas, overrides = {}) {
   lap('uploadMs');
   await renderer.programsReady();
   lap('linkMs');
+  // The sky prefilter runs a few milliseconds at a time on this world's own context, before any frame draws on it.
+  await renderer.prepareEnvironmentInSlices(environmentMap, createSlicer(SLICE_MILLISECONDS));
+  lap('environmentMs');
   await replacePartsInSlices(renderer, whole.parts);
   const detachReflection = attachWaterReflection(renderer, whole.surface);
   lap('rendererMs');
