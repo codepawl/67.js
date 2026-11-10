@@ -115,6 +115,7 @@ export default defineConfig({
         'game-rules': 'src/game-rules.js',
         game: 'src/game.js',
         streaming: 'src/streaming.js',
+        netcode: 'src/netcode.js',
         'update-part-vertices':'src/update-part-vertices.js',
         'replace-textured-parts': 'src/replace-textured-parts.js',
         // Page of the MCP preview. It imports the engine chunks above instead of bundling its own copy.

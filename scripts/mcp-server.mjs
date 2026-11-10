@@ -15,6 +15,7 @@ import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, CATALOG_FILE_ID } f
 import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, VIDEO_ENCODERS, MAXIMUM_JOB_SIDE, MAXIMUM_MEMORY_MIB } from '../src/agent-scene-capabilities.js';
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
+import { responseFormatField, chosenFormat, conciseReview, conciseJobStatus, conciseJobResult, withoutNotes } from './mcp-response-format.mjs';
 import { createCallLogger, CALL_LOG_ENVIRONMENT_VARIABLE } from './mcp-call-log.mjs';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
 
@@ -328,7 +329,9 @@ const shadow = z.strictObject({
 // engine and listed in scene_capabilities curveText, because every tool that takes a recipe repeats this schema.
 function curveAndTextGeometries(id) {
   return [
-    z.strictObject({ ...id, type: z.literal('curve'), points: z.array(z.unknown()).max(1024), closed: looseField, radius: looseField, taper: looseField, profile: looseField, resolution: looseField, radialSegments: looseField }).describe('Bezier sweep; see scene_capabilities curveText.'),
+    z.strictObject({ ...id, type: z.literal('curve'), points: z.array(z.unknown()).max(1024).optional(), shape: looseField, splines: z.array(z.unknown()).max(64).optional(), kind: looseField, weights: z.array(z.unknown()).max(1024).optional(), trim: looseField, grow: looseField, closed: looseField, radius: looseField, taper: looseField, profile: looseField, resolution: looseField, radialSegments: looseField })
+      .refine(curve => curve.points !== undefined || curve.shape !== undefined || curve.splines !== undefined, { message: 'A curve needs one of points (an array of [x, y, z]), shape ({ type: "arc" | "spiral" | "star" }) or splines (an array of up to 64 splines). See scene_capabilities curveText.' })
+      .describe('Sweep along points, a shape or splines; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('sdf'), root: z.record(z.string(), z.unknown()), resolution: looseField }).describe('Signed-distance shapes with smooth union; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('text'), text: z.string().max(256), size: looseField, depth: looseField, font: looseField, align: looseField, curveSegments: looseField }).describe('3D text; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('terrain'), size: looseField, resolution: looseField, seed: looseField, amplitude: looseField, holes: z.array(z.unknown()).max(16).optional() }).describe('Hills with round holes; see scene_capabilities terrain.'),
@@ -593,6 +596,7 @@ const motion = z.strictObject({
     motionTrack('camera', 'target', vector3, vector3),
     motionTrack('camera', 'fov', finite.gt(0).lt(180), finite),
     motionTrack('camera', 'roll', finite, finite),
+    motionTrack('geometry', 'oceanTime', finite.min(-1e6).max(1e6), finite),
     lookTrack,
   ])).max(128),
 }).describe('One absolute-time procedural clip. Local node transforms propagate through parents. Cubic tangents are derivatives per second. Backend checks references, duplicate tracks, 2048 total keys and every sampled pose.');
@@ -810,15 +814,15 @@ const OUTPUT_SCHEMAS = {
 const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const INLINE_IMAGE_MAXIMUM_BYTES = 1024 * 1024;
 
-async function renderResultContent(result) {
-  const content = [{ type: 'text', text: JSON.stringify(result) }];
+async function renderResultContent(result, shown = result) {
+  const content = [{ type: 'text', text: JSON.stringify(shown) }];
   for (const artifact of result.artifacts) {
     if (INLINE_IMAGE_TYPES.has(artifact.mimeType) && artifact.bytes <= INLINE_IMAGE_MAXIMUM_BYTES) {
       content.push({ type: 'image', data: (await readFile(artifact.path)).toString('base64'), mimeType: artifact.mimeType });
     }
     content.push({ type: 'resource_link', uri: pathToFileURL(artifact.path).href, name: artifact.filename, mimeType: artifact.mimeType, size: artifact.bytes });
   }
-  return { content, structuredContent: result };
+  return { content, structuredContent: shown };
 }
 
 // Errors from the preview page arrive as "page.evaluate: RangeError: <message>\n    at <bundle url>...": the stack
@@ -896,7 +900,10 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
       return logCall ? logCall(name, call) : call();
     });
   }
-  register('scene_capabilities', 'Index of supported recipe features and runtime budgets; pass topic for the detail of one. Read it before authoring. Does not launch a browser.', z.strictObject({ topic: z.string().min(1).max(64).optional().describe('A name from the index, or name.branch such as meshEdit.bevel. Leave out for the index.') }), readOnly, async ({ topic }) => jsonResult(answerCapabilities(relations ? await runtime.capabilities() : withoutRelationsAdvice(await runtime.capabilities()), topic, outlineSources)));
+  register('scene_capabilities', 'Index of supported recipe features and runtime budgets; pass topic for the detail of one. Read it before authoring. Does not launch a browser.', z.strictObject({ topic: z.string().min(1).max(64).optional().describe('A name from the index, or name.branch such as meshEdit.bevel. Leave out for the index.'), response_format: responseFormatField }), readOnly, async ({ topic, response_format }) => {
+    const answer = answerCapabilities(relations ? await runtime.capabilities() : withoutRelationsAdvice(await runtime.capabilities()), topic, outlineSources);
+    return jsonResult(chosenFormat('scene_capabilities', response_format) === 'concise' && answer.fields !== undefined ? { ...answer, fields: withoutNotes(answer.fields) } : answer);
+  });
   register('scene_create', 'Create the single active render scene from a JSON recipe. Dispose an existing scene first.', z.strictObject({ recipe: relations ? recipe : recipeWithoutRelations }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.create(argumentsValue)));
   register('scene_asset_catalog', 'List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory. No arbitrary paths or downloads.', z.strictObject({}), readOnly, async () => jsonResult(await runtime.assetCatalog()));
   register('scene_create_asset', 'Create the active scene from a catalog GLB and editable asset recipe. Preserves supported maps, skins, morphs and clips. Dispose the existing scene first.', z.strictObject({ recipe: assetRecipe }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.createAsset(argumentsValue)));
@@ -915,6 +922,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
     width: z.number().int().min(64).max(480).default(384),
     height: z.number().int().min(64).max(480).default(384),
     labels: labelsFlag,
+    response_format: responseFormatField,
     shots: z.array(z.strictObject({
       label: z.string().max(48).optional(),
       ...reviewBranchField,
@@ -923,9 +931,10 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
       motionTime: z.number().min(0).max(3600).nullable().optional(),
       rendererTime: z.number().min(0).max(3600).optional(),
     })).min(1).max(4),
-  }), readOnly, async argumentsValue => {
-    const { data, mimeType, metadata } = await runtime.review(argumentsValue);
-    return { content: [{ type: 'image', data, mimeType }, { type: 'text', text: JSON.stringify(metadata) }], structuredContent: metadata };
+  }), readOnly, async ({ response_format, ...reviewInput }) => {
+    const { data, mimeType, metadata } = await runtime.review(reviewInput);
+    const shown = chosenFormat('scene_review', response_format) === 'concise' ? conciseReview(metadata) : metadata;
+    return { content: [{ type: 'image', data, mimeType }, { type: 'text', text: JSON.stringify(shown) }], structuredContent: shown };
   });
   register('scene_checkpoint', 'Save a private recipe snapshot. Up to eight checkpoints can be retained per session.', z.strictObject(sessionFields), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.checkpoint(argumentsValue)));
   register('scene_restore', 'Restore a checkpoint atomically using the current revision. The checkpoint remains available and revision increments. With revision (last 4 kept), undo with no checkpoint. With branch, keep that branch (one revision) and drop all branches.', z.strictObject({ ...sessionFields, checkpointId: restoreCheckpointId, revision: z.number().int().min(0).optional(), ...restoreBranchField, expectedRevision }), edit, async argumentsValue => jsonResult(await runtime.restore(argumentsValue)));
@@ -935,9 +944,15 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   register('scene_export_web', 'Write the scene with its game as a static web build in the jobs folder: index.html, game.json and engine/, which any static host serves with no server code. Needs --jobs and a game set with set-game. Procedural scenes only; the newest four builds are kept.', z.strictObject({ ...sessionFields, title: z.string().max(64).optional().describe('Page title.') }), edit, async argumentsValue => jsonResult(await runtime.exportWeb(argumentsValue)));
   register('scene_dispose', 'Dispose the active scene and its checkpoints, releasing renderer resources.', z.strictObject(sessionFields), destroy, async argumentsValue => jsonResult(await runtime.dispose(argumentsValue)));
   register('scene_render_submit', 'Start one asynchronous snapshot job in the configured private job store. Requires the current revision. Temporarily leases the preview renderer; does not change source revision or checkpoints.', z.strictObject({ ...sessionFields, expectedRevision, settings: renderSettings }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.submitJob(argumentsValue)));
-  register('scene_render_status', 'Read render job state and durable frame progress. Terminal states are completed, cancelled, failed and interrupted.', z.strictObject(jobFields), readOnly, async argumentsValue => jsonResult(await runtime.jobStatus(argumentsValue)));
+  register('scene_render_status', 'Read render job state and durable frame progress. Terminal states are completed, cancelled, failed and interrupted.', z.strictObject({ ...jobFields, response_format: responseFormatField }), readOnly, async ({ response_format, ...jobInput }) => {
+    const record = await runtime.jobStatus(jobInput);
+    return jsonResult(chosenFormat('scene_render_status', response_format) === 'concise' ? conciseJobStatus(record) : record);
+  });
   register('scene_render_cancel', 'Request cancellation of one job. Poll status until terminal before using the preview again.', z.strictObject(jobFields), { ...edit, idempotentHint: true }, async argumentsValue => jsonResult(await runtime.cancelJob(argumentsValue)));
-  register('scene_render_result', 'Read completed local output paths, MIME types, byte counts, SHA-256 digests and measured render metrics. Returns a PNG inline and a resource link to each file; video stays on disk.', z.strictObject(jobFields), readOnly, async argumentsValue => renderResultContent(await runtime.jobResult(argumentsValue)));
+  register('scene_render_result', 'Read completed local output paths, MIME types, byte counts, SHA-256 digests and measured render metrics. Returns a PNG inline and a resource link to each file; video stays on disk.', z.strictObject({ ...jobFields, response_format: responseFormatField }), readOnly, async ({ response_format, ...jobInput }) => {
+    const result = await runtime.jobResult(jobInput);
+    return renderResultContent(result, chosenFormat('scene_render_result', response_format) === 'concise' ? conciseJobResult(result) : result);
+  });
   register('scene_render_release', 'Delete the owned files and record for a terminal job, freeing store quota. Active jobs must be cancelled first.', z.strictObject(jobFields), destroy, async argumentsValue => jsonResult(await runtime.releaseJob(argumentsValue)));
   return server;
 }

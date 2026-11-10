@@ -17,9 +17,10 @@ submit call fails: tell the user which launch option is missing.
 2. `scene_inspect` for the current `revision`.
 3. `scene_render_submit` with `expectedRevision` and `settings`. Start small: one image at 960x540.
 4. `scene_render_status` with the `jobId` until the state is terminal (`completed`, `failed`, `cancelled`,
-   `interrupted`). Poll about every 5 to 10 seconds, and for video read the durable frame progress. Never loop tightly.
-5. `scene_render_result`: output paths, SHA-256 hashes and metrics. Report the actual `width` and `height`, the backend
-   and the seconds; memory limits can lower the size.
+   `interrupted`). Poll about every 5 to 10 seconds, and for video read the durable frame progress. Never loop tightly. Status and result
+   answer in a short `concise` form by default; pass `response_format: "detailed"` for the full record.
+5. `scene_render_result`: output paths, sizes and metrics. Report the actual `width` and `height`, the backend
+   and the seconds; memory limits can lower the size. `detailed` adds SHA-256 hashes and resource counters.
 6. Keep what you need, then `scene_render_release` to remove the job's files.
 7. `scene_render_cancel` stops a job; poll `scene_render_status` until it is `cancelled` before editing again.
 

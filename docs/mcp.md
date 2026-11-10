@@ -133,7 +133,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `mesh_edit` | `sessionId`, `expectedRevision`, `geometry`, `edits`, optional `replace` | Updated revision, render status and the mesh report with per-edit results |
 | `mesh_stack` | `sessionId`, `expectedRevision`, `geometry`, optional `stack`, `apply` | Updated revision, render status and the mesh report with per-node results |
 | `scene_look` | `sessionId`, optional `width`, `height`, `motionTime`, `labels` | PNG image and metadata |
-| `scene_review` | `sessionId`, `expectedRevision`, `shots` (each with an optional `branch`), optional `width`, `height`, `labels` | Labeled PNG grid and metadata from an isolated snapshot |
+| `scene_review` | `sessionId`, `expectedRevision`, `shots` (each with an optional `branch`), optional `width`, `height`, `labels`, `response_format` | Labeled PNG grid and metadata from an isolated snapshot |
 | `scene_checkpoint` | `sessionId` | Checkpoint ID, session ID, and revision |
 | `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId`, a `revision` or a `branch` | Updated revision and render status |
 | `scene_release_checkpoint` | `sessionId`, `checkpointId` | Release confirmation |
@@ -142,9 +142,9 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `scene_export_web` | `sessionId`, optional `title` | A static web build folder under `<jobs>/exports/`: path of `index.html`, file count, bytes. Needs a `game` set with `set-game`. See [Game](game.md) |
 | `scene_dispose` | `sessionId` | Disposal confirmation |
 | `scene_render_submit` | `sessionId`, `expectedRevision`, `settings` | Snapshot job ID and queued record |
-| `scene_render_status` | `jobId` | State and durable frame progress |
+| `scene_render_status` | `jobId`, optional `response_format` | State and durable frame progress |
 | `scene_render_cancel` | `jobId` | Cancellation acknowledgement |
-| `scene_render_result` | `jobId` | Completed output paths, hashes and metrics |
+| `scene_render_result` | `jobId`, optional `response_format` | Completed output paths, hashes and metrics |
 | `scene_render_release` | `jobId` | Confirmation that owned job files were removed |
 
 `sessionId` is optional on every tool that lists it: one scene exists at a time, so a call that leaves it out means the active scene. An ID that names another scene (an invented one, or one from a disposed scene) is still rejected with the active ID in the message, because acting on a scene the caller did not name could edit the wrong one.
@@ -169,6 +169,16 @@ Set operations use `set-node`, `set-material`, or `set-camera`, with fields dire
 `scene_look` can seek procedural `motionTime` without changing revisions. Omission preserves the last preview pose.
 An explicit `null` restores the authored base pose. Release `0.8.0` also supports imported source-node motion.
 Imported clip sampling remains available through `set-animation`.
+
+### Response format
+
+`scene_review`, `scene_render_status`, `scene_render_result` and `scene_capabilities` take `response_format`: `concise` or `detailed`.
+Leave it out for the default: `concise` on the first three, `detailed` on `scene_capabilities`, whose notes are the reason to call it.
+Concise review drops the per-shot resource counters, memory peaks and unset clocks, and keeps each shot's camera, label positions and branch.
+Concise status gives `jobId`, `state`, `frames`, `frameCount`, `reason` and the artifact names.
+Concise result drops the SHA-256 digests and the render's resource counters; its other metrics (passes, depth range, object names, sync) stay.
+Concise `scene_capabilities` drops the one-line notes of a schema topic and keeps field names, types, ranges and enums.
+Pass `detailed` to get the earlier full answer. On a four-shot review the concise text is 657 bytes against 2,534 detailed.
 
 `scene_review` compares up to four cameras or motion samples without changing the source recipe, revision or preview pose.
 Each shot starts from the authored base pose. The [review guide](agent-review.md) describes separate clocks, dimensions and resource limits.

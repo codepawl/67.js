@@ -4,17 +4,12 @@
 // Open bench/animation-graph/index.html with `npm run dev`. W or the up arrow walks, Shift runs; ?speed=3.5 pins the speed
 // and ?demo=1 ramps it up and down on its own.
 import { Renderer67 } from '/src/index.js';
-import { parseGltf } from '/src/gltf.js';
-import { clipFromGltfAnimation, createAssetPose } from '/src/skeleton-pose.js';
-import { createAnimationClip } from '/src/animation.js';
-import { createAnimationGraph } from '/src/animation-graph.js';
+import { createAssetPose } from '/src/skeleton-pose.js';
+import { createLocomotionGraph, loadRobot, RUN_SPEED, WALK_SPEED } from './robot-graph.js';
 import { createCharacterController } from '/src/player.js';
 import { createInput, keyboardSource } from '/src/input.js';
 import { createRuntime } from '/src/runtime.js';
 
-const ROBOT_URL = '/tests/fixtures/RobotExpressive.glb';
-const WALK_SPEED = 2.2;
-const RUN_SPEED = 5.5;
 const ACCELERATION = 6; // Speed units per second squared.
 const DEMO_PERIOD_SECONDS = 8;
 const FIXED_RATE = 60;
@@ -23,46 +18,8 @@ const query = new URLSearchParams(location.search);
 const pinnedSpeed = query.has('speed') ? Number(query.get('speed')) : null;
 const demo = query.get('demo') === '1';
 
-const response = await fetch(ROBOT_URL);
-const asset = await parseGltf(await response.arrayBuffer(), { maxVertices: 500000 });
-const ROOT_BONE = 'RobotArmature';
-
-// The CC0 clips play in place. Give a stride clip a root travel track of `metersPerSecond` so the graph has root motion to extract.
-function withRootTravel(clip, metersPerSecond) {
-  const travel = {
-    target: ROOT_BONE,
-    property: 'translation',
-    keyframes: [{ time: 0, value: [0, 0, 0] }, { time: clip.duration, value: [0, 0, metersPerSecond * clip.duration] }],
-  };
-  return createAnimationClip({ duration: clip.duration, loop: clip.loop, tracks: [...clip.tracks, travel] });
-}
-
-const clips = {};
-for (const [name, pace] of [['Idle', 0], ['Walking', WALK_SPEED], ['Running', RUN_SPEED]]) {
-  const source = asset.animations.find(animation => animation.name === name);
-  const clip = clipFromGltfAnimation(source, { loop: true });
-  clips[name] = pace > 0 ? withRootTravel(clip, pace) : clip;
-}
-
-const graph = createAnimationGraph({
-  rootMotion: { bone: ROOT_BONE },
-  clips,
-  parameters: { speed: { type: 'number' } },
-  layers: [{
-    name: 'locomotion',
-    states: [{
-      name: 'move',
-      blend: {
-        parameter: 'speed',
-        motions: [
-          { clip: 'Idle', threshold: 0 },
-          { clip: 'Walking', threshold: WALK_SPEED },
-          { clip: 'Running', threshold: RUN_SPEED },
-        ],
-      },
-    }],
-  }],
-});
+const asset = await loadRobot();
+const graph = createLocomotionGraph(asset);
 const pose = createAssetPose(asset, { layers: graph.poseLayers() });
 
 const input = createInput({

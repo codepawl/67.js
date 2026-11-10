@@ -56,6 +56,7 @@ const sourceDocuments = [
   'runtime.md',
   'streaming.md',
   'game-rules.md',
+  'netcode.md',
   'input.md',
   'physics-runtime.md',
   'player.md',

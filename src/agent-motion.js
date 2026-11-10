@@ -21,6 +21,8 @@ const PROPERTIES = {
   camera: { eye: 3, target: 3, fov: 1, roll: 1 },
   // An imported asset's morph target weight, addressed by the target's name.
   morph: { weight: 1 },
+  // A mesh geometry's modifier stack: oceanTime (seconds) replaces `time` of every ocean node in the stack, evaluated per frame.
+  geometry: { oceanTime: 1 },
   // A light of the scene, addressed as point:N, spot:N or area:N (its index in environment.pointLights and so on). Spot and area lights also take direction.
   light: { position: 3, direction: 3, color: 3, intensity: 1 },
   // The key light of the environment: lightDirection, keyColor, keyIntensity.
@@ -49,6 +51,7 @@ const LOOK_RANGES = {
     sunElevation: [-90, 90], sunRotation: [-360, 360], turbidity: [1, 10], groundAlbedo: [0, 1], aerialPerspective: [0, 4], ozone: [0, 10],
   },
   effects: { exposure: [0.01, 16], focusDistance: [0.01, 100000] },
+  geometry: { oceanTime: [-1e6, 1e6] },
 };
 const INTERPOLATIONS = ['LINEAR', 'STEP', 'SMOOTH', 'CUBICSPLINE'];
 const MAX_IK_SOLVERS = 16;
@@ -491,6 +494,7 @@ export function normalizeAgentMotion(input, recipe) {
   const nodes = new Set((recipe.nodes ?? []).map(node => node.id));
   const materials = new Set((recipe.materials ?? []).map(material => material.id));
   // An imported asset lists its morph targets; a recipe mesh offers the names of its shape keys.
+  const oceanGeometries = new Set((recipe.geometries ?? []).filter(geometry => geometry.type === 'mesh' && (geometry.stack ?? []).some(node => node?.op === 'ocean')).map(geometry => geometry.id));
   const morphTargets = new Set(recipe.morphTargets ?? (recipe.geometries ?? []).flatMap(geometry => geometry.grow ? [geometry.grow.name] : (geometry.shapeKeys ?? []).map(key => key.name)));
   const identities = new Set();
   let keyframeCount = 0;
@@ -508,9 +512,10 @@ export function normalizeAgentMotion(input, recipe) {
       if (typeof track.id !== 'string' || !track.id.trim() || track.id.length > 128) {
         throw invalidField(`motion.tracks[${index}].id`, track.id, 'an ID of 1 to 128 characters, such as "body"', TypeError);
       }
-      const references = track.kind === 'node' ? nodes : track.kind === 'morph' ? morphTargets : materials;
+      const references = track.kind === 'node' ? nodes : track.kind === 'morph' ? morphTargets : track.kind === 'geometry' ? oceanGeometries : materials;
       if (track.kind !== 'light' && !references.has(track.id)) {
-        const hint = track.kind === 'morph' ? `; morph targets of this asset: ${[...morphTargets].slice(0, 24).join(', ') || 'none'}` : '';
+        const hint = track.kind === 'morph' ? `; morph targets of this asset: ${[...morphTargets].slice(0, 24).join(', ') || 'none'}`
+          : track.kind === 'geometry' ? '; a geometry track needs a mesh geometry whose stack has an ocean node, such as stack [{ "op": "ocean" }]' : '';
         throw invalidField(`motion.tracks[${index}].id`, track.id, `the ID of a ${track.kind} in this recipe, such as ${JSON.stringify([...references][0] ?? 'body')}${hint}`);
       }
     }
@@ -808,8 +813,8 @@ export function compileAgentMotion(input, recipe) {
     })),
   });
   const sampler = compileAnimationSampler(clip);
-  const output = { nodes: new Map(), materials: new Map(), morphs: new Map(), lights: new Map(), sun: null, environment: null, effects: null, camera: null };
-  const patchesByKind = { node: output.nodes, material: output.materials, morph: output.morphs, light: output.lights };
+  const output = { nodes: new Map(), materials: new Map(), morphs: new Map(), geometries: new Map(), lights: new Map(), sun: null, environment: null, effects: null, camera: null };
+  const patchesByKind = { node: output.nodes, material: output.materials, morph: output.morphs, geometry: output.geometries, light: output.lights };
   const bindings = ordinaryTracks.map((track, index) => {
     let patch;
     if (LOOK_KINDS.has(track.kind) && track.kind !== 'light') {
