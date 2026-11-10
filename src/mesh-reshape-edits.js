@@ -1,3 +1,5 @@
+import { selectVertices } from './mesh-dissolve.js';
+import { splitEdges, deleteLoose, flattenVertices } from './mesh-reshape-more.js';
 import { selectEdges, edgeFaces } from './mesh-bevel.js';
 import { selectFaces, countSelected } from './mesh-select.js';
 import { invalidField } from './field-error.js';
@@ -8,10 +10,11 @@ import { pokeFaces, dualMesh, trisToQuads, symmetrizeMesh, scaleElements, extrud
 // The reshaping edits as recipe operations: validation of their fields and running them on MeshData. The geometry
 // lives in mesh-reshape.js; this file only connects it to the edit log.
 
-export const RESHAPE_OPERATIONS = Object.freeze(['poke', 'dual', 'tris_to_quads', 'symmetrize', 'scale_elements', 'extrude_edges']);
+export const RESHAPE_OPERATIONS = Object.freeze(['poke', 'dual', 'tris_to_quads', 'symmetrize', 'scale_elements', 'extrude_edges', 'split_edges', 'delete_loose', 'flatten']);
 
 const SYMMETRIZE_SIDES = Object.freeze(['positive', 'negative']);
 const MAX_SCALE = 1000;
+const VERTEX_RULE_HINT = 'a vertex rule such as { "all": true }, { "vertices": [0, 1] }, { "valence": 4 } or { "inside": { "min": [x, y, z], "max": [x, y, z] } }';
 
 /** Fill in `normalized` for a reshaping edit, throwing a TypeError that names the edit when a field is wrong. */
 export function normalizeReshapeEdit(edit, normalized, index, { finiteNumber, vector }) {
@@ -34,6 +37,17 @@ export function normalizeReshapeEdit(edit, normalized, index, { finiteNumber, ve
     case 'scale_elements':
       normalized.scale = finiteNumber(edit.scale, index, 'scale', { minimum: 0, maximum: MAX_SCALE, exclusiveMinimum: true });
       break;
+    case 'split_edges':
+      normalized.edges = editRuleObject(edit.edges, index, 'edges', EDGE_RULE_HINT);
+      break;
+    case 'flatten':
+      normalized.verts = editRuleObject(edit.verts, index, 'verts', VERTEX_RULE_HINT);
+      if (edit.normal !== undefined) {
+        normalized.normal = vector(edit.normal, index, 'normal');
+        if (normalized.normal.every(component => component === 0)) throw editField(index, 'normal', edit.normal, 'a direction that is not all zeros, such as [0, 1, 0]');
+      }
+      normalized.factor = edit.factor === undefined ? 1 : finiteNumber(edit.factor, index, 'factor', { minimum: 0, maximum: 1 });
+      break;
     case 'extrude_edges':
       normalized.edges = editRuleObject(edit.edges, index, 'edges', EDGE_RULE_HINT);
       normalized.offset = vector(edit.offset, index, 'offset');
@@ -52,6 +66,12 @@ export function checkReshapeBudget(mesh, edit, limits, index) {
     const faces = mesh.faceCount - countSelected(mask) + corners;
     if (faces > limits.maxFaces) {
       throw editField(index, 'select', edit.select, `a rule that keeps the mesh within ${limits.maxFaces} faces (this edit would make ${faces}), such as { "tag": "top" }`, RangeError);
+    }
+  }
+  if (edit.op === 'split_edges') {
+    const edges = countSelected(selectEdges(mesh, edit.edges, edgeFaces(mesh)));
+    if (mesh.vertexCount + edges * 2 > limits.maxVertices) {
+      throw editField(index, 'edges', edit.edges, `a rule that keeps the mesh within ${limits.maxVertices} vertices (this edit would add up to ${edges * 2}), such as { "angle": 30 }`, RangeError);
     }
   }
   if (edit.op === 'extrude_edges') {
@@ -94,6 +114,18 @@ export function runReshapeEdit(mesh, edit) {
     case 'extrude_edges': {
       const outcome = extrudeEdges(mesh, selectEdges(mesh, edit.edges, edgeFaces(mesh)), { offset: edit.offset, name: edit.name });
       return { mesh: outcome.mesh, result: { extrudedEdges: outcome.extrudedEdges } };
+    }
+    case 'split_edges': {
+      const outcome = splitEdges(mesh, selectEdges(mesh, edit.edges, edgeFaces(mesh)));
+      return { mesh: outcome.mesh, result: { splitEdges: outcome.splitEdges, addedVertices: outcome.addedVertices } };
+    }
+    case 'delete_loose': {
+      const outcome = deleteLoose(mesh);
+      return { mesh: outcome.mesh, result: { removedVertices: outcome.removedVertices } };
+    }
+    case 'flatten': {
+      const outcome = flattenVertices(mesh, selectVertices(mesh, edit.verts), { normal: edit.normal, factor: edit.factor });
+      return { mesh: outcome.mesh, result: { flattenedVertices: outcome.flattenedVertices } };
     }
   }
   throw new TypeError(`Not a reshaping edit: ${edit.op}`);

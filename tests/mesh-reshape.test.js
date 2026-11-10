@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { box, cylinder } from '../src/geometry.js';
-import { editMesh, validateTopology, meshFromGeometry, lintMesh, tagCounts, applyMeshEdits } from '../src/mesh.js';
+import { createMeshData, editMesh, validateTopology, meshFromGeometry, lintMesh, tagCounts, applyMeshEdits } from '../src/mesh.js';
 import { normalizeMeshEdits, MESH_EDIT_OPERATIONS } from '../src/mesh-recipe.js';
 
 const cube = () => meshFromGeometry(box(0, 1));
@@ -181,4 +181,55 @@ test('the reshaping edits validate their fields', () => {
 test('a poke that would pass the face limit is refused before it allocates', () => {
   const big = meshFromGeometry(cylinder(64, 0, 1));
   assert.throws(() => applyMeshEdits(big, [{ op: 'poke' }], { maxFaces: 100 }), /edits\[0\]\.select.*within 100 faces/s);
+});
+
+test('split_edges opens the surface along the chosen edges and is deterministic', () => {
+  const { mesh, results } = run(cube(), [{ op: 'split_edges', edges: { all: true } }]);
+  assert.deepEqual([mesh.vertexCount, mesh.faceCount], [24, 6]);
+  assert.equal(results[0].addedVertices, 16);
+  assert.equal(tagCounts(mesh).top, 1);
+  assert.equal(lintMesh(mesh).parts.closed, 0);
+  assert.ok(Math.abs(volume(mesh) - 1) < 1e-9);
+  sameBytes(mesh, run(cube(), [{ op: 'split_edges', edges: { all: true } }]).mesh);
+});
+
+test('split_edges refuses a rule with no shared edge', () => {
+  assert.throws(() => run(openCube(), [{ op: 'split_edges', edges: { open: true } }]), /selects no edge shared by two faces/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'split_edges' }]), /edits\[0\]\.edges/);
+});
+
+test('delete_loose drops vertices no face uses', () => {
+  const base = cube();
+  const withLoose = createMeshData({
+    positions: Float32Array.from([...base.positions, 5, 5, 5]),
+    faceOffsets: base.faceOffsets, cornerVertices: base.cornerVertices,
+    edgeVertices: base.edgeVertices, cornerEdges: base.cornerEdges, attributes: base.attributes,
+  });
+  assert.equal(lintMesh(withLoose).problems.some(problem => problem.kind === 'loose-vertex'), true);
+  const { mesh, results } = run(withLoose, [{ op: 'delete_loose' }]);
+  assert.deepEqual([mesh.vertexCount, mesh.faceCount], [8, 6]);
+  assert.equal(results[0].removedVertices, 1);
+  assertClosed(mesh);
+  assert.throws(() => run(cube(), [{ op: 'delete_loose' }]), /no loose vertex/);
+});
+
+test('flatten moves the selected vertices onto a plane', () => {
+  const bumped = run(cube(), [{ op: 'translate', select: { tag: 'top' }, offset: [0, 0.2, 0] }]).mesh;
+  const flatten = [{ op: 'flatten', verts: { all: true }, normal: [0, 1, 0] }];
+  const { mesh, results } = run(bumped, flatten);
+  assert.equal(results[0].flattenedVertices, 8);
+  const heights = new Set();
+  for (let vertex = 0; vertex < mesh.vertexCount; vertex++) heights.add(mesh.positions[vertex * 3 + 1].toFixed(5));
+  assert.equal(heights.size, 1);
+  assert.deepEqual([mesh.vertexCount, mesh.faceCount], [8, 6]);
+  sameBytes(mesh, run(bumped, flatten).mesh);
+  const half = run(cube(), [{ op: 'flatten', verts: { all: true }, normal: [0, 1, 0], factor: 0.5 }]).mesh;
+  assert.ok(Math.abs(Math.abs(half.positions[1]) - 0.25) < 1e-6);
+});
+
+test('flatten validates its fields', () => {
+  assert.throws(() => normalizeMeshEdits([{ op: 'flatten' }]), /edits\[0\]\.verts/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'flatten', verts: { all: true }, normal: [0, 0, 0] }]), /edits\[0\]\.normal/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'flatten', verts: { all: true }, factor: 2 }]), /edits\[0\]\.factor/);
+  assert.throws(() => run(cube(), [{ op: 'flatten', verts: { vertices: [0] } }]), /Pass normal/);
 });
