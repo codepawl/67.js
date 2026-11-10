@@ -197,3 +197,58 @@ test('the same 500-box scene runs live on both engines and records the step time
 test('loadJoltEngine resolves once', async () => {
   assert.equal(await loadJoltEngine(), await loadJoltEngine());
 });
+
+const TETRAHEDRON_POINTS = [-0.5, 0, -0.5, 0.5, 0, -0.5, 0, 0, 0.5, 0, 0.8, 0];
+const COLLINEAR_POINTS = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3];
+
+function hullDefinition(points, translation = [0, 0, 0], mass = 1) {
+  return {
+    bodies: [
+      { name: 'floor', type: 'fixed', translation: [0, -0.5, 0] },
+      { name: 'rock', translation: [0, 0.3, 0] },
+    ],
+    colliders: [
+      { name: 'ground', body: 'floor', shape: 'cuboid', halfExtents: [10, 0.5, 10] },
+      { name: 'hull', body: 'rock', shape: 'convexHull', points, mass, translation },
+    ],
+  };
+}
+
+test('a convex hull rests on the floor under jolt, with and without a collider offset', async () => {
+  for (const offset of [[0, 0, 0], [0, 0.1, 0]]) {
+    const physics = await createPhysicsSystem(hullDefinition(TETRAHEDRON_POINTS, offset), { adapter: joltAdapter });
+    stepMany(physics, 180);
+    const pose = physics.getPose('rock');
+    const height = pose.translation[1];
+    assert.ok(Number.isFinite(height) && height < 0.3 && height > -0.2, `the hull settled on the floor, got y ${height}`);
+    physics.dispose();
+  }
+});
+
+test('a collinear convex hull fails with a RangeError that names the collider', async () => {
+  await assert.rejects(createPhysicsSystem(hullDefinition(COLLINEAR_POINTS, [0, 0, 0], undefined), { adapter: joltAdapter }), error => {
+    assert.ok(error instanceof RangeError);
+    assert.match(error.message, /Collider "hull" could not be built by jolt.*span a volume/);
+    return true;
+  });
+});
+
+test('a setup that throws destroys the jolt interface and every owned object', async () => {
+  const Jolt = await loadJoltEngine();
+  const originalDestroy = Jolt.destroy;
+  const destroyed = [];
+  Jolt.destroy = object => {
+    destroyed.push(object);
+    return originalDestroy.call(Jolt, object);
+  };
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      destroyed.length = 0;
+      await assert.rejects(createPhysicsSystem(hullDefinition(COLLINEAR_POINTS, [0, 0, 0], undefined), { adapter: joltAdapter }), /span a volume/);
+      assert.ok(destroyed.some(object => object instanceof Jolt.JoltInterface), 'the interface is destroyed');
+      assert.ok(destroyed.length > 10, `owned objects are destroyed, got ${destroyed.length}`);
+    }
+  } finally {
+    Jolt.destroy = originalDestroy;
+  }
+});

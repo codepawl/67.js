@@ -137,7 +137,9 @@ function createJoltWorld(prepared) {
       shapeSettings = new Jolt.CylinderShapeSettings(collider.halfHeight, collider.radius, Math.min(MAX_CONVEX_RADIUS, collider.halfHeight, collider.radius) * 0.5);
     } else {
       shapeSettings = new Jolt.ConvexHullShapeSettings();
-      for (const point of collider.points) shapeSettings.mPoints.push_back(own(new Jolt.Vec3(...point)));
+      for (let index = 0; index < collider.points.length; index += 3) {
+        shapeSettings.mPoints.push_back(own(new Jolt.Vec3(collider.points[index], collider.points[index + 1], collider.points[index + 2])));
+      }
     }
     if (collider.density !== undefined) shapeSettings.mDensity = collider.density;
     const hasOffset = collider.translation.some(component => component !== 0) || collider.rotation.some((component, axis) => component !== [0, 0, 0, 1][axis]);
@@ -157,7 +159,16 @@ function createJoltWorld(prepared) {
     return shapeResult.Get();
   }
 
-  prepared.bodies.forEach((body, bodyIndex) => {
+  function freeWorld() {
+    for (const bodyId of bodyIds) {
+      bodyInterface.RemoveBody(bodyId);
+      bodyInterface.DestroyBody(bodyId);
+    }
+    Jolt.destroy(jolt);
+    for (const object of owned.reverse()) Jolt.destroy(object);
+  }
+
+  function addBody(body, bodyIndex) {
     const colliderIndex = colliderOfBody[bodyIndex];
     const collider = colliderIndex >= 0 ? prepared.colliders[colliderIndex] : undefined;
     let shape;
@@ -196,7 +207,15 @@ function createJoltWorld(prepared) {
     bodyIds.push(created.GetID());
     bodyOfIdIndex.set(created.GetID().GetIndex(), created);
     if (collider) colliderOfBodyIndex.set(created.GetID().GetIndex(), colliderIndex);
-  });
+  }
+
+  // A throw while building must not leave the Jolt interface, bodies or owned objects alive: no caller holds the world yet.
+  try {
+    prepared.bodies.forEach(addBody);
+  } catch (error) {
+    freeWorld();
+    throw error;
+  }
 
   // Jolt reports a contact as removed when a body falls asleep; Rapier does not. Track which pairs are touching so a
   // sleeping body neither ends nor restarts its contact, and every adapter reports the same started and stopped pairs.
@@ -408,14 +427,7 @@ function createJoltWorld(prepared) {
       }
       return found;
     },
-    free() {
-      for (const bodyId of bodyIds) {
-        bodyInterface.RemoveBody(bodyId);
-        bodyInterface.DestroyBody(bodyId);
-      }
-      Jolt.destroy(jolt);
-      for (const object of owned.reverse()) Jolt.destroy(object);
-    },
+    free: freeWorld,
   };
 }
 
