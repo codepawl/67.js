@@ -101,7 +101,7 @@ function markDirty() {
 }
 
 function frameFor(jitterPixels = 0) {
-  const frame = { eye: eyePosition(), target: camera.pivot, up: [0, 1, 0], fov: FIELD_OF_VIEW, far: Math.max(extent * 2.5, 100) };
+  const frame = { eye: eyePosition(), target: camera.pivot, up: [0, 1, 0], fov: FIELD_OF_VIEW, far: Math.max(extent * 2.5, 100, camera.distance * 2 + extent) };
   if (!options.nearFit) frame.near = 0.1;
   if (jitterPixels) frame.shift = [jitterPixels / canvas.width, 0];
   return frame;
@@ -176,7 +176,9 @@ function readFrame(context) {
 
 // Two frames with a sub-pixel jitter, drawn with one flat colour per part. A pixel is flicker when its owner changes while the first
 // frame is the same colour on all four sides of it: a silhouette moves by the jitter at its own edge, which that test leaves out.
-// `totalChanged` counts every pixel whose owner changed, edges included.
+// `totalChanged` counts every pixel whose owner changed, edges included. `clearOfEdges` is stricter than `changed`: an anti-aliased
+// edge blends two owners into a colour that is close to both, which the four-neighbour test reads as no edge, so this count also
+// leaves out pixels with a colour step anywhere within two pixels.
 async function probe() {
   if (!renderer) return null;
   if (!options.ids) {
@@ -199,19 +201,21 @@ async function probe() {
   const image = paint.createImageData(width, height);
   let changed = 0;
   let totalChanged = 0;
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
+  let clearOfEdges = 0;
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
       const index = (y * width + x) * 4;
       if (colourDistance(first, second, index) <= CHANGE_THRESHOLD) continue;
       totalChanged++;
       if (hasEdgeAround(first, width, index)) continue;
       changed++;
+      if (!hasEdgeNearby(first, width, index)) clearOfEdges++;
       image.data.set([255, 0, 255, 255], index);
     }
   }
   paint.putImageData(image, 0, 0);
   renderer.render(frameFor(0));
-  lastProbe = { changed, totalChanged, total: width * height, fraction: changed / (width * height), width, height };
+  lastProbe = { changed, clearOfEdges, totalChanged, total: width * height, fraction: changed / (width * height), width, height };
   setStatus(changed === 0 ? 'ok' : 'bad', changed === 0 ? 'No flicker in this view' : `${changed} pixels flicker`);
   updateReadout();
   return lastProbe;
@@ -224,6 +228,19 @@ function colourDistance(a, b, index, otherIndex = index) {
 function hasEdgeAround(data, width, index) {
   const neighbours = [index - 4, index + 4, index - width * 4, index + width * 4];
   return neighbours.some(neighbour => colourDistance(data, data, index, neighbour) > EDGE_THRESHOLD);
+}
+
+// Whether the first frame has a colour step between any two of the pixels up to two away on a row or a column through this one.
+function hasEdgeNearby(data, width, index) {
+  for (const step of [4, width * 4]) {
+    const line = [index - 2 * step, index - step, index, index + step, index + 2 * step];
+    for (let first = 0; first < line.length; first++) {
+      for (let second = first + 1; second < line.length; second++) {
+        if (colourDistance(data, data, line[first], line[second]) > EDGE_THRESHOLD) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function tick(timestamp) {

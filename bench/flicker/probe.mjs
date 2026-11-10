@@ -46,7 +46,7 @@ async function probeTraps() {
       await page.waitForTimeout(300);
       const outcome = await page.evaluate(async () => ({ probe: await window.flicker.probe(), info: window.flicker.info }));
       await page.screenshot({ path: path.join(outputFolder, `${prefix}-${trap}-${label}.png`) });
-      results.push({ trap, configuration: label, changed: outcome.probe.changed, moved: outcome.probe.totalChanged, depth: outcome.info.depthMode });
+      results.push({ trap, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, moved: outcome.probe.totalChanged, depth: outcome.info.depthMode });
       console.log(JSON.stringify(results.at(-1)));
     }
   }
@@ -73,7 +73,7 @@ try {
           return { probe, info: window.flicker.info };
         }, spot);
         await page.screenshot({ path: path.join(outputFolder, `${prefix}-${spot.name}-${label}.png`) });
-        results.push({ spot: spot.name, moved: outcome.probe.totalChanged, configuration: label, changed: outcome.probe.changed, fraction: outcome.probe.fraction, depth: outcome.info.depthMode, near: outcome.info.near, far: outcome.info.far });
+        results.push({ spot: spot.name, moved: outcome.probe.totalChanged, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, fraction: outcome.probe.fraction, depth: outcome.info.depthMode, near: outcome.info.near, far: outcome.info.far });
         console.log(JSON.stringify(results.at(-1)));
       }
     }
