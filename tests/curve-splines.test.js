@@ -260,3 +260,19 @@ test('grow rejects bad fields with what to pass', () => {
     [{ name: 'vine', bogus: 1 }, /Unknown grow field: bogus/],
   ]) assert.throws(() => createAgentScene(still(grow)), pattern);
 });
+
+test('a closed curve grows to full length with no trim, and its first and last states share a vertex count', () => {
+  const closedShapes = {
+    polygon: { points: [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0]], closed: true },
+    star: { shape: { type: 'star' } },
+  };
+  for (const [name, spline] of Object.entries(closedShapes)) {
+    const { geometries, ...recipe } = still();
+    geometries[0] = { id: 'vine', type: 'curve', ...spline, radius: 0.02, radialSegments: 4, grow: { name: 'vine', steps: 4 } };
+    const geometry = createAgentScene({ ...recipe, geometries }).parts[0].geometry;
+    const vertexCount = geometry.positions.length;
+    assert.equal(geometry.morphTargets.length, 4, name);
+    assert.equal(geometry.morphTargets[0].positions.length, vertexCount, `${name} first state`);
+    assert.equal(geometry.morphTargets[3].positions.length, vertexCount, `${name} last state`);
+  }
+});

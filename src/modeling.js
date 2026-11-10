@@ -383,7 +383,7 @@ export function curveSetVertexCount(splines, options = {}) {
 
 function planCurveSet(splines, {
   radius = 0.05, taper, profile, resolution = 12, radialSegments = 8,
-} , labelFirst) {
+}, labelFirst, growing = false) {
   radius = finite(radius, 'radius');
   if (radius <= 0) throw new RangeError('radius must be positive and closed must be boolean.');
   integer(resolution, 1, 64, 'resolution');
@@ -398,8 +398,11 @@ function planCurveSet(splines, {
   const taperFactors = taperFrom(taper);
   const vertexCount = resolved.reduce((sum, spline) => {
     const samples = sampleCountOf(spline, resolution);
-    const rings = spline.trim ? samples + 3 : samples + (spline.closed ? 1 : 0);
-    return sum + rings * sides * 2 + (spline.closed && !spline.trim ? 0 : 2 * (sides + 1));
+    // A growing curve sweeps every state open, with the ring count of growthState and caps, trim or not.
+    const trimmed = Boolean(spline.trim) || growing;
+    const extraRings = growing ? (spline.closed ? 1 : 0) : (spline.trim ? 3 : (spline.closed ? 1 : 0));
+    const rings = samples + extraRings;
+    return sum + rings * sides * 2 + (spline.closed && !trimmed ? 0 : 2 * (sides + 1));
   }, 0);
   return { resolved, vertexCount, radius, profilePoints, taperFactors, radialSegments, resolution };
 }
@@ -464,7 +467,7 @@ function growthState(plan, fraction) {
 // length. The motion weight 0 to 1 of grow.name blends two neighbouring steps, so seeking equals playing.
 function growingCurve(splines, options, label) {
   const grow = growFrom(options.grow);
-  const plan = planCurveSet(splines, options, label);
+  const plan = planCurveSet(splines, options, label, true);
   if (plan.vertexCount * grow.steps > MAX_GROW_MORPH_VERTICES) {
     throw new RangeError(`grow needs ${plan.vertexCount * grow.steps} morph vertices; at most ${MAX_GROW_MORPH_VERTICES}. Lower grow.steps, resolution or radialSegments.`);
   }
@@ -493,7 +496,7 @@ export function growthWeights(steps, growth) {
 export function curveGeometryVertexCount(value) {
   const { splines, label } = splinesOfGeometry(value);
   if (value.grow !== undefined) growFrom(value.grow);
-  return planCurveSet(splines, value, label).vertexCount;
+  return planCurveSet(splines, value, label, value.grow !== undefined).vertexCount;
 }
 
 /**
