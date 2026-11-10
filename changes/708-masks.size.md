@@ -1,0 +1,2 @@
+- scene:agent-scene: the measure and group-gradient text sits in scene_capabilities (agents read it to use the masks), and the measures with their validation are part of the mesh edit code, which the agent scene always loads
+- goal:agent-scene: the bundle is over its goal already; the growth is agent-facing capability (edge wear and cavity dirt on a mesh with no UVs) with a rendered proof

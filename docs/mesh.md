@@ -305,13 +305,21 @@ Uses:
   the texture: each vertex moves by `(field - midlevel) * strength` along `normal` (default), `x`, `y` or `z`.
   `displace` also takes `group`, the name of a vertex group: each move is scaled by the vertex's weight.
 - Both are also stack nodes, so a late change reuses the cached earlier nodes.
-- `vertex_group` (`name`, `select`, and one of `weight`, `field` or `gradient`) writes the weights, 0 to 1, of a named group for the
+- `vertex_group` (`name`, `select`, and one of `weight`, `field`, `gradient` or `measure`) writes the weights, 0 to 1, of a named group for the
   vertices of the selected faces; the others keep theirs (0 in a new group). `gradient` is `{ "axis": "y", "range": [0, 1], "weights": [0, 1] }`,
   a straight blend between the weights at the two ends of the range along the axis. Up to 32 groups. `displace` reads one with
   `group`, and a cloth sheet holds the vertices of weight 0.5 or more with `pinGroup` (see [physics.md](physics.md)). Groups are
   point attributes: run `vertex_group` after the shape edits, because a stack node that rebuilds the mesh (`mirror`, `array`) drops them.
+  `measure` fills the group from the mesh itself, so a mesh with no UVs can tell an edge from a cavity: `curvature` (`gain` 2, 0.1 to 16) is 0.5 on a flat
+  surface, above it on a convex bulge and below it in a concave dent; `edge` (`angle` 30 degrees, 1 to 179) is 1 on a convex fold at or past the angle and 0
+  elsewhere, and a concave fold gives 0; `occlusion` (`rays` 32, 1 to 128; `distance` in metres, default a quarter of the bounding box diagonal; `seed` 0) is the
+  share of cosine-weighted rays from the vertex that hit the mesh within `distance`, 1 deep in a cavity. All three are deterministic: the same mesh and seed give
+  the same bytes. Occlusion casts at most 2 million rays in all and names the fix when a `select` holds too many vertices; it needs vertices where the detail is, so
+  cut the mesh first (`subdivide_edges`). Edge wear needs the geometry to carry the fold: bevel the edge and cut the faces so a vertex sits on it.
 - `vertex_color` (`select`, and one of `color`, `field` or `gradient`) sets the corner colors of the selected faces. `color` is
   `[r, g, b]` from 0 to 1, `field` a vector expression of the vertex, and `gradient` is `{ "axis": "y", "range": [0, 1], "colors": [[0, 0, 1], [1, 0, 0]] }`.
+  `gradient` can also follow a vertex group instead of an axis: `{ "group": "wear", "colors": [dirt, paint, metal] }` blends two colors from weight 0 to 1, or three at
+  weights 0, 0.5 and 1, so `curvature` gives dirt in the dents, paint on flat faces and bare metal on the convex edges.
   The renderer multiplies the material color by it and a GLB export writes it as `COLOR_0`. Faces not selected stay white until painted.
 - `instances` on a recipe node repeats its geometry at points; see [agent-scene.md](agent-scene.md#instances-on-points).
 

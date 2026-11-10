@@ -168,8 +168,8 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
 
 // Vertex colors and groups. Details stay here so the tool schemas stay small.
 export const MESH_ATTRIBUTE_NOTES = Object.freeze({
-  vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field or gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] }. Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
-  vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
+  vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field, gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] } or measure curvature (gain 0.1-16, 2; 0.5 flat, up convex), edge (angle 1-179 deg, 30; convex folds) or occlusion (rays 1-128, 32; distance m; seed). Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
+  vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] } or { group, colors } of 2 or 3 stops along a vertex group's weights (edge wear: curvature group, colors [dirt, paint, metal]). Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
 });
 
 // UV projection and packing edits. Details stay here so the tool schemas stay small.
