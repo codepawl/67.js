@@ -5,7 +5,7 @@
   "glb": "/showcase/chipfab/scene.glb",
   "hdri": "/showcase/chipfab/sky.hdr",
   "hdriOptions": {
-    "intensity": 1.0,
+    "intensity": 0.8,
     "rotation": 0,
     "showBackground": false,
     "backgroundBlur": 0
@@ -13,7 +13,7 @@
   "gltfOptions": {
     "maxTexturePixels": 33554432
   },
-  "exposure": 0.88,
+  "exposure": 0.8,
   "renderer": {
     "ground": false,
     "hdr": true,
@@ -30,14 +30,14 @@
         1
       ],
       "keyIntensity": 0.0001,
-      "fillIntensity": 0.8,
-      "ambientIntensity": 1,
+      "fillIntensity": 0.6,
+      "ambientIntensity": 0.7,
       "fogColor": [
-        0.78,
-        0.84,
-        0.92
+        0.55,
+        0.64,
+        0.78
       ],
-      "fogDensity": 0.0016,
+      "fogDensity": 0.0011,
       "pointLights": [
         {
           "position": [
@@ -227,14 +227,14 @@
     "near": 0.3,
     "far": 400,
     "effects": {
-      "ambientOcclusion": 1.0,
+      "ambientOcclusion": 1,
       "bloom": {
-        "strength": 0.25,
-        "threshold": 1,
+        "strength": 0.3,
+        "threshold": 1.1,
         "radius": 0.9
       },
-      "saturation": 1.05,
-      "vignette": 0.25
+      "saturation": 1.12,
+      "vignette": 0.32
     }
   },
   "credits": [
