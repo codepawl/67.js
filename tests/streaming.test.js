@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRuntime } from '../src/runtime.js';
-import { createGlbLoader, createStreaming, selectDetailLevel } from '../src/streaming.js';
+import { createGlbLoader, createStreaming, createWorkerLoader, selectDetailLevel } from '../src/streaming.js';
 
 function fakeLoader() {
   const log = [];
@@ -29,7 +29,7 @@ async function walkTo(streaming, point) {
   await streaming.settled();
 }
 
-test('evicts the least recently used far asset to stay under the byte budget', async () => {
+test('evicts the farthest unwanted asset to stay under the byte budget', async () => {
   const loader = fakeLoader();
   const streaming = createStreaming({ budgetBytes: 250, loaders: { tile: loader } });
   for (const [id, x] of [['a', 0], ['b', 100], ['c', 200]]) streaming.addAsset(tileDefinition(id, x));
@@ -179,4 +179,103 @@ test('runs as a runtime system and disposes what it holds', async () => {
   runtime.dispose();
   assert.deepEqual(loader.disposed, ['home#0']);
   assert.throws(() => streaming.addAsset(tileDefinition('late', 0)), /disposed/);
+});
+
+test('eviction frees low priority assets first, then the farthest, whatever the use order', async () => {
+  const loader = fakeLoader();
+  const streaming = createStreaming({ budgetBytes: 300, loaders: { tile: loader } });
+  streaming.addAsset(tileDefinition('important', 0, { priority: 10 }));
+  streaming.addAsset(tileDefinition('far-plain', 100));
+  streaming.addAsset(tileDefinition('near-plain', 200));
+  streaming.addAsset(tileDefinition('newcomer', 300));
+
+  await walkTo(streaming, [0, 0, 0]);
+  await walkTo(streaming, [100, 0, 0]);
+  await walkTo(streaming, [200, 0, 0]);
+  await walkTo(streaming, [300, 0, 0]);
+
+  assert.deepEqual(loader.disposed, ['far-plain#0']);
+});
+
+test('eviction frees the farthest of two equal priority assets even when it was used last', async () => {
+  const loader = fakeLoader();
+  const streaming = createStreaming({ budgetBytes: 200, loaders: { tile: loader } });
+  streaming.addAsset(tileDefinition('west', -100));
+  streaming.addAsset(tileDefinition('east', 100));
+  streaming.addAsset(tileDefinition('north', 0, { position: [0, 0, 300] }));
+  await walkTo(streaming, [100, 0, 0]);
+  await walkTo(streaming, [-100, 0, 0]);
+  streaming.getAsset('east');
+  await walkTo(streaming, [0, 0, 300]);
+  assert.deepEqual(loader.disposed, ['east#0']);
+});
+
+test('a priority outside the range is rejected with the range', () => {
+  const streaming = createStreaming({ budgetBytes: 100, loaders: { tile: fakeLoader() } });
+  assert.throws(() => streaming.addAsset(tileDefinition('a', 0, { priority: 500 })), /priority must be a number from -100 to 100/);
+});
+
+function fakeWorkerFactory(behavior) {
+  const workers = [];
+  const createWorker = () => {
+    const worker = {
+      terminated: false,
+      posted: [],
+      postMessage(message) {
+        worker.posted.push(message);
+        queueMicrotask(() => behavior(worker, message));
+      },
+      terminate() {
+        worker.terminated = true;
+      },
+    };
+    workers.push(worker);
+    return worker;
+  };
+  return { workers, createWorker };
+}
+
+test('the worker loader decodes in a worker and terminates it after each load', async () => {
+  const { workers, createWorker } = fakeWorkerFactory((worker, message) => worker.onmessage({ data: { asset: { decoded: message.source }, bytes: 64 } }));
+  const freed = [];
+  const streaming = createStreaming({
+    budgetBytes: 1000,
+    loaders: { tile: createWorkerLoader({ createWorker, dispose: asset => freed.push(asset.decoded) }) },
+  });
+  streaming.addAsset(tileDefinition('a', 0));
+  streaming.addAsset(tileDefinition('b', 5));
+  await walkTo(streaming, [0, 0, 0]);
+
+  assert.deepEqual(streaming.getAsset('a'), { decoded: 'a.bin' });
+  assert.equal(streaming.getState('b').bytes, 64);
+  assert.equal(workers.length, 2);
+  assert.ok(workers.every(worker => worker.terminated));
+  assert.deepEqual(workers[0].posted[0], { id: 'a', format: 'tile', source: 'a.bin', level: 0 });
+  streaming.dispose();
+  assert.deepEqual(freed.sort(), ['a.bin', 'b.bin']);
+});
+
+test('a worker error fails the load and a dispose aborts the worker in flight', async () => {
+  const failing = fakeWorkerFactory(worker => worker.onmessage({ data: { error: 'bad tile' } }));
+  const failingStreaming = createStreaming({ budgetBytes: 1000, loaders: { tile: createWorkerLoader({ createWorker: failing.createWorker }) } });
+  failingStreaming.addAsset(tileDefinition('a', 0));
+  await walkTo(failingStreaming, [0, 0, 0]);
+  assert.equal(failingStreaming.getState('a').state, 'failed');
+  assert.equal(failingStreaming.getState('a').failure, 'bad tile');
+  assert.ok(failing.workers[0].terminated);
+
+  const silent = fakeWorkerFactory(() => {});
+  const silentStreaming = createStreaming({ budgetBytes: 1000, loaders: { tile: createWorkerLoader({ createWorker: silent.createWorker }) } });
+  silentStreaming.addAsset(tileDefinition('a', 0));
+  silentStreaming.update();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  silentStreaming.dispose();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(silent.workers[0].terminated);
+  assert.equal(silentStreaming.stats.activeLoads, 0);
+});
+
+test('createWorkerLoader says what to pass when createWorker is missing', () => {
+  assert.throws(() => createWorkerLoader({}), /createWorker: a function/);
+  assert.throws(() => createWorkerLoader({ createWorker: () => ({}), dispose: 3 }), /dispose must be a function/);
 });

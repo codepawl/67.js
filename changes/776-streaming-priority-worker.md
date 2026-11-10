@@ -1,0 +1,1 @@
+- `67js/addons/streaming` evicts by asset `priority`, then distance from the focus, then recency, and adds `createWorkerLoader` to decode assets in a worker (part of #776)
