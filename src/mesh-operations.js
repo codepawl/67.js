@@ -98,6 +98,7 @@ export const FIELD_OPERATOR_NAMES = /* @__PURE__ */ Object.freeze([
   'vec', 'dot', 'cross', 'distance', 'length', 'normalize', 'x', 'y', 'z',
   'rotate', 'align', 'transform',
   'attr', 'noise', 'random', 'nearest', 'raycast',
+  'faceArea', 'edgeAngle', 'island', 'neighbors', 'accumulate', 'statistic', 'blur', 'sampleIndex', 'rank',
 ]);
 export const INSTANCE_SOURCES = /* @__PURE__ */ Object.freeze(['grid', 'scatter', 'surface', 'curve']);
 export const MAX_INSTANCE_CANDIDATES = 2048;
