@@ -62,6 +62,7 @@ const addonLoaders = import.meta.glob([
   './replace-textured-parts.js',
   './texture-update.js',
   './cloth.js',
+  './runtime.js',
   './update-part-vertices.js',
 ]);
 const moduleCache = new Map();

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runtime loop sample</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161a; color: #e8eaed; font: 14px/1.4 system-ui, sans-serif; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  .panel { position: fixed; top: 16px; left: 16px; display: grid; gap: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(20, 22, 26, 0.82); }
+  .modes { display: flex; gap: 4px; }
+  button { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.14); }
+  output { display: block; font-variant-numeric: tabular-nums; white-space: pre; }
+</style>
+</head>
+<body>
+<canvas></canvas>
+<div class="panel">
+  <div class="modes" role="group" aria-label="Update mode">
+    <button type="button" data-mode="fixed">Fixed</button>
+    <button type="button" data-mode="variable">Variable</button>
+    <button type="button" data-mode="both">Both, interpolated</button>
+  </div>
+  <output id="readout"></output>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
