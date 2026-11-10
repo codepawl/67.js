@@ -17,6 +17,32 @@ function paintPartsByOwner(parts) {
   });
 }
 
+// facets=1: one colour per triangle instead of per part. Two faces of one part that meet at a crease then differ in colour, so the
+// probe reads the crease as an edge and stops counting its ordinary anti-aliasing as flicker. Fighting triangles still differ.
+function paintTrianglesApart(parts) {
+  for (const part of parts) {
+    const { positions, normals, indices } = part.geometry;
+    const triangleCount = indices.length / 3;
+    const flatPositions = new Float32Array(triangleCount * 9);
+    const flatNormals = new Float32Array(triangleCount * 9);
+    const colors = new Float32Array(triangleCount * 9);
+    for (let triangle = 0; triangle < triangleCount; triangle++) {
+      const hue = (((triangle + 1) * 0.618034) % 1);
+      const colour = [0, 1 / 3, 2 / 3].map(offset => 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(2 * Math.PI * (hue + offset))));
+      for (let corner = 0; corner < 3; corner++) {
+        const source = indices[triangle * 3 + corner] * 3;
+        const target = (triangle * 3 + corner) * 3;
+        flatPositions.set(positions.subarray(source, source + 3), target);
+        flatNormals.set(normals.subarray(source, source + 3), target);
+        colors.set(colour, target);
+      }
+    }
+    part.geometry = { positions: flatPositions, normals: flatNormals, colors, indices: Uint32Array.from({ length: triangleCount * 3 }, (_, index) => index) };
+    const { map, ...material } = part.material;
+    part.material = { ...material, color: [1, 1, 1], metallic: 0, roughness: 1 };
+  }
+}
+
 function measureBounds(parts) {
   const minimum = [Infinity, Infinity, Infinity];
   const maximum = [-Infinity, -Infinity, -Infinity];
@@ -57,6 +83,9 @@ const options = {
   nearFit: parameters.get('nearFit') !== '0',
   offset: parameters.get('offset') !== '0',
   ids: parameters.get('ids') === '1',
+  // shadows=0 turns off casting and receiving, to tell shadow-edge aliasing apart from depth fighting.
+  shadows: parameters.get('shadows') !== '0',
+  facets: parameters.get('facets') === '1',
 };
 const trapName = parameters.get('trap');
 const camera = { pivot: [0, 0, 0], yaw: 0.8, pitch: -0.5, distance: 10 };
@@ -114,6 +143,8 @@ async function loadScene() {
   if (!trapName) {
     const loaded = await parseGltf(glbBytes.slice(0));
     if (options.ids) paintPartsByOwner(loaded.parts);
+    if (options.facets) paintTrianglesApart(loaded.parts);
+    if (!options.shadows) for (const part of loaded.parts) Object.assign(part, { castShadow: false, receiveShadow: false });
     return loaded;
   }
   if (!TRAPS[trapName]) throw new Error(`Unknown trap ${trapName}. Use one of: ${Object.keys(TRAPS).join(', ')}.`);
