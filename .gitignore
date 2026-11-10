@@ -4,36 +4,10 @@ build/
 .wrangler/
 public/releases/
 public/release.json
-public/changelog.md
+# Guides copied from docs/ at build time
+public/*.md
 public/changelog.json
-public/guide.md
 public/api-reference.json
-public/gltf.md
-public/gltf-morph.md
-public/morph-targets.md
-public/skinning.md
-public/physics.md
-public/export-glb.md
-public/sculpt.md
-public/surface.md
-public/mesh-query.md
-public/mesh.md
-public/skeleton-pose.md
-public/primitives.md
-public/shrinkwrap.md
-public/spume.md
-public/retarget.md
-public/vehicle.md
-public/vegetation.md
-public/terrain.md
-public/grass.md
-public/clutter.md
-public/light-bake.md
-public/path-tracer.md
-public/scene-graph.md
-public/modeling.md
-public/animation-curves.md
-public/animation-mixer.md
 artifacts/
 .env
 .env.*
@@ -43,24 +17,9 @@ artifacts/
 *.log
 .agents/
 build-browser/
-public/camera-path.md
-public/lighting.md
-public/volumetric.md
-public/film-physics.md
-public/surface-attachment.md
-public/agent-scene.md
-public/mcp.md
-public/agent-look.md
-public/agent-asset.md
-public/agent-render-jobs.md
-public/agent-motion.md
 
-public/agent-character-motion.md
-public/agent-review.md
 .claude/worktrees/
 bench/gaussian-splats/data/
-public/gaussian-splats.md
-public/runtime.md
 
 # Optional denoiser binaries fetched by packages/denoise-oidn/fetch-oidn.mjs
 packages/denoise-oidn/vendor/
