@@ -27,6 +27,8 @@ const LIGHT_DRIVEN = { intensity: false, color: true };
 const MORPH_DRIVEN = { weight: false };
 const SCALAR_TARGET_KINDS = ['light', 'morph'];
 const TARGET_PROPERTIES = { light: LIGHT_DRIVEN, morph: MORPH_DRIVEN };
+// The camera has no ID. eye and target take a component; fov (degrees) and roll (radians) take none.
+const CAMERA_DRIVEN = { eye: true, target: true, fov: false, roll: false };
 const RADIANS_TO_DEGREES = 180 / Math.PI;
 
 const COMMON_FIELDS = ['type', 'node', 'influence'];
@@ -90,10 +92,10 @@ function axisRanges(input, limit, label) {
   return ranges;
 }
 
-function influenceFrom(value, nodeIds, label) {
+function influenceFrom(value, nodeIds, label, properties) {
   if (value === undefined) return 1;
   if (typeof value === 'number') return bounded(value, 0, 1, `${label} influence`);
-  compileMotionExpression(value, nodeIds, `${label} influence`);
+  compileMotionExpression(value, nodeIds, `${label} influence`, properties);
   return structuredClone(value);
 }
 
@@ -109,7 +111,7 @@ function withArguments(input, label) {
   return { ...rest, ...args };
 }
 
-function normalizeConstraint(rawInput, position, movableIds, visibleIds) {
+function normalizeConstraint(rawInput, position, movableIds, visibleIds, properties) {
   const label = `Motion constraint ${position}`;
   const input = withArguments(rawInput, label);
   if (!input || !Object.hasOwn(CONSTRAINT_FIELDS, input.type)) {
@@ -117,7 +119,7 @@ function normalizeConstraint(rawInput, position, movableIds, visibleIds) {
   }
   knownKeys(input, [...COMMON_FIELDS, ...CONSTRAINT_FIELDS[input.type]], label);
   if (!movableIds.has(input.node)) throw new RangeError(`${label} node must be a node ID in this recipe; got ${JSON.stringify(input.node)}.`);
-  const result = { type: input.type, node: input.node, influence: influenceFrom(input.influence, visibleIds, label) };
+  const result = { type: input.type, node: input.node, influence: influenceFrom(input.influence, visibleIds, label, properties) };
   if (CONSTRAINT_FIELDS[input.type].includes('target') && (input.type !== 'pivot' || input.target !== undefined)) {
     if (!visibleIds.has(input.target)) throw new RangeError(`${label} target must be a node ID in this recipe; got ${JSON.stringify(input.target)}.`);
     if (input.target === input.node) throw new RangeError(`${label} target cannot be the constrained node itself.`);
@@ -280,9 +282,20 @@ function normalizeActionConstraint(input, result, label) {
 }
 
 /** Validate a constraint list against the node IDs a motion may move and the ones it may read. Returns plain data. */
-export function normalizeConstraints(input, movableIds, visibleIds) {
+export function normalizeConstraints(input, movableIds, visibleIds, properties = new Map()) {
   denseArray(input, MAX_CONSTRAINTS, 'Motion constraints');
-  return input.map((constraint, position) => normalizeConstraint(constraint, position, movableIds, visibleIds));
+  return input.map((constraint, position) => normalizeConstraint(constraint, position, movableIds, visibleIds, properties));
+}
+
+function normalizeCameraDriver(input, label, visibleIds, properties) {
+  const { id, property, component } = input.target;
+  if (id !== undefined) throw new RangeError(`${label} camera target takes no id; leave it out, such as { "kind": "camera", "property": "fov" }.`);
+  const takesComponent = CAMERA_DRIVEN[property];
+  if (takesComponent === undefined) throw new RangeError(`${label} camera property must be one of ${Object.keys(CAMERA_DRIVEN).join(', ')}.`);
+  if (takesComponent && !AXES.includes(component)) throw new RangeError(`${label}: camera ${property} needs a component, x, y or z.`);
+  if (!takesComponent && component !== undefined) throw new RangeError(`${label}: camera ${property} takes no component.`);
+  compileMotionExpression(input.expression, visibleIds, `${label} expression`, properties);
+  return { target: { kind: 'camera', property, ...(component === undefined ? {} : { component }) }, expression: structuredClone(input.expression) };
 }
 
 function normalizeDriver(input, position, ids) {
@@ -291,6 +304,7 @@ function normalizeDriver(input, position, ids) {
   knownKeys(input, ['target', 'expression'], label);
   knownKeys(input.target, ['kind', 'id', 'property', 'component'], `${label} target`);
   const { kind, id, property, component } = input.target;
+  if (kind === 'camera') return normalizeCameraDriver(input, label, visibleIds, ids.properties);
   if (component !== undefined && !AXES.includes(component)) throw new RangeError(`${label} component must be x, y or z.`);
   if (kind === 'node') {
     if (!movableIds.has(id)) throw new RangeError(`${label} node must be a node ID in this recipe; got ${JSON.stringify(id)}.`);
@@ -308,7 +322,7 @@ function normalizeDriver(input, position, ids) {
     if (isVector === undefined) throw new RangeError(`${label} property must be one of ${Object.keys(TARGET_PROPERTIES[kind]).join(', ')} for a ${kind}.`);
     if (isVector !== (component !== undefined)) throw new RangeError(`${label}: ${isVector ? 'a light color needs a component (x, y, z for red, green, blue)' : `${property} takes no component`}.`);
   } else {
-    throw new RangeError(`${label} target kind must be node, material, light or morph.`);
+    throw new RangeError(`${label} target kind must be node, material, light, morph or camera.`);
   }
   compileMotionExpression(input.expression, visibleIds, `${label} expression`, ids.properties);
   return { target: { kind, id, property, ...(component === undefined ? {} : { component }) }, expression: structuredClone(input.expression) };
@@ -808,7 +822,7 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
     const value = driver.compiled.evaluate(context);
     const { kind, id, property, component } = driver.target;
     const index = AXES.indexOf(component);
-    if (SCALAR_TARGET_KINDS.includes(kind)) {
+    if (SCALAR_TARGET_KINDS.includes(kind) || kind === 'camera') {
       drivenLooks.push({ target: driver.target, value });
       return;
     }

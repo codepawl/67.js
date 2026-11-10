@@ -70,7 +70,7 @@ export const MESH_EDIT_OPERATIONS = /* @__PURE__ */ Object.freeze({
   circularize: { fields: ['verts', 'factor', 'regular'], tags: [] },
   set_position: { fields: ['select', 'position', 'offset'], tags: [] },
   displace: { fields: ['select', 'field', 'strength', 'midlevel', 'direction', 'group'], tags: [] },
-  vertex_group: { fields: ['select', 'name', 'weight', 'field', 'gradient'], tags: [] },
+  vertex_group: { fields: ['select', 'name', 'weight', 'field', 'gradient', 'measure', 'gain', 'angle', 'rays', 'distance', 'seed'], tags: [] },
   vertex_color: { fields: ['select', 'color', 'field', 'gradient'], tags: [] },
   decimate: { fields: ['ratio'], tags: [] },
   remesh: { fields: ['voxelSize', 'resolution'], tags: [] },

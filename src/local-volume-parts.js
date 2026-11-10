@@ -1,7 +1,51 @@
 // Binds the mesh volumes of environment.localVolumes (shape "mesh") to the parts they name. A volume that fits the bounds of its
 // part becomes an oriented box: the part's local bounding box carried through its matrix, so a rotated room is still a tight box.
-// A volume that fits the closed mesh keeps the part for the CPU path tracer, which walks the mesh itself
-// (path-tracer-volume.js, prepareMeshVolume); the rasterizer has no mesh pass and refuses it with a message that names the field.
+// A volume that fits the closed mesh keeps the part: the CPU path tracer walks the mesh itself (path-tracer-volume.js,
+// prepareMeshVolume) and the rasterizer draws it into a depth buffer first (mesh-volume-pass.js).
+
+function weldedVertexIds(positions, tolerance) {
+  const ids = new Map();
+  const welded = new Uint32Array(positions.length / 3);
+  for (let vertex = 0; vertex < welded.length; vertex++) {
+    const key = `${Math.round(positions[vertex * 3] / tolerance)},${Math.round(positions[vertex * 3 + 1] / tolerance)},${Math.round(positions[vertex * 3 + 2] / tolerance)}`;
+    if (!ids.has(key)) ids.set(key, ids.size);
+    welded[vertex] = ids.get(key);
+  }
+  return welded;
+}
+
+/**
+ * Counts the edges that do not join exactly two triangles (`open`, with vertices at the same place counted as one) and, among those
+ * that do, the edges whose two triangles run the same way along it (`inconsistent`: faces wound against each other).
+ */
+export function countMeshEdgeProblems(positions, indices, tolerance) {
+  const welded = weldedVertexIds(positions, tolerance);
+  const uses = new Map();
+  for (let corner = 0; corner < indices.length; corner += 3) {
+    for (let edge = 0; edge < 3; edge++) {
+      const from = welded[indices[corner + edge]];
+      const to = welded[indices[corner + (edge + 1) % 3]];
+      if (from === to) continue;
+      const key = from < to ? `${from}-${to}` : `${to}-${from}`;
+      const use = uses.get(key) ?? { count: 0, direction: 0 };
+      use.count++;
+      use.direction += from < to ? 1 : -1;
+      uses.set(key, use);
+    }
+  }
+  let open = 0;
+  let inconsistent = 0;
+  for (const { count, direction } of uses.values()) {
+    if (count !== 2) open++;
+    else if (direction !== 0) inconsistent++;
+  }
+  return { open, inconsistent };
+}
+
+/** The number of edges that do not join exactly two triangles, with vertices at the same place counted as one. 0 for a closed mesh. */
+export function countOpenEdges(positions, indices, tolerance) {
+  return countMeshEdgeProblems(positions, indices, tolerance).open;
+}
 
 const LISTED_PART_NAMES = 12;
 const boundsByGeometry = new WeakMap();
@@ -43,6 +87,21 @@ function orientedBounds(part, label) {
   return { center, size, axes };
 }
 
+const edgeProblemsByGeometry = new WeakMap();
+
+/** Throws unless the part's mesh is closed and its faces wind the same way, which the rasterizer's front and back faces rely on. */
+export function assertClosedMesh(part, label) {
+  let problems = edgeProblemsByGeometry.get(part.geometry);
+  if (!problems) {
+    const { minimum, maximum } = localBounds(part.geometry);
+    const diagonal = Math.hypot(maximum[0] - minimum[0], maximum[1] - minimum[1], maximum[2] - minimum[2]);
+    problems = countMeshEdgeProblems(part.geometry.positions, part.geometry.indices, diagonal * 1e-6);
+    edgeProblemsByGeometry.set(part.geometry, problems);
+  }
+  if (problems.open > 0) throw new RangeError(`${label}.part "${part.name}" is not a closed mesh (${problems.open} open edges), so it has no inside; close it or use fit "bounds"`);
+  if (problems.inconsistent > 0) throw new RangeError(`${label}.part "${part.name}" has faces wound against each other (${problems.inconsistent} edges), so the rasterizer cannot tell inside from outside; flip those faces or use the path tracer`);
+}
+
 function findPart(parts, name, label) {
   const part = parts.find(candidate => candidate.name === name);
   if (part) return part;
@@ -52,10 +111,10 @@ function findPart(parts, name, label) {
 }
 
 /**
- * Returns the resolved volumes with every mesh volume bound to its part. Pass `meshFit: false` for the rasterizer, which draws
- * the bounds only. Volumes that are not meshes are returned as they are.
+ * Returns the resolved volumes with every mesh volume bound to its part. A volume with fit "bounds" becomes a box; one with
+ * fit "mesh" keeps its part and also carries the bounds. Volumes that are not meshes are returned as they are.
  */
-export function bindLocalVolumeParts(volumes, parts, { meshFit = true, label = 'environment.localVolumes' } = {}) {
+export function bindLocalVolumeParts(volumes, parts, { label = 'environment.localVolumes' } = {}) {
   if (!volumes.some(volume => volume.shape === 'mesh')) return volumes;
   return volumes.map((volume, index) => {
     if (volume.shape !== 'mesh') return volume;
@@ -65,7 +124,6 @@ export function bindLocalVolumeParts(volumes, parts, { meshFit = true, label = '
     if (part.skin) throw new RangeError(`${field}.part "${part.name}" is skinned; a mesh volume needs a rigid part`);
     const bounds = orientedBounds(part, field);
     if (volume.fit === 'mesh') {
-      if (!meshFit) throw new RangeError(`${field}.fit "mesh" is traced by the CPU path tracer only; the rasterizer draws the part's bounds. Use fit "bounds" or the path tracer with backend "cpu".`);
       return { ...volume, ...bounds, part };
     }
     const rest = { ...volume };

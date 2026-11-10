@@ -168,8 +168,8 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
 
 // Vertex colors and groups. Details stay here so the tool schemas stay small.
 export const MESH_ATTRIBUTE_NOTES = Object.freeze({
-  vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field or gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] }. Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
-  vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
+  vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field, gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] } or measure curvature (gain 0.1-16, 2; 0.5 flat, up convex), edge (angle 1-179 deg, 30; convex folds) or occlusion (rays 1-128, 32; distance m; seed). Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
+  vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] } or { group, colors } of 2 or 3 stops along the weights of a vertex group (edge wear: curvature group, colors [dirt, paint, metal]). Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
 });
 
 // UV projection and packing edits. Details stay here so the tool schemas stay small.
@@ -234,6 +234,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     note: MATERIAL_LAYER_NOTES[field],
   })]))),
   materialSubsurface: 'material.subsurface { weight, radius, scale, color } as Blender Principled BSDF Subsurface; surface tag, rasterizer only. Ranges in scene_create.',
+  materialWear: 'material.wear { mask, threshold 0.5, softness 0.25, metal { color, metallic 1, roughness 0.3 }, dirt { mask, threshold, softness, color, roughness 0.9 } }: the material own color, metallic and roughness are the paint; per pixel it turns to the metal layer where the vertex group mask is high, then to dirt (no metal, rougher) where the dirt group is high. Masks are vertex groups of the node mesh (vertex_group measure edge, curvature or occlusion), so a mesh with no UVs works. Rasterizer only; not with baked sky visibility.',
   alphaModes: RECIPE_ALPHA_MODES,
   materialPatterns: MATERIAL_PATTERN_TYPES, maxMaterialPatterns: MAX_MATERIAL_PATTERNS,
   materialMappings: MATERIAL_MAPPINGS,
@@ -270,7 +271,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   maxSpotLights: MAX_SPOT_LIGHTS, maxAreaLights: MAX_AREA_LIGHTS,
   localShadows: Object.freeze({ lights: Object.freeze(['pointLights', 'spotLights']), atlasTiles: 24, pointLightTiles: 6, spotLightTiles: 1, tileSize: 512 }),
   lightLinking: Object.freeze({ fields: Object.freeze(['environment.keyAffects', 'pointLights[].affects', 'spotLights[].affects', 'areaLights[].affects']), unlisted: 'a light without affects lights every node', unknownNode: 'rejected', bake: 'honoured', pathTracer: 'ignored, named in report.ignored' }),
-  localVolumes: Object.freeze({ field: 'environment.localVolumes', maximum: 8, shapes: Object.freeze(['box', 'sphere', 'mesh']), fields: 'shape, center, size (box) or radius (sphere) or part + fit bounds|mesh (mesh: the named part, bounds by default; fit mesh needs a closed part and backend cpu), density 0-100 (1), falloff 0-1 (0.5), absorption rgb 0-1 (1,1,1), emission rgb 0-1, emissionStrength 0-1000 (1), noiseAmount 0-1 (0), noiseScale (1), steps 4-32 (16)', note: 'Absorb and emit, no scattering; needs hdr and depth like volumeFog; noise is raster only; path tracer: backend cpu only (gpu and native throw); a bake leaves them out, so an emissive volume lights no baked surface (bake report: skippedLocalVolumes, warnings).' }),
+  localVolumes: Object.freeze({ field: 'environment.localVolumes', maximum: 8, shapes: Object.freeze(['box', 'sphere', 'mesh']), fields: 'shape, center, size (box) or radius (sphere) or part + fit bounds|mesh (mesh: the named part, bounds by default; fit mesh fills a closed part, ignoring falloff, noise and steps), density 0-100 (1), falloff 0-1 (0.5), absorption rgb 0-1 (1,1,1), emission rgb 0-1, emissionStrength 0-1000 (1), noiseAmount 0-1 (0), noiseScale (1), steps 4-32 (16)', note: 'Absorb and emit, no scattering; needs hdr and depth like volumeFog; noise is raster only; path tracer: backend cpu only (gpu and native throw); a bake leaves them out, so an emissive volume lights no baked surface (bake report: skippedLocalVolumes, warnings).' }),
   shadowCascades: Object.freeze({ field: 'environment.shadowCascades', counts: Object.freeze([0, 1, 2, 3, 4]), zero: 'one shadow map', automatic: 'three cascades when shadow.extent is above 40 and the field is unset', maximumDistance: 150, note: 'volume fog and water read the single map' }),
   lineArt: Object.freeze({ field: 'environment.lines', fields: 'width px 0.25-16 (1.5), color, boundaries, creaseAngle deg (35), depthJump (0.08), toon steps 0-8, polylines [{points [x,y,z] 2-256, color, width, depthTest, closed}] max 64; {} turns on, null clears; material toon 0-8', note: 'docs/line-art.md' }),
   viewTransform: Object.freeze({
@@ -297,7 +298,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   rigging: Object.freeze({ presets: Object.freeze(['humanoid', 'quadruped']), maxArmatures: 16, maxBones: 128, maxInfluences: 4, weights: 'bone-distance' }),
   motionConstraints: Object.freeze(['copy_location', 'copy_rotation', 'copy_scale', 'limit_location', 'limit_rotation', 'track_to', 'child_of', 'floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action', 'maintain_volume', 'damped_track', 'pivot', 'follow_path', 'clamp_to', 'shrinkwrap', 'armature']),
-  motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxProperties: 32, maxPropertyKeys: 16, targets: Object.freeze(['node', 'material', 'light', 'morph']), variables: Object.freeze(['time', 'node', 'custom', 'distance', 'rotationDifference']), maxExpressionParts: 64, maxExpressionDepth: 8 }),
+  motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxProperties: 32, maxPropertyKeys: 16, targets: Object.freeze(['node', 'material', 'light', 'morph', 'camera']), variables: Object.freeze(['time', 'node', 'custom', 'distance', 'rotationDifference']), maxExpressionParts: 64, maxExpressionDepth: 8 }),
   // Recipe physics: Rapier (an optional peer) bakes bodies on nodes offline; playback is a seek into the bake.
   physics: Object.freeze({
     bodyTypes: Object.freeze(['dynamic', 'fixed', 'kinematic']),

@@ -136,6 +136,10 @@ const parameterSystem = {
 
 The controller turns the travel by its yaw. It faces -Z at yaw 0 while a glTF model faces +Z, so start it at `yaw: Math.PI` or turn the model's node. In the air the controller falls back to its own velocity, and vertical motion always stays with the controller.
 
+### Foot slide
+
+`tests/animation-foot-slide.test.js` measures it. A biped with idle, walk (1.4 m/s) and run (3.6 m/s) clips in a blend space plays through root motion, and each foot is followed in the world. The drift of a contact is how far the planted foot strays from where it landed. At constant speeds, in the walk, the run and both blends, the worst drift is under 1e-6 m. While the speed ramps from 0 to 3.6 m/s it stays under 0.03 m, because the blend weights change in the middle of a stance. This holds when the clips are authored so a planted foot moves back at the speed the root travels and the cycles share their foot-down phase; a clip with a foot that slides in its own authoring slides in the graph too.
+
 ## IK hooks
 
 `createFootPlacement` and `createLookAt` build entries for the `ik` list of `createSkeletonPose` and `createAssetPose`. They read the game through a function, ease toward it with the pose time, and are deterministic.

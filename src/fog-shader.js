@@ -1,6 +1,7 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
 import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
+import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
 
 // The volume fog step of the post pass: its uniforms and the march that scatters light through the fog box. Only a renderer that
@@ -77,12 +78,13 @@ function bindFieldAndLights(renderer, post, volume) {
 
 // The local volumes of the frame (environment.localVolumes), checked and packed once before the post program is chosen, so a bad
 // field or a renderer without depth or HDR throws before any program is bound. Returns the count packed, or 0 for an empty list.
-function prepareLocalVolumes(renderer, input) {
+function prepareLocalVolumes(renderer, input, frame) {
   const resolved = resolveLocalVolumes(input, 'environment.localVolumes');
   if (resolved.length === 0) return 0;
   if (!renderer.depth || !renderer.hdr || renderer.transparent || renderer.benchmark) throw new Error('Local volumes require depth:true, active HDR and an opaque canvas');
   const buffers = (renderer.localVolumeBuffers ??= createLocalVolumeBuffers());
-  packLocalVolumes(bindLocalVolumeParts(resolved, renderer.sceneParts, { meshFit: false }), buffers);
+  packLocalVolumes(bindLocalVolumeParts(resolved, renderer.sceneParts), buffers);
+  drawMeshVolumes(renderer, frame);
   return buffers.count;
 }
 
@@ -99,6 +101,10 @@ function bindLocalVolumes(renderer, post, frame) {
   context.uniform4fv(locate('localVolumeEmission[0]'), buffers.emission);
   context.uniform4fv(locate('localVolumeSteps[0]'), buffers.steps);
   context.uniform4fv(locate('localVolumeAxes[0]'), buffers.axes);
+  // The sampler always gets a texture of its own type, so the program is valid in a frame with no mesh volume.
+  context.activeTexture(context.TEXTURE7);
+  context.bindTexture(context.TEXTURE_2D, buffers.meshParts.length > 0 ? renderer.meshVolumePass.target.texture : renderer.whiteTexture);
+  context.uniform1i(locate('localMeshVolumes'), 7);
 }
 
 const LOCAL_VOLUME_DECLARATIONS = `
@@ -110,6 +116,7 @@ uniform vec4 localVolumeAbsorption[8];
 uniform vec4 localVolumeEmission[8];
 uniform vec4 localVolumeSteps[8];
 uniform vec4 localVolumeAxes[24];
+uniform highp sampler2D localMeshVolumes;
 `;
 
 // Each volume is marched on its own between its entry and exit (cut at the first surface) and composited nearest first: the colour
@@ -173,6 +180,17 @@ vec3 localVolumes(vec3 background) {
     entries[index] = 1e30;
     exits[index] = 0.0;
     if (index >= localVolumeCount) continue;
+    if (localVolumeCenters[index].w > 1.5) {
+      // A closed mesh: the mesh pass stored the length inside this pixel's ray and the nearest entry (see mesh-volume-pass.js).
+      vec2 inside = texelFetch(localMeshVolumes, ivec2(gl_FragCoord.xy) + ivec2(0, int(localVolumeSteps[index].y) * int(resolution.y)), 0).rg;
+      // A back face past the far plane is clipped and leaves only its front face, a negative sum; that ray ends at the surface.
+      float insideLength = inside.x < -1e-5 * surfaceDistance ? inside.x + surfaceDistance : inside.x;
+      if (insideLength > 0.0) {
+        entries[index] = inside.y < 1e29 ? inside.y : 0.0;
+        exits[index] = entries[index] + insideLength;
+      }
+      continue;
+    }
     vec2 span = localVolumeInterval(index, origin, direction);
     float entry = max(span.x, 0.0);
     float exitDistance = min(span.y, surfaceDistance);
@@ -196,6 +214,17 @@ vec3 localVolumes(vec3 background) {
     float entry = entries[nearest];
     float exitDistance = exits[nearest];
     entries[nearest] = 1e30;
+    if (localVolumeCenters[nearest].w > 1.5) {
+      // Uniform density, so the march has a closed form: the light behind is dimmed by exp(-k L) and the emission adds
+      // (1 - exp(-k L)) / k, or L where k is 0, wherever the stretches inside lie along the ray.
+      float insideLength = exitDistance - entry;
+      vec3 absorption = localVolumeAbsorption[nearest].rgb;
+      vec3 factor = exp(-absorption * insideLength);
+      vec3 gain = mix(vec3(insideLength), (1.0 - factor) / max(absorption, vec3(1e-6)), step(vec3(1e-6), absorption));
+      radiance += transmittance * localVolumeEmission[nearest].rgb * gain;
+      transmittance *= factor;
+      continue;
+    }
     int steps = int(localVolumeSteps[nearest].x);
     float stepSize = (exitDistance - entry) / float(steps);
     float jitter = hash(vec3(gl_FragCoord.xy, float(nearest) + 1.0));
