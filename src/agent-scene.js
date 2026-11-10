@@ -1398,7 +1398,14 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         const geometryBytes = Object.values(geometry).reduce((total, array) => total + array.byteLength, 0);
         const vertices = geometry.positions.length / 3;
         if (plan.definition.type === 'mesh') {
-          if (residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
+          // Edits can grow a mesh past its estimate. Undo history never blocks an edit, so release the oldest revisions before refusing.
+          let residentVertices = residentStats.vertices;
+          while (residentVertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices && revisionHistory.length > 0) {
+            revisionHistory.shift();
+            const stillResident = new Set([...ownedGeometryRecords(), ...plans.map(candidate => candidate.existing).filter(Boolean)]);
+            residentVertices = geometryStats(stillResident).vertices;
+          }
+          if (residentVertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
             throw new RangeError(`Mesh ${plan.definition.id} has ${vertices} render vertices after its edits, which exceeds maxVertices across the scene. Reduce detail or edits.`);
           }
         } else if (vertices > plan.estimatedVertices || geometryBytes > plan.estimatedVertices * (56 + TERRAIN_SKY_VISIBILITY_BYTES)) {
