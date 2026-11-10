@@ -1,1 +1,1 @@
-- scene:agent-scene: the stylize effects field adds a few bytes of schema; the filter and mask code sits in the lazy post-steps module.
+- scene:agent-scene+lazy: the part mask and the stylize filters (kuwahara, sharpen, posterize, pixelate) add 2191 bytes gzip to the lazy post-steps chunk, which loads only for a recipe that names a post step.
