@@ -1,1 +1,3 @@
-- scene:agent-scene+lazy: the bake report names the local volumes it leaves out, which an agent otherwise cannot tell from a missing glow (228 bytes gzip).
+- scene:agent-scene: the bake report names the local volumes it leaves out, read from the recipe on every call so edits after the bake stay current, which an agent otherwise cannot tell from a missing glow (78 bytes gzip).
+- scene:agent-scene+lazy: the same report and the capabilities note that a bake leaves local volumes out (328 bytes gzip).
+- goal:agent-scene: the growth is an agent-facing warning (#809), 78 bytes gzip, with no cheaper place: the report is built where the scene reads the bake.

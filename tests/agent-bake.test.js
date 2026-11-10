@@ -106,3 +106,21 @@ test('a bake names the local volumes it leaves out and a scene without volumes r
   assert.match(volumed.warnings[0], /localVolumes\[0\] \(sphere, emissive\), environment\.localVolumes\[1\] \(box\)/);
   assert.equal(volumed.texels, plain.texels);
 });
+
+test('the volume report follows localVolumes edits made after the bake, without a rebake', () => {
+  const scene = createAgentScene(closedRoom());
+  assert.equal(scene.inspect().bake.skippedLocalVolumes, undefined);
+
+  const volume = { shape: 'sphere', center: [0, 1, 0], radius: 0.5, emission: [1, 0.6, 0.2] };
+  scene.apply([{ type: 'set-environment', environment: { localVolumes: [volume] } }], { expectedRevision: 0 });
+  const added = scene.inspect().bake;
+  assert.equal(added.reused, true);
+  assert.deepEqual(added.skippedLocalVolumes, [{ index: 0, shape: 'sphere', emissive: true }]);
+  assert.equal(added.warnings.length, 1);
+
+  scene.apply([{ type: 'set-environment', environment: { localVolumes: [] } }], { expectedRevision: 1 });
+  const cleared = scene.inspect().bake;
+  assert.equal(cleared.reused, true);
+  assert.equal(cleared.skippedLocalVolumes, undefined);
+  assert.equal(cleared.warnings, undefined);
+});
