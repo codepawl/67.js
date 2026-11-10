@@ -54,6 +54,7 @@ Other entities are drawn `interpolationDelaySeconds` (default 0.1) behind the ne
 A transport is a plain object `{ id, peers(), send(peerId, message), receive(callback) }`. `peers()` returns the connected peer ids, `send` takes a JSON-compatible object and must not throw for a transient failure, and `receive(callback)` registers `callback(peerId, message)` and returns a function that unregisters it. Write your own for WebRTC or WebTransport.
 
 - `createLoopbackNetwork({ seed, latencyMilliseconds, jitterMilliseconds, lossRate })` is an in-memory network for tests. `network.createTransport(id)` adds a peer; `network.advance(milliseconds)` moves time and delivers what is due. Latency, jitter and loss come from the seeded generator, so a seed repeats a run exactly. Messages are copied through JSON and may arrive out of order.
+- `createBroadcastChannelTransport(channel, { id })` wraps a `BroadcastChannel` so tabs, windows and workers of one browser play together with no server. Peers find each other with a hello the other side answers once, and a message to one peer reaches only that peer. A peer silent for `peerTimeoutMilliseconds` (default 5000) is forgotten until it speaks again, so a closed tab leaves the peer list; call `transport.close()` on `pagehide` to say goodbye at once. `now` swaps the clock for tests.
 - `createWebSocketTransport(socket, { id, remoteId, multiplexed, maximumMessageBytes })` wraps a socket-like object you opened (`send(text)`, `addEventListener`, `readyState`, `close()`). By default it is a line to one peer, `remoteId`. With `multiplexed: true` it speaks to a relay that wraps messages as `{ to, data }` going out and `{ from, data }` coming in (and `{ from, left: true }` when a peer leaves), so a server or host can hear many clients.
 
 ## Options and bounds
@@ -75,6 +76,14 @@ A transport is a plain object `{ id, peers(), send(peerId, message), receive(cal
 
 `stats` reports `snapshotsSent`, `fullSnapshotsSent`, `bytesSent`, `inputsProcessed`, `snapshotsReceived`, `staleSnapshots`, `missingBaseSnapshots`, `reconciliations`, `lastCorrection`, `maximumCorrection` and `rejectedMessages`.
 
+## Sample game and relay
+
+`scripts/netcode-sample.html` is a two-player sample: one page is the host (`?role=host`, plays `alice`, owns the truth) and the other is a client (`?role=client`, plays `bob` with prediction and reconciliation). Move with the arrow keys or WASD. `?transport=broadcast` (default) uses two tabs of one browser; `?transport=websocket&relay=ws://127.0.0.1:8787/` uses the relay. `?delay=50` adds that many milliseconds to everything a page sends. The sample sends a snapshot every tick and draws remote players 40 ms behind (`?snap=` and `?interp=` change them), which shows a move on the other page about 95 ms after the key with 50 ms of injected latency each way. Serve the repository root (for example with `npx vite`) and open both URLs.
+
+`node scripts/netcode-relay.mjs --port 8787 [--host 0.0.0.0] [--latency 50]` is a reference relay of about 80 lines. Players connect to `/?id=<name>`; it forwards `{ to, data }` as `{ from, data }`, announces `{ from, left: true }`, refuses a repeated name and keeps no game state, so it runs on any free Node host. It needs the `ws` package, a dev dependency of this repository only; the library itself gains no dependency.
+
+`tests/netcode-two-browsers.test.js` opens the host and client in two headless Chrome pages over each transport with 50 ms injected per direction. It asserts that both pages end within 0.05 units of each other and that a move shows on the other page in under 450 ms. Measured on a loaded machine: a host move shows on the client after about 200 to 230 ms and a client move shows on the host after about 130 to 150 ms, the same over both transports. The client's own player never waits, since it is predicted, and the largest correction was 0. The host-to-client figure holds the 50 ms line, up to one snapshot interval (40 ms) and the 100 ms interpolation delay.
+
 ## Not yet
 
-WebRTC and WebTransport transports, peer-to-peer authority, a reference relay on a free host and a two-browser sample game come in later slices of #778. Use the same `fixedRate` on the authority and every client.
+WebRTC and WebTransport transports, peer-to-peer authority and a physics-prop sample come in later work on #778. Use the same `fixedRate` on the authority and every client.

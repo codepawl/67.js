@@ -1,6 +1,6 @@
 # Streaming: load and free assets while a game plays
 
-`67js/addons/streaming` is a [runtime](runtime.md) system. It loads assets when the player gets near or the game asks, keeps the bytes in use under a budget, frees the least recently used far assets and swaps detail levels. It loads only when imported and adds no dependency. The GLB loader imports the glTF parser on first use.
+`67js/addons/streaming` is a [runtime](runtime.md) system. It loads assets when the player gets near or the game asks, keeps the bytes in use under a budget, frees low priority assets and swaps detail levels. It loads only when imported and adds no dependency. The GLB loader imports the glTF parser on first use.
 
 ```js
 import { createRuntime } from '67js/addons/runtime';
@@ -26,7 +26,7 @@ const runtime = createRuntime(renderer, { systems: [input, physics, streaming] }
 
 ## Memory budget
 
-`budgetBytes` caps loaded bytes plus the `estimatedBytes` of loads in flight. Before a load starts, assets nobody wants are freed, least recently used first, until it fits. Reading an asset with `getAsset(id)` or keeping it wanted counts as a use. If nothing can be freed, the load waits and update tries again. When a loader reports more bytes than estimated, the system frees unwanted assets to get back under the budget. Wanted and requested assets are never freed, so a budget smaller than what the player needs shows as waiting loads in `stats`.
+`budgetBytes` caps loaded bytes plus the `estimatedBytes` of loads in flight. Before a load starts, assets nobody wants are freed until it fits. The order is lowest `priority` first (a number from -100 to 100, default 0, set on the asset), then by `evictionOrder`: `"recency"` (the default, unchanged from before) frees the least recently used first and breaks ties by distance; `"distance"` frees the farthest from the focus first and breaks ties by recency. Last comes the id, so the same walk always frees the same assets. Reading an asset with `getAsset(id)` or keeping it wanted counts as a use. If nothing can be freed, the load waits and update tries again. When a loader reports more bytes than estimated, the system frees unwanted assets to get back under the budget. Wanted and requested assets are never freed, so a budget smaller than what the player needs shows as waiting loads in `stats`.
 
 ## Detail levels
 
@@ -44,7 +44,7 @@ streaming.registerLoader('terrain-tile', {
 });
 ```
 
-A loader is `{ load(request), dispose(asset) }`. `load` returns `{ asset, bytes }` and gets an `AbortSignal` that fires when the system is disposed. The format name is lowercase letters, digits and hyphens, and each can be registered once (`createStreaming({ loaders: { 'terrain-tile': loader } })` does the same). `glb` is registered by default through `createGlbLoader({ options, fetchBytes })`; `options` go to `parseGltf`, so its limits and decoders apply. Splats, point clouds, audio and compressed textures are loaders of their own.
+A loader is `{ load(request), dispose(asset) }`. `load` returns `{ asset, bytes }` and gets an `AbortSignal` that fires when the system is disposed. The format name is lowercase letters, digits and hyphens, and each can be registered once (`createStreaming({ loaders: { 'terrain-tile': loader } })` does the same). `glb` is registered by default through `createGlbLoader({ options, fetchBytes })`; `options` go to `parseGltf`, so its limits and decoders apply. `createWorkerLoader({ createWorker, dispose })` decodes off the main thread: it starts a worker for each load, posts `{ id, format, source, level }`, expects `{ asset, bytes }` or `{ error }` back, fails the load when the worker throws, cannot clone the source or sends a reply that cannot be read, and terminates the worker when the load ends or the system is disposed, so workers never outnumber `maximumConcurrentLoads`. Splats, point clouds, audio and compressed textures are loaders of their own.
 
 ## Reading the state
 
@@ -54,4 +54,4 @@ A loader is `{ load(request), dispose(asset) }`. `load` returns `{ asset, bytes 
 
 At most 4096 assets, 8 levels per asset and 32 loaders. `budgetBytes` is at least 1. Bad input throws an error that says what to pass instead.
 
-Not in this slice: loading in a worker, culling for instanced groups and a measured frame budget on a laptop (#776).
+Not yet: culling for instanced groups and a measured frame budget on a laptop (#776).

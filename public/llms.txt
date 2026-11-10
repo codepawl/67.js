@@ -2,7 +2,7 @@
 
 > A 3D engine that AI agents drive. Real-time WebGL2 scenes in the browser, and deterministic PNG, MP4 and GLB output from the same scene.
 
-67js has an MCP server (`67js-mcp`, 23 tools) that builds, edits, looks at and renders scenes from JSON recipes.
+67js has an MCP server (`67js-mcp`, 24 tools) that builds, edits, looks at and renders scenes from JSON recipes.
 The same engine is a JavaScript library for pages and Node. The library API is in the guide below.
 Scenes are plain data with stable IDs, so an agent can edit by ID and check each change with a rendered image.
 
@@ -34,12 +34,13 @@ Scenes are plain data with stable IDs, so an agent can edit by ID and check each
 - Review the result: `scene_look` for one PNG, `scene_review` for a labeled grid of up to four views. [Docs](https://67js.codepawl.com/agent-review.md)
 - Render a still or a video: `scene_render_submit`, poll `scene_render_status`, read `scene_render_result`, then `scene_render_release`. [Docs](https://67js.codepawl.com/agent-render-jobs.md)
 - Export a model: `scene_export_glb`, or `scene_export_recipe` for the JSON recipe. [Docs](https://67js.codepawl.com/export-glb.md)
+- Make a playable game: `scene_apply` with `set-game` (topic `game` in `scene_capabilities`), then `scene_export_web` for a static folder. [Docs](https://67js.codepawl.com/game.md)
 - Recover from an error: `scene_restore` to a `scene_checkpoint`, or `scene_inspect` for the current revision and retry; every error names its next step. [Docs](https://67js.codepawl.com/mcp.md)
 
 ## All tools
 
 - `scene_capabilities`: Index of supported recipe features and runtime budgets; pass topic for the detail of one.
-- `scene_create`: Create the single active render scene from a JSON recipe.
+- `scene_create`: Create a render scene from a JSON recipe; the result has its sessionId.
 - `scene_asset_catalog`: List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory.
 - `scene_create_asset`: Create the active scene from a catalog GLB and editable asset recipe.
 - `scene_inspect`: Read revision, counts and selected nodes.
@@ -55,6 +56,7 @@ Scenes are plain data with stable IDs, so an agent can edit by ID and check each
 - `scene_release_checkpoint`: Release one checkpoint slot.
 - `scene_export_recipe`: Read a detached canonical JSON recipe for reproduction.
 - `scene_export_glb`: Write the active scene as a GLB file in the configured jobs folder, under a server-chosen name (the result has the path, byte count and...
+- `scene_export_web`: Write the scene with its game as a static web build in the jobs folder: index.html, game.json and engine/, which any static host serves...
 - `scene_dispose`: Dispose the active scene and its checkpoints, releasing renderer resources.
 - `scene_render_submit`: Start one asynchronous snapshot job in the configured private job store.
 - `scene_render_status`: Read render job state and durable frame progress.

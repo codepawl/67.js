@@ -26,6 +26,8 @@ export const NETCODE_LIMITS = Object.freeze({
   defaultMessageBytes: 65536,
 });
 
+const DEFAULT_PEER_TIMEOUT_MILLISECONDS = 5000;
+
 const DEFAULTS = Object.freeze({
   snapshotEveryTicks: 2,
   inputRedundancy: 3,
@@ -820,6 +822,99 @@ export function createLoopbackNetwork(options = {}) {
     },
     get stats() { return { ...stats, inFlight: inFlight.length }; },
     get nowMilliseconds() { return nowMilliseconds; },
+  };
+}
+
+// Wraps a BroadcastChannel-like object ({ postMessage, addEventListener, close }) so tabs, windows and workers of one
+// browser can play together with no server. Every peer hears the channel; a message names its sender and, when sent to one
+// peer, its target. Peers find each other by a hello that the other side answers once, and leave with a goodbye on close().
+export function createBroadcastChannelTransport(channel, options = {}) {
+  if (channel === null || typeof channel !== 'object' || typeof channel.postMessage !== 'function' || typeof channel.addEventListener !== 'function') {
+    throw new TypeError('createBroadcastChannelTransport needs a BroadcastChannel-like object with postMessage(value) and addEventListener(type, listener), such as new BroadcastChannel("my-game").');
+  }
+  const id = requireName(options.id, 'createBroadcastChannelTransport id');
+  const maximumMessageBytes = boundedInteger(options.maximumMessageBytes ?? NETCODE_LIMITS.defaultMessageBytes, 'createBroadcastChannelTransport maximumMessageBytes', 256, NETCODE_LIMITS.maximumMessageBytes);
+  const peerTimeoutMilliseconds = boundedNumber(options.peerTimeoutMilliseconds ?? DEFAULT_PEER_TIMEOUT_MILLISECONDS, 'createBroadcastChannelTransport peerTimeoutMilliseconds', 50, 3600000);
+  const now = options.now ?? Date.now;
+  if (typeof now !== 'function') throw new TypeError('createBroadcastChannelTransport now must be a function that returns milliseconds, such as performance.now.');
+  const listeners = new Set();
+  const knownPeers = new Map();
+  const stats = { sent: 0, received: 0, rejected: 0 };
+
+  // A peer that closed its page without saying goodbye is forgotten once it has been silent for the timeout.
+  // Netcode peers speak every tick, so a live one is heard again at once and re-learned if it was dropped.
+  function forgetSilentPeers() {
+    const oldestAllowed = now() - peerTimeoutMilliseconds;
+    for (const [peerId, lastHeardAt] of knownPeers) {
+      if (lastHeardAt < oldestAllowed) knownPeers.delete(peerId);
+    }
+  }
+
+  function learnPeer(peerId) {
+    if (!knownPeers.has(peerId)) {
+      forgetSilentPeers();
+      if (knownPeers.size >= NETCODE_LIMITS.maximumPeers) return false;
+    }
+    knownPeers.set(peerId, now());
+    return true;
+  }
+
+  function onMessage(event) {
+    const packet = event?.data;
+    if (!isPlainObject(packet) || typeof packet.from !== 'string' || packet.from === '' || packet.from.length > NETCODE_LIMITS.maximumNameLength) {
+      stats.rejected += 1;
+      return;
+    }
+    const peerId = packet.from;
+    const isForMe = packet.to === undefined || packet.to === id;
+    if (peerId === id || !isForMe) return;
+    if (packet.left === true) {
+      knownPeers.delete(peerId);
+      return;
+    }
+    const isNew = !knownPeers.has(peerId);
+    if (!learnPeer(peerId)) {
+      stats.rejected += 1;
+      return;
+    }
+    if (packet.hello === true) {
+      if (isNew && packet.to === undefined) channel.postMessage({ from: id, to: peerId, hello: true });
+      return;
+    }
+    stats.received += 1;
+    for (const listener of [...listeners]) listener(peerId, packet.data);
+  }
+
+  channel.addEventListener('message', onMessage);
+  channel.postMessage({ from: id, hello: true });
+
+  return {
+    id,
+    peers() {
+      forgetSilentPeers();
+      return [...knownPeers.keys()];
+    },
+    send(peerId, message) {
+      const text = JSON.stringify(message);
+      if (text === undefined || text.length > maximumMessageBytes) {
+        throw new RangeError(`BroadcastChannel transport send: a message must be JSON of at most ${maximumMessageBytes} characters, got ${text === undefined ? 'a value JSON cannot hold' : text.length}.`);
+      }
+      channel.postMessage({ from: id, to: peerId, data: JSON.parse(text) });
+      stats.sent += 1;
+    },
+    receive(callback) {
+      if (typeof callback !== 'function') throw new TypeError('transport.receive needs a callback (peerId, message) => void.');
+      listeners.add(callback);
+      return () => listeners.delete(callback);
+    },
+    close() {
+      channel.postMessage({ from: id, left: true });
+      channel.removeEventListener?.('message', onMessage);
+      listeners.clear();
+      knownPeers.clear();
+      channel.close?.();
+    },
+    get stats() { return { ...stats }; },
   };
 }
 

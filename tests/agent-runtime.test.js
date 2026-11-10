@@ -1,13 +1,19 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentRuntime } from '../scripts/agent-runtime.mjs';
 import { isPreviewHost } from '../scripts/preview-host.mjs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { writeWebBuild } from '../scripts/web-export.mjs';
+import { EXPORT_DIRECTORY_NAME } from '../scripts/agent-render-jobs.mjs';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createContext, Script } from 'node:vm';
 import { VEGETATION_CAPABILITY_NOTE } from '../src/agent-vegetation-notes.js';
 import { CROWD_CAPABILITY_NOTE } from '../src/agent-crowd-notes.js';
+import { GAME_CAPABILITIES } from '../src/game-setup-notes.js';
 import { USER_PASS_CAPABILITIES } from '../src/user-pass.js';
 import { MESH_BLEND_CAPABILITIES } from '../src/mesh-blend.js';
 import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
@@ -22,13 +28,14 @@ import { audioInputArguments, createAudioLibrary, measureStreamSeconds } from '.
 import { filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline } from '../src/film-timeline.js';
 import { normalizeReview, REVIEW_LIMITS } from '../scripts/agent-review.mjs';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
+import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 
 test('runtime reports real scene capabilities without launching a browser and closes idempotently', async () => {
   const runtime = createAgentRuntime({ backend: 'cpu', memory: 64 });
   const capabilities = await runtime.capabilities();
   assert.equal(capabilities.phase, 'idle');
   assert.equal(capabilities.scene.schemaVersion, 1);
-  assert.equal(capabilities.preview.maximumActiveScenes, 1);
+  assert.equal(capabilities.preview.maximumActiveScenes, 4);
   assert.equal(capabilities.preview.memoryBudgetMiB, 64);
   assert.equal(capabilities.preview.backend, 'cpu');
   assert.equal(capabilities.review.maximumShots, 4);
@@ -42,7 +49,7 @@ test('runtime reports real scene capabilities without launching a browser and cl
 });
 
 async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = false, deadlineMs,
-  failDispose = false, heapSize = 1024, stallPrivatePage = false, resumeDelayMs = 0, sceneBake } = {}) {
+  failDispose = false, heapSize = 1024, stallPrivatePage = false, resumeDelayMs = 0, sceneBake, exportedRecipe, runtimeOptions = {}, contextOverrides = {} } = {}) {
   const events = [];
   const deadlines = [];
   let privatePage;
@@ -67,6 +74,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     async evaluate(callback, { method, input }) {
       events.push(`${this.privateTarget ? 'private' : 'source'}:${method}`);
       if (method === 'create') return { sessionId: input.sessionId, revision: 0 };
+      if (method === 'exportRecipe') return { recipe: exportedRecipe, revision: 1 };
       if (method === 'snapshot') {
         if (input.expectedRevision !== sourceRevision) throw new Error('Stale revision for render snapshot.');
         return { sourceRevision, recipe };
@@ -111,13 +119,14 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
   const context = createContext({ createServer, randomUUID, existsSync: () => true,
     readFile: async () => '', packageMetadata: { version: 'test' },
     createRequire: () => ({ resolve: () => { throw new Error('no peer in tests'); } }),
-    VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
+    VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, GAME_CAPABILITIES, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
     recipeAssetNeeds, sequenceFrameIds, catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, TEXTURE_SEQUENCE_CAPABILITIES, AGENT_ASSET_LIMITS, assertCombinedAssetBytes,
-    audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName,
+    audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName, sessionProblem, SCENE_STORE_LIMITS,
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
+    runtimeOptions, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
     setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },
   });
-  new Script(`${source}\nglobalThis.runtime = createAgentRuntime({ backend: 'cpu' });`).runInContext(context);
+  new Script(`${source}\nglobalThis.runtime = createAgentRuntime({ backend: 'cpu', ...runtimeOptions });`).runInContext(context);
   const runtime = context.runtime;
   const created = await runtime.create({ recipe });
   return { runtime, sessionId: created.sessionId, deadlines, events, shotStarted, acquisitionStarted, resolvePrivatePage };
@@ -303,4 +312,71 @@ test('the preview server accepts only its own loopback host', () => {
   assert.equal(isPreviewHost('localhost:4100', 4100), false);
   assert.equal(isPreviewHost('127.0.0.1:4101', 4100), false);
   assert.equal(isPreviewHost(undefined, 4100), false);
+});
+
+async function webExportHarness({ exportedRecipe, failCopy = () => false } = {}) {
+  const root = await mkdtemp(join(tmpdir(), '67js-web-runtime-'));
+  const buildDirectory = join(root, 'build');
+  await mkdir(join(buildDirectory, 'mcp'), { recursive: true });
+  await writeFile(join(buildDirectory, 'game.js'), 'export {};');
+  const jobsDirectory = join(root, 'jobs');
+  await mkdir(jobsDirectory);
+  const failingWriteWebBuild = async options => {
+    if (failCopy()) {
+      await mkdir(join(options.outputDirectory, 'engine'), { recursive: true });
+      throw new Error('Injected copy failure');
+    }
+    return writeWebBuild(options);
+  };
+  const harness = await reviewRuntimeHarness({
+    exportedRecipe,
+    runtimeOptions: { jobs: jobsDirectory, previewUrl: pathToFileURL(join(buildDirectory, 'mcp', 'preview.js')) },
+    contextOverrides: { writeWebBuild: failingWriteWebBuild },
+  });
+  const keptBuilds = async () => (await readdir(join(jobsDirectory, EXPORT_DIRECTORY_NAME))).filter(name => name.startsWith('web-'));
+  after(() => harness.runtime.close());
+  return { ...harness, keptBuilds };
+}
+
+const PLAYABLE_RECIPE = { format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], game: { player: { node: 'creature' }, physics: false } };
+
+test('exportWeb keeps only the newest four builds and returns a real entry page', async () => {
+  const { runtime, sessionId, keptBuilds } = await webExportHarness({ exportedRecipe: PLAYABLE_RECIPE });
+  const entries = [];
+  for (let index = 0; index < 5; index++) entries.push((await runtime.exportWeb({ sessionId })).entry);
+  assert.equal((await keptBuilds()).length, 4);
+  await assert.rejects(stat(entries[0]), { code: 'ENOENT' });
+  for (const entry of entries.slice(1)) assert.ok((await stat(entry)).isFile());
+});
+
+test('a half-written web export is removed and never evicts or uses up a kept build', async () => {
+  let breakCopy = false;
+  const { runtime, sessionId, keptBuilds } = await webExportHarness({ exportedRecipe: PLAYABLE_RECIPE, failCopy: () => breakCopy });
+  const goodEntries = [];
+  for (let index = 0; index < 4; index++) goodEntries.push((await runtime.exportWeb({ sessionId })).entry);
+  breakCopy = true;
+  for (let attempt = 0; attempt < 5; attempt++) await assert.rejects(runtime.exportWeb({ sessionId }), /Injected copy failure/);
+  assert.equal((await keptBuilds()).length, 4);
+  for (const entry of goodEntries) assert.ok((await stat(entry)).isFile());
+});
+
+test('exportWeb refuses a scene without a game or with physics, and earlier builds stay', async () => {
+  const { runtime, sessionId, keptBuilds } = await webExportHarness({ exportedRecipe: PLAYABLE_RECIPE });
+  await runtime.exportWeb({ sessionId });
+  const refused = [
+    [{ ...PLAYABLE_RECIPE, game: undefined }, /no game/],
+    [{ ...PLAYABLE_RECIPE, game: { ...PLAYABLE_RECIPE.game, physics: true } }, /game\.physics is true/],
+  ];
+  for (const [recipe, message] of refused) {
+    const refusing = await webExportHarness({ exportedRecipe: recipe });
+    for (let attempt = 0; attempt < 5; attempt++) await assert.rejects(refusing.runtime.exportWeb({ sessionId: refusing.sessionId }), message);
+    assert.equal((await refusing.keptBuilds().catch(() => [])).length, 0);
+  }
+  assert.equal((await keptBuilds()).length, 1);
+});
+
+test('exportWeb needs a jobs folder', async () => {
+  const harness = await reviewRuntimeHarness({ exportedRecipe: PLAYABLE_RECIPE });
+  after(() => harness.runtime.close());
+  await assert.rejects(harness.runtime.exportWeb({ sessionId: harness.sessionId }), /--jobs/);
 });

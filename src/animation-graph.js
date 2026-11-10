@@ -473,18 +473,20 @@ function createLayerRuntime(layer, parameters) {
     writePoseWeights();
   }
 
-  // createSkeletonPose layers blend one over another, so a normalized set of weights becomes a chain of lerp factors.
+  // createSkeletonPose layers blend one over another, so each later clip lerps over the ones before it. For every clip to
+  // end with its own share, a clip's factor is its share divided by what the clips after it leave free.
   function writePoseWeights() {
-    let accumulated = 0;
-    for (const slot of layer.slots) {
+    let laterShares = 0;
+    for (let index = layer.slots.length - 1; index >= 0; index--) {
+      const slot = layer.slots[index];
       const share = runtime.weight * slot.weight;
       if (layer.additive) {
         slot.poseWeight = share;
         continue;
       }
-      const remaining = 1 - accumulated;
-      slot.poseWeight = remaining > 0 ? Math.min(1, Math.max(0, share / remaining)) : 0;
-      accumulated += share;
+      const free = 1 - laterShares;
+      slot.poseWeight = free > 0 ? Math.min(1, Math.max(0, share / free)) : 0;
+      laterShares += share;
     }
   }
 

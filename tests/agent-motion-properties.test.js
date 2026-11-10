@@ -146,7 +146,7 @@ test('light and morph driver targets are checked against the scene', () => {
   assert.throws(() => build({ kind: 'light', id: 'point:0', property: 'color' }), /needs a component/);
   assert.throws(() => build({ kind: 'morph', id: 'nope', property: 'weight' }), /morph was not found.*lift/);
   assert.throws(() => build({ kind: 'morph', id: 'lift', property: 'weight', component: 'x' }), /takes no component/);
-  assert.throws(() => build({ kind: 'sun', id: 'x', property: 'intensity' }), /node, material, light or morph/);
+  assert.throws(() => build({ kind: 'sun', id: 'x', property: 'intensity' }), /node, material, light, morph or camera/);
   const clash = rigRecipe({
     duration: 1, tracks: [{ kind: 'light', id: 'point:0', property: 'intensity', keyframes: [{ time: 0, value: 1 }] }],
     drivers: [{ target: { kind: 'light', id: 'point:0', property: 'intensity' }, expression: 1 }],
@@ -158,6 +158,6 @@ test('light and morph driver targets are checked against the scene', () => {
 
 test('the capabilities list the property limits', () => {
   assert.equal(AGENT_SCENE_CAPABILITIES.motionDrivers.maxProperties, 32);
-  assert.deepEqual(AGENT_SCENE_CAPABILITIES.motionDrivers.targets, ['node', 'material', 'light', 'morph']);
+  assert.deepEqual(AGENT_SCENE_CAPABILITIES.motionDrivers.targets, ['node', 'material', 'light', 'morph', 'camera']);
   assert.deepEqual(AGENT_SCENE_CAPABILITIES.motionDrivers.variables, ['time', 'node', 'custom', 'distance', 'rotationDifference']);
 });

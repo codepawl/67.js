@@ -517,7 +517,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       const runnerDirectory = await directoryFor(record.jobId);
       if (controller.signal.aborted) throw controller.signal.reason;
       const completed = await run({
-        jobId: record.jobId, directory: runnerDirectory, snapshot, settings: structuredClone(record.settings), signal: controller.signal,
+        jobId: record.jobId, sessionId: job.sessionId, directory: runnerDirectory, snapshot, settings: structuredClone(record.settings), signal: controller.signal,
         progress(update) {
           objectKeys(update, ['frames', 'maximumPendingFrames'], 'progress');
           if (controller.signal.aborted) throw controller.signal.reason;
@@ -591,7 +591,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     async submit(input) {
       if (closed) throw new Error('Render job controller is closed.');
       if (active || admission) throw new Error('A render job is already active. No additional jobs are queued.');
-      objectKeys(input, ['sourceRevision', 'snapshot', 'settings'], 'submission');
+      objectKeys(input, ['sessionId', 'sourceRevision', 'snapshot', 'settings'], 'submission');
       const sourceRevision = boundedNumber(input.sourceRevision, 0, Number.MAX_SAFE_INTEGER, 'source revision', true);
       objectKeys(input.snapshot, ['recipe', 'assetBytes', 'clips'], 'snapshot');
       const clips = jsonCopy(input.snapshot.clips ?? []);
@@ -618,7 +618,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
         const record = { schemaVersion: 1, jobId, sourceRevision, state: 'queued', settings, progress: { frames: 0, maximumPendingFrames: 0 }, artifacts: [] };
         await writeFile(join(staging, 'status.json'), JSON.stringify(record), { flag: 'wx', mode: 0o600 });
         await rename(staging, directory);
-        const job = { record, controller: new AbortController(), persistence: Promise.resolve() };
+        const job = { record, sessionId: input.sessionId, controller: new AbortController(), persistence: Promise.resolve() };
         jobs.set(jobId, job);
         active = job;
         const result = structuredClone(record);

@@ -36,7 +36,7 @@ export default defineConfig({
   build: {
     copyPublicDir: false,
     rolldownOptions: {
-      external: ['@dimforge/rapier3d-compat', 'manifold-3d'],
+      external: ['@dimforge/rapier3d-compat', 'jolt-physics', 'manifold-3d'],
       output: { banner: legalBanner },
     },
     outDir: 'build',
@@ -109,10 +109,12 @@ export default defineConfig({
         runtime: 'src/runtime.js',
         input: 'src/input.js',
         'physics-runtime': 'src/physics-runtime.js',
+        'physics-jolt': 'src/physics-jolt.js',
         audio: 'src/audio.js',
         'animation-graph': 'src/animation-graph.js',
         player: 'src/player.js',
         'game-rules': 'src/game-rules.js',
+        game: 'src/game.js',
         streaming: 'src/streaming.js',
         netcode: 'src/netcode.js',
         'update-part-vertices':'src/update-part-vertices.js',

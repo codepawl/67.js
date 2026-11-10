@@ -323,7 +323,7 @@ XYZ in degrees) or `{ "kind": "material", "id", "property" }` for `emission`, `m
 `component` for `color` and `emissiveColor` (`x`, `y`, `z` for red, green, blue). Two more targets set a look value:
 `{ "kind": "light", "id": "point:0", "property": "intensity" }` (or `color` with a `component`, where the other components keep the
 recipe colour) and `{ "kind": "morph", "id": "<shape key>", "property": "weight" }`. A driven property cannot also have a track.
-Camera fields are not driven yet.
+The camera is a target too: `{ "kind": "camera", "property": "eye" | "target", "component": "x" | "y" | "z" }` or `{ "kind": "camera", "property": "fov" | "roll" }` (fov in degrees, roll in radians, as in the camera tracks). A camera target has no `id`. Drivers apply after the camera tracks: the driver value replaces that eye or target component, fov or roll, and the other fields keep their track or recipe value. A camera property with a track cannot also have a driver, and a camera with a `focalLength` takes no fov driver. With no camera track, the recipe camera is the base.
 
 An expression is JSON data and is never run as code. It is the motion context of the one expression language described in
 [field expressions](mesh.md#field-expressions): the same operators with the same results, the same syntax, and limits of 64
@@ -356,8 +356,9 @@ property can drive several parts:
   ] }
 ```
 
-Only driver expressions read properties; a constraint `influence` expression does not yet. A property is a pure function of the
-time, so seeking gives the same value as playing to it.
+Driver expressions and constraint `influence` expressions both read properties, so one property can fade a constraint in and out:
+`{ "type": "copy_location", "node": "follower", "target": "lead", "influence": { "custom": { "node": "lead", "name": "fade" } } }`.
+An influence is clamped to 0 to 1. A property is a pure function of the time, so seeking gives the same value as playing to it.
 
 ### Evaluation order
 
@@ -366,7 +367,7 @@ to that time:
 
 1. For an asset, the selected clip, then `motion.layers`, then tracks.
 2. IK, in list order.
-3. Drivers. They read the pose from steps 1 and 2, so one driver never sees another's result.
+3. Drivers. They read the pose from steps 1 and 2, so one driver never sees another's result. Camera drivers replace fields of the pose the camera tracks sampled at the same time.
 4. Constraints, in list order. Each reads the pose the ones before it left. Expressions in `influence` read the pose from
    step 2.
 
