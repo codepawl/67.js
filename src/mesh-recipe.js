@@ -12,6 +12,7 @@ import { mirrorMesh, arrayMesh, solidifyMesh } from './mesh-stack.js';
 import { bevelEdges } from './mesh-bevel.js';
 import { loopCut } from './mesh-loopcut.js';
 import { CUT_OPERATIONS, normalizeCutEdit, runCutEdit, checkCutBudget } from './mesh-cut-edits.js';
+import { RESHAPE_OPERATIONS, normalizeReshapeEdit, runReshapeEdit, checkReshapeBudget } from './mesh-reshape-edits.js';
 import { unwrapUv } from './mesh-uv.js';
 import { projectUv, packUvIslands, UV_PROJECTION_MODES } from './mesh-uv-project.js';
 import { runKernel, KernelDeferred } from './kernel-offload.js';
@@ -324,6 +325,7 @@ export function normalizeMeshEdits(edits) {
         break;
     }
     if (CUT_OPERATIONS.includes(edit.op)) normalizeCutEdit(edit, normalized, index, { finiteNumber, vector });
+    if (RESHAPE_OPERATIONS.includes(edit.op)) normalizeReshapeEdit(edit, normalized, index, { finiteNumber, vector });
     if (isModifierOperation(edit.op)) normalizeModifierEdit(edit, normalized, index, { finiteNumber, checkedField });
     return normalized;
   });
@@ -339,6 +341,7 @@ function checkSubdivideBudget(mesh, edit, limits, index) {
 
 function checkArrayBudget(mesh, edit, limits, index) {
   checkCutBudget(mesh, edit, limits, index);
+  checkReshapeBudget(mesh, edit, limits, index);
   if (edit.op === 'sculpt') {
     try {
       checkSculptBudget(mesh, edit.strokes.length);
@@ -474,10 +477,10 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     result.tags = tagSummary(outcome.mesh, edit.name);
     return { mesh: outcome.mesh, result };
   }
-  if (CUT_OPERATIONS.includes(edit.op)) {
+  if (CUT_OPERATIONS.includes(edit.op) || RESHAPE_OPERATIONS.includes(edit.op)) {
     let outcome;
     try {
-      outcome = runCutEdit(current, edit);
+      outcome = CUT_OPERATIONS.includes(edit.op) ? runCutEdit(current, edit) : runReshapeEdit(current, edit);
     } catch (error) {
       throw editFailure(error, index, `${edit.op}`);
     }

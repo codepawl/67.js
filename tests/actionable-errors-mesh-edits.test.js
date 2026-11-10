@@ -49,6 +49,12 @@ const CASES = [
   ['src/mesh-cut-edits.js', 'dissolve_edges rule as a list', badEdit({ op: 'dissolve_edges', edges: [] }), 'edits[0].edges', '[]'],
   ['src/mesh-cut-edits.js', 'subdivide_edges cuts too many', badEdit({ op: 'subdivide_edges', edges: { all: true }, cuts: 99 }), 'edits[0].cuts', '99'],
   ['src/mesh-cut-edits.js', 'dissolve_faces rule selects nothing', badEdit({ op: 'dissolve_faces', select: { faces: [] } }), 'edits[0].select', '{"faces":[]}'],
+  ['src/mesh-reshape-edits.js', 'poke offset as text', badEdit({ op: 'poke', offset: 'far' }), 'edits[0].offset', '"far"'],
+  ['src/mesh-reshape-edits.js', 'tris_to_quads angle too wide', badEdit({ op: 'tris_to_quads', angle: 500 }), 'edits[0].angle', '500'],
+  ['src/mesh-reshape-edits.js', 'symmetrize axis unknown', badEdit({ op: 'symmetrize', axis: 'w' }), 'edits[0].axis', '"w"'],
+  ['src/mesh-reshape-edits.js', 'symmetrize keep unknown', badEdit({ op: 'symmetrize', keep: 'both' }), 'edits[0].keep', '"both"'],
+  ['src/mesh-reshape-edits.js', 'scale_elements without a scale', badEdit({ op: 'scale_elements' }), 'edits[0].scale', 'undefined'],
+  ['src/mesh-reshape-edits.js', 'extrude_edges offset with one number', badEdit({ op: 'extrude_edges', edges: { open: true }, offset: [1] }), 'edits[0].offset', '[1]'],
   ['src/mesh-deform-modifiers.js', 'lattice divisions too high', badEdit({ op: 'lattice', divisions: [9, 2, 2] }), 'edits[0].divisions', '9'],
   ['src/mesh-deform-modifiers.js', 'lattice move without an offset', badEdit({ op: 'lattice', moves: [{ point: [0, 0, 0] }] }), 'edits[0].moves[0].offset', 'undefined'],
   ['src/mesh-deform-modifiers.js', 'lattice move point out of the grid', badEdit({ op: 'lattice', divisions: [2, 2, 2], moves: [{ point: [2, 0, 0], offset: [0, 0, 1] }] }), 'edits[0].moves[0].point', '2'],
@@ -137,6 +143,9 @@ for (const [file, label, trigger, path, received] of CASES) {
 const RAW_THROWS_LEFT = {
   'src/mesh-cut-edits.js': [
     '`Not a cutting edit: ${edit.op}`);',
+  ],
+  'src/mesh-reshape-edits.js': [
+    '`Not a reshaping edit: ${edit.op}`);',
   ],
   'src/mesh-deform-modifiers.js': [],
   'src/mesh-generator-modifiers.js': [
