@@ -42,6 +42,7 @@ let loopRound = 0;
 const loopState = window.__loop = {
   events: [],
   samples: [],
+  ticks: [],
   worldsAlive: () => [active, incoming, pending?.world && pending].filter(Boolean).length,
   peakWorlds: 0,
 };
@@ -74,6 +75,7 @@ async function buildFrom(download) {
       context.readPixels(0, 0, 1, 1, context.RGBA, context.UNSIGNED_BYTE, probe);
     };
   }
+  if (measureMode) (loopState.worlds ??= {})[world.id] = world;
   return world;
 }
 
@@ -234,7 +236,8 @@ function tick(seconds) {
   const flightSeconds = prefersReducedMotion ? flights[active.index].duration * REDUCED_FLIGHT_POSITION : activeSeconds;
   const sceneTime = prefersReducedMotion ? STILL_SCENE_TIME : clock;
   const stillHeld = prefersReducedMotion && !incoming && active.drawn;
-  if (!stillHeld) drawWorld(active, flightSeconds, sceneTime);
+  // While a fade runs the world that is leaving keeps its last frame: drawing two worlds per tick doubled the frame time of every fade.
+  if (!stillHeld && !incoming) drawWorld(active, flightSeconds, sceneTime);
   active.drawn = true;
   if (incoming) {
     const amount = smoothstep(0, 1, (clock - incoming.startedAt) / fadeSeconds);
@@ -272,7 +275,10 @@ async function start() {
     return;
   }
   const loop = startLoop(stage, seconds => {
+    const started = performance.now();
+    const blending = Boolean(incoming);
     tick(seconds);
+    if (measureMode) loopState.ticks.push({ scene: active && SCENES[active.index].id, ms: performance.now() - started, blending });
     return true;
   });
   loopState.wake = loop.wake;
@@ -293,6 +299,8 @@ loopState.scout = async id => {
   const world = await buildFrom(await fetchWorld(SCENES[index].description));
   world.canvas.style.opacity = '1';
   stage.dataset.live = 'true';
-  return (eye, target, fov) => world.render({ eye, target, fov }, 1);
+  const draw = (eye, target, fov, seconds = 1) => world.render({ eye, target, fov }, seconds);
+  draw.world = world;
+  return draw;
 };
 if (!parameters.has('scout')) start().catch(error => showStageError(stage, `Live view unavailable: ${error.message}`));

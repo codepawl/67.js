@@ -3,7 +3,7 @@
 // Eye and target are in the world's own units (metres). Flights were scouted against the real scenes, see FLIGHT NOTES in each entry.
 const NVIDIA_SIMREADY = { label: 'NVIDIA SimReady assets', licence: 'CC BY 4.0', href: 'https://docs.omniverse.nvidia.com/usd/latest/usd_content_samples/simready_assets.html' };
 
-export const SCENES = [
+const ALL_SCENES = [
   {
     id: 'port',
     name: 'Container port',
@@ -65,10 +65,11 @@ export const SCENES = [
     near: 0.3,
     far: 400,
     keys: [
-      { at: 0, eye: [30, 22, 40], target: [4, 1, -1], fov: 32 },
-      { at: 0.3, eye: [14, 16, 27], target: [0, 1.5, -4], fov: 38 },
-      { at: 0.62, eye: [0, 9.5, 15], target: [-8, 1.5, -8], fov: 46 },
-      { at: 1, eye: [-16, 4.5, 9], target: [-26, 2, -14], fov: 56 },
+      { at: 0, eye: [34, 1.8, 16], target: [14, 2.4, 2], fov: 52 },
+      { at: 0.28, eye: [22, 3.2, 9], target: [4, 2.4, -3], fov: 48 },
+      { at: 0.52, eye: [13, 4.6, 13], target: [0, 2.4, -5], fov: 46 },
+      { at: 0.76, eye: [2, 8.5, 13], target: [-10, 2, -6], fov: 44 },
+      { at: 1, eye: [-18, 12, 22], target: [2, 0, -8], fov: 41 },
     ],
     credits: [NVIDIA_SIMREADY],
   },
@@ -81,10 +82,16 @@ export const SCENES = [
     near: 0.25,
     far: 300,
     keys: [
-      { at: 0, eye: [22, 17, 22], target: [4, 0, -6], fov: 34 },
-      { at: 0.5, eye: [6, 14.5, 18], target: [-2, 0, -10], fov: 38 },
-      { at: 1, eye: [-10, 11, 9], target: [8, 0.5, -18], fov: 42 },
+      { at: 0, eye: [0, 2.2, 21], target: [0, 2, -8], fov: 54 },
+      { at: 0.28, eye: [-1.5, 3.2, 6], target: [1.5, 2, -12], fov: 52 },
+      { at: 0.55, eye: [2.5, 6.2, 1.5], target: [-4, 1.5, -10], fov: 48 },
+      { at: 0.8, eye: [8, 9, 3], target: [-3, 1, -12], fov: 44 },
+      { at: 1, eye: [14, 12, 15], target: [-3, 0.5, -10], fov: 42 },
     ],
     credits: [NVIDIA_SIMREADY],
   },
 ];
+
+// TEMPORARY while the chip fab is rebuilt: ?skip=chipfab (comma list) leaves scenes out of the loop. Remove with the chip fab swap.
+const skipped = new Set((new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('skip') ?? '').split(',').filter(Boolean));
+export const SCENES = ALL_SCENES.filter(scene => !skipped.has(scene.id));

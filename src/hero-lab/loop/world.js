@@ -8,6 +8,7 @@ import { loadHdri } from '../../hdri.js';
 import { createCascadedShadows } from '../../cascaded-shadows.js';
 import { applyWaterReflection, attachWaterReflection } from '../../water-reflection.js';
 import { readPartRanks } from '../../showcase-download.js';
+import { prepareEffects } from './effects.js';
 
 // The water mirror is off in the loop: once the camera moves between two draws the port world drew only its sky (the same happens
 // on hero-b.html?scene=port when the camera is set by hand; with the mirror off every pose draws). Turn it on again when that is fixed.
@@ -39,14 +40,25 @@ export async function fetchWorld(descriptionUrl) {
 
 export async function buildWorld(download, canvas, overrides = {}) {
   const { description, paths, models, sky } = download;
+  const timings = {};
+  let lapStart = performance.now();
+  const lap = name => {
+    const now = performance.now();
+    timings[name] = Math.round(now - lapStart);
+    lapStart = now;
+  };
   const sharedTextures = createSharedTextures();
   const files = [];
   for (const [index, model] of models.entries()) {
     const loaded = await loadGltf(model, { baseUrl: baseUrlOf(paths[index]), sharedTextures, ...description.gltfOptions });
     files.push({ parts: loaded.parts, ranks: await readPartRanks(model) });
   }
+  lap('parseMs');
   const options = description.renderer;
   const environmentMap = await loadHdri(description.hdri, { ...description.hdriOptions, fetchImplementation: async () => new Response(sky) });
+  lap('hdriMs');
+  const effects = prepareEffects(description.id, inWholeWorldOrder(files));
+  if (effects?.needsFogAddon) await import('../../fog-shader.js');
   const surfaceOf = parts => (description.waterReflection && WATER_MIRROR_ENABLED ? applyWaterReflection(parts) : { parts, surface: null });
   // The renderer starts on the first file's parts and takes the whole world through replaceParts, the order the showcase page
   // uses: a water mirror attached to a renderer built on the whole world drew nothing after its first frame.
@@ -56,8 +68,9 @@ export async function buildWorld(download, canvas, overrides = {}) {
     ...overrides,
     pixelRatio: Math.min(devicePixelRatio, 1.25),
     memoryBudgetMiB: 512,
+    ...effects?.rendererOptions,
     ...(options.shadowCascades ? { shadowCascades: createCascadedShadows(options.shadowCascades) } : {}),
-    environment: { ...options.environment, map: environmentMap },
+    environment: { ...options.environment, map: environmentMap, ...(effects?.volumeFog ? { volumeFog: effects.volumeFog } : {}) },
   });
   let detachReflection = attachWaterReflection(renderer, firstReflection.surface);
   if (files.length > 1) {
@@ -67,14 +80,18 @@ export async function buildWorld(download, canvas, overrides = {}) {
     detachReflection();
     detachReflection = attachWaterReflection(renderer, whole.surface);
   }
+  lap('rendererMs');
   const frame = { ...description.frame, exposure: description.exposure ?? 1 };
   return {
     id: description.id,
     title: description.title,
     description,
     canvas,
+    renderer,
+    timings,
     render(camera, seconds) {
-      renderer.render({ ...frame, eye: camera.eye, target: camera.target, fov: camera.fov, time: seconds });
+      const drawn = effects ? effects.apply(renderer, seconds, frame) : frame;
+      renderer.render({ ...drawn, eye: camera.eye, target: camera.target, fov: camera.fov, time: seconds });
     },
     resize: () => renderer.resize(),
     dispose() {
