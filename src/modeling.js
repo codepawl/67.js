@@ -1,6 +1,7 @@
 import { buildLathe, buildExtrusion, buildTube } from './modeling-shapes.js';
 import { sweepSamples } from './modeling-bezier.js';
 import { sampleCountOf, sampleSpline, shapeToSpline, trimSamples } from './modeling-splines.js';
+import { planSdf, sdfGeometry as buildSdf } from './modeling-sdf.js';
 
 const MAX_INPUT_POINTS = 4096;
 const DEFAULT_VERTEX_LIMIT = 250_000;
@@ -455,3 +456,12 @@ export function tube(path, {
   checkBudget((segments + 1) * (radialSegments + 1), maxVertices);
   return meshFrom(buildTube(points, closed, radius, segments, radialSegments), maxVertices);
 }
+
+/** The sdf scene geometry: signed-distance shapes meshed by surface nets. See docs/modeling.md. */
+export function sdfGeometry(value, maxVertices = DEFAULT_VERTEX_LIMIT) {
+  planSdf(value);
+  return meshFrom(buildSdf(value), maxVertices);
+}
+
+/** The vertex count reserved for an sdf geometry, validated like sdfGeometry. */
+export { sdfVertexEstimate } from './modeling-sdf.js';

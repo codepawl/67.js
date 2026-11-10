@@ -159,7 +159,7 @@ Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs`
 `mesh_inspect` lint adds warnings for `intersecting-parts`, `self-intersection`, `thin-wall`, `floating-part` and `asymmetric`. They never set `ok` to false, run within face budgets, and list any check they skipped in `skippedChecks`. `scene_inspect` returns a `diagnostics` list only when there is something to say: ignored material fields, blended transmission, unused materials or geometries, and for imported assets the decoder's not-drawn features, rigs with no joints or no skin, and assets with no clips. Each item has `kind`, `severity`, `target`, `message` and `fix`.
 
 The recipe uses `format: '67js.scene'` and `schemaVersion: 1`.
-Supported geometry types are `box`, `cylinder`, `sphere`, `torus`, `lathe`, `extrude`, `tube`, `curve`, `text`, `grid`, `terrain`, and `mesh`. The fields of `curve` and `text` are listed by `scene_capabilities` (`curveText.details`) and not repeated in every tool schema. Text uses the bundled font only; the MCP accepts no font file or URL.
+Supported geometry types are `box`, `cylinder`, `sphere`, `torus`, `lathe`, `extrude`, `tube`, `curve`, `sdf`, `text`, `grid`, `terrain`, and `mesh`. The fields of `curve` and `text` are listed by `scene_capabilities` (`curveText.details`) and not repeated in every tool schema. Text uses the bundled font only; the MCP accepts no font file or URL.
 A `mesh` geometry starts from one of the others as `base` and replays an edit log; see [mesh.md](mesh.md).
 Geometry fields remain flat inside each geometry record.
 Set operations use `set-node`, `set-material`, or `set-camera`, with fields directly on each command.

@@ -327,6 +327,7 @@ const shadow = z.strictObject({
 function curveAndTextGeometries(id) {
   return [
     z.strictObject({ ...id, type: z.literal('curve'), points: z.array(z.unknown()).max(1024), closed: looseField, radius: looseField, taper: looseField, profile: looseField, resolution: looseField, radialSegments: looseField }).describe('Bezier sweep; see scene_capabilities curveText.'),
+    z.strictObject({ ...id, type: z.literal('sdf'), root: z.record(z.string(), z.unknown()), resolution: looseField }).describe('Signed-distance shapes with smooth union; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('text'), text: z.string().max(256), size: looseField, depth: looseField, font: looseField, align: looseField, curveSegments: looseField }).describe('3D text; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('terrain'), size: looseField, resolution: looseField, seed: looseField, amplitude: looseField, holes: z.array(z.unknown()).max(16).optional() }).describe('Hills with round holes; see scene_capabilities terrain.'),
   ];
