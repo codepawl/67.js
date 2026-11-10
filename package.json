@@ -217,6 +217,7 @@
     "tool-cost": "node scripts/check-tool-cost.mjs",
     "tool-cost:release": "node scripts/check-tool-cost.mjs --set-budgets",
     "benchmark:runtime": "node bench/runtime/run.mjs",
+    "benchmark:streaming": "node bench/streaming-crossing/run.mjs",
     "benchmark:crowd": "node scripts/benchmark-crowd.mjs",
     "check:tool-schemas": "node scripts/check-tool-schemas.mjs",
     "check:links": "node scripts/check-links.mjs",

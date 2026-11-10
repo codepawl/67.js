@@ -54,4 +54,10 @@ A loader is `{ load(request), dispose(asset) }`. `load` returns `{ asset, bytes 
 
 At most 4096 assets, 8 levels per asset and 32 loaders. `budgetBytes` is at least 1. Bad input throws an error that says what to pass instead.
 
-Not yet: culling for instanced groups and a measured frame budget on a laptop (#776).
+## Crossing a large world
+
+`npm run benchmark:streaming` crosses a seeded world of 576 terrain tiles (480 by 480 units, three detail levels, tiles built in workers with `createWorkerLoader`) on a scripted path through the runtime, in headless Chrome. It records frame time, long tasks over 50 ms, `replaceParts` time and resident bytes for the whole crossing, and writes `crossing-<label>.json` and a contact sheet to `--out`. `--cpu` uses SwiftShader and `--speed` sets the player speed. The world and its generator are in `bench/streaming-crossing/world.js`. `tests/streaming-crossing.test.js` runs the same crossing in Node and asserts that bytes in use never pass the budget (the budget does force evictions), that no loader starts inside a frame and that the player's tile is always resident.
+
+Pick a budget above what the focus wants at once: the tiles inside `loadDistance`, each at its level. A budget below that leaves loads waiting and the ground missing under the player; `stats.pending` and the events show it. The benchmark world wants about 11 MB at once and runs on a 16 MiB budget, 6 percent of the 257 MB the whole world takes at its finest level. A renderer that draws the resident tiles should call `replaceParts(parts, { retainedUnchanged: true })` when the resident set changes, so batches that did not change are not synced again.
+
+Not yet: culling for instanced groups, and a run on a mid laptop (#776).
