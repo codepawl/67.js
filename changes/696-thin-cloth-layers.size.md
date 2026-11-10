@@ -1,0 +1,3 @@
+- entry:cloth: the self collision radius reads the sheet thickness, a four-line helper, so thin cloth can fold in layers 1 cm apart instead of about 4 cm.
+- tool-cost: the scene_capabilities cloth note gains nine words saying that thickness sets the self collision radius.
+- goal:agent-scene: 12 bytes of capability text tell agents that a sheet's thickness sets the self collision layer spacing, which they need to build a thin folded cloth.

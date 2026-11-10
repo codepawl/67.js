@@ -41,7 +41,22 @@ export function jellyCubeRecipe() {
   });
 }
 
-/** A flag hung from a pole by its top edge; the pole drops 2.35 m so the cloth piles into folds on the floor. */
+// The pole's path: a swing out and down so the flag ripples, a drag across the floor to lay it flat, then a short push back that crumples the near end.
+const POLE_KEYFRAMES = [
+  { time: 0, value: [0, 2.6, 0] },
+  { time: 0.3, value: [0, 2.6, 0] },
+  { time: 0.9, value: [0.25, 1.2, 0.4] },
+  { time: 1.5, value: [0, 0.012, 1] },
+  { time: 2.2, value: [0, 0.012, 1.3] },
+  { time: 3.2, value: [0, 0.012, 0.9] },
+  { time: 4, value: [0, 0.012, 0.9] },
+];
+export const FLAG_FILM_SECONDS = 4;
+
+/**
+ * A flag hung from a pole by its top edge. The pole swings down to the floor and drags the cloth flat, so it ends as a thin layer with
+ * a fold. The sheet sets thickness 5 mm, which also sets the self collision radius, so layers stack 1 cm apart instead of 3.7 cm.
+ */
 export function foldingFlagRecipe({ selfCollision = true } = {}) {
   return baseRecipe({
     geometries: [{ id: 'flag', type: 'grid', segments: 24 }],
@@ -50,11 +65,11 @@ export function foldingFlagRecipe({ selfCollision = true } = {}) {
       { id: 'flag', geometry: 'flag', material: 'fabric', translation: [0, 2.1, 0], scale: [1.6, 1, 1] },
       { id: 'pole', translation: [0, 2.6, 0] },
     ],
-    motion: { duration: 3, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes: [{ time: 0, value: [0, 2.6, 0] }, { time: 0.3, value: [0, 2.6, 0] }, { time: 1.6, value: [0, 0.25, 0] }, { time: 3, value: [0, 0.25, 0] }] }] },
-    camera: { eye: [0.7, 0.8, 3.0], target: [0, 0.5, 0] },
+    motion: { duration: FLAG_FILM_SECONDS, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes: POLE_KEYFRAMES }] },
+    camera: { eye: [1.1, 1.1, 4.3], target: [0, 0.75, 0.4] },
     cloth: {
-      duration: 3,
-      sheets: [{ node: 'flag', pin: ['top'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.9, bend: 0.2, damping: 1 }],
+      duration: FLAG_FILM_SECONDS,
+      sheets: [{ node: 'flag', pin: ['top'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.9, bend: 0.01, damping: 2.5, friction: 0.25, thickness: 0.005 }],
       colliders: [{ node: 'ground', shape: 'box' }],
     },
   });

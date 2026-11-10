@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene } from '../src/agent-scene.js';
-import { FILM_FRAMES_PER_SECOND, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm, unjoinedMinimumDistance } from '../scripts/soft-body-film.mjs';
+import { FILM_FRAMES_PER_SECOND, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm, unjoinedMinimumDistance } from '../scripts/soft-body-film.mjs';
 
 // Film tests for #696: each film is one recipe baked twice. The frames must match byte for byte, and the numbers a viewer
-// would see (the landing, the dent, the layers of the fold) are measured from the baked vertices, not read off a picture.
+// would see (the landing, the dent, the height and layers of the fold) are measured from the baked vertices, not read off a picture.
 const JELLY_FRAMES = 120;
-const FLAG_FRAMES = 150;
+const FLAG_FRAMES = FLAG_FILM_SECONDS * FILM_FRAMES_PER_SECOND;
+const FLAG_SAMPLE_EVERY = 12;
 function milliseconds(value) {
   return Number(value.toFixed(2));
 }
@@ -36,7 +37,7 @@ test('measureLanding names the problem when the body never reaches the floor', (
   assert.throws(() => measureLanding(airborne, 1), /never reached the floor within 1 frames/);
 });
 
-test('a flag lowered into folds is byte-identical across two bakes and keeps its layers apart', context => {
+test('a flag dropped by its pole falls to the floor and ends as a thin layer whose folds keep their layers apart', context => {
   const first = recordFilm(foldingFlagRecipe(), 'flag', FLAG_FRAMES);
   const second = recordFilm(foldingFlagRecipe(), 'flag', FLAG_FRAMES);
   assert.deepEqual(first.hashes, second.hashes, 'two bakes of the same recipe give the same bytes in every frame');
@@ -45,15 +46,26 @@ test('a flag lowered into folds is byte-identical across two bakes and keeps its
 
   const indices = createAgentScene(foldingFlagRecipe()).parts.find(part => part.name === 'flag').geometry.indices;
   const restHeight = axisRange(first.frames[0], 1).extent;
-  const pileHeight = axisRange(first.frames[last], 1).extent;
-  assert.ok(pileHeight < restHeight * 0.6, `the flag folds from ${restHeight} m to a pile ${pileHeight} m tall`);
+  const touch = measureLanding(first.frames, restHeight).contact;
+  assert.ok(touch > 30 && touch < 90, `the hanging flag first touches the floor within frames 30 to 90, got ${touch}`);
+  const midFall = Math.round(touch * 0.7);
+  assert.ok(axisRange(first.frames[midFall], 1).extent > restHeight * 0.6, 'mid fall the flag is still hanging in the air');
+
+  const finalRange = axisRange(first.frames[last], 1);
+  assert.ok(finalRange.high < 0.055, `the flag ends no more than 5.5 cm above the floor, got ${finalRange.high} m`);
+  assert.ok(axisRange(first.frames[last], 2).extent > 0.7, 'the flag lies spread over the floor, not stacked in one place');
+
   const without = recordFilm(foldingFlagRecipe({ selfCollision: false }), 'flag', FLAG_FRAMES);
-  const gap = unjoinedMinimumDistance(first.frames[last], indices);
-  const gapWithout = unjoinedMinimumDistance(without.frames[last], indices);
-  assert.ok(gap > gapWithout * 5, `layers stay apart with self collision (${gap} m) and merge without it (${gapWithout} m)`);
-  assert.ok(gap > 0.005, `the closest unjoined pair is ${gap} m apart`);
+  let closestWith = Infinity;
+  let closestWithout = Infinity;
+  for (let frame = touch; frame < FLAG_FRAMES; frame += FLAG_SAMPLE_EVERY) {
+    closestWith = Math.min(closestWith, unjoinedMinimumDistance(first.frames[frame], indices));
+    closestWithout = Math.min(closestWithout, unjoinedMinimumDistance(without.frames[frame], indices));
+  }
+  assert.ok(closestWith > 0.005, `with self collision no two unjoined particles come within 5 mm in any sampled frame (closest ${closestWith} m)`);
+  assert.ok(closestWithout < closestWith * 0.9, `without self collision the layers come closer (${closestWithout} m)`);
 
   const bake = first.bakeMilliseconds;
-  context.diagnostic(`flag: pile ${pileHeight.toFixed(3)} m from ${restHeight.toFixed(3)} m, closest unjoined pair ${gap.toFixed(4)} m (${gapWithout.toFixed(4)} m without self collision)`);
+  context.diagnostic(`flag: touch at frame ${touch}, final height ${finalRange.high.toFixed(4)} m from ${restHeight.toFixed(3)} m, closest unjoined pair ${closestWith.toFixed(4)} m (${closestWithout.toFixed(4)} m without self collision)`);
   context.diagnostic(`flag: bake ${milliseconds(bake)} ms for ${FLAG_FRAMES} steps (${milliseconds(bake / FLAG_FRAMES)} ms a step with self collision, ${milliseconds(without.bakeMilliseconds / FLAG_FRAMES)} ms without)`);
 });

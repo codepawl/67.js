@@ -1,0 +1,1 @@
+- A cloth sheet with `selfCollision: true` and its own `thickness` stacks folded layers `2 x thickness` apart (never past half the shortest edge), so a flag dropped to the floor lies as a thin crumpled layer; sheets that set no thickness are unchanged (#696)

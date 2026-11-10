@@ -51,6 +51,11 @@ function edgeKey(first, second, particleCount) {
 }
 
 // Stretch constraints along every edge, bend constraints between the far corners of two triangles sharing an edge.
+// A sheet that sets its own thickness gets contact layers that thick (never past the longest radius); without one the radius follows the mesh, as before.
+function defaultSelfCollisionRadius(longest, thickness) {
+  return thickness > 0 ? Math.min(thickness, longest) : longest * 0.9;
+}
+
 function buildConstraints(positions, triangles, particleCount, bendStiffness, stretchStiffness, stiffnessWeights = null) {
   const edgeNeighbours = new Map();
   for (let corner = 0; corner < triangles.length; corner += 3) {
@@ -393,7 +398,7 @@ function prepareExtras(options, positions, triangles, particleCount, constraints
       throw new RangeError(`Cloth selfCollision handles ${SELF_COLLISION_LIMITS.maxParticles} particles at most; this sheet has ${particleCount}. Use a coarser grid or drop selfCollision.`);
     }
     const longest = maxSelfCollisionRadius(constraints);
-    const radius = selfCollision === true ? longest * 0.9 : selfCollision.radius;
+    const radius = selfCollision === true ? defaultSelfCollisionRadius(longest, options.thickness) : selfCollision.radius;
     if (!(radius > 0 && radius <= longest)) {
       throw new RangeError(`Cloth selfCollision.radius must be above 0 and at most ${longest.toPrecision(4)} (half the shortest edge); found ${radius}. Use a smaller radius or true.`);
     }

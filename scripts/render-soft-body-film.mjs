@@ -10,7 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createAgentScene } from '../src/agent-scene.js';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { FILM_FRAMES_PER_SECOND, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
+import { FILM_FRAMES_PER_SECOND, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
 
 const PREVIEW = { width: 960, height: 540, fps: FILM_FRAMES_PER_SECOND };
 const FONT_FILE = 'C\\:/Windows/Fonts/arial.ttf';
@@ -92,10 +92,12 @@ async function main() {
   await mkdir(outputDirectory, { recursive: true });
 
   const jellyFrames = 120;
-  const flagFrames = 150;
+  const flagFrames = FLAG_FILM_SECONDS * FILM_FRAMES_PER_SECOND;
   const jelly = filmNumbers(jellyCubeRecipe(), 'cube', jellyFrames);
   const landing = measureLanding(jelly.record.frames, axisRange(jelly.record.frames[0], 1).extent);
   const flag = filmNumbers(foldingFlagRecipe(), 'flag', flagFrames);
+  const flagTouch = measureLanding(flag.record.frames, axisRange(flag.record.frames[0], 1).extent).contact;
+  const flagMidFall = Math.round(flagTouch * 0.7);
   const flagHash = flag.record.hashes[flagFrames - 1];
 
   const jobsDirectory = join(tmpdir(), `67js-soft-body-film-${process.pid}`);
@@ -110,7 +112,7 @@ async function main() {
     });
     const flagFiles = await renderFilm(call, outputDirectory, {
       name: 'folding-flag', recipe: foldingFlagRecipe(), nodeId: 'flag', frameCount: flagFrames, videoSeconds: flagFrames / FILM_FRAMES_PER_SECOND,
-      stillTimes: { folded: (flagFrames - 1) / FILM_FRAMES_PER_SECOND },
+      stillTimes: { 'mid-fall': flagMidFall / FILM_FRAMES_PER_SECOND, 'first-touch': flagTouch / FILM_FRAMES_PER_SECOND, 'final-rest': (flagFrames - 1) / FILM_FRAMES_PER_SECOND },
     });
     const restFrame = jelly.record.frames[0];
     const atContact = cubeSize(jelly.record.frames[landing.contact]);
@@ -141,6 +143,8 @@ dent ${landing.maxDentDepth.toFixed(4)} m`,
         finalStep: lastFlagStep,
         finalTimeSeconds: seconds(lastFlagStep),
         restHeightMeters: meters(axisRange(flag.record.frames[0], 1).extent),
+        midFallStep: flagMidFall,
+        firstTouchStep: flagTouch,
         pileHeightMeters: meters(axisRange(flag.record.frames[lastFlagStep], 1).extent),
         closestUnjoinedGapMeters: {
           atStep: lastFlagStep,
