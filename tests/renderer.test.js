@@ -117,13 +117,14 @@ test('alpha material fields are validated with clear errors', () => {
   for (const [fields, expected] of invalid) assert.throws(() => groupParts([alphaPart('bad', geometry, fields)]), expected);
 });
 
-test('blend batches skip shadows by default and alpha state cannot change after upload', () => {
+test('blend batches cast tinted shadows by default, add batches do not, and alpha state cannot change after upload', () => {
   const geometry = {};
   const glass = alphaPart('glass', geometry, { alphaMode: 'blend', opacity: 0.5 });
-  assert.equal(groupParts([glass, { ...glass, castShadow: true }]).length, 2);
+  assert.equal(groupParts([glass, { ...glass, castShadow: false }]).length, 2);
+  assert.equal(groupParts([glass])[0][0].castShadow, undefined);
   const { renderer, batch, writes } = retainedRenderer([glass]);
   batch.alphaMode = 'blend';
-  batch.castShadow = false;
+  batch.castShadow = true;
   renderer.updateParts([glass]);
   assert.equal(writes.length, 1);
   for (const change of [{ alphaMode: 'mask' }, { alphaMode: 'add' }, { doubleSided: true }]) {
@@ -140,7 +141,7 @@ test('updateParts changes the opacity of blend and add parts without a new batch
     const trail = alphaPart('trail', geometry, { alphaMode, opacity: 0.5 });
     const { renderer, batch, writes } = retainedRenderer([trail]);
     batch.alphaMode = alphaMode;
-    batch.castShadow = false;
+    batch.castShadow = alphaMode === 'blend';
     for (const opacity of [0.25, 0.75, 0]) {
       trail.material = { ...trail.material, opacity };
       renderer.updateParts([trail]);
