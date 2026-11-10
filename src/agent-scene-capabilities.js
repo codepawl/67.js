@@ -213,7 +213,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   operations: Object.freeze([
     'set-node', 'set-material', 'set-camera', 'add-node', 'remove-node',
     'add-geometry', 'remove-geometry', 'add-material', 'remove-material',
-    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'edit-mesh', 'set-mesh-stack',
+    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'edit-mesh', 'set-mesh-stack', 'bake-motion',
   ]),
   materialTags: Object.freeze(['surface', 'unlit', 'liquid', 'foam', 'foliage', 'grass', 'water']),
   // A flat water sheet; the largest sets the level. A bed d metres down keeps exp(-absorption * d) per channel (RGB per metre).
@@ -327,6 +327,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   motionModifiers: 'Track extrapolation constant|linear; modifiers [{type: cycles|stepped|noise|generator|limits|envelope, ...}], 8 at most; cycles and stepped remap time first.',
   motionLimits: Object.freeze({ maxTracks: 128, maxKeyframesPerTrack: 64, maxKeyframes: 2048, maxDuration: 30 }),
+  motionBake: 'scene_apply bake-motion { nodes (32 at most), start 0, end (motion or physics duration), step 1/30 (512 samples), tolerance { position m, angle deg, scale } }: samples tracks, IK, constraints, drivers and physics into LINEAR tracks and removes those sources (an IK solver or the physics world only when all its nodes are baked). tolerance drops keys within it; without it a track keeps every sample, 64 keys at most. Procedural scenes only.',
 });
 
 /** Degrees between faces above which a mesh geometry keeps a hard edge, as Blender's auto smooth does. */

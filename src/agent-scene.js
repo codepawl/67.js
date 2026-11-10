@@ -960,20 +960,46 @@ function cameraPoseFrom(pose) {
   return camera;
 }
 
+// Physics holds its last pose after its duration, so a seek past the end is the resting state.
+function simulatedPose(stagedState, time) {
+  return time === null ? null : stagedState.physicsSampler?.sample(Math.min(time, stagedState.physicsSampler.duration));
+}
+
+/** The local transform of a node at a sampled motion and simulated pose: a body, then a track, then the rest value. */
+function localTransformOf(node, sampled, simulated) {
+  const patch = sampled?.nodes.get(node.id);
+  const bodyPatch = simulated?.get(node.id);
+  return {
+    translation: bodyPatch?.translation ?? patch?.translation ?? node.translation,
+    rotation: bodyPatch?.rotation ?? patch?.rotation ?? node.rotation,
+    scale: patch?.scale ?? node.scale,
+  };
+}
+
+/** What a bake-motion operation samples: the committed scene's local node transforms at any time, without touching the pose. */
+function motionBakeSource(stagedState) {
+  const nodesById = new Map(stagedState.recipe.nodes.map(node => [node.id, node]));
+  return {
+    animated: Boolean(stagedState.motionSampler || stagedState.physicsSampler),
+    motionDuration: stagedState.recipe.motion?.duration ?? 0,
+    physicsDuration: stagedState.physicsSampler?.duration ?? 0,
+    sampleLocalTransforms(time, ids) {
+      const sampled = stagedState.motionSampler?.sample(time) ?? null;
+      const simulated = simulatedPose(stagedState, time);
+      return new Map(ids.map(id => [id, localTransformOf(nodesById.get(id), sampled, simulated)]));
+    },
+  };
+}
+
 // Candidate buffers are private. A failed seek cannot publish half a pose to render handles.
 function stagePose(stagedState, time) {
   const sampled = time === null ? null : stagedState.motionSampler?.sample(time);
   const hiddenNodes = hiddenNodeIds(stagedState.recipe, sampled);
-  // Physics holds its last pose after its duration, so a seek past the end is the resting state.
-  const simulated = time === null ? null : stagedState.physicsSampler?.sample(Math.min(time, stagedState.physicsSampler.duration));
+  const simulated = simulatedPose(stagedState, time);
   const graph = stagedState.poseGraph ?? stagedState.graph;
   if (stagedState.poseGraph) {
     for (const node of stagedState.recipe.nodes) {
-      const patch = sampled?.nodes.get(node.id);
-      const bodyPatch = simulated?.get(node.id);
-      const translation = bodyPatch?.translation ?? patch?.translation ?? node.translation;
-      const rotation = bodyPatch?.rotation ?? patch?.rotation ?? node.rotation;
-      const scale = patch?.scale ?? node.scale;
+      const { translation, rotation, scale } = localTransformOf(node, sampled, simulated);
       if (Array.from(scale).some(component => !Number.isFinite(Math.fround(component)) || Math.fround(component) <= 0)) {
         throw new RangeError('Motion scale must remain positive at Float32 precision.');
       }
@@ -1699,6 +1725,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
             throw invalidField(`${field}.id`, record.id, `an ID no ${collection} entry uses yet; pick a new ID, or remove the existing one first`);
           }
           candidate[collection].push(record);
+          continue;
+        }
+        if (operation.type === 'bake-motion') {
+          agentSceneModule('motionBake').bakeMotion(candidate, operation, motionBakeSource(state));
           continue;
         }
         if (operation.type === 'edit-mesh') {
