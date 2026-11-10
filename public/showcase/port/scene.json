@@ -14,7 +14,7 @@
   },
   "waterReflection": true,
   "gltfOptions": {
-    "maxTexturePixels": 134217728,
+    "maxTexturePixels": 75000000,
     "maxTextureImagePixels": 33554432
   },
   "exposure": 1.2,
