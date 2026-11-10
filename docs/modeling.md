@@ -124,5 +124,7 @@ Plain point arrays keep profiles serializable and keep any other library's class
 Accepting custom curve objects would let callers supply their own curve classes, but weakens input bounds.
 Lathe, bevel construction and curve frames follow the formulas Three.js used before, so those outputs are unchanged. Extrusion caps use an ear-clipping triangulation of the addon's own, so a cap can be split along different diagonals than before, with the same area, volume and bounds.
 
+Mesh edits select and shape points and faces with JSON field expressions, never code; see [field expressions](mesh.md#field-expressions).
+
 The Aster lantern at `/modeling.html` combines these tools with texture channels and the shared scene graph.
 It is a procedural modeling demonstration, not a mesh editor or a Blender feature parity claim.
