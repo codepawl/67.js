@@ -66,22 +66,28 @@ export function resolveLocalVolumes(input, label = 'localVolumes') {
 /** The uniform arrays the post shader reads, one vec4 per volume. Pass resolved volumes. */
 export function createLocalVolumeBuffers() {
   const size = MAX_LOCAL_VOLUMES * 4;
-  return { count: 0, centers: new Float32Array(size), extents: new Float32Array(size), absorption: new Float32Array(size), emission: new Float32Array(size), steps: new Float32Array(size), axes: new Float32Array(size * 3) };
+  return { count: 0, meshParts: [], centers: new Float32Array(size), extents: new Float32Array(size), absorption: new Float32Array(size), emission: new Float32Array(size), steps: new Float32Array(size), axes: new Float32Array(size * 3) };
 }
 
 const IDENTITY_AXES = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
+// The w of a packed centre tells the shader how to find the volume: 0 a box, 1 a sphere, 2 a closed mesh read from the mesh pass.
+export const PACKED_SHAPE_MESH = 2;
+
 export function packLocalVolumes(volumes, buffers) {
-  if (volumes.some(volume => volume.shape === 'mesh')) throw new RangeError('A mesh volume names a part: bind it with bindLocalVolumeParts before packing');
+  if (volumes.some(volume => volume.shape === 'mesh' && !volume.center)) throw new RangeError('A mesh volume names a part: bind it with bindLocalVolumeParts before packing');
   buffers.count = volumes.length;
+  buffers.meshParts = [];
   volumes.forEach((volume, index) => {
     const at = index * 4;
     const half = volume.shape === 'sphere' ? [volume.radius, volume.radius, volume.radius] : volume.size.map(extent => extent / 2);
-    buffers.centers.set([...volume.center, volume.shape === 'sphere' ? 1 : 0], at);
+    const packedShape = volume.shape === 'sphere' ? 1 : volume.part ? PACKED_SHAPE_MESH : 0;
+    buffers.centers.set([...volume.center, packedShape], at);
     buffers.extents.set([...half, volume.falloff], at);
     buffers.absorption.set([...volume.absorption.map(channel => channel * volume.density), volume.noiseAmount], at);
     buffers.emission.set([...volume.emission.map(channel => channel * volume.emissionStrength), volume.noiseScale], at);
-    buffers.steps.set([volume.steps, 0, 0, 0], at);
+    buffers.steps.set([volume.steps, packedShape === PACKED_SHAPE_MESH ? buffers.meshParts.length : 0, 0, 0], at);
+    if (packedShape === PACKED_SHAPE_MESH) buffers.meshParts.push({ part: volume.part, label: `environment.localVolumes[${index}]` });
     const axes = volume.axes ?? IDENTITY_AXES;
     for (let axis = 0; axis < 3; axis++) buffers.axes.set([axes[axis * 3], axes[axis * 3 + 1], axes[axis * 3 + 2], 0], (index * 3 + axis) * 4);
   });

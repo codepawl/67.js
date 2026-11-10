@@ -2045,6 +2045,7 @@ export class Renderer67 {
     const localVolumes = this.prepareLocalVolumes(environment.localVolumes);
     if (fogSupport) fogSupport.packLights(this);
     else if (this.fogLightBuffers) this.fogLightBuffers.count = 0;
+    if (localVolumes) requireFeatureCode('volumeFog').support.drawMeshVolumes(this, frame);
     const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky, localVolumes));
     context.useProgram(post.program);
     if (this.look) viewTransformShader.bindLook(this, post.program);
@@ -2575,6 +2576,7 @@ export class Renderer67 {
 
   dispose() {
     this.fogFieldTexture?.dispose();
+    if (this.meshVolumePass) requireFeatureCode('volumeFog').support.disposeMeshVolumes(this);
     this.releaseFrameTargets();
     this.shadowCascades?.dispose(this.context, this.renderTargets);
     viewTransformShader.dispose?.(this);
