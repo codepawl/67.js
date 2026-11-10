@@ -202,7 +202,7 @@ These three (and `bevel`, below) work as edits and as stack nodes:
 
 ### Modifier stack
 
-A recipe mesh may carry `stack`, a list of `mirror`, `array`, `solidify`, `bevel`, `subdivide`, `uv_unwrap`, `set_position`, `displace`, `decimate`, `remesh`, `weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `weighted_normal` and `smooth_by_angle` nodes (up to 16) evaluated after the
+A recipe mesh may carry `stack`, a list of `mirror`, `array`, `solidify`, `bevel`, `subdivide`, `uv_unwrap`, `set_position`, `displace`, `decimate`, `remesh`, `weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `build`, `weighted_normal` and `smooth_by_angle` nodes (up to 16) evaluated after the
 edits without changing them, as Blender's modifier stack. Every prefix (the edit result, then each node) is cached
 by its recipe text in a least-recently-used cache bounded at 64 entries and 64 MiB, so changing a late node reuses
 the earlier work. Results list one entry per node with `cached: true` when reused. `meshCacheStats()` reports hits
@@ -225,7 +225,7 @@ Normals stay those of the base mesh. Test: `tests/mesh-shape-keys.test.js`.
 
 ### Whole-mesh modifiers
 
-`weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `bounding_box`, `convex_hull`, `ocean`, `weighted_normal` and `smooth_by_angle` take no selection and no name, and work as edits or stack nodes. Their fields and defaults are plain data in `MESH_MODIFIER_NOTES` (`src/agent-scene-capabilities.js`), which `scene_capabilities` returns as `meshModifiers`; the code is in `src/mesh-modifiers.js` and `src/mesh-restructure.js`.
+`weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `bounding_box`, `convex_hull`, `ocean`, `build`, `weighted_normal` and `smooth_by_angle` take no selection and no name, and work as edits or stack nodes. Their fields and defaults are plain data in `MESH_MODIFIER_NOTES` (`src/agent-scene-capabilities.js`), which `scene_capabilities` returns as `meshModifiers`; the code is in `src/mesh-modifiers.js` and `src/mesh-restructure.js`.
 
 | op | fields | does |
 | --- | --- | --- |
@@ -246,6 +246,7 @@ Normals stay those of the base mesh. Test: `tests/mesh-shape-keys.test.js`.
 | `smooth_by_angle` | `angle` (30), `ignoreSharp` (false) | Marks edges bending more than the angle sharp and the others smooth, over the geometry `smoothAngle`; sharp edges made by hand, and the 12 of a box, stay sharp unless `ignoreSharp` is set. |
 | `bounding_box` | none | Replaces the mesh with the axis-aligned box around all its vertices: 8 vertices and 6 quads. Tags and attributes are dropped. |
 | `convex_hull` | none | Replaces the mesh with its convex hull, outward triangles on the extreme vertices only, from at most 8192 vertices. A mesh whose vertices lie on one line or in one plane has no hull and is refused. Tags and attributes are dropped. |
+| `build` | `order` (index, random or axis), `seed` (0, random only), `axis` (y, axis only), `frame` (0), `start` (0), `length` (60 frames, above 0), `reverse` (false) | Shows the first faces in that order: none before `start`, all from `start + length`, linear between; `reverse` unbuilds. Unused vertices drop, tags and corner attributes follow their faces, and while no face shows the mesh is one zero-area triangle. Same fields and frame give the same bytes on every seek. Works on imported meshes. |
 | `ocean` | `axis` (y, the up axis), `windSpeed` (10 m/s, above 0 to 60), `direction` (0 degrees from +x toward +z), `choppiness` (1, 0 to 4), `size` (100 m, 1 to 10000), `seed` (0), `time` (0 s), `resolution` (8, 1 to 16) | A seeded sea like Blender's Ocean modifier, without the FFT: a sum of travelling waves on a lattice of wave vectors with a Phillips spectrum for the wind, so the surface repeats every `size` metres and the same seed and time give identical vertices. Waves lift the up axis; choppiness pulls vertices toward the crests along the other two. The squeeze of that move is written as the vertex group `foam` (0 flat, 1 folded). Waves cost (2 x resolution + 1)^2 - 1 per vertex, capped at 50 million evaluations. A box base has few vertices across a flat face (bevel 0 has none inside it), so run `subdivide_edges` with `cuts` first, or the waves have nothing to move. For an open sea: delete every face but the top, `subdivide_edges` with 16 cuts, `subdivide` 4 levels (about 74,000 vertices), scale the sheet to hundreds of metres, then `ocean` with a `size` of 50 (smaller than the wind's longest wave, so the sea has short chop), and a `vertex_color` field that mixes deep blue to white by `{ "attr": "group", "name": "foam" }`. |
 
 `triangulate` and `edge_split` check their output size before building it, against the same vertex and face limits as the other edits. Each op has cases in `tests/fixtures/blender/cases.json` and matches Blender 5.2 with no listed difference. `screw` and `wireframe` have cases in the same fixtures (the volume of the open screw strips differs by winding, listed in `differences.json`); `wave` matches Blender on two cases; `skin`, `lattice`, `curve` and `hook` are not compared with Blender, because each needs a second object there. The two normal modifiers are tested by their own properties, because the Blender comparison does not measure normals. Not yet: `shrinkwrap` and `scatter_on_surface` as stack nodes (`instances` already scatters), and cast shapes other than the sphere.
@@ -383,6 +384,25 @@ makes no cut, and a face that runs along `direction` is not split (its edge poin
 Open boundaries reported by lint (`boundary-edge`) are fixed with `fill_holes`. Names follow `bmesh.ops`
 (`holes_fill`, `dissolve_*`, `bisect_plane`, `bridge_loops`, `grid_fill`, `subdivide_edges`) where the meaning matches, and
 `point` and `normal` are Blender's `plane_co` and `plane_no`.
+
+### Reshaping tools
+
+These edits change how a surface is divided or shaped. Elements are visited in index order and ties break toward the
+lower index, so the same input always gives the same bytes. Faces they keep carry their tags and attributes.
+
+| Edit | Fields | Tags | What it does |
+| --- | --- | --- | --- |
+| `poke` | `select`, `offset` (default 0), `relative` | `poke` | Replaces each selected face with a triangle fan around a centre vertex at the face's average point, moved `offset` along the face normal (times the face's average corner distance when `relative`). |
+| `dual` | none | `dual` | One vertex at each face centre and one face around each vertex, wound the same way as the original. Needs a closed mesh with consistent winding; the new faces carry no attributes. |
+| `tris_to_quads` | `select`, `angle` (default 40) | `merged` | Joins adjacent selected triangles whose normals differ by at most `angle` degrees into convex quads, the most rectangular pairs first; each triangle joins once. |
+| `symmetrize` | `axis` (default x), `keep` (`positive` or `negative`), `distance` | `mirrored` | Cuts faces that cross the plane through the origin, drops the other half and mirrors the kept half. Left and right (top and bottom, front and back) tags swap on the mirrored half. |
+| `scale_elements` | `select`, `scale` (above 0) | none | Scales each group of selected faces that share a vertex about the group's average vertex position. Unselected neighbours follow along shared vertices. |
+| `extrude_edges` | `edges`, `offset` | `side` | Copies the vertices of the selected edges, moves the copies by `offset` and joins each edge to its copy with a quad. Select a surface boundary with `{ "open": true }`. |
+
+`dual` and `symmetrize` leave a closed surface closed. `extrude_edges` on interior edges adds a fin, so a closed
+mesh is no longer closed afterwards. `extrude_vertices` is not offered: a mesh derives its edges from faces and cannot
+hold a loose edge. The size of `poke` and `extrude_edges` is checked before they allocate. The `meshEdit.<op>`
+capabilities topic lists the exact fields.
 
 ### Subdivide
 
@@ -550,3 +570,28 @@ one thread at below-normal priority on a shared machine, medians of five runs. R
 
 The `EditMesh` arrays take about 200 bytes per quad face without attributes. These numbers are this machine only
 and say nothing about Blender's speed.
+
+### UV projection and packing
+
+`uv_project` writes the corner attribute `uv` by a simple projection, and `uv_pack` repacks the islands a mesh already
+has. Both work as an edit or as a stack node and change no geometry.
+
+| Field | Meaning |
+| --- | --- |
+| `mode` | `cube` (each face by its dominant axis), `cylinder` (sides wrap around `axis`, caps project flat) or `sphere` (longitude and latitude); `uv_project` only, required |
+| `axis` | `x`, `y` (default) or `z`, the cylinder or sphere axis |
+| `pack` | `true` (default) packs the result into the unit square; `false` leaves uv in mesh units for a later `uv_pack` |
+| `margin` | Gap between islands and around the square, 0 to 0.2 (default 0.01) |
+| `rotate` | `true` (default) lays tall islands on their side; `false` keeps them upright |
+
+Cylinder and sphere uv are measured from the centre of the bounds. `u` is arc length at the mean radius of the mesh
+and `v` is the height (cylinder) or the latitude times that radius (sphere), so one unit of uv covers about one unit
+of surface at the mean radius. Faces that wrap are cut on the side opposite the first radial axis. Islands are the
+faces joined across edges whose two ends share the same uv; `uv_pack` finds them from the uv itself, so it also packs
+an `uv_unwrap` result again (for example after `pack: false` merges) or a hand-set layout. Every island takes one common
+scale, shelf-packed with a gap, so texel density keeps its ratio between islands and no two islands overlap.
+
+Texel density measured in the tests: a cube projection gives a crate six islands with the same density to 0.1 percent,
+a 24-sided cylinder projection keeps a barrel within 15 percent of the median, and a sphere stretches toward the poles
+as any equirectangular map does. The result reports `islands`. Not done yet: view and angle-based smart projection,
+and `uv_warp` (offset, scale and rotate by a field); `uv_unwrap` still covers general meshes.

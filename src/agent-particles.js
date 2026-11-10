@@ -3,15 +3,17 @@ import { HAIR_LIMITS, buildHairMesh, createStrandRoots } from './hair.js';
 import { normalizeForceFields } from './force-fields.js';
 import { PARTICLE_LIMITS, buildParticleMesh, createParticleLaunches } from './particles.js';
 import { createCollisionSurface } from './particle-collision.js';
+import { EMITTER_MESH_MODES, createMeshSource } from './particle-emitter-mesh.js';
 import { invalidField } from './field-error.js';
 import { bakingContext, boundedArray, finiteNumber, knownKeys, rootNodeWithGeometry, vectorOfThree } from './agent-recipe-checks.js';
 
 const PARTICLES_FIELDS = ['gravity', 'wind', 'fields', 'systems'];
 const SYSTEM_TYPES = ['emitter', 'hair'];
-const EMITTER_SYSTEM_FIELDS = ['type', 'node', 'seed', 'count', 'rate', 'lifetime', 'speed', 'direction', 'spread', 'emitter', 'size', 'scale', 'drag', 'floor', 'bounce', 'friction', 'colliders', 'spin', 'color', 'alpha'];
+const EMITTER_SYSTEM_FIELDS = ['type', 'node', 'seed', 'count', 'rate', 'lifetime', 'speed', 'direction', 'spread', 'emitter', 'size', 'scale', 'drag', 'floor', 'bounce', 'friction', 'colliders', 'spin', 'color', 'alpha', 'instances', 'orient'];
 const HAIR_FIELDS = ['type', 'node', 'surface', 'seed', 'count', 'length', 'segments', 'width', 'droop', 'lean', 'sway', 'swayRate'];
-const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius'];
-const EMITTER_SHAPES = ['point', 'box', 'sphere', 'disc'];
+const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius', 'mesh', 'from', 'normalSpeed'];
+const EMITTER_SHAPES = ['point', 'box', 'sphere', 'disc', 'mesh'];
+const ORIENT_MODES = ['none', 'random', 'normal'];
 const SCALE_MODES = ['constant', 'shrink', 'grow'];
 const DEFAULT_GRAVITY = Object.freeze([0, -9.81, 0]);
 // Defaults that read as debris: a bounce keeps 30 percent of the speed (the first release of collision stuck at 0 without colliders and had no default with them), friction 0.5.
@@ -35,18 +37,65 @@ function rangeOf(value, path, minimum, maximum) {
   return range;
 }
 
-function normalizeEmitter(input, path) {
+function normalizeMeshEmitter(input, emitter, context, path) {
+  rootNodeWithGeometry(input.mesh, context.recipeNodes, new Set(), context.motionNodeIds, context.physicsNodeIds, `${path}.mesh`, 'particles');
+  const from = input.from ?? 'surface';
+  if (!EMITTER_MESH_MODES.includes(from)) {
+    throw invalidField(`${path}.from`, from, `one of ${EMITTER_MESH_MODES.join(', ')}`);
+  }
+  emitter.mesh = input.mesh;
+  emitter.from = from;
+  if (input.normalSpeed !== undefined) {
+    emitter.normalSpeed = finiteNumber(input.normalSpeed, `${path}.normalSpeed`, -1000, 1000);
+  }
+}
+
+function normalizeEmitter(input, context, path) {
   knownKeys(input, EMITTER_FIELDS, path);
   const shape = input.shape ?? 'point';
   if (!EMITTER_SHAPES.includes(shape)) {
     throw invalidField(`${path}.shape`, shape, `one of ${EMITTER_SHAPES.join(', ')}`);
   }
-  return {
+  const emitter = {
     shape,
     position: input.position === undefined ? [0, 0, 0] : vectorOfThree(input.position, `${path}.position`, POSITION_LIMIT),
     halfExtents: input.halfExtents === undefined ? [0.5, 0.5, 0.5] : vectorOfThree(input.halfExtents, `${path}.halfExtents`, POSITION_LIMIT).map(Math.abs),
     radius: input.radius === undefined ? 0.5 : finiteNumber(input.radius, `${path}.radius`, 0, POSITION_LIMIT),
   };
+  if (shape === 'mesh') {
+    normalizeMeshEmitter(input, emitter, context, path);
+  } else {
+    for (const field of ['mesh', 'from', 'normalSpeed']) {
+      if (input[field] !== undefined) throw invalidField(`${path}.${field}`, input[field], `left out unless ${path}.shape is "mesh"`);
+    }
+  }
+  return emitter;
+}
+
+function normalizeInstances(input, system, context, path) {
+  if (input.instances !== undefined) {
+    const nodeIds = boundedArray(input.instances, PARTICLE_LIMITS.maxInstances, `${path}.instances`);
+    if (!nodeIds.length) {
+      throw invalidField(`${path}.instances`, nodeIds, 'at least one node ID, such as ["leaf"]; leave it out to repeat the system node');
+    }
+    // Instance nodes are only read, so several systems may share one.
+    nodeIds.forEach((nodeId, index) => {
+      rootNodeWithGeometry(nodeId, context.recipeNodes, new Set(), context.motionNodeIds, context.physicsNodeIds, `${path}.instances[${index}]`, 'particles');
+    });
+    system.instances = nodeIds;
+  }
+  const orient = input.orient ?? 'none';
+  if (!ORIENT_MODES.includes(orient)) {
+    throw invalidField(`${path}.orient`, orient, `one of ${ORIENT_MODES.join(', ')}`);
+  }
+  const source = system.emitter;
+  if (orient === 'normal' && (source.shape !== 'mesh' || source.from === 'volume')) {
+    throw invalidField(`${path}.orient`, orient, `"none" or "random", because a normal needs ${path}.emitter.shape "mesh" with from "surface" or "vertices"`);
+  }
+  if (source.normalSpeed && source.from === 'volume') {
+    throw invalidField(`${path}.emitter.normalSpeed`, source.normalSpeed, 'left out when from is "volume", which has no surface normal');
+  }
+  if (orient !== 'none') system.orient = orient;
 }
 
 function normalizeCount(input, path) {
@@ -102,7 +151,7 @@ function normalizeEmitterSystem(input, context, path) {
     size: rangeOf(input.size ?? 0.05, `${path}.size`, 0.0001, 100),
     direction: input.direction === undefined ? [0, 1, 0] : vectorOfThree(input.direction, `${path}.direction`, 1000),
     spread: input.spread === undefined ? 30 : finiteNumber(input.spread, `${path}.spread`, 0, 180),
-    emitter: normalizeEmitter(input.emitter ?? {}, `${path}.emitter`),
+    emitter: normalizeEmitter(input.emitter ?? {}, context, `${path}.emitter`),
     scale: input.scale ?? 'constant',
     drag: input.drag === undefined ? 0 : finiteNumber(input.drag, `${path}.drag`, 0, 100),
   };
@@ -124,6 +173,7 @@ function normalizeEmitterSystem(input, context, path) {
       throw invalidField(`${path}.colliders`, system.colliders, `node IDs other than the system's own node "${system.node}"`);
     }
   }
+  normalizeInstances(input, system, context, path);
   if (input.floor !== undefined) system.floor = finiteNumber(input.floor, `${path}.floor`, -POSITION_LIMIT, POSITION_LIMIT);
   return system;
 }
@@ -249,6 +299,11 @@ function checkVertexBudget(vertices, totalVertices, nodeId) {
   }
 }
 
+// The geometries a particle can be: the listed instance nodes, or else the system node's own.
+function templateNodeIds(system) {
+  return system.instances ?? [system.node];
+}
+
 function horizontalDirection(wind) {
   const length = Math.hypot(wind[0], wind[2]);
   return length > 1e-6 ? [wind[0] / length, 0, wind[2] / length] : [1, 0, 0];
@@ -268,13 +323,29 @@ function collisionSurfaceOf(system, nodes, geometries) {
   return surface;
 }
 
-function prepareEmitter(system, node, template, forces, colliders) {
+function meshSourceOf(system, nodes, geometries) {
+  const emitter = system.emitter;
+  if (emitter.shape !== 'mesh') return emitter;
+  const sourceNode = nodes.get(emitter.mesh);
+  const geometry = geometries.get(sourceNode.geometry);
+  const world = surfaceInWorld(geometry, nodeMatrix(sourceNode));
+  const source = createMeshSource(world.positions, world.normals, geometry.indices, emitter.from);
+  if (!source) {
+    throw invalidField(`particles.systems[].emitter.mesh`, emitter.mesh, `a node whose mesh has triangles with some area, because emitter.from is "${emitter.from}"`);
+  }
+  if (source.triangleCount > PARTICLE_LIMITS.maxEmitterTriangles) {
+    throw invalidField('particles.systems[].emitter.mesh', `${source.triangleCount} triangles on node ${emitter.mesh}`, `a mesh with at most ${PARTICLE_LIMITS.maxEmitterTriangles} triangles, such as a simpler proxy mesh`);
+  }
+  return { ...emitter, source };
+}
+
+function prepareEmitter(system, node, templates, forces, colliders, emitter) {
   const systemForces = { ...forces, drag: system.drag, floor: system.floor, bounce: system.bounce ?? (colliders ? DEBRIS_BOUNCE : 0), friction: system.friction ?? DEBRIS_FRICTION, colliders };
-  const launches = createParticleLaunches({ ...system, spreadRadians: system.spread * Math.PI / 180, forces: systemForces });
+  const launches = createParticleLaunches({ ...system, emitter, instanceCount: templates.length, spreadRadians: system.spread * Math.PI / 180, forces: systemForces });
   return {
     node,
-    report: () => ({ node: system.node, type: 'emitter', particles: system.count, verticesPerParticle: template.positions.length / 3, ...lifeSummary(launches) }),
-    build: time => buildParticleMesh(template, launches, systemForces, system.scale, time, system),
+    report: () => ({ node: system.node, type: 'emitter', particles: system.count, verticesPerParticle: Math.max(...templates.map(template => template.positions.length / 3)), ...lifeSummary(launches) }),
+    build: time => buildParticleMesh(templates, launches, systemForces, system.scale, time, system),
   };
 }
 
@@ -310,14 +381,15 @@ export function bakeAgentParticles(particles, recipe, geometries) {
   let totalVertices = 0;
   const prepared = particles.systems.map(system => {
     const node = nodes.get(system.node);
-    const verticesPerItem = system.type === 'hair' ? (system.segments + 1) * HAIR_LIMITS.ringSides : geometries.get(node.geometry).positions.length / 3;
+    const verticesPerItem = system.type === 'hair' ? (system.segments + 1) * HAIR_LIMITS.ringSides : Math.max(...templateNodeIds(system).map(nodeId => geometries.get(nodes.get(nodeId).geometry).positions.length / 3));
     totalVertices += verticesPerItem * system.count;
     checkVertexBudget(verticesPerItem * system.count, totalVertices, system.node);
     if (system.type === 'hair') {
       const surfaceNode = nodes.get(system.surface);
       return prepareHair(system, node, surfaceNode, geometries.get(surfaceNode.geometry), forces);
     }
-    return prepareEmitter(system, node, geometries.get(node.geometry), forces, collisionSurfaceOf(system, nodes, geometries));
+    const templates = templateNodeIds(system).map(nodeId => geometries.get(nodes.get(nodeId).geometry));
+    return prepareEmitter(system, node, templates, forces, collisionSurfaceOf(system, nodes, geometries), meshSourceOf(system, nodes, geometries));
   });
   return Object.freeze({
     sample(time) {

@@ -66,6 +66,31 @@ sweeps a cross-section along a chain of cubic Bezier spans, the way a Blender cu
 Volume, area and bounds match Blender 5.2 for an open and a closed Bezier curve with a round bevel to 2e-5
 (`tests/blender-curve-text.test.js`). A Blender bevel resolution of `n` is `radialSegments: 4 + 2n`.
 
+### Splines, shapes and trim
+
+`curveSet(splines, options)` sweeps up to 64 splines (4096 points in all) into one mesh that shares `radius`, `taper`,
+`profile`, `resolution` and `radialSegments`. The scene geometry `curve` takes one spline in its own fields or several
+in `splines`, never both. A spline is `{ points | shape, closed, kind, weights, trim }`, and `curve(points, { kind, weights, trim })` is the one-spline form.
+
+- `kind` is `bezier` (default), `poly` or `nurbs`. A poly spline is straight segments with sharp corners; each ring takes the
+  direction of the segment that leaves it, so corners are not mitred. A NURBS spline is a uniform cubic B-spline: open ones are
+  clamped (they start and end on the first and last point), closed ones are periodic. `weights` holds one number above 0 per
+  point (default 1); a higher weight pulls the curve toward its point.
+- `shape` replaces `points` with a primitive in the XY plane, and sets `closed` and `kind` itself:
+  - `{ type: 'arc', radius = 1, startAngle = 0, sweep = 3.14159, segments = 8 }`: a Bezier arc, exact to about 1e-7 of the radius;
+    a sweep of 2 pi closes it. Angles are radians; circle segments are arcs.
+  - `{ type: 'spiral', rotations = 2, startRadius = 1, endRadius = 1, height = 2, pointsPerRotation = 12, reverse }`: a helix
+    along +Z, smooth through its points (a spiral staircase rail is `height` over `rotations`).
+  - `{ type: 'star', points = 5, innerRadius = 0.5, outerRadius = 1, innerTwist = 0 }`: a closed poly spline of `2 * points` vertices.
+- `trim: { start = 0, end = 1, length = false }` keeps the arc-length range from `start` to `end` as factors of the length, or
+  as lengths when `length` is true (lengths past the end are clamped to it). `end` must be greater than `start`. A trimmed
+  curve is open and gets caps, also when it was closed. Trimming a range that covers an open curve changes nothing. Trim is
+  computed from the same samples every time, so raising `end` frame by frame grows the curve along the same path: that is how a
+  vine grows. Building a mesh per frame is the caller's job.
+
+Not covered: trim ranges that wrap around the start of a closed curve, NURBS of other orders or with custom knots, a spline
+fill, and mesh edges to curve.
+
 ## Text
 
 `text(content, { size = 1, depth = 0.2, font = 'default', align = 'left', curveSegments = 4, maxVertices })`

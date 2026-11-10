@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>67js flicker viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161a; color: #e6e8eb; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; user-select: none; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .panel { position: fixed; top: 12px; left: 12px; display: grid; gap: 8px; padding: 10px; border-radius: 10px; background: rgb(20 22 26 / 0.82); backdrop-filter: blur(8px); max-width: 340px; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  button { font: inherit; color: #9aa1ab; background: none; border: 0; padding: 4px 9px; border-radius: 6px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  button:hover { background: rgb(255 255 255 / 0.06); }
+  button[aria-pressed="true"] { color: #e6e8eb; background: rgb(255 255 255 / 0.12); }
+  button svg { width: 14px; height: 14px; flex: none; }
+  .readout { font: 12px/1.5 ui-monospace, Consolas, monospace; color: #b8bec7; white-space: pre; padding: 0 4px; }
+  .status { display: flex; gap: 6px; align-items: center; padding: 0 4px; min-height: 18px; }
+  .status svg { width: 14px; height: 14px; flex: none; }
+  .ok { color: #5ec27f; } .bad { color: #ff6b8b; } .wait { color: #e0b64a; }
+  label { display: flex; gap: 8px; align-items: center; padding: 0 4px; color: #9aa1ab; }
+  input[type=range] { width: 130px; }
+  #drop[hidden] { display: none; }
+  #drop { position: fixed; inset: 0; display: grid; place-items: center; color: #9aa1ab; pointer-events: none; }
+  #overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="viewport"></canvas>
+<canvas id="overlay"></canvas>
+<div id="drop">Drop a GLB here, or open this page with ?asset=/path</div>
+<div class="panel">
+  <div class="row" id="mode">
+    <button data-mode="orbit" aria-pressed="true">Orbit</button>
+    <button data-mode="fly" aria-pressed="false">Fly</button>
+  </div>
+  <label>Speed <input id="speed" type="range" min="-2" max="3" step="0.05" value="1"><span id="speedValue"></span></label>
+  <div class="row" id="toggles">
+    <button data-toggle="reversed" aria-pressed="true">Reversed-Z</button>
+    <button data-toggle="nearFit" aria-pressed="true">Near fit</button>
+    <button data-toggle="offset" aria-pressed="false">Coplanar offset</button>
+    <button data-toggle="ids" aria-pressed="false">Part colours</button>
+  </div>
+  <div class="row"><button id="probe">Flicker probe</button><button id="clear">Clear</button></div>
+  <div class="status" id="status"></div>
+  <div class="readout" id="readout"></div>
+</div>
+<script type="module" src="./viewer.js"></script>
+</body>
+</html>

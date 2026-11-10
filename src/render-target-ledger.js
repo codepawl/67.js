@@ -1,6 +1,6 @@
 // Lists the GPU render targets a renderer owns, so an agent can read what each one costs.
 // Sizes follow the texel format, so they are the same on every machine, whatever padding a driver adds.
-const BYTES_PER_PIXEL = { R8: 1, RGBA8: 4, RGBA16F: 8, R11F_G11F_B10F: 4, R11F_G11F_B10F: 4, DEPTH_COMPONENT16: 2, DEPTH_COMPONENT24: 4 };
+const BYTES_PER_PIXEL = { R8: 1, RGBA8: 4, RGBA16F: 8, R11F_G11F_B10F: 4, R11F_G11F_B10F: 4, DEPTH_COMPONENT16: 2, DEPTH_COMPONENT24: 4, DEPTH_COMPONENT32F: 4 };
 const BYTES_PER_MEGABYTE = 1048576;
 
 export class RenderTargetLedger {

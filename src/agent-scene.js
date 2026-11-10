@@ -452,7 +452,8 @@ const GEOMETRY_FIELDS = {
   lathe: ['profile', 'segments', 'startAngle', 'sweep'],
   extrude: ['contour', 'holes', 'depth', 'steps', 'bevel', 'bevelThickness', 'bevelSegments'],
   tube: ['path', 'radius', 'segments', 'radialSegments', 'closed'],
-  curve: ['points', 'closed', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
+  sdf: ['root', 'resolution'],
+  curve: ['points', 'shape', 'splines', 'closed', 'kind', 'weights', 'trim', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
   text: ['text', 'size', 'depth', 'font', 'align', 'curveSegments'],
   mesh: ['base', 'edits', 'stack', 'smoothAngle', 'shapeKeys'],
   terrain: ['size', 'resolution', 'seed', 'amplitude', 'holes'],
@@ -486,7 +487,7 @@ function geometryEstimate(value) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim', 'root'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -522,6 +523,9 @@ function geometryEstimate(value) {
       }
       return (detail('segments', 64, 3, 2048) + 1) * (detail('radialSegments', 12, 3, 128) + 1);
     case 'curve': {
+      if (['shape', 'splines', 'kind', 'weights', 'trim'].some(field => value[field] !== undefined)) {
+        return agentSceneModule('modeling').curveGeometryVertexCount(value);
+      }
       const knots = value.points;
       if (!Array.isArray(knots) || knots.length < 2 || knots.length > CURVE_TEXT_LIMITS.maxCurvePoints) {
         throw invalidField('points', Array.isArray(knots) ? `${knots.length} points` : knots, `a list of 2 to ${CURVE_TEXT_LIMITS.maxCurvePoints} points, such as [[0, 0, 0], [0, 1, 0]]`);
@@ -530,6 +534,8 @@ function geometryEstimate(value) {
       const rings = (value.closed ? knots.length : knots.length - 1) * detail('resolution', 12, 1, 64) + 1;
       return rings * sides * 2 + 2 * (sides + 1);
     }
+    case 'sdf':
+      return agentSceneModule('modeling').sdfVertexEstimate(value);
     case 'text': {
       if (typeof value.text !== 'string') throw invalidField('text', value.text, 'a string, such as "Hello"', TypeError);
       const visible = [...value.text].filter(character => !/\s/.test(character)).length;
@@ -616,8 +622,10 @@ function generateGeometry(value, maxVertices) {
       return agentSceneModule('modeling').extrude(value.contour, { ...value, maxVertices });
     case 'tube':
       return agentSceneModule('modeling').tube(value.path, { ...value, maxVertices });
+    case 'sdf':
+      return agentSceneModule('modeling').sdfGeometry(value, maxVertices);
     case 'curve':
-      return agentSceneModule('modeling').curve(value.points, { ...value, maxVertices });
+      return agentSceneModule('modeling').curveGeometry(value, maxVertices);
     case 'text':
       return agentSceneModule('text').text(value.text, { ...value, maxVertices });
     case 'terrain':
@@ -952,20 +960,46 @@ function cameraPoseFrom(pose) {
   return camera;
 }
 
+// Physics holds its last pose after its duration, so a seek past the end is the resting state.
+function simulatedPose(stagedState, time) {
+  return time === null ? null : stagedState.physicsSampler?.sample(Math.min(time, stagedState.physicsSampler.duration));
+}
+
+/** The local transform of a node at a sampled motion and simulated pose: a body, then a track, then the rest value. */
+function localTransformOf(node, sampled, simulated) {
+  const patch = sampled?.nodes.get(node.id);
+  const bodyPatch = simulated?.get(node.id);
+  return {
+    translation: bodyPatch?.translation ?? patch?.translation ?? node.translation,
+    rotation: bodyPatch?.rotation ?? patch?.rotation ?? node.rotation,
+    scale: patch?.scale ?? node.scale,
+  };
+}
+
+/** What a bake-motion operation samples: the committed scene's local node transforms at any time, without touching the pose. */
+function motionBakeSource(stagedState) {
+  const nodesById = new Map(stagedState.recipe.nodes.map(node => [node.id, node]));
+  return {
+    animated: Boolean(stagedState.motionSampler || stagedState.physicsSampler),
+    motionDuration: stagedState.recipe.motion?.duration ?? 0,
+    physicsDuration: stagedState.physicsSampler?.duration ?? 0,
+    sampleLocalTransforms(time, ids) {
+      const sampled = stagedState.motionSampler?.sample(time) ?? null;
+      const simulated = simulatedPose(stagedState, time);
+      return new Map(ids.map(id => [id, localTransformOf(nodesById.get(id), sampled, simulated)]));
+    },
+  };
+}
+
 // Candidate buffers are private. A failed seek cannot publish half a pose to render handles.
 function stagePose(stagedState, time) {
   const sampled = time === null ? null : stagedState.motionSampler?.sample(time);
   const hiddenNodes = hiddenNodeIds(stagedState.recipe, sampled);
-  // Physics holds its last pose after its duration, so a seek past the end is the resting state.
-  const simulated = time === null ? null : stagedState.physicsSampler?.sample(Math.min(time, stagedState.physicsSampler.duration));
+  const simulated = simulatedPose(stagedState, time);
   const graph = stagedState.poseGraph ?? stagedState.graph;
   if (stagedState.poseGraph) {
     for (const node of stagedState.recipe.nodes) {
-      const patch = sampled?.nodes.get(node.id);
-      const bodyPatch = simulated?.get(node.id);
-      const translation = bodyPatch?.translation ?? patch?.translation ?? node.translation;
-      const rotation = bodyPatch?.rotation ?? patch?.rotation ?? node.rotation;
-      const scale = patch?.scale ?? node.scale;
+      const { translation, rotation, scale } = localTransformOf(node, sampled, simulated);
       if (Array.from(scale).some(component => !Number.isFinite(Math.fround(component)) || Math.fround(component) <= 0)) {
         throw new RangeError('Motion scale must remain positive at Float32 precision.');
       }
@@ -1691,6 +1725,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
             throw invalidField(`${field}.id`, record.id, `an ID no ${collection} entry uses yet; pick a new ID, or remove the existing one first`);
           }
           candidate[collection].push(record);
+          continue;
+        }
+        if (operation.type === 'bake-motion') {
+          agentSceneModule('motionBake').bakeMotion(candidate, operation, motionBakeSource(state));
           continue;
         }
         if (operation.type === 'edit-mesh') {

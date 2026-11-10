@@ -30,6 +30,8 @@ tool schemas, size, tool cost, the build, the unit tests with coverage and the c
 writes each log to `artifacts/preflight/`, prints only the tail of a failing log and ends with one line per check and its fix.
 `--skip-tests` skips the slow test pass while you iterate, and `--json` adds a machine-readable summary.
 Run the full preflight once before you push. A green preflight means the `test` check should pass.
+`npm ci` installs a pre-push hook that runs `npm run preflight -- --skip-tests` and stops a push that would fail those gates.
+`SKIP_PREFLIGHT=1 git push` skips it once; use that only for a push you know the gates do not cover.
 
 For one test file: `node --test tests/<area>.test.js`.
 

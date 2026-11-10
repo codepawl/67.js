@@ -80,7 +80,7 @@ export function sampleBezierSpans(handles, closed, resolution) {
 }
 
 // A handle that sits on its knot makes the derivative zero there; the chord to a neighbour stands in.
-function fillZeroTangents(points, tangents, closed) {
+export function fillZeroTangents(points, tangents, closed) {
   const count = points.length;
   const unit = tangents.map(tangent => {
     const length = lengthOf(tangent);
@@ -161,6 +161,11 @@ function taperAt(taper, fraction) {
  */
 export function buildBezierSweep({ handles, closed, radius, taper, profile, resolution, radialSegments }) {
   const { points, tangents } = sampleBezierSpans(handles, closed, resolution);
+  return sweepSamples({ points, tangents, closed, radius, taper, profile, radialSegments });
+}
+
+/** The sweep of buildBezierSweep along any samples: points with unit tangents, a closed curve not repeating its first point. */
+export function sweepSamples({ points, tangents, closed, radius, taper, profile, radialSegments }) {
   const count = points.length;
   const frames = transportFrames(closed ? [...tangents, tangents[0]] : tangents, closed);
   const distances = [0];

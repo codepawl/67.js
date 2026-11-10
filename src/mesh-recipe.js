@@ -1,6 +1,6 @@
 import { editMesh, meshData } from './mesh-edit.js';
 import { invalidField } from './field-error.js';
-import { editField } from './mesh-edit-field.js';
+import { editField, editBoolean } from './mesh-edit-field.js';
 import { countSelected, selectFaces } from './mesh-select.js';
 import {
   extrudeFaceRegion, extrudeIndividual, insetRegion, insetIndividual, deleteFaces, flipFaces, translateFaces, mergeByDistance, tagFaces,
@@ -12,7 +12,9 @@ import { mirrorMesh, arrayMesh, solidifyMesh } from './mesh-stack.js';
 import { bevelEdges } from './mesh-bevel.js';
 import { loopCut } from './mesh-loopcut.js';
 import { CUT_OPERATIONS, normalizeCutEdit, runCutEdit, checkCutBudget } from './mesh-cut-edits.js';
+import { RESHAPE_OPERATIONS, normalizeReshapeEdit, runReshapeEdit, checkReshapeBudget } from './mesh-reshape-edits.js';
 import { unwrapUv } from './mesh-uv.js';
+import { projectUv, packUvIslands, UV_PROJECTION_MODES } from './mesh-uv-project.js';
 import { runKernel, KernelDeferred } from './kernel-offload.js';
 import { validateField } from './mesh-fields.js';
 import { setPosition, displaceMesh, DISPLACE_DIRECTIONS } from './mesh-field-edits.js';
@@ -28,6 +30,7 @@ import './mesh-field-surfaces.js';
 import './field-rotation.js';
 import './mesh-hull-modifiers.js';
 import './mesh-ocean-modifier.js';
+import './mesh-build-modifier.js';
 import { remeshMesh, remeshGridSize, MAX_REMESH_RESOLUTION } from './mesh-remesh.js';
 import {
   MESH_EDIT_OPERATIONS, MAX_MESH_EDITS, STACK_OPERATIONS, MAX_STACK_NODES, SCULPT_STROKE_TYPES, MAX_SCULPT_STROKES, SHRINKWRAP_MODES,
@@ -249,6 +252,22 @@ export function normalizeMeshEdits(edits) {
         normalized.margin = edit.margin === undefined ? 0.01 : finiteNumber(edit.margin, index, 'margin', { minimum: 0, maximum: 0.2 });
         normalized.maxDistortion = edit.maxDistortion === undefined ? 0.25 : finiteNumber(edit.maxDistortion, index, 'maxDistortion', { minimum: 0, maximum: 100 });
         break;
+      case 'uv_project':
+        if (!UV_PROJECTION_MODES.includes(edit.mode)) throw editField(index, 'mode', edit.mode, `one of ${UV_PROJECTION_MODES.join(', ')}`);
+        normalized.mode = edit.mode;
+        if (!['x', 'y', 'z'].includes(edit.axis ?? 'y')) throw editField(index, 'axis', edit.axis, '"x", "y" or "z", the cylinder or sphere axis');
+        normalized.axis = edit.axis ?? 'y';
+        normalized.pack = edit.pack ?? true;
+        normalized.margin = edit.margin === undefined ? 0.01 : finiteNumber(edit.margin, index, 'margin', { minimum: 0, maximum: 0.2 });
+        normalized.rotate = edit.rotate ?? true;
+        editBoolean(normalized.pack, index, 'pack');
+        editBoolean(normalized.rotate, index, 'rotate');
+        break;
+      case 'uv_pack':
+        normalized.margin = edit.margin === undefined ? 0.01 : finiteNumber(edit.margin, index, 'margin', { minimum: 0, maximum: 0.2 });
+        normalized.rotate = edit.rotate ?? true;
+        editBoolean(normalized.rotate, index, 'rotate');
+        break;
       case 'subdivide':
         if (!Number.isInteger(edit.levels ?? 1) || (edit.levels ?? 1) < 1 || (edit.levels ?? 1) > MAX_SUBDIVISION_LEVELS) {
           throw editField(index, 'levels', edit.levels, `a whole number from 1 to ${MAX_SUBDIVISION_LEVELS}, such as 1`);
@@ -306,6 +325,7 @@ export function normalizeMeshEdits(edits) {
         break;
     }
     if (CUT_OPERATIONS.includes(edit.op)) normalizeCutEdit(edit, normalized, index, { finiteNumber, vector });
+    if (RESHAPE_OPERATIONS.includes(edit.op)) normalizeReshapeEdit(edit, normalized, index, { finiteNumber, vector });
     if (isModifierOperation(edit.op)) normalizeModifierEdit(edit, normalized, index, { finiteNumber, checkedField });
     return normalized;
   });
@@ -321,6 +341,7 @@ function checkSubdivideBudget(mesh, edit, limits, index) {
 
 function checkArrayBudget(mesh, edit, limits, index) {
   checkCutBudget(mesh, edit, limits, index);
+  checkReshapeBudget(mesh, edit, limits, index);
   if (edit.op === 'sculpt') {
     try {
       checkSculptBudget(mesh, edit.strokes.length);
@@ -456,10 +477,10 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     result.tags = tagSummary(outcome.mesh, edit.name);
     return { mesh: outcome.mesh, result };
   }
-  if (CUT_OPERATIONS.includes(edit.op)) {
+  if (CUT_OPERATIONS.includes(edit.op) || RESHAPE_OPERATIONS.includes(edit.op)) {
     let outcome;
     try {
-      outcome = runCutEdit(current, edit);
+      outcome = CUT_OPERATIONS.includes(edit.op) ? runCutEdit(current, edit) : runReshapeEdit(current, edit);
     } catch (error) {
       throw editFailure(error, index, `${edit.op}`);
     }
@@ -553,6 +574,16 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     result.flipped = outcome.flipped;
     result.areaDistortion = Number(outcome.areaDistortion.toFixed(4));
     result.utilization = Number(outcome.utilization.toFixed(4));
+    return { mesh: outcome.mesh, result };
+  }
+  if (edit.op === 'uv_project' || edit.op === 'uv_pack') {
+    let outcome;
+    try {
+      outcome = edit.op === 'uv_project' ? projectUv(current, edit) : packUvIslands(current, edit);
+    } catch (error) {
+      throw editFailure(error, index, edit.op);
+    }
+    result.islands = outcome.islands;
     return { mesh: outcome.mesh, result };
   }
   if (Object.hasOwn(GENERATORS, edit.op)) {

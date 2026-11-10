@@ -327,6 +327,7 @@ const shadow = z.strictObject({
 function curveAndTextGeometries(id) {
   return [
     z.strictObject({ ...id, type: z.literal('curve'), points: z.array(z.unknown()).max(1024), closed: looseField, radius: looseField, taper: looseField, profile: looseField, resolution: looseField, radialSegments: looseField }).describe('Bezier sweep; see scene_capabilities curveText.'),
+    z.strictObject({ ...id, type: z.literal('sdf'), root: z.record(z.string(), z.unknown()), resolution: looseField }).describe('Signed-distance shapes with smooth union; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('text'), text: z.string().max(256), size: looseField, depth: looseField, font: looseField, align: looseField, curveSegments: looseField }).describe('3D text; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('terrain'), size: looseField, resolution: looseField, seed: looseField, amplitude: looseField, holes: z.array(z.unknown()).max(16).optional() }).describe('Hills with round holes; see scene_capabilities terrain.'),
   ];
@@ -386,6 +387,12 @@ const meshEdit = z.discriminatedUnion('op', [
     op: z.literal('knife_project'), name: editName,
     path: z.array(vector3).min(2).max(256).describe('Polyline in the mesh\'s local space.'), direction: vector3.describe('Direction the line is projected along, for example [0,0,-1].'),
   }).describe('Cut along a polyline projected along a direction, through front and back faces. Split faces get <name>.cut.'),
+  z.strictObject({ op: z.literal('poke'), select: selectRule.optional(), name: editName, offset: finite.optional().describe('Move each new centre along the face normal. Defaults to 0.'), relative: z.boolean().optional().describe('Scale offset by the face\'s average corner distance.') }).describe('Replace each selected face with a triangle fan around a centre vertex, tagged <name>.poke.'),
+  z.strictObject({ op: z.literal('dual'), name: editName }).describe('Dual mesh: a vertex per face centre, a face per vertex, tagged <name>.dual. Needs a closed, consistently wound mesh.'),
+  z.strictObject({ op: z.literal('tris_to_quads'), select: selectRule.optional(), name: editName, angle: bounded(0, 180).optional().describe('Largest angle in degrees between the two triangle normals. Defaults to 40.') }).describe('Join adjacent triangles into convex quads, best-shaped first, tagged <name>.merged.'),
+  z.strictObject({ op: z.literal('symmetrize'), name: editName, axis: z.enum(['x', 'y', 'z']).optional(), keep: z.enum(['positive', 'negative']).optional().describe('Side of the plane kept and mirrored. Defaults to positive.'), distance: bounded(0, 1).optional().describe('Vertices this close to the plane count as on it. Defaults to 0.0001.') }).describe('Cut at the plane through the origin, drop the other half and mirror the kept half. Mirrored faces get <name>.mirrored.'),
+  z.strictObject({ op: z.literal('scale_elements'), select: selectRule.optional(), scale: finite.describe('Factor above 0 about each connected group of selected faces.') }).describe('Scale connected groups of selected faces about their own centres.'),
+  z.strictObject({ op: z.literal('extrude_edges'), name: editName, edges: edgeRule.describe('Edges to extrude, usually {"open":true} for a boundary.'), offset: vector3.describe('Where the copied vertices move.') }).describe('Extrude edges into quads, tagged <name>.side.'),
   z.strictObject({ op: z.literal('tag'), select: selectRule, name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/).describe('Tag to add to the selected faces.') }),
   z.strictObject({
     op: z.literal('boolean'), name: editName,
@@ -438,6 +445,8 @@ const stackNodes = [
     margin: bounded(0, 0.2).optional().describe('Gap between islands and around the square, as a fraction of it. Defaults to 0.01.'),
     maxDistortion: bounded(0, 100).optional().describe('Islands stretching more than this (mean |area ratio - 1|) are split into charts by facing axis. Defaults to 0.25.'),
   }).describe('Conformal UV unwrap into the corner attribute uv, packed into 0..1. Put it last (or as the last stack node): later edits do not keep UVs exact. The result reports islands, flipped triangles and areaDistortion.'),
+  z.strictObject({ op: z.literal('uv_project'), mode: z.enum(['cube', 'cylinder', 'sphere']), axis: z.enum(['x', 'y', 'z']).optional(), pack: z.boolean().optional(), margin: bounded(0, 0.2).optional(), rotate: z.boolean().optional() }).describe('Cube, cylinder or sphere uv projection, packed into 0..1. Detail: scene_capabilities meshUv.'),
+  z.strictObject({ op: z.literal('uv_pack'), margin: bounded(0, 0.2).optional(), rotate: z.boolean().optional() }).describe('Pack the existing uv islands into 0..1 with one scale.'),
   z.strictObject({
     op: z.literal('subdivide'),
     levels: z.number().int().min(1).max(4).optional().describe('Catmull-Clark levels; each multiplies the faces by about 4 (n-gons become n quads). Defaults to 1.'),
@@ -711,6 +720,7 @@ const otherOperations = [
   materialListed(z.strictObject({ type: z.literal('set-material'), id: identifier, ...materialFields }, { error: flatFieldsHint('set-material', 'material') }), 'Change a material.', { type: z.literal('set-material'), id: identifier }),
   z.strictObject({ type: z.literal('set-camera'), ...cameraFields }),
   z.strictObject({ type: z.literal('set-motion'), motion: recipeMotionReference.nullable() }),
+  z.strictObject({ type: z.literal('bake-motion'), nodes: z.array(identifier).min(1).max(32), start: nonnegative.optional(), end: nonnegative.optional(), step: positive.optional(), tolerance: z.record(z.string(), z.number()).optional() }),
   z.strictObject({ type: z.literal('set-armatures'), armatures: armaturesReference.nullable() }),
   z.strictObject({ type: z.literal('set-physics'), physics: z.record(z.string(), z.unknown()).nullable().describe('Same object as recipe.physics in scene_create.') }),
   z.strictObject({ type: z.literal('set-cloth'), cloth: z.record(z.string(), z.unknown()).nullable() }),

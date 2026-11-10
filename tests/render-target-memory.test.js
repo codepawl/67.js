@@ -80,12 +80,12 @@ function frameTargetRenderer(depth) {
   return renderer;
 }
 
-test('the multisampled depth uses 16 bits unless a depth texture needs the same format as its resolve', () => {
+test('the multisampled depth is never 16 bits, with or without a depth texture', () => {
   const plain = frameTargetRenderer(false);
   plain.allocateFrameTargets(960, 540);
   const plainDepth = plain.memoryReport().targets.find(target => target.name === 'multisampleDepth');
-  assert.equal(plainDepth.format, 'DEPTH_COMPONENT16');
-  assert.equal(plainDepth.bytes, 960 * 540 * 4 * 2);
+  assert.equal(plainDepth.format, 'DEPTH_COMPONENT24');
+  assert.equal(plainDepth.bytes, 960 * 540 * 4 * 4);
   const withTexture = frameTargetRenderer(true);
   withTexture.allocateFrameTargets(960, 540);
   const textureDepth = withTexture.memoryReport().targets.find(target => target.name === 'multisampleDepth');

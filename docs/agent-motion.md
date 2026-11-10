@@ -152,6 +152,7 @@ each blending over the pose so far, before tracks and IK:
 | `additive`, `reference` | Add the clip's change from `reference` seconds instead of replacing the pose |
 | `bones` | Retarget by name: `{ "UpperArmR": "node-20" }` makes the clip's track for `UpperArmR` move that node of this asset. Up to 64 entries; the clip must have the track |
 | `morph` | `false` leaves morph weights alone. Default: the clip's morph tracks play |
+| `strip` | Places the clip on the timeline in place of `speed`, `offset` and `loop`: `{ start, scale, repeat, end, blendIn, blendOut, extend, blend }`. `{ "repeat": 3 }` plays three cycles; an overlapping strip with `blendIn` crossfades. See [clip strips](https://67js.codepawl.com/animation-mixer.md#clip-strips) |
 
 ```json
 "motion": { "duration": 2, "loop": true, "layers": [
@@ -414,7 +415,7 @@ It can contain at most 128 tracks, 64 keys per track, and 2048 keys in total.
 Values and tangents must remain finite at Float32 precision.
 The scene integration must also enforce its total recipe byte budget.
 
-1. Run `node --test tests/agent-motion.test.js`.
+1. Run `node --test tests/agent-motion.test.js tests/motion-bake.test.js`.
 
 The CPU tests cover curves, looping, references, bounds, backward seeks, retained buffers, and failed sample publication.
 Native rendering and published MCP verification belong to the integration layer.

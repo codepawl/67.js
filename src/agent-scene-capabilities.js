@@ -65,6 +65,8 @@ export const CURVE_TEXT_LIMITS = Object.freeze({
 });
 export const CURVE_TEXT_DETAILS = Object.freeze({
   curve: 'bends along path, 2-64 points [x,y,z] (Catmull-Rom); the coordinate along axis (x) is the distance from the path start, so model from 0.',
+  splines: 'Geometry curve takes points (kind bezier|poly|nurbs, weights for nurbs, closed), or shape {type arc|spiral|star} (arc: radius, startAngle, sweep radians, segments; spiral: rotations, startRadius, endRadius, height, pointsPerRotation, reverse; star: points, innerRadius, outerRadius, innerTwist), or splines: up to 64 of those in one mesh. trim {start, end, length}: factors 0-1 of the arc length, or lengths when length is true; a trimmed curve is open. See docs/modeling.md.',
+  sdf: 'Geometry sdf: root is a tree meshed by surface nets, resolution 4-128 cells along the longest side (default 32). Primitive {shape sphere|box|roundBox|capsule|cylinder|torus, radius, size, height, tubeRadius, position, rotation (Euler radians), scale (uniform)}. Operation {op union|subtract|intersect, smooth (blend radius), children: 2-16} (subtract removes the rest from the first) or {op offset, distance, child}. At most 64 nodes, 8 levels. See docs/modeling.md.',
   text: 'Extruded text, baseline y=0 along +X, facing +Z. text (\n for lines), size (1), depth (0.2), align left|center|right, curveSegments, font. See docs/modeling.md.',
 });
 export const MATERIAL_MAPPINGS = Object.freeze(['box', 'uv']);
@@ -157,6 +159,7 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
   smooth_by_angle: 'edges bending over angle 30 (0-180) become sharp, others smooth, over smoothAngle; ignoreSharp true also clears hand-made sharp edges.',
   bounding_box: 'becomes its axis-aligned box.',
   convex_hull: 'becomes its convex hull, up to 8192 vertices.',
+  build: 'shows faces one by one as frame runs from start 0 over length 60 frames (frame 0; give the current frame, e.g. from your film clock): order index (default), random (seed 0) or axis (axis y, lowest centroid first); reverse true unbuilds. Unused vertices drop; while none shows, one zero-area triangle stays.',
   ocean: 'seeded sea: lifts axis (y) by waves of windSpeed 10 m/s (0-60) toward direction 0 deg, size 100 m (repeats), seed 0, time 0 s, resolution 8 (1-16); choppiness 1 (0-4) pulls points to crests. Writes group foam.',
 });
 
@@ -164,6 +167,12 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
 export const MESH_ATTRIBUTE_NOTES = Object.freeze({
   vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field or gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] }. Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
   vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
+});
+
+// UV projection and packing edits. Details stay here so the tool schemas stay small.
+export const MESH_UV_NOTES = Object.freeze({
+  uv_project: 'mode cube (each face by its dominant axis), cylinder (sides wrap around axis, caps flat) or sphere (longitude and latitude); axis x|y|z (y) for the last two, measured from the bounds centre; wrapped faces cut opposite the first radial axis. pack true (default) packs into 0..1 with one scale for every island so texel density is even; false leaves uv in mesh units for a later uv_pack. margin 0-0.2 (0.01); rotate true lays tall islands on their side. Reports islands. Texel density: cube exact, cylinder within about 15 percent, sphere stretches toward the poles.',
+  uv_pack: 'repacks the islands already in uv (faces joined across edges whose two ends share uv) into 0..1 with one scale. margin 0-0.2 (0.01), rotate true. Needs uv from uv_unwrap or uv_project. Reports islands.',
 });
 
 // Shape keys on a recipe mesh. Details stay here so the tool schemas stay small.
@@ -179,7 +188,7 @@ export const MESH_SCULPT_NOTES = Object.freeze({
 
 export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   format: '67js.scene', schemaVersion: 1,
-  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh']),
+  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'sdf', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh']),
   camera: 'eye, target, up, near, far, then fov (vertical degrees) or focalLength (mm, with sensorWidth mm, 36; not both). projection orthographic with orthoScale (view height in m, default 4). shift [x, y] moves the frame by a fraction of its size. fStop (0.7-64) turns on depth of field focused on target; 1.4 or lower is full blur; effects.depthOfField.blur must stay 0. Orthographic/shifted cameras use the rasterizer.',
   terrain: 'One mesh, x and z from -size/2 to size/2, hills about y = 0. size 40 m (1-2000), resolution 64 cells (2-256), seed 1, amplitude 1 m (0-200), holes up to 16 of {center:[x,z],radius}, no surface inside; radius a few cells or more.',
   placedAssets: 'Node field asset:{id,materials?,clip?,drive?} turns a group node into a catalog GLB (id from asset_catalog). Its transform places it. materials:[{name,color,metallic,roughness,opacity,emission,emissiveColor}] override source materials by name. clip:{index,start=0,speed=1,loop=true} plays that clip from scene time start; set-motion tracks move the node and scene time seeks the clip. drive:{path | legs, cruiseSpeed | speed, wheels, lights} drives a car along a path in the placement frame (docs/vehicle.md). Max 512 placements, 16 assets, 16 animated.',
@@ -189,6 +198,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   meshModifiers: MESH_MODIFIER_NOTES,
   meshSculpt: MESH_SCULPT_NOTES,
   meshAttributes: MESH_ATTRIBUTE_NOTES,
+  meshUv: MESH_UV_NOTES,
   meshShapeKeys: MESH_SHAPE_KEY_NOTES,
   fieldExpressions: Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,
@@ -203,7 +213,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   operations: Object.freeze([
     'set-node', 'set-material', 'set-camera', 'add-node', 'remove-node',
     'add-geometry', 'remove-geometry', 'add-material', 'remove-material',
-    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'edit-mesh', 'set-mesh-stack',
+    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'edit-mesh', 'set-mesh-stack', 'bake-motion',
   ]),
   materialTags: Object.freeze(['surface', 'unlit', 'liquid', 'foam', 'foliage', 'grass', 'water']),
   // A flat water sheet; the largest sets the level. A bed d metres down keeps exp(-absorption * d) per channel (RGB per metre).
@@ -294,7 +304,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   // Recipe particles: closed-form from seeded launch values, so any time is computed directly and a seek never replays.
   particles: Object.freeze({
-    emitter: 'System node geometry is the particle shape; its transform does not move them. Fields (defaults): node, seed (1), count (100), rate (per second; omit: burst at 0), lifetime, speed, size (number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc, position, halfExtents, radius }, scale constant|shrink|grow, drag (1/s, 0), floor (world y they land on).',
+    emitter: 'System node geometry is the particle shape; its transform does not move them. Fields (defaults): node, seed (1), count (100), rate (per second; omit: burst at 0), lifetime, speed, size (number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc|mesh, position, halfExtents, radius; mesh: mesh node, from surface (area weighted)|vertices|volume (closed mesh), normalSpeed m/s along the normal }, instances [node ids, up to 8: each particle draws one], orient none|random|normal (mesh surface or vertices), scale constant|shrink|grow, drag (1/s, 0), floor (world y they land on).',
     hair: 'type hair grows strands from a read-only root surface node into node (its own geometry is ignored). Fields (defaults): surface, seed, count, length (m, number or [min, max], 0.1), segments (1-8, 4), width (m, 0.004), droop (0.5), lean (0.2), sway (tip travel m, off), swayRate (Hz, 0.5). Tapering tubes, no UVs.',
     sectionFields: 'systems, gravity ([0,-9.81,0]), wind (m/s; moves emitter particles only with drag > 0, and sets the hair sway direction), fields (also cloth; wind, turbulence, vortex, drag, magnet: docs/physics.md)',
     collision: 'colliders [node ids], bounce 0-1 (0.3 with colliders), friction 0-1 (0.5), spin deg/s, color [[r,g,b] birth, [r,g,b] death], alpha [birth, death].',
@@ -317,6 +327,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   motionModifiers: 'Track extrapolation constant|linear; modifiers [{type: cycles|stepped|noise|generator|limits|envelope, ...}], 8 at most; cycles and stepped remap time first.',
   motionLimits: Object.freeze({ maxTracks: 128, maxKeyframesPerTrack: 64, maxKeyframes: 2048, maxDuration: 30 }),
+  motionBake: 'scene_apply bake-motion { nodes (32 at most), start 0, end (motion or physics duration), step 1/30 (512 samples), tolerance { position m, angle deg, scale } }: samples tracks, IK, constraints, drivers and physics into LINEAR tracks and removes those sources (an IK solver or the physics world only when all its nodes are baked). tolerance drops keys within it; without it a track keeps every sample, 64 keys at most. Procedural scenes only.',
 });
 
 /** Degrees between faces above which a mesh geometry keeps a hard edge, as Blender's auto smooth does. */
