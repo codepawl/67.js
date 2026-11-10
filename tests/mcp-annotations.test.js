@@ -32,7 +32,7 @@ async function connect(context, runtime) {
 test('every tool has a title and complete annotations, with the read-only and destructive sets fixed', async context => {
   const client = await connect(context, { activeSessionId: () => null, async close() {} });
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 23);
+  assert.equal(tools.length, 24);
   for (const tool of tools) {
     assert.ok(tool.title && tool.annotations.title === tool.title, `${tool.name} has a title`);
     for (const hint of ['readOnlyHint', 'destructiveHint', 'idempotentHint']) {

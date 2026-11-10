@@ -105,4 +105,4 @@ After `win` or `lose`, `fixedUpdate` does nothing until `restart()`. Same inputs
 
 `GAME_RULES_LIMITS` exports them. `validateGameRules(document)` checks a document alone and returns a normalised copy. An error names the field and says what to pass, such as `Game rules rules[2].do[1].variable names the variable "scor", which is not declared. Use one of: score, secondsLeft.` An unknown field, an undeclared variable, zone, part, prefab or tag, and an input trigger with no `options.input` are all errors.
 
-The tool surface for an agent (MCP) comes later. It will need the agent bench before it ships.
+An agent sets this document inside a scene recipe `game` section with `set-game`, and `scene_export_web` plays it in a static web build; see [Game](game.md).
