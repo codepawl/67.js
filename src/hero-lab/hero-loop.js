@@ -94,6 +94,8 @@ function prepare(index, { immediately = false } = {}) {
       if (entry.skipped) return;
       const started = performance.now();
       entry.world = await buildFrom(download);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (!entry.skipped) entry.world.warm(flights[index].at(0));
       note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started) });
       loopState.peakWorlds = Math.max(loopState.peakWorlds, loopState.worldsAlive());
     })
@@ -292,7 +294,13 @@ function revealPoster() {
   requestAnimationFrame(() => { stage.dataset.live = 'true'; });
 }
 
-Object.assign(loopState, { get clock() { return clock; }, get round() { return loopRound; }, get active() { return active && SCENES[active.index].id; }, scenes: SCENES });
+Object.assign(loopState, { get clock() { return clock; }, get round() { return loopRound; }, get active() { return active && SCENES[active.index].id; }, scenes: SCENES,
+  // The pose of a scene's real flight (spline included) at a time, as copies; for scouting.
+  flightPose(id, seconds) {
+    const pose = flights[SCENES.findIndex(scene => scene.id === id)].at(seconds);
+    return { eye: [...pose.eye], target: [...pose.target], fov: pose.fov };
+  },
+});
 // ?scout=1: no loop; window.__loop.scout(id) builds one world and returns a function that draws it from any pose (for authoring flights).
 loopState.scout = async id => {
   const index = SCENES.findIndex(scene => scene.id === id);
