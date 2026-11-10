@@ -594,6 +594,7 @@ const motion = z.strictObject({
     motionTrack('camera', 'target', vector3, vector3),
     motionTrack('camera', 'fov', finite.gt(0).lt(180), finite),
     motionTrack('camera', 'roll', finite, finite),
+    motionTrack('geometry', 'oceanTime', finite.min(-1e6).max(1e6), finite),
     lookTrack,
   ])).max(128),
 }).describe('One absolute-time procedural clip. Local node transforms propagate through parents. Cubic tangents are derivatives per second. Backend checks references, duplicate tracks, 2048 total keys and every sampled pose.');
