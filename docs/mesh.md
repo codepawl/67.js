@@ -607,6 +607,9 @@ faces joined across edges whose two ends share the same uv; `uv_pack` finds them
 an `uv_unwrap` result again (for example after `pack: false` merges) or a hand-set layout. Every island takes one common
 scale, shelf-packed with a gap, so texel density keeps its ratio between islands and no two islands overlap.
 
+The light bake does not read these uv. It unwraps every part into its own light uv, so islands that overlap in a
+projected layout cannot share a lightmap texel (`tests/light-bake-projected-uv.test.js`).
+
 Texel density measured in the tests: a cube projection gives a crate six islands with the same density to 0.1 percent,
 a 24-sided cylinder projection keeps a barrel within 15 percent of the median, and a sphere stretches toward the poles
 as any equirectangular map does. The result reports `islands`. Not done yet: view and angle-based smart projection,

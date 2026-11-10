@@ -1,13 +1,15 @@
-// A mesh as a particle emitter: points on its surface (weighted by triangle area), at its vertices, or inside its volume.
-// A vertex group (one weight per vertex) narrows the surface and vertex modes to where the group is painted.
+// A mesh as a particle emitter: points on its surface (weighted by triangle area), at its vertices, along its edges (weighted by length), or inside its volume.
+// A vertex group (one weight per vertex) narrows the surface, vertex and edge modes to where the group is painted; edges can also be limited to the sharp ones.
 // Every sample draws from the particle's own generator, so the same seed gives the same points.
 
-export const EMITTER_MESH_MODES = Object.freeze(['surface', 'vertices', 'volume']);
+export const EMITTER_MESH_MODES = Object.freeze(['surface', 'vertices', 'edges', 'volume']);
 
 const MAX_VOLUME_TRIES = 200;
 // A direction no mesh edge is likely to lie along, so the inside test does not graze an edge.
 const PROBE_DIRECTION = Object.freeze([0.5773, 0.5791, 0.5759]);
 const EPSILON = 1e-12;
+// Two corners closer than this on every axis are the same point when edges are matched.
+const WELD_STEP = 1e-5;
 
 function corner(positions, vertex) {
   return [positions[vertex * 3], positions[vertex * 3 + 1], positions[vertex * 3 + 2]];
@@ -136,16 +138,94 @@ function vertexSampler(positions, normals, weights) {
   };
 }
 
+function normalized(vector) {
+  const length = Math.hypot(vector[0], vector[1], vector[2]);
+  return length > 0 ? vector.map(component => component / length) : null;
+}
+
+// Render meshes repeat a corner for every face that uses it, so an edge is found by the position of its two ends.
+function weldKey(point) {
+  return point.map(component => Math.round(component / WELD_STEP)).join(',');
+}
+
+/**
+ * Every distinct edge of the triangles, as `{ start, end, length, faceNormals, weight }`. `weight` is the lighter of the
+ * two end weights of the vertex group (an edge belongs to the group only when both ends are painted), or 1 without a group.
+ */
+function edgesOf(positions, indices, weights) {
+  const edges = new Map();
+  const cornerWeight = new Map();
+  for (let offset = 0; offset + 2 < indices.length; offset += 3) {
+    const corners = [0, 1, 2].map(index => corner(positions, indices[offset + index]));
+    const keys = corners.map(weldKey);
+    const faceNormal = normalized(crossProduct(subtract(corners[1], corners[0]), subtract(corners[2], corners[0])));
+    for (let index = 0; index < 3; index++) {
+      if (weights) cornerWeight.set(keys[index], Math.max(cornerWeight.get(keys[index]) ?? 0, weights[indices[offset + index]]));
+      const next = (index + 1) % 3;
+      if (keys[index] === keys[next]) continue;
+      const edgeKey = keys[index] < keys[next] ? `${keys[index]}|${keys[next]}` : `${keys[next]}|${keys[index]}`;
+      let edge = edges.get(edgeKey);
+      if (!edge) {
+        const [start, end] = keys[index] < keys[next] ? [index, next] : [next, index];
+        edge = { start: corners[start], end: corners[end], startKey: keys[start], endKey: keys[end], faceNormals: [] };
+        edge.length = Math.hypot(...subtract(edge.end, edge.start));
+        edges.set(edgeKey, edge);
+      }
+      if (faceNormal) edge.faceNormals.push(faceNormal);
+    }
+  }
+  for (const edge of edges.values()) {
+    edge.weight = weights ? Math.min(cornerWeight.get(edge.startKey), cornerWeight.get(edge.endKey)) : 1;
+  }
+  return [...edges.values()];
+}
+
+// An edge is sharp when it has one face or more than two (an open or joined border), or its two faces meet at more than `sharpAngle` degrees.
+function isSharpEdge(edge, sharpAngle) {
+  if (edge.faceNormals.length !== 2) return true;
+  const cosine = Math.max(-1, Math.min(1, dotProduct(edge.faceNormals[0], edge.faceNormals[1])));
+  return Math.acos(cosine) * 180 / Math.PI > sharpAngle;
+}
+
+function edgeSampler(positions, indices, weights, sharpAngle) {
+  let edges = edgesOf(positions, indices, weights);
+  if (sharpAngle !== null) edges = edges.filter(edge => isSharpEdge(edge, sharpAngle));
+  const cumulative = [];
+  let total = 0;
+  for (const edge of edges) {
+    total += edge.length * edge.weight;
+    cumulative.push(total);
+  }
+  if (!(total > 0)) return null;
+  return random => {
+    const target = random() * total;
+    let low = 0;
+    let high = cumulative.length - 1;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (cumulative[middle] < target) low = middle + 1;
+      else high = middle;
+    }
+    const edge = edges[low];
+    const along = random();
+    const point = [0, 1, 2].map(axis => edge.start[axis] + (edge.end[axis] - edge.start[axis]) * along);
+    const summed = edge.faceNormals.reduce((sum, normal) => sum.map((component, axis) => component + normal[axis]), [0, 0, 0]);
+    return { point, normal: normalized(summed) ?? edge.faceNormals[0] ?? [0, 1, 0] };
+  };
+}
+
 /**
  * Build a sampler over a mesh already in world space. `sample(random)` returns `{ point, normal }`; the normal is null
- * for a volume. `weights` is an optional vertex group (one weight per vertex) for the surface and vertices modes. Returns
- * null when the mesh cannot supply the mode (no area, no triangles, or a group that weighs nothing).
+ * for a volume. `weights` is an optional vertex group (one weight per vertex) for the surface, vertices and edges modes.
+ * `sharpAngle` (degrees, edges mode only) keeps the edges that are open or bend more than that. Returns null when the
+ * mesh cannot supply the mode (no area, no triangles, no edge left, or a group that weighs nothing).
  */
-export function createMeshSource(positions, normals, indices, mode, weights = null) {
+export function createMeshSource(positions, normals, indices, mode, weights = null, sharpAngle = null) {
   const triangles = trianglesOf(positions, indices, weights);
   if (!triangles.length) return null;
   let sampler = null;
   if (mode === 'vertices') sampler = vertexSampler(positions, normals, weights);
+  else if (mode === 'edges') sampler = edgeSampler(positions, indices, weights, sharpAngle);
   else if (mode === 'volume') sampler = volumeSampler(triangles, positions);
   else sampler = surfaceSampler(triangles);
   if (!sampler) return null;

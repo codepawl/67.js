@@ -145,6 +145,7 @@ export function withDepthCode(source, features) {
 }
 
 export function createDepthVertexShader(features = []) {
+  const tinted = new Set(features).has('tintedShadows');
   return withDepthCode(`#version 300 es
 ${vertexDefinitions(new Set(features))}
 precision highp float;
@@ -155,7 +156,7 @@ layout(location=11) in vec3 assemblyOffset;
 layout(location=12) in vec3 assemblyDetailOffset;
 layout(location=13) in vec4 uvSets;
 layout(location=14) in vec4 vertexColor;
-uniform mat4 lightProjection;
+${tinted ? TINT_VERTEX_DECLARATIONS : ''}uniform mat4 lightProjection;
 uniform float assemblyAmount;
 uniform float time;
 uniform float wind;
@@ -170,11 +171,47 @@ void main() {
   // Same displacement as the colour pass, so shadows follow the swaying leaves.
   world.xyz += windOffset(position, world.xyz, uv, instanceSurface.w, time, wind);
   textureUV = uv;
-  gl_Position = lightProjection * world;
+${tinted ? TINT_VERTEX_ASSIGNMENTS : ''}  gl_Position = lightProjection * world;
 }`, features);
 }
 
 export const depthVertexShader = createDepthVertexShader();
+
+// Tinted shadows: blended and transmissive casters leave the depth map and draw into a colour map of the light that passes
+// them (see docs/lighting.md). The same vertex and fragment program draws it, switched by the tintPass uniform.
+const TINT_VERTEX_DECLARATIONS = `layout(location=9) in vec3 instanceColor;
+layout(location=15) in vec4 instanceEmissive;
+out vec3 tintColor;
+out float tintOpacity;
+`;
+const TINT_VERTEX_ASSIGNMENTS = `  tintColor = instanceColor;
+  tintOpacity = instanceEmissive.w;
+`;
+
+const TINT_FRAGMENT_DECLARATIONS = `in vec3 tintColor;
+in float tintOpacity;
+uniform float tintPass;
+uniform float tintTransmission;
+uniform float tintMapSize;
+uniform float tintBias;
+uniform highp sampler2DShadow opaqueShadow;
+out vec4 tintOutput;
+`;
+
+// One draw writes the map: rgb multiplies in the light each caster lets through, (1 - coverage) passing whole and coverage
+// passing the transmitted colour, and alpha keeps the nearest depth (blend equation MIN). A fragment behind an opaque
+// caster is dropped, because no light reaches it, and so is one that covers almost nothing.
+const TINT_FRAGMENT_BRANCH = `void main() {
+  if (tintPass > 0.5) {
+    vec4 baseSample = hasBaseMap > 0.5 ? texture(baseMap, textureUV) : vec4(1.0);
+    float coverage = tintOpacity * baseSample.a;
+    if (coverage < 0.02) discard;
+    if (texture(opaqueShadow, vec3(gl_FragCoord.xy / tintMapSize, gl_FragCoord.z - tintBias)) < 0.5) discard;
+    vec3 passing = tintTransmission * tintColor * baseSample.rgb;
+    tintOutput = vec4(mix(vec3(1.0), passing, coverage), gl_FragCoord.z);
+    return;
+  }
+`;
 
 // Only masked batches sample the base map, so shadows follow the cutout.
 export const depthFragmentShader = `#version 300 es
@@ -192,6 +229,15 @@ void main() {
   if (alpha < alphaCutoff) discard;
 }
 `;
+
+/** The shadow fragment shader. With the tintedShadows feature it also draws the light that blended and transmissive casters let through. */
+export function createDepthFragmentShader(features = []) {
+  const code = withDepthCode(depthFragmentShader, features);
+  if (!new Set(features).has('tintedShadows')) return code;
+  return code
+    .replace('precision highp float;', () => `precision highp float;\n${TINT_FRAGMENT_DECLARATIONS}`)
+    .replace('void main() {\n', () => TINT_FRAGMENT_BRANCH);
+}
 
 export const benchmarkVertexShader = `#version 300 es
 precision highp float;
@@ -286,6 +332,8 @@ uniform float rippleTime;
 uniform float explosionProgress;
 uniform highp sampler2DShadow shadowMap;
 uniform float shadowBiasPerSlope;
+uniform sampler2D tintShadowMap;
+uniform float tintBlind;
 uniform sampler2D baseMap;
 uniform float hasBaseMap;
 uniform sampler2D normalMap;
@@ -340,6 +388,16 @@ float shadowVisibility(vec3 normal) {
     }
   }
   return visibility / float((2 * radius + 1) * (2 * radius + 1));
+}
+
+// The light that blended and transmissive casters let through to this point: white in front of the nearest one (rgb of the map, depth in alpha).
+vec3 tintedShadowTransmittance(vec3 normal) {
+  vec3 projected = shadowPosition.xyz / shadowPosition.w * 0.5 + 0.5;
+  if (projected.z > 1.0 || projected.z < 0.0 || any(lessThan(projected.xy, vec2(0.0))) || any(greaterThan(projected.xy, vec2(1.0)))) return vec3(1.0);
+  float cosine = max(dot(normal, normalize(lightDirection)), 0.05);
+  float bias = shadowBiasPerSlope * clamp(sqrt(1.0 - cosine * cosine) / cosine, 0.25, 4.0);
+  float nearestCaster = texelFetch(tintShadowMap, ivec2(projected.xy * vec2(textureSize(tintShadowMap, 0))), 0).a;
+  return projected.z - bias > nearestCaster ? texture(tintShadowMap, projected.xy).rgb : vec3(1.0);
 }
 
 // Atlas tiles are 512 texels square on a 4 x 4 grid. The receiver is pushed off its surface by about two shadow texels,
@@ -629,7 +687,8 @@ ${featureCode("mainSetup")}  if (ENVIRONMENT_ENABLED && !LIGHT_SHADING) {
     directSpecularGain = multipleScatterGain(brdfLookup, baseReflectance);
   }
   float visibility = shadowBlind > 0.5 ? 1.0 : shadowVisibility(normal);
-${featureCode("worldVisibility")}  vec3 radiance = illuminate(normal, viewDirection, normalize(lightDirection), keyColor * visibility${featureCode("linkSun")}, color, metallic, roughness);
+  vec3 shadowTint = (USES_TINTED_SHADOWS && shadowBlind < 0.5 && tintBlind < 0.5) ? tintedShadowTransmittance(normal) : vec3(1.0);
+${featureCode("worldVisibility")}  vec3 radiance = illuminate(normal, viewDirection, normalize(lightDirection), keyColor * visibility * shadowTint${featureCode("linkSun")}, color, metallic, roughness);
   if (FILL_ON) {
   radiance += illuminate(normal, viewDirection, normalize(vec3(4.0, 2.0, -3.0)), mix(vec3(0.8, 2.0, 1.8), vec3(0.12, 0.17, 0.20) * daylight, worldMode) * fillIntensity * mix(1.0, vertexSkyVisibility, worldMode), color, metallic, roughness);
   radiance += illuminate(normal, viewDirection, normalize(vec3(1.0, 2.0, 5.0)), vec3(0.6, 0.7, 0.8) * mix(1.0, 0.25 * daylight, worldMode) * fillIntensity * mix(1.0, vertexSkyVisibility, worldMode), color, metallic, roughness);
@@ -766,6 +825,7 @@ const SHADER_FEATURE_CONDITIONS = {
   spotLights: ['USES_SPOT_LIGHTS', 'spotLightCount > 0'],
   areaLights: ['USES_AREA_LIGHTS', 'areaLightCount > 0'],
   localShadows: ['USES_LOCAL_SHADOWS', 'true'],
+  tintedShadows: ['USES_TINTED_SHADOWS', 'true'],
   fill: ['FILL_ON', 'true'],
   renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5 && renderPassMode < 5.5'],
   sheen: ['USES_SHEEN', 'materialSheen.rgb != vec3(0.0)'],

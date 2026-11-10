@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4, vec3 } from 'gl-matrix';
@@ -672,4 +673,31 @@ test('cylinder and cone colliders, spring joints and force fields bake determini
     colliders: [{ name: 'b', body: 'b', shape: 'cone', radius: 0.5, halfHeight: 0.5 }],
     joints: [{ name: 'j', type: 'fixed', bodyA: 'a', bodyB: 'b', stiffness: 10 }],
   }), /spring joint/);
+});
+
+// The hash was recorded from the bake on main before createRapierWorld and applyForceFieldImpulses were extracted.
+test('a force-field and spring bake matches the output recorded before the live-physics refactor', async () => {
+  const definition = {
+    gravity: [0, 0, 0],
+    fields: [{ type: 'wind', direction: [1, 0, 0], strength: 4 }],
+    bodies: [
+      { name: 'anchor', type: 'fixed', translation: [0, 0, 0] },
+      { name: 'cyl', type: 'dynamic', translation: [0, -2, 0] },
+      { name: 'cone', type: 'dynamic', translation: [2, 0, 0] },
+    ],
+    colliders: [
+      { name: 'anchor', body: 'anchor', shape: 'cylinder', radius: 0.5, halfHeight: 0.5 },
+      { name: 'cyl', body: 'cyl', shape: 'cylinder', radius: 0.4, halfHeight: 0.6, mass: 1 },
+      { name: 'cone', body: 'cone', shape: 'cone', radius: 0.5, halfHeight: 0.8, mass: 1 },
+    ],
+    joints: [{ name: 'spring', type: 'spring', bodyA: 'anchor', bodyB: 'cyl', restLength: 1, stiffness: 20, damping: 2 }],
+  };
+  const frameCount = 61;
+  const scene = await createPhysicsScene(definition, { frameCount });
+  const hash = createHash('sha256');
+  for (let frame = 0; frame < frameCount; frame++) {
+    hash.update(Buffer.from(new Float32Array(scene.sample(frame / 60)).buffer));
+  }
+  scene.dispose();
+  assert.equal(hash.digest('hex'), '0ca9567131bd01531d04580283f2ea10009cc2180e1f08c60b1d3bd523e8fb1c');
 });

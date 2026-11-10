@@ -139,9 +139,13 @@ Each addon is a separate import, so a page loads only what it uses.
 | Vehicles | `67js/addons/vehicle` | [Wheeled vehicles on a path](https://67js.codepawl.com/vehicle.md) |
 | Physics | `67js/addons/physics` | [Rapier contacts and joints](docs/physics.md) recorded into a timeline |
 | Live games | `67js/addons/runtime` | [Game loop](docs/runtime.md) with fixed or variable steps and pluggable systems |
-| Live games | `67js/addons/input` | [Input](docs/input.md): keyboard, mouse, gamepad and custom sources mapped to named actions and axes |
+| Live games | `67js/addons/input` | [Input](docs/input.md): keyboard, mouse, gamepad, touch, device motion, replay and custom sources mapped to named actions and axes |
+| Live games | `67js/addons/streaming` | [Streaming](docs/streaming.md): loader plugins, distance and request loading, a byte budget with LRU eviction and LOD with hysteresis |
+| Live games | `67js/addons/physics-runtime` | [Live physics](docs/physics-runtime.md): a physics world stepped in the game loop, contact and sensor events, ray, shape and overlap queries |
+| Live games | `67js/addons/audio` | [Spatial audio](docs/audio.md): sounds on nodes, played from contacts, markers and input, with buses and a limiter |
 | Live games | `67js/addons/animation-graph` | [Animation graph](docs/animation-graph.md): states, 1D and 2D blend spaces, parameter transitions with crossfades and masked layers for any rig |
 | Live games | `67js/addons/player` | [Player](docs/player.md): character controller, follow, first-person and top-down camera rigs, swappable at runtime |
+| Live games | `67js/addons/game-rules` | [Game rules](docs/game-rules.md): a JSON rule document of variables, triggers and actions, played as a runtime system |
 | Modeling | `67js/addons/mesh`, `67js/addons/modeling`, `67js/addons/sculpt` | [Mesh editing](docs/mesh.md), [modeling](docs/modeling.md) and [sculpt brushes](https://67js.codepawl.com/sculpt.md) |
 | Offline light | `67js/addons/path-tracer`, `67js/addons/light-bake` | [Path-traced stills](https://67js.codepawl.com/path-tracer.md) and [baked lightmaps](https://67js.codepawl.com/light-bake.md) |
 | Post passes | `67js/addons/user-pass` | [Your own full-screen GLSL passes](docs/user-passes.md): dither, pixel downscale, quantise |

@@ -459,7 +459,7 @@ const GEOMETRY_FIELDS = {
   extrude: ['contour', 'holes', 'depth', 'steps', 'bevel', 'bevelThickness', 'bevelSegments'],
   tube: ['path', 'radius', 'segments', 'radialSegments', 'closed'],
   sdf: ['root', 'resolution'],
-  curve: ['points', 'shape', 'splines', 'closed', 'kind', 'weights', 'trim', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
+  curve: ['points', 'shape', 'splines', 'closed', 'kind', 'weights', 'trim', 'grow', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
   text: ['text', 'size', 'depth', 'font', 'align', 'curveSegments'],
   mesh: ['base', 'edits', 'stack', 'smoothAngle', 'shapeKeys'],
   terrain: ['size', 'resolution', 'seed', 'amplitude', 'holes'],
@@ -493,7 +493,7 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim', 'root'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim', 'grow', 'root'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -529,7 +529,7 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
       }
       return (detail('segments', 64, 3, 2048) + 1) * (detail('radialSegments', 12, 3, 128) + 1);
     case 'curve': {
-      if (['shape', 'splines', 'kind', 'weights', 'trim'].some(field => value[field] !== undefined)) {
+      if (['shape', 'splines', 'kind', 'weights', 'trim', 'grow'].some(field => value[field] !== undefined)) {
         return agentSceneModule('modeling').curveGeometryVertexCount(value);
       }
       const knots = value.points;
@@ -1218,8 +1218,15 @@ function partsWithCloth(restParts, clothGeometries, previousParts) {
 
 // A shape key weighs what its morph track samples at this time, or its starting value when no track names it.
 function publishShapeKeyWeights(part, sampledMorphs) {
-  const { morphTargetNames, morphTargetValues } = part.geometry;
+  const { morphTargetNames, morphTargetValues, morphGrowth } = part.geometry;
   if (!morphTargetNames || !part.morph) return;
+  if (morphGrowth) {
+    const growth = sampledMorphs?.get(morphGrowth.name)?.weight ?? morphGrowth.value;
+    agentSceneModule('modeling').growthWeights(morphGrowth.steps, growth).forEach((weight, index) => {
+      part.morph.weights[index] = weight;
+    });
+    return;
+  }
   morphTargetNames.forEach((name, index) => {
     part.morph.weights[index] = sampledMorphs?.get(name)?.weight ?? morphTargetValues[index];
   });
@@ -1317,6 +1324,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
   let state = null;
   let revision = 0;
   let topologyRevision = 0;
+  // Undo revisions the latest stage released to fit the vertex budget; the edit's answer tells the agent.
+  let releasedRevisionCount = 0;
   let physicsBake = null;
   let clothBake = null;
   let particleBake = null;
@@ -1361,6 +1370,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
   }
 
   function stage(inputRecipe, preferred = null, removedNodes = new Set(), removedMaterials = new Set()) {
+    releasedRevisionCount = 0;
     const recipe = normalizeRecipe(inputRecipe, limits);
     const placedRuntime = recipe.nodes.some(node => node.asset)
       ? agentSceneModule('assets').expandAssetPlacements(recipe, options.assets, limits, assetOutputCache, recipe.nodes.some(node => node.asset?.drive) ? agentSceneModule('drive').createAssetDrive : null)
@@ -1397,9 +1407,11 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     // Automatic undo history never blocks an edit: drop the oldest kept revisions before refusing for budget.
     while (planned.overBudget && revisionHistory.length > 0) {
       revisionHistory.shift();
+      releasedRevisionCount++;
       planned = planGeometry();
     }
-    const { plans, residentStats, pendingVertices } = planned;
+    let { residentStats } = planned;
+    const { plans, pendingVertices } = planned;
     if (planned.overBudget) {
       throw new RangeError('Geometry preflight exceeds peak maxVertices or maxGeometryBytes across active, checkpoint and staged resources. Reduce detail or release checkpoints');
     }
@@ -1426,6 +1438,12 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         const geometryBytes = Object.values(geometry).reduce((total, array) => total + array.byteLength, 0);
         const vertices = geometry.positions.length / 3;
         if (plan.definition.type === 'mesh') {
+          // Edits can grow a mesh past its estimate. Undo history never blocks an edit, so release the oldest revisions before refusing.
+          while (revisionHistory.length > 0 && residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
+            revisionHistory.shift();
+            releasedRevisionCount++;
+            residentStats = geometryStats(ownedGeometryRecords());
+          }
           if (residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
             throw new RangeError(`Mesh ${plan.definition.id} has ${vertices} render vertices after its edits, which exceeds maxVertices across the scene. Reduce detail or edits.`);
           }
@@ -1733,6 +1751,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     get parts() {
       return state.parts;
     },
+    /** How many oldest undo revisions the latest edit released to fit maxVertices; 0 when none. */
+    get releasedRevisions() {
+      return releasedRevisionCount;
+    },
     get revision() {
       return revision;
     },
@@ -1833,7 +1855,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           knownKeys(operation, ['type', lookField], 'operation');
           const patch = operation[lookField];
           // Spot and area lights, cascades and sun links are absent from a recipe until it sets them.
-          const optionalFields = lookField === 'environment' ? ['ground', 'spotLights', 'areaLights', 'shadowCascades', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'hdri', 'sky'] : lookField === 'effects' ? postStepSupport.fields : [];
+          const optionalFields = lookField === 'environment' ? ['ground', 'spotLights', 'areaLights', 'shadowCascades', 'localVolumes', 'keyAffects', 'objectReflections', 'floorSkyTrace', 'sunBounce', 'specularAntiAliasing', 'sunAngularRadius', 'lines', 'resolveCoplanar', 'viewTransform', 'look', 'hdri', 'sky'] : lookField === 'effects' ? postStepSupport.fields : [];
           knownKeys(patch, [...Object.keys(candidate[lookField]), ...optionalFields], lookField);
           const nestedField = lookField === 'environment' ? 'volumeFog' : 'bloom';
           const merged = { ...candidate[lookField], ...(lookField === 'environment' ? environmentPatchWithSetup(patch) : patch) };
