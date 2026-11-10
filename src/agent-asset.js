@@ -395,6 +395,25 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     return records.find(value => value.id === partIds[0]);
   }
 
+  /** The parts scene_inspect lists for one ID: a mesh ID is that part; a source node is every part of it and of the nodes below it. */
+  function inspectedRecordsFor(id) {
+    const sourceNode = sourceNodes.get(id);
+    if (!sourceNode || records.some(value => value.id === id)) {
+      return [partRecordFor(id)];
+    }
+    const partIds = [];
+    const pending = [id];
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      partIds.push(...(sourceNodes.get(nodeId).meshIds ?? []));
+      pending.push(...[...sourceNodes.values()].filter(node => node.parent === nodeId).map(node => node.id));
+    }
+    if (partIds.length === 0) {
+      return [partRecordFor(id)];
+    }
+    return records.filter(value => partIds.includes(value.id));
+  }
+
   function geometryOf(record, edited = editedParts) {
     return edited.get(record.id)?.geometry ?? record.source.geometry;
   }
@@ -1019,9 +1038,6 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         throw invalidField('offset', offset, 'a whole number from 0 to 4096, such as 0');
       }
       if (options.kind === 'hierarchy') {
-        if (options.includeBounds) {
-          throw invalidField('includeBounds', options.includeBounds, 'false for kind hierarchy, which has no deformed silhouette bounds; drop it, or inspect without kind to get mesh bounds', TypeError);
-        }
         if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > sourceNodes.size)) {
           throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${sourceNodes.size} source-node IDs, such as []`);
         }
@@ -1035,12 +1051,13 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         return { revision, topologyRevision, assetId: canonicalAssetId, kind: 'hierarchy', ...motionIkReport(), ...motionDriveReport(), ...motionLayerReport(), ...diagnosticsReport(),
           counts: { nodes: sourceNodes.size, joints: [...sourceNodes.values()].filter(node => node.joint).length },
           nodes, offset, truncated: offset + nodes.length < selected.length,
+          ...(options.includeBounds ? { note: 'Hierarchy lists no bounds; inspect without kind, with ids of nodes or meshes, to get them.' } : {}),
           motion: recipe.motion ? { duration: recipe.motion.duration, loop: recipe.motion.loop, tracks: recipe.motion.tracks.length, time: motionTime } : null };
       }
       if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > records.length)) {
         throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${records.length} mesh IDs, such as ["mesh-0"]`);
       }
-      const selected = options.ids === undefined ? records : options.ids.map(id => partRecordFor(id));
+      const selected = options.ids === undefined ? records : options.ids.flatMap(id => inspectedRecordsFor(id));
       const visible = selected.slice(offset, offset + limit);
       if (options.includeBounds && visible.reduce((total, record) => total + geometryOf(record).positions.length / 3, 0) > MAX_INSPECTION_VERTICES) {
         throw invalidField('ids', `${visible.length} meshes`, 'fewer meshes, under two million authored base vertices in all, such as ["mesh-0"]');

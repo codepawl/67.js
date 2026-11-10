@@ -258,16 +258,17 @@ test('imported parts report as polygon meshes with the shared lint', async () =>
   asset.dispose();
 });
 
-test('inspect accepts a source-node ID that holds one part and names the parts of one that holds several', async () => {
+test('inspect accepts a source-node ID and lists its parts and those of the nodes below it', async () => {
   const scene = createScene(await loadRobot());
   const nodes = scene.inspect({ kind: 'hierarchy', limit: 256 }).nodes;
   const single = nodes.find(node => node.meshIds.length === 1);
   const several = nodes.find(node => node.meshIds.length > 1);
-  const empty = nodes.find(node => node.meshIds.length === 0);
-  assert.ok(single && several && empty, 'the robot has leaf, group and mesh-less nodes');
+  const empty = nodes.find(node => node.meshIds.length === 0 && !nodes.some(other => other.parent === node.id));
+  assert.ok(single && several && empty, 'the robot has leaf, group and childless mesh-less nodes');
   const byNode = scene.inspect({ ids: [single.id] }).nodes;
   assert.deepEqual(byNode.map(node => node.id), single.meshIds);
-  assert.throws(() => scene.inspect({ ids: [several.id] }), error => error.message.includes(several.meshIds[0]) && /^geometry: got .*; expected one part ID, such as .*holds \d+ parts/.test(error.message));
+  const bySeveral = scene.inspect({ ids: [several.id] }).nodes.map(node => node.id);
+  assert.ok(several.meshIds.every(id => bySeveral.includes(id)));
   assert.throws(() => scene.inspect({ ids: [empty.id] }), /^RangeError: geometry: got .*; expected a source node with a mesh of its own, or a mesh ID such as "mesh-0"/);
   assert.throws(() => scene.inspect({ ids: ['nothing-here'] }), /^RangeError: geometry: got "nothing-here"; expected an imported mesh ID such as "mesh-0"/);
 });

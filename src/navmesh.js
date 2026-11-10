@@ -200,7 +200,24 @@ export function createNavmesh({ positions, indices, agentRadius, maxSlopeDegrees
     const cell = cellOf(worldX, worldZ);
     if (cell < 0) return `${label} [${worldX}, ${worldZ}] is outside the ground.`;
     if (heights[cell] === NO_SURFACE) return `${label} [${worldX}, ${worldZ}] has no ground under it (a hole).`;
-    return `${label} [${worldX}, ${worldZ}] is not walkable: it is on an obstacle or a steep slope, or within the agent radius ${radius} m of a hole or an obstacle.`;
+    const nearest = nearestWalkableCenter(worldX, worldZ);
+    const suggestion = nearest ? ` The nearest walkable point is [${nearest[0].toFixed(2)}, ${nearest[1].toFixed(2)}].` : '';
+    return `${label} [${worldX}, ${worldZ}] is not walkable: it is on an obstacle or a steep slope, or within the agent radius ${radius} m of a hole or an obstacle.${suggestion}`;
+  }
+
+  function nearestWalkableCenter(worldX, worldZ) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (let cell = 0; cell < walkable.length; cell++) {
+      if (walkable[cell] === 0) continue;
+      const [centerX, centerZ] = centerOf(cell);
+      const distance = Math.hypot(centerX - worldX, centerZ - worldZ);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = [centerX, centerZ];
+      }
+    }
+    return best;
   }
 
   /** Route from [x, z] to [x, z]: { points: [[x, y, z], ...], length, searchNodes }. Throws when the goal cannot be reached. */
