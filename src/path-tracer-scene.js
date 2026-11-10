@@ -110,7 +110,8 @@ function resolveTexture(descriptor) {
     height: image.height,
     data,
     colorLookup: descriptor.colorSpace === 'linear' ? null : SRGB_TO_LINEAR,
-    repeat: descriptor.wrapS === REPEAT_WRAP,
+    // A map without a wrap mode repeats: the rasteriser and glTF both default to repeat.
+    repeat: (descriptor.wrapS ?? REPEAT_WRAP) === REPEAT_WRAP,
   };
 }
 
