@@ -224,7 +224,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   operations: Object.freeze([
     'set-node', 'set-material', 'set-camera', 'add-node', 'remove-node',
     'add-geometry', 'remove-geometry', 'add-material', 'remove-material',
-    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'edit-mesh', 'set-mesh-stack', 'bake-motion',
+    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'set-game', 'edit-mesh', 'set-mesh-stack', 'bake-motion',
   ]),
   materialTags: Object.freeze(['surface', 'unlit', 'liquid', 'foam', 'foliage', 'grass', 'water']),
   // A flat water sheet; the largest sets the level. A bed d metres down keeps exp(-absorption * d) per channel (RGB per metre).
@@ -298,7 +298,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   rigging: Object.freeze({ presets: Object.freeze(['humanoid', 'quadruped']), maxArmatures: 16, maxBones: 128, maxInfluences: 4, weights: 'bone-distance' }),
   motionConstraints: Object.freeze(['copy_location', 'copy_rotation', 'copy_scale', 'limit_location', 'limit_rotation', 'track_to', 'child_of', 'floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action', 'maintain_volume', 'damped_track', 'pivot', 'follow_path', 'clamp_to', 'shrinkwrap', 'armature']),
-  motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxProperties: 32, maxPropertyKeys: 16, targets: Object.freeze(['node', 'material', 'light', 'morph']), variables: Object.freeze(['time', 'node', 'custom', 'distance', 'rotationDifference']), maxExpressionParts: 64, maxExpressionDepth: 8 }),
+  motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxProperties: 32, maxPropertyKeys: 16, targets: Object.freeze(['node', 'material', 'light', 'morph', 'camera']), variables: Object.freeze(['time', 'node', 'custom', 'distance', 'rotationDifference']), maxExpressionParts: 64, maxExpressionDepth: 8 }),
   // Recipe physics: Rapier (an optional peer) bakes bodies on nodes offline; playback is a seek into the bake.
   physics: Object.freeze({
     bodyTypes: Object.freeze(['dynamic', 'fixed', 'kinematic']),

@@ -36,6 +36,7 @@ const MODULE_LOADERS = {
   physicalSky: () => import('./physical-sky.js'),
   floorSky: () => import('./floor-sky-visibility.js'),
   userPass: () => import('./user-pass.js'),
+  game: () => import('./game-setup.js'),
   objectMotionBlur: () => import('./object-motion-blur.js'),
   postSteps: () => import('./post-steps.js'),
   materialSnippet: () => import('./material-snippet.js'),
@@ -87,6 +88,7 @@ const MODULE_MARKERS = {
   floorSky: ['"keyColor"', '"keyIntensity"'],
   physicalSky: ['"type":"physical"'],
   userPass: ['"postPasses"'],
+  game: ['"game":{', '"set-game"'],
   materialSnippet: ['"snippet":{'],
   // Only a motionBlur object that sets a non-zero `objects` loads it; the common `"shutter":0` look does not.
   objectMotionBlur: [/"motionBlur":\{[^}]*"objects":(?!0[,}])/],

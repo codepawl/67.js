@@ -6,7 +6,7 @@ This page shows how to make an agent finish a 67js task with fewer tool calls, f
 
 An agent pays for three things: the tool list, the results of its calls, and the pictures that it reads.
 
-**The tool list.** The harness sends every tool's name, description and input schema to the model. The 23 tools total 65,777 bytes, about 18,800 tokens (measured 2026-11-09 on the main branch after the schema diet; it was 196,826 bytes before). A tool lists its common fields and one line naming the rest, and every call is still checked against the full schema. `scene_capabilities` with a `topic` gives the field list of one recipe part. Three tools make up most of it:
+**The tool list.** The harness sends every tool's name, description and input schema to the model. The 24 tools total 70,401 bytes, about 20,100 tokens (measured 2026-11-10 on the game branch after the schema diet; it was 196,826 bytes before). A tool lists its common fields and one line naming the rest, and every call is still checked against the full schema. `scene_capabilities` with a `topic` gives the field list of one recipe part. Three tools make up most of it:
 
 | Tool | Schema size | Estimated tokens |
 | --- | --- | --- |
