@@ -484,6 +484,75 @@ async function measureProgressiveFrameTime(source, options, frames = 200, warmup
 window.renderProgressiveCheckpoints = renderProgressiveCheckpoints;
 window.measureProgressiveFrameTime = measureProgressiveFrameTime;
 
+// Splits the first path traced draw of a fresh page into phases, in seconds (issue #861; bench/reference/cold-draw.mjs).
+async function profileColdFirstDraw(source, options) {
+  const phases = {};
+  let mark = performance.now();
+  const lap = (name) => {
+    const now = performance.now();
+    phases[name] = Number(((now - mark) / 1000).toFixed(3));
+    mark = now;
+  };
+  const scene = await loadTraceSceneFor(source);
+  lap('loadScene');
+  const [{ buildTraceScene }, gpuModule, shaderModule, packModule, pathTracerModule] = await Promise.all([
+    import('/src/path-tracer-scene.js'), import('/src/path-tracer-gpu.js'), import('/src/path-tracer-gpu-shader.js'), import('/src/path-tracer-gpu-pack.js'), import('/src/path-tracer.js'),
+  ]);
+  lap('importModules');
+  const traceScene = buildTraceScene(scene.parts, scene.environment ?? {});
+  lap('buildTraceScene');
+  const normalized = pathTracerModule.normalizePathTracerOptions({ ...options, backend: 'gpu', samples: 1 });
+  const { gl } = gpuModule.getContext();
+  lap('createContext');
+  const variant = { hasSubsurface: packModule.sceneUsesSubsurface(traceScene.materials), texelBake: false, blueNoise: false, lightImportance: false, radianceCache: false, lightTree: false };
+  const fragmentSource = shaderModule.buildFragmentSource(variant);
+  lap('buildSource');
+  const parallel = gl.getExtension('KHR_parallel_shader_compile');
+  const program = gl.createProgram();
+  for (const [kind, text] of [[gl.VERTEX_SHADER, shaderModule.VERTEX_SOURCE], [gl.FRAGMENT_SHADER, fragmentSource]]) {
+    const shader = gl.createShader(kind);
+    gl.shaderSource(shader, text);
+    gl.compileShader(shader);
+    gl.attachShader(program, shader);
+  }
+  lap('submitCompile');
+  gl.linkProgram(program);
+  lap('submitLink');
+  if (parallel) {
+    while (!gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  lap('waitCompletion');
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+  lap('linkStatus');
+  gl.useProgram(program);
+  const { lightCount } = gpuModule.uploadScene(gl, program, traceScene, normalized);
+  gl.finish();
+  lap('uploadScene');
+  const camera = pathTracerModule.createCamera(scene.camera, normalized.width, normalized.height);
+  gpuModule.setSceneUniforms(gl, program, traceScene, camera, normalized, lightCount);
+  gpuModule.createTargets(gl, normalized.width, normalized.height);
+  lap('uniformsAndTargets');
+  const band = gpuModule.createBandState(normalized.height);
+  const pixel = new Float32Array(4);
+  const draw = async (name, divisor) => {
+    const drawWidth = Math.ceil(normalized.width / divisor);
+    const drawHeight = Math.ceil(normalized.height / divisor);
+    gl.uniform2i(gl.getUniformLocation(program, 'uSize'), drawWidth, drawHeight);
+    await gpuModule.drawOneSample(gl, program, drawWidth, drawHeight, 0, band, () => {});
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, pixel);
+    lap(name);
+  };
+  await draw('firstDrawQuarter', 4);
+  await draw('secondDrawQuarter', 4);
+  await draw('drawHalf', 2);
+  await draw('drawFull', 1);
+  gpuModule.releaseResources(gl);
+  const coldTotal = Object.entries(phases).filter(([name]) => name !== 'secondDrawQuarter' && name !== 'drawHalf' && name !== 'drawFull').reduce((sum, [, value]) => sum + value, 0);
+  return { gpu: gpuModule.getContext().gpu, fragmentSourceKilobytes: Math.round(fragmentSource.length / 1024), phases, coldTotal: Number(coldTotal.toFixed(2)) };
+}
+window.profileColdFirstDraw = profileColdFirstDraw;
+
 window.loadTraceSceneFor = loadTraceSceneFor;
 
 // The masked leaf cards of bench/native-tracer/cutout-scene.js on the path tracer's gpu or webgpu backend, as the PNG of the

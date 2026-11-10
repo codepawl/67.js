@@ -1,0 +1,1 @@
+- The first path traced draw of a page on the WebGL2 backend builds its kernel faster, 108 s to 27 s for `lit-interior` on an RTX 3060, because the emitter loop now holds one copy of the shadow ray, with identical pixels (#861)

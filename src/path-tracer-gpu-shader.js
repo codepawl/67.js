@@ -1113,36 +1113,36 @@ int chooseEmitterByImportance(vec3 normal, out float probability) {
 }
 
 ${lightTree ? LIGHT_TREE_FUNCTIONS : ''}
-/** The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it. */
+/**
+ * The first hit lights from every emitter; later hits draw one, and divide by the chance of drawing it. The emitters and the
+ * single draw share one loop, so the shader holds one copy of the emitter sampling and the shadow ray (issue #861).
+ */
 void addLights(int depth, vec3 normal) {
   bool firstHitByTree = LIGHT_TREE && uLightCount > LIGHT_TREE_FIRST_HIT_LIGHTS;
-  if ((depth == 0 && !STOCHASTIC_FIRST_HIT && !firstHitByTree) || uEmitterCount <= 1) {
+  bool everyEmitter = (depth == 0 && !STOCHASTIC_FIRST_HIT && !firstHitByTree) || uEmitterCount <= 1;
+  int turns = uEmitterCount;
+  int chosen = 0;
+  bool shareAfterwards = false;
+  if (everyEmitter) {
     selectionProbability = 1.0;
-    for (int emitter = 0; emitter < uEmitterCount; emitter++) {
-      sampleEmitter(depth, normal, emitter);
-      flushShadowRay();
-    }
-    return;
-  }
-${lightTree ? `  if (LIGHT_TREE) {
-    int chosen = chooseEmitterByTree(normal, selectionProbability);
-    if (chosen >= 0) {
-      sampleEmitter(depth, normal, chosen);
-      flushShadowRay();
-    }
+${lightTree ? `  } else if (LIGHT_TREE) {
+    chosen = chooseEmitterByTree(normal, selectionProbability);
+    turns = chosen >= 0 ? 1 : 0;
     // The sky is drawn with its uniform share whatever light was chosen: that share weighs the next escape ray.
+    shareAfterwards = true;
+` : ''}  } else if (IMPORTANT_LIGHTS) {
+    turns = 1;
+    chosen = chooseEmitterByImportance(normal, selectionProbability);
+  } else {
+    turns = 1;
     selectionProbability = 1.0 / float(uEmitterCount);
-    return;
+    chosen = int(floor(nextRandom() * float(uEmitterCount)));
   }
-` : ''}  if (IMPORTANT_LIGHTS) {
-    int chosen = chooseEmitterByImportance(normal, selectionProbability);
-    sampleEmitter(depth, normal, chosen);
+  for (int turn = 0; turn < turns; turn++) {
+    sampleEmitter(depth, normal, everyEmitter ? turn : chosen);
     flushShadowRay();
-    return;
   }
-  selectionProbability = 1.0 / float(uEmitterCount);
-  sampleEmitter(depth, normal, int(floor(nextRandom() * float(uEmitterCount))));
-  flushShadowRay();
+  if (shareAfterwards) selectionProbability = 1.0 / float(uEmitterCount);
 }
 
 void addEscape(int depth, float previousPdf, bool afterMirror) {
