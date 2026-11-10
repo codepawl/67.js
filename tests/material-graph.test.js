@@ -177,7 +177,7 @@ test('graph and preset fields do not mix', () => {
 
 test('every capability operator compiles, and no other operator does', () => {
   const samples = {
-    uv: { uv: 'u' }, vec: { vec: [1, 2, 3] }, ramp: { ramp: { value: 0.5, stops: [[0, 0], [1, 1]] } },
+    uv: { uv: 'u' }, coord: { coord: 'object' }, mapping: { mapping: {} }, whiteNoise: { whiteNoise: {} }, brick: { brick: {} }, vec: { vec: [1, 2, 3] }, ramp: { ramp: { value: 0.5, stops: [[0, 0], [1, 1]] } },
     noise: { noise: {} }, voronoi: { voronoi: {} }, wave: { wave: {} }, checker: { checker: {} }, gradient: { gradient: {} },
     layer: { layer: { base: [0, 0, 0], top: [1, 1, 1], mask: 0.5 } }, hue: { hue: { color: [1, 0, 0], shift: 0.1 } }, curve: { curve: { value: 0.5, points: [[0, 0], [1, 1]] } },
   };
@@ -285,7 +285,7 @@ test('the same graph shares one baked texture set across materials', () => {
 });
 
 test('graph errors name the valid options, and scene_capabilities lists the nodes an agent can use', () => {
-  assert.throws(() => compileMaterialGraph({ color: { glow: 1 } }), /unknown operator "glow"\. Use one of uv, vec, ramp/);
+  assert.throws(() => compileMaterialGraph({ color: { glow: 1 } }), /unknown operator "glow"\. Use one of uv, coord, mapping, vec, ramp/);
   assert.throws(() => compileMaterialGraph({ shine: 1 }), /color, roughness, metallic, emission, height/);
   assert.throws(() => compileMaterialGraph({ color: { noise: { size: 4 } } }), /does not take "size"; fields: /);
   assert.throws(() => compileMaterialGraph({ color: { wave: { frequency: 4, shape: 'square' } } }), /must be one of sine, saw, triangle/);
