@@ -332,15 +332,21 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
 }
 
 `,
-  worldSurface: `  if (TAG_WATER) {
-    normal = normalize(vec3(-cos(worldPosition.x * 1.4 + time * 0.8) * 0.035, 1.0, -cos(worldPosition.z * 1.8 - time) * 0.036));
+  worldSurface: `  float waterFoam = 0.0;
+  if (TAG_WATER) {
+    // Small ripples tilt the surface's own normal, so a sea mesh keeps its waves; a flat sheet (normal up) gets the same ripples as before.
+    vec3 rippleTilt = vec3(-cos(worldPosition.x * 1.4 + time * 0.8) * 0.035, 0.0, -cos(worldPosition.z * 1.8 - time) * 0.036);
     float radius = length(worldPosition.xz - waterRipple.xz);
     float age = time - rippleTime;
     float wave = sin(radius * 11.0 - age * 8.0) * exp(-abs(radius - age * 1.4) * 1.5) * exp(-age * 0.7) * step(0.0, age);
-    normal.xz += normalize(worldPosition.xz - waterRipple.xz + 0.001) * wave * 0.07;
-    normal = normalize(normal);
-    color = mix(color, vec3(0.10, 0.23, 0.25), pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0));
-    roughness = 0.16;
+    rippleTilt.xz += normalize(worldPosition.xz - waterRipple.xz + 0.001) * wave * 0.07;
+    normal = normalize(normal + rippleTilt);
+    // The body is deeper at grazing angles; the foam mask (the ocean's, stored as 1 - foam in the sky visibility channel) turns it white.
+    waterFoam = smoothstep(0.15, 0.85, clamp(1.0 - vertexSkyVisibility, 0.0, 1.0));
+    float grazing = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
+    color = mix(color, vec3(0.04, 0.12, 0.16), grazing * 0.85);
+    color = mix(color, vec3(0.92, 0.95, 0.97), waterFoam);
+    roughness = mix(0.16, 0.8, waterFoam);
   }
   if (CANOPY_TAG) {
     float leaves = sin(worldPosition.x * 13.0 + sin(worldPosition.y * 9.0)) * sin(worldPosition.z * 11.0 - worldPosition.y * 5.0);
@@ -398,10 +404,19 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
     radiance += color * keyResponse / max(waterSunTransmittance, vec3(0.0001)) * max(dot(normal, normalize(lightDirection)), 0.0) * waterShadowVisibility * waterScatterShare * 3.4 * exp(-waterAbsorption);
   }
   if (TAG_WATER) {
-    float reflectivity = 0.20 + 0.65 * pow(1.0 - max(dot(normal, viewDirection), 0.0), 3.0);
-    vec3 reflection = mix(vec3(0.12, 0.24, 0.28), vec3(0.40, 0.63, 0.78), clamp(reflect(-viewDirection, normal).y, 0.0, 1.0));
-    radiance = mix(radiance * 0.6, reflection * daylight * ambientIntensity, reflectivity);
-    radiance += vec3(1.0, 0.85, 0.55) * pow(max(dot(reflect(-normalize(lightDirection), normal), viewDirection), 0.0), 220.0) * 2.0 * keyResponse;
+    // Fresnel (Schlick, water F0 0.02) of the sky or environment the surface mirrors; foam is rough and reflects little.
+    float cosine = max(dot(normal, viewDirection), 0.0);
+    float reflectivity = (0.02 + 0.98 * pow(1.0 - cosine, 5.0)) * (1.0 - waterFoam);
+    vec3 mirrorDirection = reflect(-viewDirection, normal);
+    mirrorDirection.y = max(mirrorDirection.y, 0.02);
+    vec3 skyColor = ENVIRONMENT_ENABLED ? surroundingsColor(mirrorDirection, 0.05) : mix(vec3(0.12, 0.24, 0.28), vec3(0.40, 0.63, 0.78), clamp(mirrorDirection.y, 0.0, 1.0)) * daylight;
+    radiance = mix(radiance * 0.6, skyColor * ambientIntensity, clamp(reflectivity, 0.0, 1.0));
+    // Sun glint: a narrow lobe around the mirror direction, the width of open water slopes, bright enough to bloom.
+    vec3 halfVector = normalize(normalize(lightDirection) + viewDirection);
+    float glintShape = pow(max(dot(normal, halfVector), 0.0), 900.0);
+    float glintFresnel = 0.02 + 0.98 * pow(1.0 - max(dot(halfVector, viewDirection), 0.0), 5.0);
+    radiance += vec3(1.0, 0.9, 0.7) * glintShape * (0.5 + 40.0 * glintFresnel) * 6.0 * keyResponse * (1.0 - waterFoam);
+    radiance += vec3(0.85, 0.9, 0.95) * waterFoam * (max(dot(normal, normalize(lightDirection)), 0.0) * keyResponse + 0.35 * daylight * ambientIntensity);
     if (waterBody.w > 0.5 && alphaMode > 1.5) {
       // Blended water draws its own background: the opaque scene refracted and blurred, not the one behind it unbent.
       radiance = radiance * alpha + refractedBackground(radiance, worldPosition, normal, viewDirection) * (1.0 - alpha);
