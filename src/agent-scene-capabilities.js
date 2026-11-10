@@ -14,7 +14,7 @@ import { MATERIAL_LAYER_FIELDS, MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COL
 export const AGENT_SCENE_DEFAULT_LIMITS = Object.freeze({
   maxNodes: 4096, maxDepth: 256, maxGeometries: 256, maxMaterials: 256,
   maxVertices: 250_000, maxGeometryBytes: 32 * 1024 * 1024,
-  maxOperations: 256, maxCheckpoints: 8, maxRecipeBytes: 1024 * 1024,
+  maxOperations: 256, maxCheckpoints: 16, maxRecipeBytes: 1024 * 1024,
 });
 
 // The values of the water presets (src/world-material-shader.js holds the same numbers; a test keeps them in step), written out
