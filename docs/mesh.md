@@ -385,6 +385,25 @@ Open boundaries reported by lint (`boundary-edge`) are fixed with `fill_holes`. 
 (`holes_fill`, `dissolve_*`, `bisect_plane`, `bridge_loops`, `grid_fill`, `subdivide_edges`) where the meaning matches, and
 `point` and `normal` are Blender's `plane_co` and `plane_no`.
 
+### Reshaping tools
+
+These edits change how a surface is divided or shaped. Elements are visited in index order and ties break toward the
+lower index, so the same input always gives the same bytes. Faces they keep carry their tags and attributes.
+
+| Edit | Fields | Tags | What it does |
+| --- | --- | --- | --- |
+| `poke` | `select`, `offset` (default 0), `relative` | `poke` | Replaces each selected face with a triangle fan around a centre vertex at the face's average point, moved `offset` along the face normal (times the face's average corner distance when `relative`). |
+| `dual` | none | `dual` | One vertex at each face centre and one face around each vertex, wound the same way as the original. Needs a closed mesh with consistent winding; the new faces carry no attributes. |
+| `tris_to_quads` | `select`, `angle` (default 40) | `merged` | Joins adjacent selected triangles whose normals differ by at most `angle` degrees into convex quads, the most rectangular pairs first; each triangle joins once. |
+| `symmetrize` | `axis` (default x), `keep` (`positive` or `negative`), `distance` | `mirrored` | Cuts faces that cross the plane through the origin, drops the other half and mirrors the kept half. Left and right (top and bottom, front and back) tags swap on the mirrored half. |
+| `scale_elements` | `select`, `scale` (above 0) | none | Scales each group of selected faces that share a vertex about the group's average vertex position. Unselected neighbours follow along shared vertices. |
+| `extrude_edges` | `edges`, `offset` | `side` | Copies the vertices of the selected edges, moves the copies by `offset` and joins each edge to its copy with a quad. Select a surface boundary with `{ "open": true }`. |
+
+`dual` and `symmetrize` leave a closed surface closed. `extrude_edges` on interior edges adds a fin, so a closed
+mesh is no longer closed afterwards. `extrude_vertices` is not offered: a mesh derives its edges from faces and cannot
+hold a loose edge. The size of `poke` and `extrude_edges` is checked before they allocate. The `meshEdit.<op>`
+capabilities topic lists the exact fields.
+
 ### Subdivide
 
 `subdivide` is Catmull-Clark subdivision with semi-sharp creases, as an edit or as a stack node, on the rules Pixar
