@@ -46,7 +46,7 @@ const report = { timedScenes: {}, frameTime: {}, lightChoice: {} };
 // 1. Time to the still's score, and 2. frame time.
 for (let runIndex = 1; runIndex <= runCount; runIndex++) {
   const directory = `${outputDirectory}/run${runIndex}`;
-  run(process.execPath, ['bench/reference/progressive-compare.mjs', directory, TIMED_SCENES.join(','), '--still', '--variant', TIMED_VARIANTS.join(','), '--checkpoints', CHECKPOINTS]);
+  run(process.execPath, ['bench/reference/progressive-compare.mjs', directory, TIMED_SCENES.join(','), '--still', '--warm', '--variant', TIMED_VARIANTS.join(','), '--checkpoints', CHECKPOINTS]);
   const scores = score(directory);
   const timings = JSON.parse(readFileSync(`${directory}/timings.json`, 'utf8'));
   for (const scene of TIMED_SCENES) {
@@ -54,8 +54,10 @@ for (let runIndex = 1; runIndex <= runCount; runIndex++) {
     const still = timings[`${scene}:still-64`];
     for (const variant of TIMED_VARIANTS) {
       const reached = CHECKPOINTS.split(',').map(Number).find(samples => scores[`${scene}:${variant}-${samples}`] <= stillScore);
-      const entry = (report.timedScenes[`${scene}:${variant}`] ??= { stillScore, stillSeconds: [], reachedSamples: [], progressiveSeconds: [], progressiveScore: null });
+      const entry = (report.timedScenes[`${scene}:${variant}`] ??= { stillScore, stillSeconds: [], stillTracedSeconds: [], warmUpCompileSeconds: [], reachedSamples: [], progressiveSeconds: [], progressiveScore: null });
       entry.stillSeconds.push(still.seconds);
+      entry.stillTracedSeconds.push(still.tracedSeconds);
+      entry.warmUpCompileSeconds.push(timings[`${scene}:${variant}:warm`].compileSeconds);
       if (reached === undefined) continue;
       const point = timings[`${scene}:${variant}:${reached}`];
       entry.reachedSamples.push(reached);
@@ -71,16 +73,16 @@ for (let runIndex = 1; runIndex <= runCount; runIndex++) {
   (report.frameTime.maximumMilliseconds ??= []).push(frame.maximumMilliseconds);
 }
 
-// 3. Default light choice against forced uniform. Scores do not vary between runs, so one pass.
+// 3. Default light choice against forced uniform and forced tree. Scores do not vary between runs, so one pass.
 const lightDirectory = `${outputDirectory}/light-choice`;
-if (lightSceneIds.length) run(process.execPath, ['bench/reference/progressive-compare.mjs', lightDirectory, lightSceneIds.join(','), '--variant', 'uniform,tree,importance', '--checkpoints', LIGHT_SCENE_SAMPLES]);
-if (lightSceneIds.length) run(process.execPath, ['bench/reference/progressive-compare.mjs', lightDirectory, lightSceneIds.join(','), '--variant', 'random', '--checkpoints', LIGHT_SCENE_SAMPLES]);
+if (lightSceneIds.length) run(process.execPath, ['bench/reference/progressive-compare.mjs', lightDirectory, lightSceneIds.join(','), '--variant', 'random,uniform,tree,importance', '--checkpoints', LIGHT_SCENE_SAMPLES]);
 const lightScores = lightSceneIds.length ? score(lightDirectory) : {};
 const files = lightSceneIds.length ? readdirSync(lightDirectory) : [];
 for (const scene of lightSceneIds) {
   for (const samples of LIGHT_SCENE_SAMPLES.split(',')) {
     const defaultPath = `${lightDirectory}/${scene}@random-${samples}.png`;
     const uniformPath = `${lightDirectory}/${scene}@uniform-${samples}.png`;
+    const treePath = `${lightDirectory}/${scene}@tree-${samples}.png`;
     if (!files.includes(`${scene}@random-${samples}.png`)) continue;
     report.lightChoice[`${scene}:${samples}`] = {
       defaultScore: lightScores[`${scene}:random-${samples}`] ?? null,
@@ -88,23 +90,25 @@ for (const scene of lightSceneIds) {
       treeScore: lightScores[`${scene}:tree-${samples}`] ?? null,
       importanceScore: lightScores[`${scene}:importance-${samples}`] ?? null,
       defaultEqualsUniform: existsSync(uniformPath) ? fileHash(defaultPath) === fileHash(uniformPath) : null,
+      defaultEqualsTree: existsSync(treePath) ? fileHash(defaultPath) === fileHash(treePath) : null,
+      treeEqualsUniform: existsSync(treePath) && existsSync(uniformPath) ? fileHash(treePath) === fileHash(uniformPath) : null,
     };
   }
 }
 writeFileSync(`${outputDirectory}/progressive-proof.json`, JSON.stringify(report, null, 1));
 
-console.log(`\nItem 1: progressive (default options) against the 64 sample still, 960 by 540, ${runCount} runs (seconds: setup, compile, steps and read back)`);
-console.log('| Scene | Light choice | Still FLIP | Progressive FLIP | Samples reached | Progressive s | Still s |');
-console.log('| --- | --- | --- | --- | --- | --- | --- |');
+console.log(`\nItem 1: progressive (default options) against the 64 sample still, 960 by 540, ${runCount} runs (seconds: setup, compile, steps and read back; a warm-up draw compiles every kernel first, so neither timed side pays a compile; the warm-up compile seconds are printed apart. The still time is its whole call, the traced time its GPU part)`);
+console.log('| Scene | Light choice | Still FLIP | Progressive FLIP | Samples reached | Progressive s | Still s | Still traced s | Warm-up compile s |');
+console.log('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
 for (const [key, entry] of Object.entries(report.timedScenes)) {
   const progressive = entry.progressiveSeconds.length ? range(entry.progressiveSeconds) : 'not reached';
-  console.log(`| ${key.split(':')[0]} | ${key.split(':')[1] === 'random' ? 'default (uniform)' : 'forced tree'} | ${entry.stillScore} | ${entry.progressiveScore ?? '-'} | ${[...new Set(entry.reachedSamples)].join(', ') || '-'} | ${progressive} | ${range(entry.stillSeconds)} |`);
+  console.log(`| ${key.split(':')[0]} | ${key.split(':')[1] === 'random' ? 'default (uniform)' : 'forced tree'} | ${entry.stillScore} | ${entry.progressiveScore ?? '-'} | ${[...new Set(entry.reachedSamples)].join(', ') || '-'} | ${progressive} | ${range(entry.stillSeconds)} | ${range(entry.stillTracedSeconds)} | ${range(entry.warmUpCompileSeconds)} |`);
 }
 console.log(`\nItem 2: median frame time at 1 sample per pixel, demo room, ${frameCount} frames, ${runCount} runs: median ${range(report.frameTime.medianMilliseconds)} ms (fastest frame ${range(report.frameTime.minimumMilliseconds)}, slowest ${range(report.frameTime.maximumMilliseconds)})`);
-console.log('\nItem 3: default light choice (auto) against forced uniform, FLIP against Cycles (- means no Cycles render given)');
-console.log('| Scene | Samples | Default | Uniform | Tree | Importance | Default pixels equal uniform |');
-console.log('| --- | --- | --- | --- | --- | --- | --- |');
+console.log('\nItem 3: default light choice (auto) against forced uniform and forced tree, FLIP against Cycles (- means no Cycles render given)');
+console.log('| Scene | Samples | Default | Uniform | Tree | Importance | Default pixels equal uniform | Default pixels equal tree | Tree pixels equal uniform |');
+console.log('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
 for (const [key, entry] of Object.entries(report.lightChoice)) {
   const [scene, samples] = key.split(':');
-  console.log(`| ${scene} | ${samples} | ${entry.defaultScore ?? '-'} | ${entry.uniformScore ?? '-'} | ${entry.treeScore ?? '-'} | ${entry.importanceScore ?? '-'} | ${entry.defaultEqualsUniform} |`);
+  console.log(`| ${scene} | ${samples} | ${entry.defaultScore ?? '-'} | ${entry.uniformScore ?? '-'} | ${entry.treeScore ?? '-'} | ${entry.importanceScore ?? '-'} | ${entry.defaultEqualsUniform} | ${entry.defaultEqualsTree} | ${entry.treeEqualsUniform} |`);
 }
