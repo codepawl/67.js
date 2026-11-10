@@ -11,15 +11,15 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import '../tests/support/load-agent-scene-modules.mjs';
 import { createAgentScene } from '../src/agent-scene.js';
-import { JELLY_FRAMES_PER_SECOND, JELLY_PRESETS, jellyCubeRecipe, measureBounce } from '../tests/support/jelly-cube.mjs';
+import { invertedTriangles, JELLY_FRAMES_PER_SECOND, JELLY_PRESETS, jellyCubeRecipe, measureBounce, topFaceTilt } from '../tests/support/jelly-cube.mjs';
 
 const PREVIEW = { width: 960, height: 540, fps: JELLY_FRAMES_PER_SECOND };
-const FRAME_COUNT = 150;
+const FRAME_COUNT = 240;
 const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 
 // The presets are shared with the test (tests/support/jelly-cube.mjs). Colours are named so the labels and the docs agree:
-// blue is firm, amber is medium, pink is soft.
-const POSITIONS = { firm: { x: -1.2, color: [0.15, 0.45, 0.95] }, medium: { x: 0, color: [0.98, 0.7, 0.1] }, soft: { x: 1.2, color: [0.95, 0.3, 0.6] } };
+// blue is firm, orange is medium, pink is soft.
+const POSITIONS = { firm: { x: -0.85, color: [0.08, 0.3, 0.85] }, medium: { x: 0, color: [0.85, 0.15, 0.0] }, soft: { x: 0.85, color: [0.85, 0.12, 0.45] } };
 const CUBES = JELLY_PRESETS.map(preset => ({ ...preset, ...POSITIONS[preset.id] }));
 
 function threeCubeRecipe() {
@@ -29,7 +29,7 @@ function threeCubeRecipe() {
     ...single,
     materials: [...CUBES.map(cube => ({ id: `${cube.id}-gel`, color: cube.color })), single.materials[1]],
     nodes: [...cubeNodes, ...single.nodes.slice(1)],
-    camera: { fov: 34, eye: [0, 0.6, 4.4], target: [0, 0.5, 0] },
+    camera: { fov: 11, eye: [0, 0.7, 8.4], target: [0, 0.42, 0] },
     cloth: {
       ...single.cloth,
       sheets: CUBES.map(cube => ({ node: cube.id, softBody: { pressure: 1, ...cube.softBody }, stiffness: 0.9, bend: 0, damping: 2, ...cube.sheet })),
@@ -51,6 +51,36 @@ function cubeFrames(recipe) {
     }
   }
   return framesByCube;
+}
+
+function horizontalExtent(frame) {
+  let low = Infinity;
+  let high = -Infinity;
+  for (let index = 0; index < frame.length; index += 3) {
+    low = Math.min(low, frame[index]);
+    high = Math.max(high, frame[index]);
+  }
+  return high - low;
+}
+
+// What the stills should show besides dent and rebound: sideways bulge at the deepest dent, the step the body stops moving,
+// the top face tilt at the deepest dent and at the last frame, and the inverted triangles of the single-cube bake.
+function restAndShape(id, frames, bounce) {
+  const preset = CUBES.find(cube => cube.id === id);
+  let settledStep = 0;
+  for (let step = 1; step < frames.length; step++) {
+    let move = 0;
+    for (let index = 0; index < frames[step].length; index++) move = Math.max(move, Math.abs(frames[step][index] - frames[step - 1][index]));
+    if (move > 0.0015) settledStep = step;
+  }
+  const single = jellyCubeRecipe({ softBody: { pressure: 1, ...preset.softBody }, sheet: preset.sheet, duration: FRAME_COUNT / JELLY_FRAMES_PER_SECOND });
+  return {
+    bulgeMeters: Number((horizontalExtent(frames[bounce.deepestFrame]) - horizontalExtent(frames[0])).toFixed(4)),
+    tiltAtDeepestDentDegrees: Number(topFaceTilt(frames[bounce.deepestFrame]).toFixed(2)),
+    tiltAtLastFrameDegrees: Number(topFaceTilt(frames.at(-1)).toFixed(2)),
+    lastMovingStep: settledStep,
+    invertedTriangles: invertedTriangles(single, FRAME_COUNT),
+  };
 }
 
 async function renderJob(call, sessionId, settings) {
@@ -78,6 +108,7 @@ async function main() {
   for (const [id, frames] of cubeFrames(recipe)) {
     const bounce = measureBounce(frames);
     measured[id] = { colorName: CUBES.find(cube => cube.id === id).colorName, ...CUBES.find(cube => cube.id === id).softBody, ...CUBES.find(cube => cube.id === id).sheet, contactStep: bounce.contact, deepestDentStep: bounce.deepestFrame, reboundTopStep: bounce.topFrame, dentMeters: Number(bounce.dent.toFixed(4)), reboundMeters: Number(bounce.reboundHeight.toFixed(4)) };
+    Object.assign(measured[id], restAndShape(id, frames, bounce));
     stillTimes[`${id}-contact`] = bounce.contact / JELLY_FRAMES_PER_SECOND;
     stillTimes[`${id}-deepest-dent`] = bounce.deepestFrame / JELLY_FRAMES_PER_SECOND;
     stillTimes[`${id}-rebound-top`] = bounce.topFrame / JELLY_FRAMES_PER_SECOND;

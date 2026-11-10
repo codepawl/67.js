@@ -450,15 +450,17 @@ Jelly feel (`tests/soft-body-bounce.test.js`, measured): the 0.5 m rounded cube 
 | 0.02 | 0.9 | 0.065 m | 0.000 m | 0.093 m | 0.441 m |
 | 0.02 | 0.1 | 0.099 m | 0.000 m | 0.100 m | 0.447 m |
 
-Before `bounce` existed, `shape` and `damping` were the only knobs that changed the rebound, and none gave a controlled one. Lowering `shape` or `stiffness` deepens the dent (0.026 to 0.099 m), so softness needed no new field. A very low `shape` has a price: with `shape` 0.02 and `stiffness` 0.1, 132 of the cube's 588 triangles turn inside out in the worst frame and the dent shows ragged, doubled edges. It is a real surface fold, not shading, and `selfCollision`, `bend`, more solver iterations and a gentler volume step do not remove it (measured). Keep `shape` at 0.15 or more for a jelly that has to look clean.
+Before `bounce` existed, `shape` and `damping` were the only knobs that changed the rebound, and none gave a controlled one. Lowering `shape` or `stiffness` deepens the dent (0.026 to 0.099 m), so softness needed no new field. A very low `shape` has a price: with `shape` 0.02 and `stiffness` 0.1, 132 of the cube's 588 triangles turn inside out in the worst frame and the dent shows ragged, doubled edges. It is a real surface fold, not shading, and `selfCollision`, `bend`, more solver iterations and a gentler volume step do not remove it (measured). Keep `shape` at 0.13 or more for a jelly that has to look clean.
 
-Three presets that step clearly (`JELLY_PRESETS` in `tests/support/jelly-cube.mjs`, previewed by `scripts/render-jelly-bounce.mjs` and labelled by `scripts/label-jelly-bounce.py`; no triangle folds in the test):
+Three presets that step clearly (`JELLY_PRESETS` in `tests/support/jelly-cube.mjs`, previewed by `scripts/render-jelly-bounce.mjs` and labelled by `scripts/label-jelly-bounce.py`; the preview is 960 by 540 at 60 fps, 4 seconds, from a long lens so the cubes carry no perspective skew, and each cube has a name label and its own colour):
 
-| Preset (cube colour in the preview) | `shape` | `stiffness` | `bounce` | Dent | Rebound |
-| --- | --- | --- | --- | --- | --- |
-| firm (blue) | 1 | 0.9 | 0 | 0.026 m | 0.102 m |
-| medium (amber) | 0.3 | 0.2 | 0.6 | 0.042 m | 0.216 m |
-| soft (pink) | 0.15 | 0.05 | 1 | 0.052 m | 0.464 m |
+| Preset (cube colour in the preview) | `shape` | `stiffness` | `bounce` | Dent | Sideways bulge | Rebound | Stops moving at step |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| firm (blue) | 1 | 0.9 | 0 | 0.026 m | 0.020 m | 0.102 m | 96 |
+| medium (orange) | 0.3 | 0.05 | 0.5 | 0.041 m | 0.038 m | 0.184 m | 126 |
+| soft (pink) | 0.13 | 0.01 | 0.9 | 0.049 m | 0.064 m | 0.377 m | 186 |
+
+A dent without folds stops near 5 cm, so the dent steps 1.6 and 1.2 times while the rebound steps 1.8 and 2.0 times; the soft cube also keeps wobbling about twice as long as the firm one. All three keep every triangle facing out (0 inverted in the bake), the top face is level within 0.05 degrees at the deepest dent and within 0.1 degrees at the end, and the sides bulge past the top at the dent (the soft cube is 0.564 m wide at the dent against a top face 0.385 m wide, equal on the left and right), so the lit side of that rim can look like a separate sliver in a still.
 
 With `damping: 0` and the default shape, `bounce` 1 sends the cube back to 1.85 m of its 1.95 m drop.
 

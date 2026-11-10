@@ -80,14 +80,63 @@ export function measureBounce(frames) {
 }
 
 /**
- * The three jellies of the preview, from firm to soft. The soft one keeps `shape` at 0.15: below about 0.1 the surface
- * folds over itself on impact (see `foldedTriangles`), which is how a deeper dent was paid for before.
+ * The three jellies of the preview, from firm to soft, with the colour each is drawn in. The soft one keeps `shape` at
+ * 0.13 or more: below about 0.1 the surface folds over itself on impact (see `foldedTriangles`), which is how a deeper
+ * dent was paid for before. A fold-free dent stops near 5 cm, so the steps between presets show most in the rebound.
  */
 export const JELLY_PRESETS = [
   { id: 'firm', colorName: 'blue', softBody: { shape: 1, bounce: 0 }, sheet: {} },
-  { id: 'medium', colorName: 'amber', softBody: { shape: 0.3, bounce: 0.6 }, sheet: { stiffness: 0.2 } },
-  { id: 'soft', colorName: 'pink', softBody: { shape: 0.15, bounce: 1 }, sheet: { stiffness: 0.05 } },
+  { id: 'medium', colorName: 'orange', softBody: { shape: 0.3, bounce: 0.5 }, sheet: { stiffness: 0.05 } },
+  { id: 'soft', colorName: 'pink', softBody: { shape: 0.13, bounce: 0.9 }, sheet: { stiffness: 0.01 } },
 ];
+
+/** Angle in degrees of the plane through the highest vertices of a frame, against the horizontal, along x then z. */
+export function topFaceTilt(frame) {
+  let highest = -Infinity;
+  for (let index = 1; index < frame.length; index += 3) highest = Math.max(highest, frame[index]);
+  const points = [];
+  for (let index = 0; index < frame.length; index += 3) {
+    if (frame[index + 1] > highest - 0.06) points.push([frame[index], frame[index + 1], frame[index + 2]]);
+  }
+  const mean = [0, 1, 2].map(axis => points.reduce((sum, point) => sum + point[axis], 0) / points.length);
+  const slopeAlong = axis => {
+    let covariance = 0;
+    let variance = 0;
+    for (const point of points) {
+      covariance += (point[axis] - mean[axis]) * (point[1] - mean[1]);
+      variance += (point[axis] - mean[axis]) ** 2;
+    }
+    return Math.abs(Math.atan2(covariance, variance)) * 180 / Math.PI;
+  };
+  return Math.max(slopeAlong(0), slopeAlong(2));
+}
+
+/** Most triangles in any frame whose normal points against the normal they had at rest: an inverted triangle. */
+export function invertedTriangles(recipe, frameCount) {
+  const scene = createAgentScene(recipe);
+  let rest = null;
+  let worst = 0;
+  for (let frame = 0; frame < frameCount; frame++) {
+    scene.sampleMotion(frame / JELLY_FRAMES_PER_SECOND);
+    const { positions, indices } = scene.parts.find(part => part.name === 'cube').geometry;
+    const normals = [];
+    for (let corner = 0; corner < indices.length; corner += 3) {
+      const a = indices[corner] * 3;
+      const b = indices[corner + 1] * 3;
+      const c = indices[corner + 2] * 3;
+      const edgeOne = [positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]];
+      const edgeTwo = [positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]];
+      normals.push([edgeOne[1] * edgeTwo[2] - edgeOne[2] * edgeTwo[1], edgeOne[2] * edgeTwo[0] - edgeOne[0] * edgeTwo[2], edgeOne[0] * edgeTwo[1] - edgeOne[1] * edgeTwo[0]]);
+    }
+    rest ??= normals;
+    let inverted = 0;
+    normals.forEach((normal, index) => {
+      if (normal[0] * rest[index][0] + normal[1] * rest[index][1] + normal[2] * rest[index][2] < 0) inverted++;
+    });
+    worst = Math.max(worst, inverted);
+  }
+  return worst;
+}
 
 /**
  * Most triangles facing toward the body's centre in any one frame. A closed convex-ish jelly keeps every triangle facing

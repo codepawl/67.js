@@ -13,8 +13,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 WIDTH, HEIGHT = 960, 540
-COLUMN_CENTERS = {"firm": 239, "medium": 480, "soft": 721}
-CHIP_COLORS = {"blue": (38, 115, 242), "amber": (250, 178, 26), "pink": (242, 77, 153)}
+COLUMN_CENTERS = {"firm": 197, "medium": 480, "soft": 763}
+CHIP_COLORS = {"blue": (38, 115, 242), "orange": (240, 90, 10), "pink": (217, 31, 115)}
 FONT_PATH = "C:/Windows/Fonts/segoeuib.ttf"
 
 
@@ -30,11 +30,11 @@ def build_overlay(summary):
         title = f"{cube_id.upper()}"
         lines = [f"{cube['colorName']} cube", f"dent {cube['dentMeters'] * 100:.1f} cm", f"rebound {cube['reboundMeters'] * 100:.0f} cm"]
         left, right = center - 100, center + 100
-        draw.rounded_rectangle([left, 410, right, 516], radius=10, fill=(20, 24, 32, 215))
-        draw.ellipse([left + 12, 421, left + 30, 439], fill=CHIP_COLORS[cube["colorName"]] + (255,))
-        draw.text((left + 40, 414), title, font=font(26), fill=(255, 255, 255, 255))
+        draw.rounded_rectangle([left, 426, right, 526], radius=10, fill=(20, 24, 32, 215))
+        draw.ellipse([left + 12, 435, left + 30, 453], fill=CHIP_COLORS[cube["colorName"]] + (255,))
+        draw.text((left + 40, 428), title, font=font(26), fill=(255, 255, 255, 255))
         for index, line in enumerate(lines):
-            draw.text((left + 14, 446 + index * 22), line, font=font(18), fill=(215, 220, 230, 255))
+            draw.text((left + 14, 458 + index * 21), line, font=font(18), fill=(215, 220, 230, 255))
     return overlay
 
 
@@ -59,12 +59,12 @@ def main():
             still.convert("RGB").save(output / name)
     cubes = summary["cubes"]
     picks = [
-        ("falling", 30),
+        ("falling", 36),
         ("contact", cubes["soft"]["contactStep"]),
         ("deepest dent (soft)", cubes["soft"]["deepestDentStep"]),
         ("firm rebound top", cubes["firm"]["reboundTopStep"]),
         ("soft rebound top", cubes["soft"]["reboundTopStep"]),
-        ("end", 149),
+        ("end", 239),
     ]
     frames = []
     for label, step in picks:
