@@ -367,6 +367,18 @@ test('curve takes order, knots and knotMode and rejects bad ones with what to pa
   for (const [options, pattern] of cases) assert.throws(() => curve(points, options), pattern);
 });
 
+test('NURBS knots repeated beyond the order or leaving a zero-width last span are rejected, valid ones sample finite', () => {
+  const points = [[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0], [4, 0, 0]];
+  const wire = { radius: 0.05, resolution: 4, kind: 'nurbs', order: 4 };
+  assert.throws(() => curve(points, { ...wire, knots: [0, 0, 0, 0, 1, 1, 1, 1, 1] }), /repeats 1 more than order 4 times/);
+  assert.throws(() => curve(points, { ...wire, knots: [0, 0, 0, 0, 1, 1, 1, 1, 2] }), /knots\[5\] must be above knots\[4\]/);
+  const weights = Array(points.length).fill(1);
+  for (const knots of [[0, 0, 0, 0, 1, 2, 2, 2, 2], [0, 0, 0, 1, 1, 2, 2, 2, 2]]) {
+    const sampled = sampleNurbs(points, weights, false, 6, { order: 4, knots });
+    for (const point of sampled.points) for (const value of point) assert.ok(Number.isFinite(value));
+  }
+});
+
 test('a recipe curve geometry takes order and knots', () => {
   const recipe = geometry => ({
     format: '67js.scene',

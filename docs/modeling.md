@@ -79,7 +79,8 @@ in `splines`, never both. A spline is `{ points | shape, closed, kind, weights, 
 - NURBS `order` is an integer from 2 to 8 and at most the point count (default 4, cubic; 2 follows the control polygon, 3 with
   weights draws exact conic arcs). An open NURBS takes `knotMode` `clamped` (default) or `uniform` (evenly spaced knots, the
   curve does not reach its end points), or explicit `knots`: point count plus order numbers that never decrease and rise
-  between `knots[order - 1]` and `knots[count]`, where the curve is defined; repeated knots lower the smoothness there. `knots`
+  between `knots[order - 1]` and `knots[count]`, where the curve is defined; repeated knots lower the smoothness there, but none repeats more than `order` times and
+  `knots[count]` stays above `knots[count - 1]`. `knots`
   and `knotMode` exclude each other and do not apply to a closed spline, which is periodic. Samples spread evenly over that
   parameter range, so unevenly spaced knots do not change the sample count. Tests compare the points with the Cox-de Boor
   recursion written out from its definition.

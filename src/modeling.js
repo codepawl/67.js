@@ -323,6 +323,12 @@ function nurbsBasisFrom(input, count, closed, label) {
       if (index > 0 && knot < knots[index - 1]) throw new RangeError(`${label}.knots must not decrease; knots[${index}] ${knot} is below knots[${index - 1}] ${knots[index - 1]}.`);
     });
     if (!(knots[count] > knots[order - 1])) throw new RangeError(`${label}.knots must rise between knots[${order - 1}] and knots[${count}]; the curve is defined only there.`);
+    let runLength = 1;
+    for (let index = 1; index < knots.length; index += 1) {
+      runLength = knots[index] === knots[index - 1] ? runLength + 1 : 1;
+      if (runLength > order) throw new RangeError(`${label}.knots repeats ${knots[index]} more than order ${order} times (at knots[${index}]). Repeat a knot at most ${order} times.`);
+    }
+    if (!(knots[count] > knots[count - 1])) throw new RangeError(`${label}.knots[${count}] must be above knots[${count - 1}]; the curve's last span would have no width. Raise knots[${count}] or lower knots[${count - 1}].`);
   }
   return { order, knots: knots && [...knots], knotMode };
 }
