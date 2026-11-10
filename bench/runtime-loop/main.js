@@ -3,6 +3,7 @@
 import { Renderer67, box, sphere } from '/src/index.js';
 import { createRuntime } from '/src/runtime.js';
 import { createInput, gamepadSource, keyboardSource } from '/src/input.js';
+import { createAudio } from '/src/audio.js';
 import { createCharacterController, createFirstPersonCamera, createFollowCamera, createTopDownCamera } from '/src/player.js';
 
 const GRAVITY = -9.8;
@@ -12,6 +13,10 @@ const BALL_RADIUS = 0.4;
 const SPIN_RADIANS_PER_SECOND = 1.5;
 const CUBE_SPEED = 3; // World units per second along the moveX axis.
 const JUMP_SPEED = 6;
+const CAMERA = { eye: [0, 3, 8], target: [0, 1.2, 0], up: [0, 1, 0] };
+const BALL_GROUND_POSITION = [-1.2, 0, 0];
+// The cube's animation markers: one tick at each half turn.
+const SPIN_MARKERS = [{ time: 0.5, name: 'half-turn' }, { time: 1, name: 'half-turn' }];
 
 function translation(x, y, z, scale = 1) {
   return new Float32Array([scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0, x, y, z, 1]);
@@ -27,6 +32,18 @@ function boxMatrix({ min, max }) {
   const size = max.map((value, axis) => value - min[axis]);
   const center = max.map((value, axis) => (value + min[axis]) / 2);
   return new Float32Array([size[0], 0, 0, 0, 0, size[1], 0, 0, 0, 0, size[2], 0, center[0], center[1], center[2], 1]);
+}
+
+// Short synthesized tones stand in for sound files: a decaying sine at the given pitch.
+function createTone(frequency, seconds) {
+  const sampleRate = 44100;
+  const tone = new AudioBuffer({ length: Math.round(sampleRate * seconds), sampleRate, numberOfChannels: 1 });
+  const samples = tone.getChannelData(0);
+  for (let index = 0; index < samples.length; index += 1) {
+    const time = index / sampleRate;
+    samples[index] = Math.sin(2 * Math.PI * frequency * time) * Math.exp(-time * 12 / seconds);
+  }
+  return tone;
 }
 
 const ballPart = {
@@ -83,6 +100,9 @@ const physicsSystem = {
     this.height += this.velocity * stepSeconds;
     if (this.height < BALL_RADIUS) {
       this.height = BALL_RADIUS;
+      audio.emitContacts([{ started: true, kind: 'contact', colliderA: 'ball', colliderB: 'ground', impulse: Math.abs(this.velocity) }], {
+        position: () => BALL_GROUND_POSITION,
+      });
       this.velocity = -this.velocity * BOUNCE_ENERGY;
     }
   },
@@ -109,7 +129,10 @@ const spinSystem = {
     this.slide(stepSeconds);
   },
   update(deltaSeconds, context) {
+    const previousPhase = (this.angle / (2 * Math.PI)) % 1;
     this.angle += SPIN_RADIANS_PER_SECOND * deltaSeconds;
+    const phase = (this.angle / (2 * Math.PI)) % 1;
+    audio.emitMarkers(SPIN_MARKERS, previousPhase, phase, { loop: true, duration: 1, data: { position: [this.x, 0.5, 0] } });
     if (context.mode === 'variable') this.slide(deltaSeconds);
   },
 };
@@ -127,6 +150,17 @@ const input = createInput({
     lookY: ['keyboard/ArrowUp', { control: 'keyboard/ArrowDown', scale: -1 }],
   },
 });
+
+// Sounds come from a contact (the bounce, louder with the impact speed), an animation marker (the cube's half turns) and
+// an input action (Space). The listener sits on the active camera, so the cube's tick pans as the cube slides.
+let cameraFrame = CAMERA;
+const audio = createAudio({ input, listener: () => cameraFrame });
+audio.defineSound('thud', { buffer: createTone(110, 0.3), spatial: { referenceDistance: 4 } });
+audio.defineSound('tick', { buffer: createTone(880, 0.08), spatial: { referenceDistance: 4 }, volume: 0.4 });
+audio.defineSound('hop', { buffer: createTone(440, 0.15) });
+audio.bindEvent('contact', 'thud', { volume: data => Math.min(1, data.impulse / 10) });
+audio.bindEvent('marker:half-turn', 'tick');
+audio.bindAction('jump', 'hop');
 
 // The player faces and walks relative to whichever camera rig is active, so swapping the rig keeps the controls natural.
 const player = createCharacterController({
@@ -176,8 +210,8 @@ function buildFrame(context) {
   cubePart.matrix = rotationAroundY(spinSystem.angle, spinSystem.x, 0.5, 0);
   placePlayer(context.alpha);
   renderer.updateParts(parts);
-  const pose = runtime.getSystem('camera')?.pose(context) ?? { eye: [0, 3, 8], target: [0, 1.2, 0], up: [0, 1, 0] };
-  return { ...pose, time: context.elapsedSeconds };
+  cameraFrame = runtime.getSystem('camera')?.pose(context) ?? CAMERA;
+  return { ...cameraFrame, time: context.elapsedSeconds };
 }
 
 let runtime = null;
@@ -194,7 +228,7 @@ function startMode(mode) {
     mode,
     fixedRate: FIXED_RATE,
     frame: buildFrame,
-    systems: [input, physicsSystem, spinSystem, player],
+    systems: [input, audio, physicsSystem, spinSystem, player],
   });
   if (rigKind !== 'static') runtime.addSystem(createRig(rigKind));
   runtime.start();
@@ -231,7 +265,7 @@ setInterval(() => {
     `update ${stats.updateMilliseconds.toFixed(2)} ms, render ${stats.renderMilliseconds.toFixed(2)} ms`,
     `fixed steps ${stats.fixedSteps}, alpha ${stats.alpha.toFixed(2)}`,
     `player ${player.state.grounded ? 'on the ground' : 'airborne'}, speed ${player.state.speed.toFixed(1)}`,
-    'WASD walks, Shift runs, Space jumps, arrows look, J/L slide the cube',
+    'WASD walks, Shift runs, Space jumps, arrows look, J/L slide the cube (sound starts at your first key press)',
   ].join('\n');
 }, 250);
 
