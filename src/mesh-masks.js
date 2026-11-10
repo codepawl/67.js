@@ -26,6 +26,7 @@ export const MASK_LIMITS = Object.freeze({
 export const MASK_DEFAULTS = Object.freeze({ gain: 2, angle: 30, rays: 32, seed: 0 });
 
 const RAY_START_OFFSET = 1e-4;
+const GOLDEN_RATIO_CONJUGATE = 0.6180339887498949;
 const DEFAULT_DISTANCE_SHARE = 0.25;
 
 function clampUnit(value) {
@@ -134,9 +135,15 @@ function measureOcclusion(mesh, selectedFlags, { rays, distance, seed }) {
         mesh.positions[vertex * 3 + 1] + normalY * extent * RAY_START_OFFSET,
         mesh.positions[vertex * 3 + 2] + normalZ * extent * RAY_START_OFFSET,
       ];
+      // Stratified rays: the ring of each ray is its own slice of the cosine distribution and the turn follows the golden
+      // ratio, rotated by one random angle per vertex. Plain random rays differ from one vertex to the next by their own
+      // noise, and that noise showed as wrinkles in the mask.
+      const turnOffset = seededRandom(vertex, 0, seed);
       let blocked = 0;
       for (let ray = 0; ray < rays; ray++) {
-        const direction = hemisphereDirection(normalX, normalY, normalZ, seededRandom(vertex, ray * 2, seed), seededRandom(vertex, ray * 2 + 1, seed));
+        const ringShare = (ray + 0.5) / rays;
+        const turnShare = (turnOffset + ray * GOLDEN_RATIO_CONJUGATE) % 1;
+        const direction = hemisphereDirection(normalX, normalY, normalZ, ringShare, turnShare);
         const found = index.project({ origin, direction, maxDistance: reach, maxTriangleTests: MASK_LIMITS.maxTriangleTests - triangleTests });
         triangleTests += found.triangleTests;
         if (found.hit) blocked++;

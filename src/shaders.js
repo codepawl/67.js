@@ -307,6 +307,25 @@ uniform vec4 wearMetal;
 uniform vec4 wearDirt;
 uniform vec4 wearShape;
 uniform vec2 wearDirtShape;
+
+// Integer hash of a lattice cell, so the break-up of the wear edge is the same on every GPU and in material-wear.js.
+float wearCellHash(vec3 cell) {
+  uvec3 lattice = uvec3(ivec3(floor(cell)) + ivec3(32768));
+  uint bits = (lattice.x * 1597334673u) ^ (lattice.y * 3812015801u) ^ (lattice.z * 2798796415u);
+  bits = (bits ^ (bits >> 16u)) * 2246822519u;
+  bits = (bits ^ (bits >> 13u)) * 3266489917u;
+  bits ^= bits >> 16u;
+  return float(bits >> 8u) / 16777215.0;
+}
+
+float wearNoise(vec3 position) {
+  vec3 cell = floor(position);
+  vec3 blend = fract(position);
+  blend = blend * blend * (3.0 - 2.0 * blend);
+  float low = mix(mix(wearCellHash(cell), wearCellHash(cell + vec3(1, 0, 0)), blend.x), mix(wearCellHash(cell + vec3(0, 1, 0)), wearCellHash(cell + vec3(1, 1, 0)), blend.x), blend.y);
+  float high = mix(mix(wearCellHash(cell + vec3(0, 0, 1)), wearCellHash(cell + vec3(1, 0, 1)), blend.x), mix(wearCellHash(cell + vec3(0, 1, 1)), wearCellHash(cell + vec3(1, 1, 1)), blend.x), blend.y);
+  return mix(low, high, blend.z);
+}
 in vec4 shadowPosition;
 in vec2 textureUV, lightmapUV;
 uniform sampler2D lightMap;
@@ -605,12 +624,12 @@ vec3 surroundingsColor(vec3 direction, float roughness) {
 
 // Clear coat: a second dielectric specular lobe over the base. Light that reflects off it never reaches the base.
 // Passing 0.04 as the colour of a fully metallic surface gives the lobe's own reflectance and no diffuse part.
-vec3 clearCoatLayer(vec3 baseRadiance, vec3 normal, vec3 viewDirection, float visibility) {
+vec3 clearCoatLayer(vec3 baseRadiance, vec3 normal, vec3 viewDirection, float visibility, float coatStrength) {
   float roughness = clamp(materialCoat.y, 0.075, 1.0);
-${featureCode("coatReset")}  float coatFresnel = fresnel(max(dot(normal, viewDirection), 0.001), vec3(0.04)).x * materialCoat.x;
+${featureCode("coatReset")}  float coatFresnel = fresnel(max(dot(normal, viewDirection), 0.001), vec3(0.04)).x * coatStrength;
   vec3 mirror = surroundingsColor(reflect(-viewDirection, normal), roughness) * coatFresnel * ambientIntensity;
   vec3 highlight = illuminate(normal, viewDirection, normalize(lightDirection), keyColor * visibility, vec3(0.04), 1.0, roughness);
-  return baseRadiance * (1.0 - coatFresnel) + mirror + highlight * materialCoat.x;
+  return baseRadiance * (1.0 - coatFresnel) + mirror + highlight * coatStrength;
 }
 
 // Sheen: the Charlie distribution with the Neubelt visibility term (KHR_materials_sheen), plus a rim of ambient light.
@@ -688,17 +707,25 @@ ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
     metallic *= sampled.b;
     roughness *= sampled.g;
   }
+  float coatKept = 1.0;
   if (USES_SURFACE_WEAR) {
-    // Bare metal where the wear mask is high, then dirt where the dirt mask is high (material-wear.js).
-    float worn = smoothstep(wearShape.y - wearShape.z, wearShape.y + wearShape.z, vertexWear.x);
+    // Bare metal where the wear mask is high, then dirt where the dirt mask is high (material-wear.js). The per-vertex
+    // weights are scaled by noise, so a chip breaks up where the mask is low and a flat face the mask leaves at 0 stays clean.
+    // Bare metal and dirt have no clear coat over them.
+    float wearBreak = 0.65 * wearNoise(worldPosition * 48.0) + 0.35 * wearNoise(worldPosition * 110.0 + vec3(17.0));
+    float worn = smoothstep(wearShape.y - wearShape.z, wearShape.y + wearShape.z, vertexWear.x * (0.55 + 0.9 * wearBreak));
     color = mix(color, wearMetal.rgb, worn);
     metallic = mix(metallic, wearMetal.w, worn);
     roughness = mix(roughness, wearShape.x, worn);
+    coatKept = 1.0 - worn;
     if (wearShape.w > 0.5) {
-      float dirty = smoothstep(wearDirtShape.x - wearDirtShape.y, wearDirtShape.x + wearDirtShape.y, vertexWear.y);
-      color = mix(color, wearDirt.rgb, dirty);
+      float dirtBreak = 0.65 * wearNoise(worldPosition * 30.0 + vec3(5.0)) + 0.35 * wearNoise(worldPosition * 75.0 + vec3(31.0));
+      float dirty = smoothstep(wearDirtShape.x - wearDirtShape.y, wearDirtShape.x + wearDirtShape.y, vertexWear.y * (0.7 + 0.6 * dirtBreak));
+      // Dirt darkens and tints the layer below instead of replacing it, so paint and metal stay readable through it.
+      color = mix(color, color * wearDirt.rgb * 4.0 + wearDirt.rgb * 0.5, dirty);
       metallic *= 1.0 - dirty;
       roughness = mix(roughness, max(roughness, wearDirt.w), dirty);
+      coatKept *= 1.0 - dirty;
     }
   }
   float splatCavity = 1.0;
@@ -811,7 +838,7 @@ ${featureCode("probeSurroundings")}    radiance += surroundings * reflectance * 
 ${featureCode("irradianceGrid")}  vec3 keyResponse = keyColor / mix(vec3(5.2, 4.7, 4.1), vec3(3.7, 3.4, 2.9), worldMode);
   keyResponse *= mix(daylight, 1.0, worldMode);
 ${featureCode("worldLight")}  if (USES_SHEEN) radiance = sheenLayer(radiance, normal, viewDirection, visibility);
-  if (USES_CLEARCOAT) radiance = clearCoatLayer(radiance, normal, viewDirection, visibility);
+  if (USES_CLEARCOAT) radiance = clearCoatLayer(radiance, normal, viewDirection, visibility, materialCoat.x * coatKept);
   radiance += emission;
 ${featureCode("afterEmission")}${featureCode("worldAfterEmission")}  if (TAG_FLOOR) {
     float contact = 1.0 - 0.45 * exp(-dot(worldPosition.xz, worldPosition.xz) * 1.4);
