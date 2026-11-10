@@ -1,32 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene } from '../src/agent-scene.js';
-import { FILM_FRAMES_PER_SECOND, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm } from '../scripts/soft-body-film.mjs';
+import { FILM_FRAMES_PER_SECOND, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm, unjoinedMinimumDistance } from '../scripts/soft-body-film.mjs';
 
 // Film tests for #696: each film is one recipe baked twice. The frames must match byte for byte, and the numbers a viewer
 // would see (the landing, the dent, the layers of the fold) are measured from the baked vertices, not read off a picture.
 const JELLY_FRAMES = 120;
 const FLAG_FRAMES = 150;
-function unjoinedMinimumDistance(vertices, indices) {
-  const count = vertices.length / 3;
-  const joined = new Set();
-  for (let corner = 0; corner < indices.length; corner += 3) {
-    for (let side = 0; side < 3; side++) {
-      const first = indices[corner + side];
-      const second = indices[corner + (side + 1) % 3];
-      joined.add(Math.min(first, second) * count + Math.max(first, second));
-    }
-  }
-  let minimum = Infinity;
-  for (let first = 0; first < count; first++) {
-    for (let second = first + 1; second < count; second++) {
-      if (joined.has(first * count + second)) continue;
-      minimum = Math.min(minimum, Math.hypot(vertices[first * 3] - vertices[second * 3], vertices[first * 3 + 1] - vertices[second * 3 + 1], vertices[first * 3 + 2] - vertices[second * 3 + 2]));
-    }
-  }
-  return minimum;
-}
-
 function milliseconds(value) {
   return Number(value.toFixed(2));
 }

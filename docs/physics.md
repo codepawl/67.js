@@ -446,7 +446,7 @@ Soft body films (`scripts/soft-body-film.mjs`, `tests/soft-body-film.test.js`): 
 - Flag: a 24 by 24 grid, 1 m tall, hung by its top edge from a pole (`pinTo`) that drops 2.35 m, so the cloth piles on the floor with `selfCollision: true`. The pile is 0.547 m tall. The closest pair of particles not joined by an edge ends 7.9 mm apart; the same film without self collision ends 0.5 mm apart (layers merged).
 - Both films bake to the same bytes in every frame across two runs; the test compares every frame's vertex buffer.
 - Frame time, in milliseconds per solver step (the bake is one call, so this is its total over the steps, on a machine shared with other sessions, so read it as a range): jelly 2.5 to 6.8 ms a step over 120 steps, flag 20 to 37 ms a step over 150 steps (5.5 ms a step without self collision, 625 particles). Sampling a recorded frame for playback costs about 1 to 1.5 ms.
-- `node scripts/render-soft-body-film.mjs <folder>` (run it through gpu-lock) writes a 480 by 270 preview MP4 of each film, stills at contact and at the deepest dent, and `soft-body-film.json` with the same numbers. It needs `npm run build:lib` first. No default changes.
+- `node scripts/render-soft-body-film.mjs <folder>` (run it through gpu-lock) writes a 960 by 540, 60 fps preview MP4 of each film (one video frame per simulation step, so frame N is step N), stills at contact and at the deepest dent, `jelly-cube-compare.png` (both side by side with the measured width and height drawn on it) and `soft-body-film.json` with every number, its unit and its step. It needs `npm run build:lib` first. No default changes.
 
 Blender comparison (`scripts/blender-cloth.py`, Blender 5.2.2, default stiffness, mass set from the same kg/m2; `tests/cloth-blender.test.js`):
 

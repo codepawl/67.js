@@ -32,7 +32,7 @@ export function jellyCubeRecipe() {
     ],
     // A recipe needs authored motion before a render job accepts a start time; the cloth bake reads the same clock.
     motion: { duration: 2, loop: false, tracks: [{ kind: 'node', id: 'clock', property: 'translation', interpolation: 'LINEAR', keyframes: [{ time: 0, value: [0, 0, 0] }, { time: 2, value: [0, 0, 0] }] }] },
-    camera: { eye: [1.2, 0.5, 1.7], target: [0, 0.35, 0] },
+    camera: { eye: [0.45, 0.22, 1.75], target: [0, 0.3, 0] },
     cloth: {
       duration: 2,
       sheets: [{ node: 'cube', softBody: { shape: 0.15, pressure: 1 }, stiffness: 0.9, bend: 0, damping: 2 }],
@@ -51,7 +51,7 @@ export function foldingFlagRecipe({ selfCollision = true } = {}) {
       { id: 'pole', translation: [0, 2.6, 0] },
     ],
     motion: { duration: 3, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes: [{ time: 0, value: [0, 2.6, 0] }, { time: 0.3, value: [0, 2.6, 0] }, { time: 1.6, value: [0, 0.25, 0] }, { time: 3, value: [0, 0.25, 0] }] }] },
-    camera: { eye: [0.4, 1.4, 4.2], target: [0, 1.1, 0] },
+    camera: { eye: [0.7, 0.8, 3.0], target: [0, 0.5, 0] },
     cloth: {
       duration: 3,
       sheets: [{ node: 'flag', pin: ['top'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.9, bend: 0.2, damping: 1 }],
@@ -119,4 +119,26 @@ export function measureLanding(frames, restHeight) {
     }
   }
   return { contact, maxDentFrame: deepest, maxDentDepth: restHeight - deepestHeight, restHeight };
+}
+
+/** Smallest distance between two vertices that no triangle edge joins: the closest two layers of a fold come. */
+export function unjoinedMinimumDistance(vertices, indices) {
+  const count = vertices.length / 3;
+  const joined = new Set();
+  for (let corner = 0; corner < indices.length; corner += 3) {
+    for (let side = 0; side < 3; side++) {
+      const first = indices[corner + side];
+      const second = indices[corner + (side + 1) % 3];
+      joined.add(Math.min(first, second) * count + Math.max(first, second));
+    }
+  }
+  let minimum = Infinity;
+  for (let first = 0; first < count; first++) {
+    for (let second = first + 1; second < count; second++) {
+      if (joined.has(first * count + second)) continue;
+      const distance = Math.hypot(vertices[first * 3] - vertices[second * 3], vertices[first * 3 + 1] - vertices[second * 3 + 1], vertices[first * 3 + 2] - vertices[second * 3 + 2]);
+      minimum = Math.min(minimum, distance);
+    }
+  }
+  return minimum;
 }
