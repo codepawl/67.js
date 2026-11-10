@@ -83,7 +83,7 @@ Both read the same input names as the character controller, use the same `mover`
 
 ### Camera collision
 
-`createCameraClip({ obstacles, ground, padding })` returns a `clipEye(target, eye)` for any orbiting rig. It pulls the eye along the line to the target until it is `padding` (0.25) outside every obstacle box and above the ground, so the camera never ends up inside a wall or under the floor. A body pressed within `padding` of a wall leaves the camera at the target.
+`createCameraClip({ obstacles, ground, padding })` returns a `clipEye(target, eye)` for any orbiting rig. It pulls the eye along the line to the target until it is `padding` (0.25) outside every obstacle box and above the ground, so the camera never ends up inside a wall or under the floor. A body pressed within `padding` of a wall leaves the camera at the target. When the target itself is inside a padded box, the eye collapses onto the target. A ground function that returns a non-finite height counts as height 0.
 
 ```js
 const clip = createCameraClip({ obstacles, ground });
@@ -94,7 +94,7 @@ const camera = createChaseCamera({ subject: car.state, clipEye: clip });
 
 `registerController(kind, factory)` and `registerCameraRig(kind, factory)` add a kind (up to 64 names, built-ins cannot be replaced). A controller factory returns a runtime system with `state.position` and a `fixedUpdate` or `update` function; a rig factory returns a system with `subject` and `pose(context) => { eye, target, up }`. `createController(kind, options)` and `createCameraRigOfKind(kind, options)` build one by name; `listControllerKinds()` and `listCameraRigKinds()` list them (`character`, `vehicle`, `flight`; `follow`, `firstPerson`, `topDown`, `orbit`, `chase`, `sideScroller`).
 
-`replaceController(runtime, name, kind, options)` swaps the controller system for another kind at the same position and yaw. `replaceCameraRig(runtime, name, kind, options)` swaps the rig and keeps its subject and yaw. After a controller swap, point the rig at the new `state`:
+`replaceController(runtime, name, kind, options)` swaps the controller system for another kind at the same position and yaw. `replaceCameraRig(runtime, name, kind, options)` swaps the rig and keeps its subject and yaw but not its input: pass `input` again in `options` if the new rig reads it. After a controller swap, point the rig at the new `state`:
 
 ```js
 const car = replaceController(runtime, 'player', 'vehicle', { input });

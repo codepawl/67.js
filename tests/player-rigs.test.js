@@ -112,6 +112,13 @@ test('the clip keeps the camera above sloped ground', () => {
   assert.ok(eye[1] >= 3.5 - 0.05, `eye y was ${eye[1]}`);
 });
 
+test('the clip treats a non-finite ground height as ground height 0', () => {
+  const clip = createCameraClip({ ground: () => NaN, padding: 0.5 });
+  const eye = clip([0, 5, 0], [0, -4, 6]);
+  assert.ok(eye.every(Number.isFinite), `eye was ${eye}`);
+  assert.ok(eye[1] >= 0.5 - 0.05, `eye y was ${eye[1]}`);
+});
+
 test('the car drives the course on its own controller and chase camera and stops at the wall', () => {
   const clip = createCameraClip({ obstacles: OBSTACLES, ground: courseGround });
   const game = createGame(

@@ -449,6 +449,8 @@ export function createSideScrollerCamera(options = {}) {
 
 // A clipEye for any orbiting rig: pulls the camera in along the line from its target so the eye stays `padding` outside every
 // obstacle box and above the ground, and so never shows the inside of a wall.
+const FALLBACK_GROUND_HEIGHT = 0;
+
 export function createCameraClip(options = {}) {
   const owner = 'createCameraClip';
   const padding = numberOption(owner, 'padding', options.padding, 0.25, 0, 10);
@@ -460,7 +462,11 @@ export function createCameraClip(options = {}) {
   if (typeof ground !== 'function' && !Number.isFinite(ground)) {
     throw new TypeError(`${owner} ground must be a height number or a function (x, z) => height, got ${describe(ground)}.`);
   }
-  const groundHeight = (x, z) => (typeof ground === 'function' ? ground(x, z) : ground);
+  // A ground function that returns NaN or Infinity would make every comparison false and silently turn clipping off.
+  const groundHeight = (x, z) => {
+    const height = typeof ground === 'function' ? ground(x, z) : ground;
+    return Number.isFinite(height) ? height : FALLBACK_GROUND_HEIGHT;
+  };
 
   // Fraction of the segment target -> eye that is free of the padded box (1 when it never enters it).
   function freeFraction(target, offset, box) {
