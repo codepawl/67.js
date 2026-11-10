@@ -134,6 +134,35 @@ Without `clip` it writes the current pose: pattern and imported textures, skins,
 With `clip` (imported assets) it writes that source clip, translation, rotation, scale and weights, on the source skeleton, so the scene must carry no animation, node overrides or motion.
 `node scripts/smoke-glb-export.mjs cpu` runs a patterned recipe, the robot with IK and its Walking clip through the real server and leaves the files in `artifacts/`.
 
+## OBJ and STL
+
+`exportObj(parts, { mtlFilename })` returns `{ obj, mtl }` as text, and `exportStl(parts)` returns a binary STL `ArrayBuffer`.
+Both take the same `parts` as `exportGlb`, apply each part matrix so every vertex is in world space, and write the same bytes for the same input.
+Save the OBJ and MTL side by side; the OBJ names the MTL by `mtlFilename` (default `model.mtl`, a plain file name ending in `.mtl`).
+
+They live in the `@codepawlhq/67js/addons/export-mesh` addon, so the core bundle does not grow.
+
+```js
+import { exportObj, exportStl } from '@codepawlhq/67js/addons/export-mesh';
+
+const { obj, mtl } = exportObj(parts);
+const stl = exportStl(parts);
+```
+
+| Format | Written | Not written |
+| --- | --- | --- |
+| OBJ | One `o` object per part, positions, UVs and normals when the geometry has them, faces as triangles | Textures, lights, cameras, animation, skins, morph weights |
+| MTL | One material per distinct base color, emission, roughness and metallic: `Kd`, `Ke` (when emission is positive), `Pr`, `Pm`, and `d` (opacity) for mask, blend and add materials | Texture maps, alpha cutoff, layers, patterns |
+| STL | Triangles with face normals, 80 byte header, no color | Everything but shape |
+
+Y stays up and units stay as authored (67js uses meters); set the axis and unit in the importer or slicer.
+A mirrored part (negative scale) has its winding swapped so faces still point outward.
+A skinned part exports its bind shape.
+Export stops with an error past `MAX_MESH_EXPORT_TRIANGLES` (1,000,000), and names the field it rejected: positions, indices, `part.matrix`, and for OBJ also `geometry.uvs`, `geometry.normals` and the `material` fields.
+Colors in the MTL are the linear base colors of the parts.
+Blender 5.2 imports both files with the same triangle count (`File > Import > Wavefront (.obj)` and `STL (.stl)`).
+These two functions are library calls; the `scene_export_glb` tool still writes GLB only.
+
 ## Limits
 
 Recipe motion tracks are not converted to clips, and an imported clip cannot be combined with IK or node overrides in the MCP tool.

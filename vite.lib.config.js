@@ -66,6 +66,7 @@ export default defineConfig({
         vegetation: 'src/vegetation.js',
         terrain: 'src/terrain.js',
         heightfield: 'src/heightfield.js',
+        'export-mesh': 'src/export-mesh.js',
         navmesh: 'src/navmesh.js',
         grass: 'src/grass.js',
         clutter: 'src/clutter.js',
