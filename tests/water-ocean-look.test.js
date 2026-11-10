@@ -67,6 +67,7 @@ test('the ocean foam of a rough sea reaches the water material as 1 - foam', () 
 test('wind ripples break the glint into facets and the foam into streaks', () => {
   const shader = createFragmentShader(['water', 'vertexColors']);
   assert.match(shader, /vec2 waterDetailSlope\(/);
+  assert.match(shader, /float foamBand = 0\.13 \+ 1\.5 \* fwidth\(foamDensity\)/);
   assert.match(shader, /rippleTilt\.xz \+= detailSlope/);
-  assert.match(shader, /waterFoam = smoothstep\(0\.4, 0\.58, foamMask/);
+  assert.match(shader, /terrainNoise\(crestPosition \* vec2\(3\.1, 14\.0\)/);
 });

@@ -319,22 +319,27 @@ vec3 terrainNoise(vec2 position) {
     (upper - lower) * derivative.y);
 }
 
-// Wind ripples the mesh is too coarse to carry: six travelling waves from 2.6 m down to 0.2 m, about 0.12 rms slope in all, which
-// is what breaks a sun glint into facets. A wave fades out once a pixel is wider than a quarter of its length, so far water does
-// not shimmer; the slope variance the faded waves took with them comes back as lostVariance, to widen the glint instead.
+// Wind ripples the mesh is too coarse to carry: eight travelling waves from 3 m down to 0.15 m, about 0.15 rms slope in all, which
+// is what breaks a sun glint into facets. The wavelengths step by an irrational ratio and the directions by the golden angle, and
+// each wave's phase and strength drift with slow noise, so no pair of waves repeats the same blob pattern over the water. A wave
+// fades out once a pixel is wider than a quarter of its length, so far water does not shimmer; the slope variance the faded waves
+// took with them comes back as lostVariance, to widen the glint instead.
 vec2 waterDetailSlope(vec2 position, float footprint, out float lostVariance) {
   vec2 slope = vec2(0.0);
   lostVariance = 0.0;
-  float wavenumber = 2.4;
+  float wavenumber = 2.1;
   float angle = 0.4;
-  for (int index = 0; index < 6; index++) {
+  for (int index = 0; index < 8; index++) {
     float visible = 1.0 - smoothstep(0.08, 0.25, footprint * wavenumber / 6.2831853);
-    float phase = dot(position, vec2(cos(angle), sin(angle))) * wavenumber + time * sqrt(9.81 * wavenumber) + float(index) * 1.7;
-    float amplitude = 0.11 * pow(wavenumber / 2.4, -0.5);
-    slope += vec2(cos(angle), sin(angle)) * cos(phase) * amplitude * visible;
+    vec2 direction = vec2(cos(angle), sin(angle));
+    float drift = terrainNoise(position * 0.21 + float(index) * 9.17).x;
+    float strength = 0.35 + 1.3 * terrainNoise(position * 0.13 + float(index) * 23.9 + 4.0).x;
+    float phase = dot(position, direction) * wavenumber + time * sqrt(9.81 * wavenumber) + float(index) * 1.7 + drift * 0.5;
+    float amplitude = 0.085 * pow(wavenumber / 2.1, -0.3) * strength;
+    slope += direction * cos(phase) * amplitude * visible;
     lostVariance += 0.5 * amplitude * amplitude * (1.0 - visible);
-    wavenumber *= 1.65;
-    angle += 2.399963;
+    wavenumber *= 1.7320508;
+    angle += 2.399963 + 0.08 * drift;
   }
   return slope;
 }
@@ -367,16 +372,25 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
     vec3 crestNormal = normal;
     normal = normalize(normal + rippleTilt);
     // The body is deeper at grazing angles; the foam mask (the ocean's, stored as 1 - foam in the sky visibility channel) turns it white.
-    // Streaks: only the heaviest half of the ocean's foam counts (about 5% of a rough sea), and noise breaks it up by noise stretched along the crest, so a patch has lacy edges and holes rather than a soft blob.
+    // Foam: the mask is the heavy half of the ocean's foam (about 5% of a rough sea). Three octaves of noise stretched along the crest
+    // make lace: the core stays bright and solid, the edge dissolves into holes and thin veins, and it grows less opaque outwards.
+    // The threshold has a soft band at least one pixel wide (fwidth), so the edge is smooth and does not follow the mesh triangles.
     vec2 crestAcross = normalize(crestNormal.xz + vec2(0.0001));
     vec2 crestAlong = vec2(-crestAcross.y, crestAcross.x);
-    vec2 streakPosition = vec2(dot(worldPosition.xz, crestAlong) * 0.6, dot(worldPosition.xz, crestAcross) * 3.2);
-    float streaks = terrainNoise(streakPosition).x * 0.6 + terrainNoise(streakPosition * 2.9 + 7.3).x * 0.4;
+    vec2 crestPosition = vec2(dot(worldPosition.xz, crestAlong), dot(worldPosition.xz, crestAcross));
+    float broadLace = terrainNoise(crestPosition * vec2(0.45, 2.4)).x;
+    float midLace = terrainNoise(crestPosition * vec2(1.3, 6.5) + 7.3).x;
+    float fineLace = terrainNoise(crestPosition * vec2(3.1, 14.0) + 3.9).x;
+    float lace = broadLace * 0.5 + midLace * 0.3 + fineLace * 0.2;
     float foamMask = clamp(2.0 * (1.0 - vertexSkyVisibility) - 1.0, 0.0, 1.0);
-    waterFoam = smoothstep(0.4, 0.58, foamMask * 1.25 + (streaks - 0.5) * 0.7);
+    float foamDensity = foamMask * 1.25 + (lace - 0.5) * 0.9;
+    float foamBand = 0.13 + 1.5 * fwidth(foamDensity);
+    float foamBody = smoothstep(0.5 - foamBand, 0.5 + foamBand, foamDensity) * smoothstep(0.03, 0.25, foamMask);
+    float foamVeins = pow(1.0 - abs(2.0 * midLace - 1.0), 3.0) * smoothstep(0.45, 0.9, foamMask) * (1.0 - foamBody) * 0.32;
+    waterFoam = max(foamBody * mix(0.5, 1.0, smoothstep(0.3, 0.95, foamMask)) * (0.78 + 0.22 * smoothstep(0.25, 0.75, fineLace * 0.6 + midLace * 0.4)), foamVeins);
     float grazing = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
-    color = mix(color, vec3(0.04, 0.12, 0.16), grazing * 0.85);
-    color = mix(color, vec3(0.92, 0.95, 0.97), waterFoam);
+    color = mix(color, vec3(0.0137, 0.147, 0.195), grazing * 0.85);
+    color = mix(color, vec3(0.92, 0.95, 0.97) * (0.68 + 0.32 * (fineLace * 0.5 + midLace * 0.5)), waterFoam);
     roughness = mix(0.16, 0.8, waterFoam);
   }
   if (CANOPY_TAG) {
@@ -441,11 +455,11 @@ void mossMasks(vec3 normal, float amount, out float sharpMask, out float softMas
     vec3 mirrorDirection = reflect(-viewDirection, normal);
     mirrorDirection.y = max(mirrorDirection.y, 0.02);
     vec3 skyColor = ENVIRONMENT_ENABLED ? surroundingsColor(mirrorDirection, 0.05) : mix(vec3(0.12, 0.24, 0.28), vec3(0.40, 0.63, 0.78), clamp(mirrorDirection.y, 0.0, 1.0)) * daylight;
-    radiance = mix(radiance * 0.6, skyColor * ambientIntensity, clamp(reflectivity, 0.0, 1.0));
+    radiance = mix(radiance * 0.6 + color * ambientIntensity * daylight * 1.7, skyColor * ambientIntensity, clamp(reflectivity, 0.0, 1.0));
     // Sun glint: a narrow lobe around the mirror direction, the width of open water slopes, bright enough to bloom.
     vec3 halfVector = normalize(normalize(lightDirection) + viewDirection);
-    float glintSharpness = 1.0 / (1.0 / 900.0 + waterLostVariance);
-    float glintShape = pow(max(dot(normal, halfVector), 0.0), glintSharpness) * (glintSharpness + 2.0) / 902.0;
+    float glintSharpness = 1.0 / (1.0 / 500.0 + waterLostVariance);
+    float glintShape = pow(max(dot(normal, halfVector), 0.0), glintSharpness);
     float glintFresnel = 0.02 + 0.98 * pow(1.0 - max(dot(halfVector, viewDirection), 0.0), 5.0);
     radiance += vec3(1.0, 0.9, 0.7) * glintShape * (0.5 + 40.0 * glintFresnel) * 6.0 * keyResponse * (1.0 - waterFoam);
     radiance += vec3(0.85, 0.9, 0.95) * waterFoam * (max(dot(normal, normalize(lightDirection)), 0.0) * keyResponse + 0.35 * daylight * ambientIntensity);

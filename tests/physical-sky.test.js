@@ -86,7 +86,7 @@ test('ozone deepens twilight blue and sunDisc adds the solar disc to the sky map
 
   const withDisc = agentEnvironmentMap(skyEnvironment({ sunElevation: 30, sunDisc: true }));
   const withoutDisc = agentEnvironmentMap(skyEnvironment({ sunElevation: 30, sunDisc: false }));
-  const peak = values => Math.max(...values);
+  const peak = values => values.reduce((largest, value) => Math.max(largest, value), 0);
   assert.ok(peak(withDisc.data) > peak(withoutDisc.data) * 1.2);
   assert.throws(() => skyEnvironment({ ozone: -1 }), /environment\.sky\.ozone/);
   assert.throws(() => skyEnvironment({ sunDisc: 1 }), /environment\.sky\.sunDisc/);
