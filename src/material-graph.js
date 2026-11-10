@@ -1,5 +1,5 @@
 import { MATERIAL_GRAPH_LIMITS, MATERIAL_GRAPH_OUTPUTS, MATERIAL_GRAPH_OPERATORS } from './agent-scene-capabilities.js';
-import { clampUnit, smoothStep, wrapCell, cellularNoise, linearToSrgbByte, createImage, normalMapFromHeightFunction } from './material-texture-kit.js';
+import { clampUnit, smoothStep, wrapCell, hashCell, cellularNoise, linearToSrgbByte, createImage, normalMapFromHeightFunction } from './material-texture-kit.js';
 
 // A bounded material node graph. Like a field expression (src/mesh-fields.js), a graph is data and never code: it is
 // walked as plain objects against a fixed table of operators, checked against its limits before any pixel is
@@ -433,8 +433,95 @@ function compileCurve(node, state, depth) {
   return liftComponentwise([compileNode(settings.value, state, depth + 1)], remap);
 }
 
+const COORDINATE_SPACES = ['generated', 'object', 'world'];
+
+// Where a texel sits on the surface. A baked texture is projected onto the mesh (box mapping along the object axes, or
+// its UVs), so the two axes it knows are the only ones a texel can report: the third is 0. "generated" is the unit tile,
+// "object" and "world" are metres across the tile (u * size). Box mapping reads the placed, scaled position, so the
+// two are the same here.
+function compileCoordinate(node, state) {
+  const space = oneOf(node.coord, COORDINATE_SPACES, 'coord');
+  if (Object.keys(node).length !== 1) throw graphError('coord takes no other fields.');
+  const metres = space === 'generated' ? 1 : state.size;
+  return vectorValue(u => u * metres, (u, v) => v * metres, () => 0);
+}
+
+const MAPPING_FIELDS = ['vector', 'scale', 'offset', 'rotate'];
+
+function mappingTriple(value, fallback, label) {
+  if (value === undefined) return fallback;
+  const triple = typeof value === 'number' ? [value, value, value] : value;
+  if (!Array.isArray(triple) || triple.length !== 3 || !triple.every(finiteLiteral)) throw graphError(`mapping "${label}" is a number or [x, y, z] of finite numbers.`);
+  return triple;
+}
+
+// Blender's Mapping node (point): scale, then rotate around Z, then move. The vector defaults to {"coord":"generated"}.
+function compileMapping(node, state, depth) {
+  const settings = textureSettings(node, 'mapping', MAPPING_FIELDS);
+  const [scaleX, scaleY, scaleZ] = mappingTriple(settings.scale, [1, 1, 1], 'scale');
+  const [offsetX, offsetY, offsetZ] = mappingTriple(settings.offset, [0, 0, 0], 'offset');
+  const rotation = settings.rotate ?? 0;
+  if (!finiteLiteral(rotation)) throw graphError('mapping "rotate" is an angle in radians around Z.');
+  const input = compileNode(settings.vector ?? { coord: 'generated' }, state, depth + 1);
+  if (input.kind !== 'vector') throw graphError('mapping "vector" needs a vector such as {"coord":"generated"}.');
+  const [inputX, inputY, inputZ] = input.parts;
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  const rotatedX = (u, v) => inputX(u, v) * scaleX * cosine - inputY(u, v) * scaleY * sine + offsetX;
+  const rotatedY = (u, v) => inputX(u, v) * scaleX * sine + inputY(u, v) * scaleY * cosine + offsetY;
+  return vectorValue(rotatedX, rotatedY, (u, v) => inputZ(u, v) * scaleZ + offsetZ);
+}
+
+const BRICK_OUTPUTS = ['mortar', 'edge', 'cell'];
+const BRICK_COST = 4;
+
+// Blender's Brick Texture, laid in a running bond. Whole columns and an even number of rows keep it tileable.
+function compileBrick(node, state, depth) {
+  const settings = textureSettings(node, 'brick', ['columns', 'rows', 'mortar', 'offset', 'seed', 'output', 'at']);
+  const columns = integerInRange(settings.columns ?? 8, 1, NOISE_SCALE_LIMIT, 'brick columns');
+  const rows = integerInRange(settings.rows ?? 8, 2, NOISE_SCALE_LIMIT, 'brick rows');
+  if (rows % 2 !== 0) throw graphError('brick rows must be even so the bond tiles.');
+  const seed = integerInRange(settings.seed ?? 0, 0, MAX_SEED, 'brick seed');
+  const output = oneOf(settings.output ?? 'mortar', BRICK_OUTPUTS, 'brick output');
+  const mortar = settings.mortar ?? 0.05;
+  const offset = settings.offset ?? 0.5;
+  if (!finiteLiteral(mortar) || mortar < 0 || mortar > 0.5) throw graphError('brick mortar is the joint width as a share of a brick, from 0 to 0.5.');
+  if (!finiteLiteral(offset) || offset < 0 || offset >= 1) throw graphError('brick offset is the shift of every other row as a share of a brick, from 0 up to 1.');
+  state.cost += BRICK_COST;
+  const [positionU, positionV] = compilePosition(settings, state, depth);
+  return scalarValue((u, v) => {
+    const scaledV = positionV(u, v) * rows;
+    const row = Math.floor(scaledV);
+    const scaledU = positionU(u, v) * columns + (wrapCell(row, 2) === 1 ? offset : 0);
+    const column = Math.floor(scaledU);
+    if (output === 'cell') return hashCell(wrapCell(column, columns), wrapCell(row, rows), seed) / 4294967296;
+    const fractionU = scaledU - column;
+    const fractionV = scaledV - row;
+    const distance = Math.min(fractionU, 1 - fractionU, fractionV, 1 - fractionV);
+    if (output === 'edge') return clampUnit(distance * 2);
+    return mortar === 0 ? 0 : 1 - smoothStep(mortar * 0.5, mortar, distance);
+  });
+}
+
+const WHITE_NOISE_OUTPUTS = ['value', 'color'];
+
+// A random value per cell of a scale by scale grid; the cells wrap, so it tiles. "color" is three independent values.
+function compileWhiteNoise(node, state, depth) {
+  const settings = textureSettings(node, 'whiteNoise', ['scale', 'seed', 'output', 'at']);
+  const scale = integerInRange(settings.scale ?? 16, 1, NOISE_SCALE_LIMIT, 'whiteNoise scale');
+  const seed = integerInRange(settings.seed ?? 0, 0, MAX_SEED, 'whiteNoise seed');
+  const output = oneOf(settings.output ?? 'value', WHITE_NOISE_OUTPUTS, 'whiteNoise output');
+  const [positionU, positionV] = compilePosition(settings, state, depth);
+  const channel = channelIndex => (u, v) => {
+    const cellX = wrapCell(Math.floor(positionU(u, v) * scale), scale);
+    const cellY = wrapCell(Math.floor(positionV(u, v) * scale), scale);
+    return hashCell(cellX, cellY, (seed + channelIndex * 7919) | 0) / 4294967296;
+  };
+  return output === 'color' ? vectorValue(channel(1), channel(2), channel(3)) : scalarValue(channel(0));
+}
+
 const TEXTURE_COMPILERS = new Map([
-  ['noise', compileNoise], ['voronoi', compileVoronoi], ['wave', compileWave], ['checker', compileChecker], ['gradient', compileGradient],
+  ['noise', compileNoise], ['whiteNoise', compileWhiteNoise], ['brick', compileBrick], ['voronoi', compileVoronoi], ['wave', compileWave], ['checker', compileChecker], ['gradient', compileGradient],
 ]);
 
 function compileNode(node, state, depth) {
@@ -456,6 +543,8 @@ function compileNode(node, state, depth) {
   if (keys.length !== 1) throw graphError(`a node holds exactly one operator; got ${keys.length}.`);
   const name = keys[0];
   if (name === 'uv') return compileCoordinates(node);
+  if (name === 'coord') return compileCoordinate(node, state);
+  if (name === 'mapping') return compileMapping(node, state, depth);
   if (name === 'vec') return compileVector(node, state, depth);
   if (name === 'ramp') return compileRamp(node, state, depth);
   if (name === 'layer') return compileLayer(node, state, depth);
@@ -469,15 +558,15 @@ function compileNode(node, state, depth) {
 const SCALAR_OUTPUTS = ['roughness', 'metallic', 'height', 'opacity', 'clearcoat', 'transmission'];
 
 /**
- * Check a graph and compile each output. Limits on nodes, depth and work per pixel are enforced here, before any
+ * Check a graph and compile each output. `size` is the metres one texture tile covers, which object and world coordinates report. Limits on nodes, depth and work per pixel are enforced here, before any
  * pixel is evaluated. Returns { outputs: { name: compiled }, nodeCount, cost }.
  */
-export function compileMaterialGraph(graph) {
+export function compileMaterialGraph(graph, { size = 1 } = {}) {
   if (!isPlainObject(graph)) throw graphError(`graph must be an object with outputs: ${MATERIAL_GRAPH_OUTPUTS.join(', ')}.`);
   onlyKeys(graph, MATERIAL_GRAPH_OUTPUTS, 'graph');
   const names = Object.keys(graph);
   if (names.length === 0) throw graphError(`graph needs at least one output: ${MATERIAL_GRAPH_OUTPUTS.join(', ')}.`);
-  const state = { nodeCount: 0, cost: 0 };
+  const state = { nodeCount: 0, cost: 0, size };
   const outputs = {};
   for (const name of names) {
     outputs[name] = compileNode(graph[name], state, 0);
@@ -526,8 +615,8 @@ function writeColor(data, offset, channels) {
 }
 
 /** Bake a normalized graph into texture descriptors, one for each output the graph has. Deterministic. */
-export function bakeMaterialGraph(graph, { resolution, bump }) {
-  const compiled = compileMaterialGraph(graph);
+export function bakeMaterialGraph(graph, { resolution, bump, size = 1 }) {
+  const compiled = compileMaterialGraph(graph, { size });
   checkMaterialGraphWork(compiled, resolution);
   const { color, roughness, metallic, emission, height, opacity, clearcoat, transmission, aov } = compiled.outputs;
   const pixelCount = resolution * resolution;

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.18.0
+
+- Clip layers on an imported asset take a `strip` with start, scale, repeat, blend in and out, extend and blend mode, so a walk repeated three times can crossfade into an idle (#693)
+- Particle emitters take points from a mesh surface (weighted by area), its vertices or its closed volume, push them along the normal, and draw each particle as one of up to 8 listed nodes with a random or surface-aligned rotation (#695)
+- `scene_apply` takes `bake-motion`: it samples nodes over a range into keyframe tracks (tracks, IK, constraints, drivers, ragdoll and rigid bodies), optionally drops keys within a position and angle tolerance, and removes the sources it replaced, so the motion exports as a clip (#697)
+- `sdf` geometry meshes a tree of sphere, box, round box, capsule, cylinder and torus shapes with union, subtract, intersect, smooth blends and offset by surface nets, so blobby bodies and rounded joins need no hand modeling (#700)
+- `curve` geometry takes `kind` poly or nurbs, several `splines`, arc, spiral and star `shape`s and a `trim`, so rails, ropes and a growing vine need no hand-placed points (#701)
+- `uv_project` (cube, cylinder, sphere) and `uv_pack` mesh edits write and pack UVs with one texel density (#702)
+- `mesh_edit` gains `poke`, `dual`, `tris_to_quads`, `symmetrize`, `scale_elements` and `extrude_edges` (#703)
+- Add a `build` mesh modifier that reveals faces over `start` and `length` frames in index, seeded random or axis order, with `reverse` (#704).
+- `scene_restore` takes `revision` to undo the last few `scene_apply` edits in one call, with no checkpoint made first (#744)
+- Docs: add an FAQ page for the questions from the launch: three.js, size and speed, tokens, what the agent sees, undo and diffs (#745).
+- Set `SIXTYSEVENJS_MCP_LOG=<file>` to log each MCP tool call (tool, duration, ok, result size, never arguments), and run `scripts/summarize-mcp-log.mjs` for calls, error rate and median duration per tool (#746)
+- Depth precision by default (#751, phase 1 of 2): the colour pass draws with reversed-Z and a 32-bit float depth buffer wherever `EXT_clip_control` exists, at any far / near ratio, from the first frame; the 16-bit depth buffer is gone; without the extension the depth buffer is 24-bit and the near plane fits the visible bounds when the camera left near unset; `reversedDepth: false` opts out; `installDepthPrecision`, `hasFarOverlap` and `requestReversedDepth` are removed (use `installCoplanarDiagnostics` for the warning); `bench/flicker/index.html` is a viewer with a flicker probe
+- Flush faces stop flickering by default (#751, phase 2, step 1 of 2): faces that lie on one plane or a few millimetres apart, inside one mesh or across parts, are ranked per triangle and drawn with a small view-space depth bias, so the face in front wins at every distance and on every depth format; agent scenes do it unless `environment.resolveCoplanar` is `false`, a renderer does it with `resolveCoplanar: resolveFlushParts`; `decal` and `depthLayer` use the same bias; what cannot be ranked (more than 15 faces stacked on one plane, double-sided faces a gap apart) comes back as a `coplanar-overlap` warning with a `reason`; `coplanarLayers`, `resolveCoplanarParts` and `EXACT_FLUSH_DISTANCE` are removed; `bench/flicker` has trap scenes (`?trap=`, `probe.mjs --traps`)
+- Hidden flush faces are cut away (#751, phase 2, step 2 of 2): where an opaque face covers another on exactly the same plane (1 cm2 or more), the covered part is cut out of the copy the hidden face draws with, every vertex array interpolated, so a stack of any depth on one plane stops flickering and no longer reports `rank-overflow`; parts and their geometry stay as they are (`flushOrderOf(part).geometry` holds the cut copy), instances of one geometry share a cut, and the path tracer traces the cut geometry; a face under a blended or masked face, or a double-sided face under a one-sided one, is still ranked; `bench/flicker` gains the `plaque-closeup-0.5m` trap with an open-pixel count
+- Near-flush faces are cut too (#751): an opaque face in front of another by at most a thousandth of the side of their shared area (from 1 mm to 1 cm) cuts the face behind it, as a flush face does, instead of taking a rank; the Melbourne city model, whose stacked blocks nest facades 5 to 17 mm apart up to 17 deep, now reports no `rank-overflow`
+- scene_inspect and scene_capabilities take the inputs Haiku sent in the bench: short mesh edit branch names (meshEdit.inset), dotted fields (environment.spotLights), near topic names (uvs, scene.terrain), source nodes without a mesh of their own, includeBounds with kind hierarchy; an unwalkable path start names the nearest walkable point (#761)
+- scene_inspect with a node ID lists the parts below it and tags each with `fromNode`; a node with no part below it, such as a skeleton joint, returns its transform (parent, joint flag, local translation, rotation and scale, rest world position) instead of an error (#761)
+- `67js/addons/runtime` adds `createRuntime`, a live game loop with fixed, variable or interpolated steps, ordered pluggable systems, pause on a hidden tab and a frame-time readout (#770)
+
 ## 0.17.0
 
 - bake.gridFog: the sun the fog scatters is dimmed by the fog between it and the sun (#543)

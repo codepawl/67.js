@@ -1,6 +1,6 @@
 {
   "name": "@codepawlhq/67js",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": false,
   "type": "module",
   "description": "3D engine that AI agents drive: an MCP server, PNG previews and CPU or GPU export to images and video",
@@ -179,7 +179,7 @@
     "smoke:agent-review-close": "node scripts/smoke-agent-review-close.mjs",
     "smoke:film-physics": "node scripts/smoke-film-physics.mjs",
     "plugin:sync": "node scripts/sync-plugin-version.mjs",
-    "publish:ci":"node scripts/publish-ci.mjs",
+    "publish:ci": "node scripts/publish-ci.mjs",
     "smoke:character": "node scripts/smoke-character.mjs",
     "smoke:modeling": "node scripts/smoke-modeling.mjs",
     "smoke:material-maps": "node scripts/smoke-material-maps.mjs",

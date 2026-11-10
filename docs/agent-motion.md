@@ -308,7 +308,10 @@ Not covered yet: `use_*` switches on `child_of`, `damped_track`, bone sub-target
 `motion.drivers` sets one node component or material property from a bounded expression, at most 32. A target is
 `{ "kind": "node", "id", "property": "translation" | "rotation" | "scale", "component": "x" | "y" | "z" }` (rotation is Euler
 XYZ in degrees) or `{ "kind": "material", "id", "property" }` for `emission`, `metallic` and `roughness`, or with a
-`component` for `color` and `emissiveColor` (`x`, `y`, `z` for red, green, blue). A driven property cannot also have a track.
+`component` for `color` and `emissiveColor` (`x`, `y`, `z` for red, green, blue). Two more targets set a look value:
+`{ "kind": "light", "id": "point:0", "property": "intensity" }` (or `color` with a `component`, where the other components keep the
+recipe colour) and `{ "kind": "morph", "id": "<shape key>", "property": "weight" }`. A driven property cannot also have a track.
+Camera fields are not driven yet.
 
 An expression is JSON data and is never run as code. It is the motion context of the one expression language described in
 [field expressions](mesh.md#field-expressions): the same operators with the same results, the same syntax, and limits of 64
@@ -316,6 +319,33 @@ parts and 8 levels. Where a field reads mesh attributes, a driver reads `"time"`
 `{ "node", "property", "component", "space" }`, for example `{ "mul": ["time", 2] }`; vectors, attributes and noise are field
 inputs and are rejected here with a message that says so. `sin` and `cos` take radians. One difference remains: `div` by zero
 gives 0 in a field but is a non-finite result in a driver, which is an error, so a mistaken driver is reported.
+
+### Variables and custom properties
+
+Besides `"time"` and a node read (a transform channel), an expression reads three more variables:
+
+- `{ "custom": { "node", "name", "component" } }`: a custom property. `component` (`x`, `y`, `z`) is required for a vector or colour and
+  not allowed for a number.
+- `{ "distance": { "from", "to" } }`: the world distance between two nodes, in metres.
+- `{ "rotationDifference": { "from", "to" } }`: the angle between their world rotations, 0 to 180 degrees.
+
+`motion.properties` declares custom properties on nodes and bones (any node ID of the recipe or of an imported rig), at most 32:
+`{ "node", "name", "kind": "number" | "vector" | "color", "value", "min", "max", "keys" }`. A number defaults to 0 within
+-1e6 to 1e6, a colour to 0 to 1. Give either a constant `value` or up to 16 `keys` of `{ "time", "value" }` with rising times: the
+property is linear between them and holds the first and last value outside. Every value must lie inside `min` and `max`. One
+property can drive several parts:
+
+```json
+{ "duration": 2, "tracks": [],
+  "properties": [{ "node": "lid", "name": "open", "min": 0, "max": 1, "keys": [{ "time": 0, "value": 0 }, { "time": 2, "value": 1 }] }],
+  "drivers": [
+    { "target": { "kind": "node", "id": "lid", "property": "rotation", "component": "x" }, "expression": { "mul": [{ "custom": { "node": "lid", "name": "open" } }, 90] } },
+    { "target": { "kind": "light", "id": "point:0", "property": "intensity" }, "expression": { "sub": [1, { "custom": { "node": "lid", "name": "open" } }] } }
+  ] }
+```
+
+Only driver expressions read properties; a constraint `influence` expression does not yet. A property is a pure function of the
+time, so seeking gives the same value as playing to it.
 
 ### Evaluation order
 
