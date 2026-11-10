@@ -13,6 +13,12 @@ import { closedRoomShare, CLOSED_ROOM_SHARE } from './closed-room.js';
 import { depthLayerOf, MAXIMUM_DEPTH_LAYER } from './depth-layer.js';
 import { armatureNodes, bakeRigExport, bindSkins, createSkinStages, normalizeArmatures, publishSkinPoses, restWorldMatrix, rigReport, stageSkinPoses, transformedBounds, withoutArmatureNodes } from './rig.js';
 export { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS };
+
+/**
+ * Earlier revisions a session keeps for scene_restore with a revision. Each one holds a recipe copy (a few kilobytes) and
+ * shares geometry buffers with the live scene, so four cost little; their geometry still counts in the allocation budget.
+ */
+export const REVISION_HISTORY_LIMIT = 4;
 export { normalizeAgentLook, resolveAgentShadow } from './agent-look.js';
 export { describeApplication } from './agent-apply-report.js';
 export {
@@ -1163,6 +1169,18 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
   let objectReflectionCache = null;
   const skinCache = new Map();
   const checkpoints = new Map();
+  // The states before the last edits, oldest first, each with the revision number it had.
+  const revisionHistory = [];
+
+  function snapshotState() {
+    return {
+      recipe: authoredRecipe(state.recipe),
+      geometryRecords: new Map(state.geometryRecords),
+      materialHandles: new Map(state.materialHandles),
+      restParts: state.restParts,
+      sourceRestParts: state.sourceRestParts,
+    };
+  }
 
   function drawnNodeGeometry(id, label) {
     identifier(id);
@@ -1177,8 +1195,9 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
 
   function ownedGeometryRecords() {
     const records = new Set(state?.geometryRecords.values() ?? []);
-    for (const checkpoint of checkpoints.values()) {
-      for (const record of checkpoint.geometryRecords.values()) {
+    const snapshots = [...checkpoints.values(), ...revisionHistory.map(entry => entry.snapshot)];
+    for (const snapshot of snapshots) {
+      for (const record of snapshot.geometryRecords.values()) {
         records.add(record);
       }
     }
@@ -1197,24 +1216,34 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     if (state) {
       retainedMatrices(state.parts);
     }
-    const ownedRecords = ownedGeometryRecords();
-    const availableRecords = new Map();
-    for (const record of ownedRecords) {
-      availableRecords.set(record.signature, record);
+    const planGeometry = () => {
+      const ownedRecords = ownedGeometryRecords();
+      const availableRecords = new Map();
+      for (const record of ownedRecords) {
+        availableRecords.set(record.signature, record);
+      }
+      const plans = recipe.geometries.map(definition => {
+        const signature = JSON.stringify(definition);
+        const preferredRecord = preferred?.geometryRecords.get(definition.id);
+        const activeRecord = state?.geometryRecords.get(definition.id);
+        const existing = [preferredRecord, activeRecord, availableRecords.get(signature)]
+          .find(record => record?.signature === signature);
+        return { definition, signature, existing, estimatedVertices: definition.type === 'asset' ? 0 : geometryEstimate(definition) };
+      });
+      const residentStats = geometryStats(ownedRecords);
+      const pendingVertices = plans.filter(plan => !plan.existing).reduce((total, plan) => total + plan.estimatedVertices, 0);
+      const overBudget = residentStats.vertices + pendingVertices > limits.maxVertices ||
+        residentStats.geometryBytes + pendingVertices * 56 > limits.maxGeometryBytes;
+      return { plans, residentStats, pendingVertices, overBudget };
+    };
+    let planned = planGeometry();
+    // Automatic undo history never blocks an edit: drop the oldest kept revisions before refusing for budget.
+    while (planned.overBudget && revisionHistory.length > 0) {
+      revisionHistory.shift();
+      planned = planGeometry();
     }
-    const plans = recipe.geometries.map(definition => {
-      const signature = JSON.stringify(definition);
-      const preferredRecord = preferred?.geometryRecords.get(definition.id);
-      const activeRecord = state?.geometryRecords.get(definition.id);
-      const existing = [preferredRecord, activeRecord, availableRecords.get(signature)]
-        .find(record => record?.signature === signature);
-      return { definition, signature, existing, estimatedVertices: definition.type === 'asset' ? 0 : geometryEstimate(definition) };
-    });
-    const residentStats = geometryStats(ownedRecords);
-    const pendingPlans = plans.filter(plan => !plan.existing);
-    const pendingVertices = pendingPlans.reduce((total, plan) => total + plan.estimatedVertices, 0);
-    if (residentStats.vertices + pendingVertices > limits.maxVertices ||
-        residentStats.geometryBytes + pendingVertices * 56 > limits.maxGeometryBytes) {
+    const { plans, residentStats, pendingVertices } = planned;
+    if (planned.overBudget) {
       throw new RangeError('Geometry preflight exceeds peak maxVertices or maxGeometryBytes across active, checkpoint and staged resources. Reduce detail or release checkpoints');
     }
 
@@ -1504,6 +1533,12 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     publishPose(stagedState, stagedState.initialPose);
     if (stagedState.topologyChanged) {
       topologyRevision++;
+    }
+    if (incrementRevision && state) {
+      revisionHistory.push({ revision, snapshot: snapshotState() });
+      while (revisionHistory.length > REVISION_HISTORY_LIMIT) {
+        revisionHistory.shift();
+      }
     }
     state = stagedState;
     if (incrementRevision) {
@@ -1828,13 +1863,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         throw invalidField('checkpoints', `${checkpoints.size} saved`, `at most ${limits.maxCheckpoints} saved checkpoints; release one with scene_release_checkpoint first`);
       }
       const handle = Object.freeze({});
-      checkpoints.set(handle, {
-        recipe: authoredRecipe(state.recipe),
-        geometryRecords: new Map(state.geometryRecords),
-        materialHandles: new Map(state.materialHandles),
-        restParts: state.restParts,
-        sourceRestParts: state.sourceRestParts,
-      });
+      checkpoints.set(handle, snapshotState());
       return handle;
     },
     restore(handle, options = {}) {
@@ -1844,6 +1873,18 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         throw invalidField('checkpointId', handle, 'a checkpointId that scene_checkpoint returned and you have not released');
       }
       return commit(stage(checkpoint.recipe, checkpoint), true);
+    },
+    /** Go back to an earlier revision that scene_apply or scene_restore left behind; no checkpoint is needed. */
+    restoreRevision(target, options = {}) {
+      expected(options);
+      const entry = revisionHistory.find(candidate => candidate.revision === target);
+      if (!entry) {
+        const kept = revisionHistory.map(candidate => candidate.revision);
+        throw invalidField('revision', target, kept.length > 0
+          ? `one of the kept revisions: ${kept.join(', ')} (the last ${REVISION_HISTORY_LIMIT} are kept; older ones are dropped)`
+          : 'a revision this session kept, but none is kept yet because nothing has been edited; apply an edit first');
+      }
+      return commit(stage(entry.snapshot.recipe, entry.snapshot), true);
     },
     releaseCheckpoint(handle) {
       if (!checkpoints.delete(handle)) {

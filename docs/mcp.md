@@ -108,6 +108,7 @@ Known gaps, checked by `npm run check:tool-schemas`:
 `scene_create` returns the session ID, current revision, inspection, and render status. `scene_apply` and `scene_restore` return the same without the inspection, so an edit answer stays small; call `scene_inspect` to read the nodes.
 `scene_checkpoint` returns a checkpoint UUID scoped to its session UUID.
 A restore increments revision and keeps the checkpoint available.
+To undo the last edits without a checkpoint, call `scene_restore` with `revision` set to an earlier revision number. The session keeps the 4 revisions before the current one (every `scene_apply` and `scene_restore` leaves one behind), drops the oldest first, and an unknown or dropped revision fails with the revisions still kept. The restore is itself a revision, so it can be undone the same way.
 A stale revision or invalid command produces an error without publishing partial edits.
 SDK validation rejects unknown tool fields before dispatch.
 Backend errors return `isError: true` with a readable message.
@@ -134,7 +135,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `scene_look` | `sessionId`, optional `width`, `height`, `motionTime`, `labels` | PNG image and metadata |
 | `scene_review` | `sessionId`, `expectedRevision`, `shots` (each with an optional `branch`), optional `width`, `height`, `labels` | Labeled PNG grid and metadata from an isolated snapshot |
 | `scene_checkpoint` | `sessionId` | Checkpoint ID, session ID, and revision |
-| `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId` or a `branch` | Updated revision and render status |
+| `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId`, a `revision` or a `branch` | Updated revision and render status |
 | `scene_release_checkpoint` | `sessionId`, `checkpointId` | Release confirmation |
 | `scene_export_recipe` | `sessionId` | Canonical recipe and revision |
 | `scene_export_glb` | `sessionId`, optional `clip`, `motionTime`, `maxTextureSize` | A GLB file under `<jobs>/exports/` with a server-chosen name: path, bytes, SHA-256. See [GLB export](export-glb.md) |
@@ -210,6 +211,7 @@ The [scene contract](agent-scene.md) defines the geometry fields, transforms, ma
 | Geometries and materials | 256 each |
 | Operations per batch | 256 |
 | Checkpoints per session | 8 |
+| Earlier revisions kept per session for `scene_restore` with `revision` | 4 |
 | Geometry input points | 4096 per input, including all extrusion contours |
 | Extrusion holes | 128 |
 | Unique geometry vertices | 250000 |
@@ -232,6 +234,7 @@ Camera matrices must remain finite at every supported preview aspect ratio, from
 Geometry resources remain immutable. Remove an unused definition and add its replacement in one batch, or add a new resource ID and rebind its nodes.
 Checkpoints retain their resource handles for exact restoration. Active, checkpoint and staged geometry share a bounded allocation budget.
 Release unused checkpoints to free that ownership before adding detail.
+The kept revisions share geometry buffers with the live scene, so four cost a recipe copy each (a few kilobytes) plus any geometry a later edit removed. That removed geometry counts in the same budget, and an edit that would exceed it drops the oldest kept revisions first instead of failing.
 
 The preview reconciles rigid parts, textured ones with the `replace-textured-parts` addon, while retaining shader programs, render targets and shared geometry buffers.
 A scene with material patterns gets a new renderer on each topology change instead. Skinned and morphed parts are not streamed either; `replaceParts` rejects adding or removing them.

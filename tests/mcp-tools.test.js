@@ -82,7 +82,11 @@ async function connect(context) {
       checkpoints.set(checkpointId, scene.checkpoint());
       return { checkpointId, sessionId, revision: scene.revision };
     },
-    async restore({ checkpointId, expectedRevision }) {
+    async restore({ checkpointId, revision, expectedRevision }) {
+      if (revision !== undefined) {
+        scene.restoreRevision(revision, { expectedRevision });
+        return editStatus();
+      }
       scene.restore(checkpoints.get(checkpointId), { expectedRevision });
       return editStatus();
     },
@@ -411,6 +415,24 @@ test('real SDK calls preserve atomic revisions, checkpoints, recipe snapshots an
   assert.equal(boundary.closed(), true);
 });
 
+test('scene_restore with a revision undoes the last edits without a checkpoint and names the kept revisions', async context => {
+  const { client, sessionId } = await connect(context);
+  const call = (name, argumentsValue = {}) => client.callTool({ name, arguments: argumentsValue });
+  await call('scene_create', { recipe: recipe() });
+  const before = (await call('scene_export_recipe', { sessionId })).structuredContent.recipe;
+  const imageBefore = (await call('scene_look', { sessionId })).content[0].data;
+  for (let revision = 0; revision < 3; revision++) {
+    await call('scene_apply', { sessionId, expectedRevision: revision, operations: [{ type: 'set-node', id: 'mesh', translation: [revision + 1, 0, 0] }] });
+  }
+  const unknown = await call('scene_restore', { sessionId, expectedRevision: 3, revision: 7 });
+  assert.equal(unknown.isError, true);
+  assert.match(unknown.content[0].text, /revision: got 7; expected one of the kept revisions: 0, 1, 2/);
+  const restored = await call('scene_restore', { sessionId, expectedRevision: 3, revision: 0 });
+  assert.equal(restored.structuredContent.revision, 4);
+  assert.deepEqual((await call('scene_export_recipe', { sessionId })).structuredContent.recipe, before);
+  assert.equal((await call('scene_look', { sessionId })).content[0].data, imageBefore);
+});
+
 test('SDK stdio EOF closes the runtime without launching a scene', async () => {
   const input = new PassThrough();
   const output = new PassThrough();
@@ -442,7 +464,8 @@ test('branches off leaves the branch field and the variants advice out of the sc
     assert.ok(!JSON.stringify(tool.inputSchema).includes('"branch"'), `${toolName} must not offer a branch`);
   }
   const restore = tools.find(candidate => candidate.name === 'scene_restore');
-  assert.ok(restore.inputSchema.required.includes('checkpointId'));
+  assert.ok(!restore.inputSchema.required.includes('checkpointId'), 'a revision can stand in for the checkpoint');
+  assert.ok(restore.inputSchema.properties.revision);
   assert.ok(!client.getInstructions().includes('branch'));
 });
 

@@ -104,8 +104,21 @@ try {
   await rejected('scene_review', { sessionId, expectedRevision: 1, shots: [{ branch: 'warm' }] });
   const restored = (await call('scene_restore', { sessionId, expectedRevision: 1, checkpointId: checkpoint.checkpointId })).structuredContent;
   assert.equal(restored.revision, 2);
+
+  // Undo two edits with one call and no checkpoint: the pixels and the recipe match the scene before them.
+  await call('scene_apply', { sessionId, expectedRevision: 2, operations: recolor([1, 0.3, 0.1]) });
+  await call('scene_apply', { sessionId, expectedRevision: 3, operations: recolor([0.1, 1, 0.1]) });
+  assert.notDeepEqual(decodedPixels(imageBytes(await call('scene_look', { sessionId, width: 256, height: 256 }))), sourceBefore);
+  const unknownRevision = await client.callTool({ name: 'scene_restore', arguments: { sessionId, expectedRevision: 4, revision: 99 } }, { timeout: 60000 });
+  assert.equal(unknownRevision.isError, true);
+  assert.match(unknownRevision.content[0].text, /kept revisions: 0, 1, 2, 3/);
+  const undone = (await call('scene_restore', { sessionId, expectedRevision: 4, revision: 2 })).structuredContent;
+  assert.equal(undone.revision, 5);
+  assert.deepEqual((await call('scene_export_recipe', { sessionId })).structuredContent.recipe, recipeBefore);
+  assert.deepEqual(decodedPixels(imageBytes(await call('scene_look', { sessionId, width: 256, height: 256 }))), sourceBefore,
+    'restoring an earlier revision gives the same image as before the edits');
   await call('scene_dispose', { sessionId });
-  console.log('Branch smoke passed: fork, shared snapshot, review, labels, keep, hostile names.');
+  console.log('Branch smoke passed: fork, shared snapshot, review, labels, keep, revision undo, hostile names.');
 } finally {
   await client.close().catch(() => {});
 }

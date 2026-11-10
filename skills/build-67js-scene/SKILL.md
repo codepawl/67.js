@@ -20,7 +20,7 @@ Start the server with `npx --package @codepawlhq/67js 67js-mcp --backend gpu --a
 3. `scene_inspect`: node IDs, bounds, `diagnostics`, current `revision`.
 4. `scene_look`: the PNG. Add `labels: true` to match node names to the image. Judge the image, not the lint.
 5. `scene_apply` with the current `expectedRevision` and a small `operations` batch. A stale revision fails whole.
-6. `scene_checkpoint` before a risky batch, `scene_restore` to undo, `scene_release_checkpoint` after.
+6. `scene_checkpoint` before a risky batch, `scene_restore` to undo, `scene_release_checkpoint` after. Without a checkpoint, `scene_restore` with `revision` goes back to one of the last 4 earlier revisions.
 7. `scene_export_recipe` keeps the result. `scene_dispose` before a different scene.
 
 `sessionId` may be left out: one scene is active at a time.

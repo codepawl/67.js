@@ -983,7 +983,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         if (input.branch !== undefined) {
           return invoke('keepBranch', { sessionId: input.sessionId, name: validateBranchName(input.branch), expectedRevision: input.expectedRevision });
         }
-        if (input.checkpointId === undefined) throw new TypeError('Restore needs a checkpointId or a branch.');
+        if (input.revision === undefined && input.checkpointId === undefined) throw new TypeError('Restore needs a checkpointId, a revision or a branch.');
         return invoke('restore', input);
       });
     },

@@ -1,5 +1,5 @@
 import { mat4, mat3 } from 'gl-matrix';
-import { createAgentScene } from './agent-scene.js';
+import { createAgentScene, REVISION_HISTORY_LIMIT } from './agent-scene.js';
 import { environmentPatchWithSetup } from './agent-look.js';
 import { assetDiagnostics } from './agent-diagnostics.js';
 import { fitPerspectiveDistance } from './camera.js';
@@ -348,6 +348,8 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   let motionTime = null;
   let sampledCamera;
   const checkpoints = new Map();
+  // Earlier recipes, oldest first. A published recipe is never edited in place, so the reference is a safe snapshot.
+  const revisionHistory = [];
   const materialOutputs = new Map([...materials].map(([source, record]) => {
     const output = {};
     for (const [field, value] of Object.entries(source)) {
@@ -758,6 +760,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         parts = buildParts(editedParts);
         topologyRevision++;
       }
+      const previousRecipe = recipe;
       if (transientTime === undefined) {
         recipe = candidate;
         sampler = stagedSampler;
@@ -772,6 +775,12 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         matrices = stagedMatrices;
       }
       if (increment) {
+        if (transientTime === undefined) {
+          revisionHistory.push({ revision, recipe: previousRecipe });
+          while (revisionHistory.length > REVISION_HISTORY_LIMIT) {
+            revisionHistory.shift();
+          }
+        }
         revision++;
       }
       return revision;
@@ -1108,6 +1117,18 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         throw invalidField('checkpointId', 'unknown or released', 'a checkpointId that scene_checkpoint returned and you have not released, such as the last one returned');
       }
       return publish(checkpoints.get(handle));
+    },
+    /** Go back to an earlier revision that apply or restore left behind; no checkpoint is needed. */
+    restoreRevision(target, options = {}) {
+      expected(options);
+      const entry = revisionHistory.find(candidate => candidate.revision === target);
+      if (!entry) {
+        const kept = revisionHistory.map(candidate => candidate.revision);
+        throw invalidField('revision', target, kept.length > 0
+          ? `one of the kept revisions: ${kept.join(', ')} (the last ${REVISION_HISTORY_LIMIT} are kept; older ones are dropped)`
+          : 'a revision this session kept, but none is kept yet because nothing has been edited; apply an edit first');
+      }
+      return publish(entry.recipe);
     },
     releaseCheckpoint(handle) {
       if (!checkpoints.delete(handle)) {
