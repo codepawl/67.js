@@ -79,7 +79,18 @@ An adapter is `{ name, load?(), createWorld(prepared) }`. `prepared` is the vali
 }
 ```
 
-Bodies and colliders are addressed by their index in the definition; the system maps indices to names, validates every argument and orders events. `rapierAdapter` (Rapier, already a dependency of the physics addon) is the one adapter shipped today. The tests run the system over a scripted adapter to prove it reads nothing else.
+Bodies and colliders are addressed by their index in the definition; the system maps indices to names, validates every argument and orders events. `rapierAdapter` (Rapier, the default) and `joltAdapter` (Jolt) ship. The tests also run the system over a scripted adapter to prove it reads nothing else.
+
+### Jolt
+
+```js
+import { createPhysicsSystem } from '67js/addons/physics-runtime';
+import { joltAdapter } from '67js/addons/physics-jolt';
+
+const physics = await createPhysicsSystem(definition, { adapter: joltAdapter });
+```
+
+`jolt-physics` (JoltPhysics built to wasm, MIT, install it with `npm install jolt-physics`) is an optional peer dependency of the `physics-jolt` addon; the core and the other addons never import it. The adapter covers bodies, sensors, collision groups and masks, kinematic control, force fields, ray, shape-cast and overlap queries, and the same contact and sensor events as Rapier. What it does not cover yet throws an error that names the fix: joints, `cone` and `trimesh` colliders, and more than one collider per body. It also limits a scene to 256 distinct group and mask pairs. Engines differ in friction and restitution combining and in solver details, so a settled pose can differ by a few centimetres between engines. Jolt reports a contact as ended when a body falls asleep; the adapter hides that, so a sleeping box keeps its contact.
 
 ## Limits
 
@@ -87,4 +98,4 @@ At most 64 listeners per kind, 4096 bound parts, 1024 overlap results and a quer
 
 After every step the system checks each pose like the bake does: a non-finite position or a quaternion that is not unit length throws a `RangeError` naming the body and the step, so a bad pose never reaches a bound part. If setup throws (an unknown body in `bindings`, say), the engine world is freed before the error propagates.
 
-Steps for 500 dynamic boxes settling on a floor were seen at about 3 ms on one machine with Rapier; the test prints the figure but asserts no timing. Only Rapier ships, so no step time is recorded for a second engine and event parity between two real engines is not shown. Issue #771 stays open for both.
+Steps for 500 dynamic boxes settling on a floor, 240 steps after 10 warm-up steps, three runs on one machine under load from other jobs (Node 24, wasm builds of both engines): Rapier 0.81 to 1.19 ms, Jolt 0.76 to 0.87 ms. `tests/physics-jolt.test.js` prints the figures and asserts only that they are finite. The same file replays one scene on both engines (a box falls on a floor, is pushed through a sensor zone and leaves it) and asserts the same contact and sensor events in the same order, each within 3 steps of the other engine's step, and the final box position within 0.2 m. In the recorded run the events fired on identical steps: contact start at step 34, sensor start at 83, sensor stop at 121 on both, and the box stopped at x 6.499 on Rapier and 6.457 on Jolt.
