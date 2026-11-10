@@ -9,10 +9,10 @@ const FLOOR_THICKNESS = 0.01;
 const LIFT_OFF_HEIGHT = 0.02;
 
 /** The recipe for one jelly cube; `softBody` and `sheet` override the film's softBody fields and sheet fields. */
-export function jellyCubeRecipe({ softBody = {}, sheet = {}, x = 0, duration = 2 } = {}) {
+export function jellyCubeRecipe({ softBody = {}, sheet = {}, x = 0, duration = 2, bevel = 0.12, subdivisions = 3 } = {}) {
   return {
     format: '67js.scene', schemaVersion: 1,
-    geometries: [{ id: 'jelly', type: 'box', bevel: 0.12, subdivisions: 3 }, { id: 'floor', type: 'box', bevel: 0 }],
+    geometries: [{ id: 'jelly', type: 'box', bevel, subdivisions }, { id: 'floor', type: 'box', bevel: 0 }],
     materials: [{ id: 'gel', color: [0.25, 0.85, 0.45] }, { id: 'stone', color: [0.55, 0.55, 0.58] }],
     nodes: [
       { id: 'cube', geometry: 'jelly', material: 'gel', translation: [x, 2.2, 0], scale: [0.5, 0.5, 0.5] },
@@ -80,15 +80,43 @@ export function measureBounce(frames) {
 }
 
 /**
- * The three jellies of the preview, from firm to soft, with the colour each is drawn in. The soft one keeps `shape` at
- * 0.13 or more: below about 0.1 the surface folds over itself on impact (see `foldedTriangles`), which is how a deeper
- * dent was paid for before. A fold-free dent stops near 5 cm, so the steps between presets show most in the rebound.
+ * The geometry the preview draws the jelly with. A 0.3 bevel gives the side faces rows of vertices at many heights, so the
+ * dent bulges into a belly. With the film's 0.12 bevel each side is one flat quad between two rim rows, the bulge can only
+ * sit on the rims, and the top rim juts past the sunken top face: a ledge and a stepped outline (see `widestRowHeight`).
+ */
+export const JELLY_LOOK = { bevel: 0.3, subdivisions: 4 };
+
+/**
+ * The three jellies of the preview, from firm to soft, with the colour each is drawn in. Measured with `JELLY_LOOK`:
+ * dents of about 2.9, 5.4 and 8.5 cm and rebounds of about 15, 22 and 35 cm. Shape below about 0.05 folds or inverts triangles on
+ * impact (see `foldedTriangles`), so 0.06 with stiffness 0.02 is the softest preset that also inverts no triangle.
  */
 export const JELLY_PRESETS = [
   { id: 'firm', colorName: 'blue', softBody: { shape: 1, bounce: 0 }, sheet: {} },
-  { id: 'medium', colorName: 'orange', softBody: { shape: 0.3, bounce: 0.5 }, sheet: { stiffness: 0.05 } },
-  { id: 'soft', colorName: 'pink', softBody: { shape: 0.13, bounce: 0.9 }, sheet: { stiffness: 0.01 } },
+  { id: 'medium', colorName: 'orange', softBody: { shape: 0.2, bounce: 0.5 }, sheet: { stiffness: 0.05 } },
+  { id: 'soft', colorName: 'pink', softBody: { shape: 0.06, bounce: 0.9 }, sheet: { stiffness: 0.02 } },
 ];
+
+/**
+ * Where the widest vertex sits in a frame, as a fraction of the body height from the floor (0 bottom, 1 top). A belly has
+ * its widest row low or in the middle; a ledge puts it at the top rim.
+ */
+export function widestRowHeight(frame) {
+  let low = Infinity;
+  let high = -Infinity;
+  let widestHeight = 0;
+  let widest = -Infinity;
+  for (let index = 0; index < frame.length; index += 3) {
+    low = Math.min(low, frame[index + 1]);
+    high = Math.max(high, frame[index + 1]);
+    const reach = Math.max(Math.abs(frame[index]), Math.abs(frame[index + 2]));
+    if (reach > widest) {
+      widest = reach;
+      widestHeight = frame[index + 1];
+    }
+  }
+  return (widestHeight - low) / (high - low);
+}
 
 /** Angle in degrees of the plane through the highest vertices of a frame, against the horizontal, along x then z. */
 export function topFaceTilt(frame) {

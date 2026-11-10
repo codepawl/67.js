@@ -2,7 +2,7 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createCloth } from '../src/cloth.js';
-import { foldedTriangles, frameHashes, invertedTriangles, JELLY_PRESETS, jellyCubeRecipe, measureBounce, recordJelly, topFaceTilt } from './support/jelly-cube.mjs';
+import { foldedTriangles, frameHashes, invertedTriangles, JELLY_LOOK, JELLY_PRESETS, jellyCubeRecipe, measureBounce, recordJelly, topFaceTilt, widestRowHeight } from './support/jelly-cube.mjs';
 
 const FRAME_COUNT = 110;
 
@@ -77,28 +77,44 @@ test('a recipe sheet rejects a bad bounce at the boundary', async () => {
   assert.throws(() => createAgentScene(jellyCubeRecipe({ softBody: { bounce: 2 } })), /softBody\.bounce.*0.*1/s);
 });
 
-// The preview's three presets (`JELLY_PRESETS`): each step must be clearly visible, and the surface must not fold.
+// The preview's three presets (`JELLY_PRESETS`) drawn with `JELLY_LOOK`: each step must be clearly visible, and the surface must not fold.
+const presetRecipe = (preset, duration) => jellyCubeRecipe({ softBody: preset.softBody, sheet: preset.sheet, duration, ...JELLY_LOOK });
+
 test('the firm, medium and soft presets step clearly in dent and rebound without folding', () => {
-  const results = JELLY_PRESETS.map(preset => measure(preset.softBody, preset.sheet));
+  const results = JELLY_PRESETS.map(preset => measureBounce(recordJelly(presetRecipe(preset, 2), FRAME_COUNT)));
   const [firm, medium, soft] = results;
-  assert.ok(medium.dent > firm.dent * 1.4 && soft.dent > medium.dent * 1.1, `dents ${results.map(result => result.dent.toFixed(3)).join(', ')}`);
-  assert.ok(medium.reboundHeight > firm.reboundHeight * 1.6 && soft.reboundHeight > medium.reboundHeight * 1.8, `rebounds ${results.map(result => result.reboundHeight.toFixed(3)).join(', ')}`);
-  assert.ok(soft.dent > 0.045 && soft.reboundHeight > 0.35, `soft dent ${soft.dent}, rebound ${soft.reboundHeight}`);
+  assert.ok(medium.dent > firm.dent * 1.6 && soft.dent > medium.dent * 1.4, `dents ${results.map(result => result.dent.toFixed(3)).join(', ')}`);
+  assert.ok(medium.reboundHeight > firm.reboundHeight * 1.3 && soft.reboundHeight > medium.reboundHeight * 1.4, `rebounds ${results.map(result => result.reboundHeight.toFixed(3)).join(', ')}`);
+  assert.ok(soft.dent > 0.08 && soft.reboundHeight > 0.3, `soft dent ${soft.dent}, rebound ${soft.reboundHeight}`);
   for (const preset of JELLY_PRESETS) {
-    const folded = foldedTriangles(jellyCubeRecipe({ softBody: preset.softBody, sheet: preset.sheet }), FRAME_COUNT);
-    assert.ok(folded <= 8, `${preset.id} folded ${folded} of 588 triangles in one frame`);
+    const folded = foldedTriangles(presetRecipe(preset, 2), FRAME_COUNT);
+    assert.ok(folded <= 8, `${preset.id} folded ${folded} triangles in one frame`);
   }
 });
 
-test('a near-zero shape folds the surface on impact, which is why the soft preset keeps 0.13 or more', () => {
-  const folded = foldedTriangles(jellyCubeRecipe({ softBody: { shape: 0.02, bounce: 1 }, sheet: { stiffness: 0.1 } }), FRAME_COUNT);
-  assert.ok(folded > 50, `shape 0.02 should fold more than 50 triangles, got ${folded}`);
+test('a near-zero shape folds the surface on impact, which is why the soft preset keeps 0.06 or more', () => {
+  const folded = foldedTriangles(jellyCubeRecipe({ softBody: { shape: 0.02, bounce: 1 }, sheet: { stiffness: 0.1 }, ...JELLY_LOOK }), FRAME_COUNT);
+  assert.ok(folded > 20, `shape 0.02 should fold more than 20 triangles, got ${folded}`);
+});
+
+// The ragged, doubled edge of the soft cube at its deepest dent was the mesh, not a fold: a flat side is one quad, so the
+// bulge sat on the top rim. The bevel decides where the widest row is.
+test('the soft dent bulges into a belly with the preview bevel and into a top ledge with the thin bevel', () => {
+  const soft = JELLY_PRESETS.find(preset => preset.id === 'soft');
+  const widestAtDent = options => {
+    const frames = recordJelly(jellyCubeRecipe({ softBody: soft.softBody, sheet: soft.sheet, ...options }), FRAME_COUNT);
+    return widestRowHeight(frames[measureBounce(frames).deepestFrame]);
+  };
+  const belly = widestAtDent(JELLY_LOOK);
+  const ledge = widestAtDent({});
+  assert.ok(belly < 0.5, `the belly sits in the lower half, got ${belly.toFixed(2)} of the height`);
+  assert.ok(ledge > 0.8, `the thin bevel puts the widest row at the top rim, got ${ledge.toFixed(2)}`);
 });
 
 // The frames the preview shows: every preset keeps its surface the right way out, and each rests level once it has settled.
 test('the presets never invert a triangle and rest level after 4 seconds', () => {
   for (const preset of JELLY_PRESETS) {
-    const recipe = jellyCubeRecipe({ softBody: preset.softBody, sheet: preset.sheet, duration: 4 });
+    const recipe = presetRecipe(preset, 4);
     const inverted = invertedTriangles(recipe, 240);
     assert.ok(inverted <= 2, `${preset.id} inverted ${inverted} triangles in one frame`);
     const frames = recordJelly(recipe, 240);

@@ -11,7 +11,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import '../tests/support/load-agent-scene-modules.mjs';
 import { createAgentScene } from '../src/agent-scene.js';
-import { invertedTriangles, JELLY_FRAMES_PER_SECOND, JELLY_PRESETS, jellyCubeRecipe, measureBounce, topFaceTilt } from '../tests/support/jelly-cube.mjs';
+import { invertedTriangles, JELLY_FRAMES_PER_SECOND, JELLY_LOOK, JELLY_PRESETS, jellyCubeRecipe, measureBounce, topFaceTilt, widestRowHeight } from '../tests/support/jelly-cube.mjs';
 
 const PREVIEW = { width: 960, height: 540, fps: JELLY_FRAMES_PER_SECOND };
 const FRAME_COUNT = 240;
@@ -23,7 +23,7 @@ const POSITIONS = { firm: { x: -0.85, color: [0.08, 0.3, 0.85] }, medium: { x: 0
 const CUBES = JELLY_PRESETS.map(preset => ({ ...preset, ...POSITIONS[preset.id] }));
 
 function threeCubeRecipe() {
-  const single = jellyCubeRecipe({ duration: FRAME_COUNT / JELLY_FRAMES_PER_SECOND });
+  const single = jellyCubeRecipe({ duration: FRAME_COUNT / JELLY_FRAMES_PER_SECOND, ...JELLY_LOOK });
   const cubeNodes = CUBES.map(cube => ({ id: cube.id, geometry: 'jelly', material: `${cube.id}-gel`, translation: [cube.x, 2.2, 0], scale: [0.5, 0.5, 0.5] }));
   return {
     ...single,
@@ -73,10 +73,11 @@ function restAndShape(id, frames, bounce) {
     for (let index = 0; index < frames[step].length; index++) move = Math.max(move, Math.abs(frames[step][index] - frames[step - 1][index]));
     if (move > 0.0015) settledStep = step;
   }
-  const single = jellyCubeRecipe({ softBody: { pressure: 1, ...preset.softBody }, sheet: preset.sheet, duration: FRAME_COUNT / JELLY_FRAMES_PER_SECOND });
+  const single = jellyCubeRecipe({ softBody: { pressure: 1, ...preset.softBody }, sheet: preset.sheet, duration: FRAME_COUNT / JELLY_FRAMES_PER_SECOND, ...JELLY_LOOK });
   return {
     bulgeMeters: Number((horizontalExtent(frames[bounce.deepestFrame]) - horizontalExtent(frames[0])).toFixed(4)),
     tiltAtDeepestDentDegrees: Number(topFaceTilt(frames[bounce.deepestFrame]).toFixed(2)),
+    widestRowAtDeepestDent: Number(widestRowHeight(frames[bounce.deepestFrame]).toFixed(2)),
     tiltAtLastFrameDegrees: Number(topFaceTilt(frames.at(-1)).toFixed(2)),
     lastMovingStep: settledStep,
     invertedTriangles: invertedTriangles(single, FRAME_COUNT),
