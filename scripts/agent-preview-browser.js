@@ -881,12 +881,13 @@ window.__agentPreview = {
     } else if (motionTime !== undefined) {
       record.scene.sampleMotion(motionTime);
     }
-    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene }, pack, { buildNativeInput }] = await Promise.all([
+    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes }, pack, { buildNativeInput }] = await Promise.all([
       import('../src/path-tracer.js'), import('../src/path-tracer-scene.js'), import('../src/path-tracer-gpu-pack.js'),
       import('../packages/render-native/pack-input.mjs'),
     ]);
     const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
     const traceScene = buildTraceScene(record.scene.parts, environment);
+    refuseLocalVolumes(traceScene, 'the native path tracer');
     const camera = createCamera(record.scene.camera, options.width, options.height);
     const input = buildNativeInput(traceScene, camera, options, pack);
     const tables = encodeNativeTables(input);

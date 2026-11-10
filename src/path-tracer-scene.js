@@ -3,6 +3,7 @@ import { createTracer } from './ray-query.js';
 import { SUN_BIT, POINT_FIRST_BIT, SPOT_FIRST_BIT, AREA_FIRST_BIT } from './light-link-bits.js';
 import { boxProjectedGeometry, columnLengths } from './export-box-uv.js';
 import { resolveTraceVolume } from './path-tracer-volume.js';
+import { resolveLocalVolumes } from './local-volumes.js';
 import { resolveTraceSubsurface } from './path-tracer-subsurface.js';
 import { lightShapeSupport } from './shader-registry.js';
 import { flushOrderOf } from './depth-layer.js';
@@ -302,6 +303,12 @@ export function attachTracer(scene) {
   return { ...scene, tracer: createTracer({ positions: scene.positions, indices: scene.indices, bvh: scene.bvh }) };
 }
 
+/** Local volumes are traced by the CPU path tracer only. Every other tracer entry point calls this so none drops them silently. */
+export function refuseLocalVolumes(scene, tracerName) {
+  if (!scene.localVolumes) return;
+  throw new RangeError(`environment.localVolumes is traced by the CPU path tracer only; ${tracerName} cannot draw them. Use backend "cpu" or remove the volumes.`);
+}
+
 export function buildTraceScene(parts, environment = {}) {
   if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_TRACE_PARTS) throw new RangeError(`A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
   const geometry = flattenParts(parts);
@@ -315,6 +322,7 @@ export function buildTraceScene(parts, environment = {}) {
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),
     volume: resolveTraceVolume(environment.volumeFog),
+    localVolumes: environment.localVolumes?.length ? resolveLocalVolumes(environment.localVolumes, 'environment.localVolumes') : null,
     surfaceOffset: extent * 1e-5,
     farDistance: extent * 1e4,
   });

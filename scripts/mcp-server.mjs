@@ -278,6 +278,7 @@ const environment = z.strictObject({
   fogColor: color.optional(),
   fogDensity: bounded(0, 10).optional(),
   volumeFog: volumeFog.optional().describe('Light-shaft fog; needs HDR.'),
+  localVolumes: z.array(z.record(z.string(), z.unknown())).max(8).optional().describe('Up to 8 absorbing and emitting volumes; fields in scene_capabilities localVolumes.'),
   liquid: liquidOptics.optional().describe('Optics for materials tagged liquid or foam.'),
   lines: lines.nullable().optional(),
   objectReflections: z.boolean().optional().describe("false turns off reflection probes on smooth metal parts."),
