@@ -11,7 +11,7 @@ const PARTICLES_FIELDS = ['gravity', 'wind', 'fields', 'systems'];
 const SYSTEM_TYPES = ['emitter', 'hair'];
 const EMITTER_SYSTEM_FIELDS = ['type', 'node', 'seed', 'count', 'rate', 'lifetime', 'speed', 'direction', 'spread', 'emitter', 'size', 'scale', 'drag', 'floor', 'bounce', 'friction', 'colliders', 'spin', 'color', 'alpha', 'instances', 'orient'];
 const HAIR_FIELDS = ['type', 'node', 'surface', 'seed', 'count', 'length', 'segments', 'width', 'droop', 'lean', 'sway', 'swayRate'];
-const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius', 'mesh', 'from', 'group', 'normalSpeed'];
+const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius', 'mesh', 'from', 'group', 'sharpAngle', 'normalSpeed'];
 const EMITTER_SHAPES = ['point', 'box', 'sphere', 'disc', 'mesh'];
 const ORIENT_MODES = ['none', 'random', 'normal'];
 const SCALE_MODES = ['constant', 'shrink', 'grow'];
@@ -50,9 +50,15 @@ function normalizeMeshEmitter(input, emitter, context, path) {
       throw invalidField(`${path}.group`, input.group, 'the name of a vertex group on the emitter mesh, such as "edge"');
     }
     if (from === 'volume') {
-      throw invalidField(`${path}.group`, input.group, `left out, because a vertex group weighs ${path}.from "surface" or "vertices", not "volume"`);
+      throw invalidField(`${path}.group`, input.group, `left out, because a vertex group weighs ${path}.from "surface", "vertices" or "edges", not "volume"`);
     }
     emitter.group = input.group;
+  }
+  if (input.sharpAngle !== undefined) {
+    if (from !== 'edges') {
+      throw invalidField(`${path}.sharpAngle`, input.sharpAngle, `left out unless ${path}.from is "edges"`);
+    }
+    emitter.sharpAngle = finiteNumber(input.sharpAngle, `${path}.sharpAngle`, 0, 180);
   }
   if (input.normalSpeed !== undefined) {
     emitter.normalSpeed = finiteNumber(input.normalSpeed, `${path}.normalSpeed`, -1000, 1000);
@@ -74,7 +80,7 @@ function normalizeEmitter(input, context, path) {
   if (shape === 'mesh') {
     normalizeMeshEmitter(input, emitter, context, path);
   } else {
-    for (const field of ['mesh', 'from', 'group', 'normalSpeed']) {
+    for (const field of ['mesh', 'from', 'group', 'sharpAngle', 'normalSpeed']) {
       if (input[field] !== undefined) throw invalidField(`${path}.${field}`, input[field], `left out unless ${path}.shape is "mesh"`);
     }
   }
@@ -99,7 +105,7 @@ function normalizeInstances(input, system, context, path) {
   }
   const source = system.emitter;
   if (orient === 'normal' && (source.shape !== 'mesh' || source.from === 'volume')) {
-    throw invalidField(`${path}.orient`, orient, `"none" or "random", because a normal needs ${path}.emitter.shape "mesh" with from "surface" or "vertices"`);
+    throw invalidField(`${path}.orient`, orient, `"none" or "random", because a normal needs ${path}.emitter.shape "mesh" with from "surface", "vertices" or "edges"`);
   }
   if (source.normalSpeed && source.from === 'volume') {
     throw invalidField(`${path}.emitter.normalSpeed`, source.normalSpeed, 'left out when from is "volume", which has no surface normal');
@@ -349,7 +355,8 @@ function meshSourceOf(system, nodes, geometries) {
   const geometry = geometries.get(sourceNode.geometry);
   const world = surfaceInWorld(geometry, nodeMatrix(sourceNode));
   const weights = emitter.group ? vertexGroupOf(emitter, geometry) : null;
-  const source = createMeshSource(world.positions, world.normals, geometry.indices, emitter.from, weights);
+  const sharpAngle = emitter.sharpAngle ?? null;
+  const source = createMeshSource(world.positions, world.normals, geometry.indices, emitter.from, weights, sharpAngle);
   if (!source) {
     const groupNote = emitter.group ? ` and some weight in vertex group "${emitter.group}"` : '';
     throw invalidField(`particles.systems[].emitter.mesh`, emitter.mesh, `a node whose mesh has triangles with some area${groupNote}, because emitter.from is "${emitter.from}"`);
