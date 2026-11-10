@@ -157,6 +157,7 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
   smooth_by_angle: 'edges bending over angle 30 (0-180) become sharp, others smooth, over smoothAngle; ignoreSharp true also clears hand-made sharp edges.',
   bounding_box: 'becomes its axis-aligned box.',
   convex_hull: 'becomes its convex hull, up to 8192 vertices.',
+  build: 'shows faces one by one as frame runs from start 0 over length 60 frames (frame 0; give the current frame, e.g. from your film clock): order index (default), random (seed 0) or axis (axis y, lowest centroid first); reverse true unbuilds. Unused vertices drop; while none shows, one zero-area triangle stays.',
   ocean: 'seeded sea: lifts axis (y) by waves of windSpeed 10 m/s (0-60) toward direction 0 deg, size 100 m (repeats), seed 0, time 0 s, resolution 8 (1-16); choppiness 1 (0-4) pulls points to crests. Writes group foam.',
 });
 
