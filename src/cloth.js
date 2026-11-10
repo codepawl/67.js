@@ -292,7 +292,9 @@ function pushOutOfBox(point, box, thickness, normal) {
 
 const PUSH_OUT = { ball: pushOutOfBall, capsule: pushOutOfCapsule, box: pushOutOfBox };
 
-function collide(state, previous, colliders, thickness, friction) {
+// `contactNormals` (3 numbers per particle, or null) keeps the normal of the last collider each particle touched this
+// substep, so a bounce can send it back off the surface; it is zero where nothing was touched.
+function collide(state, previous, colliders, thickness, friction, contactNormals) {
   const { positions, inverseMasses, particleCount } = state;
   const point = [0, 0, 0];
   const normal = [0, 0, 0];
@@ -305,6 +307,11 @@ function collide(state, previous, colliders, thickness, friction) {
     for (const collider of colliders) {
       const touched = PUSH_OUT[collider.kind](point, collider, thickness, normal);
       if (!touched) continue;
+      if (contactNormals) {
+        contactNormals[offset] = normal[0];
+        contactNormals[offset + 1] = normal[1];
+        contactNormals[offset + 2] = normal[2];
+      }
       // Friction removes part of the sideways travel this substep, so cloth drags over a surface instead of skating.
       const travel = [point[0] - previous[offset], point[1] - previous[offset + 1], point[2] - previous[offset + 2]];
       const along = travel[0] * normal[0] + travel[1] * normal[1] + travel[2] * normal[2];
@@ -316,6 +323,57 @@ function collide(state, previous, colliders, thickness, friction) {
     positions[offset + 1] = point[1];
     positions[offset + 2] = point[2];
   }
+}
+
+// Approach speeds below this (m/s) do not bounce, so a body at rest does not buzz on the floor: gravity alone adds
+// about 0.03 m/s per substep.
+const BOUNCE_MIN_SPEED = 0.5;
+
+/**
+ * Position-based contact removes the speed into a surface, and the body's own constraints cancel a kick given to the
+ * few particles that touch. So the bounce acts on the body as a whole: it remembers the fastest speed its centre
+ * arrived with, and when the centre turns around it adds `bounce` times that speed to every free particle, along the
+ * mean contact normal. The body has dented by then, and the shape it springs back to carries the launch. It never slows
+ * a body that already leaves faster, so the default 0 changes nothing.
+ */
+function createBodyBounce(bounce, particleCount) {
+  const meanNormal = [0, 0, 0];
+  let arrivalSpeed = 0;
+  return function reflectBody(velocities, approach, inverseMasses, contactNormals) {
+    meanNormal.fill(0);
+    for (let offset = 0; offset < particleCount * 3; offset += 3) {
+      for (let axis = 0; axis < 3; axis++) meanNormal[axis] += contactNormals[offset + axis];
+    }
+    const normalLength = Math.hypot(meanNormal[0], meanNormal[1], meanNormal[2]);
+    if (normalLength < 1e-9) {
+      arrivalSpeed = 0;
+      return;
+    }
+    for (let axis = 0; axis < 3; axis++) meanNormal[axis] /= normalLength;
+    let freeCount = 0;
+    let speedBefore = 0;
+    let speedAfter = 0;
+    for (let particle = 0; particle < particleCount; particle++) {
+      if (inverseMasses[particle] === 0) continue;
+      const offset = particle * 3;
+      freeCount++;
+      for (let axis = 0; axis < 3; axis++) {
+        speedBefore += approach[offset + axis] * meanNormal[axis];
+        speedAfter += velocities[offset + axis] * meanNormal[axis];
+      }
+    }
+    if (freeCount === 0) return;
+    arrivalSpeed = Math.max(arrivalSpeed, -speedBefore / freeCount);
+    const leaving = speedAfter / freeCount;
+    if (leaving < 0 || arrivalSpeed < BOUNCE_MIN_SPEED) return;
+    const missing = bounce * arrivalSpeed - leaving;
+    arrivalSpeed = 0;
+    if (missing <= 0) return;
+    for (let particle = 0; particle < particleCount; particle++) {
+      if (inverseMasses[particle] === 0) continue;
+      for (let axis = 0; axis < 3; axis++) velocities[particle * 3 + axis] += meanNormal[axis] * missing;
+    }
+  };
 }
 
 const MOVING_COLLIDER_NUMBERS = 7;
@@ -379,12 +437,14 @@ function prepareExtras(options, positions, triangles, particleCount, constraints
   const selfCollision = options.selfCollision ?? null;
   let shapeStiffness = 0;
   let pressure = 0;
+  let bounce = 0;
   let restVolume = 0;
   let matching = null;
   let gradients = null;
   if (softBody) {
     shapeStiffness = checkUnit(softBody.shape ?? 0.2, 'softBody.shape', 1);
     pressure = checkUnit(softBody.pressure ?? 1, 'softBody.pressure', SOFT_BODY_LIMITS.maxPressure);
+    bounce = checkUnit(softBody.bounce ?? 0, 'softBody.bounce', 1);
     if (shapeStiffness > 0) matching = createShapeMatching(positions);
     if (pressure > 0) {
       assertClosedMesh(triangles, particleCount);
@@ -405,6 +465,7 @@ function prepareExtras(options, positions, triangles, particleCount, constraints
     contacts = createSelfCollision(radius, particleCount, connectedPairs(constraints, particleCount));
   }
   return {
+    bounce,
     workPerIteration: (contacts ? SELF_COLLISION_LIMITS.workPerParticle * particleCount : 0) + (pressure > 0 ? triangles.length / 3 : 0) + (matching ? particleCount / CLOTH_LIMITS.iterations : 0),
     beforeIterations(state, inverseMasses) {
       if (matching) solveShapeMatching(matching, state, inverseMasses, shapeStiffness);
@@ -503,6 +564,9 @@ export function createCloth(positions, triangles, options = {}) {
   const friction = options.friction ?? 0.3;
   const thickness = options.thickness ?? 0.01;
   const previous = new Float64Array(positions.length);
+  const contactNormals = extras.bounce > 0 ? new Float64Array(positions.length) : null;
+  const reflectBody = extras.bounce > 0 ? createBodyBounce(extras.bounce, particleCount) : null;
+  const approachVelocities = extras.bounce > 0 ? new Float64Array(positions.length) : null;
   const stepStart = new Float64Array(positions.length);
   const pinImpulses = new Float64Array(positions.length);
   const publicPositions = Float32Array.from(positions);
@@ -548,18 +612,23 @@ export function createCloth(positions, triangles, options = {}) {
           state.positions[index] += state.velocities[index] * substepSeconds;
         }
       }
+      if (contactNormals) {
+        contactNormals.fill(0);
+        approachVelocities.set(state.velocities);
+      }
       extras.beforeIterations(state.positions, inverseMasses);
       for (let iteration = 0; iteration < CLOTH_LIMITS.iterations; iteration++) {
         solveDistances(state.positions, inverseMasses, constraints, cloth.impulses, pinImpulses);
         extras.duringIteration(state.positions, inverseMasses);
         if (moving) followAnchors(state.positions, moving, anchorTargets, true);
-        collide(state, previous, activeColliders, thickness, friction);
+        collide(state, previous, activeColliders, thickness, friction, contactNormals);
       }
       if (tears) tearOverstretched(cloth, substepSeconds);
       cloth.impulses.fill(0);
       for (let index = 0; index < positions.length; index++) {
         state.velocities[index] = (state.positions[index] - previous[index]) / substepSeconds * dampingFactor;
       }
+      if (reflectBody) reflectBody(state.velocities, approachVelocities, inverseMasses, contactNormals);
       substepsDone++;
     }
     if (!state.positions.every(Number.isFinite)) {
@@ -642,7 +711,7 @@ export function createCloth(positions, triangles, options = {}) {
 /**
  * Simulate one sheet. `positions` are world-space rest positions (3 numbers per particle), `triangles` index them.
  * Options: pinned (particle indices that stay put), gravity, wind (m/s), applyFields (see cloth-fields.js), stiffness and bend (0 to 1), stiffnessWeights (one 0 to 1 per particle; a constraint is as stiff as its softer end),
- * softBody ({ shape 0 to 1, pressure 0 to 3 }; pressure needs a closed mesh and holds that multiple of the rest volume), selfCollision (true or
+ * softBody ({ shape 0 to 1, pressure 0 to 3, bounce 0 to 1 }; pressure needs a closed mesh and holds that multiple of the rest volume; bounce gives back that fraction of the speed a particle hits a collider with, default 0), selfCollision (true or
  * { radius }, at most half the shortest edge; up to 2000 particles), density (kg/m2),
  * damping (1/s), friction (0 to 1), thickness (m), colliders ({ kind: 'ball', center, radius },
  * { kind: 'capsule', start, end, radius } or { kind: 'box', center, axes, halfExtents }), frameCount and framesPerSecond.
