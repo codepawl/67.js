@@ -7,6 +7,7 @@ import { extractRootMotion, normalizeRootMotionSettings } from './animation-root
 
 export { createFootPlacement, createLookAt } from './animation-ik.js';
 export { extractRootMotion } from './animation-root-motion.js';
+export { createPathFollower, NPC_FOLLOWER_LIMITS } from './npc-follower.js';
 
 export const ANIMATION_GRAPH_LIMITS = Object.freeze({
   maximumFadingStates: 4,

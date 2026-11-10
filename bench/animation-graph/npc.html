@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NPC path sample</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161a; color: #e8eaed; font: 14px/1.4 system-ui, sans-serif; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  .panel { position: fixed; top: 16px; left: 16px; padding: 12px 14px; border-radius: 10px; background: rgba(20, 22, 26, 0.82); }
+  output { display: block; font-variant-numeric: tabular-nums; white-space: pre; }
+</style>
+</head>
+<body>
+<canvas></canvas>
+<div class="panel"><output id="readout"></output></div>
+<script type="module" src="./npc.js"></script>
+</body>
+</html>
