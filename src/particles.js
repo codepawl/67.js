@@ -16,6 +16,8 @@ export const PARTICLE_LIMITS = Object.freeze({
   fieldStepSeconds: 1 / 120,
   maxColliders: 8,
   maxColliderTriangles: 4096,
+  maxEmitterTriangles: 8192,
+  maxInstances: 8,
 });
 
 const NO_DRAG_THRESHOLD = 1e-6;
@@ -82,12 +84,35 @@ function pointInEmitter(emitter, fractions) {
   return [0, 0, 0];
 }
 
+// Rotation (row major) that turns +Y onto the unit `normal`.
+function rotationFromUp(normal, matrix) {
+  const cosine = normal[1];
+  if (cosine < -0.9999) {
+    matrix.set([1, 0, 0, 0, -1, 0, 0, 0, -1]);
+    return;
+  }
+  const [x, y, z] = [normal[2], 0, -normal[0]];
+  const k = 1 / (1 + cosine);
+  matrix[0] = cosine + k * x * x;
+  matrix[1] = -z + k * x * y;
+  matrix[2] = y + k * x * z;
+  matrix[3] = z + k * x * y;
+  matrix[4] = cosine + k * y * y;
+  matrix[5] = -x + k * y * z;
+  matrix[6] = -y + k * x * z;
+  matrix[7] = x + k * y * z;
+  matrix[8] = cosine + k * z * z;
+}
+
 /**
  * Launch values of every particle. Each particle draws from its own generator in a fixed order, so changing `count`
  * never changes the particles that were already there.
  */
 export function createParticleLaunches(settings) {
   const { count, seed, emitter, lifetime, speed, direction, spreadRadians, size, rate, forces } = settings;
+  const instanceCount = settings.instanceCount ?? 1;
+  const orient = settings.orient ?? 'none';
+  const normalSpeed = emitter.normalSpeed ?? 0;
   const spin = settings.spin ?? [0, 0];
   const axis = normalized(direction);
   const birth = new Float64Array(count);
@@ -98,15 +123,17 @@ export function createParticleLaunches(settings) {
   const spinAxis = new Float64Array(count * 3);
   const spinRate = new Float64Array(count);
   const spinStart = new Float64Array(count);
+  const orientation = orient === 'none' ? undefined : new Float64Array(count * 9);
+  const instancePick = instanceCount > 1 ? new Uint8Array(count) : undefined;
   for (let index = 0; index < count; index++) {
     const random = createGenerator(seed, index);
     random();
-    const point = pointInEmitter(emitter, [random(), random(), random()]);
+    const emission = emitter.shape === 'mesh' ? emitter.source.sample(random) : { point: pointInEmitter(emitter, [random(), random(), random()]), normal: null };
     const launch = directionInCone(axis, spreadRadians, random(), random());
     const launchSpeed = between(speed, random());
     for (let component = 0; component < 3; component++) {
-      origin[index * 3 + component] = emitter.position[component] + point[component];
-      velocity[index * 3 + component] = launch[component] * launchSpeed;
+      origin[index * 3 + component] = emitter.position[component] + emission.point[component];
+      velocity[index * 3 + component] = launch[component] * launchSpeed + (emission.normal ? emission.normal[component] * normalSpeed : 0);
     }
     life[index] = between(lifetime, random());
     particleSize[index] = between(size, random());
@@ -116,9 +143,17 @@ export function createParticleLaunches(settings) {
     spinAxis.set(spinDirection, index * 3);
     spinRate[index] = between(spin, random()) * Math.PI / 180;
     spinStart[index] = random() * Math.PI * 2;
+    // Drawn after the spin, so choosing instances or an orientation never changes an earlier launch value.
+    if (instancePick) instancePick[index] = Math.min(Math.floor(random() * instanceCount), instanceCount - 1);
+    if (orient === 'random') {
+      const turnAxis = directionInCone([0, 1, 0], Math.PI, random(), random());
+      rotationMatrix(turnAxis, random() * Math.PI * 2, orientation.subarray(index * 9, index * 9 + 9));
+    } else if (orient === 'normal') {
+      rotationFromUp(emission.normal, orientation.subarray(index * 9, index * 9 + 9));
+    }
   }
   const launches = {
-    count, birth, life, origin, velocity, size: particleSize, spinAxis, spinRate, spinStart,
+    count, birth, life, origin, velocity, size: particleSize, spinAxis, spinRate, spinStart, orientation, instancePick,
     hasSpin: spin[0] !== 0 || spin[1] !== 0,
     // Age at which a particle stops moving: its landing, or where it came to rest.
     landing: new Float64Array(count).fill(Infinity),
@@ -391,26 +426,54 @@ function rotatedInto(matrix, source, sourceOffset, destination, destinationOffse
   }
 }
 
+const IDENTITY = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+
+function multiplyMatrices(first, second, result) {
+  for (let row = 0; row < 3; row++) {
+    for (let column = 0; column < 3; column++) {
+      result[row * 3 + column] = first[row * 3] * second[column] + first[row * 3 + 1] * second[3 + column] + first[row * 3 + 2] * second[6 + column];
+    }
+  }
+}
+
 /**
- * Copies a template mesh once per particle, scaled, spun and moved to the particle's world position. `look` may hold
+ * Copies a template mesh once per particle, scaled, spun and moved to the particle's world position. `template` is one
+ * mesh or a list; with a list each particle draws the one `launches.instancePick` names. `look` may hold
  * `color` ([start, end] RGB) and `alpha` ([start, end]) over life; they become vertex colors, and alpha multiplies the
  * color, so a particle fades toward black (the renderer has no per-vertex alpha).
  */
 export function buildParticleMesh(template, launches, forces, scaleMode, time, look = {}) {
-  const vertexCount = template.positions.length / 3;
-  const indexCount = template.indices.length;
-  const positions = new Float32Array(vertexCount * launches.count * 3);
-  const normals = new Float32Array(vertexCount * launches.count * 3);
-  const indices = new Uint32Array(indexCount * launches.count);
-  const uvs = template.uvs ? new Float32Array(vertexCount * launches.count * 2) : undefined;
-  const colors = look.color || look.alpha ? new Float32Array(vertexCount * launches.count * 3) : undefined;
+  const templates = Array.isArray(template) ? template : [template];
+  const pickOf = index => launches.instancePick ? launches.instancePick[index] : 0;
+  let totalVertices = 0;
+  let totalIndices = 0;
+  for (let index = 0; index < launches.count; index++) {
+    const picked = templates[pickOf(index)];
+    totalVertices += picked.positions.length / 3;
+    totalIndices += picked.indices.length;
+  }
+  const positions = new Float32Array(totalVertices * 3);
+  const normals = new Float32Array(totalVertices * 3);
+  const indices = new Uint32Array(totalIndices);
+  const hasUvs = templates.every(entry => entry.uvs);
+  const uvs = hasUvs ? new Float32Array(totalVertices * 2) : undefined;
+  const colors = look.color || look.alpha ? new Float32Array(totalVertices * 3) : undefined;
   const state = { position: [0, 0, 0], scale: 0 };
+  const spinMatrix = new Float64Array(9);
   const matrix = new Float64Array(9);
   const tint = [1, 1, 1];
+  const transformed = launches.hasSpin || Boolean(launches.orientation);
+  let vertexBase = 0;
+  let indexBase = 0;
   for (let index = 0; index < launches.count; index++) {
+    const picked = templates[pickOf(index)];
+    const vertexCount = picked.positions.length / 3;
     particleStateAt(launches, index, forces, scaleMode, time, state);
-    if (launches.hasSpin) {
-      rotationMatrix(launches.spinAxis.subarray(index * 3, index * 3 + 3), state.angle, matrix);
+    if (transformed) {
+      if (launches.hasSpin) rotationMatrix(launches.spinAxis.subarray(index * 3, index * 3 + 3), state.angle, spinMatrix);
+      const base = launches.orientation ? launches.orientation.subarray(index * 9, index * 9 + 9) : IDENTITY;
+      if (launches.hasSpin) multiplyMatrices(spinMatrix, base, matrix);
+      else matrix.set(base);
     }
     if (colors) {
       const alpha = look.alpha ? look.alpha[0] + (look.alpha[1] - look.alpha[0]) * state.fraction : 1;
@@ -420,23 +483,31 @@ export function buildParticleMesh(template, launches, forces, scaleMode, time, l
         tint[channel] = (start + (end - start) * state.fraction) * alpha;
       }
     }
-    const vertexBase = index * vertexCount;
     for (let vertex = 0; vertex < vertexCount; vertex++) {
       const offset = (vertexBase + vertex) * 3;
-      if (launches.hasSpin) {
-        rotatedInto(matrix, template.positions, vertex * 3, positions, offset, state.scale);
-        rotatedInto(matrix, template.normals, vertex * 3, normals, offset, 1);
+      if (transformed) {
+        rotatedInto(matrix, picked.positions, vertex * 3, positions, offset, state.scale);
+        rotatedInto(matrix, picked.normals, vertex * 3, normals, offset, 1);
       }
       for (let component = 0; component < 3; component++) {
-        positions[offset + component] = state.position[component] + (launches.hasSpin ? positions[offset + component] : template.positions[vertex * 3 + component] * state.scale);
-        if (colors) colors[offset + component] = tint[component] * (template.colors ? template.colors[vertex * 3 + component] : 1);
+        positions[offset + component] = state.position[component] + (transformed ? positions[offset + component] : picked.positions[vertex * 3 + component] * state.scale);
+        if (colors) colors[offset + component] = tint[component] * (picked.colors ? picked.colors[vertex * 3 + component] : 1);
       }
     }
-    if (!launches.hasSpin) normals.set(template.normals, vertexBase * 3);
-    uvs?.set(template.uvs, vertexBase * 2);
-    for (let corner = 0; corner < indexCount; corner++) {
-      indices[index * indexCount + corner] = template.indices[corner] + vertexBase;
+    if (!transformed) normals.set(picked.normals, vertexBase * 3);
+    uvs?.set(picked.uvs, vertexBase * 2);
+    for (let corner = 0; corner < picked.indices.length; corner++) {
+      indices[indexBase + corner] = picked.indices[corner] + vertexBase;
     }
+    vertexBase += vertexCount;
+    indexBase += picked.indices.length;
   }
-  return { ...template, positions, normals, indices, ...(uvs ? { uvs } : {}), ...(colors ? { colors } : {}) };
+  const result = { ...templates[0], positions, normals, indices };
+  if (templates.length > 1) {
+    delete result.uvs;
+    delete result.colors;
+  }
+  if (uvs) result.uvs = uvs;
+  if (colors) result.colors = colors;
+  return result;
 }
