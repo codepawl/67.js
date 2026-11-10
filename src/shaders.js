@@ -83,6 +83,9 @@ flat out mat3 boxNormalMatrix;
 #ifdef VERTEX_COLORS
 out vec3 vertexTint;
 out float vertexSkyVisibility;
+#ifdef SURFACE_WEAR
+out vec2 vertexWear;
+#endif
 #endif
 out vec4 shadowPosition;
 out vec2 textureUV, lightmapUV;
@@ -125,7 +128,16 @@ void main() {
 #endif
 #ifdef VERTEX_COLORS
   vertexTint = USES_CROWD ? vec3(1.0) : vertexColor.rgb;
+#ifdef SURFACE_WEAR
+  // A packed value of 2 or more carries the wear and dirt weights (material-wear.js); below 2 it is sky visibility.
+  bool carriesWear = !USES_CROWD && vertexColor.a >= 2.0;
+  float maskBits = carriesWear ? vertexColor.a - 2.0 : 0.0;
+  float wearLevel = floor(maskBits / 2048.0);
+  vertexWear = vec2(wearLevel, maskBits - wearLevel * 2048.0) / 2047.0;
+  vertexSkyVisibility = (USES_CROWD || carriesWear) ? 1.0 : vertexColor.a;
+#else
   vertexSkyVisibility = USES_CROWD ? 1.0 : vertexColor.a;
+#endif
 #endif
   shadowPosition = lightProjection * world;
   gl_Position = viewProjection * world;
@@ -285,6 +297,35 @@ in float vertexSkyVisibility;
 const vec3 vertexTint = vec3(1.0);
 const float vertexSkyVisibility = 1.0;
 #endif
+#if defined(VERTEX_COLORS) && defined(SURFACE_WEAR)
+in vec2 vertexWear;
+#else
+const vec2 vertexWear = vec2(0.0);
+#endif
+uniform float wearEnabled;
+uniform vec4 wearMetal;
+uniform vec4 wearDirt;
+uniform vec4 wearShape;
+uniform vec2 wearDirtShape;
+
+// Integer hash of a lattice cell, so the break-up of the wear edge is the same on every GPU and in material-wear.js.
+float wearCellHash(vec3 cell) {
+  uvec3 lattice = uvec3(ivec3(floor(cell)) + ivec3(32768));
+  uint bits = (lattice.x * 1597334673u) ^ (lattice.y * 3812015801u) ^ (lattice.z * 2798796415u);
+  bits = (bits ^ (bits >> 16u)) * 2246822519u;
+  bits = (bits ^ (bits >> 13u)) * 3266489917u;
+  bits ^= bits >> 16u;
+  return float(bits >> 8u) / 16777215.0;
+}
+
+float wearNoise(vec3 position) {
+  vec3 cell = floor(position);
+  vec3 blend = fract(position);
+  blend = blend * blend * (3.0 - 2.0 * blend);
+  float low = mix(mix(wearCellHash(cell), wearCellHash(cell + vec3(1, 0, 0)), blend.x), mix(wearCellHash(cell + vec3(0, 1, 0)), wearCellHash(cell + vec3(1, 1, 0)), blend.x), blend.y);
+  float high = mix(mix(wearCellHash(cell + vec3(0, 0, 1)), wearCellHash(cell + vec3(1, 0, 1)), blend.x), mix(wearCellHash(cell + vec3(0, 1, 1)), wearCellHash(cell + vec3(1, 1, 1)), blend.x), blend.y);
+  return mix(low, high, blend.z);
+}
 in vec4 shadowPosition;
 in vec2 textureUV, lightmapUV;
 uniform sampler2D lightMap;
@@ -583,12 +624,12 @@ vec3 surroundingsColor(vec3 direction, float roughness) {
 
 // Clear coat: a second dielectric specular lobe over the base. Light that reflects off it never reaches the base.
 // Passing 0.04 as the colour of a fully metallic surface gives the lobe's own reflectance and no diffuse part.
-vec3 clearCoatLayer(vec3 baseRadiance, vec3 normal, vec3 viewDirection, float visibility) {
+vec3 clearCoatLayer(vec3 baseRadiance, vec3 normal, vec3 viewDirection, float visibility, float coatStrength) {
   float roughness = clamp(materialCoat.y, 0.075, 1.0);
-${featureCode("coatReset")}  float coatFresnel = fresnel(max(dot(normal, viewDirection), 0.001), vec3(0.04)).x * materialCoat.x;
+${featureCode("coatReset")}  float coatFresnel = fresnel(max(dot(normal, viewDirection), 0.001), vec3(0.04)).x * coatStrength;
   vec3 mirror = surroundingsColor(reflect(-viewDirection, normal), roughness) * coatFresnel * ambientIntensity;
   vec3 highlight = illuminate(normal, viewDirection, normalize(lightDirection), keyColor * visibility, vec3(0.04), 1.0, roughness);
-  return baseRadiance * (1.0 - coatFresnel) + mirror + highlight * materialCoat.x;
+  return baseRadiance * (1.0 - coatFresnel) + mirror + highlight * coatStrength;
 }
 
 // Sheen: the Charlie distribution with the Neubelt visibility term (KHR_materials_sheen), plus a rim of ambient light.
@@ -665,6 +706,27 @@ ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
     vec4 sampled = BOX_MAPPED ? sampleBox(metallicRoughnessMap) : texture(metallicRoughnessMap, mapUV(hasMetallicRoughnessMap));
     metallic *= sampled.b;
     roughness *= sampled.g;
+  }
+  float coatKept = 1.0;
+  if (USES_SURFACE_WEAR) {
+    // Bare metal where the wear mask is high, then dirt where the dirt mask is high (material-wear.js). The per-vertex
+    // weights are scaled by noise, so a chip breaks up where the mask is low and a flat face the mask leaves at 0 stays clean.
+    // Bare metal and dirt have no clear coat over them.
+    float wearBreak = 0.65 * wearNoise(worldPosition * 48.0) + 0.35 * wearNoise(worldPosition * 110.0 + vec3(17.0));
+    float worn = smoothstep(wearShape.y - wearShape.z, wearShape.y + wearShape.z, vertexWear.x * (0.55 + 0.9 * wearBreak));
+    color = mix(color, wearMetal.rgb * (0.8 + 0.4 * wearBreak), worn);
+    metallic = mix(metallic, wearMetal.w, worn);
+    roughness = mix(roughness, wearShape.x * (0.75 + 0.5 * wearBreak), worn);
+    coatKept = 1.0 - worn;
+    if (wearShape.w > 0.5) {
+      float dirtBreak = 0.65 * wearNoise(worldPosition * 30.0 + vec3(5.0)) + 0.35 * wearNoise(worldPosition * 75.0 + vec3(31.0));
+      float dirty = smoothstep(wearDirtShape.x - wearDirtShape.y, wearDirtShape.x + wearDirtShape.y, vertexWear.y * (0.7 + 0.6 * dirtBreak));
+      // Dirt darkens the layer below and pulls it toward the dirt colour, so paint and metal stay readable through it.
+      color = mix(color, mix(color * 0.35, wearDirt.rgb, 0.6), dirty);
+      metallic *= 1.0 - dirty;
+      roughness = mix(roughness, max(roughness, wearDirt.w), dirty);
+      coatKept *= 1.0 - dirty;
+    }
   }
   float splatCavity = 1.0;
   if (USES_SPLAT) applySplat(color, normal, roughness, splatCavity);
@@ -776,7 +838,7 @@ ${featureCode("probeSurroundings")}    radiance += surroundings * reflectance * 
 ${featureCode("irradianceGrid")}  vec3 keyResponse = keyColor / mix(vec3(5.2, 4.7, 4.1), vec3(3.7, 3.4, 2.9), worldMode);
   keyResponse *= mix(daylight, 1.0, worldMode);
 ${featureCode("worldLight")}  if (USES_SHEEN) radiance = sheenLayer(radiance, normal, viewDirection, visibility);
-  if (USES_CLEARCOAT) radiance = clearCoatLayer(radiance, normal, viewDirection, visibility);
+  if (USES_CLEARCOAT) radiance = clearCoatLayer(radiance, normal, viewDirection, visibility, materialCoat.x * coatKept);
   radiance += emission;
 ${featureCode("afterEmission")}${featureCode("worldAfterEmission")}  if (TAG_FLOOR) {
     float contact = 1.0 - 0.45 * exp(-dot(worldPosition.xz, worldPosition.xz) * 1.4);
@@ -830,6 +892,7 @@ const SHADER_FEATURE_CONDITIONS = {
   renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5 && renderPassMode < 5.5'],
   sheen: ['USES_SHEEN', 'materialSheen.rgb != vec3(0.0)'],
   clearcoat: ['USES_CLEARCOAT', 'materialCoat.x > 0.0'],
+  surfaceWear: ['USES_SURFACE_WEAR', 'wearEnabled > 0.5'],
 };
 
 // Lighting from an environment map and the built-in studio lighting are two code paths, and a frame takes one of them.
@@ -911,7 +974,7 @@ export const SHADER_FEATURES = Object.freeze([...Object.keys(SHADER_FEATURE_COND
 // choice between them whether or not the uniform picks it, so a renderer without those parts compiles them out.
 // The varyings that both shaders carry: per-vertex colours, and the per-instance values that a draw of one instance sets as uniforms.
 function interpolantDefines(enabled) {
-  return [['vertexColors', 'VERTEX_COLORS'], ['instanced', 'INSTANCED']].filter(([feature]) => enabled.has(feature)).map(([, macro]) => `#define ${macro}`);
+  return [['vertexColors', 'VERTEX_COLORS'], ['surfaceWear', 'SURFACE_WEAR'], ['instanced', 'INSTANCED']].filter(([feature]) => enabled.has(feature)).map(([, macro]) => `#define ${macro}`);
 }
 
 function vertexDefinitions(enabled) {

@@ -1,0 +1,2 @@
+- Mesh edits gain geometry masks: vertex_group measure curvature, edge or occlusion, and vertex_color gradients along a group, so a mesh with no UVs can carry edge wear and dirt (#708)
+- Materials gain `wear`: a vertex group blends the material from paint to bare metal per pixel and a second group adds dirt, so a mesh with no UVs shows metal on its edges and dirt in its cavities (#708)

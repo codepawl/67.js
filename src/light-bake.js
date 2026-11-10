@@ -621,6 +621,7 @@ function unwrapIntoSecondUvSet(geometry, scale) {
   const uvs = geometry.uvs ? new Float32Array(newCount * 2) : null;
   const colors = geometry.colors ? new Float32Array(newCount * 3) : null;
   const skyVisibility = geometry.skyVisibility ? new Float32Array(newCount) : null;
+  const surfaceMasks = geometry.surfaceMasks ? new Float32Array(newCount) : null;
   for (let vertex = 0; vertex < newCount; vertex++) {
     const source = Math.round(extracted.colors[vertex * 3]);
     if (uvs) {
@@ -628,6 +629,7 @@ function unwrapIntoSecondUvSet(geometry, scale) {
       uvs[vertex * 2 + 1] = geometry.uvs[source * 2 + 1];
     }
     if (skyVisibility) skyVisibility[vertex] = geometry.skyVisibility[source];
+    if (surfaceMasks) surfaceMasks[vertex] = geometry.surfaceMasks[source];
     if (colors) {
       for (let channel = 0; channel < 3; channel++) colors[vertex * 3 + channel] = geometry.colors[source * 3 + channel];
     }
@@ -635,6 +637,7 @@ function unwrapIntoSecondUvSet(geometry, scale) {
   if (uvs) result.uvs = uvs;
   if (colors) result.colors = colors;
   if (skyVisibility) result.skyVisibility = skyVisibility;
+  if (surfaceMasks) result.surfaceMasks = surfaceMasks;
   return { geometry: result, utilization: Math.max(unwrapped.utilization, SURFACE_UTILIZATION_FLOOR) };
 }
 
