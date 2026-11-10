@@ -159,9 +159,22 @@ const pose = createAssetPose(character, {
 
 The graph knows no rig, so a creature or a machine runs the same way. The tests drive a quadruped (root, body, neck, head and four legs) and the car from the repo's test assets (wheels spinning while the body travels) through the same graph, root motion and IK hooks.
 
+## NPC path follower
+
+`createPathFollower({ graph, navmesh, position, yaw, cruiseSpeed })` walks an NPC along a path through the same graph. It writes its speed to the `speed` parameter, so idle, walk and run blend, and it moves by `graph.rootMotion`, so the feet do not slide. The graph needs the `rootMotion` option.
+
+```js
+const follower = createPathFollower({ graph, navmesh, position: [-16, 0, 0], yaw: Math.PI / 2, cruiseSpeed: 2.2 });
+follower.goTo([16, 0]); // a navmesh route; follower.follow(points) takes any list of [x, z] or [x, y, z]
+// systems: [follower.system(), graph.system()]; follower.state has position, yaw, speed and status
+```
+
+Each step it moves by the root motion of the last graph step, turned by its yaw as the [player](player.md) does, then steers to the next waypoint at `turnRate` and picks the speed for the next step: `cruiseSpeed` on a straight, lower toward a sharp corner (`cornerSlowDistance`), and in proportion to the distance inside `slowRadius` of the goal, never below `minimumSpeed`. A large heading error cuts the speed, so a sharp turn happens nearly in place. A corner counts as reached within `cornerRadius` or once passed, so the NPC rounds it on the outside. With a `navmesh`, a step into unwalkable ground slides along its edge (counted in `state.blockedSteps`). `status` becomes `"arrived"` within `arrivalRadius` of the last point and the parameter drops to 0; `stop()` returns to idle. `state.yaw` follows the player convention (0 faces -Z), so a glTF model needs `yaw + PI` about Y.
+
+At most 256 waypoints and speeds up to 100. Errors name the option or point and what to pass. `bench/animation-graph/npc.html` shows the RobotExpressive walking a route around a wall.
+
 ## Limits and errors
 
 At most 64 parameters, 8 layers, 64 states and 256 transitions per layer, 8 conditions per transition, 16 motions per blend space and 4 states fading out at once. Errors name the field and the fix, for example `createAnimationGraph layers[0].transitions[1].to names "run", which is not a state of this layer. States: idle, move.`
 
 
-Path-driven NPC speed is not a separate feature: an NPC sets `speed` from its path follower, such as the navmesh, through the same `graph.set`.
