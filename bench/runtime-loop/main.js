@@ -141,7 +141,13 @@ const RIG_FACTORIES = {
   topDown: () => createTopDownCamera({ subject: player.state }),
 };
 const requestedRig = new URLSearchParams(location.search).get('rig');
-let rigKind = requestedRig in RIG_FACTORIES || requestedRig === 'static' ? requestedRig : 'follow';
+let rigKind = Object.hasOwn(RIG_FACTORIES, requestedRig ?? '') || requestedRig === 'static' ? requestedRig : 'follow';
+
+// Only own keys: a name like "toString" from the URL or a button must not reach the prototype.
+function createRig(kind) {
+  if (!Object.hasOwn(RIG_FACTORIES, kind)) throw new Error(`Unknown camera rig "${kind}"; use follow, firstPerson, topDown or static.`);
+  return createRig(kind);
+}
 
 const canvas = document.querySelector('canvas');
 const renderer = new Renderer67(canvas, parts, { samples: 4, memoryBudgetMiB: 256 });
@@ -190,7 +196,7 @@ function startMode(mode) {
     frame: buildFrame,
     systems: [input, physicsSystem, spinSystem, player],
   });
-  if (rigKind !== 'static') runtime.addSystem(RIG_FACTORIES[rigKind]());
+  if (rigKind !== 'static') runtime.addSystem(createRig(rigKind));
   runtime.start();
   for (const button of document.querySelectorAll('button[data-mode]')) {
     button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
@@ -208,8 +214,8 @@ function selectRig(kind) {
   rigKind = kind;
   if (kind === 'static') {
     if (runtime.getSystem('camera')) runtime.removeSystem('camera');
-  } else if (runtime.getSystem('camera')) runtime.replaceSystem('camera', RIG_FACTORIES[kind]());
-  else runtime.addSystem(RIG_FACTORIES[kind]());
+  } else if (runtime.getSystem('camera')) runtime.replaceSystem('camera', createRig(kind));
+  else runtime.addSystem(createRig(kind));
   markRigButtons();
 }
 
