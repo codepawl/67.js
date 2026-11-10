@@ -27,16 +27,18 @@ try {
   await page.goto(`${serverUrl}/bench/post/post-steps.html`, { timeout: PAGE_LOAD_TIMEOUT });
   await page.waitForFunction(() => window.drawCase, null, { timeout: PAGE_LOAD_TIMEOUT });
   const hasPostSteps = await page.evaluate(() => window.hasPostSteps);
-  const names = (await page.evaluate(() => window.caseNames)).filter(name => hasPostSteps || !/color-balance|glare|lens/.test(name));
+  const names = (await page.evaluate(() => window.caseNames)).filter(name => hasPostSteps || !/color-balance|glare|lens|grade|sharpen|kuwahara|posterize|pixelate/.test(name));
   await mkdir(outputFolder, { recursive: true });
   const medians = new Map(names.map(name => [name, []]));
   const hashes = {};
+  const regions = {};
   for (let round = 0; round < rounds; round++) {
     for (const name of round % 2 === 0 ? names : [...names].reverse()) {
       const result = await page.evaluate(caseName => window.drawCase(caseName), name);
       if (result.glError !== 0) throw new Error(`${name}: GL error ${result.glError}`);
       medians.get(name).push(result.medianMilliseconds);
       const png = Buffer.from(result.image, 'base64');
+      regions[name] = result.regions;
       hashes[name] = createHash('sha256').update(png).digest('hex').slice(0, 16);
       await writeFile(resolve(outputFolder, `${name}.png`), png);
     }
@@ -44,7 +46,7 @@ try {
   const summary = {};
   for (const [name, values] of medians) {
     const sorted = [...values].sort((first, second) => first - second);
-    summary[name] = { medianMilliseconds: Number(sorted[Math.floor(sorted.length / 2)].toFixed(3)), rangeMilliseconds: [sorted[0], sorted.at(-1)].map(value => Number(value.toFixed(3))), hash: hashes[name] };
+    summary[name] = { medianMilliseconds: Number(sorted[Math.floor(sorted.length / 2)].toFixed(3)), rangeMilliseconds: [sorted[0], sorted.at(-1)].map(value => Number(value.toFixed(3))), hash: hashes[name], regions: regions[name] };
   }
   console.log(JSON.stringify({ size: [width, height], rounds, summary }, null, 1));
 } finally {

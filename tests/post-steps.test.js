@@ -9,7 +9,7 @@ import { resolveEffects } from '../src/effects.js';
 import { normalizeAgentLook } from '../src/agent-look.js';
 import { agentSceneModulesNeeded, loadAgentSceneModules } from '../src/agent-scene-modules.js';
 import { installCameraEffects } from '../src/camera-effects.js';
-import { installPostSteps, resolvePostSteps, glareFragment, lensDistortionFragment, colorBalanceFragment } from '../src/post-steps.js';
+import { installPostSteps, resolvePostSteps, glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment, usesObjectMask } from '../src/post-steps.js';
 import { createAgentScene } from '../src/agent-scene.js';
 
 function recordingContext(calls) {
@@ -33,12 +33,12 @@ function fakeRenderer(context) {
   };
 }
 
-const STAGE_NAMES = ['Glare', 'Lens distortion', 'Color balance'];
+const STAGE_NAMES = ['Glare', 'Lens distortion', 'Color balance', 'Stylize'];
 
 test('a look that names no step resolves exactly as before', async () => {
   await loadAgentSceneModules({});
   const effects = normalizeAgentLook({}).effects;
-  for (const field of ['colorBalance', 'glare', 'lensDistortion']) assert.equal(Object.hasOwn(effects, field), false);
+  for (const field of ['colorBalance', 'glare', 'lensDistortion', 'stylize']) assert.equal(Object.hasOwn(effects, field), false);
   assert.deepEqual(resolveEffects({}), resolveEffects({ saturation: 1 }));
 });
 
@@ -86,13 +86,14 @@ test('each stage draws only for a frame that sets its step, and frees its target
   const context = recordingContext(calls);
   const renderer = installPostSteps(installCameraEffects(fakeRenderer(context)));
   assert.deepEqual(renderer.postStages.slice(2).map(stage => stage.name), STAGE_NAMES);
-  assert.equal(installPostSteps(renderer).postStages.length, 5);
+  assert.equal(installPostSteps(renderer).postStages.length, 6);
   const unset = { eye: [0, 1, 5], effects: {} };
-  const neutral = { eye: [0, 1, 5], effects: { colorBalance: {}, glare: {}, lensDistortion: {} } };
+  const neutral = { eye: [0, 1, 5], effects: { colorBalance: {}, glare: {}, lensDistortion: {}, stylize: {} } };
   const named = [
     ['Glare', { glare: { streaks: 0.6 } }],
     ['Lens distortion', { lensDistortion: { distortion: 0.5, dispersion: 0.5 } }],
     ['Color balance', { colorBalance: { gain: [1.1, 1, 0.9] } }],
+    ['Stylize', { stylize: { posterize: 4 } }],
   ];
   const effects = resolveEffects({});
   for (const [name, input] of named) {
@@ -103,12 +104,67 @@ test('each stage draws only for a frame that sets its step, and frees its target
     stage.releaseTargets(context);
     stage.dispose(context);
   }
-  assert.ok(calls.filter(call => call[0] === 'drawArrays').length === 3);
-  assert.ok(calls.filter(call => call[0] === 'deleteTexture').length === 3);
+  assert.ok(calls.filter(call => call[0] === 'drawArrays').length === 4);
+  assert.ok(calls.filter(call => call[0] === 'deleteTexture').length === 4);
+});
+
+test('a stylize step resolves its filters and a mask, and refuses bad input', () => {
+  assert.deepEqual(resolvePostSteps({ stylize: {} }).stylize, {});
+  assert.deepEqual(resolvePostSteps({ stylize: { sharpen: 1, kuwahara: 3, posterize: 5, pixelate: 8 } }).stylize, { sharpen: 1, kuwahara: 3, posterize: 5, pixelate: 8 });
+  assert.throws(() => resolvePostSteps({ stylize: { kuwahara: 9 } }), /stylize.kuwahara must be between/);
+  assert.throws(() => resolvePostSteps({ stylize: { pixelate: 2.5 } }), /whole number/);
+  assert.throws(() => resolvePostSteps({ stylize: { sharpen: -1 } }), /stylize.sharpen must be between/);
+  assert.throws(() => resolvePostSteps({ stylize: { blur: 1 } }), /Unknown stylize field/);
+});
+
+test('a mask names parts or a depth range, and says what to pass when it is wrong', () => {
+  const mask = resolvePostSteps({ colorBalance: { mask: { objects: ['hero'], depth: { near: 2, far: 8 }, invert: true } } }).colorBalance.mask;
+  assert.deepEqual(mask, { invert: true, objects: ['hero'], depth: { near: 2, far: 8, feather: 0 } });
+  assert.deepEqual(resolvePostSteps({ stylize: { mask: { depth: { far: 5 } } } }).stylize.mask, { invert: false, depth: { near: 0, far: 5, feather: 0 } });
+  assert.equal(resolvePostSteps({ colorBalance: {} }).colorBalance.mask, undefined);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: {} } }), /colorBalance.mask needs a source/);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: { objects: [] } } }), /1 to 16 part names/);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: { objects: Array(17).fill('a') } } }), /1 to 16 part names/);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: { objects: [3] } } }), /mask.objects\[0\] must be a part name/);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: { depth: { near: 5, far: 5 } } } }), /far must be greater than near/);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: { depth: { feather: -1 } } } }), /feather must be between/);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: { objects: ['a'], color: 1 } } }), /Unknown colorBalance.mask field/);
+  assert.throws(() => resolvePostSteps({ colorBalance: { mask: { objects: ['a'], invert: 1 } } }), /invert must be true or false/);
+  assert.equal(usesObjectMask(resolvePostSteps({ colorBalance: { mask: { objects: ['hero'] } } })), true);
+  assert.equal(usesObjectMask(resolvePostSteps({ colorBalance: { mask: { depth: { far: 5 } } }, stylize: { pixelate: 4 } })), false);
+});
+
+test('a stage binds the part numbers of a masked step and refuses an unknown part', () => {
+  const calls = [];
+  const context = recordingContext(calls);
+  const renderer = installPostSteps(installCameraEffects(fakeRenderer(context)));
+  renderer.passSupport = { texture: 'ids', objectNames: () => ['floor', 'hero', 'post', 'hero'] };
+  const stage = renderer.postStages.find(candidate => candidate.name === 'Color balance');
+  const effects = resolveEffects({});
+  const frame = mask => ({ eye: [0, 1, 5], effects: { colorBalance: { gain: [1.2, 1, 1], mask } } });
+  assert.ok(stage.apply(renderer, frame({ objects: ['hero'] }), effects, 'source'));
+  const bound = calls.find(call => call[0] === 'uniform1iv');
+  assert.deepEqual([...bound[2]].slice(0, 3), [2, 4, 0]);
+  assert.throws(() => stage.apply(renderer, frame({ objects: ['ghost'] }), effects, 'source'), /"ghost" is not a part in the frame\. Fix: use a part name such as "floor"/);
+  const afterDraw = calls.slice(calls.findLastIndex(call => call[0] === 'drawArrays') + 1);
+  const unbind = afterDraw.findIndex(call => call[0] === 'bindTexture' && call[2] === null);
+  assert.ok(unbind > 0 && afterDraw[unbind - 1][0] === 'activeTexture', 'the object ID texture is unbound from its unit after the draw');
+  renderer.passSupport = null;
+  assert.throws(() => stage.apply(renderer, frame({ objects: ['hero'] }), effects, 'source'), /installRenderPasses/);
+  stage.releaseTargets(context);
+  stage.dispose(context);
+});
+
+test('a mask cannot be combined with an active lens distortion, which warps the image the mask is not warped with', () => {
+  const masked = { colorBalance: { gain: [1.2, 1, 1], mask: { depth: { far: 5 } } } };
+  assert.throws(() => resolvePostSteps({ ...masked, lensDistortion: { distortion: 0.2 } }), /colorBalance.mask cannot be combined with lensDistortion/);
+  assert.throws(() => resolvePostSteps({ stylize: { pixelate: 4, mask: { depth: { far: 5 } } }, lensDistortion: { dispersion: 0.3 } }), /stylize.mask cannot be combined/);
+  assert.ok(resolvePostSteps({ ...masked, lensDistortion: {} }).colorBalance.mask);
+  assert.ok(resolvePostSteps({ lensDistortion: { distortion: 0.2 }, colorBalance: { gain: [1.2, 1, 1] } }).lensDistortion);
 });
 
 test('the shaders keep their fixed sample patterns and read no history', () => {
-  for (const fragment of [glareFragment, lensDistortionFragment, colorBalanceFragment]) {
+  for (const fragment of [glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment]) {
     assert.match(fragment, /^#version 300 es/);
     assert.doesNotMatch(fragment, /previousViewProjection|time/);
   }
@@ -118,7 +174,8 @@ test('the shaders keep their fixed sample patterns and read no history', () => {
 //   RENDER_TESTS=1 node --test tests/post-steps.test.js (on a shared GPU, start it through the machine GPU lock)
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const rendersEnabled = process.env.RENDER_TESTS === '1' && existsSync(chromePath);
-const STEP_CASES = ['defocus', 'color-balance', 'glare-streaks', 'glare-streaks-6', 'glare-anamorphic', 'glare-fog', 'lens-distortion', 'lens-dispersion'];
+const STEP_CASES = ['defocus', 'color-balance', 'glare-streaks', 'glare-streaks-6', 'glare-anamorphic', 'glare-fog', 'lens-distortion', 'lens-dispersion',
+  'grade-hero', 'grade-depth', 'sharpen', 'kuwahara', 'posterize', 'pixelate', 'pixelate-hero'];
 
 test('each named step changes the picture and the default still keeps its hash', { skip: !rendersEnabled, timeout: 300000 }, () => {
   const output = execFileSync('node', ['bench/post/post-steps.mjs', '--rounds=1', `--out=${join(tmpdir(), 'post-steps-test')}`], { encoding: 'utf8' });
@@ -127,6 +184,11 @@ test('each named step changes the picture and the default still keeps its hash',
     assert.notEqual(summary[name].hash, summary.default.hash, `${name} differs from the default`);
     assert.ok(summary[name].medianMilliseconds > 0, `${name} has a frame time`);
   }
+  // A grade masked to the hero part changes the hero and leaves the floor as the default drew it; the unmasked grade changes both.
+  assert.notDeepEqual(summary['grade-hero'].regions.hero, summary.default.regions.hero);
+  assert.deepEqual(summary['grade-hero'].regions.floor, summary.default.regions.floor);
+  assert.notDeepEqual(summary['color-balance'].regions.floor, summary.default.regions.floor);
+  assert.deepEqual(summary['pixelate-hero'].regions.floor, summary.default.regions.floor);
   // Hash of the default still as origin/main drew it before the named steps (bench/post/post-steps.mjs --root=<origin/main checkout>).
   assert.equal(summary.default.hash, '8741ffc3aaace9a8');
 });
