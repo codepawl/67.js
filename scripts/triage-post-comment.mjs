@@ -39,8 +39,39 @@ export const APPROVAL_PHRASES = Object.freeze([
 ]);
 const APPROVAL_PATTERN = new RegExp(`\\b(?:${APPROVAL_PHRASES.map(phrase => phrase.replace(/ /g, '\\s+')).join('|')})\\b`, 'i');
 
+const NAMED_ENTITIES = Object.freeze({
+  nbsp: ' ',
+  ensp: ' ',
+  emsp: ' ',
+  thinsp: ' ',
+  shy: '',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+});
+const ENTITY_PATTERN = /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));?/g;
+
+function decodeEntity(whole, decimal, hexadecimal, name) {
+  if (name !== undefined) return NAMED_ENTITIES[name.toLowerCase()] ?? whole;
+  const codePoint = decimal !== undefined ? Number(decimal) : parseInt(hexadecimal, 16);
+  return codePoint > 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : whole;
+}
+
+// The text as a reader of the rendered comment sees it: entities decoded, emphasis and code marks gone, and every
+// kind of space a plain space.
+export function normalizeForApprovalCheck(text) {
+  return String(text ?? '')
+    .replace(ENTITY_PATTERN, decodeEntity)
+    .replace(/[­​-‏⁠﻿]/g, '')
+    .replace(/[*_~`\\]/g, '')
+    .replace(/[\s   -   　]+/g, ' ');
+}
+
 export function claimsApproval(text) {
-  return APPROVAL_PATTERN.test(String(text ?? ''));
+  const original = String(text ?? '');
+  return APPROVAL_PATTERN.test(original) || APPROVAL_PATTERN.test(normalizeForApprovalCheck(original));
 }
 
 // Removes every match of the pattern and repeats until nothing is left to remove, so a removal cannot join the

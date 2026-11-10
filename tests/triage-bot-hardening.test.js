@@ -139,6 +139,17 @@ test('an approval phrase hidden by tags or a zero-width character is still caugh
   assert.match(buildCommentBody('LG\u200bTM'), /A maintainer will review this item\./);
 });
 
+test('an approval phrase that only renders as one is still caught', () => {
+  const bypasses = ['sa&#102;e', 'sa&#x66;e', 'Looks&nbsp;good', 'looks&NBSP;good', 'sa**f**e', 's*a*fe', 'look`s` good', 'sa\\fe', 'Looks good', 'Looks good'];
+  for (const bypass of bypasses) {
+    assert.equal(claimsApproval(bypass), true, bypass);
+    const body = buildCommentBody(`Notes: ${bypass} to me. Details follow.`);
+    assert.match(body, /A maintainer will review this item\./, bypass);
+    assert.doesNotMatch(body, /Details follow/, bypass);
+  }
+  assert.equal(claimsApproval('Use R&amp;D notes and &copy; marks; the snake_case name is fine.'), false);
+});
+
 test('a harmless sentence is quoted and word boundaries keep similar words out', () => {
   const body = buildCommentBody('The change touches the loader and lacks a change note. Please add changes/123.md. The unsafe-looking regex was not run.');
   assert.match(body, /> The change touches the loader/);
