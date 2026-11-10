@@ -329,7 +329,9 @@ const shadow = z.strictObject({
 // engine and listed in scene_capabilities curveText, because every tool that takes a recipe repeats this schema.
 function curveAndTextGeometries(id) {
   return [
-    z.strictObject({ ...id, type: z.literal('curve'), points: z.array(z.unknown()).max(1024), closed: looseField, radius: looseField, taper: looseField, profile: looseField, resolution: looseField, radialSegments: looseField }).describe('Bezier sweep; see scene_capabilities curveText.'),
+    z.strictObject({ ...id, type: z.literal('curve'), points: z.array(z.unknown()).max(1024).optional(), shape: looseField, splines: z.array(z.unknown()).max(64).optional(), kind: looseField, weights: z.array(z.unknown()).max(1024).optional(), trim: looseField, grow: looseField, closed: looseField, radius: looseField, taper: looseField, profile: looseField, resolution: looseField, radialSegments: looseField })
+      .refine(curve => curve.points !== undefined || curve.shape !== undefined || curve.splines !== undefined, { message: 'A curve needs one of points (an array of [x, y, z]), shape ({ type: "arc" | "spiral" | "star" }) or splines (an array of up to 64 splines). See scene_capabilities curveText.' })
+      .describe('Sweep along points, a shape or splines; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('sdf'), root: z.record(z.string(), z.unknown()), resolution: looseField }).describe('Signed-distance shapes with smooth union; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('text'), text: z.string().max(256), size: looseField, depth: looseField, font: looseField, align: looseField, curveSegments: looseField }).describe('3D text; see scene_capabilities curveText.'),
     z.strictObject({ ...id, type: z.literal('terrain'), size: looseField, resolution: looseField, seed: looseField, amplitude: looseField, holes: z.array(z.unknown()).max(16).optional() }).describe('Hills with round holes; see scene_capabilities terrain.'),
@@ -594,6 +596,7 @@ const motion = z.strictObject({
     motionTrack('camera', 'target', vector3, vector3),
     motionTrack('camera', 'fov', finite.gt(0).lt(180), finite),
     motionTrack('camera', 'roll', finite, finite),
+    motionTrack('geometry', 'oceanTime', finite.min(-1e6).max(1e6), finite),
     lookTrack,
   ])).max(128),
 }).describe('One absolute-time procedural clip. Local node transforms propagate through parents. Cubic tangents are derivatives per second. Backend checks references, duplicate tracks, 2048 total keys and every sampled pose.');
