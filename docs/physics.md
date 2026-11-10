@@ -405,6 +405,7 @@ For a recipe armature, `ragdoll.armature` names it. The optional `density`, `fri
 - Rigs need uniform scale above the bones (a scale of 100 on an armature node is fine). A bone with no length, more than 48 bones, a bone with a translation or rotation track in the same recipe, or a missing floor body in a scene recipe is refused or falls forever.
 - On an asset, physics wins over motion tracks and `ik` on joints.
 - `scene_inspect` returns `physics.ragdoll`: `bones`, `lowestY`, `highestY`, `fastestFinalSpeed` and `restsAtTime` (null while still moving). Read those instead of a picture.
+- A fall exports as a glTF clip: `bake-motion` over every bone and the fixed bodies, with a tolerance, replaces the recording with LINEAR keys, and `exportGlb` writes them as one animation. `tests/motion-bake.test.js` bakes and simplifies a ragdoll fall, re-imports the GLB with `GLTFLoader` and plays it with an `AnimationMixer`; every bone stays within 0.05 m and 0.05 in the rotation matrix of the live simulation, sampled every 0.1 s over the first 2.9 s.
 - Rapier stays an optional peer. A recipe without `physics` loads none of this code.
 
 ## Recipe cloth
