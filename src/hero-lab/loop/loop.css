@@ -1,0 +1,99 @@
+/* The world loop hero: a full-viewport stage, the headline on the left over a per-scene scrim, scene names bottom right.
+   Everything that moves here is opacity or transform; no rules, no eyebrow labels, states lead with an icon. */
+@property --scrim {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0.72;
+}
+
+.hero-loop {
+  --surface-hover: #2a2538;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --press: 140ms;
+  --hover: 160ms;
+  --scrim: 0.72;
+  position: relative;
+  height: max(100svh, 640px);
+  overflow: hidden;
+  transition: --scrim 900ms ease;
+}
+/* On the home page the site header sits above the hero, so the hero fills what is left of the first screen. */
+.site > .hero-loop { height: max(calc(100svh - 80px), 560px); margin-top: 12px; }
+/* The stage: the poster first, the live canvas fades in over it, then the poster leaves. */
+.hero-loop .stage { position: absolute; inset: 0; overflow: hidden; background: var(--window, #09070f); }
+.hero-loop .stage canvas, .hero-loop .stage .poster { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hero-loop .stage .poster { object-fit: cover; z-index: 1; transition: opacity 520ms ease 80ms; }
+.hero-loop .stage canvas { z-index: 0; touch-action: pan-y; }
+.hero-loop .stage[data-live='true'] .poster { opacity: 0; pointer-events: none; }
+.hero-loop .stage-status { position: absolute; z-index: 2; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border-radius: 12px; background: var(--surface); color: var(--text); font-size: 13px; }
+.hero-loop .stage canvas.world { z-index: 0; }
+.hero-loop .stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(to top, rgb(9 7 15 / calc(var(--scrim) * 1.08)) 0%, transparent 52%),
+    linear-gradient(to right, rgb(9 7 15 / var(--scrim)) 0%, rgb(9 7 15 / calc(var(--scrim) * 0.5)) 38%, transparent 68%);
+}
+.hero-loop .copy { position: absolute; z-index: 3; left: clamp(16px, 6vw, 96px); bottom: clamp(32px, 9svh, 96px); max-width: 640px; display: flex; flex-direction: column; gap: 22px; }
+.hero-loop .copy h1 { font-size: clamp(42px, 6vw, 88px); font-weight: 640; letter-spacing: -0.04em; line-height: 0.98; text-shadow: none; }
+.hero-loop .copy .lede { max-width: 34ch; color: var(--muted); font-size: clamp(16px, 1.5vw, 19px); line-height: 1.5; }
+.hero-loop .copy .lede, .hero-loop .copy h1, .hero-loop .copy .hero-actions { animation: rise 700ms var(--ease-out) backwards; }
+.hero-loop .copy .lede { animation-delay: 190ms; }
+.hero-loop .copy .hero-actions { animation-delay: 260ms; }
+.hero-loop .copy h1 { animation-delay: 120ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+.scene-bar { position: absolute; z-index: 4; right: clamp(16px, 4vw, 48px); bottom: clamp(24px, 5svh, 48px); display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; max-width: min(720px, 60vw); }
+.scene-tabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
+.hero-loop .scene-tab, .hero-loop .credits-toggle { display: inline-flex; text-shadow: 0 1px 12px rgb(9 7 15 / 0.9); align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color var(--hover) ease, color var(--hover) ease, transform var(--press) var(--ease-out); }
+.hero-loop .scene-tab svg, .hero-loop .credits-toggle svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.hero-loop .scene-tab:active, .hero-loop .credits-toggle:active { transform: scale(0.97); }
+.hero-loop .scene-tab[aria-current='true'] { background: rgb(255 255 255 / 0.1); color: var(--text); }
+.ring-track { stroke: rgb(255 255 255 / 0.22); }
+.ring-fill { stroke: currentColor; transform: rotate(-90deg); transform-origin: 50% 50%; opacity: 0; }
+.ring-dot { fill: currentColor; stroke: none; opacity: 0.6; }
+.hero-loop .scene-tab[data-state='playing'] .ring-fill { opacity: 1; }
+.hero-loop .scene-tab[data-state='playing'] .ring-dot { opacity: 1; }
+.hero-loop .scene-tab[data-state='loading'] .ring-track { stroke-dasharray: 3 4; animation: ring-turn 1.4s linear infinite; transform-origin: 50% 50%; }
+@keyframes ring-turn { to { transform: rotate(360deg); } }
+@media (hover: hover) and (pointer: fine) {
+  .attribution a:hover { color: var(--text); }
+  .hero-loop .scene-tab:hover, .hero-loop .credits-toggle:hover { background: rgb(255 255 255 / 0.08); color: var(--text); }
+}
+.attribution[hidden], .credits-panel[hidden] { display: none; }
+.attribution { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-end; padding: 0 12px 4px; }
+.attribution a { display: inline-flex; align-items: center; min-height: 28px; color: var(--muted); font-size: 12px; text-shadow: 0 1px 12px rgb(9 7 15 / 0.9); transition: color var(--hover) ease; }
+.credits-panel { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 16px; background: var(--surface); }
+.credits-panel a { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+.credits-panel .credit-meta { color: var(--muted); font-size: 12px; }
+.credits-panel p { margin: 0; padding: 8px 10px; color: var(--muted); font-size: 12px; }
+@media (hover: hover) and (pointer: fine) { .credits-panel a:hover { background: var(--surface-hover); } }
+
+@media (max-width: 1180px) {
+  .hero-loop .scene-tab span { display: none; }
+  .hero-loop .scene-tab[aria-current='true'] span { display: inline; }
+}
+@media (max-width: 700px) {
+  .hero-loop .copy { bottom: 148px; }
+  .hero-loop .copy h1 { font-size: 40px; }
+  .scene-bar { left: 8px; right: 8px; max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'attribution attribution' 'panel panel' 'tabs credits'; align-items: center; gap: 0; bottom: 16px; }
+  .attribution { grid-area: attribution; }
+  .credits-panel { grid-area: panel; margin-bottom: 8px; }
+  .scene-tabs { grid-area: tabs; }
+  .hero-loop .credits-toggle { grid-area: credits; }
+  .attribution { align-items: flex-start; padding: 0 8px 8px; }
+  .hero-loop .scene-tab, .hero-loop .credits-toggle { padding: 0 9px; }
+  .hero-loop .scene-tab[aria-current='true'] { padding: 0 12px 0 9px; }
+  .credits-label { display: none; }
+  .scene-tabs { justify-content: flex-start; }
+  .hero-loop .scene-tab span { display: none; }
+  .hero-loop .scene-tab[aria-current='true'] span { display: inline; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-loop .scene-tab[data-state='loading'] .ring-track { animation: none; }
+  .hero-loop { transition: none; }
+  .hero-loop .copy > * { animation: none; }
+}
