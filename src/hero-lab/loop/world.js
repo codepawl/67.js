@@ -167,9 +167,10 @@ export async function buildWorld(download, canvas, overrides = {}) {
       const drawn = effects ? effects.apply(renderer, seconds, frame) : frame;
       renderer.render({ ...drawn, eye: camera.eye, target: camera.target, fov: camera.fov, time: seconds });
     },
-    // One draw while the canvas is still hidden: shaders compile and textures upload now, not on the first frame of a fade.
+    // The first draw while the canvas is still hidden: programs link on the driver's threads and targets allocate now, not on the first frame of a fade.
+    // Resolves false when the driver took longer than the timeout and the draw ran in one block.
     warm(camera) {
-      renderer.render({ ...frame, eye: camera.eye, target: camera.target, fov: camera.fov, time: 0 });
+      return renderer.prepareFrame({ ...frame, eye: camera.eye, target: camera.target, fov: camera.fov, time: 0 });
     },
     resize: () => renderer.resize(),
     dispose() {

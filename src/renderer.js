@@ -2,7 +2,7 @@ import { materialTags } from './shader-registry.js';
 import { mat4, mat3 } from 'gl-matrix';
 import { SPLAT_UNITS, requireSplatSupport, layerTextureSupport, LIGHT_SHADING_FEATURE, SHADING_MODES, LIGHT_SHADING_MAXIMUM_SAMPLES, createVertexShader, vertexShader, liquidFragmentSource, createFragmentShader, liquidPassDrawer, depthFragmentShader, withDepthCode, benchmarkVertexShader, benchmarkFragmentShader, viewTransformShader, createDepthVertexShader } from './shaders.js';
 import { postFragment, createPostFragment, POST_STEPS, POST_STEPS_WITH_OPTIONAL_CODE, skyFragment, bloomFragment } from './post.js';
-import { fullscreenVertex, startProgram, finishProgram, compileProgram } from './gl-program.js';
+import { fullscreenVertex, startProgram, finishProgram, compileProgram, ProgramNotReady, isLinkComplete, setPreparing } from './gl-program.js';
 import { ambientOcclusionFragment } from './ambient-occlusion.js';
 import { planRenderSize, estimateTextureBytes, estimateFrameBytes, memoryBudgetError } from './budget.js';
 import { applyProjection } from './camera.js';
@@ -805,6 +805,37 @@ export class Renderer67 {
       await new Promise(resolve => setTimeout(resolve, 8));
     }
     this.finishConstruction();
+  }
+
+  /**
+   * Draws `frame` once the way a real frame is drawn, but without freezing the page for programs the driver has not finished
+   * building (the post pass of a fog or sky frame, liquids, ambient occlusion, a reversed-depth copy). Each draw that meets one
+   * stops there; the driver's thread keeps building while this waits in short timers, then the draw runs again. The last
+   * draw is complete and leaves every program, target and texture that frame uses ready, so the next frame costs no more than
+   * any other. Call it while the canvas is hidden or another world is on screen. Past `timeoutMilliseconds` it draws the
+   * frame at once and resolves true when it never had to, false otherwise.
+   */
+  async prepareFrame(frame, { timeoutMilliseconds = 6000 } = {}) {
+    await this.programsReady();
+    const context = this.context;
+    const deadline = performance.now() + timeoutMilliseconds;
+    setPreparing(context, true);
+    try {
+      for (;;) {
+        try {
+          this.render(frame);
+          return true;
+        } catch (error) {
+          if (!(error instanceof ProgramNotReady)) throw error;
+          while (!isLinkComplete(context, error.program) && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 8));
+          if (performance.now() >= deadline) break;
+        }
+      }
+    } finally {
+      setPreparing(context, false);
+    }
+    this.render(frame);
+    return false;
   }
 
   selectViewTransform(viewTransform, lookSource) {

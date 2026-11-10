@@ -113,6 +113,7 @@ renderer.replaceParts(asset.parts);
 ```
 
 `programsReady()` polls `KHR_parallel_shader_compile` and then finishes construction; a renderer made with `deferProgramLink` must not render before it resolves.
+`await renderer.prepareFrame(frame)` is the matching last step before a hidden renderer is shown: it draws `frame` once without freezing the page for the programs a first draw links (the post pass of a fog or sky frame, liquids, ambient occlusion, the reversed-depth copy). A draw that meets a program the driver is still building stops, the page waits in short timers, and the draw runs again until one completes; it resolves `true`. After `timeoutMilliseconds` (6000 by default) it draws the frame in one block and resolves `false`, so a slow driver costs a stall, never a hang. Start the next scene's `prepareFrame` while the current scene plays and begin the fade when it resolves.
 Starting on `shaderFeatureRepresentatives` matters: a scene whose first parts lack a feature recompiles the program inside `replaceParts`, which blocks again.
 
 ## Animation and ownership
