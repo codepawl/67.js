@@ -721,8 +721,8 @@ ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
     if (wearShape.w > 0.5) {
       float dirtBreak = 0.65 * wearNoise(worldPosition * 30.0 + vec3(5.0)) + 0.35 * wearNoise(worldPosition * 75.0 + vec3(31.0));
       float dirty = smoothstep(wearDirtShape.x - wearDirtShape.y, wearDirtShape.x + wearDirtShape.y, vertexWear.y * (0.7 + 0.6 * dirtBreak));
-      // Dirt darkens and tints the layer below instead of replacing it, so paint and metal stay readable through it.
-      color = mix(color, color * wearDirt.rgb * 4.0 + wearDirt.rgb * 0.5, dirty);
+      // Dirt darkens the layer below and pulls it toward the dirt colour, so paint and metal stay readable through it.
+      color = mix(color, mix(color * 0.35, wearDirt.rgb, 0.6), dirty);
       metallic *= 1.0 - dirty;
       roughness = mix(roughness, max(roughness, wearDirt.w), dirty);
       coatKept *= 1.0 - dirty;

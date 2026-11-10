@@ -82,3 +82,13 @@ test('the shader carries the wear term only when the feature is on', () => {
   assert.match(createFragmentShader(withWear), /#define USES_SURFACE_WEAR \(wearEnabled > 0\.5\)/);
   assert.match(createFragmentShader(['vertexColors']), /#define USES_SURFACE_WEAR false/);
 });
+
+test('the shader breaks the wear edge with noise, darkens the layer under dirt and keeps no clear coat on worn or dirty pixels', () => {
+  const shader = createFragmentShader(['vertexColors', 'surfaceWear']);
+  assert.match(shader, /float wearBreak = 0\.65 \* wearNoise\(worldPosition \* 48\.0\)/);
+  assert.match(shader, /smoothstep\(wearShape\.y - wearShape\.z, wearShape\.y \+ wearShape\.z, vertexWear\.x \* \(0\.55 \+ 0\.9 \* wearBreak\)\)/);
+  assert.match(shader, /color = mix\(color, mix\(color \* 0\.35, wearDirt\.rgb, 0\.6\), dirty\);/);
+  assert.match(shader, /metallic \*= 1\.0 - dirty;/);
+  assert.match(shader, /coatKept \*= 1\.0 - dirty;/);
+  assert.match(shader, /uniform vec4 wearDirt;/);
+});

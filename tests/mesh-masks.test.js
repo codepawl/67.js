@@ -158,3 +158,23 @@ test('a vertex_color group gradient names the fix for an unknown group or a bad 
   assert.throws(run({ group: 'wear', colors: [[0, 0, 0]] }), /two colors/);
   assert.throws(run({ group: 'wear', axis: 'y', colors: [[0, 0, 0], [1, 1, 1]] }), /group gradient fields/);
 });
+
+test('stratified occlusion rays give the same bytes on every run, in whole shares of the rays, and 0 on an open face', () => {
+  const edit = { measure: 'occlusion', rays: 64, distance: 1, seed: 3 };
+  const first = measured(edit, grooved());
+  const second = measured(edit, grooved());
+  assert.ok(sameBytes(first.weights, second.weights));
+  for (const weight of first.weights) {
+    assert.ok(Math.abs(weight * 64 - Math.round(weight * 64)) < 1e-4, `${weight} is not a whole share of 64 rays`);
+  }
+  let topWeights = 0;
+  let topCount = 0;
+  for (let vertex = 0; vertex < first.mesh.vertexCount; vertex++) {
+    if (first.mesh.positions[vertex * 3 + 1] > 0.49) {
+      topWeights += first.weights[vertex];
+      topCount++;
+    }
+  }
+  assert.ok(topCount > 0);
+  assert.equal(topWeights, 0, 'the open top is not occluded');
+});
