@@ -43,6 +43,8 @@
     "docs/physics.md",
     "docs/runtime.md",
     "docs/input.md",
+    "docs/animation-graph.md",
+    "docs/player.md",
     "docs/scene-query.md",
     "docs/user-passes.md",
     "docs/skeleton-pose.md",
@@ -121,6 +123,8 @@
     "./addons/cloth": "./build/cloth.js",
     "./addons/runtime": "./build/runtime.js",
     "./addons/input": "./build/input.js",
+    "./addons/animation-graph": "./build/animation-graph.js",
+    "./addons/player": "./build/player.js",
     "./addons/update-part-vertices": "./build/update-part-vertices.js",
     "./package.json": "./package.json"
   },
