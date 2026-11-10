@@ -80,7 +80,8 @@ const MODULE_MARKERS = {
   crowd: ['"crowd":{'],
   lineArt: ['"lines":{', '"toon":'],
   viewTransform: ['"viewTransform":"agx"', '"viewTransform":"neutral"', '"look":"'],
-  // The coplanar-overlap warning in scene_inspect appears only once this is loaded, which loadAllAgentSceneModules does; a recipe with resolveCoplanar needs it.
+  // Flush faces are ranked whenever this is loaded (issue #751): the MCP preview registers it, loadAllAgentSceneModules loads it,
+  // and so does a recipe that names resolveCoplanar. A plain recipe in a host without it still needs no on-demand module.
   coplanar: ['"resolveCoplanar"'],
   // A closed room a sun lights gets the floor sky trace by default. The recipe text can not say whether a room is closed, so a recipe that names its sun loads it and the module skips an open scene.
   floorSky: ['"keyColor"', '"keyIntensity"'],

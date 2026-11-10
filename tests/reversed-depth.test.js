@@ -43,7 +43,7 @@ function fakeRenderer({ extension = {}, benchmark = false } = {}) {
     context: { getExtension: name => (name === 'EXT_clip_control' ? extension : null) },
     render: frame => drawn.push(frame),
     applyEnvironmentUniforms() {},
-    applyDepthLayer() {},
+    applyDepthRank() {},
     resolveFrame() {},
     allocateFrameTargets() {},
   };

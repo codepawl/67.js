@@ -9,10 +9,6 @@ import { mat4 } from 'gl-matrix';
 import { compileProgram, fullscreenVertex } from './gl-program.js';
 import { shaderTransforms } from './shader-registry.js';
 
-// A float depth buffer resolves about 2^-23 of the value, so the constant part of a depth-layer offset moves a surface by well
-// under a micrometre, less than the rounding of a part's own matrix (issue #593: 2 um flush pairs kept flickering). The slope
-// part scales with the surface's own depth gradient, so it is the term that separates two flush faces; 16 cleared the metro film.
-const REVERSED_LAYER_SLOPE_SCALE = 16;
 const ZERO_VECTOR = new Float32Array(4);
 
 /**
@@ -174,7 +170,7 @@ export function installReversedDepth(renderer, mode = 'auto') {
   const original = {
     render: renderer.render,
     applyEnvironmentUniforms: renderer.applyEnvironmentUniforms,
-    applyDepthLayer: renderer.applyDepthLayer,
+    applyDepthRank: renderer.applyDepthRank,
     resolveFrame: renderer.resolveFrame,
     allocateFrameTargets: renderer.allocateFrameTargets,
   };
@@ -216,6 +212,7 @@ export function installReversedDepth(renderer, mode = 'auto') {
     reverseProjectionDepth(rasterProjection, renderer.projection);
     mat4.multiply(rasterViewProjection, rasterProjection, renderer.view);
     context.uniformMatrix4fv(renderer.uniforms.viewProjection, false, rasterViewProjection);
+    renderer.setFlushProjection(rasterViewProjection);
     cameraOffset.set(frameEye);
     cameraShift.set(rasterProjection.subarray(12, 16));
     setCameraRelative(cameraOffset, cameraShift);
@@ -252,10 +249,9 @@ export function installReversedDepth(renderer, mode = 'auto') {
       original.applyEnvironmentUniforms.call(this, map, uniforms);
       if (inFrame && !clipControl.active && uniforms === undefined) beginReversed();
     };
-    // The core pulls a decal toward the eye with a negative offset; reversed depth grows toward the eye, so the sign flips.
-    renderer.applyDepthLayer = function applyDepthLayerReversed(layer) {
-      original.applyDepthLayer.call(this, layer);
-      if (layer && clipControl.active) context.polygonOffset(layer * REVERSED_LAYER_SLOPE_SCALE, layer * 4);
+    // Reversed depth grows toward the eye, so a depth rank pulls the other way there.
+    renderer.applyDepthRank = function applyDepthRankReversed(rank) {
+      original.applyDepthRank.call(this, rank, clipControl.active ? 1 : -1);
     };
     renderer.resolveFrame = function resolveFrameStandard(...parameters) {
       endReversed();

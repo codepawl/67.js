@@ -23,7 +23,7 @@ Every tool error names what failed and what to do next, so read the message befo
 `diagnostics` appears only when something needs a decision. The ones that change the picture:
 
 - `closed-room-without-bake`: add a bake (`light.md`).
-- `coplanar-overlap`: flush faces will flicker; `environment.resolveCoplanar: "offset"` or a node `decal` (`light.md`).
+- `coplanar-overlap`: flush faces are ranked automatically; this is what is left. Follow its `fix` (`light.md`).
 - `motionIk` `warnings` (`wrong-bend`, `hyperextended`) and `limited`: fix `bendToward` and `limits`.
 - `rig` problems: unweighted vertices, bones with no vertices.
 - Mesh lint (`mesh_inspect`): `intersecting-parts`, `thin-wall`, `floating-part`; each comes with a fix.

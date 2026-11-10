@@ -65,6 +65,8 @@ layout(location=14) in vec4 vertexColor;
 layout(location=15) in vec4 instanceEmissive;
 uniform mat4 viewProjection;
 uniform mat4 lightProjection;
+uniform vec3 flushBias;
+uniform vec4 clipPerMetre;
 uniform float time;
 uniform float wind;
 uniform float explosionProgress;
@@ -127,6 +129,12 @@ void main() {
 #endif
   shadowPosition = lightProjection * world;
   gl_Position = viewProjection * world;
+  // A depth rank (renderer applyDepthRank): the depth of this point moved toward the eye by flushBias.x metres plus
+  // flushBias.y of its distance, at the same place on screen, so ranked faces never crack or slide.
+  if (flushBias != vec3(0.0)) {
+    vec4 lifted = gl_Position - (flushBias.x + flushBias.y * gl_Position.w) * clipPerMetre;
+    gl_Position.z = (lifted.z / lifted.w + flushBias.z) * gl_Position.w;
+  }
 }`;
 }
 
