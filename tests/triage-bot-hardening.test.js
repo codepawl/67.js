@@ -115,8 +115,10 @@ test('the workflow limits cost, drafts, file access and reruns', () => {
 
 test('tags nested inside tags or comments cannot rebuild a tag, comment or image after one pass', () => {
   assert.doesNotMatch(sanitizeComment('<<b>img src=x onerror=1>'), /<img/);
-  assert.doesNotMatch(sanitizeComment('<scr<b>ipt>alert(1)</scr</b>ipt>'), /<script|<\/script/i);
-  assert.doesNotMatch(sanitizeComment('<!<!-- -->-- hidden -->visible'), /<!--|-->|hidden/);
+  const rebuiltScript = sanitizeComment('<scr<b>ipt>alert(1)</scr</b>ipt>').toLowerCase();
+  assert.equal(rebuiltScript.includes('<script') || rebuiltScript.includes('</script'), false, rebuiltScript);
+  const rebuiltComment = sanitizeComment('<!<!-- -->-- hidden -->visible');
+  for (const fragment of ['<!--', '-->', '--!>', 'hidden']) assert.equal(rebuiltComment.includes(fragment), false, rebuiltComment);
   assert.doesNotMatch(sanitizeComment('!<<b>b>[x](https://evil.example/p.png)'), /evil\.example|!\[/);
   assert.equal(containsSecretValue('ghp_abc<<b>>defghijkl<<i>>mnopqrstu', ['ghp_abcdefghijklmnopqrstu']), true);
 });
