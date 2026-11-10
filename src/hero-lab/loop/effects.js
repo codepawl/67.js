@@ -138,9 +138,12 @@ function placeGull(settings, bird, seconds) {
   const roll = bird.direction * 0.4 + 0.12 * Math.sin(TAU * bird.flap * seconds);
   const [cosYaw, sinYaw, cosRoll, sinRoll] = [Math.cos(yaw), Math.sin(yaw), Math.cos(roll), Math.sin(roll)];
   const matrix = bird.part.matrix;
-  matrix[0] = cosYaw * cosRoll; matrix[1] = sinRoll; matrix[2] = -sinYaw * cosRoll;
-  // The wing tips sit above the body plane; scaling the up axis by a sine beats them up and down.
+  // The wing tips sit above the body plane; scaling the up axis by a sine beats them up and down. A negative beat alone would
+  // mirror the bird, and the renderer packs every part again each time a part changes handedness (thousands of times a minute),
+  // so the side axis flips with it: the bird is left-right symmetric, and the picture is the same.
   const beat = Math.sin(TAU * bird.flap * seconds * 1.3 + bird.angle);
+  const side = beat < 0 ? -1 : 1;
+  matrix[0] = side * cosYaw * cosRoll; matrix[1] = side * sinRoll; matrix[2] = -side * sinYaw * cosRoll;
   matrix[4] = -cosYaw * sinRoll * beat; matrix[5] = cosRoll * beat; matrix[6] = sinYaw * sinRoll * beat;
   matrix[8] = sinYaw; matrix[9] = 0; matrix[10] = cosYaw;
   matrix[12] = settings.center[0] + bird.radius * Math.cos(theta);
