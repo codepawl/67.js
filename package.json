@@ -80,6 +80,7 @@
     "./addons/vegetation": "./build/vegetation.js",
     "./addons/terrain": "./build/terrain.js",
     "./addons/heightfield": "./build/heightfield.js",
+    "./addons/export-mesh": "./build/export-mesh.js",
     "./addons/navmesh": "./build/navmesh.js",
     "./addons/grass": "./build/grass.js",
     "./addons/clutter": "./build/clutter.js",
