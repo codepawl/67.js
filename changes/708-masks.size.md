@@ -1,2 +1,3 @@
-- scene:agent-scene: the measure and group-gradient text sits in scene_capabilities (agents read it to use the masks), and the measures with their validation are part of the mesh edit code, which the agent scene always loads
-- goal:agent-scene: the bundle is over its goal already; the growth is agent-facing capability (edge wear and cavity dirt on a mesh with no UVs) with a rendered proof
+- scene:agent-scene: the measure and group-gradient text sits in scene_capabilities (147 bytes gzip), which agents read to use the masks
+- scene:agent-scene+lazy: the three measures (curvature, edge, occlusion) and their validation, 1831 bytes gzip in all; they give a mesh with no UVs edge wear and cavity dirt, which no graph node can, because a baked texture knows only (u, v)
+- goal:agent-scene: the bundle is over its goal already; the growth is agent-facing capability with a rendered proof
