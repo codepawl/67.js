@@ -13,12 +13,16 @@ function placed(center, size) {
   return new Float32Array([size[0], 0, 0, 0, 0, size[1], 0, 0, 0, 0, size[2], 0, center[0], center[1], center[2], 1]);
 }
 
-function sceneParts() {
+// The hero is a green screen in the keying cases, so a chroma key has something to remove.
+const GREEN_SCREEN = [0.05, 0.8, 0.1];
+
+function sceneParts(greenHero) {
   const material = { color: [0.75, 0.75, 0.78], metallic: 0, roughness: 0.7 };
+  const heroMaterial = greenHero ? { color: GREEN_SCREEN, metallic: 0, roughness: 0.7 } : material;
   const lamp = { color: [1, 0.9, 0.7], emissiveColor: [1, 0.9, 0.7], metallic: 0, roughness: 1, emission: 14 };
   const parts = [
     { geometry: box(), matrix: placed([0, -0.05, 0], [10, 0.1, 10]), material },
-    { name: 'hero', geometry: box(), matrix: placed([0, 0.6, 0], [0.4, 1.2, 0.4]), material },
+    { name: 'hero', geometry: box(), matrix: placed([0, 0.6, 0], [0.4, 1.2, 0.4]), material: heroMaterial },
     { geometry: box(), matrix: placed([-1.2, 1.6, -0.6], [0.9, 0.06, 0.06]), material: lamp },
   ];
   for (let index = 0; index < 5; index++) {
@@ -45,7 +49,12 @@ const CASES = {
   posterize: { stylize: { posterize: 4 } },
   pixelate: { stylize: { pixelate: 8 } },
   'pixelate-hero': { stylize: { pixelate: 8, mask: { objects: ['hero'] } } },
+  'green-default': {},
+  'key-chroma': { composite: { background: { top: [0.9, 0.35, 0.1], bottom: [0.1, 0.2, 0.6] }, key: { chroma: { color: GREEN_SCREEN, tolerance: 0.25, softness: 0.1 } } } },
+  'key-chroma-masked': { composite: { background: { color: [0.9, 0.35, 0.1] }, key: { chroma: { color: GREEN_SCREEN, tolerance: 0.25 } }, mask: { depth: { near: 0, far: 3 } } } },
+  'key-luma': { composite: { background: { color: [0.1, 0.2, 0.6] }, key: { luma: { low: 0.05, high: 0.3 } } } },
 };
+const GREEN_CASES = ['green-default', 'key-chroma', 'key-chroma-masked'];
 const camera = { eye: [3.4, 1.8, 4.6], target: [0, 0.8, -1], fov: 45 };
 
 // Mean color of a 6 by 6 pixel patch at a point of the frame (0 to 1, from the lower left), to check where a step changed the picture.
@@ -60,7 +69,7 @@ function regionMean(context, x, y) {
 
 async function drawCase(name, { warmupFrames = 4, measuredFrames = 20 } = {}) {
   const canvas = document.querySelector('canvas');
-  const renderer = installRenderPasses(installCameraEffects(new Renderer67(canvas, sceneParts(), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment })));
+  const renderer = installRenderPasses(installCameraEffects(new Renderer67(canvas, sceneParts(GREEN_CASES.includes(name)), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment })));
   if (postSteps) postSteps.installPostSteps(renderer);
   renderer.resize();
   const frame = { ...camera, environment, time: 0, exposure: 1, effects: { ambientOcclusion: 0, ...CASES[name] } };
