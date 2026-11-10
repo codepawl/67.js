@@ -19,7 +19,7 @@ export const CUT_OPERATIONS = Object.freeze([
 ]);
 
 const MAX_PATH_POINTS = 256;
-const EDGE_RULE_HINT = 'an edge rule such as { "all": true }, { "angle": 30 }, { "along": [x, y, z] } or { "open": true }';
+export const EDGE_RULE_HINT = 'an edge rule such as { "all": true }, { "angle": 30 }, { "along": [x, y, z] } or { "open": true }';
 
 function booleanField(value, index, label) {
   return editBoolean(value, index, label) ?? false;

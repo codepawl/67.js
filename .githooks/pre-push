@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs the fast preflight gates before a push. Installed by `npm install` (scripts/install-git-hooks.mjs).
+# Skip once with SKIP_PREFLIGHT=1 git push, or git push --no-verify.
+exec node scripts/pre-push.mjs "$@"

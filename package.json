@@ -120,6 +120,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
+    "prepare": "node scripts/install-git-hooks.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/prepare-release.mjs && vite build",
     "build:lib": "vite build --config vite.lib.config.js",

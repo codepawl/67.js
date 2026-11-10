@@ -1,5 +1,7 @@
 import { buildLathe, buildExtrusion, buildTube } from './modeling-shapes.js';
-import { buildBezierSweep, resolveHandles } from './modeling-bezier.js';
+import { sweepSamples } from './modeling-bezier.js';
+import { sampleCountOf, sampleSpline, shapeToSpline, trimSamples } from './modeling-splines.js';
+import { planSdf, sdfGeometry as buildSdf } from './modeling-sdf.js';
 
 const MAX_INPUT_POINTS = 4096;
 const DEFAULT_VERTEX_LIMIT = 250_000;
@@ -270,29 +272,173 @@ export function extrude(contour, {
   return closeTJunctions(meshFrom(buildExtrusion(outer, inner, { depth, steps, bevel, bevelThickness, bevelSegments }), maxVertices));
 }
 
+const SPLINE_TYPES = ['bezier', 'poly', 'nurbs'];
+const MAX_SPLINES = 64;
+const MAX_CURVE_POINTS = 1024;
+const MAX_TOTAL_CURVE_POINTS = 4096;
+const SPLINE_FIELDS = ['points', 'shape', 'closed', 'kind', 'weights', 'trim'];
+
+function trimFrom(input, label) {
+  if (input === undefined) return null;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError(`${label} must be an object such as { "start": 0, "end": 0.5 }.`);
+  for (const key of Object.keys(input)) {
+    if (!['start', 'end', 'length'].includes(key)) throw new TypeError(`Unknown ${label} field: ${key}. Use start, end, length.`);
+  }
+  if (input.length !== undefined && typeof input.length !== 'boolean') throw new TypeError(`${label}.length must be true (start and end are lengths) or false (factors 0 to 1).`);
+  const byLength = input.length === true;
+  const maximum = byLength ? 1e9 : 1;
+  const start = finite(input.start ?? 0, `${label}.start`);
+  const end = finite(input.end ?? maximum, `${label}.end`);
+  if (start < 0 || start > maximum || end < 0 || end > maximum) {
+    throw new RangeError(`${label}.start and ${label}.end must be from 0 to ${byLength ? 'the curve length' : '1'}.`);
+  }
+  if (end <= start) throw new RangeError(`${label}.end must be greater than ${label}.start. Pass a range such as { "start": 0, "end": 0.5 }.`);
+  return { start, end, length: byLength };
+}
+
+function weightsFrom(input, count, label) {
+  if (input === undefined) return Array(count).fill(1);
+  if (!Array.isArray(input) || input.length !== count) throw new RangeError(`${label} needs one weight per point (${count}).`);
+  return input.map(weight => {
+    finite(weight, label);
+    if (weight <= 0 || weight > 1e6) throw new RangeError(`${label} must be greater than 0 and at most 1000000.`);
+    return weight;
+  });
+}
+
+// One spline: points or a primitive shape, a type (bezier, poly, nurbs), closed, NURBS weights and a trim.
+function splineFrom(input, label) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError(`${label} must be an object with points or shape.`);
+  for (const key of Object.keys(input)) {
+    if (!SPLINE_FIELDS.includes(key)) throw new TypeError(`Unknown ${label} field: ${key}. Use ${SPLINE_FIELDS.join(', ')}.`);
+  }
+  if ((input.points === undefined) === (input.shape === undefined)) throw new TypeError(`${label} needs exactly one of points or shape.`);
+  let { points, closed = false, kind = 'bezier' } = input;
+  if (input.shape !== undefined) {
+    if (input.closed !== undefined || input.kind !== undefined) throw new TypeError(`${label}.closed and ${label}.kind come from shape. Remove them.`);
+    ({ points, closed, type: kind } = shapeToSpline(input.shape));
+  }
+  if (typeof closed !== 'boolean') throw new RangeError('radius must be positive and closed must be boolean.');
+  if (!SPLINE_TYPES.includes(kind)) throw new RangeError(`${label}.kind must be one of ${SPLINE_TYPES.join(', ')}.`);
+  if (!Array.isArray(points) || points.length < (closed ? 3 : 2) || points.length > MAX_CURVE_POINTS) {
+    throw new RangeError(`${label === 'points' ? 'points' : `${label}.points`} needs ${closed ? 3 : 2} to ${MAX_CURVE_POINTS} entries.`);
+  }
+  if (kind !== 'nurbs' && input.weights !== undefined) throw new TypeError(`${label}.weights apply to kind nurbs only.`);
+  const resolved = kind === 'bezier' ? points.map(knotFrom) : points.map(point => vectorFrom(point, 'point'));
+  const weights = kind === 'nurbs' ? weightsFrom(input.weights, points.length, `${label}.weights`) : undefined;
+  return { type: kind, closed, points: resolved, weights, trim: trimFrom(input.trim, `${label}.trim`) };
+}
+
+function joinSweeps(parts) {
+  if (parts.length === 1) return parts[0];
+  const vertexTotal = parts.reduce((sum, part) => sum + part.positions.length / 3, 0);
+  const indexTotal = parts.reduce((sum, part) => sum + part.indices.length, 0);
+  const joined = {
+    positions: new Float32Array(vertexTotal * 3),
+    normals: new Float32Array(vertexTotal * 3),
+    uvs: new Float32Array(vertexTotal * 2),
+    indices: new Uint32Array(indexTotal),
+  };
+  let vertexOffset = 0;
+  let indexOffset = 0;
+  for (const part of parts) {
+    joined.positions.set(part.positions, vertexOffset * 3);
+    joined.normals.set(part.normals, vertexOffset * 3);
+    joined.uvs.set(part.uvs, vertexOffset * 2);
+    part.indices.forEach((vertex, index) => {
+      joined.indices[indexOffset + index] = vertex + vertexOffset;
+    });
+    vertexOffset += part.positions.length / 3;
+    indexOffset += part.indices.length;
+  }
+  return joined;
+}
+
 /**
- * Sweep a round or custom profile along a cubic Bezier curve. Points are [x, y, z] (smooth automatic handles) or
- * { position, handleIn, handleOut } with absolute handle positions; `taper` lists radius factors spread along the length.
+ * Sweep a round or custom profile along one or more splines. A spline is { points | shape, closed, kind, weights,
+ * trim }: kind is bezier (default), poly or nurbs; shape is an arc, spiral or star; trim cuts an arc-length range.
+ * The splines share radius, taper, profile and resolution and become one mesh.
  */
-export function curve(points, {
-  closed = false, radius = 0.05, taper, profile, resolution = 12, radialSegments = 8,
-  maxVertices = DEFAULT_VERTEX_LIMIT,
-} = {}) {
+export function curveSet(splines, options = {}, labelFirst = 'splines[0]') {
+  const { maxVertices = DEFAULT_VERTEX_LIMIT } = options;
+  const plan = planCurveSet(splines, options, labelFirst);
+  checkBudget(plan.vertexCount, maxVertices);
+  const { resolved, radius, profilePoints, taperFactors, radialSegments, resolution } = plan;
+  const parts = resolved.map(spline => {
+    let samples = sampleSpline(spline, resolution);
+    let closed = spline.closed;
+    if (spline.trim) {
+      samples = trimSamples(samples, closed, spline.trim);
+      closed = false;
+    }
+    return sweepSamples({ ...samples, closed, radius, taper: taperFactors, profile: profilePoints, radialSegments });
+  });
+  return meshFrom(joinSweeps(parts), maxVertices);
+}
+
+/** Validates curveSet input and returns the vertex count it would build, without building it. */
+export function curveSetVertexCount(splines, options = {}) {
+  return planCurveSet(splines, options, 'splines[0]').vertexCount;
+}
+
+function planCurveSet(splines, {
+  radius = 0.05, taper, profile, resolution = 12, radialSegments = 8,
+} , labelFirst) {
   radius = finite(radius, 'radius');
-  if (radius <= 0 || typeof closed !== 'boolean') throw new RangeError('radius must be positive and closed must be boolean.');
+  if (radius <= 0) throw new RangeError('radius must be positive and closed must be boolean.');
   integer(resolution, 1, 64, 'resolution');
   integer(radialSegments, 3, 128, 'radialSegments');
-  if (!Array.isArray(points) || points.length < (closed ? 3 : 2) || points.length > 1024) {
-    throw new RangeError(`points needs ${closed ? 3 : 2} to 1024 entries.`);
-  }
-  const knots = points.map(knotFrom);
+  if (!Array.isArray(splines) || splines.length < 1 || splines.length > MAX_SPLINES) throw new RangeError(`splines needs 1 to ${MAX_SPLINES} entries.`);
+  const resolved = splines.map((spline, index) => splineFrom(spline, index === 0 ? labelFirst : `splines[${index}]`));
+  const totalPoints = resolved.reduce((sum, spline) => sum + spline.points.length, 0);
+  if (totalPoints > MAX_TOTAL_CURVE_POINTS) throw new RangeError(`splines hold ${totalPoints} points in all; at most ${MAX_TOTAL_CURVE_POINTS}. Remove points or splines.`);
   const profilePoints = profile === undefined ? null : pointsFrom(profile, 2, 3, 'profile');
   if (profilePoints && profilePoints.length > 256) throw new RangeError('profile needs 3 to 256 points.');
   const sides = profilePoints ? profilePoints.length : radialSegments;
-  const rings = (closed ? knots.length : knots.length - 1) * resolution + 1;
-  checkBudget(rings * sides * 2 + (closed ? 0 : 2 * (sides + 1)), maxVertices);
-  const handles = resolveHandles(knots, closed);
-  return meshFrom(buildBezierSweep({ handles, closed, radius, taper: taperFrom(taper), profile: profilePoints, resolution, radialSegments }), maxVertices);
+  const taperFactors = taperFrom(taper);
+  const vertexCount = resolved.reduce((sum, spline) => {
+    const samples = sampleCountOf(spline, resolution);
+    const rings = spline.trim ? samples + 3 : samples + (spline.closed ? 1 : 0);
+    return sum + rings * sides * 2 + (spline.closed && !spline.trim ? 0 : 2 * (sides + 1));
+  }, 0);
+  return { resolved, vertexCount, radius, profilePoints, taperFactors, radialSegments, resolution };
+}
+
+const SINGLE_SPLINE_FIELDS = ['points', 'shape', 'closed', 'kind', 'weights', 'trim'];
+
+// The scene geometry `curve` holds one spline in its own fields, or several in `splines`.
+function splinesOfGeometry(value) {
+  if (value.splines === undefined) {
+    const spline = Object.fromEntries(SINGLE_SPLINE_FIELDS.map(key => [key, value[key]]));
+    return { splines: [spline], label: 'points' };
+  }
+  for (const key of SINGLE_SPLINE_FIELDS) {
+    if (value[key] !== undefined) throw new TypeError(`${key} cannot be used with splines. Put ${key} inside a splines entry.`);
+  }
+  return { splines: value.splines, label: 'splines[0]' };
+}
+
+/** The curve scene geometry: points, a shape or splines, with the shared sweep options. */
+export function curveGeometry(value, maxVertices) {
+  const { splines, label } = splinesOfGeometry(value);
+  return curveSet(splines, { ...value, maxVertices }, label);
+}
+
+/** The vertex count of a curve scene geometry, validated like curveGeometry. */
+export function curveGeometryVertexCount(value) {
+  const { splines, label } = splinesOfGeometry(value);
+  return planCurveSet(splines, value, label).vertexCount;
+}
+
+/**
+ * Sweep a round or custom profile along a curve: cubic Bezier by default (points are [x, y, z] with smooth automatic
+ * handles, or { position, handleIn, handleOut } with absolute handle positions), or kind poly or nurbs. `taper` lists
+ * radius factors spread along the length. For several splines or a primitive shape see curveSet.
+ */
+export function curve(points, {
+  closed = false, kind, weights, trim, radius, taper, profile, resolution, radialSegments, maxVertices,
+} = {}) {
+  return curveSet([{ points, closed, kind, weights, trim }], { radius, taper, profile, resolution, radialSegments, maxVertices }, 'points');
 }
 
 /** Sweep a circular tube along a centripetal Catmull-Rom curve. */
@@ -310,3 +456,12 @@ export function tube(path, {
   checkBudget((segments + 1) * (radialSegments + 1), maxVertices);
   return meshFrom(buildTube(points, closed, radius, segments, radialSegments), maxVertices);
 }
+
+/** The sdf scene geometry: signed-distance shapes meshed by surface nets. See docs/modeling.md. */
+export function sdfGeometry(value, maxVertices = DEFAULT_VERTEX_LIMIT) {
+  planSdf(value);
+  return meshFrom(buildSdf(value), maxVertices);
+}
+
+/** The vertex count reserved for an sdf geometry, validated like sdfGeometry. */
+export { sdfVertexEstimate } from './modeling-sdf.js';

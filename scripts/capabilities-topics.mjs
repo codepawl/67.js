@@ -47,12 +47,31 @@ function unionIndex(topic, branches) {
 function outlineAnswer(topic, branchName, schema) {
   const jsonSchema = inputJsonSchema(schema);
   const branches = unionBranches(jsonSchema);
+  const withDefinitions = part => ({ ...part, ...(jsonSchema.$defs ? { $defs: jsonSchema.$defs } : {}) });
   if (!branchName) return branches ? unionIndex(topic, branches) : outlineSchema(jsonSchema);
-  if (!branches?.has(branchName)) {
-    const known = branches ? [...branches.keys()].join(', ') : 'none: this topic has no branches';
-    throw new Error(`Topic ${topic} has no branch ${branchName}. Branches: ${known}.`);
-  }
-  return outlineSchema({ ...branches.get(branchName), ...(jsonSchema.$defs ? { $defs: jsonSchema.$defs } : {}) });
+  if (branches?.has(branchName)) return outlineSchema(withDefinitions(branches.get(branchName)));
+  // A short name such as inset or extrude stands for every branch that starts with it: inset_region and inset_individual.
+  const prefixed = branches ? [...branches].filter(([name]) => name.startsWith(`${branchName}_`)) : [];
+  if (prefixed.length === 1) return outlineSchema(withDefinitions(prefixed[0][1]));
+  if (prefixed.length > 1) return unionIndex(topic, new Map(prefixed));
+  // A dotted field of a plain topic, such as environment.spotLights, is that field's outline.
+  const field = jsonSchema.properties?.[branchName];
+  if (!branches && field) return outlineSchema(withDefinitions(field));
+  const known = branches ? [...branches.keys()] : Object.keys(jsonSchema.properties ?? {});
+  const sharedField = branches && [...branches.values()].some(branch => branch.properties?.[branchName]);
+  const fieldNote = sharedField ? ` ${branchName} is a field of those branches, not a branch: open one branch to see it.` : '';
+  throw new Error(`Topic ${topic} has no ${branches ? 'branch' : 'field'} ${branchName}. ${branches ? 'Branches' : 'Fields'}: ${known.join(', ') || 'none'}.${fieldNote}`);
+}
+
+/** A near miss of a topic name: a leading "scene." is dropped, and a name that contains or is contained by exactly one topic (uvs for meshUv) stands for it. */
+function closestTopic(name, allNames) {
+  if (allNames.includes(name)) return name;
+  const stem = name.toLowerCase().replace(/s$/, '');
+  const near = stem.length < 2 ? [] : allNames.filter(candidate => {
+    const lowered = candidate.toLowerCase();
+    return lowered.includes(stem) || (lowered.length > 2 && stem.includes(lowered));
+  });
+  return near.length === 1 ? near[0] : undefined;
 }
 
 /** The topics a caller can ask for, by name. */
@@ -76,14 +95,19 @@ export function answerCapabilities(capabilities, topic, outlineSources) {
       topics: names,
     };
   }
-  const [name, branchName] = topic.split('.');
+  const allNames = [...names.scene, ...names.runtime, ...names.schemas];
+  const parts = topic.split('.');
+  if (parts[0] === 'scene' && parts.length > 1) parts.shift();
+  const [requestedName, branchName] = parts;
+  const name = closestTopic(requestedName, allNames) ?? requestedName;
   const notes = sceneTopics(capabilities.scene).get(name);
   const runtime = RUNTIME_SECTIONS.includes(name) ? capabilities[name] : undefined;
   const source = outlineSources.get(name);
   const found = [notes, runtime, source].some(value => value !== undefined);
   if (!found) {
-    throw new Error(`Unknown topic ${topic}. Topics: ${[...names.scene, ...names.runtime, ...names.schemas].join(', ')}.`);
+    throw new Error(`Unknown topic ${topic}. Topics: ${allNames.join(', ')}.`);
   }
-  if (source) return { topic, ...(notes === undefined ? {} : { notes }), fields: outlineAnswer(name, branchName, source) };
-  return { topic, value: notes ?? runtime };
+  const answeredTopic = [name, branchName].filter(Boolean).join('.');
+  if (source) return { topic: answeredTopic, ...(notes === undefined ? {} : { notes }), fields: outlineAnswer(name, branchName, source) };
+  return { topic: answeredTopic, value: notes ?? runtime };
 }

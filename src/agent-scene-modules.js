@@ -8,6 +8,7 @@ const MODULE_LOADERS = {
   modeling: () => import('./modeling.js'),
   text: () => import('./text-geometry.js'),
   motion: () => import('./agent-motion.js'),
+  motionBake: () => import('./agent-motion-bake.js'),
   drive: () => import('./agent-drive.js'),
   physics: () => import('./agent-physics.js'),
   cloth: () => import('./agent-cloth.js'),
@@ -48,9 +49,10 @@ let physicsLoader = null;
 // Each test errs on the side of loading: a false positive costs a chunk, a false negative a clear error.
 const MODULE_MARKERS = {
   mesh: ['"type":"mesh"', '"instances"'],
-  modeling: ['"type":"lathe"', '"type":"extrude"', '"type":"tube"', '"type":"curve"'],
+  modeling: ['"type":"lathe"', '"type":"extrude"', '"type":"tube"', '"type":"curve"', '"type":"sdf"'],
   text: ['"type":"text"'],
-  motion: ['"motion":{'],
+  motion: ['"motion":{', '"bake-motion"'],
+  motionBake: ['"bake-motion"'],
   drive: ['"drive":{'],
   physics: ['"physics":{'],
   cloth: ['"cloth":{'],

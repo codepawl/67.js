@@ -6,6 +6,7 @@ import { fitPerspectiveDistance } from './camera.js';
 import { validateSkinGeometry, validateSkinPose } from './skinning.js';
 import { validateMorphGeometry, validateMorphTransform } from './morph.js';
 import * as agentMotion from './agent-motion.js';
+import { compileClipStrip } from './clip-strip.js';
 import { clipLayerContextFromAsset, retargetSourceFromAsset } from './agent-clip-layers.js';
 import { retargetAssetClip, retargetReport } from './agent-retarget.js';
 import { createFootLock } from './foot-lock.js';
@@ -373,25 +374,60 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   let editSignature = meshEditSignature(editedParts);
   let topologyRevision = 0;
 
-  /** A part by its ID (mesh-3), or by the source node that holds exactly that one part; several or none is named in the error. */
+  /** A part by its ID (mesh-3); anything else that is not a source node is an unknown ID. */
   function partRecordFor(id) {
     const record = records.find(value => value.id === id);
-    if (record) {
-      return record;
+    if (!record) {
+      throw invalidField('geometry', id, 'an imported mesh ID such as "mesh-0", or a source node ID; call scene_inspect without ids to list the meshes, or with kind hierarchy for source nodes');
     }
+    return record;
+  }
+
+  /** The parts scene_inspect lists for one ID: a mesh ID is that part; a source node is every part of it and of the nodes below it. */
+  function inspectedRecordsFor(id, originNodes = new Map()) {
     const sourceNode = sourceNodes.get(id);
-    if (!sourceNode) {
-      throw invalidField('geometry', id, 'an imported mesh ID such as "mesh-0"; call scene_inspect without ids to list them, or with kind hierarchy for source nodes');
+    if (!sourceNode || records.some(value => value.id === id)) {
+      return [partRecordFor(id)];
     }
-    const partIds = sourceNode.meshIds ?? [];
+    const found = collectNodeRecords(id);
+    for (const record of found) {
+      if (!record.isSourceNodeReport) {
+        originNodes.set(record.id, id);
+      }
+    }
+    return found;
+  }
+
+  /** A source node with no part anywhere below it (a joint or an empty): its transform at rest, so an agent can aim at it or pose it. */
+  function sourceNodeReport(sourceNode) {
+    const world = mat4.create();
+    const chain = [];
+    for (let current = sourceNode; current; current = current.parent ? sourceNodes.get(current.parent) : null) {
+      chain.unshift(current);
+    }
+    for (const link of chain) {
+      mat4.multiply(world, world, mat4.fromRotationTranslationScale(mat4.create(), link.rotation, link.translation, link.scale));
+    }
+    return {
+      isSourceNodeReport: true, id: sourceNode.id, label: sourceNode.label, name: sourceNode.name, parent: sourceNode.parent,
+      joint: Boolean(sourceNode.joint), translation: [...sourceNode.translation], rotation: [...sourceNode.rotation], scale: [...sourceNode.scale],
+      restWorldPosition: [world[12], world[13], world[14]], meshIds: [],
+    };
+  }
+
+  /** Every part of a source node and of the nodes below it; with no part anywhere below it, the node's own report. */
+  function collectNodeRecords(id) {
+    const partIds = [];
+    const pending = [id];
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      partIds.push(...(sourceNodes.get(nodeId).meshIds ?? []));
+      pending.push(...[...sourceNodes.values()].filter(node => node.parent === nodeId).map(node => node.id));
+    }
     if (partIds.length === 0) {
-      throw invalidField('geometry', id, 'a source node with a mesh of its own, or a mesh ID such as "mesh-0"; call scene_inspect with kind hierarchy to see which nodes hold parts');
+      return [sourceNodeReport(sourceNodes.get(id))];
     }
-    if (partIds.length > 1) {
-      const listed = partIds.slice(0, 8).join(', ');
-      throw invalidField('geometry', id, `one part ID, such as "${partIds[0]}"; this source node holds ${partIds.length} parts: ${listed}${partIds.length > 8 ? ', ...' : ''}`);
-    }
-    return records.find(value => value.id === partIds[0]);
+    return records.filter(value => partIds.includes(value.id));
   }
 
   function geometryOf(record, edited = editedParts) {
@@ -592,16 +628,29 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     return [...byPart].map(([part, weights]) => ({ part, weights }));
   }
 
+  /**
+   * A strip times its layer: the fade envelope multiplies the layer's weight and the strip maps motion time to clip
+   * time. The clip holds its ends, since the strip does the repeating.
+   */
+  function stripTiming(layer) {
+    if (!layer.strip) return { loop: layer.loop !== false, timing: {} };
+    const duration = layer.from ? clipLayerContext.external.get(layer.from.asset).clips[layer.from.clip].duration : asset.animations[layer.clip].duration;
+    const compiled = compileClipStrip(layer.strip, duration);
+    const base = layer.weight ?? 1;
+    return { loop: false, timing: { weight: time => base * compiled.weight(time), clipTime: compiled.clipTime } };
+  }
+
   /** Layers of the motion as definitions for the pose code: decoded clips, renamed by `bones`, with their morph tracks. */
   function layerDefinitions(layers) {
     return layers.map(layer => {
-      const loop = layer.loop !== false;
-      if (layer.from) return { clip: retargetedLayerClip(layer, loop), weight: layer.weight, speed: layer.speed, offset: layer.offset, additive: layer.additive, reference: layer.reference, mask: layer.mask };
+      const { loop, timing } = stripTiming(layer);
+      const common = { weight: layer.weight, speed: layer.speed, offset: layer.offset, additive: layer.additive, reference: layer.reference, mask: layer.mask, ...timing };
+      if (layer.from) return { clip: retargetedLayerClip(layer, loop), ...common };
       const animation = asset.animations[layer.clip];
       return {
         clip: clipFromGltfAnimation(animation, { loop, rename: layer.bones }),
         ...(layer.morph === false ? {} : { morphs: morphClipFromGltfAnimation(animation, { loop }) }),
-        weight: layer.weight, speed: layer.speed, offset: layer.offset, additive: layer.additive, reference: layer.reference, mask: layer.mask,
+        ...common,
       };
     });
   }
@@ -1005,9 +1054,6 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         throw invalidField('offset', offset, 'a whole number from 0 to 4096, such as 0');
       }
       if (options.kind === 'hierarchy') {
-        if (options.includeBounds) {
-          throw invalidField('includeBounds', options.includeBounds, 'false for kind hierarchy, which has no deformed silhouette bounds; drop it, or inspect without kind to get mesh bounds', TypeError);
-        }
         if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > sourceNodes.size)) {
           throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${sourceNodes.size} source-node IDs, such as []`);
         }
@@ -1021,17 +1067,23 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         return { revision, topologyRevision, assetId: canonicalAssetId, kind: 'hierarchy', ...motionIkReport(), ...motionDriveReport(), ...motionLayerReport(), ...diagnosticsReport(),
           counts: { nodes: sourceNodes.size, joints: [...sourceNodes.values()].filter(node => node.joint).length },
           nodes, offset, truncated: offset + nodes.length < selected.length,
+          ...(options.includeBounds ? { note: 'Hierarchy lists no bounds; inspect without kind, with ids of nodes or meshes, to get them.' } : {}),
           motion: recipe.motion ? { duration: recipe.motion.duration, loop: recipe.motion.loop, tracks: recipe.motion.tracks.length, time: motionTime } : null };
       }
-      if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > records.length)) {
-        throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${records.length} mesh IDs, such as ["mesh-0"]`);
+      if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > Math.max(records.length, sourceNodes.size))) {
+        throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${Math.max(records.length, sourceNodes.size)} mesh or node IDs, such as ["mesh-0"]`);
       }
-      const selected = options.ids === undefined ? records : options.ids.map(id => partRecordFor(id));
+      const originNodes = new Map();
+      const selected = options.ids === undefined ? records : options.ids.flatMap(id => inspectedRecordsFor(id, originNodes));
       const visible = selected.slice(offset, offset + limit);
-      if (options.includeBounds && visible.reduce((total, record) => total + geometryOf(record).positions.length / 3, 0) > MAX_INSPECTION_VERTICES) {
+      if (options.includeBounds && visible.filter(record => !record.isSourceNodeReport).reduce((total, record) => total + geometryOf(record).positions.length / 3, 0) > MAX_INSPECTION_VERTICES) {
         throw invalidField('ids', `${visible.length} meshes`, 'fewer meshes, under two million authored base vertices in all, such as ["mesh-0"]');
       }
       const nodes = visible.map(record => {
+        if (record.isSourceNodeReport) {
+          const { isSourceNodeReport, ...report } = record;
+          return report;
+        }
         const index = Number(record.id.slice(5));
         const node = {
           id: record.id, label: record.label, geometry: record.geometry.id, material: record.material.id,
@@ -1039,6 +1091,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
           triangles: geometryOf(record).indices.length / 3,
           skinned: Boolean(record.source.skin), morphTargets: geometryOf(record).morphTargets?.length ?? 0,
           ...(editedParts.has(record.id) ? { edited: true } : {}),
+          ...(originNodes.has(record.id) ? { fromNode: originNodes.get(record.id) } : {}),
         };
         if (options.includeBounds) {
           node.bounds = baseBounds([geometryOf(record)], [matrices[index]]);
