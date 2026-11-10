@@ -15,6 +15,7 @@ import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, CATALOG_FILE_ID } f
 import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, VIDEO_ENCODERS, MAXIMUM_JOB_SIDE, MAXIMUM_MEMORY_MIB } from '../src/agent-scene-capabilities.js';
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
+import { createCallLogger, CALL_LOG_ENVIRONMENT_VARIABLE } from './mcp-call-log.mjs';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
 
 describeSchemaInputsWithReceivedValues();
@@ -835,7 +836,8 @@ function jsonResult(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }
 
-export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true } = {}) {
+export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true, callLogPath = process.env[CALL_LOG_ENVIRONMENT_VARIABLE] } = {}) {
+  const logCall = createCallLogger(callLogPath);
   // Without branches the schemas carry no branch field and the instructions do not mention variants (a benchmark switch).
   const branchField = branches ? { branch: branchName.optional().describe('Fork: store the result as this branch (up to 8), leaving the scene unchanged.') } : {};
   const reviewBranchField = branches ? { branch: branchName.optional().describe('Render this scene_apply branch.') } : {};
@@ -865,6 +867,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   }
   function register(name, description, inputSchema, annotations, run) {
     server.registerTool(name, { title: TOOL_TITLES[name], description, inputSchema, annotations: { title: TOOL_TITLES[name], ...annotations }, ...(OUTPUT_SCHEMAS[name] ? { outputSchema: OUTPUT_SCHEMAS[name] } : {}) }, async argumentsValue => {
+      const call = async () => {
       try {
         return await run(withActiveSession(argumentsValue, inputSchema));
       } catch (error) {
@@ -873,6 +876,8 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
         const sceneMissing = CREATE_TOOLS.has(name) && !message.startsWith('Dispose the current scene');
         return { isError: true, content: [{ type: 'text', text: `${name} failed: ${message}${sceneMissing ? ` ${SCENE_NOT_CREATED_ADVICE}` : ''}` }] };
       }
+      };
+      return logCall ? logCall(name, call) : call();
     });
   }
   register('scene_capabilities', 'Index of supported recipe features and runtime budgets; pass topic for the detail of one. Read it before authoring. Does not launch a browser.', z.strictObject({ topic: z.string().min(1).max(64).optional().describe('A name from the index, or name.branch such as meshEdit.bevel. Leave out for the index.') }), readOnly, async ({ topic }) => jsonResult(answerCapabilities(relations ? await runtime.capabilities() : withoutRelationsAdvice(await runtime.capabilities()), topic, outlineSources)));
