@@ -10,6 +10,19 @@ import { invertAffine } from './path-tracer-reprojection.js';
 
 const COLLAPSED_AXIS_SHARE = 1e-3;
 const CACHED_ORDERS_PER_GEOMETRY = 8;
+// A face this close in front of another, facing the same way, is cut like a flush one. Seen at a grazing angle, the cut
+// can open a strip no wider than the gap at the front face's edge: a thousandth of the shared face, never less than a
+// millimetre and never more than a centimetre, does not show. A wider gap, such as a sign standing off a wall, is ranked
+// instead. Without the cut, assets built as stacked blocks nest facades a few millimetres apart deeper than the 15 ranks
+// (the Melbourne city model nests 17).
+const NEAR_FLUSH_CUT_GAP_SHARE = 1e-3;
+const NEAR_FLUSH_CUT_MINIMUM_GAP = 1e-3;
+const NEAR_FLUSH_CUT_MAXIMUM_GAP = 1e-2;
+
+function nearFlushCutGap(sharedArea) {
+  const relative = NEAR_FLUSH_CUT_GAP_SHARE * Math.sqrt(sharedArea);
+  return Math.min(NEAR_FLUSH_CUT_MAXIMUM_GAP, Math.max(NEAR_FLUSH_CUT_MINIMUM_GAP, relative));
+}
 
 // Kept between runs, so a part whose ranks and cuts did not change keeps its order object and the renderer keeps its batch.
 const ordersByGeometry = new WeakMap();
@@ -54,10 +67,12 @@ function rankTriangles(count, edges, seamEdges) {
   return { ranks, overflow };
 }
 
-// Whether the back triangle of a pair can be cut away under the front one: they lie on one plane and face the same way, the
-// front one hides what is under it, and no side of the back one stays in view where the front one is culled.
+// Whether the back triangle of a pair can be cut away under the front one: they lie on one plane, or within
+// nearFlushCutGap of it, and face the same way, the front one hides what is under it, and no side of the back one stays
+// in view where the front one is culled.
 function canCut(pair, frontPart, backPart) {
-  if (!pair.flush || pair.opposite || pair.area < FLUSH_CUT_MINIMUM_AREA) return false;
+  if (pair.opposite || pair.area < FLUSH_CUT_MINIMUM_AREA) return false;
+  if (!pair.flush && !(Math.abs(pair.gap) <= nearFlushCutGap(pair.area))) return false;
   if ((frontPart.material?.alphaMode ?? 'opaque') !== 'opaque') return false;
   return backPart.material?.doubleSided !== true || frontPart.material?.doubleSided === true;
 }

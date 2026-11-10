@@ -106,7 +106,8 @@ test('a part hidden whole keeps its geometry and is ranked under what hides it',
 });
 
 test('the ranked order holds every triangle once, sorted by rank, and leaves the geometry alone', () => {
-  const kitbash = partOf('kitbash', [quadCorners(0, 0, 2, 1, 0.002), quadCorners(0, 0, 10, 1, 0), quadCorners(0, 0, 5, 1, 0.001)]);
+  // Strips 1.5 mm apart: wider than the near-flush cut allows on strips this small, so they are ranked, not cut.
+  const kitbash = partOf('kitbash', [quadCorners(0, 0, 2, 0.1, 0.003), quadCorners(0, 0, 10, 0.1, 0), quadCorners(0, 0, 5, 0.1, 0.0015)]);
   const original = Array.from(kitbash.geometry.indices);
   const geometry = kitbash.geometry;
   resolveFlush([kitbash]);
@@ -128,15 +129,29 @@ test('a stack of 20 or 30 faces on one plane is cut down to what shows and repor
   }
 });
 
-test('a stack of 20 faces half a millimetre apart fills the 16 ranks and reports the rest as rank-overflow', () => {
+test('faces stacked within the near-flush gap are cut like flush ones, however deep the stack', () => {
   const stack = partOf('stack', Array.from({ length: 20 }, (unused, index) => quadCorners(0, 0, 20 - index, 1, index * 0.0005)));
+  assert.deepEqual(resolveFlush([stack]), { ranked: 1, leftovers: [] });
+  assert.ok(Math.abs(drawnArea(stack) - 20) < 1e-2, 'only the union of the faces is drawn');
+  // Facades of blocks stacked from the ground, each a few millimetres out from the one before, as city models build towers.
+  const tower = partOf('tower', Array.from({ length: 17 }, (unused, index) => {
+    const height = 40 + index * 5;
+    return [0, 0, index * 0.005, 30, 0, index * 0.005, 30, height, index * 0.005, 0, height, index * 0.005];
+  }));
+  assert.deepEqual(resolveFlush([tower]), { ranked: 1, leftovers: [] });
+  assert.ok(Math.abs(drawnArea(tower) - 30 * 120) < 1);
+});
+
+test('a stack of 20 faces wider apart than the near-flush cut fills the 16 ranks and reports the rest as rank-overflow', () => {
+  const stack = partOf('stack', Array.from({ length: 20 }, (unused, index) => quadCorners(0, 0, 20 - index, 0.1, index * 0.0015)));
   const { ranked, leftovers } = resolveFlush([stack]);
   assert.equal(ranked, 1);
-  assert.deepEqual(leftovers, [{ reason: 'rank-overflow', part: 'stack', triangles: 8 }]);
+  // The last strips sit beyond the search reach of the rank-15 strip, so their chain starts again and only the first is cut off.
+  assert.deepEqual(leftovers, [{ reason: 'rank-overflow', part: 'stack', triangles: 6 }]);
   const ranks = ranksOf(stack);
   assert.equal(Math.max(...ranks), MAXIMUM_FLUSH_RANK);
   assert.deepEqual(ranks.slice(0, 32), Array.from({ length: 32 }, (unused, index) => index >> 1));
-  const shallow = partOf('shallow', Array.from({ length: 16 }, (unused, index) => quadCorners(0, 0, 20 - index, 1, index * 0.0005)));
+  const shallow = partOf('shallow', Array.from({ length: 16 }, (unused, index) => quadCorners(0, 0, 20 - index, 0.1, index * 0.0015)));
   assert.deepEqual(resolveFlush([shallow]).leftovers, []);
 });
 
