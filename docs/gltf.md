@@ -95,6 +95,26 @@ Texture rendering requires batches grouped by geometry and texture identity.
 The image descriptor requires sRGB sampling with conversion to linear RGB before lighting.
 The importer rejects a requested texture that fails to decode, rather than returning an untextured material.
 
+## Loading a large scene without a long freeze
+
+Building a renderer on a big asset blocks the page while the driver links the shader program, uploads textures and packs batches.
+Three pieces split that work across frames:
+
+```js
+import { Renderer67, shaderFeatureRepresentatives } from '67js';
+import '67js/addons/replace-textured-parts';
+
+// 1. Start on a few parts that need the same shader features as the whole scene, and do not wait for the link.
+const renderer = new Renderer67(canvas, shaderFeatureRepresentatives(asset.parts), { deferProgramLink: true });
+// 2. Upload textures in short slices: renderer.createTexture(descriptor) caches each one, then yield to the page.
+// 3. Wait for the program with a poll that leaves the main thread free, then take the whole scene.
+await renderer.programsReady();
+renderer.replaceParts(asset.parts);
+```
+
+`programsReady()` polls `KHR_parallel_shader_compile` and then finishes construction; a renderer made with `deferProgramLink` must not render before it resolves.
+Starting on `shaderFeatureRepresentatives` matters: a scene whose first parts lack a feature recompiles the program inside `replaceParts`, which blocks again.
+
 ## Animation and ownership
 
 `animations` contains the decoded animation clips, including their names, durations, and tracks. Each track has `name` (`Node.position`, `Node.quaternion`, `Node.scale` or `Node.morphTargetInfluences`), `times`, `values`, `getInterpolation()` and `createInterpolant(result)`, the same fields the Three.js clips had.

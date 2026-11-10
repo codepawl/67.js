@@ -77,6 +77,28 @@ function shaderFeaturesOfLighting(lighting) {
   return features;
 }
 
+/**
+ * A few parts that need the same shader features as all of `parts`, plus one instanced pair when any geometry repeats.
+ * A renderer built on these compiles the program the whole scene needs; replaceParts then adds the rest without a recompile.
+ */
+export function shaderFeatureRepresentatives(parts) {
+  const covered = new Set();
+  const representatives = [];
+  const firstOfGeometry = new Map();
+  let instancedPair = null;
+  for (const part of parts) {
+    const features = shaderFeaturesOfParts([part]);
+    if ([...features].some(feature => !covered.has(feature))) {
+      features.forEach(feature => covered.add(feature));
+      representatives.push(part);
+    }
+    if (!instancedPair && firstOfGeometry.has(part.geometry)) instancedPair = [firstOfGeometry.get(part.geometry), part];
+    else if (!firstOfGeometry.has(part.geometry)) firstOfGeometry.set(part.geometry, part);
+  }
+  if (instancedPair) for (const part of instancedPair) if (!representatives.includes(part)) representatives.push(part);
+  return representatives.length > 0 ? representatives : parts.slice(0, 1);
+}
+
 function shaderFeaturesOfParts(parts) {
   const features = new Set();
   for (const part of parts) {
@@ -399,6 +421,8 @@ export function groupParts(parts, batching = true) {
   const groups = new Map();
   const batches = [];
   const morphInfos = new Map();
+  const materialKeyValues = new Map();
+  const materialKeyTails = new Map();
   for (const part of parts) {
     validateTransform(part);
     validatePartFlags(part);
@@ -418,7 +442,18 @@ export function groupParts(parts, batching = true) {
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
-    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)]) {
+    // Thousands of parts share a few materials, so the material half of the key is built once per material.
+    let materialValues = materialKeyValues.get(part.material);
+    if (!materialValues) {
+      materialValues = [...materialMapState(part.material), ...materialLayerState(part.material)];
+      materialKeyValues.set(part.material, materialValues);
+    }
+    let materialTail = materialKeyTails.get(part.material);
+    if (!materialTail) {
+      materialTail = [renderPass(part.material), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)];
+      materialKeyTails.set(part.material, materialTail);
+    }
+    for (const value of [...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail]) {
       if (!maps.has(value)) maps.set(value, new Map());
       maps = maps.get(value);
     }
@@ -527,7 +562,7 @@ function allFinite(values) {
 }
 
 export class Renderer67 {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto' } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false } = {}) {
     this.canvas = canvas;
     this.sceneParts = parts;
     // `skyOpenness` from closed-room.js is passed in, which keeps the ray code out of scenes without volume fog.
@@ -703,6 +738,16 @@ export class Renderer67 {
     }
     // The driver links the programs on its own threads while the textures and buffers upload; only then is the link result read.
     groups.forEach((group) => this.batches.push(this.uploadBatch(group)));
+    this.pendingConstruction = { pending, parts, environment };
+    if (!deferProgramLink) this.finishConstruction();
+  }
+
+  // The second half of construction, which reads the link results. Reading a result waits for the driver, so a page that
+  // builds a heavy renderer passes deferProgramLink and awaits programsReady() instead of freezing for the whole compile.
+  finishConstruction() {
+    const { pending, parts, environment } = this.pendingConstruction;
+    this.pendingConstruction = null;
+    const benchmark = this.benchmark;
     this.finishMainProgram(pending.main);
     this.depthProgram = finishProgram(this.context, pending.depth);
     this.depthSkinUniforms = Object.fromEntries(SKIN_UNIFORMS.map(name => [name, this.context.getUniformLocation(this.depthProgram, name)]));
@@ -742,6 +787,19 @@ export class Renderer67 {
     this.createShadowMap();
     this.resize();
     if (!this.benchmark && !this.multisampleFramebuffer) this.allocateFrameTargets(this.canvas.width, this.canvas.height);
+  }
+
+  /** Resolves once every program started by the constructor has linked, polling without blocking the main thread, then finishes construction. Needs deferProgramLink. */
+  async programsReady() {
+    if (!this.pendingConstruction) return;
+    const context = this.context;
+    const parallelCompile = context.getExtension('KHR_parallel_shader_compile');
+    const { pending } = this.pendingConstruction;
+    const programs = [...Object.values(pending), ...(this.pendingEnvironmentPrograms?.values() ?? [])].map(started => started.program);
+    while (parallelCompile && programs.some(program => !context.getProgramParameter(program, parallelCompile.COMPLETION_STATUS_KHR))) {
+      await new Promise(resolve => setTimeout(resolve, 8));
+    }
+    this.finishConstruction();
   }
 
   selectViewTransform(viewTransform, lookSource) {
@@ -1104,8 +1162,8 @@ export class Renderer67 {
     return batch;
   }
 
-  /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. */
-  replaceParts(parts, { regroupOnly = false } = {}) {
+  /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. `retainedUnchanged` skips the re-sync of parts in kept batches, for a world that grows in slices. */
+  replaceParts(parts, { regroupOnly = false, retainedUnchanged = false } = {}) {
     if (!Array.isArray(parts) || new Set(parts).size !== parts.length) {
       throw new TypeError('Scene parts must be an array with distinct object identities.');
     }
@@ -1218,7 +1276,8 @@ export class Renderer67 {
     this.triangles = parts.reduce((total, part) => total + part.geometry.indices.length / 3, 0);
     this.updateBatches.clear();
     this.shadowsDirty = true;
-    this.updateParts(renderParts);
+    // With retainedUnchanged the caller promises that parts of kept batches did not move, so only the new batches are re-synced.
+    this.updateParts(retainedUnchanged ? renderParts.filter(part => !retained.has(this.partLocations.get(part)?.batch)) : renderParts);
     return parts.length;
   }
 

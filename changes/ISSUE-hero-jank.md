@@ -1,0 +1,1 @@
+- A renderer built with `deferProgramLink: true` links its shaders without freezing the page: await `renderer.programsReady()`; `shaderFeatureRepresentatives(parts)` picks the few parts that compile the program a whole scene needs, and `groupParts` builds each material key once (#ISSUE)

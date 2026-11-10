@@ -1,0 +1,11 @@
+- entry:core: deferProgramLink, programsReady and shaderFeatureRepresentatives let a heavy scene link its shaders without freezing the page, and groupParts builds each material key once, 470 bytes gzip for a measured 3 s to 0.6 s drop in main-thread blocking on the home hero loop
+- entry:core+lazy: same code as entry:core
+- scene:lit-box: same code as entry:core
+- scene:lit-box+lazy: same code as entry:core
+- scene:gltf-box: same code as entry:core
+- scene:gltf-box+lazy: same code as entry:core
+- scene:agent-scene: same code as entry:core
+- scene:agent-scene+lazy: same code as entry:core
+- goal:lit-box: the growth is the deferred link path and the faster grouping, not scene features
+- goal:gltf-box: the growth is the deferred link path and the faster grouping, not scene features
+- goal:agent-scene: the growth is the deferred link path and the faster grouping, not scene features
