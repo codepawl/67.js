@@ -2,6 +2,9 @@
 // Constraints are solved in a fixed order with no random numbers, so the same input always gives the same frames,
 // and playback is an interpolation between two recorded frames: a seek never runs the solver.
 
+import { assertClosedMesh, createShapeMatching, signedVolume, solveShapeMatching, solveVolume, SOFT_BODY_LIMITS } from './soft-body.js';
+import { connectedPairs, createSelfCollision, maxSelfCollisionRadius, SELF_COLLISION_LIMITS } from './cloth-self-collision.js';
+
 export const CLOTH_LIMITS = Object.freeze({
   maxParticles: 5000,
   maxFrameParticles: 3_000_000,
@@ -48,7 +51,7 @@ function edgeKey(first, second, particleCount) {
 }
 
 // Stretch constraints along every edge, bend constraints between the far corners of two triangles sharing an edge.
-function buildConstraints(positions, triangles, particleCount, bendStiffness, stretchStiffness) {
+function buildConstraints(positions, triangles, particleCount, bendStiffness, stretchStiffness, stiffnessWeights = null) {
   const edgeNeighbours = new Map();
   for (let corner = 0; corner < triangles.length; corner += 3) {
     for (let side = 0; side < 3; side++) {
@@ -86,6 +89,8 @@ function buildConstraints(positions, triangles, particleCount, bendStiffness, st
   }
   const restLengths = new Float64Array(firsts.length);
   for (let constraint = 0; constraint < firsts.length; constraint++) {
+    // A constraint is as stiff as the softer of its two particles, so a group of low weight goes limp.
+    if (stiffnessWeights) stiffnesses[constraint] *= Math.min(stiffnessWeights[firsts[constraint]], stiffnessWeights[seconds[constraint]]);
     const a = firsts[constraint] * 3;
     const b = seconds[constraint] * 3;
     restLengths[constraint] = Math.hypot(positions[a] - positions[b], positions[a + 1] - positions[b + 1], positions[a + 2] - positions[b + 2]);
@@ -332,8 +337,8 @@ function followAnchors(positions, moving, targets, softOnly) {
   }
 }
 
-function checkWork(particleCount, constraintCount, triangleCount, colliderCount, frameCount) {
-  const work = frameCount * CLOTH_LIMITS.substeps * (CLOTH_LIMITS.iterations * constraintCount + triangleCount + particleCount * (colliderCount + 1));
+function checkWork(particleCount, constraintCount, triangleCount, colliderCount, frameCount, extraPerIteration = 0) {
+  const work = frameCount * CLOTH_LIMITS.substeps * (CLOTH_LIMITS.iterations * (constraintCount + extraPerIteration) + triangleCount + particleCount * (colliderCount + 1));
   if (particleCount > CLOTH_LIMITS.maxParticles) {
     throw new RangeError(`Cloth has ${particleCount} particles; the limit is ${CLOTH_LIMITS.maxParticles}. Use a coarser grid.`);
   }
@@ -343,6 +348,68 @@ function checkWork(particleCount, constraintCount, triangleCount, colliderCount,
   if (work > CLOTH_LIMITS.maxWork) {
     throw new RangeError(`Cloth needs ${Math.round(work)} solver operations; the limit is ${CLOTH_LIMITS.maxWork}. Use a shorter duration or a coarser grid.`);
   }
+}
+
+function checkStiffnessWeights(weights, particleCount) {
+  if (weights === undefined || weights === null) return null;
+  if (weights.length !== particleCount) {
+    throw new RangeError(`Cloth stiffnessWeights has ${weights.length} numbers; pass one 0 to 1 weight per particle (${particleCount}).`);
+  }
+  for (const weight of weights) {
+    if (!(weight >= 0 && weight <= 1)) throw new RangeError(`Cloth stiffnessWeights must all be between 0 and 1; found ${weight}.`);
+  }
+  return weights;
+}
+
+function checkUnit(value, field, maximum) {
+  if (!Number.isFinite(value) || value < 0 || value > maximum) {
+    throw new RangeError(`Cloth ${field} must be a number from 0 to ${maximum}; found ${value}.`);
+  }
+  return value;
+}
+
+// Soft body and self collision terms, as two hooks the step calls: once per substep and once per iteration.
+function prepareExtras(options, positions, triangles, particleCount, constraints) {
+  const softBody = options.softBody ?? null;
+  const selfCollision = options.selfCollision ?? null;
+  let shapeStiffness = 0;
+  let pressure = 0;
+  let restVolume = 0;
+  let matching = null;
+  let gradients = null;
+  if (softBody) {
+    shapeStiffness = checkUnit(softBody.shape ?? 0.2, 'softBody.shape', 1);
+    pressure = checkUnit(softBody.pressure ?? 1, 'softBody.pressure', SOFT_BODY_LIMITS.maxPressure);
+    if (shapeStiffness > 0) matching = createShapeMatching(positions);
+    if (pressure > 0) {
+      assertClosedMesh(triangles, particleCount);
+      restVolume = signedVolume(positions, triangles);
+      gradients = new Float64Array(positions.length);
+    }
+  }
+  let contacts = null;
+  if (selfCollision) {
+    if (particleCount > SELF_COLLISION_LIMITS.maxParticles) {
+      throw new RangeError(`Cloth selfCollision handles ${SELF_COLLISION_LIMITS.maxParticles} particles at most; this sheet has ${particleCount}. Use a coarser grid or drop selfCollision.`);
+    }
+    const longest = maxSelfCollisionRadius(constraints);
+    const radius = selfCollision === true ? longest * 0.9 : selfCollision.radius;
+    if (!(radius > 0 && radius <= longest)) {
+      throw new RangeError(`Cloth selfCollision.radius must be above 0 and at most ${longest.toPrecision(4)} (half the shortest edge); found ${radius}. Use a smaller radius or true.`);
+    }
+    contacts = createSelfCollision(radius, particleCount, connectedPairs(constraints, particleCount));
+  }
+  return {
+    workPerIteration: (contacts ? SELF_COLLISION_LIMITS.workPerParticle * particleCount : 0) + (pressure > 0 ? triangles.length / 3 : 0) + (matching ? particleCount / CLOTH_LIMITS.iterations : 0),
+    beforeIterations(state, inverseMasses) {
+      if (matching) solveShapeMatching(matching, state, inverseMasses, shapeStiffness);
+      contacts?.build(state);
+    },
+    duringIteration(state, inverseMasses) {
+      if (pressure > 0) solveVolume(state, triangles, inverseMasses, restVolume, pressure, gradients);
+      contacts?.solve(state, inverseMasses);
+    },
+  };
 }
 
 function setParticleInverseMass(cloth, particle) {
@@ -397,8 +464,10 @@ export function createCloth(positions, triangles, options = {}) {
   for (const particle of options.pinned ?? []) {
     if (!Number.isInteger(particle) || particle < 0 || particle >= particleCount) throw new RangeError(`Cloth pinned particle ${particle} does not exist; there are ${particleCount}.`);
   }
-  const constraints = buildConstraints(positions, triangles, particleCount, options.bend ?? 0.1, options.stiffness ?? 0.9);
-  checkWork(particleCount, constraints.count, triangles.length / 3, colliders.length + (moving?.colliderCount ?? 0), options.frameCount ?? 1);
+  const stiffnessWeights = checkStiffnessWeights(options.stiffnessWeights, particleCount);
+  const constraints = buildConstraints(positions, triangles, particleCount, options.bend ?? 0.1, options.stiffness ?? 0.9, stiffnessWeights);
+  const extras = prepareExtras(options, positions, triangles, particleCount, constraints);
+  checkWork(particleCount, constraints.count, triangles.length / 3, colliders.length + (moving?.colliderCount ?? 0), options.frameCount ?? 1, extras.workPerIteration);
   const density = options.density ?? 0.2;
   const areas = particleAreas(positions, triangles, particleCount);
   const totalArea = areas.reduce((sum, area) => sum + area, 0);
@@ -474,8 +543,10 @@ export function createCloth(positions, triangles, options = {}) {
           state.positions[index] += state.velocities[index] * substepSeconds;
         }
       }
+      extras.beforeIterations(state.positions, inverseMasses);
       for (let iteration = 0; iteration < CLOTH_LIMITS.iterations; iteration++) {
         solveDistances(state.positions, inverseMasses, constraints, cloth.impulses, pinImpulses);
+        extras.duringIteration(state.positions, inverseMasses);
         if (moving) followAnchors(state.positions, moving, anchorTargets, true);
         collide(state, previous, activeColliders, thickness, friction);
       }
@@ -565,7 +636,9 @@ export function createCloth(positions, triangles, options = {}) {
 
 /**
  * Simulate one sheet. `positions` are world-space rest positions (3 numbers per particle), `triangles` index them.
- * Options: pinned (particle indices that stay put), gravity, wind (m/s), applyFields (see cloth-fields.js), stiffness and bend (0 to 1), density (kg/m2),
+ * Options: pinned (particle indices that stay put), gravity, wind (m/s), applyFields (see cloth-fields.js), stiffness and bend (0 to 1), stiffnessWeights (one 0 to 1 per particle; a constraint is as stiff as its softer end),
+ * softBody ({ shape 0 to 1, pressure 0 to 3 }; pressure needs a closed mesh and holds that multiple of the rest volume), selfCollision (true or
+ * { radius }, at most half the shortest edge; up to 2000 particles), density (kg/m2),
  * damping (1/s), friction (0 to 1), thickness (m), colliders ({ kind: 'ball', center, radius },
  * { kind: 'capsule', start, end, radius } or { kind: 'box', center, axes, halfExtents }), frameCount and framesPerSecond.
  * `moving` follows a body that moves with time, sampled ahead as plain numbers so it can cross to a worker. One entry per

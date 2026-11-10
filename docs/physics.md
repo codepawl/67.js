@@ -334,7 +334,7 @@ The selected shape adds complete joint motor snapshots to the existing serializa
 This preserves pre-async validation, deterministic bake order and arbitrary recorded seeks after the solver world is freed.
 
 The addon supports rigid-body contacts, compound colliders, impulses, kinematics, articulated graphs, and single-coordinate joint limits and motors.
-It does not implement soft bodies, spherical multi-axis controls, or live solver editing.
+It does not implement spherical multi-axis controls, or live solver editing.
 It does not bind physics directly to skeletal bones or generate a humanoid skeleton.
 Those features need additional public contracts.
 Creating a scene bakes synchronously after asynchronous WASM initialization and can block the main thread.
@@ -405,6 +405,7 @@ For a recipe armature, `ragdoll.armature` names it. The optional `density`, `fri
 - Rigs need uniform scale above the bones (a scale of 100 on an armature node is fine). A bone with no length, more than 48 bones, a bone with a translation or rotation track in the same recipe, or a missing floor body in a scene recipe is refused or falls forever.
 - On an asset, physics wins over motion tracks and `ik` on joints.
 - `scene_inspect` returns `physics.ragdoll`: `bones`, `lowestY`, `highestY`, `fastestFinalSpeed` and `restsAtTime` (null while still moving). Read those instead of a picture.
+- A fall exports as a glTF clip: `bake-motion` over every bone and the fixed bodies, with a tolerance, replaces the recording with LINEAR keys, and `exportGlb` writes them as one animation. `tests/motion-bake.test.js` bakes and simplifies a ragdoll fall, re-imports the GLB with `GLTFLoader` and plays it with an `AnimationMixer`; every bone stays within 0.05 m and 0.05 in the rotation matrix of the live simulation, sampled every 0.1 s over the first 2.9 s.
 - Rapier stays an optional peer. A recipe without `physics` loads none of this code.
 
 ## Recipe cloth
@@ -424,10 +425,13 @@ A recipe `cloth` section records deformable sheets with a position-based solver 
 - `pin` holds edges of the local bounds in place: `top`, `bottom`, `left`, `right` or a corner such as `topLeft`.
 - Sheet fields: `stiffness` (0.01 to 1, default 0.9), `bend` (0 to 1, default 0.1), `density` in kg/m2 (default 0.2), `damping` in 1/s (default 0.3), `friction` (default 0.3) and `thickness` in metres (default 0.01). `gravity` and a steady `wind` in m/s sit on the section.
 - Colliders are fixed root nodes fitted to their geometry bounds as a `ball` or an oriented `box` (default). A thin box is a floor.
-- A sheet or fixed collider cannot have a motion translation or rotation track or a physics body. No cloth-to-cloth or self collision, and no soft bodies yet.
+- A sheet or fixed collider cannot have a motion translation or rotation track or a physics body. No cloth-to-cloth collision between two sheets.
 - Moving colliders and pins follow any node or bone, including a walking character, and are read at every solver substep, so a seek still equals playing to that time:
   - `{ "attach": "leftHand", "shape": "ball", "radius": 0.08, "offset": [0, 0, 0] }` is a ball on a node. `{ "attach": "upperArm", "shape": "capsule", "to": "lowerArm", "radius": 0.05 }` runs a capsule from one node (plus `offset`) to another (plus `toOffset`). Radius 0.001 to 10 m.
   - `{ "armature": "rig", "radiusFraction": 0.2, "exclude": ["head"] }` adds one capsule per bone, head to tail, the radius a fraction (0.02 to 0.5, default 0.2) of the bone length as the ragdoll fits it. A bone with no length is skipped.
+  - A sheet's `stiffnessGroup: "sleeve"` names a vertex group whose weights scale stretch and bend stiffness per vertex; a constraint is as stiff as the softer of its two ends, and a weight under 0.05 counts as 0.05 so the vertex does not drift off.
+  - `selfCollision: true` makes the sheet's own particles push each other apart, so cloth folded over itself stays in layers instead of passing through. The contact radius is 0.9 of half the shortest edge, a spatial hash keeps it near linear, two particles joined by an edge are skipped, and a sheet over 2000 particles fails with the count and the fix. It is per particle, so a layer can still slip between particles on a mesh much coarser than the fold. The fold test (`tests/soft-body.test.js`) keeps every unjoined pair at least 0.8 of the contact distance apart; without it the same fold interpenetrates.
+  - `softBody: { "shape": 0.2, "pressure": 1 }` turns the sheet node into a jelly: `shape` (0 to 1) pulls every particle toward the best rigid fit of the rest shape (shape matching, rotation extracted with a warm-started iteration), and `pressure` (0 to 3) is a volume constraint that holds that multiple of the rest volume. Pressure needs a closed mesh (every edge in two triangles) and fails naming the open edge otherwise; set `pressure: 0` to keep only shape matching. A box or sphere geometry is closed. It rests on the colliders like cloth and bakes to the same frames every run.
   - A sheet on a mesh geometry can hold chosen vertices with `pinGroup: "hem"`, the name of a vertex group made by a `vertex_group` mesh edit; vertices of weight 0.5 or more are pinned, on their own or together with `pin`. An unknown name fails and lists the groups the mesh has.
   - A sheet's `pinTo: { "node": "chest", "weight": 1 }` makes the pinned edges (`pin`) ride that node, keeping their rest offset in its space. Weight 1 holds them on the node; 0.01 to under 1 pulls them toward it by that fraction on every pass, so they sag and lag.
   - Up to 64 moving balls and capsules, counting every bone. The node poses come from the recipe's motion tracks and IK; a physics ragdoll or body is not followed. Points are pushed out of the capsules, not whole triangles, so a coarse sheet can still cut a corner of a thin limb: use a finer grid than the limb is wide. A cape on the reference walker (24 by 24 grid, 5 s, about 2.5 s to bake on the dev machine) stays outside every limb capsule in `tests/cloth-moving.test.js`.

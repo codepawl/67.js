@@ -152,15 +152,21 @@ test('a ragdoll fall bakes to keys, simplifies and exports as a clip a viewer pl
   });
   const mixer = new AnimationMixer(gltf.scene);
   mixer.clipAction(gltf.animations[0]).play();
-  const hips = skinned[0].skeleton.bones.find(bone => bone.name === 'hips');
-  const hipsIndex = skinned[0].skeleton.bones.indexOf(hips);
-  for (const time of [0.5, 1.5, 2.9]) {
+  const bones = skinned[0].skeleton.bones;
+  const POSITION_TOLERANCE = 0.05;
+  const ROTATION_TOLERANCE = 0.05;
+  for (const time of frameTimes(2.9, 0.1)) {
     mixer.setTime(time);
     gltf.scene.updateMatrixWorld(true);
-    const liveMatrix = jointWorlds(live, time).slice(hipsIndex * 16, hipsIndex * 16 + 16);
-    const viewerPosition = hips.getWorldPosition(new Vector3());
-    const difference = Math.hypot(viewerPosition.x - liveMatrix[12], viewerPosition.y - liveMatrix[13], viewerPosition.z - liveMatrix[14]);
-    assert.ok(difference < 0.05, `hips at ${time} are ${difference} off in the viewer`);
+    const liveJoints = jointWorlds(live, time);
+    bones.forEach((bone, index) => {
+      const liveMatrix = liveJoints.slice(index * 16, index * 16 + 16);
+      const viewerMatrix = bone.matrixWorld.elements;
+      const positionError = Math.hypot(viewerMatrix[12] - liveMatrix[12], viewerMatrix[13] - liveMatrix[13], viewerMatrix[14] - liveMatrix[14]);
+      const rotationError = largestDifference(Array.from(viewerMatrix).slice(0, 11), liveMatrix.slice(0, 11));
+      assert.ok(positionError < POSITION_TOLERANCE, `${bone.name} at ${time} is ${positionError} m off in the viewer`);
+      assert.ok(rotationError < ROTATION_TOLERANCE, `${bone.name} at ${time} is ${rotationError} off in rotation in the viewer`);
+    });
   }
 });
 
