@@ -63,6 +63,15 @@ function filmNumbers(film, nodeId, frameCount) {
 }
 
 const meters = value => Number(value.toFixed(4));
+
+/** Height above the floor of the highest vertex and of the median and 90th percentile vertex: a thin layer with folds has a low median and a higher tail. */
+function restHeights(vertices) {
+  const heights = [];
+  for (let index = 1; index < vertices.length; index += 3) heights.push(vertices[index]);
+  heights.sort((low, high) => low - high);
+  const at = share => meters(heights[Math.floor(share * (heights.length - 1))]);
+  return { highest: meters(heights[heights.length - 1]), median: at(0.5), percentile90: at(0.9) };
+}
 const seconds = step => Number((step / FILM_FRAMES_PER_SECOND).toFixed(4));
 
 /** Size of the cube in one frame: width along x (what the side camera sees) and height. */
@@ -156,6 +165,7 @@ async function main() {
         midFallStep: flagMidFall,
         firstTouchStep: flagTouch,
         pileHeightMeters: meters(axisRange(flag.record.frames[lastFlagStep], 1).extent),
+        restHeightsMeters: restHeights(flag.record.frames[lastFlagStep]),
         normalSpread: {
           start: meters(normalSpread(flagStart, flagIndicesForSpread)),
           midFall: meters(normalSpread(flag.record.frames[flagMidFall], flagIndicesForSpread)),

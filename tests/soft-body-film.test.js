@@ -49,7 +49,7 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   const touch = measureLanding(first.frames, restHeight).contact;
   assert.ok(touch > 30 && touch < 90, `the hanging flag first touches the floor within frames 30 to 90, got ${touch}`);
   const midFall = Math.round(touch * 0.7);
-  assert.ok(axisRange(first.frames[midFall], 1).extent > restHeight * 0.6, 'mid fall the flag is still hanging in the air');
+  assert.ok(axisRange(first.frames[midFall], 1).low > 0.1, `mid fall the flag is still in the air, lowest point ${axisRange(first.frames[midFall], 1).low} m`);
   // A stiff card would stay one plane: its normals agree and it has no depth. Cloth ripples, so both measures are well above zero.
   const spreadAtStart = normalSpread(first.frames[0], indices);
   const spreadMidFall = normalSpread(first.frames[midFall], indices);
@@ -61,7 +61,14 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   const finalRange = axisRange(first.frames[last], 1);
   assert.ok(finalRange.high < 0.05, `the flag ends no more than 5 cm above the floor, got ${finalRange.high} m`);
   const spreadAtRest = normalSpread(first.frames[last], indices);
-  assert.ok(spreadAtRest > 0.2, `the flag rests crumpled, not as a flat sheet (spread ${spreadAtRest})`);
+  assert.ok(spreadAtRest > 0.5, `the flag rests crumpled, not as a flat sheet (spread ${spreadAtRest})`);
+  // A thin layer with folds in it: most of the cloth lies within a centimetre or two of the floor, a tenth of it stands in folds above 2 cm.
+  const restHeights = [];
+  for (let index = 1; index < first.frames[last].length; index += 3) restHeights.push(first.frames[last][index]);
+  restHeights.sort((low, high) => low - high);
+  const heightAt = share => restHeights[Math.floor(share * (restHeights.length - 1))];
+  assert.ok(heightAt(0.5) < 0.01, `half of the cloth lies within 1 cm of the floor, got ${heightAt(0.5)} m`);
+  assert.ok(heightAt(0.9) > 0.02, `a tenth of the cloth stands in folds above 2 cm, got ${heightAt(0.9)} m`);
   assert.ok(axisRange(first.frames[last], 2).extent > 0.7, 'the flag lies spread over the floor, not stacked in one place');
 
   const without = recordFilm(foldingFlagRecipe({ selfCollision: false }), 'flag', FLAG_FRAMES);
@@ -75,6 +82,6 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   assert.ok(closestWithout < closestWith * 0.9, `without self collision the layers come closer (${closestWithout} m)`);
 
   const bake = first.bakeMilliseconds;
-  context.diagnostic(`flag: touch at frame ${touch}, final height ${finalRange.high.toFixed(4)} m from ${restHeight.toFixed(3)} m, spread mid fall ${spreadMidFall.toFixed(3)}, at rest ${spreadAtRest.toFixed(3)}, closest unjoined pair ${closestWith.toFixed(4)} m (${closestWithout.toFixed(4)} m without self collision)`);
+  context.diagnostic(`flag: touch at frame ${touch}, final height ${finalRange.high.toFixed(4)} m from ${restHeight.toFixed(3)} m, spread mid fall ${spreadMidFall.toFixed(3)}, at rest ${spreadAtRest.toFixed(3)}, p50 height ${heightAt(0.5).toFixed(4)} m, p90 ${heightAt(0.9).toFixed(4)} m, closest unjoined pair ${closestWith.toFixed(4)} m (${closestWithout.toFixed(4)} m without self collision)`);
   context.diagnostic(`flag: bake ${milliseconds(bake)} ms for ${FLAG_FRAMES} steps (${milliseconds(bake / FLAG_FRAMES)} ms a step with self collision, ${milliseconds(without.bakeMilliseconds / FLAG_FRAMES)} ms without)`);
 });
