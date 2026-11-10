@@ -4,6 +4,8 @@
 // Events write the live control state at any time; the snapshot game logic reads changes only when the runtime samples,
 // so a fixed-step game sees the same state for the whole step. See docs/input.md.
 
+export { deviceMotionSource, INPUT_SOURCE_LIMITS, recordInput, replaySource, touchSource } from './input-sources.js';
+
 export const INPUT_LIMITS = Object.freeze({
   maximumSources: 16,
   maximumControls: 512,
@@ -61,6 +63,8 @@ export function createInput(options = {}) {
   let started = false;
   let disposed = false;
   let snapshot = { actions: new Map(), axes: new Map() };
+  const controlListeners = new Set();
+  const sampleListeners = new Set();
 
   function assertAlive() {
     if (disposed) throw new Error('This input was disposed. Call createInput again.');
@@ -85,6 +89,13 @@ export function createInput(options = {}) {
     if (isDown && !wasDown) control.pressedLatch = true;
     if (!isDown && wasDown) control.releasedLatch = true;
     control.value = value;
+    for (const listener of [...controlListeners]) listener(controlName, value);
+  }
+
+  function addListener(listeners, listener, label) {
+    if (typeof listener !== 'function') throw new TypeError(`${label} needs a function, got ${describe(listener)}.`);
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   }
 
   function releaseControls(sourceName) {
@@ -119,9 +130,23 @@ export function createInput(options = {}) {
     if (sources.size >= INPUT_LIMITS.maximumSources) {
       throw new RangeError(`Input already has ${INPUT_LIMITS.maximumSources} sources. Unregister one before adding "${name}".`);
     }
+    const foreignControls = new Set();
     const emit = (controlName, value) => setControl(`${name}/${controlName}`, value);
-    emit.releaseAll = () => releaseControls(name);
-    const entry = { source, emit, attached: false };
+    emit.releaseAll = () => {
+      releaseControls(name);
+      for (const controlName of foreignControls) {
+        if (controls.has(controlName)) setControl(controlName, 0);
+      }
+    };
+    if (source.writesAnyControl === true) {
+      // Only a source that declares writesAnyControl (a replay) may write full control names. They are tracked so
+      // releaseAll and unregisterSource clean them up.
+      emit.control = (controlName, value) => {
+        foreignControls.add(controlName);
+        setControl(controlName, value);
+      };
+    }
+    const entry = { source, emit, attached: false, foreignControls };
     sources.set(name, entry);
     if (started) attach(entry);
     return api;
@@ -132,9 +157,9 @@ export function createInput(options = {}) {
     if (entry === undefined) throw new RangeError(`No input source named "${String(name)}". Registered: ${[...sources.keys()].join(', ') || 'none'}.`);
     entry.source.dispose?.();
     sources.delete(name);
-    releaseControls(name);
+    entry.emit.releaseAll();
     for (const controlName of [...controls.keys()]) {
-      if (controlName.startsWith(`${name}/`)) controls.delete(controlName);
+      if (controlName.startsWith(`${name}/`) || entry.foreignControls.has(controlName)) controls.delete(controlName);
     }
     return api;
   }
@@ -154,13 +179,17 @@ export function createInput(options = {}) {
     requireName(name, 'bindAxis name');
     const bindings = Array.isArray(definition) ? definition : definition?.bindings;
     const deadZone = (Array.isArray(definition) ? undefined : definition?.deadZone) ?? INPUT_LIMITS.defaultDeadZone;
+    const smoothing = (Array.isArray(definition) ? undefined : definition?.smoothing) ?? 0;
+    if (!Number.isFinite(smoothing) || smoothing < 0 || smoothing >= 1) {
+      throw new RangeError(`Axis "${name}" smoothing must be a number from 0 (none) up to but not including 1, got ${String(smoothing)}. Each sample moves the axis (1 - smoothing) of the way to its target.`);
+    }
     if (!Number.isFinite(deadZone) || deadZone < 0 || deadZone >= 1) {
       throw new RangeError(`Axis "${name}" deadZone must be a number from 0 up to but not including 1, got ${String(deadZone)}.`);
     }
     if (!axisBindings.has(name) && axisBindings.size >= INPUT_LIMITS.maximumAxes) {
       throw new RangeError(`Input already has ${INPUT_LIMITS.maximumAxes} axes. Reuse a name or unbindAxis first.`);
     }
-    axisBindings.set(name, { bindings: normalizeBindings(bindings, `Axis "${name}" bindings`), deadZone });
+    axisBindings.set(name, { bindings: normalizeBindings(bindings, `Axis "${name}" bindings`), deadZone, smoothing, smoothed: 0 });
     return api;
   }
 
@@ -180,19 +209,24 @@ export function createInput(options = {}) {
       actions.set(name, state);
     }
     const axes = new Map();
-    for (const [name, { bindings, deadZone }] of axisBindings) {
+    for (const [name, axis] of axisBindings) {
       let total = 0;
-      for (const { control: controlName, scale } of bindings) {
+      for (const { control: controlName, scale } of axis.bindings) {
         total += (controls.get(controlName)?.value ?? 0) * scale;
       }
-      axes.set(name, applyDeadZone(Math.max(-1, Math.min(1, total)), deadZone));
+      const target = applyDeadZone(Math.max(-1, Math.min(1, total)), axis.deadZone);
+      axis.smoothed = axis.smoothing === 0 ? target : axis.smoothed + (target - axis.smoothed) * (1 - axis.smoothing);
+      axes.set(name, axis.smoothed);
     }
     for (const control of controls.values()) {
       control.pressedLatch = false;
       control.releasedLatch = false;
     }
-    for (const entry of sources.values()) entry.source.endSample?.(entry.emit);
     snapshot = { actions, axes };
+    // Listeners hear the sample end before sources reset their pulses, so a reset (a tap going back to 0) is
+    // recorded under the next sample number, the way a live game sees it.
+    for (const listener of [...sampleListeners]) listener();
+    for (const entry of sources.values()) entry.source.endSample?.(entry.emit);
   }
 
   function actionState(name) {
@@ -221,6 +255,8 @@ export function createInput(options = {}) {
     actionBindings.clear();
     axisBindings.clear();
     snapshot = { actions: new Map(), axes: new Map() };
+    controlListeners.clear();
+    sampleListeners.clear();
     disposed = true;
   }
 
@@ -237,6 +273,10 @@ export function createInput(options = {}) {
     release: controlName => setControl(controlName, 0),
     releaseControls,
     sample,
+    // Observers for recording: the first hears every control change, the second the end of every sample.
+    // Each returns a function that removes the listener.
+    onControlChange: listener => addListener(controlListeners, listener, 'onControlChange'),
+    onSample: listener => addListener(sampleListeners, listener, 'onSample'),
     isHeld: name => actionState(name).held,
     wasPressed: name => actionState(name).pressed,
     wasReleased: name => actionState(name).released,
