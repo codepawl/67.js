@@ -88,6 +88,12 @@ const options = {
   facets: parameters.get('facets') === '1',
 };
 const trapName = parameters.get('trap');
+
+// The trap name comes from the URL, so only the table's own entries count, never an inherited method such as toString.
+function trapBuilder() {
+  if (!Object.hasOwn(TRAPS, trapName)) throw new Error(`Unknown trap ${trapName}. Use one of: ${Object.keys(TRAPS).join(', ')}.`);
+  return TRAPS[trapName];
+}
 const camera = { pivot: [0, 0, 0], yaw: 0.8, pitch: -0.5, distance: 10 };
 let mode = 'orbit';
 let glbBytes = null;
@@ -147,9 +153,9 @@ async function loadScene() {
     if (!options.shadows) for (const part of loaded.parts) Object.assign(part, { castShadow: false, receiveShadow: false });
     return loaded;
   }
-  if (!TRAPS[trapName]) throw new Error(`Unknown trap ${trapName}. Use one of: ${Object.keys(TRAPS).join(', ')}.`);
+  const buildTrap = trapBuilder();
   options.ids = true;
-  return TRAPS[trapName]();
+  return buildTrap();
 }
 
 // What the flush pass did to the scene: how long it took, what it could not settle and how much it cut.
@@ -268,7 +274,7 @@ async function probe() {
   paint.putImageData(image, 0, 0);
   renderer.render(frameFor(0));
   lastProbe = { changed, clearOfEdges, totalChanged, total: width * height, fraction: changed / (width * height), width, height };
-  if (trapName && TRAPS[trapName]().countOpen) lastProbe.open = countOpenPixels(first, width, height);
+  if (trapName && trapBuilder()().countOpen) lastProbe.open = countOpenPixels(first, width, height);
   setStatus(changed === 0 ? 'ok' : 'bad', changed === 0 ? 'No flicker in this view' : `${changed} pixels flicker`);
   updateReadout();
   return lastProbe;
@@ -435,7 +441,7 @@ async function loadFromUrl(url) {
 async function loadTrap() {
   assetName = trapName;
   await build();
-  setCamera(TRAPS[trapName]());
+  setCamera(trapBuilder()());
 }
 
 bindControls();
