@@ -1076,8 +1076,12 @@ window.__agentPreview = {
     record.checkpoints.set(checkpointId, { handle, fogDensity: record.scene.environment.volumeFog.density });
     return { sessionId, checkpointId, revision: record.scene.revision };
   },
-  restore({ sessionId, checkpointId, expectedRevision }) {
+  restore({ sessionId, checkpointId, revision, expectedRevision }) {
     const record = requireSession(sessionId);
+    if (revision !== undefined) {
+      record.scene.restoreRevision(revision, { expectedRevision });
+      return mutationStatus(record);
+    }
     if (!record.checkpoints.has(checkpointId)) {
       throw new Error('Unknown or released checkpoint.');
     }

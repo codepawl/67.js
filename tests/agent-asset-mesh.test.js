@@ -165,6 +165,21 @@ test('a checkpoint undoes a mesh edit and replace swaps the log', async () => {
   asset.dispose();
 });
 
+test('restoreRevision undoes mesh edits of an asset without a checkpoint', async () => {
+  const asset = await loadRobot();
+  const scene = createScene(asset);
+  applyEdits(scene, TORSO, [{ op: 'delete', select: { tag: 'top' } }]);
+  applyEdits(scene, TORSO, [{ op: 'delete', select: { tag: 'bottom' } }]);
+  const edited = partOf(scene, TORSO).geometry.indices.length;
+  scene.restoreRevision(0, { expectedRevision: scene.revision });
+  assert.equal(partOf(scene, TORSO).geometry, asset.parts[1].geometry);
+  assert.equal(scene.exportRecipe().meshEdits, undefined);
+  assert.throws(() => scene.restoreRevision(9, { expectedRevision: scene.revision }), /kept revisions: 0, 1, 2/);
+  scene.restoreRevision(2, { expectedRevision: scene.revision });
+  assert.equal(partOf(scene, TORSO).geometry.indices.length, edited);
+  asset.dispose();
+});
+
 test('an exported recipe replays the edits on a fresh decode', async () => {
   const asset = await loadRobot();
   const scene = createScene(asset);

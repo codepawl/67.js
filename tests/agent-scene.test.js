@@ -2,7 +2,7 @@ import './support/load-agent-scene-modules.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Matrix4, Quaternion, Vector3 } from 'three';
-import { createAgentScene, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS } from '../src/agent-scene.js';
+import { createAgentScene, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, REVISION_HISTORY_LIMIT } from '../src/agent-scene.js';
 import * as lightweightCapabilities from '../src/agent-scene-capabilities.js';
 
 test('the plain-data capabilities module matches the scene engine', () => {
@@ -460,7 +460,8 @@ test('node deletion distinguishes nonrecursive rejection from explicit subtree r
     { type: 'remove-geometry', id: 'box' },
   ], { expectedRevision: 1 });
   assert.equal(session.parts.length, 0);
-  assert.equal(session.inspect().residentGeometryBytes, 0);
+  assert.equal(session.inspect().geometryBytes, 0);
+  assert.equal(session.inspect().residentGeometryBytes, 720, 'the kept earlier revisions still own the removed geometry');
 });
 
 test('resource removal and node rebinding resolve final references after sequential commands', () => {
@@ -551,7 +552,8 @@ test('peak geometry budgets count checkpoint ownership and free it on release', 
     { type: 'remove-geometry', id: 'box' }, { type: 'remove-material', id: 'finish' },
   ], { expectedRevision: 2 });
   session.releaseCheckpoint(secondCheckpoint);
-  assert.equal(session.inspect().residentGeometryBytes, 0);
+  // Kept revisions still own the box; an edit that needs the room drops them oldest first.
+  assert.equal(session.inspect().residentGeometryBytes, 720);
   session.apply(add, { expectedRevision: 3 });
   assert.equal(session.inspect().geometryBytes, 720);
   assert.equal(session.topologyRevision, 3);
@@ -649,4 +651,63 @@ test("recipe materials accept alphaMode 'add' and keep it when opacity is below 
   assert.equal(exported.materials.find(material => material.id === 'faint spark').alphaMode, 'add');
   input.materials.push({ id: 'bad', color: [1, 1, 1], alphaMode: 'multiply' });
   assert.throws(() => createAgentScene(input), /alphaMode: got .*; expected one of opaque, blend, add/);
+});
+
+function geometryBytes(session) {
+  return session.parts.map(part => Buffer.concat([
+    Buffer.from(part.geometry.positions.buffer, part.geometry.positions.byteOffset, part.geometry.positions.byteLength),
+    Buffer.from(part.geometry.indices.buffer, part.geometry.indices.byteOffset, part.geometry.indices.byteLength),
+    Buffer.from(part.matrix.buffer, part.matrix.byteOffset, part.matrix.byteLength),
+  ]).toString('hex'));
+}
+
+test('restoreRevision undoes the last edits without a checkpoint and restores byte-identical geometry', () => {
+  const session = createAgentScene(recipe());
+  const before = session.exportRecipe();
+  const bytesBefore = geometryBytes(session);
+  const originalParts = session.parts;
+  session.apply([{ type: 'set-node', id: 'root', translation: [9, 9, 9] }], { expectedRevision: 0 });
+  session.apply([
+    { type: 'remove-node', id: 'other' },
+    { type: 'add-geometry', geometry: { id: 'wide', type: 'box', bevel: 0, subdivisions: 1 } },
+    { type: 'add-node', node: { id: 'wide-node', geometry: 'wide', material: 'finish' } },
+  ], { expectedRevision: 1 });
+  session.apply([{ type: 'set-material', id: 'finish', color: [1, 0, 0] }], { expectedRevision: 2 });
+  assert.equal(session.restoreRevision(0, { expectedRevision: 3 }), 4);
+  assert.deepEqual(session.exportRecipe(), before);
+  assert.deepEqual(geometryBytes(session), bytesBefore);
+  assert.equal(session.parts[0], originalParts[0], 'part identities are retained for the renderer');
+  assert.throws(() => session.restoreRevision(0, { expectedRevision: 3 }), /expectedRevision/);
+});
+
+test('restoreRevision keeps a bounded history, drops the oldest first and names the kept revisions', () => {
+  const session = createAgentScene(recipe());
+  assert.throws(() => session.restoreRevision(0, { expectedRevision: 0 }), /revision: got 0; expected a revision this session kept, but none is kept yet/);
+  const edits = REVISION_HISTORY_LIMIT + 3;
+  for (let index = 0; index < edits; index++) {
+    session.apply([
+      { type: 'add-geometry', geometry: { id: `extra-${index}`, type: 'box', bevel: 0, subdivisions: 1 } },
+      ...(index > 0 ? [{ type: 'remove-geometry', id: `extra-${index - 1}` }] : []),
+    ], { expectedRevision: index });
+    assert.ok(session.inspect().residentGeometryBytes <= (REVISION_HISTORY_LIMIT + 2) * 6000, 'history stays inside a fixed allocation');
+  }
+  const kept = Array.from({ length: REVISION_HISTORY_LIMIT }, (_, index) => edits - REVISION_HISTORY_LIMIT + index);
+  assert.throws(() => session.restoreRevision(0, { expectedRevision: edits }), new RegExp(`expected one of the kept revisions: ${kept.join(', ')}`));
+  assert.throws(() => session.restoreRevision(edits, { expectedRevision: edits }), /kept revisions/);
+  session.restoreRevision(kept[1], { expectedRevision: edits });
+  assert.ok(session.exportRecipe().geometries.some(geometry => geometry.id === `extra-${kept[1] - 1}`));
+  // Undoing the undo works: the state before the restore is kept under its own revision.
+  session.restoreRevision(edits, { expectedRevision: edits + 1 });
+  assert.ok(session.exportRecipe().geometries.some(geometry => geometry.id === `extra-${edits - 1}`));
+});
+
+test('kept revisions never block an edit that fits the geometry budget without them', () => {
+  const session = createAgentScene(recipe(), { maxVertices: 24, maxGeometryBytes: 1344 });
+  session.apply([
+    { type: 'remove-node', id: 'root', recursive: true }, { type: 'remove-node', id: 'other' },
+    { type: 'remove-geometry', id: 'box' }, { type: 'remove-material', id: 'finish' },
+  ], { expectedRevision: 0 });
+  session.apply([{ type: 'add-geometry', geometry: { id: 'new', type: 'box', bevel: 0 } }], { expectedRevision: 1 });
+  assert.equal(session.inspect().geometryBytes, 720);
+  assert.throws(() => session.restoreRevision(0, { expectedRevision: 2 }), /kept revisions: 1/);
 });

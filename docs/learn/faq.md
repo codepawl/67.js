@@ -46,7 +46,7 @@ The agent asks for a picture only when it needs one, so most calls cost no image
 
 ## Can an agent undo an edit?
 
-Yes. Call `scene_checkpoint` before an experiment, and `scene_restore` goes back to it exactly, geometry and textures included. `scene_apply` with a `branch` name tries an edit on a copy and leaves the scene as it is. Issue #744 adds undo of the last edits without a checkpoint made first. The [MCP guide](/mcp.md) has the limits.
+Yes. `scene_restore` with `revision` goes back to any of the last 4 revisions in one call, with no checkpoint made first. For an experiment that may take longer, call `scene_checkpoint` first, and `scene_restore` goes back to it exactly, geometry and textures included. `scene_apply` with a `branch` name tries an edit on a copy and leaves the scene as it is. The [MCP guide](/mcp.md) has the limits.
 
 ## Can I check that an edit did not change the rest of the scene?
 
