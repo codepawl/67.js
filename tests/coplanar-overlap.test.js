@@ -253,19 +253,23 @@ test('resolveFlushParts settles exactly flush pairs too, on every depth format',
 });
 
 test('ranks settle in chains, and a stack deeper than the ranks is reported instead of piled on the top rank', () => {
-  const big = gridPart('chainBig', 10, 1, 0);
-  const middle = gridPart('chainMiddle', 5, 1, 0.0002);
-  const small = gridPart('chainSmall', 2, 1, 0.0004);
-  assert.equal(findCoplanarOverlaps([small, middle, big]).overlaps.length, 3);
+  // Faces under a metre, 1.2 mm apart: wider than the near-flush cut, which cuts anything findCoplanarOverlaps reports, and
+  // inside the 2 mm the flush search reaches on a scene this small. So each pair is ranked, and only neighbours pair up.
+  const step = 0.0012;
+  const big = gridPart('chainBig', 1, 1, 0);
+  const middle = gridPart('chainMiddle', 0.5, 1, step);
+  const small = gridPart('chainSmall', 0.2, 1, step * 2);
+  assert.equal(findCoplanarOverlaps([small, middle, big]).overlaps.length, 0, 'wider apart than the overlap check looks');
   const rankOf = part => flushOrderOf(part)?.ranges.at(-1).rank ?? 0;
   assert.deepEqual(resolveFlushParts([small, middle, big]), { ranked: 2, leftovers: [] });
   assert.deepEqual([big, middle, small].map(rankOf), [0, 1, 2]);
-  const stack = Array.from({ length: 8 }, (unused, index) => gridPart(`stack${index}`, 10 - index, 1, index * 0.0005));
+  const stack = Array.from({ length: 8 }, (unused, index) => gridPart(`stack${index}`, (10 - index) / 10, 1, index * step));
   assert.deepEqual(resolveFlushParts(stack).leftovers, []);
   assert.deepEqual(stack.map(rankOf), [0, 1, 2, 3, 4, 5, 6, 7], 'every face of the stack has a rank of its own');
-  const deep = Array.from({ length: 20 }, (unused, index) => gridPart(`deep${index}`, 20 - index, 1, index * 0.0005));
+  const deep = Array.from({ length: 20 }, (unused, index) => gridPart(`deep${index}`, (20 - index) / 20, 1, index * step));
   const { leftovers } = resolveFlushParts(deep);
-  assert.deepEqual(leftovers.map(leftover => leftover.reason), ['rank-overflow', 'rank-overflow', 'rank-overflow', 'rank-overflow']);
+  // Face 16 would need rank 16; the faces past it only reach face 16, so their chain starts again below the top rank.
+  assert.deepEqual(leftovers, [{ reason: 'rank-overflow', part: 'deep16', triangles: 2 }]);
   assert.ok(deep.every(part => rankOf(part) <= 15));
   const onOnePlane = Array.from({ length: 20 }, (unused, index) => gridPart(`plane${index}`, 20 - index, 1, 0));
   assert.deepEqual(resolveFlushParts(onOnePlane).leftovers, [], 'on one plane the hidden faces are cut away, however deep the stack');
