@@ -15,8 +15,8 @@ import { encodePng } from '../src/export-png.js';
 import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes } from '../src/local-volumes.js';
 import { createLocalVolumeCrossing, meanEnvironmentRadiance } from '../src/path-tracer-volume.js';
 
-const REGION_TOLERANCE = 0.05;
-const MEAN_TOLERANCE = 0.02;
+const REGION_TOLERANCE = 0.01;
+const MEAN_TOLERANCE = 0.005;
 const SMOKE_BOX = { shape: 'box', center: [0, 1.5, 0], size: [3, 1.5, 3], density: 1.2, falloff: 0.3, absorption: [0.7, 0.8, 1], scatter: 0.8, steps: 32 };
 const SUN_DIRECTION = [1, 0.1, 0];
 const SUN_COLOR = [3, 3, 3];
