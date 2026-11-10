@@ -3,6 +3,10 @@
 //        --spots spots.json --configs "reversed=1,nearFit=1;reversed=0,nearFit=0"
 // spots.json: [{ "name": "roofs", "eye": [x, y, z], "target": [x, y, z] }]. Without --spots it prints the scene bounds and exits.
 //   node bench/flicker/probe.mjs --traps --configs "reversed=1;reversed=0"   runs every trap scene of traps.js with its own camera.
+// Each result also carries `truth`, the ground-truth probe of ground-truth.js: the render compared with a float64 ray cast that
+// cannot z-fight. `swapped` is the count that matters (a pixel showing the colour of a face behind the visible one), `tied` the
+// pixels where the scene itself names no winner (exact coplanar faces with the flush pass off, `offset=0`), and `wrong` also holds
+// shading steps within a face. A glTF needs `ids=1` (flat colour per part) or `facets=1` (per triangle) for the truth to read colours.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
@@ -44,9 +48,9 @@ async function probeTraps() {
     for (const trap of await page.evaluate(() => window.flicker.traps)) {
       await open(configuration, trap);
       await page.waitForTimeout(300);
-      const outcome = await page.evaluate(async () => ({ probe: await window.flicker.probe(), info: window.flicker.info }));
+      const outcome = await page.evaluate(async () => ({ probe: await window.flicker.probe(), info: window.flicker.info, truth: await window.flicker.truth() }));
       await page.screenshot({ path: path.join(outputFolder, `${prefix}-${trap}-${label}.png`) });
-      results.push({ trap, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, moved: outcome.probe.totalChanged, ...(outcome.probe.open === undefined ? {} : { open: outcome.probe.open }), depth: outcome.info.depthMode });
+      results.push({ trap, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, moved: outcome.probe.totalChanged, truth: outcome.truth, ...(outcome.probe.open === undefined ? {} : { open: outcome.probe.open }), depth: outcome.info.depthMode });
       console.log(JSON.stringify(results.at(-1)));
     }
   }
@@ -71,10 +75,11 @@ try {
           window.flicker.setCamera({ eye, target });
           window.flicker.render();
           const probe = await window.flicker.probe();
-          return { probe, info: window.flicker.info };
+          const truth = await window.flicker.truth();
+          return { probe, truth, info: window.flicker.info };
         }, spot);
         await page.screenshot({ path: path.join(outputFolder, `${prefix}-${spot.name}-${label}.png`) });
-        results.push({ spot: spot.name, moved: outcome.probe.totalChanged, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, fraction: outcome.probe.fraction, depth: outcome.info.depthMode, near: outcome.info.near, far: outcome.info.far });
+        results.push({ spot: spot.name, moved: outcome.probe.totalChanged, configuration: label, truth: outcome.truth, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, fraction: outcome.probe.fraction, depth: outcome.info.depthMode, near: outcome.info.near, far: outcome.info.far });
         console.log(JSON.stringify(results.at(-1)));
       }
     }
