@@ -1,4 +1,5 @@
-import { createMeshData, GROUP_PREFIX, vertexGroupNames } from './mesh-data.js';
+import { createMeshData, GROUP_PREFIX, vertexGroupNames, vertexGroupWeights } from './mesh-data.js';
+import { MASK_MEASURES, MASK_LIMITS, checkOcclusionWork, measureVertexMask } from './mesh-masks.js';
 import { evaluateField, meshFieldContext } from './mesh-fields.js';
 import { selectedVertices } from './mesh-field-edits.js';
 import { selectFaces } from './mesh-select.js';
@@ -17,11 +18,23 @@ function unitNumber(value, index, label, finiteNumber) {
   return finiteNumber(value, index, label, { minimum: 0, maximum: 1 });
 }
 
+function normalizeGroupGradient(gradient, normalized, index, readValue) {
+  for (const key of Object.keys(gradient)) {
+    if (!['group', 'colors'].includes(key)) throw editField(index, `gradient.${key}`, gradient[key], `one of the group gradient fields group, colors; remove "${key}"`);
+  }
+  if (typeof gradient.group !== 'string' || gradient.group === '') throw editField(index, 'gradient.group', gradient.group, 'the name of a vertex group, such as "wear"');
+  if (!Array.isArray(gradient.colors) || gradient.colors.length < 2 || gradient.colors.length > 3) {
+    throw editField(index, 'gradient.colors', gradient.colors, 'two colors (weight 0 then 1) or three (weight 0, 0.5 then 1), such as [[0.1, 0.1, 0.1], [0.8, 0.1, 0.1], [0.8, 0.8, 0.8]]');
+  }
+  normalized.gradient = { group: gradient.group, colors: gradient.colors.map((value, stop) => readValue(value, `gradient.colors[${stop}]`)) };
+}
+
 function normalizeGradient(gradient, normalized, index, { finiteNumber, valuesKey, readValue }) {
   const example = valuesKey === 'weights' ? '[0, 1]' : '[[1, 0, 0], [0, 0, 1]]';
   if (!gradient || typeof gradient !== 'object' || Array.isArray(gradient)) {
     throw editField(index, 'gradient', gradient, `an object such as { "axis": "z", "range": [0, 1], "${valuesKey}": ${example} }`);
   }
+  if (gradient.group !== undefined && valuesKey === 'colors') return normalizeGroupGradient(gradient, normalized, index, readValue);
   for (const key of Object.keys(gradient)) {
     if (!['axis', 'range', valuesKey].includes(key)) throw editField(index, `gradient.${key}`, gradient[key], `one of the gradient fields axis, range, ${valuesKey}; remove "${key}"`);
   }
@@ -41,10 +54,36 @@ function rejectSecondSource(edit, index, sources) {
   return given[0];
 }
 
+const MEASURE_SETTINGS = Object.freeze({ curvature: ['gain'], edge: ['angle'], occlusion: ['rays', 'distance', 'seed'] });
+
+function normalizeMeasure(edit, normalized, index, finiteNumber) {
+  if (!MASK_MEASURES.includes(edit.measure)) throw editField(index, 'measure', edit.measure, `one of ${MASK_MEASURES.join(', ')}`);
+  normalized.measure = edit.measure;
+  const allowed = MEASURE_SETTINGS[edit.measure];
+  for (const setting of Object.keys(MASK_LIMITS).filter(name => Array.isArray(MASK_LIMITS[name])).concat('distance')) {
+    if (edit[setting] === undefined) continue;
+    if (!allowed.includes(setting)) throw editField(index, setting, edit[setting], `left out, because measure "${edit.measure}" takes ${allowed.join(', ')}`);
+    if (setting === 'distance') {
+      normalized.distance = finiteNumber(edit.distance, index, 'distance', { minimum: 0, exclusiveMinimum: true });
+    } else if (setting === 'rays' || setting === 'seed') {
+      const [minimum, maximum] = MASK_LIMITS[setting];
+      if (!Number.isInteger(edit[setting]) || edit[setting] < minimum || edit[setting] > maximum) {
+        throw editField(index, setting, edit[setting], `a whole number from ${minimum} to ${maximum}`);
+      }
+      normalized[setting] = edit[setting];
+    } else {
+      const [minimum, maximum] = MASK_LIMITS[setting];
+      normalized[setting] = finiteNumber(edit[setting], index, setting, { minimum, maximum });
+    }
+  }
+}
+
 /** Validate a vertex_group edit: a required name and at most one of weight, field or gradient (default weight 1). */
 export function normalizeVertexGroupEdit(edit, normalized, index, { finiteNumber, checkedField }) {
-  const source = rejectSecondSource(edit, index, ['weight', 'field', 'gradient']);
-  if (source === 'field') {
+  const source = rejectSecondSource(edit, index, ['weight', 'field', 'gradient', 'measure']);
+  if (source === 'measure') {
+    normalizeMeasure(edit, normalized, index, finiteNumber);
+  } else if (source === 'field') {
     normalized.field = checkedField(edit.field, index, 'field', 'scalar');
   } else if (source === 'gradient') {
     normalizeGradient(edit.gradient, normalized, index, {
@@ -92,8 +131,19 @@ function gradientFractions(mesh, gradient) {
   return fractions;
 }
 
+// Colors along the weights of a vertex group: two stops sit at weight 0 and 1, three at 0, 0.5 and 1.
+function groupStops(mesh, { group, colors }) {
+  const weights = vertexGroupWeights(mesh, group);
+  const lastStop = colors.length - 1;
+  return (vertex, channel) => {
+    const position = Math.min(1, Math.max(0, weights[vertex])) * lastStop;
+    const lower = Math.min(lastStop - 1, Math.floor(position));
+    return colors[lower][channel] + (colors[lower + 1][channel] - colors[lower][channel]) * (position - lower);
+  };
+}
+
 /** Set the weight of a named group for the vertices of the selected faces; other vertices keep their weight (0 in a new group). */
-export function setVertexGroup(mesh, { select, name, weight, field, gradient }, loadSurface) {
+export function setVertexGroup(mesh, { select, name, weight, field, gradient, measure, ...measureSettings }, loadSurface) {
   const attributeName = GROUP_PREFIX + name;
   const existing = mesh.attributes.point[attributeName];
   if (!existing && vertexGroupNames(mesh).length >= MAX_VERTEX_GROUPS) {
@@ -102,13 +152,16 @@ export function setVertexGroup(mesh, { select, name, weight, field, gradient }, 
   const weights = existing ? Float32Array.from(existing.data) : new Float32Array(mesh.vertexCount);
   const flags = selectedVertices(mesh, select);
   const fieldValues = field === undefined ? null : evaluateField(field, meshFieldContext(mesh, 'point', loadSurface), { kind: 'scalar' }).values;
-  const fractions = gradient ? gradientFractions(mesh, gradient) : null;
+  const fractions = gradient?.axis ? gradientFractions(mesh, gradient) : null;
+  if (measure === 'occlusion') checkOcclusionWork(flags.reduce((count, flag) => count + (flag ? 1 : 0), 0), measureSettings.rays ?? 32);
+  const measured = measure ? measureVertexMask(mesh, measure, measureSettings, flags) : null;
   let assignedVertices = 0;
   for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
     if (!flags[vertex]) continue;
     assignedVertices++;
     let value = weight;
     if (fieldValues) value = fieldValues[vertex];
+    if (measured) value = measured[vertex];
     if (fractions) value = gradient.weights[0] + (gradient.weights[1] - gradient.weights[0]) * fractions[vertex];
     weights[vertex] = Math.min(1, Math.max(0, value));
   }
@@ -121,7 +174,8 @@ export function setVertexColor(mesh, { select, color, field, gradient }, loadSur
   const colors = existing?.size === 3 ? Float32Array.from(existing.data) : new Float32Array(mesh.cornerCount * 3).fill(1);
   const faceMask = select ? selectFaces(mesh, select) : null;
   const fieldValues = field === undefined ? null : evaluateField(field, meshFieldContext(mesh, 'point', loadSurface), { kind: 'vector' }).values;
-  const fractions = gradient ? gradientFractions(mesh, gradient) : null;
+  const fractions = gradient?.axis ? gradientFractions(mesh, gradient) : null;
+  const stopped = gradient?.group === undefined ? null : groupStops(mesh, gradient);
   let assignedCorners = 0;
   for (let face = 0; face < mesh.faceCount; face++) {
     if (faceMask && !faceMask[face]) continue;
@@ -132,6 +186,7 @@ export function setVertexColor(mesh, { select, color, field, gradient }, loadSur
         let value = color?.[channel];
         if (fieldValues) value = fieldValues[vertex * 3 + channel];
         if (fractions) value = gradient.colors[0][channel] + (gradient.colors[1][channel] - gradient.colors[0][channel]) * fractions[vertex];
+        if (stopped) value = stopped(vertex, channel);
         colors[corner * 3 + channel] = Math.min(1, Math.max(0, value));
       }
     }

@@ -247,7 +247,8 @@ test('pose weights chain so blended clips match a direct weighted mix', () => {
   }] }));
   graph.set('speed', 3).advance(0.01);
   const weights = graph.poseLayers().map(layer => Number(layer.weight().toFixed(6)));
-  assert.deepEqual(weights, [0, 0.5, 1]);
+  // Run lerps over walk by 0.5, and walk is the whole pose before it: walk and run end with half each.
+  assert.deepEqual(weights, [0, 1, 0.5]);
 });
 
 test('the same parameter sequence gives identical weights and times', () => {
