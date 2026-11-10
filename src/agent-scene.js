@@ -1371,7 +1371,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       revisionHistory.shift();
       planned = planGeometry();
     }
-    const { plans, residentStats, pendingVertices } = planned;
+    let { residentStats } = planned;
+    const { plans, pendingVertices } = planned;
     if (planned.overBudget) {
       throw new RangeError('Geometry preflight exceeds peak maxVertices or maxGeometryBytes across active, checkpoint and staged resources. Reduce detail or release checkpoints');
     }
@@ -1399,13 +1400,11 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         const vertices = geometry.positions.length / 3;
         if (plan.definition.type === 'mesh') {
           // Edits can grow a mesh past its estimate. Undo history never blocks an edit, so release the oldest revisions before refusing.
-          let residentVertices = residentStats.vertices;
-          while (residentVertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices && revisionHistory.length > 0) {
-            revisionHistory.shift();
-            const stillResident = new Set([...ownedGeometryRecords(), ...plans.map(candidate => candidate.existing).filter(Boolean)]);
-            residentVertices = geometryStats(stillResident).vertices;
+          if (revisionHistory.length > 0 && residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
+            revisionHistory.length = 0;
+            residentStats = geometryStats(ownedGeometryRecords());
           }
-          if (residentVertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
+          if (residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
             throw new RangeError(`Mesh ${plan.definition.id} has ${vertices} render vertices after its edits, which exceeds maxVertices across the scene. Reduce detail or edits.`);
           }
         } else if (vertices > plan.estimatedVertices || geometryBytes > plan.estimatedVertices * (56 + TERRAIN_SKY_VISIBILITY_BYTES)) {
