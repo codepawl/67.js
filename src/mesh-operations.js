@@ -66,6 +66,8 @@ export const MESH_EDIT_OPERATIONS = /* @__PURE__ */ Object.freeze({
   split_edges: { fields: ['edges', 'name'], tags: [] },
   delete_loose: { fields: [], tags: [] },
   flatten: { fields: ['verts', 'normal', 'factor'], tags: [] },
+  unsubdivide: { fields: [], tags: [] },
+  circularize: { fields: ['verts', 'factor', 'regular'], tags: [] },
   set_position: { fields: ['select', 'position', 'offset'], tags: [] },
   displace: { fields: ['select', 'field', 'strength', 'midlevel', 'direction', 'group'], tags: [] },
   vertex_group: { fields: ['select', 'name', 'weight', 'field', 'gradient'], tags: [] },
