@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createCloth } from '../src/cloth.js';
 import { frameHashes, jellyCubeRecipe, measureBounce, recordJelly } from './support/jelly-cube.mjs';
@@ -36,6 +37,16 @@ test('the dent grows as shape and stiffness drop', () => {
 test('a body falling without air drag returns to its drop height at bounce 1', () => {
   const result = measure({ bounce: 1 }, { damping: 0 });
   assert.ok(result.reboundHeight > 1.5, `expected most of the 1.95 m drop back, got ${result.reboundHeight}`);
+});
+
+// Measured on origin/main before softBody.bounce existed: SHA-256 of the 120 per-frame hashes joined by newlines, for the
+// default jelly cube recipe. If this changes, the default look of a soft body changed.
+const MAIN_DEFAULT_JELLY_DIGEST = '8d5ac451dbe7aa203e96c926d2e7a7ace2d2ad59f596f8abd5e98c0e29c6595d';
+
+test('the default jelly recipe bakes the same 120 frames as before softBody.bounce existed', () => {
+  const hashes = frameHashes(recordJelly(jellyCubeRecipe(), 120));
+  assert.equal(hashes.length, 120);
+  assert.equal(createHash('sha256').update(hashes.join('\n')).digest('hex'), MAIN_DEFAULT_JELLY_DIGEST);
 });
 
 test('a recipe without softBody.bounce bakes the same frames as bounce 0', () => {
