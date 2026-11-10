@@ -10,8 +10,10 @@
     <meta property="og:title" content="67js · 3D engine that AI agents drive" />
     <meta property="og:description" content="Real-time WebGL2, offline path tracing and an MCP server in one npm package." />
     <meta property="og:url" content="https://67js.codepawl.com/" />
-    <meta property="og:image" content="https://67js.codepawl.com/previews/showcase-airport.webp" />
-    <meta property="og:image:alt" content="An airport ramp rendered by 67js" />
+    <meta property="og:image" content="https://67js.codepawl.com/hero-lab/poster-b-port.webp" />
+    <meta property="og:image:width" content="1440" />
+    <meta property="og:image:height" content="900" />
+    <meta property="og:image:alt" content="A container port rendered live by 67js" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="canonical" href="https://67js.codepawl.com/" />
     <title>67js · 3D engine that AI agents drive</title>
@@ -27,33 +29,26 @@
       </nav>
       <a class="site-nav-cta" href="https://github.com/codepawl/67.js" aria-label="GitHub"><span class="package-logo package-logo-github" aria-hidden="true"></span><span class="site-nav-cta-label">GitHub</span></a>
     </header>
+    <section id="hero" class="hero-loop" data-scene="port" aria-label="67js introduction and live preview">
+      <div class="stage" id="stage" role="img" aria-label="A live 3D scene: Container port">
+        <picture><source media="(max-width: 700px)" srcset="/hero-lab/poster-b-port-mobile.webp" /><img class="poster" id="poster" src="/hero-lab/poster-b-port.webp" alt="" width="1440" height="900" fetchpriority="high" /></picture>
+      </div>
+      <div class="copy">
+        <h1>3D engine that<br />AI agents drive</h1>
+        <p class="lede">Real-time WebGL2 with Glaze, offline path tracing with Cook, and 24 MCP tools in one package.</p>
+        <div class="hero-actions">
+          <a href="/docs.html#getting-started" data-icon="book">Get started</a>
+          <a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm brand-npm" aria-hidden="true"></span>npm</a>
+        </div>
+      </div>
+      <div class="scene-bar">
+        <div class="attribution" id="attribution" hidden></div>
+        <div class="credits-panel" id="credits-panel" hidden></div>
+        <nav class="scene-tabs" id="scene-tabs" aria-label="Scenes"></nav>
+        <button class="credits-toggle" id="credits-toggle" type="button" aria-expanded="false" aria-controls="credits-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.1"/></svg><span class="credits-label">Credits</span></button>
+      </div>
+    </section>
     <main id="content">
-      <section class="hero" aria-label="67js introduction and live preview">
-        <div class="hero-frame" data-glow="#ff6a2b">
-          <a class="hero-shot" href="./showcase.html?scene=airport" aria-label="Open the airport ramp as a live 3D scene">
-            <img src="./previews/showcase-airport.webp" alt="An airport ramp with a 787 at its stand and the turnaround crew, rendered by 67js" width="1280" height="720" fetchpriority="high" />
-          </a>
-          <canvas id="hero-viewport" class="hero-viewport" aria-label="Live 3D airport ramp. Drag to orbit, or pick a shot."></canvas>
-          <aside class="hero-prompt" aria-label="Agent prompt presets">
-            <div class="hero-prompt-tabs" role="group" aria-label="Agent prompt">
-              <button type="button" data-prompt-preset="model" aria-pressed="true">Stand</button>
-              <button type="button" data-prompt-preset="explode" aria-pressed="false">Ramp crew</button>
-              <button type="button" data-prompt-preset="blend" aria-pressed="false">Sunset tower</button>
-              <button type="button" data-prompt-preset="review" aria-pressed="false">Normals</button>
-            </div>
-            <p class="hero-prompt-text" data-agent-prompt>"Frame the widebody stand at golden hour with 3-cascade shadows across the Boeing 787-9, service trucks, and ground crew."</p>
-          </aside>
-        </div>
-        <div class="hero-copy">
-          <h1>3D engine that<br />AI agents drive</h1>
-          <p class="lede">Real-time WebGL2 with Glaze, offline path tracing with Cook, and 24 MCP tools in one package.</p>
-          <div class="hero-actions">
-            <a href="/docs.html#getting-started" data-icon="book">Get started</a>
-            <a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm brand-npm" aria-hidden="true"></span>npm</a>
-          </div>
-        </div>
-      </section>
-
       <section id="downloads" class="home-install" aria-label="Install 67js">
         <div class="package-install">
           <div class="package-managers" role="group" aria-label="Package manager">
@@ -122,7 +117,7 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
           </div>
         </div>
         <div class="agent-cards">
-          <a href="/mcp.md" data-icon="cube"><h3>24 MCP tools</h3><p>Create, edit, explode, blend and render over stdio.</p></a>
+          <a href="/mcp.md" data-icon="cube"><h3>23 MCP tools</h3><p>Create, edit, explode, blend and render over stdio.</p></a>
           <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time WebGL2 frames or path-traced stills.</p></a>
           <a href="/agent-review.md" data-icon="image"><h3>Visual review</h3><p>Compare labeled views and normals from one snapshot.</p></a>
         </div>
@@ -143,6 +138,6 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
       <nav class="footer-links" aria-label="Project links"><a href="https://github.com/codepawl/67.js"><span class="package-logo package-logo-github" aria-hidden="true"></span>GitHub</a><a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm" aria-hidden="true"></span>npm</a><a data-release-commit href="https://github.com/codepawl/67.js">Release commit</a><a href="/changelog.html">Changelog</a><a href="/license.txt">MIT license</a><a href="/logo.svg" download>Logo SVG</a></nav>
     </footer>
     <script type="module" src="/src/home.js"></script>
-    <script type="module" src="/src/home-effects.js"></script>
+    <script type="module" src="/src/hero-lab/hero-loop.js"></script>
   </body>
 </html>

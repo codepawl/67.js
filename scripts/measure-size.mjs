@@ -14,7 +14,7 @@ import { DEFAULT_BASE_REF, baseRefExists, measureBase, readAcceptedBundles } fro
 
 const BUDGETS_PATH = 'bench/size/budgets.json';
 const BASELINE_PATH = 'bench/size/baseline.json';
-const EXTERNAL_PACKAGES = ['manifold-3d', '@dimforge/rapier3d-compat'];
+const EXTERNAL_PACKAGES = ['manifold-3d', '@dimforge/rapier3d-compat', 'jolt-physics'];
 const CORE_ENTRY = 'core';
 
 // Each scene does the same small job in both engines, so a size difference is the cost of the engine.
