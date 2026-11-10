@@ -10,7 +10,7 @@ Three pages cover the details:
 
 ## What the agent does
 
-The server has 23 tools for authoring, previewing and exporting scenes. A normal session uses them in this order:
+The server has 24 tools for authoring, previewing and exporting scenes. A normal session uses them in this order:
 
 1. `scene_capabilities` reads the supported features and limits.
 2. `scene_create` makes a scene from a [recipe](/agent-scene.md). A recipe is JSON with object IDs, geometry, materials, a hierarchy and a camera.

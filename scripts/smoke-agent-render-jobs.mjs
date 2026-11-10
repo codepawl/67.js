@@ -57,7 +57,7 @@ async function close() {
 }
 try {
   await connect();
-  assert.equal((await client.listTools()).tools.length, 23);
+  assert.equal((await client.listTools()).tools.length, 24);
   const catalog = (await call('scene_asset_catalog')).structuredContent;
   const created = (await call('scene_create_asset', { recipe: {
     format: '67js.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
