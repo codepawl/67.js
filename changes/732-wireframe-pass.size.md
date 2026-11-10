@@ -1,0 +1,1 @@
+- goal:agent-scene: 60 bytes gzip for the pass name and its one-line colour legend in scene_capabilities, which an agent needs to read the wireframe picture; the drawing code loads only for a job that asks for the pass
