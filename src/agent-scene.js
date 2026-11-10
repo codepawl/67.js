@@ -1475,9 +1475,12 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       return parts;
     }
     if (flushCache?.parts !== parts) {
-      flushCache = { parts, ...coplanar.resolveFlushParts(parts) };
+      const resolved = coplanar.resolveFlushParts(parts);
+      // Ranked parts batch apart, so the list they are staged in is a new one: the renderer then regroups, also when the
+      // ranking is switched on or off for parts that did not change.
+      flushCache = { parts, staged: resolved.ranked ? Object.freeze([...parts]) : parts, ...resolved };
     }
-    return parts;
+    return flushCache.staged;
   }
 
   // scene_inspect names what the ranking could not settle. A scene that opted out gets the pairs of parts that fight instead:

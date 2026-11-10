@@ -564,7 +564,7 @@ test('the shadow depth pass draws both faces of a single-sided batch, so the sun
     CULL_FACE: 2884,
     enable(capability) { culling.push(['enable', capability]); },
     disable(capability) { culling.push(['disable', capability]); },
-    uniform1f() {}, activeTexture() {}, bindTexture() {},
+    uniform1f() {}, uniform3f() {}, activeTexture() {}, bindTexture() {},
   };
   const singleSided = { doubleSided: false, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, mapState: [null], textures: [] };
   renderer.applyAlphaState(singleSided, false);

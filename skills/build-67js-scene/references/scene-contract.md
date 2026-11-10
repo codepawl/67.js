@@ -131,7 +131,7 @@ It rejects skin, morph, assembly and procedural targets. It does not detect arbi
 
 Static `createMeshQueryIndex` copies geometry into an owned disposable BVH. Read `docs/mesh-query.md` for numerical and work limits.
 Pass current affine matrices to `createMeshPairQuery(...).evaluate()`. Rebuild indices after editing geometry.
-Closed-solid containment requires two `solid: true` indices. Surface contact does not prove volume penetration. Flush faces flicker: `scene_inspect` warns `coplanar-overlap` naming both parts; set `decal: true` on the smaller node (a sign, a road marking), `depthLayer` 0 to 4 for stacked decals, or `environment.resolveCoplanar: 'offset'` to bias every flagged pair at draw time. Or move one part 2 mm along its normal. Never use these to hide overlapping solids.
+Closed-solid containment requires two `solid: true` indices. Surface contact does not prove volume penetration. Flush faces are ranked at draw time automatically, so they do not flicker (`environment.resolveCoplanar: false` opts out); `scene_inspect` warns `coplanar-overlap` only for what is left. To choose the winner yourself set `decal: true` on the node on top (a sign, a road marking) or `depthLayer` 0 to 4 for stacked decals. Or move one part 2 mm along its normal. Never use these to hide overlapping solids.
 
 Use `docs/primitives.md` for exact seam closure and preallocation bounds. Preserve indeterminate and budget errors rather than reporting a miss.
 

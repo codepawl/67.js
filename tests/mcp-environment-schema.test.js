@@ -142,8 +142,8 @@ test('set-environment accepts ground, viewTransform and resolveCoplanar', () => 
   assert.equal(scene.environment.resolveCoplanar, 'offset');
 });
 
-test('a coplanar depth layer regroups parts, and the preview sees every texture map so it rebuilds the renderer', () => {
-  const scene = createAgentScene(coplanarRecipe());
+test('switching the flush ranks on regroups parts, and the preview sees every texture map so it rebuilds the renderer', () => {
+  const scene = createAgentScene({ ...coplanarRecipe(), environment: { resolveCoplanar: false } });
   const before = scene.topologyRevision;
   scene.apply([{ type: 'set-environment', environment: { resolveCoplanar: 'offset' } }], { expectedRevision: scene.revision });
   assert.ok(scene.topologyRevision > before, 'the edit changes topology, which replaceParts refuses for textured parts');

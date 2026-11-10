@@ -8,7 +8,7 @@ import { frameDiagnostics } from '../src/frame-diagnostics.js';
 import { groupParts } from '../src/renderer.js';
 import { resolveEffects } from '../src/effects.js';
 
-await loadAgentSceneModules({});
+await loadAgentSceneModules({ environment: { resolveCoplanar: 'offset' } });
 
 function node(id, translation, scale, extra = {}) {
   return { id, geometry: 'box', material: 'paint', translation, scale, ...extra };

@@ -186,7 +186,7 @@ Both parts draw the plane `y = 0.1`, so the patch flickers against the slab. The
 
 Use a real offset along the normal when the gap should be visible in exports or the path tracer.
 
-The coplanar code is not in the core bundle. Call `installCoplanarDiagnostics(renderer)` from `67js/addons/coplanar-overlap` to add the warning to `renderer.diagnostics` (checked once per layout). `scene_inspect` shows it once `loadAllAgentSceneModules()` (or a recipe with `resolveCoplanar`) has loaded the code.
+The coplanar code is not in the core bundle. Call `installCoplanarDiagnostics(renderer)` from `67js/addons/coplanar-overlap` to add the warning to `renderer.diagnostics` (checked once per layout). To fix the flicker instead of naming it, pass `resolveCoplanar: resolveFlushParts` (same addon) to `new Renderer67`: it ranks flush and near-flush triangles, inside one part and across parts, and draws each rank with a small depth-only bias, so the face in front wins at every distance; ranked pairs leave the warning. Agent scenes do this by default wherever the code is loaded (the MCP preview always has it; elsewhere call `loadAllAgentSceneModules()`), and `environment.resolveCoplanar: false` opts out.
 
 ### Depth precision far from the camera
 
