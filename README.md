@@ -141,6 +141,7 @@ Each addon is a separate import, so a page loads only what it uses.
 | Live games | `67js/addons/runtime` | [Game loop](docs/runtime.md) with fixed or variable steps and pluggable systems |
 | Live games | `67js/addons/input` | [Input](docs/input.md): keyboard, mouse, gamepad, touch, device motion, replay and custom sources mapped to named actions and axes |
 | Live games | `67js/addons/streaming` | [Streaming](docs/streaming.md): loader plugins, distance and request loading, a byte budget with LRU eviction and LOD with hysteresis |
+| Live games | `67js/addons/netcode` | [Netcode](docs/netcode.md): server or host authority, pluggable transports, delta snapshots, client prediction with reconciliation and remote interpolation |
 | Live games | `67js/addons/physics-runtime` | [Live physics](docs/physics-runtime.md): a physics world stepped in the game loop, contact and sensor events, ray, shape and overlap queries |
 | Live games | `67js/addons/audio` | [Spatial audio](docs/audio.md): sounds on nodes, played from contacts, markers and input, with buses and a limiter |
 | Live games | `67js/addons/animation-graph` | [Animation graph](docs/animation-graph.md): states, 1D and 2D blend spaces, parameter transitions with crossfades and masked layers for any rig |

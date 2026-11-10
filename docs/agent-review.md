@@ -35,7 +35,7 @@ The tool renders an isolated snapshot. It preserves the source recipe, revision,
 ```
 
 The response contains one PNG image block, JSON text and structured metadata.
-The grid labels identify shots. Each shot reports its sampled camera, clocks, output dimensions and render resources.
+The grid labels identify shots. Each shot reports its sampled camera, label positions and branch. `response_format: "detailed"` also gives the clocks, output dimensions and render resources (graphics, estimated bytes, buffer counts) and the run's memory peaks.
 This tool does not require a configured render job directory or write output files.
 
 ## Compare motion
