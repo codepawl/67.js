@@ -105,3 +105,26 @@ Measured at 1920 × 1080 with 24 steps on an RTX 3060 shared with other jobs, wh
 Run `node scripts/smoke-volumetric.mjs` with the development server running for native GPU extinction, foreground clipping, directional shadow, long-distance ray, resource reuse and disposal checks. Run `node scripts/benchmark-volumetric.mjs` for a fixed laboratory comparison and deterministic noise seeking. These fixtures establish behavior, not cinematic trailer quality.
 
 In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is the grid's mean light at the cell instead of the fog's own 64 rays: the grid already holds the sun's bounce, the lights and the emission over several bounces, so the sun is not left out there. The fog's ambient then stands for the sky only (it follows the cell's sky visibility, with no floor for the sun's shadow), because the grid replaces what the ambient stood in for. Measured on the reference halls (FLIP against Cycles, lower is better): `temple-hall-a` 0.1454 to 0.1323, `temple-hall-b` 0.1211 to 0.1085, `temple-hall-c` 0.1078 to 0.0874, `temple-hall` 0.0576 to 0.0513. `dark-shaft`, a small room with dense fog, goes from 0.0569 to 0.0732: the grid's light in its shade is about three times the fog's old stand-in, and Cycles draws that shade darker still.
+
+## Local volumes
+
+`environment.localVolumes` holds up to 8 boxes or spheres that absorb and emit light: candle haze, a smoke puff, a glowing cloud in one place. They need no `volumeFog` and do not scatter, so a lamp does not light them; they only dim what is behind them and add their own glow. A scene without `localVolumes` draws exactly as before and compiles nothing extra.
+
+```json
+{ "environment": { "localVolumes": [
+  { "shape": "sphere", "center": [0, 1.2, 0], "radius": 0.8, "density": 3, "absorption": [1, 1, 1], "emission": [1, 0.45, 0.1], "emissionStrength": 4, "noiseAmount": 0.6, "noiseScale": 2 }
+] } }
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `shape` | `box` | `box` takes `size: [width, height, depth]`, `sphere` takes `radius` |
+| `center` | required | World position |
+| `density` | `1` | `0` to `100`. Extinction per unit length at the core |
+| `absorption` | `[1, 1, 1]` | Per colour channel share of the density, `0` to `1`. A larger value dims that channel more, so `[0.1, 0.6, 1]` removes blue first and leaves a warm tint |
+| `emission`, `emissionStrength` | `[0, 0, 0]`, `1` | Glow colour and its radiance per unit length at the core, `0` to `1000`. Emission does not depend on `density`, so `density: 0` is a pure glow |
+| `falloff` | `0.5` | `0` to `1`. The outer share of the volume over which the density fades to zero (`0` is a hard edge) |
+| `noiseAmount`, `noiseScale` | `0`, `1` | Raster only. `noiseAmount` `0` to `1` breaks the density up with the cloud noise at `noiseScale` cells per unit |
+| `steps` | `16` | `4` to `32` samples through the volume |
+
+Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake. The path tracer traces them on `backend: "cpu"` with the same fields except the noise, and refuses them on the GPU backends rather than leaving them out. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.

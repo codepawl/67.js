@@ -11,7 +11,7 @@ import {
 } from './path-tracer-shading.js';
 import { buildLightTree, chooseLightFromTree, LIGHT_TREE_FIRST_HIT_LIGHTS, resolveLightSelection } from './path-tracer-light-tree.js';
 import { createRandomWalk, WALK_OUTCOME } from './path-tracer-subsurface.js';
-import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval } from './path-tracer-volume.js';
+import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval, createLocalVolumeCrossing } from './path-tracer-volume.js';
 
 // Offline still renderer: unidirectional path tracing on the CPU with next-event estimation for every light, the
 // environment map drawn by importance, and a wavelet denoiser. It reads the same parts, materials, lights and camera
@@ -772,6 +772,9 @@ function createPathTracer(scene, options) {
     return henyeyGreensteinPhase(volume.anisotropy, cosine);
   }
 
+  const crossLocalVolumes = scene.localVolumes ? createLocalVolumeCrossing(scene.localVolumes) : null;
+  const localEmitted = new Float64Array(3);
+
   const walkSubsurface = createRandomWalk(scene, random, intersect);
   const walkWeight = new Float64Array(3);
 
@@ -829,7 +832,13 @@ function createPathTracer(scene, options) {
     let afterMirror = true;
     for (let depth = 0; depth <= options.bounces; depth++) {
       const found = intersect(scene, positionX, positionY, positionZ, direction[0], direction[1], direction[2], hit);
-      if (scene.volume && scatterInFog(positionX, positionY, positionZ, found ? hit.distance : scene.farDistance)) {
+      const scattersInFog = scene.volume && scatterInFog(positionX, positionY, positionZ, found ? hit.distance : scene.farDistance);
+      if (crossLocalVolumes) {
+        const segmentLength = scattersInFog ? Math.hypot(hit.point[0] - positionX, hit.point[1] - positionY, hit.point[2] - positionZ) : (found ? hit.distance : scene.farDistance);
+        crossLocalVolumes(positionX, positionY, positionZ, direction[0], direction[1], direction[2], segmentLength, random.next(), throughput, localEmitted);
+        addRadiance(depth, localEmitted[0], localEmitted[1], localEmitted[2]);
+      }
+      if (scattersInFog) {
         previousPdf = scatterInMedium(depth);
         afterMirror = false;
         positionX = hit.point[0];
@@ -1111,6 +1120,9 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   const { width, height } = options;
   const view = createCamera(camera, width, height);
   const scene = buildTraceScene(parts, environment);
+  if (scene.localVolumes && options.backend !== 'cpu') {
+    throw new RangeError(`environment.localVolumes is traced by the CPU path tracer only; use backend "cpu" or remove the volumes (backend "${options.backend}" was asked for).`);
+  }
   const pixelCount = width * height;
   const buffers = {
     color: new Float32Array(pixelCount * 3), albedo: new Float32Array(pixelCount * 3), normal: new Float32Array(pixelCount * 3),

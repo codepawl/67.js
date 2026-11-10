@@ -3,6 +3,7 @@ import { createTracer } from './ray-query.js';
 import { SUN_BIT, POINT_FIRST_BIT, SPOT_FIRST_BIT, AREA_FIRST_BIT } from './light-link-bits.js';
 import { boxProjectedGeometry, columnLengths } from './export-box-uv.js';
 import { resolveTraceVolume } from './path-tracer-volume.js';
+import { resolveLocalVolumes } from './local-volumes.js';
 import { resolveTraceSubsurface } from './path-tracer-subsurface.js';
 import { lightShapeSupport } from './shader-registry.js';
 import { flushOrderOf } from './depth-layer.js';
@@ -315,6 +316,7 @@ export function buildTraceScene(parts, environment = {}) {
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),
     volume: resolveTraceVolume(environment.volumeFog),
+    localVolumes: environment.localVolumes?.length ? resolveLocalVolumes(environment.localVolumes, 'environment.localVolumes') : null,
     surfaceOffset: extent * 1e-5,
     farDistance: extent * 1e4,
   });
