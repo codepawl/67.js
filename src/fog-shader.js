@@ -74,13 +74,21 @@ function bindFieldAndLights(renderer, post, volume) {
   context.uniform4fv(post.uniforms['volumeLightCones[0]'], lights.cones);
 }
 
-// The local volumes of the frame (environment.localVolumes): validated, packed and bound. Their uniforms exist only in a program
-// with the local step compiled in, and a program without it never reaches this function.
-function bindLocalVolumes(renderer, post, volumes, frame) {
-  const context = renderer.context;
+// The local volumes of the frame (environment.localVolumes), checked and packed once before the post program is chosen, so a bad
+// field or a renderer without depth or HDR throws before any program is bound. Returns the count packed, or 0 for an empty list.
+function prepareLocalVolumes(renderer, input) {
+  const volumes = resolveLocalVolumes(input, 'environment.localVolumes');
+  if (volumes.length === 0) return 0;
   if (!renderer.depth || !renderer.hdr || renderer.transparent || renderer.benchmark) throw new Error('Local volumes require depth:true, active HDR and an opaque canvas');
   const buffers = (renderer.localVolumeBuffers ??= createLocalVolumeBuffers());
-  packLocalVolumes(resolveLocalVolumes(volumes, 'environment.localVolumes'), buffers);
+  packLocalVolumes(volumes, buffers);
+  return buffers.count;
+}
+
+// Uploads the packed volumes. Their uniforms exist only in a program with the local step compiled in.
+function bindLocalVolumes(renderer, post, frame) {
+  const context = renderer.context;
+  const buffers = renderer.localVolumeBuffers;
   const locate = name => (post.uniforms[name] ??= context.getUniformLocation(post.program, name));
   context.uniform1i(locate('localVolumeCount'), buffers.count);
   context.uniform1f(locate('localOrthographic'), frame.projection === 'orthographic' ? 1 : 0);
@@ -200,8 +208,8 @@ function packLights(renderer) {
 }
 
 registerShaderFeatureCode('volumeFog', {
-  // The JavaScript halfSize, which the renderer calls for a frame that draws a volume fog.
-  support: { packLights, bindUniforms, usesDetail: fogUsesDetail, bindLocalVolumes },
+  // The JavaScript half, which the renderer calls for a frame that draws a volume fog.
+  support: { packLights, bindUniforms, usesDetail: fogUsesDetail, prepareLocalVolumes, bindLocalVolumes },
   localDeclarations: LOCAL_VOLUME_DECLARATIONS,
   localFunctions: LOCAL_VOLUME_FUNCTIONS,
   postDeclarations: `
@@ -354,7 +362,7 @@ float sunOpticalDepth(vec3 position, vec3 towardSun) {
   return volumeDensity * sum * exitDistance / 3.0;
 }
 // The sun's in-scatter at a point. The octave sum approximates multiple scattering (Wrenninge et al. 2015, "Oz: the great and
-// volumetric"): octave n scatters multiScatter^n as much, sees halfSize^n of the extinction and has halfSize^n of the anisotropy.
+// volumetric"): octave n scatters multiScatter^n as much, sees half^n of the extinction and has half^n of the anisotropy.
 float keyInScatter(float cosine, float opticalDepth) {
   float total = 0.0;
   float weight = 1.0;

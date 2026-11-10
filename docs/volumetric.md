@@ -127,4 +127,12 @@ In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is th
 | `noiseAmount`, `noiseScale` | `0`, `1` | Raster only. `noiseAmount` `0` to `1` breaks the density up with the cloud noise at `noiseScale` cells per unit |
 | `steps` | `16` | `4` to `32` samples through the volume |
 
-Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake. The path tracer traces them on `backend: "cpu"` with the same fields except the noise, and refuses them on the GPU backends rather than leaving them out. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.
+Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake. The path tracer traces them on `backend: "cpu"` with the same fields except the noise, and every other tracer entry point (backends `gpu` and `native`, the progressive and realtime tracers, the GPU light bake) throws instead of leaving them out. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.
+
+### Reference render and frame time
+
+`node bench/reference/local-volumes.mjs gpu` draws a smoky room (a haze box with noise and a glowing noisy puff, `bench/reference/images/local-volumes.png`) and the same room without volumes (`local-volumes-plain.png`), and times both: 960 x 540, 4x MSAA, median of 200 frames with readback, three rounds with the order alternating. On the RTX 3060 shared with other jobs (2026-11-10) the room without volumes took 1.34, 1.25 and 1.07 ms, and with the two volumes 2.13, 2.11 and 1.54 ms, so the pair costs about 0.5 to 0.9 ms at this size (noisy; treat it as a range).
+
+### Not covered yet
+
+Mesh bounds as a shape, the WebGPU and WebGL path tracers, the lightmap bake and path tracer noise are open work: mesh bounds #807, tracer noise and GPU tracers #808, the bake #809.

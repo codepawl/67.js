@@ -303,6 +303,12 @@ export function attachTracer(scene) {
   return { ...scene, tracer: createTracer({ positions: scene.positions, indices: scene.indices, bvh: scene.bvh }) };
 }
 
+/** Local volumes are traced by the CPU path tracer only. Every other tracer entry point calls this so none drops them silently. */
+export function refuseLocalVolumes(scene, tracerName) {
+  if (!scene.localVolumes) return;
+  throw new RangeError(`environment.localVolumes is traced by the CPU path tracer only; ${tracerName} cannot draw them. Use backend "cpu" or remove the volumes.`);
+}
+
 export function buildTraceScene(parts, environment = {}) {
   if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_TRACE_PARTS) throw new RangeError(`A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
   const geometry = flattenParts(parts);

@@ -1,4 +1,4 @@
-import { buildTraceScene } from './path-tracer-scene.js';
+import { buildTraceScene, refuseLocalVolumes } from './path-tracer-scene.js';
 import { checkBudget, checkedBakeSize, finishLightmaps, planLightmaps, rasterizeEntries, traceLightmaps } from './light-bake.js';
 
 // The GPU side of the light bake: the texels of every part go to the path tracer's kernel in one batch, which starts a
@@ -59,6 +59,7 @@ async function gatherOnGpu(plan, settings, rasterized, shouldStop) {
   const environment = traceEnvironment(plan);
   const texels = packCoveredTexels(rasterized);
   const scene = buildTraceScene(plan.parts, environment);
+  refuseLocalVolumes(scene, 'the GPU light bake');
   const traceTexels = settings.texelTracer ?? await loadTexelTracer(settings.backend);
   const traced = await traceTexels(scene, texels, { samples: settings.samples, bounces: settings.bounces, seed: BAKE_SEED, fireflyClamp: NO_FIREFLY_CLAMP }, shouldStop);
   let next = 0;

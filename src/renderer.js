@@ -1849,6 +1849,12 @@ export class Renderer67 {
     context.drawArrays(context.TRIANGLES, 0, 3);
   }
 
+  // True when the frame draws local volumes. An empty list costs nothing; anything else is checked here, before a program is bound.
+  prepareLocalVolumes(input) {
+    if (input === undefined || (Array.isArray(input) && input.length === 0)) return false;
+    return requireFeatureCode('volumeFog').support.prepareLocalVolumes(this, input) > 0;
+  }
+
   // The post steps this frame uses. A step that is off costs nothing in a program that has it compiled out.
   postStepsOf(frame, effects, volume, occluded, fogSky, localVolumes) {
     const steps = [];
@@ -1918,7 +1924,7 @@ export class Renderer67 {
     context.bindVertexArray(null);
     const fogSky = this.fogSkyVisibility?.(this.sceneParts, volume, context, environment);
     const fogSupport = volume.density > 0 ? requireFeatureCode('volumeFog').support : null;
-    const localVolumes = environment.localVolumes?.length ? environment.localVolumes : null;
+    const localVolumes = this.prepareLocalVolumes(environment.localVolumes);
     if (fogSupport) fogSupport.packLights(this);
     else if (this.fogLightBuffers) this.fogLightBuffers.count = 0;
     const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky, localVolumes));
@@ -1940,7 +1946,7 @@ export class Renderer67 {
     context.bindTexture(context.TEXTURE_2D, this.depthTexture ?? this.whiteTexture);
     context.uniform1i(post.uniforms.sceneDepth, 1);
     fogSupport?.bindUniforms(this, post, volume, environment, frame);
-    if (localVolumes) requireFeatureCode('volumeFog').support.bindLocalVolumes(this, post, localVolumes, frame);
+    if (localVolumes) requireFeatureCode('volumeFog').support.bindLocalVolumes(this, post, frame);
     context.activeTexture(context.TEXTURE2);
     context.bindTexture(context.TEXTURE_2D, effects.bloom.strength > 0 ? this.bloomTargets[1].texture : this.whiteTexture);
     context.uniform1i(post.uniforms.bloomTexture, 2);

@@ -1,7 +1,7 @@
 import { cameraFieldOfView } from './camera.js';
 import { pointLightFalloff } from './ray-query.js';
 import { profileGain } from './light-profile.js';
-import { buildTraceScene, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
+import { buildTraceScene, refuseLocalVolumes, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
 import { denoiseRadiance } from './path-tracer-denoise.js';
 import { acesChannel, displayColor } from './view-transform.js';
 import { VIEW_TRANSFORM_NAMES } from './view-transform-names.js';
@@ -1120,9 +1120,7 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   const { width, height } = options;
   const view = createCamera(camera, width, height);
   const scene = buildTraceScene(parts, environment);
-  if (scene.localVolumes && options.backend !== 'cpu') {
-    throw new RangeError(`environment.localVolumes is traced by the CPU path tracer only; use backend "cpu" or remove the volumes (backend "${options.backend}" was asked for).`);
-  }
+  if (options.backend !== 'cpu') refuseLocalVolumes(scene, `backend "${options.backend}"`);
   const pixelCount = width * height;
   const buffers = {
     color: new Float32Array(pixelCount * 3), albedo: new Float32Array(pixelCount * 3), normal: new Float32Array(pixelCount * 3),
