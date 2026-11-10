@@ -22,6 +22,15 @@ async function startServer(port) {
   return server;
 }
 
+// Playwright's own browser download is not installed on CI, so fall back to the Google Chrome the runner already has.
+async function launchChrome(chromium) {
+  try {
+    return await chromium.launch({ headless: true, args: CHROME_ARGUMENTS });
+  } catch {
+    return chromium.launch({ headless: true, channel: 'chrome', args: CHROME_ARGUMENTS });
+  }
+}
+
 /**
  * Runs `body(page)` on the dev server's page in headless Chrome and cleans up.
  * Where Chrome or playwright is missing the test skips on a developer machine and fails on CI, where Chrome is required.
@@ -43,7 +52,7 @@ export async function withDevServerPage(testContext, body) {
   let browser;
   try {
     try {
-      browser = await chromium.launch({ headless: true, args: CHROME_ARGUMENTS });
+      browser = await launchChrome(chromium);
     } catch (error) {
       skipOrThrow(`Chrome did not start: ${error.message.split('\n')[0]}`);
       return;
