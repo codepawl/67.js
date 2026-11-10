@@ -37,6 +37,9 @@ export const GLTF_CAPABILITIES = Object.freeze({
 const LAYER_SHADER_EXTENSIONS = Object.freeze(['KHR_materials_anisotropy', 'KHR_materials_iridescence']);
 
 // The shader code for anisotropy, iridescence and transmission is not in the core bundle; a file that uses one brings it in.
+const CONVERSION_SLICE_MILLISECONDS = 8;
+const yieldToPage = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise(resolve => setTimeout(resolve, 0)));
+
 async function loadLayerShadersFor(document) {
   const usesLayerShaders = (document.materials ?? []).some(material => LAYER_SHADER_EXTENSIONS.some(extension => material?.extensions?.[extension]) || layerTextureReferences(material).length > 0 || materialUvTransforms(material ?? {}).normalRelative);
   if (usesLayerShaders) await import('./material-layer-shaders.js');
@@ -1271,7 +1274,7 @@ export async function parseGltf(data, options = {}) {
     const pendingNodeMatrix = new Float32Array(16);
     const keyedNodeIndices = nodesKeyedInClips(document);
     let actualVertices = 0;
-    gltf.scene.traverse(node => {
+    const visitNode = node => {
       nodes.push(node);
       const sourceNodeIndex = node.association?.nodes;
       if (sourceNodeIndex !== undefined && document.nodes?.[sourceNodeIndex]?.extensions?.KHR_lights_punctual) {
@@ -1360,7 +1363,18 @@ export async function parseGltf(data, options = {}) {
         bindings.push(transformBinding);
         throwOverruns(overLimit([], 'decoded parts', parts.length, 'maxParts', limits.maxParts));
       }
-    });
+    };
+    // Converting a large scene is one long block; handing the thread back every few milliseconds keeps the page responding. Same nodes, same order.
+    const traversed = [];
+    gltf.scene.traverse(node => traversed.push(node));
+    let sliceStart = performance.now();
+    for (const node of traversed) {
+      visitNode(node);
+      if (performance.now() - sliceStart > CONVERSION_SLICE_MILLISECONDS) {
+        await yieldToPage();
+        sliceStart = performance.now();
+      }
+    }
     const toleratedNodes = Object.assign(new Set(), { collecting: true });
     validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform, toleratedNodes);
     toleratedNodes.collecting = false;
