@@ -3,6 +3,7 @@
 //        --spots spots.json --configs "reversed=1,nearFit=1;reversed=0,nearFit=0"
 // spots.json: [{ "name": "roofs", "eye": [x, y, z], "target": [x, y, z] }]. Without --spots it prints the scene bounds and exits.
 //   node bench/flicker/probe.mjs --traps --configs "reversed=1;reversed=0"   runs every trap scene of traps.js with its own camera.
+// Add --assert to exit with code 1 when any trap shows a swapped pixel with the flush pass on (configs without offset=0).
 // Each result also carries `truth`, the ground-truth probe of ground-truth.js: the render compared with a float64 ray cast that
 // cannot z-fight. `swapped` is the count that matters (a pixel showing the colour of a face behind the visible one), `tied` the
 // pixels where the scene itself names no winner (exact coplanar faces with the flush pass off, `offset=0`), and `wrong` also holds
@@ -10,6 +11,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import { failingTraps } from './verdict.js';
 
 function argument(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -55,6 +57,11 @@ async function probeTraps() {
     }
   }
   writeFileSync(path.join(outputFolder, `${prefix}-results.json`), JSON.stringify(results, null, 1));
+  if (process.argv.includes('--assert')) {
+    const failures = failingTraps(results);
+    console.log(failures.length === 0 ? 'assert: no swapped pixels with the flush pass on' : `assert: FAILED ${JSON.stringify(failures)}`);
+    if (failures.length > 0) process.exitCode = 1;
+  }
 }
 
 try {

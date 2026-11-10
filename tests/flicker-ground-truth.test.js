@@ -170,3 +170,17 @@ test('a one-sided face seen from behind is not hit', () => {
   const behind = castPixelOwners(world, { ...CAMERA, eye: [0, 0, -10] }, WIDTH, HEIGHT);
   assert.ok(behind.owner.every(owner => owner === NO_TRIANGLE));
 });
+
+test('failingTraps flags a swapped pixel with the flush pass on and ignores runs with it off', async () => {
+  const { failingTraps } = await import('../bench/flicker/verdict.js');
+  const results = [
+    { trap: 'plaque-0.5m', configuration: 'reversed1-offset0', truth: { swapped: 389 } },
+    { trap: 'plaque-0.5m', configuration: 'reversed1', truth: { swapped: 0 } },
+    { trap: 'stacked', configuration: 'reversed0', truth: { swapped: 7 } },
+    { trap: 'missing', configuration: 'reversed0' },
+  ];
+  assert.deepEqual(failingTraps(results), [
+    { trap: 'stacked', configuration: 'reversed0', swapped: 7 },
+    { trap: 'missing', configuration: 'reversed0', swapped: null },
+  ]);
+});
