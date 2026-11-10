@@ -90,7 +90,7 @@ The generators also enforce their existing numeric and modeling constraints.
 | `lathe` | `profile`, `segments`, `startAngle`, `sweep` | Required XY profile, `64`, `0`, `2π` |
 | `extrude` | `contour`, `holes`, `depth`, `steps`, `bevel`, `bevelThickness`, `bevelSegments` | Required XY contour, `[]`, `1`, `1`, `0`, bevel, `3` |
 | `tube` | `path`, `radius`, `segments`, `radialSegments`, `closed` | Required XYZ path, `0.1`, `64`, `12`, `false` |
-| `curve` | `points`, `closed`, `radius`, `taper`, `profile`, `resolution`, `radialSegments` | Required points, `false`, `0.05`, none, round, `12`, `8` |
+| `curve` | `points` or `shape` or `splines`, `closed`, `kind`, `weights`, `trim`, `radius`, `taper`, `profile`, `resolution`, `radialSegments` | One of points, shape or splines, `false`, `bezier`, 1, none, `0.05`, none, round, `12`, `8` |
 | `text` | `text`, `size`, `depth`, `font`, `align`, `curveSegments` | Required string, `1`, `0.2`, `default`, `left`, `4` |
 | `terrain` | `size`, `resolution`, `seed`, `amplitude`, `holes` | `40` m, `64` cells, `1`, `1` m, none |
 

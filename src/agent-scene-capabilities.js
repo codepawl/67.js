@@ -65,6 +65,7 @@ export const CURVE_TEXT_LIMITS = Object.freeze({
 });
 export const CURVE_TEXT_DETAILS = Object.freeze({
   curve: 'bends along path, 2-64 points [x,y,z] (Catmull-Rom); the coordinate along axis (x) is the distance from the path start, so model from 0.',
+  splines: 'Geometry curve takes points (kind bezier|poly|nurbs, weights for nurbs, closed), or shape {type arc|spiral|star} (arc: radius, startAngle, sweep radians, segments; spiral: rotations, startRadius, endRadius, height, pointsPerRotation, reverse; star: points, innerRadius, outerRadius, innerTwist), or splines: up to 64 of those in one mesh. trim {start, end, length}: factors 0-1 of the arc length, or lengths when length is true; a trimmed curve is open. See docs/modeling.md.',
   text: 'Extruded text, baseline y=0 along +X, facing +Z. text (\n for lines), size (1), depth (0.2), align left|center|right, curveSegments, font. See docs/modeling.md.',
 });
 export const MATERIAL_MAPPINGS = Object.freeze(['box', 'uv']);

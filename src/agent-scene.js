@@ -452,7 +452,7 @@ const GEOMETRY_FIELDS = {
   lathe: ['profile', 'segments', 'startAngle', 'sweep'],
   extrude: ['contour', 'holes', 'depth', 'steps', 'bevel', 'bevelThickness', 'bevelSegments'],
   tube: ['path', 'radius', 'segments', 'radialSegments', 'closed'],
-  curve: ['points', 'closed', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
+  curve: ['points', 'shape', 'splines', 'closed', 'kind', 'weights', 'trim', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
   text: ['text', 'size', 'depth', 'font', 'align', 'curveSegments'],
   mesh: ['base', 'edits', 'stack', 'smoothAngle', 'shapeKeys'],
   terrain: ['size', 'resolution', 'seed', 'amplitude', 'holes'],
@@ -486,7 +486,7 @@ function geometryEstimate(value) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -522,6 +522,9 @@ function geometryEstimate(value) {
       }
       return (detail('segments', 64, 3, 2048) + 1) * (detail('radialSegments', 12, 3, 128) + 1);
     case 'curve': {
+      if (['shape', 'splines', 'kind', 'weights', 'trim'].some(field => value[field] !== undefined)) {
+        return agentSceneModule('modeling').curveGeometryVertexCount(value);
+      }
       const knots = value.points;
       if (!Array.isArray(knots) || knots.length < 2 || knots.length > CURVE_TEXT_LIMITS.maxCurvePoints) {
         throw invalidField('points', Array.isArray(knots) ? `${knots.length} points` : knots, `a list of 2 to ${CURVE_TEXT_LIMITS.maxCurvePoints} points, such as [[0, 0, 0], [0, 1, 0]]`);
@@ -617,7 +620,7 @@ function generateGeometry(value, maxVertices) {
     case 'tube':
       return agentSceneModule('modeling').tube(value.path, { ...value, maxVertices });
     case 'curve':
-      return agentSceneModule('modeling').curve(value.points, { ...value, maxVertices });
+      return agentSceneModule('modeling').curveGeometry(value, maxVertices);
     case 'text':
       return agentSceneModule('text').text(value.text, { ...value, maxVertices });
     case 'terrain':
