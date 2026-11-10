@@ -1,0 +1,1 @@
+- scene:agent-scene+lazy: the bake report names the local volumes it leaves out, which an agent otherwise cannot tell from a missing glow (228 bytes gzip).

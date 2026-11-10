@@ -86,3 +86,23 @@ test('a failed bake leaves the scene as it was', () => {
   assert.equal(scene.revision, 0);
   assert.equal(scene.inspect().bake.samples, BAKE_PRESETS.draft.samples);
 });
+
+test('a bake names the local volumes it leaves out and a scene without volumes reports as before', () => {
+  const plain = createAgentScene(closedRoom()).inspect().bake;
+  assert.equal(plain.skippedLocalVolumes, undefined);
+  assert.equal(plain.warnings, undefined);
+
+  const recipe = closedRoom();
+  recipe.environment.localVolumes = [
+    { shape: 'sphere', center: [0, 1, 0], radius: 0.5, emission: [1, 0.6, 0.2] },
+    { shape: 'box', center: [1, 1, 0], size: [1, 1, 1] },
+  ];
+  const volumed = createAgentScene(recipe).inspect().bake;
+  assert.deepEqual(volumed.skippedLocalVolumes, [
+    { index: 0, shape: 'sphere', emissive: true },
+    { index: 1, shape: 'box', emissive: false },
+  ]);
+  assert.equal(volumed.warnings.length, 1);
+  assert.match(volumed.warnings[0], /localVolumes\[0\] \(sphere, emissive\), environment\.localVolumes\[1\] \(box\)/);
+  assert.equal(volumed.texels, plain.texels);
+});
