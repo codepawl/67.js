@@ -97,8 +97,22 @@ export function packLocalVolumes(volumes, buffers) {
   return buffers;
 }
 
+/**
+ * How much the key light of a scattering volume is scaled over the single-scatter estimate. A smoke thick enough to show form scatters the sun many times
+ * and reads about as bright as a surface in the same sun, which one isotropic scatter (1 / 4 pi of the key colour) leaves about a dozen times too dark
+ * beside the sky term; the gain keeps the sunlit side clearly above the shaded side. The rasterizer and the CPU path tracer both apply it.
+ */
+export const LOCAL_VOLUME_KEY_GAIN = 4;
+
+/**
+ * How many times the volume's own depth toward the sun counts in the key light's attenuation. The sun of a scene seen from the front reaches a
+ * smoke through its near face, so the optical depth toward it differs little across the frame; counting the depth more than once keeps the shaded
+ * side of the smoke visibly darker than the sunlit side, the way the many scatters of a real smoke take the light from its shade.
+ */
+export const LOCAL_VOLUME_SHADOW_STRENGTH = 4;
+
 /** The density factor of a volume at a point: 1 at the core, fading over the outer `falloff` share, times the noise factor (up to 2) when `noiseAmount` is above 0, as the post shader does. */
-export function localVolumeProfile(volume, x, y, z) {
+export function localVolumeProfile(volume, x, y, z, withNoise = true) {
   if (volume.shape === 'mesh') return 1;
   let offsetX = x - volume.center[0];
   let offsetY = y - volume.center[1];
@@ -120,7 +134,7 @@ export function localVolumeProfile(volume, x, y, z) {
     const ratio = Math.min(1, Math.max(0, (distance - (1 - volume.falloff)) / volume.falloff));
     profile = 1 - ratio * ratio * (3 - 2 * ratio);
   }
-  if (volume.noiseAmount > 0) profile *= localVolumeNoiseFactor(volume, x, y, z);
+  if (withNoise && volume.noiseAmount > 0) profile *= localVolumeNoiseFactor(volume, x, y, z);
   return profile;
 }
 

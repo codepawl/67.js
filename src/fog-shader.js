@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes } from './local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
@@ -196,7 +196,7 @@ vec2 localVolumeInterval(int index, vec3 origin, vec3 direction) {
   }
   return vec2(entry, exitDistance);
 }
-float localVolumeProfile(int index, vec3 position) {
+float localVolumeProfile(int index, vec3 position, bool withNoise) {
   vec3 offset = position - localVolumeCenters[index].xyz;
   if (localVolumeCenters[index].w < 0.5) offset = localVolumeLocal(index, offset);
   vec3 halfSize = localVolumeExtents[index].xyz;
@@ -204,7 +204,7 @@ float localVolumeProfile(int index, vec3 position) {
   float falloff = localVolumeExtents[index].w;
   float profile = falloff > 0.0 ? 1.0 - smoothstep(1.0 - falloff, 1.0, distanceRatio) : 1.0 - step(1.0, distanceRatio);
   float noiseAmount = localVolumeAbsorption[index].w;
-  if (noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
+  if (withNoise && noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
   return profile;
 }
 // The optical depth of a volume between a point inside it and its far side along a direction, from midpoint taps of its profile.
@@ -213,7 +213,7 @@ vec3 localVolumeDepth(int index, vec3 position, vec3 direction, int taps) {
   float profileSum = 0.0;
   for (int tap = 0; tap < 3; tap++) {
     if (tap >= taps) break;
-    profileSum += localVolumeProfile(index, position + direction * (exitDistance * (float(tap) + 0.5) / float(taps)));
+    profileSum += localVolumeProfile(index, position + direction * (exitDistance * (float(tap) + 0.5) / float(taps)), false);
   }
   return localVolumeAbsorption[index].rgb * (profileSum * exitDistance / float(taps));
 }
@@ -232,7 +232,7 @@ vec3 localVolumeInScatter(int index, vec3 position, vec3 direction) {
   vec3 towardSun = normalize(volumeLightDirection);
   float visibility = keyVisibility(position);
   vec3 sunLight = vec3(0.0);
-  if (visibility > 0.001) sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility) * exp(-localVolumeDepth(index, position, towardSun, 3));
+  if (visibility > 0.001) sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility * ${LOCAL_VOLUME_KEY_GAIN.toFixed(1)}) * exp(-localVolumeDepth(index, position, towardSun, 3) * ${LOCAL_VOLUME_SHADOW_STRENGTH.toFixed(1)});
   return localVolumeSkyLight(index, position) + sunLight;
 }
 vec3 localVolumes(vec3 background) {
@@ -303,7 +303,7 @@ vec3 localVolumes(vec3 background) {
     for (int step = 0; step < 32; step++) {
       if (step >= steps) break;
       vec3 position = origin + direction * (entry + (float(step) + jitter) * stepSize);
-      float profile = localVolumeProfile(nearest, position);
+      float profile = localVolumeProfile(nearest, position, true);
       radiance += transmittance * localVolumeEmission[nearest].rgb * (profile * stepSize);
       vec3 extinction = localVolumeAbsorption[nearest].rgb * (profile * stepSize);
       if (scatterAlbedo > 0.0 && profile > 0.0) radiance += transmittance * (scatterAlbedo * (1.0 - exp(-extinction))) * localVolumeInScatter(nearest, position, direction);

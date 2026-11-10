@@ -1,5 +1,5 @@
 import { resolveVolumeFog } from './volumetric.js';
-import { localVolumeInterval, localVolumeProfile } from './local-volumes.js';
+import { localVolumeInterval, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH } from './local-volumes.js';
 import { countOpenEdges } from './local-volume-parts.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
@@ -180,7 +180,7 @@ function writeOpticalDepth(volume, x, y, z, direction, taps, span, out) {
   let profileSum = 0;
   for (let tap = 0; tap < taps; tap++) {
     const distance = exitDistance * (tap + 0.5) / taps;
-    profileSum += localVolumeProfile(volume, x + direction[0] * distance, y + direction[1] * distance, z + direction[2] * distance);
+    profileSum += localVolumeProfile(volume, x + direction[0] * distance, y + direction[1] * distance, z + direction[2] * distance, false);
   }
   for (let channel = 0; channel < 3; channel++) out[channel] = volume.absorption[channel] * volume.density * profileSum * exitDistance / taps;
 }
@@ -223,7 +223,7 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
       writeOpticalDepth(volume, x, y, z, sun.direction, SUN_DEPTH_TAPS, span, sunDepth);
       const cosine = sun.direction[0] * directionX + sun.direction[1] * directionY + sun.direction[2] * directionZ;
       const phase = henyeyGreensteinPhase(0, cosine);
-      for (let channel = 0; channel < 3; channel++) sunLight[channel] = sun.color[channel] * phase * Math.exp(-sunDepth[channel]);
+      for (let channel = 0; channel < 3; channel++) sunLight[channel] = sun.color[channel] * phase * LOCAL_VOLUME_KEY_GAIN * Math.exp(-sunDepth[channel] * LOCAL_VOLUME_SHADOW_STRENGTH);
     }
     for (let channel = 0; channel < 3; channel++) {
       const scattered = volume.scatter * (1 - Math.exp(-volume.absorption[channel] * volume.density * width));

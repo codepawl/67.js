@@ -12,7 +12,7 @@ import { freePort } from './helpers/free-port.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { applyViewTransform } from '../src/view-transform.js';
 import { encodePng } from '../src/export-png.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes } from '../src/local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH } from '../src/local-volumes.js';
 import { createLocalVolumeCrossing, meanEnvironmentRadiance } from '../src/path-tracer-volume.js';
 
 const REGION_TOLERANCE = 0.01;
@@ -78,6 +78,27 @@ test('a volume with scatter 0 draws exactly as it did: no light is added and the
   assert.deepEqual(withLighting.emitted, [0, 0, 0]);
   assert.deepEqual(withLighting, withoutLighting);
   assert.ok(withLighting.throughput[0] < 1);
+});
+
+test('the key light of a thin volume is the phase function times the key gain, and a thick box shades its far side by the shadow strength', () => {
+  const thin = downRay({ ...SMOKE_BOX, size: [0.05, 0.05, 0.05], falloff: 0 }, FULL_SUN, 0);
+  const extinguished = 1 - thin.throughput[1];
+  const expected = SMOKE_BOX.scatter * SUN_COLOR[1] * LOCAL_VOLUME_KEY_GAIN / (4 * Math.PI);
+  const returned = thin.emitted[1] / extinguished;
+  // The thin box still shades itself a little (its own depth toward the sun), so the open value is an upper bound.
+  assert.ok(returned < expected && returned > 0.85 * expected, `thin volume returns ${returned}, expected up to ${expected}`);
+  const lit = downRay(SMOKE_BOX, FULL_SUN, 1.2).emitted[1];
+  const shaded = downRay(SMOKE_BOX, FULL_SUN, -1.2).emitted[1];
+  assert.ok(LOCAL_VOLUME_SHADOW_STRENGTH > 1);
+  assert.ok(lit > shaded * 2.5, `lit side ${lit} against shaded side ${shaded}`);
+});
+
+test('the light depth of a noisy volume is its smooth envelope, so the noise does not speckle the shading', () => {
+  const [noisy] = resolveLocalVolumes([{ ...SMOKE_BOX, noiseAmount: 0.9, noiseScale: 2.2 }]);
+  const [smooth] = resolveLocalVolumes([{ ...SMOKE_BOX }]);
+  const point = [0.4, 1.3, 0.2];
+  assert.equal(localVolumeProfile(noisy, ...point, false), localVolumeProfile(smooth, ...point));
+  assert.notEqual(localVolumeProfile(noisy, ...point), localVolumeProfile(smooth, ...point));
 });
 
 // The sky light per unit of what a ray extinguishes, as a share of the open-sky value (scatter times the sky level).
