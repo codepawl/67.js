@@ -186,6 +186,11 @@ export const MESH_SCULPT_NOTES = Object.freeze({
   shrinkwrap: 'target is a primitive record placed by translation, rotation and scale. mode nearest (default) moves each selected vertex to the closest point; project moves it along direction (needed) to the first hit. offset (0) stands it off along the normal. maxDistance limits the search; onMiss error (default) or keep. For a decal, use enough grid cells, then solidify.',
 });
 
+// Boolean cutters on a recipe mesh. Details stay here so the tool schemas stay small.
+export const MESH_BOOLEAN_NOTES = Object.freeze({
+  cutter: 'A primitive or profile record such as { type: "cylinder" }, or { geometry: "<id>" } naming another recipe geometry (a mesh with its own edits and stack, or a primitive). Put translation, rotation and scale on the edit. References form a DAG: a cycle or an unknown ID fails with the chain; at most 4 cutter geometries deep and 250000 estimated cutter vertices per mesh. Editing the cutter geometry rebuilds only the meshes that name it. Imported-part edits take inline records only.',
+});
+
 export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   format: '67js.scene', schemaVersion: 1,
   geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'sdf', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh']),
@@ -199,6 +204,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   meshSculpt: MESH_SCULPT_NOTES,
   meshAttributes: MESH_ATTRIBUTE_NOTES,
   meshUv: MESH_UV_NOTES,
+  meshBoolean: MESH_BOOLEAN_NOTES,
   meshShapeKeys: MESH_SHAPE_KEY_NOTES,
   fieldExpressions: Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,
@@ -285,7 +291,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   rigging: Object.freeze({ presets: Object.freeze(['humanoid', 'quadruped']), maxArmatures: 16, maxBones: 128, maxInfluences: 4, weights: 'bone-distance' }),
   motionConstraints: Object.freeze(['copy_location', 'copy_rotation', 'copy_scale', 'limit_location', 'limit_rotation', 'track_to', 'child_of', 'floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action', 'maintain_volume', 'damped_track', 'pivot', 'follow_path', 'clamp_to', 'shrinkwrap', 'armature']),
-  motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxExpressionParts: 64, maxExpressionDepth: 8 }),
+  motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxProperties: 32, maxPropertyKeys: 16, targets: Object.freeze(['node', 'material', 'light', 'morph']), variables: Object.freeze(['time', 'node', 'custom', 'distance', 'rotationDifference']), maxExpressionParts: 64, maxExpressionDepth: 8 }),
   // Recipe physics: Rapier (an optional peer) bakes bodies on nodes offline; playback is a seek into the bake.
   physics: Object.freeze({
     bodyTypes: Object.freeze(['dynamic', 'fixed', 'kinematic']),

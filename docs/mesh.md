@@ -165,6 +165,14 @@ space. Faces from the mesh keep their tags; faces the cutter contributes (the wa
 union) get `<name>.cut`. Flat faces come back as polygons; faces with holes come back as triangles, joined into quads
 where flat pairs allow.
 
+A `cutter` can also be `{ "geometry": "<id>" }`, naming another geometry in the recipe's `geometries`: a `mesh` with its
+own edits and stack, or any primitive record. Meshes then form a directed acyclic graph of cuts, and editing the
+cutter rebuilds only the meshes that name it (its record joins their cache key). Put `translation`, `rotation` and
+`scale` on the boolean edit; the reference takes no other field. The cutter geometry needs no node; it can stay unseen.
+Limits: a chain of at most 4 cutter geometries, and at most 250,000 estimated vertices across the cutters a mesh names.
+A self-reference, a cycle (`a -> b -> a`) or an unknown ID fails when the recipe is checked, with the chain and the IDs
+that exist. Imported-part edits take inline records only. The same recipe always gives the same bytes.
+
 Both inputs must be closed and consistently wound. A boolean on an open mesh fails with the lint counts and a fix.
 A difference that leaves a hollow inside the mesh is valid; `lintMesh` reports it under `parts.cavities` instead of as
 an inverted part.
