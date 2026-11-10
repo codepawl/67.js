@@ -193,6 +193,25 @@ test('the flyer stops at the wall when it flies into it low, and skims the groun
   assert.ok(controller.state.position[1] >= 0);
 });
 
+test('a zero-length variable update leaves vehicle and flyer state finite', () => {
+  const makers = [
+    input => createVehicleController({ input, position: [0, 0, 6], ground: courseGround, obstacles: OBSTACLES }),
+    input => createFlightController({ input, position: [0, 3, 4], ground: courseGround, obstacles: OBSTACLES }),
+  ];
+  for (const makeController of makers) {
+    const game = createGame(makeController);
+    game.input.press('script/forward');
+    stepOnce(game);
+    stepOnce(game);
+    game.controller.update(0, { mode: 'variable' });
+    game.controller.fixedUpdate(0);
+    stepOnce(game);
+    const { state } = game.controller;
+    const numbers = [...state.position, ...state.velocity, state.speed, state.yaw];
+    assert.ok(numbers.every(Number.isFinite), `${game.controller.kind} state is not finite: ${numbers}`);
+  }
+});
+
 test('flight and driving are deterministic for the same inputs', () => {
   const finalStates = [0, 1].map(() => {
     const game = createGame(input => createFlightController({ input }));

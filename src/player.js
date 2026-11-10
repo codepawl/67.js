@@ -227,6 +227,7 @@ export function createCharacterController(options = {}) {
   }
 
   function advance(stepSeconds) {
+    if (!(stepSeconds > 0)) return;
     state.previousPosition = [...state.position];
     const sideInput = input.getAxis(names.moveX);
     const forwardInput = input.getAxis(names.moveForward);
@@ -537,7 +538,8 @@ function finishController(parts) {
     init: writeNode,
     fixedUpdate: advance,
     update(deltaSeconds, context) {
-      if (context?.mode === 'variable') advance(deltaSeconds);
+      if (context?.mode !== 'variable' || !(deltaSeconds > 0)) return;
+      advance(deltaSeconds);
     },
   };
   return controller;
@@ -611,6 +613,7 @@ export function createVehicleController(options = {}) {
   }
 
   function advance(stepSeconds) {
+    if (!(stepSeconds > 0)) return;
     state.previousPosition = [...state.position];
     updateSpeed(clamp(input.getAxis(names.throttle), -1, 1), stepSeconds);
     const steerWanted = clamp(input.getAxis(names.steer), -1, 1);
@@ -732,6 +735,7 @@ export function createFlightController(options = {}) {
   }
 
   function advance(stepSeconds) {
+    if (!(stepSeconds > 0)) return;
     state.previousPosition = [...state.position];
     steer(stepSeconds);
     updateSpeed(stepSeconds);
