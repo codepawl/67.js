@@ -22,6 +22,22 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npm audit --audit-level=high
 
+  # The cheap gates of `npm run preflight` that need no tests: protected files and the change note. The pre-push hook runs them
+  # too, but `git push --no-verify` skips the hook, so CI is where they cannot be skipped. A release run has no base to compare.
+  change-note:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm run check:change-note
+
   # Size and tool cost compare against the pull request base, which only a merge commit has, so a release run skips them.
   size:
     if: github.event_name == 'pull_request'
@@ -123,7 +139,7 @@ jobs:
 
   test:
     if: always()
-    needs: [audit, size, unit, coverage, package, bun]
+    needs: [audit, change-note, size, unit, coverage, package, bun]
     runs-on: ubuntu-latest
     steps:
       # A skipped size job is expected outside pull requests. Anything else that is not a success fails the check.
@@ -136,7 +152,7 @@ jobs:
             const needs = JSON.parse(require("fs").readFileSync(0, "utf8"));
             let failed = false;
             for (const [name, { result }] of Object.entries(needs)) {
-              const expectedSkip = name === "size" && process.env.EVENT_NAME !== "pull_request";
+              const expectedSkip = (name === "size" || name === "change-note") && process.env.EVENT_NAME !== "pull_request";
               const ok = result === "success" || (result === "skipped" && expectedSkip);
               console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${result}`);
               if (!ok) failed = true;

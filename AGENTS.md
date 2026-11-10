@@ -37,7 +37,10 @@ For one test file: `node --test tests/<area>.test.js`.
 
 ## Rules that fail a pull request
 
-- Add `changes/<issue>.md` with one bullet when you change `src/`, `bin/`, `packages/` or `skills/` ([changes/README.md](changes/README.md)).
+- Add `changes/<issue>.md` with one bullet when you change `src/`, `bin/`, `packages/` or `skills/` ([changes/README.md](changes/README.md) has the naming rule).
+- Name the branch `<issue>-<slug>` and the pull request `<imperative sentence> (#<issue>)`. Put `Closes #N` or `Part of #N` in the description and paste the commands you ran with their results.
+- A change to an MCP tool schema or a skill needs the Haiku bench table in the pull request ([CONTRIBUTING.md](CONTRIBUTING.md#tool-schema-and-skill-changes)).
+- Look changes (shaders, lighting, materials, default render, post steps) carry `hold:look-approval`. Never remove it and never merge: only the maintainer merges.
 - Never edit `CHANGELOG.md`, `bench/size/budgets.json`, `bench/size/baseline.json` or `bench/tool-cost-budgets.json`. Maintainers reset them at release.
 - A bundle that grows past its allowance needs a line in `changes/<issue>.size.md` that says why the bytes are worth it ([bench/size/README.md](bench/size/README.md)). The same file accepts tool cost growth ([bench/tool-cost/README.md](bench/tool-cost/README.md)).
 - Coverage may not drop. Write the tests in the same commit as the code.

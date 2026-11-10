@@ -58,7 +58,7 @@ export function goalProblems(measured, baseMeasured, goals, accepted = new Map()
     const baseSize = baseMeasured[`scene:${scene}`]?.gzip;
     if (size === undefined || baseSize === undefined || size <= goal) continue;
     if (accepted.has(`goal:${scene}`)) continue;
-    const acceptLine = `ask An to accept it with the line "- goal:${scene}: <why>" in changes/<issue>.size.md`;
+    const acceptLine = `ask the maintainer to accept it with the line "- goal:${scene}: <why>" in changes/<issue>.size.md`;
     if (baseSize <= goal) {
       problems.push(`scene:${scene} is ${size} bytes gzip, over its goal of ${goal}, which the base branch met (${baseSize}). Move code out of the core bundle, or ${acceptLine}.`);
     } else if (size - baseSize > GOAL_NOISE_BYTES) {
