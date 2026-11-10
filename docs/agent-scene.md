@@ -185,6 +185,15 @@ it. Scales and counts are whole numbers (1 to 64, even for `checker`), so every 
 (2D, detail `octaves - 1`, roughness 0.5, lacunarity 2, normalized; `seed` moves the lattice by whole cells) with the lattice
 wrapped so it repeats. `"tile": false` matches Blender's Noise Texture exactly, does not repeat.
 
+Placement and pattern nodes:
+
+- `brick` (`columns` 8, `rows` 8 and even, `mortar` 0.05 of a brick, `offset` 0.5 for every other row, `seed`, `output`: `mortar` is 1 in the joint, `edge` is 0 at a joint and 1 at the brick centre, `cell` is one random value per brick) lays a running bond and costs 4. Whole columns and even rows keep it tiling.
+- `whiteNoise` (`scale` 16, `seed`, `output`: `value` or `color` for three independent values) is one random value per cell of a `scale` by `scale` grid. It tiles and is the same for the same seed.
+- `coord` (`"generated"`, `"object"` or `"world"`) is a vector for `at`. `generated` is the unit tile, `object` and `world` are metres across the tile (texture u and v times the pattern `size`). A baked texture is projected onto the mesh, so it knows only the two axes of that projection and the third is 0; `object` and `world` are the same because box mapping reads the placed, scaled position.
+- `mapping` (`vector`, default `{ "coord": "generated" }`; `scale` a number or `[x, y, z]`; `rotate` radians around Z; `offset` `[x, y, z]`) scales, turns and moves a vector, as Blender's Mapping node does. Feed it to `at`.
+
+These make a material work on a mesh without UVs: box mapping (the default) projects the baked graph along the object axes, so a brick wall or a noise pattern needs no unwrap. `vertex_color` on a mesh already multiplies the baked colour. Not in graphs yet: ambient occlusion, bevel and curvature masks, fresnel and an image texture node (they need per-vertex or per-pixel data that a bake from `u` and `v` alone does not have).
+
 Limits, checked while the recipe is read: at most 64 nodes in all outputs, depth 12 (the field expression limits), at most 8 ramp
 stops, `resolution` of 256, 512 or 1024, and a work budget of 30 million units, where a plain node costs 1, a `noise` octave 3
 and a `voronoi` 8, per pixel and per pixel of the texture. A heavy graph at 1024 can be over it; use 512. A graph that is over a
