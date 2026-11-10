@@ -1,14 +1,14 @@
 // The time rules and the wording of the `PR metadata` bot. Pure, so tests call it without GitHub.
 // The bot keeps one status comment per pull request and finds it by a hidden marker. The marker also holds the time of the
-// first failing comment, which starts the 7 day clock, and the time of the one reminder.
+// first failing comment, which starts the 72 hour clock, and the time of the one reminder.
 import { NEEDS_OWNER_DECISION_LABEL } from './pr-metadata-check.mjs';
 
 export const STATUS_MARKER = 'pr-metadata-status';
 export const REMINDER_MARKER = 'pr-metadata-reminder';
 export const CLOSE_MARKER = 'pr-metadata-closed';
 export const HOUR_MS = 60 * 60 * 1000;
-export const REMINDER_AFTER_HOURS = 120;
-export const CLOSE_AFTER_HOURS = 168;
+export const REMINDER_AFTER_HOURS = 48;
+export const CLOSE_AFTER_HOURS = 72;
 
 const guideUrl = 'https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.md';
 
@@ -76,7 +76,7 @@ export function renderReminderComment({ contributorFixes, closeDate }) {
 export function renderCloseComment() {
   return [
     buildMarker(CLOSE_MARKER),
-    'Thank you for the work on this. We are closing the pull request because the items above stayed open for 7 days. Nothing is lost and there is no rush: reopen it whenever you are ready.',
+    'Thank you for the work on this. We are closing the pull request because the items above stayed open for 72 hours. Nothing is lost and there is no rush: reopen it whenever you are ready.',
     '',
     `Once they are fixed, reopen it and the check runs again. Details are in the [contributing guide](${guideUrl}).`,
   ].join('\n');

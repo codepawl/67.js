@@ -3,8 +3,8 @@ name: PR metadata
 # A friendly check of the pull request description, files and labels against CONTRIBUTING.md. It is not a required check.
 # It runs on pull_request_target so that it can comment on pull requests from forks. For that reason it NEVER checks out,
 # builds or runs the pull request's code: the checkout is the base branch (the default for this event), and the pull request
-# is read through the API only. Keep it that way. The hourly schedule sends the 5 day reminder and closes pull requests
-# that stayed unfixed for 7 days. How it works and how to test it: CONTRIBUTING.md#the-pull-request-check.
+# is read through the API only. Keep it that way. The hourly schedule sends the reminder 24 hours before the close and closes pull requests
+# that stayed unfixed for 72 hours. How it works and how to test it: CONTRIBUTING.md#the-pull-request-check.
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened, labeled, unlabeled, milestoned, demilestoned, ready_for_review]

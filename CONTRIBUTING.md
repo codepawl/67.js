@@ -127,8 +127,8 @@ The `PR metadata` workflow checks each pull request against this guide. It posts
 
 Docs-only, CI-only and test-only pull requests skip everything except the local path check.
 
-- The comment updates itself when you fix an item. One reminder follows after 5 days.
-- A maintainer gives a first answer within about 7 days. That reply time is separate from the bot clock, which counts only items on your side. If an item is still open 7 days after the first comment (the end of that UTC day, weekends included), the bot closes the pull request. It invites you to reopen it once the item is fixed, and reopening starts the time again.
+- The comment updates itself when you fix an item. One reminder follows when 24 hours are left.
+- A maintainer gives a first answer within about 7 days. That reply time is separate from the bot clock, which counts only items on your side. If an item is still open 72 hours after the first comment (the end of that UTC day, weekends included), the bot closes the pull request. It invites you to reopen it once the item is fixed, and reopening starts the time again.
 - Pull requests from the owner, members, collaborators and bots never close by themselves. Drafts and pull requests labelled `needs-owner-decision` do not close either.
 - Labels and the milestone never count against you. The bot adds `needs-triage` when they are missing and `status:needs-author` while something of yours is missing.
 

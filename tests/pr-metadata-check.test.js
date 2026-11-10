@@ -203,7 +203,7 @@ test('sectionOf reads a section up to the next heading', () => {
 
 const someFix = [{ id: 'x', message: 'Fix x.', docsAnchor: 'link-the-issue' }];
 
-test('the clock starts at the first failure, reminds once at 5 days and closes at 7', () => {
+test('the clock starts at the first failure, reminds once 24 hours before the close and closes at 72 hours', () => {
   const start = Date.parse('2026-11-01T00:00:00.000Z');
   const base = { contributorFixes: someFix, exempt: false, draft: false, labels: [] };
   const first = decideActions({ ...base, now: start, previousState: null });
@@ -214,7 +214,7 @@ test('the clock starts at the first failure, reminds once at 5 days and closes a
   assert.ok(!early.remind);
   const reminder = decideActions({ ...base, now: start + REMINDER_AFTER_HOURS * HOUR_MS, previousState: state });
   assert.ok(reminder.remind && !reminder.close);
-  assert.equal(reminder.closeDate, '2026-11-08');
+  assert.equal(reminder.closeDate, '2026-11-04');
   const again = decideActions({ ...base, now: start + (REMINDER_AFTER_HOURS + 2) * HOUR_MS, previousState: reminder.statusState });
   assert.ok(!again.remind);
   const closing = decideActions({ ...base, now: start + CLOSE_AFTER_HOURS * HOUR_MS, previousState: reminder.statusState });
@@ -251,7 +251,7 @@ test('the marker round trips and the comment stays warm and short', () => {
   assert.match(comment, /^<!-- pr-metadata-status firstFailedAt=2026-11-01T00:00:00.000Z -->/);
   assert.match(comment, /Thank you/);
   assert.match(comment, /CONTRIBUTING\.md#link-the-issue/);
-  assert.match(comment, /2026-11-08/);
+  assert.match(comment, /2026-11-04/);
   assert.match(comment, /first answer within about 7 days/);
 });
 
@@ -303,7 +303,7 @@ test('the runner posts one friendly comment for a new pull request and labels it
   assert.ok(!names.includes('closePullRequest'));
 });
 
-test('the runner closes a pull request that stayed unfixed for 7 days, and never an owner one', async () => {
+test('the runner closes a pull request that stayed unfixed for 72 hours, and never an owner one', async () => {
   const marker = buildMarker('pr-metadata-status', { firstFailedAt: '2026-11-01T00:00:00.000Z' });
   const comments = [{ id: 9, user: { login: 'github-actions[bot]' }, body: `${marker}\nold` }];
   const now = Date.parse('2026-11-09T00:00:00Z');
