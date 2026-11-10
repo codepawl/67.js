@@ -17,8 +17,8 @@ const LIMITS = Object.freeze({
   ozone: [0, 10, 'ozone absorption from 0 (none) to 10, such as 1'],
 });
 
-const MAP_WIDTH = 128;
-const MAP_HEIGHT = 64;
+const MAP_WIDTH = 1024;
+const MAP_HEIGHT = 512;
 // Per-channel (red, green, blue) optical depth of the air at the zenith, the aerosol depth per unit turbidity, and the
 // Chappuis-band ozone absorption depth per unit ozone (strong in orange-green, weak in blue).
 const RAYLEIGH_DEPTH = [0.04, 0.1, 0.24];
@@ -147,6 +147,28 @@ export function applyPhysicalSky(input, environment, fail) {
 const mapsByKey = new Map();
 const MAXIMUM_CACHED_MAPS = 8;
 
+/**
+ * A round disc with a flat bright top and a soft rim, by the angle from the sun's centre. A squared falloff over a map of a few
+ * degrees per texel drew the sun as the texel grid (a rounded rectangle); the finer map and this profile keep it a circle.
+ */
+function sunDiscWeight(sunCosine) {
+  const rim = (sunCosine - SUN_DISC_COSINE) / (1 - SUN_DISC_COSINE);
+  const edge = Math.min(Math.max(rim / 0.64, 0), 1);
+  return edge * edge * (3 - 2 * edge) * SUN_DISC_STRENGTH;
+}
+
+// Haze fills the first degrees under the horizon, so a finite sea or plane whose far edge ends short of the true horizon meets
+// haze the colour of the sky, not a flat band of ground colour with a hard step at the horizon line.
+const HORIZON_HAZE_SINE = 0.12;
+
+function belowHorizonRadiance(sky, color, zenith, sun, direction) {
+  const horizonSky = skyRadiance(sky, [direction[0], 0, direction[2]], sun);
+  const ground = groundRadiance(sky, color, zenith, sun).map((component, channel) => component + horizonSky[channel] * 0.35 * (1 - sky.groundAlbedo));
+  const depth = Math.min(-direction[1] / HORIZON_HAZE_SINE, 1);
+  const groundShare = depth * depth * (3 - 2 * depth);
+  return ground.map((component, channel) => horizonSky[channel] + (component - horizonSky[channel]) * groundShare);
+}
+
 function buildMapData(sky) {
   const { sun, color, zenith } = colorAtZenithAndHorizon(sky);
   const drawDisc = sky.sunDisc !== false && sky.sunElevation > -1.5;
@@ -158,11 +180,11 @@ function buildMapData(sky) {
       const direction = [Math.sin(polar) * Math.sin(azimuth), Math.cos(polar), -Math.sin(polar) * Math.cos(azimuth)];
       const sunCosine = direction[0] * sun[0] + direction[1] * sun[1] + direction[2] * sun[2];
       const discWeight = drawDisc && direction[1] > 0 && sunCosine > SUN_DISC_COSINE
-        ? ((sunCosine - SUN_DISC_COSINE) / (1 - SUN_DISC_COSINE)) ** 2 * SUN_DISC_STRENGTH
+        ? sunDiscWeight(sunCosine)
         : 0;
       const radiance = direction[1] >= 0
         ? skyRadiance(sky, direction, sun).map((component, channel) => component + color[channel] * discWeight)
-        : groundRadiance(sky, color, zenith, sun).map((component, channel) => component + skyRadiance(sky, [direction[0], 0, direction[2]], sun)[channel] * 0.35 * (1 - sky.groundAlbedo));
+        : belowHorizonRadiance(sky, color, zenith, sun, direction);
       data.set(radiance, (row * MAP_WIDTH + column) * 3);
     }
   }
