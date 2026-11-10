@@ -43,10 +43,11 @@ Order the systems input, controller, rig. The controller reads this step's input
 | `position`, `yaw` | origin, 0 | Start pose. Yaw 0 faces -Z, positive turns toward +X |
 | `faceCamera`, `turnSpeed` | false, 12 | Face the view yaw (first person) or turn toward the move direction |
 | `node` | none | An object with `position` (and `rotationY`) that is written every step |
+| `rootMotion` | none | A function `() => [x, z]` with the travel of the last animation step, such as `() => graph.rootMotion.delta` ([animation graph](animation-graph.md#root-motion)). On the ground the body moves by it instead of by its speed; x is to its right, negative z forward |
 | `mover` | kinematic | The seam for physics, see below |
 | `name` | `player` | System name, for `replaceSystem` |
 
-`controller.state` is updated in place for animation and audio: `position`, `previousPosition`, `velocity`, `yaw`, `grounded`, `airborne`, `speed` (horizontal) and `running`. `controller.positionAt(alpha)` returns the position drawn between the last two fixed steps, and `teleport(position, yaw)` places it again.
+`controller.state` is updated in place for animation and audio: `position`, `previousPosition`, `velocity`, `yaw`, `grounded`, `airborne`, `speed` (horizontal), `intentSpeed` (the speed the input asks for) and `running`. `controller.positionAt(alpha)` returns the position drawn between the last two fixed steps, and `teleport(position, yaw)` places it again.
 
 ### Collide and slide
 

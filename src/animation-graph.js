@@ -3,8 +3,13 @@
 // advances in fixed steps and says which clip plays at which time and weight. It knows no rig: `poseLayers()` hands the
 // result to createSkeletonPose / createAssetPose, and any retargeted clip can be a motion. Same parameters and the same
 // steps always give the same weights. See docs/animation-graph.md.
+import { extractRootMotion, normalizeRootMotionSettings } from './animation-root-motion.js';
+
+export { createFootPlacement, createLookAt } from './animation-ik.js';
+export { extractRootMotion } from './animation-root-motion.js';
 
 export const ANIMATION_GRAPH_LIMITS = Object.freeze({
+  maximumFadingStates: 4,
   maximumParameters: 64,
   maximumLayers: 8,
   maximumStates: 64,
@@ -59,14 +64,22 @@ function requireFiniteNumber(value, label, minimum = -Infinity, maximum = Infini
   return value;
 }
 
-function compileClips(clips) {
+// With root motion, `clip` is the in-place copy that poses read and `rootMotion` carries the travel taken out of it.
+function compileClips(clips, rootMotion) {
   requireObject(clips, 'createAnimationGraph clips');
   const table = new Map();
   for (const [name, clip] of Object.entries(clips)) {
     const label = `createAnimationGraph clips.${name}`;
     requireObject(clip, label);
     requireFiniteNumber(clip.duration, `${label}.duration`, 1e-6);
-    table.set(name, { name, clip, duration: clip.duration, loop: clip.loop === true });
+    const extracted = rootMotion && Array.isArray(clip.tracks) ? extractRootMotion(clip, rootMotion) : null;
+    table.set(name, {
+      name,
+      clip: extracted ? extracted.clip : clip,
+      duration: clip.duration,
+      loop: clip.loop === true,
+      rootMotion: extracted?.hasMotion ? extracted : null,
+    });
   }
   return table;
 }
@@ -217,6 +230,11 @@ function compileCondition(condition, label, parameters) {
   return { parameter, test: (value, limit) => value === limit, limit: expected };
 }
 
+function interruptOf(value, label) {
+  if (value !== undefined && typeof value !== 'boolean') throw new TypeError(`${label}.interrupt must be true or false, got ${describe(value)}.`);
+  return value === true;
+}
+
 function compileTransition(definition, label, states, parameters) {
   requireObject(definition, label);
   const from = definition.from ?? '*';
@@ -235,6 +253,7 @@ function compileTransition(definition, label, states, parameters) {
     to,
     duration: requireFiniteNumber(definition.duration ?? 0, `${label}.duration`, 0, ANIMATION_GRAPH_LIMITS.maximumFadeSeconds),
     exitPhase,
+    interrupt: interruptOf(definition.interrupt, label),
     conditions: conditions.map((condition, index) => compileCondition(condition, `${label}.when[${index}]`, parameters)),
   };
 }
@@ -337,7 +356,7 @@ function writeBlend2DWeights(state, x, y, weights) {
 }
 
 function createStateRuntime(state) {
-  return { state, phase: 0, frozen: false, weights: new Float64Array(state.motions.length) };
+  return { state, phase: 0, previousPhase: 0, frozen: false, weights: new Float64Array(state.motions.length) };
 }
 
 function stateSpeed(runtime, parameters) {
@@ -351,7 +370,24 @@ function advanceStateRuntime(runtime, parameters, deltaSeconds) {
   if (!runtime.frozen) writeMotionWeights(state, parameters, weights);
   let duration = 0;
   for (let index = 0; index < weights.length; index++) duration += weights[index] * state.motions[index].clip.duration;
+  runtime.previousPhase = runtime.phase;
   runtime.phase += deltaSeconds * stateSpeed(runtime, parameters) / duration;
+}
+
+// Adds the weighted root travel of one state over the last step to `total` ([x, z]).
+function addRootTravel(runtime, stateWeight, total) {
+  const { state, weights, phase, previousPhase } = runtime;
+  state.motions.forEach((motion, index) => {
+    const share = stateWeight * weights[index];
+    const rootMotion = motion.clip.rootMotion;
+    if (share <= 0 || !rootMotion) return;
+    const after = rootMotion.displacement(phase, state.loop);
+    const afterX = after[0];
+    const afterZ = after[1];
+    const before = rootMotion.displacement(previousPhase, state.loop);
+    total[0] += share * (afterX - before[0]);
+    total[1] += share * (afterZ - before[1]);
+  });
 }
 
 function motionTime(runtime, motion) {
@@ -370,45 +406,60 @@ function createLayerRuntime(layer, parameters) {
     layer,
     weight: layer.initialWeight,
     current: null,
-    previous: null,
+    // States fading out, oldest first, each with the share `base` it had when the running crossfade began. Their shares and
+    // the incoming state's always sum to 1; an interrupting transition adds the state it interrupts.
+    fading: [],
     fadeElapsed: 0,
     fadeDuration: 0,
+    rootTravel: [0, 0],
   };
 
   function begin() {
     runtime.current = createStateRuntime(layer.states.get(layer.initial));
-    runtime.previous = null;
+    runtime.fading = [];
     runtime.fadeElapsed = 0;
     runtime.fadeDuration = 0;
+    runtime.rootTravel = [0, 0];
     runtime.weight = layer.initialWeight;
     writeMotionWeights(runtime.current.state, parameters, runtime.current.weights);
   }
 
   function fadeProgress() {
-    return runtime.previous ? Math.min(1, runtime.fadeElapsed / runtime.fadeDuration) : 1;
+    return runtime.fading.length ? Math.min(1, runtime.fadeElapsed / runtime.fadeDuration) : 1;
+  }
+
+  // The outgoing blend keeps the weights it had, so a parameter change does not bend the fade.
+  function fadeOutCurrent(duration) {
+    const progress = fadeProgress();
+    for (const entry of runtime.fading) entry.base *= 1 - progress;
+    runtime.current.frozen = true;
+    runtime.fading.push({ stateRuntime: runtime.current, base: progress });
+    runtime.fading = runtime.fading.filter(entry => entry.base > 0);
+    if (runtime.fading.length > ANIMATION_GRAPH_LIMITS.maximumFadingStates) runtime.fading.shift();
+    const total = runtime.fading.reduce((sum, entry) => sum + entry.base, 0);
+    for (const entry of runtime.fading) entry.base /= total;
+    runtime.fadeElapsed = 0;
+    runtime.fadeDuration = duration;
   }
 
   function startTransition() {
     const name = runtime.current.state.name;
-    const transition = layer.transitions.find(candidate => (candidate.from === '*' || candidate.from === name) && candidate.to !== name && conditionsHold(candidate, runtime.current));
+    const fading = runtime.fading.length > 0;
+    const transition = layer.transitions.find(candidate => (!fading || candidate.interrupt) && (candidate.from === '*' || candidate.from === name) && candidate.to !== name && conditionsHold(candidate, runtime.current));
     if (!transition) return;
     for (const condition of transition.conditions) {
       if (condition.parameter.type === 'trigger') condition.parameter.value = false;
     }
     const next = createStateRuntime(layer.states.get(transition.to));
-    if (transition.duration > 0) {
-      runtime.previous = runtime.current;
-      runtime.previous.frozen = true; // The outgoing blend keeps the weights it had, so a parameter change does not bend the fade.
-      runtime.fadeElapsed = 0;
-      runtime.fadeDuration = transition.duration;
-    }
+    if (transition.duration > 0) fadeOutCurrent(transition.duration);
+    else runtime.fading = [];
     runtime.current = next;
   }
 
   function collect() {
     for (const slot of layer.slots) slot.weight = 0;
     const progress = fadeProgress();
-    const contributors = runtime.previous ? [[runtime.previous, 1 - progress], [runtime.current, progress]] : [[runtime.current, 1]];
+    const contributors = [...runtime.fading.map(entry => [entry.stateRuntime, entry.base * (1 - progress)]), [runtime.current, progress]];
     for (const [stateRuntime, stateWeight] of contributors) {
       stateRuntime.state.motions.forEach((motion, index) => {
         const contribution = stateWeight * stateRuntime.weights[index];
@@ -442,17 +493,25 @@ function createLayerRuntime(layer, parameters) {
       collect();
     },
     advance(deltaSeconds) {
-      if (!runtime.previous) startTransition();
+      startTransition();
       advanceStateRuntime(runtime.current, parameters, deltaSeconds);
-      if (runtime.previous) {
-        advanceStateRuntime(runtime.previous, parameters, deltaSeconds);
-        runtime.fadeElapsed += deltaSeconds;
-        if (runtime.fadeElapsed >= runtime.fadeDuration - FADE_EPSILON) {
-          runtime.previous = null;
-          runtime.fadeElapsed = 0;
-        }
+      for (const entry of runtime.fading) advanceStateRuntime(entry.stateRuntime, parameters, deltaSeconds);
+      runtime.fadeElapsed += deltaSeconds;
+      if (layer.followsRootMotion) {
+        const progress = fadeProgress();
+        runtime.rootTravel = [0, 0];
+        for (const entry of runtime.fading) addRootTravel(entry.stateRuntime, entry.base * (1 - progress), runtime.rootTravel);
+        addRootTravel(runtime.current, progress, runtime.rootTravel);
+      }
+      if (runtime.fading.length && runtime.fadeElapsed >= runtime.fadeDuration - FADE_EPSILON) {
+        runtime.fading = [];
+        runtime.fadeElapsed = 0;
       }
       collect();
+    },
+    // Root travel of the last step, [x, z] in metres, scaled by the layer weight.
+    rootTravel() {
+      return [runtime.rootTravel[0] * runtime.weight, runtime.rootTravel[1] * runtime.weight];
     },
     setWeight(weight) {
       runtime.weight = weight;
@@ -461,14 +520,33 @@ function createLayerRuntime(layer, parameters) {
     describe() {
       return {
         state: runtime.current.state.name,
-        previousState: runtime.previous ? runtime.previous.state.name : null,
-        fade: runtime.previous ? fadeProgress() : null,
+        previousState: runtime.fading.length ? runtime.fading[runtime.fading.length - 1].stateRuntime.state.name : null,
+        fade: runtime.fading.length ? fadeProgress() : null,
         phase: runtime.current.phase,
         weight: runtime.weight,
         clips: layer.slots.filter(slot => slot.weight > 0).map(slot => ({ clip: slot.clip.name, time: slot.time, weight: slot.weight })),
       };
     },
   };
+}
+
+const NO_ROOT_MOTION = Object.freeze({ delta: Object.freeze([0, 0]), distance: 0, speed: 0 });
+
+function describeRootMotion(travel, deltaSeconds) {
+  const distance = Math.hypot(travel[0], travel[1]);
+  return Object.freeze({ delta: Object.freeze(travel), distance, speed: deltaSeconds > 0 ? distance / deltaSeconds : 0 });
+}
+
+// The layer whose travel becomes the root motion: the named one, else the first. Fails when no clip carries the bone's translation.
+function chooseRootMotionLayer(settings, layers, clips) {
+  const layer = settings.layer === undefined ? layers[0] : layers.find(candidate => candidate.name === settings.layer);
+  if (!layer) {
+    throw new RangeError(`createAnimationGraph rootMotion.layer names "${String(settings.layer)}", which is not a layer. Layers: ${layers.map(candidate => candidate.name).join(', ')}.`);
+  }
+  if (![...clips.values()].some(clip => clip.rootMotion)) {
+    throw new RangeError(`createAnimationGraph rootMotion.bone "${settings.bone}" has no translation track in any clip. Name the bone that the clips move, as the track target.`);
+  }
+  return layer;
 }
 
 /**
@@ -479,7 +557,8 @@ function createLayerRuntime(layer, parameters) {
  */
 export function createAnimationGraph(definition) {
   requireObject(definition, 'createAnimationGraph definition');
-  const clips = compileClips(definition.clips ?? {});
+  const rootMotionSettings = definition.rootMotion === undefined ? null : normalizeRootMotionSettings(definition.rootMotion, 'createAnimationGraph rootMotion');
+  const clips = compileClips(definition.clips ?? {}, rootMotionSettings);
   const parameters = compileParameters(definition.parameters ?? {});
   const boneGroups = requireObject(definition.boneGroups ?? {}, 'createAnimationGraph boneGroups');
   const layerDefinitions = requireArray(definition.layers, 'createAnimationGraph layers', ANIMATION_GRAPH_LIMITS.maximumLayers);
@@ -489,8 +568,11 @@ export function createAnimationGraph(definition) {
     if (layerNames.has(layer.name)) throw new RangeError(`createAnimationGraph has two layers named "${layer.name}". Rename one.`);
     layerNames.add(layer.name);
   }
+  const rootMotionLayer = rootMotionSettings ? chooseRootMotionLayer(rootMotionSettings, layers, clips) : null;
+  for (const layer of layers) layer.followsRootMotion = layer === rootMotionLayer;
   const runtimes = layers.map(layer => createLayerRuntime(layer, parameters));
   let elapsedSeconds = 0;
+  let lastRootMotion = NO_ROOT_MOTION;
 
   function runtimeOf(name) {
     const index = layers.findIndex(layer => layer.name === name);
@@ -501,6 +583,13 @@ export function createAnimationGraph(definition) {
   const graph = {
     get layers() { return layers.map(layer => layer.name); },
     get time() { return elapsedSeconds; },
+
+    // Root travel of the last advance as { delta: [x, z], distance, speed } in metres: x to the right, negative z forward (the
+    // player's convention), scaled by the layer weight. Needs the rootMotion option.
+    get rootMotion() {
+      if (!rootMotionSettings) throw new TypeError('graph.rootMotion needs the rootMotion option, for example createAnimationGraph({ rootMotion: { bone: "Root" }, ... }).');
+      return lastRootMotion;
+    },
 
     // Sets a number or boolean parameter. Read by the transitions and blend spaces on the next advance.
     set(name, value) {
@@ -542,6 +631,7 @@ export function createAnimationGraph(definition) {
       requireFiniteNumber(deltaSeconds, 'graph.advance deltaSeconds', 0, ANIMATION_GRAPH_LIMITS.maximumDeltaSeconds);
       for (const runtime of runtimes) runtime.advance(deltaSeconds);
       elapsedSeconds += deltaSeconds;
+      if (rootMotionLayer) lastRootMotion = describeRootMotion(runtimes[layers.indexOf(rootMotionLayer)].rootTravel(), deltaSeconds);
       return graph;
     },
 
@@ -550,6 +640,7 @@ export function createAnimationGraph(definition) {
       for (const parameter of parameters.values()) parameter.value = parameter.initial;
       for (const runtime of runtimes) runtime.begin();
       elapsedSeconds = 0;
+      lastRootMotion = NO_ROOT_MOTION;
       return graph;
     },
 

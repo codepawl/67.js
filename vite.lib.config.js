@@ -66,6 +66,7 @@ export default defineConfig({
         vegetation: 'src/vegetation.js',
         terrain: 'src/terrain.js',
         heightfield: 'src/heightfield.js',
+        'export-mesh': 'src/export-mesh.js',
         navmesh: 'src/navmesh.js',
         grass: 'src/grass.js',
         clutter: 'src/clutter.js',
@@ -107,8 +108,10 @@ export default defineConfig({
         cloth: 'src/cloth.js',
         runtime: 'src/runtime.js',
         input: 'src/input.js',
+        audio: 'src/audio.js',
         'animation-graph': 'src/animation-graph.js',
         player: 'src/player.js',
+        streaming: 'src/streaming.js',
         'update-part-vertices':'src/update-part-vertices.js',
         'replace-textured-parts': 'src/replace-textured-parts.js',
         // Page of the MCP preview. It imports the engine chunks above instead of bundling its own copy.

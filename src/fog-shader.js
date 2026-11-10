@@ -1,4 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes } from './local-volumes.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
 
 // The volume fog step of the post pass: its uniforms and the march that scatters light through the fog box. Only a renderer that
@@ -73,6 +74,134 @@ function bindFieldAndLights(renderer, post, volume) {
   context.uniform4fv(post.uniforms['volumeLightCones[0]'], lights.cones);
 }
 
+// The local volumes of the frame (environment.localVolumes), checked and packed once before the post program is chosen, so a bad
+// field or a renderer without depth or HDR throws before any program is bound. Returns the count packed, or 0 for an empty list.
+function prepareLocalVolumes(renderer, input) {
+  const volumes = resolveLocalVolumes(input, 'environment.localVolumes');
+  if (volumes.length === 0) return 0;
+  if (!renderer.depth || !renderer.hdr || renderer.transparent || renderer.benchmark) throw new Error('Local volumes require depth:true, active HDR and an opaque canvas');
+  const buffers = (renderer.localVolumeBuffers ??= createLocalVolumeBuffers());
+  packLocalVolumes(volumes, buffers);
+  return buffers.count;
+}
+
+// Uploads the packed volumes. Their uniforms exist only in a program with the local step compiled in.
+function bindLocalVolumes(renderer, post, frame) {
+  const context = renderer.context;
+  const buffers = renderer.localVolumeBuffers;
+  const locate = name => (post.uniforms[name] ??= context.getUniformLocation(post.program, name));
+  context.uniform1i(locate('localVolumeCount'), buffers.count);
+  context.uniform1f(locate('localOrthographic'), frame.projection === 'orthographic' ? 1 : 0);
+  context.uniform4fv(locate('localVolumeCenters[0]'), buffers.centers);
+  context.uniform4fv(locate('localVolumeExtents[0]'), buffers.extents);
+  context.uniform4fv(locate('localVolumeAbsorption[0]'), buffers.absorption);
+  context.uniform4fv(locate('localVolumeEmission[0]'), buffers.emission);
+  context.uniform4fv(locate('localVolumeSteps[0]'), buffers.steps);
+}
+
+const LOCAL_VOLUME_DECLARATIONS = `
+uniform int localVolumeCount;
+uniform float localOrthographic;
+uniform vec4 localVolumeCenters[8];
+uniform vec4 localVolumeExtents[8];
+uniform vec4 localVolumeAbsorption[8];
+uniform vec4 localVolumeEmission[8];
+uniform vec4 localVolumeSteps[8];
+`;
+
+// Each volume is marched on its own between its entry and exit (cut at the first surface) and composited nearest first: the colour
+// behind it is dimmed by exp(-absorption * profile * step) and its emission is added, both per colour channel.
+const LOCAL_VOLUME_FUNCTIONS = `
+vec2 localVolumeInterval(int index, vec3 origin, vec3 direction) {
+  vec3 center = localVolumeCenters[index].xyz;
+  vec3 halfSize = localVolumeExtents[index].xyz;
+  if (localVolumeCenters[index].w > 0.5) {
+    vec3 offset = origin - center;
+    float along = dot(offset, direction);
+    float discriminant = along * along - (dot(offset, offset) - halfSize.x * halfSize.x);
+    if (discriminant <= 0.0) return vec2(0.0);
+    float root = sqrt(discriminant);
+    return vec2(-along - root, -along + root);
+  }
+  float entry = -1e30;
+  float exitDistance = 1e30;
+  for (int axis = 0; axis < 3; axis++) {
+    float relative = center[axis] - origin[axis];
+    if (direction[axis] == 0.0) {
+      if (abs(relative) > halfSize[axis]) return vec2(0.0);
+    } else {
+      float first = (relative - halfSize[axis]) / direction[axis];
+      float second = (relative + halfSize[axis]) / direction[axis];
+      entry = max(entry, min(first, second));
+      exitDistance = min(exitDistance, max(first, second));
+    }
+  }
+  return vec2(entry, exitDistance);
+}
+float localVolumeProfile(int index, vec3 position) {
+  vec3 offset = position - localVolumeCenters[index].xyz;
+  vec3 halfSize = localVolumeExtents[index].xyz;
+  float distanceRatio = localVolumeCenters[index].w > 0.5 ? length(offset) / halfSize.x : max(max(abs(offset.x) / halfSize.x, abs(offset.y) / halfSize.y), abs(offset.z) / halfSize.z);
+  float falloff = localVolumeExtents[index].w;
+  float profile = falloff > 0.0 ? 1.0 - smoothstep(1.0 - falloff, 1.0, distanceRatio) : 1.0 - step(1.0, distanceRatio);
+  float noiseAmount = localVolumeAbsorption[index].w;
+  if (noiseAmount > 0.0) profile *= mix(1.0, cloudNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
+  return profile;
+}
+vec3 localVolumes(vec3 background) {
+  vec2 clipXY = textureCoordinate * 2.0 - 1.0;
+  vec4 farPoint = inverseViewProjection * vec4(clipXY, 1.0, 1.0);
+  vec4 nearPoint = inverseViewProjection * vec4(clipXY, -1.0, 1.0);
+  vec3 origin = localOrthographic > 0.5 ? nearPoint.xyz / nearPoint.w : eye;
+  vec3 direction = normalize(farPoint.xyz - origin * farPoint.w);
+  float depth = texture(sceneDepth, textureCoordinate).r;
+  vec4 surfacePoint = inverseViewProjection * vec4(clipXY, depth * 2.0 - 1.0, 1.0);
+  float surfaceDistance = 1e30;
+  if (surfacePoint.w > 0.0) surfaceDistance = max(0.0, dot(surfacePoint.xyz - origin * surfacePoint.w, direction) / surfacePoint.w);
+  float entries[8];
+  float exits[8];
+  for (int index = 0; index < 8; index++) {
+    entries[index] = 1e30;
+    exits[index] = 0.0;
+    if (index >= localVolumeCount) continue;
+    vec2 span = localVolumeInterval(index, origin, direction);
+    float entry = max(span.x, 0.0);
+    float exitDistance = min(span.y, surfaceDistance);
+    if (exitDistance > entry) {
+      entries[index] = entry;
+      exits[index] = exitDistance;
+    }
+  }
+  vec3 transmittance = vec3(1.0);
+  vec3 radiance = vec3(0.0);
+  for (int pass = 0; pass < 8; pass++) {
+    int nearest = -1;
+    float nearestEntry = 1e29;
+    for (int index = 0; index < 8; index++) {
+      if (entries[index] < nearestEntry) {
+        nearestEntry = entries[index];
+        nearest = index;
+      }
+    }
+    if (nearest < 0) break;
+    float entry = entries[nearest];
+    float exitDistance = exits[nearest];
+    entries[nearest] = 1e30;
+    int steps = int(localVolumeSteps[nearest].x);
+    float stepSize = (exitDistance - entry) / float(steps);
+    float jitter = hash(vec3(gl_FragCoord.xy, float(nearest) + 1.0));
+    for (int step = 0; step < 32; step++) {
+      if (step >= steps) break;
+      vec3 position = origin + direction * (entry + (float(step) + jitter) * stepSize);
+      float profile = localVolumeProfile(nearest, position);
+      radiance += transmittance * localVolumeEmission[nearest].rgb * (profile * stepSize);
+      transmittance *= exp(-localVolumeAbsorption[nearest].rgb * (profile * stepSize));
+    }
+  }
+  return background * transmittance + radiance;
+}
+`;
+
 function packLights(renderer) {
   renderer.fogLightBuffers ??= createFogLightBuffers();
   packFogLights(renderer.lighting, renderer.fogLightBuffers);
@@ -80,7 +209,9 @@ function packLights(renderer) {
 
 registerShaderFeatureCode('volumeFog', {
   // The JavaScript half, which the renderer calls for a frame that draws a volume fog.
-  support: { packLights, bindUniforms, usesDetail: fogUsesDetail },
+  support: { packLights, bindUniforms, usesDetail: fogUsesDetail, prepareLocalVolumes, bindLocalVolumes },
+  localDeclarations: LOCAL_VOLUME_DECLARATIONS,
+  localFunctions: LOCAL_VOLUME_FUNCTIONS,
   postDeclarations: `
 uniform highp sampler2DShadow volumeShadowMap;
 uniform mat4 volumeLightProjection;
