@@ -248,7 +248,7 @@ The Windsurf documentation pages now redirect to Devin Desktop, which names `.de
 
 ## Check that it works
 
-First, ask the harness to list its MCP tools. You must see 23 tools whose names start with `scene_`, `mesh_` or `scene_render_`. Some harnesses add the server name in front, for example `mcp__67js-scene__scene_look` in Claude Code.
+First, ask the harness to list its MCP tools. You must see 24 tools whose names start with `scene_`, `mesh_` or `scene_render_`. Some harnesses add the server name in front, for example `mcp__67js-scene__scene_look` in Claude Code.
 
 Then give the agent this prompt:
 
