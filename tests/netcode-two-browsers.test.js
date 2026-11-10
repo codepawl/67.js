@@ -109,8 +109,12 @@ for (const transport of ['broadcast', 'websocket']) {
     let browser;
     try {
       try {
-        browser = await chromium.launch({ headless: true });
+        browser = await launchChrome(chromium);
       } catch (error) {
+        // On CI the runner ships Chrome, so a launch failure there is a real failure, not a reason to skip.
+        if (process.env.CI) {
+          throw error;
+        }
         testContext.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
         return;
       }
