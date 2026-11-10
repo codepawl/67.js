@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { createContext, Script } from 'node:vm';
 import { VEGETATION_CAPABILITY_NOTE } from '../src/agent-vegetation-notes.js';
 import { CROWD_CAPABILITY_NOTE } from '../src/agent-crowd-notes.js';
+import { GAME_CAPABILITIES } from '../src/game-setup-notes.js';
 import { USER_PASS_CAPABILITIES } from '../src/user-pass.js';
 import { MESH_BLEND_CAPABILITIES } from '../src/mesh-blend.js';
 import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
@@ -111,7 +112,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
   const context = createContext({ createServer, randomUUID, existsSync: () => true,
     readFile: async () => '', packageMetadata: { version: 'test' },
     createRequire: () => ({ resolve: () => { throw new Error('no peer in tests'); } }),
-    VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
+    VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, GAME_CAPABILITIES, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
     recipeAssetNeeds, sequenceFrameIds, catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, TEXTURE_SEQUENCE_CAPABILITIES, AGENT_ASSET_LIMITS, assertCombinedAssetBytes,
     audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName,
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
