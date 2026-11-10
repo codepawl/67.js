@@ -48,6 +48,19 @@ graph.trigger('wave');
 
 A runnable sample is `bench/animation-graph/index.html` (`npm run dev`, then open `/bench/animation-graph/`): the CC0 RobotExpressive blends Idle, Walking and Running by speed. W walks, Shift runs, `?speed=3.5` pins the speed.
 
+With the [player](player.md), copy its state into parameters in a system placed between the controller and the graph:
+
+```js
+const parameterSystem = {
+  name: 'animation-parameters',
+  fixedUpdate() {
+    graph.set('speed', controller.state.speed);
+    graph.set('airborne', controller.state.airborne);
+  },
+};
+// systems: [input, controller, parameterSystem, graph.system()]
+```
+
 ## Parameters
 
 `parameters` maps a name to `{ type, initial }`.
