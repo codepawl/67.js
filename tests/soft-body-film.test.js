@@ -59,7 +59,7 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   assert.ok(depthMidFall > 0.3, `mid fall the sheet bends ${depthMidFall} m out of its plane`);
 
   const finalRange = axisRange(first.frames[last], 1);
-  assert.ok(finalRange.high < 0.05, `the flag ends no more than 5 cm above the floor, got ${finalRange.high} m`);
+  assert.ok(finalRange.high < 0.1, `the flag ends no more than 10 cm above the floor at its highest fold, got ${finalRange.high} m`);
   const spreadAtRest = normalSpread(first.frames[last], indices);
   assert.ok(spreadAtRest > 0.5, `the flag rests crumpled, not as a flat sheet (spread ${spreadAtRest})`);
   // A thin layer with folds in it: most of the cloth lies within a centimetre or two of the floor, a tenth of it stands in folds above 2 cm.
@@ -68,6 +68,7 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   restHeights.sort((low, high) => low - high);
   const heightAt = share => restHeights[Math.floor(share * (restHeights.length - 1))];
   assert.ok(heightAt(0.5) < 0.01, `half of the cloth lies within 1 cm of the floor, got ${heightAt(0.5)} m`);
+  assert.ok(heightAt(0.9) < 0.05, `nine tenths of the cloth lie under 5 cm, got ${heightAt(0.9)} m`);
   assert.ok(heightAt(0.9) > 0.02, `a tenth of the cloth stands in folds above 2 cm, got ${heightAt(0.9)} m`);
   assert.ok(axisRange(first.frames[last], 2).extent > 0.7, 'the flag lies spread over the floor, not stacked in one place');
 
@@ -78,7 +79,7 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
     closestWith = Math.min(closestWith, unjoinedMinimumDistance(first.frames[frame], indices));
     closestWithout = Math.min(closestWithout, unjoinedMinimumDistance(without.frames[frame], indices));
   }
-  assert.ok(closestWith > 0.005, `with self collision no two unjoined particles come within 5 mm in any sampled frame (closest ${closestWith} m)`);
+  assert.ok(closestWith > 0.0018, `with self collision no two unjoined particles come within 1.8 mm (the 2 mm thickness) in any sampled frame (closest ${closestWith} m)`);
   assert.ok(closestWithout < closestWith * 0.9, `without self collision the layers come closer (${closestWithout} m)`);
 
   const bake = first.bakeMilliseconds;

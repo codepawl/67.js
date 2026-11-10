@@ -42,24 +42,25 @@ export function jellyCubeRecipe() {
   });
 }
 
-// The pole's path: a fast side to side swing on the way down so the sheet ripples, a landing at 0.7 s, then a zig-zag drag across the floor
-// that tosses the cloth from side to side, so it piles in several crumpled folds instead of one ridge.
+// The pole's path: a wide whip from side to side on the way down so the sheet billows and ripples, a landing at 0.8 s, then a zig-zag drag
+// 2 m across the floor that pulls the cloth into a thin crumpled layer.
 const POLE_KEYFRAMES = [
-  { time: 0, value: [0, 2.6, 0] },
-  { time: 0.2, value: [0.15, 2.3, 0.3] },
-  { time: 0.4, value: [-0.15, 1.5, -0.3] },
-  { time: 0.6, value: [0.1, 0.5, 0.4] },
-  { time: 0.8, value: [0, 0.012, 0.6] },
-  { time: 1.0, value: [0.4, 0.012, 1.0] },
-  { time: 1.3, value: [-0.4, 0.012, 1.5] },
-  { time: 1.6, value: [0.4, 0.012, 2.0] },
-  { time: 1.9, value: [-0.4, 0.012, 2.5] },
-  { time: 2.3, value: [0, 0.012, 2.8] },
-  { time: 3, value: [0, 0.012, 2.8] },
+  { time: 0, value: [0, 2.0, 0] },
+  { time: 0.15, value: [0.5, 1.85, 0.4] },
+  { time: 0.3, value: [-0.5, 1.4, -0.4] },
+  { time: 0.45, value: [0.4, 0.8, 0.5] },
+  { time: 0.6, value: [-0.2, 0.3, -0.2] },
+  { time: 0.8, value: [0, 0.012, 0] },
+  { time: 1.1, value: [0.3, 0.012, 0.7] },
+  { time: 1.5, value: [-0.3, 0.012, 1.1] },
+  { time: 1.9, value: [0.3, 0.012, 1.5] },
+  { time: 2.4, value: [0, 0.012, 1.9] },
+  { time: 3, value: [0, 0.012, 2.0] },
 ];
 export const FLAG_FILM_SECONDS = 3;
-// A dark saturated cloth on a mid grey floor, lit by a low key from the side so every fold casts a shadow.
-const FLAG_LOOK = { lightDirection: [-0.9, 0.45, 0.55], keyIntensity: 1.3, fillIntensity: 0.15, ambientIntensity: 0.25 };
+// A deep red and cream striped cloth on a mid grey floor, lit by a grazing key from the side so every fold casts a shadow and bends the stripes.
+const FLAG_LOOK = { lightDirection: [-0.9, 0.3, 0.45], keyIntensity: 1.5, fillIntensity: 0.12, ambientIntensity: 0.15 };
+const FLAG_STRIPES = { type: 'graph', mapping: 'uv', resolution: 256, graph: { color: { layer: { base: [0.35, 0.015, 0.04], top: [0.85, 0.78, 0.62], mask: { wave: { frequency: 8, direction: 'v', shape: 'saw' } }, edge: 0.5, softness: 0.02 } } } };
 
 /**
  * A flag hung from a pole by its top edge. The pole swings from side to side while it falls, so the sheet ripples, lands on the floor and
@@ -69,18 +70,18 @@ const FLAG_LOOK = { lightDirection: [-0.9, 0.45, 0.55], keyIntensity: 1.3, fillI
 export function foldingFlagRecipe({ selfCollision = true } = {}) {
   return baseRecipe({
     geometries: [{ id: 'flag', type: 'grid', segments: 38 }],
-    materials: [{ id: 'fabric', color: [0.5, 0.03, 0.07], doubleSided: true }],
+    materials: [{ id: 'fabric', color: [1, 1, 1], doubleSided: true, pattern: FLAG_STRIPES }],
     nodes: [
-      { id: 'flag', geometry: 'flag', material: 'fabric', translation: [0, 2.1, 0], scale: [1.6, 1, 1] },
-      { id: 'pole', translation: [0, 2.6, 0] },
+      { id: 'flag', geometry: 'flag', material: 'fabric', translation: [0, 1.5, 0], scale: [1.6, 1, 1] },
+      { id: 'pole', translation: [0, 2.0, 0] },
     ],
     motion: { duration: FLAG_FILM_SECONDS, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes: POLE_KEYFRAMES }] },
-    camera: { eye: [2.6, 1.8, 7.5], target: [0, 1.0, 1.2] },
+    camera: { eye: [2.2, 1.7, 5.4], target: [0, 0.6, 0.8] },
     floorColor: [0.28, 0.28, 0.3],
     environment: FLAG_LOOK,
     cloth: {
       duration: FLAG_FILM_SECONDS,
-      sheets: [{ node: 'flag', pin: ['top'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, bend: 0.0002, damping: 1.5, friction: 0.4, thickness: 0.003 }],
+      sheets: [{ node: 'flag', pin: ['topLeft', 'topRight'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, bend: 0.0002, damping: 1.5, friction: 0.4, thickness: 0.002 }],
       colliders: [{ node: 'ground', shape: 'box' }],
     },
   });
