@@ -56,15 +56,20 @@ async function uploadTexturesInSlices(renderer, parts) {
   }
 }
 
+// replaceParts keeps skinned, morphed and crowd batches only while they stay unchanged, so they start inside the renderer.
+const isPinnedPart = part => Boolean(part.skin || part.morph || part.crowd || part.geometry.skinIndices || part.geometry.morphTargets);
+
 // replaceParts builds every batch, buffer and culling table in one call. Feeding it the world in growing prefixes that
 // end on a geometry boundary keeps each call small, because the batches it already built are kept as they are.
 async function replacePartsInSlices(renderer, parts) {
   const partsByGeometry = new Map();
+  const pinned = parts.filter(isPinnedPart);
   for (const part of parts) {
+    if (isPinnedPart(part)) continue;
     if (!partsByGeometry.has(part.geometry)) partsByGeometry.set(part.geometry, []);
     partsByGeometry.get(part.geometry).push(part);
   }
-  const prefix = [];
+  const prefix = [...pinned];
   const totalWeight = [...partsByGeometry].reduce((total, [geometry, sharing]) => total + geometry.indices.length + sharing.length * 300, 0);
   const sliceWeight = totalWeight / REPLACE_SLICES;
   let weight = 0;
@@ -121,7 +126,7 @@ export async function buildWorld(download, canvas, overrides = {}) {
   // whole world drew nothing after its first frame).
   const frame = { ...description.frame, exposure: description.exposure ?? 1 };
   const whole = surfaceOf([...inWholeWorldOrder(files), ...extraParts]);
-  const renderer = new Renderer67(canvas, shaderFeatureRepresentatives(whole.parts), {
+  const renderer = new Renderer67(canvas, [...new Set([...shaderFeatureRepresentatives(whole.parts), ...whole.parts.filter(isPinnedPart)])], {
     ...options,
     ...overrides,
     pixelRatio: Math.min(devicePixelRatio, 1.25),
