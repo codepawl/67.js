@@ -1,7 +1,7 @@
 // Prints the three "Done when" numbers of issue #623 in one table: progressive time to the 64 sample still's FLIP score,
 // the median frame time at 1 sample per pixel, and the light choice score against uniform at equal samples.
 //   node bench/reference/progressive-proof.mjs <output directory> --cycles <directory with <scene>-cycles.npy> [--runs 3] [--frames 200]
-// Behind the GPU lock: bash ~/.agents/tools/gpu-lock.sh node bench/reference/progressive-proof.mjs ...
+// Run it behind a GPU lock when other jobs share the GPU: it takes the whole GPU for minutes at a time.
 // It runs progressive-compare.mjs and progressive-score.py (uv, flip-evaluator) once per run, so it needs Chrome, a GPU and uv.
 // The scores do not change between runs; the times do, so every time is printed as a range over the runs.
 import { spawnSync } from 'node:child_process';
