@@ -125,3 +125,10 @@ export function bindMask(context, uniforms, renderer, frame, mask) {
   context.uniform1f(uniforms.maskInvert, mask?.invert ? 1 : 0);
   context.activeTexture(context.TEXTURE1);
 }
+
+/** Clears the object ID texture from unit 2 after the draw, so the pass framebuffer can be drawn into again. Leaves unit 1 active. */
+export function unbindMask(context) {
+  context.activeTexture(context.TEXTURE2);
+  context.bindTexture(context.TEXTURE_2D, null);
+  context.activeTexture(context.TEXTURE1);
+}

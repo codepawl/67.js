@@ -146,10 +146,21 @@ test('a stage binds the part numbers of a masked step and refuses an unknown par
   const bound = calls.find(call => call[0] === 'uniform1iv');
   assert.deepEqual([...bound[2]].slice(0, 3), [2, 4, 0]);
   assert.throws(() => stage.apply(renderer, frame({ objects: ['ghost'] }), effects, 'source'), /"ghost" is not a part in the frame\. Fix: use a part name such as "floor"/);
+  const afterDraw = calls.slice(calls.findLastIndex(call => call[0] === 'drawArrays') + 1);
+  const unbind = afterDraw.findIndex(call => call[0] === 'bindTexture' && call[2] === null);
+  assert.ok(unbind > 0 && afterDraw[unbind - 1][0] === 'activeTexture', 'the object ID texture is unbound from its unit after the draw');
   renderer.passSupport = null;
   assert.throws(() => stage.apply(renderer, frame({ objects: ['hero'] }), effects, 'source'), /installRenderPasses/);
   stage.releaseTargets(context);
   stage.dispose(context);
+});
+
+test('a mask cannot be combined with an active lens distortion, which warps the image the mask is not warped with', () => {
+  const masked = { colorBalance: { gain: [1.2, 1, 1], mask: { depth: { far: 5 } } } };
+  assert.throws(() => resolvePostSteps({ ...masked, lensDistortion: { distortion: 0.2 } }), /colorBalance.mask cannot be combined with lensDistortion/);
+  assert.throws(() => resolvePostSteps({ stylize: { pixelate: 4, mask: { depth: { far: 5 } } }, lensDistortion: { dispersion: 0.3 } }), /stylize.mask cannot be combined/);
+  assert.ok(resolvePostSteps({ ...masked, lensDistortion: {} }).colorBalance.mask);
+  assert.ok(resolvePostSteps({ lensDistortion: { distortion: 0.2 }, colorBalance: { gain: [1.2, 1, 1] } }).lensDistortion);
 });
 
 test('the shaders keep their fixed sample patterns and read no history', () => {

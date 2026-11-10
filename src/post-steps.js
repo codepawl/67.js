@@ -1,6 +1,6 @@
 import { postStepSupport } from './shader-registry.js';
 import { createStage, sharedFragmentHeader } from './camera-effects.js';
-import { resolveMask, usesObjectMask, maskShader, bindMask, MASK_UNIFORM_NAMES } from './post-mask.js';
+import { resolveMask, usesObjectMask, maskShader, bindMask, unbindMask, MASK_UNIFORM_NAMES } from './post-mask.js';
 
 export { usesObjectMask };
 
@@ -105,7 +105,19 @@ export function resolvePostSteps(effects) {
   if (effects.glare !== undefined) resolved.glare = resolveGlare(effects.glare);
   if (effects.lensDistortion !== undefined) resolved.lensDistortion = resolveLensDistortion(effects.lensDistortion);
   if (effects.stylize !== undefined) resolved.stylize = resolveStylize(effects.stylize);
+  refuseMaskWithLensDistortion(resolved);
   return resolved;
+}
+
+// A mask reads the object ID pass and the depth, which are in undistorted screen space; lens distortion warps the colour image
+// before the masked stages run, so the mask would sit in the wrong place, more so toward the corners and with dispersion.
+function refuseMaskWithLensDistortion(resolved) {
+  const lens = resolved.lensDistortion;
+  const lensIsOn = Boolean(lens) && (lens.distortion !== 0 || lens.dispersion > 0);
+  const maskedStep = ['colorBalance', 'stylize'].find(name => resolved[name]?.mask);
+  if (lensIsOn && maskedStep) {
+    throw new TypeError(`${maskedStep}.mask cannot be combined with lensDistortion: the mask is in undistorted screen space and would not line up with the warped image. Fix: remove the mask, or set lensDistortion.distortion and dispersion to 0.`);
+  }
 }
 
 // Registers what the look needs: the field names it accepts and how to resolve them (src/shader-registry.js).
@@ -264,8 +276,21 @@ function isColorBalanceActive(colorBalance) {
   return Boolean(colorBalance) && ['lift', 'gamma', 'gain'].some(name => colorBalance[name].some((component, index) => component !== NEUTRAL[name][index]));
 }
 
+// The object ID texture is the colour attachment of the pass framebuffer, which the next frame draws into. Leaving it bound on
+// unit 2 would risk a feedback loop, so the unit is cleared after the masked draw.
+function withMaskUnbound(stage) {
+  return {
+    ...stage,
+    apply(renderer, frame, effects, sourceTexture) {
+      const result = stage.apply(renderer, frame, effects, sourceTexture);
+      if (result) unbindMask(renderer.context);
+      return result;
+    },
+  };
+}
+
 function createColorBalanceStage() {
-  return createStage({
+  return withMaskUnbound(createStage({
     name: 'Color balance',
     fragment: colorBalanceFragment,
     uniformNames: ['lift', 'inverseGamma', 'gain', ...MASK_UNIFORM_NAMES],
@@ -277,7 +302,7 @@ function createColorBalanceStage() {
       context.uniform3fv(uniforms.gain, colorBalance.gain);
       bindMask(context, uniforms, renderer, frame, colorBalance.mask);
     },
-  });
+  }));
 }
 
 function isStylizeActive(stylize) {
@@ -285,7 +310,7 @@ function isStylizeActive(stylize) {
 }
 
 function createStylizeStage() {
-  return createStage({
+  return withMaskUnbound(createStage({
     name: 'Stylize',
     fragment: stylizeFragment,
     uniformNames: ['sharpenAmount', 'kuwaharaRadius', 'posterizeLevels', 'pixelateSize', ...MASK_UNIFORM_NAMES],
@@ -298,7 +323,7 @@ function createStylizeStage() {
       context.uniform1f(uniforms.pixelateSize, stylize.pixelate ?? 0);
       bindMask(context, uniforms, renderer, frame, stylize.mask);
     },
-  });
+  }));
 }
 
 function createGlareStage() {
