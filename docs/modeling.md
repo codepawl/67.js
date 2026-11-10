@@ -70,12 +70,19 @@ Volume, area and bounds match Blender 5.2 for an open and a closed Bezier curve 
 
 `curveSet(splines, options)` sweeps up to 64 splines (4096 points in all) into one mesh that shares `radius`, `taper`,
 `profile`, `resolution` and `radialSegments`. The scene geometry `curve` takes one spline in its own fields or several
-in `splines`, never both. A spline is `{ points | shape, closed, kind, weights, trim }`, and `curve(points, { kind, weights, trim })` is the one-spline form.
+in `splines`, never both. A spline is `{ points | shape, closed, kind, weights, order, knots, knotMode, trim }`, and `curve(points, { kind, weights, order, knots, knotMode, trim })` is the one-spline form.
 
 - `kind` is `bezier` (default), `poly` or `nurbs`. A poly spline is straight segments with sharp corners; each ring takes the
-  direction of the segment that leaves it, so corners are not mitred. A NURBS spline is a uniform cubic B-spline: open ones are
+  direction of the segment that leaves it, so corners are not mitred. A NURBS spline is a cubic B-spline by default: open ones are
   clamped (they start and end on the first and last point), closed ones are periodic. `weights` holds one number above 0 per
   point (default 1); a higher weight pulls the curve toward its point.
+- NURBS `order` is an integer from 2 to 8 and at most the point count (default 4, cubic; 2 follows the control polygon, 3 with
+  weights draws exact conic arcs). An open NURBS takes `knotMode` `clamped` (default) or `uniform` (evenly spaced knots, the
+  curve does not reach its end points), or explicit `knots`: point count plus order numbers that never decrease and rise
+  between `knots[order - 1]` and `knots[count]`, where the curve is defined; repeated knots lower the smoothness there. `knots`
+  and `knotMode` exclude each other and do not apply to a closed spline, which is periodic. Samples spread evenly over that
+  parameter range, so unevenly spaced knots do not change the sample count. Tests compare the points with the Cox-de Boor
+  recursion written out from its definition.
 - `shape` replaces `points` with a primitive in the XY plane, and sets `closed` and `kind` itself:
   - `{ type: 'arc', radius = 1, startAngle = 0, sweep = 3.14159, segments = 8 }`: a Bezier arc, exact to about 1e-7 of the radius;
     a sweep of 2 pi closes it. Angles are radians; circle segments are arcs.
@@ -93,8 +100,22 @@ in `splines`, never both. A spline is `{ points | shape, closed, kind, weights, 
   The growth runs over the spline's own trim range (a trim in factors). `value` is the growth with no track. More steps follow
   a curved path more closely; between steps the tube blends the two neighbours.
 
-Not covered: trim ranges that wrap around the start of a closed curve, NURBS of other orders or with custom knots, a spline
-fill, and mesh edges to curve.
+### Mesh edges to curve
+
+`meshEdgesToSplines(mesh, selection)` from `src/mesh.js` turns selected edges of a `MeshData` into poly splines that
+`curveSet` sweeps: `[{ kind: 'poly', closed, points }]`. The selection is one of
+- an edge rule of `selectEdges`, such as `{ open: true }` (boundary edges of a hole or rim), `{ angle: 45 }` or `{ along: [0, 1, 0] }`;
+- `{ group, minWeight = 0.5 }`: edges whose two vertices both weigh at least `minWeight` in the vertex group;
+- `{ edges: [edge indices] }`.
+
+A loop where every vertex has two selected edges becomes a closed spline, starting at its lowest vertex and leaving toward its
+lower neighbour. A chain becomes an open spline from its end or from a junction vertex (three or more edges), so a branching
+selection is several splines that meet there. The order is by first vertex and does not depend on the selection order. At most
+64 splines, 1024 points in one and 4096 in all; a selection past that fails and says to pick fewer edges. It is a library
+call; a recipe curve takes the resulting splines in `splines`.
+
+Not covered: trim ranges that wrap around the start of a closed curve, a spline fill, and reading the edges of a scene part
+through MCP.
 
 ## Text
 

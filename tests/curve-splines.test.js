@@ -276,3 +276,108 @@ test('a closed curve grows to full length with no trim, and its first and last s
     assert.equal(geometry.morphTargets[3].positions.length, vertexCount, `${name} last state`);
   }
 });
+
+// Cox-de Boor recursion straight from the definition of the basis functions, to check the implementation against.
+function referenceBasis(index, degree, parameter, knots, lastDomainKnot) {
+  if (degree === 0) {
+    const inSpan = parameter >= knots[index] && parameter < knots[index + 1];
+    const atEnd = parameter === lastDomainKnot && knots[index] < knots[index + 1] && knots[index + 1] === lastDomainKnot;
+    return inSpan || atEnd ? 1 : 0;
+  }
+  const leftSpan = knots[index + degree] - knots[index];
+  const rightSpan = knots[index + degree + 1] - knots[index + 1];
+  const left = leftSpan === 0 ? 0 : (parameter - knots[index]) / leftSpan * referenceBasis(index, degree - 1, parameter, knots, lastDomainKnot);
+  const right = rightSpan === 0 ? 0 : (knots[index + degree + 1] - parameter) / rightSpan * referenceBasis(index + 1, degree - 1, parameter, knots, lastDomainKnot);
+  return left + right;
+}
+
+function referenceNurbs(controls, weights, order, knots, parameter) {
+  const sum = [0, 0, 0];
+  let weightSum = 0;
+  controls.forEach((control, index) => {
+    const weighted = referenceBasis(index, order - 1, parameter, knots, knots[controls.length]) * weights[index];
+    weightSum += weighted;
+    for (let axis = 0; axis < 3; axis++) sum[axis] += weighted * control[axis];
+  });
+  return sum.map(value => value / weightSum);
+}
+
+function assertMatchesReference(controls, weights, options, resolution) {
+  const { order, knots } = options;
+  const samples = sampleNurbs(controls, weights, false, resolution, options);
+  const start = knots[order - 1];
+  const end = knots[controls.length];
+  const spans = controls.length - 1;
+  samples.points.forEach((point, index) => {
+    const expected = referenceNurbs(controls, weights, order, knots, start + (end - start) * index / (spans * resolution));
+    point.forEach((value, axis) => assert.ok(Math.abs(value - expected[axis]) < 1e-9, `sample ${index} axis ${axis}: ${value} against ${expected[axis]}`));
+  });
+}
+
+test('NURBS order and knots match a reference evaluation', () => {
+  const controls = [[0, 0, 0], [1, 2, 0], [2, -1, 1], [3, 2, 0], [4, 0, 2]];
+  const weights = [1, 2, 0.5, 1.5, 1];
+  assertMatchesReference(controls, weights, { order: 3, knots: [0, 0, 0, 1, 2, 3, 3, 3] }, 7);
+  assertMatchesReference(controls, weights, { order: 5, knots: [0, 0, 0, 0, 0, 1, 1, 1, 1, 1] }, 7);
+  assertMatchesReference(controls, weights, { order: 4, knots: [0, 1, 2, 3, 4, 5, 6, 7, 8] }, 7);
+  assertMatchesReference(controls, weights, { order: 3, knots: [0, 0, 0, 0.5, 0.5, 2, 2, 2] }, 7);
+});
+
+test('a quadratic rational NURBS draws an exact quarter circle', () => {
+  const controls = [[1, 0, 0], [1, 1, 0], [0, 1, 0]];
+  const samples = sampleNurbs(controls, [1, Math.SQRT1_2, 1], false, 16, { order: 3 });
+  for (const [x, y] of samples.points) assert.ok(Math.abs(Math.hypot(x, y) - 1) < 1e-12);
+});
+
+test('knotMode uniform leaves the end points, clamped keeps them, order 2 is the control polygon', () => {
+  const controls = [[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0], [4, 0, 0]];
+  const weights = Array(5).fill(1);
+  const clamped = sampleNurbs(controls, weights, false, 4, { order: 4, knotMode: 'clamped' });
+  const uniform = sampleNurbs(controls, weights, false, 4, { order: 4, knotMode: 'uniform' });
+  assert.deepEqual(clamped.points[0], controls[0]);
+  assert.notDeepEqual(uniform.points[0], controls[0]);
+  assert.deepEqual(sampleNurbs(controls, weights, false, 4), clamped);
+  const linear = sampleNurbs(controls, weights, false, 4, { order: 2 });
+  assert.deepEqual(linear.points[4], controls[1]);
+});
+
+test('curve takes order, knots and knotMode and rejects bad ones with what to pass', () => {
+  const points = [[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]];
+  const wire = { radius: 0.05, resolution: 4 };
+  const base = curve(points, { ...wire, kind: 'nurbs' });
+  assert.equal(hashOf(curve(points, { ...wire, kind: 'nurbs', order: 4 })), hashOf(base));
+  assert.equal(hashOf(curve(points, { ...wire, kind: 'nurbs', knots: [0, 0, 0, 0, 1, 1, 1, 1] })), hashOf(base));
+  assert.notEqual(hashOf(curve(points, { ...wire, kind: 'nurbs', order: 3 })), hashOf(base));
+  assert.equal(hashOf(curve(points, { ...wire, kind: 'nurbs', order: 3 })), hashOf(curve(points, { ...wire, kind: 'nurbs', order: 3 })));
+  const nurbs = { ...wire, kind: 'nurbs' };
+  const cases = [
+    [{ ...nurbs, order: 1 }, /order must be an integer from 2 to 4/],
+    [{ ...nurbs, order: 5 }, /order must be an integer from 2 to 4/],
+    [{ ...nurbs, order: 2.5 }, /order must be an integer/],
+    [{ ...nurbs, knots: [0, 0, 0, 1, 1, 1] }, /needs 8 values \(points 4 plus order 4\)/],
+    [{ ...nurbs, knots: [0, 0, 0, 0, 1, 0.5, 1, 1] }, /must not decrease; knots\[5\]/],
+    [{ ...nurbs, knots: [0, 0, 0, 0, 0, 0, 0, 0] }, /must rise between knots\[3\] and knots\[4\]/],
+    [{ ...nurbs, knots: [0, 0, 0, 0, 1, 1, 1, NaN] }, /knots must be a finite float/],
+    [{ ...nurbs, knots: [0, 0, 0, 0, 1, 1, 1, 1], knotMode: 'uniform' }, /exclude each other/],
+    [{ ...nurbs, knotMode: 'periodic' }, /knotMode must be one of clamped, uniform/],
+    [{ ...nurbs, closed: true, knotMode: 'uniform' }, /apply to open splines/],
+    [{ ...wire, order: 3 }, /order is not allowed here/],
+    [{ ...wire, knotMode: 'uniform' }, /knotMode is not allowed here/],
+  ];
+  for (const [options, pattern] of cases) assert.throws(() => curve(points, options), pattern);
+});
+
+test('a recipe curve geometry takes order and knots', () => {
+  const recipe = geometry => ({
+    format: '67js.scene',
+    schemaVersion: 1,
+    materials: [{ id: 'metal', color: [0.6, 0.6, 0.65] }],
+    geometries: [{ id: 'g', type: 'curve', kind: 'nurbs', points: [[0, 0, 0], [1, 1, 0], [2, 0, 0], [3, 1, 0]], radius: 0.05, ...geometry }],
+    nodes: [{ id: 'n', geometry: 'g', material: 'metal' }],
+  });
+  const cubic = createAgentScene(recipe({}));
+  const quadratic = createAgentScene(recipe({ order: 3, knots: [0, 0, 0, 1, 2, 2, 2] }));
+  assert.ok(quadratic.parts[0].geometry.indices.length > 0);
+  assert.notEqual(hashOf(quadratic.parts[0].geometry), hashOf(cubic.parts[0].geometry));
+  assert.throws(() => createAgentScene(recipe({ order: 9 })), /order must be an integer from 2 to 4/);
+});
