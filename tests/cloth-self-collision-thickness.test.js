@@ -51,3 +51,15 @@ test('a thickness beyond half the shortest edge is capped, so layers never fight
 test('the thick-layer bake is deterministic', () => {
   assert.equal(restingGap({ thickness: 0.01 }), restingGap({ thickness: 0.01 }));
 });
+
+test('a sheet without a thickness rests exactly like an explicit radius of 0.9 x half the shortest edge', () => {
+  const byDefault = restingGap({});
+  const explicit = restingGap({ selfCollision: { radius: SPACING / 2 * 0.9 } });
+  assert.ok(Math.abs(byDefault - explicit) < 1e-6, `default ${byDefault} m against explicit ${explicit} m`);
+});
+
+test('a sheet that sets both selfCollision true and a thickness uses the thickness, unlike an explicit radius', () => {
+  const withThickness = restingGap({ thickness: 0.01 });
+  const explicitOld = restingGap({ thickness: 0.01, selfCollision: { radius: SPACING / 2 * 0.9 } });
+  assert.ok(explicitOld - withThickness > 0.02, `thickness layers ${withThickness} m, explicit old radius ${explicitOld} m`);
+});
