@@ -2,7 +2,7 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createCloth } from '../src/cloth.js';
-import { frameHashes, jellyCubeRecipe, measureBounce, recordJelly } from './support/jelly-cube.mjs';
+import { foldedTriangles, frameHashes, JELLY_PRESETS, jellyCubeRecipe, measureBounce, recordJelly } from './support/jelly-cube.mjs';
 
 const FRAME_COUNT = 110;
 
@@ -75,4 +75,22 @@ test('softBody.bounce outside 0 to 1 names the field and the range', () => {
 test('a recipe sheet rejects a bad bounce at the boundary', async () => {
   const { createAgentScene } = await import('../src/agent-scene.js');
   assert.throws(() => createAgentScene(jellyCubeRecipe({ softBody: { bounce: 2 } })), /softBody\.bounce.*0.*1/s);
+});
+
+// The preview's three presets (`JELLY_PRESETS`): each step must be clearly visible, and the surface must not fold.
+test('the firm, medium and soft presets step clearly in dent and rebound without folding', () => {
+  const results = JELLY_PRESETS.map(preset => measure(preset.softBody, preset.sheet));
+  const [firm, medium, soft] = results;
+  assert.ok(medium.dent > firm.dent * 1.4 && soft.dent > medium.dent * 1.1, `dents ${results.map(result => result.dent.toFixed(3)).join(', ')}`);
+  assert.ok(medium.reboundHeight > firm.reboundHeight * 1.8 && soft.reboundHeight > medium.reboundHeight * 1.8, `rebounds ${results.map(result => result.reboundHeight.toFixed(3)).join(', ')}`);
+  assert.ok(soft.dent > 0.045 && soft.reboundHeight > 0.4, `soft dent ${soft.dent}, rebound ${soft.reboundHeight}`);
+  for (const preset of JELLY_PRESETS) {
+    const folded = foldedTriangles(jellyCubeRecipe({ softBody: preset.softBody, sheet: preset.sheet }), FRAME_COUNT);
+    assert.ok(folded <= 8, `${preset.id} folded ${folded} of 588 triangles in one frame`);
+  }
+});
+
+test('a near-zero shape folds the surface on impact, which is why the soft preset keeps 0.15', () => {
+  const folded = foldedTriangles(jellyCubeRecipe({ softBody: { shape: 0.02, bounce: 1 }, sheet: { stiffness: 0.1 } }), FRAME_COUNT);
+  assert.ok(folded > 50, `shape 0.02 should fold more than 50 triangles, got ${folded}`);
 });

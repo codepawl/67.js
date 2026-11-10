@@ -11,17 +11,16 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import '../tests/support/load-agent-scene-modules.mjs';
 import { createAgentScene } from '../src/agent-scene.js';
-import { JELLY_FRAMES_PER_SECOND, jellyCubeRecipe, measureBounce } from '../tests/support/jelly-cube.mjs';
+import { JELLY_FRAMES_PER_SECOND, JELLY_PRESETS, jellyCubeRecipe, measureBounce } from '../tests/support/jelly-cube.mjs';
 
 const PREVIEW = { width: 960, height: 540, fps: JELLY_FRAMES_PER_SECOND };
 const FRAME_COUNT = 150;
 const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 
-const CUBES = [
-  { id: 'firm', x: -1.2, color: [0.2, 0.55, 0.95], softBody: { shape: 1, bounce: 0.1 }, sheet: {} },
-  { id: 'medium', x: 0, color: [0.25, 0.85, 0.45], softBody: { shape: 0.15, bounce: 0.5 }, sheet: {} },
-  { id: 'soft', x: 1.2, color: [0.95, 0.35, 0.55], softBody: { shape: 0.02, bounce: 1 }, sheet: { stiffness: 0.1 } },
-];
+// The presets are shared with the test (tests/support/jelly-cube.mjs). Colours are named so the labels and the docs agree:
+// blue is firm, amber is medium, pink is soft.
+const POSITIONS = { firm: { x: -1.2, color: [0.15, 0.45, 0.95] }, medium: { x: 0, color: [0.98, 0.7, 0.1] }, soft: { x: 1.2, color: [0.95, 0.3, 0.6] } };
+const CUBES = JELLY_PRESETS.map(preset => ({ ...preset, ...POSITIONS[preset.id] }));
 
 function threeCubeRecipe() {
   const single = jellyCubeRecipe({ duration: FRAME_COUNT / JELLY_FRAMES_PER_SECOND });
@@ -78,7 +77,7 @@ async function main() {
   const stillTimes = {};
   for (const [id, frames] of cubeFrames(recipe)) {
     const bounce = measureBounce(frames);
-    measured[id] = { ...CUBES.find(cube => cube.id === id).softBody, ...CUBES.find(cube => cube.id === id).sheet, contactStep: bounce.contact, deepestDentStep: bounce.deepestFrame, reboundTopStep: bounce.topFrame, dentMeters: Number(bounce.dent.toFixed(4)), reboundMeters: Number(bounce.reboundHeight.toFixed(4)) };
+    measured[id] = { colorName: CUBES.find(cube => cube.id === id).colorName, ...CUBES.find(cube => cube.id === id).softBody, ...CUBES.find(cube => cube.id === id).sheet, contactStep: bounce.contact, deepestDentStep: bounce.deepestFrame, reboundTopStep: bounce.topFrame, dentMeters: Number(bounce.dent.toFixed(4)), reboundMeters: Number(bounce.reboundHeight.toFixed(4)) };
     stillTimes[`${id}-contact`] = bounce.contact / JELLY_FRAMES_PER_SECOND;
     stillTimes[`${id}-deepest-dent`] = bounce.deepestFrame / JELLY_FRAMES_PER_SECOND;
     stillTimes[`${id}-rebound-top`] = bounce.topFrame / JELLY_FRAMES_PER_SECOND;

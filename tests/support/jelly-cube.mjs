@@ -78,3 +78,42 @@ export function measureBounce(frames) {
   const reboundHeight = liftOff >= frames.length ? 0 : ranges[topFrame].low - FLOOR_THICKNESS;
   return { restHeight, contact, deepestFrame, topFrame: Math.min(topFrame, frames.length - 1), dent: restHeight - ranges[deepestFrame].extent, reboundHeight };
 }
+
+/**
+ * The three jellies of the preview, from firm to soft. The soft one keeps `shape` at 0.15: below about 0.1 the surface
+ * folds over itself on impact (see `foldedTriangles`), which is how a deeper dent was paid for before.
+ */
+export const JELLY_PRESETS = [
+  { id: 'firm', colorName: 'blue', softBody: { shape: 1, bounce: 0 }, sheet: {} },
+  { id: 'medium', colorName: 'amber', softBody: { shape: 0.3, bounce: 0.6 }, sheet: { stiffness: 0.2 } },
+  { id: 'soft', colorName: 'pink', softBody: { shape: 0.15, bounce: 1 }, sheet: { stiffness: 0.05 } },
+];
+
+/**
+ * Most triangles facing toward the body's centre in any one frame. A closed convex-ish jelly keeps every triangle facing
+ * out, so a count above zero means the surface folded over itself (a fold shows as ragged doubled edges).
+ */
+export function foldedTriangles(recipe, frameCount) {
+  const scene = createAgentScene(recipe);
+  let worst = 0;
+  for (let frame = 0; frame < frameCount; frame++) {
+    scene.sampleMotion(frame / JELLY_FRAMES_PER_SECOND);
+    const { positions, indices } = scene.parts.find(part => part.name === 'cube').geometry;
+    const center = [0, 0, 0];
+    for (let index = 0; index < positions.length; index++) center[index % 3] += positions[index] / (positions.length / 3);
+    let folded = 0;
+    for (let corner = 0; corner < indices.length; corner += 3) {
+      const a = indices[corner] * 3;
+      const b = indices[corner + 1] * 3;
+      const c = indices[corner + 2] * 3;
+      const edgeOne = [positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]];
+      const edgeTwo = [positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]];
+      const facing = (edgeOne[1] * edgeTwo[2] - edgeOne[2] * edgeTwo[1]) * (positions[a] - center[0])
+        + (edgeOne[2] * edgeTwo[0] - edgeOne[0] * edgeTwo[2]) * (positions[a + 1] - center[1])
+        + (edgeOne[0] * edgeTwo[1] - edgeOne[1] * edgeTwo[0]) * (positions[a + 2] - center[2]);
+      if (facing <= 0) folded++;
+    }
+    worst = Math.max(worst, folded);
+  }
+  return worst;
+}

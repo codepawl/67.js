@@ -450,7 +450,17 @@ Jelly feel (`tests/soft-body-bounce.test.js`, measured): the 0.5 m rounded cube 
 | 0.02 | 0.9 | 0.065 m | 0.000 m | 0.093 m | 0.441 m |
 | 0.02 | 0.1 | 0.099 m | 0.000 m | 0.100 m | 0.447 m |
 
-Before `bounce` existed, `shape` and `damping` were the only knobs that changed the rebound, and none gave a controlled one. Lowering `shape` or `stiffness` gives a dent up to 3.8 times deeper (0.026 to 0.099 m), so softness needed no new field. With `damping: 0` and the default shape, `bounce` 1 sends the cube back to 1.85 m of its 1.95 m drop.
+Before `bounce` existed, `shape` and `damping` were the only knobs that changed the rebound, and none gave a controlled one. Lowering `shape` or `stiffness` deepens the dent (0.026 to 0.099 m), so softness needed no new field. A very low `shape` has a price: with `shape` 0.02 and `stiffness` 0.1, 132 of the cube's 588 triangles turn inside out in the worst frame and the dent shows ragged, doubled edges. It is a real surface fold, not shading, and `selfCollision`, `bend`, more solver iterations and a gentler volume step do not remove it (measured). Keep `shape` at 0.15 or more for a jelly that has to look clean.
+
+Three presets that step clearly (`JELLY_PRESETS` in `tests/support/jelly-cube.mjs`, previewed by `scripts/render-jelly-bounce.mjs` and labelled by `scripts/label-jelly-bounce.py`; no triangle folds in the test):
+
+| Preset (cube colour in the preview) | `shape` | `stiffness` | `bounce` | Dent | Rebound |
+| --- | --- | --- | --- | --- | --- |
+| firm (blue) | 1 | 0.9 | 0 | 0.026 m | 0.102 m |
+| medium (amber) | 0.3 | 0.2 | 0.6 | 0.042 m | 0.216 m |
+| soft (pink) | 0.15 | 0.05 | 1 | 0.052 m | 0.464 m |
+
+With `damping: 0` and the default shape, `bounce` 1 sends the cube back to 1.85 m of its 1.95 m drop.
 
 Blender comparison (`scripts/blender-cloth.py`, Blender 5.2.2, default stiffness, mass set from the same kg/m2; `tests/cloth-blender.test.js`):
 
