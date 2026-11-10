@@ -1,1 +1,1 @@
-- `67js/addons/streaming` evicts by asset `priority`, then distance from the focus, then recency, and adds `createWorkerLoader` to decode assets in a worker (part of #776)
+- `67js/addons/streaming` evicts lowest asset `priority` first (new `evictionOrder: "distance"` opts in to farthest-first within a priority; the default stays least recently used) and adds `createWorkerLoader` to decode assets in a worker (part of #776)

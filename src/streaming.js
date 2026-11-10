@@ -97,10 +97,10 @@ export function createWorkerLoader({ createWorker, dispose } = {}) {
   return {
     load({ id, format, source, level, signal }) {
       return new Promise((resolve, reject) => {
-        const worker = createWorker();
+        let worker = null;
         const finish = settle => value => {
           signal.removeEventListener('abort', onAbort);
-          worker.terminate();
+          worker?.terminate();
           settle(value);
         };
         const succeed = finish(resolve);
@@ -108,23 +108,29 @@ export function createWorkerLoader({ createWorker, dispose } = {}) {
         function onAbort() {
           fail(new Error(`Loading "${id}" level ${level} was aborted.`));
         }
-        worker.onmessage = event => {
-          const reply = event?.data;
-          if (reply === null || typeof reply !== 'object') {
-            fail(new TypeError(`The worker for "${id}" must answer { asset, bytes } or { error }, got ${describe(reply)}.`));
-          } else if (reply.error !== undefined) {
-            fail(new Error(String(reply.error)));
-          } else {
-            succeed({ asset: reply.asset, bytes: reply.bytes });
-          }
-        };
-        worker.onerror = event => fail(new Error(event?.message ?? `The worker for "${id}" failed.`));
         if (signal.aborted) {
           onAbort();
           return;
         }
         signal.addEventListener('abort', onAbort, { once: true });
-        worker.postMessage({ id, format, source, level });
+        try {
+          worker = createWorker();
+          worker.onmessage = event => {
+            const reply = event?.data;
+            if (reply === null || typeof reply !== 'object') {
+              fail(new TypeError(`The worker for "${id}" must answer { asset, bytes } or { error }, got ${describe(reply)}.`));
+            } else if (reply.error !== undefined) {
+              fail(new Error(String(reply.error)));
+            } else {
+              succeed({ asset: reply.asset, bytes: reply.bytes });
+            }
+          };
+          worker.onmessageerror = () => fail(new Error(`The worker for "${id}" sent a reply that could not be read.`));
+          worker.onerror = event => fail(new Error(event?.message ?? `The worker for "${id}" failed.`));
+          worker.postMessage({ id, format, source, level });
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
     dispose(asset) {
@@ -191,6 +197,11 @@ export function createStreaming(options = {}) {
     throw new TypeError('createStreaming onEvent must be a function (event) or left out.');
   }
 
+  const evictionOrder = options.evictionOrder ?? 'recency';
+  if (evictionOrder !== 'recency' && evictionOrder !== 'distance') {
+    throw new RangeError(`createStreaming evictionOrder must be "recency" (least recently used first, the default) or "distance" (farthest first), got ${describe(evictionOrder)} ${String(evictionOrder)}.`);
+  }
+
   const loaders = new Map();
   const records = new Map();
   const events = [];
@@ -243,9 +254,12 @@ export function createStreaming(options = {}) {
       for (const [level, resident] of record.resident) candidates.push({ record, level, resident });
     }
     const distances = new Map(candidates.map(candidate => [candidate.record.id, distanceTo(candidate.record)]));
+    const farthestFirst = (first, second) => distances.get(second.record.id) - distances.get(first.record.id);
+    const leastRecentFirst = (first, second) => first.record.lastUsed - second.record.lastUsed;
+    const [primary, secondary] = evictionOrder === 'distance' ? [farthestFirst, leastRecentFirst] : [leastRecentFirst, farthestFirst];
     return candidates.sort((first, second) => first.record.priority - second.record.priority
-      || distances.get(second.record.id) - distances.get(first.record.id)
-      || first.record.lastUsed - second.record.lastUsed
+      || primary(first, second)
+      || secondary(first, second)
       || compareText(first.record.id, second.record.id)
       || first.level - second.level);
   }
