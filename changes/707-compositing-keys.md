@@ -1,0 +1,1 @@
+- `effects.composite` keys a green screen (chroma) or a luma range out of the frame and draws it over a colour or gradient background, with the same `mask` as the other post steps (part of #707)

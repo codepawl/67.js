@@ -287,7 +287,7 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   const { objectMotion, ...renderOptions } = frameOptions;
   const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
   let needsObjectIds = Boolean(objectMotion);
-  if (effects.colorBalance || effects.glare || effects.lensDistortion || effects.stylize) {
+  if (effects.colorBalance || effects.glare || effects.lensDistortion || effects.stylize || effects.composite) {
     const postSteps = agentSceneModule('postSteps');
     postSteps.installPostSteps(record.renderer);
     needsObjectIds ||= postSteps.usesObjectMask(postSteps.resolvePostSteps(frame.effects));
