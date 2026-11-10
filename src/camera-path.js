@@ -81,6 +81,14 @@ export function fovFromFocalLength(focalLength, { sensorHeight = 24 } = {}) {
   return fov;
 }
 
+// A driver replaces single components after the tracks: `overrides.eye[1]` is a number, or undefined to keep the track.
+function applyVectorOverrides(vector, components) {
+  if (!components) return;
+  for (let axis = 0; axis < 3; axis++) {
+    if (components[axis] !== undefined) vector[axis] = components[axis];
+  }
+}
+
 /** Absolute-time camera channels reuse the same interpolation as animation clips. */
 export function createCameraPath({ duration, loop = false, eye, target = [0, 0, 0], fov = 45, roll = 0, up = [0, 1, 0], near = 0.1, far = 100 } = {}) {
   validateVector(up, 'Camera up');
@@ -102,7 +110,7 @@ export function createCameraPath({ duration, loop = false, eye, target = [0, 0, 
   const stagedUp = new Float64Array(3);
   const direction = new Float64Array(3);
 
-  function sample(time, output = { eye: [0, 0, 0], target: [0, 0, 0], up: [0, 0, 0] }, { targetMatrix } = {}) {
+  function sample(time, output = { eye: [0, 0, 0], target: [0, 0, 0], up: [0, 0, 0] }, { targetMatrix, overrides } = {}) {
     const destinations = [output.eye, output.target, output.up];
     for (const destination of destinations) {
       if (!(Array.isArray(destination) || destination instanceof Float32Array || destination instanceof Float64Array) || destination.length !== 3) {
@@ -134,11 +142,13 @@ export function createCameraPath({ duration, loop = false, eye, target = [0, 0, 
     const tracks = sampler.sample(time);
     stagedEye.set(tracks[0].output);
     stagedTarget.set(tracks[1].output);
+    applyVectorOverrides(stagedEye, overrides?.eye);
+    applyVectorOverrides(stagedTarget, overrides?.target);
     if (targetMatrix !== undefined) transformTarget(stagedTarget, targetMatrix);
     validatePose(stagedEye, stagedTarget, baseUp);
-    const fieldOfView = tracks[2].output[0];
+    const fieldOfView = overrides?.fov ?? tracks[2].output[0];
     validateLens(fieldOfView, near, far);
-    const angle = tracks[3].output[0];
+    const angle = overrides?.roll ?? tracks[3].output[0];
     const directionLength = Math.hypot(stagedTarget[0] - stagedEye[0], stagedTarget[1] - stagedEye[1], stagedTarget[2] - stagedEye[2]);
     for (let axis = 0; axis < 3; axis++) direction[axis] = (stagedTarget[axis] - stagedEye[axis]) / directionLength;
     const cosine = Math.cos(angle);

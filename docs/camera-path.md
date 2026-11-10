@@ -45,6 +45,7 @@ The path copies input vectors and keyframes. The returned `clip` is immutable. `
 ## Tracking and retained frames
 
 The optional `targetMatrix` transforms the sampled target from local coordinates into world coordinates.
+The optional `overrides` (`{ eye, target, fov, roll }`, where `eye` and `target` hold a number or `undefined` per axis) replace sampled values before the up vector is built; motion drivers use it, see [agent motion](agent-motion.md#drivers).
 The eye remains in world coordinates. The caller supplies the current matrix explicitly, so seeking has no hidden playback state.
 
 ```js

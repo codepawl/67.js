@@ -569,22 +569,33 @@ export function normalizeAgentMotion(input, recipe) {
     }
   }
   const visibleIds = new Set(ikHierarchy(recipe).map(node => node.id));
-  if (input.constraints !== undefined) {
-    result.constraints = normalizeConstraints(input.constraints, nodes, visibleIds);
-  }
   if (input.properties !== undefined) {
     result.properties = normalizeProperties(input.properties, duration, visibleIds);
+  }
+  if (input.constraints !== undefined) {
+    result.constraints = normalizeConstraints(input.constraints, nodes, visibleIds, propertyKinds(result.properties));
   }
   if (input.drivers !== undefined) {
     const lights = new Set(recipe.environment ? lightIds(recipe.environment) : []);
     result.drivers = normalizeDrivers(input.drivers, { nodes, materials, lights, morphs: morphTargets, visible: visibleIds, properties: propertyKinds(result.properties) });
     for (const { target } of result.drivers) {
-      if (identities.has(JSON.stringify([target.kind, target.id, target.property]))) {
-        throw invalidField('motion.drivers', `${target.id} ${target.property}`, `a property no track animates, since a track on ${target.kind} ${target.id} already moves ${target.property}; drop the track or the driver`);
+      if (identities.has(JSON.stringify([target.kind, target.id ?? null, target.property]))) {
+        throw invalidField('motion.drivers', `${target.id} ${target.property}`, `a property no track animates, since a track on ${target.kind} ${target.id ?? ''} already moves ${target.property}; drop the track or the driver`);
       }
     }
   }
   return result;
+}
+
+/** The camera components drivers set, in the shape createCameraPath.sample takes: eye and target by axis, fov and roll alone. */
+function cameraOverrides(looks = []) {
+  const overrides = {};
+  for (const { target, value } of looks) {
+    if (target.kind !== 'camera') continue;
+    if (target.component === undefined) overrides[target.property] = value;
+    else (overrides[target.property] ??= [])[COMPONENT_INDEX[target.component]] = value;
+  }
+  return overrides;
 }
 
 /** A rig of just the nodes IK needs: chains, the nodes their targets follow, and all their ancestors. */
@@ -896,11 +907,12 @@ export function compileAgentMotion(input, recipe) {
   for (const track of cameraTracks) {
     cameraInput[track.property] = { interpolation: track.interpolation, keyframes: track.keyframes, extrapolation: track.extrapolation, modifiers: track.modifiers };
   }
-  const cameraPath = cameraTracks.length ? createCameraPath(cameraInput) : null;
+  const cameraDrivers = (motion.drivers ?? []).filter(driver => driver.target.kind === 'camera');
+  const cameraPath = cameraTracks.length || cameraDrivers.length ? createCameraPath(cameraInput) : null;
   const stagedCamera = cameraPath ? { eye: new Float32Array(3), target: new Float32Array(3), up: new Float32Array(3) } : null;
   if (cameraPath) {
-    if (cameraInput.focalLength !== undefined && cameraTracks.some(track => track.property === 'fov')) {
-      throw invalidField('motion.tracks.property', 'camera.fov', 'a camera track other than fov, since the camera has a focalLength; give the camera a fov instead, or leave fov out of the motion');
+    if (cameraInput.focalLength !== undefined && (cameraTracks.some(track => track.property === 'fov') || cameraDrivers.some(driver => driver.target.property === 'fov'))) {
+      throw invalidField('motion.tracks.property', 'camera.fov', 'a camera track or driver other than fov, since the camera has a focalLength; give the camera a fov instead, or leave fov out of the motion');
     }
     output.camera = {
       eye: new Float32Array(3), target: new Float32Array(3), up: new Float32Array(3),
@@ -1001,7 +1013,7 @@ export function compileAgentMotion(input, recipe) {
         validateRadiance(material, materialId);
       }
       if (cameraPath) {
-        cameraPath.sample(time, stagedCamera);
+        cameraPath.sample(time, stagedCamera, { overrides: cameraOverrides(evaluated?.looks) });
         for (const field of ['fov', 'near', 'far']) {
           finite(stagedCamera[field], `Camera ${field}`);
         }
@@ -1043,6 +1055,7 @@ export function compileAgentMotion(input, recipe) {
         else materialPatch[target.property].set(value);
       }
       for (const { target, value } of evaluated?.looks ?? []) {
+        if (target.kind === 'camera') continue;
         const patch = (target.kind === 'light' ? output.lights : output.morphs).get(target.id);
         if (target.component === undefined) patch[target.property] = value;
         else patch[target.property][COMPONENT_INDEX[target.component]] = value;

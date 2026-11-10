@@ -1,0 +1,1 @@
+- scene:agent-scene+lazy: 370 bytes gzip lets a driver move the camera and a constraint influence read a custom property, so one property can dolly a shot or fade a constraint, which agents had to key by hand
