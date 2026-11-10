@@ -68,7 +68,8 @@ try {
       assert.equal(await page.locator('#downloads').count(), 1, 'Homepage install controls are missing');
       const scenePaths = await page.locator('.gallery .example').evaluateAll(links => links.map(link => { const url = new URL(link.href); return url.pathname + url.search; }));
       assert.equal(new Set(scenePaths).size, scenePaths.length, 'Showcase repeats the same scene');
-      assert.equal(new URL(await page.locator('.hero-shot').evaluate(link => link.href)).search, '?scene=airport');
+      assert.equal(await page.locator('.hero-loop #scene-tabs button').count(), 5, 'Hero scene tabs are missing');
+      assert.equal(await page.locator('.hero-loop #credits-toggle').count(), 1, 'Hero credits control is missing');
       const showcase = await browser.newPage({ viewport:{ width:1440,height:900 }, reducedMotion:'reduce' });
       showcase.on('pageerror', error => errors.push(error.message));
       await showcase.goto(origin + '/showcase.html?scene=datacenter');
@@ -86,7 +87,7 @@ try {
       await chip.waitFor({ state:'hidden', timeout:10000 });
       assert.equal(await showcase.locator('#showcase-tabs button[data-scene="airport"]').getAttribute('aria-pressed'), 'true');
       await showcase.close();
-      report.interactions.push('Hero links to the live airport scene, and the showcase opens the data center scene');
+      report.interactions.push('Hero shows five scene tabs and credits, and the showcase opens the data center scene');
     }
     if (['/', '/downloads.html'].includes(route)) {
       if (route === '/downloads.html') assert.match(page.url(), /\/#downloads$/);

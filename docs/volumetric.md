@@ -128,7 +128,7 @@ In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is th
 | `noiseAmount`, `noiseScale` | `0`, `1` | Raster only. `noiseAmount` `0` to `1` breaks the density up with the cloud noise at `noiseScale` cells per unit |
 | `steps` | `16` | `4` to `32` samples through the volume |
 
-Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake. The path tracer traces them on `backend: "cpu"` with the same fields except the noise, and every other tracer entry point (backends `gpu` and `native`, the progressive and realtime tracers, the GPU light bake) throws instead of leaving them out. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.
+Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake: a scene bake (`bake` in a recipe) leaves them out, an emissive volume lights no baked surface and no volume dims the baked light, and the bake report names them in `skippedLocalVolumes` (index, shape, whether emissive) with a `warnings` line. A scene without local volumes bakes and reports exactly as before. Add a point light or an emissive part where the volume's glow should reach a wall. The path tracer traces them on `backend: "cpu"` with the same fields except the noise, and every other tracer entry point (backends `gpu` and `native`, the progressive and realtime tracers, the GPU light bake) throws instead of leaving them out. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.
 
 ### Mesh volumes
 
@@ -152,4 +152,4 @@ Each volume is marched on its own between its entry and its exit, cut at the fir
 
 ### Not covered yet
 
-The WebGPU and WebGL path tracers, the lightmap bake and path tracer noise are open work: tracer noise and GPU tracers #808, the bake #809.
+The WebGPU and WebGL path tracers and path tracer noise are open work: tracer noise and GPU tracers #808. Lighting baked surfaces from a volume's emission is not planned (#809): the bake reports the limit instead.

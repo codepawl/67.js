@@ -63,7 +63,7 @@ The client sends `initialize`. The server answers with its name, version and ins
     "maxVertices": 250000,
     "maxGeometryBytes": 33554432,
     "maxOperations": 256,
-    "maxCheckpoints": 8,
+    "maxCheckpoints": 16,
     "maxRecipeBytes": 1048576
   },
   "preview": {
@@ -72,7 +72,7 @@ The client sends `initialize`. The server answers with its name, version and ins
     "maximumWidth": 1024,
     "maximumHeight": 1024,
     "maximumImageBytes": 1048576,
-    "maximumActiveScenes": 1,
+    "maximumActiveScenes": 4,
     "maximumQueuedCalls": 16,
     "evaluationTimeoutMs": 30000
   },

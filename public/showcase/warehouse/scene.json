@@ -1,0 +1,30 @@
+{
+  "id": "warehouse",
+  "title": "Warehouse",
+  "blurb": "A distribution warehouse with racking, forklifts and dock doors.",
+  "glb": "/showcase/warehouse/scene.glb",
+  "hdri": "/showcase/warehouse/sky.hdr",
+  "hdriOptions": { "intensity": 0.7, "rotation": 0, "showBackground": true, "backgroundBlur": 0.6 },
+  "gltfOptions": { "maxTexturePixels": 67108864 },
+  "exposure": 1,
+  "renderer": {
+    "ground": false,
+    "hdr": true,
+    "samples": 4,
+    "environment": {
+      "lightDirection": [-0.35, 0.85, 0.4],
+      "keyColor": [2.2, 2.0, 1.7],
+      "keyIntensity": 1,
+      "fillIntensity": 0.4,
+      "ambientIntensity": 0.8,
+      "fogColor": [0.003, 0.004, 0.006],
+      "fogDensity": 0.0042
+    }
+  },
+  "frame": { "fov": 34, "near": 0.3, "far": 400, "effects": { "ambientOcclusion": 0.6, "saturation": 1.05, "vignette": 0.3, "bloom": { "strength": 0.3, "threshold": 1, "radius": 1 } } },
+  "credits": [
+    { "model": "Warehouse racking, pallets, boxes, containers and equipment (NVIDIA SimReady assets)", "author": "NVIDIA", "licence": "CC BY 4.0", "source": "https://docs.omniverse.nvidia.com/usd/latest/usd_content_samples/simready_assets.html" },
+    { "model": "Warehouse layout and remaining props", "author": "CodePawl", "licence": "MIT", "source": "https://github.com/codepawl/67.js" },
+    { "model": "empty_warehouse_01 (sky lighting, 512 x 256 average)", "author": "Poly Haven", "licence": "CC0", "source": "https://polyhaven.com/a/empty_warehouse_01" }
+  ]
+}

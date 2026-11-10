@@ -2,7 +2,7 @@ import { materialTags } from './shader-registry.js';
 import { mat4, mat3 } from 'gl-matrix';
 import { SPLAT_UNITS, requireSplatSupport, layerTextureSupport, LIGHT_SHADING_FEATURE, SHADING_MODES, LIGHT_SHADING_MAXIMUM_SAMPLES, createVertexShader, vertexShader, liquidFragmentSource, createFragmentShader, liquidPassDrawer, createDepthFragmentShader, benchmarkVertexShader, benchmarkFragmentShader, viewTransformShader, createDepthVertexShader } from './shaders.js';
 import { postFragment, createPostFragment, POST_STEPS, POST_STEPS_WITH_OPTIONAL_CODE, skyFragment, bloomFragment } from './post.js';
-import { fullscreenVertex, startProgram, finishProgram, compileProgram } from './gl-program.js';
+import { fullscreenVertex, startProgram, finishProgram, compileProgram, ProgramNotReady, isLinkComplete, setPreparing } from './gl-program.js';
 import { ambientOcclusionFragment } from './ambient-occlusion.js';
 import { planRenderSize, estimateTextureBytes, estimateFrameBytes, memoryBudgetError } from './budget.js';
 import { applyProjection } from './camera.js';
@@ -84,6 +84,28 @@ function shaderFeaturesOfLighting(lighting) {
   if (lighting.extraFeatures) features.push(...lighting.extraFeatures);
   if (lighting.fillIntensity > 0) features.push('fill');
   return features;
+}
+
+/**
+ * A few parts that need the same shader features as all of `parts`, plus one instanced pair when any geometry repeats.
+ * A renderer built on these compiles the program the whole scene needs; replaceParts then adds the rest without a recompile.
+ */
+export function shaderFeatureRepresentatives(parts) {
+  const covered = new Set();
+  const representatives = [];
+  const firstOfGeometry = new Map();
+  let instancedPair = null;
+  for (const part of parts) {
+    const features = shaderFeaturesOfParts([part]);
+    if ([...features].some(feature => !covered.has(feature))) {
+      features.forEach(feature => covered.add(feature));
+      representatives.push(part);
+    }
+    if (!instancedPair && firstOfGeometry.has(part.geometry)) instancedPair = [firstOfGeometry.get(part.geometry), part];
+    else if (!firstOfGeometry.has(part.geometry)) firstOfGeometry.set(part.geometry, part);
+  }
+  if (instancedPair) for (const part of instancedPair) if (!representatives.includes(part)) representatives.push(part);
+  return representatives.length > 0 ? representatives : parts.slice(0, 1);
 }
 
 function shaderFeaturesOfParts(parts) {
@@ -429,6 +451,8 @@ export function groupParts(parts, batching = true) {
   const groups = new Map();
   const batches = [];
   const morphInfos = new Map();
+  const materialKeyValues = new Map();
+  const materialKeyTails = new Map();
   for (const part of parts) {
     validateTransform(part);
     validatePartFlags(part);
@@ -448,7 +472,18 @@ export function groupParts(parts, batching = true) {
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
-    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)]) {
+    // Thousands of parts share a few materials, so the material half of the key is built once per material.
+    let materialValues = materialKeyValues.get(part.material);
+    if (!materialValues) {
+      materialValues = [...materialMapState(part.material), ...materialLayerState(part.material)];
+      materialKeyValues.set(part.material, materialValues);
+    }
+    let materialTail = materialKeyTails.get(part.material);
+    if (!materialTail) {
+      materialTail = [renderPass(part.material), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)];
+      materialKeyTails.set(part.material, materialTail);
+    }
+    for (const value of [...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail]) {
       if (!maps.has(value)) maps.set(value, new Map());
       maps = maps.get(value);
     }
@@ -557,7 +592,7 @@ function allFinite(values) {
 }
 
 export class Renderer67 {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto' } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false } = {}) {
     this.canvas = canvas;
     this.sceneParts = parts;
     // `skyOpenness` from closed-room.js is passed in, which keeps the ray code out of scenes without volume fog.
@@ -738,6 +773,17 @@ export class Renderer67 {
     }
     // The driver links the programs on its own threads while the textures and buffers upload; only then is the link result read.
     groups.forEach((group) => this.batches.push(this.uploadBatch(group)));
+    this.pendingConstruction = { pending, parts, environment };
+    this.deferEnvironmentPrefilter = deferEnvironmentPrefilter;
+    if (!deferProgramLink) this.finishConstruction();
+  }
+
+  // The second half of construction, which reads the link results. Reading a result waits for the driver, so a page that
+  // builds a heavy renderer passes deferProgramLink and awaits programsReady() instead of freezing for the whole compile.
+  finishConstruction() {
+    const { pending, parts, environment } = this.pendingConstruction;
+    this.pendingConstruction = null;
+    const benchmark = this.benchmark;
     this.finishMainProgram(pending.main);
     this.depthProgram = finishProgram(this.context, pending.depth);
     this.depthSkinUniforms = Object.fromEntries(SKIN_UNIFORMS.map(name => [name, this.context.getUniformLocation(this.depthProgram, name)]));
@@ -775,9 +821,53 @@ export class Renderer67 {
     if (this.shaderFeatures.has('splat')) requireSplatSupport().initializePlaceholders(this);
     this.initializeEnvironment(environment.map);
     this.createShadowMap();
-    if (reversedDepth !== false && !benchmark) installReversedDepth(this, reversedDepth);
+    if (this.reversedDepthMode !== false && !benchmark) installReversedDepth(this, this.reversedDepthMode);
     this.resize();
     if (!this.benchmark && !this.multisampleFramebuffer) this.allocateFrameTargets(this.canvas.width, this.canvas.height);
+  }
+
+  /** Resolves once every program started by the constructor has linked, polling without blocking the main thread, then finishes construction. Needs deferProgramLink. */
+  async programsReady() {
+    if (!this.pendingConstruction) return;
+    const context = this.context;
+    const parallelCompile = context.getExtension('KHR_parallel_shader_compile');
+    const { pending } = this.pendingConstruction;
+    const programs = [...Object.values(pending), ...(this.pendingEnvironmentPrograms?.values() ?? [])].map(started => started.program);
+    while (parallelCompile && programs.some(program => !context.getProgramParameter(program, parallelCompile.COMPLETION_STATUS_KHR))) {
+      await new Promise(resolve => setTimeout(resolve, 8));
+    }
+    this.finishConstruction();
+  }
+
+  /**
+   * Draws `frame` once the way a real frame is drawn, but without freezing the page for programs the driver has not finished
+   * building (the post pass of a fog or sky frame, liquids, ambient occlusion, a reversed-depth copy). Each draw that meets one
+   * stops there; the driver's thread keeps building while this waits in short timers, then the draw runs again. The last
+   * draw is complete and leaves every program, target and texture that frame uses ready, so the next frame costs no more than
+   * any other. Call it while the canvas is hidden or another world is on screen. Past `timeoutMilliseconds` it draws the
+   * frame at once and resolves true when it never had to, false otherwise.
+   */
+  async prepareFrame(frame, { timeoutMilliseconds = 6000 } = {}) {
+    await this.programsReady();
+    const context = this.context;
+    const deadline = performance.now() + timeoutMilliseconds;
+    setPreparing(context, true);
+    try {
+      for (;;) {
+        try {
+          this.render(frame);
+          return true;
+        } catch (error) {
+          if (!(error instanceof ProgramNotReady)) throw error;
+          while (!isLinkComplete(context, error.program) && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 8));
+          if (performance.now() >= deadline) break;
+        }
+      }
+    } finally {
+      setPreparing(context, false);
+    }
+    this.render(frame);
+    return false;
   }
 
   selectViewTransform(viewTransform, lookSource) {
@@ -1159,8 +1249,8 @@ export class Renderer67 {
     return batch;
   }
 
-  /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. */
-  replaceParts(parts, { regroupOnly = false } = {}) {
+  /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. `retainedUnchanged` skips the re-sync of parts in kept batches, for a world that grows in slices. */
+  replaceParts(parts, { regroupOnly = false, retainedUnchanged = false } = {}) {
     if (!Array.isArray(parts) || new Set(parts).size !== parts.length) {
       throw new TypeError('Scene parts must be an array with distinct object identities.');
     }
@@ -1276,7 +1366,8 @@ export class Renderer67 {
     this.triangles = parts.reduce((total, part) => total + part.geometry.indices.length / 3, 0);
     this.updateBatches.clear();
     this.shadowsDirty = true;
-    this.updateParts(renderParts);
+    // With retainedUnchanged the caller promises that parts of kept batches did not move, so only the new batches are re-synced.
+    this.updateParts(retainedUnchanged ? renderParts.filter(part => !retained.has(this.partLocations.get(part)?.batch)) : renderParts);
     return parts.length;
   }
 
@@ -1876,7 +1967,7 @@ export class Renderer67 {
       context.uniform1i(this.liquidUniforms.environmentSpecular, ENVIRONMENT_SPECULAR_UNIT);
     }
     this.bindEnvironmentTextures(this.whiteTexture, this.whiteTexture);
-    if (!this.benchmark && map) this.prepareEnvironment(map);
+    if (!this.benchmark && map && !this.deferEnvironmentPrefilter) this.prepareEnvironment(map);
   }
 
   bindEnvironmentTextures(specularTexture, brdfTexture) {
@@ -1893,6 +1984,22 @@ export class Renderer67 {
     if (this.environmentResources?.data === map.data && this.environmentResources.irradianceSource === map.irradianceSource) return false;
     requireEnvironmentSupport().estimateBytes(map, this.capabilities.maximumTextureSize);
     const resources = requireEnvironmentSupport().createResources(this.context, map, { compileProgram: (context, vertexSource, fragmentSource) => this.compileEnvironmentProgram(context, vertexSource, fragmentSource), fullscreenVertex });
+    this.environmentResources?.dispose();
+    this.environmentResources = resources;
+    this.textureBytes += resources.bytes - this.environmentBytes;
+    this.environmentBytes = resources.bytes;
+    return true;
+  }
+
+  /**
+   * Prefilters the map in steps, awaiting `checkpoint()` between them, for a renderer built with `deferEnvironmentPrefilter: true`.
+   * Call it before the first render: the steps leave GL state mid-pass, so no frame may draw on this context until it resolves.
+   */
+  async prepareEnvironmentInSlices(map, checkpoint) {
+    requireEnvironmentSupport().assertMap(map);
+    if (this.environmentResources?.data === map.data && this.environmentResources.irradianceSource === map.irradianceSource) return false;
+    requireEnvironmentSupport().estimateBytes(map, this.capabilities.maximumTextureSize);
+    const resources = await requireEnvironmentSupport().createResourcesInSlices(this.context, map, { compileProgram: (context, vertexSource, fragmentSource) => this.compileEnvironmentProgram(context, vertexSource, fragmentSource), fullscreenVertex }, checkpoint);
     this.environmentResources?.dispose();
     this.environmentResources = resources;
     this.textureBytes += resources.bytes - this.environmentBytes;

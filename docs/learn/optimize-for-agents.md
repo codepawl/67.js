@@ -68,7 +68,7 @@ Every call is a turn. These habits remove turns:
 - **Batch edits.** One `scene_apply` takes up to 256 operations. Adding four legs in one call took one call and 49 ms in the local test. A call for each leg takes four.
 - **Read the answer, not the scene.** `scene_apply` returns the revision, the render status, a result for each operation and a diff of the IDs it changed. Call `scene_inspect` only when you need node bounds or counts.
 - **Edit, do not rewrite.** A small mesh change as a `mesh_edit` call is 187 bytes. The same change as a new `scene_create` is 1,202 bytes, plus 52 bytes to dispose the old scene. The gap grows with the size of the scene.
-- **Leave out `sessionId`.** One scene exists at a time. Every tool uses the active scene when the field is missing.
+- **Leave out `sessionId`.** Every tool uses the last used scene when the field is missing. Pass it only when you work on two scenes.
 - **Send the right revision.** A stale `expectedRevision` costs a failed call and a retry. Pass the `revision` from the last result.
 - **Compare variants with branches.** `scene_apply` with a `branch` name tries a change without touching the scene. One `scene_review` compares up to four branches. `scene_restore` with the winning `branch` keeps it.
 - **Checkpoint before a risky edit.** `scene_checkpoint` and `scene_restore` return to a good state in two calls. Rebuilding a scene takes many.
@@ -91,7 +91,7 @@ The scene lives in the server process. The agent does not resend it on each call
 - **Do not resend the recipe.** After `scene_create`, send only operations. A recipe can be up to 1 MiB of JSON.
 - **Save the recipe.** `scene_export_recipe` returns the canonical recipe, 2,664 bytes in the measured case. Ask the agent to save it to a file after each good step. A server restart loses the active scene, and the recipe is how the agent rebuilds it.
 - **Keep the tool list stable.** A harness that caches the start of the prompt can reuse the cache only while the tool list stays the same. Do not switch the server on and off during a session. This is an inference that was not measured.
-- **Dispose before a new scene.** One scene is active at a time. `scene_dispose` frees its memory before `scene_create` starts the next.
+- **Dispose what you finished with.** The server keeps up to 4 scenes and closes the least recently used one past that. `scene_dispose` frees a scene's memory early.
 
 ## Speed
 

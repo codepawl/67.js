@@ -9,7 +9,7 @@ import { resolveEffects } from '../src/effects.js';
 import { normalizeAgentLook } from '../src/agent-look.js';
 import { agentSceneModulesNeeded, loadAgentSceneModules } from '../src/agent-scene-modules.js';
 import { installCameraEffects } from '../src/camera-effects.js';
-import { installPostSteps, resolvePostSteps, glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment, usesObjectMask } from '../src/post-steps.js';
+import { installPostSteps, resolvePostSteps, glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment, compositeFragment, usesObjectMask } from '../src/post-steps.js';
 import { createAgentScene } from '../src/agent-scene.js';
 
 function recordingContext(calls) {
@@ -33,7 +33,7 @@ function fakeRenderer(context) {
   };
 }
 
-const STAGE_NAMES = ['Glare', 'Lens distortion', 'Color balance', 'Stylize'];
+const STAGE_NAMES = ['Glare', 'Lens distortion', 'Color balance', 'Stylize', 'Composite'];
 
 test('a look that names no step resolves exactly as before', async () => {
   await loadAgentSceneModules({});
@@ -86,14 +86,15 @@ test('each stage draws only for a frame that sets its step, and frees its target
   const context = recordingContext(calls);
   const renderer = installPostSteps(installCameraEffects(fakeRenderer(context)));
   assert.deepEqual(renderer.postStages.slice(2).map(stage => stage.name), STAGE_NAMES);
-  assert.equal(installPostSteps(renderer).postStages.length, 6);
+  assert.equal(installPostSteps(renderer).postStages.length, 7);
   const unset = { eye: [0, 1, 5], effects: {} };
-  const neutral = { eye: [0, 1, 5], effects: { colorBalance: {}, glare: {}, lensDistortion: {}, stylize: {} } };
+  const neutral = { eye: [0, 1, 5], effects: { colorBalance: {}, glare: {}, lensDistortion: {}, stylize: {}, composite: {} } };
   const named = [
     ['Glare', { glare: { streaks: 0.6 } }],
     ['Lens distortion', { lensDistortion: { distortion: 0.5, dispersion: 0.5 } }],
     ['Color balance', { colorBalance: { gain: [1.1, 1, 0.9] } }],
     ['Stylize', { stylize: { posterize: 4 } }],
+    ['Composite', { composite: { background: { color: [0.1, 0.2, 0.6] }, key: { luma: { low: 0.1, high: 0.4 } } } }],
   ];
   const effects = resolveEffects({});
   for (const [name, input] of named) {
@@ -104,8 +105,8 @@ test('each stage draws only for a frame that sets its step, and frees its target
     stage.releaseTargets(context);
     stage.dispose(context);
   }
-  assert.ok(calls.filter(call => call[0] === 'drawArrays').length === 4);
-  assert.ok(calls.filter(call => call[0] === 'deleteTexture').length === 4);
+  assert.ok(calls.filter(call => call[0] === 'drawArrays').length === 5);
+  assert.ok(calls.filter(call => call[0] === 'deleteTexture').length === 5);
 });
 
 test('a stylize step resolves its filters and a mask, and refuses bad input', () => {
@@ -163,8 +164,27 @@ test('a mask cannot be combined with an active lens distortion, which warps the 
   assert.ok(resolvePostSteps({ lensDistortion: { distortion: 0.2 }, colorBalance: { gain: [1.2, 1, 1] } }).lensDistortion);
 });
 
+test('a composite step resolves a background and a key, and says what to pass when it is wrong', () => {
+  const resolved = resolvePostSteps({ composite: { background: { top: [1, 0, 0], bottom: [0, 0, 1] }, key: { chroma: { color: [0, 1, 0] } } } }).composite;
+  assert.deepEqual(resolved, { background: { top: [1, 0, 0], bottom: [0, 0, 1] }, key: { chroma: { color: [0, 1, 0], tolerance: 0.3, softness: 0.1 } } });
+  assert.deepEqual(resolvePostSteps({ composite: { background: { color: [0, 0, 0] }, key: { luma: { low: 0.1, high: 0.5, invert: true } } } }).composite.key, { luma: { low: 0.1, high: 0.5, invert: true } });
+  assert.deepEqual(resolvePostSteps({ composite: {} }).composite, {});
+  assert.throws(() => resolvePostSteps({ composite: { key: { luma: {} } } }), /composite.key needs composite.background/);
+  assert.throws(() => resolvePostSteps({ composite: { background: { color: [0, 0, 0], top: [0, 0, 0] } } }), /not both/);
+  assert.throws(() => resolvePostSteps({ composite: { background: { top: [0, 0, 0] } } }), /both top and bottom/);
+  assert.throws(() => resolvePostSteps({ composite: { background: { color: [0, 0, 0] }, key: {} } }), /exactly one of chroma/);
+  assert.throws(() => resolvePostSteps({ composite: { background: { color: [0, 0, 0] }, key: { chroma: {} } } }), /key.chroma.color must be three numbers/);
+  assert.throws(() => resolvePostSteps({ composite: { background: { color: [0, 0, 0] }, key: { chroma: { color: [0, 1, 0], tolerance: 2 } } } }), /tolerance must be between/);
+  assert.throws(() => resolvePostSteps({ composite: { background: { color: [0, 0, 0] }, key: { luma: { low: 0.5, high: 0.5 } } } }), /high must be greater than low/);
+  assert.throws(() => resolvePostSteps({ composite: { background: { color: [0, 0, 0] }, mask: { depth: { far: 5 } } } }), /mask limits the key/);
+  assert.throws(() => resolvePostSteps({ composite: { image: 'plate.png' } }), /Unknown composite field/);
+  const masked = { composite: { background: { color: [0, 0, 0] }, key: { luma: {} }, mask: { objects: ['hero'] } } };
+  assert.equal(usesObjectMask(resolvePostSteps(masked)), true);
+  assert.throws(() => resolvePostSteps({ ...masked, lensDistortion: { distortion: 0.2 } }), /composite.mask cannot be combined with lensDistortion/);
+});
+
 test('the shaders keep their fixed sample patterns and read no history', () => {
-  for (const fragment of [glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment]) {
+  for (const fragment of [glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment, compositeFragment]) {
     assert.match(fragment, /^#version 300 es/);
     assert.doesNotMatch(fragment, /previousViewProjection|time/);
   }
@@ -175,7 +195,7 @@ test('the shaders keep their fixed sample patterns and read no history', () => {
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const rendersEnabled = process.env.RENDER_TESTS === '1' && existsSync(chromePath);
 const STEP_CASES = ['defocus', 'color-balance', 'glare-streaks', 'glare-streaks-6', 'glare-anamorphic', 'glare-fog', 'lens-distortion', 'lens-dispersion',
-  'grade-hero', 'grade-depth', 'sharpen', 'kuwahara', 'posterize', 'pixelate', 'pixelate-hero'];
+  'grade-hero', 'grade-depth', 'sharpen', 'kuwahara', 'posterize', 'pixelate', 'pixelate-hero', 'key-chroma', 'key-luma'];
 
 test('each named step changes the picture and the default still keeps its hash', { skip: !rendersEnabled, timeout: 300000 }, () => {
   const output = execFileSync('node', ['bench/post/post-steps.mjs', '--rounds=1', `--out=${join(tmpdir(), 'post-steps-test')}`], { encoding: 'utf8' });
@@ -185,6 +205,10 @@ test('each named step changes the picture and the default still keeps its hash',
     assert.ok(summary[name].medianMilliseconds > 0, `${name} has a frame time`);
   }
   // A grade masked to the hero part changes the hero and leaves the floor as the default drew it; the unmasked grade changes both.
+  // A green-screen hero keyed out shows the background there; the floor is untouched. A key limited by a depth mask that leaves the hero out changes nothing.
+  assert.notDeepEqual(summary['key-chroma'].regions.hero, summary['green-default'].regions.hero);
+  assert.deepEqual(summary['key-chroma'].regions.floor, summary['green-default'].regions.floor);
+  assert.deepEqual(summary['key-chroma-masked'].regions.hero, summary['green-default'].regions.hero);
   assert.notDeepEqual(summary['grade-hero'].regions.hero, summary.default.regions.hero);
   assert.deepEqual(summary['grade-hero'].regions.floor, summary.default.regions.floor);
   assert.notDeepEqual(summary['color-balance'].regions.floor, summary.default.regions.floor);

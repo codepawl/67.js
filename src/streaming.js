@@ -1,6 +1,6 @@
 // Live asset streaming: a runtime system that loads, swaps and frees assets while a game plays.
 // Assets are requested by distance from a focus point or by an explicit game request, held under a byte budget with
-// least-recently-used eviction, and switched between detail levels with hysteresis. Formats load through plugins, so GLB
+// priority and distance eviction, and switched between detail levels with hysteresis. Formats load through plugins, so GLB
 // is only the first loader. Everything is decided inside update() from the focus, a counter and sorted ids, never from
 // wall time, so the same walk streams in the same order. Loaders are async; update() only starts them. See docs/streaming.md.
 
@@ -14,6 +14,8 @@ export const STREAMING_LIMITS = Object.freeze({
   defaultHysteresis: 0.1,
   maximumHysteresis: 1,
   eventHistory: 256,
+  minimumPriority: -100,
+  maximumPriority: 100,
 });
 
 export const STREAMING_STATES = Object.freeze(['idle', 'pending', 'loaded', 'evicted', 'failed']);
@@ -81,6 +83,64 @@ function baseUrlOf(source) {
   return /^https?:/.test(source) ? new URL('.', source).href : '';
 }
 
+/**
+ * A loader that decodes off the main thread. `createWorker()` returns a Worker (or anything with postMessage, terminate and
+ * onmessage/onerror). The worker receives { id, format, source, level } and answers { asset, bytes } or { error }. A fresh worker
+ * serves each load and is terminated when the load ends or is aborted, so the number of workers never exceeds the concurrent
+ * load limit. `dispose(asset)` frees what the main thread holds.
+ */
+export function createWorkerLoader({ createWorker, dispose } = {}) {
+  if (typeof createWorker !== 'function') {
+    throw new TypeError('createWorkerLoader needs createWorker: a function () => Worker, e.g. () => new Worker(new URL("./decode.js", import.meta.url), { type: "module" }).');
+  }
+  if (dispose !== undefined && typeof dispose !== 'function') throw new TypeError('createWorkerLoader dispose must be a function (asset) or left out.');
+  return {
+    load({ id, format, source, level, signal }) {
+      return new Promise((resolve, reject) => {
+        let worker = null;
+        const finish = settle => value => {
+          signal.removeEventListener('abort', onAbort);
+          worker?.terminate();
+          settle(value);
+        };
+        const succeed = finish(resolve);
+        const fail = finish(reject);
+        function onAbort() {
+          fail(new Error(`Loading "${id}" level ${level} was aborted.`));
+        }
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          worker = createWorker();
+          worker.onmessage = event => {
+            const reply = event?.data;
+            if (reply === null || typeof reply !== 'object') {
+              fail(new TypeError(`The worker for "${id}" must answer { asset, bytes } or { error }, got ${describe(reply)}.`));
+            } else if (reply.error !== undefined) {
+              fail(new Error(String(reply.error)));
+            } else if (reply.asset === undefined) {
+              fail(new TypeError(`The worker for "${id}" answered without an asset; answer { asset, bytes } or { error }.`));
+            } else {
+              succeed({ asset: reply.asset, bytes: reply.bytes });
+            }
+          };
+          worker.onmessageerror = () => fail(new Error(`The worker for "${id}" sent a reply that could not be read.`));
+          worker.onerror = event => fail(new Error(event?.message ?? `The worker for "${id}" failed.`));
+          worker.postMessage({ id, format, source, level });
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    },
+    dispose(asset) {
+      dispose?.(asset);
+    },
+  };
+}
+
 function validateLoader(format, loader) {
   if (typeof format !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(format)) {
     throw new TypeError(`A loader format must be a lowercase name like "glb" or "terrain-tile", got ${describe(format)} ${String(format)}.`);
@@ -123,7 +183,8 @@ function validateDefinition(definition, loaders, hysteresis) {
       throw new RangeError(`Streamed asset "${id}" level maximumDistance values must increase from the finest level to the coarsest.`);
     }
   }
-  return { id, format, position, loadDistance, unloadDistance: loadDistance * (1 + hysteresis), levels };
+  const priority = definition.priority === undefined ? 0 : boundedNumber(definition.priority, `Streamed asset "${id}" priority`, STREAMING_LIMITS.minimumPriority, STREAMING_LIMITS.maximumPriority);
+  return { id, format, position, priority, loadDistance, unloadDistance: loadDistance * (1 + hysteresis), levels };
 }
 
 export function createStreaming(options = {}) {
@@ -136,6 +197,11 @@ export function createStreaming(options = {}) {
   }
   if (options.onEvent !== undefined && typeof options.onEvent !== 'function') {
     throw new TypeError('createStreaming onEvent must be a function (event) or left out.');
+  }
+
+  const evictionOrder = options.evictionOrder ?? 'recency';
+  if (evictionOrder !== 'recency' && evictionOrder !== 'distance') {
+    throw new RangeError(`createStreaming evictionOrder must be "recency" (least recently used first, the default) or "distance" (farthest first), got ${describe(evictionOrder)} ${String(evictionOrder)}.`);
   }
 
   const loaders = new Map();
@@ -189,7 +255,15 @@ export function createStreaming(options = {}) {
       if (record.wanted || record.requested) continue;
       for (const [level, resident] of record.resident) candidates.push({ record, level, resident });
     }
-    return candidates.sort((first, second) => first.record.lastUsed - second.record.lastUsed || compareText(first.record.id, second.record.id) || first.level - second.level);
+    const distances = new Map(candidates.map(candidate => [candidate.record.id, distanceTo(candidate.record)]));
+    const farthestFirst = (first, second) => distances.get(second.record.id) - distances.get(first.record.id);
+    const leastRecentFirst = (first, second) => first.record.lastUsed - second.record.lastUsed;
+    const [primary, secondary] = evictionOrder === 'distance' ? [farthestFirst, leastRecentFirst] : [leastRecentFirst, farthestFirst];
+    return candidates.sort((first, second) => first.record.priority - second.record.priority
+      || primary(first, second)
+      || secondary(first, second)
+      || compareText(first.record.id, second.record.id)
+      || first.level - second.level);
   }
 
   function evict({ record, level, resident }, reason) {
@@ -199,7 +273,7 @@ export function createStreaming(options = {}) {
     emit('evict', record.id, level, { reason, bytes: resident.bytes });
   }
 
-  /** Free least recently used assets nobody wants until `neededBytes` fit. Returns whether they fit. */
+  /** Free assets nobody wants, in the chosen eviction order, until `neededBytes` fit. Returns whether they fit. */
   function makeRoom(neededBytes) {
     let used = bytesInUse();
     if (used + neededBytes <= budgetBytes) return true;

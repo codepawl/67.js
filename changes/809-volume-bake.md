@@ -1,0 +1,1 @@
+- The bake report names the `environment.localVolumes` the lightmap bake leaves out (`skippedLocalVolumes` and a `warnings` line), and the volumes guide states that a volume emission does not light baked surfaces (#809).
