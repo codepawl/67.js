@@ -1,5 +1,6 @@
 // Applies the labels Claude suggested during the automated first pass, and only those on a fixed allowlist.
 // This step has no Claude secret and can add labels only: it never removes one, closes anything or edits text.
+// No label here acts as a stop signal or a gate (hold:*, status:*), so a hijacked Claude cannot park an item.
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -12,8 +13,6 @@ export const LABEL_ALLOWLIST = Object.freeze([
   'goal:capable',
   'goal:light',
   'goal:ai',
-  'status:needs-author',
-  'hold:look-approval',
 ]);
 const GOAL_LABELS = LABEL_ALLOWLIST.filter(name => name.startsWith('goal:'));
 

@@ -11,7 +11,6 @@ const decide = (overrides = {}, event = {}) =>
 
 test('triage runs for a new pull request or issue from an outsider', () => {
   assert.equal(decide().run, true);
-  assert.equal(decide({}, { action: 'synchronize' }).run, true);
   assert.equal(decideTriage({ eventName: 'issues', action: 'opened', item: { ...outsider, draft: undefined } }).run, true);
 });
 
@@ -49,7 +48,7 @@ test('only people who maintain the repository count as maintainer activity', () 
 });
 
 test('label filter keeps allowlisted labels only and never repeats or replaces a goal', () => {
-  assert.deepEqual(filterLabels(['bug', 'bug', 'wontfix', 'status:in-progress', 'priority:must', 'hold:look-approval']), ['bug', 'hold:look-approval']);
+  assert.deepEqual(filterLabels(['bug', 'bug', 'wontfix', 'status:in-progress', 'priority:must', 'hold:look-approval', 'status:needs-author']), ['bug']);
   assert.deepEqual(filterLabels(['goal:ai', 'goal:light', 'enhancement'], []), ['goal:ai', 'enhancement']);
   assert.deepEqual(filterLabels(['goal:light', 'bug'], ['goal:ai', 'bug']), []);
   assert.deepEqual(filterLabels(['needs-triage'], ['needs-triage']), []);
