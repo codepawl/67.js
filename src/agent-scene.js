@@ -21,6 +21,7 @@ export { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS };
  */
 export const REVISION_HISTORY_LIMIT = 4;
 export { normalizeAgentLook, resolveAgentShadow } from './agent-look.js';
+import { OWN_SECTIONS as NULLABLE_SECTION_OPERATIONS } from './agent-apply-report.js';
 export { describeApplication } from './agent-apply-report.js';
 export {
   needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader,
@@ -50,11 +51,6 @@ const LOOK_OPERATION_FIELDS = Object.freeze({
   'set-environment': 'environment',
   'set-effects': 'effects',
   'set-shadow': 'shadow',
-});
-// Each of these replaces one recipe section whole; null clears it.
-const NULLABLE_SECTION_OPERATIONS = Object.freeze({
-  'set-motion': 'motion', 'set-physics': 'physics', 'set-timeline': 'timeline', 'set-cloth': 'cloth',
-  'set-bake': 'bake', 'set-particles': 'particles', 'set-post-passes': 'postPasses', 'set-armatures': 'armatures',
 });
 const ADDITION_FIELDS = Object.freeze({
   'add-geometry': ['geometries', 'geometry'],
@@ -881,7 +877,7 @@ function linkedMaterial(liveMaterial, lightMask, wrappers) {
 
 function normalizeRecipe(input, limits) {
   let recipe = copiedJson(input, limits.maxRecipeBytes);
-  knownKeys(recipe, ['format', 'schemaVersion', 'geometries', 'materials', 'nodes', 'armatures', 'camera', 'environment', 'effects', 'shadow', 'motion', 'physics', 'cloth', 'timeline', 'particles', 'bake', 'postPasses'], 'recipe');
+  knownKeys(recipe, ['format', 'schemaVersion', 'geometries', 'materials', 'nodes', 'armatures', 'camera', 'environment', 'effects', 'shadow', 'motion', 'physics', 'cloth', 'timeline', 'particles', 'bake', 'postPasses', 'game'], 'recipe');
   if (recipe.format !== '67js.scene' || recipe.schemaVersion !== 1) {
     throw invalidField(recipe.format !== '67js.scene' ? 'format' : 'schemaVersion', recipe.format !== '67js.scene' ? recipe.format : recipe.schemaVersion, recipe.format !== '67js.scene' ? '"67js.scene"' : '1');
   }
@@ -961,6 +957,10 @@ function normalizeRecipe(input, limits) {
     recipe.bake = recipe.bake === null ? null : agentSceneModule('bake').normalizeAgentBake(recipe.bake);
   }
   if (Object.hasOwn(recipe, 'postPasses')) recipe.postPasses = agentSceneModule('userPass').normalizeUserPasses(recipe.postPasses ?? []);
+  if (Object.hasOwn(recipe, 'game')) {
+    if (recipe.game === null) delete recipe.game;
+    else recipe.game = agentSceneModule('game').normalizeGameSetup(recipe.game, new Set(recipe.nodes.map(node => node.id)));
+  }
   recipe = copiedJson(recipe, limits.maxRecipeBytes);
   return recipe;
 }

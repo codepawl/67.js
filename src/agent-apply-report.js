@@ -6,9 +6,9 @@ export const APPLY_REPORT_LIMITS = Object.freeze({ maxEntries: 20, maxDiffIds: 8
 
 const COLLECTIONS = Object.freeze({ node: 'nodes', material: 'materials', geometry: 'geometries' });
 const LOOK_SECTIONS = Object.freeze({ 'set-environment': 'environment', 'set-effects': 'effects', 'set-shadow': 'shadow' });
-const OWN_SECTIONS = Object.freeze({
+export const OWN_SECTIONS = Object.freeze({
   'set-motion': 'motion', 'set-physics': 'physics', 'set-timeline': 'timeline', 'set-cloth': 'cloth',
-  'set-bake': 'bake', 'set-particles': 'particles', 'set-post-passes': 'postPasses', 'set-armatures': 'armatures',
+  'set-bake': 'bake', 'set-particles': 'particles', 'set-post-passes': 'postPasses', 'set-armatures': 'armatures', 'set-game': 'game',
 });
 
 function isPlainObject(value) {

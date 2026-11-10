@@ -51,6 +51,7 @@
     "docs/player.md",
     "docs/vehicle.md",
     "docs/game-rules.md",
+    "docs/game.md",
     "docs/scene-query.md",
     "docs/user-passes.md",
     "docs/skeleton-pose.md",
@@ -137,6 +138,7 @@
     "./addons/animation-graph": "./build/animation-graph.js",
     "./addons/player": "./build/player.js",
     "./addons/game-rules": "./build/game-rules.js",
+    "./addons/game": "./build/game.js",
     "./addons/update-part-vertices": "./build/update-part-vertices.js",
     "./package.json": "./package.json"
   },
