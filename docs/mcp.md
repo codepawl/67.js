@@ -201,6 +201,17 @@ References must resolve after the complete batch. Removing a parent leaves its c
 Reparent or remove those children before the parent removal command to avoid rejection.
 The [scene contract](agent-scene.md) defines the geometry fields, transforms, materials, and atomic validation rules.
 
+## Call log
+
+To see which tools agents use, set `SIXTYSEVENJS_MCP_LOG=<file path>` before starting the server. It appends one JSON line per tool call: `time`, `tool`, `durationMs`, `ok`, `error` (`tool_error` or `thrown`, only on failure) and `resultBytes`. It never writes arguments, scene content or paths. With the variable unset nothing is written.
+
+```sh
+SIXTYSEVENJS_MCP_LOG=calls.jsonl npx 67js-mcp
+node scripts/summarize-mcp-log.mjs calls.jsonl other.jsonl
+```
+
+The script prints calls, errors, error rate and median duration per tool, most called first.
+
 ## Limits
 
 | Budget | Limit |
