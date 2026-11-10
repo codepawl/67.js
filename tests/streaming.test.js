@@ -308,6 +308,13 @@ test('a createWorker that throws fails the load', async () => {
   await assert.rejects(loader.load({ id: 'a', format: 'tile', source: 'a.bin', level: 0, signal: new AbortController().signal }), /no worker/);
 });
 
+test('a worker reply without an asset fails the load', async () => {
+  const { workers, createWorker } = fakeWorkerFactory(worker => worker.onmessage({ data: { bytes: 64 } }));
+  const loader = createWorkerLoader({ createWorker });
+  await assert.rejects(loader.load({ id: 'a', format: 'tile', source: 'a.bin', level: 0, signal: new AbortController().signal }), /answered without an asset/);
+  assert.ok(workers[0].terminated);
+});
+
 test('an unreadable worker reply fails the load and frees the slot', async () => {
   const { workers, createWorker } = fakeWorkerFactory(worker => worker.onmessageerror({}));
   const streaming = createStreaming({ budgetBytes: 1000, loaders: { tile: createWorkerLoader({ createWorker }) } });

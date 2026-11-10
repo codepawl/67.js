@@ -121,6 +121,8 @@ export function createWorkerLoader({ createWorker, dispose } = {}) {
               fail(new TypeError(`The worker for "${id}" must answer { asset, bytes } or { error }, got ${describe(reply)}.`));
             } else if (reply.error !== undefined) {
               fail(new Error(String(reply.error)));
+            } else if (reply.asset === undefined) {
+              fail(new TypeError(`The worker for "${id}" answered without an asset; answer { asset, bytes } or { error }.`));
             } else {
               succeed({ asset: reply.asset, bytes: reply.bytes });
             }
@@ -271,7 +273,7 @@ export function createStreaming(options = {}) {
     emit('evict', record.id, level, { reason, bytes: resident.bytes });
   }
 
-  /** Free least recently used assets nobody wants until `neededBytes` fit. Returns whether they fit. */
+  /** Free assets nobody wants, in the chosen eviction order, until `neededBytes` fit. Returns whether they fit. */
   function makeRoom(neededBytes) {
     let used = bytesInUse();
     if (used + neededBytes <= budgetBytes) return true;
