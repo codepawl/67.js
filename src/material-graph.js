@@ -520,8 +520,65 @@ function compileWhiteNoise(node, state, depth) {
   return output === 'color' ? vectorValue(channel(1), channel(2), channel(3)) : scalarValue(channel(0));
 }
 
+const IMAGE_OUTPUTS = ['color', 'alpha'];
+const IMAGE_COST = 4;
+const IMAGE_ASSET_PATTERN = /^[a-f0-9]{64}$/;
+
+const srgbToLinear = byte => {
+  const encoded = byte / 255;
+  return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+};
+
+// One channel of an RGBA image read with bilinear filtering; the image repeats, so it tiles. Row 0 is the top, as is
+// row 0 of a baked graph, so v needs no flip. Colour channels are decoded from sRGB to linear before they are blended.
+function sampleImageChannel(image, positionU, positionV, channel, decode) {
+  const { width, height, data } = image;
+  const texelU = fract(positionU) * width - 0.5;
+  const texelV = fract(positionV) * height - 0.5;
+  const leftColumn = Math.floor(texelU);
+  const topRow = Math.floor(texelV);
+  const shareU = texelU - leftColumn;
+  const shareV = texelV - topRow;
+  const read = (column, row) => decode(data[(wrapCell(row, height) * width + wrapCell(column, width)) * 4 + channel]);
+  const top = mixNumbers(read(leftColumn, topRow), read(leftColumn + 1, topRow), shareU);
+  const bottom = mixNumbers(read(leftColumn, topRow + 1), read(leftColumn + 1, topRow + 1), shareU);
+  return mixNumbers(top, bottom, shareV);
+}
+
+/**
+ * The catalog image asset IDs a graph reads with `image` nodes, in the order they first appear. The host decodes these
+ * (the same pool as texture sequence frames) before the graph is baked.
+ */
+export function graphImageAssets(graph) {
+  const assets = new Set();
+  const visit = (value, depth) => {
+    if (!value || typeof value !== 'object' || depth > MATERIAL_GRAPH_LIMITS.maxDepth * 3) return;
+    if (!Array.isArray(value) && typeof value.image?.asset === 'string') assets.add(value.image.asset);
+    for (const child of Array.isArray(value) ? value : Object.values(value)) visit(child, depth + 1);
+  };
+  visit(graph, 0);
+  return [...assets];
+}
+
+// An image from the catalog, decoded by the host. Validating a graph needs no pixels, so without a pool only the
+// asset ID is checked; baking without the image throws.
+function compileImage(node, state, depth) {
+  const settings = textureSettings(node, 'image', ['asset', 'output', 'at']);
+  const asset = typeof settings.asset === 'string' ? settings.asset.toLowerCase() : settings.asset;
+  if (typeof asset !== 'string' || !IMAGE_ASSET_PATTERN.test(asset)) throw graphError('image asset must be the 64 hexadecimal characters of a catalog image asset ID; scene_asset_catalog lists them. Remote URLs are not accepted.');
+  const output = oneOf(settings.output ?? 'color', IMAGE_OUTPUTS, 'image output');
+  state.cost += IMAGE_COST;
+  const [positionU, positionV] = compilePosition(settings, state, depth);
+  const image = state.images ? state.images.get(asset) : null;
+  if (state.images && !image) throw graphError(`image ${asset.slice(0, 12)} was not loaded. The host decodes catalog images before the scene is created.`);
+  if (!image) return output === 'alpha' ? scalarValue(() => 0) : vectorValue(() => 0, () => 0, () => 0);
+  const at = (channel, decode) => (u, v) => sampleImageChannel(image, positionU(u, v), positionV(u, v), channel, decode);
+  if (output === 'alpha') return scalarValue(at(3, byte => byte / 255));
+  return vectorValue(at(0, srgbToLinear), at(1, srgbToLinear), at(2, srgbToLinear));
+}
+
 const TEXTURE_COMPILERS = new Map([
-  ['noise', compileNoise], ['whiteNoise', compileWhiteNoise], ['brick', compileBrick], ['voronoi', compileVoronoi], ['wave', compileWave], ['checker', compileChecker], ['gradient', compileGradient],
+  ['image', compileImage], ['noise', compileNoise], ['whiteNoise', compileWhiteNoise], ['brick', compileBrick], ['voronoi', compileVoronoi], ['wave', compileWave], ['checker', compileChecker], ['gradient', compileGradient],
 ]);
 
 function compileNode(node, state, depth) {
@@ -561,12 +618,12 @@ const SCALAR_OUTPUTS = ['roughness', 'metallic', 'height', 'opacity', 'clearcoat
  * Check a graph and compile each output. `size` is the metres one texture tile covers, which object and world coordinates report. Limits on nodes, depth and work per pixel are enforced here, before any
  * pixel is evaluated. Returns { outputs: { name: compiled }, nodeCount, cost }.
  */
-export function compileMaterialGraph(graph, { size = 1 } = {}) {
+export function compileMaterialGraph(graph, { size = 1, images } = {}) {
   if (!isPlainObject(graph)) throw graphError(`graph must be an object with outputs: ${MATERIAL_GRAPH_OUTPUTS.join(', ')}.`);
   onlyKeys(graph, MATERIAL_GRAPH_OUTPUTS, 'graph');
   const names = Object.keys(graph);
   if (names.length === 0) throw graphError(`graph needs at least one output: ${MATERIAL_GRAPH_OUTPUTS.join(', ')}.`);
-  const state = { nodeCount: 0, cost: 0, size };
+  const state = { nodeCount: 0, cost: 0, size, images };
   const outputs = {};
   for (const name of names) {
     outputs[name] = compileNode(graph[name], state, 0);
@@ -614,9 +671,27 @@ function writeColor(data, offset, channels) {
   data[offset + 3] = 255;
 }
 
+// The kernel worker takes plain data, so the images a graph uses arrive as { [assetId]: { width, height, data } };
+// the host's own pool is a Map. Both work.
+function imagePoolMap(images) {
+  if (!images) return new Map();
+  return images instanceof Map ? images : new Map(Object.entries(images));
+}
+
+/** The pixels a graph's image nodes read, as plain data a kernel worker can clone and the cache can hash. */
+export function graphImageData(graph, pool) {
+  const used = {};
+  for (const asset of graphImageAssets(graph)) {
+    const id = asset.toLowerCase();
+    const frame = pool?.get(id);
+    if (frame) used[id] = { width: frame.width, height: frame.height, data: frame.data };
+  }
+  return used;
+}
+
 /** Bake a normalized graph into texture descriptors, one for each output the graph has. Deterministic. */
-export function bakeMaterialGraph(graph, { resolution, bump, size = 1 }) {
-  const compiled = compileMaterialGraph(graph, { size });
+export function bakeMaterialGraph(graph, { resolution, bump, size = 1 }, images) {
+  const compiled = compileMaterialGraph(graph, { size, images: imagePoolMap(images) });
   checkMaterialGraphWork(compiled, resolution);
   const { color, roughness, metallic, emission, height, opacity, clearcoat, transmission, aov } = compiled.outputs;
   const pixelCount = resolution * resolution;

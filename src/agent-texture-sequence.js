@@ -1,6 +1,7 @@
 import { createImage } from './material-texture-kit.js';
 import { TEXTURE_SEQUENCE_LIMITS } from './texture-sequence-limits.js';
 import { invalidField } from './field-error.js';
+import { graphImageAssets } from './material-graph.js';
 
 // An image sequence as the colour map of a recipe material: `map: { sequence: { frames, fps, loop } }`. The frames are
 // catalog image assets that the host decodes before createAgentScene. The scene picks a frame from its motion time, so a
@@ -49,7 +50,7 @@ export function sequenceFrameIndex(sequence, time) {
   return sequence.loop ? raw % count : Math.min(raw, count - 1);
 }
 
-/** The catalog image IDs a recipe, or a list of edit operations, uses as sequence frames. */
+/** The catalog image IDs a recipe, or a list of edit operations, uses as sequence frames or as `image` nodes of a material graph. */
 export function sequenceFrameIds(value) {
   const ids = new Set();
   const visit = (node, depth) => {
@@ -57,6 +58,11 @@ export function sequenceFrameIds(value) {
     if (Array.isArray(node)) {
       for (const child of node) visit(child, depth + 1);
       return;
+    }
+    if (node.type === 'graph' && node.graph) {
+      for (const asset of graphImageAssets(node.graph)) {
+        if (ASSET_ID.test(asset.toLowerCase())) ids.add(asset.toLowerCase());
+      }
     }
     const frames = node.map?.sequence?.frames;
     if (Array.isArray(frames)) {
