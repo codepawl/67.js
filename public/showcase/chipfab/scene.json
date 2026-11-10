@@ -1,0 +1,260 @@
+{
+  "id": "chipfab",
+  "title": "Chip fab",
+  "blurb": "A semiconductor cleanroom bay: lithography scanners under yellow light, etch clusters, wet benches, stockers and overhead hoist rails carrying wafer pods.",
+  "glb": "/showcase/chipfab/scene.glb",
+  "hdri": "/showcase/chipfab/sky.hdr",
+  "hdriOptions": {
+    "intensity": 0.8,
+    "rotation": 0,
+    "showBackground": false,
+    "backgroundBlur": 0
+  },
+  "gltfOptions": {
+    "maxTexturePixels": 33554432
+  },
+  "exposure": 0.8,
+  "renderer": {
+    "ground": false,
+    "hdr": true,
+    "samples": 4,
+    "environment": {
+      "lightDirection": [
+        0.2,
+        1,
+        0.1
+      ],
+      "keyColor": [
+        1,
+        1,
+        1
+      ],
+      "keyIntensity": 0.0001,
+      "fillIntensity": 0.6,
+      "ambientIntensity": 0.7,
+      "fogColor": [
+        0.55,
+        0.64,
+        0.78
+      ],
+      "fogDensity": 0.0011,
+      "pointLights": [
+        {
+          "position": [
+            4,
+            6.3,
+            1.2
+          ],
+          "color": [
+            1,
+            0.72,
+            0.3
+          ],
+          "intensity": 120,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            13.7,
+            6.3,
+            -1.2
+          ],
+          "color": [
+            1,
+            0.72,
+            0.3
+          ],
+          "intensity": 120,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            23.4,
+            6.3,
+            1.2
+          ],
+          "color": [
+            1,
+            0.72,
+            0.3
+          ],
+          "intensity": 120,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            33.1,
+            6.3,
+            -1.2
+          ],
+          "color": [
+            1,
+            0.72,
+            0.3
+          ],
+          "intensity": 120,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            42.8,
+            6.3,
+            1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            52.5,
+            6.3,
+            -1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            62.2,
+            6.3,
+            1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            71.9,
+            6.3,
+            -1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            81.6,
+            6.3,
+            1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            91.3,
+            6.3,
+            -1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            101,
+            6.3,
+            1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        },
+        {
+          "position": [
+            110.7,
+            6.3,
+            -1.2
+          ],
+          "color": [
+            0.86,
+            0.92,
+            1
+          ],
+          "intensity": 110,
+          "radius": 0.6,
+          "range": 26
+        }
+      ]
+    }
+  },
+  "frame": {
+    "fov": 55,
+    "near": 0.3,
+    "far": 400,
+    "effects": {
+      "ambientOcclusion": 1,
+      "bloom": {
+        "strength": 0.3,
+        "threshold": 1.1,
+        "radius": 0.9
+      },
+      "saturation": 1.12,
+      "vignette": 0.32
+    }
+  },
+  "credits": [
+    {
+      "model": "Chip fab cleanroom bay, built in Blender for 67js",
+      "author": "CodePawl",
+      "licence": "MIT",
+      "source": "https://github.com/codepawl/67.js"
+    },
+    {
+      "model": "Universal Base Characters, Universal Animation Library",
+      "author": "Quaternius",
+      "licence": "CC0",
+      "source": "https://quaternius.com/"
+    },
+    {
+      "model": "studio_small_09 (reflection light)",
+      "author": "Poly Haven",
+      "licence": "CC0",
+      "source": "https://polyhaven.com/a/studio_small_09"
+    }
+  ]
+}

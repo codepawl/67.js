@@ -6,7 +6,7 @@ This page connects the 67js MCP server to an AI agent harness. A harness is the 
 
 `67js-mcp` is a local program. The harness starts it and talks to it over stdin and stdout. It has no network listener for MCP.
 
-The server holds one active scene. When the agent calls `scene_create`, the server starts your installed Chrome in the background and renders the scene there. It gives the agent 23 tools to build, look at and export the scene. The tools take JSON, and they never run code that the agent writes.
+The server holds a few open scenes and uses the last one you used when a call has no `sessionId`. When the agent calls `scene_create`, the server starts your installed Chrome in the background and renders the scene there. It gives the agent 23 tools to build, look at and export the scene. The tools take JSON, and they never run code that the agent writes.
 
 You need two things:
 

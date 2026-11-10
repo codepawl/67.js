@@ -1,3 +1,4 @@
+import { createSlicer } from './cooperative.js';
 import { createEnvironmentMap, MAXIMUM_ENVIRONMENT_SIZE } from './environment.js';
 
 const MAXIMUM_FILE_BYTES = 256 * 1024 ** 2;
@@ -67,8 +68,8 @@ function startsRunLengthScanline(bytes, position, width) {
     && ((bytes[position + 2] << 8) | bytes[position + 3]) === width;
 }
 
-// Parses Radiance RGBE (.hdr) data into linear RGB floats, top row first.
-export function parseRadianceHdr(buffer) {
+// Decodes one scanline per step, so a caller can run it to the end at once or hand the thread back between rows.
+function* decodeRadianceRows(buffer) {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   if (bytes.length > MAXIMUM_FILE_BYTES) throw new RangeError('Radiance HDR file is larger than 256 MiB.');
   const { width, height, dataStart } = parseHeader(bytes);
@@ -92,15 +93,35 @@ export function parseRadianceHdr(buffer) {
       data[target + 1] = scanline[column * 4 + 1] * scale;
       data[target + 2] = scanline[column * 4 + 2] * scale;
     }
+    yield row;
   }
   return { width, height, data };
+}
+
+// Parses Radiance RGBE (.hdr) data into linear RGB floats, top row first.
+export function parseRadianceHdr(buffer) {
+  const rows = decodeRadianceRows(buffer);
+  let step = rows.next();
+  while (!step.done) step = rows.next();
+  return step.value;
+}
+
+// The same result as parseRadianceHdr, with `checkpoint()` awaited between rows so a large map does not block the page.
+export async function parseRadianceHdrInSlices(buffer, checkpoint) {
+  const rows = decodeRadianceRows(buffer);
+  let step = rows.next();
+  while (!step.done) {
+    await checkpoint();
+    step = rows.next();
+  }
+  return step.value;
 }
 
 // Fetches a .hdr file (for example a 1k or 2k Poly Haven HDRI) and returns an environment map descriptor.
 export async function loadHdri(url, { intensity, rotation, showBackground, backgroundBlur, signal, fetchImplementation = globalThis.fetch } = {}) {
   const response = await fetchImplementation(url, { signal });
   if (!response.ok) throw new Error(`HDRI download failed: HTTP ${response.status}.`);
-  const parsed = parseRadianceHdr(await response.arrayBuffer());
+  const parsed = await parseRadianceHdrInSlices(await response.arrayBuffer(), createSlicer());
   return createEnvironmentMap({ ...parsed, intensity, rotation, showBackground, backgroundBlur });
 }
 

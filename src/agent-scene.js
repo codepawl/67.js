@@ -1516,7 +1516,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       // Part identity decides what the next stage reuses, so it compares the parts as built, before any bake.
       sourceRestParts,
       parts: restParts, restParts,
-      bakeReport: lightBakeResult ? { ...lightBakeResult.report, reused: lightBakeResult.reused } : null,
+      bakeReport: lightBakeResult ? agentSceneModule('bake').withLocalVolumeReport({ ...lightBakeResult.report, reused: lightBakeResult.reused }, recipe.environment.localVolumes) : null,
       reflectionReport: reflected ? reflected.report : null,
       // A renderer holding the deformed cloth parts of the old state needs the rest parts back as a topology change.
       topologyChanged: Boolean(state && (restParts !== state.restParts || state.parts !== state.restParts)),
@@ -1575,7 +1575,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     const rebaked = state.recipe.bake?.rebake && agentSceneModule('bake').bakeAtSampledPose(lightBake, state.recipe, pose);
     if (rebaked) {
       state.restParts = stageRestParts(state.recipe, state.sourceRestParts, rebaked, pose.graph).restParts;
-      state.bakeReport = rebaked.report;
+      state.bakeReport = agentSceneModule('bake').withLocalVolumeReport(rebaked.report, state.recipe.environment.localVolumes);
     }
   }
 

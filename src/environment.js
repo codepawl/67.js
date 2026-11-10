@@ -87,7 +87,10 @@ function sphericalHarmonicBasis(x, y, z) {
 
 // Returns 27 floats (9 RGB triples) with basis constants and the Lambert kernel folded in,
 // so evaluateIrradiance(coefficients, normal) is the diffuse radiance for a white surface.
-export function computeIrradianceCoefficients(map) {
+const IRRADIANCE_ROWS_PER_STEP = 32;
+
+// One step per few rows of the map, so a caller can hand the thread back between steps.
+function* irradianceSteps(map) {
   assertEnvironmentMap(map);
   const { width, height, channels, data } = map;
   const columnSine = new Float64Array(width);
@@ -114,6 +117,7 @@ export function computeIrradianceCoefficients(map) {
         sums[term * 3 + 2] += data[offset + 2] * termWeight;
       }
     }
+    if (row % IRRADIANCE_ROWS_PER_STEP === IRRADIANCE_ROWS_PER_STEP - 1) yield;
   }
   const coefficients = new Float32Array(27);
   for (let term = 0; term < 9; term++) {
@@ -122,6 +126,27 @@ export function computeIrradianceCoefficients(map) {
     for (let channel = 0; channel < 3; channel++) coefficients[term * 3 + channel] = sums[term * 3 + channel] * scale;
   }
   return coefficients;
+}
+
+export function computeIrradianceCoefficients(map) {
+  return runToEnd(irradianceSteps(map));
+}
+
+/** Runs a step generator to its end without pausing and returns its result. */
+function runToEnd(steps) {
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+/** Awaits `checkpoint()` after every step of a generator and returns its result. */
+export async function runInSlices(steps, checkpoint) {
+  let step = steps.next();
+  while (!step.done) {
+    await checkpoint();
+    step = steps.next();
+  }
+  return step.value;
 }
 
 export function evaluateIrradiance(coefficients, normal) {
@@ -134,11 +159,14 @@ export function evaluateIrradiance(coefficients, normal) {
   return result.map(value => Math.max(value, 0));
 }
 
-function paddedHalfFloatSource(map) {
-  const pixelCount = map.width * map.height;
+// Rows of the map as RGBA floats clamped to the half-float range, so a large map goes to the GPU a strip at a time.
+const UPLOAD_ROWS_PER_STEP = 64;
+
+function paddedHalfFloatRows(map, firstRow, rowCount) {
+  const pixelCount = map.width * rowCount;
   const padded = new Float32Array(pixelCount * 4);
   for (let pixel = 0; pixel < pixelCount; pixel++) {
-    const source = pixel * map.channels;
+    const source = (firstRow * map.width + pixel) * map.channels;
     const target = pixel * 4;
     padded[target] = Math.min(Math.max(map.data[source], 0), HALF_FLOAT_MAXIMUM);
     padded[target + 1] = Math.min(Math.max(map.data[source + 1], 0), HALF_FLOAT_MAXIMUM);
@@ -290,15 +318,29 @@ function drawIntoLevel(context, framebuffer, texture, level, width, height) {
 }
 
 // Prefilters once at load: GGX-convolved equirect mip chain (level = roughness), split-sum BRDF lookup and L2 spherical harmonics.
-export function createEnvironmentResources(context, map, { compileProgram, fullscreenVertex }) {
+export function createEnvironmentResources(context, map, programs) {
+  return runToEnd(environmentResourceSteps(context, map, programs));
+}
+
+/** The same resources, built a step at a time (upload, mipmaps, each roughness level, the lookup table, the irradiance) so a caller can draw frames between steps. */
+export function createEnvironmentResourcesInSlices(context, map, programs, checkpoint) {
+  return runInSlices(environmentResourceSteps(context, map, programs), checkpoint);
+}
+
+function* environmentResourceSteps(context, map, { compileProgram, fullscreenVertex }) {
   assertEnvironmentMap(map);
   if (!context.getExtension('EXT_color_buffer_float')) throw new Error('Environment maps require EXT_color_buffer_float.');
   const started = performance.now();
   const layout = environmentSpecularLayout(map);
   const sourceLevelCount = Math.floor(Math.log2(Math.max(map.width, map.height))) + 1;
   const sourceTexture = createHalfFloatTexture(context, context.RGBA16F, sourceLevelCount, map.width, map.height, { wrapHorizontally: true });
-  context.texSubImage2D(context.TEXTURE_2D, 0, 0, 0, map.width, map.height, context.RGBA, context.FLOAT, paddedHalfFloatSource(map));
+  for (let firstRow = 0; firstRow < map.height; firstRow += UPLOAD_ROWS_PER_STEP) {
+    const rowCount = Math.min(UPLOAD_ROWS_PER_STEP, map.height - firstRow);
+    context.texSubImage2D(context.TEXTURE_2D, 0, 0, firstRow, map.width, rowCount, context.RGBA, context.FLOAT, paddedHalfFloatRows(map, firstRow, rowCount));
+    yield;
+  }
   context.generateMipmap(context.TEXTURE_2D);
+  yield;
   const specularTexture = createHalfFloatTexture(context, context.RGBA16F, layout.levelCount, layout.width, layout.height, { wrapHorizontally: true });
   const brdfTexture = createHalfFloatTexture(context, context.RG16F, 1, ENVIRONMENT_BRDF_SIZE, ENVIRONMENT_BRDF_SIZE, { wrapHorizontally: false });
   const framebuffer = context.createFramebuffer();
@@ -320,6 +362,7 @@ export function createEnvironmentResources(context, map, { compileProgram, fulls
     context.uniform1f(roughnessUniform, level / Math.max(1, layout.levelCount - 1));
     context.uniform1f(levelOffsetUniform, Math.max(0, Math.log2(map.width / layout.levels[level].width)));
     drawIntoLevel(context, framebuffer, specularTexture, level, layout.levels[level].width, layout.levels[level].height);
+    yield;
   }
   context.useProgram(brdfProgram);
   drawIntoLevel(context, framebuffer, brdfTexture, 0, ENVIRONMENT_BRDF_SIZE, ENVIRONMENT_BRDF_SIZE);
@@ -329,6 +372,8 @@ export function createEnvironmentResources(context, map, { compileProgram, fulls
   context.deleteProgram(brdfProgram);
   context.deleteTexture(sourceTexture);
   context.finish();
+  yield;
+  const irradiance = yield* irradianceSteps(map.irradianceSource ?? map);
   return {
     data: map.data,
     irradianceSource: map.irradianceSource,
@@ -336,7 +381,7 @@ export function createEnvironmentResources(context, map, { compileProgram, fulls
     brdfTexture,
     levelCount: layout.levelCount,
     bytes: layout.bytes,
-    irradiance: computeIrradianceCoefficients(map.irradianceSource ?? map),
+    irradiance,
     prefilterMilliseconds: performance.now() - started,
     dispose() {
       context.deleteTexture(specularTexture);
@@ -353,6 +398,7 @@ registerEnvironmentSupport({
   assertMap: assertEnvironmentMap,
   estimateBytes: estimateEnvironmentBytes,
   createResources: createEnvironmentResources,
+  createResourcesInSlices: createEnvironmentResourcesInSlices,
   prefilterFragment: environmentPrefilterFragment,
   brdfFragment: environmentBrdfFragment,
   backgroundFragment: environmentBackgroundFragment,
