@@ -24,7 +24,7 @@ export const PROTECTED_FILES = Object.freeze({
 
 const userFacingPattern = /^(src|bin|packages|skills)\//;
 const shippedCodePattern = /^(src|bin|packages)\/|^package(-lock)?\.json$|^vite\.lib\.config\.js$|^scripts\/build-mcp\.mjs$/;
-const toolCodePattern = /^(src\/agent-|src\/mcp|bin\/)|^scripts\/(build-mcp|measure-tool-cost|check-tool-cost)/;
+const toolCodePattern = /^(src\/agent-|src\/mcp|bin\/)|^scripts\/(build-mcp|measure-tool-cost|check-tool-cost|mcp-server|mcp-input-errors|capabilities-topics|tool-examples)/;
 const linkedTextPattern = /\.(md|html)$/;
 
 // Checks a GPU or a person's eyes must run. CONTRIBUTING.md lists them; these patterns only point out the ones that may apply.
