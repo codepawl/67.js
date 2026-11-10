@@ -22,4 +22,4 @@ Each of these has a row in `docs/parity.md` with this reason. A change of direct
 
 ## Where the work is
 
-Open issues are grouped by the milestones `0 Measure`, `1 Lighter`, `2 Modeling`, `3 Look`, `4 Motion and simulation` and `5 Agent surface` on GitHub. Each issue has a `goal:capable`, `goal:light` or `goal:ai` label. There is no tracking issue.
+Open issues are grouped by the milestones `0 Measure`, `1 Lighter`, `2 Modeling`, `3 Look`, `4 Motion and simulation`, `5 Agent surface` and `6 Games` on GitHub. `6 Games` is a live runtime for browser games (loop, physics, input, player, animation graph, audio, streaming, a prompt-to-playable agent path, multiplayer); game logic comes from bounded systems and recipes, never from agent-written code run in the engine. Each issue has a `goal:capable`, `goal:light` or `goal:ai` label. There is no tracking issue.
