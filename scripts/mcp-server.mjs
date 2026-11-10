@@ -630,6 +630,7 @@ const clothSheet = z.strictObject({
   pin: z.array(z.enum(['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight'])).max(8).optional(),
   pinGroup: z.string().max(48).optional(),
   pinTo: looseRecord.optional(),
+  stiffnessGroup: z.string().max(48).optional(), softBody: looseRecord.optional(), selfCollision: z.boolean().optional(),
   stiffness: unit.optional(), bend: unit.optional(), density: positive.optional(), damping: nonnegative.optional(), friction: unit.optional(), thickness: nonnegative.optional(),
 });
 const cloth = z.strictObject({

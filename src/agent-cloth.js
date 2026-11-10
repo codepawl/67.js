@@ -24,8 +24,11 @@ const PIN_EDGES = ['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bot
 const COLLIDER_SHAPES = ['ball', 'box'];
 const MOVING_SHAPES = ['ball', 'capsule'];
 const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'fields', 'sheets', 'colliders'];
-const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
+const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffnessGroup', 'softBody', 'selfCollision', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
 const PIN_TO_FIELDS = ['node', 'weight'];
+const SOFT_BODY_FIELDS = ['shape', 'pressure'];
+// A stiffness group never goes fully limp: a zero weight would let its particles drift off.
+const MIN_GROUP_STIFFNESS = 0.05;
 const FIXED_COLLIDER_FIELDS = ['node', 'shape'];
 // A ball or capsule that rides on a node: the capsule runs from `attach` (plus offset) to `to` (plus toOffset).
 const MOVING_COLLIDER_FIELDS = ['attach', 'shape', 'radius', 'offset', 'to', 'toOffset'];
@@ -55,6 +58,24 @@ function normalizeSheet(input, context, path) {
       throw invalidField(`${path}.pinGroup`, input.pinGroup, 'the name of a vertex group on the sheet mesh, such as "hem"');
     }
     sheet.pinGroup = input.pinGroup;
+  }
+  if (input.stiffnessGroup !== undefined) {
+    if (typeof input.stiffnessGroup !== 'string' || !GROUP_NAME_PATTERN.test(input.stiffnessGroup)) {
+      throw invalidField(`${path}.stiffnessGroup`, input.stiffnessGroup, 'the name of a vertex group on the sheet mesh whose weights scale stiffness, such as "sleeve"');
+    }
+    sheet.stiffnessGroup = input.stiffnessGroup;
+  }
+  if (input.softBody !== undefined) {
+    knownKeys(input.softBody, SOFT_BODY_FIELDS, `${path}.softBody`);
+    sheet.softBody = {};
+    if (input.softBody.shape !== undefined) sheet.softBody.shape = finiteNumber(input.softBody.shape, `${path}.softBody.shape`, 0, 1);
+    if (input.softBody.pressure !== undefined) sheet.softBody.pressure = finiteNumber(input.softBody.pressure, `${path}.softBody.pressure`, 0, 3);
+  }
+  if (input.selfCollision !== undefined) {
+    if (typeof input.selfCollision !== 'boolean') {
+      throw invalidField(`${path}.selfCollision`, input.selfCollision, 'true or false; the radius follows the mesh edge length');
+    }
+    sheet.selfCollision = input.selfCollision;
   }
   if (input.pinTo !== undefined) {
     knownKeys(input.pinTo, PIN_TO_FIELDS, `${path}.pinTo`);
@@ -206,14 +227,24 @@ function colliderFor(collider, node, geometry) {
 }
 
 // The weights of the sheet's pin group per render vertex, or null without one. A name the mesh lacks is an error that lists the groups it has.
-function pinGroupWeights(sheet, geometry) {
-  if (!sheet.pinGroup) return null;
-  const weights = geometry.vertexGroups?.[sheet.pinGroup];
+function groupWeights(sheet, geometry, field) {
+  const name = sheet[field];
+  if (!name) return null;
+  const weights = geometry.vertexGroups?.[name];
   if (!weights) {
     const known = Object.keys(geometry.vertexGroups ?? {});
-    throw invalidField('cloth.sheets[].pinGroup', sheet.pinGroup, `a vertex group of node ${sheet.node} (known groups: ${known.join(', ') || 'none'}); make one with a vertex_group mesh edit`);
+    throw invalidField(`cloth.sheets[].${field}`, name, `a vertex group of node ${sheet.node} (known groups: ${known.join(', ') || 'none'}); make one with a vertex_group mesh edit`);
   }
   return weights;
+}
+
+const pinGroupWeights = (sheet, geometry) => groupWeights(sheet, geometry, 'pinGroup');
+
+// One 0.05 to 1 stiffness weight per particle from the sheet's stiffness group, or undefined without one.
+function stiffnessWeights(sheet, geometry, representatives) {
+  const weights = groupWeights(sheet, geometry, 'stiffnessGroup');
+  if (!weights) return undefined;
+  return Float64Array.from(representatives, vertex => Math.max(weights[vertex], MIN_GROUP_STIFFNESS));
 }
 
 // Particles on the requested edges of the sheet's local bounds, so 'top' is the row of highest local y, plus the particles
@@ -383,6 +414,7 @@ function bakeSheet(sheet, cloth, node, geometry, colliders, frameCount, movingSe
   const moving = needsMoving ? createMovingBodies(sheet, pinned, worldPositions, movingSetup, frameCount) : null;
   const recording = Object.freeze({ ...runKernel('cloth', [worldPositions, welded.triangles, {
     pinned: sheet.pinTo ? [] : pinned, moving,
+    stiffnessWeights: stiffnessWeights(sheet, geometry, welded.representatives), softBody: sheet.softBody, selfCollision: sheet.selfCollision,
     gravity: cloth.gravity, wind: cloth.wind, fields: cloth.fields, stiffness: sheet.stiffness, bend: sheet.bend,
     density: sheet.density, damping: sheet.damping, friction: sheet.friction, thickness: sheet.thickness,
     colliders, frameCount, framesPerSecond: FRAMES_PER_SECOND,

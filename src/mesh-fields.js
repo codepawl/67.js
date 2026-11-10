@@ -164,13 +164,16 @@ export function registerFieldOperator(name, operator) {
 }
 
 export { MAX_FIELD_NODES, MAX_FIELD_DEPTH, MAX_FIELD_ELEMENTS, MAX_FIELD_WORK };
-const SOURCE_KEYS = Object.freeze(['attr', 'noise', 'random', 'nearest', 'raycast']);
+const SOURCE_KEYS = ['attr', 'noise', 'random', 'nearest', 'raycast'];
 
 // Inputs that other modules supply (the surface inputs register themselves), so a bundle that never reads one does not carry its code.
 const FIELD_SOURCES = new Map();
 
 export function registerFieldSource(name, compile) {
   FIELD_SOURCES.set(name, compile);
+  if (SOURCE_KEYS.includes(name)) return;
+  SOURCE_KEYS.push(name);
+  FIELD_OPERATORS.push(name);
 }
 // Every operator and input name; registerFieldOperator adds the late ones.
 export const FIELD_OPERATORS = [...OPERATORS.keys(), ...SOURCE_KEYS];
@@ -298,7 +301,7 @@ export function validateField(expression, { kind } = {}) {
 }
 
 const EMPTY = new Float64Array(0);
-const VALIDATION_CONTEXT = Object.freeze({ count: 0, positions: () => EMPTY, normals: () => EMPTY, tag: () => EMPTY, group: () => EMPTY, loadSurface: null });
+const VALIDATION_CONTEXT = Object.freeze({ count: 0, positions: () => EMPTY, normals: () => EMPTY, tag: () => EMPTY, group: () => EMPTY, loadSurface: null, validationOnly: true });
 
 function finiteValues(source, count, width) {
   const values = new Float64Array(count * width);
@@ -315,6 +318,8 @@ export function meshFieldContext(mesh, domain, loadSurface) {
   const isPoint = domain === 'point';
   const cache = {};
   return {
+    mesh,
+    domain,
     count: isPoint ? mesh.vertexCount : mesh.faceCount,
     positions: () => (cache.positions ??= isPoint ? mesh.positions : faceCentroids(mesh)),
     normals: () => (cache.normals ??= isPoint ? vertexNormals(mesh) : faceNormals(mesh).normals),
