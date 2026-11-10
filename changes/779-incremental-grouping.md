@@ -1,0 +1,2 @@
+- `replaceParts(parts, { retainedUnchanged: true })` groups only the parts appended since the last call when a world grows by whole geometries, so loading a large world in slices no longer regroups the whole prefix on every call (#779)
+- An unflipped texture image over 1,048,576 pixels uploads in row bands of at most that size instead of one `texImage2D`; the pixels are identical (#779)
