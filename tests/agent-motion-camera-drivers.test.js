@@ -95,7 +95,7 @@ test('camera driver and influence errors name the field and what to pass', () =>
   assert.throws(build([{ target: { kind: 'camera', property: 'fov', component: 'x' }, expression: 40 }]), /camera fov takes no component/);
   assert.throws(
     build([{ target: { kind: 'camera', property: 'fov' }, expression: 40 }], { tracks: [{ kind: 'camera', property: 'fov', keyframes: [{ time: 0, value: 40 }, { time: 2, value: 50 }] }] }),
-    /already moves fov/,
+    error => /a track on camera already moves fov/.test(error.message) && !/undefined/.test(error.message),
   );
   assert.throws(
     () => createAgentScene(recipeWith({ duration: 2, tracks: [], constraints: [{ type: 'copy_location', node: 'follower', target: 'lead', influence: customRead('missing') }] })),

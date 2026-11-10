@@ -580,7 +580,8 @@ export function normalizeAgentMotion(input, recipe) {
     result.drivers = normalizeDrivers(input.drivers, { nodes, materials, lights, morphs: morphTargets, visible: visibleIds, properties: propertyKinds(result.properties) });
     for (const { target } of result.drivers) {
       if (identities.has(JSON.stringify([target.kind, target.id ?? null, target.property]))) {
-        throw invalidField('motion.drivers', `${target.id} ${target.property}`, `a property no track animates, since a track on ${target.kind} ${target.id ?? ''} already moves ${target.property}; drop the track or the driver`);
+        const targetName = target.id === undefined ? target.kind : `${target.kind} ${target.id}`;
+        throw invalidField('motion.drivers', `${targetName} ${target.property}`, `a property no track animates, since a track on ${targetName} already moves ${target.property}; drop the track or the driver`);
       }
     }
   }
