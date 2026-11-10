@@ -244,6 +244,18 @@ gives that target; targets without a track keep theirs. Names come from the file
 that Blender and face rigs with ARKit names such as `eyeBlinkLeft` and `jawOpen` export); `scene_inspect` returns them as
 `morphTargetNames`, and an unknown name fails with the first ones. Tracks can address morph targets only on an imported asset.
 
+### Ocean time tracks
+
+A track `{ "kind": "geometry", "id": "sea", "property": "oceanTime", "keyframes": [...] }` drives the `time` (seconds, -1e6 to 1e6)
+of every `ocean` node in the `stack` of the mesh geometry `sea`, so one video job or timeline renders moving waves without
+a still per frame. Two keyframes `0 -> 0` and `4 -> 4` run the sea in real time; steeper keyframes run it faster. The track
+replaces the `time` written in the stack. Each frame rebuilds the geometry from the cached edits and the stack nodes before the
+ocean, then runs the ocean and the nodes after it, so the vertices of a frame equal those of a still with that `time` written
+into the node, and seeking in any order gives the same bytes. The ocean work limit (50 million wave evaluations) and `maxVertices`
+apply to every frame; the per-frame cost grows with vertices times waves, so keep a sea that moves to about 30,000 vertices.
+The ID must name a mesh geometry whose stack has an `ocean` node (an `ocean` in `edits` is baked and cannot move). Only
+`oceanTime` is a geometry property; other numeric stack fields are not drivable.
+
 ### Joint limits and sanity warnings
 
 A two-bone solver takes `limits: { "root": { "x": [min, max], "y": [...], "z": [...] }, "middle": {...} }` in degrees. Each

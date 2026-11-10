@@ -1,0 +1,3 @@
+- scene:agent-scene: the per-frame ocean geometry sampler and the `geometry` track kind (about 180 bytes gzip) give agents a moving sea in one video job instead of one still per frame; a 72 frame 540p clip rendered in about 3 s.
+- scene:agent-scene+lazy: same change, the track kind and the sampler appear in the scene and motion chunks.
+- goal:agent-scene: the sampler is 30 lines that reuse generateGeometry and the motion sampler, and a moving sea is an agent-facing capability.
