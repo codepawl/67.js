@@ -159,3 +159,50 @@ test('bad emitter input names the field and what to pass', () => {
   failure({ instances: Array(9).fill('leaf') }, /instances/);
   failure({ emitter: { shape: 'mesh', mesh: 'leaf', from: 'volume' } }, /closed mesh/);
 });
+
+// A wall whose top row of vertices is painted into the vertex group "rim".
+function rimWallRecipe(system) {
+  const base = recipe(system);
+  base.geometries.push({
+    id: 'rimmed', type: 'mesh', base: { type: 'box', bevel: 0 },
+    edits: [{ op: 'vertex_group', name: 'rim', select: { tag: 'top' }, weight: 1 }],
+  });
+  base.nodes.push({ id: 'rimwall', geometry: 'rimmed', material: 'paint', translation: WALL_CENTER, scale: [WALL_SCALE, WALL_SCALE, WALL_SCALE] });
+  return base;
+}
+
+function rimCentres(system) {
+  const scene = createAgentScene(rimWallRecipe(system));
+  scene.sampleMotion(0);
+  return particleCentres(sparksGeometry(scene), 24);
+}
+
+test('a vertex group keeps sparks on the painted rim, from vertices and from the surface', () => {
+  const topHeight = WALL_CENTER[1] + WALL_SCALE * 0.5;
+  const fromVertices = rimCentres({ emitter: { shape: 'mesh', mesh: 'rimwall', from: 'vertices', group: 'rim' } });
+  assert.equal(fromVertices.length, 80);
+  for (const centre of fromVertices) assert.ok(Math.abs(centre[1] - topHeight) < TOLERANCE, `y ${centre[1]}`);
+  // Surface triangles weigh area times the mean group weight: the unpainted bottom face gets none and the top face the most.
+  const bottomHeight = WALL_CENTER[1] - WALL_SCALE * 0.5;
+  const onTop = centres => centres.filter(centre => Math.abs(centre[1] - topHeight) < TOLERANCE).length;
+  const fromSurface = rimCentres({ emitter: { shape: 'mesh', mesh: 'rimwall', group: 'rim' }, count: 400 });
+  const ungrouped = rimCentres({ emitter: { shape: 'mesh', mesh: 'rimwall' }, count: 400 });
+  assert.ok(fromSurface.every(centre => centre[1] > bottomHeight + TOLERANCE), 'no spark on the unpainted bottom face');
+  assert.ok(onTop(fromSurface) > onTop(ungrouped) * 1.8, `${onTop(fromSurface)} on top against ${onTop(ungrouped)} without a group`);
+});
+
+test('sparks from a group and leaves picked from 3 meshes work in one scene, with the same bytes each run', () => {
+  const build = () => {
+    const scene = createAgentScene(rimWallRecipe({ emitter: { shape: 'mesh', mesh: 'rimwall', group: 'rim' }, instances: ['sparks', 'leaf', 'thorn'], count: 40, size: 0.1 }));
+    scene.sampleMotion(0.5);
+    return Array.from(sparksGeometry(scene).positions);
+  };
+  assert.deepEqual(build(), build());
+});
+
+test('a vertex group that is missing, nameless or aimed at a volume names the field and what to pass', () => {
+  const failure = (emitter, pattern) => assert.throws(() => createAgentScene(rimWallRecipe({ emitter: { shape: 'mesh', mesh: 'rimwall', ...emitter } })), pattern);
+  failure({ group: 'hem' }, /emitter\.group[\s\S]*known groups: rim/);
+  failure({ group: '' }, /emitter\.group[\s\S]*name of a vertex group/);
+  failure({ group: 'rim', from: 'volume' }, /emitter\.group[\s\S]*"surface" or "vertices"/);
+});

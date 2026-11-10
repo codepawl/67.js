@@ -213,6 +213,8 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,
     maxNodes: MAX_FIELD_NODES, maxDepth: MAX_FIELD_DEPTH, maxElements: MAX_FIELD_ELEMENTS,
     rotation: 'rotate [v, axis, rad]; align [dir]: Euler of +Y to dir; transform [p, move, euler, size].',
+    meshShape: 'faceArea {}; edgeAngle {} (radians, 0 on a border); island {}; neighbors {read edges|faces}. Over points faceArea is the mean of the faces around. A point set has no mesh and rejects them.',
+    wholeDomain: 'accumulate {value, group}; statistic {value, mode min|max|mean|sum|range, group}; blur {value, iterations 1-32, weight 0-1}; sampleIndex {value, index} (clamped); rank {value, descending} (Sort Elements index). value and group are number expressions.',
     surfaces: 'nearest {surface, at, read distance|point|normal}; raycast {surface, at, direction, read hit|distance|point|normal, miss}. at defaults to position; rays go forward. surface: geometry id (instances where) or record (mesh edits). attr group + name reads a vertex group.',
   }),
   instancing: Object.freeze({
@@ -313,7 +315,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   }),
   // Recipe particles: closed-form from seeded launch values, so any time is computed directly and a seek never replays.
   particles: Object.freeze({
-    emitter: 'System node geometry is the particle shape; its transform does not move them. Fields (defaults): node, seed (1), count (100), rate (per second; omit: burst at 0), lifetime, speed, size (number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc|mesh, position, halfExtents, radius; mesh: mesh node, from surface (area weighted)|vertices|volume (closed mesh), normalSpeed m/s along the normal }, instances [node ids, up to 8: each particle draws one], orient none|random|normal (mesh surface or vertices), scale constant|shrink|grow, drag (1/s, 0), floor (world y they land on).',
+    emitter: 'System node geometry is the particle shape; its transform does not move them. Fields (defaults): node, seed (1), count (100), rate (per second; omit: burst at 0), lifetime, speed, size (number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc|mesh, position, halfExtents, radius; mesh: mesh node, group (vertex group weighting surface or vertices), from surface (area weighted)|vertices|volume (closed mesh), normalSpeed m/s along the normal }, instances [node ids, up to 8: each particle draws one], orient none|random|normal (mesh surface or vertices), scale constant|shrink|grow, drag (1/s, 0), floor (world y they land on).',
     hair: 'type hair grows strands from a read-only root surface node into node (its own geometry is ignored). Fields (defaults): surface, seed, count, length (m, number or [min, max], 0.1), segments (1-8, 4), width (m, 0.004), droop (0.5), lean (0.2), sway (tip travel m, off), swayRate (Hz, 0.5). Tapering tubes, no UVs.',
     sectionFields: 'systems, gravity ([0,-9.81,0]), wind (m/s; moves emitter particles only with drag > 0, and sets the hair sway direction), fields (also cloth; wind, turbulence, vortex, drag, magnet: docs/physics.md)',
     collision: 'colliders [node ids], bounce 0-1 (0.3 with colliders), friction 0-1 (0.5), spin deg/s, color [[r,g,b] birth, [r,g,b] death], alpha [birth, death].',
