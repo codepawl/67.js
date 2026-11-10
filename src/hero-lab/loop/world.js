@@ -130,7 +130,6 @@ export async function buildWorld(download, canvas, overrides = {}) {
     ...options,
     ...overrides,
     pixelRatio: Math.min(devicePixelRatio, 1.25),
-    memoryBudgetMiB: 640,
     deferProgramLink: true,
     ...effects?.rendererOptions,
     ...(options.shadowCascades ? { shadowCascades: createCascadedShadows(options.shadowCascades) } : {}),

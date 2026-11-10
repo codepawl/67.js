@@ -95,7 +95,11 @@ function prepare(index, { immediately = false } = {}) {
       const started = performance.now();
       entry.world = await buildFrom(download);
       await new Promise(resolve => setTimeout(resolve, 0));
-      if (!entry.skipped) entry.world.warm(flights[index].at(0));
+      if (!entry.skipped) {
+        const warmStarted = performance.now();
+        entry.world.warm(flights[index].at(0));
+        note('warmed', { scene: SCENES[index].id, ms: Math.round(performance.now() - warmStarted) });
+      }
       note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started) });
       loopState.peakWorlds = Math.max(loopState.peakWorlds, loopState.worldsAlive());
     })
