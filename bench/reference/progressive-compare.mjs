@@ -1,5 +1,5 @@
 // Draws reference scenes progressively (issue #623) and measures the time against the 64 sample still.
-//   node bench/reference/progressive-compare.mjs <output directory> <scene id or recipe.json>,... [--variant random|blue|importance|tree|both]
+//   node bench/reference/progressive-compare.mjs <output directory> <scene id or recipe.json>,... [--variant random|uniform|blue|importance|tree|both]
 //     [--checkpoints 1,2,4,8,16,32,64] [--firefly-clamp 1e9] [--width 960] [--height 540] [--still] [--frames 200]
 // Files are <scene>@<variant>-<samples>.png, <scene>@still-64.png and timings.json; bench/reference/progressive-score.py scores them against Cycles.
 // With --frames the script also prints the median time of one full size sample (1 sample per pixel) for each scene.
@@ -23,6 +23,7 @@ function valueAfter(flag, fallback) {
 
 const VARIANT_OPTIONS = {
   random: {},
+  uniform: { lightSelection: 'uniform' },
   blue: { samplingPattern: 'blue-noise-first' },
   importance: { lightSelection: 'importance' },
   tree: { lightSelection: 'tree' },
