@@ -2,8 +2,10 @@ import './support/load-agent-scene-modules.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { bakeMaterialPattern, normalizeMaterialPattern } from '../src/material-patterns.js';
-import { compileMaterialGraph, graphImageAssets } from '../src/material-graph.js';
+import { bakeMaterialPattern, materialPatternTextures, normalizeMaterialPattern } from '../src/material-patterns.js';
+import { buildWithKernels, kernelKey, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
+import { createInProcessWorker } from './support/kernel-offload-fixture.mjs';
+import { compileMaterialGraph, graphImageAssets, graphImageData } from '../src/material-graph.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
 import { createAgentScene } from '../src/agent-scene.js';
 
@@ -78,4 +80,60 @@ test('a scene material with an image graph bakes through the frame pool the host
   const data = material.map.image.data;
   assert.equal(data.length, 256 * 256 * 4);
   assert.ok(data[(128 * 256 + 255) * 4] > data[(128 * 256) * 4]);
+});
+
+function poolOf(pixel) {
+  return imagePool(2, 2, () => pixel);
+}
+
+function bakedFirstByte(pool, pattern = imagePattern()) {
+  return materialPatternTextures(pattern, pool).map.image.data[0];
+}
+
+test('an image graph is hashable and served by the kernel worker, never logged as a fallback', async () => {
+  resetKernelStats();
+  const requestedKernels = [];
+  const pool = poolOf([10, 20, 30, 255]);
+  const textures = await buildWithKernels(
+    () => materialPatternTextures(imagePattern(), pool),
+    { createWorker: () => createInProcessWorker(requestedKernels), available: true },
+  );
+  assert.deepEqual(kernelStats().fallbacks, []);
+  assert.ok(requestedKernels.includes('pattern'));
+  assert.deepEqual([...textures.map.image.data], [...bakeMaterialPattern(imagePattern(), pool).map.image.data]);
+});
+
+test('only the images a graph names reach the kernel, and the key covers their pixels', () => {
+  const graph = imagePattern().graph;
+  const pool = new Map([...poolOf([1, 2, 3, 255]), [OTHER_ASSET, { width: 1, height: 1, data: new Uint8ClampedArray(4) }]]);
+  const used = graphImageData(graph, pool);
+  assert.deepEqual(Object.keys(used), [IMAGE_ASSET]);
+  const keyA = kernelKey('pattern', [imagePattern(), used]);
+  const keyB = kernelKey('pattern', [imagePattern(), graphImageData(graph, poolOf([9, 9, 9, 255]))]);
+  assert.ok(keyA);
+  assert.notEqual(keyA, keyB);
+});
+
+test('the same asset ID with different pixels bakes again, with and without the pattern object shortcut', () => {
+  const pattern = imagePattern();
+  const first = bakedFirstByte(poolOf([250, 0, 0, 255]), pattern);
+  const second = bakedFirstByte(poolOf([0, 0, 0, 255]), pattern);
+  assert.ok(first > second, 'the same pattern object re-bakes against a pool with other pixels');
+  assert.equal(bakedFirstByte(poolOf([250, 0, 0, 255])), first, 'a new pattern object finds the cached bake of identical pixels');
+  assert.equal(bakedFirstByte(poolOf([0, 0, 0, 255])), second);
+});
+
+test('an image graph whose image is missing from the pool still says so', () => {
+  assert.throws(() => materialPatternTextures(imagePattern(), new Map()), /image aaaaaaaaaaaa was not loaded/);
+});
+
+test('sequence frame IDs resolve at the depth of an edit operation, and as before for sequence frames', () => {
+  const graph = { color: { image: { asset: IMAGE_ASSET } } };
+  const operations = [{ op: 'set_material', material: { id: 'wall', pattern: { type: 'graph', graph } } }];
+  assert.deepEqual(sequenceFrameIds(operations), [IMAGE_ASSET]);
+  const frames = [IMAGE_ASSET, OTHER_ASSET];
+  assert.deepEqual(sequenceFrameIds({ materials: [{ id: 'screen', map: { sequence: { frames, fps: 12, loop: true } } }] }).sort(), frames);
+  let deep = { type: 'graph', graph };
+  for (let level = 0; level < 12; level++) deep = { child: deep };
+  assert.deepEqual(sequenceFrameIds(deep), [], 'a graph nested beyond the search depth is ignored, as sequence frames are');
 });

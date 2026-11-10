@@ -671,9 +671,27 @@ function writeColor(data, offset, channels) {
   data[offset + 3] = 255;
 }
 
+// The kernel worker takes plain data, so the images a graph uses arrive as { [assetId]: { width, height, data } };
+// the host's own pool is a Map. Both work.
+function imagePoolMap(images) {
+  if (!images) return new Map();
+  return images instanceof Map ? images : new Map(Object.entries(images));
+}
+
+/** The pixels a graph's image nodes read, as plain data a kernel worker can clone and the cache can hash. */
+export function graphImageData(graph, pool) {
+  const used = {};
+  for (const asset of graphImageAssets(graph)) {
+    const id = asset.toLowerCase();
+    const frame = pool?.get(id);
+    if (frame) used[id] = { width: frame.width, height: frame.height, data: frame.data };
+  }
+  return used;
+}
+
 /** Bake a normalized graph into texture descriptors, one for each output the graph has. Deterministic. */
 export function bakeMaterialGraph(graph, { resolution, bump, size = 1 }, images) {
-  const compiled = compileMaterialGraph(graph, { size, images: images ?? new Map() });
+  const compiled = compileMaterialGraph(graph, { size, images: imagePoolMap(images) });
   checkMaterialGraphWork(compiled, resolution);
   const { color, roughness, metallic, emission, height, opacity, clearcoat, transmission, aov } = compiled.outputs;
   const pixelCount = resolution * resolution;

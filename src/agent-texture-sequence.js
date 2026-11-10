@@ -54,7 +54,7 @@ export function sequenceFrameIndex(sequence, time) {
 export function sequenceFrameIds(value) {
   const ids = new Set();
   const visit = (node, depth) => {
-    if (!node || typeof node !== 'object' || depth > 24) return;
+    if (!node || typeof node !== 'object' || depth > 8) return;
     if (Array.isArray(node)) {
       for (const child of node) visit(child, depth + 1);
       return;

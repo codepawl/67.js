@@ -1,6 +1,6 @@
 import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS } from './agent-scene-capabilities.js';
-import { bakeMaterialGraph, graphImageAssets, normalizeMaterialGraph } from './material-graph.js';
-import { runKernel } from './kernel-offload.js';
+import { bakeMaterialGraph, graphImageData, normalizeMaterialGraph } from './material-graph.js';
+import { kernelKey, runKernel } from './kernel-offload.js';
 
 // Procedural surface patterns for recipe materials: seeded, tileable and baked on the CPU into the same texture
 // descriptors a loaded material uses. Texture coordinates run 0 to 1 and every noise is periodic over that square, so
@@ -273,20 +273,29 @@ const bakedByPatternObject = new WeakMap();
 
 /** The baked textures of a pattern, shared by every material with the same definition. */
 export function materialPatternTextures(pattern, imagePool) {
-  const images = pattern.graph && graphImageAssets(pattern.graph).length ? imagePool : undefined;
+  const images = pattern.graph ? graphImageData(pattern.graph, imagePool) : {};
+  const hasImages = Object.keys(images).length > 0;
   const remembered = bakedByPatternObject.get(pattern);
-  if (remembered) return remembered;
-  const key = JSON.stringify(pattern);
+  // An image graph is remembered only for the very frames it was baked from, so another pool with the same asset ID
+  // but different pixels bakes again.
+  if (remembered && (!hasImages || sameFrames(remembered.images, images))) return remembered.baked;
+  // The key covers the pixel bytes of the images the graph reads, not only their IDs.
+  const key = hasImages ? kernelKey('pattern', [pattern, images]) : JSON.stringify(pattern);
   let baked = bakedPatterns.get(key);
   if (baked) {
     bakedPatterns.delete(key);
   } else {
-    baked = runKernel('pattern', images ? [pattern, images] : [pattern], bakeMaterialPattern);
+    baked = runKernel('pattern', hasImages ? [pattern, images] : [pattern], bakeMaterialPattern);
     if (bakedPatterns.size >= MAX_BAKED_PATTERNS) bakedPatterns.delete(bakedPatterns.keys().next().value);
   }
   bakedPatterns.set(key, baked);
-  bakedByPatternObject.set(pattern, baked);
+  bakedByPatternObject.set(pattern, { baked, images });
   return baked;
+}
+
+function sameFrames(rememberedImages, images) {
+  const ids = Object.keys(images);
+  return ids.length === Object.keys(rememberedImages).length && ids.every(id => rememberedImages[id]?.data === images[id].data);
 }
 
 export { PATTERN_DEFAULTS };
