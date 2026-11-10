@@ -1,4 +1,4 @@
-import { buildTraceScene } from './path-tracer-scene.js';
+import { buildTraceScene, refuseLocalVolumes } from './path-tracer-scene.js';
 import { denoiseRadiance } from './path-tracer-denoise.js';
 import { resolveLightSelection } from './path-tracer-light-tree.js';
 import { createCamera, normalizePathTracerOptions, toneMapToRgba8 } from './path-tracer.js';
@@ -43,6 +43,7 @@ export async function createProgressiveTracer(scene, rawOptions = {}, { resoluti
   const loadScene = (parts, environment) => {
     releaseResources(gl);
     traceScene = buildTraceScene(parts, environment);
+    refuseLocalVolumes(traceScene, 'the progressive path tracer');
     sceneOptions = { ...options, lightSelection: resolveLightSelection(options.lightSelection, traceScene.lights) };
     const kernel = getKernel(sceneUsesSubsurface(traceScene.materials), false, sceneOptions);
     program = kernel.program;

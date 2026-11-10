@@ -295,7 +295,27 @@ def sculpt(bm, edit):
         vertex.co = point
 
 
+def poke(bm, edit):
+    bmesh.ops.poke(bm, faces=selected_faces(bm, edit["select"]), offset=edit.get("offset", 0), center_mode="MEAN", use_relative_offset=edit.get("relative", False))
+
+
+# 67js joins by the angle between face normals only, so the shape limit is opened fully.
+def tris_to_quads(bm, edit):
+    bmesh.ops.join_triangles(bm, faces=selected_faces(bm, edit["select"]), angle_face_threshold=radians(edit.get("angle", 40)), angle_shape_threshold=radians(180))
+
+
+# Blender's direction "-X" copies the negative half over the positive one, so keeping the positive half is "X".
+def symmetrize(bm, edit):
+    axis = edit.get("axis", "x").upper()
+    direction = axis if edit.get("keep", "positive") == "positive" else "-" + axis
+    geometry = list(bm.verts) + list(bm.edges) + list(bm.faces)
+    bmesh.ops.symmetrize(bm, input=geometry, direction=direction, dist=edit.get("distance", 1e-4))
+
+
 BMESH_OPERATIONS = {
+    "poke": poke,
+    "tris_to_quads": tris_to_quads,
+    "symmetrize": symmetrize,
     "sculpt": sculpt,
     "extrude_face_region": extrude_face_region,
     "extrude_individual": extrude_individual,
@@ -559,7 +579,21 @@ def add_wave(mesh_object, edit, _inputs):
     bpy.context.scene.frame_set(int(edit.get("time", 0)))
 
 
+def add_dual(mesh_object, _edit, _inputs):
+    tree = bpy.data.node_groups.new("DualMesh", "GeometryNodeTree")
+    tree.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    tree.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    group_input = tree.nodes.new("NodeGroupInput")
+    group_output = tree.nodes.new("NodeGroupOutput")
+    dual = tree.nodes.new("GeometryNodeDualMesh")
+    tree.links.new(group_input.outputs[0], dual.inputs["Mesh"])
+    tree.links.new(dual.outputs["Dual Mesh"], group_output.inputs[0])
+    modifier = mesh_object.modifiers.new("DualMesh", "NODES")
+    modifier.node_group = tree
+
+
 MODIFIERS = {
+    "dual": add_dual,
     "wave": add_wave,
     "screw": add_screw,
     "wireframe": add_wireframe,

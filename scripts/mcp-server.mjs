@@ -278,6 +278,7 @@ const environment = z.strictObject({
   fogColor: color.optional(),
   fogDensity: bounded(0, 10).optional(),
   volumeFog: volumeFog.optional().describe('Light-shaft fog; needs HDR.'),
+  localVolumes: z.array(z.record(z.string(), z.unknown())).max(8).optional().describe('Up to 8 absorbing and emitting volumes; fields in scene_capabilities localVolumes.'),
   liquid: liquidOptics.optional().describe('Optics for materials tagged liquid or foam.'),
   lines: lines.nullable().optional(),
   objectReflections: z.boolean().optional().describe("false turns off reflection probes on smooth metal parts."),
@@ -313,8 +314,9 @@ const effects = z.strictObject({
   colorBalance: looseField,
   glare: looseField,
   lensDistortion: looseField,
+  stylize: looseField,
 });
-const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}, colorBalance, glare, lensDistortion; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
+const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}, colorBalance, glare, lensDistortion, stylize; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
 const shadow = z.strictObject({
   target: boundedVector(-1e6, 1e6).optional(),
   extent: bounded(0.01, 1e5).optional(),
@@ -629,6 +631,7 @@ const clothSheet = z.strictObject({
   pin: z.array(z.enum(['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight'])).max(8).optional(),
   pinGroup: z.string().max(48).optional(),
   pinTo: looseRecord.optional(),
+  stiffnessGroup: z.string().max(48).optional(), softBody: looseRecord.optional(), selfCollision: z.boolean().optional(),
   stiffness: unit.optional(), bend: unit.optional(), density: positive.optional(), damping: nonnegative.optional(), friction: unit.optional(), thickness: nonnegative.optional(),
 });
 const cloth = z.strictObject({

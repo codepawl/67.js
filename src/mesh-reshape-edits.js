@@ -1,5 +1,6 @@
 import { selectVertices } from './mesh-dissolve.js';
-import { splitEdges, deleteLoose, flattenVertices } from './mesh-reshape-more.js';
+import { splitEdges, deleteLoose, flattenVertices, circularizeVertices } from './mesh-reshape-more.js';
+import { unsubdivideMesh } from './mesh-unsubdivide.js';
 import { selectEdges, edgeFaces } from './mesh-bevel.js';
 import { selectFaces, countSelected } from './mesh-select.js';
 import { invalidField } from './field-error.js';
@@ -10,7 +11,7 @@ import { pokeFaces, dualMesh, trisToQuads, symmetrizeMesh, scaleElements, extrud
 // The reshaping edits as recipe operations: validation of their fields and running them on MeshData. The geometry
 // lives in mesh-reshape.js; this file only connects it to the edit log.
 
-export const RESHAPE_OPERATIONS = Object.freeze(['poke', 'dual', 'tris_to_quads', 'symmetrize', 'scale_elements', 'extrude_edges', 'split_edges', 'delete_loose', 'flatten']);
+export const RESHAPE_OPERATIONS = Object.freeze(['poke', 'dual', 'tris_to_quads', 'symmetrize', 'scale_elements', 'extrude_edges', 'split_edges', 'delete_loose', 'flatten', 'unsubdivide', 'circularize']);
 
 const SYMMETRIZE_SIDES = Object.freeze(['positive', 'negative']);
 const MAX_SCALE = 1000;
@@ -47,6 +48,12 @@ export function normalizeReshapeEdit(edit, normalized, index, { finiteNumber, ve
         if (normalized.normal.every(component => component === 0)) throw editField(index, 'normal', edit.normal, 'a direction that is not all zeros, such as [0, 1, 0]');
       }
       normalized.factor = edit.factor === undefined ? 1 : finiteNumber(edit.factor, index, 'factor', { minimum: 0, maximum: 1 });
+      break;
+    case 'circularize':
+      normalized.verts = editRuleObject(edit.verts, index, 'verts', VERTEX_RULE_HINT);
+      normalized.factor = edit.factor === undefined ? 1 : finiteNumber(edit.factor, index, 'factor', { minimum: 0, maximum: 1 });
+      if (edit.regular !== undefined && typeof edit.regular !== 'boolean') throw editField(index, 'regular', edit.regular, 'true or false');
+      normalized.regular = edit.regular ?? true;
       break;
     case 'extrude_edges':
       normalized.edges = editRuleObject(edit.edges, index, 'edges', EDGE_RULE_HINT);
@@ -126,6 +133,14 @@ export function runReshapeEdit(mesh, edit) {
     case 'flatten': {
       const outcome = flattenVertices(mesh, selectVertices(mesh, edit.verts), { normal: edit.normal, factor: edit.factor });
       return { mesh: outcome.mesh, result: { flattenedVertices: outcome.flattenedVertices } };
+    }
+    case 'unsubdivide': {
+      const outcome = unsubdivideMesh(mesh);
+      return { mesh: outcome.mesh, result: { coarseFaces: outcome.coarseFaces, removedVertices: outcome.removedVertices } };
+    }
+    case 'circularize': {
+      const outcome = circularizeVertices(mesh, selectVertices(mesh, edit.verts), { factor: edit.factor, regular: edit.regular });
+      return { mesh: outcome.mesh, result: { circularizedVertices: outcome.circularizedVertices } };
     }
   }
   throw new TypeError(`Not a reshaping edit: ${edit.op}`);
