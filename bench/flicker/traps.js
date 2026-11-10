@@ -120,6 +120,17 @@ function gappedWalls() {
   };
 }
 
+// A panel 1.5 cm in front of a wall, seen from 176 m: past the 1 cm a cut may open, so the panel is ranked, not cut. The case of
+// the glass reported in #751 (there as an unconfirmed `rank-overflow`), with an opaque panel so the probe can read its colour.
+function panelOnWallFar() {
+  const distance = 176;
+  return {
+    parts: [part('wall', [wallQuad([0, 30, 0], 120, 60, faceColour(0))]), part('panel', [wallQuad([0, 30, 0.015], 50, 30, faceColour(1))])],
+    eye: [distance * 0.3, 30 + distance * 0.1, distance],
+    target: [0, 30, 0],
+  };
+}
+
 // 30 quads on exactly one plane in one mesh, each a little smaller than the one before, so every one shows as a ring.
 function exactStack() {
   return {
@@ -175,6 +186,7 @@ export const TRAPS = {
   'kitbash-duplicates': kitbashedDuplicates,
   'decal-grazing-2deg': grazingDecal,
   'walls-16mm-1km-5deg': gappedWalls,
+  'panel-15mm-176m': panelOnWallFar,
   'stack-30-exact': exactStack,
   'instanced-flush': instancedFlush,
   'plaque-closeup-0.5m': plaqueCloseUp,

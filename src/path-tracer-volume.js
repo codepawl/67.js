@@ -7,7 +7,7 @@ import { createTracer } from './ray-query.js';
 // Homogeneous fog for the path tracer: a box of uniform scattering medium with the colour, density and anisotropy of the
 // rasterizer's `environment.volumeFog`. Distances to the next scattering event are drawn from the exact free-flight
 // distribution, so the cost is one random number per ray segment and there is no step count to trade against quality.
-// The rasterizer's noise, drift and ambient term are not traced: the medium is uniform and lit only by the scene's lights.
+// The rasterizer's drift and ambient term are not traced: the medium is lit only by the scene's lights.
 
 /** The medium the tracer reads, or null when the environment has no fog. Throws what the rasterizer throws for bad input. */
 export function resolveTraceVolume(volumeFog) {
@@ -154,7 +154,7 @@ function marchMeshVolume(volume, spans, originX, originY, originZ, directionX, d
  * Builds the function that carries a ray through the scene's local volumes (environment.localVolumes). Each volume is marched with
  * its own step count between its entry and exit, nearest entry first: the emitted light is added in proportion to the throughput
  * so far, then the throughput is dimmed by exp(-absorption * profile * step). Emission and absorption do not scatter, so no light
- * sample is taken. The rasterizer's noise is not traced. `jitter` (0 to 1) offsets the samples within a step.
+ * sample is taken. A volume's `noiseAmount` modulates the profile with the rasterizer's own noise field. `jitter` (0 to 1) offsets the samples within a step.
  * The returned function writes the emitted light into `emitted` and scales `throughput` in place.
  */
 export function createLocalVolumeCrossing(volumes) {

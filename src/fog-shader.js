@@ -122,6 +122,21 @@ uniform highp sampler2D localMeshVolumes;
 // Each volume is marched on its own between its entry and exit (cut at the first surface) and composited nearest first: the colour
 // behind it is dimmed by exp(-absorption * profile * step) and its emission is added, both per colour channel.
 const LOCAL_VOLUME_FUNCTIONS = `
+// Value noise on a hash of plain multiplies, adds and fract, which rounds the same way on SwiftShader, where it was measured, and is unchecked on hardware GPUs (a sine hash does not: its error
+// grows with the argument). local-volume-noise.js repeats it for the CPU path tracer, so keep the two in step.
+float localVolumeCellHash(vec3 cell) {
+  vec3 scrambled = fract(cell * 0.1031);
+  scrambled += dot(scrambled, scrambled.zyx + 31.32);
+  return fract((scrambled.x + scrambled.y) * scrambled.z);
+}
+float localVolumeNoise(vec3 position) {
+  vec3 cell = floor(position);
+  vec3 fraction = fract(position);
+  fraction = fraction * fraction * (3.0 - 2.0 * fraction);
+  float lower = mix(mix(localVolumeCellHash(cell), localVolumeCellHash(cell + vec3(1,0,0)), fraction.x), mix(localVolumeCellHash(cell + vec3(0,1,0)), localVolumeCellHash(cell + vec3(1,1,0)), fraction.x), fraction.y);
+  float upper = mix(mix(localVolumeCellHash(cell + vec3(0,0,1)), localVolumeCellHash(cell + vec3(1,0,1)), fraction.x), mix(localVolumeCellHash(cell + vec3(0,1,1)), localVolumeCellHash(cell + vec3(1,1,1)), fraction.x), fraction.y);
+  return mix(lower, upper, fraction.z);
+}
 vec3 localVolumeLocal(int index, vec3 vector) {
   return vec3(dot(localVolumeAxes[index * 3].xyz, vector), dot(localVolumeAxes[index * 3 + 1].xyz, vector), dot(localVolumeAxes[index * 3 + 2].xyz, vector));
 }
@@ -161,7 +176,7 @@ float localVolumeProfile(int index, vec3 position) {
   float falloff = localVolumeExtents[index].w;
   float profile = falloff > 0.0 ? 1.0 - smoothstep(1.0 - falloff, 1.0, distanceRatio) : 1.0 - step(1.0, distanceRatio);
   float noiseAmount = localVolumeAbsorption[index].w;
-  if (noiseAmount > 0.0) profile *= mix(1.0, cloudNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
+  if (noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
   return profile;
 }
 vec3 localVolumes(vec3 background) {

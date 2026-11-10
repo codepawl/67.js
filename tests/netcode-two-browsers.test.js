@@ -1,6 +1,6 @@
 // Two real browser pages play the netcode sample together, once over BroadcastChannel and once over a WebSocket relay,
 // each with 50 ms of injected latency per direction. The test checks that both pages converge and measures how long a
-// move takes to show on the other page. It skips when Chrome cannot start.
+// move takes to show on the other page. It uses Playwright's browser or the installed Google Chrome, and skips with the reason printed when neither starts outside CI.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -83,12 +83,24 @@ async function playTogether(context, transport, relayUrl) {
   return { hostToClientLag, clientToHostLag, positions };
 }
 
+// Playwright's own browser download is not installed on CI, so fall back to the Google Chrome the runner already has.
+async function launchChrome(chromium) {
+  try {
+    return await chromium.launch({ headless: true });
+  } catch {
+    return chromium.launch({ headless: true, channel: 'chrome' });
+  }
+}
+
 for (const transport of ['broadcast', 'websocket']) {
   test(`two browser pages converge and show a move within bounded lag over ${transport}`, async testContext => {
     let chromium;
     try {
       ({ chromium } = await import('playwright'));
-    } catch {
+    } catch (error) {
+      if (process.env.CI) {
+        throw error;
+      }
       testContext.skip('playwright is not installed');
       return;
     }
@@ -97,8 +109,12 @@ for (const transport of ['broadcast', 'websocket']) {
     let browser;
     try {
       try {
-        browser = await chromium.launch({ headless: true });
+        browser = await launchChrome(chromium);
       } catch (error) {
+        // On CI the runner ships Chrome, so a launch failure there is a real failure, not a reason to skip.
+        if (process.env.CI) {
+          throw error;
+        }
         testContext.skip(`Chrome did not start: ${error.message.split('\n')[0]}`);
         return;
       }
