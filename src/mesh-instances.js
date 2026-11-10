@@ -5,6 +5,7 @@ import { MAX_CURVE_POINTS, curveLength, filletCurve, resampleCurve } from './cur
 import { createTriangleSurfaceIndex } from './mesh-query.js';
 import './mesh-field-surfaces.js';
 import './field-rotation.js';
+import './field-mesh-inputs.js';
 import {
   checkedPlace, clampedSize, eulerQuaternion, mergeRealizedInstances, meshPoints, pickVariant, thinByDensity, thinBySpacing,
 } from './mesh-instance-placement.js';

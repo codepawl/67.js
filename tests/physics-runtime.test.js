@@ -135,7 +135,8 @@ test('the system runs inside the runtime and writes interpolated part matrices',
   assert.throws(() => physics.getPose('box'), /disposed/);
 });
 
-test('a 500-box scene runs live and records the step time', async () => {
+// Step time is printed for information only; no timing is asserted and no second engine is compared (issue #771 stays open).
+test('a 500-box scene runs live', async () => {
   const bodies = [{ name: 'floor', type: 'fixed', translation: [0, -0.5, 0] }];
   const colliders = [{ name: 'ground', body: 'floor', shape: 'cuboid', halfExtents: [20, 0.5, 20] }];
   for (let index = 0; index < 500; index++) {
@@ -186,6 +187,66 @@ test('another adapter plugs in and its events are normalised the same way', asyn
   assert.equal(physics.raycast([0, 0, 0], [0, 1, 0]).body, 'box');
   physics.dispose();
   assert.deepEqual(calls.at(-1), ['free']);
+});
+
+function scriptedAdapter(overrides = {}) {
+  const calls = [];
+  return {
+    calls,
+    adapter: {
+      name: 'scripted',
+      createWorld() {
+        return {
+          step() {},
+          readPose(index, output) { output.set([index, 0, 0, 0, 0, 0, 1]); },
+          drainEvents() {},
+          free() { calls.push('free'); },
+          ...overrides,
+        };
+      },
+    },
+  };
+}
+
+test('a setup that throws frees the engine world', async () => {
+  const { adapter, calls } = scriptedAdapter();
+  await assert.rejects(createPhysicsSystem(worldDefinition(), { adapter, bindings: [{ body: 'nobody', part: { matrix: new Float32Array(16) } }] }), /names no body/);
+  assert.deepEqual(calls, ['free']);
+
+  const unreadable = scriptedAdapter({ readPose() { throw new Error('engine failed'); } });
+  await assert.rejects(createPhysicsSystem(worldDefinition(), { adapter: unreadable.adapter }), /engine failed/);
+  assert.deepEqual(unreadable.calls, ['free']);
+});
+
+test('a step that produces a non-finite or non-unit pose throws and names the body and step', async () => {
+  let poison = null;
+  const { adapter } = scriptedAdapter({
+    readPose(index, output) {
+      output.set(index === 1 && poison ? poison : [index, 0, 0, 0, 0, 0, 1]);
+    },
+  });
+  const physics = await createPhysicsSystem(worldDefinition(), { adapter });
+  physics.fixedUpdate(STEP, { mode: 'fixed' });
+  poison = [Number.NaN, 0, 0, 0, 0, 0, 1];
+  assert.throws(() => physics.fixedUpdate(STEP, { mode: 'fixed' }), /Body "box" has a non-finite pose at step 2/);
+  poison = [0, 0, 0, 0, 0, 0, 3];
+  assert.throws(() => physics.fixedUpdate(STEP, { mode: 'fixed' }), /Body "box" has a non-unit rotation at step 3/);
+  physics.dispose();
+});
+
+test('a huge impulse never writes a bad pose into a bound part', async () => {
+  const physics = await createPhysicsSystem(worldDefinition());
+  const part = { matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) };
+  physics.bind('box', part);
+  physics.applyImpulse('box', [1e30, 1e30, 1e30]);
+  try {
+    stepMany(physics, 5);
+  } catch (error) {
+    assert.ok(error instanceof RangeError, String(error));
+    assert.match(error.message, /Body "box"/);
+  }
+  assert.ok(part.matrix.every(Number.isFinite), 'the bound matrix stays finite');
+  physics.dispose();
 });
 
 test('the rapier adapter is frozen and named', () => {

@@ -85,4 +85,6 @@ Bodies and colliders are addressed by their index in the definition; the system 
 
 At most 64 listeners per kind, 4096 bound parts, 1024 overlap results and a query distance up to 1,000,000. Counts of bodies, colliders and joints follow physics.md. `dispose()` (the runtime calls it) frees the world.
 
-Measured on one machine, 500 dynamic boxes settling on a floor with Rapier: about 3 ms per step (`tests/physics-runtime.test.js` prints the figure). Other engines are not shipped yet.
+After every step the system checks each pose like the bake does: a non-finite position or a quaternion that is not unit length throws a `RangeError` naming the body and the step, so a bad pose never reaches a bound part. If setup throws (an unknown body in `bindings`, say), the engine world is freed before the error propagates.
+
+Steps for 500 dynamic boxes settling on a floor were seen at about 3 ms on one machine with Rapier; the test prints the figure but asserts no timing. Only Rapier ships, so no step time is recorded for a second engine and event parity between two real engines is not shown. Issue #771 stays open for both.

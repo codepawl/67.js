@@ -141,6 +141,8 @@ Each addon is a separate import, so a page loads only what it uses.
 | Live games | `67js/addons/runtime` | [Game loop](docs/runtime.md) with fixed or variable steps and pluggable systems |
 | Live games | `67js/addons/input` | [Input](docs/input.md): keyboard, mouse, gamepad and custom sources mapped to named actions and axes |
 | Live games | `67js/addons/physics-runtime` | [Live physics](docs/physics-runtime.md): a physics world stepped in the game loop, contact and sensor events, ray, shape and overlap queries |
+| Live games | `67js/addons/animation-graph` | [Animation graph](docs/animation-graph.md): states, 1D and 2D blend spaces, parameter transitions with crossfades and masked layers for any rig |
+| Live games | `67js/addons/player` | [Player](docs/player.md): character controller, follow, first-person and top-down camera rigs, swappable at runtime |
 | Modeling | `67js/addons/mesh`, `67js/addons/modeling`, `67js/addons/sculpt` | [Mesh editing](docs/mesh.md), [modeling](docs/modeling.md) and [sculpt brushes](https://67js.codepawl.com/sculpt.md) |
 | Offline light | `67js/addons/path-tracer`, `67js/addons/light-bake` | [Path-traced stills](https://67js.codepawl.com/path-tracer.md) and [baked lightmaps](https://67js.codepawl.com/light-bake.md) |
 | Post passes | `67js/addons/user-pass` | [Your own full-screen GLSL passes](docs/user-passes.md): dither, pixel downscale, quantise |

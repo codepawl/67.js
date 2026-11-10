@@ -212,8 +212,39 @@ export async function createPhysicsSystem(definition, options = {}) {
       world.readPose(bodyIndex, currentPoses.subarray(bodyIndex * POSE_STRIDE, (bodyIndex + 1) * POSE_STRIDE));
     }
   }
-  readPoses();
-  previousPoses.set(currentPoses);
+  // The wasm world is only freed by dispose(), so a setup that throws before the system exists must free it here.
+  function freeWorldOnFailure(action) {
+    try {
+      return action();
+    } catch (error) {
+      world.free();
+      throw error;
+    }
+  }
+
+  // The bake rejects non-finite poses and non-unit quaternions after each step; the live step does the same.
+  function assertPosesSound() {
+    for (let bodyIndex = 0; bodyIndex < bodyNames.length; bodyIndex++) {
+      const offset = bodyIndex * POSE_STRIDE;
+      let quaternionLengthSquared = 0;
+      for (let component = 0; component < POSE_STRIDE; component++) {
+        const value = currentPoses[offset + component];
+        if (!Number.isFinite(value)) {
+          throw new RangeError(`Body "${bodyNames[bodyIndex]}" has a non-finite pose at step ${stepCount}. Apply smaller velocities and impulses.`);
+        }
+        if (component >= 3) quaternionLengthSquared += value * value;
+      }
+      if (Math.abs(Math.sqrt(quaternionLengthSquared) - 1) > 1e-3) {
+        throw new RangeError(`Body "${bodyNames[bodyIndex]}" has a non-unit rotation at step ${stepCount}. Apply smaller velocities and impulses.`);
+      }
+    }
+  }
+
+  freeWorldOnFailure(() => {
+    readPoses();
+    assertPosesSound();
+    previousPoses.set(currentPoses);
+  });
 
   function assertAlive() {
     if (disposed) throw new Error('This physics system was disposed. Call createPhysicsSystem again.');
@@ -337,6 +368,7 @@ export async function createPhysicsSystem(definition, options = {}) {
       stepCount += 1;
       [previousPoses, currentPoses] = [currentPoses, previousPoses];
       readPoses();
+      assertPosesSound();
       stepEvents = collectEvents();
       // In 'both' mode update() writes the interpolated pose; otherwise this step is the only writer.
       if (context?.mode !== 'both') writeBindings(1);
@@ -416,6 +448,8 @@ export async function createPhysicsSystem(definition, options = {}) {
       return [...new Set(found.map(colliderBodyName))].sort();
     },
   };
-  for (const binding of initialBindings ?? []) bind(binding.body, binding.part);
+  freeWorldOnFailure(() => {
+    for (const binding of initialBindings ?? []) bind(binding.body, binding.part);
+  });
   return system;
 }
