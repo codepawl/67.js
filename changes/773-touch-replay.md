@@ -1,0 +1,1 @@
+- `67js/addons/input` adds `touchSource` (virtual sticks, tap, swipe, pinch), `deviceMotionSource`, axis `smoothing`, and `recordInput` with `replaySource` so one demo runs from keyboard, gamepad, touch or a replay (#773)
