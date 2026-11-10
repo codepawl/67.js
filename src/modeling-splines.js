@@ -3,7 +3,9 @@
 import { fillZeroTangents, resolveHandles, sampleBezierSpans } from './modeling-bezier.js';
 
 const TWO_PI = Math.PI * 2;
-const NURBS_ORDER = 4;
+export const NURBS_DEFAULT_ORDER = 4;
+export const NURBS_MAX_ORDER = 8;
+export const KNOT_MODES = ['clamped', 'uniform'];
 const DERIVATIVE_STEP = 1e-5;
 const MINIMUM_SEGMENT = 1e-9;
 
@@ -125,10 +127,11 @@ function samplePoly(points, closed) {
   return { points, tangents: fillZeroTangents(points, tangents, closed) };
 }
 
-// Clamped (open) or periodic (closed) uniform knot vector for a cubic B-spline over `count` control points.
-function knotVector(count, order, closed) {
+// Clamped (open, the default), uniform (open, not touching the end points) or periodic (closed) knot vector for a
+// B-spline of the given order over `count` control points.
+function knotVector(count, order, closed, knotMode = 'clamped') {
   const total = count + order;
-  if (closed) return Array.from({ length: total }, (_, index) => index);
+  if (closed || knotMode === 'uniform') return Array.from({ length: total }, (_, index) => index);
   return Array.from({ length: total }, (_, index) => Math.min(Math.max(index - order + 1, 0), count - order + 1));
 }
 
@@ -177,15 +180,16 @@ function nurbsPoint(controls, weights, knots, order, parameter) {
 }
 
 /**
- * Uniform cubic NURBS (order 4, or the point count when lower): an open spline is clamped so it starts and ends on its
- * first and last control point, a closed one is periodic. `resolution` samples per control point span.
+ * NURBS of `options.order` (default 4, or the point count when lower). An open spline uses `options.knots` (one
+ * non-decreasing value per control point plus the order) or a `knotMode`: `clamped` starts and ends on the first and
+ * last control point, `uniform` does not. A closed one is periodic. `resolution` samples per control point span.
  */
-export function sampleNurbs(controlPoints, weights, closed, resolution) {
-  const order = Math.min(NURBS_ORDER, controlPoints.length);
+export function sampleNurbs(controlPoints, weights, closed, resolution, options = {}) {
+  const order = Math.min(options.order ?? NURBS_DEFAULT_ORDER, controlPoints.length);
   const wrap = closed ? order - 1 : 0;
   const controls = [...controlPoints, ...controlPoints.slice(0, wrap)];
   const controlWeights = [...weights, ...weights.slice(0, wrap)];
-  const knots = knotVector(controls.length, order, closed);
+  const knots = options.knots ?? knotVector(controls.length, order, closed, options.knotMode);
   const start = knots[order - 1];
   const end = knots[controls.length];
   const spans = closed ? controlPoints.length : controlPoints.length - 1;
@@ -206,7 +210,7 @@ export function sampleNurbs(controlPoints, weights, closed, resolution) {
 /** Points and unit tangents of a resolved spline `{ type, closed, points, weights }`. */
 export function sampleSpline(spline, resolution) {
   if (spline.type === 'poly') return samplePoly(spline.points, spline.closed);
-  if (spline.type === 'nurbs') return sampleNurbs(spline.points, spline.weights, spline.closed, resolution);
+  if (spline.type === 'nurbs') return sampleNurbs(spline.points, spline.weights, spline.closed, resolution, spline.basis);
   return sampleBezierSpans(resolveHandles(spline.points, spline.closed), spline.closed, resolution);
 }
 
