@@ -1,15 +1,27 @@
-/** Highest depth layer; the draw-time polygon offset grows with the layer. */
+/** Highest depth layer a part can ask for with `depthLayer`. */
 export const MAXIMUM_DEPTH_LAYER = 4;
+/** Draw ranks one depth layer spans: ranks 0 to 15 order near-coplanar triangles, and a layer clears all of them. */
+export const RANKS_PER_LAYER = 16;
+/** Highest rank the flush search gives a triangle; a deeper stack is reported as `rank-overflow`. */
+export const MAXIMUM_FLUSH_RANK = RANKS_PER_LAYER - 1;
 
-// Layers the renderer gave to parts that draw the same plane as a larger part (coplanar-overlap.js), kept beside the part
-// so the part object, and its identity for updateParts, stay as the caller made it.
-const flushDepthLayers = new WeakMap();
+// The draw order flush-resolve.js found for a part: `{ indices, ranges: [{ start, count, rank }], geometry? }`, the part's
+// triangles sorted by rank. A part with hidden flush faces cut away also has `geometry`, the cut geometry those indices
+// belong to. It is kept beside the part so the part object, its geometry and its identity for updateParts stay as the
+// caller made them.
+const flushOrders = new WeakMap();
 
-export function setFlushDepthLayers(layers) {
-  for (const [part, layer] of layers) flushDepthLayers.set(part, layer);
+export function setFlushOrder(part, order) {
+  if (order) flushOrders.set(part, order);
+  else flushOrders.delete(part);
 }
 
-/** The layer a part draws on: `depthLayer` if set, else 1 for `decal: true`, else the flush layer found for it, else 0. */
+/** The ranked index order of a part, or null when none of its triangles needs a rank. */
+export function flushOrderOf(part) {
+  return flushOrders.get(part) ?? null;
+}
+
+/** The layer a part draws on: `depthLayer` if set, else 1 for `decal: true`, else 0. */
 export function depthLayerOf(part) {
-  return part.depthLayer ?? (part.decal ? 1 : flushDepthLayers.get(part) ?? 0);
+  return part.depthLayer ?? (part.decal ? 1 : 0);
 }

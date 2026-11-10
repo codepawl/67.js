@@ -2,6 +2,7 @@
 //   node bench/flicker/probe.mjs --url http://127.0.0.1:5210 --asset /@fs/D:/path/file.glb --out artifacts/flicker \
 //        --spots spots.json --configs "reversed=1,nearFit=1;reversed=0,nearFit=0"
 // spots.json: [{ "name": "roofs", "eye": [x, y, z], "target": [x, y, z] }]. Without --spots it prints the scene bounds and exits.
+//   node bench/flicker/probe.mjs --traps --configs "reversed=1;reversed=0"   runs every trap scene of traps.js with its own camera.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
@@ -30,14 +31,32 @@ page.on('pageerror', error => console.error('pageerror', error.message));
 page.on('console', message => { if (message.type() === 'error') console.error('console', message.text()); });
 const results = [];
 
-async function open(configuration) {
-  const query = new URLSearchParams({ asset, ...Object.fromEntries(Object.entries(configuration).map(([key, value]) => [key, value])) });
+async function open(configuration, trap = null) {
+  const query = new URLSearchParams({ ...(trap ? { trap } : { asset }), ...configuration });
   await page.goto(`${baseUrl}/bench/flicker/index.html?${query}`);
   await page.evaluate(() => window.flicker.ready);
 }
 
+async function probeTraps() {
+  for (const configuration of configurations) {
+    const label = Object.entries(configuration).map(([key, value]) => `${key}${value}`).join('-');
+    await open(configuration, 'plaque-2m');
+    for (const trap of await page.evaluate(() => window.flicker.traps)) {
+      await open(configuration, trap);
+      await page.waitForTimeout(300);
+      const outcome = await page.evaluate(async () => ({ probe: await window.flicker.probe(), info: window.flicker.info }));
+      await page.screenshot({ path: path.join(outputFolder, `${prefix}-${trap}-${label}.png`) });
+      results.push({ trap, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, moved: outcome.probe.totalChanged, ...(outcome.probe.open === undefined ? {} : { open: outcome.probe.open }), depth: outcome.info.depthMode });
+      console.log(JSON.stringify(results.at(-1)));
+    }
+  }
+  writeFileSync(path.join(outputFolder, `${prefix}-results.json`), JSON.stringify(results, null, 1));
+}
+
 try {
-  if (!spotsFile) {
+  if (process.argv.includes('--traps')) {
+    await probeTraps();
+  } else if (!spotsFile) {
     await open(configurations[0]);
     console.log(JSON.stringify(await page.evaluate(() => window.flicker.info), null, 1));
   } else {
@@ -45,6 +64,7 @@ try {
     for (const configuration of configurations) {
       await open(configuration);
       await page.waitForTimeout(1500);
+      console.log(JSON.stringify({ flush: await page.evaluate(() => window.flicker.info.flush) }));
       const label = Object.entries(configuration).map(([key, value]) => `${key}${value}`).join('-');
       for (const spot of spots) {
         const outcome = await page.evaluate(async ({ eye, target }) => {
@@ -54,7 +74,7 @@ try {
           return { probe, info: window.flicker.info };
         }, spot);
         await page.screenshot({ path: path.join(outputFolder, `${prefix}-${spot.name}-${label}.png`) });
-        results.push({ spot: spot.name, moved: outcome.probe.totalChanged, configuration: label, changed: outcome.probe.changed, fraction: outcome.probe.fraction, depth: outcome.info.depthMode, near: outcome.info.near, far: outcome.info.far });
+        results.push({ spot: spot.name, moved: outcome.probe.totalChanged, configuration: label, clear: outcome.probe.clearOfEdges, changed: outcome.probe.changed, fraction: outcome.probe.fraction, depth: outcome.info.depthMode, near: outcome.info.near, far: outcome.info.far });
         console.log(JSON.stringify(results.at(-1)));
       }
     }

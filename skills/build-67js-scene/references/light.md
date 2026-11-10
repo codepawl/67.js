@@ -85,19 +85,19 @@ A motion track that moves a light, the sun or a part leaves the baked light behi
 
 ## Flush faces flicker (z-fighting)
 
-`scene_inspect` lists a `coplanar-overlap` diagnostic for two faces on one plane. Depth precision itself needs no
-setting: the renderer switches to reversed depth by itself when the camera's `far` over `near` passes 10000 (a large
-world with a small `near`), and also when a flush pair sits far from the eye. If you still see flicker, raise `near`
-(`set-camera`) first, then pick one fix per pair:
+The fix is automatic. Depth precision needs no setting, and faces that lie flush or a few millimetres apart, inside
+one mesh or across parts, are ranked per triangle at draw time so the face in front always wins; geometry never moves.
+`scene_inspect` returns `flush.ranked`, the number of parts that got ranks. You only act on what is left:
 
-- `environment.resolveCoplanar: "offset"` moves the smaller part of every flagged pair onto the next depth layer;
-  geometry never moves.
-- A single node gets `decal: true` (a sticker on a surface) or `depthLayer` (1 to 4).
+- A `coplanar-overlap` diagnostic with `reason: "rank-overflow"` means more than 15 faces are stacked on one plane:
+  remove the duplicate faces. The other reasons (`double-sided-gap`, `unchecked`, `collapsed-node`) carry their own `fix`.
+- To choose which of two flush nodes wins, set `decal: true` on the one on top (a sticker on a surface) or `depthLayer`
+  (1 to 4) to stack several.
+- `environment.resolveCoplanar: false` opts out; `scene_inspect` then lists each flush pair as `coplanar-overlap`.
 
 ```json
 { "expectedRevision": 5, "operations": [
-  { "type": "set-environment", "environment": { "resolveCoplanar": "offset" } },
-  { "type": "set-camera", "near": 0.5, "far": 2000 }
+  { "type": "set-environment", "environment": { "resolveCoplanar": false } }
 ] }
 ```
 
