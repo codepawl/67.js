@@ -6,7 +6,7 @@ This page connects the 67js MCP server to an AI agent harness. A harness is the 
 
 `67js-mcp` is a local program. The harness starts it and talks to it over stdin and stdout. It has no network listener for MCP.
 
-The server holds one active scene. When the agent calls `scene_create`, the server starts your installed Chrome in the background and renders the scene there. It gives the agent 23 tools to build, look at and export the scene. The tools take JSON, and they never run code that the agent writes.
+The server holds one active scene. When the agent calls `scene_create`, the server starts your installed Chrome in the background and renders the scene there. It gives the agent 24 tools to build, look at and export the scene. The tools take JSON, and they never run code that the agent writes.
 
 You need two things:
 
@@ -248,7 +248,7 @@ The Windsurf documentation pages now redirect to Devin Desktop, which names `.de
 
 ## Check that it works
 
-First, ask the harness to list its MCP tools. You must see 23 tools whose names start with `scene_`, `mesh_` or `scene_render_`. Some harnesses add the server name in front, for example `mcp__67js-scene__scene_look` in Claude Code.
+First, ask the harness to list its MCP tools. You must see 24 tools whose names start with `scene_`, `mesh_` or `scene_render_`. Some harnesses add the server name in front, for example `mcp__67js-scene__scene_look` in Claude Code.
 
 Then give the agent this prompt:
 

@@ -51,6 +51,7 @@ function taskMap() {
     ['Review the result', '`scene_look` for one PNG, `scene_review` for a labeled grid of up to four views', 'agent-review.md'],
     ['Render a still or a video', '`scene_render_submit`, poll `scene_render_status`, read `scene_render_result`, then `scene_render_release`', 'agent-render-jobs.md'],
     ['Export a model', '`scene_export_glb`, or `scene_export_recipe` for the JSON recipe', 'export-glb.md'],
+    ['Make a playable game', '`scene_apply` with `set-game` (topic `game` in `scene_capabilities`), then `scene_export_web` for a static folder', 'game.md'],
     ['Recover from an error', '`scene_restore` to a `scene_checkpoint`, or `scene_inspect` for the current revision and retry; every error names its next step', 'mcp.md'],
   ];
   return rows.map(([task, calls, doc]) => `- ${task}: ${calls}. [Docs](${page(doc)})`).join('\n');

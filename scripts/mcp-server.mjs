@@ -672,6 +672,7 @@ const motionListed = listed('motion', motion, 'One absolute-time clip: duration 
 const physicsListed = listed('physics', physics, 'Rigid bodies recorded offline with Rapier: duration, gravity, bodies [{node, type, shape, mass, ...}], joints; see scene_capabilities physics.', coreOf(physics.shape, ['duration']));
 const clothListed = listed('cloth', cloth, 'Baked cloth sheets: duration, gravity, wind, sheets [{node, pin, pinTo, stiffness, ...}], colliders; see scene_capabilities cloth.', coreOf(cloth.shape, ['duration']));
 const armatureListed = listed('armatures', armature, 'A skeleton { id, parent, preset humanoid|quadruped, fit, bones [{name, parent, head, tail}], prefix, translation, rotation }; see scene_capabilities armatures.', { id: identifier });
+const gameReference = z.record(z.string(), z.unknown()).describe('Playable setup as plain JSON, never code: {player:{node}, camera, input, physics, ground, rules}. Fields and an example: scene_capabilities game.');
 const recipe = z.strictObject({
   format: z.literal('67js.scene'),
   schemaVersion: z.literal(1),
@@ -690,6 +691,7 @@ const recipe = z.strictObject({
   particles: z.record(z.string(), z.unknown()).nullable().optional().describe('Particle emitters and hair, seeked by motionTime. Fields: scene_capabilities particles.'),
   bake: z.record(z.string(), z.unknown()).nullable().optional().describe('Bounced light baked at build time. Fields: scene_capabilities bake.'),
   postPasses: z.array(z.record(z.string(), z.unknown())).nullable().optional().describe('Full-screen GLSL passes, [{name, fragment, uniforms, scale}]. Rules: scene_capabilities postPasses.'),
+  game: gameReference.nullable().optional(),
 }).describe('Bounded scene recipe; the backend validates it.');
 const assetRecipe = z.strictObject({
   format: z.literal('67js.asset'),
@@ -731,6 +733,7 @@ const otherOperations = [
   z.strictObject({ type: z.literal('set-particles'), particles: z.record(z.string(), z.unknown()).nullable() }),
   z.strictObject({ type: z.literal('set-bake'), bake: z.record(z.string(), z.unknown()).nullable() }),
   z.strictObject({ type: z.literal('set-post-passes'), postPasses: z.array(z.record(z.string(), z.unknown())).nullable() }),
+  z.strictObject({ type: z.literal('set-game'), game: gameReference.nullable() }),
   z.strictObject({ type: z.literal('set-environment'), environment: environmentListed }),
   z.strictObject({ type: z.literal('set-effects'), effects: effectsListed }),
   z.strictObject({ type: z.literal('set-shadow'), shadow }),
@@ -787,7 +790,7 @@ const TOOL_TITLES = {
   scene_capabilities: 'Scene capabilities', scene_create: 'Create scene', scene_asset_catalog: 'Asset catalog', scene_create_asset: 'Create scene from asset',
   scene_inspect: 'Inspect scene', scene_walkmap: 'Walkable map', mesh_inspect: 'Inspect meshes', mesh_edit: 'Edit mesh', mesh_stack: 'Set mesh modifiers',
   scene_apply: 'Apply scene edits', scene_look: 'Look at scene', scene_review: 'Review camera samples', scene_checkpoint: 'Save checkpoint',
-  scene_restore: 'Restore checkpoint', scene_release_checkpoint: 'Release checkpoint', scene_export_recipe: 'Export recipe', scene_export_glb: 'Export GLB',
+  scene_restore: 'Restore checkpoint', scene_release_checkpoint: 'Release checkpoint', scene_export_recipe: 'Export recipe', scene_export_glb: 'Export GLB', scene_export_web: 'Export web game',
   scene_dispose: 'Dispose scene', scene_render_submit: 'Submit render job', scene_render_status: 'Render job status', scene_render_cancel: 'Cancel render job',
   scene_render_result: 'Render job result', scene_render_release: 'Release render job',
 };
@@ -929,6 +932,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   register('scene_release_checkpoint', 'Release one checkpoint slot. Released or foreign checkpoints fail.', z.strictObject(checkpointFields), destroy, async argumentsValue => jsonResult(await runtime.releaseCheckpoint(argumentsValue)));
   register('scene_export_recipe', 'Read a detached canonical JSON recipe for reproduction.', z.strictObject(sessionFields), readOnly, async argumentsValue => jsonResult(await runtime.exportRecipe(argumentsValue)));
   register('scene_export_glb', 'Write the active scene as a GLB file in the configured jobs folder, under a server-chosen name (the result has the path, byte count and SHA-256). Needs --jobs. Exports the current pose with pattern and imported textures, skins, morph weights and IK as posed; motionTime seeks authored motion first. For an imported asset, clip adds that source clip (translation, rotation, scale and morph weight tracks) on the source skeleton, which needs no animation, node overrides or motion in the scene. At most eight files are kept, oldest removed first; the GLB is at most 32 MiB.', z.strictObject({ ...sessionFields, clip: z.number().int().min(0).max(255).optional().describe('Imported assets only: index of the source clip to write.'), motionTime: z.number().min(0).max(3600).optional().describe('Seek authored motion (and IK) to this time before exporting. Leaves the preview there, like scene_look.'), maxTextureSize: z.number().int().min(1).max(4096).optional().describe('Largest texture side in pixels. Defaults to 2048.') }), edit, async argumentsValue => jsonResult(await runtime.exportGlb(argumentsValue)));
+  register('scene_export_web', 'Write the scene with its game as a static web build in the jobs folder: index.html, game.json and engine/, which any static host serves with no server code. Needs --jobs and a game set with set-game. Procedural scenes only; the newest four builds are kept.', z.strictObject({ ...sessionFields, title: z.string().max(64).optional().describe('Page title.') }), edit, async argumentsValue => jsonResult(await runtime.exportWeb(argumentsValue)));
   register('scene_dispose', 'Dispose the active scene and its checkpoints, releasing renderer resources.', z.strictObject(sessionFields), destroy, async argumentsValue => jsonResult(await runtime.dispose(argumentsValue)));
   register('scene_render_submit', 'Start one asynchronous snapshot job in the configured private job store. Requires the current revision. Temporarily leases the preview renderer; does not change source revision or checkpoints.', z.strictObject({ ...sessionFields, expectedRevision, settings: renderSettings }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.submitJob(argumentsValue)));
   register('scene_render_status', 'Read render job state and durable frame progress. Terminal states are completed, cancelled, failed and interrupted.', z.strictObject(jobFields), readOnly, async argumentsValue => jsonResult(await runtime.jobStatus(argumentsValue)));
