@@ -550,3 +550,28 @@ one thread at below-normal priority on a shared machine, medians of five runs. R
 
 The `EditMesh` arrays take about 200 bytes per quad face without attributes. These numbers are this machine only
 and say nothing about Blender's speed.
+
+### UV projection and packing
+
+`uv_project` writes the corner attribute `uv` by a simple projection, and `uv_pack` repacks the islands a mesh already
+has. Both work as an edit or as a stack node and change no geometry.
+
+| Field | Meaning |
+| --- | --- |
+| `mode` | `cube` (each face by its dominant axis), `cylinder` (sides wrap around `axis`, caps project flat) or `sphere` (longitude and latitude); `uv_project` only, required |
+| `axis` | `x`, `y` (default) or `z`, the cylinder or sphere axis |
+| `pack` | `true` (default) packs the result into the unit square; `false` leaves uv in mesh units for a later `uv_pack` |
+| `margin` | Gap between islands and around the square, 0 to 0.2 (default 0.01) |
+| `rotate` | `true` (default) lays tall islands on their side; `false` keeps them upright |
+
+Cylinder and sphere uv are measured from the centre of the bounds. `u` is arc length at the mean radius of the mesh
+and `v` is the height (cylinder) or the latitude times that radius (sphere), so one unit of uv covers about one unit
+of surface at the mean radius. Faces that wrap are cut on the side opposite the first radial axis. Islands are the
+faces joined across edges whose two ends share the same uv; `uv_pack` finds them from the uv itself, so it also packs
+an `uv_unwrap` result again (for example after `pack: false` merges) or a hand-set layout. Every island takes one common
+scale, shelf-packed with a gap, so texel density keeps its ratio between islands and no two islands overlap.
+
+Texel density measured in the tests: a cube projection gives a crate six islands with the same density to 0.1 percent,
+a 24-sided cylinder projection keeps a barrel within 15 percent of the median, and a sphere stretches toward the poles
+as any equirectangular map does. The result reports `islands`. Not done yet: view and angle-based smart projection,
+and `uv_warp` (offset, scale and rotate by a field); `uv_unwrap` still covers general meshes.
