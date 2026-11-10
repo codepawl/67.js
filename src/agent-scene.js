@@ -1124,19 +1124,47 @@ function stagePose(stagedState, time) {
   }
   const camera = sampled?.camera ? cameraPoseFrom(sampled.camera) : stagedState.recipe.camera;
   retainedMatrices(stagedState.parts);
-  const clothGeometries = sampledGeometries(stagedState, time);
+  const clothGeometries = sampledGeometries(stagedState, time, sampled);
   // Staged last: a pose pending on a decoded asset must be committed or discarded, so nothing above may throw after it.
   const assetClips = stagedState.assetRuntime.animators.length ? agentSceneModule('assets').stageAssetClips(stagedState.assetRuntime, graph, time) : null;
   const movedLook = stagedState.motionSampler && agentSceneModule('motion').motionMovesLook(sampled) ? sampled : null;
   return { graph, materialUpdates, camera, time, clothGeometries, assetClips, hiddenNodes, movedLook, morphs: sampled?.morphs ?? null };
 }
 
+/**
+ * Geometries of mesh stacks whose ocean time a geometry track drives, keyed by node ID. Each one is built from the cached edits with
+ * every ocean node's `time` set to the sampled value, so it equals the still of a recipe that writes that time into the node. The last
+ * result of each geometry is kept, so a repeated time reuses the geometry and the renderer sees no change.
+ */
+function oceanTimeGeometries(stagedState, sampled) {
+  const patches = sampled?.geometries;
+  if (!patches?.size) {
+    return new Map();
+  }
+  const frames = stagedState.oceanFrames ??= new Map();
+  const geometries = new Map();
+  for (const [geometryId, patch] of patches) {
+    let frame = frames.get(geometryId);
+    if (frame?.time !== patch.oceanTime) {
+      const definition = stagedState.recipe.geometries.find(candidate => candidate.id === geometryId);
+      const stack = definition.stack.map(node => (node.op === 'ocean' ? { ...node, time: patch.oceanTime } : node));
+      const scope = cutterScopeOf(stagedState.recipe.geometries);
+      frame = { time: patch.oceanTime, geometry: Object.freeze(generateGeometry({ ...definition, stack }, stagedState.maxGeometryVertices, scope)) };
+      frames.set(geometryId, frame);
+    }
+    for (const node of stagedState.recipe.nodes) {
+      if (node.geometry === geometryId) geometries.set(node.id, frame.geometry);
+    }
+  }
+  return geometries;
+}
+
 // Cloth and particles replace the geometry of their own nodes at a sampled time; no node belongs to both.
-function sampledGeometries(stagedState, time) {
+function sampledGeometries(stagedState, time, sampled) {
   if (time === null) {
     return null;
   }
-  const geometries = new Map();
+  const geometries = oceanTimeGeometries(stagedState, sampled);
   for (const sampler of [stagedState.clothSampler, stagedState.particleSampler]) {
     sampler?.sample(time)?.forEach((geometry, nodeId) => geometries.set(nodeId, geometry));
   }
@@ -1477,6 +1505,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       stats: geometryStats(geometryRecords.values()),
     };
     stagedState.assetRuntime = assetRuntime;
+    stagedState.maxGeometryVertices = Math.min(limits.maxVertices, 1_000_000);
     stagedState.sequences = [...materialHandles.values()].map(handle => handle.holder.sequence).filter(Boolean);
     stagedState.localBounds = localBounds;
     stagedState.skinBindings = skinBindings;
