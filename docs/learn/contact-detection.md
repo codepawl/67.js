@@ -190,7 +190,7 @@ The coplanar code is not in the core bundle. Call `installCoplanarDiagnostics(re
 
 ### Depth precision far from the camera
 
-Far from the camera, depth precision is the other cause. `installReversedDepth(renderer, 'auto')` from `67js/addons/reversed-depth` switches on reversed-Z with a 32-bit float depth buffer and camera-relative drawing when a frame's far / near passes 10,000, or when `installDepthPrecision` finds a flush pair more than 40 units from the eye. It still has a float32 limit, because vertex positions are float32.
+Far from the camera, depth precision is the other cause. The renderer draws every colour pass with reversed-Z, a 32-bit float depth buffer and camera-relative vertices by default wherever `EXT_clip_control` exists, at any far / near ratio; pass `reversedDepth: false` to opt out. Without the extension it uses a 24-bit buffer and moves the near plane out to the visible bounds when the camera left near unset. It still has a float32 limit, because vertex positions are float32.
 
 On the RTX 3060 a 0.1 mm gap at 500 m still draws the far surface on 6.9% of pixels, and a 1 mm gap at 500 m on 1.4%. At 50 m both stay under 1%. Keep surfaces that must not flicker at least 1 mm apart when they sit hundreds of metres from the camera, or mark the top one `decal: true`.
 
