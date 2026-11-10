@@ -29,6 +29,12 @@ export {
 
 const DEFAULT_LIMITS = AGENT_SCENE_DEFAULT_LIMITS;
 const MAX_MESH_REPORTS = 16;
+// A boolean cutter may name another recipe geometry, which may itself cut with a third. Both bounds are static, so they
+// do not depend on what the evaluation cache holds.
+const MAX_CUTTER_DEPTH = 4;
+const MAX_CUTTER_WORK_VERTICES = 250_000;
+// Where a geometry is checked before the whole recipe is known: references stay unresolved and count nothing.
+const PENDING_CUTTER_SCOPE = Object.freeze({ definitions: null, chain: Object.freeze([]) });
 // Terrain meshes carry one more float for each vertex (sky visibility) than the 56 bytes the budget estimates.
 const TERRAIN_SKY_VISIBILITY_BYTES = 4;
 const CAMERA_DEFAULTS = Object.freeze({ eye: [4, 3, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 1000 });
@@ -469,7 +475,7 @@ function lineEnds(value) {
   return ends;
 }
 
-function geometryEstimate(value) {
+function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
   if (!Object.hasOwn(GEOMETRY_FIELDS, value.type)) {
     throw invalidField('type', value.type, `one of ${Object.keys(GEOMETRY_FIELDS).join(', ')}`, TypeError);
   }
@@ -563,8 +569,16 @@ function geometryEstimate(value) {
         throw invalidField('base', base, 'a primitive or profile record without an id, such as { "type": "box" } (box, cylinder, sphere, torus, lathe, extrude or tube)', TypeError);
       }
       let estimate = geometryEstimate({ id: 'base', ...base });
+      const cutterScope = meshCutterScope(value, scope);
+      let referencedWork = 0;
       for (const edit of agentSceneModule('mesh').normalizeMeshEdits(value.edits ?? [])) {
-        if (edit.op === 'boolean') estimate += cutterEstimate(edit.cutter);
+        if (edit.op !== 'boolean') continue;
+        const cutterVertices = cutterEstimate(edit.cutter, cutterScope);
+        estimate += cutterVertices;
+        if (isCutterReference(edit.cutter)) referencedWork += cutterVertices;
+      }
+      if (referencedWork > MAX_CUTTER_WORK_VERTICES) {
+        throw invalidField('cutter.geometry', `${referencedWork} estimated cutter vertices in ${cutterScope.chain.join(' -> ')}`, `cutter geometries that total at most ${MAX_CUTTER_WORK_VERTICES} estimated vertices; use fewer segments or fewer referenced cutters`);
       }
       // Stack nodes multiply the mesh: arrays by their count, mirror and solidify at most by two.
       for (const node of agentSceneModule('mesh').normalizeMeshStack(value.stack ?? [])) estimate *= node.op === 'array' ? node.count : 2;
@@ -582,11 +596,79 @@ function hasInstancedNodes(nodes) {
   return !Array.isArray(nodes) || nodes.some(node => node && typeof node === 'object' && Object.hasOwn(node, 'instances'));
 }
 
-function cutterEstimate(cutter) {
+function isCutterReference(cutter) {
+  return Object.hasOwn(cutter, 'geometry');
+}
+
+function meshCutterScope(meshDefinition, scope) {
+  return scope && { definitions: scope.definitions, chain: scope.chain.length ? scope.chain : [meshDefinition.id] };
+}
+
+function cutterEstimate(cutter, scope) {
+  if (isCutterReference(cutter)) return referencedCutterEstimate(cutter, scope);
   if (cutter.type === 'mesh' || Object.hasOwn(cutter, 'id')) {
-    throw invalidField('cutter', cutter, 'a primitive or profile record without an id, such as { "type": "box" } (box, cylinder, sphere, torus, lathe, extrude or tube)', TypeError);
+    throw invalidField('cutter', cutter, 'a primitive or profile record without an id, such as { "type": "box" } (box, cylinder, sphere, torus, lathe, extrude or tube), or { "geometry": "<recipe geometry id>" }', TypeError);
   }
   return geometryEstimate({ id: 'cutter', ...cutter });
+}
+
+// A cutter naming a recipe geometry. scope.chain lists the meshes on the way here, the first being the mesh being built.
+function referencedCutterEstimate(cutter, scope) {
+  if (Object.keys(cutter).length !== 1 || typeof cutter.geometry !== 'string') {
+    throw invalidField('cutter', cutter, 'only { "geometry": "<recipe geometry id>" }; put translation, rotation and scale on the boolean edit', TypeError);
+  }
+  if (!scope) {
+    throw invalidField('cutter.geometry', cutter.geometry, 'a primitive or profile record such as { "type": "box" }; only recipe meshes can name another geometry');
+  }
+  const chain = [...scope.chain, cutter.geometry];
+  if (chain.indexOf(cutter.geometry) !== chain.length - 1) {
+    throw invalidField('cutter.geometry', chain.join(' -> '), `a geometry that does not cut with itself; remove ${cutter.geometry} from the cutters of ${scope.chain[scope.chain.length - 1]} or give it another cutter`);
+  }
+  if (chain.length - 1 > MAX_CUTTER_DEPTH) {
+    throw invalidField('cutter.geometry', chain.join(' -> '), `a chain of at most ${MAX_CUTTER_DEPTH} cutter geometries; build the inner cutters into one geometry`);
+  }
+  if (!scope.definitions) return 0;
+  const definition = scope.definitions.get(cutter.geometry);
+  if (!definition) {
+    throw invalidField('cutter.geometry', chain.join(' -> '), `the ID of a geometry in geometries, one of ${[...scope.definitions.keys()].join(', ') || 'none yet'}; add ${cutter.geometry} or pick one of them`);
+  }
+  return geometryEstimate(definition, { definitions: scope.definitions, chain });
+}
+
+function namesCutterGeometry(edit) {
+  return edit?.op === 'boolean' && typeof edit.cutter?.geometry === 'string';
+}
+
+// The records of the cutter geometries a mesh names, nested ones included: what its result depends on beyond its own record.
+function cutterDependencySignature(meshDefinition, definitions) {
+  const parts = [];
+  for (const edit of meshDefinition.edits ?? []) {
+    if (!namesCutterGeometry(edit)) continue;
+    const definition = definitions.get(edit.cutter.geometry);
+    parts.push(JSON.stringify(definition), cutterDependencySignature(definition, definitions));
+  }
+  return parts.join('|');
+}
+
+// Validates the cutter chain (cycles, depth, missing IDs, work) before returning its signature, so the signature walk ends.
+function checkedCutterDependencies(meshDefinition, definitions) {
+  if (!(meshDefinition.edits ?? []).some(namesCutterGeometry)) return '';
+  geometryEstimate(meshDefinition, { definitions, chain: [] });
+  return cutterDependencySignature(meshDefinition, definitions);
+}
+
+/** Cache identity of a geometry record: its own fields plus the cutter geometries it depends on. */
+function geometrySignature(definition, definitions) {
+  const dependencies = definition.type === 'mesh' ? checkedCutterDependencies(definition, definitions) : '';
+  return dependencies ? `${JSON.stringify(definition)}|cutters|${dependencies}` : JSON.stringify(definition);
+}
+
+function geometryDefinitions(geometries) {
+  return new Map(geometries.map(definition => [definition.id, definition]));
+}
+
+function cutterScopeOf(geometries) {
+  return { definitions: geometryDefinitions(geometries), chain: [] };
 }
 
 /** Render geometry of a boolean cutter record, checked like the cutters of recipe meshes. Used by imported-part edits. */
@@ -595,7 +677,7 @@ export function generateCutterGeometry(cutter, maxVertices) {
   return generateGeometry(cutter, maxVertices);
 }
 
-function generateGeometry(value, maxVertices) {
+function generateGeometry(value, maxVertices, scope) {
   switch (value.type) {
     case 'box':
       return box(value.bevel, value.subdivisions);
@@ -630,15 +712,22 @@ function generateGeometry(value, maxVertices) {
       return agentSceneModule('text').text(value.text, { ...value, maxVertices });
     case 'terrain':
       return agentSceneModule('terrain').generateTerrainGeometry(value, maxVertices);
-    case 'mesh':
+    case 'mesh': {
+      const cutterScope = meshCutterScope(value, scope);
+      const dependencies = scope ? checkedCutterDependencies(value, scope.definitions) : '';
       return agentSceneModule('mesh').generateMeshGeometry(() => generateGeometry(value.base, maxVertices), value.edits ?? [], {
         maxVertices, smoothAngle: value.smoothAngle ?? MESH_SMOOTH_ANGLE_DEFAULT,
-        stack: value.stack ?? [], cacheKey: JSON.stringify(value.base), shapeKeys: value.shapeKeys ?? [],
+        stack: value.stack ?? [], shapeKeys: value.shapeKeys ?? [],
+        // The edits only name a cutter geometry, so that geometry's own record joins the key: editing it changes the key.
+        cacheKey: dependencies ? `${JSON.stringify(value.base)}|cutters|${dependencies}` : JSON.stringify(value.base),
         resolveCutter: cutter => {
-          cutterEstimate(cutter);
-          return generateGeometry(cutter, maxVertices);
+          cutterEstimate(cutter, cutterScope);
+          if (!isCutterReference(cutter)) return generateGeometry(cutter, maxVertices);
+          const chain = [...cutterScope.chain, cutter.geometry];
+          return generateGeometry(scope.definitions.get(cutter.geometry), maxVertices, { definitions: scope.definitions, chain });
         },
       });
+    }
   }
 }
 
@@ -712,7 +801,7 @@ function addArmatures(recipe, limits) {
       throw invalidField(`armatures.${armature.id}.fit`, nodeId, 'the ID of a mesh node with a geometry, such as one scene_inspect lists');
     }
     const definition = recipe.geometries.find(geometry => geometry.id === node.geometry);
-    const bounds = boundsFor(generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000)), mat4.create());
+    const bounds = boundsFor(generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000), cutterScopeOf(recipe.geometries)), mat4.create());
     const toArmature = mat4.invert(mat4.create(), restWorldMatrix(armature.id, userNodes, [armature]));
     const toWorld = restWorldMatrix(node.id, userNodes);
     return transformedBounds(bounds, mat4.multiply(mat4.create(), toArmature, toWorld));
@@ -811,6 +900,11 @@ function normalizeRecipe(input, limits) {
     }
     return definition;
   });
+  // Every geometry exists now, so cutter IDs, cycles, depth and work can be checked.
+  const definitionsById = geometryDefinitions(recipe.geometries);
+  recipe.geometries.forEach((definition, index) => {
+    if (definition.type === 'mesh') withFieldPrefix(`geometries[${index}]`, () => checkedCutterDependencies(definition, definitionsById));
+  });
   recipe.materials = resources(withDefaultMaterial(recipe), limits.maxMaterials, 'materials', materialFrom);
   const distinctPatterns = new Set(recipe.materials.filter(material => material.pattern).map(material => JSON.stringify(material.pattern)));
   if (distinctPatterns.size > MAX_MATERIAL_PATTERNS) {
@@ -822,7 +916,7 @@ function normalizeRecipe(input, limits) {
     resolveSurface: id => {
       const definition = recipe.geometries.find(geometry => geometry.id === id);
       if (!definition) throw invalidField('instances.surface', id, `the ID of a geometry in geometries, such as ${recipe.geometries[0]?.id ?? 'ground'}`);
-      return generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000));
+      return generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000), cutterScopeOf(recipe.geometries));
     },
   }, recipe.geometries);
   recipe.nodes = resources(recipe.nodes, limits.maxNodes, 'nodes', nodeFrom);
@@ -1250,6 +1344,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     if (state) {
       retainedMatrices(state.parts);
     }
+    const definitionsById = geometryDefinitions(recipe.geometries);
     const planGeometry = () => {
       const ownedRecords = ownedGeometryRecords();
       const availableRecords = new Map();
@@ -1257,12 +1352,12 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         availableRecords.set(record.signature, record);
       }
       const plans = recipe.geometries.map(definition => {
-        const signature = JSON.stringify(definition);
+        const signature = geometrySignature(definition, definitionsById);
         const preferredRecord = preferred?.geometryRecords.get(definition.id);
         const activeRecord = state?.geometryRecords.get(definition.id);
         const existing = [preferredRecord, activeRecord, availableRecords.get(signature)]
           .find(record => record?.signature === signature);
-        return { definition, signature, existing, estimatedVertices: definition.type === 'asset' ? 0 : geometryEstimate(definition) };
+        return { definition, signature, existing, estimatedVertices: definition.type === 'asset' ? 0 : geometryEstimate(definition, { definitions: definitionsById, chain: [] }) };
       });
       const residentStats = geometryStats(ownedRecords);
       const pendingVertices = plans.filter(plan => !plan.existing).reduce((total, plan) => total + plan.estimatedVertices, 0);
@@ -1299,7 +1394,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         const geometry = assetRuntime.geometryParts.get(plan.definition.id);
         record = Object.freeze({ signature: plan.signature, geometry, bounds: boundsFor(geometry, mat4.create()), vertices: 0, geometryBytes: 0, estimatedVertices: 0 });
       } else if (!record) {
-        const geometry = Object.freeze(generateGeometry(plan.definition, Math.min(limits.maxVertices, 1_000_000)));
+        const geometry = Object.freeze(generateGeometry(plan.definition, Math.min(limits.maxVertices, 1_000_000), { definitions: definitionsById, chain: [] }));
         const geometryBytes = Object.values(geometry).reduce((total, array) => total + array.byteLength, 0);
         const vertices = geometry.positions.length / 3;
         if (plan.definition.type === 'mesh') {
