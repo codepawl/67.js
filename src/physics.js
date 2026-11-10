@@ -329,6 +329,7 @@ function prepare(definition, options) {
       throw new TypeError('sensor must be boolean');
     }
     const common = {
+      name: collider.name,
       body,
       translation: vector(collider.translation, 3, 'collider translation', ZERO),
       rotation: rotation(collider.rotation, 'collider rotation'),
@@ -757,15 +758,10 @@ function colliderDescriptor(rapier, collider) {
   return descriptor;
 }
 
-function bakePrepared(preparedScene) {
-  const rapier = rapierEngine;
+/** Build the Rapier world for a prepared scene. Shared by the recorded bake and the live runtime. Frees itself on failure. */
+export function createRapierWorld(rapier, preparedScene) {
   const world = new rapier.World(xyz(preparedScene.gravity));
-  const eventQueue = new rapier.EventQueue(true);
-  const contactEvents = [];
   const colliderIndices = new Map();
-  const lastMovingFrames = new Int32Array(preparedScene.bodies.length).fill(-1);
-  let contactEventsTruncated = false;
-  let timeline;
   try {
     world.timestep = preparedScene.timestep;
     world.numSolverIterations = preparedScene.solverIterations;
@@ -814,6 +810,38 @@ function bakePrepared(preparedScene) {
       if (joint.motor !== undefined) applyJointMotor(rapier, created, joint.motor);
       return created;
     });
+    return { world, bodies, joints, colliderIndices };
+  } catch (error) {
+    world.free();
+    throw error;
+  }
+}
+
+/** Push every dynamic body by the force fields at `fieldTime`, as one impulse over a step. */
+export function applyForceFieldImpulses(preparedScene, bodies, fieldTime) {
+  const fieldAccel = [0, 0, 0];
+  for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex++) {
+    if (preparedScene.bodies[bodyIndex].type !== 'dynamic') continue;
+    const body = bodies[bodyIndex];
+    const pos = body.translation();
+    const vel = body.linvel();
+    evaluateForceFields(preparedScene.fields, [pos.x, pos.y, pos.z], [vel.x, vel.y, vel.z], fieldTime, fieldAccel);
+    const scale = body.mass() * preparedScene.timestep;
+    if (fieldAccel[0] || fieldAccel[1] || fieldAccel[2]) {
+      body.applyImpulse({ x: fieldAccel[0] * scale, y: fieldAccel[1] * scale, z: fieldAccel[2] * scale }, true);
+    }
+  }
+}
+
+function bakePrepared(preparedScene) {
+  const rapier = rapierEngine;
+  const { world, bodies, joints, colliderIndices } = createRapierWorld(rapier, preparedScene);
+  const eventQueue = new rapier.EventQueue(true);
+  const contactEvents = [];
+  const lastMovingFrames = new Int32Array(preparedScene.bodies.length).fill(-1);
+  let contactEventsTruncated = false;
+  let timeline;
+  try {
     timeline = new Float32Array(preparedScene.memoryPlan.timelineBytes / 4);
     let eventIndex = 0;
     for (let frame = 0; frame < preparedScene.frameCount; frame++) {
@@ -846,21 +874,7 @@ function bakePrepared(preparedScene) {
             }
           }
         }
-        if (preparedScene.fields.length) {
-          const fieldTime = (frame - 1) * preparedScene.timestep;
-          const fieldAccel = [0, 0, 0];
-          for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex++) {
-            if (preparedScene.bodies[bodyIndex].type !== 'dynamic') continue;
-            const body = bodies[bodyIndex];
-            const pos = body.translation();
-            const vel = body.linvel();
-            evaluateForceFields(preparedScene.fields, [pos.x, pos.y, pos.z], [vel.x, vel.y, vel.z], fieldTime, fieldAccel);
-            const scale = body.mass() * preparedScene.timestep;
-            if (fieldAccel[0] || fieldAccel[1] || fieldAccel[2]) {
-              body.applyImpulse({ x: fieldAccel[0] * scale, y: fieldAccel[1] * scale, z: fieldAccel[2] * scale }, true);
-            }
-          }
-        }
+        if (preparedScene.fields.length) applyForceFieldImpulses(preparedScene, bodies, (frame - 1) * preparedScene.timestep);
         world.step(eventQueue);
         eventQueue.drainCollisionEvents((firstHandle, secondHandle, started) => {
           if (contactEvents.length >= preparedScene.maxContactEvents) {
@@ -1098,4 +1112,19 @@ function recordedScene(preparedScene, timeline, recording) {
       return timeline === null;
     },
   });
+}
+
+/** Validate a definition for the live runtime. There is no timeline, so the frame count is 1 and tick events are not accepted. */
+export function prepareLivePhysics(definition, options = {}) {
+  if (definition && definition.events !== undefined && definition.events.length) {
+    throw new TypeError('a live physics definition takes no events; call applyImpulse, setKinematicPose or setLinearVelocity on the system instead');
+  }
+  const prepared = prepare({ ...definition, events: [] }, { ...options, frameCount: 1 });
+  return prepared;
+}
+
+/** The loaded Rapier module, or throws when loadPhysicsEngine has not resolved. */
+export function requireRapier() {
+  if (!rapierEngine) throw new Error('Physics engine is not loaded. Await loadPhysicsEngine() first.');
+  return rapierEngine;
 }
