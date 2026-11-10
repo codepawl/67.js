@@ -91,8 +91,8 @@ Point lights do not scatter in volume fog; the sun does. A sunlit closed room wi
 `effects` holds `exposure`, `saturation`, `contrast`, `temperature`, `vignette`, `grain`, `ambientOcclusion` (0 = off),
 `bloom` and `depthOfField` (see `camera.md`). Nested `bloom` fields merge.
 Named post steps, each off until set: `colorBalance` (`lift`, `gamma`, `gain`, three numbers each), `glare` (`streaks`,
-`count`, `angle`, `fogGlow`, `threshold`, `size`) `lensDistortion` (`distortion`, `dispersion`) and `stylize` (`sharpen`, `kuwahara`, `posterize`, `pixelate`); ranges in `docs/agent-look.md`.
-`colorBalance` and `stylize` take a `mask` (`objects` part names, `depth` `{ near, far, feather }`, `invert`) to apply only to a hero part or a depth band.
+`count`, `angle`, `fogGlow`, `threshold`, `size`) `lensDistortion` (`distortion`, `dispersion`), `stylize` (`sharpen`, `kuwahara`, `posterize`, `pixelate`) and `composite` (`background` `{ color }` or `{ top, bottom }`, `key` `{ chroma: { color, tolerance, softness } }` or `{ luma: { low, high, invert } }`, `mask`; a key needs a background); ranges in `docs/agent-look.md`.
+`colorBalance`, `stylize` and `composite` take a `mask` (`objects` part names, `depth` `{ near, far, feather }`, `invert`) to apply only to a hero part or a depth band.
 
 Tool `scene_apply`:
 

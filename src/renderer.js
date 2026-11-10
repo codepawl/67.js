@@ -2,7 +2,7 @@ import { materialTags } from './shader-registry.js';
 import { mat4, mat3 } from 'gl-matrix';
 import { SPLAT_UNITS, requireSplatSupport, layerTextureSupport, LIGHT_SHADING_FEATURE, SHADING_MODES, LIGHT_SHADING_MAXIMUM_SAMPLES, createVertexShader, vertexShader, liquidFragmentSource, createFragmentShader, liquidPassDrawer, createDepthFragmentShader, benchmarkVertexShader, benchmarkFragmentShader, viewTransformShader, createDepthVertexShader } from './shaders.js';
 import { postFragment, createPostFragment, POST_STEPS, POST_STEPS_WITH_OPTIONAL_CODE, skyFragment, bloomFragment } from './post.js';
-import { fullscreenVertex, startProgram, finishProgram, compileProgram } from './gl-program.js';
+import { fullscreenVertex, startProgram, finishProgram, compileProgram, ProgramNotReady, isLinkComplete, setPreparing } from './gl-program.js';
 import { ambientOcclusionFragment } from './ambient-occlusion.js';
 import { planRenderSize, estimateTextureBytes, estimateFrameBytes, memoryBudgetError } from './budget.js';
 import { applyProjection } from './camera.js';
@@ -18,6 +18,7 @@ import { resolveVolumeFog, validateFogField } from './volumetric.js';
 import { requireEnvironmentSupport } from './environment-shading.js';
 import { materialLayerState, materialLayerValue } from './material-layers.js';
 import { MaterialSnapshot } from './material-snapshot.js';
+import { wearUniformValues } from './material-wear.js';
 import { fittedFogDensity } from './fog-fit.js';
 import { InstanceSelection, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from './render-culling.js';
 import { resolveShadowLight, shadowBiasPerSlope } from './shadow-light.js';
@@ -86,6 +87,28 @@ function shaderFeaturesOfLighting(lighting) {
   return features;
 }
 
+/**
+ * A few parts that need the same shader features as all of `parts`, plus one instanced pair when any geometry repeats.
+ * A renderer built on these compiles the program the whole scene needs; replaceParts then adds the rest without a recompile.
+ */
+export function shaderFeatureRepresentatives(parts) {
+  const covered = new Set();
+  const representatives = [];
+  const firstOfGeometry = new Map();
+  let instancedPair = null;
+  for (const part of parts) {
+    const features = shaderFeaturesOfParts([part]);
+    if ([...features].some(feature => !covered.has(feature))) {
+      features.forEach(feature => covered.add(feature));
+      representatives.push(part);
+    }
+    if (!instancedPair && firstOfGeometry.has(part.geometry)) instancedPair = [firstOfGeometry.get(part.geometry), part];
+    else if (!firstOfGeometry.has(part.geometry)) firstOfGeometry.set(part.geometry, part);
+  }
+  if (instancedPair) for (const part of instancedPair) if (!representatives.includes(part)) representatives.push(part);
+  return representatives.length > 0 ? representatives : parts.slice(0, 1);
+}
+
 function shaderFeaturesOfParts(parts) {
   const features = new Set();
   for (const part of parts) {
@@ -108,12 +131,13 @@ function shaderFeaturesOfParts(parts) {
     if (material.lightMask !== undefined) features.add('lightLinking');
     if ((material.alphaMode ?? 'opaque') !== 'opaque') features.add('alphaMode');
     if (material.subsurface?.weight > 0) features.add('subsurface');
+    if (material.wear) features.add('surfaceWear');
     if (material.snippet) features.add(material.snippet.feature);
     if (materialLayerValue(material, 'clearcoat') > 0) features.add('clearcoat');
     if (materialLayerValue(material, 'sheenColor').some(channel => channel !== 0)) features.add('sheen');
     if (TAG_SHADER_FEATURES.has(material.tag)) features.add(material.tag);
     // Without vertex colours the tint and sky visibility are the constants of the unbound attribute, so no varying carries them.
-    if ([part.geometry, ...(part.lods ?? []).map(level => level.geometry)].some(geometry => geometry.colors || geometry.skyVisibility)) features.add('vertexColors');
+    if ([part.geometry, ...(part.lods ?? []).map(level => level.geometry)].some(geometry => geometry.colors || vertexAlpha(geometry))) features.add('vertexColors');
   }
   return features;
 }
@@ -196,7 +220,7 @@ function materialMapState(material) {
   const occlusionStrength = material.occlusionStrength ?? 1;
   if (material.layers || material.splat) requireSplatSupport().validate(material);
   if (material.layers && PROCEDURAL_MATERIAL_TAGS.has(material.tag)) throw new Error('Splat layers require a standard PBR material tag.');
-  return [...MATERIAL_MAPS.map(field => material[field] ?? null), normalScale[0], normalScale[1], occlusionStrength, ...mossState(material), material.boxMapScale ?? 0, material.boxMapAxis ?? 1, ...lightMapState(material), material.layers ?? null, material.splat ?? null, material.layerMaps ?? null, material.environmentProbe ?? null, material.waterReflection ?? null, material.irradianceGrid ?? null];
+  return [...MATERIAL_MAPS.map(field => material[field] ?? null), normalScale[0], normalScale[1], occlusionStrength, ...mossState(material), material.boxMapScale ?? 0, material.boxMapAxis ?? 1, ...lightMapState(material), material.layers ?? null, material.splat ?? null, material.layerMaps ?? null, material.environmentProbe ?? null, material.waterReflection ?? null, material.irradianceGrid ?? null, material.wear ?? null];
 }
 
 // A baked light map reads the second UV set, so it is only drawn for parts that cannot be skinned or morphed.
@@ -429,6 +453,8 @@ export function groupParts(parts, batching = true) {
   const groups = new Map();
   const batches = [];
   const morphInfos = new Map();
+  const materialKeyValues = new Map();
+  const materialKeyTails = new Map();
   for (const part of parts) {
     validateTransform(part);
     validatePartFlags(part);
@@ -448,7 +474,18 @@ export function groupParts(parts, batching = true) {
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
-    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)]) {
+    // Thousands of parts share a few materials, so the material half of the key is built once per material.
+    let materialValues = materialKeyValues.get(part.material);
+    if (!materialValues) {
+      materialValues = [...materialMapState(part.material), ...materialLayerState(part.material)];
+      materialKeyValues.set(part.material, materialValues);
+    }
+    let materialTail = materialKeyTails.get(part.material);
+    if (!materialTail) {
+      materialTail = [renderPass(part.material), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)];
+      materialKeyTails.set(part.material, materialTail);
+    }
+    for (const value of [...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail]) {
       if (!maps.has(value)) maps.set(value, new Map());
       maps = maps.get(value);
     }
@@ -506,23 +543,28 @@ function interleaveUvSets(geometry) {
   return combined;
 }
 
-// Sky visibility rides in the fourth component of the vertex colour attribute, so the attribute layout stays the same.
+// Sky visibility, or the packed surface wear masks of a material with `wear`, rides in the fourth component of the vertex
+// colour attribute, so the attribute layout stays the same.
+function vertexAlpha(geometry) {
+  return geometry.surfaceMasks ?? geometry.skyVisibility;
+}
+
 function interleaveColorsWithSkyVisibility(geometry) {
-  const vertexCount = geometry.skyVisibility.length;
+  const vertexCount = vertexAlpha(geometry).length;
   const combined = new Float32Array(vertexCount * 4);
   for (let vertex = 0; vertex < vertexCount; vertex++) {
     for (let channel = 0; channel < 3; channel++) {
       combined[vertex * 4 + channel] = geometry.colors ? geometry.colors[vertex * 3 + channel] : 1;
     }
-    combined[vertex * 4 + 3] = geometry.skyVisibility[vertex];
+    combined[vertex * 4 + 3] = vertexAlpha(geometry)[vertex];
   }
   return combined;
 }
 
 function geometryBufferBytes(geometry) {
   const plainBytes = ['positions', 'normals', 'colors', 'indices'].reduce((total, field) => total + (geometry[field]?.byteLength ?? 0), uvBufferBytes(geometry));
-  if (!geometry.skyVisibility) return plainBytes;
-  return plainBytes - (geometry.colors?.byteLength ?? 0) + geometry.skyVisibility.length * 16;
+  if (!vertexAlpha(geometry)) return plainBytes;
+  return plainBytes - (geometry.colors?.byteLength ?? 0) + vertexAlpha(geometry).length * 16;
 }
 
 function validateReplacementGeometry(geometry) {
@@ -557,7 +599,7 @@ function allFinite(values) {
 }
 
 export class Renderer67 {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto' } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto', deferProgramLink = false, deferEnvironmentPrefilter = false } = {}) {
     this.canvas = canvas;
     this.sceneParts = parts;
     // `skyOpenness` from closed-room.js is passed in, which keeps the ray code out of scenes without volume fog.
@@ -738,6 +780,17 @@ export class Renderer67 {
     }
     // The driver links the programs on its own threads while the textures and buffers upload; only then is the link result read.
     groups.forEach((group) => this.batches.push(this.uploadBatch(group)));
+    this.pendingConstruction = { pending, parts, environment };
+    this.deferEnvironmentPrefilter = deferEnvironmentPrefilter;
+    if (!deferProgramLink) this.finishConstruction();
+  }
+
+  // The second half of construction, which reads the link results. Reading a result waits for the driver, so a page that
+  // builds a heavy renderer passes deferProgramLink and awaits programsReady() instead of freezing for the whole compile.
+  finishConstruction() {
+    const { pending, parts, environment } = this.pendingConstruction;
+    this.pendingConstruction = null;
+    const benchmark = this.benchmark;
     this.finishMainProgram(pending.main);
     this.depthProgram = finishProgram(this.context, pending.depth);
     this.depthSkinUniforms = Object.fromEntries(SKIN_UNIFORMS.map(name => [name, this.context.getUniformLocation(this.depthProgram, name)]));
@@ -775,9 +828,53 @@ export class Renderer67 {
     if (this.shaderFeatures.has('splat')) requireSplatSupport().initializePlaceholders(this);
     this.initializeEnvironment(environment.map);
     this.createShadowMap();
-    if (reversedDepth !== false && !benchmark) installReversedDepth(this, reversedDepth);
+    if (this.reversedDepthMode !== false && !benchmark) installReversedDepth(this, this.reversedDepthMode);
     this.resize();
     if (!this.benchmark && !this.multisampleFramebuffer) this.allocateFrameTargets(this.canvas.width, this.canvas.height);
+  }
+
+  /** Resolves once every program started by the constructor has linked, polling without blocking the main thread, then finishes construction. Needs deferProgramLink. */
+  async programsReady() {
+    if (!this.pendingConstruction) return;
+    const context = this.context;
+    const parallelCompile = context.getExtension('KHR_parallel_shader_compile');
+    const { pending } = this.pendingConstruction;
+    const programs = [...Object.values(pending), ...(this.pendingEnvironmentPrograms?.values() ?? [])].map(started => started.program);
+    while (parallelCompile && programs.some(program => !context.getProgramParameter(program, parallelCompile.COMPLETION_STATUS_KHR))) {
+      await new Promise(resolve => setTimeout(resolve, 8));
+    }
+    this.finishConstruction();
+  }
+
+  /**
+   * Draws `frame` once the way a real frame is drawn, but without freezing the page for programs the driver has not finished
+   * building (the post pass of a fog or sky frame, liquids, ambient occlusion, a reversed-depth copy). Each draw that meets one
+   * stops there; the driver's thread keeps building while this waits in short timers, then the draw runs again. The last
+   * draw is complete and leaves every program, target and texture that frame uses ready, so the next frame costs no more than
+   * any other. Call it while the canvas is hidden or another world is on screen. Past `timeoutMilliseconds` it draws the
+   * frame at once and resolves true when it never had to, false otherwise.
+   */
+  async prepareFrame(frame, { timeoutMilliseconds = 6000 } = {}) {
+    await this.programsReady();
+    const context = this.context;
+    const deadline = performance.now() + timeoutMilliseconds;
+    setPreparing(context, true);
+    try {
+      for (;;) {
+        try {
+          this.render(frame);
+          return true;
+        } catch (error) {
+          if (!(error instanceof ProgramNotReady)) throw error;
+          while (!isLinkComplete(context, error.program) && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 8));
+          if (performance.now() >= deadline) break;
+        }
+      }
+    } finally {
+      setPreparing(context, false);
+    }
+    this.render(frame);
+    return false;
   }
 
   selectViewTransform(viewTransform, lookSource) {
@@ -829,7 +926,7 @@ export class Renderer67 {
 
   finishMainProgram(pendingProgram) {
     this.program = finishProgram(this.context, pendingProgram);
-    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', 'tintShadowMap', 'tintBlind', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
+    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', 'wearEnabled', 'wearMetal', 'wearDirt', 'wearShape', 'wearDirtShape', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', 'tintShadowMap', 'tintBlind', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
       this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     }
@@ -957,6 +1054,18 @@ export class Renderer67 {
     }
   }
 
+  /** Sets the surface wear uniforms of a batch; a material without wear turns the term off. */
+  bindSurfaceWear(wear) {
+    const { context, uniforms } = this;
+    context.uniform1f(uniforms.wearEnabled, wear ? 1 : 0);
+    if (!wear) return;
+    const values = wearUniformValues(wear);
+    context.uniform4fv(uniforms.wearMetal, values.metal);
+    context.uniform4fv(uniforms.wearDirt, values.dirt);
+    context.uniform4fv(uniforms.wearShape, values.shape);
+    context.uniform2fv(uniforms.wearDirtShape, values.dirtShape);
+  }
+
   /** Binds the geometry's vertex buffers and attributes into the bound vertex array. */
   bindGeometryAttributes(geometry, material) {
     const context = this.context;
@@ -967,10 +1076,10 @@ export class Renderer67 {
         if (geometry[field]) {
           const target = field === 'indices' ? context.ELEMENT_ARRAY_BUFFER : context.ARRAY_BUFFER;
           const values = field === 'uvs' && geometry.lightUvs ? interleaveUvSets(geometry) : geometry[field];
-          geometryBuffers.set(field, this.uploadBuffer(target, field === 'colors' && geometry.skyVisibility ? interleaveColorsWithSkyVisibility(geometry) : values));
+          geometryBuffers.set(field, this.uploadBuffer(target, field === 'colors' && vertexAlpha(geometry) ? interleaveColorsWithSkyVisibility(geometry) : values));
         }
       }
-      if (geometry.skyVisibility && !geometry.colors) geometryBuffers.set('colors', this.uploadBuffer(context.ARRAY_BUFFER, interleaveColorsWithSkyVisibility(geometry)));
+      if (vertexAlpha(geometry) && !geometry.colors) geometryBuffers.set('colors', this.uploadBuffer(context.ARRAY_BUFFER, interleaveColorsWithSkyVisibility(geometry)));
       if (geometry.lightUvs && !geometry.uvs) geometryBuffers.set('uvs', this.uploadBuffer(context.ARRAY_BUFFER, interleaveUvSets(geometry)));
       this.geometryBuffers.set(geometry, geometryBuffers);
     }
@@ -992,11 +1101,11 @@ export class Renderer67 {
       context.vertexAttrib2f(13, -1, -1);
     }
     if (geometry.colors && geometry.colors.length !== geometry.positions.length) throw new Error('Geometry colors must contain RGB for every vertex.');
-    if (geometry.skyVisibility && geometry.skyVisibility.length !== geometry.positions.length / 3) throw new Error('Geometry skyVisibility must hold one value for every vertex.');
-    if (geometry.colors || geometry.skyVisibility) {
+    if (vertexAlpha(geometry) && vertexAlpha(geometry).length !== geometry.positions.length / 3) throw new Error('Geometry skyVisibility must hold one value for every vertex.');
+    if (geometry.colors || vertexAlpha(geometry)) {
       context.bindBuffer(context.ARRAY_BUFFER, geometryBuffers.get('colors'));
       context.enableVertexAttribArray(14);
-      context.vertexAttribPointer(14, geometry.skyVisibility ? 4 : 3, context.FLOAT, false, 0, 0);
+      context.vertexAttribPointer(14, vertexAlpha(geometry) ? 4 : 3, context.FLOAT, false, 0, 0);
     } else {
       context.disableVertexAttribArray(14);
       context.vertexAttrib3f(14, 1, 1, 1);
@@ -1152,15 +1261,15 @@ export class Renderer67 {
     const [alphaMode, alphaCutoff, opacity, doubleSided] = materialAlphaState(parts[0].material);
     const layerState = materialLayerState(parts[0].material);
     const culling = this.createCullingState(parts);
-    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: flushOrder?.indices.length ?? geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), tintedShadow: castsTintedShadow(parts[0]), tintBlind: Boolean(splat) || Object.keys(parts[0].material.layerMaps ?? {}).length >= 3, receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
+    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, wear: parts[0].material.wear ?? null, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: flushOrder?.indices.length ?? geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), tintedShadow: castsTintedShadow(parts[0]), tintBlind: Boolean(splat) || Object.keys(parts[0].material.layerMaps ?? {}).length >= 3, receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
     if (parts[0].lods) culling.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level));
     culling.shadowLevels?.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level, batch.shadowLevels));
     parts.forEach((part, index) => this.partLocations.set(part, { batch, index, geometry: part.geometry, map, mapState, layerState, skin, jointMatrices: skin?.jointMatrices, skinIndices: geometry.skinIndices, skinWeights: geometry.skinWeights, morph, morphWeights: morph?.weights, morphTargets: geometry.morphTargets, normalMatrix: mat3.create(), committedMatrix: batch.instanceData.subarray(index * INSTANCE_STRIDE, index * INSTANCE_STRIDE + 16) }));
     return batch;
   }
 
-  /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. */
-  replaceParts(parts, { regroupOnly = false } = {}) {
+  /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. `retainedUnchanged` skips the re-sync of parts in kept batches, for a world that grows in slices. */
+  replaceParts(parts, { regroupOnly = false, retainedUnchanged = false } = {}) {
     if (!Array.isArray(parts) || new Set(parts).size !== parts.length) {
       throw new TypeError('Scene parts must be an array with distinct object identities.');
     }
@@ -1276,7 +1385,8 @@ export class Renderer67 {
     this.triangles = parts.reduce((total, part) => total + part.geometry.indices.length / 3, 0);
     this.updateBatches.clear();
     this.shadowsDirty = true;
-    this.updateParts(renderParts);
+    // With retainedUnchanged the caller promises that parts of kept batches did not move, so only the new batches are re-synced.
+    this.updateParts(retainedUnchanged ? renderParts.filter(part => !retained.has(this.partLocations.get(part)?.batch)) : renderParts);
     return parts.length;
   }
 
@@ -1876,7 +1986,7 @@ export class Renderer67 {
       context.uniform1i(this.liquidUniforms.environmentSpecular, ENVIRONMENT_SPECULAR_UNIT);
     }
     this.bindEnvironmentTextures(this.whiteTexture, this.whiteTexture);
-    if (!this.benchmark && map) this.prepareEnvironment(map);
+    if (!this.benchmark && map && !this.deferEnvironmentPrefilter) this.prepareEnvironment(map);
   }
 
   bindEnvironmentTextures(specularTexture, brdfTexture) {
@@ -1893,6 +2003,22 @@ export class Renderer67 {
     if (this.environmentResources?.data === map.data && this.environmentResources.irradianceSource === map.irradianceSource) return false;
     requireEnvironmentSupport().estimateBytes(map, this.capabilities.maximumTextureSize);
     const resources = requireEnvironmentSupport().createResources(this.context, map, { compileProgram: (context, vertexSource, fragmentSource) => this.compileEnvironmentProgram(context, vertexSource, fragmentSource), fullscreenVertex });
+    this.environmentResources?.dispose();
+    this.environmentResources = resources;
+    this.textureBytes += resources.bytes - this.environmentBytes;
+    this.environmentBytes = resources.bytes;
+    return true;
+  }
+
+  /**
+   * Prefilters the map in steps, awaiting `checkpoint()` between them, for a renderer built with `deferEnvironmentPrefilter: true`.
+   * Call it before the first render: the steps leave GL state mid-pass, so no frame may draw on this context until it resolves.
+   */
+  async prepareEnvironmentInSlices(map, checkpoint) {
+    requireEnvironmentSupport().assertMap(map);
+    if (this.environmentResources?.data === map.data && this.environmentResources.irradianceSource === map.irradianceSource) return false;
+    requireEnvironmentSupport().estimateBytes(map, this.capabilities.maximumTextureSize);
+    const resources = await requireEnvironmentSupport().createResourcesInSlices(this.context, map, { compileProgram: (context, vertexSource, fragmentSource) => this.compileEnvironmentProgram(context, vertexSource, fragmentSource), fullscreenVertex }, checkpoint);
     this.environmentResources?.dispose();
     this.environmentResources = resources;
     this.textureBytes += resources.bytes - this.environmentBytes;
@@ -1968,9 +2094,9 @@ export class Renderer67 {
   }
 
   // True when the frame draws local volumes. An empty list costs nothing; anything else is checked here, before a program is bound.
-  prepareLocalVolumes(input) {
+  prepareLocalVolumes(input, frame) {
     if (input === undefined || (Array.isArray(input) && input.length === 0)) return false;
-    return requireFeatureCode('volumeFog').support.prepareLocalVolumes(this, input) > 0;
+    return requireFeatureCode('volumeFog').support.prepareLocalVolumes(this, input, frame) > 0;
   }
 
   // The post steps this frame uses. A step that is off costs nothing in a program that has it compiled out.
@@ -2042,7 +2168,7 @@ export class Renderer67 {
     context.bindVertexArray(null);
     const fogSky = this.fogSkyVisibility?.(this.sceneParts, volume, context, environment);
     const fogSupport = volume.density > 0 ? requireFeatureCode('volumeFog').support : null;
-    const localVolumes = this.prepareLocalVolumes(environment.localVolumes);
+    const localVolumes = this.prepareLocalVolumes(environment.localVolumes, frame);
     if (fogSupport) fogSupport.packLights(this);
     else if (this.fogLightBuffers) this.fogLightBuffers.count = 0;
     const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky, localVolumes));
@@ -2342,6 +2468,7 @@ export class Renderer67 {
       this.context.uniform2f(this.uniforms.normalScale, batch.mapState[5], batch.mapState[6]);
       this.context.uniform1f(this.uniforms.occlusionStrength, batch.mapState[7]);
       this.context.uniform4f(this.uniforms.materialMoss, batch.mapState[8], batch.mapState[9], batch.mapState[10], batch.mapState[11]);
+      this.bindSurfaceWear(batch.wear);
       const layers = batch.layerState;
       this.context.uniform3f(this.uniforms.materialDielectric, layers[0], layers[1], layers[2]);
       this.context.uniform2f(this.uniforms.materialCoat, layers[3], layers[4]);

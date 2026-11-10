@@ -12,7 +12,7 @@ Release `0.9.0` adds [visual review](agent-review.md) for several labeled views 
 
 To see what changed, including changes not yet released, read `https://67js.codepawl.com/changelog.json`: `released` sections, `unreleased` entries and each entry's issue number and `breaking` flag.
 
-It renders one active scene and returns PNG images through MCP image content.
+It renders scenes (several can be open) and returns PNG images through MCP image content.
 Tool results also contain JSON text and structured metadata.
 The image bytes appear only in the image content block.
 
@@ -77,7 +77,7 @@ Every recorded agent run used Claude Code. This table says what was tried elsewh
 | Client or check | Result |
 |---|---|
 | Official MCP SDK client over stdio (`npm run smoke:mcp-package`) | Passes. |
-| MCP Inspector CLI 2.13.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Lists all 23 tools through `tools/list` in 7 s. `tools/call` of `scene_create` with the lamp recipe succeeds in 10 s. The CLI starts a new server for every command and the scene lives in the server, so it cannot follow with `scene_look`. That call fails with "No scene is active" and returns no image. The preview image is not testable through this CLI. |
+| MCP Inspector CLI 2.13.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Lists all 24 tools through `tools/list` in 7 s. `tools/call` of `scene_create` with the lamp recipe succeeds in 10 s. The CLI starts a new server for every command and the scene lives in the server, so it cannot follow with `scene_look`. That call fails with "No scene is active" and returns no image. The preview image is not testable through this CLI. |
 | Official MCP Python SDK 2.3.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Initialize, `tools/list` (22 tools), `scene_create` and `scene_look` in one session. `scene_look` returns a 20480 byte PNG. 11 s including the first `uv` download. |
 | JSON Schema 2020-12 validator with strict mode (Ajv 8), run in `npm test` | Every tool input schema compiles. |
 | Tool names and descriptions | Names are 9 to 24 characters from `[a-z_]`, within the 64-character limit OpenAI, Gemini and Anthropic share. No description is over 1024 characters. |
@@ -139,6 +139,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `scene_release_checkpoint` | `sessionId`, `checkpointId` | Release confirmation |
 | `scene_export_recipe` | `sessionId` | Canonical recipe and revision |
 | `scene_export_glb` | `sessionId`, optional `clip`, `motionTime`, `maxTextureSize` | A GLB file under `<jobs>/exports/` with a server-chosen name: path, bytes, SHA-256. See [GLB export](export-glb.md) |
+| `scene_export_web` | `sessionId`, optional `title` | A static web build folder under `<jobs>/exports/`: path of `index.html`, file count, bytes. Needs a `game` set with `set-game`. See [Game](game.md) |
 | `scene_dispose` | `sessionId` | Disposal confirmation |
 | `scene_render_submit` | `sessionId`, `expectedRevision`, `settings` | Snapshot job ID and queued record |
 | `scene_render_status` | `jobId`, optional `response_format` | State and durable frame progress |
@@ -146,7 +147,11 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `scene_render_result` | `jobId`, optional `response_format` | Completed output paths, hashes and metrics |
 | `scene_render_release` | `jobId` | Confirmation that owned job files were removed |
 
-`sessionId` is optional on every tool that lists it: one scene exists at a time, so a call that leaves it out means the active scene. An ID that names another scene (an invented one, or one from a disposed scene) is still rejected with the active ID in the message, because acting on a scene the caller did not name could edit the wrong one.
+`sessionId` is the scene ID: `scene_create` and `scene_create_asset` return it, and every scene tool takes it. It is optional: a call that leaves it out means the last used scene. An ID that names no open scene (an invented one, one from a disposed scene, or one that was evicted) is rejected with the open IDs in the message, because acting on a scene the caller did not name could edit the wrong one.
+
+One server keeps up to 4 scenes open, within 96 MiB of resident geometry together. Creating a scene past either cap closes the least recently used scene, and the create result lists it under `evictedSessions`; a later call with that ID fails with an `evicted` error. Save a scene with `scene_export_recipe` before it can be evicted. Only one scene holds the preview renderer at a time, so a call on another scene rebuilds it first; that costs a moment, so finish a batch of calls on one scene before switching.
+
+Each scene keeps up to 16 checkpoints. `scene_checkpoint` returns `checkpointId`; past the limit the oldest checkpoint is evicted and the result lists it under `evictedCheckpointIds`. A `checkpointId` belongs to the scene that returned it. A render job stays tied to the scene it was submitted for. While a job runs the preview renderer is leased, so `scene_create`, edits and disposal wait for it, as before.
 
 ### Tool errors
 

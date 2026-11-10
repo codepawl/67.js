@@ -478,7 +478,7 @@ The optional second constructor argument overrides the following positive intege
 | `maxVertices` | `250000`, across unique active, checkpoint, and staged geometry allocations |
 | `maxGeometryBytes` | `33554432` |
 | `maxOperations` | `256`, per application |
-| `maxCheckpoints` | `8` |
+| `maxCheckpoints` | `16` |
 | `maxRecipeBytes` | `1048576`, also used for each command batch |
 
 Preflight accounts for peak geometry ownership before generating any new resource.

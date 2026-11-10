@@ -450,3 +450,16 @@ test('the deadline of a traced film covers every frame', () => {
   const film = jobDeadlineMs({ frameCount: 5, width: 64, height: 64, renderer });
   assert.equal(film - single, 4 * 10 * 1000);
 });
+
+test('a job runs against the scene it was submitted for', async context => {
+  const root = await temporary(context);
+  const scenesSeen = [];
+  const controller = await createAgentRenderJobs({ root, limits, run: async input => {
+    scenesSeen.push(input.sessionId);
+    return writeImage(input);
+  } });
+  const submitted = await controller.submit({ ...request(), sessionId: 'scene-a' });
+  await terminal(controller, submitted.jobId);
+  assert.deepEqual(scenesSeen, ['scene-a']);
+  await controller.close();
+});

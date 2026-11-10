@@ -7,6 +7,7 @@ import { normalizeAgentLook, environmentPatchWithSetup, environmentLinksLights, 
 import { postStepSupport } from './shader-registry.js';
 import { agentSceneModule, agentSceneModuleLoaded } from './agent-scene-modules.js';
 import { CURVE_TEXT_LIMITS, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, MAX_MATERIAL_PATTERNS, RECIPE_ALPHA_MODES } from './agent-scene-capabilities.js';
+import { normalizeMaterialWear, geometryWithSurfaceMasks } from './material-wear.js';
 import { ALL_LIGHTS_MASK, MATERIAL_LAYER_FIELDS, validateMaterialLayers } from './material-layers.js';
 import { recipeDiagnostics, closedRoomDiagnostic } from './agent-diagnostics.js';
 import { closedRoomShare, CLOSED_ROOM_SHARE } from './closed-room.js';
@@ -20,6 +21,7 @@ export { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS };
  */
 export const REVISION_HISTORY_LIMIT = 4;
 export { normalizeAgentLook, resolveAgentShadow } from './agent-look.js';
+import { OWN_SECTIONS as NULLABLE_SECTION_OPERATIONS } from './agent-apply-report.js';
 export { describeApplication } from './agent-apply-report.js';
 export {
   needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader,
@@ -42,18 +44,13 @@ const CAMERA_DEFAULTS = Object.freeze({ eye: [4, 3, 5], target: [0, 0, 0], up: [
 const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher'];
 const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
 const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
-const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', 'aov', ...MATERIAL_LAYER_FIELDS];
+const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', 'aov', 'wear', ...MATERIAL_LAYER_FIELDS];
 const PATTERN_TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'layerMaps', 'transmissionMap', 'aovMap', 'boxMapScale', 'boxMapAxis'];
 const CAMERA_FIELDS = [...Object.keys(CAMERA_DEFAULTS), ...CAMERA_LENS_FIELDS];
 const LOOK_OPERATION_FIELDS = Object.freeze({
   'set-environment': 'environment',
   'set-effects': 'effects',
   'set-shadow': 'shadow',
-});
-// Each of these replaces one recipe section whole; null clears it.
-const NULLABLE_SECTION_OPERATIONS = Object.freeze({
-  'set-motion': 'motion', 'set-physics': 'physics', 'set-timeline': 'timeline', 'set-cloth': 'cloth',
-  'set-bake': 'bake', 'set-particles': 'particles', 'set-post-passes': 'postPasses', 'set-armatures': 'armatures',
 });
 const ADDITION_FIELDS = Object.freeze({
   'add-geometry': ['geometries', 'geometry'],
@@ -284,6 +281,7 @@ function materialFrom(value) {
     result.aov = aov;
   }
   copyMaterialLayers(value, result);
+  if (value.wear) result.wear = normalizeMaterialWear(value.wear);
   if (agentSceneModuleLoaded('worldMaterials')) {
     agentSceneModule('worldMaterials').copyWaterFields(value, result, vector);
   }
@@ -879,7 +877,7 @@ function linkedMaterial(liveMaterial, lightMask, wrappers) {
 
 function normalizeRecipe(input, limits) {
   let recipe = copiedJson(input, limits.maxRecipeBytes);
-  knownKeys(recipe, ['format', 'schemaVersion', 'geometries', 'materials', 'nodes', 'armatures', 'camera', 'environment', 'effects', 'shadow', 'motion', 'physics', 'cloth', 'timeline', 'particles', 'bake', 'postPasses'], 'recipe');
+  knownKeys(recipe, ['format', 'schemaVersion', 'geometries', 'materials', 'nodes', 'armatures', 'camera', 'environment', 'effects', 'shadow', 'motion', 'physics', 'cloth', 'timeline', 'particles', 'bake', 'postPasses', 'game'], 'recipe');
   if (recipe.format !== '67js.scene' || recipe.schemaVersion !== 1) {
     throw invalidField(recipe.format !== '67js.scene' ? 'format' : 'schemaVersion', recipe.format !== '67js.scene' ? recipe.format : recipe.schemaVersion, recipe.format !== '67js.scene' ? '"67js.scene"' : '1');
   }
@@ -959,6 +957,10 @@ function normalizeRecipe(input, limits) {
     recipe.bake = recipe.bake === null ? null : agentSceneModule('bake').normalizeAgentBake(recipe.bake);
   }
   if (Object.hasOwn(recipe, 'postPasses')) recipe.postPasses = agentSceneModule('userPass').normalizeUserPasses(recipe.postPasses ?? []);
+  if (Object.hasOwn(recipe, 'game')) {
+    if (recipe.game === null) delete recipe.game;
+    else recipe.game = agentSceneModule('game').normalizeGameSetup(recipe.game, new Set(recipe.nodes.map(node => node.id)));
+  }
   recipe = copiedJson(recipe, limits.maxRecipeBytes);
   return recipe;
 }
@@ -1485,9 +1487,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     const usesVisibility = recipeUsesVisibility(recipe);
     const nextParts = recipe.nodes.filter(node => node.geometry !== undefined).map(node => {
       const binding = skinBindings.get(node.id);
-      const sourceGeometry = binding?.geometry ?? geometries.get(node.geometry);
-      const geometry = sourceGeometry.vertexGroups?.foam ? agentSceneModule('mesh').waterFoamGeometry(sourceGeometry, materialHandles.get(node.material).output) : sourceGeometry;
       const material = materialHandles.get(node.material).output;
+      const sourceGeometry = binding?.geometry ?? geometries.get(node.geometry);
+      const foamGeometry = sourceGeometry.vertexGroups?.foam ? agentSceneModule('mesh').waterFoamGeometry(sourceGeometry, material) : sourceGeometry;
+      const geometry = material.wear ? geometryWithSurfaceMasks(foamGeometry, material.wear, node.id) : foamGeometry;
       const assetExtras = assetRuntime.partExtras.get(node.id);
       // Shape keys of a recipe mesh are morph targets with their own weights per part; an imported asset brings its own pose.
       const shapeKeyMorph = geometry.morphTargetValues && !assetExtras?.morph ? { weights: Float32Array.from(geometry.morphTargetValues) } : undefined;
@@ -1517,7 +1520,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       // Part identity decides what the next stage reuses, so it compares the parts as built, before any bake.
       sourceRestParts,
       parts: restParts, restParts,
-      bakeReport: lightBakeResult ? { ...lightBakeResult.report, reused: lightBakeResult.reused } : null,
+      bakeReport: lightBakeResult ? agentSceneModule('bake').withLocalVolumeReport({ ...lightBakeResult.report, reused: lightBakeResult.reused }, recipe.environment.localVolumes) : null,
       reflectionReport: reflected ? reflected.report : null,
       // A renderer holding the deformed cloth parts of the old state needs the rest parts back as a topology change.
       topologyChanged: Boolean(state && (restParts !== state.restParts || state.parts !== state.restParts)),
@@ -1576,7 +1579,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     const rebaked = state.recipe.bake?.rebake && agentSceneModule('bake').bakeAtSampledPose(lightBake, state.recipe, pose);
     if (rebaked) {
       state.restParts = stageRestParts(state.recipe, state.sourceRestParts, rebaked, pose.graph).restParts;
-      state.bakeReport = rebaked.report;
+      state.bakeReport = agentSceneModule('bake').withLocalVolumeReport(rebaked.report, state.recipe.environment.localVolumes);
     }
   }
 

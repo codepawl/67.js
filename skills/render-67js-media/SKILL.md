@@ -6,7 +6,7 @@ license: MIT
 
 # Export images and video from 67js over MCP
 
-A render job is an immutable snapshot of the active scene. Edits made while it runs do not change it, and it does not
+A render job is an immutable snapshot of one scene (`sessionId`, else the last used) and stays tied to it. Edits made while it runs do not change it, and it does not
 change the scene's revision, pose or checkpoints. The MCP server must have been started with `--jobs <abs private dir>`;
 MP4 also needs `ffmpeg` on PATH or `--ffmpeg <abs path>`, and sound needs `--audio <abs dir>`. Without `--jobs` the
 submit call fails: tell the user which launch option is missing.

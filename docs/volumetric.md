@@ -108,7 +108,7 @@ In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is th
 
 ## Local volumes
 
-`environment.localVolumes` holds up to 8 boxes or spheres that absorb and emit light: candle haze, a smoke puff, a glowing cloud in one place. They need no `volumeFog` and do not scatter, so a lamp does not light them; they only dim what is behind them and add their own glow. A scene without `localVolumes` draws exactly as before and compiles nothing extra.
+`environment.localVolumes` holds up to 8 boxes, spheres or parts that absorb and emit light: candle haze, a smoke puff, a glowing cloud in one place. They need no `volumeFog` and do not scatter, so a lamp does not light them; they only dim what is behind them and add their own glow. A scene without `localVolumes` draws exactly as before and compiles nothing extra.
 
 ```json
 { "environment": { "localVolumes": [
@@ -118,8 +118,9 @@ In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is th
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `shape` | `box` | `box` takes `size: [width, height, depth]`, `sphere` takes `radius` |
-| `center` | required | World position |
+| `shape` | `box` | `box` takes `size: [width, height, depth]`, `sphere` takes `radius`, `mesh` takes `part` |
+| `center` | required for `box` and `sphere` | World position |
+| `part`, `fit` | required, `bounds` | `mesh` only. `part` names a part of the scene; `fit` is `bounds` or `mesh` (see below) |
 | `density` | `1` | `0` to `100`. Extinction per unit length at the core |
 | `absorption` | `[1, 1, 1]` | Per colour channel share of the density, `0` to `1`. A larger value dims that channel more, so `[0.1, 0.6, 1]` removes blue first and leaves a warm tint |
 | `emission`, `emissionStrength` | `[0, 0, 0]`, `1` | Glow colour and its radiance per unit length at the core, `0` to `1000`. Emission does not depend on `density`, so `density: 0` is a pure glow |
@@ -127,7 +128,23 @@ In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is th
 | `noiseAmount`, `noiseScale` | `0`, `1` | Raster only. `noiseAmount` `0` to `1` breaks the density up with the cloud noise at `noiseScale` cells per unit |
 | `steps` | `16` | `4` to `32` samples through the volume |
 
-Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake. The path tracer traces them on `backend: "cpu"` with the same fields except the noise, and every other tracer entry point (backends `gpu` and `native`, the progressive and realtime tracers, the GPU light bake) throws instead of leaving them out. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.
+Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake: a scene bake (`bake` in a recipe) leaves them out, an emissive volume lights no baked surface and no volume dims the baked light, and the bake report names them in `skippedLocalVolumes` (index, shape, whether emissive) with a `warnings` line. A scene without local volumes bakes and reports exactly as before. Add a point light or an emissive part where the volume's glow should reach a wall. The path tracer traces them on `backend: "cpu"` with the same fields except the noise, and every other tracer entry point (backends `gpu` and `native`, the progressive and realtime tracers, the GPU light bake) throws instead of leaving them out. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.
+
+### Mesh volumes
+
+`shape: "mesh"` takes its place and size from a part, so smoke can fill a room or a modelled shape without writing its numbers twice.
+
+```json
+{ "environment": { "localVolumes": [ { "shape": "mesh", "part": "hall", "fit": "mesh", "density": 1.5, "falloff": 0 } ] } }
+```
+
+- `fit: "bounds"` (the default) uses the part's bounding box in its own frame, carried through its matrix: an oriented box, tight for a rotated or scaled part. It draws in the rasterizer and the CPU path tracer, and `falloff` fades its edges as for a box.
+- `fit: "mesh"` uses the closed mesh itself. The CPU path tracer walks the ray from crossing to crossing, so an L-shaped room or two separate shells are filled exactly, and a ray that leaves the mesh and returns crosses both pieces. The mesh has no distance field, so `falloff` is ignored (the density is the same everywhere inside), and so is `noiseAmount`.
+- The rasterizer draws the closed mesh in a mesh pass before the post pass: each `fit: "mesh"` part is drawn without culling into a float buffer, adding the distance of every back face and subtracting that of every front face along each pixel's ray, each clamped to the first opaque surface. That sum is the length of the ray inside the mesh, exact for any number of shells and any shape, so there is no shell limit; the post shader then integrates the volume over that length in closed form (the light behind is dimmed by `exp(-density * absorption * length)`, the emission adds `emission * (1 - exp(-k * length)) / k`). `steps` has no effect on a mesh fit, because nothing is stepped. Volumes are still composited nearest entry first. On the L-room test (`tests/local-volume-mesh-raster.test.js`, density 1) the rasterizer's transmittance stays within 0.03 of the CPU tracer's (the test tolerance; measured differences were 0.0014 or less) and the notch of the L is exactly clear.
+- The rasterizer needs the mesh to be closed and every face to wind the same way (either outward or inward; it detects which): an open mesh throws `environment.localVolumes[n].part "x" is not a closed mesh (k open edges)`, and faces wound against each other throw `... has faces wound against each other (k edges)`. It needs `EXT_float_blend` and a buffer as wide as the canvas and as tall as the canvas times the number of `fit: "mesh"` volumes (RG32F, 8 bytes per pixel each; at 1920 x 1080 that is 16.6 MB per volume), and throws with the limit when the device cannot make it. Geometry nearer than the camera's near plane is clipped, so a ray loses the stretch between the eye and the near plane; the automatic near plane counts only visible parts, so a hidden volume part that sits nearer the camera than everything visible needs an explicit camera `near`. A mesh that crosses the far plane keeps the stretch up to it (the missing back face is made up from the surface or far distance), so smoke fades at the far plane like any other volume. A scene with no `fit: "mesh"` volume allocates nothing and draws nothing extra.
+- A part that is `visible: false` is not drawn by the rasterizer and is left out of the traced geometry when a mesh volume names it, so a hidden part can shape smoke without becoming a wall.
+- The part must be rigid (not skinned) and have volume. A mesh with open edges has no inside: `fit: "mesh"` throws an error with the part name and the number of open edges. A `part` that names nothing throws `environment.localVolumes[n].part "x" names no part in the scene` with the part names.
+- The mesh walk follows at most 64 surface crossings per ray (32 segments inside), so the cost stays bounded; the `steps` of the volume are shared between its segments by length.
 
 ### Reference render and frame time
 
@@ -135,4 +152,4 @@ Each volume is marched on its own between its entry and its exit, cut at the fir
 
 ### Not covered yet
 
-Mesh bounds as a shape, the WebGPU and WebGL path tracers, the lightmap bake and path tracer noise are open work: mesh bounds #807, tracer noise and GPU tracers #808, the bake #809.
+The WebGPU and WebGL path tracers and path tracer noise are open work: tracer noise and GPU tracers #808. Lighting baked surfaces from a volume's emission is not planned (#809): the bake reports the limit instead.

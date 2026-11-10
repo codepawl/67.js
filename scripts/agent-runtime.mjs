@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import packageMetadata from '../package.json' with { type: 'json' };
 import { VEGETATION_CAPABILITY_NOTE } from '../src/agent-vegetation-notes.js';
 import { CROWD_CAPABILITY_NOTE } from '../src/agent-crowd-notes.js';
 import { USER_PASS_CAPABILITIES } from '../src/user-pass.js';
+import { GAME_CAPABILITIES } from '../src/game-setup-notes.js';
 import { MESH_BLEND_CAPABILITIES } from '../src/mesh-blend.js';
 import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
 import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS } from '../src/agent-scene-capabilities.js';
@@ -22,6 +23,7 @@ import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
 import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
+import { writeWebBuild } from './web-export.mjs';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
 import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
@@ -32,7 +34,7 @@ import { isPreviewHost } from './preview-host.mjs';
 import { normalizeReview, REVIEW_LIMITS } from './agent-review.mjs';
 import { mergeFrameDiagnostics } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
-import { sessionProblem } from '../src/agent-errors.js';
+import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 
 const SCENE_LIMITS = AGENT_SCENE_DEFAULT_LIMITS;
 const MAXIMUM_IMAGE_BYTES = 1024 * 1024;
@@ -44,8 +46,10 @@ const MAXIMUM_OBJECT_NAMES = 1000;
 // A path trace shares the machine with the person using it, so it takes half of the eight-thread ceiling.
 const PATH_TRACER_THREADS = 8;
 const MAXIMUM_QUEUED_CALLS = 16;
+const MAXIMUM_REMEMBERED_EVICTIONS = 32;
 const MAXIMUM_GLB_BYTES = 32 * 1024 * 1024;
 const MAXIMUM_KEPT_GLBS = 8;
+const MAXIMUM_KEPT_WEB_BUILDS = 4;
 const EVALUATION_TIMEOUT_MS = 30000;
 const QUERY_ONLY_TIMEOUT_MS = 120000;
 /** A bake runs on a worker for up to its own limit, so a call that bakes gets that much more than a plain call. */
@@ -105,15 +109,19 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   let page;
   let reviewPage;
   let cancelReview;
-  let activeSessionId = null;
-  // Whether the active scene has a bake, so an edit that rebakes gets the longer deadline.
-  let activeSceneHasBake = false;
+  // Open scenes, least recently used first; the last one is what a call without a sessionId means.
+  const openSessionIds = new Set();
+  // Scenes the page closed to stay under the scene cap, so a later call with one of them gets a clear error.
+  const evictedSessionIds = [];
+  // Scenes that have a bake, so an edit that rebakes gets the longer deadline.
+  const bakedSessionIds = new Set();
   let queuedCalls = 0;
   let queue = Promise.resolve();
   let closing;
   let catalogPromise;
   let jobsPromise;
   const savedGlbPaths = [];
+  const savedWebBuildPaths = [];
   function jobs() {
     if (!jobRoot) throw new Error('Configure --jobs with an absolute output directory before submitting render jobs.');
     if (!jobsPromise && closing) throw new Error('The agent runtime is closing or closed.');
@@ -358,10 +366,40 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     }
   }
 
+  function lastUsedSessionId() {
+    let lastUsed = null;
+    for (const sessionId of openSessionIds) lastUsed = sessionId;
+    return lastUsed;
+  }
+
+  function forgetSession(sessionId) {
+    openSessionIds.delete(sessionId);
+    bakedSessionIds.delete(sessionId);
+  }
+
+  function forgetAllSessions() {
+    openSessionIds.clear();
+    bakedSessionIds.clear();
+  }
+
   function requireSession(sessionId) {
-    if (!activeSessionId || sessionId !== activeSessionId) {
-      throw new Error(sessionProblem(sessionId, activeSessionId));
+    if (!openSessionIds.has(sessionId)) {
+      throw new Error(sessionProblem(sessionId, lastUsedSessionId(), { openSessionIds: [...openSessionIds], evictedSessionIds }));
     }
+    // Re-insert so the Set order stays least to most recently used.
+    openSessionIds.delete(sessionId);
+    openSessionIds.add(sessionId);
+  }
+
+  // The page returns the scenes it closed to make room; the runtime forgets them and remembers why they are gone.
+  function registerCreatedScene(sessionId, result, hasBake) {
+    for (const evictedSessionId of result.evictedSessions ?? []) {
+      forgetSession(evictedSessionId);
+      evictedSessionIds.push(evictedSessionId);
+    }
+    evictedSessionIds.splice(0, Math.max(0, evictedSessionIds.length - MAXIMUM_REMEMBERED_EVICTIONS));
+    openSessionIds.add(sessionId);
+    if (hasBake) bakedSessionIds.add(sessionId);
   }
 
   async function invoke(method, input, timeoutMs = EVALUATION_TIMEOUT_MS) {
@@ -393,7 +431,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     } catch (error) {
       if (timedOut) {
         if (target === page) {
-          activeSessionId = null;
+          forgetAllSessions();
           await shutdownResources();
         } else {
           await target.close();
@@ -405,13 +443,12 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     }
   }
 
-  async function runJob({ jobId, directory, snapshot, settings, signal, progress }) {
+  async function runJob({ jobId, sessionId, directory, snapshot, settings, signal, progress }) {
     let jobPage;
     let encoder;
     let frameReceiver;
     let pageEncodes = false;
     let suspended = false;
-    const sessionId = activeSessionId;
     const started = performance.now();
     const metrics = { backend, requestedWidth: settings.width, requestedHeight: settings.height,
       renderSeconds: 0, captureSeconds: 0, peakNodeBytes: 0, peakBrowserHeap: 0, maximumPendingFrames: 1 };
@@ -721,9 +758,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   return Object.freeze({
     async capabilities() {
       return {
-        scene: { ...AGENT_SCENE_CAPABILITIES, postPasses: USER_PASS_CAPABILITIES, meshBlend: MESH_BLEND_CAPABILITIES, materialSnippet: MATERIAL_SNIPPET_CAPABILITIES, vegetation: VEGETATION_CAPABILITY_NOTE, crowd: CROWD_CAPABILITY_NOTE, textureSequence: TEXTURE_SEQUENCE_CAPABILITIES },
+        scene: { ...AGENT_SCENE_CAPABILITIES, game: GAME_CAPABILITIES, postPasses: USER_PASS_CAPABILITIES, meshBlend: MESH_BLEND_CAPABILITIES, materialSnippet: MATERIAL_SNIPPET_CAPABILITIES, vegetation: VEGETATION_CAPABILITY_NOTE, crowd: CROWD_CAPABILITY_NOTE, textureSequence: TEXTURE_SEQUENCE_CAPABILITIES },
         sceneLimits: SCENE_LIMITS,
-        preview: { backend, memoryBudgetMiB: memory, maximumWidth: 1024, maximumHeight: 1024, maximumImageBytes: MAXIMUM_IMAGE_BYTES, maximumActiveScenes: 1, maximumQueuedCalls: MAXIMUM_QUEUED_CALLS, evaluationTimeoutMs: EVALUATION_TIMEOUT_MS },
+        preview: { backend, memoryBudgetMiB: memory, maximumWidth: 1024, maximumHeight: 1024, maximumImageBytes: MAXIMUM_IMAGE_BYTES, maximumActiveScenes: SCENE_STORE_LIMITS.maxOpenScenes, maximumOpenSceneBytes: SCENE_STORE_LIMITS.maxOpenSceneBytes, maximumQueuedCalls: MAXIMUM_QUEUED_CALLS, evaluationTimeoutMs: EVALUATION_TIMEOUT_MS },
         review: { ...REVIEW_LIMITS, backend, memoryBudgetMiB: memory, evaluationTimeoutMs: EVALUATION_TIMEOUT_MS,
           totalTimeoutMs: EVALUATION_TIMEOUT_MS,
           sourcePreserved: true, defaultMotionTime: null, defaultRendererTime: 0, branches: BRANCH_LIMITS },
@@ -748,14 +785,11 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     },
     create({ recipe }) {
       return enqueue(async () => {
-        if (activeSessionId) {
-          throw new Error('Dispose the current scene before creating another.');
-        }
+        await requirePreviewRenderer();
         await boot();
         const sessionId = randomUUID();
         const result = await evaluate('create', { recipe, sessionId, memoryBudgetMiB: memory, backend, ...(await placedAssetData(recipe)) }, page, recipe?.bake ? BAKE_EVALUATION_TIMEOUT_MS : EVALUATION_TIMEOUT_MS);
-        activeSessionId = sessionId;
-        activeSceneHasBake = Boolean(recipe?.bake);
+        registerCreatedScene(sessionId, result, Boolean(recipe?.bake));
         return result;
       });
     },
@@ -764,12 +798,12 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     },
     createAsset({ recipe }) {
       return enqueue(async () => {
-        if (activeSessionId) throw new Error('Dispose the current scene before creating another.');
+        await requirePreviewRenderer();
         const bytes = await (await catalog()).read(recipe.assetId);
         await boot();
         const sessionId = randomUUID();
         const result = await evaluate('createAsset', { recipe, data: bytes.toString('base64'), sessionId, memoryBudgetMiB: memory, backend, ...(await motionSources([recipe.motion])) });
-        activeSessionId = sessionId;
+        registerCreatedScene(sessionId, result, false);
         return result;
       });
     },
@@ -813,10 +847,12 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return invoke('branchApply', { ...rest, name: validateBranchName(branch) });
         }
         const bakeAfter = bakeAfterOperations(input.operations);
-        const rebakes = activeSceneHasBake || bakeAfter === true;
+        const hadBake = bakedSessionIds.has(input.sessionId);
+        const rebakes = hadBake || bakeAfter === true;
         const motions = (input.operations ?? []).filter(operation => operation.type === 'set-motion').map(operation => operation.motion);
         const applied = await invoke('apply', { ...input, ...(await motionSources(motions)), ...(await placedAssetData(input.operations)) }, rebakes ? BAKE_EVALUATION_TIMEOUT_MS : EVALUATION_TIMEOUT_MS);
-        activeSceneHasBake = bakeAfter ?? activeSceneHasBake;
+        if (bakeAfter ?? hadBake) bakedSessionIds.add(input.sessionId);
+        else bakedSessionIds.delete(input.sessionId);
         return applied;
       });
     },
@@ -1003,7 +1039,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       return enqueue(async () => {
         await requirePreviewRenderer();
         const result = await invoke('dispose', input);
-        activeSessionId = null;
+        forgetSession(input.sessionId);
         return result;
       });
     },
@@ -1015,6 +1051,28 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         const { data, ...summary } = exported;
         const file = await saveGlbExport(Buffer.from(data, 'base64'));
         return { ...summary, ...file };
+      });
+    },
+    exportWeb({ sessionId, title }) {
+      return enqueue(async () => {
+        await requirePreviewRenderer();
+        await jobs();
+        const { recipe, revision } = await invoke('exportRecipe', { sessionId });
+        // Same name rule as GLB exports: the server picks the folder, and only the newest few are kept.
+        const directory = join(jobRoot, EXPORT_DIRECTORY_NAME);
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        const outputDirectory = join(directory, `web-${randomUUID()}`);
+        let summary;
+        try {
+          summary = await writeWebBuild({ recipe, buildDirectory: fileURLToPath(new URL('../', previewUrl)), outputDirectory, title });
+        } catch (error) {
+          // A refused or half-written build never uses up a retention slot or evicts a good one.
+          await rm(outputDirectory, { recursive: true, force: true });
+          throw error;
+        }
+        savedWebBuildPaths.push(outputDirectory);
+        while (savedWebBuildPaths.length > MAXIMUM_KEPT_WEB_BUILDS) await rm(savedWebBuildPaths.shift(), { recursive: true, force: true });
+        return { sessionId, revision, ...summary, entry: join(outputDirectory, 'index.html'), host: 'Serve the folder with any static file server; no server code runs.' };
       });
     },
     submitJob({ sessionId, expectedRevision, settings }) {
@@ -1029,7 +1087,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         const assetBytes = snapshot.recipe.format === '67js.asset' ? await (await catalog()).read(snapshot.recipe.assetId) : undefined;
         phase = 'rendering';
         try {
-          return await controller.submit({ sourceRevision: snapshot.sourceRevision,
+          return await controller.submit({ sessionId, sourceRevision: snapshot.sourceRevision,
             snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings });
         } catch (error) {
           phase = 'ready';
@@ -1056,9 +1114,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     async releaseJob({ jobId }) {
       return (await jobs()).release(jobId);
     },
-    /** The ID of the one scene that exists, or null. Tools that take a sessionId default to it. */
+    /** The ID of the last used scene, or null. Tools that take a sessionId default to it. */
     activeSessionId() {
-      return activeSessionId;
+      return lastUsedSessionId();
     },
     close() {
       if (!closing) {
@@ -1075,7 +1133,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             await shutdownResources();
           }
         })().finally(() => {
-          activeSessionId = null;
+          forgetAllSessions();
           phase = 'closed';
         });
       }

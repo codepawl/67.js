@@ -1,0 +1,2 @@
+- scene:agent-scene+lazy: 370 bytes gzip lets a driver move the camera and a constraint influence read a custom property, so one property can dolly a shot or fade a constraint, which agents had to key by hand
+- entry:core: 83 bytes gzip for the `overrides` option on the camera path sample, which the camera drivers apply after the tracks so seeking equals playing

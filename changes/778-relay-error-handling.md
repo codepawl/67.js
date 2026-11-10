@@ -1,0 +1,1 @@
+- Make the reference netcode relay survive an oversize frame or a socket error instead of crashing, so one bad client cannot drop every player (#778)

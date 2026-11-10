@@ -1,0 +1,1950 @@
+{
+  "bench": "pr831-main",
+  "date": "2026-11-10T15:59:16.715Z",
+  "runsPerTask": 3,
+  "tasks": [
+    "look-pick",
+    "look-metal",
+    "look-fog",
+    "light-key-fill",
+    "sunset-timelapse",
+    "film-reveal"
+  ],
+  "backend": "cpu",
+  "summary": {
+    "haiku": {
+      "tasks": 6,
+      "runs": 18,
+      "passAt1": 0.944,
+      "passPowK": 0.833,
+      "passAtK": 1,
+      "callsPerRun": 6.7,
+      "errorsPerRun": 0.3,
+      "inputTokensPerRun": 348607,
+      "outputTokensPerRun": 2601,
+      "secondsPerRun": 34.7,
+      "kinds": {
+        "look": {
+          "tasks": 3,
+          "runs": 9,
+          "passAt1": 1,
+          "passPowK": 1,
+          "passAtK": 1,
+          "callsPerRun": 6.8,
+          "errorsPerRun": 0,
+          "inputTokensPerRun": 335744,
+          "outputTokensPerRun": 2087,
+          "secondsPerRun": 27.8
+        },
+        "light": {
+          "tasks": 1,
+          "runs": 3,
+          "passAt1": 1,
+          "passPowK": 1,
+          "passAtK": 1,
+          "callsPerRun": 7.7,
+          "errorsPerRun": 0,
+          "inputTokensPerRun": 347099,
+          "outputTokensPerRun": 2303,
+          "secondsPerRun": 22.3
+        },
+        "film": {
+          "tasks": 2,
+          "runs": 6,
+          "passAt1": 0.833,
+          "passPowK": 0.5,
+          "passAtK": 1,
+          "callsPerRun": 6.2,
+          "errorsPerRun": 1,
+          "inputTokensPerRun": 368655,
+          "outputTokensPerRun": 3520,
+          "secondsPerRun": 51.2
+        }
+      },
+      "taskResults": {
+        "look-pick": {
+          "passed": 3,
+          "runs": 3
+        },
+        "look-metal": {
+          "passed": 3,
+          "runs": 3
+        },
+        "look-fog": {
+          "passed": 3,
+          "runs": 3
+        },
+        "light-key-fill": {
+          "passed": 3,
+          "runs": 3
+        },
+        "sunset-timelapse": {
+          "passed": 2,
+          "runs": 3
+        },
+        "film-reveal": {
+          "passed": 3,
+          "runs": 3
+        }
+      }
+    },
+    "sonnet": {
+      "tasks": 6,
+      "runs": 18,
+      "passAt1": 0.889,
+      "passPowK": 0.667,
+      "passAtK": 1,
+      "callsPerRun": 4.5,
+      "errorsPerRun": 0.4,
+      "inputTokensPerRun": 262429,
+      "outputTokensPerRun": 1347,
+      "secondsPerRun": 56.2,
+      "kinds": {
+        "look": {
+          "tasks": 3,
+          "runs": 9,
+          "passAt1": 0.889,
+          "passPowK": 0.667,
+          "passAtK": 1,
+          "callsPerRun": 4.6,
+          "errorsPerRun": 0.4,
+          "inputTokensPerRun": 270983,
+          "outputTokensPerRun": 1251,
+          "secondsPerRun": 47.3
+        },
+        "light": {
+          "tasks": 1,
+          "runs": 3,
+          "passAt1": 0.667,
+          "passPowK": 0,
+          "passAtK": 1,
+          "callsPerRun": 4.3,
+          "errorsPerRun": 1.3,
+          "inputTokensPerRun": 230482,
+          "outputTokensPerRun": 1365,
+          "secondsPerRun": 67.7
+        },
+        "film": {
+          "tasks": 2,
+          "runs": 6,
+          "passAt1": 1,
+          "passPowK": 1,
+          "passAtK": 1,
+          "callsPerRun": 4.5,
+          "errorsPerRun": 0,
+          "inputTokensPerRun": 265572,
+          "outputTokensPerRun": 1482,
+          "secondsPerRun": 63.8
+        }
+      },
+      "taskResults": {
+        "look-pick": {
+          "passed": 2,
+          "runs": 3
+        },
+        "look-metal": {
+          "passed": 3,
+          "runs": 3
+        },
+        "look-fog": {
+          "passed": 3,
+          "runs": 3
+        },
+        "light-key-fill": {
+          "passed": 2,
+          "runs": 3
+        },
+        "sunset-timelapse": {
+          "passed": 3,
+          "runs": 3
+        },
+        "film-reveal": {
+          "passed": 3,
+          "runs": 3
+        }
+      }
+    }
+  },
+  "recordsByModel": {
+    "haiku": [
+      {
+        "task": "look-pick",
+        "attempt": 1,
+        "pass": true,
+        "passed": 6,
+        "total": 6,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 9,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_look": 3,
+          "scene_apply": 3,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-pick-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-pick-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-pick-three-quarter.png"
+          ]
+        },
+        "turns": 11,
+        "inputTokens": 402179,
+        "outputTokens": 2659,
+        "wallSeconds": 54,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-metal",
+        "attempt": 1,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 4,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-metal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-metal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-metal-three-quarter.png"
+          ]
+        },
+        "turns": 6,
+        "inputTokens": 266205,
+        "outputTokens": 1632,
+        "wallSeconds": 20,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-fog",
+        "attempt": 1,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 7,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 2,
+          "scene_look": 2,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-fog-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-fog-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/look-fog-three-quarter.png"
+          ]
+        },
+        "turns": 9,
+        "inputTokens": 369725,
+        "outputTokens": 2066,
+        "wallSeconds": 22,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "light-key-fill",
+        "attempt": 1,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 9,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_apply": 3,
+          "scene_look": 3,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/light-key-fill-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/light-key-fill-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/light-key-fill-three-quarter.png"
+          ]
+        },
+        "turns": 11,
+        "inputTokens": 382471,
+        "outputTokens": 2893,
+        "wallSeconds": 24,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "sunset-timelapse",
+        "attempt": 1,
+        "pass": false,
+        "passed": 0,
+        "total": 4,
+        "failed": [
+          "export: no exported recipe"
+        ],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 7,
+        "toolErrors": 4,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_capabilities": 3,
+          "scene_create": 4
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": null,
+        "look": null,
+        "turns": 9,
+        "inputTokens": 413326,
+        "outputTokens": 4429,
+        "wallSeconds": 123,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "film-reveal",
+        "attempt": 1,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 5,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_apply": 1,
+          "scene_look": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 3
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/film-reveal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/film-reveal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/1/film-reveal-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 288824,
+        "outputTokens": 3395,
+        "wallSeconds": 51,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-pick",
+        "attempt": 2,
+        "pass": true,
+        "passed": 6,
+        "total": 6,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 9,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_look": 3,
+          "scene_apply": 3,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-pick-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-pick-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-pick-three-quarter.png"
+          ]
+        },
+        "turns": 11,
+        "inputTokens": 423482,
+        "outputTokens": 2703,
+        "wallSeconds": 54,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-metal",
+        "attempt": 2,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-metal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-metal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-metal-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 213891,
+        "outputTokens": 1276,
+        "wallSeconds": 18,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-fog",
+        "attempt": 2,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 9,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_checkpoint": 1,
+          "scene_apply": 2,
+          "scene_look": 2,
+          "scene_export_recipe": 2,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-fog-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-fog-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/look-fog-three-quarter.png"
+          ]
+        },
+        "turns": 11,
+        "inputTokens": 374452,
+        "outputTokens": 2428,
+        "wallSeconds": 23,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "light-key-fill",
+        "attempt": 2,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 5,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_capabilities": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_look": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/light-key-fill-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/light-key-fill-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/light-key-fill-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 272237,
+        "outputTokens": 1855,
+        "wallSeconds": 19,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "sunset-timelapse",
+        "attempt": 2,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 8,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_capabilities": 3,
+          "scene_create": 1,
+          "scene_checkpoint": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 2
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/sunset-timelapse-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/sunset-timelapse-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/sunset-timelapse-three-quarter.png"
+          ]
+        },
+        "turns": 10,
+        "inputTokens": 469712,
+        "outputTokens": 2989,
+        "wallSeconds": 27,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "film-reveal",
+        "attempt": 2,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 6,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 2,
+          "scene_capabilities": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_look": 1,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 3
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/film-reveal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/film-reveal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/2/film-reveal-three-quarter.png"
+          ]
+        },
+        "turns": 9,
+        "inputTokens": 406496,
+        "outputTokens": 3458,
+        "wallSeconds": 28,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-pick",
+        "attempt": 3,
+        "pass": true,
+        "passed": 6,
+        "total": 6,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 9,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_look": 3,
+          "scene_apply": 3,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-pick-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-pick-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-pick-three-quarter.png"
+          ]
+        },
+        "turns": 11,
+        "inputTokens": 388658,
+        "outputTokens": 3059,
+        "wallSeconds": 24,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-metal",
+        "attempt": 3,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 6,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_checkpoint": 1,
+          "scene_apply": 1,
+          "scene_look": 1,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-metal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-metal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-metal-three-quarter.png"
+          ]
+        },
+        "turns": 8,
+        "inputTokens": 267701,
+        "outputTokens": 1398,
+        "wallSeconds": 17,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-fog",
+        "attempt": 3,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 5,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_look": 1,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-fog-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-fog-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/look-fog-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 315399,
+        "outputTokens": 1559,
+        "wallSeconds": 18,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "light-key-fill",
+        "attempt": 3,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 9,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_checkpoint": 1,
+          "scene_apply": 2,
+          "scene_look": 2,
+          "scene_export_recipe": 1,
+          "scene_dispose": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/light-key-fill-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/light-key-fill-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/light-key-fill-three-quarter.png"
+          ]
+        },
+        "turns": 11,
+        "inputTokens": 386589,
+        "outputTokens": 2161,
+        "wallSeconds": 24,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "sunset-timelapse",
+        "attempt": 3,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 7,
+        "toolErrors": 2,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_capabilities": 2,
+          "scene_create": 1,
+          "scene_apply": 3,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 2
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/sunset-timelapse-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/sunset-timelapse-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/sunset-timelapse-three-quarter.png"
+          ]
+        },
+        "turns": 9,
+        "inputTokens": 399902,
+        "outputTokens": 3702,
+        "wallSeconds": 50,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "film-reveal",
+        "attempt": 3,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-haiku-5-5",
+        "toolCalls": 4,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 3
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/film-reveal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/film-reveal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-haiku/look/3/film-reveal-three-quarter.png"
+          ]
+        },
+        "turns": 6,
+        "inputTokens": 233670,
+        "outputTokens": 3148,
+        "wallSeconds": 28,
+        "exitCode": 0,
+        "stopped": "success"
+      }
+    ],
+    "sonnet": [
+      {
+        "task": "look-pick",
+        "attempt": 1,
+        "pass": true,
+        "passed": 6,
+        "total": 6,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 7,
+        "toolErrors": 1,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 2,
+          "scene_review": 1,
+          "scene_restore": 2,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 5,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-pick-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-pick-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-pick-three-quarter.png"
+          ]
+        },
+        "turns": 9,
+        "inputTokens": 369122,
+        "outputTokens": 1725,
+        "wallSeconds": 27,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-metal",
+        "attempt": 1,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-metal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-metal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-metal-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 206746,
+        "outputTokens": 884,
+        "wallSeconds": 41,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-fog",
+        "attempt": 1,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-fog-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-fog-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/look-fog-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 207101,
+        "outputTokens": 987,
+        "wallSeconds": 73,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "light-key-fill",
+        "attempt": 1,
+        "pass": false,
+        "passed": 0,
+        "total": 4,
+        "failed": [
+          "export: no exported recipe"
+        ],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 5,
+        "toolErrors": 4,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 3,
+          "scene_capabilities": 1,
+          "scene_inspect": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": null,
+        "look": null,
+        "turns": 7,
+        "inputTokens": 261157,
+        "outputTokens": 1902,
+        "wallSeconds": 120,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "sunset-timelapse",
+        "attempt": 1,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 5,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 2,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 2
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/sunset-timelapse-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/sunset-timelapse-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/sunset-timelapse-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 277297,
+        "outputTokens": 1427,
+        "wallSeconds": 71,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "film-reveal",
+        "attempt": 1,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 4,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_capabilities": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 3
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/film-reveal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/film-reveal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/1/film-reveal-three-quarter.png"
+          ]
+        },
+        "turns": 6,
+        "inputTokens": 222492,
+        "outputTokens": 1385,
+        "wallSeconds": 58,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-pick",
+        "attempt": 2,
+        "pass": true,
+        "passed": 6,
+        "total": 6,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 7,
+        "toolErrors": 1,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 2,
+          "scene_review": 1,
+          "scene_restore": 2,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 5,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-pick-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-pick-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-pick-three-quarter.png"
+          ]
+        },
+        "turns": 9,
+        "inputTokens": 369163,
+        "outputTokens": 1755,
+        "wallSeconds": 40,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-metal",
+        "attempt": 2,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-metal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-metal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-metal-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 203630,
+        "outputTokens": 949,
+        "wallSeconds": 50,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-fog",
+        "attempt": 2,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-fog-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-fog-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/look-fog-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 207045,
+        "outputTokens": 1014,
+        "wallSeconds": 30,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "light-key-fill",
+        "attempt": 2,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 4,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/light-key-fill-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/light-key-fill-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/light-key-fill-three-quarter.png"
+          ]
+        },
+        "turns": 6,
+        "inputTokens": 215193,
+        "outputTokens": 1135,
+        "wallSeconds": 52,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "sunset-timelapse",
+        "attempt": 2,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 5,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_capabilities": 2,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 2
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/sunset-timelapse-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/sunset-timelapse-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/sunset-timelapse-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 277297,
+        "outputTokens": 1439,
+        "wallSeconds": 83,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "film-reveal",
+        "attempt": 2,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 4,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 2,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 3
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/film-reveal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/film-reveal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/2/film-reveal-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 272275,
+        "outputTokens": 1586,
+        "wallSeconds": 47,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-pick",
+        "attempt": 3,
+        "pass": false,
+        "passed": 5,
+        "total": 6,
+        "failed": [
+          "renderedLook: the recipe could not be drawn: page.waitForFunction: Timeout 30000ms exceeded."
+        ],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 9,
+        "toolErrors": 2,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 3,
+          "scene_review": 2,
+          "scene_look": 2,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 4,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-pick-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-pick-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-pick-three-quarter.png"
+          ]
+        },
+        "turns": 11,
+        "inputTokens": 465369,
+        "outputTokens": 2066,
+        "wallSeconds": 111,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-metal",
+        "attempt": 3,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-metal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-metal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-metal-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 203619,
+        "outputTokens": 890,
+        "wallSeconds": 29,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "look-fog",
+        "attempt": 3,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 3,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-fog-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-fog-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/look-fog-three-quarter.png"
+          ]
+        },
+        "turns": 5,
+        "inputTokens": 207051,
+        "outputTokens": 988,
+        "wallSeconds": 25,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "light-key-fill",
+        "attempt": 3,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 4,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 0
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/light-key-fill-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/light-key-fill-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/light-key-fill-three-quarter.png"
+          ]
+        },
+        "turns": 6,
+        "inputTokens": 215095,
+        "outputTokens": 1058,
+        "wallSeconds": 31,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "sunset-timelapse",
+        "attempt": 3,
+        "pass": true,
+        "passed": 4,
+        "total": 4,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 5,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 2,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 2
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/sunset-timelapse-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/sunset-timelapse-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/sunset-timelapse-three-quarter.png"
+          ]
+        },
+        "turns": 7,
+        "inputTokens": 277361,
+        "outputTokens": 1511,
+        "wallSeconds": 81,
+        "exitCode": 0,
+        "stopped": "success"
+      },
+      {
+        "task": "film-reveal",
+        "attempt": 3,
+        "pass": true,
+        "passed": 5,
+        "total": 5,
+        "failed": [],
+        "model": "claude-sonnet-5-5",
+        "toolCalls": 4,
+        "toolErrors": 0,
+        "toolsByName": {
+          "ToolSearch": 1,
+          "scene_create": 1,
+          "scene_capabilities": 1,
+          "scene_apply": 1,
+          "scene_export_recipe": 1
+        },
+        "branchCalls": 0,
+        "relationCalls": 0,
+        "pathQueries": 0,
+        "features": {
+          "geometryTypes": [
+            "box"
+          ],
+          "meshOperations": [],
+          "motionIk": [],
+          "motionTracks": 3
+        },
+        "look": {
+          "silhouette": {
+            "views": {
+              "front": 1,
+              "side": 1,
+              "three-quarter": 1
+            },
+            "mean": 1
+          },
+          "images": [
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/film-reveal-front.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/film-reveal-side.png",
+            "artifacts/agent-modeling/bench-pr831-main-sonnet/look/3/film-reveal-three-quarter.png"
+          ]
+        },
+        "turns": 6,
+        "inputTokens": 266709,
+        "outputTokens": 1541,
+        "wallSeconds": 43,
+        "exitCode": 0,
+        "stopped": "success"
+      }
+    ]
+  }
+}

@@ -5,8 +5,8 @@ import { resolveMask, usesObjectMask, maskShader, bindMask, unbindMask, MASK_UNI
 export { usesObjectMask };
 
 // Named post steps for a graded film: color balance (lift, gamma, gain), glare (streaks and fog glow), lens distortion with
-// dispersion, and stylize filters (sharpen, kuwahara, posterize, pixelate). Color balance and stylize take a `mask` (post-mask.js)
-// that limits them to named parts or a range of distance. They are optional full-frame stages. The core renderer carries none of their code: a recipe that names one
+// dispersion, stylize filters (sharpen, kuwahara, posterize, pixelate) and composite (a chroma or luma key over a background).
+// Color balance, stylize and composite take a `mask` (post-mask.js) that limits them to named parts or a range of distance. They are optional full-frame stages. The core renderer carries none of their code: a recipe that names one
 // loads this module (agent-scene-modules.js), and each stage compiles only on the first frame that turns it on. Defocus from
 // depth is the `depthOfField` group of camera-effects.js, which is the same step under its older name.
 //
@@ -74,6 +74,66 @@ function resolveStylize(input) {
   return resolved;
 }
 
+const MAXIMUM_LIGHT = 64;
+const CHROMA_DISTANCE_SCALE = 0.7;
+
+function backgroundColor(value, name) {
+  if (!Array.isArray(value) || value.length !== 3) throw new TypeError(`${name} must be three numbers.`);
+  return triple(value, [0, 0, 0], 0, MAXIMUM_LIGHT, name);
+}
+
+function resolveBackground(input) {
+  const group = groupOf(input, 'composite.background');
+  onlyKeys(group, ['color', 'top', 'bottom'], 'composite.background');
+  if (group.color !== undefined) {
+    if (group.top !== undefined || group.bottom !== undefined) throw new TypeError('composite.background takes color, or top and bottom, not both. Fix: pass one of them.');
+    return { color: backgroundColor(group.color, 'composite.background.color') };
+  }
+  if (group.top === undefined || group.bottom === undefined) {
+    throw new TypeError('composite.background needs color, or both top and bottom. Fix: { "color": [0.1, 0.3, 0.8] } or { "top": [..], "bottom": [..] }.');
+  }
+  return { top: backgroundColor(group.top, 'composite.background.top'), bottom: backgroundColor(group.bottom, 'composite.background.bottom') };
+}
+
+function resolveKey(input) {
+  const group = groupOf(input, 'composite.key');
+  onlyKeys(group, ['chroma', 'luma'], 'composite.key');
+  if ((group.chroma === undefined) === (group.luma === undefined)) {
+    throw new TypeError('composite.key needs exactly one of chroma ({ color, tolerance, softness }) or luma ({ low, high, invert }).');
+  }
+  if (group.chroma !== undefined) {
+    const chroma = groupOf(group.chroma, 'composite.key.chroma');
+    onlyKeys(chroma, ['color', 'tolerance', 'softness'], 'composite.key.chroma');
+    return {
+      chroma: {
+        color: backgroundColor(chroma.color, 'composite.key.chroma.color'),
+        tolerance: numberInRange(chroma.tolerance, 0.3, 0, 1, 'composite.key.chroma.tolerance'),
+        softness: numberInRange(chroma.softness, 0.1, 0, 1, 'composite.key.chroma.softness'),
+      },
+    };
+  }
+  const luma = groupOf(group.luma, 'composite.key.luma');
+  onlyKeys(luma, ['low', 'high', 'invert'], 'composite.key.luma');
+  const low = numberInRange(luma.low, 0, 0, 10, 'composite.key.luma.low');
+  const high = numberInRange(luma.high, 1, 0, 10, 'composite.key.luma.high');
+  if (high <= low) throw new RangeError('composite.key.luma.high must be greater than low. Fix: luma is linear scene light, 0.18 is middle grey.');
+  if (luma.invert !== undefined && typeof luma.invert !== 'boolean') throw new TypeError('composite.key.luma.invert must be true or false.');
+  return { luma: { low, high, invert: luma.invert === true } };
+}
+
+// A key turns pixels transparent; the background is what shows through, so a key without one has nothing to show.
+function resolveComposite(input) {
+  const group = groupOf(input, 'composite');
+  onlyKeys(group, ['background', 'key', 'mask'], 'composite');
+  const resolved = {};
+  if (group.background !== undefined) resolved.background = resolveBackground(group.background);
+  if (group.key !== undefined) resolved.key = resolveKey(group.key);
+  if (group.mask !== undefined) resolved.mask = resolveMask(group.mask, 'composite.mask');
+  if (resolved.key && !resolved.background) throw new TypeError('composite.key needs composite.background to show through the keyed pixels. Fix: add background { color } or { top, bottom }.');
+  if (resolved.mask && !resolved.key) throw new TypeError('composite.mask limits the key, so it needs composite.key. Fix: add a key, or remove the mask.');
+  return resolved;
+}
+
 function resolveGlare(input) {
   const group = groupOf(input, 'glare');
   onlyKeys(group, ['streaks', 'count', 'angle', 'fogGlow', 'threshold', 'size'], 'glare');
@@ -105,6 +165,7 @@ export function resolvePostSteps(effects) {
   if (effects.glare !== undefined) resolved.glare = resolveGlare(effects.glare);
   if (effects.lensDistortion !== undefined) resolved.lensDistortion = resolveLensDistortion(effects.lensDistortion);
   if (effects.stylize !== undefined) resolved.stylize = resolveStylize(effects.stylize);
+  if (effects.composite !== undefined) resolved.composite = resolveComposite(effects.composite);
   refuseMaskWithLensDistortion(resolved);
   return resolved;
 }
@@ -114,14 +175,14 @@ export function resolvePostSteps(effects) {
 function refuseMaskWithLensDistortion(resolved) {
   const lens = resolved.lensDistortion;
   const lensIsOn = Boolean(lens) && (lens.distortion !== 0 || lens.dispersion > 0);
-  const maskedStep = ['colorBalance', 'stylize'].find(name => resolved[name]?.mask);
+  const maskedStep = ['colorBalance', 'stylize', 'composite'].find(name => resolved[name]?.mask);
   if (lensIsOn && maskedStep) {
     throw new TypeError(`${maskedStep}.mask cannot be combined with lensDistortion: the mask is in undistorted screen space and would not line up with the warped image. Fix: remove the mask, or set lensDistortion.distortion and dispersion to 0.`);
   }
 }
 
 // Registers what the look needs: the field names it accepts and how to resolve them (src/shader-registry.js).
-postStepSupport.fields = ['colorBalance', 'glare', 'lensDistortion', 'stylize'];
+postStepSupport.fields = ['colorBalance', 'glare', 'lensDistortion', 'stylize', 'composite'];
 postStepSupport.resolve = resolvePostSteps;
 
 export const colorBalanceFragment = `${sharedFragmentHeader}
@@ -194,6 +255,36 @@ void main() {
   if (posterizeLevels > 0.0) color = floor(color * posterizeLevels + 0.5) / posterizeLevels;
   float mask = maskAt(textureCoordinate);
   outputColor = vec4(mask < 1.0 ? mix(source.rgb, color, mask) : color, source.a);
+}`;
+
+export const compositeFragment = `${sharedFragmentHeader}
+${maskShader}
+uniform float keyMode;
+uniform vec3 keyColor;
+uniform vec3 keyRange;
+uniform float keyInvert;
+uniform vec3 backgroundTop;
+uniform vec3 backgroundBottom;
+vec2 chromaOf(vec3 color) {
+  vec3 normalized = color / max(max(color.r, max(color.g, color.b)), 0.0001);
+  return vec2(dot(normalized, vec3(-0.169, -0.331, 0.5)), dot(normalized, vec3(0.5, -0.419, -0.081)));
+}
+// 1 keeps the pixel, 0 shows the background. Chroma: distance between the pixel's and the key's chroma, so brightness does not matter.
+float keepAmount(vec3 color) {
+  if (keyMode > 1.5) {
+    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float keep = smoothstep(keyRange.x, keyRange.y, luma);
+    return mix(keep, 1.0 - keep, keyInvert);
+  }
+  float distanceToKey = distance(chromaOf(color), chromaOf(keyColor));
+  return smoothstep(keyRange.x, keyRange.x + keyRange.y, distanceToKey);
+}
+void main() {
+  vec4 source = texture(sourceTexture, textureCoordinate);
+  float keep = 1.0;
+  if (keyMode > 0.5) keep = mix(1.0, keepAmount(source.rgb), maskAt(textureCoordinate));
+  vec3 background = mix(backgroundBottom, backgroundTop, textureCoordinate.y);
+  outputColor = vec4(mix(background, source.rgb, keep * source.a), 1.0);
 }`;
 
 export const glareFragment = `${sharedFragmentHeader}
@@ -326,6 +417,31 @@ function createStylizeStage() {
   }));
 }
 
+function createCompositeStage() {
+  return withMaskUnbound(createStage({
+    name: 'Composite',
+    fragment: compositeFragment,
+    uniformNames: ['keyMode', 'keyColor', 'keyRange', 'keyInvert', 'backgroundTop', 'backgroundBottom', ...MASK_UNIFORM_NAMES],
+    isActive: (effects, frame) => Boolean(stepsOf(frame).composite?.background),
+    setUniforms(context, uniforms, renderer, frame) {
+      const { composite } = stepsOf(frame);
+      const { background, key } = composite;
+      context.uniform3fv(uniforms.backgroundTop, background.color ?? background.top);
+      context.uniform3fv(uniforms.backgroundBottom, background.color ?? background.bottom);
+      const chroma = key?.chroma;
+      const luma = key?.luma;
+      context.uniform1f(uniforms.keyMode, chroma ? 1 : luma ? 2 : 0);
+      context.uniform3fv(uniforms.keyColor, chroma?.color ?? [0, 0, 0]);
+      const range = chroma
+        ? [chroma.tolerance * CHROMA_DISTANCE_SCALE, Math.max(chroma.softness * CHROMA_DISTANCE_SCALE, 0.0001), 0]
+        : [luma?.low ?? 0, luma?.high ?? 1, 0];
+      context.uniform3fv(uniforms.keyRange, range);
+      context.uniform1f(uniforms.keyInvert, luma?.invert ? 1 : 0);
+      bindMask(context, uniforms, renderer, frame, composite.mask);
+    },
+  }));
+}
+
 function createGlareStage() {
   const stage = createStage({
     name: 'Glare',
@@ -389,13 +505,13 @@ function createLensDistortionStage() {
 }
 
 /**
- * Adds glare, lens distortion, color balance and the stylize filters to a renderer, after any depth of field and motion blur it has, in that
+ * Adds glare, lens distortion, color balance, the stylize filters and the composite key to a renderer, after any depth of field and motion blur it has, in that
  * order. Like them it needs `depth: true`. Each stage runs only for a frame whose effects set it. A step with a `mask` by
  * objects reads the object ID pass: install the render passes and draw that pass before the lit frame (`usesObjectMask` says when).
  */
 export function installPostSteps(renderer) {
   if (!renderer.postStages.some(stage => stage.name === 'Glare')) {
-    renderer.postStages.push(createGlareStage(), createLensDistortionStage(), createColorBalanceStage(), createStylizeStage());
+    renderer.postStages.push(createGlareStage(), createLensDistortionStage(), createColorBalanceStage(), createStylizeStage(), createCompositeStage());
   }
   return renderer;
 }

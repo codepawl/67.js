@@ -150,6 +150,7 @@ const materialFields = {
   ...materialLayerFields,
   subsurface: listed('subsurface', subsurface, 'Subsurface scattering (skin, wax, leaves): weight, radius [r,g,b], scale, color [r,g,b]; ranges in scene_capabilities materialSubsurface.').optional(),
   snippet: z.record(z.string(), z.unknown()).nullable().optional().describe('GLSL fragment hook; scene_capabilities materialSnippet.'),
+  wear: z.record(z.string(), z.unknown()).nullable().optional().describe('Metal showing through paint and dirt, from vertex groups; scene_capabilities materialWear.'),
   pattern: listed('pattern', materialPattern, 'Procedural texture; box mapping needs no UVs. type is a preset or graph (give graph); also mapping, colors, size, count, bump, seed, axis, resolution; see scene_capabilities pattern.', coreOf(materialPattern.shape, ['type'])).optional(),
   map: z.strictObject({ sequence: z.strictObject({
     frames: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(2).max(64),
@@ -168,7 +169,7 @@ const materialFields = {
 };
 const materialTag = z.enum(['surface', 'unlit', 'liquid', 'foam', 'foliage', 'grass', 'water']).optional().describe('Surface kind; liquid, foam, foliage, grass and water change how it renders: see scene_capabilities materialTags and water.');
 const materialCore = coreOf(materialFields, ['color', 'metallic', 'roughness', 'emission', 'opacity']);
-const materialMore = 'More fields: tag, alphaMode, doubleSided, emissiveColor, map, pattern, subsurface, snippet, waterPreset, absorption, turbidity and the layers clearcoat, clearcoatRoughness, transmission, thickness, ior, attenuationColor, attenuationDistance, sheenColor, sheenRoughness, specular, specularColor, anisotropy, anisotropyRotation, iridescence, iridescenceIor, iridescenceThickness, toon; see scene_capabilities materialFields.';
+const materialMore = 'More fields: tag, alphaMode, doubleSided, emissiveColor, map, pattern, subsurface, snippet, wear, waterPreset, absorption, turbidity and the layers clearcoat, clearcoatRoughness, transmission, thickness, ior, attenuationColor, attenuationDistance, sheenColor, sheenRoughness, specular, specularColor, anisotropy, anisotropyRotation, iridescence, iridescenceIor, iridescenceThickness, toon; see scene_capabilities materialFields.';
 const materialListed = (strictSchema, description, extraCore) => listed('materialFields', strictSchema, `${description} ${materialMore}`, { ...extraCore, ...materialCore });
 const liquidOptics = z.strictObject({
   thickness: z.number().min(0).max(100).optional().describe('Metres of liquid where it faces the camera.'),
@@ -316,8 +317,9 @@ const effects = z.strictObject({
   glare: looseField,
   lensDistortion: looseField,
   stylize: looseField,
+  composite: looseField,
 });
-const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}, colorBalance, glare, lensDistortion, stylize; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
+const effectsListed = listed('effects', effects, 'Post effects: exposure, saturation, contrast, temperature, vignette, grain, ambientOcclusion, ambientOcclusionRadius, bloom {strength, threshold, radius}, depthOfField {blur, focusDistance}, motionBlur {shutter}, colorBalance, glare, lensDistortion, stylize, composite; see scene_capabilities effects.', coreOf(effects.shape, ['exposure']));
 const shadow = z.strictObject({
   target: boundedVector(-1e6, 1e6).optional(),
   extent: bounded(0.01, 1e5).optional(),
@@ -676,6 +678,7 @@ const motionListed = listed('motion', motion, 'One absolute-time clip: duration 
 const physicsListed = listed('physics', physics, 'Rigid bodies recorded offline with Rapier: duration, gravity, bodies [{node, type, shape, mass, ...}], joints; see scene_capabilities physics.', coreOf(physics.shape, ['duration']));
 const clothListed = listed('cloth', cloth, 'Baked cloth sheets: duration, gravity, wind, sheets [{node, pin, pinTo, stiffness, ...}], colliders; see scene_capabilities cloth.', coreOf(cloth.shape, ['duration']));
 const armatureListed = listed('armatures', armature, 'A skeleton { id, parent, preset humanoid|quadruped, fit, bones [{name, parent, head, tail}], prefix, translation, rotation }; see scene_capabilities armatures.', { id: identifier });
+const gameReference = z.record(z.string(), z.unknown()).describe('Playable setup as plain JSON, never code: {player:{node}, camera, input, physics, ground, rules}. Fields and an example: scene_capabilities game.');
 const recipe = z.strictObject({
   format: z.literal('67js.scene'),
   schemaVersion: z.literal(1),
@@ -694,6 +697,7 @@ const recipe = z.strictObject({
   particles: z.record(z.string(), z.unknown()).nullable().optional().describe('Particle emitters and hair, seeked by motionTime. Fields: scene_capabilities particles.'),
   bake: z.record(z.string(), z.unknown()).nullable().optional().describe('Bounced light baked at build time. Fields: scene_capabilities bake.'),
   postPasses: z.array(z.record(z.string(), z.unknown())).nullable().optional().describe('Full-screen GLSL passes, [{name, fragment, uniforms, scale}]. Rules: scene_capabilities postPasses.'),
+  game: gameReference.nullable().optional(),
 }).describe('Bounded scene recipe; the backend validates it.');
 const assetRecipe = z.strictObject({
   format: z.literal('67js.asset'),
@@ -735,6 +739,7 @@ const otherOperations = [
   z.strictObject({ type: z.literal('set-particles'), particles: z.record(z.string(), z.unknown()).nullable() }),
   z.strictObject({ type: z.literal('set-bake'), bake: z.record(z.string(), z.unknown()).nullable() }),
   z.strictObject({ type: z.literal('set-post-passes'), postPasses: z.array(z.record(z.string(), z.unknown())).nullable() }),
+  z.strictObject({ type: z.literal('set-game'), game: gameReference.nullable() }),
   z.strictObject({ type: z.literal('set-environment'), environment: environmentListed }),
   z.strictObject({ type: z.literal('set-effects'), effects: effectsListed }),
   z.strictObject({ type: z.literal('set-shadow'), shadow }),
@@ -759,7 +764,7 @@ function withoutRelationsAdvice(capabilities) {
 const operationWithoutRelations = z.discriminatedUnion('type', [...nodeOperations(nodeFieldsWithoutRelations, nodeRecordWithoutRelations), ...otherOperations]);
 const branchName = z.string().regex(BRANCH_NAME_PATTERN).describe('Branch name, up to 24 characters.');
 const labelsFlag = z.boolean().optional().describe('Draw part names, tags and lint problems on the image; returned with pixel positions.');
-const sessionFields = { sessionId: z.uuid('sessionId is not a valid UUID. Leave it out to use the active scene.').optional().describe('Leave out: the active scene is used.') };
+const sessionFields = { sessionId: z.uuid('sessionId is not a valid UUID. Leave it out to use the last used scene.').optional().describe('Leave out: the last used scene.') };
 const checkpointFields = { ...sessionFields, checkpointId: z.uuid().describe('Checkpoint UUID returned by scene_checkpoint for this session.') };
 const expectedRevision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).describe('Current revision returned by create, inspect, apply or restore. Stale edits fail atomically.');
 const jobFields = { jobId: z.uuid().describe('Render job UUID returned by scene_render_submit or capabilities jobs.records.') };
@@ -791,7 +796,7 @@ const TOOL_TITLES = {
   scene_capabilities: 'Scene capabilities', scene_create: 'Create scene', scene_asset_catalog: 'Asset catalog', scene_create_asset: 'Create scene from asset',
   scene_inspect: 'Inspect scene', scene_walkmap: 'Walkable map', mesh_inspect: 'Inspect meshes', mesh_edit: 'Edit mesh', mesh_stack: 'Set mesh modifiers',
   scene_apply: 'Apply scene edits', scene_look: 'Look at scene', scene_review: 'Review camera samples', scene_checkpoint: 'Save checkpoint',
-  scene_restore: 'Restore checkpoint', scene_release_checkpoint: 'Release checkpoint', scene_export_recipe: 'Export recipe', scene_export_glb: 'Export GLB',
+  scene_restore: 'Restore checkpoint', scene_release_checkpoint: 'Release checkpoint', scene_export_recipe: 'Export recipe', scene_export_glb: 'Export GLB', scene_export_web: 'Export web game',
   scene_dispose: 'Dispose scene', scene_render_submit: 'Submit render job', scene_render_status: 'Render job status', scene_render_cancel: 'Cancel render job',
   scene_render_result: 'Render job result', scene_render_release: 'Release render job',
 };
@@ -862,7 +867,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   const restoreCheckpointId = checkpointFields.checkpointId.optional();
   const branchInstructions = branches ? ' To try variants, give scene_apply a branch name for each (the scene stays put), compare them in one scene_review with a branch per shot, then keep the best with scene_restore and its branch.' : '';
   const server = new McpServer({ name: '67js-scene', version }, {
-    instructions: 'Start with scene_capabilities. Create a procedural recipe with scene_create, or select a configured GLB digest from scene_asset_catalog and use scene_create_asset. Inspect stable IDs and save a checkpoint before editing. Apply small batches with the current expectedRevision and check committed, revision and renderSucceeded. A committed edit can have a separate renderError; do not retry it with an old revision.'+branchInstructions+' Pass labels: true to scene_look or scene_review to match part names to the image. Use scene_look to judge the actual image, or scene_review with the current expectedRevision to compare independent camera and motion samples in one grid while preserving the source pose. When jobs are configured, scene_render_submit captures an immutable snapshot. Poll scene_render_status, cancel when needed, and retrieve verified local artifact metadata with scene_render_result after completion. Preview rendering and edits pause during a job; source revision and checkpoints survive. Release outputs with scene_render_release. Export the final recipe and dispose the scene when finished. No arbitrary JavaScript, remote URLs or caller-selected output paths are exposed.',
+    instructions: 'Start with scene_capabilities. Create a procedural recipe with scene_create, or select a configured GLB digest from scene_asset_catalog and use scene_create_asset. Pass its sessionId to work on several open scenes; without it the last used scene is used. Inspect stable IDs and save a checkpoint before editing. Apply small batches with the current expectedRevision and check committed, revision and renderSucceeded. A committed edit can have a separate renderError; do not retry it with an old revision.'+branchInstructions+' Pass labels: true to scene_look or scene_review to match part names to the image. Use scene_look to judge the actual image, or scene_review with the current expectedRevision to compare independent camera and motion samples in one grid while preserving the source pose. When jobs are configured, scene_render_submit captures an immutable snapshot. Poll scene_render_status, cancel when needed, and retrieve verified local artifact metadata with scene_render_result after completion. Preview rendering and edits pause during a job; source revision and checkpoints survive. Release outputs with scene_render_release. Export the final recipe and dispose the scene when finished. No arbitrary JavaScript, remote URLs or caller-selected output paths are exposed.',
   });
   let closePromise;
   server.server.onclose = () => {
@@ -872,7 +877,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
       error => console.error(`67js runtime cleanup failed: ${error.message}`),
     );
   };
-  // One scene exists at a time, so a call that leaves sessionId out means that scene. A stale or invented ID is still
+  // A call that leaves sessionId out means the last used scene. A stale, evicted or invented ID is still
   // rejected by the runtime: acting on a scene the caller did not name could edit the wrong one.
   function withActiveSession(argumentsValue, inputSchema) {
     const takesSession = inputSchema.shape !== undefined && 'sessionId' in inputSchema.shape;
@@ -889,8 +894,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
         return await run(withActiveSession(argumentsValue, inputSchema));
       } catch (error) {
         const message = readableErrorMessage(error);
-        // A refused create because a scene already exists leaves that scene in place: no advice then.
-        const sceneMissing = CREATE_TOOLS.has(name) && !message.startsWith('Dispose the current scene');
+        const sceneMissing = CREATE_TOOLS.has(name);
         return { isError: true, content: [{ type: 'text', text: `${name} failed: ${message}${sceneMissing ? ` ${SCENE_NOT_CREATED_ADVICE}` : ''}` }] };
       }
       };
@@ -901,9 +905,9 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
     const answer = answerCapabilities(relations ? await runtime.capabilities() : withoutRelationsAdvice(await runtime.capabilities()), topic, outlineSources);
     return jsonResult(chosenFormat('scene_capabilities', response_format) === 'concise' && answer.fields !== undefined ? { ...answer, fields: withoutNotes(answer.fields) } : answer);
   });
-  register('scene_create', 'Create the single active render scene from a JSON recipe. Dispose an existing scene first.', z.strictObject({ recipe: relations ? recipe : recipeWithoutRelations }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.create(argumentsValue)));
+  register('scene_create', 'Create a render scene from a JSON recipe; the result has its sessionId. Several scenes stay open; past the cap the least recently used one is closed.', z.strictObject({ recipe: relations ? recipe : recipeWithoutRelations }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.create(argumentsValue)));
   register('scene_asset_catalog', 'List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory. No arbitrary paths or downloads.', z.strictObject({}), readOnly, async () => jsonResult(await runtime.assetCatalog()));
-  register('scene_create_asset', 'Create the active scene from a catalog GLB and editable asset recipe. Preserves supported maps, skins, morphs and clips. Dispose the existing scene first.', z.strictObject({ recipe: assetRecipe }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.createAsset(argumentsValue)));
+  register('scene_create_asset', 'Create the active scene from a catalog GLB and editable asset recipe. Preserves supported maps, skins, morphs and clips. The result has its sessionId.', z.strictObject({ recipe: assetRecipe }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.createAsset(argumentsValue)));
   register('scene_inspect', 'Read revision, counts and selected nodes. For a recipe with physics, the result lists body final positions, resting times, contacts and sensor enter/leave events. Bounds describe authored geometry rather than shader displacement.', z.strictObject({ ...sessionFields, ids: z.array(identifier).max(4096).optional().describe('Selected node IDs; an imported node means its parts and those below. Omit to inspect scene order.'), kind: z.enum(['meshes', 'hierarchy']).optional().describe('Imported assets only: hierarchy exposes stable source-node IDs and joints.'), offset: z.number().int().min(0).max(4096).optional().describe('Imported assets only: pagination offset.'), limit: z.number().int().min(1).max(4096).optional().describe('Maximum returned node records. Defaults to 64.'), includeBounds: z.boolean().optional().describe('Include world geometry bounds. Defaults to false.'), path: z.record(z.string(), z.unknown()).optional().describe('Walking route over a ground node, around holes: fields in scene_capabilities navigation.') }), readOnly, async argumentsValue => jsonResult(await runtime.inspect(argumentsValue)));
   register('scene_walkmap', 'Walkable map on a grid: rows of . walkable, x blocked, # no surface. keepOut (m) avoids obstacles. assetId: query a big catalog GLB, no render.', z.strictObject({ ...sessionFields, assetId: z.string().regex(/^[a-f0-9]{64}$/).optional(), min: z.tuple([z.number(), z.number()]), max: z.tuple([z.number(), z.number()]), cellSize: z.number().min(0.05).default(1), clearance: z.number().min(0).default(2), keepOut: z.number().min(0).optional(), streetY: z.number().optional(), includeCells: z.boolean().optional() }), readOnly, async argumentsValue => jsonResult(await runtime.walkMap(argumentsValue)));
   register('mesh_inspect', 'Check recipe geometries as polygon meshes: vertex, edge and face counts, triangles/quads/n-gons, connected and closed parts, face tags (top, bottom, side, left, right, front, back), bounds, and lint problems (non-manifold, inconsistent winding, inverted, degenerate, open, loose) with a suggested fix each. Also imported asset parts (mesh-0). Read-only and cached per geometry.', z.strictObject({ ...sessionFields, geometry: identifier.optional().describe('One geometry ID to check, as in mesh_edit.'), geometries: z.array(identifier).min(1).max(16).optional().describe('Geometry IDs to check. Omit both to check the first 16 geometries.') }), readOnly, async ({ geometry: geometryId, geometries, ...rest }) => jsonResult(await runtime.inspectMeshes({ ...rest, ...(geometries || geometryId ? { geometries: [...(geometries ?? []), ...(geometryId ? [geometryId] : [])] } : {}) })));
@@ -933,11 +937,12 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
     const shown = chosenFormat('scene_review', response_format) === 'concise' ? conciseReview(metadata) : metadata;
     return { content: [{ type: 'image', data, mimeType }, { type: 'text', text: JSON.stringify(shown) }], structuredContent: shown };
   });
-  register('scene_checkpoint', 'Save a private recipe snapshot. Up to eight checkpoints can be retained per session.', z.strictObject(sessionFields), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.checkpoint(argumentsValue)));
+  register('scene_checkpoint', 'Save a private recipe snapshot. Up to 16 are kept per scene; past that the oldest is evicted.', z.strictObject(sessionFields), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.checkpoint(argumentsValue)));
   register('scene_restore', 'Restore a checkpoint atomically using the current revision. The checkpoint remains available and revision increments. With revision (last 4 kept), undo with no checkpoint. With branch, keep that branch (one revision) and drop all branches.', z.strictObject({ ...sessionFields, checkpointId: restoreCheckpointId, revision: z.number().int().min(0).optional(), ...restoreBranchField, expectedRevision }), edit, async argumentsValue => jsonResult(await runtime.restore(argumentsValue)));
   register('scene_release_checkpoint', 'Release one checkpoint slot. Released or foreign checkpoints fail.', z.strictObject(checkpointFields), destroy, async argumentsValue => jsonResult(await runtime.releaseCheckpoint(argumentsValue)));
   register('scene_export_recipe', 'Read a detached canonical JSON recipe for reproduction.', z.strictObject(sessionFields), readOnly, async argumentsValue => jsonResult(await runtime.exportRecipe(argumentsValue)));
   register('scene_export_glb', 'Write the active scene as a GLB file in the configured jobs folder, under a server-chosen name (the result has the path, byte count and SHA-256). Needs --jobs. Exports the current pose with pattern and imported textures, skins, morph weights and IK as posed; motionTime seeks authored motion first. For an imported asset, clip adds that source clip (translation, rotation, scale and morph weight tracks) on the source skeleton, which needs no animation, node overrides or motion in the scene. At most eight files are kept, oldest removed first; the GLB is at most 32 MiB.', z.strictObject({ ...sessionFields, clip: z.number().int().min(0).max(255).optional().describe('Imported assets only: index of the source clip to write.'), motionTime: z.number().min(0).max(3600).optional().describe('Seek authored motion (and IK) to this time before exporting. Leaves the preview there, like scene_look.'), maxTextureSize: z.number().int().min(1).max(4096).optional().describe('Largest texture side in pixels. Defaults to 2048.') }), edit, async argumentsValue => jsonResult(await runtime.exportGlb(argumentsValue)));
+  register('scene_export_web', 'Write the scene with its game as a static web build in the jobs folder: index.html, game.json and engine/, which any static host serves with no server code. Needs --jobs and a game set with set-game. Procedural scenes only; the newest four builds are kept.', z.strictObject({ ...sessionFields, title: z.string().max(64).optional().describe('Page title.') }), edit, async argumentsValue => jsonResult(await runtime.exportWeb(argumentsValue)));
   register('scene_dispose', 'Dispose the active scene and its checkpoints, releasing renderer resources.', z.strictObject(sessionFields), destroy, async argumentsValue => jsonResult(await runtime.dispose(argumentsValue)));
   register('scene_render_submit', 'Start one asynchronous snapshot job in the configured private job store. Requires the current revision. Temporarily leases the preview renderer; does not change source revision or checkpoints.', z.strictObject({ ...sessionFields, expectedRevision, settings: renderSettings }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.submitJob(argumentsValue)));
   register('scene_render_status', 'Read render job state and durable frame progress. Terminal states are completed, cancelled, failed and interrupted.', z.strictObject({ ...jobFields, response_format: responseFormatField }), readOnly, async ({ response_format, ...jobInput }) => {
