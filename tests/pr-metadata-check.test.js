@@ -65,6 +65,12 @@ test('a missing Closes or Part of line is a contributor fix', () => {
   assert.deepEqual(fixIds({ pr: pullRequest({ body: partOf }), files: shippedFiles }), []);
 });
 
+test('nested comment markers are stripped until none are left', () => {
+  const body = goodBody.replace('Closes #12', '<!<!-- x -->-- Closes #12 -->');
+  assert.deepEqual(fixIds({ pr: pullRequest({ body }), files: shippedFiles }), ['missing-issue-link']);
+  assert.equal(sectionOf('<!<!-- x -->-- ## Ran -->\n## Ran\nnpm test', 'Ran'), 'npm test');
+});
+
 test('an issue link inside an HTML comment does not count', () => {
   const body = goodBody.replace('Closes #12', '<!-- Closes #12 -->');
   assert.deepEqual(fixIds({ pr: pullRequest({ body }), files: shippedFiles }), ['missing-issue-link']);

@@ -40,8 +40,15 @@ const checkedHeadings = ['How I checked it', 'Ran', 'Checks', 'Tests', 'Verifica
 const fencedBlockPattern = /```/;
 const commandLinePattern = /^\s*(?:[$>]\s*)?(?:npm|node|npx)\s+\S/m;
 
+// One pass can leave a new comment behind: '<!<!-- x -->-- y -->' becomes '<!-- y -->'. Repeat until nothing changes.
 function stripHtmlComments(text) {
-  return text.replace(/<!--[\s\S]*?-->/g, '');
+  let previous;
+  let current = text;
+  do {
+    previous = current;
+    current = previous.replace(/<!--[\s\S]*?-->/g, '');
+  } while (current !== previous);
+  return current;
 }
 
 // The text under "## <heading>" up to the next "## " heading, or null when the section is missing.
