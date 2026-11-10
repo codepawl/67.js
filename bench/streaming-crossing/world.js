@@ -10,12 +10,19 @@ export const CROSSING_DEFAULTS = Object.freeze({
   levelResolutions: Object.freeze([96, 48, 24]),
   levelDistances: Object.freeze([30, 70]),
   loadDistance: 120,
-  budgetBytes: 16 * 1024 * 1024,
+  budgetBytes: 20 * 1024 * 1024,
   playerSpeed: 30,
   eyeHeight: 2,
 });
 
-export const CROSSING_LIMITS = Object.freeze({ maximumTilesPerSide: 64, maximumResolution: 256 });
+export const CROSSING_LIMITS = Object.freeze({ maximumTilesPerSide: 64, maximumResolution: 256, maximumPlayerSpeed: 1000 });
+
+/** Checks a player speed in world units per second; the crossing never ends for zero, a negative number or NaN. */
+export function requirePlayerSpeed(speed, label) {
+  if (!Number.isFinite(speed) || speed <= 0 || speed > CROSSING_LIMITS.maximumPlayerSpeed) {
+    throw new RangeError(`${label} must be a number above 0 and at most ${CROSSING_LIMITS.maximumPlayerSpeed} world units per second, got ${String(speed)}.`);
+  }
+}
 
 const heightFunctions = new Map();
 
@@ -123,6 +130,7 @@ export function createCrossingWorld(options = {}) {
   requireInteger(settings.seed, 'createCrossingWorld seed', 0, 2 ** 31 - 1);
   requireInteger(settings.tilesPerSide, 'createCrossingWorld tilesPerSide', 2, CROSSING_LIMITS.maximumTilesPerSide);
   if (!Number.isFinite(settings.tileSize) || settings.tileSize <= 0) throw new RangeError('createCrossingWorld tileSize must be a positive number of world units.');
+  requirePlayerSpeed(settings.playerSpeed, 'createCrossingWorld playerSpeed');
   for (const resolution of settings.levelResolutions) requireInteger(resolution, 'createCrossingWorld levelResolutions entry', 1, CROSSING_LIMITS.maximumResolution);
   if (settings.levelDistances.length !== settings.levelResolutions.length - 1) {
     throw new RangeError('createCrossingWorld levelDistances needs one distance fewer than levelResolutions: the last level has no end.');

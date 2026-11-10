@@ -6,6 +6,7 @@ import { constants, setPriority } from 'node:os';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { requirePlayerSpeed } from './world.js';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
@@ -17,7 +18,9 @@ function flagValue(name, fallback) {
 const useCpu = flags.includes('--cpu');
 const outputFolder = resolve(flagValue('--out', 'artifacts/776'));
 const label = flagValue('--label', useCpu ? 'swiftshader' : 'gpu');
-const speed = Number(flagValue('--speed', 30));
+const speedText = flagValue('--speed', '30');
+const speed = speedText === undefined || speedText.trim() === '' ? Number.NaN : Number(speedText);
+requirePlayerSpeed(speed, '--speed (units per second, for example 30)');
 const withSheet = !flags.includes('--no-sheet');
 
 const browserArguments = ['--enable-webgl', '--ignore-gpu-blocklist', '--disable-renderer-backgrounding', '--enable-precise-memory-info'];

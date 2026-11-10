@@ -10,6 +10,7 @@ const MARKER_MATERIAL = { color: [0.95, 0.75, 0.2], metallic: 0, roughness: 0.5,
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const WARMUP_FRAMES = 60;
 const LONG_TASK_MILLISECONDS = 50;
+const CROSSING_DEADLINE_MARGIN_SECONDS = 120;
 const SHEET_COLUMNS = 4;
 const SHEET_ROWS = 2;
 const SHEET_FRAME_WIDTH = 480;
@@ -174,7 +175,14 @@ async function runCrossing(options = {}) {
 
   const startedAt = performance.now();
   runtime.start();
-  while (!player.state.finished) await new Promise(resolve => setTimeout(resolve, 100));
+  const deadlineSeconds = player.total / settings.playerSpeed + CROSSING_DEADLINE_MARGIN_SECONDS;
+  while (!player.state.finished) {
+    if ((performance.now() - startedAt) / 1000 > deadlineSeconds) {
+      runtime.stop();
+      throw new Error(`The crossing did not finish within ${deadlineSeconds.toFixed(0)} s (path ${player.total.toFixed(0)} units at ${settings.playerSpeed} units per second plus ${CROSSING_DEADLINE_MARGIN_SECONDS} s); it reached ${player.state.distance.toFixed(0)} units after ${frames} frames. Pass a higher --speed or check that frames are being drawn.`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
   const crossingSeconds = (performance.now() - startedAt) / 1000;
   runtime.stop();
   observer.disconnect();

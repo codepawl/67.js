@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { createRuntime } from '../src/runtime.js';
 import { createStreaming } from '../src/streaming.js';
-import { createCrossingWorld, createPathPlayer, estimatedTileBytes, generateTile, parseTileSource, tileBytes } from '../bench/streaming-crossing/world.js';
+import { createCrossingWorld, createPathPlayer, estimatedTileBytes, generateTile, parseTileSource, requirePlayerSpeed, tileBytes, tileId } from '../bench/streaming-crossing/world.js';
 
 const FRAME_SECONDS = 1 / 30;
 
@@ -63,6 +65,18 @@ test('bad world input says what to pass', () => {
   assert.throws(() => createCrossingWorld({ seed: 1.5 }), /seed must be a whole number/);
   assert.throws(() => generateTile({ seed: 1, column: 0, row: 0, tilesPerSide: 4, tileSize: 20, resolution: 0 }), /resolution must be a whole number/);
   assert.throws(() => parseTileSource('mesh:1:2:3:4'), /Tile source must look like/);
+  for (const speed of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, 5000, '30']) {
+    assert.throws(() => createCrossingWorld({ playerSpeed: speed }), /playerSpeed must be a number above 0/);
+    assert.throws(() => requirePlayerSpeed(speed, '--speed'), /--speed must be a number above 0 and at most 1000/);
+  }
+});
+
+test('the benchmark rejects a bad --speed before it starts a browser', () => {
+  for (const value of [['--speed'], ['--speed', 'fast'], ['--speed', '0'], ['--speed', '--cpu']]) {
+    const run = spawnSync(process.execPath, [fileURLToPath(new URL('../bench/streaming-crossing/run.mjs', import.meta.url)), ...value], { encoding: 'utf8', timeout: 60000 });
+    assert.notEqual(run.status, 0, `${value.join(' ')} was accepted`);
+    assert.match(run.stderr, /--speed .*must be a number above 0 and at most 1000/);
+  }
 });
 
 test('crossing the world through the runtime stays under the byte budget and never loads inside a frame', async () => {
@@ -80,10 +94,19 @@ test('crossing the world through the runtime stays under the byte budget and nev
     scheduler: { request: () => 1, cancel() {} },
     clock: () => 0,
   });
+  // Like the benchmark's loading screen: play starts after the tiles around the start are in, so every frame is checked.
+  for (let round = 0; round < 200; round += 1) {
+    const eventsBefore = streaming.events.length;
+    streaming.update();
+    await streaming.settled();
+    if (streaming.stats.activeLoads === 0 && streaming.events.length === eventsBefore) break;
+  }
   runtime.start();
 
+  const half = world.settings.tilesPerSide / 2;
+  const tileIndexUnder = coordinate => Math.min(world.settings.tilesPerSide - 1, Math.max(0, Math.floor(coordinate / world.settings.tileSize + half)));
   let peakBytes = 0;
-  let framesWithoutNearbyGround = 0;
+  let framesWithoutGround = 0;
   let frames = 0;
   while (!player.state.finished) {
     frameState.insideFrame = true;
@@ -93,10 +116,8 @@ test('crossing the world through the runtime stays under the byte budget and nev
     peakBytes = Math.max(peakBytes, streaming.stats.bytesInUse);
     assert.ok(streaming.stats.bytesInUse <= budgetBytes, `frame ${frames}: ${streaming.stats.bytesInUse} bytes in use exceeds the budget of ${budgetBytes}`);
     await new Promise(resolve => setImmediate(resolve));
-    if (frames > 30) {
-      const nearby = world.assets.filter(asset => Math.hypot(asset.position[0] - player.state.position[0], asset.position[2] - player.state.position[2]) < world.settings.tileSize);
-      if (!nearby.some(asset => streaming.getAsset(asset.id) !== null)) framesWithoutNearbyGround += 1;
-    }
+    const tileUnderPlayer = tileId(tileIndexUnder(player.state.position[0]), tileIndexUnder(player.state.position[2]));
+    if (streaming.getAsset(tileUnderPlayer) === null) framesWithoutGround += 1;
   }
   await streaming.settled();
 
@@ -106,7 +127,7 @@ test('crossing the world through the runtime stays under the byte budget and nev
   assert.equal(loader.disposed, (evictionReasons.budget ?? 0) + (evictionReasons['level-switch'] ?? 0));
   assert.ok(peakBytes <= budgetBytes);
   assert.ok(peakBytes > budgetBytes * 0.3, `peak ${peakBytes} bytes says the budget was never close`);
-  assert.equal(framesWithoutNearbyGround, 0, 'the player stood on ground that had not streamed in');
+  assert.equal(framesWithoutGround, 0, 'the tile under the player had not streamed in');
   assert.equal(streaming.stats.failed, 0);
   runtime.dispose();
 });
