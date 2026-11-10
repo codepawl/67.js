@@ -663,6 +663,22 @@ function createPathTracer(scene, options) {
     return sampleAreaLight(depth, normal, lights.areas[index - lights.spots.length]);
   }
 
+  const linkedLightsByMask = new Map();
+  const allLights = () => [...lights.points, ...lights.spots, ...lights.areas];
+  /** The sampling-order indices of the local lights the hit part is lit by; every light inside a medium. */
+  function linkedLights() {
+    const mask = inMedium ? -1 : hit.material.lightMask;
+    let linked = linkedLightsByMask.get(mask);
+    if (!linked) {
+      linked = [];
+      allLights().forEach((light, index) => {
+        if ((mask >> light.bit & 1) === 1) linked.push(index);
+      });
+      linkedLightsByMask.set(mask, linked);
+    }
+    return linked;
+  }
+
   /** One emitter by the light tree: the sun and the sky keep a uniform share, the local lights share theirs down the tree. */
   function addOneLightByTree(depth, normal) {
     const lightsShare = lightCount / emitterCount;
@@ -677,6 +693,16 @@ function createPathTracer(scene, options) {
     if (remaining >= lightCount) {
       selectionProbability = 1 / emitterCount;
       return sampleEnvironmentLight(depth, normal);
+    }
+    const linked = linkedLights();
+    if (linked.length < lightCount) {
+      // The tree weighs a node by every light under it, linked or not, so a receiver with light linking draws uniformly among the lights it can see.
+      selectionProbability = 1 / emitterCount;
+      if (linked.length === 0) return;
+      selectionProbability = lightsShare / linked.length;
+      sampleLightByIndex(depth, normal, linked[Math.floor(random.next() * linked.length)]);
+      selectionProbability = 1 / emitterCount;
+      return;
     }
     const picked = chooseLightFromTree(lightTree, hit.point[0], hit.point[1], hit.point[2], normal[0], normal[1], normal[2], drawRandom);
     selectionProbability = 1 / emitterCount;
