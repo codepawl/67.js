@@ -157,6 +157,7 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
   smooth_by_angle: 'edges bending over angle 30 (0-180) become sharp, others smooth, over smoothAngle; ignoreSharp true also clears hand-made sharp edges.',
   bounding_box: 'becomes its axis-aligned box.',
   convex_hull: 'becomes its convex hull, up to 8192 vertices.',
+  build: 'shows faces one by one as frame runs from start 0 over length 60 frames (frame 0; give the current frame, e.g. from your film clock): order index (default), random (seed 0) or axis (axis y, lowest centroid first); reverse true unbuilds. Unused vertices drop; while none shows, one zero-area triangle stays.',
   ocean: 'seeded sea: lifts axis (y) by waves of windSpeed 10 m/s (0-60) toward direction 0 deg, size 100 m (repeats), seed 0, time 0 s, resolution 8 (1-16); choppiness 1 (0-4) pulls points to crests. Writes group foam.',
 });
 
@@ -164,6 +165,12 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
 export const MESH_ATTRIBUTE_NOTES = Object.freeze({
   vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field or gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] }. Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
   vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
+});
+
+// UV projection and packing edits. Details stay here so the tool schemas stay small.
+export const MESH_UV_NOTES = Object.freeze({
+  uv_project: 'mode cube (each face by its dominant axis), cylinder (sides wrap around axis, caps flat) or sphere (longitude and latitude); axis x|y|z (y) for the last two, measured from the bounds centre; wrapped faces cut opposite the first radial axis. pack true (default) packs into 0..1 with one scale for every island so texel density is even; false leaves uv in mesh units for a later uv_pack. margin 0-0.2 (0.01); rotate true lays tall islands on their side. Reports islands. Texel density: cube exact, cylinder within about 15 percent, sphere stretches toward the poles.',
+  uv_pack: 'repacks the islands already in uv (faces joined across edges whose two ends share uv) into 0..1 with one scale. margin 0-0.2 (0.01), rotate true. Needs uv from uv_unwrap or uv_project. Reports islands.',
 });
 
 // Shape keys on a recipe mesh. Details stay here so the tool schemas stay small.
@@ -189,6 +196,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   meshModifiers: MESH_MODIFIER_NOTES,
   meshSculpt: MESH_SCULPT_NOTES,
   meshAttributes: MESH_ATTRIBUTE_NOTES,
+  meshUv: MESH_UV_NOTES,
   meshShapeKeys: MESH_SHAPE_KEY_NOTES,
   fieldExpressions: Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,

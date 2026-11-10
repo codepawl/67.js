@@ -2,22 +2,18 @@
 // the far plane to 0, and the buffer is cleared to 0 and tested with GREATER. Floating point numbers are densest near 0, which is
 // where the far surfaces land, so a 32-bit float buffer keeps its precision at distance instead of losing it as 1 / z does.
 //
-// This is an addon: the renderer core carries none of it. `installReversedDepth(renderer)` wraps a few renderer steps, and the
-// mode decides when it switches on: `true` at once, `false` never, `'auto'` (the default) when a frame's far / near ratio passes
-// FAR_TO_NEAR_LIMIT or `renderer.requestReversedDepth()` is called (the coplanar check does, for a flush pair far from the eye).
-// Switching on reallocates the frame targets once, at the start of a frame.
+// The renderer constructor installs it (issue #751): `installReversedDepth(renderer)` wraps a few renderer steps and switches on at
+// once wherever EXT_clip_control exists, at any far / near ratio. `false` opts out, and a browser without the extension keeps the
+// standard path with a 24-bit buffer and a fitted near plane (near-plane-fit.js).
 import { mat4 } from 'gl-matrix';
-import { installCoplanarDiagnostics } from './coplanar-overlap.js';
 import { compileProgram, fullscreenVertex } from './gl-program.js';
 import { shaderTransforms } from './shader-registry.js';
 
-export const FAR_TO_NEAR_LIMIT = 1e4;
 // A float depth buffer resolves about 2^-23 of the value, so the constant part of a depth-layer offset moves a surface by well
 // under a micrometre, less than the rounding of a part's own matrix (issue #593: 2 um flush pairs kept flickering). The slope
 // part scales with the surface's own depth gradient, so it is the term that separates two flush faces; 16 cleared the metro film.
 const REVERSED_LAYER_SLOPE_SCALE = 16;
 const ZERO_VECTOR = new Float32Array(4);
-const DEFAULT_NEAR = 0.1;
 
 /**
  * Turns a projection that maps depth to -1..1 into one that maps it to 1..0 (the clip control range is 0..1).
@@ -49,11 +45,6 @@ let transformInstalled = false;
 function makeVertexCameraRelative(source) {
   if (!patchingMainProgram || !source.includes(WORLD_CLIP_LINE)) return source;
   return source.replace('uniform mat4 lightProjection;', CAMERA_UNIFORMS).replace(WORLD_CLIP_LINE, CAMERA_RELATIVE_LINE);
-}
-
-/** Whether a frame's lens is stretched enough that a 24-bit depth buffer cannot tell close surfaces apart far away. */
-export function exceedsFarToNearLimit(frame) {
-  return frame.far / (frame.near ?? DEFAULT_NEAR) > FAR_TO_NEAR_LIMIT;
 }
 
 // The depth texture the other passes read holds standard depth (1 at the far plane), so a stage right after the resolve turns the
@@ -136,9 +127,11 @@ function useFloatDepthTargets(renderer) {
   const { width, height } = renderer.canvas;
   context.bindRenderbuffer(context.RENDERBUFFER, renderer.multisampleDepth);
   context.renderbufferStorageMultisample(context.RENDERBUFFER, renderer.multisampleSamples, context.DEPTH_COMPONENT32F, width, height);
+  renderer.renderTargets?.record('multisampleDepth', { width, height, format: 'DEPTH_COMPONENT32F', samples: renderer.multisampleSamples });
   if (renderer.depthTexture) {
     context.bindTexture(context.TEXTURE_2D, renderer.depthTexture);
     context.texImage2D(context.TEXTURE_2D, 0, context.DEPTH_COMPONENT32F, width, height, 0, context.DEPTH_COMPONENT, context.FLOAT, null);
+    renderer.renderTargets?.record('sceneDepth', { width, height, format: 'DEPTH_COMPONENT32F' });
   }
   for (const framebuffer of [renderer.multisampleFramebuffer, renderer.resolveFramebuffer]) {
     context.bindFramebuffer(context.FRAMEBUFFER, framebuffer);
@@ -148,8 +141,31 @@ function useFloatDepthTargets(renderer) {
 }
 
 /**
- * Wraps the renderer so its colour pass draws with reversed-Z once the mode asks for it. Returns the renderer.
- * `renderer.reversedDepth` is true once it is on. A browser without EXT_clip_control, or a benchmark renderer, stays standard.
+ * Makes the renderer's main vertex shader camera-relative from its first compile. The constructor calls this before it compiles, so
+ * switching reversed depth on does not compile the main program a second time.
+ */
+export function prepareCameraRelativeProgram(renderer) {
+  if (renderer.cameraRelativeMainProgram) return;
+  if (!transformInstalled) {
+    shaderTransforms.push(makeVertexCameraRelative);
+    transformInstalled = true;
+  }
+  const startMainProgram = renderer.startMainProgram;
+  renderer.startMainProgram = function startCameraRelativeMainProgram() {
+    patchingMainProgram = true;
+    try {
+      return startMainProgram.call(this);
+    } finally {
+      patchingMainProgram = false;
+    }
+  };
+  renderer.cameraRelativeMainProgram = true;
+}
+
+/**
+ * Wraps the renderer so its colour pass draws with reversed-Z and a float depth buffer. Returns the renderer.
+ * `mode` is `false` to opt out; anything else switches it on. `renderer.reversedDepth` is true once it is on. A browser without
+ * EXT_clip_control, or a benchmark renderer, stays standard.
  */
 export function installReversedDepth(renderer, mode = 'auto') {
   if (mode === false) renderer.reversedDepth ??= false;
@@ -167,7 +183,6 @@ export function installReversedDepth(renderer, mode = 'auto') {
   const cameraOffset = new Float32Array([0, 0, 0, 1]);
   const cameraShift = new Float32Array(4);
   let clipControl = null;
-  let requested = mode === true;
   let inFrame = false;
   let reversed = false;
   let frameEye = null;
@@ -212,28 +227,17 @@ export function installReversedDepth(renderer, mode = 'auto') {
     clipControl.active = true;
   }
 
-  // Compiles the main program again with the patched line, now and whenever a new shader feature rebuilds it.
+  // The program was compiled with the patched line (prepareCameraRelativeProgram) or is compiled again now, and again whenever a
+  // new shader feature rebuilds it.
   function useCameraRelativeProgram() {
     if (!renderer.shaderFeatures) return;
-    if (!transformInstalled) {
-      shaderTransforms.push(makeVertexCameraRelative);
-      transformInstalled = true;
-    }
-    const startMainProgram = renderer.startMainProgram;
-    renderer.startMainProgram = function startCameraRelativeMainProgram() {
-      patchingMainProgram = true;
-      try {
-        return startMainProgram.call(this);
-      } finally {
-        patchingMainProgram = false;
-      }
-    };
+    if (renderer.cameraRelativeMainProgram) return;
+    prepareCameraRelativeProgram(renderer);
     renderer.rebuildMainProgram();
   }
 
   function enable() {
     const extension = renderer.benchmark ? null : context.getExtension?.('EXT_clip_control');
-    requested = false;
     if (!extension) {
       renderer.reversedDepth = false;
       return false;
@@ -267,12 +271,7 @@ export function installReversedDepth(renderer, mode = 'auto') {
     return true;
   }
 
-  renderer.requestReversedDepth = () => {
-    requested = true;
-  };
   renderer.render = function renderReversed(frame) {
-    if (!reversed && renderer.reversedDepth === undefined && (requested || exceedsFarToNearLimit(frame))) enable();
-    if (!reversed) return original.render.call(this, frame);
     const outerEye = frameEye;
     frameEye = frame.eye;
     inFrame = true;
@@ -285,32 +284,6 @@ export function installReversedDepth(renderer, mode = 'auto') {
       clearCameraRelative();
     }
   };
-  if (requested) enable();
+  enable();
   return renderer;
-}
-
-// A 24-bit depth buffer with a 0.1 near plane cannot tell a 1 mm gap apart much beyond this many units from the eye.
-export const REVERSED_DEPTH_PAIR_DISTANCE = 40;
-
-/** Whether the smaller part of any coplanar pair is farther from the eye (the view matrix) than the distance limit. */
-export function hasFarOverlap(overlaps, view, distanceLimit = REVERSED_DEPTH_PAIR_DISTANCE) {
-  if (!view) return false;
-  return overlaps.some(({ smaller }) => {
-    const [x, y, z] = smaller.matrix.slice(12, 15);
-    const viewX = view[0] * x + view[4] * y + view[8] * z + view[12];
-    const viewY = view[1] * x + view[5] * y + view[9] * z + view[13];
-    const viewZ = view[2] * x + view[6] * y + view[10] * z + view[14];
-    return Math.hypot(viewX, viewY, viewZ) > distanceLimit;
-  });
-}
-
-/**
- * The coplanar-overlap warning (coplanar-overlap.js) together with reversed-Z: `reversedDepth` is `true`, `false` or `'auto'`, which
- * also switches it on when the coplanar check finds a flush pair far from the eye, besides the far / near rule.
- */
-export function installDepthPrecision(renderer, { reversedDepth = 'auto' } = {}) {
-  installReversedDepth(renderer, reversedDepth);
-  return installCoplanarDiagnostics(renderer, overlaps => {
-    if (hasFarOverlap(overlaps, renderer.view)) renderer.requestReversedDepth?.();
-  });
 }

@@ -17,6 +17,7 @@ export { mirrorMesh, arrayMesh, solidifyMesh, removeCoincidentFaces } from './me
 export { bevelEdges, selectEdges } from './mesh-bevel.js';
 export { loopCut } from './mesh-loopcut.js';
 export { unwrapUv } from './mesh-uv.js';
+export { projectUv, packUvIslands } from './mesh-uv-project.js';
 export { decimateMesh } from './mesh-decimate.js';
 export { remeshMesh, MAX_REMESH_RESOLUTION, MAX_REMESH_CELLS } from './mesh-remesh.js';
 export { generateMeshLods, generateGeometryLods, generateAssetLods, DEFAULT_LOD_RATIOS } from './mesh-lod.js';

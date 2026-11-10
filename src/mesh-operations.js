@@ -23,6 +23,7 @@ export const MODIFIER_OPERATIONS = /* @__PURE__ */ Object.freeze({
   smooth_by_angle: { fields: ['angle', 'ignoreSharp'], tags: [] },
   bounding_box: { fields: [], tags: [] },
   convex_hull: { fields: [], tags: [] },
+  build: { fields: ['order', 'axis', 'seed', 'frame', 'start', 'length', 'reverse'], tags: [] },
   ocean: { fields: ['axis', 'windSpeed', 'direction', 'choppiness', 'size', 'seed', 'time', 'resolution'], tags: [] },
 });
 
@@ -43,6 +44,8 @@ export const MESH_EDIT_OPERATIONS = /* @__PURE__ */ Object.freeze({
   bevel: { fields: ['name', 'edges', 'width', 'segments', 'profile', 'clampOverlap'], tags: ['strip', 'corner'] },
   loop_cut: { fields: ['name', 'edges', 'cuts', 'factor'], tags: ['band-<k>'] },
   uv_unwrap: { fields: ['seams', 'margin', 'maxDistortion'], tags: [] },
+  uv_project: { fields: ['mode', 'axis', 'pack', 'margin', 'rotate'], tags: [] },
+  uv_pack: { fields: ['margin', 'rotate'], tags: [] },
   subdivide: { fields: ['levels', 'crease', 'sharpness'], tags: [] },
   fill_holes: { fields: ['name', 'sides'], tags: ['fill'] },
   dissolve_faces: { fields: ['select', 'name'], tags: ['merged'] },
@@ -72,7 +75,7 @@ export const MAX_SCULPT_VISITS = 5_000_000;
 export const SHRINKWRAP_MODES = /* @__PURE__ */ Object.freeze(['nearest', 'project']);
 export const MAX_SHRINKWRAP_TRIANGLE_TESTS = 20_000_000;
 
-export const STACK_OPERATIONS = /* @__PURE__ */ Object.freeze(['mirror', 'array', 'solidify', 'bevel', 'uv_unwrap', 'subdivide', 'set_position', 'displace', 'decimate', 'remesh', ...Object.keys(MODIFIER_OPERATIONS)]);
+export const STACK_OPERATIONS = /* @__PURE__ */ Object.freeze(['mirror', 'array', 'solidify', 'bevel', 'uv_unwrap', 'uv_project', 'uv_pack', 'subdivide', 'set_position', 'displace', 'decimate', 'remesh', ...Object.keys(MODIFIER_OPERATIONS)]);
 export const MAX_STACK_NODES = 16;
 
 // Field expressions (mesh-fields.js) and instancing (mesh-instances.js): limits and names as plain data. A test

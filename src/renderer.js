@@ -6,6 +6,8 @@ import { fullscreenVertex, startProgram, finishProgram, compileProgram } from '.
 import { ambientOcclusionFragment } from './ambient-occlusion.js';
 import { planRenderSize, estimateTextureBytes, estimateFrameBytes, memoryBudgetError } from './budget.js';
 import { applyProjection } from './camera.js';
+import { fittedNearPlane, sceneBoundsOfParts } from './near-plane-fit.js';
+import { installReversedDepth, prepareCameraRelativeProgram } from './reversed-depth.js';
 import { resolveEffects } from './effects.js';
 import { frameDiagnostics } from './frame-diagnostics.js';
 import { depthLayerOf } from './depth-layer.js';
@@ -566,10 +568,9 @@ export class Renderer67 {
     this.shadowBounds = shadowBounds;
     /** Set by installCoplanarDiagnostics (coplanar-overlap.js): called with the batches, returns coplanar-overlap warnings. */
     this.coplanarDiagnostics = null;
-    /** `false` keeps the standard depth buffer; `'auto'` (default) loads reversed-Z once a frame's far / near passes 10,000. */
+    /** `false` keeps the standard depth buffer; the default draws every colour pass with reversed-Z and a 32-bit float depth buffer where EXT_clip_control exists. */
     this.reversedDepthMode = reversedDepth;
-    /** Resolves once reversed depth is installed (set by the first frame with a stretched lens); `await` it to render with it from the start. */
-    this.reversedDepthReady = null;
+    const reversedDepthWanted = reversedDepth !== false && !benchmark && Boolean(this.context.getExtension?.('EXT_clip_control'));
     /** Warnings about the last frame drawn, in the shape of `agent-diagnostics.js`; see `frame-diagnostics.js`. */
     this.diagnostics = [];
     this.activeLightDirection = environment.lightDirection ?? [-3, 6, 4];
@@ -614,7 +615,8 @@ export class Renderer67 {
     if (resolveCoplanar && typeof resolveCoplanar !== 'function') throw new TypeError('resolveCoplanar is resolveFlushParts from 67js/addons/coplanar-overlap.');
     // Exact-flush pairs are left to a float depth buffer, so they are layered only when reversed depth is switched off.
     if (resolveCoplanar && !benchmark) resolveCoplanar(parts, reversedDepth === false && { minimumGap: 0 });
-    const groups = groupParts(this.groundPart ? [...parts, this.groundPart] : parts, batching);
+    this.fitParts = this.groundPart ? [...parts, this.groundPart] : parts;
+    const groups = groupParts(this.fitParts, batching);
     const textureLimit = this.context.getParameter(this.context.MAX_TEXTURE_SIZE);
     this.hasSkins = groups.some(group => group[0].skin || group[0].crowd);
     this.hasMorphs = groups.some(group => group[0].morph);
@@ -691,6 +693,8 @@ export class Renderer67 {
     shaderFeaturesOfLighting(this.lighting).forEach(feature => this.shaderFeatures.add(feature));
     if (shading === 'light') this.shaderFeatures.add(LIGHT_SHADING_FEATURE);
     if (shadowCascades) this.shaderFeatures.add(shadowCascades.shaderFeature);
+    // The camera-relative vertex line is part of the first compile, so reversed depth does not compile the main program twice.
+    if (reversedDepthWanted) prepareCameraRelativeProgram(this);
     const pending = {
       main: this.startMainProgram(),
       depth: startProgram(this.context, createDepthVertexShader(this.shaderFeatures), withDepthCode(depthFragmentShader, this.shaderFeatures)),
@@ -740,6 +744,7 @@ export class Renderer67 {
     if (this.shaderFeatures.has('splat')) requireSplatSupport().initializePlaceholders(this);
     this.initializeEnvironment(environment.map);
     this.createShadowMap();
+    if (reversedDepth !== false && !benchmark) installReversedDepth(this, reversedDepth);
     this.resize();
     if (!this.benchmark && !this.multisampleFramebuffer) this.allocateFrameTargets(this.canvas.width, this.canvas.height);
   }
@@ -1110,6 +1115,8 @@ export class Renderer67 {
       throw new TypeError('Scene parts must be an array with distinct object identities.');
     }
     const renderParts = this.groundPart ? [...parts, this.groundPart] : parts;
+    this.fitParts = renderParts;
+    this.fitBounds = undefined;
     const groups = groupParts(renderParts, this.batching);
     const geometries = new Set(renderParts.flatMap(partGeometries));
     // Uploaded geometry was validated when it arrived; rechecking a large static scene every frame dominated streamed playback.
@@ -1546,6 +1553,20 @@ export class Renderer67 {
     mat4.perspective(this.projection, this.world ? Math.PI / 4 : Math.PI / 5.5, width / height, 0.1, this.world ? 600 : 100);
   }
 
+  /**
+   * Without reversed depth the 24-bit buffer needs a tight near plane: a camera that left near unset gets one just in front of the
+   * nearest scene bounds (near-plane-fit.js). A frame with its own near, an orthographic lens or a scene that can move out of its
+   * bounds keeps the frame as it is.
+   */
+  withFittedNear(frame) {
+    if (this.reversedDepth || frame.near !== undefined || frame.projection === 'orthographic') return frame;
+    if (this.fitBounds === undefined) this.fitBounds = sceneBoundsOfParts(this.fitParts);
+    if (!this.fitBounds) return frame;
+    const far = frame.far ?? (this.world ? 600 : 100);
+    const near = fittedNearPlane(this.fitBounds, this.view, far);
+    return near === 0.1 ? frame : { ...frame, near };
+  }
+
   /** Every GPU render target this renderer holds: name, size, format, samples and bytes, largest first, with the total. */
   memoryReport() {
     return this.renderTargets.report();
@@ -1646,8 +1667,8 @@ export class Renderer67 {
     context.framebufferRenderbuffer(context.FRAMEBUFFER, context.COLOR_ATTACHMENT0, context.RENDERBUFFER, this.multisampleColor);
     this.multisampleDepth = context.createRenderbuffer();
     context.bindRenderbuffer(context.RENDERBUFFER, this.multisampleDepth);
-    // Without a depth texture nothing reads or resolves the depth, so the visibility test can use 16 bits; a depth texture needs the same format.
-    const depthFormat = this.depth ? 'DEPTH_COMPONENT24' : 'DEPTH_COMPONENT16';
+    // 24 bits at least (issue #751): 16 bits is one step per 1.5 cm at 10 m. Reversed depth respecifies this store as 32-bit float.
+    const depthFormat = 'DEPTH_COMPONENT24';
     context.renderbufferStorageMultisample(context.RENDERBUFFER, this.multisampleSamples, context[depthFormat], width, height);
     context.framebufferRenderbuffer(context.FRAMEBUFFER, context.DEPTH_ATTACHMENT, context.RENDERBUFFER, this.multisampleDepth);
     if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) throw new Error('Multisample framebuffer allocation failed. Choose a lower quality preset.');
@@ -2193,16 +2214,7 @@ export class Renderer67 {
     this.fogFieldOverride = field === null ? null : validateFogField(field);
   }
 
-  // A 24-bit depth buffer cannot tell surfaces 2 micrometres apart at 2.6 m when far / near is this large (issue #593), so the
-  // first such frame loads reversed-Z (reversed-depth.js, a separate chunk) and the frames after it use a float depth buffer.
-  loadReversedDepthFor(frame) {
-    if (this.reversedDepthMode === false || this.reversedDepth !== undefined || this.reversedDepthReady) return;
-    if (!(frame.far / (frame.near ?? 0.1) > 1e4)) return;
-    this.reversedDepthReady = import('./reversed-depth.js').then(({ installReversedDepth }) => installReversedDepth(this, this.reversedDepthMode));
-  }
-
   render(frame) {
-    this.loadReversedDepthFor?.(frame);
     const { eye, target = [0, 1.2, 0], armorColor = [0.53, 0.39, 0.24], armorSurface = [0.88, 0.32], exposure = 1, inspection = false } = frame;
     const effects = resolveEffects(frame.effects);
     const environment = { lightDirection: [-3, 6, 4], fogColor: [0.35, 0.43, 0.43], fogDensity: 0.006, daylight: 1, explosionCenter: [0, 0, 0], ...this.environment, ...frame.environment };
@@ -2241,8 +2253,8 @@ export class Renderer67 {
     this.updateLocalShadows(casterChanged);
     const environmentMap = this.activateEnvironment(environment.map);
     this.requireFeatureNames([environmentMap ? 'environmentMap' : 'studioLighting']);
-    applyProjection(this.projection, frame, this.canvas.width / this.canvas.height, { world: this.world });
     mat4.lookAt(this.view, eye, target, frame.up ?? [0, 1, 0]);
+    applyProjection(this.projection, this.withFittedNear(frame), this.canvas.width / this.canvas.height, { world: this.world });
     mat4.multiply(this.viewProjection, this.projection, this.view);
     mat4.invert(this.inverseViewProjection, this.viewProjection);
     extractFrustumPlanes(this.viewProjection, this.frustumPlanes);
