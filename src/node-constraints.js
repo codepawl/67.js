@@ -1,5 +1,6 @@
 import { mat3, mat4, quat, vec3 } from 'gl-matrix';
 import { compileMotionExpression } from './motion-expression.js';
+import { createPropertyReader, propertyKinds } from './motion-properties.js';
 import { bounded, denseArray, knownKeys, valueFrom } from './motion-validation.js';
 import { eulerFromQuaternion, quaternionFromEuler } from './rotation-euler.js';
 
@@ -21,6 +22,12 @@ const MAX_COORDINATE = 1e6;
 const SPACES = ['world', 'local'];
 const MATERIAL_SCALARS = ['emission', 'metallic', 'roughness'];
 const MATERIAL_VECTORS = ['color', 'emissiveColor'];
+// Look targets a driver may write. A light is addressed as point:N, spot:N or area:N; a morph by its target name.
+const LIGHT_DRIVEN = { intensity: false, color: true };
+const MORPH_DRIVEN = { weight: false };
+const SCALAR_TARGET_KINDS = ['light', 'morph'];
+const TARGET_PROPERTIES = { light: LIGHT_DRIVEN, morph: MORPH_DRIVEN };
+const RADIANS_TO_DEGREES = 180 / Math.PI;
 
 const COMMON_FIELDS = ['type', 'node', 'influence'];
 const CONSTRAINT_FIELDS = {
@@ -278,7 +285,8 @@ export function normalizeConstraints(input, movableIds, visibleIds) {
   return input.map((constraint, position) => normalizeConstraint(constraint, position, movableIds, visibleIds));
 }
 
-function normalizeDriver(input, position, movableIds, materialIds, visibleIds) {
+function normalizeDriver(input, position, ids) {
+  const { nodes: movableIds, materials: materialIds, visible: visibleIds } = ids;
   const label = `Motion driver ${position}`;
   knownKeys(input, ['target', 'expression'], label);
   knownKeys(input.target, ['kind', 'id', 'property', 'component'], `${label} target`);
@@ -293,18 +301,28 @@ function normalizeDriver(input, position, movableIds, materialIds, visibleIds) {
     const isVector = MATERIAL_VECTORS.includes(property);
     if (!isVector && !MATERIAL_SCALARS.includes(property)) throw new RangeError(`${label} property must be one of ${[...MATERIAL_VECTORS, ...MATERIAL_SCALARS].join(', ')}.`);
     if (isVector !== (component !== undefined)) throw new RangeError(`${label}: color properties need a component (x, y, z for red, green, blue); the others take none.`);
+  } else if (SCALAR_TARGET_KINDS.includes(kind)) {
+    const known = kind === 'light' ? ids.lights : ids.morphs;
+    if (!known.has(id)) throw new RangeError(`${label} ${kind} was not found: ${JSON.stringify(id)}; this scene has ${[...known].slice(0, 24).join(', ') || 'none'}.`);
+    const isVector = TARGET_PROPERTIES[kind][property];
+    if (isVector === undefined) throw new RangeError(`${label} property must be one of ${Object.keys(TARGET_PROPERTIES[kind]).join(', ')} for a ${kind}.`);
+    if (isVector !== (component !== undefined)) throw new RangeError(`${label}: ${isVector ? 'a light color needs a component (x, y, z for red, green, blue)' : `${property} takes no component`}.`);
   } else {
-    throw new RangeError(`${label} target kind must be node or material.`);
+    throw new RangeError(`${label} target kind must be node, material, light or morph.`);
   }
-  compileMotionExpression(input.expression, visibleIds, `${label} expression`);
+  compileMotionExpression(input.expression, visibleIds, `${label} expression`, ids.properties);
   return { target: { kind, id, property, ...(component === undefined ? {} : { component }) }, expression: structuredClone(input.expression) };
 }
 
-export function normalizeDrivers(input, movableIds, materialIds, visibleIds) {
+/**
+ * Validate a driver list. `ids` holds the Sets of node, material, light and morph IDs a driver may write ({ nodes,
+ * materials, lights, morphs }), `visible` (the nodes an expression may read) and `properties` (node -> name -> kind).
+ */
+export function normalizeDrivers(input, ids) {
   denseArray(input, MAX_DRIVERS, 'Motion drivers');
   const seen = new Set();
   return input.map((driver, position) => {
-    const normalized = normalizeDriver(driver, position, movableIds, materialIds, visibleIds);
+    const normalized = normalizeDriver(driver, position, ids);
     const identity = JSON.stringify(Object.values(normalized.target));
     if (seen.has(identity)) throw new RangeError(`Motion driver ${position} drives the same property as an earlier driver.`);
     seen.add(identity);
@@ -726,12 +744,12 @@ function wantsEvaluation(constraints, drivers) {
 }
 
 /**
- * Build an evaluator over { hierarchy, rootMatrix, constraints, drivers, materials }. `hierarchy` lists every node as
+ * Build an evaluator over { hierarchy, rootMatrix, constraints, drivers, materials, properties }. `hierarchy` lists every node as
  * { id, parent, translation, rotation, scale }. `evaluate(time, bases)` takes the base pose as a Map of node ID to
  * { translation, rotation, scale } (missing parts use the rest pose) and returns the final local frames of every node
- * a driver or constraint writes, plus driven material values. The base arrays are not changed.
+ * a driver or constraint writes, plus driven material values and `looks`, the { target, value } of each driven light or morph. The base arrays are not changed.
  */
-export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constraints = [], drivers = [], materials = [] }) {
+export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constraints = [], drivers = [], materials = [], properties = [] }) {
   if (!wantsEvaluation(constraints, drivers)) return null;
   const indexById = new Map(hierarchy.map((node, index) => [node.id, index]));
   const order = topologicalOrder(hierarchy, indexById);
@@ -739,10 +757,12 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
   const rootWorld = rootMatrix ? mat4.clone(rootMatrix) : mat4.create();
   const nodeIds = new Set(indexById.keys());
   const materialBaselines = new Map(materials.map(material => [material.id, material]));
-  const compiledDrivers = drivers.map(driver => ({ ...driver, compiled: compileMotionExpression(driver.expression, nodeIds, 'Motion driver expression') }));
+  const kindsByNode = propertyKinds(properties);
+  const readProperty = createPropertyReader(properties);
+  const compiledDrivers = drivers.map(driver => ({ ...driver, compiled: compileMotionExpression(driver.expression, nodeIds, 'Motion driver expression', kindsByNode) }));
   const compiledConstraints = constraints.map(constraint => ({
     ...constraint,
-    compiledInfluence: typeof constraint.influence === 'number' ? null : compileMotionExpression(constraint.influence, nodeIds, 'Motion constraint influence'),
+    compiledInfluence: typeof constraint.influence === 'number' ? null : compileMotionExpression(constraint.influence, nodeIds, 'Motion constraint influence', kindsByNode),
   }));
 
   function computeWorlds(locals) {
@@ -766,10 +786,32 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
     };
   }
 
-  function applyDriver(driver, locals, context, touchedMaterials) {
+  function worldFrame(worlds, id) {
+    return decompose(worlds[indexById.get(id)]);
+  }
+
+  function readContext(time, locals) {
+    const worlds = computeWorlds(locals);
+    return {
+      time,
+      read: readFrom(locals, worlds),
+      custom: (node, name, componentIndex) => readProperty(node, name, componentIndex, time),
+      distance: (from, to) => vec3.distance(worldFrame(worlds, from).translation, worldFrame(worlds, to).translation),
+      rotationDifference: (from, to) => {
+        const overlap = Math.abs(quat.dot(worldFrame(worlds, from).rotation, worldFrame(worlds, to).rotation));
+        return 2 * Math.acos(Math.min(1, overlap)) * RADIANS_TO_DEGREES;
+      },
+    };
+  }
+
+  function applyDriver(driver, locals, context, touchedMaterials, drivenLooks) {
     const value = driver.compiled.evaluate(context);
     const { kind, id, property, component } = driver.target;
     const index = AXES.indexOf(component);
+    if (SCALAR_TARGET_KINDS.includes(kind)) {
+      drivenLooks.push({ target: driver.target, value });
+      return;
+    }
     if (kind === 'material') {
       if (index < 0) {
         touchedMaterials.set(id, { ...touchedMaterials.get(id), [property]: value });
@@ -852,10 +894,11 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
         if (base?.scale) frame.scale.set(base.scale);
         return frame;
       });
-      const context = { time, read: readFrom(baseLocals, computeWorlds(baseLocals)) };
+      const context = readContext(time, baseLocals);
       const locals = baseLocals.map(copyFrame);
       const touchedMaterials = new Map();
-      for (const driver of compiledDrivers) applyDriver(driver, locals, context, touchedMaterials);
+      const drivenLooks = [];
+      for (const driver of compiledDrivers) applyDriver(driver, locals, context, touchedMaterials, drivenLooks);
       for (const constraint of compiledConstraints) applyConstraint(constraint, locals, context);
       const written = new Set([...compiledDrivers.filter(driver => driver.target.kind === 'node').map(driver => driver.target.id), ...compiledConstraints.map(constraint => constraint.node)]);
       const nodes = new Map([...written].map(id => [id, locals[indexById.get(id)]]));
@@ -863,7 +906,7 @@ export function createNodeConstraintEvaluator({ hierarchy, rootMatrix, constrain
         if (![...frame.translation, ...frame.rotation, ...frame.scale].every(Number.isFinite)) throw new RangeError(`Motion constraints produced an invalid pose for node ${id}.`);
         if (frame.scale.some(component => !(Math.fround(component) > 0))) throw new RangeError(`Motion constraints made the scale of node ${id} not positive.`);
       }
-      return { nodes, materials: touchedMaterials };
+      return { nodes, materials: touchedMaterials, looks: drivenLooks };
     },
   });
 }
