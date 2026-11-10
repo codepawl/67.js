@@ -989,8 +989,8 @@ function batchSignature(material) {
   return `${material.tag}|${material.alphaMode}|${material.opacity}|${material.transmission > 0}|${material.doubleSided}|${JSON.stringify(material.pattern ?? material.map ?? null)}|${JSON.stringify(material.snippet)}`;
 }
 
-function materialHandle(snapshot, sequence) {
-  const holder = { snapshot, sequence };
+function materialHandle(snapshot, sequence, images) {
+  const holder = { snapshot, sequence, images };
   const output = {};
   for (const field of ['id', 'tag', ...MATERIAL_FIELDS]) {
     Object.defineProperty(output, field, {
@@ -1007,7 +1007,7 @@ function materialHandle(snapshot, sequence) {
       // Baked on first read, so validating or inspecting a recipe never pays for it.
       get() {
         if (field === 'map' && holder.sequence) return holder.sequence.descriptor;
-        return holder.snapshot.pattern ? agentSceneModule('patterns').materialPatternTextures(holder.snapshot.pattern)[field] : undefined;
+        return holder.snapshot.pattern ? agentSceneModule('patterns').materialPatternTextures(holder.snapshot.pattern, holder.images)[field] : undefined;
       },
     });
   }
@@ -1479,7 +1479,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       // The renderer keeps tag, blending, opacity and sidedness per batch, so a handle is reused only when all match.
       const existing = [preferredHandle, activeHandle].find(handle => handle && batchSignature(handle.holder.snapshot) === batchSignature(material));
       const assetOutput = assetRuntime.materialOutputs.get(material.id);
-      const handle = assetOutput ? assetMaterialHandle(snapshot, assetOutput, preferredHandle, activeHandle) : existing ?? materialHandle(snapshot, material.map && agentSceneModule('assets').createTextureSequence(material.id, material.map, options.sequenceFrames));
+      const handle = assetOutput ? assetMaterialHandle(snapshot, assetOutput, preferredHandle, activeHandle) : existing ?? materialHandle(snapshot, material.map && agentSceneModule('assets').createTextureSequence(material.id, material.map, options.sequenceFrames), options.sequenceFrames);
       materialHandles.set(material.id, handle);
     }
     const activeParts = new Map(state?.sourceRestParts.map(part => [part.name, part]) ?? []);
