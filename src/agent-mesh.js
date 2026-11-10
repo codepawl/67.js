@@ -165,6 +165,11 @@ function roundedBounds(bounds) {
   return { min: bounds.min.map(round), max: bounds.max.map(round) };
 }
 
+/** The polygon mesh behind renderer geometry: the recipe's own mesh when it has one, else the welded, quad-joined view. */
+export function polygonMeshOf(geometry) {
+  return polygonMeshes.get(geometry)?.mesh ?? meshFromGeometry(geometry);
+}
+
 /**
  * Polygon view and lint of renderer geometry: counts, face sizes, connected parts, face tags, bounds and problems
  * with suggested fixes. The geometry is welded and joined into quads first, as meshFromGeometry does.

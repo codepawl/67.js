@@ -1868,3 +1868,7 @@ What it says (measured, causes marked):
 - Not isolated: why the lit side of `-a` and `-b` is 25 to 30 percent dim. Candidates still to test, one each: fog in the beam taking light that Cycles keeps, the sun bounce lights (about 0.3 gain) lighting walls rather than the lit floor, and the unshadowed bounce lights lifting the shadow side.
 
 No engine change was made and no frame cost changes. The megacity and mountain options were not re-measured in this pass. Box 2 stays open for `temple-hall-b`, `-c` and `-rose`.
+
+## Local volumes (issue #710)
+
+`node bench/reference/local-volumes.mjs gpu` (or `cpu` for SwiftShader) renders a smoky room with a glowing puff, with and without `environment.localVolumes`, writes `images/local-volumes.png` and `images/local-volumes-plain.png`, and prints the frame time. It is not scored against Blender: Cycles has no counterpart for these fields, so it sits outside the 23 scored scenes. Frame time on the RTX 3060 shared with other jobs (2026-11-10, 960 x 540, 4x MSAA, median of 200 frames, three alternating rounds): 1.34, 1.25 and 1.07 ms without volumes, 2.13, 2.11 and 1.54 ms with the haze box and the puff, so the two volumes cost about 0.5 to 0.9 ms (noisy).

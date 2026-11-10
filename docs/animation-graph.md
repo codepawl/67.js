@@ -46,7 +46,7 @@ graph.set('speed', 3.1);   // from game logic, any time
 graph.trigger('wave');
 ```
 
-A runnable sample is `bench/animation-graph/index.html` (`npm run dev`, then open `/bench/animation-graph/`): the CC0 RobotExpressive blends Idle, Walking and Running by speed. W walks, Shift runs, `?speed=3.5` pins the speed.
+A runnable sample is `bench/animation-graph/index.html` (`npm run dev`, then open `/bench/animation-graph/`): the CC0 RobotExpressive blends Idle, Walking and Running by speed. W walks, Shift runs, `?speed=3.5` pins the speed. The in-place clips get a root travel track at the stride pace, the graph extracts it and a character controller moves by it; the readout shows the root speed and the distance travelled.
 
 With the [player](player.md), copy its state into parameters in a system placed between the controller and the graph:
 
@@ -60,6 +60,8 @@ const parameterSystem = {
 };
 // systems: [input, controller, parameterSystem, graph.system()]
 ```
+
+To let the clips move the body instead, see [Root motion](#root-motion).
 
 ## Parameters
 
@@ -89,7 +91,7 @@ Weights always sum to 1. All clips of a blend space share one normalized phase, 
 - `when` is a list of conditions that must all hold. A number condition has exactly one of `greater`, `atLeast`, `less`, `atMost`, `equals`, `notEquals`. A boolean or trigger condition is `{ parameter, is: true }` (`is` defaults to true).
 - `exitPhase` holds the transition until the source state has played that many cycles (1 is one full play of the clip). A transition needs `when`, `exitPhase` or both.
 - `duration` is the crossfade in seconds (0 to 10, default 0 for a cut). Weights fade linearly over fixed steps. The outgoing state keeps the blend weights it had when the fade started, so a parameter change does not bend the fade.
-- A new transition starts only when the current crossfade has ended. The longest wait is the fade time.
+- A new transition starts only when the current crossfade has ended, unless it sets `interrupt: true` (see below).
 
 ## Layers and masks
 
@@ -107,8 +109,59 @@ A clip has one time per layer. When both ends of a crossfade use the same clip, 
 
 `graph.layerState(name)` returns `{ state, previousState, fade, phase, weight, clips: [{ clip, time, weight }] }`; `fade` is 0 to 1 during a crossfade and null otherwise. `graph.time` is the advanced time and `graph.layers` the layer names.
 
+## Interrupting a crossfade
+
+A transition with `interrupt: true` may start while a crossfade is running, for example a jump or a hit that must not wait for a slow blend. The state that was fading in starts fading out from the weight it had reached, together with the shares of the states still fading out, so the pose does not pop; the new state fades in over its own `duration`. Weights keep summing to 1. At most 4 states fade out at once (`maximumFadingStates`); a longer chain drops the oldest and renormalizes the rest. A transition without `interrupt` still waits.
+
+## Root motion
+
+`rootMotion: { bone, layer, facing, scale }` takes the horizontal travel of the root bone out of the clips. The bone is the target of a `translation` track, such as the armature or hips. The graph reads those clips in place (the bone keeps its height but stays at its first-frame x and z, so `graph.poseLayers()` no longer slides the model) and `graph.rootMotion` says how far the root travelled in the last `advance`:
+
+```js
+graph.rootMotion; // { delta: [x, z], distance, speed } in metres; x is to the right, negative z is forward
+```
+
+The travel follows the blend: each clip's travel over the phase step it played, weighted like its pose, so a blend space walks at the speed its clips blend to. `layer` is the layer whose clips carry it (default: the first); its weight scales the result. `facing` is the way the rig faces at rest, `'+z'` (default, glTF) or `'-z'`, and `scale` converts clip units to metres (`0.01` for centimetres). Without the option `graph.rootMotion` throws. `extractRootMotion(clip, { bone, facing, scale })` does the same for one clip: it returns `{ clip, hasMotion, displacement(cycles, loops) }`.
+
+Hand it to the [player](player.md) controller, which then moves by it on the ground instead of by its own speed, and put the graph after the controller so the controller reads the travel of the previous step:
+
+```js
+const controller = createCharacterController({ input, yaw: Math.PI, rootMotion: () => graph.rootMotion.delta });
+const parameterSystem = {
+  name: 'animation-parameters',
+  fixedUpdate() { graph.set('speed', controller.state.intentSpeed); }, // what the player asks for, not the speed it has
+};
+// systems: [input, controller, parameterSystem, graph.system()]
+```
+
+The controller turns the travel by its yaw. It faces -Z at yaw 0 while a glTF model faces +Z, so start it at `yaw: Math.PI` or turn the model's node. In the air the controller falls back to its own velocity, and vertical motion always stays with the controller.
+
+## IK hooks
+
+`createFootPlacement` and `createLookAt` build entries for the `ik` list of `createSkeletonPose` and `createAssetPose`. They read the game through a function, ease toward it with the pose time, and are deterministic.
+
+```js
+const pose = createAssetPose(character, {
+  layers: graph.poseLayers(),
+  ik: [
+    createFootPlacement({ root: 'UpperLegL', middle: 'LowerLegL', end: 'FootL', groundOffset: foot => heightAt(foot) - baseHeight }),
+    createLookAt({ joints: ['Neck', 'Head'], target: () => targetPosition, maxAngle: 60, weight: () => graph.get('alert') }),
+  ],
+});
+```
+
+- `createFootPlacement({ root, middle, end, groundOffset, ankleHeight, liftHeight, maxAdjust, smoothSeconds, weight, pole, bendToward, groundNormal })`: `groundOffset(footPosition)` returns how far the ground under the animated foot is above (positive) or below the ground the clip was made for. A planted foot (near `ankleHeight`, within `liftHeight`, default 0.15) follows it by at most `maxAdjust` (default 0.4); a swinging foot is left alone. `smoothSeconds` (default 0.06) eases the correction.
+- `createLookAt({ joints, target, forward, worldForward, maxAngle, smoothSeconds, weight })`: turns the chain from its base to the aiming joint toward a point or a function `(time, current) => [x, y, z]`, by at most `maxAngle` degrees (default 70) from the animated direction.
+
+`weight` is a number or a function of the pose time from 0 to 1, so a graph parameter can fade a hook in and out. The positions are in the pose's space: the skeleton pose's model space, or the world space of the asset for `createAssetPose`.
+
+## Other rigs
+
+The graph knows no rig, so a creature or a machine runs the same way. The tests drive a quadruped (root, body, neck, head and four legs) and the car from the repo's test assets (wheels spinning while the body travels) through the same graph, root motion and IK hooks.
+
 ## Limits and errors
 
-At most 64 parameters, 8 layers, 64 states and 256 transitions per layer, 8 conditions per transition and 16 motions per blend space. Errors name the field and the fix, for example `createAnimationGraph layers[0].transitions[1].to names "run", which is not a state of this layer. States: idle, move.`
+At most 64 parameters, 8 layers, 64 states and 256 transitions per layer, 8 conditions per transition, 16 motions per blend space and 4 states fading out at once. Errors name the field and the fix, for example `createAnimationGraph layers[0].transitions[1].to names "run", which is not a state of this layer. States: idle, move.`
 
-Not part of this addon yet: root motion, IK hooks (use the `ik` option of the skeleton pose), and path-driven NPC speed. An NPC sets `speed` from its path follower, such as the navmesh, through the same `graph.set`.
+
+Path-driven NPC speed is not a separate feature: an NPC sets `speed` from its path follower, such as the navmesh, through the same `graph.set`.

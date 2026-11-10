@@ -1,0 +1,4 @@
+- scene:agent-scene+lazy: edge emission (length weighted, edge group, sharp angle) is a simulation capability the lead approved for sparks off a rim; 652 bytes gzip in the lazy particles path
+- goal:agent-scene: 38 bytes gzip are the capabilities text that tells an agent about from "edges" and sharpAngle; the code loads lazily
+- entry:agent-scene: +38 bytes gzip is the capabilities text for the edges mode
+- entry:agent-scene+lazy: +652 bytes gzip is the edge sampler, which loads only with particles
