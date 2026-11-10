@@ -123,3 +123,100 @@ export function flattenVertices(mesh, vertexMask, { normal = null, factor = 1 } 
   });
   return { mesh: flattened, flattenedVertices: count };
 }
+
+function crossProduct(first, second) {
+  return [first[1] * second[2] - first[2] * second[1], first[2] * second[0] - first[0] * second[2], first[0] * second[1] - first[1] * second[0]];
+}
+
+function dotProduct(first, second) {
+  return first[0] * second[0] + first[1] * second[1] + first[2] * second[2];
+}
+
+/** The selected vertices as closed loops: every vertex has exactly two selected neighbours along an edge. */
+function selectedLoops(mesh, vertexMask) {
+  const neighbors = new Map();
+  for (let edge = 0; edge < mesh.edgeCount; edge++) {
+    const first = mesh.edgeVertices[edge * 2];
+    const second = mesh.edgeVertices[edge * 2 + 1];
+    if (!vertexMask[first] || !vertexMask[second]) continue;
+    for (const [vertex, other] of [[first, second], [second, first]]) {
+      if (!neighbors.has(vertex)) neighbors.set(vertex, []);
+      neighbors.get(vertex).push(other);
+    }
+  }
+  const loops = [];
+  const visited = new Set();
+  for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
+    if (!vertexMask[vertex]) continue;
+    const around = neighbors.get(vertex) ?? [];
+    if (around.length !== 2) {
+      throw new RangeError(`Vertex ${vertex} has ${around.length} selected neighbours; circularize needs closed loops where each vertex has exactly 2. Select only the vertices of the loop, such as { "vertices": [0, 1, 2, 3] }.`);
+    }
+    if (visited.has(vertex)) continue;
+    const loop = [vertex];
+    visited.add(vertex);
+    let previous = vertex;
+    let current = Math.min(...around);
+    while (current !== vertex) {
+      loop.push(current);
+      visited.add(current);
+      const [one, two] = neighbors.get(current);
+      if (one === undefined || two === undefined) throw new RangeError('The selected vertices do not form closed loops.');
+      const next = one === previous ? two : one;
+      previous = current;
+      current = next;
+    }
+    if (loop.length < 3) throw new RangeError(`The loop through vertex ${vertex} has ${loop.length} vertices; circularize needs at least 3.`);
+    loops.push(loop);
+  }
+  if (loops.length === 0) throw new RangeError('The rule selects no vertex. Use a loop such as { "vertices": [0, 1, 2, 3] }.');
+  return loops;
+}
+
+/**
+ * Turn each selected vertex loop into a circle after LoopTools Circle. The circle lies in the loop's best plane (the
+ * Newell normal), centred on the average point, with the average distance as its radius. `regular` spaces the vertices
+ * evenly from the first one; otherwise each keeps its own angle. `factor` 1 lands on the circle and 0 changes nothing.
+ */
+export function circularizeVertices(mesh, vertexMask, { factor = 1, regular = true } = {}) {
+  const positions = Float32Array.from(mesh.positions);
+  let circularizedVertices = 0;
+  for (const loop of selectedLoops(mesh, vertexMask)) {
+    const points = loop.map(vertex => positionOf(mesh, vertex));
+    const center = [0, 1, 2].map(axis => points.reduce((sum, point) => sum + point[axis], 0) / points.length);
+    const offsets = points.map(point => point.map((value, axis) => value - center[axis]));
+    const normal = [0, 0, 0];
+    offsets.forEach((offset, index) => {
+      const area = crossProduct(offset, offsets[(index + 1) % offsets.length]);
+      for (let axis = 0; axis < 3; axis++) normal[axis] += area[axis];
+    });
+    const normalLength = Math.hypot(...normal);
+    if (normalLength === 0) throw new RangeError(`The loop through vertex ${loop[0]} is degenerate (no plane); circularize needs a loop that encloses an area.`);
+    const unit = normal.map(value => value / normalLength);
+    const inPlane = offsets.map(offset => {
+      const height = dotProduct(offset, unit);
+      return offset.map((value, axis) => value - unit[axis] * height);
+    });
+    const radius = inPlane.reduce((sum, offset) => sum + Math.hypot(...offset), 0) / inPlane.length;
+    const firstLength = Math.hypot(...inPlane[0]);
+    if (firstLength === 0) throw new RangeError(`Vertex ${loop[0]} sits on the loop's centre; circularize cannot tell its direction.`);
+    const along = inPlane[0].map(value => value / firstLength);
+    const across = crossProduct(unit, along);
+    loop.forEach((vertex, index) => {
+      const angle = regular
+        ? index * 2 * Math.PI / loop.length
+        : Math.atan2(dotProduct(inPlane[index], across), dotProduct(inPlane[index], along));
+      for (let axis = 0; axis < 3; axis++) {
+        const target = center[axis] + radius * (Math.cos(angle) * along[axis] + Math.sin(angle) * across[axis]);
+        const current = positions[vertex * 3 + axis];
+        positions[vertex * 3 + axis] = current + (target - current) * factor;
+      }
+      circularizedVertices++;
+    });
+  }
+  const circular = createMeshData({
+    positions, faceOffsets: mesh.faceOffsets, cornerVertices: mesh.cornerVertices,
+    edgeVertices: mesh.edgeVertices, cornerEdges: mesh.cornerEdges, attributes: mesh.attributes,
+  });
+  return { mesh: circular, circularizedVertices };
+}

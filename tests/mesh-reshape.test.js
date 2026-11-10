@@ -233,3 +233,61 @@ test('flatten validates its fields', () => {
   assert.throws(() => normalizeMeshEdits([{ op: 'flatten', verts: { all: true }, factor: 2 }]), /edits\[0\]\.factor/);
   assert.throws(() => run(cube(), [{ op: 'flatten', verts: { vertices: [0] } }]), /Pass normal/);
 });
+
+test('unsubdivide reverses one Catmull-Clark level and is deterministic', () => {
+  const subdivided = run(cube(), [{ op: 'subdivide', levels: 1 }]).mesh;
+  assert.deepEqual([subdivided.vertexCount, subdivided.faceCount], [26, 24]);
+  const { mesh, results } = run(subdivided, [{ op: 'unsubdivide' }]);
+  assert.deepEqual([mesh.vertexCount, mesh.faceCount], [8, 6]);
+  assert.deepEqual([results[0].coarseFaces, results[0].removedVertices], [6, 18]);
+  assertClosed(mesh);
+  sameBytes(mesh, run(subdivided, [{ op: 'unsubdivide' }]).mesh);
+  const twice = run(cube(), [{ op: 'subdivide', levels: 2 }, { op: 'unsubdivide' }]).mesh;
+  assert.deepEqual([twice.vertexCount, twice.faceCount], [26, 24]);
+  assertClosed(twice);
+});
+
+test('unsubdivide recovers a coarse n-gon and an open boundary', () => {
+  const prism = meshFromGeometry(cylinder(6, 0, 1));
+  const back = run(prism, [{ op: 'subdivide', levels: 1 }, { op: 'unsubdivide' }]).mesh;
+  assert.equal(back.faceCount, prism.faceCount);
+  assert.equal(back.vertexCount, prism.vertexCount);
+  const open = run(cube(), [{ op: 'delete', select: { tag: 'top' } }, { op: 'subdivide', levels: 1 }, { op: 'unsubdivide' }]).mesh;
+  assert.deepEqual([open.vertexCount, open.faceCount], [8, 5]);
+});
+
+test('unsubdivide says why a mesh cannot be reversed', () => {
+  assert.throws(() => run(cube(), [{ op: 'unsubdivide' }]), /not one level of Catmull-Clark subdivision/);
+  assert.throws(() => run(cube(), [{ op: 'poke', select: { all: true } }, { op: 'unsubdivide' }]), /is not a quad.*tris_to_quads/);
+});
+
+function topCorners(mesh) {
+  const corners = [];
+  for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
+    if (mesh.positions[vertex * 3 + 1] > 0) corners.push(vertex);
+  }
+  return corners;
+}
+
+test('circularize puts a loop on a circle and keeps the topology', () => {
+  const stretched = run(cube(), [{ op: 'translate', select: { tag: 'top' }, offset: [0.3, 0, 0] }]).mesh;
+  const corners = topCorners(stretched);
+  const circularize = [{ op: 'circularize', verts: { vertices: corners } }];
+  const { mesh, results } = run(stretched, circularize);
+  assert.equal(results[0].circularizedVertices, 4);
+  assert.deepEqual([mesh.vertexCount, mesh.faceCount], [8, 6]);
+  assertClosed(mesh);
+  const center = [0, 1, 2].map(axis => corners.reduce((sum, vertex) => sum + mesh.positions[vertex * 3 + axis], 0) / 4);
+  const distances = corners.map(vertex => Math.hypot(...[0, 1, 2].map(axis => mesh.positions[vertex * 3 + axis] - center[axis])));
+  for (const distance of distances) assert.ok(Math.abs(distance - distances[0]) < 1e-5);
+  assert.ok(Math.abs(mesh.positions[corners[0] * 3 + 1] - stretched.positions[corners[0] * 3 + 1]) < 1e-6);
+  sameBytes(mesh, run(stretched, circularize).mesh);
+});
+
+test('circularize validates its fields and its loop', () => {
+  assert.throws(() => normalizeMeshEdits([{ op: 'circularize' }]), /edits\[0\]\.verts/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'circularize', verts: { all: true }, factor: 2 }]), /edits\[0\]\.factor/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'circularize', verts: { all: true }, regular: 'yes' }]), /edits\[0\]\.regular/);
+  assert.throws(() => run(cube(), [{ op: 'circularize', verts: { all: true } }]), /selected neighbours/);
+  assert.throws(() => run(cube(), [{ op: 'circularize', verts: { vertices: [0, 1] } }]), /selected neighbours/);
+});
