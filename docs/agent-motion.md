@@ -152,7 +152,7 @@ each blending over the pose so far, before tracks and IK:
 | `additive`, `reference` | Add the clip's change from `reference` seconds instead of replacing the pose |
 | `bones` | Retarget by name: `{ "UpperArmR": "node-20" }` makes the clip's track for `UpperArmR` move that node of this asset. Up to 64 entries; the clip must have the track |
 | `morph` | `false` leaves morph weights alone. Default: the clip's morph tracks play |
-| `strip` | Places the clip on the timeline in place of `speed`, `offset` and `loop`: `{ start, scale, repeat, end, blendIn, blendOut, extend, blend }`. `{ "repeat": 3 }` plays three cycles; an overlapping strip with `blendIn` crossfades. See [clip strips](animation-mixer.md#clip-strips) |
+| `strip` | Places the clip on the timeline in place of `speed`, `offset` and `loop`: `{ start, scale, repeat, end, blendIn, blendOut, extend, blend }`. `{ "repeat": 3 }` plays three cycles; an overlapping strip with `blendIn` crossfades. See [clip strips](https://67js.codepawl.com/animation-mixer.md#clip-strips) |
 
 ```json
 "motion": { "duration": 2, "loop": true, "layers": [
