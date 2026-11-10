@@ -412,6 +412,9 @@ lower index, so the same input always gives the same bytes. Faces they keep carr
 | `delete_loose` | none | none | Removes every vertex that no face uses (the lint problem `loose-vertex`). Fails when there is none. |
 | `flatten` | `verts`, `normal`, `factor` (0 to 1, default 1) | none | Moves the selected vertices toward the plane through their average point. `normal` is the plane direction; without it the area-weighted normal of the faces whose vertices are all selected is used. |
 
+| `unsubdivide` | none | none | Reverses one Catmull-Clark level: the original vertices and the coarse faces they make (n-gons too) are kept, every face point and edge point is dropped. The survivors stay where they are, so the smoothing is not undone. Fails, naming the quad that breaks the pattern, when the mesh has a non-quad face or is not one level of subdivision. |
+| `circularize` | `verts`, `factor` (0 to 1, default 1), `regular` (default true) | none | LoopTools Circle: each closed loop of selected vertices (every vertex with exactly two selected neighbours) lands on a circle in the loop's best plane, centred on its average point, with the average distance as radius. `regular` spaces the vertices evenly from the first; otherwise each keeps its own angle. Topology is unchanged. |
+
 `dual` and `symmetrize` leave a closed surface closed. `extrude_edges` on interior edges adds a fin, so a closed
 mesh is no longer closed afterwards. `extrude_vertices` is not offered: a mesh derives its edges from faces and cannot
 hold a loose edge. The size of `poke`, `split_edges` and `extrude_edges` is checked before they allocate. The `meshEdit.<op>`
