@@ -1,0 +1,1 @@
+- Animation graph: blended clips now end with their own shares in `poseLayers()` (the chain of lerp factors ran in the wrong order, so a walk to run blend played as full run); planted feet no longer slide in a blend space (#774)
