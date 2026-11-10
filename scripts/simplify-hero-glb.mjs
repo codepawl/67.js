@@ -4,11 +4,11 @@
 // Instanced nodes are split by level (one node per mesh and level), so the page needs no level-of-detail code.
 //
 //   node scripts/simplify-hero-glb.mjs <scene id> <input.glb> <output.glb> [--pixels 1.2] [--levels 0.0008,0.005,0.025,0.1]
-//        [--max-texture 1024] [--prop-texture 512] [--prop-pattern '^m_'] [--webp-quality 78] [--height 900]
+//        [--max-texture 1024] [--prop-texture 512] [--prop-prefix m_] [--webp-quality 78] [--height 900]
 //
 // The route is read from src/hero-lab/loop/scenes.js, so rerun this after a flight changes.
 // --levels         relative errors (share of the mesh's own size) the copies are simplified to; the first is applied to every mesh
-// --prop-pattern   materials whose name matches get --prop-texture instead of --max-texture
+// --prop-prefix    materials whose name starts with this text get --prop-texture instead of --max-texture
 // Nothing is read from the network and no input script is run.
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, EXTMeshoptCompression, EXTMeshGPUInstancing } from '@gltf-transform/extensions';
@@ -18,7 +18,7 @@ import sharp from 'sharp';
 import { SCENES } from '../src/hero-lab/loop/scenes.js';
 import { createCameraSpline } from '../src/hero-lab/camera-spline.js';
 
-const DEFAULTS = { pixels: 1.2, levels: '0.0008,0.005,0.025,0.1', maxTexture: 1024, propTexture: 512, propPattern: '^m_', webpQuality: 78, height: 900 };
+const DEFAULTS = { pixels: 1.2, levels: '0.0008,0.005,0.025,0.1', maxTexture: 1024, propTexture: 512, propPrefix: 'm_', webpQuality: 78, height: 900 };
 const ROUTE_SAMPLES = 240;
 const MINIMUM_TRIANGLES = 12;
 const UNUSED = 0xffffffff;
@@ -195,11 +195,12 @@ function splitNodeByLevel(document, node, chosen, variantOf, extension) {
 }
 
 async function scaleTextures(document, options) {
-  const pattern = new RegExp(options.propPattern);
+  const propPrefixes = String(options.propPrefix).split(',').filter(Boolean);
   const propTextures = new Set();
   const largeTextures = new Set();
   for (const material of document.getRoot().listMaterials()) {
-    const bucket = pattern.test(material.getName()) ? propTextures : largeTextures;
+    const isProp = propPrefixes.some(prefix => material.getName().startsWith(prefix));
+    const bucket = isProp ? propTextures : largeTextures;
     for (const texture of [material.getBaseColorTexture(), material.getNormalTexture(), material.getOcclusionTexture(), material.getEmissiveTexture(), material.getMetallicRoughnessTexture()]) {
       if (texture) bucket.add(texture);
     }
