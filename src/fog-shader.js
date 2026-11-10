@@ -122,7 +122,7 @@ uniform highp sampler2D localMeshVolumes;
 // Each volume is marched on its own between its entry and exit (cut at the first surface) and composited nearest first: the colour
 // behind it is dimmed by exp(-absorption * profile * step) and its emission is added, both per colour channel.
 const LOCAL_VOLUME_FUNCTIONS = `
-// Value noise on a hash of plain multiplies, adds and fract, which every GPU rounds the same way (a sine hash does not: its error
+// Value noise on a hash of plain multiplies, adds and fract, which rounds the same way on SwiftShader, where it was measured, and is unchecked on hardware GPUs (a sine hash does not: its error
 // grows with the argument). local-volume-noise.js repeats it for the CPU path tracer, so keep the two in step.
 float localVolumeCellHash(vec3 cell) {
   vec3 scrambled = fract(cell * 0.1031);

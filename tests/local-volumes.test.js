@@ -191,7 +191,7 @@ test('the path tracer refuses local volumes on every non-CPU backend instead of 
   for (const backend of ['gpu', 'webgpu']) {
     await assert.rejects(
       renderPathTracedImage({ parts: ground(1), environment: { localVolumes: [{ shape: 'sphere', center: [0, 1, 0], radius: 1 }] }, camera: LOOKING_DOWN }, { ...IMAGE, backend }),
-      new RegExp(`environment\.localVolumes is traced by the CPU path tracer only; backend "${backend}" cannot draw them`),
+      new RegExp(`environment\\.localVolumes is traced by the CPU path tracer only; backend "${backend}" cannot draw them`),
     );
   }
 });
