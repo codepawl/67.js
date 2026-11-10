@@ -386,7 +386,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     }
     const partIds = sourceNode.meshIds ?? [];
     if (partIds.length === 0) {
-      throw invalidField('geometry', id, 'a source node with a mesh of its own, or a mesh ID such as "mesh-0"; call scene_inspect with kind hierarchy to see which nodes hold parts');
+      throw invalidField('geometry', id, 'a source node with a mesh of its own or below it, or a mesh ID such as "mesh-0"; call scene_inspect with kind hierarchy to see which nodes hold parts');
     }
     if (partIds.length > 1) {
       const listed = partIds.slice(0, 8).join(', ');
@@ -396,11 +396,20 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   }
 
   /** The parts scene_inspect lists for one ID: a mesh ID is that part; a source node is every part of it and of the nodes below it. */
-  function inspectedRecordsFor(id) {
+  function inspectedRecordsFor(id, originNodes = new Map()) {
     const sourceNode = sourceNodes.get(id);
     if (!sourceNode || records.some(value => value.id === id)) {
       return [partRecordFor(id)];
     }
+    const found = collectNodeRecords(id);
+    for (const record of found) {
+      originNodes.set(record.id, id);
+    }
+    return found;
+  }
+
+  /** Every part of a source node and of the nodes below it; a node with no part anywhere below it throws the partRecordFor error. */
+  function collectNodeRecords(id) {
     const partIds = [];
     const pending = [id];
     while (pending.length > 0) {
@@ -1057,7 +1066,8 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > records.length)) {
         throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${records.length} mesh IDs, such as ["mesh-0"]`);
       }
-      const selected = options.ids === undefined ? records : options.ids.flatMap(id => inspectedRecordsFor(id));
+      const originNodes = new Map();
+      const selected = options.ids === undefined ? records : options.ids.flatMap(id => inspectedRecordsFor(id, originNodes));
       const visible = selected.slice(offset, offset + limit);
       if (options.includeBounds && visible.reduce((total, record) => total + geometryOf(record).positions.length / 3, 0) > MAX_INSPECTION_VERTICES) {
         throw invalidField('ids', `${visible.length} meshes`, 'fewer meshes, under two million authored base vertices in all, such as ["mesh-0"]');
@@ -1070,6 +1080,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
           triangles: geometryOf(record).indices.length / 3,
           skinned: Boolean(record.source.skin), morphTargets: geometryOf(record).morphTargets?.length ?? 0,
           ...(editedParts.has(record.id) ? { edited: true } : {}),
+          ...(originNodes.has(record.id) ? { fromNode: originNodes.get(record.id) } : {}),
         };
         if (options.includeBounds) {
           node.bounds = baseBounds([geometryOf(record)], [matrices[index]]);

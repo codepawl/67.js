@@ -267,8 +267,11 @@ test('inspect accepts a source-node ID and lists its parts and those of the node
   assert.ok(single && several && empty, 'the robot has leaf, group and childless mesh-less nodes');
   const byNode = scene.inspect({ ids: [single.id] }).nodes;
   assert.deepEqual(byNode.map(node => node.id), single.meshIds);
+  assert.ok(byNode.every(node => node.fromNode === single.id), 'each part says which node it came from');
   const bySeveral = scene.inspect({ ids: [several.id] }).nodes.map(node => node.id);
   assert.ok(several.meshIds.every(id => bySeveral.includes(id)));
-  assert.throws(() => scene.inspect({ ids: [empty.id] }), /^RangeError: geometry: got .*; expected a source node with a mesh of its own, or a mesh ID such as "mesh-0"/);
+  assert.ok(scene.inspect({ ids: [several.id] }).nodes.every(node => node.fromNode === several.id));
+  assert.equal(scene.inspect({ ids: [single.meshIds[0]] }).nodes[0].fromNode, undefined);
+  assert.throws(() => scene.inspect({ ids: [empty.id] }), /^RangeError: geometry: got .*; expected a source node with a mesh of its own or below it, or a mesh ID such as "mesh-0"/);
   assert.throws(() => scene.inspect({ ids: ['nothing-here'] }), /^RangeError: geometry: got "nothing-here"; expected an imported mesh ID such as "mesh-0"/);
 });
