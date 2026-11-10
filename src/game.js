@@ -83,9 +83,33 @@ function describeState(state) {
 
 /**
  * Start the game a recipe describes on a canvas and return its parts: `scene`, `runtime`, `rules`, `input`, `controller`, `renderer`
- * and `dispose()`. Options: `replay` (a recording from recordInput; the keyboard is not attached) and `showStatus` (default true).
+ * and `dispose()`. Options: `replay` (a recording from recordInput; the keyboard is not attached) `showStatus` (default true) and `createRenderer` (tests pass a stand-in for the WebGL renderer).
  */
-export async function startGame(canvas, recipe, { replay, showStatus = true } = {}) {
+export async function startGame(canvas, recipe, options = {}) {
+  const cleanups = [];
+  try {
+    const game = await buildGame(canvas, recipe, options, cleanups);
+    let disposed = false;
+    return {
+      ...game,
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        runCleanups(cleanups);
+      },
+    };
+  } catch (error) {
+    runCleanups(cleanups);
+    throw error;
+  }
+}
+
+// Each resource registers its cleanup as it is created; they run newest first.
+function runCleanups(cleanups) {
+  while (cleanups.length > 0) cleanups.pop()();
+}
+
+async function buildGame(canvas, recipe, { replay, showStatus = true, createRenderer = (...rendererArguments) => new Renderer67(...rendererArguments) }, cleanups) {
   const setup = recipe.game;
   if (!setup) throw new Error('startGame needs a recipe with a game section. Add one with the set-game operation.');
   await loadAgentSceneModules(recipe);
@@ -93,7 +117,7 @@ export async function startGame(canvas, recipe, { replay, showStatus = true } = 
   const { game } = scene.exportRecipe();
   const placement = agentGroundPlacement(scene.parts, scene.environment);
   const environment = litEnvironment(scene, Boolean(placement));
-  const renderer = new Renderer67(canvas, scene.parts, {
+  const renderer = createRenderer(canvas, scene.parts, {
     ground: placement ? createAgentGround(placement) : false,
     hdr: true,
     depth: true,
@@ -101,6 +125,7 @@ export async function startGame(canvas, recipe, { replay, showStatus = true } = 
     environment,
     pixelRatio: Math.min(globalThis.devicePixelRatio ?? 1, 2),
   });
+  cleanups.push(() => renderer.dispose());
 
   const { actions, axes } = inputDefinition(game.input);
   const input = createInput({ sources: replay ? [replaySource(replay)] : inputSources(game.input, canvas), actions, axes });
@@ -126,6 +151,7 @@ export async function startGame(canvas, recipe, { replay, showStatus = true } = 
   const shownNodes = new Map();
   let drawnTopology = scene.topologyRevision;
   const status = showStatus && rules ? createStatusLine(canvas) : null;
+  if (status) cleanups.push(() => status.remove());
 
   const sceneSystem = {
     name: 'scene',
@@ -154,17 +180,12 @@ export async function startGame(canvas, recipe, { replay, showStatus = true } = 
     systems: [input, controller, rig, ...(rules ? [rules] : []), sceneSystem],
     frame: context => ({ ...baseCamera, ...rig.pose(context), environment, time: context.elapsedSeconds }),
   });
+  cleanups.push(() => runtime.dispose());
   const resize = () => renderer.resize();
   globalThis.addEventListener?.('resize', resize);
+  cleanups.push(() => globalThis.removeEventListener?.('resize', resize));
   resize();
   runtime.start();
 
-  return {
-    scene, runtime, rules, input, controller, renderer,
-    dispose() {
-      globalThis.removeEventListener?.('resize', resize);
-      runtime.dispose();
-      status?.remove();
-    },
-  };
+  return { scene, runtime, rules, input, controller, renderer };
 }

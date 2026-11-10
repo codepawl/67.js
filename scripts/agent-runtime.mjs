@@ -1061,10 +1061,17 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         // Same name rule as GLB exports: the server picks the folder, and only the newest few are kept.
         const directory = join(jobRoot, EXPORT_DIRECTORY_NAME);
         await mkdir(directory, { recursive: true, mode: 0o700 });
-        while (savedWebBuildPaths.length >= MAXIMUM_KEPT_WEB_BUILDS) await rm(savedWebBuildPaths.shift(), { recursive: true, force: true });
         const outputDirectory = join(directory, `web-${randomUUID()}`);
+        let summary;
+        try {
+          summary = await writeWebBuild({ recipe, buildDirectory: fileURLToPath(new URL('../', previewUrl)), outputDirectory, title });
+        } catch (error) {
+          // A refused or half-written build never uses up a retention slot or evicts a good one.
+          await rm(outputDirectory, { recursive: true, force: true });
+          throw error;
+        }
         savedWebBuildPaths.push(outputDirectory);
-        const summary = await writeWebBuild({ recipe, buildDirectory: fileURLToPath(new URL('../', previewUrl)), outputDirectory, title });
+        while (savedWebBuildPaths.length > MAXIMUM_KEPT_WEB_BUILDS) await rm(savedWebBuildPaths.shift(), { recursive: true, force: true });
         return { sessionId, revision, ...summary, entry: join(outputDirectory, 'index.html'), host: 'Serve the folder with any static file server; no server code runs.' };
       });
     },
