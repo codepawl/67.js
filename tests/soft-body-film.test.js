@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene } from '../src/agent-scene.js';
-import { FILM_FRAMES_PER_SECOND, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm, unjoinedMinimumDistance } from '../scripts/soft-body-film.mjs';
+import { FILM_FRAMES_PER_SECOND, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, normalSpread, recordFilm, unjoinedMinimumDistance } from '../scripts/soft-body-film.mjs';
 
 // Film tests for #696: each film is one recipe baked twice. The frames must match byte for byte, and the numbers a viewer
 // would see (the landing, the dent, the height and layers of the fold) are measured from the baked vertices, not read off a picture.
@@ -50,9 +50,18 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   assert.ok(touch > 30 && touch < 90, `the hanging flag first touches the floor within frames 30 to 90, got ${touch}`);
   const midFall = Math.round(touch * 0.7);
   assert.ok(axisRange(first.frames[midFall], 1).extent > restHeight * 0.6, 'mid fall the flag is still hanging in the air');
+  // A stiff card would stay one plane: its normals agree and it has no depth. Cloth ripples, so both measures are well above zero.
+  const spreadAtStart = normalSpread(first.frames[0], indices);
+  const spreadMidFall = normalSpread(first.frames[midFall], indices);
+  const depthMidFall = axisRange(first.frames[midFall], 2).extent;
+  assert.ok(spreadAtStart < 0.001, `the hanging flag starts flat, spread ${spreadAtStart}`);
+  assert.ok(spreadMidFall > 0.25, `mid fall the triangle normals scatter (spread ${spreadMidFall}), the sheet is rippled`);
+  assert.ok(depthMidFall > 0.3, `mid fall the sheet bends ${depthMidFall} m out of its plane`);
 
   const finalRange = axisRange(first.frames[last], 1);
-  assert.ok(finalRange.high < 0.055, `the flag ends no more than 5.5 cm above the floor, got ${finalRange.high} m`);
+  assert.ok(finalRange.high < 0.05, `the flag ends no more than 5 cm above the floor, got ${finalRange.high} m`);
+  const spreadAtRest = normalSpread(first.frames[last], indices);
+  assert.ok(spreadAtRest > 0.2, `the flag rests crumpled, not as a flat sheet (spread ${spreadAtRest})`);
   assert.ok(axisRange(first.frames[last], 2).extent > 0.7, 'the flag lies spread over the floor, not stacked in one place');
 
   const without = recordFilm(foldingFlagRecipe({ selfCollision: false }), 'flag', FLAG_FRAMES);
@@ -66,6 +75,6 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   assert.ok(closestWithout < closestWith * 0.9, `without self collision the layers come closer (${closestWithout} m)`);
 
   const bake = first.bakeMilliseconds;
-  context.diagnostic(`flag: touch at frame ${touch}, final height ${finalRange.high.toFixed(4)} m from ${restHeight.toFixed(3)} m, closest unjoined pair ${closestWith.toFixed(4)} m (${closestWithout.toFixed(4)} m without self collision)`);
+  context.diagnostic(`flag: touch at frame ${touch}, final height ${finalRange.high.toFixed(4)} m from ${restHeight.toFixed(3)} m, spread mid fall ${spreadMidFall.toFixed(3)}, at rest ${spreadAtRest.toFixed(3)}, closest unjoined pair ${closestWith.toFixed(4)} m (${closestWithout.toFixed(4)} m without self collision)`);
   context.diagnostic(`flag: bake ${milliseconds(bake)} ms for ${FLAG_FRAMES} steps (${milliseconds(bake / FLAG_FRAMES)} ms a step with self collision, ${milliseconds(without.bakeMilliseconds / FLAG_FRAMES)} ms without)`);
 });

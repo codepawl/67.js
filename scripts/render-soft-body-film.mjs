@@ -1,5 +1,5 @@
 // Renders a preview MP4 of each soft body film (960 by 540, 60 fps, one video frame per simulation step), stills at contact
-// and at the deepest dent, a side-by-side still of the two with the measured size drawn on it, and one JSON of the numbers. Usage: node scripts/render-soft-body-film.mjs <output directory>
+// and at the deepest dent, a side-by-side still of the two with the measured size drawn on it, and one JSON of the numbers. Usage: node scripts/render-soft-body-film.mjs <output directory> [--flag-only]
 // Run it through gpu-lock on a shared machine. It needs `npm run build:lib` first.
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
@@ -10,7 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createAgentScene } from '../src/agent-scene.js';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { FILM_FRAMES_PER_SECOND, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
+import { FILM_FRAMES_PER_SECOND, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, normalSpread, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
 
 const PREVIEW = { width: 960, height: 540, fps: FILM_FRAMES_PER_SECOND };
 const FONT_FILE = 'C\\:/Windows/Fonts/arial.ttf';
@@ -85,19 +85,44 @@ function writeComparisonStill(outputDirectory, files, captions) {
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...inputs, '-filter_complex', filterGraph, '-frames:v', '1', join(outputDirectory, 'jelly-cube-compare.png')]);
 }
 
+/** The jelly cube half of the summary: sizes at rest, contact and the deepest dent, plus the side by side still. */
+function summarizeJelly(outputDirectory, jelly, jellyFiles, landing, jellyFrames) {
+  const atContact = cubeSize(jelly.record.frames[landing.contact]);
+  const atMaxDent = cubeSize(jelly.record.frames[landing.maxDentFrame]);
+  writeComparisonStill(outputDirectory, jellyFiles.files, {
+    contact: `contact: step ${landing.contact} (${seconds(landing.contact).toFixed(3)} s)
+width ${atContact.widthMeters.toFixed(4)} m, height ${atContact.heightMeters.toFixed(4)} m`,
+    'max-dent': `max dent: step ${landing.maxDentFrame} (${seconds(landing.maxDentFrame).toFixed(3)} s)
+width ${atMaxDent.widthMeters.toFixed(4)} m, height ${atMaxDent.heightMeters.toFixed(4)} m
+dent ${landing.maxDentDepth.toFixed(4)} m`,
+  });
+  jellyFiles.files.compare = 'jelly-cube-compare.png';
+  return {
+    simulationSteps: jellyFrames,
+    restSize: { widthMeters: meters(axisRange(jelly.record.frames[0], 0).extent), heightMeters: meters(landing.restHeight) },
+    contact: { step: landing.contact, timeSeconds: seconds(landing.contact), ...atContact },
+    maxDent: { step: landing.maxDentFrame, timeSeconds: seconds(landing.maxDentFrame), depthMeters: meters(landing.maxDentDepth), ...atMaxDent },
+    frameTimes: jelly.frameTimes,
+    files: jellyFiles.files,
+  };
+}
+
 async function main() {
   if (!existsSync(new URL('../build/mcp/server.mjs', import.meta.url))) throw new Error('Run npm run build:lib first: the MCP server is not built.');
-  const outputDirectory = resolve(process.argv[2] ?? '');
-  if (!process.argv[2]) throw new Error('Pass the output directory: node scripts/render-soft-body-film.mjs <directory>');
+  const flagOnly = process.argv.includes('--flag-only');
+  const directoryArgument = process.argv.slice(2).find(argument => !argument.startsWith('--'));
+  const outputDirectory = resolve(directoryArgument ?? '');
+  if (!directoryArgument) throw new Error('Pass the output directory: node scripts/render-soft-body-film.mjs <directory>');
   await mkdir(outputDirectory, { recursive: true });
 
   const jellyFrames = 120;
   const flagFrames = FLAG_FILM_SECONDS * FILM_FRAMES_PER_SECOND;
-  const jelly = filmNumbers(jellyCubeRecipe(), 'cube', jellyFrames);
-  const landing = measureLanding(jelly.record.frames, axisRange(jelly.record.frames[0], 1).extent);
+  const jelly = flagOnly ? null : filmNumbers(jellyCubeRecipe(), 'cube', jellyFrames);
+  const landing = flagOnly ? null : measureLanding(jelly.record.frames, axisRange(jelly.record.frames[0], 1).extent);
   const flag = filmNumbers(foldingFlagRecipe(), 'flag', flagFrames);
   const flagTouch = measureLanding(flag.record.frames, axisRange(flag.record.frames[0], 1).extent).contact;
   const flagMidFall = Math.round(flagTouch * 0.7);
+  const flagSettling = Math.round(flagTouch * 2);
   const flagHash = flag.record.hashes[flagFrames - 1];
 
   const jobsDirectory = join(tmpdir(), `67js-soft-body-film-${process.pid}`);
@@ -106,38 +131,23 @@ async function main() {
   await client.connect(transport);
   try {
     const call = (name, toolArguments) => client.callTool({ name, arguments: toolArguments }, { timeout: 300000 });
-    const jellyFiles = await renderFilm(call, outputDirectory, {
+    const jellyFiles = flagOnly ? null : await renderFilm(call, outputDirectory, {
       name: 'jelly-cube', recipe: jellyCubeRecipe(), nodeId: 'cube', frameCount: jellyFrames, videoSeconds: jellyFrames / FILM_FRAMES_PER_SECOND,
       stillTimes: { contact: landing.contact / FILM_FRAMES_PER_SECOND, 'max-dent': landing.maxDentFrame / FILM_FRAMES_PER_SECOND },
     });
     const flagFiles = await renderFilm(call, outputDirectory, {
       name: 'folding-flag', recipe: foldingFlagRecipe(), nodeId: 'flag', frameCount: flagFrames, videoSeconds: flagFrames / FILM_FRAMES_PER_SECOND,
-      stillTimes: { 'mid-fall': flagMidFall / FILM_FRAMES_PER_SECOND, 'first-touch': flagTouch / FILM_FRAMES_PER_SECOND, 'final-rest': (flagFrames - 1) / FILM_FRAMES_PER_SECOND },
+      stillTimes: { start: 0, 'mid-fall': flagMidFall / FILM_FRAMES_PER_SECOND, 'first-touch': flagTouch / FILM_FRAMES_PER_SECOND, settling: flagSettling / FILM_FRAMES_PER_SECOND, 'final-rest': (flagFrames - 1) / FILM_FRAMES_PER_SECOND },
     });
-    const restFrame = jelly.record.frames[0];
-    const atContact = cubeSize(jelly.record.frames[landing.contact]);
-    const atMaxDent = cubeSize(jelly.record.frames[landing.maxDentFrame]);
     const withoutSelfCollision = recordFilm(foldingFlagRecipe({ selfCollision: false }), 'flag', flagFrames);
     const flagIndices = createAgentScene(foldingFlagRecipe()).parts.find(part => part.name === 'flag').geometry.indices;
     const lastFlagStep = flagFrames - 1;
-    writeComparisonStill(outputDirectory, jellyFiles.files, {
-      contact: `contact: step ${landing.contact} (${seconds(landing.contact).toFixed(3)} s)
-width ${atContact.widthMeters.toFixed(4)} m, height ${atContact.heightMeters.toFixed(4)} m`,
-      'max-dent': `max dent: step ${landing.maxDentFrame} (${seconds(landing.maxDentFrame).toFixed(3)} s)
-width ${atMaxDent.widthMeters.toFixed(4)} m, height ${atMaxDent.heightMeters.toFixed(4)} m
-dent ${landing.maxDentDepth.toFixed(4)} m`,
-    });
-    jellyFiles.files.compare = 'jelly-cube-compare.png';
+    const jellyCube = flagOnly ? undefined : summarizeJelly(outputDirectory, jelly, jellyFiles, landing, jellyFrames);
+    const flagStart = flag.record.frames[0];
+    const flagIndicesForSpread = flagIndices;
     const summary = {
       preview: { ...PREVIEW, videoFrameToStep: 'one video frame is one simulation step: frame N is step N, at N / 60 s' },
-      jellyCube: {
-        simulationSteps: jellyFrames,
-        restSize: { widthMeters: meters(axisRange(restFrame, 0).extent), heightMeters: meters(landing.restHeight) },
-        contact: { step: landing.contact, timeSeconds: seconds(landing.contact), ...atContact },
-        maxDent: { step: landing.maxDentFrame, timeSeconds: seconds(landing.maxDentFrame), depthMeters: meters(landing.maxDentDepth), ...atMaxDent },
-        frameTimes: jelly.frameTimes,
-        files: jellyFiles.files,
-      },
+      jellyCube,
       foldingFlag: {
         simulationSteps: flagFrames,
         finalStep: lastFlagStep,
@@ -146,6 +156,14 @@ dent ${landing.maxDentDepth.toFixed(4)} m`,
         midFallStep: flagMidFall,
         firstTouchStep: flagTouch,
         pileHeightMeters: meters(axisRange(flag.record.frames[lastFlagStep], 1).extent),
+        normalSpread: {
+          start: meters(normalSpread(flagStart, flagIndicesForSpread)),
+          midFall: meters(normalSpread(flag.record.frames[flagMidFall], flagIndicesForSpread)),
+          settling: meters(normalSpread(flag.record.frames[flagSettling], flagIndicesForSpread)),
+          rest: meters(normalSpread(flag.record.frames[lastFlagStep], flagIndicesForSpread)),
+        },
+        midFallDepthMeters: meters(axisRange(flag.record.frames[flagMidFall], 2).extent),
+        settlingStep: flagSettling,
         closestUnjoinedGapMeters: {
           atStep: lastFlagStep,
           withSelfCollision: meters(unjoinedMinimumDistance(flag.record.frames[lastFlagStep], flagIndices)),

@@ -9,15 +9,16 @@ const FLOOR_THICKNESS = 0.01;
 const GROUND_NODE = { id: 'ground', geometry: 'floor', material: 'stone', translation: [0, -0.5, 0], scale: [8, 1, 8] };
 const CAMERA = { fov: 34 };
 
-function baseRecipe({ geometries, materials, nodes, motion, cloth, camera }) {
+function baseRecipe({ geometries, materials, nodes, motion, cloth, camera, floorColor = [0.55, 0.55, 0.58], environment }) {
   return {
     format: '67js.scene', schemaVersion: 1,
     geometries: [...geometries, { id: 'floor', type: 'box', bevel: 0 }],
-    materials: [...materials, { id: 'stone', color: [0.55, 0.55, 0.58] }],
+    materials: [...materials, { id: 'stone', color: floorColor }],
     nodes: [...nodes, GROUND_NODE],
     camera: { ...CAMERA, ...camera },
     motion,
     cloth,
+    ...(environment ? { environment } : {}),
   };
 }
 
@@ -41,38 +42,78 @@ export function jellyCubeRecipe() {
   });
 }
 
-// The pole's path: a swing out and down so the flag ripples, a drag across the floor to lay it flat, then a short push back that crumples the near end.
+// The pole's path: a side to side swing on the way down so the sheet ripples, a landing, then a pull across the floor that gathers
+// the cloth into a crumpled ridge and flattens the rest into a thin layer.
 const POLE_KEYFRAMES = [
   { time: 0, value: [0, 2.6, 0] },
-  { time: 0.3, value: [0, 2.6, 0] },
-  { time: 0.9, value: [0.25, 1.2, 0.4] },
-  { time: 1.5, value: [0, 0.012, 1] },
-  { time: 2.2, value: [0, 0.012, 1.3] },
-  { time: 3.2, value: [0, 0.012, 0.9] },
-  { time: 4, value: [0, 0.012, 0.9] },
+  { time: 0.2, value: [0.1, 2.5, 0.3] },
+  { time: 0.4, value: [-0.1, 2.1, -0.3] },
+  { time: 0.6, value: [0.12, 1.7, 0.35] },
+  { time: 0.8, value: [-0.1, 1.2, -0.3] },
+  { time: 1.0, value: [0.1, 0.7, 0.3] },
+  { time: 1.3, value: [0, 0.012, 0.9] },
+  { time: 2.2, value: [0, 0.012, 2] },
+  { time: 4, value: [0, 0.012, 2] },
 ];
 export const FLAG_FILM_SECONDS = 4;
+// A dark saturated cloth on a mid grey floor, lit by a low key from the side so every fold casts a shadow.
+const FLAG_LOOK = { lightDirection: [-0.9, 0.45, 0.55], keyIntensity: 1.6, fillIntensity: 0.15, ambientIntensity: 0.25 };
 
 /**
- * A flag hung from a pole by its top edge. The pole swings down to the floor and drags the cloth flat, so it ends as a thin layer with
- * a fold. The sheet sets thickness 5 mm, which also sets the self collision radius, so layers stack 1 cm apart instead of 3.7 cm.
+ * A flag hung from a pole by its top edge. The pole swings from side to side while it falls, so the sheet ripples, lands on the floor and
+ * drags the cloth into a crumpled ridge on a thin layer. The sheet sets thickness 3.5 mm, which also sets the self collision radius,
+ * so layers stack 6 mm apart instead of 3.7 cm.
  */
 export function foldingFlagRecipe({ selfCollision = true } = {}) {
   return baseRecipe({
-    geometries: [{ id: 'flag', type: 'grid', segments: 24 }],
-    materials: [{ id: 'fabric', color: [0.9, 0.2, 0.2], doubleSided: true }],
+    geometries: [{ id: 'flag', type: 'grid', segments: 30 }],
+    materials: [{ id: 'fabric', color: [0.62, 0.05, 0.1], doubleSided: true }],
     nodes: [
       { id: 'flag', geometry: 'flag', material: 'fabric', translation: [0, 2.1, 0], scale: [1.6, 1, 1] },
       { id: 'pole', translation: [0, 2.6, 0] },
     ],
     motion: { duration: FLAG_FILM_SECONDS, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes: POLE_KEYFRAMES }] },
-    camera: { eye: [1.1, 1.1, 4.3], target: [0, 0.75, 0.4] },
+    camera: { eye: [1.1, 1.1, 4.3], target: [0, 0.75, 0.9] },
+    floorColor: [0.4, 0.4, 0.42],
+    environment: FLAG_LOOK,
     cloth: {
       duration: FLAG_FILM_SECONDS,
-      sheets: [{ node: 'flag', pin: ['top'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.9, bend: 0.01, damping: 2.5, friction: 0.25, thickness: 0.005 }],
+      sheets: [{ node: 'flag', pin: ['top'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, bend: 0.001, damping: 2.5, friction: 0.25, thickness: 0.003 }],
       colliders: [{ node: 'ground', shape: 'box' }],
     },
   });
+}
+
+/**
+ * How far the sheet's triangles face different ways: 0 for a flat sheet, toward 1 as the normals scatter. A triangle's normal is
+ * taken up to its sign (a cloth has two faces), summed, and the length of that sum over the triangle count is taken from 1.
+ */
+export function normalSpread(vertices, indices) {
+  let sumX = 0;
+  let sumY = 0;
+  let sumZ = 0;
+  let counted = 0;
+  for (let corner = 0; corner < indices.length; corner += 3) {
+    const a = indices[corner] * 3;
+    const b = indices[corner + 1] * 3;
+    const c = indices[corner + 2] * 3;
+    const edgeOne = [vertices[b] - vertices[a], vertices[b + 1] - vertices[a + 1], vertices[b + 2] - vertices[a + 2]];
+    const edgeTwo = [vertices[c] - vertices[a], vertices[c + 1] - vertices[a + 1], vertices[c + 2] - vertices[a + 2]];
+    let normalX = edgeOne[1] * edgeTwo[2] - edgeOne[2] * edgeTwo[1];
+    let normalY = edgeOne[2] * edgeTwo[0] - edgeOne[0] * edgeTwo[2];
+    let normalZ = edgeOne[0] * edgeTwo[1] - edgeOne[1] * edgeTwo[0];
+    const length = Math.hypot(normalX, normalY, normalZ);
+    if (length < 1e-12) continue;
+    const sign = normalZ < 0 ? -1 / length : 1 / length;
+    normalX *= sign;
+    normalY *= sign;
+    normalZ *= sign;
+    sumX += normalX;
+    sumY += normalY;
+    sumZ += normalZ;
+    counted++;
+  }
+  return counted === 0 ? 0 : 1 - Math.hypot(sumX, sumY, sumZ) / counted;
 }
 
 /** The cloth node's vertices at `time` in world space (the recipe nodes use translation and scale only), as a copy. */
