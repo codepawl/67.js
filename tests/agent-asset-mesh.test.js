@@ -272,6 +272,17 @@ test('inspect accepts a source-node ID and lists its parts and those of the node
   assert.ok(several.meshIds.every(id => bySeveral.includes(id)));
   assert.ok(scene.inspect({ ids: [several.id] }).nodes.every(node => node.fromNode === several.id));
   assert.equal(scene.inspect({ ids: [single.meshIds[0]] }).nodes[0].fromNode, undefined);
-  assert.throws(() => scene.inspect({ ids: [empty.id] }), /^RangeError: geometry: got .*; expected a source node with a mesh of its own or below it, or a mesh ID such as "mesh-0"/);
+  const [report] = scene.inspect({ ids: [empty.id, single.id], includeBounds: false }).nodes;
+  assert.equal(report.id, empty.id);
+  assert.equal(report.parent, empty.parent);
+  assert.equal(report.joint, empty.joint);
+  assert.deepEqual(report.translation, empty.translation);
+  assert.equal(report.restWorldPosition.length, 3);
+  assert.ok(report.restWorldPosition.every(Number.isFinite));
+  assert.equal(report.isSourceNodeReport, undefined);
+  const holdsMeshBelow = node => node.meshIds.length > 0 || nodes.some(other => other.parent === node.id && holdsMeshBelow(other));
+  const joint = nodes.find(node => node.joint && !holdsMeshBelow(node));
+  assert.ok(joint, 'the rigged robot has a joint with no mesh below it');
+  assert.equal(scene.inspect({ ids: [joint.id] }).nodes[0].joint, true);
   assert.throws(() => scene.inspect({ ids: ['nothing-here'] }), /^RangeError: geometry: got "nothing-here"; expected an imported mesh ID such as "mesh-0"/);
 });

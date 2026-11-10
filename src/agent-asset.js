@@ -374,25 +374,13 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   let editSignature = meshEditSignature(editedParts);
   let topologyRevision = 0;
 
-  /** A part by its ID (mesh-3), or by the source node that holds exactly that one part; several or none is named in the error. */
+  /** A part by its ID (mesh-3); anything else that is not a source node is an unknown ID. */
   function partRecordFor(id) {
     const record = records.find(value => value.id === id);
-    if (record) {
-      return record;
+    if (!record) {
+      throw invalidField('geometry', id, 'an imported mesh ID such as "mesh-0", or a source node ID; call scene_inspect without ids to list the meshes, or with kind hierarchy for source nodes');
     }
-    const sourceNode = sourceNodes.get(id);
-    if (!sourceNode) {
-      throw invalidField('geometry', id, 'an imported mesh ID such as "mesh-0"; call scene_inspect without ids to list them, or with kind hierarchy for source nodes');
-    }
-    const partIds = sourceNode.meshIds ?? [];
-    if (partIds.length === 0) {
-      throw invalidField('geometry', id, 'a source node with a mesh of its own or below it, or a mesh ID such as "mesh-0"; call scene_inspect with kind hierarchy to see which nodes hold parts');
-    }
-    if (partIds.length > 1) {
-      const listed = partIds.slice(0, 8).join(', ');
-      throw invalidField('geometry', id, `one part ID, such as "${partIds[0]}"; this source node holds ${partIds.length} parts: ${listed}${partIds.length > 8 ? ', ...' : ''}`);
-    }
-    return records.find(value => value.id === partIds[0]);
+    return record;
   }
 
   /** The parts scene_inspect lists for one ID: a mesh ID is that part; a source node is every part of it and of the nodes below it. */
@@ -403,12 +391,31 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     }
     const found = collectNodeRecords(id);
     for (const record of found) {
-      originNodes.set(record.id, id);
+      if (!record.isSourceNodeReport) {
+        originNodes.set(record.id, id);
+      }
     }
     return found;
   }
 
-  /** Every part of a source node and of the nodes below it; a node with no part anywhere below it throws the partRecordFor error. */
+  /** A source node with no part anywhere below it (a joint or an empty): its transform at rest, so an agent can aim at it or pose it. */
+  function sourceNodeReport(sourceNode) {
+    const world = mat4.create();
+    const chain = [];
+    for (let current = sourceNode; current; current = current.parent ? sourceNodes.get(current.parent) : null) {
+      chain.unshift(current);
+    }
+    for (const link of chain) {
+      mat4.multiply(world, world, mat4.fromRotationTranslationScale(mat4.create(), link.rotation, link.translation, link.scale));
+    }
+    return {
+      isSourceNodeReport: true, id: sourceNode.id, label: sourceNode.label, name: sourceNode.name, parent: sourceNode.parent,
+      joint: Boolean(sourceNode.joint), translation: [...sourceNode.translation], rotation: [...sourceNode.rotation], scale: [...sourceNode.scale],
+      restWorldPosition: [world[12], world[13], world[14]], meshIds: [],
+    };
+  }
+
+  /** Every part of a source node and of the nodes below it; with no part anywhere below it, the node's own report. */
   function collectNodeRecords(id) {
     const partIds = [];
     const pending = [id];
@@ -418,7 +425,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       pending.push(...[...sourceNodes.values()].filter(node => node.parent === nodeId).map(node => node.id));
     }
     if (partIds.length === 0) {
-      return [partRecordFor(id)];
+      return [sourceNodeReport(sourceNodes.get(id))];
     }
     return records.filter(value => partIds.includes(value.id));
   }
@@ -1063,16 +1070,20 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
           ...(options.includeBounds ? { note: 'Hierarchy lists no bounds; inspect without kind, with ids of nodes or meshes, to get them.' } : {}),
           motion: recipe.motion ? { duration: recipe.motion.duration, loop: recipe.motion.loop, tracks: recipe.motion.tracks.length, time: motionTime } : null };
       }
-      if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > records.length)) {
-        throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${records.length} mesh IDs, such as ["mesh-0"]`);
+      if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > Math.max(records.length, sourceNodes.size))) {
+        throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${Math.max(records.length, sourceNodes.size)} mesh or node IDs, such as ["mesh-0"]`);
       }
       const originNodes = new Map();
       const selected = options.ids === undefined ? records : options.ids.flatMap(id => inspectedRecordsFor(id, originNodes));
       const visible = selected.slice(offset, offset + limit);
-      if (options.includeBounds && visible.reduce((total, record) => total + geometryOf(record).positions.length / 3, 0) > MAX_INSPECTION_VERTICES) {
+      if (options.includeBounds && visible.filter(record => !record.isSourceNodeReport).reduce((total, record) => total + geometryOf(record).positions.length / 3, 0) > MAX_INSPECTION_VERTICES) {
         throw invalidField('ids', `${visible.length} meshes`, 'fewer meshes, under two million authored base vertices in all, such as ["mesh-0"]');
       }
       const nodes = visible.map(record => {
+        if (record.isSourceNodeReport) {
+          const { isSourceNodeReport, ...report } = record;
+          return report;
+        }
         const index = Number(record.id.slice(5));
         const node = {
           id: record.id, label: record.label, geometry: record.geometry.id, material: record.material.id,
