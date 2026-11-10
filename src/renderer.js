@@ -2075,9 +2075,9 @@ export class Renderer67 {
   }
 
   // True when the frame draws local volumes. An empty list costs nothing; anything else is checked here, before a program is bound.
-  prepareLocalVolumes(input) {
+  prepareLocalVolumes(input, frame) {
     if (input === undefined || (Array.isArray(input) && input.length === 0)) return false;
-    return requireFeatureCode('volumeFog').support.prepareLocalVolumes(this, input) > 0;
+    return requireFeatureCode('volumeFog').support.prepareLocalVolumes(this, input, frame) > 0;
   }
 
   // The post steps this frame uses. A step that is off costs nothing in a program that has it compiled out.
@@ -2149,10 +2149,9 @@ export class Renderer67 {
     context.bindVertexArray(null);
     const fogSky = this.fogSkyVisibility?.(this.sceneParts, volume, context, environment);
     const fogSupport = volume.density > 0 ? requireFeatureCode('volumeFog').support : null;
-    const localVolumes = this.prepareLocalVolumes(environment.localVolumes);
+    const localVolumes = this.prepareLocalVolumes(environment.localVolumes, frame);
     if (fogSupport) fogSupport.packLights(this);
     else if (this.fogLightBuffers) this.fogLightBuffers.count = 0;
-    if (localVolumes) requireFeatureCode('volumeFog').support.drawMeshVolumes(this, frame);
     const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky, localVolumes));
     context.useProgram(post.program);
     if (this.look) viewTransformShader.bindLook(this, post.program);
@@ -2683,7 +2682,6 @@ export class Renderer67 {
 
   dispose() {
     this.fogFieldTexture?.dispose();
-    if (this.meshVolumePass) requireFeatureCode('volumeFog').support.disposeMeshVolumes(this);
     this.releaseFrameTargets();
     this.shadowCascades?.dispose(this.context, this.renderTargets);
     viewTransformShader.dispose?.(this);

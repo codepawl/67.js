@@ -8,6 +8,7 @@ import { assertClosedMesh } from './local-volume-parts.js';
 //   channel G  keeps the nearest front face distance (the entry, used to order the volumes).
 // That sum is exact for any number of shells and any shape, so there is no shell limit. The post shader then integrates the volume
 // over that length in closed form, which is exact because a mesh volume has the same density everywhere inside (no falloff, no noise).
+// Geometry far past the far plane is clipped, so a ray can meet a front face and lose its back face; the post shader repairs that.
 // The cost is two draws of the part per frame, so a scene without mesh volumes pays nothing.
 // Limits: the mesh must be closed and rigid; geometry nearer than the camera's near plane is clipped, so a ray loses the stretch
 // between the eye and the near plane; the target is as wide as the canvas and as tall as the canvas times the number of mesh volumes.
@@ -97,11 +98,19 @@ function uploadGeometry(context, geometry) {
   };
 }
 
-function createState(context) {
+function createState(renderer) {
+  const context = renderer.context;
   if (!context.getExtension('EXT_float_blend')) throw new Error('Local volumes with fit "mesh" need the WebGL extension EXT_float_blend, which this browser does not offer; use fit "bounds"');
   const program = compileProgram(context, MESH_VERTEX, MESH_FRAGMENT);
   const uniforms = Object.fromEntries(UNIFORM_NAMES.map(name => [name, context.getUniformLocation(program, name)]));
-  return { program, uniforms, geometries: new Map(), target: null };
+  const state = { program, uniforms, geometries: new Map(), target: null };
+  // The renderer's dispose gains this step here, so the core carries no call for a pass most scenes never create.
+  const disposeRenderer = renderer.dispose.bind(renderer);
+  renderer.dispose = () => {
+    disposeMeshVolumePass(renderer, state);
+    disposeRenderer();
+  };
+  return state;
 }
 
 function allocateTarget(renderer, state, layers) {
@@ -136,6 +145,21 @@ function releaseTarget(renderer, state) {
   renderer.renderTargets.release('meshVolumes');
 }
 
+function releaseGeometry(context, gpu) {
+  context.deleteVertexArray(gpu.vertexArray);
+  gpu.buffers.forEach(buffer => context.deleteBuffer(buffer));
+}
+
+// A part whose geometry was replaced or removed no longer draws, so its buffers go.
+function pruneGeometries(context, state, meshParts) {
+  const inUse = new Set(meshParts.map(({ part }) => part.geometry));
+  for (const [geometry, gpu] of state.geometries) {
+    if (inUse.has(geometry)) continue;
+    releaseGeometry(context, gpu);
+    state.geometries.delete(geometry);
+  }
+}
+
 function drawPart(context, state, part) {
   let gpu = state.geometries.get(part.geometry);
   if (!gpu) {
@@ -156,10 +180,14 @@ function drawPart(context, state, part) {
  */
 export function drawMeshVolumes(renderer, frame) {
   const meshParts = renderer.localVolumeBuffers?.meshParts ?? [];
-  if (meshParts.length === 0) return null;
+  if (meshParts.length === 0) {
+    if (renderer.meshVolumePass) pruneGeometries(renderer.context, renderer.meshVolumePass, meshParts);
+    return null;
+  }
   const context = renderer.context;
-  const state = (renderer.meshVolumePass ??= createState(context));
+  const state = (renderer.meshVolumePass ??= createState(renderer));
   for (const { part, label } of meshParts) assertClosedMesh(part, label);
+  pruneGeometries(context, state, meshParts);
   allocateTarget(renderer, state, meshParts.length);
   const { width, height } = renderer.canvas;
   const blendWasOn = context.isEnabled(context.BLEND);
@@ -201,16 +229,10 @@ export function drawMeshVolumes(renderer, frame) {
   return state.target.texture;
 }
 
-/** Frees the program, the buffer and the uploaded meshes. */
-export function disposeMeshVolumePass(renderer) {
-  const state = renderer.meshVolumePass;
-  if (!state) return;
+function disposeMeshVolumePass(renderer, state) {
   const context = renderer.context;
   releaseTarget(renderer, state);
-  for (const gpu of state.geometries.values()) {
-    context.deleteVertexArray(gpu.vertexArray);
-    gpu.buffers.forEach(buffer => context.deleteBuffer(buffer));
-  }
+  state.geometries.forEach(gpu => releaseGeometry(context, gpu));
   context.deleteProgram(state.program);
   renderer.meshVolumePass = null;
 }

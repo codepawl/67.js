@@ -1,8 +1,6 @@
 - entry:fog-shader: the mesh pass (a small program, an RG32F target, the front and back face sum) and the closed-form step in the post shader, so smoke fills a modelled room in the rasterizer as it does in the path tracer instead of throwing; the code loads only with the fog addon and costs nothing in a scene without a fit "mesh" volume.
-- scene:agent-scene: the same lazy fog code plus the edge check (open edges and winding) moved into the part binding, an agent-facing capability.
+- scene:agent-scene: the edge check (open edges and winding) moved into the part binding, an agent-facing capability.
 - scene:agent-scene+lazy: the same code, counted with the lazy chunks.
-- scene:lit-box: two lines in the renderer (the mesh pass call and its dispose), 26 bytes gzip; the pass itself is in the fog addon.
-- goal:lit-box: 26 bytes gzip for the renderer's call into the mesh pass; the call must sit in the frame path, and the pass is lazy.
-- scene:gltf-box: the same two renderer lines, 31 bytes gzip.
-- goal:gltf-box: the same two renderer lines, 31 bytes gzip.
-- goal:agent-scene: the scene is already over its goal; the part binding and edge check must run where the recipe is checked, and the gain is an agent-facing capability (119 bytes gzip).
+- goal:agent-scene: the scene is already over its goal; the part binding and edge check must run where the recipe is checked, and the gain is an agent-facing capability (92 bytes gzip).
+- scene:lit-box: the renderer passes the frame to the local volume step, 2 bytes gzip; the mesh pass and its dispose hook load lazily with the fog addon.
+- scene:gltf-box: the same argument, 1 byte gzip.

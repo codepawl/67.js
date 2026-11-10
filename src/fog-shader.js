@@ -1,7 +1,7 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
 import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
-import { drawMeshVolumes, disposeMeshVolumePass } from './mesh-volume-pass.js';
+import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
 
 // The volume fog step of the post pass: its uniforms and the march that scatters light through the fog box. Only a renderer that
@@ -78,12 +78,13 @@ function bindFieldAndLights(renderer, post, volume) {
 
 // The local volumes of the frame (environment.localVolumes), checked and packed once before the post program is chosen, so a bad
 // field or a renderer without depth or HDR throws before any program is bound. Returns the count packed, or 0 for an empty list.
-function prepareLocalVolumes(renderer, input) {
+function prepareLocalVolumes(renderer, input, frame) {
   const resolved = resolveLocalVolumes(input, 'environment.localVolumes');
   if (resolved.length === 0) return 0;
   if (!renderer.depth || !renderer.hdr || renderer.transparent || renderer.benchmark) throw new Error('Local volumes require depth:true, active HDR and an opaque canvas');
   const buffers = (renderer.localVolumeBuffers ??= createLocalVolumeBuffers());
   packLocalVolumes(bindLocalVolumeParts(resolved, renderer.sceneParts), buffers);
+  drawMeshVolumes(renderer, frame);
   return buffers.count;
 }
 
@@ -182,9 +183,11 @@ vec3 localVolumes(vec3 background) {
     if (localVolumeCenters[index].w > 1.5) {
       // A closed mesh: the mesh pass stored the length inside this pixel's ray and the nearest entry (see mesh-volume-pass.js).
       vec2 inside = texelFetch(localMeshVolumes, ivec2(gl_FragCoord.xy) + ivec2(0, int(localVolumeSteps[index].y) * int(resolution.y)), 0).rg;
-      if (inside.x > 0.0) {
+      // A back face past the far plane is clipped and leaves only its front face, a negative sum; that ray ends at the surface.
+      float insideLength = inside.x < -1e-5 * surfaceDistance ? inside.x + surfaceDistance : inside.x;
+      if (insideLength > 0.0) {
         entries[index] = inside.y < 1e29 ? inside.y : 0.0;
-        exits[index] = entries[index] + inside.x;
+        exits[index] = entries[index] + insideLength;
       }
       continue;
     }
@@ -244,7 +247,7 @@ function packLights(renderer) {
 
 registerShaderFeatureCode('volumeFog', {
   // The JavaScript half, which the renderer calls for a frame that draws a volume fog.
-  support: { packLights, bindUniforms, usesDetail: fogUsesDetail, prepareLocalVolumes, bindLocalVolumes, drawMeshVolumes, disposeMeshVolumes: disposeMeshVolumePass },
+  support: { packLights, bindUniforms, usesDetail: fogUsesDetail, prepareLocalVolumes, bindLocalVolumes },
   localDeclarations: LOCAL_VOLUME_DECLARATIONS,
   localFunctions: LOCAL_VOLUME_FUNCTIONS,
   postDeclarations: `

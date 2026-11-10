@@ -107,7 +107,7 @@ async function drawInChrome(page, scenarios) {
     return results;
   };
   const frames = await page.evaluate(task, { scenarios, size: SIZE });
-  return frames.map(frame => (frame.transmittance ? { ...frame, transmittance: transmittanceOf(frame.transmittance) } : frame));
+  return frames.map(frame => (frame.transmittance ? { ...frame, filled: frame.transmittance.filled, transmittance: transmittanceOf(frame.transmittance) } : frame));
 }
 
 // The display shows aces(light) ^ (1 / 2.2); this undoes both for a channel, so the ratio of two frames is the light that got through.
@@ -230,6 +230,30 @@ test('the rasterizer sums every shell a ray crosses, from outside and from insid
     assert.ok(Math.abs(inside.transmittance[middle * 4] - Math.exp(-0.7 * 1.5)) < 0.01, `from inside: ${inside.transmittance[middle * 4]}`);
     assert.match(open.message, /environment\.localVolumes\[0\]\.part "room" is not a closed mesh \(\d+ open edges\)/);
     assert.match(mixed.message, /environment\.localVolumes\[0\]\.part "room" has faces wound against each other/);
+  } finally {
+    await opened.close();
+  }
+});
+
+test('a mesh that straddles the far plane keeps the stretch it has this side of it', async (context) => {
+  const opened = await openPage(context);
+  if (!opened) return;
+  try {
+    // The box spans 6 to 7 units from the eye and the far plane sits at 6.5, so its back face is clipped. A box half as long ends
+    // at 6.5 inside a farther far plane and loses nothing, so both pixels must glow the same.
+    const view = { eye: [-6, 0.5, 0.5], target: [0, 0.5, 0.5], up: [0, 1, 0], fov: 20 };
+    const glowing = { shape: 'mesh', part: 'room', fit: 'mesh', density: 0.7, falloff: 0, steps: 16, emission: [1, 1, 1] };
+    const singleBox = { positions: dumbbell().positions.slice(0, 24), indices: dumbbell().indices.slice(0, 36) };
+    const halfLong = [0.5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    const [clipped, whole] = await drawInChrome(opened.page, [
+      { mesh: singleBox, matrix: IDENTITY, camera: { ...view, far: 6.5 }, localVolumes: [glowing] },
+      { mesh: singleBox, matrix: halfLong, camera: { ...view, far: 7.5 }, localVolumes: [glowing] },
+    ]);
+    assert.equal(clipped.message, null);
+    const middle = ((SIZE / 2) * SIZE + SIZE / 2) * 4;
+    const expected = lightOf(whole.filled[middle]);
+    assert.ok(lightOf(clipped.filled[middle]) > 0.4, 'the clipped volume still glows');
+    assert.ok(Math.abs(lightOf(clipped.filled[middle]) - expected) < 0.02 * expected, `clipped ${lightOf(clipped.filled[middle])} against ${expected}`);
   } finally {
     await opened.close();
   }
