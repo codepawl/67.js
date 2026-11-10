@@ -3,10 +3,10 @@
 // normal gets the higher draw rank, and the renderer pulls each rank a little closer in depth only, so the same triangle
 // wins every frame and at every distance. Ranks are per triangle, not per part: a whole-part offset moved faces that had
 // no conflict and made things worse (issue #593).
-import { mat4 } from 'gl-matrix';
 import { depthLayerOf, MAXIMUM_FLUSH_RANK, setFlushOrder } from './depth-layer.js';
 import { clipFlushOverlaps, FLUSH_CUT_MINIMUM_AREA, FLUSH_CUT_STRIDE, sameNumbers } from './flush-clip.js';
 import { findFlushPairs, float32Step, worldBounds } from './flush-search.js';
+import { invertAffine } from './path-tracer-reprojection.js';
 
 const COLLAPSED_AXIS_SHARE = 1e-3;
 const CACHED_ORDERS_PER_GEOMETRY = 8;
@@ -77,7 +77,7 @@ function coordinateStep(part) {
 function cutRecords(found, partIndex, cutPairs) {
   const part = found.parts[partIndex];
   const { positions, indices } = part.geometry;
-  const inverse = mat4.invert(new Float64Array(16), part.matrix);
+  const inverse = invertAffine(part.matrix);
   if (!inverse) return null;
   cutPairs.sort((one, other) => found.local[one.back] - found.local[other.back] || one.front - other.front);
   const cuts = new Float64Array(cutPairs.length * FLUSH_CUT_STRIDE);
