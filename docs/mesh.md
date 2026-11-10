@@ -406,10 +406,13 @@ lower index, so the same input always gives the same bytes. Faces they keep carr
 | `symmetrize` | `axis` (default x), `keep` (`positive` or `negative`), `distance` | `mirrored` | Cuts faces that cross the plane through the origin, drops the other half and mirrors the kept half. Left and right (top and bottom, front and back) tags swap on the mirrored half. |
 | `scale_elements` | `select`, `scale` (above 0) | none | Scales each group of selected faces that share a vertex about the group's average vertex position. Unselected neighbours follow along shared vertices. |
 | `extrude_edges` | `edges`, `offset` | `side` | Copies the vertices of the selected edges, moves the copies by `offset` and joins each edge to its copy with a quad. Select a surface boundary with `{ "open": true }`. |
+| `split_edges` | `edges` | none | Opens the surface along the selected edges: the faces on each side stop sharing the edge's vertices, which are copied once per group of faces that still meet around them. Faces keep their tags and attributes; the result has boundary edges. |
+| `delete_loose` | none | none | Removes every vertex that no face uses (the lint problem `loose-vertex`). Fails when there is none. |
+| `flatten` | `verts`, `normal`, `factor` (0 to 1, default 1) | none | Moves the selected vertices toward the plane through their average point. `normal` is the plane direction; without it the area-weighted normal of the faces whose vertices are all selected is used. |
 
 `dual` and `symmetrize` leave a closed surface closed. `extrude_edges` on interior edges adds a fin, so a closed
 mesh is no longer closed afterwards. `extrude_vertices` is not offered: a mesh derives its edges from faces and cannot
-hold a loose edge. The size of `poke` and `extrude_edges` is checked before they allocate. The `meshEdit.<op>`
+hold a loose edge. The size of `poke`, `split_edges` and `extrude_edges` is checked before they allocate. The `meshEdit.<op>`
 capabilities topic lists the exact fields.
 
 ### Subdivide
