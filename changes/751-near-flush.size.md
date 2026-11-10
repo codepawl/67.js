@@ -1,0 +1,1 @@
+- scene:agent-scene+lazy: the near-flush cut (+80 bytes) settles nested facades a few millimetres apart, which left 22 rank-overflow triangles on the Melbourne city model
