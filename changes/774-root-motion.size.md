@@ -1,0 +1,2 @@
+- entry:animation-graph: root motion extraction, interruptible crossfades and the two IK hook builders are agent-facing capabilities for any rig (a creature or a machine walks and stands on uneven ground without a custom pose system); they load only with this optional addon.
+- scene:player: the controller reads a root motion function and publishes `intentSpeed`, a few dozen bytes gzip, so a game that hooks animation to movement does not need its own controller.
