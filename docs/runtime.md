@@ -58,7 +58,7 @@ The first argument is any object with `render(frame)`, such as `Renderer67`.
 
 ## System interface
 
-Physics, input, player, animation graph, audio and game code plug in as systems. A system is a plain object. Only `name` is required; leave out any hook it does not need.
+Physics ([live physics](physics-runtime.md)), input ([input](input.md)), player, animation graph, audio and game code plug in as systems. A system is a plain object. Only `name` is required; leave out any hook it does not need.
 
 ```js
 const system = {
