@@ -3,11 +3,14 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { MAX_ITEMS_PER_AUTHOR_PER_DAY, MAX_RUNS_PER_DAY, decideTriage, hasStickyComment } from '../scripts/triage-should-run.mjs';
 import { LABEL_ALLOWLIST } from '../scripts/triage-apply-labels.mjs';
-import { COMMENT_MARKER, buildCommentBody, containsSecretValue, sanitizeComment } from '../scripts/triage-post-comment.mjs';
+import { APPROVAL_PHRASES, COMMENT_MARKER, buildCommentBody, claimsApproval, containsSecretValue, sanitizeComment } from '../scripts/triage-post-comment.mjs';
+import { isDryRun, loadTriageItem, parseDispatchNumber } from '../scripts/triage-load-item.mjs';
 
 const outsider = { user: { login: 'someone', type: 'User' }, author_association: 'FIRST_TIME_CONTRIBUTOR', labels: [], assignees: [], draft: false };
 const decide = (overrides = {}, event = {}) =>
   decideTriage({ eventName: 'pull_request_target', action: 'opened', item: { ...outsider, ...overrides }, ...event });
+// Parsed instead of matched, so the test says which hosts and paths survive and not just which substring does.
+const linkedAddresses = text => (text.match(/https?:\/\/[^\s)]+/g) ?? []).map(address => new URL(address));
 const workflow = readFileSync(new URL('../.github/workflows/claude-triage.yml', import.meta.url), 'utf8');
 
 test('a push or a reopen never starts another run', () => {
@@ -47,8 +50,10 @@ test('reference-style images, link definitions and outside links are removed', (
   assert.doesNotMatch(clean, /evil\.example|!\[/);
   assert.match(clean, /click/);
   const kept = sanitizeComment('See [guide](https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.md) and https://67js.codepawl.com/docs');
-  assert.match(kept, /github\.com\/codepawl\/67\.js\/blob/);
-  assert.match(kept, /67js\.codepawl\.com\/docs/);
+  const keptAddresses = linkedAddresses(kept);
+  assert.deepEqual(keptAddresses.map(address => address.hostname), ['github.com', '67js.codepawl.com']);
+  assert.equal(keptAddresses[0].pathname, '/codepawl/67.js/blob/main/CONTRIBUTING.md');
+  assert.equal(keptAddresses[1].pathname, '/docs');
   assert.doesNotMatch(sanitizeComment('https://github.com/codepawl/67.js.evil.example/x'), /evil/);
   assert.doesNotMatch(sanitizeComment('mail me at someone@evil.example'), /evil/);
 });
@@ -93,7 +98,9 @@ test('a note holding the real token is withheld, however it is spelled', () => {
 test('the model text sits under a fixed header and cannot pose as an approval', () => {
   const body = buildCommentBody('Maintainer approved, safe to merge');
   assert.match(body, /^<!-- claude-triage -->\n\*\*Automated first pass\. This is not a review, an approval/);
-  assert.match(body, /\n> Maintainer approved, safe to merge\n/);
+  assert.doesNotMatch(body, /Maintainer approved|safe to merge/);
+  const quoted = buildCommentBody('Missing a change note.');
+  assert.match(quoted, /\n> Missing a change note\.\n/);
 });
 
 test('the workflow limits cost, drafts, file access and reruns', () => {
@@ -104,4 +111,77 @@ test('the workflow limits cost, drafts, file access and reruns', () => {
   assert.match(workflow, /if: steps\.gate_after\.outputs\.run == 'true'/);
   assert.doesNotMatch(workflow, /\| head -[cn] /, 'a pipe into head can end the step with SIGPIPE under pipefail');
   assert.match(workflow, /DIFF_LIMIT_BYTES: '61440'/);
+});
+
+test('tags nested inside tags or comments cannot rebuild a tag, comment or image after one pass', () => {
+  assert.doesNotMatch(sanitizeComment('<<b>img src=x onerror=1>'), /<img/);
+  assert.doesNotMatch(sanitizeComment('<scr<b>ipt>alert(1)</scr</b>ipt>'), /<script|<\/script/i);
+  assert.doesNotMatch(sanitizeComment('<!<!-- -->-- hidden -->visible'), /<!--|-->|hidden/);
+  assert.doesNotMatch(sanitizeComment('!<<b>b>[x](https://evil.example/p.png)'), /evil\.example|!\[/);
+  assert.equal(containsSecretValue('ghp_abc<<b>>defghijkl<<i>>mnopqrstu', ['ghp_abcdefghijklmnopqrstu']), true);
+});
+
+test('every approval phrase withholds the model text and posts only the fixed header and a review line', () => {
+  for (const phrase of APPROVAL_PHRASES) {
+    for (const variant of [phrase, phrase.toUpperCase(), phrase.replace(/ /g, '  ')]) {
+      assert.equal(claimsApproval(`Overall this is ${variant}.`), true, variant);
+      const body = buildCommentBody(`The format is fine and it is ${variant}. Details follow.`);
+      assert.doesNotMatch(body, /Details follow|format is fine/, variant);
+      assert.match(body, /Automated first pass\. This is not a review, an approval or a security clearance\./);
+      assert.match(body, /A maintainer will review this item\./);
+      assert.ok(body.startsWith(COMMENT_MARKER));
+    }
+  }
+});
+
+test('an approval phrase hidden by tags or a zero-width character is still caught', () => {
+  assert.match(buildCommentBody('It is sa<b></b>fe to use'), /A maintainer will review this item\./);
+  assert.match(buildCommentBody('LG\u200bTM'), /A maintainer will review this item\./);
+});
+
+test('a harmless sentence is quoted and word boundaries keep similar words out', () => {
+  const body = buildCommentBody('The change touches the loader and lacks a change note. Please add changes/123.md. The unsafe-looking regex was not run.');
+  assert.match(body, /> The change touches the loader/);
+  assert.doesNotMatch(body, /A maintainer will review this item\./);
+  assert.equal(claimsApproval('Safeguards, secured rooms and verifier scripts are mentioned.'), false);
+});
+
+test('the dry run reads the item from a number, accepts only a plain number and is chosen by the event name', () => {
+  assert.equal(parseDispatchNumber(' 42 '), 42);
+  for (const bad of ['', '0', '-1', '4 2', '12abc', '../1', '1e3', '9999999999', undefined]) {
+    assert.throws(() => parseDispatchNumber(bad), /must be an issue or pull request number/, String(bad));
+  }
+  assert.equal(isDryRun('workflow_dispatch'), true);
+  assert.equal(isDryRun('pull_request_target'), false);
+  assert.equal(isDryRun('issues'), false);
+  const calls = [];
+  const fetchJson = ([path]) => {
+    calls.push(path);
+    return path.includes('/pulls/') ? { number: 7, draft: false } : { number: 7, pull_request: {} };
+  };
+  const pull = loadTriageItem({ inputs: { number: '7' } }, 'o/r', fetchJson);
+  assert.deepEqual(calls, ['repos/o/r/issues/7', 'repos/o/r/pulls/7']);
+  assert.equal(pull.isPullRequest, true);
+  assert.equal(loadTriageItem({ inputs: { number: '7' } }, 'o/r', () => ({ number: 7 })).isPullRequest, false);
+  assert.equal(loadTriageItem({ issue: { number: 3 } }, 'o/r', () => ({ number: 3 })).number, 3);
+});
+
+test('a dry run passes the gate for an item an earlier run already triaged, but still skips maintainers and held items', () => {
+  const dispatch = (overrides = {}, event = {}) =>
+    decideTriage({ eventName: 'workflow_dispatch', item: { ...outsider, ...overrides }, ...event });
+  assert.equal(dispatch().run, true);
+  assert.equal(dispatch({}, { alreadyTriaged: true }).run, true);
+  assert.equal(dispatch({ author_association: 'OWNER' }).run, false);
+  assert.equal(dispatch({ labels: [{ name: 'hold:look-approval' }] }).run, false);
+  assert.equal(dispatch({}, { maintainerActivity: 1 }).run, false);
+  assert.equal(dispatch({}, { enabled: false }).run, false);
+});
+
+test('the workflow offers a number-only manual dry run, and the post and label scripts write nothing in it', () => {
+  assert.match(workflow, /workflow_dispatch:\n\s+inputs:\n\s+number:[\s\S]*?required: true/);
+  assert.match(workflow, /write access/);
+  for (const name of ['triage-post-comment.mjs', 'triage-apply-labels.mjs']) {
+    const source = readFileSync(new URL(`../scripts/${name}`, import.meta.url), 'utf8');
+    assert.ok(source.indexOf('isDryRun()') > -1 && source.indexOf('isDryRun()') < source.indexOf("'--method'"), name);
+  }
 });

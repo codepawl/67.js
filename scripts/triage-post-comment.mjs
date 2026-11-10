@@ -1,15 +1,17 @@
 // Posts Claude's first-pass note as one sticky comment. Claude has no write tool: it returns text, and this step,
 // which holds no Claude secret in its prompt path, cleans the text and posts or updates the single comment carrying a
 // hidden marker.
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { isDryRun, loadTriageItem } from './triage-load-item.mjs';
 
 export const COMMENT_MARKER = '<!-- claude-triage -->';
 export const BOT_LOGIN = 'github-actions[bot]';
 export const MAX_COMMENT_LENGTH = 6000;
 const HEADER = '**Automated first pass. This is not a review, an approval or a security clearance.**';
 const FOOTER = '_Automated first pass by Claude. It can be wrong. A maintainer will pick this up, and this note stops updating then._';
+const REVIEW_NOTE = 'A maintainer will review this item.';
 const WITHHELD_NOTE = 'The automated note was withheld because it contained text that looked like a credential. A maintainer will look at this item.';
 
 const SECRET_PATTERNS = [
@@ -23,6 +25,40 @@ const SECRET_PATTERNS = [
 const ALLOWED_URL = /^https:\/\/(github\.com\/codepawl\/67\.js|67js\.codepawl\.com)([/?#][^\s)]*)?$/i;
 const MAX_CLEAN_PASSES = 6;
 
+// The note must never read as an approval, so text that uses one of these words or phrases is not posted at all.
+export const APPROVAL_PHRASES = Object.freeze([
+  'safe',
+  'secure',
+  'approved',
+  'LGTM',
+  'ready to merge',
+  'good to merge',
+  'looks good',
+  'no security issues',
+  'verified',
+]);
+const APPROVAL_PATTERN = new RegExp(`\\b(?:${APPROVAL_PHRASES.map(phrase => phrase.replace(/ /g, '\\s+')).join('|')})\\b`, 'i');
+
+export function claimsApproval(text) {
+  return APPROVAL_PATTERN.test(String(text ?? ''));
+}
+
+// Removes every match of the pattern and repeats until nothing is left to remove, so a removal cannot join the
+// pieces on either side of it into a new match, such as "<scr<b>ipt>" or "<!<!-- -->-->".
+function removeUntilStable(text, pattern) {
+  let current = text;
+  let previous;
+  do {
+    previous = current;
+    current = current.replace(pattern, '');
+  } while (current !== previous);
+  return current;
+}
+
+function stripMarkup(text) {
+  return removeUntilStable(removeUntilStable(text, /<!--[\s\S]*?-->/g), /<[^>\n]*>/g);
+}
+
 function isAllowedUrl(url) {
   return ALLOWED_URL.test(String(url).trim());
 }
@@ -31,8 +67,7 @@ function isAllowedUrl(url) {
 // patterns and the image rules see the text a reader sees. sanitizeComment repeats this until the text stops changing.
 function cleanOnce(text) {
   let clean = text;
-  clean = clean.replace(/<!--[\s\S]*?-->/g, '');
-  clean = clean.replace(/<[^>\n]*>/g, '');
+  clean = stripMarkup(clean);
   clean = clean.replace(/[​-‏⁠﻿]/g, '');
   for (const pattern of SECRET_PATTERNS) clean = clean.replace(pattern, '[redacted]');
   clean = clean.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
@@ -61,7 +96,7 @@ function secretForms(secret) {
 
 // True when the text holds one of the real secret values, also split by spaces, tags or line breaks, or encoded.
 export function containsSecretValue(text, secrets = []) {
-  const withoutTags = String(text).replace(/<[^>\n]*>/g, '');
+  const withoutTags = stripMarkup(String(text));
   const haystack = squash(withoutTags).toLowerCase();
   return secrets.some(secret => secretForms(secret).some(form => haystack.includes(form)));
 }
@@ -84,6 +119,7 @@ export function sanitizeComment(text, secrets = []) {
 // The model's words are quoted under a fixed header the script writes, so they cannot pose as the bot's own verdict.
 export function buildCommentBody(text, secrets = []) {
   const clean = sanitizeComment(text, secrets);
+  if (clean !== '' && claimsApproval(clean)) return `${COMMENT_MARKER}\n${HEADER}\n\n${REVIEW_NOTE}\n\n${FOOTER}`;
   const quoted = clean === '' ? WITHHELD_NOTE : clean.split('\n').map(line => `> ${line}`).join('\n');
   return `${COMMENT_MARKER}\n${HEADER}\n\n${quoted}\n\n${FOOTER}`;
 }
@@ -104,8 +140,8 @@ function secretValues() {
 
 function main() {
   const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-  const number = (payload.pull_request ?? payload.issue).number;
   const repository = process.env.GITHUB_REPOSITORY;
+  const { number } = loadTriageItem(payload, repository);
   let comment;
   try {
     comment = JSON.parse(process.env.TRIAGE_OUTPUT).comment;
@@ -117,7 +153,15 @@ function main() {
     console.log('empty comment; nothing to post');
     return;
   }
-  const body = JSON.stringify({ body: buildCommentBody(comment, secretValues()) });
+  const commentBody = buildCommentBody(comment, secretValues());
+  if (isDryRun()) {
+    console.log(`Dry run for #${number}. This comment would be posted:\n\n${commentBody}`);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Dry run for #${number}: comment that would be posted\n\n${commentBody}\n`);
+    }
+    return;
+  }
+  const body = JSON.stringify({ body: commentBody });
   const existing = JSON.parse(callApi(['--paginate', '--slurp', `repos/${repository}/issues/${number}/comments?per_page=100`])).flat();
   const stickyId = findStickyCommentId(existing);
   if (stickyId) callApi(['--method', 'PATCH', `repos/${repository}/issues/comments/${stickyId}`, '--input', '-'], body);

@@ -1,9 +1,10 @@
 // Applies the labels Claude suggested during the automated first pass, and only those on a fixed allowlist.
 // This step has no Claude secret and can add labels only: it never removes one, closes anything or edits text.
 // No label here acts as a stop signal or a gate (hold:*, status:*), so a hijacked Claude cannot park an item.
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { isDryRun, loadTriageItem } from './triage-load-item.mjs';
 
 export const LABEL_ALLOWLIST = Object.freeze([
   'needs-triage',
@@ -32,7 +33,7 @@ export function filterLabels(suggested, existing = []) {
 
 function main() {
   const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-  const item = payload.pull_request ?? payload.issue;
+  const { number, item } = loadTriageItem(payload, process.env.GITHUB_REPOSITORY);
   let suggested = [];
   try {
     suggested = JSON.parse(process.env.TRIAGE_OUTPUT).labels;
@@ -45,8 +46,14 @@ function main() {
     console.log('no labels to add');
     return;
   }
+  if (isDryRun()) {
+    const line = `Dry run: would add labels: ${toAdd.join(', ')}. Nothing was added.`;
+    console.log(line);
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${line}\n`);
+    return;
+  }
   const body = JSON.stringify({ labels: toAdd });
-  execFileSync('gh', ['api', '--method', 'POST', `repos/${process.env.GITHUB_REPOSITORY}/issues/${item.number}/labels`, '--input', '-'], { input: body });
+  execFileSync('gh', ['api', '--method', 'POST', `repos/${process.env.GITHUB_REPOSITORY}/issues/${number}/labels`, '--input', '-'], { input: body });
   console.log(`added labels: ${toAdd.join(', ')}`);
 }
 

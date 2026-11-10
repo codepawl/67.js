@@ -18,6 +18,10 @@ name: Claude triage
 #   The action then scrubs secrets from the environment of Claude's subprocesses (kept on below).
 # Cost and abuse: one run per item (opened or ready for review only), at most 3 items per author and 40 runs per day, the
 # gate runs again before anything is posted, and the repository variable TRIAGE_ENABLED=false pauses it.
+# Dry run: a maintainer can start this workflow by hand (Actions tab, Run workflow) with the number of an issue or pull
+# request. It runs the same gate and the same Claude step, then prints the comment and labels it would post to the job
+# log and the step summary, and posts nothing and adds no label. Only people with write access can start a
+# workflow_dispatch run, so this is not a new way in for a stranger. docs/maintainers.md says how to use it.
 # Setup: the repository secret CLAUDE_CODE_OAUTH_TOKEN, created with `claude setup-token`. Without it the job only logs
 # that and exits.
 
@@ -26,9 +30,15 @@ on:
     types: [opened]
   pull_request_target:
     types: [opened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      number:
+        description: Issue or pull request number to try the first pass on (posts nothing)
+        required: true
+        type: string
 
 concurrency:
-  group: claude-triage-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: claude-triage-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.number }}
   cancel-in-progress: true
 
 jobs:
@@ -73,6 +83,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_NUMBER: ${{ github.event.inputs.number }}
           DIFF_LIMIT_BYTES: '61440'
           BODY_LIMIT_BYTES: '16384'
           LINKED_LIMIT_BYTES: '8192'
@@ -81,14 +92,24 @@ jobs:
           mkdir -p pr-data
           scratch="$RUNNER_TEMP/triage-scratch"
           mkdir -p "$scratch"
-          number=$(jq -r '(.pull_request // .issue).number' "$GITHUB_EVENT_PATH")
-          jq -r '(.pull_request // .issue).title' "$GITHUB_EVENT_PATH" > pr-data/title.txt
-          jq -r '(.pull_request // .issue).body // ""' "$GITHUB_EVENT_PATH" > "$scratch/body.md"
+          # A dry run has only a number, so the item is read from the API into the same shape as an event payload.
+          event_file="$GITHUB_EVENT_PATH"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if ! printf '%s' "$INPUT_NUMBER" | grep -qE '^[1-9][0-9]{0,8}$'; then
+              echo "The input number must be an issue or pull request number such as 123."
+              exit 1
+            fi
+            event_file="$scratch/event.json"
+            gh api "repos/$REPOSITORY/issues/$INPUT_NUMBER" | jq '{issue: .}' > "$event_file"
+          fi
+          number=$(jq -r '(.pull_request // .issue).number' "$event_file")
+          jq -r '(.pull_request // .issue).title' "$event_file" > pr-data/title.txt
+          jq -r '(.pull_request // .issue).body // ""' "$event_file" > "$scratch/body.md"
           head -c "$BODY_LIMIT_BYTES" "$scratch/body.md" > pr-data/body.md
-          jq -r '(.pull_request // .issue).user.login' "$GITHUB_EVENT_PATH" > pr-data/author.txt
-          jq -r '[(.pull_request // .issue).labels[].name] | join(", ")' "$GITHUB_EVENT_PATH" > pr-data/labels.txt
+          jq -r '(.pull_request // .issue).user.login' "$event_file" > pr-data/author.txt
+          jq -r '[(.pull_request // .issue).labels[].name] | join(", ")' "$event_file" > pr-data/labels.txt
 
-          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+          if jq -e '(.pull_request != null) or (.issue.pull_request != null)' "$event_file" > /dev/null; then
             echo "pull request" > pr-data/kind.txt
             gh api --paginate "repos/$REPOSITORY/pulls/$number/files?per_page=100" \
               --jq '.[] | [.filename, .status, .additions, .deletions] | @tsv' > "$scratch/files.tsv"

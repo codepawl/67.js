@@ -41,6 +41,14 @@ Without the secret the job logs one line and does nothing. The workflow takes no
 
 Each run uses the subscription behind that token, with the Sonnet model and at most 6 turns, so a run is small but not free. The body is cut at 16 KB, the diff at 60 KB and a linked issue at 8 KB. The limits above cap a day's spend.
 
+### Trying it without posting
+
+To see what the first pass would say about an item, open the Actions tab, pick "Claude triage", choose "Run workflow" and enter the issue or pull request number. The run applies the same gate and the same Claude step, then prints the comment and the labels it would add to the job log and the step summary. It posts no comment and adds no label. Only people with write access can start it. The gate still skips maintainer-authored items, drafts and items a maintainer has touched; the reason is in the "Decide whether the first pass applies" step. An earlier bot comment does not stop a dry run.
+
+### Approval wording
+
+The comment is quoted under a fixed header that says it is not a review, an approval or a security clearance. If Claude's text uses a word or phrase such as "safe", "secure", "approved", "LGTM", "ready to merge", "good to merge", "looks good", "no security issues" or "verified" (`APPROVAL_PHRASES` in `scripts/triage-post-comment.mjs`), the text is withheld and the comment only says that a maintainer will review the item.
+
 ### Turning it off
 
 Disable the "Claude triage" workflow in the Actions tab, delete the secret, or delete the workflow file. Any of these stops it at once.

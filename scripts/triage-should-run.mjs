@@ -6,11 +6,14 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { COMMENT_MARKER, BOT_LOGIN } from './triage-post-comment.mjs';
+import { loadTriageItem } from './triage-load-item.mjs';
 
 // One run per item: the sticky comment marks an item as done, so reopening or re-marking it never runs again.
 export const TRIGGERS = Object.freeze({
   issues: ['opened'],
   pull_request_target: ['opened', 'ready_for_review'],
+  // A maintainer's dry run names the item itself, so there is no action to match.
+  workflow_dispatch: [],
 });
 export const MAINTAINER_ASSOCIATIONS = Object.freeze(['OWNER', 'MEMBER', 'COLLABORATOR']);
 export const SKIP_LABELS = Object.freeze(['status:in-progress', 'hold:look-approval', 'needs-owner-decision']);
@@ -51,19 +54,20 @@ export function decideTriage({
   if (!enabled) return { run: false, reason: 'paused by TRIAGE_ENABLED' };
   const allowedActions = TRIGGERS[eventName];
   if (!allowedActions) return { run: false, reason: `event ${eventName} is not triaged` };
-  if (!allowedActions.includes(action)) return { run: false, reason: `action ${action} is not triaged` };
+  const isDispatch = eventName === 'workflow_dispatch';
+  if (!isDispatch && !allowedActions.includes(action)) return { run: false, reason: `action ${action} is not triaged` };
   if (item.state && item.state !== 'open') return { run: false, reason: 'closed or merged' };
   if (item.merged === true) return { run: false, reason: 'closed or merged' };
   if (item.draft === true) return { run: false, reason: 'draft pull request' };
   if (isBot(item.user)) return { run: false, reason: 'opened by a bot' };
   if (isMaintainerAssociation(item.author_association)) return { run: false, reason: 'opened by a maintainer' };
-  if (senderLogin && item.user?.login && senderLogin !== item.user.login) return { run: false, reason: 'someone other than the author triggered it' };
+  if (!isDispatch && senderLogin && item.user?.login && senderLogin !== item.user.login) return { run: false, reason: 'someone other than the author triggered it' };
   if ((item.assignees ?? []).length > 0) return { run: false, reason: 'assigned to someone' };
   const labelNames = (item.labels ?? []).map(label => label.name);
   const skipLabel = SKIP_LABELS.find(name => labelNames.includes(name));
   if (skipLabel) return { run: false, reason: `carries ${skipLabel}` };
   if (maintainerActivity > 0) return { run: false, reason: 'a maintainer already commented or reviewed' };
-  if (alreadyTriaged && !requireStickyForLaterSteps) return { run: false, reason: 'already triaged once' };
+  if (!isDispatch && alreadyTriaged && !requireStickyForLaterSteps) return { run: false, reason: 'already triaged once' };
   if (authorItemsToday > MAX_ITEMS_PER_AUTHOR_PER_DAY) return { run: false, reason: 'author opened too many items today' };
   if (runsToday > MAX_RUNS_PER_DAY) return { run: false, reason: 'daily run limit reached' };
   return { run: true, reason: 'new contribution without maintainer activity' };
@@ -95,12 +99,9 @@ function main() {
   const eventName = process.env.GITHUB_EVENT_NAME;
   const repository = process.env.GITHUB_REPOSITORY;
   const stage = process.env.TRIAGE_STAGE ?? 'before';
-  const number = (payload.pull_request ?? payload.issue).number;
-  const item = payload.pull_request
-    ? JSON.parse(callApi([`repos/${repository}/pulls/${number}`]))
-    : JSON.parse(callApi([`repos/${repository}/issues/${number}`]));
+  const { number, item, isPullRequest } = loadTriageItem(payload, repository);
   const entries = listApi(`repos/${repository}/issues/${number}/comments?per_page=100`);
-  if (payload.pull_request) {
+  if (isPullRequest) {
     entries.push(...listApi(`repos/${repository}/pulls/${number}/reviews?per_page=100`));
     entries.push(...listApi(`repos/${repository}/pulls/${number}/comments?per_page=100`));
   }
