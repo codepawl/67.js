@@ -1,1 +1,2 @@
 - Animation graph: blended clips now end with their own shares in `poseLayers()` (the chain of lerp factors ran in the wrong order, so a walk to run blend played as full run); planted feet no longer slide in a blend space (#774)
+- Breaking for tuned graphs: a layer with two or more active slots (blend space or crossfade) now gives a different pose than before, because the old mix was wrong. Graphs tuned around the old output need a fresh look (#774)
