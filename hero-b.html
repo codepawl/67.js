@@ -5,9 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#09070f" />
     <meta name="robots" content="noindex" />
-    <title>Hero B · World · 67js</title>
+    <title>Hero B · World scenes · 67js</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="preload" as="image" href="/hero-lab/poster-b.webp" media="(min-width: 701px)" fetchpriority="high" />
+    <script>
+      const scene = ["valley", "ignition", "port"].find(id => id === new URLSearchParams(location.search).get("scene")) ?? "valley";
+      const mobile = matchMedia("(max-width: 700px)").matches ? "-mobile" : "";
+      document.write(`<link rel="preload" as="image" href="/hero-lab/poster-b-${scene}${mobile}.webp" fetchpriority="high" />`);
+    </script>
   </head>
   <body>
     <a class="skip-link" href="#content">Skip to content</a>
@@ -21,8 +25,9 @@
     <main id="content" class="hero-b">
       <div class="pin" id="pin">
         <div class="stage" id="stage">
-          <picture><source media="(max-width: 700px)" srcset="/hero-lab/poster-b-mobile.webp" /><img class="poster" src="/hero-lab/poster-b.webp" alt="" width="1440" height="900" fetchpriority="high" /></picture>
-          <canvas id="viewport" aria-label="A live 3D airport ramp. Scroll to move the camera."></canvas>
+          <picture><source media="(max-width: 700px)" id="poster-mobile" /><img class="poster" id="poster" alt="" width="1440" height="900" fetchpriority="high" /></picture>
+          <script>document.querySelector("#poster-mobile").srcset = `/hero-lab/poster-b-${scene}-mobile.webp`; document.querySelector("#poster").src = `/hero-lab/poster-b-${scene}.webp`;</script>
+          <canvas id="viewport" aria-label="A live 3D scene. Scroll to move the camera."></canvas>
         </div>
         <div class="progress" aria-hidden="true"><i id="progress-fill"></i></div>
         <div class="chapter chapter-one" id="chapter-one">
@@ -36,7 +41,7 @@
         <div class="chapter chapter-two" id="chapter-two">
           <h2>Every frame is real geometry,<br />lit and shadowed in your browser.</h2>
           <div class="lab-actions">
-            <a class="lab-button is-primary" href="/showcase.html?scene=airport"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8v9l9 5 9-5V8l-9-5ZM3 8l9 5 9-5M12 13v9"/></svg>Open this scene live<svg class="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a>
+            <a class="lab-button is-primary" id="open-scene" href="/showcase.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8v9l9 5 9-5V8l-9-5ZM3 8l9 5 9-5M12 13v9"/></svg>Open this scene live<svg class="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a>
           </div>
         </div>
         <p class="cue rise" style="--i:4" id="cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Scroll</p>

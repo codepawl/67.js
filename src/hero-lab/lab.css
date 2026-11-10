@@ -87,7 +87,9 @@ h1 { margin: 0; font-weight: 640; letter-spacing: -0.04em; line-height: 0.98; te
 /* ---------- Direction B: a world, the scroll moves the camera ---------- */
 .hero-b { position: relative; height: 260svh; }
 .hero-b .pin { position: sticky; top: 0; height: 100svh; overflow: hidden; }
-.hero-b .stage::after { content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none; background: linear-gradient(to top, rgb(9 7 15 / 0.82) 0%, transparent 52%); }
+.hero-b .stage::after { content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none; background: linear-gradient(to top, rgb(9 7 15 / 0.72) 0%, transparent 46%), radial-gradient(75% 65% at 0% 100%, rgb(9 7 15 / 0.5), transparent 72%); }
+/* The port is busy behind the words (crane legs, hull lettering), so it gets a stronger scrim from the left edge. */
+.hero-b[data-scene='port'] .stage::after { background: linear-gradient(to top, rgb(9 7 15 / 0.78) 0%, transparent 52%), linear-gradient(to right, rgb(9 7 15 / 0.72) 0%, rgb(9 7 15 / 0.35) 38%, transparent 66%); }
 .hero-b .chapter { position: absolute; z-index: 3; left: clamp(16px, 6vw, 96px); bottom: clamp(32px, 9svh, 96px); max-width: 640px; display: flex; flex-direction: column; gap: 22px; will-change: transform, opacity; }
 .hero-b h1 { font-size: clamp(42px, 6vw, 88px); }
 .hero-b .chapter-two { pointer-events: none; opacity: 0; }
