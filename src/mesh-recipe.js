@@ -28,6 +28,7 @@ import { triangulatedSurface } from './mesh-surface-distance.js';
 import { createTriangleSurfaceIndex } from './mesh-query.js';
 import './mesh-field-surfaces.js';
 import './field-rotation.js';
+import './field-mesh-inputs.js';
 import './mesh-hull-modifiers.js';
 import './mesh-ocean-modifier.js';
 import './mesh-build-modifier.js';
