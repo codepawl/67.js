@@ -118,6 +118,35 @@ test('a jelly cube lands on the ground, keeps its volume and comes to rest', () 
   assert.ok(fallen > 0);
 });
 
+test('a jelly ball falls as fast as free fall, then flattens and bulges on impact with its volume kept', async () => {
+  const { icoSphere } = await import('../src/geometry.js');
+  const { weldVertices } = await import('../src/cloth.js');
+  const geometry = icoSphere(2);
+  const lifted = Float32Array.from(geometry.positions, (value, index) => (index % 3 === 1 ? value * 0.5 + 1.4 : value * 0.5));
+  const welded = weldVertices(lifted, geometry.indices);
+  const particles = new Float32Array(welded.representatives.length * 3);
+  welded.representatives.forEach((vertex, particle) => particles.set(lifted.subarray(vertex * 3, vertex * 3 + 3), particle * 3));
+  const restVolume = signedVolume(particles, welded.triangles);
+  const recording = bakeCloth(particles, welded.triangles, { colliders: [GROUND], softBody: { shape: 0.03, pressure: 1 }, bend: 0, damping: 0.3, frameCount: 61 });
+  const measure = frame => {
+    const state = frameAt(recording, frame);
+    const low = [Infinity, Infinity, Infinity];
+    const high = [-Infinity, -Infinity, -Infinity];
+    state.forEach((value, index) => {
+      low[index % 3] = Math.min(low[index % 3], value);
+      high[index % 3] = Math.max(high[index % 3], value);
+    });
+    return { bottom: low[1], height: high[1] - low[1], width: high[0] - low[0], volume: signedVolume(state, welded.triangles) / restVolume };
+  };
+  // Free fall from a ball bottom at 0.9 m reaches the floor (thickness 0.01) at about 0.43 s, frame 26.
+  assert.ok(measure(24).bottom > 0.05, 'still falling two frames before contact');
+  assert.ok(measure(26).bottom < 0.011, 'touches the floor at frame 26');
+  const impact = measure(29);
+  assert.ok(impact.height < 0.9, `height ${impact.height} m flattens below 0.9 m`);
+  assert.ok(impact.width > 1.005, `width ${impact.width} m bulges past 1 m`);
+  assert.ok(Math.abs(impact.volume - 1) < 0.02, `volume ratio ${impact.volume} stays at 1`);
+});
+
 test('pressure keeps a jelly full while a soft body without it collapses further', () => {
   const body = cube(4, 0.5, 1);
   const settle = softBody => {
