@@ -45,28 +45,6 @@ const MAP_FLAGS = ['hasBaseMap', 'hasNormalMap', 'hasMetallicRoughnessMap', 'has
 const DEFAULT_NORMAL_SCALE = [1, 1];
 // The most texture taps a mipmapped texture may take along a grazing axis (16 is the usual hardware ceiling, 8 costs less).
 const MAX_TEXTURE_ANISOTROPY = 8;
-// One texImage2D of a large image stalls the driver for tens of milliseconds, so an image over this many pixels goes up in bands.
-export const MAX_UPLOAD_PIXELS = 1 << 20;
-
-/** Uploads `image` to the bound TEXTURE_2D. An unflipped image over MAX_UPLOAD_PIXELS goes up in row bands of at most that size; the pixels are the same. */
-export function uploadImage(context, image, width, height, internalFormat, flipY) {
-  // Browsers disagree on whether a flip applies before or after the skipped rows, so a flipped image stays one upload.
-  if (flipY || width * height <= MAX_UPLOAD_PIXELS) {
-    context.texImage2D(context.TEXTURE_2D, 0, internalFormat, context.RGBA, context.UNSIGNED_BYTE, image);
-    return;
-  }
-  context.texImage2D(context.TEXTURE_2D, 0, internalFormat, width, height, 0, context.RGBA, context.UNSIGNED_BYTE, null);
-  const bandRows = Math.max(1, Math.floor(MAX_UPLOAD_PIXELS / width));
-  try {
-    for (let firstRow = 0; firstRow < height; firstRow += bandRows) {
-      const rows = Math.min(bandRows, height - firstRow);
-      context.pixelStorei(context.UNPACK_SKIP_ROWS, firstRow);
-      context.texSubImage2D(context.TEXTURE_2D, 0, 0, firstRow, width, rows, context.RGBA, context.UNSIGNED_BYTE, image);
-    }
-  } finally {
-    context.pixelStorei(context.UNPACK_SKIP_ROWS, 0);
-  }
-}
 const PROCEDURAL_MATERIAL_TAGS = new Set(['water', 'foliage', 'grass', 'terrain', 'floor', 'fire', 'smoke', 'liquid', 'foam']);
 
 // Tags whose vertices sway in the wind; the shadow pass must be redrawn when time moves.
@@ -538,6 +516,20 @@ export function groupPartsIncrementally(previous, parts, batching = true) {
   }
   const batches = groupParts(parts, batching);
   return { batches, state: { parts: parts.slice(), geometries: new Set(parts.map(part => part.geometry)), batches } };
+}
+
+/**
+ * Groups the world and its floor for replaceParts. Without `retainedUnchanged` this is groupParts over the parts and the floor, with no state kept.
+ * With it, only the appended slice is grouped; the floor is one more batch unless it shares a geometry with a world part,
+ * where groupParts would have merged them, so that case groups everything.
+ */
+export function groupWorld(previous, parts, groundPart, batching, retainedUnchanged) {
+  if (!retainedUnchanged) return { batches: groupParts(groundPart ? [...parts, groundPart] : parts, batching), state: null };
+  const grouped = groupPartsIncrementally(previous, parts, batching);
+  if (!groundPart) return grouped;
+  const floorMerges = grouped.state.geometries.has(groundPart.geometry);
+  const batches = floorMerges ? groupParts([...parts, groundPart], batching) : [...grouped.batches, ...groupParts([groundPart], batching)];
+  return { batches, state: grouped.state };
 }
 
 export function textureDescriptorInfo(map, maximumSize = Infinity) {
@@ -1023,7 +1015,7 @@ export class Renderer67 {
       if (map) {
         const info = textureDescriptorInfo(map, context.getParameter(context.MAX_TEXTURE_SIZE));
         if (map.image.compressed) map.image.compressed.upload(context);
-        else uploadImage(context, map.image, info.width, info.height, map.colorSpace === 'linear' ? context.RGBA8 : context.SRGB8_ALPHA8, map.flipY ?? false);
+        else context.texImage2D(context.TEXTURE_2D, 0, map.colorSpace === 'linear' ? context.RGBA8 : context.SRGB8_ALPHA8, context.RGBA, context.UNSIGNED_BYTE, map.image);
         context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, info.wrapS);
         context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, info.wrapT);
         context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, info.minFilter);
@@ -1317,16 +1309,9 @@ export class Renderer67 {
     const renderParts = this.groundPart ? [...parts, this.groundPart] : parts;
     this.fitParts = renderParts;
     this.fitBounds = undefined;
-    let groups;
-    if (retainedUnchanged) {
-      // A world that grows in slices groups only the slice that arrived; the floor is one more batch of its own geometry.
-      const grouped = groupPartsIncrementally(this.incrementalGrouping, parts, this.batching);
-      this.incrementalGrouping = grouped.state;
-      groups = this.groundPart ? [...grouped.batches, ...groupParts([this.groundPart], this.batching)] : grouped.batches;
-    } else {
-      this.incrementalGrouping = null;
-      groups = groupParts(renderParts, this.batching);
-    }
+    const grouped = groupWorld(retainedUnchanged ? this.incrementalGrouping : null, parts, this.groundPart, this.batching, retainedUnchanged);
+    this.incrementalGrouping = grouped.state;
+    const groups = grouped.batches;
     const geometries = new Set(renderParts.flatMap(partGeometries));
     // Uploaded geometry was validated when it arrived; rechecking a large static scene every frame dominated streamed playback.
     for (const geometry of geometries) {

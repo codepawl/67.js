@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { groupParts, groupPartsIncrementally } from '../src/renderer.js';
+import { groupParts, groupPartsIncrementally, groupWorld } from '../src/renderer.js';
 
 const identity = () => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const makeGeometry = () => ({
@@ -51,4 +51,43 @@ test('an invalid appended part still throws', () => {
   const grouped = groupPartsIncrementally(null, worldParts.slice(0, 5));
   const broken = { ...makePart(200, geometries[5]), matrix: new Float32Array(3) };
   assert.throws(() => groupPartsIncrementally(grouped.state, [...worldParts.slice(0, 5), broken]));
+});
+
+const floorPart = { name: 'floor', geometry: makeGeometry(), matrix: identity(), material: materials[0] };
+const sharingFloor = { name: 'shared floor', geometry: geometries[2], matrix: identity(), material: materials[0] };
+
+test('groupWorld with a floor and growing prefixes builds the batches of one full grouping', () => {
+  let state = null;
+  for (let end = 5; end <= worldParts.length; end += 5) {
+    const prefix = worldParts.slice(0, end);
+    const grouped = groupWorld(state, prefix, floorPart, true, true);
+    assert.ok(sameBatches(grouped.batches, groupParts([...prefix, floorPart])), `prefix of ${end} parts`);
+    state = grouped.state;
+  }
+  assert.equal(state.parts.includes(floorPart), false, 'the floor is not part of the kept state');
+});
+
+test('groupWorld puts a floor that shares a geometry with a world part into that batch, as before', () => {
+  let state = null;
+  for (let end = 5; end <= worldParts.length; end += 5) {
+    const prefix = worldParts.slice(0, end);
+    const grouped = groupWorld(state, prefix, sharingFloor, true, true);
+    assert.ok(sameBatches(grouped.batches, groupParts([...prefix, sharingFloor])), `prefix of ${end} parts`);
+    state = grouped.state;
+  }
+});
+
+test('groupWorld without retainedUnchanged groups the whole list and keeps no state', () => {
+  const kept = groupWorld(null, worldParts.slice(0, 10), floorPart, true, true);
+  const whole = groupWorld(kept.state, worldParts.slice(0, 20), floorPart, true, false);
+  assert.ok(sameBatches(whole.batches, groupParts([...worldParts.slice(0, 20), floorPart])));
+  assert.equal(whole.state, null);
+  const withoutFloor = groupWorld(kept.state, worldParts.slice(0, 20), null, true, false);
+  assert.ok(sameBatches(withoutFloor.batches, groupParts(worldParts.slice(0, 20))));
+});
+
+test('groupWorld without a floor returns the incremental grouping as it is', () => {
+  const first = groupWorld(null, worldParts.slice(0, 10), null, true, true);
+  const next = groupWorld(first.state, worldParts.slice(0, 20), null, true, true);
+  assert.ok(sameBatches(next.batches, groupParts(worldParts.slice(0, 20))));
 });

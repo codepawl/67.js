@@ -1,9 +1,0 @@
-- entry:core: the incremental grouping for sliced replaceParts and the banded texture upload, about 340 bytes gzip, for a measured drop in grouping time from 1.5 to 2.9 s to 0.16 to 0.30 s over a 100,000-part world loaded in 20 slices
-- scene:lit-box: same code as entry:core
-- scene:gltf-box: same code as entry:core
-- scene:gltf-box+lazy: same code as entry:core
-- scene:agent-scene: same code as entry:core
-- scene:agent-scene+lazy: same code as entry:core
-- goal:lit-box: the growth is the sliced grouping and banded upload, not scene features; it takes the regroup of a 100,000-part world from 11 to 23 ms at worst per slice, and the lead accepts it as a functional gain
-- goal:gltf-box: the growth is the sliced grouping and banded upload, not scene features; same measured gain
-- goal:agent-scene: the growth is the sliced grouping and banded upload, not scene features; same measured gain
