@@ -31,7 +31,9 @@ async function renderDemoRoom(requestedBackend, workDirectory) {
   try {
     const call = (name, toolArguments) => client.callTool({ name, arguments: toolArguments }, { timeout: 300000 });
     const recipe = JSON.parse(await readFile(recipeUrl, 'utf8'));
-    const created = (await call('scene_create', { recipe })).structuredContent;
+    const createResult = await call('scene_create', { recipe });
+    assert.notEqual(createResult.isError, true, createResult.content?.[0]?.text);
+    const created = createResult.structuredContent;
     const settings = { kind: 'image', width: 64, height: 64, renderer: { type: 'pathTracer', backend: requestedBackend, samples: 2, bounces: 2, denoise: false, seed: 3, maxSeconds: 120 } };
     const submitted = await call('scene_render_submit', { sessionId: created.sessionId, expectedRevision: 0, settings });
     assert.notEqual(submitted.isError, true, submitted.content?.[0]?.text);
