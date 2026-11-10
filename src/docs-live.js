@@ -65,6 +65,7 @@ const addonLoaders = import.meta.glob([
   './runtime.js',
   './input.js',
   './audio.js',
+  './player.js',
   './update-part-vertices.js',
 ]);
 const moduleCache = new Map();

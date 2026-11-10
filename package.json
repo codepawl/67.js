@@ -44,6 +44,7 @@
     "docs/runtime.md",
     "docs/input.md",
     "docs/audio.md",
+    "docs/player.md",
     "docs/scene-query.md",
     "docs/user-passes.md",
     "docs/skeleton-pose.md",
@@ -122,6 +123,7 @@
     "./addons/runtime": "./build/runtime.js",
     "./addons/input": "./build/input.js",
     "./addons/audio": "./build/audio.js",
+    "./addons/player": "./build/player.js",
     "./addons/update-part-vertices": "./build/update-part-vertices.js",
     "./package.json": "./package.json"
   },

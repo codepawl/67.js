@@ -40,6 +40,12 @@ test('MCP tool code runs the schema and tool cost checks', () => {
   assert.equal(checkNamed(checks, 'tool cost').skipped, null);
 });
 
+test('the MCP server scripts that shape tool results run the tool cost check', () => {
+  for (const path of ['scripts/capabilities-topics.mjs', 'scripts/mcp-server.mjs', 'scripts/tool-examples.mjs']) {
+    assert.equal(checkNamed(planChecks([path, 'changes/700.md']), 'tool cost').skipped, null, path);
+  }
+});
+
 test('--skip-tests skips the build, the tests and the coverage gate', () => {
   const checks = planChecks(['src/camera.js'], { skipTests: true });
   for (const name of ['build library', 'unit tests and coverage', 'coverage gate']) {

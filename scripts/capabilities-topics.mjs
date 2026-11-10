@@ -3,6 +3,7 @@
 // (motion, environment, meshEdit, ...). A union such as meshEdit takes a branch: meshEdit.bevel.
 import * as z from 'zod/v4';
 import { outlineSchema, unionBranches } from './schema-outline.mjs';
+import { AGENT_TOOL_EXAMPLES } from './tool-examples.mjs';
 
 const RUNTIME_SECTIONS = ['sceneLimits', 'preview', 'review', 'assets', 'jobs', 'unsupported'];
 const SUMMARY_LENGTH = 110;
@@ -25,6 +26,7 @@ function sceneTopics(scene) {
     if (isScalar(value)) flags[name] = value;
     else topics.set(name, value);
   }
+  topics.set('examples', AGENT_TOOL_EXAMPLES);
   topics.set(FLAGS_TOPIC, flags);
   return topics;
 }
@@ -91,7 +93,7 @@ export function answerCapabilities(capabilities, topic, outlineSources) {
     return {
       format: capabilities.scene.format, schemaVersion: capabilities.scene.schemaVersion,
       phase: capabilities.phase, availableIn: capabilities.availableIn,
-      how: 'Call scene_capabilities with topic set to a name below. Tools list common fields; schemas names the full field list of a recipe part (meshEdit and meshStack also take <name>.<op>, geometries takes geometries.<type>).',
+      how: 'Call scene_capabilities with topic set to a name below. Tools list common fields; schemas names the full field list of a recipe part (meshEdit and meshStack also take <name>.<op>, geometries takes geometries.<type>). examples.<tool> is one complete call.',
       topics: names,
     };
   }
@@ -109,5 +111,8 @@ export function answerCapabilities(capabilities, topic, outlineSources) {
   }
   const answeredTopic = [name, branchName].filter(Boolean).join('.');
   if (source) return { topic: answeredTopic, ...(notes === undefined ? {} : { notes }), fields: outlineAnswer(name, branchName, source) };
+  // A dotted name picks one entry of a plain topic: examples.scene_apply.
+  const entry = notes !== null && typeof notes === 'object' && branchName !== undefined && Object.hasOwn(notes, branchName);
+  if (entry) return { topic: answeredTopic, value: notes[branchName] };
   return { topic: answeredTopic, value: notes ?? runtime };
 }
