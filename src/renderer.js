@@ -1493,6 +1493,23 @@ export class Renderer67 {
     return Boolean(this.tintedShadowsActive && batch.tintedShadow);
   }
 
+  // The shadow program's opaqueShadow sampler is a comparison sampler, so while a depth map renders it needs a comparison-capable
+  // depth texture on its unit that is not the render target: a 2D map left there, or the sun map itself, fails the draw.
+  bindPlaceholderOpaqueShadow() {
+    const context = this.context;
+    context.activeTexture(context.TEXTURE0 + OPAQUE_SHADOW_UNIT);
+    if (!this.placeholderShadowTexture) {
+      this.placeholderShadowTexture = context.createTexture();
+      context.bindTexture(context.TEXTURE_2D, this.placeholderShadowTexture);
+      context.texImage2D(context.TEXTURE_2D, 0, context.DEPTH_COMPONENT24, 1, 1, 0, context.DEPTH_COMPONENT, context.UNSIGNED_INT, null);
+      context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.NEAREST);
+      context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, context.NEAREST);
+      context.texParameteri(context.TEXTURE_2D, context.TEXTURE_COMPARE_MODE, context.COMPARE_REF_TO_TEXTURE);
+    }
+    context.bindTexture(context.TEXTURE_2D, this.placeholderShadowTexture);
+    context.activeTexture(context.TEXTURE0);
+  }
+
   allocateTintTarget() {
     const context = this.context;
     this.tintTexture = context.createTexture();
@@ -1594,6 +1611,7 @@ export class Renderer67 {
     if (this.tintedShadowsActive) {
       context.uniform1f(this.depthAlphaUniforms.tintPass, 0);
       context.uniform1i(this.depthAlphaUniforms.opaqueShadow, OPAQUE_SHADOW_UNIT);
+      this.bindPlaceholderOpaqueShadow();
     }
     context.enable(context.POLYGON_OFFSET_FILL);
     context.polygonOffset(1, 1);
@@ -2553,6 +2571,7 @@ export class Renderer67 {
     viewTransformShader.dispose?.(this);
     if (this.localShadowTexture) this.context.deleteTexture(this.localShadowTexture);
     if (this.localShadowFramebuffer) this.context.deleteFramebuffer(this.localShadowFramebuffer);
+    if (this.placeholderShadowTexture) this.context.deleteTexture(this.placeholderShadowTexture);
     if (this.tintFramebuffer) {
       this.context.deleteTexture(this.tintTexture);
       this.context.deleteFramebuffer(this.tintFramebuffer);

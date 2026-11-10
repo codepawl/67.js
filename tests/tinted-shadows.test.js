@@ -92,3 +92,19 @@ test('the shadow program never samples the sun map it is rendering into (that fe
   const unitBeforeBind = calls.findIndex(([name, unit]) => name === 'activeTexture' && unit - 1 === unitSet[2]);
   assert.ok(unitBeforeBind >= 0, 'the tint draw binds the sun map on the sampler unit');
 });
+
+test('while a depth map renders, the comparison sampler of the shadow program reads a depth placeholder, not a 2D map or the target (WebGL error 1282 on SwiftShader)', () => {
+  const { renderer, calls } = tintRenderer([opaqueBatch, glassBatch]);
+  renderer.shadowTexture = { name: 'sunMap' };
+  renderer.depthAlphaUniforms = { opaqueShadow: 'opaqueShadow' };
+  renderer.depthWindUniforms = {};
+  renderer.drawShadowCasters = Renderer67.prototype.drawShadowCasters;
+  renderer.bindPlaceholderOpaqueShadow = Renderer67.prototype.bindPlaceholderOpaqueShadow;
+  renderer.drawShadowCasters(renderer.lightProjection, 2048, true);
+  const unitSet = calls.find(([name, location]) => name === 'uniform1i' && location === 'opaqueShadow')[2];
+  const placeholderBind = calls.filter(([name]) => name === 'bindTexture').pop();
+  assert.ok(placeholderBind[2] && placeholderBind[2] !== renderer.shadowTexture, 'a placeholder texture, not the sun map');
+  const unitBeforeBind = calls.slice(0, calls.indexOf(placeholderBind)).filter(([name]) => name === 'activeTexture').pop();
+  assert.equal(unitBeforeBind[1] - 1, unitSet, 'bound on the unit the sampler reads');
+  assert.ok(calls.some(([name, , parameter]) => name === 'texParameteri' && parameter === 1), 'the placeholder compares on fetch');
+});
