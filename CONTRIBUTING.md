@@ -27,6 +27,8 @@ The tests are in `tests/` and the guides are in `docs/`.
 
 Run `npm run preflight` before you open a pull request. It runs every check below that applies to the files you changed, plus the size, tool cost and coverage gates, keeps going after a failure and ends with one line per check and how to fix it. Logs go to `artifacts/preflight/`. `--skip-tests` skips the slow test pass while you iterate.
 
+`npm ci` points git at `.githooks/`, whose pre-push hook runs `npm run preflight -- --skip-tests` and stops the push when a gate fails. Pushing only tags or branch deletions skips it. `SKIP_PREFLIGHT=1 git push` skips it once. The unit tests stay out of the hook because they take minutes; run the full preflight before you open the pull request.
+
 The checks it runs, if you want one alone:
 
 1. Run `npm test`. All Node tests must pass.
