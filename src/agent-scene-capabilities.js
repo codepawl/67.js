@@ -66,6 +66,7 @@ export const CURVE_TEXT_LIMITS = Object.freeze({
 export const CURVE_TEXT_DETAILS = Object.freeze({
   curve: 'bends along path, 2-64 points [x,y,z] (Catmull-Rom); the coordinate along axis (x) is the distance from the path start, so model from 0.',
   splines: 'Geometry curve takes points (kind bezier|poly|nurbs, weights for nurbs, closed), or shape {type arc|spiral|star} (arc: radius, startAngle, sweep radians, segments; spiral: rotations, startRadius, endRadius, height, pointsPerRotation, reverse; star: points, innerRadius, outerRadius, innerTwist), or splines: up to 64 of those in one mesh. trim {start, end, length}: factors 0-1 of the arc length, or lengths when length is true; a trimmed curve is open. See docs/modeling.md.',
+  sdf: 'Geometry sdf: root is a tree meshed by surface nets, resolution 4-128 cells along the longest side (default 32). Primitive {shape sphere|box|roundBox|capsule|cylinder|torus, radius, size, height, tubeRadius, position, rotation (Euler radians), scale (uniform)}. Operation {op union|subtract|intersect, smooth (blend radius), children: 2-16} (subtract removes the rest from the first) or {op offset, distance, child}. At most 64 nodes, 8 levels. See docs/modeling.md.',
   text: 'Extruded text, baseline y=0 along +X, facing +Z. text (\n for lines), size (1), depth (0.2), align left|center|right, curveSegments, font. See docs/modeling.md.',
 });
 export const MATERIAL_MAPPINGS = Object.freeze(['box', 'uv']);
@@ -187,7 +188,7 @@ export const MESH_SCULPT_NOTES = Object.freeze({
 
 export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   format: '67js.scene', schemaVersion: 1,
-  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh']),
+  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'sdf', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh']),
   camera: 'eye, target, up, near, far, then fov (vertical degrees) or focalLength (mm, with sensorWidth mm, 36; not both). projection orthographic with orthoScale (view height in m, default 4). shift [x, y] moves the frame by a fraction of its size. fStop (0.7-64) turns on depth of field focused on target; 1.4 or lower is full blur; effects.depthOfField.blur must stay 0. Orthographic/shifted cameras use the rasterizer.',
   terrain: 'One mesh, x and z from -size/2 to size/2, hills about y = 0. size 40 m (1-2000), resolution 64 cells (2-256), seed 1, amplitude 1 m (0-200), holes up to 16 of {center:[x,z],radius}, no surface inside; radius a few cells or more.',
   placedAssets: 'Node field asset:{id,materials?,clip?,drive?} turns a group node into a catalog GLB (id from asset_catalog). Its transform places it. materials:[{name,color,metallic,roughness,opacity,emission,emissiveColor}] override source materials by name. clip:{index,start=0,speed=1,loop=true} plays that clip from scene time start; set-motion tracks move the node and scene time seeks the clip. drive:{path | legs, cruiseSpeed | speed, wheels, lights} drives a car along a path in the placement frame (docs/vehicle.md). Max 512 placements, 16 assets, 16 animated.',

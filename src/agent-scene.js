@@ -452,6 +452,7 @@ const GEOMETRY_FIELDS = {
   lathe: ['profile', 'segments', 'startAngle', 'sweep'],
   extrude: ['contour', 'holes', 'depth', 'steps', 'bevel', 'bevelThickness', 'bevelSegments'],
   tube: ['path', 'radius', 'segments', 'radialSegments', 'closed'],
+  sdf: ['root', 'resolution'],
   curve: ['points', 'shape', 'splines', 'closed', 'kind', 'weights', 'trim', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
   text: ['text', 'size', 'depth', 'font', 'align', 'curveSegments'],
   mesh: ['base', 'edits', 'stack', 'smoothAngle', 'shapeKeys'],
@@ -486,7 +487,7 @@ function geometryEstimate(value) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim', 'root'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -533,6 +534,8 @@ function geometryEstimate(value) {
       const rings = (value.closed ? knots.length : knots.length - 1) * detail('resolution', 12, 1, 64) + 1;
       return rings * sides * 2 + 2 * (sides + 1);
     }
+    case 'sdf':
+      return agentSceneModule('modeling').sdfVertexEstimate(value);
     case 'text': {
       if (typeof value.text !== 'string') throw invalidField('text', value.text, 'a string, such as "Hello"', TypeError);
       const visible = [...value.text].filter(character => !/\s/.test(character)).length;
@@ -619,6 +622,8 @@ function generateGeometry(value, maxVertices) {
       return agentSceneModule('modeling').extrude(value.contour, { ...value, maxVertices });
     case 'tube':
       return agentSceneModule('modeling').tube(value.path, { ...value, maxVertices });
+    case 'sdf':
+      return agentSceneModule('modeling').sdfGeometry(value, maxVertices);
     case 'curve':
       return agentSceneModule('modeling').curveGeometry(value, maxVertices);
     case 'text':
