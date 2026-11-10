@@ -9,3 +9,8 @@
 - goal:lit-box: the growth is the deferred link path and the faster grouping, not scene features
 - goal:gltf-box: the growth is the deferred link path and the faster grouping, not scene features
 - goal:agent-scene: the growth is the deferred link path and the faster grouping, not scene features
+- entry:camera-effects: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
+- entry:render-passes: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
+- entry:user-pass: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
+- entry:reversed-depth: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
+- entry:liquid-shader: compileProgram carries the prepare-time wait (about 200 bytes) so the first draw of a hidden scene never blocks on this program
