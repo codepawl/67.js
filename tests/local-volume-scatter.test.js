@@ -12,7 +12,7 @@ import { freePort } from './helpers/free-port.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { applyViewTransform } from '../src/view-transform.js';
 import { encodePng } from '../src/export-png.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from '../src/local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from '../src/local-volumes.js';
 import { createLocalVolumeCrossing, meanEnvironmentRadiance } from '../src/path-tracer-volume.js';
 
 const REGION_TOLERANCE = 0.01;
@@ -140,6 +140,21 @@ test('the mean of an environment map weights each row by its solid angle', () =>
   const data = new Float32Array(4 * 2 * 3).fill(0.5);
   assert.deepEqual(meanEnvironmentRadiance({ width: 4, height: 2, channels: 3, data, intensity: 2 }).map(value => +value.toFixed(6)), [1, 1, 1]);
   assert.deepEqual(meanEnvironmentRadiance(null), [0, 0, 0]);
+});
+
+test('the light of a heavily faded box still falls off steadily from the sunward side: its skin is shaded like its body, not lit as a rim', () => {
+  const faded = { ...SMOKE_BOX, falloff: 0.9, size: [3, 3, 3], center: [0, 1.5, 0] };
+  const columns = [-1.2, -0.6, 0, 0.6, 1.2].map(x => downRay(faded, FULL_SUN, x).emitted[1]);
+  for (let index = 1; index < columns.length; index++) assert.ok(columns[index] > columns[index - 1], `light at column ${index} (${columns[index]}) is not above column ${index - 1} (${columns[index - 1]})`);
+  const skinShare = LOCAL_VOLUME_LIGHT_DEPTH_SATURATION;
+  assert.ok(skinShare > 1, 'the faded skin counts at more than its own density toward the light depth');
+});
+
+test('a sunlit volume never returns more light per unit it extinguishes than a surface facing the sun would at the same albedo', () => {
+  const thin = downRay({ ...SMOKE_BOX, size: [0.05, 0.05, 0.05], falloff: 0 }, FULL_SUN, 0);
+  const returned = thin.emitted[1] / (1 - thin.throughput[1]);
+  const surfaceFacingSun = SMOKE_BOX.scatter * SUN_COLOR[1] / Math.PI;
+  assert.ok(returned <= surfaceFacingSun, `smoke returns ${returned} per unit extinguished, a sunlit surface of the same albedo ${surfaceFacingSun}`);
 });
 
 async function startServer(port) {

@@ -102,16 +102,24 @@ export function packLocalVolumes(volumes, buffers) {
  * and reads about as bright as a surface in the same sun, which one isotropic scatter (1 / 4 pi of the key colour) leaves far too dark; the gain keeps the
  * sunlit side clearly above the shaded side. The rasterizer and the CPU path tracer both apply it.
  */
-export const LOCAL_VOLUME_KEY_GAIN = 8;
+export const LOCAL_VOLUME_KEY_GAIN = 4;
+
+/**
+ * How much the faded outer share of a volume counts toward the depth the light crosses: the profile used for the sun and sky depth is
+ * `min(profile * saturation, 1)`. The many scatters of a real smoke spread light through its thin fringe as through its body, so a sun
+ * ray running along the faded top or side skin is shaded by the whole volume, not by the skin's low density. With the plain profile that
+ * skin is lit far above the core and reads as a bright rim around the form.
+ */
+export const LOCAL_VOLUME_LIGHT_DEPTH_SATURATION = 3;
 
 /**
  * How many times the volume's own depth toward the sun counts in the key light's attenuation. Counting it more than once keeps the shaded
  * side of the smoke clearly darker than the sunlit side, the way the many scatters of a real smoke take the light from its shade.
  */
-export const LOCAL_VOLUME_SHADOW_STRENGTH = 5;
+export const LOCAL_VOLUME_SHADOW_STRENGTH = 3;
 
 /** The share of the mean sky radiance the sky term of a scattering volume keeps. The sky lights the whole volume evenly, so a high share flattens the form the sun gives it. */
-export const LOCAL_VOLUME_SKY_GAIN = 0.2;
+export const LOCAL_VOLUME_SKY_GAIN = 0.5;
 
 /**
  * How much of the sun's elevation the depth toward the sun keeps (1 is the true direction). A low sun lights a smoke box through its top face as

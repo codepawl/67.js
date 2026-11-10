@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
@@ -213,7 +213,7 @@ vec3 localVolumeDepth(int index, vec3 position, vec3 direction, int taps) {
   float profileSum = 0.0;
   for (int tap = 0; tap < 3; tap++) {
     if (tap >= taps) break;
-    profileSum += localVolumeProfile(index, position + direction * (exitDistance * (float(tap) + 0.5) / float(taps)), false);
+    profileSum += min(localVolumeProfile(index, position + direction * (exitDistance * (float(tap) + 0.5) / float(taps)), false) * ${LOCAL_VOLUME_LIGHT_DEPTH_SATURATION.toFixed(3)}, 1.0);
   }
   return localVolumeAbsorption[index].rgb * (profileSum * exitDistance / float(taps));
 }
