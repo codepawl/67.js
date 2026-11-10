@@ -152,13 +152,13 @@ const stl = exportStl(parts);
 | Format | Written | Not written |
 | --- | --- | --- |
 | OBJ | One `o` object per part, positions, UVs and normals when the geometry has them, faces as triangles | Textures, lights, cameras, animation, skins, morph weights |
-| MTL | One material per distinct base color, emission, roughness and metallic: `Kd`, `Ke` (when emission is positive), `Pr`, `Pm` | Texture maps, layers, patterns |
+| MTL | One material per distinct base color, emission, roughness and metallic: `Kd`, `Ke` (when emission is positive), `Pr`, `Pm`, and `d` (opacity) for mask, blend and add materials | Texture maps, alpha cutoff, layers, patterns |
 | STL | Triangles with face normals, 80 byte header, no color | Everything but shape |
 
 Y stays up and units stay as authored (67js uses meters); set the axis and unit in the importer or slicer.
 A mirrored part (negative scale) has its winding swapped so faces still point outward.
 A skinned part exports its bind shape.
-Export stops with an error past `MAX_MESH_EXPORT_TRIANGLES` (1,000,000), and names the field it rejected: positions, indices or `part.matrix`.
+Export stops with an error past `MAX_MESH_EXPORT_TRIANGLES` (1,000,000), and names the field it rejected: positions, indices, `part.matrix`, and for OBJ also `geometry.uvs`, `geometry.normals` and the `material` fields.
 Colors in the MTL are the linear base colors of the parts.
 Blender 5.2 imports both files with the same triangle count (`File > Import > Wavefront (.obj)` and `STL (.stl)`).
 These two functions are library calls; the `scene_export_glb` tool still writes GLB only.

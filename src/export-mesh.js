@@ -4,7 +4,44 @@
 export const MAX_MESH_EXPORT_TRIANGLES = 1_000_000;
 const MAX_NAME_LENGTH = 64;
 const STL_HEADER_TEXT = '67js binary STL';
+const ALPHA_MODES = ['opaque', 'mask', 'blend', 'add'];
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function checkFinite(values, label) {
+  for (const value of values) {
+    if (!Number.isFinite(value)) throw new RangeError(`OBJ export requires finite ${label}.`);
+  }
+}
+
+function checkFactor(value, label, maximum = 1) {
+  if (!Number.isFinite(value) || value < 0 || value > maximum) {
+    throw new RangeError(`OBJ export requires ${label} to be a finite number ${maximum === 1 ? 'within [0,1]' : 'of at least 0'}.`);
+  }
+}
+
+function checkColor(values, label) {
+  if (!values || values.length !== 3) throw new TypeError(`OBJ export requires ${label} as three linear RGB components.`);
+  for (const value of values) checkFactor(value, label);
+}
+
+// Only the OBJ writer reads UVs, normals and materials. Each is optional, and one that is present must be well formed.
+function checkObjAttributes(part, vertexCount) {
+  const { uvs, normals } = part.geometry;
+  if (uvs?.length === vertexCount * 2) checkFinite(uvs, 'geometry.uvs');
+  if (normals?.length === vertexCount * 3) checkFinite(normals, 'geometry.normals');
+  const material = part.material;
+  if (material === undefined) return;
+  if (material === null || typeof material !== 'object') throw new TypeError('OBJ export requires part.material to be an object.');
+  if (material.color !== undefined) checkColor(material.color, 'material.color');
+  if (material.emissiveColor !== undefined) checkColor(material.emissiveColor, 'material.emissiveColor');
+  if (material.roughness !== undefined) checkFactor(material.roughness, 'material.roughness');
+  if (material.metallic !== undefined) checkFactor(material.metallic, 'material.metallic');
+  if (material.emission !== undefined) checkFactor(material.emission, 'material.emission', Infinity);
+  if (material.alphaMode !== undefined && !ALPHA_MODES.includes(material.alphaMode)) {
+    throw new TypeError("OBJ export requires material.alphaMode to be 'opaque', 'mask', 'blend' or 'add'.");
+  }
+  if (material.opacity !== undefined) checkFactor(material.opacity, 'material.opacity');
+}
 
 function checkParts(parts, format) {
   if (!Array.isArray(parts) || parts.length === 0) throw new TypeError(`${format} export requires a nonempty parts array.`);
@@ -27,6 +64,7 @@ function checkParts(parts, format) {
     if (part.matrix !== undefined && (part.matrix.length !== 16 || Array.from(part.matrix).some(value => !Number.isFinite(value)))) {
       throw new RangeError(`${format} export requires part.matrix with 16 finite components.`);
     }
+    if (format === 'OBJ') checkObjAttributes(part, vertexCount);
     triangleCount += indices.length / 3;
     if (triangleCount > MAX_MESH_EXPORT_TRIANGLES) {
       throw new RangeError(`${format} export is limited to ${MAX_MESH_EXPORT_TRIANGLES} triangles. Simplify the scene or export fewer parts.`);
@@ -114,7 +152,13 @@ function safeName(name, fallback) {
 }
 
 function materialKey(material) {
-  return JSON.stringify([material?.color, material?.emissiveColor, material?.emission, material?.metallic, material?.roughness]);
+  return JSON.stringify([material?.color, material?.emissiveColor, material?.emission, material?.metallic, material?.roughness, dissolve(material)]);
+}
+
+// An opaque material ignores opacity, as in the GLB export; mask, blend and add write it as the MTL dissolve value.
+function dissolve(material) {
+  const alphaMode = material?.alphaMode ?? 'opaque';
+  return alphaMode === 'opaque' ? 1 : material.opacity ?? 1;
 }
 
 function mtlBlock(name, material) {
@@ -124,13 +168,14 @@ function mtlBlock(name, material) {
     const emissive = (material.emissiveColor ?? color).map(value => value * Math.min(material.emission, 1));
     lines.push(`Ke ${emissive.map(formatNumber).join(' ')}`);
   }
-  lines.push(`Pr ${formatNumber(material?.roughness ?? 0.5)}`, `Pm ${formatNumber(material?.metallic ?? 0)}`, 'd 1');
+  lines.push(`Pr ${formatNumber(material?.roughness ?? 0.5)}`, `Pm ${formatNumber(material?.metallic ?? 0)}`, `d ${formatNumber(dissolve(material))}`);
   return lines.join('\n');
 }
 
 /**
  * Returns `{ obj, mtl }` as text. The OBJ names the MTL by `mtlFilename` (default `model.mtl`); save both files side by side.
- * Colors in the MTL are the linear base colors of the parts, with roughness and metallic as `Pr` and `Pm`.
+ * Colors in the MTL are the linear base colors of the parts, with roughness and metallic as `Pr` and `Pm`
+ * and the opacity of a mask, blend or add material as `d`.
  */
 export function exportObj(parts, options = {}) {
   checkParts(parts, 'OBJ');

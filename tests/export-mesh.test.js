@@ -149,6 +149,50 @@ test('invalid input names the field and what to pass', () => {
   assert.equal(exportObj(parts, { mtlFilename: 'scene.mtl' }).obj.includes('mtllib scene.mtl'), true);
 });
 
+test('OBJ rejects non-finite UVs and normals and names the field', () => {
+  const [part] = sceneParts();
+  const uvs = new Float32Array(part.geometry.positions.length / 3 * 2);
+  uvs[1] = NaN;
+  assert.throws(() => exportObj([{ ...part, geometry: { ...part.geometry, uvs } }]), /finite geometry\.uvs/);
+  const normals = new Float32Array(part.geometry.positions.length);
+  normals[2] = Infinity;
+  assert.throws(() => exportObj([{ ...part, geometry: { ...part.geometry, normals } }]), /finite geometry\.normals/);
+});
+
+test('OBJ rejects malformed material fields and STL ignores them', () => {
+  const [part] = sceneParts();
+  const bad = [
+    [{ color: [0.5, 0.5] }, /material\.color/],
+    [{ color: [0.5, undefined, 0.5] }, /material\.color/],
+    [{ emissiveColor: [1, 2, 0] }, /material\.emissiveColor/],
+    [{ roughness: NaN }, /material\.roughness/],
+    [{ metallic: 2 }, /material\.metallic/],
+    [{ emission: -1 }, /material\.emission/],
+    [{ alphaMode: 'glass' }, /material\.alphaMode/],
+    [{ alphaMode: 'blend', opacity: 1.5 }, /material\.opacity/],
+  ];
+  for (const [material, message] of bad) {
+    assert.throws(() => exportObj([{ ...part, material }]), message);
+  }
+  assert.doesNotThrow(() => exportStl([{ ...part, material: bad[0][0] }]));
+  assert.match(exportObj([{ ...part, material: undefined }]).mtl, /Kd 0\.8 0\.8 0\.8/);
+});
+
+test('MTL writes opacity for mask, blend and add materials and keeps them as separate materials', () => {
+  const [part] = sceneParts();
+  const parts = [
+    part,
+    { ...part, material: { ...redMaterial, alphaMode: 'blend', opacity: 0.25 } },
+    { ...part, material: { ...redMaterial, alphaMode: 'mask', opacity: 0.6 } },
+    { ...part, material: { ...redMaterial, alphaMode: 'opaque', opacity: 0.1 } },
+  ];
+  const blocks = exportObj(parts).mtl.trim().split('\n\n');
+  assert.equal(blocks.length, 3);
+  assert.match(blocks[0], /\nd 1$/);
+  assert.match(blocks[1], /\nd 0\.25$/);
+  assert.match(blocks[2], /\nd 0\.6$/);
+});
+
 test('the triangle limit is enforced before any output is built', () => {
   const geometry = { positions: new Float32Array(9), indices: new Uint32Array(MAX_MESH_EXPORT_TRIANGLES * 3 + 3) };
   assert.throws(() => exportStl([{ geometry }]), /limited to 1000000 triangles/);
