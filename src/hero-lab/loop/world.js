@@ -41,8 +41,10 @@ export async function buildWorld(download, canvas, overrides = {}) {
   const { description, paths, models, sky } = download;
   const sharedTextures = createSharedTextures();
   const files = [];
+  let animated = null;
   for (const [index, model] of models.entries()) {
     const loaded = await loadGltf(model, { baseUrl: baseUrlOf(paths[index]), sharedTextures, ...description.gltfOptions });
+    if (loaded.animations?.length) animated = loaded;
     files.push({ parts: loaded.parts, ranks: await readPartRanks(model) });
   }
   const options = description.renderer;
@@ -67,6 +69,7 @@ export async function buildWorld(download, canvas, overrides = {}) {
     detachReflection();
     detachReflection = attachWaterReflection(renderer, whole.surface);
   }
+  let animationOrigin = null;
   const frame = { ...description.frame, exposure: description.exposure ?? 1 };
   return {
     id: description.id,
@@ -74,6 +77,11 @@ export async function buildWorld(download, canvas, overrides = {}) {
     description,
     canvas,
     render(camera, seconds) {
+      // A GLB with an animation clip (vehicles on rails, people walking) plays from the world's first drawn frame.
+      if (animated) {
+        animationOrigin ??= seconds;
+        renderer.updateParts(animated.applyAnimation(seconds - animationOrigin, 0));
+      }
       renderer.render({ ...frame, eye: camera.eye, target: camera.target, fov: camera.fov, time: seconds });
     },
     resize: () => renderer.resize(),

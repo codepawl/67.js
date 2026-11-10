@@ -47,12 +47,16 @@ export const SCENES = [
     description: '/showcase/chipfab/scene.json',
     seconds: 10,
     scrim: 0.6,
-    near: 0.5,
-    far: 4000,
+    near: 0.3,
+    far: 400,
+    // Cleanroom bay, 124 m long, in glTF units (Y up). FLIGHT NOTES: low down the aisle (y 1.5 to 2.8) between the tool rows
+    // (rows start at |z| 5.2, pods and rails at |z| 4.4), then up to 4.8 m under the hoist rails (5.8 m). Ends before the x = 88 rail crossing.
     keys: [
-      { at: 0, eye: [80.7, 76.4, 118.6], target: [77.6, 69.3, 109.4], fov: 30 },
-      { at: 0.5, eye: [64, 75, 114], target: [60, 69, 107], fov: 32 },
-      { at: 1, eye: [46, 76, 116], target: [42, 69, 108], fov: 34 },
+      { at: 0, eye: [0.5, 1.5, 0.8], target: [24, 1.7, -0.5], fov: 58 },
+      { at: 0.3, eye: [14, 1.7, -0.6], target: [40, 1.9, 0.4], fov: 58 },
+      { at: 0.6, eye: [30, 2.7, 0.2], target: [58, 2.6, 0], fov: 56 },
+      { at: 0.85, eye: [40, 4.2, 0], target: [60, 4.6, 2.5], fov: 54 },
+      { at: 1, eye: [46, 4.7, -1.2], target: [64, 5.0, 4], fov: 52 },
     ],
     credits: [],
   },
