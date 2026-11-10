@@ -1296,6 +1296,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
   let state = null;
   let revision = 0;
   let topologyRevision = 0;
+  // Undo revisions the latest stage released to fit the vertex budget; the edit's answer tells the agent.
+  let releasedRevisionCount = 0;
   let physicsBake = null;
   let clothBake = null;
   let particleBake = null;
@@ -1340,6 +1342,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
   }
 
   function stage(inputRecipe, preferred = null, removedNodes = new Set(), removedMaterials = new Set()) {
+    releasedRevisionCount = 0;
     const recipe = normalizeRecipe(inputRecipe, limits);
     const placedRuntime = recipe.nodes.some(node => node.asset)
       ? agentSceneModule('assets').expandAssetPlacements(recipe, options.assets, limits, assetOutputCache, recipe.nodes.some(node => node.asset?.drive) ? agentSceneModule('drive').createAssetDrive : null)
@@ -1376,6 +1379,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     // Automatic undo history never blocks an edit: drop the oldest kept revisions before refusing for budget.
     while (planned.overBudget && revisionHistory.length > 0) {
       revisionHistory.shift();
+      releasedRevisionCount++;
       planned = planGeometry();
     }
     let { residentStats } = planned;
@@ -1407,8 +1411,9 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         const vertices = geometry.positions.length / 3;
         if (plan.definition.type === 'mesh') {
           // Edits can grow a mesh past its estimate. Undo history never blocks an edit, so release the oldest revisions before refusing.
-          if (revisionHistory.length > 0 && residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
-            revisionHistory.length = 0;
+          while (revisionHistory.length > 0 && residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
+            revisionHistory.shift();
+            releasedRevisionCount++;
             residentStats = geometryStats(ownedGeometryRecords());
           }
           if (residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
@@ -1716,6 +1721,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     limits,
     get parts() {
       return state.parts;
+    },
+    /** How many oldest undo revisions the latest edit released to fit maxVertices; 0 when none. */
+    get releasedRevisions() {
+      return releasedRevisionCount;
     },
     get revision() {
       return revision;

@@ -34,3 +34,22 @@ test('the vertex budget still rejects a stack that is over the limit by itself (
   const scene = createAgentScene(seaRecipe(2), { maxVertices: 50_000 });
   assert.throws(() => setStack(scene, 0, 38, 1), /maxVertices/);
 });
+
+test('releasing undo history keeps the newest revisions and reports the released count (#818)', () => {
+  const scene = createAgentScene(seaRecipe(38));
+  let totalReleased = 0;
+  for (let revision = 0; revision < 10; revision += 1) {
+    setStack(scene, revision, 38, 1 + (revision + 1) * 0.01);
+    totalReleased += scene.releasedRevisions;
+  }
+  assert.ok(totalReleased > 0, 'a 70k-vertex scene must release some undo history to stay in budget');
+  assert.equal(scene.revision, 10);
+  scene.restoreRevision(9, { expectedRevision: 10 });
+  assert.equal(scene.revision, 11);
+});
+
+test('an edit that releases nothing reports zero released revisions (#818)', () => {
+  const scene = createAgentScene(seaRecipe(2));
+  setStack(scene, 0, 3, 1);
+  assert.equal(scene.releasedRevisions, 0);
+});
