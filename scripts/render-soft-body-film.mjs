@@ -3,7 +3,7 @@
 // Run it through gpu-lock on a shared machine. It needs `npm run build:lib` first.
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -81,17 +81,22 @@ function cubeSize(frame) {
 
 /** Joins the contact and max dent stills left and right, each captioned with its step, time and measured size. */
 function writeComparisonStill(outputDirectory, files, captions) {
+  const captionDirectory = mkdtempSync(join(tmpdir(), '67js-captions-'));
   const inputs = [];
   const filters = [];
   Object.keys(captions).forEach((label, index) => {
     inputs.push('-i', join(outputDirectory, files[label]));
-    const captionFile = join(tmpdir(), `67js-caption-${process.pid}-${index}.txt`);
+    const captionFile = join(captionDirectory, `caption-${index}.txt`);
     writeFileSync(captionFile, captions[label]);
     const escapedCaption = captionFile.replaceAll('\\', '/').replace(':', '\\:');
     filters.push(`[${index}:v]drawbox=x=0:y=0:w=iw:h=124:color=black@0.65:t=fill,drawtext=fontfile='${FONT_FILE}':textfile='${escapedCaption}':fontcolor=white:fontsize=28:line_spacing=8:x=20:y=12[caption${index}]`);
   });
   const filterGraph = `${filters.join(';')};[caption0][caption1]hstack=inputs=2`;
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...inputs, '-filter_complex', filterGraph, '-frames:v', '1', join(outputDirectory, 'jelly-cube-compare.png')]);
+  try {
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...inputs, '-filter_complex', filterGraph, '-frames:v', '1', join(outputDirectory, 'jelly-cube-compare.png')]);
+  } finally {
+    rmSync(captionDirectory, { recursive: true, force: true });
+  }
 }
 
 /** The jelly cube half of the summary: sizes at rest, contact and the deepest dent, plus the side by side still. */
