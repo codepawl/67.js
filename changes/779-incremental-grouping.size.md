@@ -4,3 +4,6 @@
 - scene:gltf-box+lazy: same code as entry:core
 - scene:agent-scene: same code as entry:core
 - scene:agent-scene+lazy: same code as entry:core
+- goal:lit-box: the growth is the sliced grouping and banded upload, not scene features; it takes the regroup of a 100,000-part world from 11 to 23 ms at worst per slice, and the lead accepts it as a functional gain
+- goal:gltf-box: the growth is the sliced grouping and banded upload, not scene features; same measured gain
+- goal:agent-scene: the growth is the sliced grouping and banded upload, not scene features; same measured gain
