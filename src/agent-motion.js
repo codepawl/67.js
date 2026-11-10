@@ -5,6 +5,7 @@ import { createCameraPath } from './camera-path.js';
 import { CAMERA_LENS_FIELDS } from './camera.js';
 import { createSkeletonPose } from './skeleton-pose.js';
 import { createNodeConstraintEvaluator, normalizeConstraints, normalizeDrivers } from './node-constraints.js';
+import { normalizeProperties, propertyKinds } from './motion-properties.js';
 import { normalizeClipLayers } from './agent-clip-layers.js';
 import { normalizeKeyframeEasing } from './easing.js';
 import { normalizeFootLock } from './foot-lock.js';
@@ -474,7 +475,7 @@ export function normalizeAgentMotion(input, recipe) {
   if (input === null || input === undefined) {
     return null;
   }
-  knownKeys(input, ['duration', 'loop', 'tracks', 'ik', 'constraints', 'drivers', 'layers', 'footLock', 'drive'], 'motion');
+  knownKeys(input, ['duration', 'loop', 'tracks', 'ik', 'constraints', 'drivers', 'properties', 'layers', 'footLock', 'drive'], 'motion');
   const drive = input.drive === undefined ? null : normalizedDrive(input.drive, recipe);
   // A drive knows how long its path takes, so the motion may leave the duration out.
   const duration = bounded(input.duration === undefined && drive ? Math.ceil(drive.built.duration * 1000) / 1000 : input.duration, 0.1, 30, 'motion.duration');
@@ -566,8 +567,12 @@ export function normalizeAgentMotion(input, recipe) {
   if (input.constraints !== undefined) {
     result.constraints = normalizeConstraints(input.constraints, nodes, visibleIds);
   }
+  if (input.properties !== undefined) {
+    result.properties = normalizeProperties(input.properties, duration, visibleIds);
+  }
   if (input.drivers !== undefined) {
-    result.drivers = normalizeDrivers(input.drivers, nodes, materials, visibleIds);
+    const lights = new Set(recipe.environment ? lightIds(recipe.environment) : []);
+    result.drivers = normalizeDrivers(input.drivers, { nodes, materials, lights, morphs: morphTargets, visible: visibleIds, properties: propertyKinds(result.properties) });
     for (const { target } of result.drivers) {
       if (identities.has(JSON.stringify([target.kind, target.id, target.property]))) {
         throw invalidField('motion.drivers', `${target.id} ${target.property}`, `a property no track animates, since a track on ${target.kind} ${target.id} already moves ${target.property}; drop the track or the driver`);
@@ -721,6 +726,14 @@ function validateRadiance(material, materialId) {
   }
 }
 
+const COMPONENT_INDEX = { x: 0, y: 1, z: 2 };
+
+/** The colour a light has in the recipe: the components of a driven colour that no driver sets keep it. */
+function drivenLightColor(recipe, id) {
+  const [type, index] = id.split(':');
+  return recipe.environment[LIGHT_LISTS[type]][Number(index)].color ?? [1, 1, 1];
+}
+
 /** IDs of the nodes a driver or constraint writes. */
 function constrainedNodeIds(motion) {
   const driven = (motion.drivers ?? []).filter(driver => driver.target.kind === 'node').map(driver => driver.target.id);
@@ -822,7 +835,7 @@ export function compileAgentMotion(input, recipe) {
   const ikEvaluator = motion.ik?.length ? createIkEvaluator(motion, recipe, stagedNodeTracks) : null;
   const constraintEvaluator = createNodeConstraintEvaluator({
     hierarchy: ikHierarchy(recipe), rootMatrix: recipe.ikRootMatrix,
-    constraints: motion.constraints, drivers: motion.drivers, materials: recipe.materials ?? [],
+    constraints: motion.constraints, drivers: motion.drivers, materials: recipe.materials ?? [], properties: motion.properties,
   });
   // An imported asset's base pose comes from its decoder, so it asks for IK and constraints itself with solveStagedPose.
   const ikUsesStagedPose = Boolean((ikEvaluator || constraintEvaluator) && recipe.ikHierarchy);
@@ -851,6 +864,13 @@ export function compileAgentMotion(input, recipe) {
   for (const { target } of drivenMaterials) {
     if (!output.materials.has(target.id)) output.materials.set(target.id, {});
     output.materials.get(target.id)[target.property] = target.component === undefined ? 0 : new Float64Array(3);
+  }
+  for (const { target } of (motion.drivers ?? []).filter(driver => driver.target.kind === 'light' || driver.target.kind === 'morph')) {
+    const patches = target.kind === 'light' ? output.lights : output.morphs;
+    if (!patches.has(target.id)) patches.set(target.id, {});
+    const patch = patches.get(target.id);
+    if (target.component === undefined) patch[target.property] = 0;
+    else patch.color ??= new Float64Array(drivenLightColor(recipe, target.id));
   }
   const driveSampler = motion.drive ? recipe.buildDrive(motion.drive) : null;
   if (driveSampler) {
@@ -971,6 +991,7 @@ export function compileAgentMotion(input, recipe) {
         materialSamples.get(target.id)[target.property] = value;
         drivenValues.push({ target, value });
       }
+      for (const { target, value } of evaluated?.looks ?? []) validateValue(target.kind, target.property, value, `driver ${target.kind} ${target.id} ${target.property}`);
       for (const [materialId, material] of materialSamples) {
         validateRadiance(material, materialId);
       }
@@ -1015,6 +1036,11 @@ export function compileAgentMotion(input, recipe) {
         const materialPatch = output.materials.get(target.id);
         if (typeof value === 'number') materialPatch[target.property] = value;
         else materialPatch[target.property].set(value);
+      }
+      for (const { target, value } of evaluated?.looks ?? []) {
+        const patch = (target.kind === 'light' ? output.lights : output.morphs).get(target.id);
+        if (target.component === undefined) patch[target.property] = value;
+        else patch[target.property][COMPONENT_INDEX[target.component]] = value;
       }
       if (cameraPath) {
         for (const field of ['eye', 'target', 'up']) {
