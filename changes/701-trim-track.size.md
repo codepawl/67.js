@@ -1,0 +1,4 @@
+- entry:modeling: curve growth builds morph targets so a vine grows by a motion track, a capability agents could not get before (#701)
+- scene:agent-scene: the weights of the growth steps are published where shape key weights already are
+- scene:agent-scene+lazy: the growth builder and arc-length resampling load with the modeling code
+- goal:agent-scene: the growth weights are a few lines; the builder itself sits in the lazy modeling bundle

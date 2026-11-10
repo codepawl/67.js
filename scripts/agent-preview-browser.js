@@ -286,13 +286,21 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   applyRecipeWindHeading(record.renderer, environment);
   const { objectMotion, ...renderOptions } = frameOptions;
   const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
-  if (effects.colorBalance || effects.glare || effects.lensDistortion) agentSceneModule('postSteps').installPostSteps(record.renderer);
+  let needsObjectIds = Boolean(objectMotion);
+  if (effects.colorBalance || effects.glare || effects.lensDistortion || effects.stylize) {
+    const postSteps = agentSceneModule('postSteps');
+    postSteps.installPostSteps(record.renderer);
+    needsObjectIds ||= postSteps.usesObjectMask(postSteps.resolvePostSteps(frame.effects));
+  }
   if (objectMotion) {
     // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
     const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
     if (!frame.pass) installObjectMotionBlur(record.renderer);
     if (!frame.pass) record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
     frame.objectMotion = packObjectMotion(record.renderer, objectMotion.current, objectMotion.previous);
+  } else if (needsObjectIds && !frame.pass) {
+    // A mask by parts reads the same pass.
+    record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
   }
   record.renderer.render(frame);
   const error = record.renderer.context.getError();
@@ -824,12 +832,14 @@ window.__agentPreview = {
       ? { ...record.scene.effects, depthOfField: { ...record.scene.effects.depthOfField, ...depthOfFieldOverrides } }
       : undefined;
     const outputFramebuffer = floatOutput && !pass ? record.floatModule.outputFor(record, canvas).framebuffer : undefined;
-    draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
+    const drawFrame = () => draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
       ...(brightness === 1 ? {} : { exposure }), ...(shotEffects ? { effects: shotEffects } : {}) });
+    const wireframe = pass === 'wireframe' ? record.wireframeModule.withWireframe(record.renderer, drawFrame) : drawFrame();
     // The first lit frame of a job is checked; a pass or a fade has no exposure to judge.
     const checkLitFrame = diagnose && !pass && !floatOutput && brightness === 1;
     const info = renderInfo(record.renderer, pass ? [] : viewProblems(record, shotCamera ?? record.scene.camera, checkLitFrame ? record.scene.effects.exposure : undefined));
-    return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() }
+    return pass === 'wireframe' ? { ...info, wireframe }
+      : pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() }
       : pass === 'cryptomatte' ? { ...info, cryptomatte: record.renderer.passSupport.cryptomatteManifest() }
       : info;
   },
@@ -838,6 +848,10 @@ window.__agentPreview = {
   // 16-bit PNG and EXR output load their module here, so a scene that never asks for them does not carry it.
   async prepareFloatOutput({ sessionId }) {
     requireSession(sessionId).floatModule = await import('../src/float-output.js');
+  },
+  // The wireframe pass draws its edges with this module, loaded here so a scene that never asks for it does not carry it.
+  async prepareWireframe({ sessionId }) {
+    requireSession(sessionId).wireframeModule = await import('../src/wireframe-pass.js');
   },
   readFloat({ sessionId, source, region }) {
     const record = requireSession(sessionId);
@@ -881,12 +895,13 @@ window.__agentPreview = {
     } else if (motionTime !== undefined) {
       record.scene.sampleMotion(motionTime);
     }
-    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene }, pack, { buildNativeInput }] = await Promise.all([
+    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes }, pack, { buildNativeInput }] = await Promise.all([
       import('../src/path-tracer.js'), import('../src/path-tracer-scene.js'), import('../src/path-tracer-gpu-pack.js'),
       import('../packages/render-native/pack-input.mjs'),
     ]);
     const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
     const traceScene = buildTraceScene(record.scene.parts, environment);
+    refuseLocalVolumes(traceScene, 'the native path tracer');
     const camera = createCamera(record.scene.camera, options.width, options.height);
     const input = buildNativeInput(traceScene, camera, options, pack);
     const tables = encodeNativeTables(input);

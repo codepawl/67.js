@@ -442,6 +442,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       const session = await jobPage.context().newCDPSession(jobPage);
       const region = settings.region;
       if (settings.format && settings.format !== 'png') await jobPage.evaluate(prepareInput => window.__agentPreview.prepareFloatOutput(prepareInput), { sessionId: jobId });
+      if (settings.passes?.includes('wireframe')) await jobPage.evaluate(prepareInput => window.__agentPreview.prepareWireframe(prepareInput), { sessionId: jobId });
       // A memory budget can shrink the frame below the size the region was chosen for.
       if (region && (region.x + region.width > width || region.y + region.height > height)) {
         throw new Error(`The region lies outside the rendered frame, which the memory budget reduced to ${width}x${height}.`);
@@ -627,6 +628,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
                 metrics.objectNamesTruncated = passInfo.objectNames.length > MAXIMUM_OBJECT_NAMES;
               }
               if (pass === 'cryptomatte') metrics.cryptomatte = passInfo.cryptomatte;
+              if (pass === 'wireframe') metrics.wireframe = passInfo.wireframe;
             }
             const encodedBytes = encodeMultilayerExr({ width: beautyRead.width, height: beautyRead.height, beauty: beautyRead.pixels, passes: passPixels, hasAlpha: settings.transparent === true, depthRange: RENDER_PASS_DEPTH_RANGE });
             metrics.captureSeconds += (performance.now() - captureStarted) / 1000;
@@ -640,6 +642,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
               { ...frameInput, floatOutput: false, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE, ...(highPrecision ? { passFloat: true } : {}) });
             await writeArtifact(`${stem}-${pass}.${artifactExtension}`, highPrecision ? await captureHighPrecisionBytes(pass) : await captureFrameBytes());
             if (pass === 'cryptomatte') metrics.cryptomatte = passInfo.cryptomatte;
+            if (pass === 'wireframe') metrics.wireframe = passInfo.wireframe;
             if (pass === 'depth') metrics.depthRangeMetres = RENDER_PASS_DEPTH_RANGE;
             if (pass === 'objectId') {
               metrics.objectNames = passInfo.objectNames.slice(0, MAXIMUM_OBJECT_NAMES);

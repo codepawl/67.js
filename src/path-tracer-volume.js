@@ -1,4 +1,5 @@
 import { resolveVolumeFog } from './volumetric.js';
+import { localVolumeInterval, localVolumeProfile } from './local-volumes.js';
 
 // Homogeneous fog for the path tracer: a box of uniform scattering medium with the colour, density and anisotropy of the
 // rasterizer's `environment.volumeFog`. Distances to the next scattering event are drawn from the exact free-flight
@@ -60,4 +61,50 @@ export function sampleHenyeyGreensteinCosine(anisotropy, unit) {
   const squared = anisotropy * anisotropy;
   const ratio = (1 - squared) / (1 - anisotropy + 2 * anisotropy * unit);
   return Math.max(-1, Math.min(1, (1 + squared - ratio * ratio) / (2 * anisotropy)));
+}
+
+/**
+ * Builds the function that carries a ray through the scene's local volumes (environment.localVolumes). Each volume is marched with
+ * its own step count between its entry and exit, nearest entry first: the emitted light is added in proportion to the throughput
+ * so far, then the throughput is dimmed by exp(-absorption * profile * step). Emission and absorption do not scatter, so no light
+ * sample is taken. The rasterizer's noise is not traced. `jitter` (0 to 1) offsets the samples within a step.
+ * The returned function writes the emitted light into `emitted` and scales `throughput` in place.
+ */
+export function createLocalVolumeCrossing(volumes) {
+  const entries = new Float64Array(volumes.length);
+  const exits = new Float64Array(volumes.length);
+  const order = new Int32Array(volumes.length);
+  const span = new Float64Array(2);
+  return function crossLocalVolumes(originX, originY, originZ, directionX, directionY, directionZ, length, jitter, throughput, emitted) {
+    emitted[0] = 0;
+    emitted[1] = 0;
+    emitted[2] = 0;
+    let count = 0;
+    for (let index = 0; index < volumes.length; index++) {
+      if (!localVolumeInterval(volumes[index], originX, originY, originZ, directionX, directionY, directionZ, length, span)) continue;
+      entries[index] = span[0];
+      exits[index] = span[1];
+      let slot = count++;
+      while (slot > 0 && entries[order[slot - 1]] > span[0]) {
+        order[slot] = order[slot - 1];
+        slot--;
+      }
+      order[slot] = index;
+    }
+    for (let rank = 0; rank < count; rank++) {
+      const volume = volumes[order[rank]];
+      const entry = entries[order[rank]];
+      const stepLength = (exits[order[rank]] - entry) / volume.steps;
+      for (let step = 0; step < volume.steps; step++) {
+        const distance = entry + (step + jitter) * stepLength;
+        const profile = localVolumeProfile(volume, originX + directionX * distance, originY + directionY * distance, originZ + directionZ * distance);
+        if (profile <= 0) continue;
+        const width = profile * stepLength;
+        for (let channel = 0; channel < 3; channel++) {
+          emitted[channel] += throughput[channel] * volume.emission[channel] * volume.emissionStrength * width;
+          throughput[channel] *= Math.exp(-volume.absorption[channel] * volume.density * width);
+        }
+      }
+    }
+  };
 }

@@ -67,7 +67,7 @@ const MODULE_MARKERS = {
   liquidShader: ['"transmission"', '"liquid"', '"foam"'],
   subsurfaceShader: ['"subsurface"'],
   // Any mention loads it, because an edit can set the density through a path or the environment of an operation.
-  fogShader: ['volumeFog'],
+  fogShader: ['volumeFog', 'localVolumes'],
   worldMaterials: ['"tag":"water"', '"waterPreset"', '"absorption"', '"turbidity"', '"vegetation":{', '"tag":"foliage"', '"tag":"grass"', '"tag":"terrain"', '"tag":"fire"', '"tag":"smoke"', '"moss"'],
   terrain: ['"type":"terrain"'],
   // No recipe text asks for it, only the path option of scene_inspect does, so a host loads it with loadAllAgentSceneModules.
@@ -90,7 +90,7 @@ const MODULE_MARKERS = {
   materialSnippet: ['"snippet":{'],
   // Only a motionBlur object that sets a non-zero `objects` loads it; the common `"shutter":0` look does not.
   objectMotionBlur: [/"motionBlur":\{[^}]*"objects":(?!0[,}])/],
-  postSteps: [/"(?:colorBalance|glare|lensDistortion)"/],
+  postSteps: [/"(?:colorBalance|glare|lensDistortion|stylize)"/],
 };
 
 /** Whether a recipe, operation list or edit list contains a boolean edit, which needs loadMeshBooleans() first. */
