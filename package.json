@@ -41,6 +41,7 @@
     "docs/mesh.md",
     "docs/modeling.md",
     "docs/physics.md",
+    "docs/runtime.md",
     "docs/scene-query.md",
     "docs/user-passes.md",
     "docs/skeleton-pose.md",
@@ -116,6 +117,7 @@
     "./addons/replace-textured-parts": "./build/replace-textured-parts.js",
     "./addons/texture-update": "./build/texture-update.js",
     "./addons/cloth": "./build/cloth.js",
+    "./addons/runtime": "./build/runtime.js",
     "./addons/update-part-vertices": "./build/update-part-vertices.js",
     "./package.json": "./package.json"
   },
