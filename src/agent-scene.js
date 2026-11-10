@@ -459,7 +459,7 @@ const GEOMETRY_FIELDS = {
   extrude: ['contour', 'holes', 'depth', 'steps', 'bevel', 'bevelThickness', 'bevelSegments'],
   tube: ['path', 'radius', 'segments', 'radialSegments', 'closed'],
   sdf: ['root', 'resolution'],
-  curve: ['points', 'shape', 'splines', 'closed', 'kind', 'weights', 'trim', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
+  curve: ['points', 'shape', 'splines', 'closed', 'kind', 'weights', 'trim', 'grow', 'radius', 'taper', 'profile', 'resolution', 'radialSegments'],
   text: ['text', 'size', 'depth', 'font', 'align', 'curveSegments'],
   mesh: ['base', 'edits', 'stack', 'smoothAngle', 'shapeKeys'],
   terrain: ['size', 'resolution', 'seed', 'amplitude', 'holes'],
@@ -493,7 +493,7 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim', 'root'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'trim', 'grow', 'root'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -529,7 +529,7 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
       }
       return (detail('segments', 64, 3, 2048) + 1) * (detail('radialSegments', 12, 3, 128) + 1);
     case 'curve': {
-      if (['shape', 'splines', 'kind', 'weights', 'trim'].some(field => value[field] !== undefined)) {
+      if (['shape', 'splines', 'kind', 'weights', 'trim', 'grow'].some(field => value[field] !== undefined)) {
         return agentSceneModule('modeling').curveGeometryVertexCount(value);
       }
       const knots = value.points;
@@ -1190,8 +1190,15 @@ function partsWithCloth(restParts, clothGeometries, previousParts) {
 
 // A shape key weighs what its morph track samples at this time, or its starting value when no track names it.
 function publishShapeKeyWeights(part, sampledMorphs) {
-  const { morphTargetNames, morphTargetValues } = part.geometry;
+  const { morphTargetNames, morphTargetValues, morphGrowth } = part.geometry;
   if (!morphTargetNames || !part.morph) return;
+  if (morphGrowth) {
+    const growth = sampledMorphs?.get(morphGrowth.name)?.weight ?? morphGrowth.value;
+    agentSceneModule('modeling').growthWeights(morphGrowth.steps, growth).forEach((weight, index) => {
+      part.morph.weights[index] = weight;
+    });
+    return;
+  }
   morphTargetNames.forEach((name, index) => {
     part.morph.weights[index] = sampledMorphs?.get(name)?.weight ?? morphTargetValues[index];
   });

@@ -86,7 +86,12 @@ in `splines`, never both. A spline is `{ points | shape, closed, kind, weights, 
   as lengths when `length` is true (lengths past the end are clamped to it). `end` must be greater than `start`. A trimmed
   curve is open and gets caps, also when it was closed. Trimming a range that covers an open curve changes nothing. Trim is
   computed from the same samples every time, so raising `end` frame by frame grows the curve along the same path: that is how a
-  vine grows. Building a mesh per frame is the caller's job.
+  vine grows in code.
+- `grow: { name, steps = 8, value = 1 }` on a recipe curve makes that growth a motion track. The geometry is the bare root and
+  each of `steps` (2 to 16) morph targets holds the curve grown that far, resampled to the same rings, so a morph track
+  `{ kind: "morph", id: <name>, property: "weight", keyframes }` with values 0 to 1 grows the vine, and seeking equals playing.
+  The growth runs over the spline's own trim range (a trim in factors). `value` is the growth with no track. More steps follow
+  a curved path more closely; between steps the tube blends the two neighbours.
 
 Not covered: trim ranges that wrap around the start of a closed curve, NURBS of other orders or with custom knots, a spline
 fill, and mesh edges to curve.

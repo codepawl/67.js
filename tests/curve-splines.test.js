@@ -190,3 +190,73 @@ test('a recipe curve geometry takes a shape, splines, kind and trim, and rejects
   assert.throws(() => createAgentScene(recipe({ shape: { type: 'star', points: 1 } })), /shape\.points/);
   assert.throws(() => createAgentScene(recipe({ shape: { type: 'star' }, trim: { end: 3 } })), /trim/);
 });
+
+function vineRecipe(grow = { name: 'vine', steps: 8 }, keyframes = [{ time: 0, value: 0 }, { time: 1, value: 1 }]) {
+  return {
+    format: '67js.scene',
+    schemaVersion: 1,
+    materials: [{ id: 'leaf', color: [0.2, 0.6, 0.2] }],
+    geometries: [{ id: 'vine', type: 'curve', points: [[0, 0, 0], [2, 0, 0], [4, 1, 0], [6, 1, 0]], kind: 'poly', radius: 0.02, radialSegments: 4, grow }],
+    nodes: [{ id: 'vine', geometry: 'vine', material: 'leaf' }],
+    motion: { duration: 1, tracks: [{ kind: 'morph', id: 'vine', property: 'weight', keyframes }] },
+  };
+}
+
+function still(grow) {
+  const { motion, ...recipe } = vineRecipe(grow);
+  return recipe;
+}
+
+// The renderer adds weight times offset to every vertex; this does the same on the CPU.
+function blendedPositions(part) {
+  const blended = Float32Array.from(part.geometry.positions);
+  part.geometry.morphTargets.forEach((target, index) => {
+    for (let component = 0; component < blended.length; component++) blended[component] += part.morph.weights[index] * target.positions[component];
+  });
+  return blended;
+}
+
+test('a growing vine reaches further along its curve as the grow track plays, and seeking equals playing', () => {
+  const scene = createAgentScene(vineRecipe());
+  const [part] = scene.parts;
+  const reach = () => bounds({ positions: blendedPositions(part) }).maximum[0];
+  const played = [0, 0.25, 0.5, 0.75, 1].map(time => {
+    scene.sampleMotion(time);
+    return reach();
+  });
+  played.reduce((previous, current) => {
+    assert.ok(current > previous, `the vine grew from ${previous} to ${current}`);
+    return current;
+  });
+  assert.ok(played[0] < 0.3, `a bare root at the start (${played[0]})`);
+  const whole = curve([[0, 0, 0], [2, 0, 0], [4, 1, 0], [6, 1, 0]], { kind: 'poly', radius: 0.02, radialSegments: 4 });
+  assert.ok(Math.abs(bounds(whole).maximum[0] - played.at(-1)) < 0.02, `the whole curve at the end (${played.at(-1)})`);
+  scene.sampleMotion(1);
+  scene.sampleMotion(0.5);
+  const sought = reach();
+  const fresh = createAgentScene(vineRecipe());
+  fresh.sampleMotion(0.5);
+  assert.equal(sought, bounds({ positions: blendedPositions(fresh.parts[0]) }).maximum[0], 'seeking equals a fresh sample');
+  assert.equal(sought, played[2]);
+});
+
+test('a growing vine without a track shows the curve grown to grow.value, and the targets are deterministic', () => {
+  const grown = createAgentScene(still({ name: 'vine', steps: 4 }));
+  const [part] = grown.parts;
+  assert.deepEqual(part.geometry.morphTargetNames, ['vine#1', 'vine#2', 'vine#3', 'vine#4']);
+  assert.deepEqual(Array.from(part.morph.weights), [0, 0, 0, 1]);
+  const half = createAgentScene(still({ name: 'vine', steps: 4, value: 0.5 }));
+  assert.deepEqual(Array.from(half.parts[0].morph.weights), [0, 1, 0, 0]);
+  const again = createAgentScene(still({ name: 'vine', steps: 4 }));
+  assert.deepEqual(part.geometry.morphTargets[2].positions, again.parts[0].geometry.morphTargets[2].positions);
+});
+
+test('grow rejects bad fields with what to pass', () => {
+  for (const [grow, pattern] of [
+    [{ steps: 4 }, /grow\.name/],
+    [{ name: 'vine', steps: 1 }, /grow\.steps/],
+    [{ name: 'vine', steps: 99 }, /grow\.steps/],
+    [{ name: 'vine', value: 2 }, /grow\.value/],
+    [{ name: 'vine', bogus: 1 }, /Unknown grow field: bogus/],
+  ]) assert.throws(() => createAgentScene(still(grow)), pattern);
+});

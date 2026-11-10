@@ -1,6 +1,6 @@
 import { buildLathe, buildExtrusion, buildTube } from './modeling-shapes.js';
 import { sweepSamples } from './modeling-bezier.js';
-import { sampleCountOf, sampleSpline, shapeToSpline, trimSamples } from './modeling-splines.js';
+import { resampleSamples, sampleCountOf, sampleSpline, shapeToSpline, trimSamples } from './modeling-splines.js';
 import { planSdf, sdfGeometry as buildSdf } from './modeling-sdf.js';
 
 const MAX_INPUT_POINTS = 4096;
@@ -418,15 +418,81 @@ function splinesOfGeometry(value) {
   return { splines: value.splines, label: 'splines[0]' };
 }
 
-/** The curve scene geometry: points, a shape or splines, with the shared sweep options. */
+/** The curve scene geometry: points, a shape or splines, with the shared sweep options and an optional growth. */
 export function curveGeometry(value, maxVertices) {
   const { splines, label } = splinesOfGeometry(value);
+  if (value.grow !== undefined) return growingCurve(splines, { ...value, maxVertices }, label);
   return curveSet(splines, { ...value, maxVertices }, label);
+}
+
+const GROW_FIELDS = ['name', 'steps', 'value'];
+const MAX_GROW_STEPS = 16;
+const MAX_GROW_MORPH_VERTICES = 2000000;
+// The smallest fraction a growing curve starts from, so its first state still has a length to sweep.
+const MINIMUM_GROWTH = 0.01;
+
+/** Validates the grow field of a curve geometry: { name, steps, value } with the defaults filled in. */
+export function growFrom(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('grow must be an object such as { "name": "vine", "steps": 8 }.');
+  for (const key of Object.keys(input)) {
+    if (!GROW_FIELDS.includes(key)) throw new TypeError(`Unknown grow field: ${key}. Use ${GROW_FIELDS.join(', ')}.`);
+  }
+  if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 64) throw new TypeError('grow.name must be 1 to 64 characters, such as "vine". A motion track { kind: "morph", id: <name>, property: "weight" } animates it.');
+  const steps = input.steps ?? 8;
+  integer(steps, 2, MAX_GROW_STEPS, 'grow.steps');
+  const value = finite(input.value ?? 1, 'grow.value');
+  if (value < 0 || value > 1) throw new RangeError('grow.value must be from 0 to 1 (0 is a bare root, 1 the whole curve).');
+  return { name: input.name, steps, value };
+}
+
+// One sweep of every spline grown to `fraction` of its trim range, resampled to the full-curve ring count so all
+// states share one topology.
+function growthState(plan, fraction) {
+  const { resolved, radius, profilePoints, taperFactors, radialSegments, resolution } = plan;
+  const parts = resolved.map(spline => {
+    if (spline.trim?.length) throw new TypeError('grow works with a trim in factors (length false), not lengths. Remove trim.length.');
+    const start = spline.trim?.start ?? 0;
+    const end = start + ((spline.trim?.end ?? 1) - start) * fraction;
+    const ringCount = Math.max(2, sampleCountOf(spline, resolution) + (spline.closed ? 1 : 0));
+    const samples = resampleSamples(trimSamples(sampleSpline(spline, resolution), spline.closed, { start, end }), ringCount);
+    return sweepSamples({ ...samples, closed: false, radius, taper: taperFactors, profile: profilePoints, radialSegments });
+  });
+  return joinSweeps(parts);
+}
+
+// A curve that grows: the bare root is the geometry and each step is a morph target holding the curve at that
+// length. The motion weight 0 to 1 of grow.name blends two neighbouring steps, so seeking equals playing.
+function growingCurve(splines, options, label) {
+  const grow = growFrom(options.grow);
+  const plan = planCurveSet(splines, options, label);
+  if (plan.vertexCount * grow.steps > MAX_GROW_MORPH_VERTICES) {
+    throw new RangeError(`grow needs ${plan.vertexCount * grow.steps} morph vertices; at most ${MAX_GROW_MORPH_VERTICES}. Lower grow.steps, resolution or radialSegments.`);
+  }
+  const maximum = options.maxVertices ?? DEFAULT_VERTEX_LIMIT;
+  const base = meshFrom(growthState(plan, MINIMUM_GROWTH), maximum);
+  base.morphTargets = Array.from({ length: grow.steps }, (_, index) => {
+    const state = meshFrom(growthState(plan, Math.max((index + 1) / grow.steps, MINIMUM_GROWTH)), maximum);
+    return {
+      positions: state.positions.map((position, offset) => position - base.positions[offset]),
+      normals: state.normals.map((normal, offset) => normal - base.normals[offset]),
+    };
+  });
+  base.morphTargetNames = base.morphTargets.map((_, index) => `${grow.name}#${index + 1}`);
+  base.morphTargetValues = Float32Array.from(growthWeights(grow.steps, grow.value));
+  base.morphGrowth = Object.freeze(grow);
+  return base;
+}
+
+/** Weights of the growth steps at a growth from 0 to 1: the two steps around it share the weight, the others are 0. */
+export function growthWeights(steps, growth) {
+  const position = Math.min(Math.max(growth, 0), 1) * steps;
+  return Array.from({ length: steps }, (_, index) => Math.max(0, 1 - Math.abs(position - (index + 1))));
 }
 
 /** The vertex count of a curve scene geometry, validated like curveGeometry. */
 export function curveGeometryVertexCount(value) {
   const { splines, label } = splinesOfGeometry(value);
+  if (value.grow !== undefined) growFrom(value.grow);
   return planCurveSet(splines, value, label).vertexCount;
 }
 

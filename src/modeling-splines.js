@@ -260,3 +260,25 @@ export function trimSamples(samples, closed, { start = 0, end = 1, length: byLen
   place(to);
   return { points, tangents };
 }
+
+/** Spreads `count` samples evenly by arc length along an open curve, so curves of any length share one topology. */
+export function resampleSamples(samples, count) {
+  const { points, tangents } = samples;
+  const distances = [0];
+  for (let index = 1; index < points.length; index++) {
+    const segment = subtract(points[index], points[index - 1]);
+    distances.push(distances[index - 1] + Math.hypot(segment[0], segment[1], segment[2]));
+  }
+  const total = distances.at(-1);
+  const resampled = { points: [], tangents: [] };
+  let upper = 1;
+  for (let index = 0; index < count; index++) {
+    const distance = total * index / (count - 1);
+    while (upper < points.length - 1 && distances[upper] < distance) upper++;
+    const span = distances[upper] - distances[upper - 1];
+    const weight = span > 0 ? Math.min(Math.max((distance - distances[upper - 1]) / span, 0), 1) : 0;
+    resampled.points.push(lerp(points[upper - 1], points[upper], weight));
+    resampled.tangents.push(unitOrNull(lerp(tangents[upper - 1], tangents[upper], weight)) ?? tangents[upper]);
+  }
+  return resampled;
+}
