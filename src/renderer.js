@@ -499,6 +499,39 @@ export function groupParts(parts, batching = true) {
   return batches;
 }
 
+/**
+ * Groups a world that grows by whole geometries, as replaceParts({ retainedUnchanged: true }) receives it in slices.
+ * When `parts` starts with the parts of `previous` and no appended part shares a geometry with them, the earlier batches
+ * are exactly what groupParts would build again, so only the appended parts are grouped and validated.
+ * Anything else groups the whole list. Returns the batches and the state to pass on the next call.
+ */
+export function groupPartsIncrementally(previous, parts, batching = true) {
+  const startsWithPrevious = Boolean(previous) && batching && previous.parts.length <= parts.length &&
+    previous.parts.every((part, index) => part === parts[index]);
+  const appended = startsWithPrevious ? parts.slice(previous.parts.length) : null;
+  if (appended && appended.every(part => !previous.geometries.has(part.geometry))) {
+    for (const part of appended) previous.geometries.add(part.geometry);
+    const batches = [...previous.batches, ...groupParts(appended, batching)];
+    return { batches, state: { parts: parts.slice(), geometries: previous.geometries, batches } };
+  }
+  const batches = groupParts(parts, batching);
+  return { batches, state: { parts: parts.slice(), geometries: new Set(parts.map(part => part.geometry)), batches } };
+}
+
+/**
+ * Groups the world and its floor for replaceParts. Without `retainedUnchanged` this is groupParts over the parts and the floor, with no state kept.
+ * With it, only the appended slice is grouped; the floor is one more batch unless it shares a geometry with a world part,
+ * where groupParts would have merged them, so that case groups everything.
+ */
+export function groupWorld(previous, parts, groundPart, batching, retainedUnchanged) {
+  if (!retainedUnchanged) return { batches: groupParts(groundPart ? [...parts, groundPart] : parts, batching), state: null };
+  const grouped = groupPartsIncrementally(previous, parts, batching);
+  if (!groundPart) return grouped;
+  const floorMerges = grouped.state.geometries.has(groundPart.geometry);
+  const batches = floorMerges ? groupParts([...parts, groundPart], batching) : [...grouped.batches, ...groupParts([groundPart], batching)];
+  return { batches, state: grouped.state };
+}
+
 export function textureDescriptorInfo(map, maximumSize = Infinity) {
   const width = map.image?.naturalWidth ?? map.image?.width;
   const height = map.image?.naturalHeight ?? map.image?.height;
@@ -1276,7 +1309,9 @@ export class Renderer67 {
     const renderParts = this.groundPart ? [...parts, this.groundPart] : parts;
     this.fitParts = renderParts;
     this.fitBounds = undefined;
-    const groups = groupParts(renderParts, this.batching);
+    const grouped = groupWorld(retainedUnchanged ? this.incrementalGrouping : null, parts, this.groundPart, this.batching, retainedUnchanged);
+    this.incrementalGrouping = grouped.state;
+    const groups = grouped.batches;
     const geometries = new Set(renderParts.flatMap(partGeometries));
     // Uploaded geometry was validated when it arrived; rechecking a large static scene every frame dominated streamed playback.
     for (const geometry of geometries) {
