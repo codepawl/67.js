@@ -53,8 +53,10 @@ export async function buildWorld(download, canvas, overrides = {}) {
   };
   const sharedTextures = createSharedTextures();
   const files = [];
+  let animated = null;
   for (const [index, model] of models.entries()) {
     const loaded = await loadGltf(model, { baseUrl: baseUrlOf(paths[index]), sharedTextures, ...description.gltfOptions });
+    if (loaded.animations?.length) animated = loaded;
     files.push({ parts: loaded.parts, ranks: await readPartRanks(model) });
     await yieldToMain();
   }
@@ -90,6 +92,8 @@ export async function buildWorld(download, canvas, overrides = {}) {
     detachReflection = attachWaterReflection(renderer, whole.surface);
   }
   lap('rendererMs');
+  let animationOrigin = null;
+  let animationShadowStep = -1;
   const frame = { ...description.frame, exposure: description.exposure ?? 1 };
   return {
     id: description.id,
@@ -99,6 +103,15 @@ export async function buildWorld(download, canvas, overrides = {}) {
     renderer,
     timings,
     render(camera, seconds) {
+      // A GLB with an animation clip (vehicles on rails, people walking) plays from the world's first drawn frame.
+      if (animated) {
+        animationOrigin ??= seconds;
+        const clipSeconds = seconds - animationOrigin;
+        // The shadow map follows the clip 8 times a second, not on every frame.
+        const shadowStep = Math.floor(clipSeconds * 8);
+        renderer.updateParts(animated.applyAnimation(clipSeconds, 0), { shadows: shadowStep !== animationShadowStep });
+        animationShadowStep = shadowStep;
+      }
       const drawn = effects ? effects.apply(renderer, seconds, frame) : frame;
       renderer.render({ ...drawn, eye: camera.eye, target: camera.target, fov: camera.fov, time: seconds });
     },
