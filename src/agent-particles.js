@@ -11,7 +11,7 @@ const PARTICLES_FIELDS = ['gravity', 'wind', 'fields', 'systems'];
 const SYSTEM_TYPES = ['emitter', 'hair'];
 const EMITTER_SYSTEM_FIELDS = ['type', 'node', 'seed', 'count', 'rate', 'lifetime', 'speed', 'direction', 'spread', 'emitter', 'size', 'scale', 'drag', 'floor', 'bounce', 'friction', 'colliders', 'spin', 'color', 'alpha', 'instances', 'orient'];
 const HAIR_FIELDS = ['type', 'node', 'surface', 'seed', 'count', 'length', 'segments', 'width', 'droop', 'lean', 'sway', 'swayRate'];
-const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius', 'mesh', 'from', 'normalSpeed'];
+const EMITTER_FIELDS = ['shape', 'position', 'halfExtents', 'radius', 'mesh', 'from', 'group', 'normalSpeed'];
 const EMITTER_SHAPES = ['point', 'box', 'sphere', 'disc', 'mesh'];
 const ORIENT_MODES = ['none', 'random', 'normal'];
 const SCALE_MODES = ['constant', 'shrink', 'grow'];
@@ -45,6 +45,15 @@ function normalizeMeshEmitter(input, emitter, context, path) {
   }
   emitter.mesh = input.mesh;
   emitter.from = from;
+  if (input.group !== undefined) {
+    if (typeof input.group !== 'string' || !input.group) {
+      throw invalidField(`${path}.group`, input.group, 'the name of a vertex group on the emitter mesh, such as "edge"');
+    }
+    if (from === 'volume') {
+      throw invalidField(`${path}.group`, input.group, `left out, because a vertex group weighs ${path}.from "surface" or "vertices", not "volume"`);
+    }
+    emitter.group = input.group;
+  }
   if (input.normalSpeed !== undefined) {
     emitter.normalSpeed = finiteNumber(input.normalSpeed, `${path}.normalSpeed`, -1000, 1000);
   }
@@ -65,7 +74,7 @@ function normalizeEmitter(input, context, path) {
   if (shape === 'mesh') {
     normalizeMeshEmitter(input, emitter, context, path);
   } else {
-    for (const field of ['mesh', 'from', 'normalSpeed']) {
+    for (const field of ['mesh', 'from', 'group', 'normalSpeed']) {
       if (input[field] !== undefined) throw invalidField(`${path}.${field}`, input[field], `left out unless ${path}.shape is "mesh"`);
     }
   }
@@ -323,15 +332,27 @@ function collisionSurfaceOf(system, nodes, geometries) {
   return surface;
 }
 
+// The emitter group's weight per render vertex. A name the mesh lacks is an error that lists the groups it has.
+function vertexGroupOf(emitter, geometry) {
+  const weights = geometry.vertexGroups?.[emitter.group];
+  if (!weights) {
+    const known = Object.keys(geometry.vertexGroups ?? {});
+    throw invalidField('particles.systems[].emitter.group', emitter.group, `a vertex group of node ${emitter.mesh} (known groups: ${known.join(', ') || 'none'}); make one with a vertex_group mesh edit`);
+  }
+  return weights;
+}
+
 function meshSourceOf(system, nodes, geometries) {
   const emitter = system.emitter;
   if (emitter.shape !== 'mesh') return emitter;
   const sourceNode = nodes.get(emitter.mesh);
   const geometry = geometries.get(sourceNode.geometry);
   const world = surfaceInWorld(geometry, nodeMatrix(sourceNode));
-  const source = createMeshSource(world.positions, world.normals, geometry.indices, emitter.from);
+  const weights = emitter.group ? vertexGroupOf(emitter, geometry) : null;
+  const source = createMeshSource(world.positions, world.normals, geometry.indices, emitter.from, weights);
   if (!source) {
-    throw invalidField(`particles.systems[].emitter.mesh`, emitter.mesh, `a node whose mesh has triangles with some area, because emitter.from is "${emitter.from}"`);
+    const groupNote = emitter.group ? ` and some weight in vertex group "${emitter.group}"` : '';
+    throw invalidField(`particles.systems[].emitter.mesh`, emitter.mesh, `a node whose mesh has triangles with some area${groupNote}, because emitter.from is "${emitter.from}"`);
   }
   if (source.triangleCount > PARTICLE_LIMITS.maxEmitterTriangles) {
     throw invalidField('particles.systems[].emitter.mesh', `${source.triangleCount} triangles on node ${emitter.mesh}`, `a mesh with at most ${PARTICLE_LIMITS.maxEmitterTriangles} triangles, such as a simpler proxy mesh`);

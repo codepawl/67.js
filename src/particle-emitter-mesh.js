@@ -1,4 +1,5 @@
 // A mesh as a particle emitter: points on its surface (weighted by triangle area), at its vertices, or inside its volume.
+// A vertex group (one weight per vertex) narrows the surface and vertex modes to where the group is painted.
 // Every sample draws from the particle's own generator, so the same seed gives the same points.
 
 export const EMITTER_MESH_MODES = Object.freeze(['surface', 'vertices', 'volume']);
@@ -28,7 +29,7 @@ function dotProduct(first, second) {
   return first[0] * second[0] + first[1] * second[1] + first[2] * second[2];
 }
 
-function trianglesOf(positions, indices) {
+function trianglesOf(positions, indices, weights) {
   const triangles = [];
   for (let offset = 0; offset + 2 < indices.length; offset += 3) {
     const a = corner(positions, indices[offset]);
@@ -36,7 +37,8 @@ function trianglesOf(positions, indices) {
     const c = corner(positions, indices[offset + 2]);
     const faceVector = crossProduct(subtract(b, a), subtract(c, a));
     const doubleArea = Math.hypot(faceVector[0], faceVector[1], faceVector[2]);
-    triangles.push({ a, b, c, doubleArea, normal: doubleArea > 0 ? faceVector.map(component => component / doubleArea) : [0, 1, 0] });
+    const groupWeight = weights ? (weights[indices[offset]] + weights[indices[offset + 1]] + weights[indices[offset + 2]]) / 3 : 1;
+    triangles.push({ a, b, c, doubleArea, emitWeight: doubleArea * groupWeight, normal: doubleArea > 0 ? faceVector.map(component => component / doubleArea) : [0, 1, 0] });
   }
   return triangles;
 }
@@ -45,7 +47,7 @@ function surfaceSampler(triangles) {
   const cumulative = [];
   let total = 0;
   for (const triangle of triangles) {
-    total += triangle.doubleArea;
+    total += triangle.emitWeight;
     cumulative.push(total);
   }
   if (!(total > 0)) return null;
@@ -112,23 +114,38 @@ function volumeSampler(triangles, positions) {
   };
 }
 
-function vertexSampler(positions, normals) {
+function vertexSampler(positions, normals, weights) {
   const vertexCount = positions.length / 3;
+  const cumulative = [];
+  let total = 0;
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    total += weights ? weights[vertex] : 1;
+    cumulative.push(total);
+  }
+  if (!(total > 0)) return null;
   return random => {
-    const vertex = Math.min(Math.floor(random() * vertexCount), vertexCount - 1);
-    return { point: corner(positions, vertex), normal: corner(normals, vertex) };
+    const target = random() * total;
+    let low = 0;
+    let high = vertexCount - 1;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (cumulative[middle] <= target) low = middle + 1;
+      else high = middle;
+    }
+    return { point: corner(positions, low), normal: corner(normals, low) };
   };
 }
 
 /**
  * Build a sampler over a mesh already in world space. `sample(random)` returns `{ point, normal }`; the normal is null
- * for a volume. Returns null when the mesh cannot supply the mode (no area, or no triangles).
+ * for a volume. `weights` is an optional vertex group (one weight per vertex) for the surface and vertices modes. Returns
+ * null when the mesh cannot supply the mode (no area, no triangles, or a group that weighs nothing).
  */
-export function createMeshSource(positions, normals, indices, mode) {
-  const triangles = trianglesOf(positions, indices);
+export function createMeshSource(positions, normals, indices, mode, weights = null) {
+  const triangles = trianglesOf(positions, indices, weights);
   if (!triangles.length) return null;
   let sampler = null;
-  if (mode === 'vertices') sampler = vertexSampler(positions, normals);
+  if (mode === 'vertices') sampler = vertexSampler(positions, normals, weights);
   else if (mode === 'volume') sampler = volumeSampler(triangles, positions);
   else sampler = surfaceSampler(triangles);
   if (!sampler) return null;
