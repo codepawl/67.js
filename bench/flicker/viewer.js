@@ -6,6 +6,7 @@ import { parseGltf } from '../../src/gltf.js';
 import { resolveFlushParts } from '../../src/coplanar-overlap.js';
 import { flushOrderOf } from '../../src/depth-layer.js';
 import { TRAPS } from './traps.js';
+import { collectWorldTriangles, castPixelOwners, compareWithGroundTruth } from './ground-truth.js';
 
 // One flat colour per part, no textures, so a pixel's colour says which part owns it and a changed colour is a changed owner.
 function paintPartsByOwner(parts) {
@@ -237,6 +238,26 @@ function readFrame(context) {
 // `totalChanged` counts every pixel whose owner changed, edges included. `clearOfEdges` is stricter than `changed`: an anti-aliased
 // edge blends two owners into a colour that is close to both, which the four-neighbour test reads as no edge, so this count also
 // leaves out pixels with a colour step anywhere within two pixels.
+// The ground-truth probe (ground-truth.js): one frame, compared with a float64 ray cast that cannot z-fight. Needs flat colours
+// per part (ids=1) or per triangle (facets=1); the trap scenes bring their own. Returns the counts of compareWithGroundTruth
+// and the milliseconds the ray cast took.
+async function truth() {
+  if (!renderer) return null;
+  const { width, height } = canvas;
+  const scratch = document.createElement('canvas');
+  scratch.width = width;
+  scratch.height = height;
+  const context = scratch.getContext('2d', { willReadFrequently: true });
+  renderer.render(frameFor(0));
+  const pixels = new Uint8ClampedArray(readFrame(context));
+  const started = performance.now();
+  const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
+  const cast = castPixelOwners(world, frameFor(0), width, height);
+  const { mismatchMask, ...counts } = compareWithGroundTruth({ pixels, world, cast, width, height });
+  renderer.render(frameFor(0));
+  return { ...counts, triangles: world.count, castMilliseconds: Math.round(performance.now() - started), width, height };
+}
+
 async function probe() {
   if (!renderer) return null;
   if (!options.ids) {
@@ -451,7 +472,7 @@ bindControls();
 requestAnimationFrame(tick);
 document.querySelector('#speedValue').textContent = '';
 window.flicker = {
-  setCamera, probe, build, options, frameWholeScene,
+  setCamera, probe, truth, build, options, frameWholeScene,
   get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.(), flush: flushReport }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
   traps: Object.keys(TRAPS),
