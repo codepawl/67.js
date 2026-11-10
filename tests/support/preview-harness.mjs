@@ -90,7 +90,7 @@ export function previewHarness() {
     // The fault-injected renderer has no floor part; the automatic floor is covered by agent-ground.test.js and the live smokes.
     agentGroundPlacement: () => null, createAgentGround: () => null, placeAgentGround: () => {}, FLOOR_COLOR: [0.22, 0.22, 0.21], groundBounceEnvironment: (parts, environment) => environment,
     // The optional addons only plug stages into a real renderer; the fault-injected one needs none.
-    installCameraEffects: renderer => renderer, effectsWithFStop, installRenderPasses: renderer => renderer, installDepthPrecision: renderer => renderer,
+    installCameraEffects: renderer => renderer, effectsWithFStop, installRenderPasses: renderer => renderer, installCoplanarDiagnostics: renderer => renderer,
     installMeshBlend: renderer => Object.assign(renderer, { meshBlend: { radii: new Map() } }), normalizeBlend,
   });
   // Evaluate only trusted repository adapter code; inject the driver boundary for failure cases.
