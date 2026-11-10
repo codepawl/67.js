@@ -7,6 +7,7 @@
     <meta name="robots" content="noindex" />
     <title>Hero · World loop · 67js</title>
     <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/src/hero-lab/lab.css" />
     <script>
       const mobile = matchMedia("(max-width: 700px)").matches ? "-mobile" : "";
       const preload = document.createElement("link");
@@ -40,10 +41,10 @@
         </div>
       </div>
       <div class="scene-bar">
-        <a class="attribution" id="attribution" hidden target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span></span></a>
+        <div class="attribution" id="attribution" hidden></div>
         <div class="credits-panel" id="credits-panel" hidden></div>
         <nav class="scene-tabs" id="scene-tabs" aria-label="Scenes"></nav>
-        <button class="credits-toggle" id="credits-toggle" type="button" aria-expanded="false" aria-controls="credits-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.1"/></svg>Credits</button>
+        <button class="credits-toggle" id="credits-toggle" type="button" aria-expanded="false" aria-controls="credits-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.1"/></svg><span class="credits-label">Credits</span></button>
       </div>
     </main>
     <script type="module" src="/src/hero-lab/hero-loop.js"></script>

@@ -3,7 +3,6 @@
 //   ?capture=1   no real-time clock: the page waits for window.__loop.step(seconds) so a recorder can render exact frames
 //   ?measure=1   reads a pixel back after every draw so frame times include the GPU, and keeps per-scene samples
 //   ?samples=1   overrides the anti-aliasing sample count (previews)
-import './lab.css';
 import './loop/loop.css';
 import { clamp, prefersReducedMotion, showStageError, smoothstep, startLoop, metrics } from './stage.js';
 import { SCENES } from './loop/scenes.js';
@@ -159,12 +158,15 @@ function paintScene(index) {
   root.style.setProperty('--scrim', String(scene.scrim));
   stage.setAttribute('aria-label', `A live 3D scene: ${scene.name}`);
   ringMarks.forEach(mark => { mark.fill.style.strokeDashoffset = String(RING_LENGTH); });
-  const simready = scene.credits.find(credit => credit.label.startsWith('NVIDIA'));
-  attribution.hidden = !simready;
-  if (simready) {
-    attribution.href = simready.href;
-    attribution.querySelector('span').textContent = `${simready.label}, ${simready.licence}`;
-  }
+  attribution.hidden = scene.credits.length === 0;
+  attribution.replaceChildren(...scene.credits.map(credit => {
+    const link = document.createElement('a');
+    link.href = credit.href;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = `${credit.label}, ${credit.licence}`;
+    return link;
+  }));
 }
 
 // ---- Credits: every attribution the five worlds need, one list.
@@ -259,7 +261,18 @@ function tick(seconds) {
   paintIndicator(incoming ? 1 : prefersReducedMotion ? 0 : activeSeconds / scene.seconds);
 }
 
+// The poster is the largest paint, so the first world's download (about 12 MB) starts only after the poster has arrived.
+function posterLoaded() {
+  const poster = document.querySelector('#poster');
+  if (!poster || poster.complete) return Promise.resolve();
+  return new Promise(resolve => {
+    poster.addEventListener('load', resolve, { once: true });
+    poster.addEventListener('error', resolve, { once: true });
+  });
+}
+
 async function start() {
+  await posterLoaded();
   const first = prepare(0, { immediately: true });
   await first.ready;
   if (first.error) throw first.error;
