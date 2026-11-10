@@ -104,9 +104,16 @@ test('the bounds of a rotated, scaled part become an oriented box that the inter
   assert.throws(() => packLocalVolumes([volume], createLocalVolumeBuffers()), /bindLocalVolumeParts/);
 });
 
-test('the rasterizer draws bounds only: a fit "mesh" volume throws a message that names the field', () => {
+test('a fit "mesh" volume packs for the rasterizer as its bounds plus a slot in the mesh buffer', () => {
   const [volume] = resolveLocalVolumes([{ shape: 'mesh', part: 'room', fit: 'mesh' }]);
-  assert.throws(() => bindLocalVolumeParts([volume], [part('room', unitBox())], { meshFit: false }), /environment\.localVolumes\[0\]\.fit "mesh" is traced by the CPU path tracer only/);
+  const room = part('room', unitBox());
+  const buffers = packLocalVolumes(bindLocalVolumeParts([volume], [room]), createLocalVolumeBuffers());
+  assert.equal(buffers.centers[3], 2, 'packed as a mesh shape');
+  assert.equal(buffers.steps[1], 0, 'the first slot');
+  assert.deepEqual(buffers.meshParts, [{ part: room, label: 'environment.localVolumes[0]' }]);
+  const bounds = packLocalVolumes(bindLocalVolumeParts(resolveLocalVolumes([{ shape: 'mesh', part: 'room' }]), [room]), createLocalVolumeBuffers());
+  assert.equal(bounds.centers[3], 0, 'fit bounds packs as a box');
+  assert.equal(bounds.meshParts.length, 0);
 });
 
 test('an open mesh has no inside: it throws with the open edge count, and a closed one reports none', () => {

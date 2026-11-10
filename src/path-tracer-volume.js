@@ -1,5 +1,6 @@
 import { resolveVolumeFog } from './volumetric.js';
 import { localVolumeInterval, localVolumeProfile } from './local-volumes.js';
+import { countOpenEdges } from './local-volume-parts.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
 
@@ -69,36 +70,7 @@ const MAXIMUM_MESH_CROSSINGS = 64;
 const MAXIMUM_MESH_SEGMENTS = MAXIMUM_MESH_CROSSINGS / 2;
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
-function weldedVertexIds(positions, tolerance) {
-  const ids = new Map();
-  const welded = new Uint32Array(positions.length / 3);
-  for (let vertex = 0; vertex < welded.length; vertex++) {
-    const key = `${Math.round(positions[vertex * 3] / tolerance)},${Math.round(positions[vertex * 3 + 1] / tolerance)},${Math.round(positions[vertex * 3 + 2] / tolerance)}`;
-    if (!ids.has(key)) ids.set(key, ids.size);
-    welded[vertex] = ids.get(key);
-  }
-  return welded;
-}
-
-/** The number of edges that do not join exactly two triangles, with vertices at the same place counted as one. 0 for a closed mesh. */
-export function countOpenEdges(positions, indices, tolerance) {
-  const welded = weldedVertexIds(positions, tolerance);
-  const uses = new Map();
-  for (let corner = 0; corner < indices.length; corner += 3) {
-    for (let edge = 0; edge < 3; edge++) {
-      const from = welded[indices[corner + edge]];
-      const to = welded[indices[corner + (edge + 1) % 3]];
-      if (from === to) continue;
-      const key = from < to ? `${from}-${to}` : `${to}-${from}`;
-      uses.set(key, (uses.get(key) ?? 0) + 1);
-    }
-  }
-  let open = 0;
-  for (const count of uses.values()) {
-    if (count !== 2) open++;
-  }
-  return open;
-}
+export { countOpenEdges };
 
 /**
  * Gives a mesh volume (shape "mesh", bound to its part by bindLocalVolumeParts) what the tracer needs: the part's triangles in

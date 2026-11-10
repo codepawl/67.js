@@ -60,7 +60,7 @@ async function drawInChrome(page, scenarios) {
   return page.evaluate(task, scenarios);
 }
 
-test('the rasterizer draws a mesh volume as the oriented bounds of its part and refuses a mesh fit', async (context) => {
+test('the rasterizer draws a mesh volume with fit bounds as the oriented bounds of its part', async (context) => {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -81,18 +81,16 @@ test('the rasterizer draws a mesh volume as the oriented bounds of its part and 
     const page = await browser.newPage({ viewport: { width: 64, height: 64 } });
     await page.goto(`http://127.0.0.1:${port}/`);
     const smoke = { density: 2, falloff: 0, steps: 24 };
-    const [plain, byPart, byBox, wrongFit, unknown] = await drawInChrome(page, [
+    const [plain, byPart, byBox, unknown] = await drawInChrome(page, [
       [],
       [{ shape: 'mesh', part: 'room', ...smoke }],
       [{ shape: 'box', center: [0, 0, 2], size: [3, 2, 1], ...smoke }],
-      [{ shape: 'mesh', part: 'room', fit: 'mesh' }],
       [{ shape: 'mesh', part: 'hall' }],
     ]);
     assert.equal(byPart.message, null);
     assert.equal(byPart.glError, 0);
     assert.notDeepEqual(byPart.pixels, plain.pixels, 'the part fills a volume that dims the wall');
     assert.deepEqual(byPart.pixels, byBox.pixels, 'the oriented bounds of the turned part draw as the box they equal');
-    assert.match(wrongFit.message, /environment\.localVolumes\[0\]\.fit "mesh" is traced by the CPU path tracer only/);
     assert.match(unknown.message, /environment\.localVolumes\[0\]\.part "hall" names no part in the scene; parts: wall, room/);
   } finally {
     await browser?.close();
