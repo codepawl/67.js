@@ -1,0 +1,9 @@
+- entry:fog-shader: smoke and haze in sun drew as a dark stain; the lit local volume step (sun depth, in-scatter, key light binding) shares the fog's shadow lookup and phase function instead of copying them.
+- scene:agent-scene: the `scatter` field check and the capabilities text run where the recipe is checked, an agent-facing capability.
+- scene:agent-scene+lazy: the same field plus the CPU path tracer's lit volume step (sky mean, shadow ray, sun depth), counted in the lazy bundle.
+- scene:lit-box: a few core lines (the key light block in the post program, the shadow flag, the environment passed to the volume bind), counted in this scene.
+- scene:gltf-box: the same core lines, counted in this scene.
+- scene:gltf-box+lazy: the same core lines, counted in this scene.
+- goal:lit-box: growth is a few core lines for a visible fix whose shader code lives in the fog addon.
+- goal:gltf-box: growth is a few core lines for a visible fix whose shader code lives in the fog addon.
+- goal:agent-scene: the scene is already over its goal; the `scatter` check must run where the recipe is checked.

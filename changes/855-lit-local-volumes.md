@@ -1,0 +1,1 @@
+- `environment.localVolumes[].scatter` (0 to 1, default 0 draws as before) lights a local volume with the key light (shadow map, phase function and the volume's own depth toward the sun) and the sky, in the rasterizer and the CPU path tracer (#855)

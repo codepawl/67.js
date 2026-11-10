@@ -108,7 +108,7 @@ In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is th
 
 ## Local volumes
 
-`environment.localVolumes` holds up to 8 boxes, spheres or parts that absorb and emit light: candle haze, a smoke puff, a glowing cloud in one place. They need no `volumeFog` and do not scatter, so a lamp does not light them; they only dim what is behind them and add their own glow. A scene without `localVolumes` draws exactly as before and compiles nothing extra.
+`environment.localVolumes` holds up to 8 boxes, spheres or parts that absorb and emit light: candle haze, a smoke puff, a glowing cloud in one place. They need no `volumeFog`. With `scatter` at its default `0` they do not scatter, so the sun and the sky do not light them; they only dim what is behind them and add their own glow. Raise `scatter` to light them (see "Lit volumes"). A scene without `localVolumes` draws exactly as before and compiles nothing extra.
 
 ```json
 { "environment": { "localVolumes": [
@@ -125,10 +125,21 @@ In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is th
 | `absorption` | `[1, 1, 1]` | Per colour channel share of the density, `0` to `1`. A larger value dims that channel more, so `[0.1, 0.6, 1]` removes blue first and leaves a warm tint |
 | `emission`, `emissionStrength` | `[0, 0, 0]`, `1` | Glow colour and its radiance per unit length at the core, `0` to `1000`. Emission does not depend on `density`, so `density: 0` is a pure glow |
 | `falloff` | `0.5` | `0` to `1`. The outer share of the volume over which the density fades to zero (`0` is a hard edge) |
+| `scatter` | `0` | `0` to `1`. The share of the light the volume extinguishes that it scatters back instead of absorbing, lit by the key light and the sky (see "Lit volumes"). `0` draws exactly as before. Not allowed with `fit: "mesh"` |
 | `noiseAmount`, `noiseScale` | `0`, `1` | `noiseAmount` `0` to `1` breaks the density up with value noise at `noiseScale` cells per unit: the profile is multiplied by `mix(1, 2 * noise, noiseAmount)`. The rasterizer and the CPU path tracer read the same field. A `fit: "mesh"` volume ignores it |
 | `steps` | `16` | `4` to `32` samples through the volume |
 
 Each volume is marched on its own between its entry and its exit, cut at the first surface, and the volumes are composited nearest entry first. Overlapping volumes are therefore an approximation. Local volumes are drawn before `volumeFog`, so a fog in front of a puff also dims it. They need the same renderer as the fog (`hdr: true`, `depth: true`, an opaque canvas) and are drawn in the post pass, so they are not in the lightmap bake: a scene bake (`bake` in a recipe) leaves them out, an emissive volume lights no baked surface and no volume dims the baked light, and the bake report names them in `skippedLocalVolumes` (index, shape, whether emissive) with a `warnings` line. A scene without local volumes bakes and reports exactly as before. Add a point light or an emissive part where the volume's glow should reach a wall. The path tracer traces them on `backend: "cpu"` with the same fields, noise included, and every other tracer entry point (backends `gpu`, `webgpu` and `native`, the progressive and both realtime tracers, the GPU light bake) throws `environment.localVolumes is traced by the CPU path tracer only` instead of leaving them out. The GPU tracers are refused, not ported: each would need a second march loop in its kernel and a volume table in every pack, for a feature the CPU tracer already draws. Cost grows with the covered pixels times `steps` times the number of volumes that the pixel's ray crosses; a ray that misses every volume pays only the interval test.
+
+### Lit volumes
+
+A volume with `scatter` above `0` returns, in each step, `scatter * (1 - exp(-extinction * step))` of the light it dims, per colour channel, times the light that arrives at that point: the sky term plus the key light. Smoke or haze in sun then reads bright on the side toward the sun and grey in shade, where a `scatter: 0` volume draws as a dark stain.
+
+- The key light uses the same shadow map lookup (`keyVisibility`) and phase function (`henyeyGreenstein`, isotropic here) as `volumeFog`, times `exp(-depth)` where `depth` is the volume's own optical depth between the point and the volume's far side toward the sun (three midpoint taps of its profile, noise included). That depth is what makes the sunward side brighter than the shaded side. Only the key light and the sky light a volume: point, spot and area lights do not.
+- The sky term is the mean of `skyTop` and `skyBottom` times `ambientIntensity` in the rasterizer, and the mean radiance of `environment.map` in the CPU path tracer. It is not occluded. With an environment map the rasterizer still reads `skyTop` and `skyBottom`.
+- The CPU path tracer uses the same model on `backend: "cpu"`: the sky term, a shadow ray toward the sun, and the same three taps. The sun's colour is `keyColor` there.
+- A scene with a lit volume draws the key light's shadow map for the post pass, as a fog does. A volume with `scatter: 0` pays nothing extra per step.
+- Measured (`tests/local-volume-scatter.test.js`, a density 1.2 smoke box under a side sun over an even grey sky, seen from above; 64 px rasterizer on SwiftShader against the 32 px, 16 sample CPU tracer): the worst of 64 regions differed by 0.0003 of linear radiance and the whole frame matched to four places (0.4141 both), inside the 0.05 and 0.02 tolerances. The half toward the sun read 0.424 and the shaded half 0.404 in both renderers.
 
 ### Mesh volumes
 

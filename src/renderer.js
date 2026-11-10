@@ -2190,7 +2190,7 @@ export class Renderer67 {
     context.bindTexture(context.TEXTURE_2D, this.depthTexture ?? this.whiteTexture);
     context.uniform1i(post.uniforms.sceneDepth, 1);
     fogSupport?.bindUniforms(this, post, volume, environment, frame);
-    if (localVolumes) requireFeatureCode('volumeFog').support.bindLocalVolumes(this, post, frame);
+    if (localVolumes) requireFeatureCode('volumeFog').support.bindLocalVolumes(this, post, frame, environment);
     context.activeTexture(context.TEXTURE2);
     context.bindTexture(context.TEXTURE_2D, effects.bloom.strength > 0 ? this.bloomTargets[1].texture : this.whiteTexture);
     context.uniform1i(post.uniforms.bloomTexture, 2);
@@ -2550,7 +2550,7 @@ export class Renderer67 {
     this.requireFeatureNames(shaderFeaturesOfLighting(this.lighting));
     const passMode = this.preparePass(frame);
     this.renderingPass = passMode > 0;
-    this.volumeShadowWanted = volume.density > 0;
+    this.volumeShadowWanted = volume.density > 0 || (Array.isArray(environment.localVolumes) && environment.localVolumes.some(localVolume => localVolume?.scatter > 0));
     if (casterChanged || this.shadowMapSizeWanted() !== this.shadowMapSize) {
       this.assemblyAmount = assemblyAmount;
       this.createShadowMap();

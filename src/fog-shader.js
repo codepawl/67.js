@@ -89,10 +89,11 @@ function prepareLocalVolumes(renderer, input, frame) {
 }
 
 // Uploads the packed volumes. Their uniforms exist only in a program with the local step compiled in.
-function bindLocalVolumes(renderer, post, frame) {
+function bindLocalVolumes(renderer, post, frame, environment) {
   const context = renderer.context;
   const buffers = renderer.localVolumeBuffers;
   const locate = name => (post.uniforms[name] ??= context.getUniformLocation(post.program, name));
+  bindKeyLight(renderer, locate, environment);
   context.uniform1i(locate('localVolumeCount'), buffers.count);
   context.uniform1f(locate('localOrthographic'), frame.projection === 'orthographic' ? 1 : 0);
   context.uniform4fv(locate('localVolumeCenters[0]'), buffers.centers);
@@ -107,6 +108,32 @@ function bindLocalVolumes(renderer, post, frame) {
   context.uniform1i(locate('localMeshVolumes'), 7);
 }
 
+// The renderer's own sky gradient when a scene names none; drawSky in renderer.js holds the same two colours.
+const DEFAULT_SKY_TOP = [0.20, 0.38, 0.52];
+const DEFAULT_SKY_BOTTOM = [0.62, 0.70, 0.67];
+
+// The sky term of a scattering local volume: the mean of the sky gradient times the ambient intensity.
+function localSkyAmbient(renderer, environment) {
+  const top = environment.skyTop ?? DEFAULT_SKY_TOP;
+  const bottom = environment.skyBottom ?? DEFAULT_SKY_BOTTOM;
+  return [0, 1, 2].map(channel => 0.5 * (top[channel] + bottom[channel]) * renderer.lighting.ambientIntensity);
+}
+
+// The key light's shadow map, direction and colour, and the sky term, for volumes that scatter. The sampler always has the shadow map
+// on its unit, so the program is valid in a frame where no volume scatters.
+function bindKeyLight(renderer, locate, environment) {
+  const context = renderer.context;
+  if (renderer.shadowTexture) {
+    context.activeTexture(context.TEXTURE3);
+    context.bindTexture(context.TEXTURE_2D, renderer.shadowTexture);
+  }
+  context.uniform1i(locate('volumeShadowMap'), 3);
+  context.uniformMatrix4fv(locate('volumeLightProjection'), false, renderer.lightProjection);
+  context.uniform3fv(locate('volumeLightDirection'), environment.lightDirection);
+  context.uniform3fv(locate('volumeLightColor'), renderer.lighting.keyColor);
+  context.uniform3fv(locate('localSkyAmbient'), localSkyAmbient(renderer, environment));
+}
+
 const LOCAL_VOLUME_DECLARATIONS = `
 uniform int localVolumeCount;
 uniform float localOrthographic;
@@ -116,6 +143,7 @@ uniform vec4 localVolumeAbsorption[8];
 uniform vec4 localVolumeEmission[8];
 uniform vec4 localVolumeSteps[8];
 uniform vec4 localVolumeAxes[24];
+uniform vec3 localSkyAmbient;
 uniform highp sampler2D localMeshVolumes;
 `;
 
@@ -178,6 +206,21 @@ float localVolumeProfile(int index, vec3 position) {
   float noiseAmount = localVolumeAbsorption[index].w;
   if (noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
   return profile;
+}
+// The optical depth of a volume between a point inside it and its far side toward the sun, from three midpoint taps of its profile.
+vec3 localVolumeSunDepth(int index, vec3 position, vec3 towardSun) {
+  float exitDistance = max(localVolumeInterval(index, position, towardSun).y, 0.0);
+  float profileSum = 0.0;
+  for (int tap = 0; tap < 3; tap++) profileSum += localVolumeProfile(index, position + towardSun * (exitDistance * (float(tap) + 0.5) / 3.0));
+  return localVolumeAbsorption[index].rgb * (profileSum * exitDistance / 3.0);
+}
+// The light a scattering volume receives at a point: the sky term plus the key light through the shadow map and the volume's own depth.
+vec3 localVolumeInScatter(int index, vec3 position, vec3 direction) {
+  vec3 towardSun = normalize(volumeLightDirection);
+  float visibility = keyVisibility(position);
+  vec3 sunLight = vec3(0.0);
+  if (visibility > 0.001) sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility) * exp(-localVolumeSunDepth(index, position, towardSun));
+  return localSkyAmbient + sunLight;
 }
 vec3 localVolumes(vec3 background) {
   vec2 clipXY = textureCoordinate * 2.0 - 1.0;
@@ -243,15 +286,42 @@ vec3 localVolumes(vec3 background) {
     int steps = int(localVolumeSteps[nearest].x);
     float stepSize = (exitDistance - entry) / float(steps);
     float jitter = hash(vec3(gl_FragCoord.xy, float(nearest) + 1.0));
+    float scatterAlbedo = localVolumeSteps[nearest].z;
     for (int step = 0; step < 32; step++) {
       if (step >= steps) break;
       vec3 position = origin + direction * (entry + (float(step) + jitter) * stepSize);
       float profile = localVolumeProfile(nearest, position);
       radiance += transmittance * localVolumeEmission[nearest].rgb * (profile * stepSize);
-      transmittance *= exp(-localVolumeAbsorption[nearest].rgb * (profile * stepSize));
+      vec3 extinction = localVolumeAbsorption[nearest].rgb * (profile * stepSize);
+      if (scatterAlbedo > 0.0 && profile > 0.0) radiance += transmittance * (scatterAlbedo * (1.0 - exp(-extinction))) * localVolumeInScatter(nearest, position, direction);
+      transmittance *= exp(-extinction);
     }
   }
   return background * transmittance + radiance;
+}
+`;
+
+// The key light's side of the fog and of a scattering local volume: the shadow map, the light and the phase function. Both steps read these,
+// so post.js compiles this block in whenever either is on.
+const KEY_LIGHT_DECLARATIONS = `
+uniform highp sampler2DShadow volumeShadowMap;
+uniform mat4 volumeLightProjection;
+uniform vec3 volumeLightDirection;
+uniform vec3 volumeLightColor;
+`;
+
+const KEY_LIGHT_FUNCTIONS = `
+float henyeyGreenstein(float cosine, float anisotropy) {
+  return (1.0 - anisotropy * anisotropy) / (12.5663706 * pow(1.0 + anisotropy * anisotropy - 2.0 * anisotropy * cosine, 1.5));
+}
+// The share of the key light that reaches a point: the shadow map.
+float keyVisibility(vec3 position) {
+  vec4 lightPosition = volumeLightProjection * vec4(position, 1);
+  vec3 shadow = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
+  if (all(greaterThanEqual(shadow, vec3(0))) && all(lessThanEqual(shadow, vec3(1)))) {
+    return texture(volumeShadowMap, vec3(shadow.xy, shadow.z - 0.0008));
+  }
+  return 1.0;
 }
 `;
 
@@ -263,13 +333,11 @@ function packLights(renderer) {
 registerShaderFeatureCode('volumeFog', {
   // The JavaScript half, which the renderer calls for a frame that draws a volume fog.
   support: { packLights, bindUniforms, usesDetail: fogUsesDetail, prepareLocalVolumes, bindLocalVolumes },
+  keyDeclarations: KEY_LIGHT_DECLARATIONS,
+  keyFunctions: KEY_LIGHT_FUNCTIONS,
   localDeclarations: LOCAL_VOLUME_DECLARATIONS,
   localFunctions: LOCAL_VOLUME_FUNCTIONS,
   postDeclarations: `
-uniform highp sampler2DShadow volumeShadowMap;
-uniform mat4 volumeLightProjection;
-uniform vec3 volumeLightDirection;
-uniform vec3 volumeLightColor;
 uniform float volumeDensity;
 uniform vec3 volumeMinimum;
 uniform vec3 volumeMaximum;
@@ -309,9 +377,6 @@ uniform float orthographic;
 uniform highp sampler3D fogSkyVisibility;
 `,
   postFunctions: `
-float henyeyGreenstein(float cosine, float anisotropy) {
-  return (1.0 - anisotropy * anisotropy) / (12.5663706 * pow(1.0 + anisotropy * anisotropy - 2.0 * anisotropy * cosine, 1.5));
-}
 float fogLightAttenuation(float distanceSquared, float range, float radius) {
   float cutoff = 1.0;
   if (range > 0.0) {
@@ -390,15 +455,6 @@ float fogDensityFactor(vec3 position) {
   if (POST_FIELD) noise *= field.r * layerProfile((position.y - volumeMinimum.y) / max(field.g, 0.0001));
   else if (volumeHeightFalloff > 0.0) noise *= exp((volumeMinimum.y - position.y) / volumeHeightFalloff);
   return noise;
-}
-// The share of the key light that reaches a point: the shadow map.
-float keyVisibility(vec3 position) {
-  vec4 lightPosition = volumeLightProjection * vec4(position, 1);
-  vec3 shadow = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
-  if (all(greaterThanEqual(shadow, vec3(0))) && all(lessThanEqual(shadow, vec3(1)))) {
-    return texture(volumeShadowMap, vec3(shadow.xy, shadow.z - 0.0008));
-  }
-  return 1.0;
 }
 // The optical depth of the fog between a point and the sun, from three taps along the light direction up to the box exit.
 float sunOpticalDepth(vec3 position, vec3 towardSun) {
