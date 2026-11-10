@@ -25,7 +25,7 @@ Browsers keep audio silent until the page has had a user gesture. The audio star
 
 `defineSound(name, { buffer, bus, volume, pitch, pitchVariance, loop, maximumInstances, spatial })` takes a decoded `AudioBuffer`. `await load(name, source, definition)` decodes a URL, an `ArrayBuffer` or an `AudioBuffer` first. `volume` is 0 to 4, `pitch` is a playback-rate multiplier from 0.1 to 4, and `pitchVariance` (0 to 1) varies the pitch of each play from a seeded generator (`createAudio({ seed })`), so a replay sounds the same. `maximumInstances` (default 8) stops the oldest copy of a sound when it plays again.
 
-A sound without `spatial` is flat, like music or a menu click. `spatial: true` or `{ referenceDistance, maximumDistance, rolloff, model, occlusion }` places it in the world with HRTF panning. `model` is `'inverse'` (default), `'linear'` or `'exponential'`, as in the Web Audio specification.
+A sound without `spatial` is flat, like music or a menu click. `spatial: true` or `{ referenceDistance, maximumDistance, rolloff, model, occlusion }` places it in the world with HRTF panning. `model` is `'inverse'` (default), `'linear'` or `'exponential'`, as in the Web Audio specification. `rolloff` is 0 to 20, or 0 to 1 for `'linear'`. A voice whose node function stops returning a position is stopped, and a bad occlusion result is clamped to 0 to 1.
 
 ## Playing
 
@@ -40,7 +40,7 @@ A sound without `spatial` is flat, like music or a menu click. `spatial: true` o
 
 | Source | Call | Event fired |
 | --- | --- | --- |
-| Input action | `bindAction('jump', 'hop')`; the system checks `input.wasPressed` each fixed step | `input:jump`, once per press |
+| Input action | `bindAction('jump', 'hop')`; the system checks `input.wasPressed` each fixed step, or each frame when the runtime mode is `'variable'` | `input:jump`, once per press |
 | Physics contacts | `emitContacts(scene.contactEvents, { position })` | `contact` or `sensor` for each started event, plus `contact:<collider>` for both colliders |
 | Animation markers | `emitMarkers(markers, previousTime, currentTime, { loop, duration, data })` | `marker:<name>` for each `{ time, name }` crossed |
 

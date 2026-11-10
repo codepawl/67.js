@@ -387,3 +387,65 @@ test('a different backend plugs in behind the same calls', () => {
   assert.ok(calls.includes('voice:voice'));
   assert.ok(calls.includes('bus:music'));
 });
+
+function createActionRuntime(mode, input, audio) {
+  return createRuntime({ render() {} }, {
+    mode,
+    fixedRate: 60,
+    systems: [input, audio],
+    scheduler: { request: () => 1, cancel() {} },
+    clock: () => 0,
+    visibility: { hidden: false, subscribe: () => () => {} },
+  });
+}
+
+for (const mode of ['variable', 'both']) {
+  test(`input actions trigger sounds once per press in runtime mode ${mode}`, () => {
+    const input = createInput({ actions: { jump: ['script/jump'] } });
+    const { audio } = createFixture({ input });
+    audio.defineSound('hop', { buffer });
+    audio.bindAction('jump', 'hop');
+    const runtime = createActionRuntime(mode, input, audio);
+    runtime.start();
+    input.press('script/jump');
+    runtime.step(17);
+    assert.equal(audio.activeVoices().length, 1);
+    runtime.step(17);
+    assert.equal(audio.activeVoices().length, 1, 'a held key does not retrigger');
+    runtime.dispose();
+  });
+}
+
+test('a node that starts returning null stops its voice without throwing, and the others keep playing', () => {
+  const { audio } = createFixture();
+  audio.defineSound('hum', { buffer, spatial: true });
+  let position = [1, 0, 0];
+  const dying = audio.attach(() => position, 'hum');
+  const steady = audio.attach({ position: [2, 0, 0] }, 'hum');
+  position = null;
+  assert.doesNotThrow(() => audio.synchronize());
+  assert.equal(dying.playing, false);
+  assert.equal(steady.playing, true);
+});
+
+test('a bad occlusion result in a frame update is clamped, while play keeps the strict check', () => {
+  let blocked = 0;
+  const { audio } = createFixture({ occlusion: () => blocked });
+  audio.defineSound('shot', { buffer, spatial: { occlusion: true } });
+  const handle = audio.play('shot', { position: [0, 0, -1] });
+  blocked = 5;
+  assert.doesNotThrow(() => audio.synchronize());
+  assert.ok(Math.abs(handle.level - (1 - OCCLUDED_GAIN_LOSS)) < 1e-9, 'a value above 1 clamps to 1');
+  blocked = Number.NaN;
+  assert.doesNotThrow(() => audio.synchronize());
+  assert.equal(handle.level, 1, 'NaN reads as open');
+  assert.throws(() => audio.play('shot', { position: [0, 0, -1] }), /occlusion function result/);
+});
+
+test('a linear rolloff above 1 is rejected, other models keep up to 20, and gain never goes negative', () => {
+  const { audio } = createFixture();
+  assert.throws(() => audio.defineSound('far', { buffer, spatial: { model: 'linear', rolloff: 2 } }), /rolloff/);
+  assert.doesNotThrow(() => audio.defineSound('wide', { buffer, spatial: { model: 'inverse', rolloff: 5 } }));
+  assert.equal(distanceGain(1000, { model: 'linear', rolloff: 1, referenceDistance: 1, maximumDistance: 50 }), 0);
+  assert.equal(distanceGain(1000, { model: 'linear', rolloff: 5, referenceDistance: 1, maximumDistance: 50 }), 0);
+});

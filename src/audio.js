@@ -51,15 +51,19 @@ function requireVector(value, label) {
   return [value[0], value[1], value[2]];
 }
 
+function clampUnit(value) {
+  return Math.min(Math.max(value, 0), 1);
+}
+
 // Distance gain from the Web Audio specification, so the level measured here matches what a PannerNode applies.
 export function distanceGain(distance, { model = 'inverse', referenceDistance = 1, maximumDistance = 50, rolloff = 1 } = {}) {
   const clamped = Math.min(Math.max(distance, referenceDistance), maximumDistance);
   if (model === 'linear') {
     const span = maximumDistance - referenceDistance;
-    return span <= 0 ? 1 : 1 - rolloff * (clamped - referenceDistance) / span;
+    return span <= 0 ? 1 : clampUnit(1 - rolloff * (clamped - referenceDistance) / span);
   }
-  if (model === 'exponential') return (clamped / referenceDistance) ** -rolloff;
-  return referenceDistance / (referenceDistance + rolloff * (clamped - referenceDistance));
+  if (model === 'exponential') return clampUnit((clamped / referenceDistance) ** -rolloff);
+  return clampUnit(referenceDistance / (referenceDistance + rolloff * (clamped - referenceDistance)));
 }
 
 function normalizeSpatial(spatial, label) {
@@ -74,7 +78,9 @@ function normalizeSpatial(spatial, label) {
   }
   const referenceDistance = requireNumberInRange(options.referenceDistance ?? 1, `${label} spatial referenceDistance`, 0.01, 1000);
   const maximumDistance = requireNumberInRange(options.maximumDistance ?? 50, `${label} spatial maximumDistance`, referenceDistance, 100000);
-  const rolloff = requireNumberInRange(options.rolloff ?? 1, `${label} spatial rolloff`, 0, 20);
+  // A real PannerNode rejects a linear rolloff above 1, so the range is narrower for that model.
+  const maximumRolloff = model === 'linear' ? 1 : 20;
+  const rolloff = requireNumberInRange(options.rolloff ?? 1, `${label} spatial rolloff`, 0, maximumRolloff);
   return Object.freeze({ model, referenceDistance, maximumDistance, rolloff, occlusion: options.occlusion === true });
 }
 
@@ -455,6 +461,13 @@ export function createAudio(options = {}) {
     return requireNumberInRange(occluder(listenerPose.position, voice.position), 'occlusion function result', 0, 1);
   }
 
+  // The per-frame path never throws: a bad occlusion value is clamped so one callback cannot halt the runtime loop.
+  function measureOcclusionSafely(voice) {
+    if (!occluder || !voice.sound.spatial?.occlusion || !voice.position) return 0;
+    const measured = Number(occluder(listenerPose.position, voice.position));
+    return Number.isFinite(measured) ? Math.min(Math.max(measured, 0), 1) : 0;
+  }
+
   function removeVoice(voice) {
     const index = voices.indexOf(voice);
     if (index >= 0) voices.splice(index, 1);
@@ -671,12 +684,33 @@ export function createAudio(options = {}) {
   }
 
   function synchronize() {
-    if (listenerSource) setListener(listenerSource());
+    if (listenerSource) {
+      try {
+        setListener(listenerSource());
+      } catch {
+        // Keep the last good listener pose when the source returns a bad frame.
+      }
+    }
     for (const voice of [...voices]) {
-      if (voice.node !== null && voice.sound.spatial) voice.position = resolveVoicePosition(voice);
-      voice.occlusion = measureOcclusion(voice);
+      if (voice.node !== null && voice.sound.spatial) {
+        try {
+          voice.position = resolveVoicePosition(voice);
+        } catch {
+          // The node is gone (a destroyed entity): end this voice and keep the others playing.
+          stopVoice(voice);
+          continue;
+        }
+      }
+      voice.occlusion = measureOcclusionSafely(voice);
       voice.level = voiceLevel(voice);
       voice.backendVoice.update({ volume: voice.volume, pitch: voice.pitch, position: voice.position, occlusion: voice.occlusion });
+    }
+  }
+
+  function pollActions() {
+    if (!input) return;
+    for (const [actionName, eventName] of actionEvents) {
+      if (input.wasPressed(actionName)) emit(eventName, { action: actionName });
     }
   }
 
@@ -699,14 +733,12 @@ export function createAudio(options = {}) {
       startBackend();
     },
     fixedUpdate(step, context) {
-      if (input) {
-        for (const [actionName, eventName] of actionEvents) {
-          if (input.wasPressed(actionName)) emit(eventName, { action: actionName });
-        }
-      }
+      // The input system samples in fixed steps in every mode except 'variable', so actions are read where it samples.
+      if (context?.mode !== 'variable') pollActions();
       if (context?.mode === 'fixed') synchronize();
     },
-    update() {
+    update(delta, context) {
+      if (context?.mode === 'variable') pollActions();
       synchronize();
     },
     dispose() {
