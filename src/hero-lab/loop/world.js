@@ -2,7 +2,7 @@
 //   fetchWorld(descriptionUrl)  network only: the description, every GLB part and the sky, held as blobs.
 //   buildWorld(download, canvas) parses the parts, uploads them to the GPU and returns a world that draws on that canvas.
 // A world is whole before it is shown: the loop never draws the first part of a split world on its own.
-import { Renderer67 } from '../../renderer.js';
+import { Renderer67, shaderFeatureRepresentatives } from '../../renderer.js';
 import { createSharedTextures, loadGltf } from '../../gltf.js';
 import { loadHdri } from '../../hdri.js';
 import { createCascadedShadows } from '../../cascaded-shadows.js';
@@ -31,6 +31,52 @@ function inWholeWorldOrder(files) {
   if (files.some(file => !file.ranks || file.ranks.length !== file.parts.length)) return files.flatMap(file => file.parts);
   const ranked = files.flatMap(file => file.parts.map((part, index) => ({ part, rank: file.ranks[index] })));
   return ranked.sort((first, second) => first.rank - second.rank).map(entry => entry.part);
+}
+
+const TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap'];
+const SLICE_MILLISECONDS = 6;
+const REPLACE_SLICES = 8;
+
+// Each texture upload is a synchronous GL call. The renderer caches uploads by descriptor, so uploading them here, a few
+// milliseconds at a time with a yield between slices, leaves nothing for replaceParts to do in one block.
+async function uploadTexturesInSlices(renderer, parts) {
+  const seen = new Set();
+  let sliceStart = performance.now();
+  for (const part of parts) {
+    for (const field of TEXTURE_FIELDS) {
+      const descriptor = part.material?.[field];
+      if (!descriptor || seen.has(descriptor)) continue;
+      seen.add(descriptor);
+      renderer.createTexture(descriptor);
+      if (performance.now() - sliceStart > SLICE_MILLISECONDS) {
+        await yieldToMain();
+        sliceStart = performance.now();
+      }
+    }
+  }
+}
+
+// replaceParts builds every batch, buffer and culling table in one call. Feeding it the world in growing prefixes that
+// end on a geometry boundary keeps each call small, because the batches it already built are kept as they are.
+async function replacePartsInSlices(renderer, parts) {
+  const partsByGeometry = new Map();
+  for (const part of parts) {
+    if (!partsByGeometry.has(part.geometry)) partsByGeometry.set(part.geometry, []);
+    partsByGeometry.get(part.geometry).push(part);
+  }
+  const prefix = [];
+  const totalWeight = [...partsByGeometry].reduce((total, [geometry, sharing]) => total + geometry.indices.length + sharing.length * 300, 0);
+  const sliceWeight = totalWeight / REPLACE_SLICES;
+  let weight = 0;
+  for (const [geometry, sharing] of partsByGeometry) {
+    prefix.push(...sharing);
+    weight += geometry.indices.length + sharing.length * 300;
+    if (weight < sliceWeight) continue;
+    weight = 0;
+    renderer.replaceParts([...prefix], { retainedUnchanged: true });
+    await yieldToMain();
+  }
+  renderer.replaceParts(parts, { retainedUnchanged: true });
 }
 
 export async function fetchWorld(descriptionUrl) {
@@ -68,33 +114,35 @@ export async function buildWorld(download, canvas, overrides = {}) {
   const effects = prepareEffects(description.id, inWholeWorldOrder(files));
   if (effects?.needsFogAddon) await import('../../fog-shader.js');
   const surfaceOf = parts => (description.waterReflection && WATER_MIRROR_ENABLED ? applyWaterReflection(parts) : { parts, surface: null });
-  // The renderer starts on the first file's parts and takes the whole world through replaceParts, the order the showcase page
-  // uses: a water mirror attached to a renderer built on the whole world drew nothing after its first frame.
-  // Parts that exist only for the effects join the first file of a one-file world, or the whole world when the renderer takes it in two steps.
+  // Parts that exist only for the effects join the whole world.
   const extraParts = effects?.extraParts ?? [];
-  const firstReflection = surfaceOf(files.length > 1 ? files[0].parts : [...files[0].parts, ...extraParts]);
-  const renderer = new Renderer67(canvas, firstReflection.parts, {
+  // The renderer starts on a few parts that need the whole world's shader program, links it in the background, and takes the
+  // rest through replaceParts in slices, the order the showcase page uses (a water mirror attached to a renderer built on the
+  // whole world drew nothing after its first frame).
+  const frame = { ...description.frame, exposure: description.exposure ?? 1 };
+  const whole = surfaceOf([...inWholeWorldOrder(files), ...extraParts]);
+  const renderer = new Renderer67(canvas, shaderFeatureRepresentatives(whole.parts), {
     ...options,
     ...overrides,
     pixelRatio: Math.min(devicePixelRatio, 1.25),
     memoryBudgetMiB: 640,
+    deferProgramLink: true,
     ...effects?.rendererOptions,
     ...(options.shadowCascades ? { shadowCascades: createCascadedShadows(options.shadowCascades) } : {}),
     environment: { ...options.environment, map: environmentMap, ...(effects?.volumeFog ? { volumeFog: effects.volumeFog } : {}) },
   });
-  let detachReflection = attachWaterReflection(renderer, firstReflection.surface);
-  if (files.length > 1) {
-    await import('../../replace-textured-parts.js');
-    await yieldToMain();
-    const whole = surfaceOf([...inWholeWorldOrder(files), ...extraParts]);
-    renderer.replaceParts(whole.parts);
-    detachReflection();
-    detachReflection = attachWaterReflection(renderer, whole.surface);
-  }
+  lap('constructMs');
+  await import('../../replace-textured-parts.js');
+  // The programs compile on the driver's threads while the textures go up.
+  await uploadTexturesInSlices(renderer, whole.parts);
+  lap('uploadMs');
+  await renderer.programsReady();
+  lap('linkMs');
+  await replacePartsInSlices(renderer, whole.parts);
+  const detachReflection = attachWaterReflection(renderer, whole.surface);
   lap('rendererMs');
   let animationOrigin = null;
   let animationShadowStep = -1;
-  const frame = { ...description.frame, exposure: description.exposure ?? 1 };
   return {
     id: description.id,
     title: description.title,
