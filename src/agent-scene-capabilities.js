@@ -52,7 +52,7 @@ export const MAX_MATERIAL_PATTERNS = 16;
 // expression limits; maxWork is work units per pixel times pixels, so a costly graph needs a smaller texture.
 export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height', 'opacity', 'clearcoat', 'transmission', 'aov']);
 export const MATERIAL_GRAPH_OPERATORS = Object.freeze([
-  'uv', 'coord', 'mapping', 'vec', 'ramp', 'noise', 'whiteNoise', 'brick', 'voronoi', 'wave', 'checker', 'gradient',
+  'uv', 'coord', 'mapping', 'vec', 'ramp', 'image', 'noise', 'whiteNoise', 'brick', 'voronoi', 'wave', 'checker', 'gradient',
   'add', 'sub', 'mul', 'div', 'min', 'max', 'pow', 'abs', 'floor', 'fract', 'sqrt', 'invert', 'clamp', 'smoothstep', 'mix',
   'layer', 'hue', 'curve',
 ]);
@@ -79,11 +79,12 @@ export const MATERIAL_GRAPH_NODES = Object.freeze({
     checker: '{"checker":{"count":8}} (even)',
     gradient: '{"gradient":{"type":"u"|"v"|"radial"}}',
     whiteNoise: '{"whiteNoise":{"scale":16,"seed":1,"output":"value"|"color"}} one random value per cell, tiles.',
+    image: '{"image":{"asset":"<64 hex catalog image asset ID>","output":"color"|"alpha"}} bilinear, repeats; color is linear RGB, decoded from sRGB. The host decodes catalog images (scene_asset_catalog); no URLs.',
     brick: '{"brick":{"columns":8,"rows":4,"mortar":0.05,"offset":0.5,"seed":1,"output":"mortar"|"edge"|"cell"}} running bond; rows even.',
     note: 'Each takes "at", a vector such as {"uv":"both"}. Scales are whole numbers 1-64.',
   }),
   uv: '{"uv":"u"|"v"|"both"} coordinates.',
-  coordinates: '{"coord":"generated"|"object"|"world"} vector of where the texel sits: generated is the unit tile, object and world are metres across the tile (u * size); the third axis is 0 because a baked texture is projected. {"mapping":{"vector":node,"scale":n|[x,y,z],"offset":[x,y,z],"rotate":radians}} scales, turns around Z and moves a vector (default: generated). Feed either to "at". Meshes without UVs use box mapping; vertex_color already multiplies the baked colour. Not in graphs yet: AO, bevel, curvature, fresnel, image.',
+  coordinates: '{"coord":"generated"|"object"|"world"} vector of where the texel sits: generated is the unit tile, object and world are metres across the tile (u * size); the third axis is 0 because a baked texture is projected. {"mapping":{"vector":node,"scale":n|[x,y,z],"offset":[x,y,z],"rotate":radians}} scales, turns around Z and moves a vector (default: generated). Feed either to "at". Meshes without UVs use box mapping; vertex_color already multiplies the baked colour. Not in graphs yet: AO, bevel, curvature, fresnel, vertexGroup (per-pixel or per-vertex data a bake does not have).',
   ramp: '{"ramp":{"value":node,"stops":[[0,[r,g,b]],[1,[r,g,b]]]}} 2-8 stops rising from 0 to 1.',
   mixing: '{"layer":{"base","top","mask","edge","softness"}}; {"hue":{"color","shift","saturation","value"}}; {"curve":{"value","points":[[x,y]]}}.',
   maths: 'add sub mul div min max pow take [a,b]; abs floor fract sqrt invert take one node; clamp smoothstep mix take [a,b,c]; {"vec":[r,g,b]}.',
@@ -312,7 +313,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   cloth: Object.freeze({
     sheetGeometry: 'grid { segments 1-64 }: unit sheet in XY facing +Z, sized by node scale; any triangle mesh works',
     defaults: Object.freeze({ stiffness: 0.9, bend: 0.1, density: 0.2, damping: 0.3, friction: 0.3, thickness: 0.01, colliderShape: 'box' }),
-    notes: 'density kg/m2, damping 1/s, thickness m, wind m/s steady. Colliders { node, shape ball|box } fit geometry bounds; like sheets they are root nodes without a motion track or body. Moving: { attach, shape ball|capsule, radius, offset, to, toOffset } or { armature, radiusFraction, exclude }. Sheet pinGroup: a vertex group whose vertices (weight 0.5 or more) are held. Sheet pinTo { node, weight } rides pinned edges on a node. Sheet stiffnessGroup: vertex group whose weights scale stiffness (floor 0.05). Sheet softBody { shape 0-1 (0.2), pressure 0-3 (1) }: shape matching plus a volume term; pressure needs a closed mesh, a node with an open mesh fails and says to set pressure 0. Sheet selfCollision true: particles of the sheet push apart (radius 0.9 of half the shortest edge, up to 2000 particles); cloth does not collide with other sheets.',
+    notes: 'density kg/m2, damping 1/s, thickness m, wind m/s steady. Colliders { node, shape ball|box } fit geometry bounds; like sheets they are root nodes without a motion track or body. Moving: { attach, shape ball|capsule, radius, offset, to, toOffset } or { armature, radiusFraction, exclude }. Sheet pinGroup: a vertex group whose vertices (weight 0.5 or more) are held. Sheet pinTo { node, weight } rides pinned edges on a node. Sheet stiffnessGroup: vertex group whose weights scale stiffness (floor 0.05). Sheet softBody { shape 0-1 (0.2), pressure 0-3 (1), bounce 0-1 (0) }: shape matching plus a volume term; pressure needs a closed mesh, a node with an open mesh fails and says to set pressure 0. bounce is the share of its landing speed the body keeps when it turns around; lower shape or sheet stiffness makes a softer, deeper dent. Sheet selfCollision true: particles of the sheet push apart (radius 0.9 of half the shortest edge, up to 2000 particles); cloth does not collide with other sheets.',
     limits: Object.freeze({ maxSheets: 8, maxColliders: 16, maxMovingColliders: 64, maxDuration: 10, maxParticles: 5000, framesPerSecond: 60, substeps: 4, iterations: 8 }),
   }),
   // Recipe particles: closed-form from seeded launch values, so any time is computed directly and a seek never replays.

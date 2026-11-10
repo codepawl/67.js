@@ -177,7 +177,7 @@ test('graph and preset fields do not mix', () => {
 
 test('every capability operator compiles, and no other operator does', () => {
   const samples = {
-    uv: { uv: 'u' }, coord: { coord: 'object' }, mapping: { mapping: {} }, whiteNoise: { whiteNoise: {} }, brick: { brick: {} }, vec: { vec: [1, 2, 3] }, ramp: { ramp: { value: 0.5, stops: [[0, 0], [1, 1]] } },
+    uv: { uv: 'u' }, image: { image: { asset: 'a'.repeat(64) } }, coord: { coord: 'object' }, mapping: { mapping: {} }, whiteNoise: { whiteNoise: {} }, brick: { brick: {} }, vec: { vec: [1, 2, 3] }, ramp: { ramp: { value: 0.5, stops: [[0, 0], [1, 1]] } },
     noise: { noise: {} }, voronoi: { voronoi: {} }, wave: { wave: {} }, checker: { checker: {} }, gradient: { gradient: {} },
     layer: { layer: { base: [0, 0, 0], top: [1, 1, 1], mask: 0.5 } }, hue: { hue: { color: [1, 0, 0], shift: 0.1 } }, curve: { curve: { value: 0.5, points: [[0, 0], [1, 1]] } },
   };
