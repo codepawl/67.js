@@ -207,20 +207,33 @@ float localVolumeProfile(int index, vec3 position) {
   if (noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
   return profile;
 }
-// The optical depth of a volume between a point inside it and its far side toward the sun, from three midpoint taps of its profile.
-vec3 localVolumeSunDepth(int index, vec3 position, vec3 towardSun) {
-  float exitDistance = max(localVolumeInterval(index, position, towardSun).y, 0.0);
+// The optical depth of a volume between a point inside it and its far side along a direction, from midpoint taps of its profile.
+vec3 localVolumeDepth(int index, vec3 position, vec3 direction, int taps) {
+  float exitDistance = max(localVolumeInterval(index, position, direction).y, 0.0);
   float profileSum = 0.0;
-  for (int tap = 0; tap < 3; tap++) profileSum += localVolumeProfile(index, position + towardSun * (exitDistance * (float(tap) + 0.5) / 3.0));
-  return localVolumeAbsorption[index].rgb * (profileSum * exitDistance / 3.0);
+  for (int tap = 0; tap < 3; tap++) {
+    if (tap >= taps) break;
+    profileSum += localVolumeProfile(index, position + direction * (exitDistance * (float(tap) + 0.5) / float(taps)));
+  }
+  return localVolumeAbsorption[index].rgb * (profileSum * exitDistance / float(taps));
 }
-// The light a scattering volume receives at a point: the sky term plus the key light through the shadow map and the volume's own depth.
+// The sky light a point receives through the volume's own depth: the mean over the up and four side directions of what one tap leaves.
+// Without it the sky term is flat, so a thick smoke glows as evenly deep inside as at its edge and hides the key light's side.
+vec3 localVolumeSkyLight(int index, vec3 position) {
+  vec3 open = exp(-localVolumeDepth(index, position, vec3(0.0, 1.0, 0.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(1.0, 0.0, 0.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(-1.0, 0.0, 0.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(0.0, 0.0, 1.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(0.0, 0.0, -1.0), 1));
+  return localSkyAmbient * (open * 0.2);
+}
+// The light a scattering volume receives at a point: the sky term and the key light through the shadow map, each through the volume's own depth.
 vec3 localVolumeInScatter(int index, vec3 position, vec3 direction) {
   vec3 towardSun = normalize(volumeLightDirection);
   float visibility = keyVisibility(position);
   vec3 sunLight = vec3(0.0);
-  if (visibility > 0.001) sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility) * exp(-localVolumeSunDepth(index, position, towardSun));
-  return localSkyAmbient + sunLight;
+  if (visibility > 0.001) sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility) * exp(-localVolumeDepth(index, position, towardSun, 3));
+  return localVolumeSkyLight(index, position) + sunLight;
 }
 vec3 localVolumes(vec3 background) {
   vec2 clipXY = textureCoordinate * 2.0 - 1.0;

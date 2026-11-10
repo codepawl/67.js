@@ -80,11 +80,24 @@ test('a volume with scatter 0 draws exactly as it did: no light is added and the
   assert.ok(withLighting.throughput[0] < 1);
 });
 
-test('a shaded volume with only the sky around it returns the sky colour scaled by what it extinguishes', () => {
+// The sky light per unit of what a ray extinguishes, as a share of the open-sky value (scatter times the sky level).
+function skyShare(volume) {
+  const sky = { sun: null, ambient: [SKY_LEVEL, SKY_LEVEL, SKY_LEVEL], sunVisibility: () => 1 };
+  const result = downRay({ ...volume, falloff: 0 }, sky, 0);
+  return result.emitted[1] / ((1 - result.throughput[1]) * 0.8 * SKY_LEVEL);
+}
+
+test('the sky lights a thin volume at full strength and a thick one less, through its own depth', () => {
+  const thin = skyShare({ ...SMOKE_BOX, center: [0, 1.5, 0], size: [0.1, 0.1, 0.1] });
+  const thick = skyShare(SMOKE_BOX);
+  assert.ok(thin > 0.9 && thin <= 1, `thin volume sky share ${thin}`);
+  assert.ok(thick > 0.3 && thick < 0.85 * thin, `thick volume sky share ${thick} against thin ${thin}`);
+});
+
+test('a shaded volume with only the sky around it returns less than the open sky and no sun', () => {
   const sky = { sun: null, ambient: [SKY_LEVEL, SKY_LEVEL, SKY_LEVEL], sunVisibility: () => 1 };
   const result = downRay({ ...SMOKE_BOX, falloff: 0 }, sky, 0);
-  const extinguished = 1 - result.throughput[1];
-  assert.ok(Math.abs(result.emitted[1] - 0.8 * extinguished * SKY_LEVEL) < 1e-9, `${result.emitted[1]} against ${0.8 * extinguished * SKY_LEVEL}`);
+  assert.ok(result.emitted[1] > 0 && result.emitted[1] < 0.8 * (1 - result.throughput[1]) * SKY_LEVEL);
   const blocked = downRay(SMOKE_BOX, { ...FULL_SUN, sunVisibility: () => 0 }, 1.2);
   assert.deepEqual(blocked.emitted, [0, 0, 0]);
 });
