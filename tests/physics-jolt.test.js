@@ -225,6 +225,25 @@ test('a convex hull rests on the floor under jolt, with and without a collider o
   }
 });
 
+test('a capsule with a rotated collider offset comes to rest on the floor under jolt', async () => {
+  const quarterTurnAroundZ = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+  const definition = {
+    bodies: [
+      { name: 'floor', type: 'fixed', translation: [0, -0.5, 0] },
+      { name: 'pill', translation: [0, 0.6, 0] },
+    ],
+    colliders: [
+      { name: 'ground', body: 'floor', shape: 'cuboid', halfExtents: [10, 0.5, 10] },
+      { name: 'capsule', body: 'pill', shape: 'capsule', halfHeight: 0.5, radius: 0.25, mass: 1, translation: [0.3, 0, 0], rotation: quarterTurnAroundZ },
+    ],
+  };
+  const physics = await createPhysicsSystem(definition, { adapter: joltAdapter });
+  stepMany(physics, 180);
+  const height = physics.getPose('pill').translation[1];
+  assert.ok(Math.abs(height - 0.25) < POSE_TOLERANCE, `the lying capsule rests with its axis on the floor at y 0.25, got y ${height}`);
+  physics.dispose();
+});
+
 test('a collinear convex hull fails with a RangeError that names the collider', async () => {
   await assert.rejects(createPhysicsSystem(hullDefinition(COLLINEAR_POINTS, [0, 0, 0], undefined), { adapter: joltAdapter }), error => {
     assert.ok(error instanceof RangeError);
