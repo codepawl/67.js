@@ -1,7 +1,9 @@
 // Draws reference scenes progressively (issue #623) and measures the time against the 64 sample still.
-//   node bench/reference/progressive-compare.mjs <output directory> <scene id or recipe.json>,... [--variant random|blue|importance|tree|both]
-//     [--checkpoints 1,2,4,8,16,32,64] [--firefly-clamp 1e9] [--width 960] [--height 540] [--still] [--frames 200]
+//   node bench/reference/progressive-compare.mjs <output directory> <scene id or recipe.json>,... [--variant random|uniform|blue|importance|tree|both]
+//     [--checkpoints 1,2,4,8,16,32,64] [--firefly-clamp 1e9] [--width 960] [--height 540] [--still] [--warm] [--frames 200]
 // Files are <scene>@<variant>-<samples>.png, <scene>@still-64.png and timings.json; bench/reference/progressive-score.py scores them against Cycles.
+// With --warm every scene first runs a 1 sample still and a 1 sample progressive draw for each variant, so the timed still and the timed
+// progressive draw both start with the GPU kernels compiled; the warm-up compile seconds are written to timings.json as <scene>:<variant>:warm.
 // With --frames the script also prints the median time of one full size sample (1 sample per pixel) for each scene.
 // Run it behind a GPU lock when other jobs share the GPU: it takes the whole GPU for seconds at a time.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -23,6 +25,7 @@ function valueAfter(flag, fallback) {
 
 const VARIANT_OPTIONS = {
   random: {},
+  uniform: { lightSelection: 'uniform' },
   blue: { samplingPattern: 'blue-noise-first' },
   importance: { lightSelection: 'importance' },
   tree: { lightSelection: 'tree' },
@@ -57,6 +60,14 @@ try {
     const isRecipe = id.endsWith('.json');
     const source = isRecipe ? JSON.parse(await readFile(id, 'utf8')) : id;
     const name = isRecipe ? recipeName(id) : id;
+    if (argumentsGiven.includes('--warm')) {
+      const warmStill = await page.evaluate(([scene, options]) => (typeof scene === 'string' ? window.renderReferencePathTraced(scene, options) : window.renderRecipePathTraced(scene, options)), [source, { ...baseOptions, samples: 1, backend: 'gpu' }]);
+      timings[`${name}:still-warm`] = { seconds: Number(warmStill.report.seconds.toFixed(2)), compileSeconds: warmStill.report.gpuCompileSeconds };
+      for (const variant of variantNames) {
+        const { report: warmReport } = await page.evaluate(([scene, tracerOptions, counts]) => window.renderProgressiveCheckpoints(scene, tracerOptions, counts), [source, { ...baseOptions, ...VARIANT_OPTIONS[variant] }, [1]]);
+        timings[`${name}:${variant}:warm`] = { setupSeconds: Number(warmReport.setupSeconds.toFixed(2)), compileSeconds: Number(warmReport.compileSeconds.toFixed(2)) };
+      }
+    }
     if (argumentsGiven.includes('--still')) {
       const still = await page.evaluate(([scene, options]) => (typeof scene === 'string' ? window.renderReferencePathTraced(scene, options) : window.renderRecipePathTraced(scene, options)), [source, { ...baseOptions, samples: 64, backend: 'gpu' }]);
       await writeFile(`${outputDirectory}/${name}@still-64.png`, Buffer.from(still.image, 'base64'));
