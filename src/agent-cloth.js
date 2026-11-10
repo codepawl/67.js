@@ -26,7 +26,7 @@ const MOVING_SHAPES = ['ball', 'capsule'];
 const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'fields', 'sheets', 'colliders'];
 const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffnessGroup', 'softBody', 'selfCollision', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
 const PIN_TO_FIELDS = ['node', 'weight'];
-const SOFT_BODY_FIELDS = ['shape', 'pressure'];
+const SOFT_BODY_FIELDS = ['shape', 'pressure', 'bounce'];
 // A stiffness group never goes fully limp: a zero weight would let its particles drift off.
 const MIN_GROUP_STIFFNESS = 0.05;
 const FIXED_COLLIDER_FIELDS = ['node', 'shape'];
@@ -70,6 +70,7 @@ function normalizeSheet(input, context, path) {
     sheet.softBody = {};
     if (input.softBody.shape !== undefined) sheet.softBody.shape = finiteNumber(input.softBody.shape, `${path}.softBody.shape`, 0, 1);
     if (input.softBody.pressure !== undefined) sheet.softBody.pressure = finiteNumber(input.softBody.pressure, `${path}.softBody.pressure`, 0, 3);
+    if (input.softBody.bounce !== undefined) sheet.softBody.bounce = finiteNumber(input.softBody.bounce, `${path}.softBody.bounce`, 0, 1);
   }
   if (input.selfCollision !== undefined) {
     if (typeof input.selfCollision !== 'boolean') {
