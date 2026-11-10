@@ -789,7 +789,7 @@ export class Renderer67 {
     if (this.shaderFeatures.has('splat')) requireSplatSupport().initializePlaceholders(this);
     this.initializeEnvironment(environment.map);
     this.createShadowMap();
-    if (reversedDepth !== false && !benchmark) installReversedDepth(this, reversedDepth);
+    if (this.reversedDepthMode !== false && !benchmark) installReversedDepth(this, this.reversedDepthMode);
     this.resize();
     if (!this.benchmark && !this.multisampleFramebuffer) this.allocateFrameTargets(this.canvas.width, this.canvas.height);
   }
