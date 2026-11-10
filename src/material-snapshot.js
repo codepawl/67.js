@@ -6,7 +6,7 @@
 export const SNAPSHOT_VALUE_FIELDS = Object.freeze(['map', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap', 'tag', 'alphaMode', 'alphaCutoff', 'opacity', 'doubleSided', 'occlusionStrength', 'moss', 'boxMapScale', 'boxMapAxis', 'lightMapScale', 'layerMaps', 'lightMask', 'clearcoat', 'clearcoatRoughness', 'transmission', 'thickness', 'ior', 'sheenRoughness', 'specular', 'anisotropy', 'anisotropyRotation', 'iridescence', 'iridescenceIor', 'iridescenceThickness', 'attenuationDistance', 'toon']);
 
 /** Fields holding an array or descriptor, which can change in place. A material that sets one is never snapshotted. */
-export const SNAPSHOT_REFERENCE_FIELDS = Object.freeze(['normalScale', 'mossColor', 'lightMap', 'attenuationColor', 'sheenColor', 'specularColor', 'subsurface']);
+export const SNAPSHOT_REFERENCE_FIELDS = Object.freeze(['normalScale', 'mossColor', 'lightMap', 'attenuationColor', 'sheenColor', 'specularColor', 'subsurface', 'wear']);
 
 function hasNoReferenceFields(material) {
   return material.normalScale === undefined &&
@@ -15,7 +15,8 @@ function hasNoReferenceFields(material) {
     material.attenuationColor === undefined &&
     material.sheenColor === undefined &&
     material.specularColor === undefined &&
-    material.subsurface === undefined;
+    material.subsurface === undefined &&
+    material.wear === undefined;
 }
 
 export class MaterialSnapshot {

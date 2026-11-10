@@ -321,6 +321,11 @@ Uses:
   `gradient` can also follow a vertex group instead of an axis: `{ "group": "wear", "colors": [dirt, paint, metal] }` blends two colors from weight 0 to 1, or three at
   weights 0, 0.5 and 1, so `curvature` gives dirt in the dents, paint on flat faces and bare metal on the convex edges.
   The renderer multiplies the material color by it and a GLB export writes it as `COLOR_0`. Faces not selected stay white until painted.
+- Material `wear` makes a group drive the material per pixel instead of tinting it: `"wear": { "mask": "edge", "metal": { "color": [0.56, 0.57, 0.58], "metallic": 1, "roughness": 0.3 }, "dirt": { "mask": "cavity", "color": [0.05, 0.04, 0.03], "roughness": 0.9 } }`.
+  The material's own `color`, `metallic` and `roughness` are the paint. Where the `mask` group is high the pixel turns to the metal layer; where the `dirt.mask` group is high it turns to dirt, which
+  removes metal and raises roughness. `threshold` (0.5) and `softness` (0.25, 0.001 to 0.5) set where and how sharply each mask switches (`dirt` has its own). Both masks must be vertex groups of the node's mesh;
+  a name that is not one is an error that lists the groups. The two weights travel in the fourth vertex colour component with 11 bits each, so no attribute is added and a material without `wear` renders as before.
+  It needs a mesh without baked floor sky visibility, and the rasterizer only: the path tracer and a GLB export keep the paint.
 - `instances` on a recipe node repeats its geometry at points; see [agent-scene.md](agent-scene.md#instances-on-points).
 
 Blender comparison: `tests/blender-golden.test.js` runs `set_position` against a Geometry Nodes Set Position node

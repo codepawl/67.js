@@ -83,6 +83,9 @@ flat out mat3 boxNormalMatrix;
 #ifdef VERTEX_COLORS
 out vec3 vertexTint;
 out float vertexSkyVisibility;
+#ifdef SURFACE_WEAR
+out vec2 vertexWear;
+#endif
 #endif
 out vec4 shadowPosition;
 out vec2 textureUV, lightmapUV;
@@ -125,7 +128,16 @@ void main() {
 #endif
 #ifdef VERTEX_COLORS
   vertexTint = USES_CROWD ? vec3(1.0) : vertexColor.rgb;
+#ifdef SURFACE_WEAR
+  // A packed value of 2 or more carries the wear and dirt weights (material-wear.js); below 2 it is sky visibility.
+  bool carriesWear = !USES_CROWD && vertexColor.a >= 2.0;
+  float maskBits = carriesWear ? vertexColor.a - 2.0 : 0.0;
+  float wearLevel = floor(maskBits / 2048.0);
+  vertexWear = vec2(wearLevel, maskBits - wearLevel * 2048.0) / 2047.0;
+  vertexSkyVisibility = (USES_CROWD || carriesWear) ? 1.0 : vertexColor.a;
+#else
   vertexSkyVisibility = USES_CROWD ? 1.0 : vertexColor.a;
+#endif
 #endif
   shadowPosition = lightProjection * world;
   gl_Position = viewProjection * world;
@@ -285,6 +297,16 @@ in float vertexSkyVisibility;
 const vec3 vertexTint = vec3(1.0);
 const float vertexSkyVisibility = 1.0;
 #endif
+#if defined(VERTEX_COLORS) && defined(SURFACE_WEAR)
+in vec2 vertexWear;
+#else
+const vec2 vertexWear = vec2(0.0);
+#endif
+uniform float wearEnabled;
+uniform vec4 wearMetal;
+uniform vec4 wearDirt;
+uniform vec4 wearShape;
+uniform vec2 wearDirtShape;
 in vec4 shadowPosition;
 in vec2 textureUV, lightmapUV;
 uniform sampler2D lightMap;
@@ -666,6 +688,19 @@ ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
     metallic *= sampled.b;
     roughness *= sampled.g;
   }
+  if (USES_SURFACE_WEAR) {
+    // Bare metal where the wear mask is high, then dirt where the dirt mask is high (material-wear.js).
+    float worn = smoothstep(wearShape.y - wearShape.z, wearShape.y + wearShape.z, vertexWear.x);
+    color = mix(color, wearMetal.rgb, worn);
+    metallic = mix(metallic, wearMetal.w, worn);
+    roughness = mix(roughness, wearShape.x, worn);
+    if (wearShape.w > 0.5) {
+      float dirty = smoothstep(wearDirtShape.x - wearDirtShape.y, wearDirtShape.x + wearDirtShape.y, vertexWear.y);
+      color = mix(color, wearDirt.rgb, dirty);
+      metallic *= 1.0 - dirty;
+      roughness = mix(roughness, max(roughness, wearDirt.w), dirty);
+    }
+  }
   float splatCavity = 1.0;
   if (USES_SPLAT) applySplat(color, normal, roughness, splatCavity);
   roughness = clamp(roughness, 0.075, 1.0);
@@ -830,6 +865,7 @@ const SHADER_FEATURE_CONDITIONS = {
   renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5 && renderPassMode < 5.5'],
   sheen: ['USES_SHEEN', 'materialSheen.rgb != vec3(0.0)'],
   clearcoat: ['USES_CLEARCOAT', 'materialCoat.x > 0.0'],
+  surfaceWear: ['USES_SURFACE_WEAR', 'wearEnabled > 0.5'],
 };
 
 // Lighting from an environment map and the built-in studio lighting are two code paths, and a frame takes one of them.
@@ -911,7 +947,7 @@ export const SHADER_FEATURES = Object.freeze([...Object.keys(SHADER_FEATURE_COND
 // choice between them whether or not the uniform picks it, so a renderer without those parts compiles them out.
 // The varyings that both shaders carry: per-vertex colours, and the per-instance values that a draw of one instance sets as uniforms.
 function interpolantDefines(enabled) {
-  return [['vertexColors', 'VERTEX_COLORS'], ['instanced', 'INSTANCED']].filter(([feature]) => enabled.has(feature)).map(([, macro]) => `#define ${macro}`);
+  return [['vertexColors', 'VERTEX_COLORS'], ['surfaceWear', 'SURFACE_WEAR'], ['instanced', 'INSTANCED']].filter(([feature]) => enabled.has(feature)).map(([, macro]) => `#define ${macro}`);
 }
 
 function vertexDefinitions(enabled) {
