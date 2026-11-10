@@ -27,21 +27,104 @@ import { parseRadianceHdr } from '../src/hdri.js';
 import { parseCube } from '../src/view-transform.js';
 import { weightTracksFromGltfAnimation } from '../src/export-skeleton.js';
 import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
-import { sessionProblem } from '../src/agent-errors.js';
+import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
+import { AGENT_SCENE_DEFAULT_LIMITS } from '../src/agent-scene-capabilities.js';
 import { describeApplication } from '../src/agent-apply-report.js';
 import { framingProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
 import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from './agent-walkmap.js';
 
-let active = null;
+// Open scenes by sessionId, least recently used first. One canvas serves them all, so at most one record owns a renderer;
+// a call on another scene hands the canvas over (the scene data stays, the renderer is rebuilt).
+const records = new Map();
+// The scene whose renderer a render job holds; no scene gets a renderer until the job gives it back.
+let leasedRecord = null;
+const EVICTED_SESSIONS_KEPT = 32;
+const evictedSessions = [];
 let canvas = document.querySelector('canvas');
 
-function requireSession(sessionId) {
-  if (!active || active.sessionId !== sessionId) {
-    throw new Error(sessionProblem(sessionId, active?.sessionId));
+function sessionError(sessionId) {
+  const openSessionIds = [...records.keys()];
+  return new Error(sessionProblem(sessionId, openSessionIds.at(-1), { openSessionIds, evictedSessionIds: evictedSessions }));
+}
+
+function lookupSession(sessionId) {
+  const record = records.get(sessionId);
+  if (!record) throw sessionError(sessionId);
+  // Re-insert so the Map order stays least to most recently used.
+  records.delete(sessionId);
+  records.set(sessionId, record);
+  return record;
+}
+
+function releaseOtherRenderers(keep) {
+  let released = false;
+  for (const other of records.values()) {
+    if (other === keep || !other.renderer) continue;
+    other.renderer.dispose();
+    other.renderer = null;
+    released = true;
   }
-  return active;
+  if (released) resetCanvas();
+}
+
+function requireSession(sessionId) {
+  const record = lookupSession(sessionId);
+  if (record.renderer || leasedRecord) return record;
+  releaseOtherRenderers(record);
+  record.renderer = initializeRenderer(record.scene, record.options);
+  record.rendererTopology = record.scene.topologyRevision;
+  record.rendererTextured = sceneIsTextured(record.scene);
+  record.shadowKey = null;
+  return record;
+}
+
+function requireCheckpoint(record, checkpointId) {
+  if (record.checkpoints.has(checkpointId)) return;
+  const kept = [...record.checkpoints.keys()];
+  const reason = record.evictedCheckpointIds.includes(checkpointId)
+    ? `was evicted as the oldest when more than ${AGENT_SCENE_DEFAULT_LIMITS.maxCheckpoints} were saved`
+    : 'is unknown or was released';
+  throw new Error(`checkpointId ${checkpointId} ${reason}. Pass a checkpointId that scene_checkpoint returned for sessionId ${record.sessionId}${kept.length ? `: ${kept.join(', ')}` : '; this scene has none, so call scene_checkpoint first'}.`);
+}
+
+function releaseRecord(record) {
+  try {
+    record.renderer?.dispose();
+  } finally {
+    record.asset?.dispose();
+    disposePlacedAssets(record.placedAssets);
+  }
+  record.checkpoints.clear();
+  record.branches.clear();
+  records.delete(record.sessionId);
+}
+
+function residentBytesOf(record) {
+  return record.scene.inspect().residentGeometryBytes ?? 0;
+}
+
+// Close the least recently used scenes until `incoming` more scenes of `incomingBytes` fit, and name them to the caller.
+function evictForNewScene(incomingBytes) {
+  const evicted = [];
+  let bytes = incomingBytes;
+  const sizes = new Map();
+  for (const record of records.values()) {
+    const size = residentBytesOf(record);
+    sizes.set(record, size);
+    bytes += size;
+  }
+  for (const record of [...records.values()]) {
+    const overCount = records.size + 1 > SCENE_STORE_LIMITS.maxOpenScenes;
+    if (!overCount && bytes <= SCENE_STORE_LIMITS.maxOpenSceneBytes) break;
+    bytes -= sizes.get(record);
+    releaseRecord(record);
+    evicted.push(record.sessionId);
+    evictedSessions.push(record.sessionId);
+  }
+  evictedSessions.splice(0, Math.max(0, evictedSessions.length - EVICTED_SESSIONS_KEPT));
+  return evicted;
 }
 
 function bytesFromBase64(data) {
@@ -468,22 +551,22 @@ function objectMotionFor(record, motionTime, forVelocity = false) {
 }
 
 function createPreview(scene, { sessionId, memoryBudgetMiB, backend, transparent = false }, asset, placedAssets, sequenceFrames) {
-  if (active) {
-    throw new Error('Dispose the current scene before creating another.');
-  }
+  if (leasedRecord) throw new Error('The scene renderer is leased to a render job.');
   validatePreviewCamera(scene.camera);
   let renderer;
   try {
+    releaseOtherRenderers(null);
     renderer = initializeRenderer(scene, { memoryBudgetMiB, backend, transparent });
     const record = { scene, renderer, asset, placedAssets, sessionId, options: { memoryBudgetMiB, backend, transparent },
-      checkpoints: new Map(), branches: createBranchStore(), rendererTopology: scene.topologyRevision, rendererTextured: sceneIsTextured(scene), sequenceFrames };
+      checkpoints: new Map(), evictedCheckpointIds: [], branches: createBranchStore(), rendererTopology: scene.topologyRevision, rendererTextured: sceneIsTextured(scene), sequenceFrames };
     draw(record);
     const result = status(record);
     if (backend === 'gpu' && /swiftshader|llvmpipe|software/i.test(result.render.graphics)) {
       throw new Error('Hardware GPU rendering was requested, but the browser selected a software renderer.');
     }
-    active = record;
-    return result;
+    const evicted = evictForNewScene(result.inspection.residentGeometryBytes ?? 0);
+    records.set(sessionId, record);
+    return evicted.length ? { ...result, evictedSessions: evicted } : result;
   } catch (error) {
     renderer?.dispose();
     // A throwing constructor may already own GPU objects without returning an instance.
@@ -793,16 +876,17 @@ window.__agentPreview = {
       clips: record.asset?.animations.map(clip => ({ duration: clip.duration })) ?? [] };
   },
   suspend({ sessionId }) {
-    const record = requireSession(sessionId);
-    if (!record.renderer) throw new Error('Scene renderer is already suspended.');
-    record.renderer.dispose();
-    record.renderer = null;
+    const record = lookupSession(sessionId);
+    if (leasedRecord) throw new Error('Scene renderer is already suspended.');
+    releaseOtherRenderers(null);
     resetCanvas();
+    leasedRecord = record;
     return { sessionId, revision: record.scene.revision, suspended: true };
   },
   resume({ sessionId }) {
-    const record = requireSession(sessionId);
-    if (record.renderer) throw new Error('Scene renderer is already active.');
+    const record = lookupSession(sessionId);
+    if (leasedRecord !== record) throw new Error('Scene renderer is already active.');
+    leasedRecord = null;
     try {
       record.renderer = initializeRenderer(record.scene, record.options);
       record.rendererTopology = record.scene.topologyRevision;
@@ -953,7 +1037,6 @@ window.__agentPreview = {
   },
   create(input) {
     registerLookData(input.lookData);
-    if (active)throw new Error('Dispose the current scene before creating another.');
     if (recipeAssetNeeds(input.recipe).length) return this.createWithAssets(input);
     // Only a recipe with image sequences waits for its frames to decode; any other create stays synchronous.
     const build = sequenceFrames => {
@@ -972,7 +1055,6 @@ window.__agentPreview = {
     return afterMeshBooleans(input.recipe, () => (input.sequenceData ? loadSequenceFrames(new Map(), input.sequenceData).then(build) : build(new Map())));
   },
   async createAsset(input) {
-    if (active) throw new Error('Dispose the current scene before creating another.');
     const bytes = bytesFromBase64(input.data);
     let asset;
     try {
@@ -1094,9 +1176,19 @@ window.__agentPreview = {
   },
   checkpoint({ sessionId, checkpointId }) {
     const record = requireSession(sessionId);
+    // The oldest checkpoint goes first when the scene is at its limit; the answer names it so the agent can drop it from its notes.
+    const evictedCheckpointIds = [];
+    while (record.checkpoints.size >= AGENT_SCENE_DEFAULT_LIMITS.maxCheckpoints) {
+      const [oldestId, oldest] = record.checkpoints.entries().next().value;
+      record.scene.releaseCheckpoint(oldest.handle);
+      record.checkpoints.delete(oldestId);
+      record.evictedCheckpointIds.push(oldestId);
+      evictedCheckpointIds.push(oldestId);
+    }
+    record.evictedCheckpointIds.splice(0, Math.max(0, record.evictedCheckpointIds.length - EVICTED_SESSIONS_KEPT));
     const handle = record.scene.checkpoint();
     record.checkpoints.set(checkpointId, { handle, fogDensity: record.scene.environment.volumeFog.density });
-    return { sessionId, checkpointId, revision: record.scene.revision };
+    return { sessionId, checkpointId, revision: record.scene.revision, ...(evictedCheckpointIds.length ? { evictedCheckpointIds } : {}) };
   },
   restore({ sessionId, checkpointId, revision, expectedRevision }) {
     const record = requireSession(sessionId);
@@ -1104,9 +1196,7 @@ window.__agentPreview = {
       record.scene.restoreRevision(revision, { expectedRevision });
       return mutationStatus(record);
     }
-    if (!record.checkpoints.has(checkpointId)) {
-      throw new Error('Unknown or released checkpoint.');
-    }
+    requireCheckpoint(record, checkpointId);
     const checkpoint = record.checkpoints.get(checkpointId);
     if (checkpoint.fogDensity > 0 && !record.renderer.capabilities.hdr) {
       throw new Error('Volumetric fog requires HDR support; this preview cannot restore it.');
@@ -1116,9 +1206,7 @@ window.__agentPreview = {
   },
   releaseCheckpoint({ sessionId, checkpointId }) {
     const record = requireSession(sessionId);
-    if (!record.checkpoints.has(checkpointId)) {
-      throw new Error('Unknown or released checkpoint.');
-    }
+    requireCheckpoint(record, checkpointId);
     record.scene.releaseCheckpoint(record.checkpoints.get(checkpointId).handle);
     record.checkpoints.delete(checkpointId);
     return { sessionId, checkpointId, released: true };
@@ -1170,16 +1258,7 @@ window.__agentPreview = {
       parts: parts.length, clips: options.clips?.length ?? 0, data: bytesToBase64(new Uint8Array(binary)) };
   },
   dispose({ sessionId }) {
-    const record = requireSession(sessionId);
-    try {
-      record.renderer?.dispose();
-    } finally {
-      record.asset?.dispose();
-      disposePlacedAssets(record.placedAssets);
-    }
-    record.checkpoints.clear();
-    record.branches.clear();
-    active = null;
+    releaseRecord(lookupSession(sessionId));
     return { sessionId, disposed: true };
   },
 };

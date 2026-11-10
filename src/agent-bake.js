@@ -297,6 +297,32 @@ export function changedPartsOf(bakedParts, snapshots) {
  * rayWork, seconds, skipped parts with reasons.
  */
 export function bakeAgentParts(parts, worldMatrices, environment, settings, generatedGeometryGenerators = new Map()) {
+  return traceAgentBake(parts, worldMatrices, environment, settings, generatedGeometryGenerators);
+}
+
+/**
+ * Local volumes are drawn in the post pass and have no place in a lightmap, so the bake leaves them out. The report names
+ * them from the recipe as it is now, outside the bake cache: adding or clearing a volume does not re-trace the bake.
+ */
+export function withLocalVolumeReport(report, localVolumes) {
+  const skippedVolumes = skippedLocalVolumes(localVolumes);
+  const { skippedLocalVolumes: staleVolumes, warnings: staleWarnings, ...cleanReport } = report;
+  if (skippedVolumes.length === 0) {
+    return cleanReport;
+  }
+  return { ...cleanReport, skippedLocalVolumes: skippedVolumes, warnings: [localVolumesNotBakedWarning(skippedVolumes)] };
+}
+
+function skippedLocalVolumes(localVolumes) {
+  return (localVolumes ?? []).map((volume, index) => ({ index, shape: volume.shape, emissive: volume.emissionStrength > 0 && volume.emission.some(channel => channel > 0) }));
+}
+
+function localVolumesNotBakedWarning(skippedVolumes) {
+  const names = skippedVolumes.map(volume => `environment.localVolumes[${volume.index}] (${volume.shape}${volume.emissive ? ', emissive' : ''})`).join(', ');
+  return `The bake leaves out ${names}: local volumes are drawn in the post pass, so an emissive volume does not light baked surfaces and no volume dims the baked light. Light the surfaces with a point light or an emissive part.`;
+}
+
+function traceAgentBake(parts, worldMatrices, environment, settings, generatedGeometryGenerators) {
   const sunScale = environment.keyIntensity ?? 1;
   const lighting = {
     pointLights: environment.pointLights,
