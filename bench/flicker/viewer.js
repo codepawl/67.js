@@ -430,7 +430,10 @@ function frameWholeScene() {
 
 async function loadFromUrl(url) {
   setStatus('wait', 'Downloading the asset');
-  const response = await fetch(url);
+  // The URL comes from the query string, so only a path on this dev server is fetched, never another host.
+  const resolved = new URL(url, location.href);
+  if (resolved.origin !== location.origin) throw new Error(`The asset must be a path on this server, such as /@local/<folder>/<file>.glb. Got ${url}.`);
+  const response = await fetch(`${resolved.pathname}${resolved.search}`);
   if (!response.ok) throw new Error(`The server answered ${response.status} for ${url}. Allow the folder with VITE_FS_ALLOW.`);
   glbBytes = await response.arrayBuffer();
   assetName = decodeURIComponent(url.split('/').pop());
