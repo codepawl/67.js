@@ -122,7 +122,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
-| `scene_capabilities` | `topic` (optional) | A short index of topics; with a topic, its limits and fields (`motion`, `environment`, `materialFields`, `meshEdit`, `meshEdit.<op>`, `physics`, `jobs` and more) |
+| `scene_capabilities` | `topic` (optional) | A short index of topics; with a topic, its limits and fields (`motion`, `environment`, `materialFields`, `meshEdit`, `meshEdit.<op>`, `physics`, `jobs`, `examples` and more; `examples.<tool>` is a complete call for `scene_create`, `scene_apply`, `scene_create_asset` or `scene_render_submit`) |
 | `scene_create` | `recipe` | Session ID, revision, inspection, and render status |
 | `scene_asset_catalog` | None | Configured catalog and content-bound GLB, image, `.hdr` (kind `environment`) and `.cube` (kind `look`) IDs; an ID goes in `environment.hdri` or `environment.look`, see [agent-look](agent-look.md#catalog-hdris-and-looks) |
 | `scene_create_asset` | `recipe` using `67js.asset` | Imported scene ID, revision, inspection and render status |
