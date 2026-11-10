@@ -13,8 +13,11 @@ export const RENDER_PASS_MODES = Object.freeze({
   diffuse: 6, glossy: 7, shadow: 8, ao: 9, mist: 10,
   position: 11, velocity: 12, uv: 13, transmission: 14, volume: 15, environment: 16, cryptomatte: 17, aov: 18,
 });
-// Background pixels: depth reads as the far limit, and shadow, ao and mist as open sky (one); every other pass reads zero, and object ID zero means no object.
-const PASS_BACKGROUNDS = Object.freeze({ depth: [1, 1, 0, 1], shadow: [1, 1, 1, 1], ao: [1, 1, 1, 1], mist: [1, 1, 1, 1] });
+// Passes drawn as another pass and then finished by their own addon: wireframe is the diffuse pass with polygon edges over it (wireframe-pass.js).
+const COMPOSED_PASSES = Object.freeze({ wireframe: 'diffuse' });
+// Background pixels: depth reads as the far limit, and shadow, ao and mist as open sky (one), wireframe as light grey for dark edges
+// to read against; every other pass reads zero, and object ID zero means no object.
+const PASS_BACKGROUNDS = Object.freeze({ depth: [1, 1, 0, 1], shadow: [1, 1, 1, 1], ao: [1, 1, 1, 1], mist: [1, 1, 1, 1], wireframe: [0.82, 0.84, 0.86, 1] });
 // Modes above this one run the lit shader (lighting-pass-shader.js).
 const LAST_RAW_PASS_MODE = 5;
 const DEFAULT_BACKGROUND = Object.freeze([0, 0, 0, 1]);
@@ -120,8 +123,8 @@ export function installRenderPasses(renderer) {
   }
 
   function prepare(frame) {
-    const mode = RENDER_PASS_MODES[frame.pass];
-    if (!mode) throw new RangeError(`Unknown render pass: ${frame.pass}. Use ${Object.keys(RENDER_PASS_MODES).join(', ')}.`);
+    const mode = RENDER_PASS_MODES[COMPOSED_PASSES[frame.pass] ?? frame.pass];
+    if (!mode) throw new RangeError(`Unknown render pass: ${frame.pass}. Use ${[...Object.keys(RENDER_PASS_MODES), ...Object.keys(COMPOSED_PASSES)].join(', ')}.`);
     if (renderer.benchmark) throw new Error('Render passes are unavailable in benchmark mode.');
     const depthRange = frame.passDepthRange ?? 1;
     if (!Number.isFinite(depthRange) || depthRange <= 0) throw new RangeError('Pass depth range must be positive and finite.');
@@ -144,6 +147,8 @@ export function installRenderPasses(renderer) {
 
   function copyToCanvas() {
     const context = renderer.context;
+    // An addon finishes the pass in its target first, while the depth state of the pass is still set (wireframe-pass.js).
+    renderer.passSupport.overlay?.();
     context.bindFramebuffer(context.FRAMEBUFFER, null);
     context.viewport(0, 0, renderer.canvas.width, renderer.canvas.height);
     context.disable(context.DEPTH_TEST);
@@ -262,6 +267,7 @@ export function installRenderPasses(renderer) {
   }
 
   renderer.passSupport = {
+    overlay: null,
     prepare,
     get framebuffer() { return target.framebuffer; },
     // The pass colour of the last pass frame; object motion blur reads the object IDs from it.

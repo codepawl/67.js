@@ -1,4 +1,4 @@
-import { buildTraceScene } from './path-tracer-scene.js';
+import { buildTraceScene, refuseLocalVolumes } from './path-tracer-scene.js';
 import { createCamera } from './path-tracer.js';
 import { prepareRealtimeKernel } from './path-tracer-webgpu.js';
 import { REALTIME_KERNEL_PIECES } from './path-tracer-realtime-webgpu-kernel.js';
@@ -70,6 +70,7 @@ export async function createWebGpuRealtimeTracer(scene, resolved, suppliedCanvas
     currentParts = parts;
     currentEnvironment = environment;
     traceScene = buildTraceScene(parts, environment);
+    refuseLocalVolumes(traceScene, 'the WebGPU realtime path tracer');
     const next = await prepareRealtimeKernel(traceScene, options, REALTIME_KERNEL_PIECES);
     const previousKernel = kernel;
     kernel = next;

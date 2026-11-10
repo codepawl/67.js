@@ -86,7 +86,12 @@ in `splines`, never both. A spline is `{ points | shape, closed, kind, weights, 
   as lengths when `length` is true (lengths past the end are clamped to it). `end` must be greater than `start`. A trimmed
   curve is open and gets caps, also when it was closed. Trimming a range that covers an open curve changes nothing. Trim is
   computed from the same samples every time, so raising `end` frame by frame grows the curve along the same path: that is how a
-  vine grows. Building a mesh per frame is the caller's job.
+  vine grows in code.
+- `grow: { name, steps = 8, value = 1 }` on a recipe curve makes that growth a motion track. The geometry is the bare root and
+  each of `steps` (2 to 16) morph targets holds the curve grown that far, resampled to the same rings, so a morph track
+  `{ kind: "morph", id: <name>, property: "weight", keyframes }` with values 0 to 1 grows the vine, and seeking equals playing.
+  The growth runs over the spline's own trim range (a trim in factors). `value` is the growth with no track. More steps follow
+  a curved path more closely; between steps the tube blends the two neighbours.
 
 Not covered: trim ranges that wrap around the start of a closed curve, NURBS of other orders or with custom knots, a spline
 fill, and mesh edges to curve.
@@ -123,6 +128,8 @@ Center small geometry near the origin and place it with part transforms when wor
 Plain point arrays keep profiles serializable and keep any other library's classes out of the API.
 Accepting custom curve objects would let callers supply their own curve classes, but weakens input bounds.
 Lathe, bevel construction and curve frames follow the formulas Three.js used before, so those outputs are unchanged. Extrusion caps use an ear-clipping triangulation of the addon's own, so a cap can be split along different diagonals than before, with the same area, volume and bounds.
+
+Mesh edits select and shape points and faces with JSON field expressions, never code; see [field expressions](mesh.md#field-expressions).
 
 The Aster lantern at `/modeling.html` combines these tools with texture channels and the shared scene graph.
 It is a procedural modeling demonstration, not a mesh editor or a Blender feature parity claim.
