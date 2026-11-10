@@ -1,0 +1,1 @@
+- scene:agent-scene: the stylize effects field adds a few bytes of schema; the filter and mask code sits in the lazy post-steps module.

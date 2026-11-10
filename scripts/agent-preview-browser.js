@@ -286,13 +286,21 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   applyRecipeWindHeading(record.renderer, environment);
   const { objectMotion, ...renderOptions } = frameOptions;
   const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
-  if (effects.colorBalance || effects.glare || effects.lensDistortion) agentSceneModule('postSteps').installPostSteps(record.renderer);
+  let needsObjectIds = Boolean(objectMotion);
+  if (effects.colorBalance || effects.glare || effects.lensDistortion || effects.stylize) {
+    const postSteps = agentSceneModule('postSteps');
+    postSteps.installPostSteps(record.renderer);
+    needsObjectIds ||= postSteps.usesObjectMask(postSteps.resolvePostSteps(frame.effects));
+  }
   if (objectMotion) {
     // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
     const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
     if (!frame.pass) installObjectMotionBlur(record.renderer);
     if (!frame.pass) record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
     frame.objectMotion = packObjectMotion(record.renderer, objectMotion.current, objectMotion.previous);
+  } else if (needsObjectIds && !frame.pass) {
+    // A mask by parts reads the same pass.
+    record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
   }
   record.renderer.render(frame);
   const error = record.renderer.context.getError();

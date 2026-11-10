@@ -1,16 +1,21 @@
 import { postStepSupport } from './shader-registry.js';
 import { createStage, sharedFragmentHeader } from './camera-effects.js';
+import { resolveMask, usesObjectMask, maskShader, bindMask, MASK_UNIFORM_NAMES } from './post-mask.js';
+
+export { usesObjectMask };
 
 // Named post steps for a graded film: color balance (lift, gamma, gain), glare (streaks and fog glow), lens distortion with
-// dispersion. They are optional full-frame stages. The core renderer carries none of their code: a recipe that names one
+// dispersion, and stylize filters (sharpen, kuwahara, posterize, pixelate). Color balance and stylize take a `mask` (post-mask.js)
+// that limits them to named parts or a range of distance. They are optional full-frame stages. The core renderer carries none of their code: a recipe that names one
 // loads this module (agent-scene-modules.js), and each stage compiles only on the first frame that turns it on. Defocus from
 // depth is the `depthOfField` group of camera-effects.js, which is the same step under its older name.
 //
-// All three are deterministic: fixed sample patterns and no history, so a seek repeats the same pixels.
+// All of them are deterministic: fixed sample patterns and no history, so a seek repeats the same pixels.
 
 const MAXIMUM_STREAK_ARMS = 8;
 const STREAK_STEPS = 24;
 const FOG_SAMPLES = 32;
+const MAXIMUM_KUWAHARA_RADIUS = 8;
 // Longest lateral color offset at the image corner at full dispersion, as a fraction of the distance from the center.
 const MAXIMUM_DISPERSION = 0.03;
 
@@ -41,12 +46,32 @@ function triple(value, fallback, minimum, maximum, name) {
 
 function resolveColorBalance(input) {
   const group = groupOf(input, 'colorBalance');
-  onlyKeys(group, ['lift', 'gamma', 'gain'], 'colorBalance');
+  onlyKeys(group, ['lift', 'gamma', 'gain', 'mask'], 'colorBalance');
   return {
     lift: triple(group.lift, NEUTRAL.lift, -1, 1, 'colorBalance.lift'),
     gamma: triple(group.gamma, NEUTRAL.gamma, 0.1, 4, 'colorBalance.gamma'),
     gain: triple(group.gain, NEUTRAL.gain, 0, 4, 'colorBalance.gain'),
+    ...(group.mask === undefined ? {} : { mask: resolveMask(group.mask, 'colorBalance.mask') }),
   };
+}
+
+function wholeNumberInRange(value, minimum, maximum, name) {
+  const result = numberInRange(value, undefined, minimum, maximum, name);
+  if (!Number.isInteger(result)) throw new RangeError(`${name} must be a whole number.`);
+  return result;
+}
+
+// Each filter is off until named; a filter named with a number turns on.
+function resolveStylize(input) {
+  const group = groupOf(input, 'stylize');
+  onlyKeys(group, ['sharpen', 'kuwahara', 'posterize', 'pixelate', 'mask'], 'stylize');
+  const resolved = {};
+  if (group.sharpen !== undefined) resolved.sharpen = numberInRange(group.sharpen, undefined, 0, 2, 'stylize.sharpen');
+  if (group.kuwahara !== undefined) resolved.kuwahara = wholeNumberInRange(group.kuwahara, 0, MAXIMUM_KUWAHARA_RADIUS, 'stylize.kuwahara');
+  if (group.posterize !== undefined) resolved.posterize = wholeNumberInRange(group.posterize, 0, 256, 'stylize.posterize');
+  if (group.pixelate !== undefined) resolved.pixelate = wholeNumberInRange(group.pixelate, 0, 64, 'stylize.pixelate');
+  if (group.mask !== undefined) resolved.mask = resolveMask(group.mask, 'stylize.mask');
+  return resolved;
 }
 
 function resolveGlare(input) {
@@ -79,14 +104,16 @@ export function resolvePostSteps(effects) {
   if (effects.colorBalance !== undefined) resolved.colorBalance = resolveColorBalance(effects.colorBalance);
   if (effects.glare !== undefined) resolved.glare = resolveGlare(effects.glare);
   if (effects.lensDistortion !== undefined) resolved.lensDistortion = resolveLensDistortion(effects.lensDistortion);
+  if (effects.stylize !== undefined) resolved.stylize = resolveStylize(effects.stylize);
   return resolved;
 }
 
 // Registers what the look needs: the field names it accepts and how to resolve them (src/shader-registry.js).
-postStepSupport.fields = ['colorBalance', 'glare', 'lensDistortion'];
+postStepSupport.fields = ['colorBalance', 'glare', 'lensDistortion', 'stylize'];
 postStepSupport.resolve = resolvePostSteps;
 
 export const colorBalanceFragment = `${sharedFragmentHeader}
+${maskShader}
 uniform vec3 lift;
 uniform vec3 inverseGamma;
 uniform vec3 gain;
@@ -94,7 +121,67 @@ void main() {
   vec4 source = texture(sourceTexture, textureCoordinate);
   // Lift raises the shadows and fades out toward white, gain scales the highlights, gamma bends the midtones.
   vec3 graded = source.rgb * gain + lift * (1.0 - clamp(source.rgb, 0.0, 1.0));
-  outputColor = vec4(pow(max(graded, vec3(0.0)), inverseGamma), source.a);
+  graded = pow(max(graded, vec3(0.0)), inverseGamma);
+  float mask = maskAt(textureCoordinate);
+  outputColor = vec4(mask < 1.0 ? mix(source.rgb, graded, mask) : graded, source.a);
+}`;
+
+export const stylizeFragment = `${sharedFragmentHeader}
+${maskShader}
+uniform float sharpenAmount;
+uniform int kuwaharaRadius;
+uniform float posterizeLevels;
+uniform float pixelateSize;
+vec2 snapped(vec2 coordinate) {
+  if (pixelateSize < 1.0) return coordinate;
+  return (floor(coordinate * resolution / pixelateSize) + 0.5) * pixelateSize / resolution;
+}
+vec4 sourceAt(vec2 coordinate) {
+  return texture(sourceTexture, snapped(coordinate));
+}
+// Kuwahara: the mean of whichever of the four quadrants around the pixel varies least, so flat areas stay flat and edges stay sharp.
+vec3 kuwahara(vec2 coordinate) {
+  vec3 bestMean = vec3(0.0);
+  float bestVariance = 1e30;
+  for (int quadrant = 0; quadrant < 4; quadrant++) {
+    vec2 direction = vec2(quadrant == 1 || quadrant == 3 ? -1.0 : 1.0, quadrant >= 2 ? -1.0 : 1.0);
+    vec3 sum = vec3(0.0);
+    float lumaSum = 0.0;
+    float lumaSquareSum = 0.0;
+    float count = 0.0;
+    for (int row = 0; row <= ${MAXIMUM_KUWAHARA_RADIUS}; row++) {
+      if (row > kuwaharaRadius) break;
+      for (int column = 0; column <= ${MAXIMUM_KUWAHARA_RADIUS}; column++) {
+        if (column > kuwaharaRadius) break;
+        vec3 color = sourceAt(coordinate + direction * vec2(float(column), float(row)) / resolution).rgb;
+        float luma = dot(color, vec3(0.299, 0.587, 0.114));
+        sum += color;
+        lumaSum += luma;
+        lumaSquareSum += luma * luma;
+        count += 1.0;
+      }
+    }
+    float variance = lumaSquareSum / count - (lumaSum / count) * (lumaSum / count);
+    if (variance < bestVariance) {
+      bestVariance = variance;
+      bestMean = sum / count;
+    }
+  }
+  return bestMean;
+}
+void main() {
+  vec4 source = texture(sourceTexture, textureCoordinate);
+  vec4 center = sourceAt(textureCoordinate);
+  vec3 color = kuwaharaRadius > 0 ? kuwahara(textureCoordinate) : center.rgb;
+  if (sharpenAmount > 0.0) {
+    vec2 texel = 1.0 / resolution;
+    vec3 around = sourceAt(textureCoordinate + vec2(texel.x, 0.0)).rgb + sourceAt(textureCoordinate - vec2(texel.x, 0.0)).rgb
+      + sourceAt(textureCoordinate + vec2(0.0, texel.y)).rgb + sourceAt(textureCoordinate - vec2(0.0, texel.y)).rgb;
+    color = max(color + sharpenAmount * (center.rgb * 4.0 - around), vec3(0.0));
+  }
+  if (posterizeLevels > 0.0) color = floor(color * posterizeLevels + 0.5) / posterizeLevels;
+  float mask = maskAt(textureCoordinate);
+  outputColor = vec4(mask < 1.0 ? mix(source.rgb, color, mask) : color, source.a);
 }`;
 
 export const glareFragment = `${sharedFragmentHeader}
@@ -181,13 +268,35 @@ function createColorBalanceStage() {
   return createStage({
     name: 'Color balance',
     fragment: colorBalanceFragment,
-    uniformNames: ['lift', 'inverseGamma', 'gain'],
+    uniformNames: ['lift', 'inverseGamma', 'gain', ...MASK_UNIFORM_NAMES],
     isActive: (effects, frame) => isColorBalanceActive(stepsOf(frame).colorBalance),
     setUniforms(context, uniforms, renderer, frame) {
       const { colorBalance } = stepsOf(frame);
       context.uniform3fv(uniforms.lift, colorBalance.lift);
       context.uniform3fv(uniforms.inverseGamma, colorBalance.gamma.map(gamma => 1 / gamma));
       context.uniform3fv(uniforms.gain, colorBalance.gain);
+      bindMask(context, uniforms, renderer, frame, colorBalance.mask);
+    },
+  });
+}
+
+function isStylizeActive(stylize) {
+  return Boolean(stylize) && (stylize.sharpen > 0 || stylize.kuwahara > 0 || stylize.posterize > 0 || stylize.pixelate > 0);
+}
+
+function createStylizeStage() {
+  return createStage({
+    name: 'Stylize',
+    fragment: stylizeFragment,
+    uniformNames: ['sharpenAmount', 'kuwaharaRadius', 'posterizeLevels', 'pixelateSize', ...MASK_UNIFORM_NAMES],
+    isActive: (effects, frame) => isStylizeActive(stepsOf(frame).stylize),
+    setUniforms(context, uniforms, renderer, frame) {
+      const { stylize } = stepsOf(frame);
+      context.uniform1f(uniforms.sharpenAmount, stylize.sharpen ?? 0);
+      context.uniform1i(uniforms.kuwaharaRadius, stylize.kuwahara ?? 0);
+      context.uniform1f(uniforms.posterizeLevels, stylize.posterize ?? 0);
+      context.uniform1f(uniforms.pixelateSize, stylize.pixelate ?? 0);
+      bindMask(context, uniforms, renderer, frame, stylize.mask);
     },
   });
 }
@@ -255,12 +364,13 @@ function createLensDistortionStage() {
 }
 
 /**
- * Adds glare, lens distortion and color balance to a renderer, after any depth of field and motion blur it has, in that
- * order. Like them it needs `depth: true`. Each stage runs only for a frame whose effects set it.
+ * Adds glare, lens distortion, color balance and the stylize filters to a renderer, after any depth of field and motion blur it has, in that
+ * order. Like them it needs `depth: true`. Each stage runs only for a frame whose effects set it. A step with a `mask` by
+ * objects reads the object ID pass: install the render passes and draw that pass before the lit frame (`usesObjectMask` says when).
  */
 export function installPostSteps(renderer) {
   if (!renderer.postStages.some(stage => stage.name === 'Glare')) {
-    renderer.postStages.push(createGlareStage(), createLensDistortionStage(), createColorBalanceStage());
+    renderer.postStages.push(createGlareStage(), createLensDistortionStage(), createColorBalanceStage(), createStylizeStage());
   }
   return renderer;
 }

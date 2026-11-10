@@ -268,8 +268,15 @@ Ambient occlusion reads the depth texture, so it needs the HDR depth target that
 | `glare.fogGlow` | `0` | `0` to `1`. A soft halo around the same bright pixels |
 | `glare.threshold` | `1` | `0` to `10`. Peak scene brightness (linear, before tone mapping) from which a pixel glares |
 | `glare.size` | `0.15` | `0.01` to `1`. Streak length and halo radius as a fraction of the image height |
+| `stylize.sharpen` | off | `0` to `2`. Adds the difference between a pixel and its four neighbours back to it |
+| `stylize.kuwahara` | off | Whole number, `0` to `8`. Painterly smoothing: each pixel takes the mean of the least varying quadrant within this many pixels |
+| `stylize.posterize` | off | Whole number, `0` to `256`. Rounds each channel to this many steps |
+| `stylize.pixelate` | off | Whole number, `0` to `64`. Block size in pixels |
+| `colorBalance.mask`, `stylize.mask` | none | Limits the step to part of the frame, see below |
 | `lensDistortion.distortion` | `0` | `-1` to `1`. Above `0` is barrel, below is pincushion |
 | `lensDistortion.dispersion` | `0` | `0` to `1`. Red and blue split apart toward the edges, up to 3 percent of the distance from the center |
+
+A step with a `mask` applies only where the mask is on; with no `mask` it applies to the whole frame, as before. `mask` takes `objects` (one to 16 part names, as `scene_look` with `pass: "objectId"` lists them), `depth` (`near`, `far` metres along the view direction, and `feather`, the metres over which each end fades; defaults `0`, `100000`, `0`), or both, which multiply, and `invert: true` to flip the result. A grade for the hero part only: `{ "colorBalance": { "gain": [1.3, 1, 0.8], "mask": { "objects": ["hero"] } } }`. A mask by parts reads the object ID pass, so the frame is drawn twice, and its edges are hard because an object ID cannot be antialiased; a mask by depth costs nothing extra. A name that is not a part of the frame fails with the names it knows. `stylize` runs after color balance: pixelate first (the other filters read the blocks), then kuwahara, sharpen, posterize. Every filter is off until named, and a filter set to `0` is off.
 
 Depth of field and motion blur are deterministic: they read the frame, its depth and the camera, with fixed sample patterns, so a seek to a time gives the same pixels as playing to it.
 Depth of field applies to every render, including `scene_look`.
@@ -277,7 +284,7 @@ Motion blur needs camera `motion` tracks and a render job with `settings.motion`
 With `motionBlur.objects` above zero, a part that moves between `motion.start + elapsed - shutter` and `motion.start + elapsed` also smears along its own screen path while the still background stays sharp (`1` is the full shutter). It reads each pixel's part from an object ID pass, so it costs a second draw of the frame, and it replaces the camera smear on that frame, since it covers the camera's motion too. A part is moved as one rigid body by its node transform: a skinned or morphed part, an imported asset and a translucent part are not smeared per object.
 Both effects compile their shader and allocate their targets the first time a frame uses them, and a scene that leaves them at zero pays nothing.
 
-The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `glare` and `lensDistortion`. Each is its own group, off until a recipe names it, and a group at its neutral values draws nothing. They run on the resolved HDR frame, before bloom and tone mapping, in this order: depth of field, motion blur, glare, lens distortion, color balance. Like the two above they are deterministic, and `colorBalance`, `glare` and `lensDistortion` load their code and shaders only for a recipe that names one.
+The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `glare`, `lensDistortion` and `stylize`. Each is its own group, off until a recipe names it, and a group at its neutral values draws nothing. They run on the resolved HDR frame, before bloom and tone mapping, in this order: depth of field, motion blur, glare, lens distortion, color balance, stylize. Like the two above they are deterministic, and `colorBalance`, `glare`, `lensDistortion` and `stylize` load their code and shaders only for a recipe that names one.
 
 ## Directional shadows
 
