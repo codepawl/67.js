@@ -1,7 +1,7 @@
 // The order of the documentation. The site navigation and the plain-text guide (`/guide.md`) both read it.
 // Ids are file names in docs/learn, or slugs of the `## ` headings in docs/guide.md.
 export const documentationGroups = [
-  { title: 'Start here', icon: 'start', ids: ['introduction', 'install', 'first-scene'] },
+  { title: 'Start here', icon: 'start', ids: ['introduction', 'install', 'first-scene', 'faq'] },
   { title: 'Build a scene', icon: 'cube', ids: ['parts-and-geometry', 'materials-and-color', 'cameras-and-framing', 'effects-and-lighting', 'local-lights-and-volume-fog', 'hdr-environment-lighting', 'renderer-reference'] },
   { title: 'Model and fit surfaces', icon: 'cube', ids: ['procedural-modeling', 'sculpt-brushes', 'contact-detection', 'shrinkwrap-and-surface-patches', 'retained-surface-attachments'] },
   { title: 'Worlds', icon: 'world', ids: ['terrain-and-ground-textures', 'trees-and-grass', 'grass-fields', 'wheeled-vehicles', 'baked-liquid'] },
