@@ -9,7 +9,12 @@
     <link rel="icon" href="/favicon.svg" />
     <script>
       const mobile = matchMedia("(max-width: 700px)").matches ? "-mobile" : "";
-      document.write(`<link rel="preload" as="image" href="/hero-lab/poster-b-port${mobile}.webp" fetchpriority="high" />`);
+      const preload = document.createElement("link");
+      preload.rel = "preload";
+      preload.as = "image";
+      preload.fetchPriority = "high";
+      preload.href = `/hero-lab/poster-b-port${mobile}.webp`;
+      document.head.append(preload);
     </script>
   </head>
   <body>
