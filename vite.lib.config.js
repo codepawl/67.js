@@ -108,6 +108,7 @@ export default defineConfig({
         cloth: 'src/cloth.js',
         runtime: 'src/runtime.js',
         input: 'src/input.js',
+        'physics-runtime': 'src/physics-runtime.js',
         audio: 'src/audio.js',
         'animation-graph': 'src/animation-graph.js',
         player: 'src/player.js',
