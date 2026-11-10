@@ -714,9 +714,9 @@ ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
     // Bare metal and dirt have no clear coat over them.
     float wearBreak = 0.65 * wearNoise(worldPosition * 48.0) + 0.35 * wearNoise(worldPosition * 110.0 + vec3(17.0));
     float worn = smoothstep(wearShape.y - wearShape.z, wearShape.y + wearShape.z, vertexWear.x * (0.55 + 0.9 * wearBreak));
-    color = mix(color, wearMetal.rgb, worn);
+    color = mix(color, wearMetal.rgb * (0.8 + 0.4 * wearBreak), worn);
     metallic = mix(metallic, wearMetal.w, worn);
-    roughness = mix(roughness, wearShape.x, worn);
+    roughness = mix(roughness, wearShape.x * (0.75 + 0.5 * wearBreak), worn);
     coatKept = 1.0 - worn;
     if (wearShape.w > 0.5) {
       float dirtBreak = 0.65 * wearNoise(worldPosition * 30.0 + vec3(5.0)) + 0.35 * wearNoise(worldPosition * 75.0 + vec3(31.0));

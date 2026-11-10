@@ -12,3 +12,4 @@
 - scene:gltf-box+lazy: the per-pixel wear blend (vertex shader decode, fragment blend, uniforms and the batch binding) is in the renderer and its shaders, about 730 bytes gzip on every bundle that carries the renderer; a mesh with no UVs cannot show metal on its edges or dirt in its cavities any other way, and a scene without wear draws byte for byte as before
 - goal:lit-box: the same renderer growth; the box scenes carry the renderer and cannot leave it out
 - goal:gltf-box: the same renderer growth; the box scenes carry the renderer and cannot leave it out
+- entry:core: bare metal varies its roughness and tint per chip from the wear noise (two multiplies in the fragment blend, a few bytes gzip); a flat chip of mirror metal reads as plastic flecks, and a scene without wear draws byte for byte as before

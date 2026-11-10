@@ -88,6 +88,8 @@ test('the shader breaks the wear edge with noise, darkens the layer under dirt a
   assert.match(shader, /float wearBreak = 0\.65 \* wearNoise\(worldPosition \* 48\.0\)/);
   assert.match(shader, /smoothstep\(wearShape\.y - wearShape\.z, wearShape\.y \+ wearShape\.z, vertexWear\.x \* \(0\.55 \+ 0\.9 \* wearBreak\)\)/);
   assert.match(shader, /color = mix\(color, mix\(color \* 0\.35, wearDirt\.rgb, 0\.6\), dirty\);/);
+  assert.match(shader, /color = mix\(color, wearMetal\.rgb \* \(0\.8 \+ 0\.4 \* wearBreak\), worn\);/);
+  assert.match(shader, /roughness = mix\(roughness, wearShape\.x \* \(0\.75 \+ 0\.5 \* wearBreak\), worn\);/);
   assert.match(shader, /metallic \*= 1\.0 - dirty;/);
   assert.match(shader, /coatKept \*= 1\.0 - dirty;/);
   assert.match(shader, /uniform vec4 wearDirt;/);
