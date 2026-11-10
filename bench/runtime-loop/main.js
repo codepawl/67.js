@@ -2,12 +2,15 @@
 // shown live in each update mode. Open bench/runtime-loop/index.html with `npm run dev`; ?mode=fixed|variable|both picks the start mode.
 import { Renderer67, box, sphere } from '/src/index.js';
 import { createRuntime } from '/src/runtime.js';
+import { createInput, gamepadSource, keyboardSource } from '/src/input.js';
 
 const GRAVITY = -9.8;
 const FIXED_RATE = 20; // Low on purpose, so the difference between fixed and interpolated is visible.
 const BOUNCE_ENERGY = 0.9;
 const BALL_RADIUS = 0.4;
 const SPIN_RADIANS_PER_SECOND = 1.5;
+const CUBE_SPEED = 3; // World units per second along the moveX axis.
+const JUMP_SPEED = 6;
 
 function translation(x, y, z, scale = 1) {
   return new Float32Array([scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0, x, y, z, 1]);
@@ -58,21 +61,45 @@ const physicsSystem = {
     }
   },
   fixedUpdate(stepSeconds) {
+    if (input.wasPressed('jump')) this.velocity = JUMP_SPEED;
     this.integrate(stepSeconds);
   },
   // Variable mode never calls fixedUpdate, so the same physics runs on the frame time there.
   update(deltaSeconds, context) {
-    if (context.mode === 'variable') this.integrate(deltaSeconds);
+    if (context.mode !== 'variable') return;
+    if (input.wasPressed('jump')) this.velocity = JUMP_SPEED;
+    this.integrate(deltaSeconds);
   },
 };
 
 const spinSystem = {
   name: 'cube-spin',
   angle: 0,
-  update(deltaSeconds) {
+  x: 1.2,
+  slide(deltaSeconds) {
+    this.x = Math.max(-3.5, Math.min(3.5, this.x + input.getAxis('moveX') * CUBE_SPEED * deltaSeconds));
+  },
+  fixedUpdate(stepSeconds) {
+    this.slide(stepSeconds);
+  },
+  update(deltaSeconds, context) {
     this.angle += SPIN_RADIANS_PER_SECOND * deltaSeconds;
+    if (context.mode === 'variable') this.slide(deltaSeconds);
   },
 };
+
+// Keys or a gamepad drive the sample: A/D or the arrow keys slide the cube, Space (or gamepad button 0) kicks the ball up.
+const input = createInput({
+  sources: [keyboardSource(), gamepadSource()],
+  actions: { jump: ['keyboard/Space', 'gamepad/0.button0'] },
+  axes: {
+    moveX: [
+      'keyboard/KeyD', 'keyboard/ArrowRight',
+      { control: 'keyboard/KeyA', scale: -1 }, { control: 'keyboard/ArrowLeft', scale: -1 },
+      'gamepad/0.axis0',
+    ],
+  },
+});
 
 const canvas = document.querySelector('canvas');
 const renderer = new Renderer67(canvas, parts, { samples: 4, memoryBudgetMiB: 256 });
@@ -83,7 +110,7 @@ function buildFrame(context) {
   const blend = context.alpha;
   const height = physicsSystem.previousHeight + (physicsSystem.height - physicsSystem.previousHeight) * blend;
   ballPart.matrix = translation(-1.2, height, 0, BALL_RADIUS);
-  cubePart.matrix = rotationAroundY(spinSystem.angle, 1.2, 0.5, 0);
+  cubePart.matrix = rotationAroundY(spinSystem.angle, spinSystem.x, 0.5, 0);
   renderer.updateParts(parts);
   return { eye: [0, 3, 8], target: [0, 1.2, 0], up: [0, 1, 0], time: context.elapsedSeconds };
 }
@@ -96,7 +123,7 @@ function startMode(mode) {
     mode,
     fixedRate: FIXED_RATE,
     frame: buildFrame,
-    systems: [physicsSystem, spinSystem],
+    systems: [input, physicsSystem, spinSystem],
   });
   runtime.start();
   for (const button of document.querySelectorAll('button[data-mode]')) {
@@ -116,6 +143,7 @@ setInterval(() => {
     `${stats.framesPerSecond.toFixed(0)} fps, ${stats.averageFrameMilliseconds.toFixed(1)} ms average, ${stats.maximumFrameMilliseconds.toFixed(1)} ms worst`,
     `update ${stats.updateMilliseconds.toFixed(2)} ms, render ${stats.renderMilliseconds.toFixed(2)} ms`,
     `fixed steps ${stats.fixedSteps}, alpha ${stats.alpha.toFixed(2)}`,
+    'A/D or arrows slide the cube, Space kicks the ball',
   ].join('\n');
 }, 250);
 
