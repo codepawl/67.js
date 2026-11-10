@@ -1,0 +1,63 @@
+/* The world loop hero: a full-viewport stage, the headline on the left over a per-scene scrim, scene names bottom right.
+   Everything that moves here is opacity or transform; no rules, no eyebrow labels, states lead with an icon. */
+@property --scrim {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0.72;
+}
+
+.hero-loop { position: relative; height: max(100svh, 640px); overflow: hidden; --scrim: 0.72; transition: --scrim 900ms ease; }
+.hero-loop .stage canvas.world { z-index: 0; }
+.hero-loop .stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(to top, rgb(9 7 15 / calc(var(--scrim) * 1.08)) 0%, transparent 52%),
+    linear-gradient(to right, rgb(9 7 15 / var(--scrim)) 0%, rgb(9 7 15 / calc(var(--scrim) * 0.5)) 38%, transparent 68%);
+}
+.hero-loop .copy { position: absolute; z-index: 3; left: clamp(16px, 6vw, 96px); bottom: clamp(32px, 9svh, 96px); max-width: 640px; display: flex; flex-direction: column; gap: 22px; }
+.hero-loop h1 { font-size: clamp(42px, 6vw, 88px); }
+
+.scene-bar { position: absolute; z-index: 4; right: clamp(16px, 4vw, 48px); bottom: clamp(24px, 5svh, 48px); display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; max-width: min(720px, 60vw); }
+.scene-tabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
+.scene-tab, .credits-toggle, .attribution { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color var(--hover) ease, color var(--hover) ease, transform var(--press) var(--ease-out); }
+.scene-tab svg, .credits-toggle svg, .attribution svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.scene-tab:active, .credits-toggle:active { transform: scale(0.97); }
+.scene-tab[aria-current='true'] { background: rgb(255 255 255 / 0.1); color: var(--text); }
+.ring-track { stroke: rgb(255 255 255 / 0.22); }
+.ring-fill { stroke: currentColor; transform: rotate(-90deg); transform-origin: 50% 50%; opacity: 0; }
+.ring-dot { fill: currentColor; stroke: none; opacity: 0.6; }
+.scene-tab[data-state='playing'] .ring-fill { opacity: 1; }
+.scene-tab[data-state='playing'] .ring-dot { opacity: 1; }
+.scene-tab[data-state='loading'] .ring-track { stroke-dasharray: 3 4; animation: ring-turn 1.4s linear infinite; transform-origin: 50% 50%; }
+@keyframes ring-turn { to { transform: rotate(360deg); } }
+@media (hover: hover) and (pointer: fine) {
+  .scene-tab:hover, .credits-toggle:hover, .attribution:hover { background: rgb(255 255 255 / 0.08); color: var(--text); }
+}
+.attribution[hidden], .credits-panel[hidden] { display: none; }
+.attribution { flex-basis: 100%; justify-content: flex-end; }
+.credits-panel { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 16px; background: var(--surface); }
+.credits-panel a { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+.credits-panel .credit-meta { color: var(--muted); font-size: 12px; }
+.credits-panel p { margin: 0; padding: 8px 10px; color: var(--muted); font-size: 12px; }
+@media (hover: hover) and (pointer: fine) { .credits-panel a:hover { background: var(--surface-hover); } }
+
+@media (max-width: 1180px) {
+  .scene-tab span { display: none; }
+  .scene-tab[aria-current='true'] span { display: inline; }
+}
+@media (max-width: 700px) {
+  .hero-loop .copy { bottom: 108px; }
+  .hero-loop h1 { font-size: 40px; }
+  .scene-bar { left: 12px; right: 12px; max-width: none; justify-content: flex-start; bottom: 16px; }
+  .scene-tabs { justify-content: flex-start; }
+  .scene-tab span { display: none; }
+  .scene-tab[aria-current='true'] span { display: inline; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-tab[data-state='loading'] .ring-track { animation: none; }
+  .hero-loop { transition: none; }
+}

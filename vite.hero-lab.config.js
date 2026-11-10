@@ -6,7 +6,7 @@ export default defineConfig({
   build: {
     outDir: 'artifacts/hero-lab-dist',
     emptyOutDir: true,
-    rolldownOptions: { input: { heroB: 'hero-b.html' } },
+    rolldownOptions: { input: { heroB: 'hero-b.html', heroLoop: 'hero-loop.html' } },
   },
   preview: { host: '127.0.0.1' },
 });
