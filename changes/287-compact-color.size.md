@@ -1,3 +1,0 @@
-- scene:lit-box: +22 B gzip (50070 to 50092) for the R11F_G11F_B10F entry in the render target ledger that the compact colour addon records.
-- goal:lit-box: +22 B gzip (50070 to 50092) for the ledger entry above. Approved by the lead under An's rule for goal scenes on 2026-11-04.
-- goal:agent-scene: +16 B gzip (102939 to 102955) for the same ledger entry. Approved by the lead under An's rule for goal scenes on 2026-11-04.

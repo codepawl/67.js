@@ -36,6 +36,34 @@ test('a sun-lit closed room gets point lights at its sunlit patches, above the f
   }
 });
 
+// A closed room lit through a window opening in its left wall, with a lawn and a hedge outside that move the middle of the bounds out of it.
+function roomWithWindowAndGarden() {
+  const recipe = roomWithOpening({ lightDirection: [-0.85, 0.4, 0.32] });
+  const block = (id, translation, scale) => ({ id, geometry: 'box', material: 'stone', translation, scale });
+  recipe.nodes = [
+    block('floor', [0, -0.05, 0], [10, 0.1, 10]),
+    block('wall-right', [5, 2, 0], [0.2, 4, 10]),
+    block('wall-front', [0, 2, 5], [10, 4, 0.2]),
+    block('wall-back', [0, 2, -5], [10, 4, 0.2]),
+    block('roof', [0, 4.1, 0], [10.4, 0.2, 10.4]),
+    block('wall-left-below', [-5, 0.5, 0], [0.2, 1, 10]),
+    block('wall-left-above', [-5, 3.5, 0], [0.2, 1, 10]),
+    block('wall-left-back', [-5, 2, -3.5], [0.2, 2, 3]),
+    block('wall-left-front', [-5, 2, 3.5], [0.2, 2, 3]),
+    block('lawn', [-20, -0.2, 0], [30, 0.1, 40]),
+    block('hedge', [-22, 1, 0], [1.4, 2, 40]),
+  ];
+  return recipe;
+}
+
+test('a room lit through a window gets lights that grow with sunBounce, though a garden lies outside it', () => {
+  const { parts, environment } = createAgentScene(roomWithWindowAndGarden());
+  const lights = findSunBounceLights(parts, environment);
+  assert.ok(lights.length > 0);
+  const strength = (value) => withSunBounce(parts, { ...environment, sunBounce: value }).pointLights.reduce((total, light) => total + light.intensity, 0);
+  assert.ok(strength(2) > strength(1) && strength(1) > 0);
+});
+
 test('environment.sunBounce scales the lights, and 0 returns the environment unchanged', () => {
   const { parts, environment } = createAgentScene(roomWithOpening());
   const strength = (value) => withSunBounce(parts, { ...environment, sunBounce: value }).pointLights.reduce((total, light) => total + light.intensity, 0);
@@ -59,7 +87,7 @@ test('open ground and a room with no sun get no lights', () => {
 
 test('environment.sunBounce that is not a number of 0 or more is refused', () => {
   for (const value of ['strong', true, -1, null]) {
-    assert.throws(() => createAgentScene(roomWithOpening({ sunBounce: value })), /sunBounce must be a number/);
+    assert.throws(() => createAgentScene(roomWithOpening({ sunBounce: value })), /environment\.sunBounce: got .*; expected a number of 0 or more/);
   }
   assert.equal(createAgentScene(roomWithOpening({ sunBounce: 2 })).environment.sunBounce, 2);
 });

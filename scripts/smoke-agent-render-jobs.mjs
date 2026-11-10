@@ -57,7 +57,7 @@ async function close() {
 }
 try {
   await connect();
-  assert.equal((await client.listTools()).tools.length, 22);
+  assert.equal((await client.listTools()).tools.length, 23);
   const catalog = (await call('scene_asset_catalog')).structuredContent;
   const created = (await call('scene_create_asset', { recipe: {
     format: '67js.asset', schemaVersion: 1, assetId: catalog.assets[0].assetId,
@@ -105,6 +105,31 @@ try {
     }
     imageJobs.push(submitted.jobId);
   }
+  // Output options (issue #611): each one writes a file of its own kind from a real job.
+  async function optionFiles(settings) {
+    const submitted = (await call('scene_render_submit', { sessionId, expectedRevision: 1, settings })).structuredContent;
+    assert.equal((await status(submitted.jobId)).state, 'completed');
+    imageJobs.push(submitted.jobId);
+    const { artifacts } = (await call('scene_render_result', { jobId: submitted.jobId })).structuredContent;
+    return Promise.all(artifacts.map(async artifact => ({ ...artifact, data: await readFile(artifact.path) })));
+  }
+  const pngColorType = data => data[25];
+  const pngBitDepth = data => data[24];
+  const [transparentFile] = await optionFiles({ kind: 'image', width: 128, height: 128, transparent: true });
+  assert.equal(pngColorType(transparentFile.data), 6);
+  const [sixteenBit, depthSixteen] = await optionFiles({ kind: 'image', width: 128, height: 128, format: 'png16', passes: ['depth'] });
+  assert.deepEqual([pngBitDepth(sixteenBit.data), pngColorType(sixteenBit.data), pngBitDepth(depthSixteen.data), pngColorType(depthSixteen.data)], [16, 2, 16, 0]);
+  const [exrFile, exrDepth] = await optionFiles({ kind: 'image', width: 128, height: 128, format: 'exr', passes: ['depth'] });
+  for (const file of [exrFile, exrDepth]) {
+    assert.equal(file.mimeType, 'image/x-exr');
+    assert.equal(file.data.subarray(0, 4).toString('hex'), '762f3101');
+  }
+  const [cropped] = await optionFiles({ kind: 'image', width: 128, height: 128, region: { x: 16, y: 8, width: 64, height: 48 } });
+  assert.deepEqual([cropped.data.readUInt32BE(16), cropped.data.readUInt32BE(20)], [64, 48]);
+  const [croppedSixteen] = await optionFiles({ kind: 'image', width: 128, height: 128, format: 'png16', region: { x: 16, y: 8, width: 64, height: 48 } });
+  assert.deepEqual([croppedSixteen.data.readUInt32BE(16), croppedSixteen.data.readUInt32BE(20)], [64, 48]);
+  const [fastVideo] = await optionFiles({ kind: 'video', width: 128, height: 128, fps: 60, duration: 0.25, animation: { clip: 0, start: 0 }, region: { x: 16, y: 8, width: 64, height: 48 } });
+  assert.equal(fastVideo.data.subarray(4, 8).toString('latin1'), 'ftyp');
   const longJob = (await call('scene_render_submit', { sessionId, expectedRevision: 1,
     settings: { kind: 'video', width: 320, height: 320, fps: 30, duration: 30 } })).structuredContent;
   await status(longJob.jobId, record => record.progress.frames > 0);
@@ -118,10 +143,11 @@ try {
   await connect();
   const recovered = (await call('scene_capabilities')).structuredContent;
   assert.equal(recovered.phase, 'idle');
-  assert.equal(recovered.jobs.records.find(record => record.jobId === interrupted.jobId).state, 'cancelled');
+  const recoveredJobs = (await call('scene_capabilities', { topic: 'jobs' })).structuredContent.value;
+  assert.equal(recoveredJobs.records.find(record => record.jobId === interrupted.jobId).state, 'cancelled');
   assert.deepEqual((await call('scene_render_result', { jobId: videoJob.jobId })).structuredContent, result);
   for (const jobId of [videoJob.jobId, longJob.jobId, interrupted.jobId, ...imageJobs]) await call('scene_render_release', { jobId });
-  assert.equal((await call('scene_capabilities')).structuredContent.jobs.records.length, 0);
+  assert.equal((await call('scene_capabilities', { topic: 'jobs' })).structuredContent.value.records.length, 0);
   await mkdir('artifacts', { recursive: true });
   await writeFile('artifacts/mcp-render-jobs-proof.json', JSON.stringify({ cli, video, result,
     animatedFramesDiffer: true, activeCancel: true, eofCleanup: true, restartResults: true,

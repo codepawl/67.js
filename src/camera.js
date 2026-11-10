@@ -1,21 +1,64 @@
 import { mat4, vec3 } from 'gl-matrix';
 
+/** Lens fields a camera may carry on top of eye, target, up, fov, near and far; each is absent unless the scene sets it. */
+export const CAMERA_LENS_FIELDS = Object.freeze(['projection', 'orthoScale', 'focalLength', 'sensorWidth', 'shift', 'fStop']);
+
+/** Image-centre shift as fractions of the frame width and height, like Blender's lens shift; positive moves the frame right and up. */
+export function validateCameraShift(shift) {
+  if (!Array.isArray(shift) || shift.length !== 2 || !shift.every(component => Number.isFinite(component) && Math.abs(component) <= 1)) {
+    throw new RangeError('Camera shift must be [x, y], each between -1 and 1 as a fraction of the frame.');
+  }
+}
+
 export function applyProjection(matrix, frame, aspect, { world = false } = {}) {
   if (!Number.isFinite(aspect) || aspect <= 0) throw new RangeError('Camera aspect must be positive and finite');
-  if (frame.projection === undefined && frame.fov === undefined) return matrix;
+  const hasLens = frame.projection !== undefined || frame.fov !== undefined || frame.focalLength !== undefined;
+  const hasClipping = frame.near !== undefined || frame.far !== undefined;
+  if (!hasLens && !hasClipping) return matrix;
   const near = frame.near ?? 0.1;
   const far = frame.far ?? (world ? 600 : 100);
   if (!Number.isFinite(near) || !Number.isFinite(far) || near <= 0 || far <= near) throw new RangeError('Camera clipping planes must satisfy 0 < near < far');
+  if (!hasLens) {
+    // Only the clipping planes are given: keep the renderer's own lens (its field of view and off-centre shift) and replace the planes.
+    const fieldOfView = 2 * Math.atan(1 / matrix[5]);
+    const shift = matrix[8];
+    mat4.perspective(matrix, fieldOfView, aspect, near, far);
+    matrix[8] = shift;
+    return matrix;
+  }
+  if (frame.shift !== undefined) validateCameraShift(frame.shift);
   if (frame.projection === 'orthographic') {
-    const height = frame.orthographicHeight ?? 4;
+    const height = frame.orthographicHeight ?? frame.orthoScale ?? 4;
     if (!Number.isFinite(height) || height <= 0) throw new RangeError('Orthographic height must be positive and finite');
     const halfHeight = height / 2;
-    return mat4.ortho(matrix, -halfHeight * aspect, halfHeight * aspect, -halfHeight, halfHeight, near, far);
+    mat4.ortho(matrix, -halfHeight * aspect, halfHeight * aspect, -halfHeight, halfHeight, near, far);
+    // An orthographic window moves sideways in clip space: x' = x + translation.
+    if (frame.shift) {
+      matrix[12] -= 2 * frame.shift[0];
+      matrix[13] -= 2 * frame.shift[1];
+    }
+    return matrix;
   }
   if (frame.projection && frame.projection !== 'perspective') throw new RangeError(`Unsupported camera projection: ${frame.projection}`);
+  mat4.perspective(matrix, cameraFieldOfView(frame, aspect) * Math.PI / 180, aspect, near, far);
+  // The z column of x and y moves the image centre by -matrix / depth in clip space, so +2 per frame fraction.
+  if (frame.shift) {
+    matrix[8] += 2 * frame.shift[0];
+    matrix[9] += 2 * frame.shift[1];
+  }
+  return matrix;
+}
+
+/** Vertical field of view in degrees: `fov`, or a focal length on a sensor `sensorWidth` wide (default 36, full frame) across the image. */
+export function cameraFieldOfView(frame, aspect) {
+  if (frame.focalLength !== undefined) {
+    const { focalLength, sensorWidth = 36 } = frame;
+    if (!Number.isFinite(focalLength) || focalLength <= 0 || !Number.isFinite(sensorWidth) || sensorWidth <= 0) throw new RangeError('Focal length and sensor width must be positive and finite');
+    return 2 * Math.atan(sensorWidth / aspect / focalLength / 2) * 180 / Math.PI;
+  }
   const fov = frame.fov ?? 45;
   if (!Number.isFinite(fov) || fov <= 0 || fov >= 180) throw new RangeError('Camera field of view must be between 0 and 180 degrees');
-  return mat4.perspective(matrix, fov * Math.PI / 180, aspect, near, far);
+  return fov;
 }
 
 const viewDirections = { front: [0, 0, 1], right: [1, 0, 0], top: [0, 1, 0], perspective: [0.58, 0.34, 0.74] };

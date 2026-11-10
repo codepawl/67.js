@@ -62,7 +62,7 @@ layout(location=11) in vec3 assemblyOffset;
 layout(location=12) in vec3 assemblyDetailOffset;
 layout(location=13) in vec4 uvSets;
 layout(location=14) in vec4 vertexColor;
-layout(location=15) in vec3 instanceEmissive;
+layout(location=15) in vec4 instanceEmissive;
 uniform mat4 viewProjection;
 uniform mat4 lightProjection;
 uniform float time;
@@ -75,6 +75,7 @@ out vec3 worldPosition, worldNormal;
 flat out vec3 baseColor;
 flat out vec4 surface;
 flat out vec4 instanceEmission;
+flat out float instanceOpacity;
 flat out mat3 boxNormalMatrix;
 #endif
 #ifdef VERTEX_COLORS
@@ -116,7 +117,8 @@ void main() {
   lightmapUV = uvSets.zw;
 #ifdef INSTANCED
   baseColor = instanceColor;
-  instanceEmission = vec4(instanceEmissive, gl_InstanceID);
+  instanceEmission = vec4(instanceEmissive.rgb, gl_InstanceID);
+  instanceOpacity = instanceEmissive.w;
   surface = instanceSurface;
 #endif
 #ifdef VERTEX_COLORS
@@ -213,11 +215,13 @@ in vec3 worldPosition, worldNormal;
 flat in vec3 baseColor;
 flat in vec4 surface;
 flat in vec4 instanceEmission;
+flat in float instanceOpacity;
 flat in mat3 boxNormalMatrix;
 #else
 uniform vec3 baseColor;
 uniform vec4 surface;
 uniform vec4 instanceEmission;
+uniform float instanceOpacity;
 uniform mat3 boxNormalMatrix;
 #endif
 #ifdef VERTEX_COLORS
@@ -265,6 +269,8 @@ uniform float localShadowTexelAngles[24];
 uniform vec3 keyColor;
 uniform float fillIntensity;
 uniform float ambientIntensity;
+uniform float specularAntiAliasing;
+const float MAXIMUM_SPECULAR_WIDENING = 0.25;
 uniform vec3 fogColor;
 uniform float fogDensity;
 uniform vec3 waterRipple;
@@ -298,6 +304,8 @@ uniform float alphaCutoff;
 uniform float materialOpacity;
 uniform float alphaToCoverage;
 uniform float doubleSided;
+uniform float shadowBlind;
+uniform float compositeMode;
 out vec4 outputColor;
 const float PI = 3.14159265359;
 
@@ -451,6 +459,10 @@ vec2 mapUV(float flag) {
   return flag > 1.5 ? lightmapUV : textureUV;
 }
 
+// Toksvig variance: a normal map mip averages texels that disagree, so the filtered normal is shorter than 1.
+// The shortfall is the detail the pixel can no longer resolve, and it widens the highlight instead of sparkling.
+float normalMapVariance = 0.0;
+
 vec3 mappedNormal(vec3 normal) {
   vec3 positionX = dFdx(worldPosition);
   vec3 positionY = dFdy(worldPosition);
@@ -473,6 +485,8 @@ vec3 mappedNormal(vec3 normal) {
   float handedness = dot(cross(normal, tangent), bitangent) < 0.0 ? -1.0 : 1.0;
   bitangent = normalize(cross(normal, tangent)) * handedness;
   vec3 sampled = texture(normalMap, textureUV${featureCode("normalUv")}).xyz * 2.0 - 1.0;
+  float filteredLength = clamp(length(sampled), 0.05, 1.0);
+  normalMapVariance = (1.0 - filteredLength) / filteredLength;
   sampled.xy *= normalScale;
   vec3 mapped = mat3(tangent, bitangent, normal) * sampled;
   return dot(mapped, mapped) > 1e-12 ? normalize(mapped) : normal;
@@ -480,10 +494,10 @@ vec3 mappedNormal(vec3 normal) {
 
 ${featureCode("libraries")}
 
-${featureCode("worldMossFunction")}// Opaque draws 1, mask resolves to a cutout (smooth coverage with MSAA) and blend keeps the fraction.
+${featureCode("worldMossFunction")}// Opaque draws 1, mask resolves to a cutout (smooth coverage with MSAA), blend and add keep the fraction (per instance opacity times the batch one).
 float surfaceAlpha(float textureAlpha) {
   if (!USES_ALPHA_MODE) return 1.0;
-  float alpha = materialOpacity * textureAlpha;
+  float alpha = materialOpacity * instanceOpacity * textureAlpha;
   if (alphaMode > 1.5) return alpha;
   if (alphaToCoverage > 0.5) {
     float softness = max(fwidth(alpha), 0.0001);
@@ -589,8 +603,15 @@ ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
   float splatCavity = 1.0;
   if (USES_SPLAT) applySplat(color, normal, roughness, splatCavity);
   roughness = clamp(roughness, 0.075, 1.0);
-  vec3 normalChange = max(abs(dFdx(normal)), abs(dFdy(normal)));
-  roughness = clamp(sqrt(roughness * roughness + dot(normalChange, normalChange) * 0.3), 0.075, 1.0);
+  if (specularAntiAliasing > 0.0) {
+    // Kaplanyan-Hoffman: the variance of the shading normal across the pixel footprint, clamped by a kernel threshold,
+    // plus the Toksvig variance of the normal map. Both add to the squared roughness.
+    vec3 normalX = dFdx(normal);
+    vec3 normalY = dFdy(normal);
+    float screenVariance = 0.25 * (dot(normalX, normalX) + dot(normalY, normalY));
+    float widening = min(2.0 * screenVariance + 0.5 * normalMapVariance, MAXIMUM_SPECULAR_WIDENING);
+    roughness = clamp(sqrt(roughness * roughness + specularAntiAliasing * widening), 0.075, 1.0);
+  }
   float mossCover = 0.0;
   vec3 mossTone = vec3(0.0);
 ${featureCode("worldSurface")}  vec3 specularNormal = normal;
@@ -599,7 +620,7 @@ ${featureCode("mainSetup")}  if (ENVIRONMENT_ENABLED && !LIGHT_SHADING) {
     vec2 brdfLookup = texture(environmentBrdf, vec2(clamp(dot(normal, viewDirection), 0.001, 1.0), roughness)).rg;
     directSpecularGain = multipleScatterGain(brdfLookup, baseReflectance);
   }
-  float visibility = shadowVisibility(normal);
+  float visibility = shadowBlind > 0.5 ? 1.0 : shadowVisibility(normal);
 ${featureCode("worldVisibility")}  vec3 radiance = illuminate(normal, viewDirection, normalize(lightDirection), keyColor * visibility${featureCode("linkSun")}, color, metallic, roughness);
   if (FILL_ON) {
   radiance += illuminate(normal, viewDirection, normalize(vec3(4.0, 2.0, -3.0)), mix(vec3(0.8, 2.0, 1.8), vec3(0.12, 0.17, 0.20) * daylight, worldMode) * fillIntensity * mix(1.0, vertexSkyVisibility, worldMode), color, metallic, roughness);
@@ -615,7 +636,7 @@ ${featureCode("worldVisibility")}  vec3 radiance = illuminate(normal, viewDirect
 ${featureCode("linkPoint")}    vec3 lightRadiance = pointLightColors[index].rgb * pointLightColors[index].w * attenuation;
     if (USES_LOCAL_SHADOWS && pointLightShadowTiles[index] >= 0.0) {
       float tile = pointLightShadowTiles[index] + pointShadowFace(-offset);
-      lightRadiance *= localShadowVisibility(tile, worldPosition, normal, sqrt(distanceSquared));
+      lightRadiance *= shadowBlind > 0.5 ? 1.0 : localShadowVisibility(tile, worldPosition, normal, sqrt(distanceSquared));
     }
     radiance += illuminate(normal, viewDirection, offset * inversesqrt(distanceSquared), lightRadiance, color, metallic, roughness);
   }
@@ -633,7 +654,7 @@ ${featureCode("linkPoint")}    vec3 lightRadiance = pointLightColors[index].rgb 
       if (attenuation == 0.0) continue;
 ${featureCode("linkSpot")}      vec3 lightRadiance = spotLightColors[index].rgb * spotLightColors[index].w * attenuation;
       if (USES_LOCAL_SHADOWS && spotLightParameters[index].z >= 0.0) {
-        lightRadiance *= localShadowVisibility(spotLightParameters[index].z, worldPosition, normal, sqrt(distanceSquared));
+        lightRadiance *= shadowBlind > 0.5 ? 1.0 : localShadowVisibility(spotLightParameters[index].z, worldPosition, normal, sqrt(distanceSquared));
       }
       radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
@@ -658,7 +679,7 @@ ${featureCode("linkArea")}      vec3 lightNormal = areaLightNormals[index].xyz;
       // Adding area / pi keeps the term finite at the surface and matches a disc source on its axis.
       float attenuation = emission / (distanceSquared + area / PI);
       vec3 lightRadiance = areaLightColors[index].rgb * areaLightColors[index].w * attenuation;
-      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
+${featureCode("areaRadiance")}      radiance += illuminate(normal, viewDirection, toLight, lightRadiance, color, metallic, roughness);
     }
   }
   vec3 reflectance = fresnel(max(dot(normal, viewDirection), 0.0), baseReflectance);
@@ -675,7 +696,7 @@ ${featureCode("linkArea")}      vec3 lightNormal = areaLightNormals[index].xyz;
   // Leaf and grass cards keep a faint sheen; full sky reflection washed grazing cards grey-blue.
   float skyReflection = canopyShaded ? 0.3 : 1.0;
   vec3 reflected = reflect(-viewDirection, specularNormal);
-${featureCode("probeReflection")}  if (ENVIRONMENT_ENABLED) {
+${featureCode("probeReflection")}${featureCode("irradianceGridOcclusion")}  if (ENVIRONMENT_ENABLED) {
     radiance += environmentLighting(normal, specularNormal, baseReflectance, viewDirection, reflected, color, metallic, roughness, occlusion, ambientIntensity, skyReflection);
   } else {
     // Outdoors the surroundings are sky and haze; reflecting the studio softboxes there lit grazing leaves white and cyan.
@@ -685,7 +706,7 @@ ${featureCode("probeSurroundings")}    radiance += surroundings * reflectance * 
   }
   // Baked bounced light arrives as irradiance, so the surface colour (pattern and texture included) tints it here.
   if (USES_LIGHT_MAP) radiance += color * (1.0 - metallic) * texture(lightMap, lightmapUV).rgb * lightMapScale;
-  vec3 keyResponse = keyColor / mix(vec3(5.2, 4.7, 4.1), vec3(3.7, 3.4, 2.9), worldMode);
+${featureCode("irradianceGrid")}  vec3 keyResponse = keyColor / mix(vec3(5.2, 4.7, 4.1), vec3(3.7, 3.4, 2.9), worldMode);
   keyResponse *= mix(daylight, 1.0, worldMode);
 ${featureCode("worldLight")}  if (USES_SHEEN) radiance = sheenLayer(radiance, normal, viewDirection, visibility);
   if (USES_CLEARCOAT) radiance = clearCoatLayer(radiance, normal, viewDirection, visibility);
@@ -697,7 +718,8 @@ ${featureCode("afterEmission")}${featureCode("worldAfterEmission")}  if (TAG_FLO
     radiance = mix(radiance, vec3(0.018, 0.022, 0.026), fog);
   }
 ${featureCode("worldFinal")}  float fog = 1.0 - exp(-length(worldPosition - eye) * fogDensity);
-  radiance = mix(radiance, fogColor, fog * worldMode);
+  // Additive light fades to black through fog; mixing it toward the fog colour would add a glow of fog.
+  radiance = alphaMode > 2.5 ? radiance * (1.0 - fog * worldMode) : mix(radiance, fogColor, fog * worldMode);
   if (inspection > 0.5) radiance = normal * 0.5 + 0.5;
   outputColor = vec4(hdrEnabled > 0.5 ? clamp(radiance * exposure, vec3(0), vec3(65504.0)) : pow(toneMap(radiance * exposure), vec3(1.0 / 2.2)), alpha);
   if (TAG_FLOOR && inspection < 0.5) {
@@ -707,6 +729,8 @@ ${featureCode("worldFinal")}  float fog = 1.0 - exp(-length(worldPosition - eye)
     vec3 result = floorColor * (0.72 + 0.28 * visibility) * contact;
     outputColor = vec4(hdrEnabled > 0.5 ? pow(result, vec3(2.2)) : result, 1.0);
   }
+  // Holdout: nothing, not even alpha. Shadow catcher: black with the shadow it receives as premultiplied alpha.
+  if (compositeMode > 0.5) outputColor = compositeMode < 1.5 ? vec4(0.0) : vec4(0.0, 0.0, 0.0, 1.0 - visibility);
 }`;
 }
 
@@ -735,7 +759,7 @@ const SHADER_FEATURE_CONDITIONS = {
   areaLights: ['USES_AREA_LIGHTS', 'areaLightCount > 0'],
   localShadows: ['USES_LOCAL_SHADOWS', 'true'],
   fill: ['FILL_ON', 'true'],
-  renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5'],
+  renderPass: ['USES_RENDER_PASS', 'renderPassMode > 0.5 && renderPassMode < 5.5'],
   sheen: ['USES_SHEEN', 'materialSheen.rgb != vec3(0.0)'],
   clearcoat: ['USES_CLEARCOAT', 'materialCoat.x > 0.0'],
 };

@@ -96,10 +96,10 @@ test('final batch reference validation prevents dangling tracks and permits atom
   scene.sampleMotion(1);
   const before = pose(scene);
   const canonical = scene.exportRecipe();
-  assert.throws(() => scene.apply([{ type: 'remove-node', id: 'hinge', recursive: true }], { expectedRevision: 0 }), /target/);
+  assert.throws(() => scene.apply([{ type: 'remove-node', id: 'hinge', recursive: true }], { expectedRevision: 0 }), /motion\.tracks\[0\]\.id: got "hinge"/);
   assert.deepEqual(pose(scene), before);
   assert.deepEqual(scene.exportRecipe(), canonical);
-  assert.throws(() => scene.apply([{ type: 'set-motion' }], { expectedRevision: 0 }), /requires motion/);
+  assert.throws(() => scene.apply([{ type: 'set-motion' }], { expectedRevision: 0 }), /motion: got undefined; expected a motion value, or null to clear it/);
   scene.apply([
     { type: 'remove-node', id: 'hinge', recursive: true },
     { type: 'remove-material', id: 'finish' },
@@ -169,5 +169,5 @@ test('failed set-motion initial sampling is atomic across recipe, transforms and
 test('motion loop is optional boolean and never accepts null as a hidden default', () => {
   const input = recipe();
   input.motion.loop = null;
-  assert.throws(() => createAgentScene(input), /loop must be boolean/);
+  assert.throws(() => createAgentScene(input), /motion\.loop: got .*; expected true or false/);
 });

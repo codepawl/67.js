@@ -1,6 +1,10 @@
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from './light-limits.js';
+import { lightShapeSupport } from './shader-registry.js';
 
 export { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS };
+export const DEFAULT_SPECULAR_ANTI_ALIASING = 1;
+export const MAXIMUM_SPECULAR_ANTI_ALIASING = 4;
+
 // One 2048 x 3072 depth atlas holds 24 tiles of 512 x 512 (24 MiB). A shadowed spot light uses one tile and a shadowed point
 // light uses six, one for each cube face.
 export const SHADOW_ATLAS_TILES = 24;
@@ -122,6 +126,7 @@ export function createLightingState() {
     areaCount: 0,
     fillIntensity: 1,
     ambientIntensity: 1,
+    specularAntiAliasing: DEFAULT_SPECULAR_ANTI_ALIASING,
   };
 }
 
@@ -203,6 +208,7 @@ export function updateLightingState(state, environment, { world = false } = {}) 
   const fillIntensity = numberInRange(environment.fillIntensity ?? 1, 0, 100, 'Fill intensity');
   const ambientIntensity = numberInRange(environment.ambientIntensity ?? 1, 0, 100, 'Ambient intensity');
   const daylight = numberInRange(environment.daylight ?? 1, 0, 100, 'Daylight');
+  const specularAntiAliasing = numberInRange(environment.specularAntiAliasing ?? DEFAULT_SPECULAR_ANTI_ALIASING, 0, MAXIMUM_SPECULAR_ANTI_ALIASING, 'Specular anti-aliasing');
   const keyColor = environment.keyColor ?? (world ? [3.7 * daylight, 3.4 * daylight, 2.9 * daylight] : [5.2, 4.7, 4.1]);
   vectorInRange(keyColor, 0, 1000, 'Key color');
   pointLights.forEach(validatePointLight);
@@ -213,11 +219,13 @@ export function updateLightingState(state, environment, { world = false } = {}) 
   writePointLights(state, pointLights);
   writeSpotLights(state, spotLights);
   writeAreaLights(state, areaLights);
+  lightShapeSupport.update?.(state, spotLights, areaLights);
   for (let axis = 0; axis < 3; axis++) state.keyColor[axis] = keyColor[axis] * keyIntensity;
   state.pointCount = pointLights.length;
   state.spotCount = spotLights.length;
   state.areaCount = areaLights.length;
   state.fillIntensity = fillIntensity;
   state.ambientIntensity = ambientIntensity;
+  state.specularAntiAliasing = specularAntiAliasing;
   return state;
 }

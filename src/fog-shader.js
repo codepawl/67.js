@@ -1,0 +1,318 @@
+import { registerShaderFeatureCode } from './shader-registry.js';
+import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
+
+// The volume fog step of the post pass: its uniforms and the march that scatters light through the fog box. Only a renderer that
+// draws a frame with environment.volumeFog needs this module; post.js gives every other post program a stub. It reads hash and
+// cloudNoise from the post shader. Recipes and the film load it by themselves.
+
+function bindUniforms(renderer, post, volume, environment, frame) {
+  const context = renderer.context;
+  context.activeTexture(context.TEXTURE3);
+  context.bindTexture(context.TEXTURE_2D, renderer.shadowTexture);
+  context.uniform1i(post.uniforms.volumeShadowMap, 3);
+  context.uniformMatrix4fv(post.uniforms.volumeLightProjection, false, renderer.lightProjection);
+  context.uniform3fv(post.uniforms.volumeLightDirection, environment.lightDirection);
+  context.uniform3fv(post.uniforms.volumeLightColor, renderer.lighting.keyColor);
+  context.uniform1f(post.uniforms.volumeDensity, volume.density);
+  context.uniform3fv(post.uniforms.volumeMinimum, volume.minimum);
+  context.uniform3fv(post.uniforms.volumeMaximum, volume.maximum);
+  context.uniform3fv(post.uniforms.volumeColor, volume.color);
+  context.uniform3fv(post.uniforms.volumeAmbient, volume.ambient);
+  context.uniform3fv(post.uniforms.volumeDrift, volume.drift);
+  context.uniform1i(post.uniforms.volumeSteps, volume.steps);
+  context.uniform1f(post.uniforms.volumeAnisotropy, volume.anisotropy);
+  context.uniform1f(post.uniforms.volumeShadowAmbient, volumeShadowAmbient(volume, renderer.sceneParts, renderer.skyOpenness));
+  context.uniform1f(post.uniforms.volumeNoiseAmount, volume.noiseAmount);
+  context.uniform1f(post.uniforms.volumeNoiseScale, volume.noiseScale);
+  context.uniform1f(post.uniforms.volumeMaxDistance, volume.maxDistance);
+  context.uniform1f(post.uniforms.volumeHeightFalloff, volume.heightFalloff);
+  bindFieldAndLights(renderer, post, volume);
+  bindDetail(context, post, volume);
+  context.uniform1f(post.uniforms.orthographic, frame.projection === 'orthographic' ? 1 : 0);
+  context.uniform1i(post.uniforms.fogSkyVisibility, 5);
+  context.uniform1f(post.uniforms.volumeGridFog, renderer.sceneParts.some(part => part.material?.irradianceGrid) ? 1 : 0);
+}
+
+// Detail, layer top and key light controls. The detail ones only act in a program with the detail step compiled in (fogUsesDetail).
+function bindDetail(context, post, volume) {
+  const detail = resolveFogDetail(volume);
+  // The renderer's post uniform list knows only the older fields; these locations are looked up here, once per program.
+  const locate = name => (post.uniforms[name] ??= context.getUniformLocation(post.program, name));
+  context.uniform1i(locate('volumeDetailOctaves'), detail.detailOctaves);
+  context.uniform1f(locate('volumeDetailAmount'), detail.detailAmount);
+  context.uniform1f(locate('volumeWarp'), detail.warp);
+  context.uniform1f(locate('volumeContrast'), detail.contrast);
+  context.uniform1f(locate('volumeProfileStart'), detail.profileSoftness);
+  context.uniform1f(locate('volumeKeyScattering'), detail.keyScattering);
+  context.uniform1i(locate('volumeScatterOctaves'), detail.scatterOctaves);
+  context.uniform1f(locate('volumeMultiScatter'), detail.multiScatter);
+  context.uniform1f(locate('volumeMultiExtinction'), detail.multiExtinction);
+  context.uniform1f(locate('volumeMultiAnisotropy'), detail.multiAnisotropy);
+  context.uniform1f(locate('volumeKeyTransmittance'), detail.keyTransmittance);
+  context.uniform1f(locate('volumeSurfaceTransmittance'), detail.surfaceTransmittance);
+}
+
+// The fog's field texture and light buffers; a program without those steps has no such uniforms, and a null location is ignored.
+function bindFieldAndLights(renderer, post, volume) {
+  const context = renderer.context;
+  if (volume.field) {
+    renderer.fogFieldTexture ??= new FogFieldTexture(context);
+    context.activeTexture(context.TEXTURE6);
+    renderer.fogFieldTexture.upload(volume.field);
+    context.uniform1i(post.uniforms.volumeField, 6);
+    context.uniform1f(post.uniforms.volumeProfile, volume.profile === 'smoothstep' ? 1 : 0);
+    context.uniform1f(post.uniforms.volumeFlowStrength, volume.flowStrength ?? DEFAULT_FLOW_STRENGTH);
+    context.uniform1f(post.uniforms.volumeFlowPeriod, volume.flowPeriod ?? DEFAULT_FLOW_PERIOD);
+  }
+  const lights = renderer.fogLightBuffers;
+  context.uniform1i(post.uniforms.volumeLightCount, lights.count);
+  if (lights.count === 0) return;
+  context.uniform4fv(post.uniforms['volumeLightPositions[0]'], lights.positions);
+  context.uniform4fv(post.uniforms['volumeLightColors[0]'], lights.colors);
+  context.uniform4fv(post.uniforms['volumeLightDirections[0]'], lights.directions);
+  context.uniform4fv(post.uniforms['volumeLightCones[0]'], lights.cones);
+}
+
+function packLights(renderer) {
+  renderer.fogLightBuffers ??= createFogLightBuffers();
+  packFogLights(renderer.lighting, renderer.fogLightBuffers);
+}
+
+registerShaderFeatureCode('volumeFog', {
+  // The JavaScript half, which the renderer calls for a frame that draws a volume fog.
+  support: { packLights, bindUniforms, usesDetail: fogUsesDetail },
+  postDeclarations: `
+uniform highp sampler2DShadow volumeShadowMap;
+uniform mat4 volumeLightProjection;
+uniform vec3 volumeLightDirection;
+uniform vec3 volumeLightColor;
+uniform float volumeDensity;
+uniform vec3 volumeMinimum;
+uniform vec3 volumeMaximum;
+uniform vec3 volumeColor;
+uniform vec3 volumeAmbient;
+uniform vec3 volumeDrift;
+uniform int volumeSteps;
+uniform float volumeAnisotropy;
+uniform float volumeShadowAmbient;
+uniform float volumeGridFog; // 1 when an irradiance grid lights the fog: the ambient then stands for the sky only
+uniform float volumeNoiseAmount;
+uniform float volumeNoiseScale;
+uniform float volumeMaxDistance;
+uniform float volumeHeightFalloff;
+uniform sampler2D volumeField;
+uniform float volumeProfile;
+uniform float volumeFlowStrength;
+uniform float volumeFlowPeriod;
+uniform int volumeDetailOctaves;
+uniform float volumeDetailAmount;
+uniform float volumeWarp;
+uniform float volumeContrast;
+uniform float volumeProfileStart;
+uniform float volumeKeyScattering;
+uniform int volumeScatterOctaves;
+uniform float volumeMultiScatter;
+uniform float volumeMultiExtinction;
+uniform float volumeMultiAnisotropy;
+uniform float volumeKeyTransmittance;
+uniform float volumeSurfaceTransmittance;
+uniform int volumeLightCount;
+uniform vec4 volumeLightPositions[8];
+uniform vec4 volumeLightColors[8];
+uniform vec4 volumeLightDirections[8];
+uniform vec4 volumeLightCones[8];
+uniform float orthographic;
+uniform highp sampler3D fogSkyVisibility;
+`,
+  postFunctions: `
+float henyeyGreenstein(float cosine, float anisotropy) {
+  return (1.0 - anisotropy * anisotropy) / (12.5663706 * pow(1.0 + anisotropy * anisotropy - 2.0 * anisotropy * cosine, 1.5));
+}
+float fogLightAttenuation(float distanceSquared, float range, float radius) {
+  float cutoff = 1.0;
+  if (range > 0.0) {
+    float squaredRatio = distanceSquared / (range * range);
+    float fade = max(1.0 - squaredRatio * squaredRatio, 0.0);
+    cutoff = fade * fade;
+  }
+  return cutoff / max(distanceSquared, radius * radius);
+}
+vec3 fogLightScattering(vec3 position, vec3 direction) {
+  vec3 total = vec3(0);
+  for (int index = 0; index < 8; index++) {
+    if (index >= volumeLightCount) break;
+    vec3 offset = volumeLightPositions[index].xyz - position;
+    float distanceSquared = dot(offset, offset);
+    if (distanceSquared < 1e-12) continue;
+    vec3 toLight = offset * inversesqrt(distanceSquared);
+    float attenuation = fogLightAttenuation(distanceSquared, volumeLightPositions[index].w, volumeLightColors[index].w);
+    if (volumeLightCones[index].y > 0.5) attenuation *= smoothstep(volumeLightDirections[index].w, volumeLightCones[index].x, dot(-toLight, volumeLightDirections[index].xyz));
+    if (attenuation <= 0.0) continue;
+    float denominator = 1.0 + volumeAnisotropy * volumeAnisotropy - 2.0 * volumeAnisotropy * dot(direction, toLight);
+    total += volumeLightColors[index].rgb * (attenuation * (1.0 - volumeAnisotropy * volumeAnisotropy) / (12.5663706 * denominator * sqrt(denominator)));
+  }
+  return total;
+}
+float flowedNoise(vec3 samplePosition, vec2 velocity, float noiseScale) {
+  float firstPhase = fract(time / volumeFlowPeriod);
+  float secondPhase = fract(time / volumeFlowPeriod + 0.5);
+  vec3 travel = vec3(velocity.x, 0.0, velocity.y) * volumeFlowStrength * volumeFlowPeriod;
+  float first = cloudNoise((samplePosition - travel * firstPhase) * noiseScale);
+  float second = cloudNoise((samplePosition - travel * secondPhase) * noiseScale);
+  return mix(first, second, abs(2.0 * firstPhase - 1.0));
+}
+float noiseAt(vec3 samplePosition, vec2 velocity, float noiseScale) {
+  return POST_FIELD ? flowedNoise(samplePosition, velocity, noiseScale) : cloudNoise(samplePosition * noiseScale);
+}
+// The density noise in 0..1. With the detail step compiled out this is the single lookup. With it, the position is warped by
+// three low-frequency lookups (warp counts noise cells), up to two octaves at 2x and 4x frequency join in (weights 0.5 and 0.25
+// times detailAmount, renormalised so the mean stays), and contrast stretches the result around its middle.
+float densityNoise(vec3 samplePosition, vec2 velocity) {
+  vec3 warped = samplePosition;
+  if (POST_DETAIL && volumeWarp > 0.0) {
+    vec3 seed = samplePosition * volumeNoiseScale * 0.5;
+    vec3 offset = vec3(cloudNoise(seed + 17.0), cloudNoise(seed + 43.0), cloudNoise(seed + 71.0)) - 0.5;
+    warped += offset * (2.0 * volumeWarp / volumeNoiseScale);
+  }
+  float lookup = noiseAt(warped, velocity, volumeNoiseScale);
+  if (POST_DETAIL) {
+    float total = 1.0;
+    float sum = lookup;
+    if (volumeDetailOctaves > 1) {
+      float weight = 0.5 * volumeDetailAmount;
+      sum += weight * noiseAt(warped, velocity, volumeNoiseScale * 2.0);
+      total += weight;
+    }
+    if (volumeDetailOctaves > 2) {
+      float weight = 0.25 * volumeDetailAmount;
+      sum += weight * noiseAt(warped, velocity, volumeNoiseScale * 4.0);
+      total += weight;
+    }
+    lookup = clamp(0.5 + (sum / total - 0.5) * volumeContrast, 0.0, 1.0);
+  }
+  return lookup;
+}
+float layerProfile(float relativeHeight) {
+  return volumeProfile > 0.5 ? 1.0 - smoothstep(volumeProfileStart, 1.0, relativeHeight) : exp(-relativeHeight);
+}
+// The density factor at one point: the noise, times the field's layer profile or the height falloff. Zero where the fog is absent.
+float fogDensityFactor(vec3 position) {
+  float noise = 1.0;
+  vec4 field = POST_FIELD ? texture(volumeField, (position.xz - volumeMinimum.xz) / (volumeMaximum.xz - volumeMinimum.xz)) : vec4(1);
+  if (volumeNoiseAmount > 0.0) {
+    float lookup = densityNoise(position - volumeDrift * time, field.zw);
+    noise = mix(1.0, lookup * 2.0, volumeNoiseAmount);
+  }
+  if (POST_FIELD) noise *= field.r * layerProfile((position.y - volumeMinimum.y) / max(field.g, 0.0001));
+  else if (volumeHeightFalloff > 0.0) noise *= exp((volumeMinimum.y - position.y) / volumeHeightFalloff);
+  return noise;
+}
+// The share of the key light that reaches a point: the shadow map.
+float keyVisibility(vec3 position) {
+  vec4 lightPosition = volumeLightProjection * vec4(position, 1);
+  vec3 shadow = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
+  if (all(greaterThanEqual(shadow, vec3(0))) && all(lessThanEqual(shadow, vec3(1)))) {
+    return texture(volumeShadowMap, vec3(shadow.xy, shadow.z - 0.0008));
+  }
+  return 1.0;
+}
+// The optical depth of the fog between a point and the sun, from three taps along the light direction up to the box exit.
+float sunOpticalDepth(vec3 position, vec3 towardSun) {
+  float exitDistance = volumeMaxDistance;
+  for (int axis = 0; axis < 3; axis++) {
+    if (towardSun[axis] == 0.0) continue;
+    float first = (volumeMinimum[axis] - position[axis]) / towardSun[axis];
+    float second = (volumeMaximum[axis] - position[axis]) / towardSun[axis];
+    exitDistance = min(exitDistance, max(first, second));
+  }
+  exitDistance = max(exitDistance, 0.0);
+  float sum = 0.0;
+  for (int tap = 0; tap < 3; tap++) sum += fogDensityFactor(position + towardSun * (exitDistance * (float(tap) + 0.5) / 3.0));
+  return volumeDensity * sum * exitDistance / 3.0;
+}
+// The sun's in-scatter at a point. The octave sum approximates multiple scattering (Wrenninge et al. 2015, "Oz: the great and
+// volumetric"): octave n scatters multiScatter^n as much, sees half^n of the extinction and has half^n of the anisotropy.
+float keyInScatter(float cosine, float opticalDepth) {
+  float total = 0.0;
+  float weight = 1.0;
+  float extinction = 1.0;
+  float anisotropy = volumeAnisotropy;
+  for (int octave = 0; octave < 4; octave++) {
+    if (octave >= volumeScatterOctaves) break;
+    total += weight * henyeyGreenstein(cosine, anisotropy) * exp(-opticalDepth * volumeKeyTransmittance * extinction);
+    weight *= volumeMultiScatter;
+    extinction *= volumeMultiExtinction;
+    anisotropy *= volumeMultiAnisotropy;
+  }
+  return total;
+}
+vec3 volumeFog(vec3 background) {
+  vec2 clipXY = textureCoordinate * 2.0 - 1.0;
+  vec4 farPoint = inverseViewProjection * vec4(clipXY, 1.0, 1.0);
+  vec4 nearPoint = inverseViewProjection * vec4(clipXY, -1.0, 1.0);
+  vec3 origin = orthographic > 0.5 ? nearPoint.xyz / nearPoint.w : eye;
+  vec3 direction = normalize(farPoint.xyz - origin * farPoint.w);
+  float depth = texture(sceneDepth, textureCoordinate).r;
+  vec4 surfacePoint = inverseViewProjection * vec4(clipXY, depth * 2.0 - 1.0, 1.0);
+  float surfaceDistance = volumeMaxDistance;
+  if (surfacePoint.w > 0.0) surfaceDistance = max(0.0, dot(surfacePoint.xyz - origin * surfacePoint.w, direction) / surfacePoint.w);
+  float exitDistance = min(volumeMaxDistance, surfaceDistance);
+  float boxExit = volumeMaxDistance;
+  float entry = 0.0;
+  for (int axis = 0; axis < 3; axis++) {
+    if (direction[axis] == 0.0) {
+      if (origin[axis] < volumeMinimum[axis] || origin[axis] > volumeMaximum[axis]) return background;
+    } else {
+      float first = (volumeMinimum[axis] - origin[axis]) / direction[axis];
+      float second = (volumeMaximum[axis] - origin[axis]) / direction[axis];
+      entry = max(entry, min(first, second));
+      exitDistance = min(exitDistance, max(first, second));
+      boxExit = min(boxExit, max(first, second));
+    }
+  }
+  if (entry >= exitDistance) return background;
+  float stepSize = (exitDistance - entry) / float(volumeSteps);
+  vec3 lightDirection = normalize(volumeLightDirection);
+  float cosine = dot(direction, lightDirection);
+  float anisotropy = volumeAnisotropy;
+  vec3 towardSun = lightDirection;
+  bool sunTransmittance = volumeKeyTransmittance > 0.0 || volumeScatterOctaves > 1;
+  float jitter = hash(vec3(gl_FragCoord.xy, 0));
+  float transmittance = 1.0;
+  vec3 accumulated = vec3(0);
+  for (int index = 0; index < 48; index++) {
+    if (index >= volumeSteps) break;
+    vec3 position = origin + direction * (entry + (float(index) + jitter) * stepSize);
+    float noise = fogDensityFactor(position);
+    float opacity = 1.0 - exp(-volumeDensity * noise * stepSize);
+    float visibility = keyVisibility(position);
+    vec4 skyCell = POST_SKY ? texture(fogSkyVisibility, (position - volumeMinimum) / (volumeMaximum - volumeMinimum)) : vec4(0);
+    float shadowShare = POST_SKY ? 0.1 + 0.9 * min(1.0, 30.0 * skyCell.r) : volumeShadowAmbient;
+    float ambientShare = mix(shadowShare, 1.0, visibility);
+    if (volumeGridFog > 0.5) ambientShare = min(1.0, 30.0 * skyCell.r);
+    float opticalDepth = 0.0;
+    if (sunTransmittance && visibility > 0.001) opticalDepth = sunOpticalDepth(position, towardSun);
+    float phase = keyInScatter(cosine, opticalDepth);
+    vec3 scattering = volumeColor * (volumeAmbient * ambientShare + 0.6 * skyCell.gba + volumeLightColor * (phase * visibility * volumeKeyScattering));
+    if (POST_LIGHTS) scattering += volumeColor * fogLightScattering(position, direction);
+    accumulated += transmittance * opacity * scattering;
+    transmittance *= 1.0 - opacity;
+    if (transmittance < 0.001) break;
+  }
+  for (int tap = 0; tap < 24; tap++) {
+    float index = float(tap) + 0.5;
+    float radius = 0.03 + 0.0002 * index * index;
+    vec2 offset = vec2(cos(index * 2.4) * resolution.y / resolution.x, sin(index * 2.4)) * radius;
+    accumulated += textureLod(frameTexture, textureCoordinate + offset, log2(0.7 * radius * resolution.y)).rgb * volumeColor * (0.009 * (1.0 - transmittance) / (1.0 + 0.04 * index));
+  }
+  float surfaceSun = 1.0;
+  if (volumeSurfaceTransmittance > 0.0 && surfacePoint.w > 0.0 && surfaceDistance <= boxExit) {
+    // A surface inside the box: its sun passes through the fog too. A lit surface takes mostly sun, so the whole colour dims by its share.
+    vec3 surfacePosition = origin + direction * surfaceDistance + towardSun * 0.05;
+    float surfaceVisibility = keyVisibility(surfacePosition);
+    if (surfaceVisibility > 0.001) surfaceSun = mix(1.0, exp(-sunOpticalDepth(surfacePosition, towardSun) * volumeSurfaceTransmittance), surfaceVisibility);
+  }
+  return accumulated + background * transmittance * surfaceSun;
+}
+`,
+});

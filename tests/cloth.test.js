@@ -174,7 +174,7 @@ test('cloth recipes need the cloth module and plain recipes do not', () => {
 
 test('set-cloth edits the section, null clears it and the recipe round trips', () => {
   const scene = createAgentScene(flagRecipe(null));
-  assert.throws(() => scene.sampleMotion(1), /no motion, physics, cloth or particles/);
+  assert.throws(() => scene.sampleMotion(1), /no motion, physics, cloth, particles/);
   scene.apply([{ type: 'set-cloth', cloth: hangingFlag }], { expectedRevision: scene.revision });
   scene.sampleMotion(1);
   const exported = scene.exportRecipe();
@@ -198,26 +198,26 @@ test('editing a scene while the cloth is posed returns the rest sheet and tells 
 
 test('hostile cloth sections are rejected before any solver runs', () => {
   const bad = (cloth, pattern, nodes) => assert.throws(() => createAgentScene(flagRecipe(cloth, nodes)), pattern);
-  bad({ duration: 2, sheets: [] }, /at least one sheet/);
-  bad({ duration: 0, sheets: [{ node: 'flag' }] }, /duration/);
-  bad({ duration: 11, sheets: [{ node: 'flag' }] }, /duration/);
-  bad({ duration: 2, sheets: [{ node: 'missing' }] }, /not found/);
-  bad({ duration: 2, sheets: [{ node: 'flag' }, { node: 'flag' }] }, /twice/);
-  bad({ duration: 2, sheets: [{ node: 'flag', stiffness: 2 }] }, /stiffness/);
-  bad({ duration: 2, sheets: [{ node: 'flag', density: 0 }] }, /density/);
-  bad({ duration: 2, sheets: [{ node: 'flag', pin: ['middle'] }] }, /pin/);
-  bad({ duration: 2, sheets: [{ node: 'flag', surprise: 1 }] }, /Unknown/);
-  bad({ duration: 2, surprise: 1, sheets: [{ node: 'flag' }] }, /Unknown/);
+  bad({ duration: 2, sheets: [] }, /cloth\.sheets: got \[\]; expected at least one sheet/);
+  bad({ duration: 0, sheets: [{ node: 'flag' }] }, /cloth\.duration: got 0; expected a number from 0\.1 to 10/);
+  bad({ duration: 11, sheets: [{ node: 'flag' }] }, /cloth\.duration: got 11; expected a number from 0\.1 to 10/);
+  bad({ duration: 2, sheets: [{ node: 'missing' }] }, /cloth\.sheets\[0\]\.node: got "missing"; expected the ID of a node in the recipe/);
+  bad({ duration: 2, sheets: [{ node: 'flag' }, { node: 'flag' }] }, /cloth\.sheets\[1\]\.node: got "flag"; expected a node that cloth uses once/);
+  bad({ duration: 2, sheets: [{ node: 'flag', stiffness: 2 }] }, /cloth\.sheets\[0\]\.stiffness: got 2; expected a number from 0\.01 to 1/);
+  bad({ duration: 2, sheets: [{ node: 'flag', density: 0 }] }, /cloth\.sheets\[0\]\.density: got 0; expected a number from 0\.01 to 10/);
+  bad({ duration: 2, sheets: [{ node: 'flag', pin: ['middle'] }] }, /cloth\.sheets\[0\]\.pin\[0\]: got "middle"; expected one of top, bottom/);
+  bad({ duration: 2, sheets: [{ node: 'flag', surprise: 1 }] }, /cloth\.sheets\[0\]\.surprise: got 1; expected no such field/);
+  bad({ duration: 2, surprise: 1, sheets: [{ node: 'flag' }] }, /cloth\.surprise: got 1; expected no such field/);
   bad({ duration: 2, wind: [0, 0, NaN], sheets: [{ node: 'flag' }] }, /finite/);
-  bad({ duration: 2, wind: [0, 0, 1e9], sheets: [{ node: 'flag' }] }, /wind/);
+  bad({ duration: 2, wind: [0, 0, 1e9], sheets: [{ node: 'flag' }] }, /cloth\.wind\[2\]: got 1000000000; expected a number from -100 to 100/);
   bad({ duration: 2, gravity: [0, -Infinity, 0], sheets: [{ node: 'flag' }] }, /finite/);
-  bad({ duration: 2, sheets: Array.from({ length: 9 }, () => ({ node: 'flag' })) }, /at most 8/);
-  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: Array.from({ length: 17 }, () => ({ node: 'flag' })) }, /at most 16/);
-  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'flag' }] }, /twice/);
-  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'stone', shape: 'cone' }] }, /shape/, [{ id: 'stone', geometry: 'ball', material: 'stone' }]);
-  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'child' }] }, /root node/, [{ id: 'child', parent: 'flag', geometry: 'ball', material: 'stone' }]);
-  bad('cloth', /plain object/);
-  bad({ duration: 2, sheets: 'flag' }, /array/);
+  bad({ duration: 2, sheets: Array.from({ length: 9 }, () => ({ node: 'flag' })) }, /cloth\.sheets: got "9 entries"; expected an array of at most 8 entries/);
+  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: Array.from({ length: 17 }, () => ({ node: 'flag' })) }, /cloth\.colliders: got "17 entries"; expected an array of at most 16 entries/);
+  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'flag' }] }, /cloth\.colliders\[0\]\.node: got "flag"; expected a node that cloth uses once/);
+  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'stone', shape: 'cone' }] }, /cloth\.colliders\[0\]\.shape: got "cone"; expected one of ball, box/, [{ id: 'stone', geometry: 'ball', material: 'stone' }]);
+  bad({ duration: 2, sheets: [{ node: 'flag' }], colliders: [{ node: 'child' }] }, /cloth\.colliders\[0\]\.node: got "child"; expected a root node with no parent/, [{ id: 'child', parent: 'flag', geometry: 'ball', material: 'stone' }]);
+  bad('cloth', /cloth: got "cloth"; expected a plain object/);
+  bad({ duration: 2, sheets: 'flag' }, /cloth\.sheets: got "flag"; expected an array/);
 });
 
 test('particle and frame limits reject oversized bakes with a clear error', () => {
@@ -230,8 +230,8 @@ test('particle and frame limits reject oversized bakes with a clear error', () =
 
 test('a cloth node cannot also carry motion or a physics body', () => {
   const withMotion = flagRecipe(hangingFlag);
-  withMotion.motion = { duration: 1, loop: false, tracks: [{ kind: 'node', id: 'flag', property: 'translation', interpolation: 'linear', keys: [{ time: 0, value: [0, 2, 0] }, { time: 1, value: [1, 2, 0] }] }] };
-  assert.throws(() => createAgentScene(withMotion), /motion/);
+  withMotion.motion = { duration: 1, loop: false, tracks: [{ kind: 'node', id: 'flag', property: 'translation', interpolation: 'LINEAR', keyframes: [{ time: 0, value: [0, 2, 0] }, { time: 1, value: [1, 2, 0] }] }] };
+  assert.throws(() => createAgentScene(withMotion), /cloth\.sheets\[0\]\.node: got "flag"; expected a node that stays where it is/);
 });
 
 test('welding joins vertices at one position so a seam cannot tear', () => {

@@ -111,6 +111,7 @@ async function createAdapter(engine, canvas, scene, characters) {
   if (engine === '67js-no-lod') return create67Adapter(canvas, scene, characters, { lods: false });
   if (engine === '67js-no-culling') return create67Adapter(canvas, scene, characters, { culling: false, lods: false });
   if (engine === '67js-ldr') return create67Adapter(canvas, scene, characters, { hdr: false });
+  if (engine === '67js-trusted') return create67Adapter(canvas, scene, characters, { checks: false });
   if (engine === '67js-light') return create67Adapter(canvas, scene, characters, { shading: 'light' });
   if (engine === '67js-one-sample') return create67Adapter(canvas, scene, characters, { samples: 1 });
   if (engine === '67js-ldr-one-sample') return create67Adapter(canvas, scene, characters, { hdr: false, samples: 1 });
@@ -146,6 +147,7 @@ async function runBenchmark(sceneId, engine, frames) {
   const fullFrameTimes = [];
   const queries = [];
   watcher.resetDrawCounters();
+  if (adapter.updatePartsTimes) adapter.updatePartsTimes.length = 0;
   for (let frame = 0; frame < frames; frame++) {
     time += FRAME_TIME_STEP;
     const beforeUpdate = performance.now();
@@ -178,6 +180,7 @@ async function runBenchmark(sceneId, engine, frames) {
     scene: sceneId, engine,
     firstFrameMilliseconds,
     updateMilliseconds: median(updateTimes),
+    updatePartsMilliseconds: adapter.updatePartsTimes?.length ? median(adapter.updatePartsTimes) : null,
     renderCpuMilliseconds: median(renderTimes),
     gpuMilliseconds: median(gpuTimes),
     fullFrameMilliseconds: median(fullFrameTimes),

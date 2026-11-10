@@ -4,17 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#09070f" />
-    <meta name="description" content="67js is a WebGL2 3D engine for agents and people: PBR, shadows, fog, animation, GLB, PNG and MP4 export, and an MCP server. Install with npm i @codepawlhq/67js." />
+    <meta name="description" content="67js is a 3D engine that AI agents drive: Glaze real-time rendering, Cook path tracing, GLB, PNG and MP4 export, and an MCP server. Install with npm i @codepawlhq/67js." />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="67js" />
-    <meta property="og:title" content="67js · a 3D engine agents can drive" />
-    <meta property="og:description" content="WebGL2 rendering, deterministic animation and an MCP server in one npm package." />
+    <meta property="og:title" content="67js · 3D engine that AI agents drive" />
+    <meta property="og:description" content="Real-time WebGL2, offline path tracing and an MCP server in one npm package." />
     <meta property="og:url" content="https://67js.codepawl.com/" />
     <meta property="og:image" content="https://67js.codepawl.com/previews/showcase-airport.webp" />
     <meta property="og:image:alt" content="An airport ramp rendered by 67js" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="canonical" href="https://67js.codepawl.com/" />
-    <title>67js · a 3D engine agents can drive</title>
+    <title>67js · 3D engine that AI agents drive</title>
     <link rel="icon" href="/favicon.svg" />
   </head>
   <body class="site">
@@ -33,11 +33,20 @@
           <a class="hero-shot" href="./showcase.html?scene=airport" aria-label="Open the airport ramp as a live 3D scene">
             <img src="./previews/showcase-airport.webp" alt="An airport ramp with a 787 at its stand and the turnaround crew, rendered by 67js" width="1280" height="720" fetchpriority="high" />
           </a>
-          <p class="hero-caption">Now showing: Airport ramp</p>
+          <canvas id="hero-viewport" class="hero-viewport" aria-label="Live 3D airport ramp. Drag to orbit, or pick a shot."></canvas>
+          <aside class="hero-prompt" aria-label="Agent prompt presets">
+            <div class="hero-prompt-tabs" role="group" aria-label="Agent prompt">
+              <button type="button" data-prompt-preset="model" aria-pressed="true">Stand</button>
+              <button type="button" data-prompt-preset="explode" aria-pressed="false">Ramp crew</button>
+              <button type="button" data-prompt-preset="blend" aria-pressed="false">Sunset tower</button>
+              <button type="button" data-prompt-preset="review" aria-pressed="false">Normals</button>
+            </div>
+            <p class="hero-prompt-text" data-agent-prompt>"Frame the widebody stand at golden hour with 3-cascade shadows across the Boeing 787-9, service trucks, and ground crew."</p>
+          </aside>
         </div>
         <div class="hero-copy">
-          <h1>A 3D engine<br />agents can drive</h1>
-          <p class="lede">WebGL2 rendering, deterministic animation and an MCP server in one package.</p>
+          <h1>3D engine that<br />AI agents drive</h1>
+          <p class="lede">Real-time WebGL2 with Glaze, offline path tracing with Cook, and 23 MCP tools in one package.</p>
           <div class="hero-actions">
             <a href="/docs.html#getting-started" data-icon="book">Get started</a>
             <a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm brand-npm" aria-hidden="true"></span>npm</a>
@@ -62,13 +71,13 @@
         <div class="code-copy">
           <h2 id="code-title">A scene in a few lines</h2>
           <div class="code-block">
-            <pre><code id="home-code" data-language="javascript">import { Renderer67 } from '67js';
+            <pre><code id="home-code" data-language="javascript">import { Glaze } from '67js';
 import { loadGltf } from '67js/addons/gltf';
 import { loadHdri } from '67js/addons/hdri';
 
 const { parts } = await loadGltf('/airport.glb');
 const map = await loadHdri('/sky.hdr');
-const renderer = new Renderer67(canvas, parts, {
+const renderer = new Glaze(canvas, parts, {
   hdr: true,
   ground: false,
   environment: { map },
@@ -84,7 +93,7 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
       <section id="examples" class="examples" aria-labelledby="examples-title">
         <div class="section-heading"><h2 id="examples-title">Showcase</h2><a href="./showcase.html">Open the live scenes</a></div>
         <ul class="capability-list" aria-label="Engine capabilities">
-          <li>PBR materials</li><li>Shadows</li><li>HDR and bloom</li><li>MSAA</li><li>Volumetric fog</li><li>Skinning and morphs</li><li>Physics</li><li>Spume liquid</li><li>Glass and leaf cutouts</li><li>HDRI lighting</li><li>Textured terrain</li><li>Trees and grass</li><li>Vehicles</li><li>Humanoid retargeting</li><li>GLB import and export</li><li>PNG and MP4 export</li>
+          <li>PBR materials</li><li>Shadows</li><li>HDR and bloom</li><li>MSAA</li><li>Mesh blend</li><li>Live cloth</li><li>Volumetric fog</li><li>Skinning and morphs</li><li>Physics</li><li>Spume liquid</li><li>Glass and leaf cutouts</li><li>HDRI lighting</li><li>Textured terrain</li><li>Trees and grass</li><li>Vehicles</li><li>GLB import and export</li><li>Cook path tracer</li>
         </ul>
         <div class="gallery">
           <a class="example is-lead" href="./showcase.html?scene=airport" data-glow="#ff6a2b"><span class="work-media"><img src="./previews/showcase-airport.webp" alt="Airport ramp, rendered by 67js" width="1280" height="720" loading="lazy" /></span><span class="work-title"><span class="work-index" aria-hidden="true">01</span><span class="work-name">Airport ramp</span><span class="work-date">A widebody at the stand with its service trucks</span></span></a>
@@ -96,16 +105,26 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
       <section id="agents" class="agents" aria-labelledby="agents-title">
         <div class="agents-intro">
           <h2 id="agents-title">Built for agents</h2>
-          <p>An agent gets a live scene to edit, render and review.</p>
+          <p>An agent gets a live scene to edit, glaze in real time or cook with path tracing, and review.</p>
           <div class="code-block">
             <pre><code id="home-mcp" data-language="shell">npx 67js-mcp --backend gpu --memory 192</code></pre>
             <button data-copy-code="home-mcp" aria-label="Copy the MCP server command">Copy</button>
           </div>
+          <div class="agent-size-bars" aria-label="Measured gzip bundle size on lit-box">
+            <div class="size-bar-row">
+              <div class="size-bar-label"><span><strong>67js</strong> (lit-box)</span><span>50.9 KB gzip · 2.6× smaller</span></div>
+              <div class="size-bar-track"><span class="size-bar-fill is-67js" style="width: 38%"></span></div>
+            </div>
+            <div class="size-bar-row">
+              <div class="size-bar-label"><span>three.js (lit-box)</span><span>133.8 KB gzip</span></div>
+              <div class="size-bar-track"><span class="size-bar-fill is-other" style="width: 100%"></span></div>
+            </div>
+          </div>
         </div>
         <div class="agent-cards">
-          <a href="/mcp.md" data-icon="cube"><h3>22 MCP tools</h3><p>Create, edit, undo and render over stdio.</p></a>
-          <a href="/agent-scene.md" data-icon="code"><h3>Scene recipes</h3><p>One JSON file describes a whole scene.</p></a>
-          <a href="/agent-review.md" data-icon="image"><h3>Visual review</h3><p>Compare labeled views from one snapshot.</p></a>
+          <a href="/mcp.md" data-icon="cube"><h3>23 MCP tools</h3><p>Create, edit, explode, blend and render over stdio.</p></a>
+          <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time WebGL2 frames or path-traced stills.</p></a>
+          <a href="/agent-review.md" data-icon="image"><h3>Visual review</h3><p>Compare labeled views and normals from one snapshot.</p></a>
         </div>
       </section>
 
@@ -123,7 +142,7 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
       <p><a class="brand" href="/" aria-label="67js home">67js</a> by <a href="https://codepawl.com">CodePawl</a></p>
       <nav class="footer-links" aria-label="Project links"><a href="https://github.com/codepawl/67.js"><span class="package-logo package-logo-github" aria-hidden="true"></span>GitHub</a><a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm" aria-hidden="true"></span>npm</a><a data-release-commit href="https://github.com/codepawl/67.js">Release commit</a><a href="/changelog.html">Changelog</a><a href="/license.txt">MIT license</a><a href="/logo.svg" download>Logo SVG</a></nav>
     </footer>
-<script type="module" src="/src/home.js"></script>
+    <script type="module" src="/src/home.js"></script>
     <script type="module" src="/src/home-effects.js"></script>
   </body>
 </html>

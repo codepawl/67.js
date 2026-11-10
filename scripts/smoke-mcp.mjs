@@ -53,7 +53,7 @@ try {
   await client.connect(transport);
   processId = transport.pid;
   const listing = await client.listTools();
-  assert.equal(listing.tools.length, 22);
+  assert.equal(listing.tools.length, 23);
   const capabilities = (await call('scene_capabilities')).structuredContent;
   assert.equal(capabilities.phase, 'idle');
   const fixture = createAgentPreviewFixture();
@@ -66,8 +66,9 @@ try {
     ...fixture.nodes.map(node => ({ type: 'add-node', node })),
   ] })).structuredContent;
   assert.equal(created.renderSucceeded, true);
-  assert.equal(created.inspection.counts.parts, 19);
-  assert.equal(created.inspection.counts.geometries, 7);
+  const createdCounts = (await call('scene_inspect', { sessionId })).structuredContent;
+  assert.equal(createdCounts.counts.parts, 19);
+  assert.equal(createdCounts.counts.geometries, 7);
   assert.equal(created.revision, 1);
   assert.match(created.render.graphics, backend === 'gpu' ? /NVIDIA/i : /SwiftShader/i);
   const meshes = (await call('mesh_inspect', { sessionId })).structuredContent;
@@ -90,8 +91,10 @@ try {
   assert.equal(edited.committed, true);
   assert.equal(edited.renderSucceeded, true);
   assert.equal(edited.render.depth, true);
-  assert.equal(edited.inspection.look.pointLights, 1);
-  assert.equal(edited.inspection.look.volumeFogDensity, 0.04);
+  assert.equal(edited.inspection, undefined);
+  const editedLook = (await call('scene_inspect', { sessionId })).structuredContent.look;
+  assert.equal(editedLook.pointLights, 1);
+  assert.equal(editedLook.volumeFogDensity, 0.04);
   const after = await look(sessionId, 'after');
   assert.notDeepEqual(after.bytes, before.bytes);
   const stale = await client.callTool({ name: 'scene_apply', arguments: {
@@ -113,21 +116,21 @@ try {
     { type: 'add-node', node: { id: 'ornament', geometry: 'ornament', material: 'ruby', translation: [-1.2, 0.8, 0], scale: [0.28, 0.28, 0.28] } },
   ] })).structuredContent;
   assert.equal(enlarged.renderSucceeded, true);
-  assert.equal(enlarged.inspection.counts.parts, 20);
-  assert.equal(enlarged.render.geometryBuffers, 8);
+  assert.equal((await call('scene_inspect', { sessionId })).structuredContent.counts.parts, 20);
+  assert.equal(enlarged.render.geometryBuffers, before.metadata.geometryBuffers + 1);
   const topology = await look(sessionId, 'topology');
   assert.notDeepEqual(topology.bytes, before.bytes);
   await call('scene_restore', { sessionId, checkpointId: checkpoint.checkpointId, expectedRevision: 4 });
   const topologyRestored = await look(sessionId, 'topology-restored');
   assert.deepEqual(topologyRestored.bytes, before.bytes);
-  assert.equal(topologyRestored.metadata.geometryBuffers, 7);
+  assert.equal(topologyRestored.metadata.geometryBuffers, before.metadata.geometryBuffers);
   const removed = (await call('scene_apply', { sessionId, expectedRevision: 5, operations: [
     { type: 'remove-node', id: 'lamp', recursive: true },
     ...fixture.geometries.map(geometry => ({ type: 'remove-geometry', id: geometry.id })),
     ...fixture.materials.map(material => ({ type: 'remove-material', id: material.id })),
   ] })).structuredContent;
   assert.equal(removed.renderSucceeded, true);
-  assert.equal(removed.inspection.counts.parts, 0);
+  assert.equal((await call('scene_inspect', { sessionId })).structuredContent.counts.parts, 0);
   assert.equal(removed.render.gpuBuffers, 0);
   await call('scene_restore', { sessionId, checkpointId: checkpoint.checkpointId, expectedRevision: 6 });
   assert.deepEqual((await look(sessionId, 'recreated')).bytes, before.bytes);
@@ -149,7 +152,7 @@ try {
   const replacement = (await call('scene_create', { recipe: createAgentPreviewFixture() })).structuredContent;
   assert.notEqual(replacement.sessionId, sessionId);
   await call('scene_dispose', { sessionId: replacement.sessionId });
-  report = { backend, era, tools: listing.tools.length, parts: created.inspection.counts.parts, geometryBytes: created.inspection.geometryBytes,
+  report = { backend, era, tools: listing.tools.length, parts: createdCounts.counts.parts, geometryBytes: createdCounts.geometryBytes,
     graphics: created.render.graphics, before: before.metadata, portrait: portrait.metadata, restorePngExact: true, staleRevisionRejected: true,
     builtFromEmpty: true, topologyRestoreExact: true, disposedGeometryBuffers: true };
 } finally {

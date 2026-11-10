@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mat4 } from 'gl-matrix';
 import { Bone, Skeleton, SkinnedMesh, BufferGeometry, Float32BufferAttribute, Uint16BufferAttribute, Matrix4, Matrix3, Vector3 } from 'three';
-import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences } from '../src/skinning.js';
+import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences, skinInfluenceSets, reflectedSkinReport, reflectedSkinDiagnostics } from '../src/skinning.js';
 
 function influences() {
   return { positions: new Float32Array([0.2, 1, 0]), skinIndices: new Uint16Array([0, 1, 0, 0]), skinWeights: new Float32Array([0.3, 0.7, 0, 0]) };
@@ -179,4 +179,70 @@ test('pose calculations use Float32 mesh and bind matrices before inversion and 
   assert.deepEqual(Array.from(pose.jointMatrices), Array.from(expected));
   updateSkinPose(pose, identity, identity, mesh);
   assert.deepEqual(Array.from(pose.jointMatrices), Array.from(expectedInverse));
+});
+
+test('validateSkinPose checks each distinct influence set once and still finds a singular one', () => {
+  const pose = createSkinPose(2);
+  // Joint 1 mirrors x. Each joint is healthy, but a 50/50 blend with the identity flattens x to zero.
+  pose.jointMatrices.set([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 16);
+  const repeatedHealthy = Array.from({ length: 50 }, () => [0, 0, 0, 0]).flat();
+  const geometry = {
+    skinIndices: new Uint16Array([...repeatedHealthy, 0, 1, 0, 0]),
+    skinWeights: new Float32Array([...Array.from({ length: 50 }, () => [1, 0, 0, 0]).flat(), 0.5, 0.5, 0, 0]),
+  };
+  assert.equal(skinInfluenceSets(geometry).joints.length / 4, 2);
+  assert.throws(() => validateSkinPose(pose, geometry), /singular weighted vertex transform/);
+});
+
+test('skinInfluenceSets rebuilds when the index array is replaced', () => {
+  const skinWeights = new Float32Array([1, 0, 0, 0, 0.5, 0.5, 0, 0]);
+  const first = skinInfluenceSets({ skinIndices: new Uint16Array([0, 0, 0, 0, 0, 1, 0, 0]), skinWeights });
+  const replaced = skinInfluenceSets({ skinIndices: new Uint16Array([1, 0, 0, 0, 1, 1, 0, 0]), skinWeights });
+  assert.notEqual(first, replaced);
+  assert.deepEqual([...replaced.joints.subarray(0, 4)], [1, 0, 0, 0]);
+});
+
+test('a mirrored weighted vertex draws pinched and is reported instead of failing the pose (issue #581)', () => {
+  const pose = createSkinPose(2);
+  // Joint 1 mirrors x. A 25/75 blend with the identity scales x by -0.5: a mirrored but healthy transform.
+  pose.jointMatrices.set([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 16);
+  const geometry = {
+    skinIndices: new Uint16Array([0, 0, 0, 0, 0, 1, 0, 0]),
+    skinWeights: new Float32Array([1, 0, 0, 0, 0.25, 0.75, 0, 0]),
+  };
+  const world = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  assert.doesNotThrow(() => validateSkinPose(pose, geometry, world));
+  assert.deepEqual(reflectedSkinReport(pose), { sets: 1, joints: [0, 1], weights: [0.25, 0.75] });
+  const [problem] = reflectedSkinDiagnostics(new Map([[{ name: "knight" }, { skin: pose }]]));
+  assert.equal(problem.kind, 'skin-reflected-vertices');
+  assert.match(problem.message, /1 vertex weight set\(s\) of knight mirror .*joint 0 at 0\.25, joint 1 at 0\.75/);
+  // Once the joint stops mirroring, the report clears.
+  pose.jointMatrices.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 16);
+  validateSkinPose(pose, geometry, world);
+  assert.equal(reflectedSkinReport(pose), null);
+  assert.deepEqual(reflectedSkinDiagnostics(new Map([[{ name: "knight" }, { skin: pose }]])), []);
+});
+
+test('a palette of many joints equals the four-matrix Float32 product with and without identity bind and mesh matrices (issue #572)', () => {
+  const jointCount = 5;
+  const jointWorld = new Float32Array(jointCount * 16);
+  const inverseBind = new Float32Array(jointCount * 16);
+  for (let joint = 0; joint < jointCount; joint++) {
+    const rotation = mat4.fromRotationTranslationScale(mat4.create(), [0.1 * joint, 0.3, 0.2, 1], [joint * 0.37, 1.1, -0.6 * joint], [1 + joint * 0.1, 1, 0.9]);
+    jointWorld.set(rotation, joint * 16);
+    inverseBind.set(mat4.invert(mat4.create(), rotation), joint * 16);
+  }
+  const transformedMesh = mat4.fromTranslation(mat4.create(), [0.4, -2.3, 1.7]);
+  const transformedBind = mat4.fromScaling(mat4.create(), [1.25, 0.8, 1.1]);
+  for (const [mesh, bind] of [[transformedMesh, transformedBind], [transformedMesh, mat4.create()], [mat4.create(), transformedBind], [mat4.create(), mat4.create()]]) {
+    const pose = createSkinPose(jointCount);
+    updateSkinPose(pose, jointWorld, inverseBind, mesh, bind, false);
+    const meshInverse = mat4.invert(mat4.create(), new Float32Array(mesh));
+    for (let joint = 0; joint < jointCount; joint++) {
+      const product = mat4.multiply(mat4.create(), jointWorld.subarray(joint * 16, joint * 16 + 16), inverseBind.subarray(joint * 16, joint * 16 + 16));
+      mat4.multiply(product, product, new Float32Array(bind));
+      mat4.multiply(product, meshInverse, product);
+      assert.deepEqual(Array.from(pose.jointMatrices.subarray(joint * 16, joint * 16 + 16)), Array.from(product));
+    }
+  }
 });

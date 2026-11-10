@@ -75,3 +75,49 @@ test('the cascade shader replaces the classic sun map and a plain shader has no 
   assert.doesNotMatch(plain, /cascadeVisibility|cascadeShadowMap/);
   assert.doesNotMatch(plain, /#define shadowVisibility/);
 });
+
+test('an update redraws only the slices whose matrix changed, and every slice when a caster changed', () => {
+  const context = new Proxy({}, { get: (target, name) => (name in target ? target[name] : () => ({})) });
+  const drawnLayers = [];
+  const renderer = { context, renderTargets: { record() {} }, drawShadowCasters: matrix => drawnLayers.push(matrix[0]) };
+  const cascades = createCascadedShadows({ count: 3, resolution: 256 });
+  const setMatrices = firstValues => {
+    firstValues.forEach((value, layer) => cascades.matrices.fill(value, layer * 16, layer * 16 + 16));
+    cascades.fitToCamera = () => cascades.matrices.some((value, index) => value !== cascades.drawnMatrices[index]);
+  };
+  setMatrices([1, 2, 3]);
+  cascades.update(renderer, false);
+  assert.deepEqual(drawnLayers.splice(0), [1, 2, 3]);
+  cascades.update(renderer, false);
+  assert.deepEqual(drawnLayers.splice(0), [], 'nothing moved');
+  setMatrices([1, 2, 4]);
+  cascades.update(renderer, false);
+  assert.deepEqual(drawnLayers.splice(0), [4], 'only the moved slice');
+  cascades.update(renderer, true);
+  assert.deepEqual(drawnLayers.splice(0), [1, 2, 4], 'a changed caster redraws every slice');
+});
+
+test('a far slice that drifts toward the light keeps its map, because the wide fit also reaches further on the light side', () => {
+  const cascades = createCascadedShadows({ count: 2, resolution: 2048 });
+  const sphereAlongLight = distance => ({ center: TOWARD_LIGHT.map(value => value * distance), radius: 80 });
+  cascades.chooseFit(1, sphereAlongLight(0), TOWARD_LIGHT);
+  const wide = cascades.chooseFit(1, sphereAlongLight(1), TOWARD_LIGHT);
+  assert.equal(cascades.chooseFit(1, sphereAlongLight(4), TOWARD_LIGHT), wide, 'a drift toward the light stays covered');
+});
+
+test('a moving camera keeps a far slice\'s map until the slice leaves it, and a stopped camera settles on the exact fit', () => {
+  const cascades = createCascadedShadows({ count: 2, resolution: 2048 });
+  const sphereAt = x => ({ center: [x, 0, -100], radius: 80 });
+  const exact = cascades.chooseFit(1, sphereAt(0), TOWARD_LIGHT);
+  assert.equal(exact.radius, 80, 'the first fit is exact');
+  const wide = cascades.chooseFit(1, sphereAt(2), TOWARD_LIGHT);
+  assert.ok(wide.radius > 80, 'the first move draws wider than needed');
+  const kept = cascades.chooseFit(1, sphereAt(6), TOWARD_LIGHT);
+  assert.equal(kept, wide, 'a small move stays inside the wide map');
+  const redrawn = cascades.chooseFit(1, sphereAt(60), TOWARD_LIGHT);
+  assert.notEqual(redrawn, wide, 'a large move leaves it');
+  const settled = cascades.chooseFit(1, sphereAt(60), TOWARD_LIGHT);
+  assert.equal(settled.radius, 80, 'a camera that stopped gets the exact fit');
+  assert.equal(cascades.chooseFit(0, sphereAt(0), TOWARD_LIGHT).radius, 80);
+  assert.equal(cascades.chooseFit(0, sphereAt(3), TOWARD_LIGHT).radius, 80, 'the nearest slice always fits exactly');
+});

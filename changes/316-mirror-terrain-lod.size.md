@@ -1,2 +1,0 @@
-- entry:terrain: the option builds the coarse mirror meshes with finest-grid chunk edges (about 100 lines of mesh code, which only the terrain module can hold). The lead approved this growth because it sits in lazy code and is opt-in.
-- scene:agent-scene+lazy: the lazy bundle of this scene contains the terrain module, so it carries the same 762 bytes of mesh code. The lead approved this growth for the same reason: lazy code, opt-in.

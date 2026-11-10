@@ -164,7 +164,7 @@ test('a target can follow a node of the character, and aim takes worldForward', 
 test('asset IK mistakes say what to pass', async () => {
   const asset = await loadRobot();
   const motion = ik => ({ duration: 1, tracks: [], ik });
-  assert.throws(() => assetScene(asset, motion([{ ...armSolver(asset), root: 'node-99999' }])), /root must be a node ID/);
+  assert.throws(() => assetScene(asset, motion([{ ...armSolver(asset), root: 'node-99999' }])), /root: got "node-99999"; expected a node ID in this recipe/);
   const feet = { type: 'two-bone', root: nodeId(asset, 'UpperLegL'), middle: nodeId(asset, 'LowerLegL'), end: nodeId(asset, 'FootL'), target: [0, 0, 0] };
   assert.throws(() => assetScene(asset, motion([feet])), /end must descend from middle/);
   assert.throws(() => assetScene(asset, motion([armSolver(asset)]), { root: { scale: [1, 2, 1] } }), /uniform asset root scale/);

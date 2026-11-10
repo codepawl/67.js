@@ -129,11 +129,12 @@ test('rigid animation seeks are absolute, order independent, clip selectable and
   assert.throws(() => asset.applyAnimation(1), /disposed/);
 });
 
-test('mirrored static transforms reverse triangle winding without altering world matrices', async () => {
+test('mirrored static transforms keep the authored winding and the world matrix; the renderer owns the reversal', async () => {
   const asset = await parseGltf(triangleAsset(document => { document.nodes[2].scale = [-1, 1, 1]; }));
   assert.deepEqual(Array.from(asset.parts[0].geometry.indices), [0, 1, 2]);
-  assert.deepEqual(Array.from(asset.parts[1].geometry.indices), [0, 2, 1]);
+  assert.deepEqual(Array.from(asset.parts[1].geometry.indices), [0, 1, 2]);
   assert.equal(asset.parts[1].matrix[0], -1);
+  assert.equal(asset.parts[0].geometry, asset.parts[1].geometry);
   asset.dispose();
 });
 
@@ -586,7 +587,7 @@ test('skin preflight guards joints, influence shapes, raw zero weights, indices 
   }), { maxJoints: 2 }), /skin pose joints/);
 });
 
-test('invalid skeletal animation fails before public matrices or palettes change', async () => {
+test('a skeletal animation that scales a joint to zero collapses it to a point and restores with the base pose', async () => {
   const asset = await parseGltf(skinnedStripAsset((document, append) => {
     const scales = append(new Float32Array([1, 1, 1, 0, 1, 1]), 'VEC3');
     document.animations[0].samplers[0].output = scales;
@@ -596,10 +597,10 @@ test('invalid skeletal animation fails before public matrices or palettes change
   const matrix = Array.from(part.matrix);
   const palette = Array.from(part.skin.jointMatrices);
   const world = Array.from(part.skin.jointWorldMatrices);
-  assert.throws(() => asset.applyAnimation(2), /singular/);
+  asset.applyAnimation(2);
+  assert.ok(Array.from(part.skin.jointMatrices).every(Number.isFinite));
   assert.deepEqual(Array.from(part.matrix), matrix);
-  assert.deepEqual(Array.from(part.skin.jointMatrices), palette);
-  assert.deepEqual(Array.from(part.skin.jointWorldMatrices), world);
+  assert.notDeepEqual(Array.from(part.skin.jointWorldMatrices), world);
   asset.applyAnimation(0);
   assert.deepEqual(Array.from(part.skin.jointMatrices), palette);
   asset.dispose();

@@ -7,6 +7,7 @@ public/release.json
 public/changelog.md
 public/changelog.json
 public/guide.md
+public/api-reference.json
 public/gltf.md
 public/gltf-morph.md
 public/morph-targets.md
@@ -66,3 +67,5 @@ packages/denoise-oidn/vendor/
 # Renders and previews that are not part of the package
 out/
 __pycache__/
+
+coverage/

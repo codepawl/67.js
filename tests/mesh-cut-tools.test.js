@@ -94,7 +94,7 @@ test('subdivide_edges grids quads whose edges are all split', () => {
 });
 
 test('subdivide_edges refuses to grow past the limits before allocating', () => {
-  assert.throws(() => applyMeshEdits(cube(), [{ op: 'subdivide_edges', edges: { all: true }, cuts: 16 }], { maxFaces: 100 }), /over the limit/);
+  assert.throws(() => applyMeshEdits(cube(), [{ op: 'subdivide_edges', edges: { all: true }, cuts: 16 }], { maxFaces: 100 }), /edits\[0\]\.cuts: got 16; expected a number of cuts that keeps the mesh within/);
 });
 
 test('grid_fill fills an even loop with quads', () => {

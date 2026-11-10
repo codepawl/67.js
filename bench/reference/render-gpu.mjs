@@ -1,6 +1,6 @@
 // Draws chosen reference scenes with 67js on the GPU only, into a directory of your choice, with measurement switches. No Blender, no scoring.
 //   node bench/reference/render-gpu.mjs <output directory> <scene id>,<scene id> [--ambient <scale>] [--fill <scale>] [--key <scale>]
-//     [--bloom <strength,threshold,radius>] [--ambient-occlusion <strength>] [--ambient-occlusion-radius <units>] [--reversed-depth] [--cpu]
+//     [--bloom <strength,threshold,radius>] [--ambient-occlusion <strength>] [--ambient-occlusion-radius <units>] [--reversed-depth] [--sun-bounce <strength>] [--sun-bounce-range <k>] [--sun-bounce-gain <g>] [--cpu]
 // Files are <output directory>/<scene id>-gpu.png, the names measure-depth.py and score.py read. Used to find what makes shadows light (issue #197).
 // --bloom <strength,threshold,radius> draws with that bloom; --bake-preset <draft|standard|fine> bakes as a recipe does (and prints the refusal, e.g. over 256 parts); a scene whose map has a bounce colour prints it.
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -38,6 +38,16 @@ function numberAfter(flag) {
   return index >= 0 ? Number(argumentsGiven[index + 1]) : null;
 }
 
+const sunBounce = numberAfter('--sun-bounce');
+const sunBounceRange = numberAfter('--sun-bounce-range');
+const sunBounceGain = numberAfter('--sun-bounce-gain');
+
+// --fog '<json>' merges those fields into the scene's volumeFog, for example --fog '{"noiseAmount":1,"warp":0.8}'.
+function fogOption() {
+  const index = argumentsGiven.indexOf('--fog');
+  return index >= 0 ? JSON.parse(argumentsGiven[index + 1]) : null;
+}
+
 const options = {
   ambient: numberAfter('--ambient'),
   fill: numberAfter('--fill'),
@@ -45,6 +55,7 @@ const options = {
   ambientOcclusion: numberAfter('--ambient-occlusion') ?? 0,
   ambientOcclusionRadius: numberAfter('--ambient-occlusion-radius') ?? 0.5,
   bloom: bloomOption(),
+  volumeFog: fogOption(),
   bake: bakePresetOption(),
 };
 
@@ -58,14 +69,15 @@ try {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } });
   page.on('pageerror', error => console.log('PAGE ERROR', error.message));
   for (const id of sceneIds) {
-    await page.goto(`${serverUrl}/bench/reference/harness.html?${[setOf(id) ? `set=${setOf(id)}` : '', waterOption ? `water=${waterOption}` : '', reversedDepth ? 'reversedDepth=on' : ''].filter(Boolean).join('&')}`, { timeout: 180000 });
+    await page.goto(`${serverUrl}/bench/reference/harness.html?${[setOf(id) ? `set=${setOf(id)}` : '', waterOption ? `water=${waterOption}` : '', reversedDepth ? 'reversedDepth=on' : '', sunBounce === null ? '' : `sunBounce=${sunBounce}`, sunBounceRange === null ? '' : `sunBounceRange=${sunBounceRange}`, sunBounceGain === null ? '' : `sunBounceGain=${sunBounceGain}`].filter(Boolean).join('&')}`, { timeout: 180000 });
     await page.waitForFunction(() => window.renderReferenceScene, null, { timeout: 180000 });
     const result = await page.evaluate(([sceneId, renderOptions]) => window.renderReferenceScene(sceneId, { describe: false, ...renderOptions }), [id, options]);
     if (result.glError !== 0) throw new Error(`${id} gave WebGL error ${result.glError}.`);
     await writeFile(`${outputDirectory}/${id}-gpu.png`, Buffer.from(result.image, 'base64'));
     if (result.bounce) console.log('bounce', JSON.stringify(result.bounce));
     if (result.bake) console.log(JSON.stringify(result.bake).slice(0, 600));
-    console.log(`${id} drawn`);
+    if (process.env.SHOW_SUN_BOUNCE_LIGHTS) console.log(JSON.stringify(await page.evaluate(() => window.sunBounceLights)));
+    console.log(`${id} drawn, sun bounce search ${((await page.evaluate(() => window.sunBounceSeconds)) ?? 0).toFixed(3)} s`);
   }
 } finally {
   await browser.close();

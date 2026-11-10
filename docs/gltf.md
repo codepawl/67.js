@@ -61,7 +61,7 @@ The result contains `parts`, `warnings`, `animations`, `applyAnimation`, `dispos
 Each part contains `name`, `geometry`, `matrix`, and `material`.
 The column-major matrix contains the complete world transform, including parent transforms.
 Repeated primitives share geometry objects.
-Static mirrored instances reverse triangle winding while preserving their world matrices.
+Static mirrored instances keep their authored winding and world matrices; the renderer batches parts with a negative-determinant matrix apart and draws them with clockwise front faces.
 
 Geometry contains `positions` and `normals` as `Float32Array` values, plus `indices` as a `Uint32Array`.
 The importer computes missing normals and normalizes supplied normals.
@@ -114,7 +114,7 @@ The importer rejects animation poses that become singular or change triangle win
 
 The current source supports four-influence [GPU skinning](https://67js.codepawl.com/skinning.md). GPU skinning is available from version `0.4.0`.
 The current source also supports relative POSITION/NORMAL morph targets and weight animations. See [morph import](https://67js.codepawl.com/gltf-morph.md).
-Morph primitives require authored base normals. TANGENT targets and per-target flat normal generation remain unsupported.
+A morph primitive without an authored base NORMAL loads with normals generated from its triangles; its morph NORMAL deltas are dropped, with a warning. TANGENT targets remain unsupported.
 
 The caller owns the Renderer67 instance.
 `asset.dispose()` releases importer textures, image bitmaps, parser resources, and temporary object URLs.
@@ -130,11 +130,14 @@ Disposal is idempotent, and subsequent animation calls fail explicitly.
 The bridge supports triangle meshes, PNG/JPEG base color textures, rigid animations, and metallic-roughness material factors.
 It also supports `KHR_mesh_quantization` and `KHR_materials_emissive_strength`.
 
+Quantized positions load exactly as stored, so their precision is set when the file is packed. `gltfpack` merges a scene's meshes and puts the positions of all of them on one grid sized to the whole scene: with the default 14 bits, a 170 m street (the ORCA Bistro) gets a 9.7 cm step, and a scooter's wheels come out square. gltfpack warns about it ("position data has significant error"). Pack a large scene with `-vp 16` (about 1 cm there) or `-vpf` (float positions); both still compress with `-cc`.
+
 Alpha masking, alpha blending and double-sided materials import onto `alphaMode`, `alphaCutoff`, `opacity` and `doubleSided` (see the material maps guide). Vertex alpha is not drawn: an RGBA `COLOR_0` loads with its RGB, and `warnings` names the meshes whose alpha was below one and was dropped.
 It supports base-color, normal, metallic-roughness, occlusion and emissive texture channels.
 An optional extension that 67js does not read is ignored and named in `warnings`, as the glTF specification allows. An extension listed in `extensionsRequired` that 67js does not read still fails the load with `Unsupported glTF extension`.
 `KHR_materials_pbrSpecularGlossiness` (also when listed in `extensionsRequired`) is converted to metallic-roughness: the diffuse color and texture become the base color, metallic is 0, roughness is 1 minus `glossinessFactor`. The specular color and `specularGlossinessTexture` are not read, and `warnings` says so. A texture on a primitive without `TEXCOORD_0` is dropped from that primitive with a warning instead of failing the load.
 A triangle primitive that cannot be drawn is skipped with one warning that names its mesh, its index and the reason, and the rest of the file loads: a missing or short POSITION accessor (fewer than 3 vertices), an index accessor with fewer than 3 indices or a count that is not a multiple of 3, an index outside the POSITION range, or only zero-area triangles. A file with no primitive left, no skin and no animation throws, and the error repeats those warnings.
+Repairs keep the file loading and add one warning each: authored vertex normals of zero length are rebuilt from the triangles ("Repaired primitive ..."), and a mesh on a node whose world transform is singular or non-finite (a zero scale, for example) is skipped ("Skipped node ..."). A pose that later makes a node singular still throws.
 A file with a skin or animation but no mesh (a skeleton-only clip such as the 100STYLE skeletons) loads with `parts: []`. `nodes` marks the skin's joints with `joint: true` and `animations` holds the clips, so `clipFromGltfAnimation`, `createAssetPose` and `pose.jointWorld` work on it. `skins` is empty because no mesh uses one.
 POINTS, LINES, LINE_LOOP and LINE_STRIP primitives are skipped with a warning that names the mesh and their count. Drawing them is not supported. TRIANGLE_STRIP and TRIANGLE_FAN primitives are still refused.
 

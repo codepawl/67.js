@@ -1,7 +1,11 @@
+import { invalidField } from './field-error.js';
 import { planLightmaps, estimateBake, traceLightmaps } from './light-bake.js';
 import { runKernel } from './kernel-offload.js';
+import { motionEnvironment } from './agent-motion.js';
 import { normalizeProbeList, traceProbes } from './probe-trace.js';
 import { placeProbes } from './reflection-probes.js';
+import { normalizeIrradianceGrid, placeIrradianceGrid, traceIrradianceGrid, withMeanRadiance } from './irradiance-grid.js';
+import { meanSkyRadiance } from './grid-medium.js';
 import { knownKeys, finiteNumber } from './agent-recipe-checks.js';
 import { BAKE_PRESETS, BAKE_RANGES, BAKE_MAXIMUM_SECONDS, BAKE_WORKER_MAXIMUM_SECONDS, BAKE_PRESET_PATH_WORK, BAKE_EXPLICIT_PATH_WORK_LIMIT } from './agent-scene-capabilities.js';
 
@@ -10,7 +14,7 @@ const PRESET_SAMPLES_FLOOR = 16;
 // Recipe `bake`: bounced light written into lightmaps when the scene builds. This module loads on demand, so scenes
 // without a bake never download the ray tracer.
 
-const BAKE_FIELDS = ['preset', 'samples', 'bounces', 'texelsPerUnit', 'probes'];
+const BAKE_FIELDS = ['preset', 'samples', 'bounces', 'texelsPerUnit', 'probes', 'irradianceGrid', 'gridFog', 'rebake'];
 const BAKED_MATERIAL_FIELDS = ['emission', 'emissiveColor', 'emissiveMap', 'lightMap', 'lightMapScale', 'occlusionMap', 'occlusionStrength'];
 
 /** Validates a recipe bake section and returns the plain, resolved form stored in the recipe (null clears it). */
@@ -20,14 +24,14 @@ export function normalizeAgentBake(input) {
   }
   knownKeys(input, BAKE_FIELDS, 'bake');
   if (input.preset !== undefined && !Object.hasOwn(BAKE_PRESETS, input.preset)) {
-    throw new RangeError(`Bake preset must be one of ${Object.keys(BAKE_PRESETS).join(', ')}.`);
+    throw invalidField('bake.preset', input.preset, `one of ${Object.keys(BAKE_PRESETS).join(', ')}`);
   }
   const resolved = { ...BAKE_PRESETS[input.preset ?? 'standard'] };
   for (const [field, [minimum, maximum]] of Object.entries(BAKE_RANGES)) {
     if (input[field] === undefined) {
       continue;
     }
-    resolved[field] = finiteNumber(input[field], `Bake ${field}`, minimum, maximum);
+    resolved[field] = finiteNumber(input[field], `bake.${field}`, minimum, maximum);
   }
   // Absent means 'room', one probe in the middle of an enclosed room (an open scene gets none). false opts out; a list places them.
   // Measured against Cycles, a probe lowered the FLIP score of every baked room, so a bake brings one along.
@@ -36,12 +40,106 @@ export function normalizeAgentBake(input) {
   } else {
     resolved.probes = input.probes === false || input.probes === 'room' ? input.probes : normalizeProbeList(input.probes);
   }
+  // Opt in: a grid of diffuse light for every part, traced instead of lightmaps (src/irradiance-grid.js). Not stored when off, so a recipe without it keeps its bytes.
+  const irradianceGrid = normalizeIrradianceGrid(input.irradianceGrid);
+  if (irradianceGrid) {
+    resolved.irradianceGrid = irradianceGrid;
+  }
+  // Opt in on top of the grid: the grid's paths scatter in the scene's volume fog. Not stored when off, so the default bake keeps its bytes.
+  if (input.gridFog !== undefined && typeof input.gridFog !== 'boolean') {
+    throw invalidField('bake.gridFog', input.gridFog, 'true or false');
+  }
+  if (input.gridFog === true) {
+    if (!irradianceGrid) {
+      throw invalidField('bake.gridFog', input.gridFog, 'true only together with bake.irradianceGrid, such as irradianceGrid: true');
+    }
+    resolved.gridFog = true;
+  }
+  // Not stored when off, so the default bake keeps its bytes.
+  if (input.rebake !== undefined && typeof input.rebake !== 'boolean') {
+    throw invalidField('bake.rebake', input.rebake, 'true or false');
+  }
+  if (input.rebake === true) {
+    resolved.rebake = true;
+  }
   for (const field of ['samples', 'bounces']) {
     if (!Number.isInteger(resolved[field])) {
-      throw new RangeError(`Bake ${field} must be an integer.`);
+      throw invalidField(`bake.${field}`, resolved[field], 'a whole number, such as 64');
     }
   }
   return resolved;
+}
+
+/**
+ * The text a bake is cached by: the bake settings (not `rebake`), the lights, materials and the world matrix of every
+ * part. The scene stores it when it bakes; a frame whose key differs is lit by a bake that no longer matches.
+ */
+export function lightBakeKey(recipe, generatedGeometryGenerators, environment, worldMatrices) {
+  const { pointLights, spotLights, areaLights, keyColor, keyIntensity, lightDirection, keyAffects } = environment;
+  return JSON.stringify([{ ...recipe.bake, rebake: undefined }, [...generatedGeometryGenerators], pointLights, spotLights, areaLights, keyColor, keyIntensity, lightDirection, keyAffects, recipe.materials,
+    [...worldMatrices].map(([name, matrix]) => [name, Array.from(matrix)])]);
+}
+
+/** The nodes whose geometry is built every frame, which no lightmap fits, with what builds each. */
+export function bakeGenerators(recipe) {
+  const generators = new Map();
+  for (const system of recipe.particles?.systems ?? []) {
+    generators.set(system.node, 'a hair or particle system');
+  }
+  for (const sheet of recipe.cloth?.sheets ?? []) {
+    generators.set(sheet.node, 'a cloth simulation');
+  }
+  return generators;
+}
+
+// The bake inputs at a sampled pose: the lights, sun and part matrices as motion has set them, and the key they give.
+function sampledBakeInputs(recipe, sourceRestParts, generators, pose) {
+  const environment = pose.movedLook ? motionEnvironment(structuredClone(recipe.environment), pose.movedLook) : recipe.environment;
+  const worldMatrices = new Map(sourceRestParts.map(part => [part.name, new Float32Array(pose.graph.getNode(part.name).worldMatrix)]));
+  return { environment, worldMatrices, key: lightBakeKey(recipe, generators, environment, worldMatrices) };
+}
+
+/** The scene_inspect diagnostics for a bake whose inputs, at the sampled pose, differ from the ones it was traced at. */
+export function staleBakeProblems(state, bakedKey) {
+  if (state.recipe.bake.rebake) {
+    return [];
+  }
+  const pose = { graph: state.poseGraph ?? state.graph, movedLook: state.movedLook };
+  return sampledBakeInputs(state.recipe, state.sourceRestParts, bakeGenerators(state.recipe), pose).key === bakedKey ? [] : [staleBakeDiagnostic()];
+}
+
+const REBAKE_CACHE_SIZE = 4;
+
+/**
+ * bake.rebake: the bake for the pose a frame is sampled at. Returns null while the bake in use already matches that pose;
+ * otherwise the bake traced at the sampled lights, sun and part matrices, from the cache (the last 4 poses, least recently
+ * used leaves first) or freshly traced. `lightBake.currentKey` is the pose the scene is drawn with.
+ */
+export function bakeAtSampledPose(lightBake, recipe, pose) {
+  const generators = bakeGenerators(recipe);
+  const { key, environment, worldMatrices } = sampledBakeInputs(recipe, lightBake.sourceRestParts, generators, pose);
+  if (key === lightBake.currentKey) {
+    return null;
+  }
+  const cache = lightBake.cache ??= new Map([[lightBake.key, lightBake]]);
+  let entry = cache.get(key);
+  const reused = Boolean(entry);
+  cache.delete(key);
+  entry ??= bakeAgentParts(lightBake.sourceRestParts, worldMatrices, environment, recipe.bake, generators);
+  cache.set(key, entry);
+  if (cache.size > REBAKE_CACHE_SIZE) {
+    cache.delete(cache.keys().next().value);
+  }
+  lightBake.currentKey = key;
+  return { parts: entry.parts, report: { ...entry.report, reused } };
+}
+
+function staleBakeDiagnostic() {
+  return {
+    kind: 'bake-stale', severity: 'warning', target: 'bake',
+    message: 'A light, the sun or a part has moved from the pose the bake was traced at, so the baked light no longer matches the frame.',
+    fix: 'Bounced light does not follow motion. Bake a pose that stays put, or set bake.rebake true (scene_apply set-bake) to bake each sampled pose. Material animation is not checked.',
+  };
 }
 
 function isPreset(settings) {
@@ -179,13 +277,18 @@ export function bakeChangedParts(snapshots, lighting, settings) {
   const plan = planLightmaps(snapshots, lighting, { ...settings, maxSeconds: bakeSecondsLimit() });
   const { used, reduced, reduction } = fitSettingsToBudget(plan, settings);
   const { parts, report } = traceWithAdvice(plan, used);
+  return { changed: changedPartsOf(parts, snapshots), report, used, reduced, reduction };
+}
+
+/** The [index, part] pairs of the parts a bake replaced; a part left alone is the caller's own object. */
+export function changedPartsOf(bakedParts, snapshots) {
   const changed = [];
-  parts.forEach((part, index) => {
+  bakedParts.forEach((part, index) => {
     if (part !== snapshots[index]) {
       changed.push([index, part]);
     }
   });
-  return { changed, report, used, reduced, reduction };
+  return changed;
 }
 
 /**
@@ -204,6 +307,10 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
     skyBottom: environment.skyBottom,
     lightDirection: environment.lightDirection,
   };
+  if (settings.gridFog) {
+    lighting.volumeFog = environment.volumeFog;
+    lighting.skyMean = meanSkyRadiance(environment.map);
+  }
   // A hair, particle or cloth node is drawn from geometry built every frame, which has no lightmap UVs.
   const snapshots = parts.map(part => ({
     ...part,
@@ -211,6 +318,9 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
     material: { ...part.material },
     generatesGeometry: generatedGeometryGenerators.get(part.name) ?? false,
   }));
+  if (settings.irradianceGrid) {
+    return bakeIrradianceGridParts(parts, snapshots, lighting, settings);
+  }
   const { changed, report, used, reduced, reduction } = runKernel('lightBake', [snapshots, lighting, settings], bakeChangedParts);
   // Probes see the unbaked parts, as the bake does, and are traced as a kernel of their own so a worker can take them too.
   const probeTrace = !settings.probes ? null
@@ -229,5 +339,35 @@ export function bakeAgentParts(parts, worldMatrices, environment, settings, gene
   // Probes are placed here, on the page, because they build maps and materials; their trace ran above.
   const placed = probeTrace ? placeProbes(bakedParts, probeTrace) : null;
   return { parts: Object.freeze(placed ? placed.parts : bakedParts), report: { ...settings, ...(placed ? { probes: placed.report } : {}), used, reduced, reduction, texels: report.texels, rayWork: report.rayWork, seconds: report.seconds,
-    bakedParts: report.parts.length, skipped: report.skipped } };
+    backend: report.backend, ...(report.gpu ? { gpu: report.gpu, gpuCompileSeconds: report.gpuCompileSeconds } : {}), bakedParts: report.parts.length, skipped: report.skipped } };
+}
+
+// The grid is a few thousand nodes of six gathers each, so its samples are a quarter of the lightmap preset's: about 32 at standard.
+const GRID_SAMPLES_SHARE = 4;
+const GRID_MINIMUM_SAMPLES = 8;
+
+/**
+ * The irradiance grid trace as a worker kernel. The time limit is read here and not passed in, so a worker traces under its
+ * own 90 s and the page's 20 s never reaches it (and never changes the kernel's cache key).
+ */
+export function traceGridKernel(snapshots, lighting, options) {
+  return traceIrradianceGrid(snapshots, lighting, { ...options, maxSeconds: bakeSecondsLimit() });
+}
+
+// bake.irradianceGrid: no lightmaps. Every part reads one baked grid of bounced light (the sun's lit patches included), and the
+// probes still run. Inside a worker session the trace runs on the worker (90 s); otherwise on the page's thread (20 s).
+function bakeIrradianceGridParts(parts, snapshots, lighting, settings) {
+  const gridOptions = {
+    resolution: settings.irradianceGrid,
+    samples: Math.max(GRID_MINIMUM_SAMPLES, Math.round(settings.samples / GRID_SAMPLES_SHARE)),
+    bounces: settings.bounces,
+  };
+  const grid = withMeanRadiance(runKernel('gridTrace', [snapshots, lighting, gridOptions], traceGridKernel));
+  const probeTrace = !settings.probes ? null
+    : runKernel('probeTrace', [snapshots, lighting, settings.probes, { environment: lighting, maxSeconds: bakeSecondsLimit() }], traceProbes);
+  const gridParts = placeIrradianceGrid(parts, grid);
+  const placed = probeTrace ? placeProbes(gridParts, probeTrace) : null;
+  const { data, ...gridReport } = grid;
+  return { parts: Object.freeze(placed ? placed.parts : gridParts), report: { ...settings, ...(placed ? { probes: placed.report } : {}), used: settings, reduced: false, reduction: null, texels: 0, rayWork: 0,
+    seconds: grid.seconds, bakedParts: 0, skipped: [], irradianceGrid: gridReport } };
 }

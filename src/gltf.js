@@ -1,3 +1,4 @@
+import { mat4 } from 'gl-matrix';
 import { applyClip } from './gltf-animation.js';
 import { GLTF_LAYER_EXTENSIONS, layerTextureReferences, materialLayersFromGltf } from './gltf-layers.js';
 import { attributeFloats } from './gltf-accessors.js';
@@ -7,7 +8,7 @@ import { decodeGltf, isLinePrimitive, overLimit, textureSourceIndex, throwOverru
 import { readPunctualLights } from './gltf-lights.js';
 import { Matrix4 } from './gltf-nodes.js';
 import { textureDescriptorInfo } from './renderer.js';
-import { createSkinPose, updateSkinPose, validateSkinGeometry, validateSkinPose } from './skinning.js';
+import { createSkinPose, matrixDeterminant, updateSkinPose, validateSkinGeometry, validateSkinPose } from './skinning.js';
 import { MAX_MORPH_TARGETS, createMorphPose, validateMorphGeometry, validateMorphPose, validateMorphTransform } from './morph.js';
 
 // The defaults fit one large exported scene (a 240 MB GLB of 8 million vertices with 8K textures) and still bound a hostile file.
@@ -30,7 +31,7 @@ export const GLTF_CAPABILITIES = Object.freeze({
   ignoredExtensions: ['KHR_materials_variants', 'KHR_materials_dispersion', 'KHR_materials_diffuse_roughness', 'EXT_materials_bump', 'EXT_texture_avif'],
   optionalExtensions: 'Any other optional extension is ignored and named in warnings. One listed in extensionsRequired that 67js does not read is refused.',
   skippedPrimitives: ['POINTS', 'LINES', 'LINE_LOOP', 'LINE_STRIP'],
-  unsupported: ['more than four skin influences', 'singular weighted skin transforms', 'reflected skin transforms', 'TANGENT morph targets', 'morph targets without authored base normals', 'drawing vertex alpha (it is ignored with a warning)','different texture transforms on one material, except a normal map that differs by scale and offset', 'skinned or morphed GPU instancing', 'transmission, iridescence and specular textures (their factors are used)', 'texture transforms on TEXCOORD_1'],
+  unsupported: ['more than four skin influences', 'singular weighted skin transforms', 'reflected skin transforms', 'TANGENT morph targets', 'drawing vertex alpha (it is ignored with a warning)','different texture transforms on one material, except a normal map that differs by scale and offset', 'skinned or morphed GPU instancing', 'transmission, iridescence and specular textures (their factors are used)', 'texture transforms on TEXCOORD_1'],
 });
 
 const LAYER_SHADER_EXTENSIONS = Object.freeze(['KHR_materials_anisotropy', 'KHR_materials_iridescence']);
@@ -354,14 +355,14 @@ function validateDocument(document, limits, allowedExtensions) {
       }
       if (primitive.targets !== undefined && (!Array.isArray(primitive.targets) || !primitive.targets.length || primitive.targets.length !== targetCount)) throw new Error('Morph target counts must match across all mesh primitives.');
       if ((primitive.targets?.length ?? 0) !== targetCount) throw new Error('Morph target counts must match across all mesh primitives.');
-      if (targetCount && primitive.attributes?.NORMAL === undefined) throw new Error('Morph targets require authored base NORMAL. Per-target flat normal generation is unsupported.');
       for (const target of primitive.targets ?? []) {
         if (!target || typeof target !== 'object' || Array.isArray(target) || !Object.keys(target).length) throw new Error('Morph targets require POSITION or NORMAL channels.');
         for (const [semantic, accessorIndex] of Object.entries(target)) {
           if (!['POSITION', 'NORMAL'].includes(semantic)) throw new Error(`Unsupported morph target semantic: ${semantic}.`);
           const accessor = document.accessors?.[accessorIndex];
-          if (primitive.attributes?.[semantic] === undefined) throw new Error('Morph target channels require corresponding base attributes.');
-          if (!Number.isInteger(accessorIndex) || !accessor || accessor.type !== 'VEC3' || accessor.componentType !== 5126 || accessor.normalized || accessor.count !== position.count) throw new Error('Morph target channels require matching float VEC3 accessors.');
+          // A morph NORMAL without a base NORMAL is dropped at conversion with a warning, so it needs no base attribute here.
+          if (primitive.attributes?.[semantic] === undefined && semantic !== 'NORMAL') throw new Error('Morph target channels require corresponding base attributes.');
+          if (!Number.isInteger(accessorIndex) || !accessor || accessor.type !== 'VEC3' || ![5120, 5122, 5126].includes(accessor.componentType) || (accessor.normalized && accessor.componentType === 5126) || accessor.count !== position.count) throw new Error('Morph target channels require matching VEC3 (float, or int8 or int16 with KHR_mesh_quantization) accessors.');
           if (semantic === 'POSITION' && (!Array.isArray(accessor.min) || !Array.isArray(accessor.max) || accessor.min.length !== 3 || accessor.max.length !== 3
               || accessor.min.some((value, axis) => typeof value !== 'number' || !Number.isFinite(Math.fround(value)) || typeof accessor.max[axis] !== 'number' || !Number.isFinite(Math.fround(accessor.max[axis])) || value > accessor.max[axis]))) throw new Error('Morph POSITION requires finite ordered min/max bounds.');
         }
@@ -802,6 +803,38 @@ function copyAttribute(attribute, size) {
   return values;
 }
 
+/** Like copyAttribute, but a NaN or Infinity becomes 0 and is reported through `onNonFinite(count)` instead of refusing the file. */
+function copyAttributeZeroingNonFinite(attribute, size, onNonFinite) {
+  if (attribute.itemSize !== size) throw new Error(`Expected a ${size}-component mesh attribute.`);
+  const values = attributeFloats(attribute);
+  let nonFiniteCount = 0;
+  for (let index = 0; index < values.length; index++) {
+    if (Number.isFinite(values[index])) continue;
+    values[index] = 0;
+    nonFiniteCount++;
+  }
+  if (nonFiniteCount) onNonFinite(nonFiniteCount);
+  return values;
+}
+
+/**
+ * Per-target normal deltas for a primitive that has no authored base NORMAL: the normals of the morphed triangles minus
+ * the base normals, so lighting follows the morph. A vertex whose morphed normal has no direction keeps the base normal.
+ */
+function computeMorphNormalDeltas(positions, indices, baseNormals, positionDeltas) {
+  const morphedPositions = new Float32Array(positions.length);
+  for (let index = 0; index < positions.length; index++) morphedPositions[index] = positions[index] + positionDeltas[index];
+  const deltas = computeVertexNormals(morphedPositions, indices);
+  for (let offset = 0; offset < deltas.length; offset += 3) {
+    const length = Math.hypot(deltas[offset], deltas[offset + 1], deltas[offset + 2]);
+    for (let axis = 0; axis < 3; axis++) {
+      const morphedNormal = length > 1e-8 ? deltas[offset + axis] / length : baseNormals[offset + axis];
+      deltas[offset + axis] = morphedNormal - baseNormals[offset + axis];
+    }
+  }
+  return deltas;
+}
+
 /** The corner offsets of a triangle and its area-weighted normal (the cross product of two edges). */
 function triangleAt(positions, indices, corner) {
   const [first, second, third] = [indices[corner] * 3, indices[corner + 1] * 3, indices[corner + 2] * 3];
@@ -813,10 +846,20 @@ function triangleAt(positions, indices, corner) {
 
 function computeVertexNormals(positions, indices) {
   const normals = new Float32Array(positions.length);
+  const firstFace = new Float32Array(positions.length);
   for (let corner = 0; corner < indices.length; corner += 3) {
     const { corners, cross } = triangleAt(positions, indices, corner);
+    const area = Math.hypot(...cross);
     for (const vertexOffset of corners) {
       for (let axis = 0; axis < 3; axis++) normals[vertexOffset + axis] += cross[axis];
+      if (area > 1e-8 && !firstFace[vertexOffset] && !firstFace[vertexOffset + 1] && !firstFace[vertexOffset + 2]) {
+        for (let axis = 0; axis < 3; axis++) firstFace[vertexOffset + axis] = cross[axis] / area;
+      }
+    }
+  }
+  for (let offset = 0; offset < normals.length; offset += 3) {
+    if (Math.hypot(...normals.subarray(offset, offset + 3)) < 1e-8 && (firstFace[offset] || firstFace[offset + 1] || firstFace[offset + 2])) {
+      for (let axis = 0; axis < 3; axis++) normals[offset + axis] = firstFace[offset + axis];
     }
   }
   return normals;
@@ -832,9 +875,10 @@ function hasTriangleWithArea(positions, indices) {
   return false;
 }
 
-function convertGeometry(source, mirrored, primitive, secondUvSet, onIgnoredVertexAlpha) {
+function convertGeometry(source, primitive, secondUvSet, onIgnoredVertexAlpha, onRepair) {
   const { position, normal, uv, uv1, color, skinIndex, skinWeight } = source.attributes;
-  const positions = copyAttribute(position, 3);
+  const zeroedBy = label => count => onRepair(`${count} non-finite ${label} value(s) were set to 0`);
+  const positions = copyAttributeZeroingNonFinite(position, 3, zeroedBy('POSITION'));
   const indices = new Uint32Array(source.index?.count ?? position.count);
   for (let index = 0; index < indices.length; index++) {
     const value = source.index ? source.index.array[index] : index;
@@ -845,6 +889,7 @@ function convertGeometry(source, mirrored, primitive, secondUvSet, onIgnoredVert
   if (!hasTriangleWithArea(positions, indices)) throw new UnusablePrimitiveError('every triangle has zero area');
   const normals = normal ? copyAttribute(normal, 3) : computeVertexNormals(positions, indices);
   const geometry = { positions, normals, indices };
+  const repairedNormals = [];
   for (let offset = 0; offset < normals.length; offset += 3) {
     const length = Math.hypot(...normals.subarray(offset, offset + 3));
     if (length < 1e-8 && !normal) {
@@ -852,14 +897,32 @@ function convertGeometry(source, mirrored, primitive, secondUvSet, onIgnoredVert
       normals[offset + 1] = 1;
       continue;
     }
-    if (length < 1e-8) throw new Error('Degenerate geometry has no usable vertex normal.');
+    if (length < 1e-8) {
+      repairedNormals.push(offset);
+      continue;
+    }
     for (let axis = 0; axis < 3; axis++) normals[offset + axis] /= length;
   }
-  if (mirrored) {
-    for (let index = 0; index < indices.length; index += 3) {
-      const second = indices[index + 1];
-      indices[index + 1] = indices[index + 2];
-      indices[index + 2] = second;
+  if (repairedNormals.length) {
+    // An authored normal of zero length cannot light anything: use the face normal of the triangles at that vertex, or up.
+    const faceNormals = computeVertexNormals(positions, indices);
+    for (const offset of repairedNormals) {
+      const length = Math.hypot(...faceNormals.subarray(offset, offset + 3));
+      for (let axis = 0; axis < 3; axis++) normals[offset + axis] = length > 1e-8 ? faceNormals[offset + axis] / length : axis === 1 ? 1 : 0;
+    }
+    onRepair(`${repairedNormals.length} vertex normal(s) had zero length and were rebuilt from the triangles`);
+  }
+  if (primitive.targets?.length) {
+    geometry.morphTargets = primitive.targets.map((target, index) => {
+      const channels = {};
+      if (target.POSITION !== undefined) channels.positions = copyAttributeZeroingNonFinite(source.morphPositions[index], 3, zeroedBy('morph POSITION'));
+      if (target.NORMAL !== undefined && normal) channels.normals = copyAttribute(source.morphNormals[index], 3);
+      // Without a base NORMAL the authored deltas have nothing to add to: derive them from the morphed positions.
+      if (!normal && channels.positions) channels.normals = computeMorphNormalDeltas(positions, indices, normals, channels.positions);
+      return channels;
+    });
+    if (!normal && geometry.morphTargets.some(channels => channels.normals)) {
+      onRepair('it has morph targets but no base NORMAL; base and per-target normals are generated from the triangles');
     }
   }
   if (uv && uv.count !== position.count) throw new Error('TEXCOORD_0 and POSITION counts must match.');
@@ -872,14 +935,6 @@ function convertGeometry(source, mirrored, primitive, secondUvSet, onIgnoredVert
   if (color) geometry.colors = convertVertexColors(color, position.count, onIgnoredVertexAlpha);
   if (skinIndex) geometry.skinIndices = new Uint16Array(copyAttribute(skinIndex, 4));
   if (skinWeight) geometry.skinWeights = copyAttribute(skinWeight, 4);
-  if (primitive.targets?.length) {
-    geometry.morphTargets = primitive.targets.map((target, index) => {
-      const channels = {};
-      if (target.POSITION !== undefined) channels.positions = copyAttribute(source.morphPositions[index], 3);
-      if (target.NORMAL !== undefined) channels.normals = copyAttribute(source.morphNormals[index], 3);
-      return channels;
-    });
-  }
   return geometry;
 }
 
@@ -888,22 +943,66 @@ function makeSkinBinding(node) {
   const pose = createSkinPose(count);
   const pendingPose = createSkinPose(count);
   const inverseBindMatrices = new Float32Array(count * 16);
+  let repairedInverseBindMatrices = 0;
+  let collapsedJoints = false;
   const jointWorldMatrices = new Float32Array(count * 16);
   const pendingWorld = new Float32Array(count * 16);
   const joints = node.skeleton.bones.map((bone, index) => {
-    inverseBindMatrices.set(node.skeleton.boneInverses[index].elements, index * 16);
+    const inverse = inverseBindMatrices.subarray(index * 16, index * 16 + 16);
+    inverse.set(node.skeleton.boneInverses[index].elements);
+    if (!inverse.every(Number.isFinite)) {
+      // A non-finite inverse bind matrix would turn every vertex of the joint into NaN: bind that joint at the identity.
+      inverse.set(IDENTITY_MATRIX);
+      repairedInverseBindMatrices++;
+    } else if (Math.abs(matrixDeterminant(inverse, 0)) < 1e-10) {
+      // A joint authored at zero scale has no inverse. Keep the file's matrices usable: its vertices collapse to a speck.
+      inverse.set(IDENTITY_MATRIX);
+      collapsedJoints = true;
+    }
     return { name: bone.name, parent: node.skeleton.bones.indexOf(bone.parent) };
   });
   const skin = Object.assign(pose, { joints, inverseBindMatrices, jointWorldMatrices, bindMatrix: new Float32Array(node.bindMatrix.elements) });
-  return { node, skin, pendingPose, pendingWorld, palette: skin.jointMatrices, jointWorld: skin.jointWorldMatrices };
+  return { node, skin, pendingPose, pendingWorld, palette: skin.jointMatrices, jointWorld: skin.jointWorldMatrices, repairedInverseBindMatrices, collapsedJoints };
 }
 
-function prepareSkinBinding(binding, geometry) {
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+/** True when collapseSingularMatrix would replace the matrix at this offset: a non-finite value or a determinant below its floor. */
+function needsCollapse(values, offset) {
+  for (let index = offset; index < offset + 16; index++) {
+    if (!Number.isFinite(values[index])) return true;
+  }
+  // The determinant of mat4.determinant, read at an offset.
+  const a00 = values[offset], a01 = values[offset + 1], a02 = values[offset + 2], a03 = values[offset + 3];
+  const a10 = values[offset + 4], a11 = values[offset + 5], a12 = values[offset + 6], a13 = values[offset + 7];
+  const a20 = values[offset + 8], a21 = values[offset + 9], a22 = values[offset + 10], a23 = values[offset + 11];
+  const a30 = values[offset + 12], a31 = values[offset + 13], a32 = values[offset + 14], a33 = values[offset + 15];
+  const b0 = a00 * a11 - a01 * a10;
+  const b1 = a00 * a12 - a02 * a10;
+  const b2 = a01 * a12 - a02 * a11;
+  const b3 = a20 * a31 - a21 * a30;
+  const b4 = a20 * a32 - a22 * a30;
+  const b5 = a21 * a32 - a22 * a31;
+  const b6 = a00 * b5 - a01 * b4 + a02 * b3;
+  const b7 = a10 * b5 - a11 * b4 + a12 * b3;
+  const b8 = a20 * b2 - a21 * b1 + a22 * b0;
+  const b9 = a30 * b2 - a31 * b1 + a32 * b0;
+  const determinant = a13 * b6 - a03 * b7 + a33 * b8 - a23 * b9;
+  return !Number.isFinite(determinant) || Math.abs(determinant) < 1e-12;
+}
+
+function prepareSkinBinding(binding, geometry, checks = true) {
   const { node, skin, pendingPose, pendingWorld } = binding;
   if (skin.jointMatrices !== binding.palette || skin.jointWorldMatrices !== binding.jointWorld || binding.palette.length !== pendingPose.jointMatrices.length || binding.jointWorld.length !== pendingWorld.length) throw new Error('Imported skin palette identities must remain unchanged.');
-  for (let joint = 0; joint < node.skeleton.bones.length; joint++) pendingWorld.set(node.skeleton.bones[joint].matrixWorld.elements, joint * 16);
-  updateSkinPose(pendingPose, pendingWorld, skin.inverseBindMatrices, node.matrixWorld.elements, skin.bindMatrix);
-  validateSkinPose(pendingPose, geometry, node.matrixWorld.elements);
+  for (let joint = 0; joint < node.skeleton.bones.length; joint++) {
+    const offset = joint * 16;
+    pendingWorld.set(node.skeleton.bones[joint].matrixWorld.elements, offset);
+    // A joint at zero scale collapses its vertices to a point instead of refusing the pose. Only a joint that needs
+    // the repair gets a view, so a normal pose allocates nothing.
+    if (needsCollapse(pendingWorld, offset) && collapseSingularMatrix(pendingWorld.subarray(offset, offset + 16), undefined, COLLAPSED_JOINT_SCALE)) binding.collapsedJoints = true;
+  }
+  updateSkinPose(pendingPose, pendingWorld, skin.inverseBindMatrices, node.matrixWorld.elements, skin.bindMatrix, checks);
+  if (checks) validateSkinPose(pendingPose, geometry, node.matrixWorld.elements);
 }
 
 function commitSkinBinding(binding) {
@@ -932,12 +1031,64 @@ function prepareMorphBinding(binding) {
   validateMorphPose(binding.pendingPose, binding.metadata);
 }
 
-function validateNodeTransforms(nodes, pending, transform) {
+const COLLAPSED_SCALE = 2e-4;
+const COLLAPSED_JOINT_SCALE = 1e-2;
+
+/**
+ * Replaces a singular or non-finite world matrix, in place, with a uniform scale of 0.0002 at the same position so the
+ * part is a speck that stays finite and invertible. Returns true when it replaced the matrix.
+ */
+function collapseSingularMatrix(elements, determinantFloor = 1e-12, collapsedScale = COLLAPSED_SCALE) {
+  let finite = true;
+  for (let index = 0; index < 16; index++) {
+    if (!Number.isFinite(elements[index])) {
+      finite = false;
+      break;
+    }
+  }
+  // mat4.determinant reads the elements as doubles, the same values a Float64 copy would hold.
+  const determinant = finite ? mat4.determinant(elements) : NaN;
+  if (finite && Number.isFinite(determinant) && Math.abs(determinant) >= determinantFloor) return false;
+  const position = [elements[12], elements[13], elements[14]];
+  const keepPosition = position.every(Number.isFinite);
+  elements.fill(0);
+  elements[0] = elements[5] = elements[10] = collapsedScale;
+  elements[15] = 1;
+  if (keepPosition) elements.set(position, 12);
+  return true;
+}
+
+/** Indices of the source nodes that any animation clip keys. */
+function nodesKeyedInClips(document) {
+  const keyed = new Set();
+  for (const animation of document.animations ?? []) {
+    for (const channel of animation.channels ?? []) {
+      if (Number.isInteger(channel.target?.node)) keyed.add(channel.target.node);
+    }
+  }
+  return keyed;
+}
+
+function isKeyedInClip(node, keyedNodeIndices) {
+  for (let current = node; current; current = current.parent) {
+    if (keyedNodeIndices.has(current.association?.nodes)) return true;
+  }
+  return false;
+}
+
+/**
+ * Rejects a pose that makes a node's world matrix non-finite or singular. A node that was already singular at load
+ * (its meshes were skipped with a warning) is listed in `tolerated` and is not checked again.
+ */
+function validateNodeTransforms(nodes, pending, transform, tolerated) {
   for (const node of nodes) {
     pending.set(node.matrixWorld.elements);
-    for (const value of pending) if (!Number.isFinite(value)) throw new Error('Animation creates a non-finite Float32 world matrix.');
-    const determinant = transform.fromArray(pending).determinant();
-    if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) throw new Error('Animation creates a singular Float32 node transform.');
+    const finite = pending.every(Number.isFinite);
+    const determinant = finite ? transform.fromArray(pending).determinant() : NaN;
+    if (finite && Number.isFinite(determinant) && Math.abs(determinant) >= 1e-12) continue;
+    if (tolerated.has(node)) continue;
+    if (!tolerated.collecting) throw new Error(finite ? 'Animation creates a singular Float32 node transform.' : 'Animation creates a non-finite Float32 world matrix.');
+    tolerated.add(node);
   }
 }
 
@@ -1118,6 +1269,7 @@ export async function parseGltf(data, options = {}) {
     const lightNodes = [];
     const pendingTransform = new Matrix4();
     const pendingNodeMatrix = new Float32Array(16);
+    const keyedNodeIndices = nodesKeyedInClips(document);
     let actualVertices = 0;
     gltf.scene.traverse(node => {
       nodes.push(node);
@@ -1138,15 +1290,27 @@ export async function parseGltf(data, options = {}) {
       const material = materials.get(node.material);
       for (const instanceMatrix of instanceMatricesOf(node, limits.maxInstances)) {
         const determinant = worldMatrixOf(node, instanceMatrix, pendingTransform).determinant();
-        if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) throw new Error('Mesh world transform is singular or non-finite.');
-        const mirrored = determinant < 0;
-        const geometryMirrored = node.isSkinnedMesh ? false : mirrored;
-        const geometryKey = `${node.geometry.uuid}:${geometryMirrored}:${uvKey}:${secondUvSet}`;
+        const singular = !Number.isFinite(determinant) || Math.abs(determinant) < 1e-12;
+        if (singular) {
+          const keyed = isKeyedInClip(node, keyedNodeIndices);
+          const label = node.name ? `"${node.name}"` : association.nodes;
+          const warning = keyed
+            ? `Node ${label} starts with a singular or non-finite world transform; it draws nothing while its scale is zero.`
+            : `Skipped node ${label}: its world transform is singular or non-finite.`;
+          if (!warnings.includes(warning)) warnings.push(warning);
+          if (!keyed) continue;
+        }
+        const mirrored = singular ? false : determinant < 0;
+        const geometryKey = `${node.geometry.uuid}:${uvKey}:${secondUvSet}`;
         if (!geometries.has(geometryKey)) {
           actualVertices += node.geometry.attributes.position.count * (1 + (primitive.targets?.length ?? 0));
           throwOverruns(overLimit([], 'decoded vertices', actualVertices, 'maxVertices', limits.maxVertices));
           try {
-            const converted = convertGeometry(node.geometry, geometryMirrored, primitive, secondUvSet, () => meshNamesWithIgnoredAlpha.add(node.name));
+            const onRepair = reason => {
+              const warning = `Repaired ${primitiveLabel(document, association.meshes, association.primitives)}: ${reason}.`;
+              if (!warnings.includes(warning)) warnings.push(warning);
+            };
+            const converted = convertGeometry(node.geometry, primitive, secondUvSet, () => meshNamesWithIgnoredAlpha.add(node.name), onRepair);
             if (converted.uvs) bakeUvTransform(converted.uvs, uvTransform);
             geometries.set(geometryKey, converted);
           } catch (error) {
@@ -1160,12 +1324,22 @@ export async function parseGltf(data, options = {}) {
         if (!geometry) continue;
         const firstSetMaps = [...MATERIAL_TEXTURES.map(([field]) => material[field]), ...Object.values(material.layerMaps ?? {})];
         if (firstSetMaps.some(map => map && map.uvChannel === 0) && !geometry.uvs) throw new Error('Material textures require TEXCOORD_0.');
-        const part = { name: node.name || `glTF mesh ${parts.length + 1}`, geometry, matrix: new Float32Array(worldMatrixOf(node, instanceMatrix, pendingTransform).elements), material };
+        const initialMatrix = new Float32Array(worldMatrixOf(node, instanceMatrix, pendingTransform).elements);
+        collapseSingularMatrix(initialMatrix);
+        const part = { name: node.name || `glTF mesh ${parts.length + 1}`, geometry, matrix: initialMatrix, material };
         const transformBinding = { node, instanceMatrix, part, mirrored, matrix: part.matrix, pendingMatrix: new Float32Array(16) };
         let pendingSkin;
         if (node.isSkinnedMesh) {
           const binding = makeSkinBinding(node);
           prepareSkinBinding(binding, geometry);
+          if (binding.collapsedJoints) {
+            const warning = `Skin of ${node.name ? `"${node.name}"` : association.nodes} has a joint with zero or non-finite scale; its vertices collapse to a point while it is singular.`;
+            if (!warnings.includes(warning)) warnings.push(warning);
+          }
+          if (binding.repairedInverseBindMatrices) {
+            const warning = `Skin of ${node.name ? `"${node.name}"` : association.nodes} has ${binding.repairedInverseBindMatrices} non-finite inverse bind matrix(es); they were replaced with the identity.`;
+            if (!warnings.includes(warning)) warnings.push(warning);
+          }
           commitSkinBinding(binding);
           part.skin = binding.skin;
           skinBindings.push({ ...binding, geometry });
@@ -1187,7 +1361,9 @@ export async function parseGltf(data, options = {}) {
         throwOverruns(overLimit([], 'decoded parts', parts.length, 'maxParts', limits.maxParts));
       }
     });
-    validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform);
+    const toleratedNodes = Object.assign(new Set(), { collecting: true });
+    validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform, toleratedNodes);
+    toleratedNodes.collecting = false;
     // A skeleton-only file (a skin or clips, no mesh) loads with zero parts so it can be posed and retargeted.
     if (!parts.length && !document.skins?.length && !gltf.animations.length) {
       const skipped = warnings.filter(warning => warning.startsWith('Skipped '));
@@ -1215,6 +1391,10 @@ export async function parseGltf(data, options = {}) {
     for (const node of sourceNodes.values()) {
       if (skinJointIndices.has(node.association.nodes)) jointNodes.add(node);
     }
+    // A node posed to zero scale draws nothing; a zero-scale skin joint collapses its vertices to a point.
+    for (const node of nodes) {
+      toleratedNodes.add(node);
+    }
     const meshIdsByNode = new Map([...sourceNodes.values()].map(node => [node, []]));
     for (let index = 0; index < bindings.length; index++) {
       let ancestor = bindings[index].node;
@@ -1235,7 +1415,7 @@ export async function parseGltf(data, options = {}) {
           Math.abs(value - composed.elements[index]) <= 1e-6 * Math.max(1, Math.abs(value)));
       const meshIds = meshIdsByNode.get(node);
       // `name` is the decoded node name, which clip tracks address; `label` is the name as authored in the file.
-      return { id, label: String(original.name ?? id).slice(0, 256), name: node.name, parent: sourceIds.get(parent) ?? null,
+      return { id, label: String(original.name ?? id).slice(0, 256), name: node.name || id, parent: sourceIds.get(parent) ?? null,
         translation: node.position.toArray(), rotation: node.quaternion.toArray(), scale: node.scale.toArray(),
         editable, joint: jointNodes.has(node), meshIds };
     });
@@ -1255,11 +1435,31 @@ export async function parseGltf(data, options = {}) {
     let pendingTransaction;
     let currentAnimation = null;
 
-    function capturePrivatePose() {
-      return nodes.map(node => ({ node, translation: node.position.toArray(), rotation: node.quaternion.toArray(),
-        scale: node.scale.toArray(), matrix: [...node.matrix.elements], world: [...node.matrixWorld.elements],
-        matrixAutoUpdate: node.matrixAutoUpdate, matrixWorldNeedsUpdate: node.matrixWorldNeedsUpdate,
-        weights: node.morphTargetInfluences ? [...node.morphTargetInfluences] : null }));
+    /** Snapshot every node's private pose. With `snapshot`, writes into it in place, so a per-frame rollback point allocates nothing. */
+    function capturePrivatePose(snapshot = null) {
+      if (!snapshot) {
+        return nodes.map(node => ({ node, translation: node.position.toArray(), rotation: node.quaternion.toArray(),
+          scale: node.scale.toArray(), matrix: [...node.matrix.elements], world: [...node.matrixWorld.elements],
+          matrixAutoUpdate: node.matrixAutoUpdate, matrixWorldNeedsUpdate: node.matrixWorldNeedsUpdate,
+          weights: node.morphTargetInfluences ? [...node.morphTargetInfluences] : null }));
+      }
+      for (let index = 0; index < nodes.length; index++) {
+        const node = nodes[index];
+        const entry = snapshot[index];
+        copyValues(node.position.values, entry.translation);
+        copyValues(node.quaternion.values, entry.rotation);
+        copyValues(node.scale.values, entry.scale);
+        copyValues(node.matrix.elements, entry.matrix);
+        copyValues(node.matrixWorld.elements, entry.world);
+        entry.matrixAutoUpdate = node.matrixAutoUpdate;
+        entry.matrixWorldNeedsUpdate = node.matrixWorldNeedsUpdate;
+        if (entry.weights) copyValues(node.morphTargetInfluences, entry.weights);
+      }
+      return snapshot;
+    }
+
+    function copyValues(source, target) {
+      for (let index = 0; index < target.length; index++) target[index] = source[index];
     }
 
     function restorePrivatePose(snapshot) {
@@ -1289,9 +1489,10 @@ export async function parseGltf(data, options = {}) {
       applyClip(gltf.animations[animation.clip], animation.time);
     }
 
-    function preparePose() {
+    /** Pose every part from the scene graph. `checks: false` keeps the zero-scale repairs and skips the finite, singular and winding checks. */
+    function preparePose(checks = true) {
       gltf.scene.updateMatrixWorld(true);
-      validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform);
+      if (checks) validateNodeTransforms(nodes, pendingNodeMatrix, pendingTransform, toleratedNodes);
       const worldMatrix = new Matrix4();
       for (const { node, instanceMatrix, part, mirrored, matrix, pendingMatrix, skin } of bindings) {
         if (part.matrix !== matrix || matrix.length !== 16) {
@@ -1301,6 +1502,7 @@ export async function parseGltf(data, options = {}) {
           throw new Error('Imported skin pose identity must remain unchanged.');
         }
         pendingMatrix.set(worldMatrixOf(node, instanceMatrix, worldMatrix).elements);
+        if (collapseSingularMatrix(pendingMatrix) || !checks) continue;
         for (const value of pendingMatrix) {
           if (!Number.isFinite(value)) {
             throw new Error('Animation creates a non-finite Float32 world matrix.');
@@ -1313,14 +1515,14 @@ export async function parseGltf(data, options = {}) {
         }
       }
       for (const binding of skinBindings) {
-        prepareSkinBinding(binding, binding.geometry);
+        prepareSkinBinding(binding, binding.geometry, checks);
       }
       for (const binding of morphBindings) {
         if (binding.part.morph !== binding.pose) {
           throw new Error('Imported morph pose identity must remain unchanged.');
         }
         prepareMorphBinding(binding);
-        validateMorphTransform(binding.pendingPose, binding.metadata, binding.pendingMatrix, binding.pendingSkin);
+        if (checks) validateMorphTransform(binding.pendingPose, binding.metadata, binding.pendingMatrix, binding.pendingSkin);
       }
     }
 
@@ -1495,16 +1697,8 @@ export async function parseGltf(data, options = {}) {
             pendingTransaction = null;
             throw error;
           }
-          for (const { matrix, pendingMatrix } of bindings) {
-            Float32Array.prototype.set.call(matrix, pendingMatrix);
-          }
-          for (const binding of skinBindings) {
-            commitSkinBinding(binding);
-          }
-          for (const binding of morphBindings) {
-            Float32Array.prototype.set.call(binding.weights, binding.pendingPose.weights);
-          }
-          currentAnimation = candidate.animation;
+          commitPreparedPose(candidate.animation);
+          poseFromAnimationOnly = false;
           settled = true;
           pendingTransaction = null;
           return parts;
@@ -1530,18 +1724,65 @@ export async function parseGltf(data, options = {}) {
       gltf.release();
     }
 
-    function applyAnimation(time, clipIndex = 0) {
+    /**
+     * Pose the asset at `time` in a clip and commit it. `checks: false` skips the per-frame finite, singular and winding
+     * checks, for clips you trust: import checks the base pose, not every key, so a broken clip may draw wrong instead of
+     * throwing. Zero-scale joints are still repaired. Poses an agent sets go through stagePose, which always checks.
+     */
+    function applyAnimation(time, clipIndex = 0, { checks = true } = {}) {
       if (disposed) {
         throw new Error('The glTF asset was disposed.');
       }
       if (!Number.isFinite(time)) {
         throw new TypeError('Animation time must be finite.');
       }
+      if (typeof checks !== 'boolean') {
+        throw new TypeError('Animation checks must be a boolean.');
+      }
       const clip = gltf.animations[clipIndex];
       if (!Number.isInteger(clipIndex) || !clip) {
         throw new RangeError('Animation clip index is out of range.');
       }
-      return stagePose({ animation: { clip: clipIndex, time: Math.max(0, Math.min(time, clip.duration)) } }).commit();
+      if (pendingTransaction) {
+        throw new Error('A pose transaction is already pending. Commit or discard it first.');
+      }
+      // Same result as stagePose({ animation }).commit(), with one preparePose instead of two: nothing can change the
+      // scene between this stage and this commit. When the committed pose came from applyAnimation alone, replaying
+      // its animation restores it exactly, so no snapshot is needed; otherwise one reused snapshot is the rollback point.
+      const animation = { clip: clipIndex, time: Math.max(0, Math.min(time, clip.duration)) };
+      const snapshot = poseFromAnimationOnly ? null : capturePrivatePose(rollbackPose ??= capturePrivatePose());
+      const previousAnimation = currentAnimation;
+      try {
+        // The same clip keys the same channels every frame, and every other node is still at its base pose.
+        if (poseFromAnimationOnly && previousAnimation?.clip === animation.clip) applyClip(clip, animation.time);
+        else playAnimation(animation);
+        preparePose(checks);
+      } catch (error) {
+        playAnimation(previousAnimation);
+        if (snapshot) restorePrivatePose(snapshot);
+        throw error;
+      }
+      commitPreparedPose(animation);
+      poseFromAnimationOnly = true;
+      return parts;
+    }
+
+    let rollbackPose = null;
+    // True while the committed pose is the base pose or one applyAnimation made, with no overrides or morph weights.
+    let poseFromAnimationOnly = true;
+
+    /** Copy the prepared candidate pose into the committed parts. */
+    function commitPreparedPose(animation) {
+      for (const { matrix, pendingMatrix } of bindings) {
+        Float32Array.prototype.set.call(matrix, pendingMatrix);
+      }
+      for (const binding of skinBindings) {
+        commitSkinBinding(binding);
+      }
+      for (const binding of morphBindings) {
+        Float32Array.prototype.set.call(binding.weights, binding.pendingPose.weights);
+      }
+      currentAnimation = animation;
     }
     return { parts, warnings, lights, scaledTextures: textureScaling.scaledTextures, textureFormats: textureFormatsOf(maps), skins: skinBindings.map(binding => binding.skin), animations: gltf.animations,
       get nodes() { return structuredClone(nodeMetadata); }, stagePose, applyAnimation, dispose, capabilities: GLTF_CAPABILITIES };

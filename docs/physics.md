@@ -75,6 +75,8 @@ Collider scales come from their dimensions, independently of visual part scales.
 | `ball` | Positive `radius`. |
 | `cuboid` | Three positive `halfExtents`. |
 | `capsule` | Positive `radius` and `halfHeight` for its cylindrical segment along local Y. |
+| `cylinder` | Positive `radius` and `halfHeight` along local Y. |
+| `cone` | Positive `radius` and `halfHeight` along local Y, apex at `+halfHeight`. |
 
 Each collider accepts either positive `mass` or positive `density`.
 The default density is `1`.
@@ -92,6 +94,7 @@ Connected bodies do not collide unless `contactsEnabled` is `true`.
 | `revolute` | Required unit `axis` expressed in both bodies' local frames. Optional `limits` and `motor`. |
 | `prismatic` | Required unit `axis` expressed in both bodies' local frames. Optional `limits` and `motor`. |
 | `fixed` | Optional unit `frameA` and `frameB` quaternions. Both default to identity. |
+| `spring` | `restLength` (default `0`), positive `stiffness` and nonnegative `damping` (default `0`). |
 
 An articulated ragdoll is a graph of dynamic bodies, colliders, and joints.
 This example connects two capsule bodies named `upperArm` and `forearm`.
@@ -372,7 +375,8 @@ A scene recipe takes a `physics` section, and `set-physics` edits it (`null` cle
 }
 ```
 
-Each body is a root node with a geometry. Its collider is fitted to that geometry at the node scale: `box`, `ball` and `capsule` from the bounds, `convex` from at most 2048 distinct vertices, `trimesh` from every triangle.
+Each body is a root node with a geometry. Its collider is fitted to that geometry at the node scale: `box`, `ball`, `capsule`, `cylinder` and `cone` from the bounds, `convex` from at most 2048 distinct vertices, `trimesh` from every triangle, or `compound` with a `shapes` list of up to 16 sub-colliders (`box`, `ball`, `capsule`, `cylinder`, `cone` with optional `translation` and `rotation`).
+Recipe joints also accept `spring` (`restLength`, `stiffness`, `damping`), `motor` (`{ mode: "position" | "velocity", target, stiffness?, damping, maxForce }`) and `contactsEnabled`. Recipe `physics.events` schedules up to 128 `impulse`, `kinematicPose` and `jointMotor` events by `time` in seconds (or `tick`), and `physics.fields` applies up to 8 force fields (`wind`, `turbulence`, `vortex`, `drag`, `magnet`) to dynamic bodies at every step.
 Defaults are `box` for dynamic bodies and sensors, `trimesh` for fixed ones.
 `layer` (0 to 15) and `collidesWith` replace raw bit masks.
 A node cannot have both a physics body and a motion `translation` or `rotation` track.
@@ -424,6 +428,7 @@ A recipe `cloth` section records deformable sheets with a position-based solver 
 - Moving colliders and pins follow any node or bone, including a walking character, and are read at every solver substep, so a seek still equals playing to that time:
   - `{ "attach": "leftHand", "shape": "ball", "radius": 0.08, "offset": [0, 0, 0] }` is a ball on a node. `{ "attach": "upperArm", "shape": "capsule", "to": "lowerArm", "radius": 0.05 }` runs a capsule from one node (plus `offset`) to another (plus `toOffset`). Radius 0.001 to 10 m.
   - `{ "armature": "rig", "radiusFraction": 0.2, "exclude": ["head"] }` adds one capsule per bone, head to tail, the radius a fraction (0.02 to 0.5, default 0.2) of the bone length as the ragdoll fits it. A bone with no length is skipped.
+  - A sheet on a mesh geometry can hold chosen vertices with `pinGroup: "hem"`, the name of a vertex group made by a `vertex_group` mesh edit; vertices of weight 0.5 or more are pinned, on their own or together with `pin`. An unknown name fails and lists the groups the mesh has.
   - A sheet's `pinTo: { "node": "chest", "weight": 1 }` makes the pinned edges (`pin`) ride that node, keeping their rest offset in its space. Weight 1 holds them on the node; 0.01 to under 1 pulls them toward it by that fraction on every pass, so they sag and lag.
   - Up to 64 moving balls and capsules, counting every bone. The node poses come from the recipe's motion tracks and IK; a physics ragdoll or body is not followed. Points are pushed out of the capsules, not whole triangles, so a coarse sheet can still cut a corner of a thin limb: use a finer grid than the limb is wide. A cape on the reference walker (24 by 24 grid, 5 s, about 2.5 s to bake on the dev machine) stays outside every limb capsule in `tests/cloth-moving.test.js`.
 - The bake runs when the scene is created: 60 frames a second, 4 substeps and 8 constraint passes a frame, constraints solved in a fixed order with no random numbers. `sample(time)` blends the two nearest frames, so the same time always gives the same positions and a seek backwards repeats them. Time zero is the authored sheet and a time past `duration` holds the last frame.
@@ -517,6 +522,25 @@ renderer.render(frame);
 - The culling bounds and the shadow map follow the new positions.
 - Per vertex a cloth steps on welded particles, so copy each vertex from its particle (`weldVertices(...).particleOfVertex`) and recompute normals (`recomputeNormals`) before the call.
 
+## Force fields
+
+One list of up to 8 fields, `fields` on the `particles` section and on the `cloth` section, accelerates every particle, hair strand and cloth particle through the same evaluation (`src/force-fields.js`, `evaluateForceFields`). Each field has a `type`:
+
+| type | acceleration | keys |
+| --- | --- | --- |
+| `wind` | `strength` m/s2 along `direction` (default +x) | `direction` |
+| `drag` | `-strength` times the velocity, in 1/s | |
+| `vortex` | `strength` m/s2 around `axis` (default +y) through `position`, along axis cross offset | `axis` |
+| `magnet` | `strength` m/s2 toward `position`; a negative strength pushes away | |
+| `turbulence` | smooth seeded value noise, each component within `strength` | `seed`, `scale` (cycles per metre, 1), `rate` (cycles per second, 0.5) |
+
+Every field also takes `strength` (default 1, -1000 to 1000), `position` (default the origin), `falloff` (exponent of 1 / (1 + distance from `position`), 0 means none) and `radius` (cutoff distance, 0 means none). Unknown keys are rejected with the list of known ones.
+
+- Particles under fields have no closed form, so each one is integrated from its own birth at a fixed 1/120 s (semi-implicit Euler, gravity, drag toward the wind, then the fields) every time it is asked. It is still a pure function of time: a seek back repeats exactly, and the same seed gives the same frames. The floor stops a particle where it lands. Cost grows with age, about the age times 120 steps for each live particle.
+- Cloth adds the fields to the velocity of every particle at each of the four substeps, with the substep time as the turbulence time, so the recording stays deterministic.
+- Hair leans: the strand tip moves by 0.02 m for each m/s2 of field acceleration at the strand root (no velocity, so drag does nothing), clamped to the strand length. A strand without turbulence builds once.
+- `tests/force-fields.test.js` checks each type against a known particle path (wind against constant acceleration, drag against the exponential, magnet against free fall toward a point, vortex against the swirl direction), falloff, seeds and seeks.
+
 ## Recipe particles and hair
 
 A recipe `particles` section holds up to 4 systems (`src/particles.js`, `src/hair.js`, `src/agent-particles.js`). It needs no peer dependency and loads on demand with the `particles` module, so a scene without particles pays nothing. Blender's particle system has the same two kinds, Emitter and Hair.
@@ -535,7 +559,8 @@ A recipe `particles` section holds up to 4 systems (`src/particles.js`, `src/hai
 - A hair system (`type: "hair"`) grows `count` strands from area-weighted seeded points of a `surface` node into its own `node` (the surface is only read, so several systems can share one). A strand is a triangular tube of 1 to 8 segments tapering to 15 percent, leaning off the surface normal by `lean`, bending with `droop`, and swaying by `sway` metres along the horizontal wind at `swayRate` hertz. Without `sway` the mesh is built once.
 - Both kinds replace their node's part at each sampled time, so the renderer sees a topology change. `npm run smoke:agent-particles` seeks sparks and hair through the MCP preview, repeats the PNG bytes after a seek back and checks that a second session renders the same bytes.
 - `scene_inspect` returns a `particles` report: per emitter the particle count, vertices per particle, `maxAlive` and `endsAt`; per hair system the strands, segments and vertices per strand.
-- Not included: collision between particles or with anything but the floor plane, bounce, per-particle rotation, colour or alpha (one material per node), particles that follow a moving node, hair collision, combing, clumping, children, hair on a skinned surface, UVs on hair (so textured materials do not apply) and fur shading.
+- Collision (#614): `colliders` lists up to 8 static root nodes (4096 triangles in total, read only); particles bounce off their triangles and the floor plane with `bounce` (0 to 1; 0 sticks where it lands; 0.3 with colliders, 0 on a floor alone) and `friction` (0 to 1, 0.5): Coulomb friction removes friction times the normal impulse from the speed along the surface, so a slider slows and stops, and spin is damped by each contact. A particle on a collider, a force field or a bounce is stepped at 1/120 s from its birth with the path tested against the triangles, so a fast particle cannot tunnel through a thin mesh. A bounce slower than 0.4 m/s is zeroed (no micro-bounces), so the particle slides, and a slow slider settles. `spin` (deg/s, a number or [min, max]) turns each particle about a seeded axis until it settles. `color` ([r,g,b] at birth, [r,g,b] at death) and `alpha` (a number or [birth, death]) become vertex colours; the renderer has no per-vertex alpha, so alpha multiplies the colour: a particle fades toward black, which reads as a fade on a dark background but does not become see-through. Whole steps are remembered per particle, so playback costs one frame of steps and a seek back replays from birth, with the same bytes. Measured with 2000 particles of 60 s bouncing on a box: a seek to the end took about 0.5 s and playback about 3.5 ms a frame; most particles settle early, a particle under a field that never settles costs its whole age at every seek back.
+- Not included: collision between particles, collision with a moving node, particles that follow a moving node, hair collision, combing, clumping, children, hair on a skinned surface, UVs on hair (so textured materials do not apply) and fur shading.
 - Measured on the dev machine: creating a scene with 4000 box particles (96000 vertices) takes about 57 ms, and each seek takes 8 to 15 ms; the test bounds a seek at 150 ms.
 
 No Blender parity is claimed for either kind: Blender's particle physics, force fields, children and hair dynamics are not reproduced, and no comparison against a Blender render was run.

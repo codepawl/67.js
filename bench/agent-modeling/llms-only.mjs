@@ -1,9 +1,13 @@
 // A coding task with no MCP: the agent has `llms.txt` and the installed npm package, and must write a script that
 // renders a scene to a PNG. This measures the path a coding agent takes when it reads the docs instead of calling tools.
 // node bench/agent-modeling/llms-only.mjs --claude <claude executable> [--model sonnet] [--runs 2] [--budget 1.5] [--timeout 900] [--label llms-only]
+// node bench/agent-modeling/llms-only.mjs --agent agy --agy <agy executable> --model gemini-3.8-flash-medium [--runs 2]
+// --agent agy drives the Antigravity CLI (Google and other non-Anthropic models). It cannot switch off its web tools,
+// so a run that calls one is recorded with usedWeb and fails the task.
 // Each attempt gets a fresh folder with the package installed from a packed archive, a copy of public/llms.txt and
 // nothing else. The check opens scene.png and requires a real image with content (png-check.mjs).
 import { spawn, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -21,7 +25,9 @@ Google Chrome is installed. When scene.png exists, reply with one line saying so
 
 const { values: options } = parseArgs({
   options: {
+    agent: { type: 'string', default: 'claude' },
     claude: { type: 'string', default: process.env.CLAUDE_EXECUTABLE ?? 'claude' },
+    agy: { type: 'string', default: process.env.AGY_EXECUTABLE ?? 'agy' },
     model: { type: 'string', default: 'sonnet' },
     runs: { type: 'string', default: '2' },
     budget: { type: 'string', default: '1.5' },
@@ -36,13 +42,18 @@ const resultsDirectory = join(repository, 'bench', 'agent-modeling', 'results');
 const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function packArchive(destination) {
+  // The pack runs with --ignore-scripts, so prepack never builds: without build/ the archive has no library
+  // and the agent cannot import anything (found in the first valid agy run, 2026-11-07).
+  if (!existsSync(join(repository, 'build', '67.module.js'))) throw new Error('build/67.module.js is missing; run npm run build:lib first');
   const output = execFileSync(npmExecutable, ['pack', '--ignore-scripts', '--json', '--pack-destination', destination], { cwd: repository, encoding: 'utf8', shell: process.platform === 'win32' });
   const packed = JSON.parse(output);
   return join(destination, (Array.isArray(packed) ? packed[0] : Object.values(packed)[0]).filename);
 }
 
-function runClaude(workingDirectory) {
-  const argumentsList = [
+const AGY_WEB_TOOLS = new Set(['search_web', 'read_url_content', 'open_browser_url', 'read_browser_page']);
+
+function claudeArguments() {
+  return [
     '-p', PROMPT,
     '--model', options.model,
     '--output-format', 'stream-json', '--verbose',
@@ -54,9 +65,26 @@ function runClaude(workingDirectory) {
     '--no-session-persistence',
     '--max-budget-usd', options.budget,
   ];
+}
+
+// Headless agy auto-denies shell commands, so each run gets a session-only settings file with one allow rule.
+// --settings is never saved to agy's own config, and the run's own folder is the working directory.
+function agyArguments(settingsPath) {
+  return [
+    '-p', PROMPT,
+    '--model', options.model,
+    '--settings', settingsPath,
+    '--output-format', 'stream-json',
+    '--print-timeout', `${options.timeout}s`,
+  ];
+}
+
+function runAgent(workingDirectory, settingsPath) {
+  const executable = options.agent === 'agy' ? options.agy : options.claude;
+  const argumentsList = options.agent === 'agy' ? agyArguments(settingsPath) : claudeArguments();
   return new Promise(resolvePromise => {
     const started = performance.now();
-    const child = spawn(options.claude, argumentsList, { cwd: workingDirectory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(executable, argumentsList, { cwd: workingDirectory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     let errors = '';
     child.stdout.on('data', chunk => {
@@ -71,6 +99,38 @@ function runClaude(workingDirectory) {
       resolvePromise({ output, errors, code, wallMs: Math.round(performance.now() - started) });
     });
   });
+}
+
+// The Antigravity CLI writes init, step_update and result events; its tool steps carry tool_name.
+function readAgyTranscript(output) {
+  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, result: null, usedWeb: false };
+  for (const line of output.split('\n')) {
+    if (!line.trim().startsWith('{')) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.event === 'init') summary.model = event.init?.model ?? null;
+    const step = event.step_update;
+    if (step?.step_type === 'tool' && step.state === 'DONE') {
+      summary.toolCalls++;
+      summary.toolsByName[step.tool_name] = (summary.toolsByName[step.tool_name] ?? 0) + 1;
+      if (AGY_WEB_TOOLS.has(step.tool_name)) summary.usedWeb = true;
+    }
+    if (step?.step_type === 'tool' && step.state === 'ERROR') summary.toolErrors++;
+    if (event.event === 'result') {
+      const usage = event.result?.usage ?? {};
+      summary.result = {
+        num_turns: event.result?.num_turns ?? null,
+        total_cost_usd: null,
+        subtype: event.result?.status ?? 'no result',
+        usage: { input_tokens: usage.input_tokens ?? 0, output_tokens: (usage.output_tokens ?? 0) + (usage.thinking_tokens ?? 0) },
+      };
+    }
+  }
+  return summary;
 }
 
 function readTranscript(output) {
@@ -115,9 +175,12 @@ async function runAttempt(archivePath, attempt) {
     await writeFile(join(workingDirectory, 'package.json'), JSON.stringify({ name: 'llms-only-task', private: true, type: 'module' }));
     execFileSync(npmExecutable, ['install', archivePath, '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: workingDirectory, stdio: 'ignore', shell: process.platform === 'win32' });
     await copyFile(join(repository, 'public', 'llms.txt'), join(workingDirectory, 'llms.txt'));
-    const run = await runClaude(workingDirectory);
-    const transcript = readTranscript(run.output);
-    const grade = await checkPng(join(workingDirectory, 'scene.png'));
+    const settingsPath = `${workingDirectory}-agy-settings.json`;
+    await writeFile(settingsPath, JSON.stringify({ permissions: { allow: ['command(*)'] } }));
+    const run = await runAgent(workingDirectory, settingsPath).finally(() => rm(settingsPath, { force: true }));
+    const transcript = options.agent === 'agy' ? readAgyTranscript(run.output) : readTranscript(run.output);
+    const pngGrade = await checkPng(join(workingDirectory, 'scene.png'));
+    const grade = transcript.usedWeb ? { pass: false, detail: `used a web tool; ${pngGrade.detail}` } : pngGrade;
     await writeFile(join(rawDirectory, `${TASK_ID}-${attempt}.jsonl`), run.output);
     const filesWritten = (await readdir(workingDirectory)).filter(name => !['node_modules', 'package-lock.json'].includes(name));
     const usage = transcript.result?.usage ?? {};
@@ -128,6 +191,8 @@ async function runAttempt(archivePath, attempt) {
       detail: removeLocalPaths(grade.detail),
       filesWritten,
       model: transcript.model,
+      agent: options.agent,
+      usedWeb: transcript.usedWeb ?? false,
       toolCalls: transcript.toolCalls,
       toolErrors: transcript.toolErrors,
       toolsByName: transcript.toolsByName,

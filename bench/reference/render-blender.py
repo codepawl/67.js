@@ -4,9 +4,15 @@
 #   (0 leaves the sun and the point lights), into <id>-cycles-world<scale>.npy. The EEVEE render and the timings are left alone.
 #   ... -- <work directory> --sun-strength <scale> [scene ids]  the same for the sun: Cycles only, the sun times <scale> (0 leaves the world and
 #   the point lights), into <id>-cycles-sun<scale>.npy. Both switches together write <id>-cycles-world<a>-sun<b>.npy.
+#   ... -- <work directory> --no-fog [scene ids]  Cycles only, without the fog volume (combines with the switches above), into <id>-cycles-nofog....npy (issue #543).
 #   ... -- <work directory> --view-transform <AgX|Khronos PBR Neutral|...> [scene ids]  Cycles only, with that Blender view transform, into <id>-cycles-<name>.png (16-bit sRGB).
 #   ... -- <work directory> --max-bounces <n> [--floor-color <v>] [scene ids]  Cycles only, with at most n light bounces (0 is direct light only)
 #   and/or the part named "floor" painted a grey of v (0 is black), into <id>-cycles-bounces<n>-floor<v>.npy. They show how much light the ground bounces.
+#   ... -- <work directory> --no-glossy [scene ids]  Cycles only, with every material's metallic, specular and coat at 0 (metals draw as diffuse
+#   in their base colour, no reflections), into <id>-cycles-noglossy.npy. It shows how much of a Cycles picture is reflection (issue #506).
+#   ... -- <work directory> --material-ids [scene ids]  Workbench, flat colours: <id>-materials.npy holds the material index under each pixel (0 is the sky,
+#   n is the nth name in <id>-materials.json), so a difference between two renders can be split by material.
+#   ... -- <work directory> --print-materials [scene ids]  prints each material's Principled values as built, one JSON line per scene.
 # Light units were measured on a white plane: sun strength equals irradiance, a point or spot light has 4 pi watts for each
 # unit of 67js intensity, and an area light has pi watts for each unit.
 import base64
@@ -896,6 +902,28 @@ def render_with_view_transform(scene, work_directory, name, view_transform):
     return time.perf_counter() - started
 
 
+def render_passes(scene, work_directory, name):
+    """A measurement switch: one undenoised Cycles render whose light components are kept apart in a multilayer EXR (issue #543)."""
+    scene.cycles.use_denoising = False
+    layer = scene.view_layers[0]
+    layer.use_pass_diffuse_direct = True
+    layer.use_pass_diffuse_indirect = True
+    layer.use_pass_diffuse_color = True
+    layer.use_pass_glossy_direct = True
+    layer.use_pass_glossy_indirect = True
+    layer.use_pass_glossy_color = True
+    layer.use_pass_emit = True
+    layer.use_pass_environment = True
+    layer.cycles.use_pass_volume_direct = True
+    layer.cycles.use_pass_volume_indirect = True
+    scene.render.image_settings.media_type = "MULTI_LAYER_IMAGE"
+    scene.render.image_settings.file_format = "OPEN_EXR_MULTILAYER"
+    scene.render.filepath = os.path.join(work_directory, f"{name}.exr")
+    started = time.perf_counter()
+    bpy.ops.render.render(write_still=True)
+    return time.perf_counter() - started
+
+
 def import_glb(root, glb_file):
     """A Khronos sample asset goes through Blender's own glTF importer, so Cycles shades the file as its authors meant."""
     bpy.ops.import_scene.gltf(filepath=os.path.join(root, glb_file))
@@ -920,6 +948,62 @@ def limit_bounces(scene, bounces):
     scene.cycles.diffuse_bounces = bounces
     scene.cycles.glossy_bounces = bounces
     scene.cycles.transmission_bounces = bounces
+
+
+def remove_glossy(scene):
+    """A measurement switch: no reflections. Metallic, specular level and coat go to 0 and lose their links, so a metal draws as a diffuse surface of its base colour."""
+    for material in bpy.data.materials:
+        if not material.use_nodes:
+            continue
+        for node in material.node_tree.nodes:
+            if node.type != "BSDF_PRINCIPLED":
+                continue
+            for input_name in ("Metallic", "Specular IOR Level", "Coat Weight"):
+                socket = node.inputs[input_name]
+                for link in list(socket.links):
+                    material.node_tree.links.remove(link)
+                socket.default_value = 0
+
+
+MATERIAL_ID_STEPS = 64
+
+
+def render_material_ids(scene, work_directory, name):
+    """Flat Workbench render with one red level per material, saved as an index map and the list of names in index order (1 first)."""
+    names = sorted({slot.material.name for item in scene.objects if item.type == "MESH" for slot in item.material_slots if slot.material})
+    for index, material_name in enumerate(names, start=1):
+        bpy.data.materials[material_name].diffuse_color = (index / MATERIAL_ID_STEPS, 0, 0, 1)
+    scene.render.engine = "BLENDER_WORKBENCH"
+    scene.display.shading.light = "FLAT"
+    scene.display.shading.color_type = "MATERIAL"
+    scene.display.render_aa = "OFF"
+    scene.view_settings.view_transform = "Raw"
+    scene.world.color = (0, 0, 0)
+    render_to_numpy(scene, work_directory, f"{name}-levels")
+    levels = np.load(os.path.join(work_directory, f"{name}-levels.npy"))[:, :, 0]
+    os.remove(os.path.join(work_directory, f"{name}-levels.npy"))
+    np.save(os.path.join(work_directory, f"{name}.npy"), np.rint(levels * MATERIAL_ID_STEPS).astype(np.int16))
+    with open(os.path.join(work_directory, f"{name}.json"), "w", encoding="utf-8") as file:
+        json.dump(names, file)
+
+
+def material_values():
+    """The Principled values of every material as built: what a material import check compares with the 67js description."""
+    values = {}
+    for material in bpy.data.materials:
+        if not material.use_nodes:
+            continue
+        for node in material.node_tree.nodes:
+            if node.type == "BSDF_PRINCIPLED":
+                values[material.name] = {
+                    "color": [round(channel, 4) for channel in node.inputs["Base Color"].default_value[:3]],
+                    "roughness": round(node.inputs["Roughness"].default_value, 4),
+                    "metallic": round(node.inputs["Metallic"].default_value, 4),
+                    "specularLevel": round(node.inputs["Specular IOR Level"].default_value, 4),
+                    "coat": round(node.inputs["Coat Weight"].default_value, 4),
+                    "linked": [socket.name for socket in node.inputs if socket.links and socket.name in ("Base Color", "Roughness", "Metallic", "Specular IOR Level")],
+                }
+    return values
 
 
 def paint_floor(scene, grey):
@@ -975,6 +1059,21 @@ def main():
         flag_index = arguments.index("--floor-color")
         floor_grey = float(arguments[flag_index + 1])
         del arguments[flag_index:flag_index + 2]
+    no_glossy = "--no-glossy" in arguments
+    if no_glossy:
+        arguments.remove("--no-glossy")
+    material_ids = "--material-ids" in arguments
+    if material_ids:
+        arguments.remove("--material-ids")
+    print_materials = "--print-materials" in arguments
+    if print_materials:
+        arguments.remove("--print-materials")
+    no_fog = "--no-fog" in arguments
+    if no_fog:
+        arguments.remove("--no-fog")
+    passes = "--passes" in arguments
+    if passes:
+        arguments.remove("--passes")
     view_transform = None
     if "--view-transform" in arguments:
         flag_index = arguments.index("--view-transform")
@@ -991,13 +1090,34 @@ def main():
         with open(os.path.join(scene_directory, file_name), encoding="utf-8") as file:
             description = json.load(file)
         scene = build_scene(description, root)
+        if print_materials:
+            print("MATERIALS " + json.dumps({scene_id: material_values()}))
+            continue
+        if material_ids:
+            render_material_ids(scene, work_directory, f"{scene_id}-materials")
+            print(f"RENDERED {scene_id} material ids")
+            continue
+        if passes:
+            configure_cycles(scene)
+            seconds = render_passes(scene, work_directory, f"{scene_id}-passes")
+            print(f"RENDERED {scene_id} as cycles passes: {seconds:.1f} s")
+            continue
+        if no_glossy:
+            remove_glossy(scene)
+            configure_cycles(scene)
+            seconds = render_to_numpy(scene, work_directory, f"{scene_id}-cycles-noglossy")
+            print(f"RENDERED {scene_id} as cycles without glossy: {seconds:.1f} s")
+            continue
         if view_transform is not None:
             configure_cycles(scene)
             seconds = render_with_view_transform(scene, work_directory, f"{scene_id}-cycles-{view_transform.lower().replace(' ', '-')}", view_transform)
             print(f"RENDERED {scene_id} as cycles with {view_transform}: {seconds:.1f} s")
             continue
-        if world_scale is not None or sun_scale is not None or bounces is not None or floor_grey is not None:
+        if world_scale is not None or sun_scale is not None or bounces is not None or floor_grey is not None or no_fog:
             suffix = ""
+            if no_fog and "Fog" in bpy.data.objects:
+                bpy.data.objects.remove(bpy.data.objects["Fog"])
+                suffix += "-nofog"
             if bounces is not None:
                 suffix += f"-bounces{bounces}"
             if floor_grey is not None:

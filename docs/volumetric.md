@@ -2,6 +2,8 @@
 
 Available from version `0.4.0`.
 
+The fog code is an addon: `import '@codepawlhq/67js/addons/fog-shader'` before the first frame that draws a fog, or a renderer that draws one throws and names this import. Recipes load it by themselves (`await loadAgentSceneModules(recipe)`), and the MCP server and the film player already do.
+
 Enable `{ hdr: true, depth: true }` when constructing an opaque, non-benchmark `Renderer67`. Active fog requires WebGL 2 `EXT_color_buffer_float`. Unsupported HDR negotiation rejects active fog. The depth option retains a resolved depth texture across frames and includes it in `memoryPlan`.
 
 ```js
@@ -42,8 +44,43 @@ renderer.render({ eye: [0, 2, 5], target: [0, 1, 0], time: 0 });
 | `drift` | `[0.03, 0, 0]` | Three components within ±100, scene units per second |
 | `maxDistance` | `100` | `0.01…10,000`, ray distance in scene units |
 | `shadowAmbient` | derived | `0…1`; the share of `ambient` the fog keeps where the sun's shadow covers it. Left unset, 32 upward rays from the middle of the fog box decide: a closed room keeps 0.15, open ground under a sky keeps 1, and a partly covered scene lands between. Set it to override |
+| `field` | none | A fog field, see below |
+| `profile` | `'exponential'` | `'exponential'` or `'smoothstep'`; the vertical shape of a layer when a `field` is set |
+| `flowStrength` | `1` | `0…100`; how far the noise travels along the field's velocity, as a share of velocity times `flowPeriod` |
+| `flowPeriod` | `2` | `0.01…1,000` seconds; how often a noise lookup restarts |
+| `detailOctaves` | `1` | Integer `1…3`; noise octaves at 1x, 2x and 4x `noiseScale`. Above 1 the frame compiles the detail step in |
+| `detailAmount` | `0.5` | `0…1`; weight of the extra octaves against the base noise, which keeps its own weight |
+| `warp` | `0` | `0…4`; domain warp strength in noise cells, for wisps and curls |
+| `contrast` | `1` | `0…4`; stretches the noise around its middle, so thin gaps sit next to thick patches |
+| `profileSoftness` | `0.5` | `0…0.95`; where the `'smoothstep'` layer top starts to fade, as a share of the layer height. Lower tapers from nearer the floor |
+| `keyScattering` | `1` | `0…10`; scales the key light's in-scattering (the shadow-mapped god rays) and leaves `ambient` alone |
+| `scatterOctaves` | `1` | Integer `1…4`; above 1 the key light's in-scatter sums octaves that approximate multiple scattering (Wrenninge et al. 2015). Octave n scatters `multiScatter`^n as much, sees `multiExtinction`^n of the extinction and has `multiAnisotropy`^n of the anisotropy. Each octave needs the optical depth to the sun, three extra density taps per step |
+| `multiScatter`, `multiExtinction`, `multiAnisotropy` | `0.5`, `0.5`, `0.5` | `0…1` each; the octave factors above. They act only with `scatterOctaves` above 1 |
+| `keyTransmittance` | `0` | `0…1`; how much of the fog between a point and the sun dims the key light scattered there (three taps along the light, to the box exit). 0 keeps today's look |
+| `surfaceTransmittance` | `0` | `0…1`; the same dimming for the key light on a lit surface inside the box, so a dense haze dims a sunlit floor. 0 keeps today's look |
 
 Values must be finite numbers. Active volume fog accepts finite frame time within ±1,000,000 seconds and a nonzero light direction with components within ±1,000,000. Noise samples absolute time, so backward seeks reproduce earlier density.
+
+## Fog field: density and velocity per footprint cell
+
+`volumeFog.field` is a 2D texture over the box's x/z footprint that the caller fills each frame, for fog that reacts to things (a character walks through it, a slam pushes it away). 67js only samples it; the simulation is the caller's.
+
+```js
+const data = new Float32Array(160 * 160 * 4); // RGBA, row 0 at the box's minimum z, column 0 at its minimum x
+// r: density multiplier (1 = the fog as is, 0 = a hole), g: layer height in metres, b: velocity x, a: velocity z (metres per second)
+renderer.setFogField({ width: 160, height: 160, data }); // stays until replaced; setFogField(null) clears it
+// or per frame: environment: { volumeFog: { density: 1.2, minimum, maximum, profile: 'smoothstep', field: { width: 160, height: 160, data } } }
+```
+
+- Density at a point is `density * field.r * profile(y / field.g) * noise`, with `y` measured from `minimum[1]`. `profile` is `exp(-y / g)` for `'exponential'` and `1 - smoothstep(0.5, 1, y / g)` for `'smoothstep'`, a flat body with a soft, readable top. With a field, `heightFalloff` is not used: the field's layer height replaces it.
+- The texture is RGBA16F, linear filtered and clamped at the edges, so the field may be coarse. `data` is a `Float32Array` of `width * height * 4` finite values; `width` and `height` are integers within `1…2048`. Anything else throws and names what it wanted.
+- A frame with a field uploads it, so rewriting the same `Float32Array` between frames is enough. The same size writes into the existing texture (`texSubImage2D`); a new size allocates a new one. `setFogField` wins over a `field` in the frame or constructor environment.
+- Flow: the noise lookup is carried along the field's velocity by two lookups that restart half a `flowPeriod` apart and cross-fade (Vlachos, "Water Flow in Portal 2", 2010), so detail swirls with the flow instead of drifting one way. It depends on frame time and the field only, so the same time and field give the same pixels after any seek. The constant `drift` still applies. Noise contrast dips slightly mid-fade, as in any flow map.
+- A fog without a field is drawn by the program it had before, pixel for pixel. The first frame with a field or a light compiles its program before drawing.
+
+## Point and spot lights in the fog
+
+Every point and spot light of the frame (`environment.pointLights`, `spotLights`) scatters in the march: points first, then spots, at most 8. Each uses the light's range window and inverse square (the same as lit surfaces, with the light's radius floored at 0.1 m so the glow has no spike), the spot cone, its colour times intensity and the fog's Henyey-Greenstein phase. There are no shadows and no light linking in the fog. Light beyond the eighth is left out.
 
 ## Sky visibility of the fog
 
@@ -55,12 +92,16 @@ The same option carries a second term, the light that surfaces give the fog. The
 
 The fullscreen march clips against resolved opaque depth, supports perspective and orthographic cameras, and stops at the volume boundary or maximum distance. It integrates Beer-Lambert extinction and directional single scattering with a Henyey-Greenstein phase function. It uses the existing directional shadow map and key-light color. Keep authored shadow bounds aligned with the light direction and covering the medium.
 
-`part.castShadow: false` excludes a mesh from shadow rendering while keeping it visible and opaque in the color/depth pass. The flag defaults to true and must be boolean. Shadow-casting groups use separate batches. Changing a part's casting regime requires a new renderer. `updateParts()` rejects that change. A luminous window can omit its shadow, but remains an opaque emissive surface rather than transparent glass.
+Parts also take `receiveShadow`, `holdout`, `shadowCatcher` and `visible`; see [agent-scene.md](agent-scene.md#visibility-and-render-flags). `part.castShadow: false` excludes a mesh from shadow rendering while keeping it visible and opaque in the color/depth pass. The flag defaults to true and must be boolean. Shadow-casting groups use separate batches. Changing a part's casting regime requires a new renderer. `updateParts()` rejects that change. A luminous window can omit its shadow, but remains an opaque emissive surface rather than transparent glass.
 
 ## Cost and limits
 
 Resolved depth adds four estimated bytes per rendered pixel, or 2,073,600 bytes at 960 × 540. The planner reduces render dimensions when needed. The target is allocated at construction/resize, reused across frames and released by `dispose()`. The march adds no additional volume textures or geometry, but shading cost grows with covered pixels and step count.
 
-This implements one bounded medium and one directional scattering source. Point-light scattering, multiple scattering, attenuation toward the source, transparent depth, volume grids, particles, temporal accumulation and half-resolution rendering remain unfinished. The legacy film explosion is separate and does not use this depth-clipped medium. Fog runs after bloom extraction, so scattering itself does not feed bloom.
+This implements one bounded medium, a directional source with shadows and up to 8 unshadowed point and spot lights. Multiple scattering, attenuation toward the source, transparent depth, volume grids, particles, temporal accumulation and half-resolution rendering remain unfinished. The legacy film explosion is separate and does not use this depth-clipped medium. Fog runs after bloom extraction, so scattering itself does not feed bloom.
+
+Measured at 1920 × 1080 with 24 steps on an RTX 3060 shared with other jobs, whole frame (a small scene, fog and read-back): the fog as before 3.6 to 3.7 ms; with a field 4.8 to 5.1 ms (about 1.3 ms more); with 8 point lights 7.3 to 7.4 ms (about 0.46 ms per light); both 8.6 to 8.8 ms. Numbers move with other jobs on the card.
 
 Run `node scripts/smoke-volumetric.mjs` with the development server running for native GPU extinction, foreground clipping, directional shadow, long-distance ray, resource reuse and disposal checks. Run `node scripts/benchmark-volumetric.mjs` for a fixed laboratory comparison and deterministic noise seeking. These fixtures establish behavior, not cinematic trailer quality.
+
+In a scene with an irradiance grid (`bake.irradianceGrid`) the bounce term is the grid's mean light at the cell instead of the fog's own 64 rays: the grid already holds the sun's bounce, the lights and the emission over several bounces, so the sun is not left out there. The fog's ambient then stands for the sky only (it follows the cell's sky visibility, with no floor for the sun's shadow), because the grid replaces what the ambient stood in for. Measured on the reference halls (FLIP against Cycles, lower is better): `temple-hall-a` 0.1454 to 0.1323, `temple-hall-b` 0.1211 to 0.1085, `temple-hall-c` 0.1078 to 0.0874, `temple-hall` 0.0576 to 0.0513. `dark-shaft`, a small room with dense fog, goes from 0.0569 to 0.0732: the grid's light in its shade is about three times the fog's old stand-in, and Cycles draws that shade darker still.

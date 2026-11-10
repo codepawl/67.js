@@ -10,11 +10,11 @@ import { compileProgram, fullscreenVertex } from './gl-program.js';
 // the per-pixel rotation comes from the pixel position, so a seek to a frame repeats the same pixels.
 
 const DEPTH_OF_FIELD_SAMPLES = 32;
-const MOTION_BLUR_SAMPLES = 16;
+export const MOTION_BLUR_SAMPLES = 16;
 // Largest blur circle as a fraction of image height at full blur; the blur setting scales it from zero.
 const MAXIMUM_BLUR_HEIGHT_FRACTION = 0.05;
 // Longest motion streak as a fraction of the frame, so a camera cut cannot smear the whole image.
-const MAXIMUM_STREAK = 0.1;
+export const MAXIMUM_STREAK = 0.1;
 
 export const sharedFragmentHeader = `#version 300 es
 precision highp float;
@@ -184,7 +184,8 @@ function createMotionBlurStage() {
     fragment: motionBlurFragment,
     uniformNames: ['previousViewProjection'],
     // Without a previous camera there is no known motion, so the frame passes through untouched.
-    isActive: (effects, frame) => effects.motionBlur.shutter > 0 && Boolean(frame.previousCamera),
+    // A frame that carries object motion is blurred by the object stage, which also covers the camera, so the two never stack.
+    isActive: (effects, frame) => effects.motionBlur.shutter > 0 && Boolean(frame.previousCamera) && !frame.objectMotion,
     setUniforms(context, uniforms, renderer, frame) {
       context.uniformMatrix4fv(uniforms.previousViewProjection, false, previousViewProjectionOf(renderer, frame));
     },
@@ -192,7 +193,7 @@ function createMotionBlurStage() {
 }
 
 // The previous camera only replaces what it names (eye, target, up, lens), so a partial camera works.
-function previousViewProjectionOf(renderer, frame) {
+export function previousViewProjectionOf(renderer, frame) {
   const previous = { ...frame, ...frame.previousCamera };
   const aspect = renderer.canvas.width / renderer.canvas.height;
   const projection = applyProjection(mat4.create(), previous, aspect, { world: renderer.world });
@@ -209,4 +210,17 @@ export function installCameraEffects(renderer) {
     renderer.postStages.push(createDepthOfFieldStage(), createMotionBlurStage());
   }
   return renderer;
+}
+
+// A lens at this f-stop or wider (smaller number) gets the full blur setting; narrower stops scale it down in proportion.
+const FULL_BLUR_F_STOP = 1.4;
+
+/**
+ * The effects of one frame when the camera carries an f-stop: depth of field with the blur that stop gives (1.4 / fStop, at most
+ * 1), focused on the camera's target. Effects with their own blur (a timeline shot's) are left as they are.
+ */
+export function effectsWithFStop(effects, camera) {
+  if (camera.fStop === undefined || effects.depthOfField.blur > 0) return effects;
+  const focusDistance = Math.max(0.01, Math.hypot(...camera.target.map((component, axis) => component - camera.eye[axis])));
+  return { ...effects, depthOfField: { blur: Math.min(1, FULL_BLUR_F_STOP / camera.fStop), focusDistance } };
 }

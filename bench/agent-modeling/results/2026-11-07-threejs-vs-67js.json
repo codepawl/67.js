@@ -1,0 +1,580 @@
+{
+  "run": "2026-11-07-threejs-vs-67js",
+  "issue": 31,
+  "model": "claude-sonnet-5-5",
+  "date": "2026-11-07T16:28:52.048Z",
+  "scope": "three.js half and 67js MCP side; the official Blender MCP half needs a VM and is not run",
+  "threeVersion": "0.187.0",
+  "runsPerTaskPerSystem": 1,
+  "summary": {
+    "67js MCP": {
+      "runs": 6,
+      "passed": 6,
+      "meanToolCalls": 3.2,
+      "meanTokens": 374760,
+      "meanLook": 0.932,
+      "meanWallSeconds": 24
+    },
+    "three.js by code": {
+      "runs": 6,
+      "passed": 5,
+      "meanToolCalls": 8.8,
+      "meanTokens": 268655,
+      "meanLook": 0.926,
+      "meanWallSeconds": 359
+    }
+  },
+  "records": [
+    {
+      "system": "67js MCP",
+      "task": "crate",
+      "attempt": 1,
+      "pass": true,
+      "passed": 8,
+      "total": 8,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 4,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 1,
+        "scene_create": 1,
+        "scene_look": 1,
+        "mesh_edit": 1,
+        "scene_export_recipe": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "mesh",
+          "box"
+        ],
+        "meshOperations": [
+          "inset_individual"
+        ],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        },
+        "images": [
+          "crate-front.png",
+          "crate-side.png",
+          "crate-three-quarter.png"
+        ]
+      },
+      "turns": 6,
+      "inputTokens": 445726,
+      "outputTokens": 1751,
+      "wallSeconds": 27,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "system": "67js MCP",
+      "task": "bolt",
+      "attempt": 1,
+      "pass": true,
+      "passed": 7,
+      "total": 7,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 2,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 1,
+        "scene_create": 1,
+        "scene_export_recipe": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "cylinder"
+        ],
+        "meshOperations": [],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        },
+        "images": [
+          "bolt-front.png",
+          "bolt-side.png",
+          "bolt-three-quarter.png"
+        ]
+      },
+      "turns": 4,
+      "inputTokens": 232980,
+      "outputTokens": 1112,
+      "wallSeconds": 21,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "system": "67js MCP",
+      "task": "window",
+      "attempt": 1,
+      "pass": true,
+      "passed": 5,
+      "total": 5,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 4,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 2,
+        "scene_create": 1,
+        "scene_inspect": 1,
+        "mesh_inspect": 1,
+        "scene_export_recipe": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "extrude"
+        ],
+        "meshOperations": [],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        },
+        "images": [
+          "window-front.png",
+          "window-side.png",
+          "window-three-quarter.png"
+        ]
+      },
+      "turns": 7,
+      "inputTokens": 546049,
+      "outputTokens": 1464,
+      "wallSeconds": 26,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "system": "67js MCP",
+      "task": "table",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 2,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 1,
+        "scene_create": 1,
+        "scene_export_recipe": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "box"
+        ],
+        "meshOperations": [],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 0.1684,
+            "three-quarter": 0.6073
+          },
+          "mean": 0.5919
+        },
+        "images": [
+          "table-front.png",
+          "table-side.png",
+          "table-three-quarter.png"
+        ]
+      },
+      "turns": 4,
+      "inputTokens": 232283,
+      "outputTokens": 1109,
+      "wallSeconds": 18,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "system": "67js MCP",
+      "task": "fence",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 2,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 1,
+        "scene_create": 1,
+        "scene_export_recipe": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "box"
+        ],
+        "meshOperations": [],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        },
+        "images": [
+          "fence-front.png",
+          "fence-side.png",
+          "fence-three-quarter.png"
+        ]
+      },
+      "turns": 4,
+      "inputTokens": 234011,
+      "outputTokens": 1253,
+      "wallSeconds": 20,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "system": "67js MCP",
+      "task": "bracket",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 5,
+      "toolErrors": 0,
+      "toolsByName": {
+        "ToolSearch": 1,
+        "scene_create": 1,
+        "mesh_inspect": 1,
+        "mesh_edit": 1,
+        "scene_apply": 1,
+        "scene_export_recipe": 1
+      },
+      "branchCalls": 0,
+      "relationCalls": 0,
+      "pathQueries": 0,
+      "features": {
+        "geometryTypes": [
+          "mesh"
+        ],
+        "meshOperations": [
+          "boolean"
+        ],
+        "motionIk": [],
+        "motionTracks": 0
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        },
+        "imagesError": "the look harness page could not fetch the boolean wasm, so no preview images; the silhouette is scored from the exported recipe afterwards"
+      },
+      "turns": 7,
+      "inputTokens": 548871,
+      "outputTokens": 1949,
+      "wallSeconds": 30,
+      "exitCode": 0,
+      "stopped": "success"
+    },
+    {
+      "system": "three.js by code",
+      "task": "crate",
+      "attempt": 1,
+      "pass": true,
+      "passed": 8,
+      "total": 8,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 9,
+      "toolErrors": 1,
+      "toolsByName": {
+        "Bash": 4,
+        "TaskStop": 2,
+        "Edit": 2,
+        "Read": 1
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 10,
+      "inputTokens": 317368,
+      "outputTokens": 6905,
+      "wallSeconds": 392,
+      "exitCode": 0,
+      "stopped": "success",
+      "filesWritten": [
+        ".chrome-profile",
+        "build.mjs",
+        "geometry.json",
+        "package.json",
+        "scene.png"
+      ]
+    },
+    {
+      "system": "three.js by code",
+      "task": "bolt",
+      "attempt": 1,
+      "pass": true,
+      "passed": 7,
+      "total": 7,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 7,
+      "toolErrors": 3,
+      "toolsByName": {
+        "Bash": 6,
+        "Read": 1
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 0.9621,
+            "side": 0.9621,
+            "three-quarter": 0.9666
+          },
+          "mean": 0.9636
+        }
+      },
+      "turns": 8,
+      "inputTokens": 308935,
+      "outputTokens": 5416,
+      "wallSeconds": 182,
+      "exitCode": 0,
+      "stopped": "success",
+      "filesWritten": [
+        "build.mjs",
+        "chrome-profile",
+        "geometry.json",
+        "package.json",
+        "render.html",
+        "scene.png"
+      ]
+    },
+    {
+      "system": "three.js by code",
+      "task": "window",
+      "attempt": 1,
+      "pass": false,
+      "passed": 4,
+      "total": 5,
+      "pngPass": true,
+      "failed": [
+        "lint: open edges"
+      ],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 11,
+      "toolErrors": 0,
+      "toolsByName": {
+        "Bash": 5,
+        "TaskStop": 2,
+        "Edit": 3,
+        "Read": 1
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 12,
+      "inputTokens": 330002,
+      "outputTokens": 4616,
+      "wallSeconds": 302,
+      "exitCode": 0,
+      "stopped": "success",
+      "filesWritten": [
+        "build.mjs",
+        "geometry.json",
+        "package.json",
+        "render.html",
+        "scene.png"
+      ]
+    },
+    {
+      "system": "three.js by code",
+      "task": "table",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 8,
+      "toolErrors": 1,
+      "toolsByName": {
+        "Bash": 7,
+        "Read": 1
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 0.1684,
+            "three-quarter": 0.6073
+          },
+          "mean": 0.5919
+        }
+      },
+      "turns": 1,
+      "inputTokens": 44307,
+      "outputTokens": 84,
+      "wallSeconds": 871,
+      "exitCode": 0,
+      "stopped": "success",
+      "filesWritten": [
+        "build.mjs",
+        "geometry.json",
+        "package.json",
+        "scene.png"
+      ]
+    },
+    {
+      "system": "three.js by code",
+      "task": "fence",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 11,
+      "toolErrors": 1,
+      "toolsByName": {
+        "Bash": 5,
+        "TaskStop": 2,
+        "PowerShell": 1,
+        "Edit": 2,
+        "Read": 1
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 13,
+      "inputTokens": 349860,
+      "outputTokens": 3328,
+      "wallSeconds": 292,
+      "exitCode": 0,
+      "stopped": "success",
+      "filesWritten": [
+        "build.mjs",
+        "geometry.json",
+        "package.json",
+        "scene.png"
+      ]
+    },
+    {
+      "system": "three.js by code",
+      "task": "bracket",
+      "attempt": 1,
+      "pass": true,
+      "passed": 6,
+      "total": 6,
+      "pngPass": true,
+      "failed": [],
+      "model": "claude-sonnet-5-5",
+      "toolCalls": 7,
+      "toolErrors": 0,
+      "toolsByName": {
+        "Bash": 4,
+        "Write": 1,
+        "Read": 2
+      },
+      "look": {
+        "silhouette": {
+          "views": {
+            "front": 1,
+            "side": 1,
+            "three-quarter": 1
+          },
+          "mean": 1
+        }
+      },
+      "turns": 8,
+      "inputTokens": 234719,
+      "outputTokens": 6392,
+      "wallSeconds": 114,
+      "exitCode": 0,
+      "stopped": "success",
+      "filesWritten": [
+        "build.mjs",
+        "geometry.json",
+        "package.json",
+        "render.html",
+        "scene.png"
+      ]
+    }
+  ]
+}

@@ -47,7 +47,7 @@ function textureMeanAlbedo(map) {
 }
 
 function groundAlbedo(material) {
-  const surface = !material.graph && material.alphaMode !== 'blend' && !(material.transmission > 0) && !EXCLUDED_TAGS.has(material.tag)
+  const surface = !material.graph && !['blend', 'add'].includes(material.alphaMode) && !(material.transmission > 0) && !EXCLUDED_TAGS.has(material.tag)
   if (!surface || !Array.isArray(material.color) || (material.metallic ?? 0) > GROUND_MAXIMUM_METALLIC) {
     return null
   }
@@ -118,7 +118,7 @@ export function withGroundBounce(map, { albedo, keyColor = [0, 0, 0], lightDirec
 const cache = new WeakMap()
 
 function isDrawnWithBakedLight(parts) {
-  return parts.some(part => part.material?.lightMap)
+  return parts.some(part => part.material?.lightMap || part.material?.irradianceGrid)
 }
 
 function isClosedRoom(parts) {
@@ -206,7 +206,7 @@ export function findRoomSurface(parts) {
   let area = 0
   const albedoSum = [0, 0, 0]
   for (const part of parts) {
-    if (part.material?.alphaMode === 'blend') {
+    if (['blend', 'add'].includes(part.material?.alphaMode)) {
       continue
     }
     const partArea = areaFacing(part, middle)

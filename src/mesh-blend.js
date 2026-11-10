@@ -90,8 +90,12 @@ ivec2 lastPixel;
 int partAt(ivec2 pixel) {
   ivec2 clamped = clamp(pixel, ivec2(0), lastPixel);
   ivec4 bytes = ivec4(texelFetch(partTexture, clamped, 0) * 255.0 + 0.5);
-  if (bytes.w != (bytes.x * 3 + bytes.y * 5 + bytes.z * 11) % 251 + 1) return 0;
+  if (bytes.w == 0) return 0;
+  if (bytes.w != (bytes.x * 3 + bytes.y * 5 + bytes.z * 11) % 251 + 1) return -1;
   return bytes.x + bytes.y * 256 + bytes.z * 65536;
+}
+float radiusOf(int part) {
+  return part > 0 ? texelFetch(radiusTexture, ivec2(part & ${TABLE_WIDTH - 1}, part / ${TABLE_WIDTH}), 0).r : 0.0;
 }
 vec3 positionAt(ivec2 pixel) {
   ivec2 clamped = clamp(pixel, ivec2(0), lastPixel);
@@ -100,18 +104,22 @@ vec3 positionAt(ivec2 pixel) {
   vec4 world = inverseViewProjection * ndc;
   return world.xyz / world.w;
 }
-// The shorter step of the two sides, skipping a zero step (the frame edge clamps a neighbour onto the pixel itself).
+// The shorter step of the two sides, skipping a zero step and staying on the same part where a neighbour crosses a seam.
 vec3 shorterStep(vec3 first, vec3 second) {
   float firstLength = dot(first, first);
   float secondLength = dot(second, second);
   return (secondLength < 1e-14 || (firstLength >= 1e-14 && firstLength < secondLength)) ? first : second;
 }
-vec3 normalAt(ivec2 pixel, vec3 center) {
-  vec3 right = positionAt(pixel + ivec2(1, 0)) - center;
-  vec3 left = center - positionAt(pixel - ivec2(1, 0));
-  vec3 up = positionAt(pixel + ivec2(0, 1)) - center;
-  vec3 down = center - positionAt(pixel - ivec2(0, 1));
-  vec3 raw = cross(shorterStep(right, left), shorterStep(up, down));
+vec3 stepAlong(ivec2 pixel, ivec2 delta, vec3 center, int part) {
+  vec3 forward = positionAt(pixel + delta) - center;
+  vec3 backward = center - positionAt(pixel - delta);
+  bool forwardSame = partAt(pixel + delta) == part;
+  bool backwardSame = partAt(pixel - delta) == part;
+  if (forwardSame != backwardSame) return forwardSame ? forward : backward;
+  return shorterStep(forward, backward);
+}
+vec3 normalAt(ivec2 pixel, vec3 center, int part) {
+  vec3 raw = cross(stepAlong(pixel, ivec2(1, 0), center, part), stepAlong(pixel, ivec2(0, 1), center, part));
   vec3 toEye = normalize(eye - center);
   if (dot(raw, raw) < 1e-20) return toEye;
   vec3 normal = normalize(raw);
@@ -124,9 +132,23 @@ void main() {
   outputColor = source;
   int part = partAt(pixel);
   if (part == 0) return;
-  float radius = texelFetch(radiusTexture, ivec2(part & ${TABLE_WIDTH - 1}, part / ${TABLE_WIDTH}), 0).r;
+  ivec2 normalPixel = pixel;
+  float radius = radiusOf(part);
+  if (part < 0) {
+    const ivec2 neighbours[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+    for (int side = 0; side < 4; side++) {
+      ivec2 neighbour = pixel + neighbours[side];
+      int candidate = partAt(neighbour);
+      float candidateRadius = radiusOf(candidate);
+      if (candidateRadius > radius) {
+        part = candidate;
+        radius = candidateRadius;
+        normalPixel = neighbour;
+      }
+    }
+  }
   if (radius <= 0.0) return;
-  vec3 center = positionAt(pixel);
+  vec3 center = positionAt(normalPixel);
   float pixelRadius = radius * pixelsPerMetre / (orthographic > 0.5 ? 1.0 : length(center - eye));
   pixelRadius = clamp(pixelRadius, 1.0, ${MAXIMUM_PIXEL_RADIUS}.0);
   float reach = radius * 3.0;
@@ -134,24 +156,26 @@ void main() {
   float otherWeight = 0.0;
   ivec2 nearestTap = pixel;
   vec3 nearestPosition = center;
+  int nearestPart = 0;
   bool found = false;
   for (int index = 0; index < ${TAP_COUNT}; index++) {
     vec3 tapOffset = tapOffsets[index];
     ivec2 tap = pixel + ivec2(round(tapOffset.xy * pixelRadius));
     int tapPart = partAt(tap);
-    if (tapPart == 0 || tapPart == part) continue;
+    if (tapPart <= 0 || tapPart == part || radiusOf(tapPart) > 0.0) continue;
     vec3 tapPosition = positionAt(tap);
     if (distance(tapPosition, center) > reach) continue;
     if (!found) {
       nearestTap = tap;
       nearestPosition = tapPosition;
+      nearestPart = tapPart;
     }
     found = true;
     colorSum += tapOffset.z * texelFetch(sourceTexture, clamp(tap, ivec2(0), lastPixel), 0).rgb;
     otherWeight += tapOffset.z;
   }
   if (!found) return;
-  float creased = smoothstep(0.05, 0.4, 1.0 - dot(normalAt(pixel, center), normalAt(nearestTap, nearestPosition)));
+  float creased = smoothstep(0.05, 0.4, 1.0 - dot(normalAt(normalPixel, center, part), normalAt(nearestTap, nearestPosition, nearestPart)));
   float amount = smoothstep(0.0, 0.5, otherWeight / ${TAP_TOTAL_WEIGHT}) * creased;
   outputColor.rgb = mix(source.rgb, colorSum / otherWeight, amount);
 }`;
@@ -204,7 +228,7 @@ function sameTable(first, second) {
 // integer target, so the resolve averages; see partAt). Blended parts write 0: they draw over the opaque pixel without writing depth.
 registerShaderFeatureCode('meshBlend', Object.freeze({
   declarations: 'layout(location = 1) out highp vec4 partIdentifier;\n',
-  surfaceHook: `  uint partNumber = alphaMode > 1.5 ? 0u : uint(renderPassObjectBase + instanceEmission.w + 1.0);
+  surfaceHook: `  uint partNumber = canopyShaded || TAG_WATER || alphaMode > 1.5 ? 0u : uint(renderPassObjectBase + instanceEmission.w + 1.0);
   uvec3 partBytes = uvec3(partNumber & 255u, (partNumber >> 8) & 255u, partNumber >> 16);
   partIdentifier = vec4(vec3(partBytes), float((partBytes.x * 3u + partBytes.y * 5u + partBytes.z * 11u) % 251u + 1u)) / 255.0;
 `,

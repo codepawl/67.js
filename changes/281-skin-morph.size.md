@@ -1,5 +1,0 @@
-- entry:surface-attachment: it imports skinning.js, which now holds the skin shader code and its registration (about 1.2 KB gzip) that left the core bundle.
-- entry:retarget: it imports skinning.js, which now holds the skin shader code and its registration (about 1.2 KB gzip) that left the core bundle.
-- entry:skeleton-pose: it imports skinning.js, which now holds the skin shader code and its registration (about 1.2 KB gzip) that left the core bundle.
-- entry:crowd-skinning: it imports skinning.js, which now holds the skin shader code and its registration (about 1.1 KB gzip) that left the core bundle.
-- archive: the explosion step ships as its own module and skinning and morph carry their renderer code, so the package grows a little while the core bundle drops under its 50,000 byte goal; the rest is growth merged on main since the ceiling was last raised.

@@ -1,1 +1,0 @@
-- MCP: `scene_apply` (`set-environment`) and `scene_create_asset` no longer repeat the whole environment schema; they name `recipe.environment` in `scene_create` and the server still checks every field. The tool schemas are about 15 KB smaller, and the environment field descriptions shortened in #444 are back.

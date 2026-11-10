@@ -93,10 +93,10 @@ async function waitForJob(jobId) {
 
 try {
   await client.connect(transport);
-  assert.equal((await client.listTools()).tools.length, 22);
-  const capabilities = (await call('scene_capabilities')).structuredContent;
-  assert.equal(capabilities.scene.postPasses.limits.maxPasses, 4);
-  assert.ok(capabilities.scene.operations.includes('set-post-passes'));
+  assert.equal((await client.listTools()).tools.length, 23);
+  const capabilities = (await call('scene_capabilities', { topic: 'postPasses' })).structuredContent;
+  assert.equal(capabilities.value.limits.maxPasses, 4);
+  assert.ok((await call('scene_capabilities', { topic: 'operations' })).structuredContent.value.includes('set-post-passes'));
 
   const created = (await call('scene_create', { recipe: createAgentPreviewFixture() })).structuredContent;
   const sessionId = created.sessionId;
@@ -123,7 +123,7 @@ try {
   // The session is still usable: the fix draws, and the result is quantised and blocky.
   const fixed = (await call('scene_apply', { sessionId, expectedRevision: brokenRevision, operations: [{ type: 'set-post-passes', postPasses: [ditherPass] }] })).structuredContent;
   assert.equal(fixed.renderSucceeded, true, fixed.renderError);
-  assert.deepEqual(fixed.inspection.postPasses, [{ name: 'pixel-dither', scale: SCALE, uniforms: ['levels:float', 'spread:float'], fragmentBytes: ditherFragment.length }]);
+  assert.deepEqual((await call('scene_inspect', { sessionId })).structuredContent.postPasses, [{ name: 'pixel-dither', scale: SCALE, uniforms: ['levels:float', 'spread:float'], fragmentBytes: ditherFragment.length }]);
   const dithered = await measure(await look(sessionId));
   assert.ok(dithered.colors <= LEVELS ** 3, `the dithered scene should have at most ${LEVELS ** 3} colours, has ${dithered.colors}`);
   assert.ok(dithered.uniformBlockShare > 0.99, `the dithered scene should be ${BLOCK}x${BLOCK} blocks, share ${dithered.uniformBlockShare}`);

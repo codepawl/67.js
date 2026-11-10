@@ -9,7 +9,35 @@ function finiteFloat(value) {
   return Number.isFinite(value) && Number.isFinite(Math.fround(value));
 }
 
-function matrixDeterminant(values, offset) {
+function isIdentityMatrix(values) {
+  for (let index = 0; index < 16; index++) {
+    if (values[index] !== IDENTITY_MATRIX[index]) return false;
+  }
+  return true;
+}
+
+/**
+ * out = a * b for 4x4 matrices at offsets, in the operation order of gl-matrix's mat4.multiply, so the Float32 results
+ * are the same without copying each operand into a workspace first. out may be the same array and offset as a or b.
+ */
+function multiplyAt(out, outOffset, a, aOffset, b, bOffset) {
+  const a00 = a[aOffset], a01 = a[aOffset + 1], a02 = a[aOffset + 2], a03 = a[aOffset + 3];
+  const a10 = a[aOffset + 4], a11 = a[aOffset + 5], a12 = a[aOffset + 6], a13 = a[aOffset + 7];
+  const a20 = a[aOffset + 8], a21 = a[aOffset + 9], a22 = a[aOffset + 10], a23 = a[aOffset + 11];
+  const a30 = a[aOffset + 12], a31 = a[aOffset + 13], a32 = a[aOffset + 14], a33 = a[aOffset + 15];
+  for (let column = 0; column < 16; column += 4) {
+    const b0 = b[bOffset + column];
+    const b1 = b[bOffset + column + 1];
+    const b2 = b[bOffset + column + 2];
+    const b3 = b[bOffset + column + 3];
+    out[outOffset + column] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+    out[outOffset + column + 1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+    out[outOffset + column + 2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+    out[outOffset + column + 3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  }
+}
+
+export function matrixDeterminant(values, offset) {
   const matrixXX = Math.fround(values[offset]);
   const matrixYX = Math.fround(values[offset + 1]);
   const matrixZX = Math.fround(values[offset + 2]);
@@ -26,7 +54,12 @@ function matrixDeterminant(values, offset) {
 
 function validateMatrices(values, count, label) {
   if (values?.length !== count * 16) throw new Error(`${label} must contain one matrix per joint.`);
-  for (const value of values) if (!finiteFloat(value)) throw new Error(`${label} must contain finite floats.`);
+  // A Float32Array element is already a float, so finiteness is the whole check; other arrays must also fit a Float32.
+  if (values instanceof Float32Array) {
+    for (let index = 0; index < values.length; index++) if (!Number.isFinite(values[index])) throw new Error(`${label} must contain finite floats.`);
+  } else {
+    for (const value of values) if (!finiteFloat(value)) throw new Error(`${label} must contain finite floats.`);
+  }
   for (let offset = 0; offset < values.length; offset += 16) {
     if (values[offset + 3] !== 0 || values[offset + 7] !== 0 || values[offset + 11] !== 0 || values[offset + 15] !== 1) throw new Error(`${label} must contain affine matrices.`);
     if (Math.abs(matrixDeterminant(values, offset)) < 1e-10) throw new Error(`${label} contains a singular joint transform.`);
@@ -47,31 +80,36 @@ export function createSkinPose(jointCount) {
   return pose;
 }
 
-/** Atomically calculate inverse(meshWorld) * jointWorld * inverseBind * bindMatrix. */
-export function updateSkinPose(pose, jointWorldMatrices, inverseBindMatrices, meshWorldMatrix = IDENTITY_MATRIX, bindMatrix = IDENTITY_MATRIX) {
+/**
+ * Atomically calculate inverse(meshWorld) * jointWorld * inverseBind * bindMatrix. `checks: false` skips the finite,
+ * affine and singular checks for inputs already checked, such as a loaded clip; a mesh world that cannot be inverted still throws.
+ */
+export function updateSkinPose(pose, jointWorldMatrices, inverseBindMatrices, meshWorldMatrix = IDENTITY_MATRIX, bindMatrix = IDENTITY_MATRIX, checks = true) {
   const workspace = poseWorkspaces.get(pose);
   if (!workspace || pose.jointMatrices !== workspace.jointMatrices) throw new Error('Use an unchanged pose from createSkinPose().');
   const count = pose.jointMatrices.length / 16;
-  validateMatrices(jointWorldMatrices, count, 'Joint world matrices');
-  validateMatrices(inverseBindMatrices, count, 'Inverse bind matrices');
-  validateMatrices(meshWorldMatrix, 1, 'Mesh world matrix');
-  validateMatrices(bindMatrix, 1, 'Bind matrix');
+  if (checks) {
+    validateMatrices(jointWorldMatrices, count, 'Joint world matrices');
+    validateMatrices(inverseBindMatrices, count, 'Inverse bind matrices');
+    validateMatrices(meshWorldMatrix, 1, 'Mesh world matrix');
+    validateMatrices(bindMatrix, 1, 'Bind matrix');
+  }
   workspace.meshWorld.set(meshWorldMatrix);
   workspace.bind.set(bindMatrix);
   if (!mat4.invert(workspace.meshInverse, workspace.meshWorld)) throw new Error('Mesh world matrix cannot be inverted.');
-  validateMatrices(workspace.meshInverse, 1, 'Inverse mesh world matrix');
+  if (checks) validateMatrices(workspace.meshInverse, 1, 'Inverse mesh world matrix');
+  // Multiplying by an exact identity returns the same Float32 values, so those products are skipped.
+  const bindIsIdentity = isIdentityMatrix(workspace.bind);
+  const meshInverseIsIdentity = isIdentityMatrix(workspace.meshInverse);
+  const product = workspace.product;
   for (let joint = 0; joint < count; joint++) {
     const offset = joint * 16;
-    for (let component = 0; component < 16; component++) {
-      workspace.world[component] = jointWorldMatrices[offset + component];
-      workspace.inverseBind[component] = inverseBindMatrices[offset + component];
-    }
-    mat4.multiply(workspace.product, workspace.world, workspace.inverseBind);
-    mat4.multiply(workspace.product, workspace.product, workspace.bind);
-    mat4.multiply(workspace.product, workspace.meshInverse, workspace.product);
-    workspace.pending.set(workspace.product, offset);
+    multiplyAt(product, 0, jointWorldMatrices, offset, inverseBindMatrices, offset);
+    if (!bindIsIdentity) multiplyAt(product, 0, product, 0, workspace.bind, 0);
+    if (meshInverseIsIdentity) workspace.pending.set(product, offset);
+    else multiplyAt(workspace.pending, offset, workspace.meshInverse, 0, product, 0);
   }
-  validateMatrices(workspace.pending, count, 'Joint palette');
+  if (checks) validateMatrices(workspace.pending, count, 'Joint palette');
   pose.jointMatrices.set(workspace.pending);
   return pose;
 }
@@ -109,12 +147,60 @@ export function validateSkinGeometry(geometry, pose) {
   validateSkinPose(pose, geometry);
 }
 
-/** Validate weighted normal transforms without allocating temporary matrices. */
+// Distinct (joints, normalized weights) sets of a geometry, keyed by its weight array. The renderer refuses a changed
+// skinIndices or skinWeights identity and packs influences to the GPU once, so the arrays are fixed for a renderer's life.
+const influenceSetCache = new WeakMap();
+
+/** The distinct influence sets in vertex order of first use. Many vertices share one set, and each set gives one transform. */
+export function skinInfluenceSets(geometry) {
+  const cached = influenceSetCache.get(geometry.skinWeights);
+  if (cached && cached.skinIndices === geometry.skinIndices) return cached;
+  const vertexCount = geometry.skinWeights.length / 4;
+  const seen = new Map();
+  const joints = [];
+  const weights = [];
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    let total = 0;
+    for (let influence = 0; influence < 4; influence++) total += geometry.skinWeights[vertex * 4 + influence];
+    const setJoints = [];
+    const setWeights = [];
+    for (let influence = 0; influence < 4; influence++) {
+      setJoints.push(geometry.skinIndices[vertex * 4 + influence]);
+      setWeights.push(Math.fround(geometry.skinWeights[vertex * 4 + influence] / total));
+    }
+    const key = `${setJoints.join(',')}|${setWeights.join(',')}`;
+    if (seen.has(key)) continue;
+    seen.set(key, true);
+    joints.push(...setJoints);
+    weights.push(...setWeights);
+  }
+  const sets = { skinIndices: geometry.skinIndices, joints: Int32Array.from(joints), weights: Float32Array.from(weights) };
+  influenceSetCache.set(geometry.skinWeights, sets);
+  return sets;
+}
+
+// The last check of each pose that found mirrored weighted transforms. The renderer reads it into renderer.diagnostics.
+const reflectedReports = new WeakMap();
+
+/** What the last checked pose drew mirrored: { sets, joints, weights } for the first such influence set, or null. */
+export function reflectedSkinReport(pose) {
+  return reflectedReports.get(pose) ?? null;
+}
+
+/**
+ * Validate weighted normal transforms without allocating temporary matrices, once per distinct influence set.
+ * A singular set throws. A set whose blend mirrors the mesh (linear blend skinning between joints that turn opposite
+ * ways, as a pinched finger) draws pinched, like other engines, and is reported through reflectedSkinReport.
+ */
 export function validateSkinPose(pose, geometry, worldMatrix) {
   const matrices = pose.jointMatrices;
   validateMatrices(matrices, matrices.length / 16, 'Joint palette');
   if (!geometry) return;
-  for (let vertex = 0; vertex < geometry.skinWeights.length / 4; vertex++) {
+  const { joints, weights } = skinInfluenceSets(geometry);
+  const worldDeterminant = worldMatrix ? matrixDeterminant(worldMatrix, 0) : 0;
+  let reflectedSets = 0;
+  let firstReflected = -1;
+  for (let set = 0; set < joints.length / 4; set++) {
     let matrixXX = 0;
     let matrixYX = 0;
     let matrixZX = 0;
@@ -124,11 +210,9 @@ export function validateSkinPose(pose, geometry, worldMatrix) {
     let matrixXZ = 0;
     let matrixYZ = 0;
     let matrixZZ = 0;
-    let total = 0;
-    for (let influence = 0; influence < 4; influence++) total += geometry.skinWeights[vertex * 4 + influence];
     for (let influence = 0; influence < 4; influence++) {
-      const weight = Math.fround(geometry.skinWeights[vertex * 4 + influence] / total);
-      const offset = geometry.skinIndices[vertex * 4 + influence] * 16;
+      const weight = weights[set * 4 + influence];
+      const offset = joints[set * 4 + influence] * 16;
       matrixXX += matrices[offset] * weight;
       matrixYX += matrices[offset + 1] * weight;
       matrixZX += matrices[offset + 2] * weight;
@@ -141,8 +225,24 @@ export function validateSkinPose(pose, geometry, worldMatrix) {
     }
     const determinant = matrixXX * (matrixYY * matrixZZ - matrixYZ * matrixZY) - matrixXY * (matrixYX * matrixZZ - matrixYZ * matrixZX) + matrixXZ * (matrixYX * matrixZY - matrixYY * matrixZX);
     if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-8) throw new Error('Skin pose produces a singular weighted vertex transform.');
-    if (worldMatrix && determinant * matrixDeterminant(worldMatrix, 0) < 0) throw new Error('Reflected weighted skin transforms are unsupported.');
+    if (worldMatrix && determinant * worldDeterminant < 0) {
+      if (firstReflected < 0) firstReflected = set;
+      reflectedSets++;
+    }
   }
+  if (!worldMatrix) return;
+  if (reflectedSets === 0) {
+    reflectedReports.delete(pose);
+    return;
+  }
+  const report = { sets: reflectedSets, joints: [], weights: [] };
+  for (let influence = 0; influence < 4; influence++) {
+    const weight = weights[firstReflected * 4 + influence];
+    if (weight <= 0) continue;
+    report.joints.push(joints[firstReflected * 4 + influence]);
+    report.weights.push(Math.round(weight * 100) / 100);
+  }
+  reflectedReports.set(pose, report);
 }
 
 export function packSkinInfluences(geometry, layout) {
@@ -184,4 +284,31 @@ mat4 jointMatrix(int joint) {
 `,
 });
 
-registerDeformationSupport({ validateSkinGeometry, validateSkinPose, skinTextureLayout, packSkinInfluences });
+// The skinned entries of each renderer part map. A renderer swaps in a new map when its parts change.
+const skinnedPartLists = new WeakMap();
+
+/** renderer.diagnostics warnings for skinned parts whose last checked pose drew mirrored vertices. */
+export function reflectedSkinDiagnostics(partLocations) {
+  let skinnedParts = skinnedPartLists.get(partLocations);
+  if (!skinnedParts) {
+    skinnedParts = [...partLocations].filter(([, location]) => location.skin);
+    skinnedPartLists.set(partLocations, skinnedParts);
+  }
+  const problems = [];
+  for (const [part, location] of skinnedParts) {
+    const report = reflectedSkinReport(location.skin);
+    if (!report) continue;
+    const name = part.name ?? 'a skinned part';
+    const joints = report.joints.map((joint, index) => `joint ${joint} at ${report.weights[index]}`).join(', ');
+    problems.push({
+      kind: 'skin-reflected-vertices',
+      severity: 'warning',
+      target: name,
+      message: `${report.sets} vertex weight set(s) of ${name} mirror in this pose and draw pinched. First: ${joints}.`,
+      fix: 'Move the weights of joints that turn opposite ways onto one joint, such as finger weights onto the hand.',
+    });
+  }
+  return problems;
+}
+
+registerDeformationSupport({ validateSkinGeometry, validateSkinPose, reflectedSkinDiagnostics, skinTextureLayout, packSkinInfluences });

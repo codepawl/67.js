@@ -1,7 +1,7 @@
 import { materialTags } from './shader-registry.js';
 import { mat4, mat3 } from 'gl-matrix';
 import { SPLAT_UNITS, requireSplatSupport, layerTextureSupport, LIGHT_SHADING_FEATURE, SHADING_MODES, LIGHT_SHADING_MAXIMUM_SAMPLES, createVertexShader, vertexShader, liquidFragmentSource, createFragmentShader, liquidPassDrawer, depthFragmentShader, withDepthCode, benchmarkVertexShader, benchmarkFragmentShader, viewTransformShader, createDepthVertexShader } from './shaders.js';
-import { postFragment, createPostFragment, POST_STEPS, skyFragment, bloomFragment } from './post.js';
+import { postFragment, createPostFragment, POST_STEPS, POST_STEPS_WITH_OPTIONAL_CODE, skyFragment, bloomFragment } from './post.js';
 import { fullscreenVertex, startProgram, finishProgram, compileProgram } from './gl-program.js';
 import { ambientOcclusionFragment } from './ambient-occlusion.js';
 import { planRenderSize, estimateTextureBytes, estimateFrameBytes, memoryBudgetError } from './budget.js';
@@ -12,22 +12,29 @@ import { depthLayerOf } from './depth-layer.js';
 import { createLightingState, updateLightingState } from './lighting.js';
 import { RenderTargetLedger } from './render-target-ledger.js';
 import { SHADOW_ATLAS_WIDTH, SHADOW_TILE_SIZE, SHADOW_TILES_PER_ROW, tileViewport, writeShadowTile } from './local-shadows.js';
-import { resolveVolumeFog, volumeShadowAmbient } from './volumetric.js';
+import { resolveVolumeFog, validateFogField } from './volumetric.js';
 import { requireEnvironmentSupport } from './environment-shading.js';
 import { materialLayerState, materialLayerValue } from './material-layers.js';
 import { MaterialSnapshot } from './material-snapshot.js';
 import { fittedFogDensity } from './fog-fit.js';
 import { InstanceSelection, extractFrustumPlanes, geometryBoundingSphere, selectInstances } from './render-culling.js';
 import { resolveShadowLight, shadowBiasPerSlope } from './shadow-light.js';
-import { requireDeformationSupport, texturedReplaceSupport, textureUpdateSupport } from './shader-registry.js';
+import { requireFeatureCode, deformationSupport, requireDeformationSupport, texturedReplaceSupport, textureUpdateSupport } from './shader-registry.js';
 
 const SHADOW_MAP_SIZE = 2048;
 // Liquid and foam see the resolved opaque scene, so they draw in their own pass after it.
 const TRANSLUCENT_TAGS = new Set(['liquid', 'foam']);
-const INSTANCE_STRIDE = 41;
+// The 42nd float is the opacity of a blend or add part, so parts that differ only in opacity share a batch.
+const INSTANCE_STRIDE = 42;
+const OPACITY_OFFSET = 41;
 // Shaders get this in place of an infinite attenuation distance, which is not a safe uniform value.
 const MAX_FINITE_DISTANCE = 3e38;
-const ALPHA_MODES = { opaque: 0, mask: 1, blend: 2 };
+const ALPHA_MODES = { opaque: 0, mask: 1, blend: 2, add: 3 };
+
+/** Blend and add draw after the opaque loop, sorted, without writing depth. */
+function isTranslucentMode(alphaMode) {
+  return alphaMode === 'blend' || alphaMode === 'add';
+}
 const ZERO_VECTOR = Object.freeze([0, 0, 0]);
 const MATERIAL_MAPS = ['map', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap'];
 const MAP_UNIFORMS = ['baseMap', 'normalMap', 'metallicRoughnessMap', 'occlusionMap', 'emissiveMap'];
@@ -46,7 +53,7 @@ const DEFORMING_TAGS = new Set(['foliage', 'grass', 'water', 'fire', 'smoke']);
 // strength, so they can be culled and given levels like rigid parts.
 const SWAY_REACH_PER_STRENGTH = 0.56;
 
-const POST_UNIFORMS = ['transparent', 'frameTexture', 'bloomTexture', 'bloomStrength', 'hdrEnabled', 'grade', 'vignette', 'grainAmount', 'resolution', 'monochrome', 'fade', 'cinematic', 'time', 'volumeExplosion', 'explosionProgress', 'inverseViewProjection', 'eye', 'sceneDepth', 'volumeShadowMap', 'volumeLightProjection', 'volumeLightDirection', 'volumeLightColor', 'volumeDensity', 'volumeMinimum', 'volumeMaximum', 'volumeColor', 'volumeAmbient', 'volumeDrift', 'volumeSteps', 'volumeAnisotropy', 'volumeShadowAmbient', 'volumeNoiseAmount', 'volumeNoiseScale', 'volumeHeightFalloff', 'volumeMaxDistance', 'fogSkyVisibility', 'orthographic', 'occlusionTexture', 'occlusionStrength', 'occlusionTexel'];
+const POST_UNIFORMS = ['transparent', 'frameTexture', 'bloomTexture', 'bloomStrength', 'hdrEnabled', 'grade', 'vignette', 'grainAmount', 'resolution', 'monochrome', 'fade', 'cinematic', 'time', 'volumeExplosion', 'explosionProgress', 'inverseViewProjection', 'eye', 'sceneDepth', 'volumeShadowMap', 'volumeLightProjection', 'volumeLightDirection', 'volumeLightColor', 'volumeDensity', 'volumeMinimum', 'volumeMaximum', 'volumeColor', 'volumeAmbient', 'volumeDrift', 'volumeSteps', 'volumeAnisotropy', 'volumeShadowAmbient', 'volumeGridFog', 'volumeNoiseAmount', 'volumeNoiseScale', 'volumeHeightFalloff', 'volumeMaxDistance', 'volumeField', 'volumeProfile', 'volumeFlowStrength', 'volumeFlowPeriod', 'volumeLightCount', 'volumeLightPositions[0]', 'volumeLightColors[0]', 'volumeLightDirections[0]', 'volumeLightCones[0]', 'fogSkyVisibility', 'orthographic', 'occlusionTexture', 'occlusionStrength', 'occlusionTexel'];
 
 function postUniformLocations(context, program) {
   return Object.fromEntries(POST_UNIFORMS.map(name => [name, context.getUniformLocation(program, name)]));
@@ -65,6 +72,7 @@ function shaderFeaturesOfLighting(lighting) {
   if (lighting.spotCount > 0) features.push('spotLights');
   if (lighting.areaCount > 0) features.push('areaLights');
   if (lighting.shadowCasters.length > 0) features.push('localShadows');
+  if (lighting.extraFeatures) features.push(...lighting.extraFeatures);
   if (lighting.fillIntensity > 0) features.push('fill');
   return features;
 }
@@ -80,6 +88,7 @@ function shaderFeaturesOfParts(parts) {
       if (material[field]) features.add(MAP_SHADER_FEATURES[index]);
     });
     if (material.environmentProbe) features.add('probe');
+    if (material.irradianceGrid) features.add('irradianceGrid');
     if (material.normalMap?.uvTransform) features.add('normalMapTransform');
     Object.keys(material.layerMaps ?? {}).forEach(name => features.add(name));
     if (material.layers) features.add('splat');
@@ -104,8 +113,9 @@ function renderPass(material) {
   return TRANSLUCENT_TAGS.has(material.tag) ? material.tag : 'opaque';
 }
 
-function partNeedsFullUpload(part) {
-  return Boolean(part.skin || part.morph || part.geometry.morphTargets || part.geometry.skinIndices || hasMaterialMap(part.material) && !texturedReplaceSupport.begin);
+// Regrouping parts that already draw (a mirrored sign change) reuses their cached textures, so it needs no texture bookkeeping.
+function partNeedsFullUpload(part, texturesReplaceable = Boolean(texturedReplaceSupport.begin)) {
+  return Boolean(part.skin || part.morph || part.geometry.morphTargets || part.geometry.skinIndices || hasMaterialMap(part.material) && !texturesReplaceable);
 }
 
 function batchPass(batch) {
@@ -126,7 +136,7 @@ const LOCAL_SHADOW_UNIT = 15;
 const LIGHT_UNIFORMS = ['pointLightCount', 'pointLightPositions[0]', 'pointLightColors[0]', 'pointLightRadii[0]', 'pointLightShadowTiles[0]',
   'spotLightCount', 'spotLightPositions[0]', 'spotLightColors[0]', 'spotLightDirections[0]', 'spotLightParameters[0]',
   'areaLightCount', 'areaLightPositions[0]', 'areaLightColors[0]', 'areaLightNormals[0]', 'areaLightTangents[0]',
-  'localShadowAtlas', 'localShadowMatrices[0]', 'localShadowTexelAngles[0]', 'keyColor', 'fillIntensity', 'ambientIntensity'];
+  'localShadowAtlas', 'localShadowMatrices[0]', 'localShadowTexelAngles[0]', 'keyColor', 'fillIntensity', 'ambientIntensity', 'specularAntiAliasing'];
 const SPLAT_UNIFORMS = ['splatEnabled', 'splatColor', 'splatNormal', 'splatPacked', 'splatMask', 'splatLayer[0]', 'splatTint[0]', 'splatSlope[0]', 'splatHeightRange[0]', 'splatMaskChannel[0]', 'splatMaskInvert[0]', 'splatBlend', 'splatOptions', 'splatMaskBounds', 'splatVariation'];
 
 function validateMaterialMaps(material) {
@@ -168,7 +178,7 @@ function materialMapState(material) {
   const occlusionStrength = material.occlusionStrength ?? 1;
   if (material.layers || material.splat) requireSplatSupport().validate(material);
   if (material.layers && PROCEDURAL_MATERIAL_TAGS.has(material.tag)) throw new Error('Splat layers require a standard PBR material tag.');
-  return [...MATERIAL_MAPS.map(field => material[field] ?? null), normalScale[0], normalScale[1], occlusionStrength, ...mossState(material), material.boxMapScale ?? 0, material.boxMapAxis ?? 1, ...lightMapState(material), material.layers ?? null, material.splat ?? null, material.layerMaps ?? null, material.environmentProbe ?? null, material.waterReflection ?? null];
+  return [...MATERIAL_MAPS.map(field => material[field] ?? null), normalScale[0], normalScale[1], occlusionStrength, ...mossState(material), material.boxMapScale ?? 0, material.boxMapAxis ?? 1, ...lightMapState(material), material.layers ?? null, material.splat ?? null, material.layerMaps ?? null, material.environmentProbe ?? null, material.waterReflection ?? null, material.irradianceGrid ?? null];
 }
 
 // A baked light map reads the second UV set, so it is only drawn for parts that cannot be skinned or morphed.
@@ -182,7 +192,7 @@ function lightMapState(material) {
 
 function validateAlphaMaterial(material) {
   const alphaMode = material.alphaMode ?? 'opaque';
-  if (!Object.hasOwn(ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask' or 'blend'.");
+  if (!Object.hasOwn(ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask', 'blend' or 'add'.");
   for (const field of ['alphaCutoff', 'opacity']) {
     const value = material[field] ?? 1;
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${field} must be a number within zero and one.`);
@@ -190,22 +200,46 @@ function validateAlphaMaterial(material) {
   if (material.doubleSided !== undefined && typeof material.doubleSided !== 'boolean') throw new TypeError('doubleSided must be a boolean');
 }
 
-/** Alpha settings that every instance of one draw call must share. Fields that a mode ignores are normalized away. */
+/** Opacity of one instance: blend and add parts carry it per instance, so it never splits a batch. */
+function instanceOpacity(material) {
+  const alphaMode = material.alphaMode ?? 'opaque';
+  return isTranslucentMode(alphaMode) ? (material.opacity ?? 1) + (material.opacityBias ?? 0) : 1;
+}
+
+/** Alpha settings that every instance of one draw call must share. Fields that a mode ignores, and the per-instance opacity, are normalized away. */
 function materialAlphaState(material) {
   validateAlphaMaterial(material);
   const alphaMode = material.alphaMode ?? 'opaque';
   const alphaCutoff = alphaMode === 'mask' ? material.alphaCutoff ?? 0.5 : 0;
-  const opacity = alphaMode === 'opaque' ? 1 : (material.opacity ?? 1) + (material.opacityBias ?? 0);
+  const opacity = alphaMode === 'mask' ? (material.opacity ?? 1) + (material.opacityBias ?? 0) : 1;
   return [alphaMode, alphaCutoff, opacity, material.doubleSided === true];
 }
 
 // A decal or depth layer draws with a scoped polygon offset so it wins against the surface it lies on (z-fighting).
 // Larger layers win over smaller ones; geometry never moves.
 
-// Translucent glass is not a shadow caster unless the part asks for it.
+// Translucent glass and additive light are not shadow casters unless the part asks for it.
+// A shadow catcher only shows the shadow it receives, so it never casts one unless the part asks for it.
 function castsShadow(part) {
-  return part.castShadow ?? (part.material.alphaMode ?? 'opaque') !== 'blend';
+  return part.castShadow ?? !(part.shadowCatcher === true || isTranslucentMode(part.material.alphaMode ?? 'opaque'));
 }
+
+const receivesShadow = part => part.receiveShadow !== false;
+
+// Uniform value of a batch: 0 draws normally, 1 is a holdout (zero colour, zero alpha), 2 is a shadow catcher (black, alpha = shadow).
+const compositeModeOf = part => (part.holdout === true ? 1 : part.shadowCatcher === true ? 2 : 0);
+
+const BOOLEAN_PART_FLAGS = ['castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'visible'];
+
+function validatePartFlags(part) {
+  for (const flag of BOOLEAN_PART_FLAGS) {
+    if (part[flag] !== undefined && typeof part[flag] !== 'boolean') throw new TypeError(`${flag} must be a boolean`);
+  }
+  if (part.holdout === true && part.shadowCatcher === true) throw new Error(`A part is a holdout or a shadow catcher, not both: ${part.name}`);
+}
+
+/** A hidden part keeps its slot in the batch but draws and casts nothing: its instance matrices are packed as zeros. */
+const isHidden = part => part.visible === false || part.visibility?.visible === false;
 
 function hasMaterialMap(material) {
   return MATERIAL_MAPS.some(field => material[field]);
@@ -251,11 +285,26 @@ function copyVector3(target, offset, source) {
   target[offset + 2] = source[2];
 }
 
+/**
+ * True when the matrix reflects space (negative determinant of its upper 3x3, column major), which reverses the screen
+ * winding of every triangle. The renderer owns this: it groups such parts apart and draws them with clockwise front faces.
+ */
+export function isMirroredMatrix(matrix) {
+  const determinant = matrix[0] * (matrix[5] * matrix[10] - matrix[6] * matrix[9])
+    - matrix[4] * (matrix[1] * matrix[10] - matrix[2] * matrix[9])
+    + matrix[8] * (matrix[1] * matrix[6] - matrix[2] * matrix[5]);
+  return determinant < 0;
+}
+
 function packInstance(data, index, part, normalMatrix) {
   const offset = index * INSTANCE_STRIDE;
   const material = part.material;
-  data.set(part.matrix, offset);
-  data.set(normalMatrix, offset + 16);
+  if (isHidden(part)) {
+    data.fill(0, offset, offset + 25);
+  } else {
+    data.set(part.matrix, offset);
+    data.set(normalMatrix, offset + 16);
+  }
   copyVector3(data, offset + 25, material.color);
   data[offset + 28] = material.metallic;
   data[offset + 29] = material.roughness;
@@ -264,6 +313,7 @@ function packInstance(data, index, part, normalMatrix) {
   copyVector3(data, offset + 32, part.assembly?.offset ?? ZERO_VECTOR);
   copyVector3(data, offset + 35, part.assembly?.detailOffset ?? ZERO_VECTOR);
   copyVector3(data, offset + 38, material.emissiveColor ?? material.color);
+  data[offset + OPACITY_OFFSET] = instanceOpacity(material);
 }
 
 // The objectId mode of RENDER_PASS_MODES in render-passes.js.
@@ -273,7 +323,7 @@ function isCullable(parts) {
   const first = parts[0];
   if (first.skin || first.morph) return false;
   if (DEFORMING_TAGS.has(first.material.tag) && !SWAYING_TAGS.has(first.material.tag)) return false;
-  if (renderPass(first.material) !== 'opaque' || materialAlphaState(first.material)[0] === 'blend') return false;
+  if (renderPass(first.material) !== 'opaque' || isTranslucentMode(materialAlphaState(first.material)[0])) return false;
   return parts.every(part => !part.assembly || part.crowd);
 }
 
@@ -351,7 +401,7 @@ export function groupParts(parts, batching = true) {
   const morphInfos = new Map();
   for (const part of parts) {
     validateTransform(part);
-    if (part.castShadow !== undefined && typeof part.castShadow !== 'boolean') throw new TypeError('castShadow must be a boolean');
+    validatePartFlags(part);
     if (hasSkinData(part)) {
       const { validateSkinGeometry, validateSkinPose } = skinSupport();
       validateSkinGeometry(part.geometry, part.skin);
@@ -368,7 +418,7 @@ export function groupParts(parts, batching = true) {
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
-    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, ...materialAlphaState(part.material)]) {
+    for (const value of [...materialMapState(part.material), ...materialLayerState(part.material), part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), renderPass(part.material), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)]) {
       if (!maps.has(value)) maps.set(value, new Map());
       maps = maps.get(value);
     }
@@ -477,13 +527,17 @@ function allFinite(values) {
 }
 
 export class Renderer67 {
-  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null } = {}) {
+  constructor(canvas, parts, { batching = true, pixelRatio = 1.5, benchmark = false, world = false, ground = true, transparent = false, samples = 4, hdr = false, depth = false, memoryBudgetMiB, environment = {}, shadowBounds = {}, shadowCascades = null, culling = true, lodPixelError = 1, createGpuTimer = null, skyOpenness = null, fogSkyVisibility = null, shading = 'full', viewTransform = 'aces', look = null, resolveCoplanar = false, reversedDepth = 'auto' } = {}) {
     this.canvas = canvas;
     this.sceneParts = parts;
     // `skyOpenness` from closed-room.js is passed in, which keeps the ray code out of scenes without volume fog.
     this.skyOpenness = skyOpenness;
     // `fogSkyVisibility` from fog-sky-visibility.js is passed in for the same reason; without it the post shader has no grid.
     this.fogSkyVisibility = fogSkyVisibility;
+    this.fogFieldOverride = null;
+    this.fogFieldTexture = null;
+    // fog-shader.js creates the light buffers on the first frame that draws a volume fog.
+    this.fogLightBuffers = null;
     // `createGpuTimer` from adaptive-quality.js is passed in, which keeps the timer code out of scenes that do not time frames.
     this.createGpuTimer = createGpuTimer;
     this.gpuTimer = undefined;
@@ -512,6 +566,10 @@ export class Renderer67 {
     this.shadowBounds = shadowBounds;
     /** Set by installCoplanarDiagnostics (coplanar-overlap.js): called with the batches, returns coplanar-overlap warnings. */
     this.coplanarDiagnostics = null;
+    /** `false` keeps the standard depth buffer; `'auto'` (default) loads reversed-Z once a frame's far / near passes 10,000. */
+    this.reversedDepthMode = reversedDepth;
+    /** Resolves once reversed depth is installed (set by the first frame with a stretched lens); `await` it to render with it from the start. */
+    this.reversedDepthReady = null;
     /** Warnings about the last frame drawn, in the shape of `agent-diagnostics.js`; see `frame-diagnostics.js`. */
     this.diagnostics = [];
     this.activeLightDirection = environment.lightDirection ?? [-3, 6, 4];
@@ -552,6 +610,10 @@ export class Renderer67 {
     this.windState = { time: 0, strength: 0.3 };
     // The shadow map the constructor draws uses no assembly, so a first frame with none does not draw it again.
     this.assemblyAmount = 0;
+    // `resolveCoplanar` is resolveFlushParts from the coplanar-overlap addon, passed in so the search stays out of the core bundle.
+    if (resolveCoplanar && typeof resolveCoplanar !== 'function') throw new TypeError('resolveCoplanar is resolveFlushParts from 67js/addons/coplanar-overlap.');
+    // Exact-flush pairs are left to a float depth buffer, so they are layered only when reversed depth is switched off.
+    if (resolveCoplanar && !benchmark) resolveCoplanar(parts, reversedDepth === false && { minimumGap: 0 });
     const groups = groupParts(this.groundPart ? [...parts, this.groundPart] : parts, batching);
     const textureLimit = this.context.getParameter(this.context.MAX_TEXTURE_SIZE);
     this.hasSkins = groups.some(group => group[0].skin || group[0].crowd);
@@ -731,7 +793,7 @@ export class Renderer67 {
 
   finishMainProgram(pendingProgram) {
     this.program = finishProgram(this.context, pendingProgram);
-    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'boxNormalMatrix', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
+    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
       this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     }
@@ -921,7 +983,7 @@ export class Renderer67 {
     this.attribute(10, 4, stride * 4, 112);
     this.attribute(11, 3, stride * 4, 128);
     this.attribute(12, 3, stride * 4, 140);
-    this.attribute(15, 3, stride * 4, 152);
+    this.attribute(15, 4, stride * 4, 152);
   }
 
   createCullingState(parts) {
@@ -1035,7 +1097,7 @@ export class Renderer67 {
     const [alphaMode, alphaCutoff, opacity, doubleSided] = materialAlphaState(parts[0].material);
     const layerState = materialLayerState(parts[0].material);
     const culling = this.createCullingState(parts);
-    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), depthLayer: depthLayerOf(parts[0]), pass: renderPass(parts[0].material) };
+    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), pass: renderPass(parts[0].material) };
     if (parts[0].lods) culling.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level));
     culling.shadowLevels?.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level, batch.shadowLevels));
     parts.forEach((part, index) => this.partLocations.set(part, { batch, index, geometry: part.geometry, map, mapState, layerState, skin, jointMatrices: skin?.jointMatrices, skinIndices: geometry.skinIndices, skinWeights: geometry.skinWeights, morph, morphWeights: morph?.weights, morphTargets: geometry.morphTargets, normalMatrix: mat3.create(), committedMatrix: batch.instanceData.subarray(index * INSTANCE_STRIDE, index * INSTANCE_STRIDE + 16) }));
@@ -1043,7 +1105,7 @@ export class Renderer67 {
   }
 
   /** Reconcile immutable rigid, untextured geometry without rebuilding programs or render targets. */
-  replaceParts(parts) {
+  replaceParts(parts, { regroupOnly = false } = {}) {
     if (!Array.isArray(parts) || new Set(parts).size !== parts.length) {
       throw new TypeError('Scene parts must be an array with distinct object identities.');
     }
@@ -1062,7 +1124,7 @@ export class Renderer67 {
       const mapState = materialMapState(first.material);
       const sameParts = batch?.parts.length === group.length && batch.parts.every((part, index) => part === group[index]);
       const alphaState = materialAlphaState(first.material);
-      const sameState = location?.geometry === first.geometry && batch?.castShadow === castsShadow(first) && (batch.depthLayer ?? 0) === depthLayerOf(first) &&
+      const sameState = location?.geometry === first.geometry && batch?.castShadow === castsShadow(first) && batch.receivesShadow === receivesShadow(first) && batch.compositeMode === compositeModeOf(first) && (batch.depthLayer ?? 0) === depthLayerOf(first) &&
         batch.floor === (first.material.tag === 'floor') && batchPass(batch) === renderPass(first.material) &&
         [batch.alphaMode, batch.alphaCutoff, batch.opacity, batch.doubleSided].every((value, index) => value === alphaState[index]) &&
         batch.mapState.every((value, index) => value === mapState[index]) &&
@@ -1075,13 +1137,13 @@ export class Renderer67 {
     });
     // Skinned and morphed batches stay valid only while retained unchanged. Textured ones need the replace-textured-parts addon to be added or dropped.
     for (const item of replacements) {
-      if (!item.batch && item.group.some(partNeedsFullUpload)) {
+      if (!item.batch && item.group.some(part => partNeedsFullUpload(part, regroupOnly || Boolean(texturedReplaceSupport.begin)))) {
         throw new Error('replaceParts can add or change only rigid, untextured parts. Keep textured, skinned and morphed parts unchanged, or import replace-textured-parts to add textured ones.');
       }
     }
     for (const [part, location] of this.partLocations) {
       if (retained.has(location.batch)) continue;
-      if (location.skin || location.morph || location.morphTargets || location.skinIndices || (location.mapState.slice(0, 5).some(Boolean) && !texturedReplaceSupport.begin)) {
+      if (location.skin || location.morph || location.morphTargets || location.skinIndices || (location.mapState.slice(0, 5).some(Boolean) && !texturedReplaceSupport.begin && !regroupOnly)) {
         throw new Error(`replaceParts can remove or regroup only existing rigid, untextured parts; ${part.name} is textured, skinned or morphed and needs a new renderer.`);
       }
     }
@@ -1200,7 +1262,13 @@ export class Renderer67 {
     return { ...layout, texture, data };
   }
 
-  updateParts(parts, { shadows = true } = {}) {
+  /**
+   * Upload changed parts. `checks: false` skips the per-frame pose checks (finite, non-singular, unmirrored skin and
+   * morph transforms) for poses already checked where they were made, such as `applyAnimation(time, clip, { checks: false })`.
+   * Identity, material and transform rules still apply.
+   */
+  updateParts(parts, { shadows = true, checks = true } = {}) {
+    if (typeof checks !== "boolean") throw new TypeError("updateParts checks must be a boolean.");
     this.updatePartIdentities ??= new Set();
     this.updatePartIdentities.clear();
     this.updateSkins.clear();
@@ -1209,6 +1277,7 @@ export class Renderer67 {
     this.updateBatches.clear();
     const locations = this.updateLocations ??= [];
     locations.length = parts.length;
+    let mirrorChanged = false;
     // Preflight every part before touching packed data or submitting GPU writes.
     for (let partIndex = 0; partIndex < parts.length; partIndex++) {
       const part = parts[partIndex];
@@ -1216,28 +1285,30 @@ export class Renderer67 {
       if (!location) throw new Error(`Unknown part identity: ${part.name}`);
       locations[partIndex] = location;
       if (part.skin || part.morph) this.updatePartIdentities.add(part);
-      if (part.castShadow !== undefined && typeof part.castShadow !== 'boolean') throw new TypeError('castShadow must be a boolean');
+      validatePartFlags(part);
       if (castsShadow(part) !== location.batch.castShadow) throw new Error(`Shadow casting changes require a new renderer: ${part.name}`);
+      if (receivesShadow(part) !== location.batch.receivesShadow || compositeModeOf(part) !== location.batch.compositeMode) throw new Error(`receiveShadow, holdout and shadowCatcher changes require replaceParts: ${part.name}`);
       if (depthLayerOf(part) !== (location.batch.depthLayer ?? 0)) throw new Error(`depthLayer changes require replaceParts: ${part.name}`);
       // A material whose fields still equal the ones that passed the full checks below needs none of them again.
       const materialUnchanged = location.materialSnapshot?.matches(part.material) === true;
       if (!materialUnchanged) {
         const alphaState = materialAlphaState(part.material);
         const batchAlphaState = [location.batch.alphaMode, location.batch.alphaCutoff, location.batch.opacity, location.batch.doubleSided];
-        if (alphaState.some((value, index) => value !== batchAlphaState[index])) throw new Error(`Alpha mode, cutoff, opacity and double-sided changes require a new renderer: ${part.name}`);
+        if (alphaState.some((value, index) => value !== batchAlphaState[index])) throw new Error(`Alpha mode, cutoff, double-sided and mask opacity changes require a new renderer (blend and add opacity may change): ${part.name}`);
       }
       if (part.geometry !== location.geometry) throw new Error(`Geometry changes require a new renderer: ${part.name}`);
+      if (isMirroredMatrix(part.matrix) !== Boolean(location.batch.mirrored)) mirrorChanged = true;
       if (!materialUnchanged && renderPass(part.material) !== batchPass(location.batch)) throw new Error(`Moving a part into or out of the liquid or foam pass requires replaceParts: ${part.name}`);
       if ((part.skin ?? null) !== location.skin || part.skin?.jointMatrices !== location.jointMatrices || part.geometry.skinIndices !== location.skinIndices || part.geometry.skinWeights !== location.skinWeights) throw new Error(`Skin identity changes require a new renderer: ${part.name}`);
       if (part.skin) {
         if (PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Skinned parts require a standard material tag.');
-        skinSupport().validateSkinPose(part.skin, part.geometry, part.matrix);
+        if (checks) skinSupport().validateSkinPose(part.skin, part.geometry, part.matrix);
         this.updateSkins.add(location.batch.skinTexture);
       }
       if ((part.morph ?? null) !== (location.morph ?? null) || part.morph?.weights !== location.morphWeights || part.geometry.morphTargets !== location.morphTargets) throw new Error(`Morph identity changes require a new renderer: ${part.name}`);
       if (part.morph) {
         if (PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Morphed parts require a standard material tag.');
-        morphSupport().validateMorphTransform(part.morph, location.batch.morphTexture.info, part.matrix, part.skin);
+        if (checks) morphSupport().validateMorphTransform(part.morph, location.batch.morphTexture.info, part.matrix, part.skin);
         this.updateMorphs.add(part.morph);
       }
       if (materialUnchanged) {
@@ -1257,8 +1328,14 @@ export class Renderer67 {
       validateTransform(part, location.normalMatrix);
       location.materialSnapshot = MaterialSnapshot.of(part.material);
     }
+    // A part that crossed a mirror (a flip animation, a toggled billboard) belongs to the other winding batch: regroup every part once.
+    // replaceParts packs all parts again, so the rest of this update is done.
+    if (mirrorChanged) {
+      this.replaceParts([...this.partLocations.keys()].filter(part => part !== this.groundPart), { regroupOnly: true });
+      return parts.length;
+    }
     // A palette upload also changes consumers absent from the submitted part list.
-    if (this.updateSkins.size) {
+    if (checks && this.updateSkins.size) {
       for (const [part, location] of this.partLocations) {
         if (!location.skin || !this.updateSkins.has(location.batch.skinTexture) || this.updatePartIdentities.has(part)) continue;
         const committedMatrix = location.committedMatrix ?? location.batch.instanceData.subarray(location.index * INSTANCE_STRIDE, location.index * INSTANCE_STRIDE + 16);
@@ -1267,7 +1344,7 @@ export class Renderer67 {
     }
     // Shared weights also affect batches absent from the submitted part list.
     // Nothing is shared when the update carries no morph and no skin.
-    if (this.updateMorphs.size || this.updateSkins.size) {
+    if (checks && (this.updateMorphs.size || this.updateSkins.size)) {
       for (const [part, location] of this.partLocations) {
         if (!location.morph || this.updatePartIdentities.has(part)) continue;
         if (!this.updateMorphs.has(location.morph) && !this.updateSkins.has(location.batch.skinTexture)) continue;
@@ -1467,7 +1544,6 @@ export class Renderer67 {
       if (!this.benchmark) this.allocateFrameTargets(width, height);
     }
     mat4.perspective(this.projection, this.world ? Math.PI / 4 : Math.PI / 5.5, width / height, 0.1, this.world ? 600 : 100);
-    this.projection[8] = !this.benchmark && !this.world && this.canvas.clientWidth > 700 ? -0.25 : 0;
   }
 
   /** Every GPU render target this renderer holds: name, size, format, samples and bytes, largest first, with the total. */
@@ -1510,7 +1586,7 @@ export class Renderer67 {
 
   /** Whether a batch is drawn by the opaque loop, and so by render passes. Its parts take object IDs in this order. */
   drawsInOpaqueLoop(batch) {
-    return batchPass(batch) === 'opaque' && batch.alphaMode !== 'blend';
+    return batchPass(batch) === 'opaque' && !isTranslucentMode(batch.alphaMode);
   }
 
   // Compiled and allocated on first use, so scenes without occlusion pay nothing.
@@ -1518,7 +1594,7 @@ export class Renderer67 {
     const context = this.context;
     if (!this.occlusionProgram) {
       this.occlusionProgram = compileProgram(context, fullscreenVertex, ambientOcclusionFragment);
-      const names = ['sceneDepth', 'inverseViewProjection', 'eye', 'radius', 'projectionScale', 'aspect', 'orthographic'];
+      const names = ['sceneDepth', 'inverseViewProjection', 'radius', 'projectionScale', 'aspect', 'orthographic'];
       this.occlusionUniforms = Object.fromEntries(names.map(name => [name, context.getUniformLocation(this.occlusionProgram, name)]));
     }
     if (this.occlusionTarget) return;
@@ -1551,8 +1627,7 @@ export class Renderer67 {
     context.activeTexture(context.TEXTURE1);
     context.bindTexture(context.TEXTURE_2D, this.depthTexture);
     context.uniform1i(uniforms.sceneDepth, 1);
-    context.uniformMatrix4fv(uniforms.inverseViewProjection, false, this.inverseViewProjection);
-    context.uniform3fv(uniforms.eye, frame.eye);
+    context.uniformMatrix4fv(uniforms.inverseViewProjection, false, mat4.invert([], this.projection));
     context.uniform1f(uniforms.radius, effects.ambientOcclusionRadius);
     context.uniform1f(uniforms.projectionScale, 0.5 * this.projection[5]);
     context.uniform1f(uniforms.aspect, this.canvas.width / this.canvas.height);
@@ -1729,6 +1804,9 @@ export class Renderer67 {
     if (occluded) steps.push('occlusion');
     if (effects.bloom.strength > 0) steps.push('bloom');
     if (volume.density > 0) steps.push('volume');
+    if (volume.density > 0 && volume.field) steps.push('field');
+    if (volume.density > 0 && requireFeatureCode('volumeFog').support.usesDetail(volume)) steps.push('detail');
+    if (volume.density > 0 && this.fogLightBuffers?.count > 0) steps.push('lights');
     if (fogSky) steps.push('sky');
     if (frame.volumeExplosion) steps.push('explosion');
     const gradesColor = effects.saturation !== 1 || effects.contrast !== 1 || effects.temperature !== 0;
@@ -1749,7 +1827,7 @@ export class Renderer67 {
     }
     if (variant.pending) {
       const parallelCompile = this.context.getExtension('KHR_parallel_shader_compile');
-      const building = parallelCompile && !steps.includes('sky') && !steps.includes('explosion') && !this.context.getProgramParameter(variant.pending.program, parallelCompile.COMPLETION_STATUS_KHR);
+      const building = parallelCompile && !POST_STEPS_WITH_OPTIONAL_CODE.some(step => steps.includes(step)) && !this.context.getProgramParameter(variant.pending.program, parallelCompile.COMPLETION_STATUS_KHR);
       if (building) return { program: this.postProgram, uniforms: this.postUniforms };
       variant.program = finishProgram(this.context, variant.pending);
       variant.uniforms = postUniformLocations(this.context, variant.program);
@@ -1758,22 +1836,37 @@ export class Renderer67 {
     return variant;
   }
 
+  // The fog step leaves the last frame's texture on a mipmapped filter. The stages and bloom read before this frame's
+  // mip chain exists, so on that filter they would sample the previous frame's blurred levels: a ghost after a seek.
+  restoreSingleLevelFiltering() {
+    if (!this.mipmappedTexture) return;
+    const context = this.context;
+    context.bindTexture(context.TEXTURE_2D, this.mipmappedTexture);
+    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR);
+    this.mipmappedTexture = null;
+  }
+
   resolveFrame(frame, effects, environment, volume) {
     const context = this.context;
     context.bindFramebuffer(context.READ_FRAMEBUFFER, this.multisampleFramebuffer);
     context.bindFramebuffer(context.DRAW_FRAMEBUFFER, this.resolveFramebuffer);
     context.blitFramebuffer(0, 0, this.canvas.width, this.canvas.height, 0, 0, this.canvas.width, this.canvas.height, context.COLOR_BUFFER_BIT | (this.depth ? context.DEPTH_BUFFER_BIT : 0), context.NEAREST);
+    this.restoreSingleLevelFiltering();
     let sourceTexture = this.frameTexture;
     for (const stage of this.postStages) sourceTexture = stage.apply(this, frame, effects, sourceTexture) ?? sourceTexture;
     if (effects.bloom.strength > 0) this.drawBloom(effects.bloom, sourceTexture);
     const occluded = effects.ambientOcclusion > 0 && Boolean(this.depthTexture);
     if (occluded) this.drawAmbientOcclusion(frame, effects);
-    context.bindFramebuffer(context.FRAMEBUFFER, null);
+    // A frame that names an outputFramebuffer (src/float-output.js) draws its final pass there, not on the canvas.
+    context.bindFramebuffer(context.FRAMEBUFFER, frame.outputFramebuffer ?? null);
     context.viewport(0, 0, this.canvas.width, this.canvas.height);
     context.disable(context.DEPTH_TEST);
     context.disable(context.CULL_FACE);
     context.bindVertexArray(null);
     const fogSky = this.fogSkyVisibility?.(this.sceneParts, volume, context, environment);
+    const fogSupport = volume.density > 0 ? requireFeatureCode('volumeFog').support : null;
+    if (fogSupport) fogSupport.packLights(this);
+    else if (this.fogLightBuffers) this.fogLightBuffers.count = 0;
     const post = this.selectPostProgram(this.postStepsOf(frame, effects, volume, occluded, fogSky));
     context.useProgram(post.program);
     if (this.look) viewTransformShader.bindLook(this, post.program);
@@ -1792,27 +1885,7 @@ export class Renderer67 {
     context.activeTexture(context.TEXTURE1);
     context.bindTexture(context.TEXTURE_2D, this.depthTexture ?? this.whiteTexture);
     context.uniform1i(post.uniforms.sceneDepth, 1);
-    context.activeTexture(context.TEXTURE3);
-    context.bindTexture(context.TEXTURE_2D, this.shadowTexture);
-    context.uniform1i(post.uniforms.volumeShadowMap, 3);
-    context.uniformMatrix4fv(post.uniforms.volumeLightProjection, false, this.lightProjection);
-    context.uniform3fv(post.uniforms.volumeLightDirection, environment.lightDirection);
-    context.uniform3fv(post.uniforms.volumeLightColor, this.lighting.keyColor);
-    context.uniform1f(post.uniforms.volumeDensity, volume.density);
-    context.uniform3fv(post.uniforms.volumeMinimum, volume.minimum);
-    context.uniform3fv(post.uniforms.volumeMaximum, volume.maximum);
-    context.uniform3fv(post.uniforms.volumeColor, volume.color);
-    context.uniform3fv(post.uniforms.volumeAmbient, volume.ambient);
-    context.uniform3fv(post.uniforms.volumeDrift, volume.drift);
-    context.uniform1i(post.uniforms.volumeSteps, volume.steps);
-    context.uniform1f(post.uniforms.volumeAnisotropy, volume.anisotropy);
-    context.uniform1f(post.uniforms.volumeShadowAmbient, volumeShadowAmbient(volume, this.sceneParts, this.skyOpenness));
-    context.uniform1f(post.uniforms.volumeNoiseAmount, volume.noiseAmount);
-    context.uniform1f(post.uniforms.volumeNoiseScale, volume.noiseScale);
-    context.uniform1f(post.uniforms.volumeMaxDistance, volume.maxDistance);
-    context.uniform1f(post.uniforms.volumeHeightFalloff, volume.heightFalloff);
-    context.uniform1f(post.uniforms.orthographic, frame.projection === 'orthographic' ? 1 : 0);
-    context.uniform1i(post.uniforms.fogSkyVisibility, 5);
+    fogSupport?.bindUniforms(this, post, volume, environment, frame);
     context.activeTexture(context.TEXTURE2);
     context.bindTexture(context.TEXTURE_2D, effects.bloom.strength > 0 ? this.bloomTargets[1].texture : this.whiteTexture);
     context.uniform1i(post.uniforms.bloomTexture, 2);
@@ -1957,12 +2030,22 @@ export class Renderer67 {
     this.context.bufferSubData(this.context.ARRAY_BUFFER, 0, batch.sortedData);
   }
 
-  /** Alpha-blended batches draw after opaque and masked geometry, farthest first, without writing depth. */
+  /** Whether any instance of a blend batch is fully opaque, and so has opaque texels to draw as a cutout first. */
+  hasOpaqueInstance(batch) {
+    for (let index = 0; index < batch.instanceCount; index++) {
+      if (batch.instanceData[index * INSTANCE_STRIDE + OPACITY_OFFSET] >= 0.999) return true;
+    }
+    return false;
+  }
+
+  /** Alpha-blended batches draw after opaque and masked geometry, farthest first, without writing depth. Additive batches draw last. */
   drawBlendBatches(frame) {
     const context = this.context;
     const eye = frame.eye;
     const blendBatches = this.batches.filter(batch => batch.alphaMode === 'blend' && batchPass(batch) === 'opaque');
-    if (blendBatches.length === 0) return;
+    // Light adds in any order, so additive batches need no sort.
+    const addBatches = this.batches.filter(batch => batch.alphaMode === 'add' && batchPass(batch) === 'opaque');
+    if (blendBatches.length === 0 && addBatches.length === 0) return;
     // The liquid and foam pass may have switched program, texture unit 0 and the viewport.
     context.bindFramebuffer(context.FRAMEBUFFER, this.multisampleFramebuffer);
     context.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -1983,7 +2066,7 @@ export class Renderer67 {
     // Fully opaque texels (most of a baked scene exported as BLEND) draw first as a cutout that writes depth, so they hide
     // whatever lies behind them in any draw order. The blend pass below then shades only the translucent texels (depth LESS).
     for (const { batch } of ordered) {
-      if (batch.opacity >= 0.999) this.drawAlphaBatch({ ...batch, alphaMode: 'mask', alphaCutoff: 0.999 }, true);
+      if (this.hasOpaqueInstance(batch)) this.drawAlphaBatch({ ...batch, alphaMode: 'mask', alphaCutoff: 0.999 }, true);
     }
     context.enable(context.BLEND);
     context.blendFuncSeparate(context.SRC_ALPHA, context.ONE_MINUS_SRC_ALPHA, context.ONE, context.ONE_MINUS_SRC_ALPHA);
@@ -1991,6 +2074,11 @@ export class Renderer67 {
     for (const { batch } of ordered) {
       this.uploadSortedInstances(batch, eye);
       this.drawAlphaBatch(batch, true);
+    }
+    if (addBatches.length > 0) {
+      // Source colour times opacity is added to the frame; the destination alpha is kept.
+      context.blendFuncSeparate(context.SRC_ALPHA, context.ONE, context.ZERO, context.ONE);
+      for (const batch of addBatches) this.drawAlphaBatch(batch, true);
     }
     context.depthMask(true);
     this.applyDepthLayer(0);
@@ -2013,6 +2101,7 @@ export class Renderer67 {
     context.uniform3f(this.uniforms.baseColor, data[25], data[26], data[27]);
     context.uniform4f(this.uniforms.surface, data[28], data[29], data[30], data[31]);
     context.uniform4f(this.uniforms.instanceEmission, data[38], data[39], data[40], 0);
+    context.uniform1f(this.uniforms.instanceOpacity, data[OPACITY_OFFSET]);
     if (this.shaderFeatures.has('boxMapScale')) context.uniformMatrix3fv(this.uniforms.boxNormalMatrix, false, data.subarray(16, 25));
   }
 
@@ -2046,6 +2135,8 @@ export class Renderer67 {
       }
     }
     if (textured && !this.benchmark) {
+      this.context.uniform1f(this.uniforms.shadowBlind, batch.receivesShadow === false ? 1 : 0);
+      this.context.uniform1f(this.uniforms.compositeMode, batch.compositeMode ?? 0);
       for (let index = 0; index < MATERIAL_MAPS.length; index++) {
         this.context.activeTexture(this.context.TEXTURE0 + index + 1);
         this.context.bindTexture(this.context.TEXTURE_2D, batch.textures[index]);
@@ -2076,12 +2167,15 @@ export class Renderer67 {
       }
     }
     if (textured && !this.benchmark && this.shaderFeatures?.has('instanced') === false)this.setSingleInstanceUniforms(batch.instanceData);
+    // A reflecting matrix reverses screen winding: clockwise triangles are the front faces of a mirrored batch.
+    if (batch.mirrored) this.context.frontFace(this.context.CW);
     if (selection && !selection.isEverything) {
       this.drawSelectedLevels(batch, selection, levelSet);
-      return;
+    } else {
+      this.context.bindVertexArray(batch.vertexArray);
+      this.context.drawElementsInstanced(this.context.TRIANGLES, batch.indexCount, this.context.UNSIGNED_INT, 0, batch.instanceCount);
     }
-    this.context.bindVertexArray(batch.vertexArray);
-    this.context.drawElementsInstanced(this.context.TRIANGLES, batch.indexCount, this.context.UNSIGNED_INT, 0, batch.instanceCount);
+    if (batch.mirrored) this.context.frontFace(this.context.CCW);
   }
 
   // A render pass draws raw material data instead of the lit image; the addon validates frame.pass and returns the shader mode.
@@ -2091,13 +2185,32 @@ export class Renderer67 {
     return this.passSupport.prepare(frame);
   }
 
+  /**
+   * Sets the fog's density and velocity field (see docs/volumetric.md) until it is replaced or cleared with null. It wins over
+   * a field in the constructor's or the frame's volumeFog. The same size is written into the existing texture on the next frame.
+   */
+  setFogField(field) {
+    this.fogFieldOverride = field === null ? null : validateFogField(field);
+  }
+
+  // A 24-bit depth buffer cannot tell surfaces 2 micrometres apart at 2.6 m when far / near is this large (issue #593), so the
+  // first such frame loads reversed-Z (reversed-depth.js, a separate chunk) and the frames after it use a float depth buffer.
+  loadReversedDepthFor(frame) {
+    if (this.reversedDepthMode === false || this.reversedDepth !== undefined || this.reversedDepthReady) return;
+    if (!(frame.far / (frame.near ?? 0.1) > 1e4)) return;
+    this.reversedDepthReady = import('./reversed-depth.js').then(({ installReversedDepth }) => installReversedDepth(this, this.reversedDepthMode));
+  }
+
   render(frame) {
+    this.loadReversedDepthFor?.(frame);
     const { eye, target = [0, 1.2, 0], armorColor = [0.53, 0.39, 0.24], armorSurface = [0.88, 0.32], exposure = 1, inspection = false } = frame;
     const effects = resolveEffects(frame.effects);
     const environment = { lightDirection: [-3, 6, 4], fogColor: [0.35, 0.43, 0.43], fogDensity: 0.006, daylight: 1, explosionCenter: [0, 0, 0], ...this.environment, ...frame.environment };
     environment.fogDensity ??= this.fittedFogDensity ?? 0.006;
     const volume = resolveVolumeFog(environment.volumeFog);
+    if (this.fogFieldOverride) volume.field = this.fogFieldOverride;
     if (volume.density > 0) {
+      requireFeatureCode('volumeFog');
       if (!this.depth || !this.hdr || this.transparent || this.benchmark) throw new Error('Volume fog requires depth:true, active HDR and an opaque canvas');
       if (!Number.isFinite(frame.time ?? 0) || Math.abs(frame.time ?? 0) > 1e6) throw new RangeError('Volume time must be finite and within ±1000000 seconds');
       const direction = environment.lightDirection;
@@ -2109,7 +2222,7 @@ export class Renderer67 {
     // The shadow view follows the sun, so a moved sun redraws the map.
     const lightChanged = String(this.activeLightDirection) !== String(environment.lightDirection);
     this.activeLightDirection = environment.lightDirection;
-    this.diagnostics = frameDiagnostics({ world: this.world, depth: this.depth, effects, lightDirection: environment.lightDirection, shadowBounds: this.shadowBounds, coplanarProblems: this.coplanarDiagnostics?.(this.batches) });
+    this.diagnostics = frameDiagnostics({ world: this.world, depth: this.depth, effects, lightDirection: environment.lightDirection, shadowBounds: this.shadowBounds, coplanarProblems: this.coplanarDiagnostics?.(this.batches), skinProblems: deformationSupport.reflectedSkinDiagnostics?.(this.partLocations) });
     const start = performance.now();
     const context = this.context;
     this.beginGpuTiming();
@@ -2175,9 +2288,11 @@ export class Renderer67 {
     context.uniform4fv(this.uniforms['pointLightColors[0]'], this.lighting.colors);
     context.uniform1fv(this.uniforms['pointLightRadii[0]'], this.lighting.radii);
     this.applyLocalLightUniforms(Boolean(frame.reflectionTarget));
+    this.lighting.bind?.(this);
     context.uniform3fv(this.uniforms.keyColor, this.lighting.keyColor);
     context.uniform1f(this.uniforms.fillIntensity, this.lighting.fillIntensity);
     context.uniform1f(this.uniforms.ambientIntensity, this.lighting.ambientIntensity);
+    context.uniform1f(this.uniforms.specularAntiAliasing, this.lighting.specularAntiAliasing);
     context.uniform1f(this.uniforms.time, frame.time ?? 0);
     context.uniform1f(this.uniforms.wind, frame.wind ?? 0.3);
     context.uniform1f(this.uniforms.worldMode, this.world ? 1 : 0);
@@ -2196,15 +2311,17 @@ export class Renderer67 {
     this.applyEnvironmentUniforms(environmentMap);
     context.uniform1f(this.uniforms.renderPassMode, passMode);
     context.uniform1f(this.uniforms.renderPassDepthRange, frame.passDepthRange ?? 100);
+    if (passMode > 5) this.passSupport.bindFrame(frame, environment, volume);
     let objectBase = 0;
     for (const batch of this.batches) {
       if (this.benchmark) {
         this.drawBatch(batch, true);
-      } else if (this.drawsInOpaqueLoop(batch) && !(mirrorTarget && batch.mapState[20])) {
+      } else if ((passMode > 5 ? this.passSupport.drawsInPass(batch, passMode) : this.drawsInOpaqueLoop(batch)) && !(mirrorTarget && batch.mapState[20])) {
         context.uniform1f(this.uniforms.renderPassObjectBase, objectBase);
         objectBase += batch.instanceCount;
         // Object IDs are the instance ordinal, which culling and level selection renumber, so that pass draws every instance.
-        this.drawAlphaBatch(batch, true, passMode !== OBJECT_ID_PASS_MODE);
+        if (passMode > 5) this.passSupport.drawBatch(batch, passMode, frame, objectBase - batch.instanceCount);
+        else this.drawAlphaBatch(batch, true, passMode !== OBJECT_ID_PASS_MODE);
       }
     }
     this.applyDepthLayer(0);
@@ -2265,6 +2382,7 @@ export class Renderer67 {
   }
 
   dispose() {
+    this.fogFieldTexture?.dispose();
     this.releaseFrameTargets();
     this.shadowCascades?.dispose(this.context, this.renderTargets);
     viewTransformShader.dispose?.(this);
@@ -2279,6 +2397,7 @@ export class Renderer67 {
     this.context.deleteTexture(this.shadowTexture);
     this.context.deleteFramebuffer(this.shadowFramebuffer);
     this.context.deleteProgram(this.program);
+    if (this.liquidProgram) this.context.deleteProgram(this.liquidProgram);
     this.context.deleteProgram(this.depthProgram);
     if (this.postProgram) this.context.deleteProgram(this.postProgram);
     // A program still linking must finish first: deleting it mid-link leaves a GL error that the next renderer on this context sees.
@@ -2304,3 +2423,6 @@ export class Renderer67 {
     this.updateBatches?.clear();
   }
 }
+
+// Glaze is the public name of the real-time renderer; Renderer67 stays for existing code.
+export { Renderer67 as Glaze };

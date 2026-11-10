@@ -48,14 +48,14 @@ test('frame index is floor(time * fps), looped by default and held on the last f
 test('a bad frame ID, frame count, fps or loop is rejected with a message that names the field', () => {
   const good = { frames: FRAME_IDS, fps: 12 };
   assert.deepEqual(normalizeMapSequence({ sequence: { ...good, frames: FRAME_IDS.map(id => id.toUpperCase()) } }).sequence.frames, FRAME_IDS);
-  assert.throws(() => normalizeMapSequence({ sequence: { ...good, frames: [FRAME_IDS[0], 'not-an-id'] } }), /64 hexadecimal characters/);
-  assert.throws(() => normalizeMapSequence({ sequence: { ...good, frames: [FRAME_IDS[0]] } }), /2 to 64/);
-  assert.throws(() => normalizeMapSequence({ sequence: { ...good, fps: 0 } }), /fps must be above 0/);
-  assert.throws(() => normalizeMapSequence({ sequence: { ...good, fps: 61 } }), /fps must be above 0 and at most 60/);
+  assert.throws(() => normalizeMapSequence({ sequence: { ...good, frames: [FRAME_IDS[0], 'not-an-id'] } }), /map\.sequence\.frames\[1\]: got "not-an-id"; expected the 64 hexadecimal characters/);
+  assert.throws(() => normalizeMapSequence({ sequence: { ...good, frames: [FRAME_IDS[0]] } }), /map\.sequence\.frames: got "1 frames"; expected a list of 2 to 64 catalog image asset IDs/);
+  assert.throws(() => normalizeMapSequence({ sequence: { ...good, fps: 0 } }), /map\.sequence\.fps: got 0; expected a number above 0 and at most 60/);
+  assert.throws(() => normalizeMapSequence({ sequence: { ...good, fps: 61 } }), /map\.sequence\.fps: got 61; expected a number above 0 and at most 60/);
   assert.throws(() => normalizeMapSequence({ sequence: { ...good, fps: Number.NaN } }), /fps/);
-  assert.throws(() => normalizeMapSequence({ sequence: { ...good, loop: 'yes' } }), /loop must be boolean/);
-  assert.throws(() => normalizeMapSequence({ sequence: { ...good, url: 'https://example.com/a.png' } }), /Unknown map sequence field: url/);
-  assert.throws(() => normalizeMapSequence({ url: 'https://example.com/a.png' }), /Unknown material map field: url/);
+  assert.throws(() => normalizeMapSequence({ sequence: { ...good, loop: 'yes' } }), /map\.sequence\.loop: got "yes"; expected true or false/);
+  assert.throws(() => normalizeMapSequence({ sequence: { ...good, url: 'https://example.com/a.png' } }), /map\.sequence\.url: got "https:\/\/example\.com\/a\.png"; expected no such field; use one of frames, fps, loop/);
+  assert.throws(() => normalizeMapSequence({ url: 'https://example.com/a.png' }), /map\.url: got "https:\/\/example\.com\/a\.png"; expected no such field; use one of sequence/);
 });
 
 test('the scene shows the frame of its motion time, reports it and seeks deterministically', () => {
@@ -81,10 +81,10 @@ test('the scene rejects frames that are missing or differ in size, and a map wit
   assert.throws(() => createAgentScene(quadRecipe({ frames: FRAME_IDS, fps: 10 }), {}, { sequenceFrames: new Map() }), /was not loaded/);
   const mixed = framePool();
   mixed.set(FRAME_IDS[1], { width: 4, height: 4, data: new Uint8ClampedArray(64) });
-  assert.throws(() => createAgentScene(quadRecipe({ frames: FRAME_IDS, fps: 10 }), {}, { sequenceFrames: mixed }), /same size/);
+  assert.throws(() => createAgentScene(quadRecipe({ frames: FRAME_IDS, fps: 10 }), {}, { sequenceFrames: mixed }), /map\.sequence\.frames: got "frames of different sizes in materia.*; expected frames that all measure 2x2/);
   const recipe = quadRecipe({ frames: FRAME_IDS, fps: 10 });
   recipe.materials[0].pattern = { type: 'bricks' };
-  assert.throws(() => createAgentScene(recipe, {}, { sequenceFrames: framePool() }), /pattern or a map sequence/);
+  assert.throws(() => createAgentScene(recipe, {}, { sequenceFrames: framePool() }), /pattern: got \{"type":"bricks"\}; expected nothing, because a material takes a pattern or a map sequence/);
 });
 
 test('an edit can set a sequence and the frame IDs of a recipe are collected for the host', () => {

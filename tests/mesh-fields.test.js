@@ -130,7 +130,7 @@ test('set_position moves vertices by a field and leaves the rest alone', () => {
   const stretched = applyMeshEdits(mesh, [{ op: 'set_position', position: { vec: [{ attr: 'position', component: 'x' }, { mul: [{ attr: 'position', component: 'y' }, 2] }, { attr: 'position', component: 'z' }] } }]).mesh;
   assert.equal(stretched.positions[1], mesh.positions[1] * 2);
   assert.equal(stretched.faceCount, mesh.faceCount);
-  assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position' }]), /position or an offset/);
+  assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position' }]), /edits\[0\]\.position: got undefined; expected a vector field expression/);
   assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position', offset: 1 }]), /vector/);
   assert.throws(() => applyMeshEdits(mesh, [{ op: 'set_position', offset: { eval: 'x' } }]), /unknown operator/);
 });
@@ -145,7 +145,7 @@ test('displace moves a sphere along its normals by (field - midlevel) * strength
   }
   const raised = applyMeshEdits(cube(), [{ op: 'displace', field: 1, strength: 0.4, midlevel: 0, direction: 'y' }]).mesh;
   assert.ok(Math.abs(raised.positions[1] - (cube().positions[1] + 0.4)) < 1e-6);
-  assert.throws(() => applyMeshEdits(mesh, [{ op: 'displace', field: 1, direction: 'sideways' }]), /direction must be/);
+  assert.throws(() => applyMeshEdits(mesh, [{ op: 'displace', field: 1, direction: 'sideways' }]), /direction: got "sideways"; expected one of/);
 });
 
 test('noise is smooth, stays in 0 to 1 and changes with the seed', () => {
@@ -253,5 +253,5 @@ test('a recipe with an instanced node creates one instanced batch of ordinary no
   assert.equal(session.parts.length, 1 + 30);
   assert.equal(new Set(session.parts.map(part => part.geometry)).size, 2);
   assert.throws(() => createAgentScene({ ...recipe, nodes: [{ ...recipe.nodes[1], instances: { scatter: { count: 10_000_000, min: [0, 0, 0], max: [1, 1, 1] } } }] }), /scatter count/);
-  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ ...recipe.nodes[1], instances: { surface: { geometry: 'missing', count: 3 } } }] }), /not in geometries/);
+  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ ...recipe.nodes[1], instances: { surface: { geometry: 'missing', count: 3 } } }] }), /instances\.surface: got "missing"; expected the ID of a geometry in geometries/);
 });

@@ -274,8 +274,9 @@ export function traceObjectProbes(parts, lighting, options = {}) {
     if (isReflectivePart(part.material)) reflective.push(index);
   });
   // Many small metal parts (lamp posts, spires) read as shapes and not as mirrors, and each probe costs a trace and a draw batch.
-  const wanted = reflective.length > MAXIMUM_OBJECT_PROBES ? [] : reflective;
-  const skipped = wanted.length > 0 ? null : reflective.length > 0 ? `more than ${MAXIMUM_OBJECT_PROBES} reflective parts` : 'no reflective part';
+  const tooManyOthers = parts.length - 1 > MAX_BAKE_PARTS;
+  const wanted = reflective.length > MAXIMUM_OBJECT_PROBES || tooManyOthers ? [] : reflective;
+  const skipped = wanted.length > 0 ? null : reflective.length > MAXIMUM_OBJECT_PROBES ? `more than ${MAXIMUM_OBJECT_PROBES} reflective parts` : tooManyOthers ? `more than ${MAX_BAKE_PARTS} other parts` : 'no reflective part';
   if (wanted.length === 0 || parts.length < 2) {
     return { traced: [], automatic: true, requested: reflective.length, skipped, seconds: 0 };
   }

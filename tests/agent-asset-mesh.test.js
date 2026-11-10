@@ -165,6 +165,21 @@ test('a checkpoint undoes a mesh edit and replace swaps the log', async () => {
   asset.dispose();
 });
 
+test('restoreRevision undoes mesh edits of an asset without a checkpoint', async () => {
+  const asset = await loadRobot();
+  const scene = createScene(asset);
+  applyEdits(scene, TORSO, [{ op: 'delete', select: { tag: 'top' } }]);
+  applyEdits(scene, TORSO, [{ op: 'delete', select: { tag: 'bottom' } }]);
+  const edited = partOf(scene, TORSO).geometry.indices.length;
+  scene.restoreRevision(0, { expectedRevision: scene.revision });
+  assert.equal(partOf(scene, TORSO).geometry, asset.parts[1].geometry);
+  assert.equal(scene.exportRecipe().meshEdits, undefined);
+  assert.throws(() => scene.restoreRevision(9, { expectedRevision: scene.revision }), /kept revisions: 0, 1, 2/);
+  scene.restoreRevision(2, { expectedRevision: scene.revision });
+  assert.equal(partOf(scene, TORSO).geometry.indices.length, edited);
+  asset.dispose();
+});
+
 test('an exported recipe replays the edits on a fresh decode', async () => {
   const asset = await loadRobot();
   const scene = createScene(asset);
@@ -182,9 +197,9 @@ test('hostile mesh edits are rejected without changing the scene', async () => {
   const scene = createScene(asset);
   const revision = scene.revision;
   const hostile = [
-    ['unknown mesh', () => applyEdits(scene, 'mesh-99', [{ op: 'delete', select: { tag: 'top' } }]), /Unknown mesh ID/],
-    ['prototype key', () => applyEdits(scene, '__proto__', [{ op: 'delete', select: { tag: 'top' } }]), /Unknown mesh ID/],
-    ['edits not an array', () => scene.apply([{ type: 'edit-mesh', geometry: TORSO, edits: 'delete' }], { expectedRevision: revision }), /edits array/],
+    ['unknown mesh', () => applyEdits(scene, 'mesh-99', [{ op: 'delete', select: { tag: 'top' } }]), /^RangeError: operations\[0\]\.geometry: got "mesh-99"; expected an imported mesh ID such as mesh-0/],
+    ['prototype key', () => applyEdits(scene, '__proto__', [{ op: 'delete', select: { tag: 'top' } }]), /^RangeError: operations\[0\]\.geometry: got "__proto__"; expected an imported mesh ID such as mesh-0/],
+    ['edits not an array', () => scene.apply([{ type: 'edit-mesh', geometry: TORSO, edits: 'delete' }], { expectedRevision: revision }), /^TypeError: operations\[0\]\.edits: got "delete"; expected an array of edits, such as/],
     ['unknown operation', () => applyEdits(scene, TORSO, [{ op: 'explode' }]), /explode|op/],
     ['not a number', () => applyEdits(scene, TORSO, [{ op: 'extrude_face_region', select: { tag: 'top' }, offset: Number.NaN }]), /offset|finite/],
     ['selects nothing', () => applyEdits(scene, TORSO, [{ op: 'delete', select: { tag: 'no-such-tag' } }]), /select|tag|no faces/i],
@@ -201,7 +216,7 @@ test('hostile mesh edits are rejected without changing the scene', async () => {
     assert.equal(scene.topologyRevision, 0, `${label} left the topology alone`);
   }
   assert.throws(() => createScene(asset, { meshEdits: [{ id: TORSO, edits: [{ op: 'delete', select: { tag: 'top' } }], extra: 1 }] }), /meshEdits/);
-  assert.throws(() => createScene(asset, { meshEdits: [{ id: TORSO, edits: [] }, { id: TORSO, edits: [] }] }), /repeated/);
+  assert.throws(() => createScene(asset, { meshEdits: [{ id: TORSO, edits: [] }, { id: TORSO, edits: [] }] }), /^RangeError: meshEdits.1.[.]id: got "[^"]+"; expected an imported mesh ID used once, such as /);
   asset.dispose();
 });
 
@@ -252,7 +267,7 @@ test('inspect accepts a source-node ID that holds one part and names the parts o
   assert.ok(single && several && empty, 'the robot has leaf, group and mesh-less nodes');
   const byNode = scene.inspect({ ids: [single.id] }).nodes;
   assert.deepEqual(byNode.map(node => node.id), single.meshIds);
-  assert.throws(() => scene.inspect({ ids: [several.id] }), error => error.message.includes(several.meshIds[0]) && /holds \d+ parts/.test(error.message));
-  assert.throws(() => scene.inspect({ ids: [empty.id] }), /no mesh/);
-  assert.throws(() => scene.inspect({ ids: ['nothing-here'] }), /Unknown mesh ID/);
+  assert.throws(() => scene.inspect({ ids: [several.id] }), error => error.message.includes(several.meshIds[0]) && /^geometry: got .*; expected one part ID, such as .*holds \d+ parts/.test(error.message));
+  assert.throws(() => scene.inspect({ ids: [empty.id] }), /^RangeError: geometry: got .*; expected a source node with a mesh of its own, or a mesh ID such as "mesh-0"/);
+  assert.throws(() => scene.inspect({ ids: ['nothing-here'] }), /^RangeError: geometry: got "nothing-here"; expected an imported mesh ID such as "mesh-0"/);
 });

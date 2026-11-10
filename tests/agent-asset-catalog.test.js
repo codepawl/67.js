@@ -97,7 +97,7 @@ test('catalog rejects linked assets and requires an explicitly absolute director
 
 test('the catalog limits are the documented values and never exceed the loadGltf defaults', () => {
   assert.deepEqual({ ...AGENT_ASSET_LIMITS }, {
-    maxBytes: 64 * 1024 * 1024, maxAssets: 64, maxVertices: 1_000_000, maxParts: 4096,
+    maxBytes: 64 * 1024 * 1024, maxAssets: 64, maxCombinedBytes: 64 * 1024 * 1024, maxVertices: 1_000_000, maxParts: 4096,
     maxTexturePixels: 4_194_304, maxJoints: 1024, maxClips: 256,
   });
   const defaults = GLTF_CAPABILITIES.limits;
@@ -126,4 +126,26 @@ test('a decode limit error names the catalog limit and the value the file hit, w
   assert.doesNotMatch(advised.message, /Fix: pass/);
   const other = new Error('unrelated');
   assert.equal(withCatalogLimitAdvice(other), other);
+});
+
+test('a Radiance .hdr and a .cube file are listed as environment and look entries and read back by ID', async context => {
+  const { directory } = await fixture(context);
+  const radiance = await readFile(new URL('../assets/looks/studio-softbox.hdr', import.meta.url));
+  const cube = await readFile(new URL('../assets/looks/noir.cube', import.meta.url));
+  await writeFile(join(directory, 'room.hdr'), radiance);
+  await writeFile(join(directory, 'grade.cube'), cube);
+  const catalog = await createAgentAssetCatalog(directory);
+  const entries = Object.fromEntries(catalog.list().assets.map(entry => [entry.name, entry]));
+  assert.equal(entries['room.hdr'].kind, 'environment');
+  assert.equal(entries['grade.cube'].kind, 'look');
+  assert.deepEqual(await catalog.read(entries['room.hdr'].assetId), radiance);
+});
+
+test('an .hdr that is not Radiance data and a .cube that is not a 3D look are refused', async context => {
+  const { directory } = await fixture(context);
+  await writeFile(join(directory, 'fake.hdr'), Buffer.alloc(64, 1));
+  await assert.rejects(createAgentAssetCatalog(directory), /Radiance/);
+  await rm(join(directory, 'fake.hdr'));
+  await writeFile(join(directory, 'fake.cube'), 'LUT_1D_SIZE 2\n0 0 0\n1 1 1\n'.padEnd(64, ' '));
+  await assert.rejects(createAgentAssetCatalog(directory), /LUT_3D_SIZE/);
 });

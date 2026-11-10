@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { changelogWithUnreleased, readChangelogData } from './changelog-fragments.mjs';
+import { plainGuide } from './plain-guide.mjs';
+import { buildApiReference } from './api-reference.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const metadata = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
@@ -38,7 +40,9 @@ const changelogText = await readFile(resolve(root, 'CHANGELOG.md'), 'utf8');
 await writeFile(resolve(root, 'public/changelog.md'), await changelogWithUnreleased(changelogText));
 await writeFile(resolve(root, 'public/changelog.json'), `${JSON.stringify(await readChangelogData({ changelogText, version: metadata.version }), null, 2)}
 `);
-await copyFile(resolve(root, 'docs/guide.md'), resolve(root, 'public/guide.md'));
+await writeFile(resolve(root, 'public/guide.md'), await plainGuide(root));
+await writeFile(resolve(root, 'public/api-reference.json'), `${JSON.stringify(await buildApiReference())}
+`);
 await copyFile(resolve(root, 'docs/gltf.md'), resolve(root, 'public/gltf.md'));
 const sourceDocuments = [
   'scene-graph.md', 'modeling.md', 'animation-curves.md', 'animation-mixer.md',

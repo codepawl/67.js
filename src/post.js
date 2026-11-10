@@ -1,8 +1,8 @@
-import { registeredFeatureCode } from './shader-registry.js';
+import { registeredFeatureCode, requireFeatureCode } from './shader-registry.js';
 
 export { fullscreenVertex } from './gl-program.js';
 
-function postFragmentSource(definitions, explosionFunction) {
+function postFragmentSource(definitions, explosionFunction, fogDeclarations, fogFunctions) {
   return `#version 300 es
 ${definitions}
 precision highp float;
@@ -25,25 +25,7 @@ uniform float explosionProgress;
 uniform mat4 inverseViewProjection;
 uniform vec3 eye;
 uniform sampler2D sceneDepth;
-uniform highp sampler2DShadow volumeShadowMap;
-uniform mat4 volumeLightProjection;
-uniform vec3 volumeLightDirection;
-uniform vec3 volumeLightColor;
-uniform float volumeDensity;
-uniform vec3 volumeMinimum;
-uniform vec3 volumeMaximum;
-uniform vec3 volumeColor;
-uniform vec3 volumeAmbient;
-uniform vec3 volumeDrift;
-uniform int volumeSteps;
-uniform float volumeAnisotropy;
-uniform float volumeShadowAmbient;
-uniform float volumeNoiseAmount;
-uniform float volumeNoiseScale;
-uniform float volumeMaxDistance;
-uniform float volumeHeightFalloff;
-uniform float orthographic;
-uniform highp sampler3D fogSkyVisibility;
+${fogDeclarations}
 uniform sampler2D occlusionTexture;
 uniform float occlusionStrength;
 uniform vec2 occlusionTexel;
@@ -59,65 +41,7 @@ float cloudNoise(vec3 position) {
   return mix(lower, upper, fraction.z);
 }
 ${explosionFunction}
-vec3 volumeFog(vec3 background) {
-  vec2 clipXY = textureCoordinate * 2.0 - 1.0;
-  vec4 farPoint = inverseViewProjection * vec4(clipXY, 1.0, 1.0);
-  vec4 nearPoint = inverseViewProjection * vec4(clipXY, -1.0, 1.0);
-  vec3 origin = orthographic > 0.5 ? nearPoint.xyz / nearPoint.w : eye;
-  vec3 direction = normalize(farPoint.xyz - origin * farPoint.w);
-  float depth = texture(sceneDepth, textureCoordinate).r;
-  vec4 surfacePoint = inverseViewProjection * vec4(clipXY, depth * 2.0 - 1.0, 1.0);
-  float surfaceDistance = volumeMaxDistance;
-  if (surfacePoint.w > 0.0) surfaceDistance = max(0.0, dot(surfacePoint.xyz - origin * surfacePoint.w, direction) / surfacePoint.w);
-  float exitDistance = min(volumeMaxDistance, surfaceDistance);
-  float entry = 0.0;
-  for (int axis = 0; axis < 3; axis++) {
-    if (direction[axis] == 0.0) {
-      if (origin[axis] < volumeMinimum[axis] || origin[axis] > volumeMaximum[axis]) return background;
-    } else {
-      float first = (volumeMinimum[axis] - origin[axis]) / direction[axis];
-      float second = (volumeMaximum[axis] - origin[axis]) / direction[axis];
-      entry = max(entry, min(first, second));
-      exitDistance = min(exitDistance, max(first, second));
-    }
-  }
-  if (entry >= exitDistance) return background;
-  float stepSize = (exitDistance - entry) / float(volumeSteps);
-  vec3 lightDirection = normalize(volumeLightDirection);
-  float cosine = dot(direction, lightDirection);
-  float anisotropy = volumeAnisotropy;
-  float phase = (1.0 - anisotropy * anisotropy) / (12.5663706 * pow(1.0 + anisotropy * anisotropy - 2.0 * anisotropy * cosine, 1.5));
-  float jitter = hash(vec3(gl_FragCoord.xy, 0));
-  float transmittance = 1.0;
-  vec3 accumulated = vec3(0);
-  for (int index = 0; index < 48; index++) {
-    if (index >= volumeSteps) break;
-    vec3 position = origin + direction * (entry + (float(index) + jitter) * stepSize);
-    float noise = 1.0;
-    if (volumeNoiseAmount > 0.0) noise = mix(1.0, cloudNoise((position - volumeDrift * time) * volumeNoiseScale) * 2.0, volumeNoiseAmount);
-    if (volumeHeightFalloff > 0.0) noise *= exp((volumeMinimum.y - position.y) / volumeHeightFalloff);
-    float opacity = 1.0 - exp(-volumeDensity * noise * stepSize);
-    vec4 lightPosition = volumeLightProjection * vec4(position, 1);
-    vec3 shadow = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
-    float visibility = 1.0;
-    if (all(greaterThanEqual(shadow, vec3(0))) && all(lessThanEqual(shadow, vec3(1)))) {
-      visibility = texture(volumeShadowMap, vec3(shadow.xy, shadow.z - 0.0008));
-    }
-    vec4 skyCell = POST_SKY ? texture(fogSkyVisibility, (position - volumeMinimum) / (volumeMaximum - volumeMinimum)) : vec4(0);
-    float shadowShare = POST_SKY ? 0.1 + 0.9 * min(1.0, 30.0 * skyCell.r) : volumeShadowAmbient;
-    vec3 scattering = volumeColor * (volumeAmbient * mix(shadowShare, 1.0, visibility) + volumeLightColor * phase * visibility + 0.6 * skyCell.gba);
-    accumulated += transmittance * opacity * scattering;
-    transmittance *= 1.0 - opacity;
-    if (transmittance < 0.001) break;
-  }
-  for (int tap = 0; tap < 24; tap++) {
-    float index = float(tap) + 0.5;
-    float radius = 0.03 + 0.0002 * index * index;
-    vec2 offset = vec2(cos(index * 2.4) * resolution.y / resolution.x, sin(index * 2.4)) * radius;
-    accumulated += textureLod(frameTexture, textureCoordinate + offset, log2(0.7 * radius * resolution.y)).rgb * volumeColor * (0.009 * (1.0 - transmittance) / (1.0 + 0.04 * index));
-  }
-  return accumulated + background * transmittance;
-}
+${fogFunctions}
 void main() {
   vec2 texel = 1.0 / resolution;
   vec3 center = texture(frameTexture, textureCoordinate).rgb;
@@ -238,15 +162,21 @@ const POST_STEP_CONDITIONS = {
   bloom: ['POST_BLOOM', 'bloomStrength > 0.0'],
   volume: ['POST_VOLUME', 'volumeDensity > 0.0'],
   sky: ['POST_SKY', 'true'],
+  field: ['POST_FIELD', 'true'],
+  detail: ['POST_DETAIL', 'true'],
+  lights: ['POST_LIGHTS', 'volumeLightCount > 0'],
   explosion: ['POST_EXPLOSION', 'volumeExplosion > 0.5'],
   finish: ['POST_FINISH', 'true'],
 };
 
-// The sky step is left out: the program with every step is the one a frame draws while a variant builds, and it has no fog sky grid.
-// The explosion step is left out too, because its code loads from explosion-shader.js only for a renderer that draws it.
-export const POST_STEPS = Object.freeze(Object.keys(POST_STEP_CONDITIONS).filter(step => step !== 'sky' && step !== 'explosion'));
+// The program with every step is the one a frame draws while a variant builds. It leaves out the steps below: the fog sky grid,
+// field and lights exist only inside a fog, and the volume fog and explosion code load from fog-shader.js and explosion-shader.js
+// only for a renderer that draws them.
+export const POST_STEPS_WITH_OPTIONAL_CODE = Object.freeze(['volume', 'sky', 'field', 'detail', 'lights', 'explosion']);
+export const POST_STEPS = Object.freeze(Object.keys(POST_STEP_CONDITIONS).filter(step => !POST_STEPS_WITH_OPTIONAL_CODE.includes(step)));
 
 const EXPLOSION_STUB = 'vec3 explosion(vec3 background) { return background; }';
+const VOLUME_FOG_STUB = 'vec3 volumeFog(vec3 background) { return background; }';
 
 function explosionFunctionFor(enabledSteps) {
   if (!enabledSteps.has('explosion')) return EXPLOSION_STUB;
@@ -255,13 +185,20 @@ function explosionFunctionFor(enabledSteps) {
   return code.post;
 }
 
+function fogCodeFor(enabledSteps) {
+  if (!enabledSteps.has('volume')) return { declarations: '', functions: VOLUME_FOG_STUB };
+  const code = requireFeatureCode('volumeFog');
+  return { declarations: code.postDeclarations, functions: code.postFunctions };
+}
+
 /** The post pass with only the listed steps compiled in; every step is switched by its uniform, as before. */
 export function createPostFragment(steps = POST_STEPS) {
   const enabled = new Set(steps);
   const definitions = Object.entries(POST_STEP_CONDITIONS)
     .map(([step, [macro, condition]]) => `#define ${macro} ${enabled.has(step) ? `(${condition})` : 'false'}`)
     .join('\n');
-  return postFragmentSource(definitions, explosionFunctionFor(enabled));
+  const fogCode = fogCodeFor(enabled);
+  return postFragmentSource(definitions, explosionFunctionFor(enabled), fogCode.declarations, fogCode.functions);
 }
 
 export const postFragment = createPostFragment();

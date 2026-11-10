@@ -38,12 +38,16 @@ export function blendReference(buffers, options) {
   const clampY = y => Math.min(height - 1, Math.max(0, y));
   const indexOf = (x, y) => clampY(y) * width + clampX(x);
   const positionAt = (x, y) => Array.from(positions.subarray(indexOf(x, y) * 3, indexOf(x, y) * 3 + 3));
-  const normalAt = (x, y, center) => {
-    const right = subtract(positionAt(x + 1, y), center);
-    const left = subtract(center, positionAt(x - 1, y));
-    const up = subtract(positionAt(x, y + 1), center);
-    const down = subtract(center, positionAt(x, y - 1));
-    const raw = cross(shorterStep(right, left), shorterStep(up, down));
+  const stepAlong = (x, y, dx, dy, center, part) => {
+    const forward = subtract(positionAt(x + dx, y + dy), center);
+    const backward = subtract(center, positionAt(x - dx, y - dy));
+    const forwardSame = ids[indexOf(x + dx, y + dy)] === part;
+    const backwardSame = ids[indexOf(x - dx, y - dy)] === part;
+    if (forwardSame !== backwardSame) return forwardSame ? forward : backward;
+    return shorterStep(forward, backward);
+  };
+  const normalAt = (x, y, center, part) => {
+    const raw = cross(stepAlong(x, y, 1, 0, center, part), stepAlong(x, y, 0, 1, center, part));
     const toEyeRaw = subtract(options.eye, center);
     const toEye = toEyeRaw.map(component => component / Math.hypot(...toEyeRaw));
     if (dot(raw, raw) < 1e-20) return toEye;
@@ -71,7 +75,7 @@ export function blendReference(buffers, options) {
         const weight = 1 - fraction;
         totalWeight += weight;
         const tapPart = ids[indexOf(tapX, tapY)];
-        if (tapPart === 0 || tapPart === part) continue;
+        if (tapPart <= 0 || tapPart === part || (options.radii.get(tapPart) ?? 0) > 0) continue;
         if (Math.hypot(...subtract(positionAt(tapX, tapY), center)) > reach) continue;
         nearestTap ??= [tapX, tapY];
         for (let channel = 0; channel < 3; channel++) colorSum[channel] += weight * colors[indexOf(tapX, tapY) * 3 + channel];
@@ -79,7 +83,7 @@ export function blendReference(buffers, options) {
       }
       if (!nearestTap) continue;
       const nearestPosition = positionAt(...nearestTap);
-      const creased = smoothstep(0.05, 0.4, 1 - dot(normalAt(x, y, center), normalAt(nearestTap[0], nearestTap[1], nearestPosition)));
+      const creased = smoothstep(0.05, 0.4, 1 - dot(normalAt(x, y, center, part), normalAt(nearestTap[0], nearestTap[1], nearestPosition, ids[indexOf(nearestTap[0], nearestTap[1])])));
       const amount = smoothstep(0, 0.5, otherWeight / totalWeight) * creased;
       for (let channel = 0; channel < 3; channel++) {
         const source = colors[indexOf(x, y) * 3 + channel];

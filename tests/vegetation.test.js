@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { exportGlb } from '../src/export.js';
 import { createFlowerPatch, createGrassClump, createGrassField, createTree, scatterVegetation, selectLevels, SPECIES } from '../src/vegetation.js';
 import { createBarkPixels, createLeafPixels } from '../src/vegetation-textures.js';
 
@@ -185,4 +186,33 @@ test('grass fields scatter clumps and flowers', () => {
   const meadow = createGrassField({ area: { minX: 0, maxX: 12, minZ: 0, maxZ: 12 }, seed: 5 });
   assert.ok(meadow.counts.grass > 50);
   assert.ok(meadow.parts.every(part => part.geometry.indices.length > 0));
+});
+
+test('mesh vegetation keeps vertex and material colors within [0, 1] for GLB export across all species and levels', () => {
+  const matrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  const broadleaf = createTree({ species: 'broadleaf', height: 9, leaves: 'mesh' }, 13);
+  for (const level of broadleaf.levels) {
+    const binary = exportGlb(level.parts.map(part => ({ ...part, matrix })));
+    assert.ok(binary.byteLength > 0);
+  }
+  for (const species of SPECIES_NAMES) {
+    const tree = createTree({ species, leaves: 'mesh' }, 3);
+    for (const level of tree.levels) {
+      for (const part of level.parts) {
+        for (const channel of part.material.color) assert.ok(channel >= 0 && channel <= 1);
+        if (part.geometry.colors) {
+          for (const channel of part.geometry.colors) assert.ok(channel >= 0 && channel <= 1);
+        }
+      }
+      assert.ok(exportGlb(level.parts.map(part => ({ ...part, matrix }))).byteLength > 0);
+    }
+  }
+  const clump = createGrassClump({ style: 'blades', seed: 2 });
+  for (const level of clump.levels) {
+    assert.ok(exportGlb(level.parts.map(part => ({ ...part, matrix }))).byteLength > 0);
+  }
+  const flowers = createFlowerPatch({ seed: 3 });
+  assert.ok(exportGlb(flowers.levels[0].parts.map(part => ({ ...part, matrix }))).byteLength > 0);
+  const field = scatterVegetation({ area: { minX: -10, maxX: 10, minZ: -10, maxZ: 10 }, density: 0.04, leaves: 'mesh', seed: 7 });
+  assert.ok(exportGlb(field.parts).byteLength > 0);
 });

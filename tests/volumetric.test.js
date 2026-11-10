@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { skyOpenness } from '../src/closed-room.js';
-import { resolveVolumeFog, volumeShadowAmbient } from '../src/volumetric.js';
+import { resolveVolumeFog } from '../src/volumetric.js';
+import { volumeShadowAmbient } from '../src/fog-field.js';
 import { Renderer67 } from '../src/renderer.js';
 
 test('bounded volume controls default disabled and preserve ordinary input data', () => {

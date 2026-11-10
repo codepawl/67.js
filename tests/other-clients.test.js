@@ -50,7 +50,7 @@ test('every tool accepts an empty-argument call only when it has no required fie
 
 test('strict-mode and subset gaps are the known ones, so a new kind of gap is noticed', () => {
   const knownGaps = {
-    'openai-strict': ['optional-properties', 'keyword-oneOf', 'keyword-prefixItems', 'any-value-schema', 'keyword-propertyNames', 'nesting-depth'],
+    'openai-strict': ['optional-properties', 'additional-properties-not-false', 'keyword-oneOf', 'keyword-prefixItems', 'any-value-schema', 'keyword-propertyNames', 'nesting-depth'],
     'gemini-subset': ['keyword-const', 'keyword-oneOf', 'keyword-$ref', 'any-value-schema', 'keyword-propertyNames', 'keyword-exclusiveMinimum', 'keyword-exclusiveMaximum'],
   };
   const summary = summarizeFindings(findings);
@@ -76,7 +76,7 @@ test('every page that llms.txt and the README link to exists in the package or o
   const missing = [];
   for (const { file, text } of documents) {
     for (const path of linkedPaths(text)) {
-      if (path === '/' || path === '/release.json') continue;
+      if (path === '/' || path === '/release.json' || path === '/changelog.json') continue;
       const found = pageSources(path).some(source => existsSync(`${repositoryRoot}${source}`));
       if (!found) missing.push(`${file} links ${path}`);
     }

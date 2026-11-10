@@ -9,6 +9,9 @@
 export const AGENT_ASSET_LIMITS = Object.freeze({
   maxBytes: 64 * 1024 * 1024,
   maxAssets: 64,
+  // The same ceiling for the sum of every asset one call hands to the preview page in one browser message (placed assets,
+  // motion sources and sequence frames together). Files that are each under maxBytes can still cross the crash size together.
+  maxCombinedBytes: 64 * 1024 * 1024,
   // About 32 bytes a vertex fills a 64 MiB file with 2,000,000; half of that keeps the decoded copy inside the preview memory budget.
   maxVertices: 1_000_000,
   maxParts: 4096,
@@ -34,6 +37,35 @@ export function describeAssetBytes(bytes) {
 export function assetBytesLimitMessage(size) {
   const limit = AGENT_ASSET_LIMITS.maxBytes;
   return `Asset is ${size} bytes, over the catalog maxBytes ${limit} (${describeAssetBytes(limit)}). Shrink it (meshopt compression, smaller textures) or split it into parts; a larger scene loads through loadGltf in code.`;
+}
+
+/** Message for one call whose assets together pass the combined limit; it names the limit, the total and the way out. */
+export function combinedAssetBytesLimitMessage(total) {
+  const limit = AGENT_ASSET_LIMITS.maxCombinedBytes;
+  return `This call sends ${total} bytes of assets to the preview page at once, over the catalog maxCombinedBytes ${limit} (${describeAssetBytes(limit)}). Place fewer or smaller assets in one call and add the rest in later calls, or shrink them (meshopt compression, smaller textures).`;
+}
+
+function decodedBase64Bytes(text) {
+  const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0;
+  return Math.floor(text.length * 3 / 4) - padding;
+}
+
+/** Decoded bytes of every base64 asset field in the input of one preview call. */
+export function combinedAssetBytes(input) {
+  let total = 0;
+  for (const field of ['assetData', 'sequenceData', 'sources']) {
+    for (const text of Object.values(input?.[field] ?? {})) {
+      if (typeof text === 'string') total += decodedBase64Bytes(text);
+    }
+  }
+  if (typeof input?.data === 'string') total += decodedBase64Bytes(input.data);
+  return total;
+}
+
+/** Throws a RangeError when the assets in one preview call pass the combined limit. */
+export function assertCombinedAssetBytes(input) {
+  const total = combinedAssetBytes(input);
+  if (total > AGENT_ASSET_LIMITS.maxCombinedBytes) throw new RangeError(combinedAssetBytesLimitMessage(total));
 }
 
 /**

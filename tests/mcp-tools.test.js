@@ -27,8 +27,10 @@ async function connect(context) {
   const sessionId = randomUUID();
   const checkpoints = new Map();
   const status = () => ({ sessionId, revision: scene.revision, inspection: scene.inspect(), render: { backend: 'fake' } });
+  // Edits answer without the inspection, like the preview does.
+  const editStatus = () => ({ sessionId, revision: scene.revision, render: { backend: 'fake' } });
   const runtime = {
-    async capabilities() { return AGENT_SCENE_CAPABILITIES; },
+    async capabilities() { return { scene: AGENT_SCENE_CAPABILITIES, phase: 'idle', availableIn: 'test' }; },
     async create({ recipe: input }) {
       calls++;
       scene = createAgentScene(input);
@@ -59,7 +61,7 @@ async function connect(context) {
     async apply({ expectedRevision, operations }) {
       calls++;
       scene.apply(operations, { expectedRevision });
-      return status();
+      return editStatus();
     },
     async look({ width, height, motionTime }) {
       calls++;
@@ -80,9 +82,13 @@ async function connect(context) {
       checkpoints.set(checkpointId, scene.checkpoint());
       return { checkpointId, sessionId, revision: scene.revision };
     },
-    async restore({ checkpointId, expectedRevision }) {
+    async restore({ checkpointId, revision, expectedRevision }) {
+      if (revision !== undefined) {
+        scene.restoreRevision(revision, { expectedRevision });
+        return editStatus();
+      }
       scene.restore(checkpoints.get(checkpointId), { expectedRevision });
-      return status();
+      return editStatus();
     },
     async releaseCheckpoint({ checkpointId }) {
       scene.releaseCheckpoint(checkpoints.get(checkpointId));
@@ -131,7 +137,7 @@ test('SDK advertises the complete strict JSON contract and truthful annotations'
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     'mesh_edit', 'mesh_inspect', 'mesh_stack', 'scene_apply', 'scene_asset_catalog', 'scene_capabilities', 'scene_checkpoint', 'scene_create', 'scene_create_asset', 'scene_dispose',
     'scene_export_glb', 'scene_export_recipe', 'scene_inspect', 'scene_look', 'scene_review', 'scene_release_checkpoint', 'scene_restore',
-    'scene_render_cancel', 'scene_render_release', 'scene_render_result', 'scene_render_status', 'scene_render_submit',
+    'scene_render_cancel', 'scene_render_release', 'scene_render_result', 'scene_render_status', 'scene_render_submit', 'scene_walkmap',
   ].sort());
   for (const tool of tools) {
     assert.equal(tool.inputSchema.type, 'object');
@@ -149,13 +155,16 @@ test('SDK advertises the complete strict JSON contract and truthful annotations'
   assert.equal(recipeSchema.properties.nodes.maxItems, 4096);
   assert.equal(recipeSchema.properties.materials.maxItems, 256);
   assert.equal(recipeSchema.properties.geometries.maxItems, 256);
-  const variants = recipeSchema.properties.geometries.items.oneOf ?? recipeSchema.properties.geometries.items.anyOf;
-  assert.deepEqual(variants.map(variant => variant.properties.type.const), ['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'terrain', 'grid', 'mesh']);
-  assert.ok(variants.every(variant => variant.additionalProperties === false));
-  assert.equal(recipeSchema.properties.environment.additionalProperties, false);
-  assert.equal(recipeSchema.properties.environment.properties.pointLights.maxItems, 8);
-  assert.equal(recipeSchema.properties.effects.additionalProperties, false);
+  // The tool lists the common fields; the strict schema still validates and scene_capabilities serves the full outline.
+  assert.deepEqual(recipeSchema.properties.geometries.items.properties.type.enum, ['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'terrain', 'grid', 'plane', 'cone', 'icoSphere', 'circle', 'line', 'mesh']);
+  assert.ok(recipeSchema.properties.environment.properties.setup);
   assert.equal(recipeSchema.properties.shadow.additionalProperties, false);
+  for (const topic of ['geometries', 'environment', 'effects', 'motion', 'physics', 'cloth', 'armatures', 'materialFields', 'meshEdit', 'meshStack']) {
+    const answer = (await client.callTool({ name: 'scene_capabilities', arguments: { topic } })).structuredContent;
+    assert.ok(answer.fields, `${topic} has an outline of its fields`);
+  }
+  assert.equal((await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'meshEdit.bevel' } })).structuredContent.fields.op, '"bevel"');
+  assert.equal((await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'nope' } })).isError, true);
   const look = tools.find(tool => tool.name === 'scene_look');
   assert.equal(look.annotations.readOnlyHint, true);
   assert.equal(look.inputSchema.properties.width.maximum, 1024);
@@ -186,7 +195,7 @@ test('review SDK exposes one image and rejects unknown or unbounded shot fields 
   await client.callTool({ name: 'scene_create', arguments: { recipe: recipe() } });
   const { tools } = await client.listTools();
   const tool = tools.find(tool => tool.name === 'scene_review');
-  assert.equal(tools.length, 22);
+  assert.equal(tools.length, 23);
   assert.equal(tool.annotations.readOnlyHint, true);
   assert.equal(tool.inputSchema.properties.shots.maxItems, 4);
   assert.equal(tool.inputSchema.properties.shots.items.additionalProperties, false);
@@ -200,7 +209,7 @@ test('review SDK exposes one image and rejects unknown or unbounded shot fields 
   const before = calls();
   for (const invalid of [
     { ...input, width: 481 }, { ...input, shots: [] }, { ...input, shots: Array(5).fill({}) },
-    { ...input, code: 'console.log(1)' }, { ...input, shots: [{ camera: { projection: 'orthographic' } }] },
+    { ...input, code: 'console.log(1)' }, { ...input, shots: [{ camera: { projection: 'fisheye' } }] },
     { ...input, shots: [{ animation: { clip: 0, time: 0, url: 'https://example.com' } }] },
     { ...input, shots: [{ label: 'x'.repeat(49) }] }, { ...input, shots: [{ motionTime: -1 }] },
     { ...input, shots: [{ rendererTime: 3601 }] }, { ...input, expectedRevision: -1 },
@@ -213,7 +222,7 @@ test('branch names and labels are bounded in every tool schema and rejected befo
   await client.callTool({ name: 'scene_create', arguments: { recipe: recipe() } });
   const { tools } = await client.listTools();
   const schema = name => tools.find(tool => tool.name === name).inputSchema;
-  assert.equal(tools.length, 22, 'branches add fields, not tools');
+  assert.equal(tools.length, 23, 'branches add fields, not tools');
   const pattern = '^[a-z][a-z0-9_-]{0,23}$';
   assert.equal(schema('scene_apply').properties.branch.pattern, pattern);
   assert.equal(schema('scene_restore').properties.branch.pattern, pattern);
@@ -287,7 +296,7 @@ test('mesh_inspect reports polygon counts, tags and lint for recipe geometries',
   assert.deepEqual(singular.structuredContent.meshes.map(mesh => mesh.geometry), ['cube']);
   const missing = await client.callTool({ name: 'mesh_inspect', arguments: { sessionId, geometries: ['nope'] } });
   assert.equal(missing.isError, true);
-  assert.match(missing.content[0].text, /Known IDs: cube, cable/);
+  assert.match(missing.content[0].text, /geometries: got "nope"; expected one of cube, cable/);
   await rejected(client, 'mesh_inspect', { sessionId, geometries: [] });
   await rejected(client, 'mesh_inspect', { sessionId, geometries: Array.from({ length: 17 }, (_, index) => `g${index}`) });
   await rejected(client, 'mesh_inspect', { sessionId, path: '../file' });
@@ -316,7 +325,7 @@ test('mesh_edit builds a mesh from a base and an edit log through the SDK', asyn
   const none = await client.callTool({ name: 'mesh_edit', arguments: { sessionId, expectedRevision: 1, geometry: 'cube',
     edits: [{ op: 'delete', select: { tag: 'lid.rim' } }, { op: 'delete', select: { tag: 'lid.rim' } }] } });
   assert.equal(none.isError, true);
-  assert.match(none.content[0].text, /Unknown tag lid\.rim|selects no faces/);
+  assert.match(none.content[0].text, /Unknown tag lid\.rim|edits\[3\]\.select: got \{"tag":"lid\.rim"\}; expected a rule that matches at least one face/);
   const exported = await client.callTool({ name: 'scene_export_recipe', arguments: { sessionId } });
   assert.equal(exported.structuredContent.recipe.geometries[0].edits.length, 2, 'failed edits leave the log unchanged');
   const replaced = await client.callTool({ name: 'mesh_edit', arguments: { sessionId, expectedRevision: 1, geometry: 'cube', replace: true,
@@ -399,11 +408,29 @@ test('real SDK calls preserve atomic revisions, checkpoints, recipe snapshots an
   assert.equal((await call('scene_release_checkpoint', { sessionId, checkpointId: checkpoint.checkpointId })).structuredContent.released, true);
   const released = await call('scene_restore', { sessionId, checkpointId: checkpoint.checkpointId, expectedRevision: revision + 2 });
   assert.equal(released.isError, true);
-  assert.match(released.content[0].text, /released checkpoint/);
+  assert.match(released.content[0].text, /checkpointId: got .*expected a checkpointId that scene_checkpoint returned and you have not released/);
   assert.equal((await call('scene_dispose', { sessionId })).structuredContent.disposed, true);
   await boundary.server.close();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(boundary.closed(), true);
+});
+
+test('scene_restore with a revision undoes the last edits without a checkpoint and names the kept revisions', async context => {
+  const { client, sessionId } = await connect(context);
+  const call = (name, argumentsValue = {}) => client.callTool({ name, arguments: argumentsValue });
+  await call('scene_create', { recipe: recipe() });
+  const before = (await call('scene_export_recipe', { sessionId })).structuredContent.recipe;
+  const imageBefore = (await call('scene_look', { sessionId })).content[0].data;
+  for (let revision = 0; revision < 3; revision++) {
+    await call('scene_apply', { sessionId, expectedRevision: revision, operations: [{ type: 'set-node', id: 'mesh', translation: [revision + 1, 0, 0] }] });
+  }
+  const unknown = await call('scene_restore', { sessionId, expectedRevision: 3, revision: 7 });
+  assert.equal(unknown.isError, true);
+  assert.match(unknown.content[0].text, /revision: got 7; expected one of the kept revisions: 0, 1, 2/);
+  const restored = await call('scene_restore', { sessionId, expectedRevision: 3, revision: 0 });
+  assert.equal(restored.structuredContent.revision, 4);
+  assert.deepEqual((await call('scene_export_recipe', { sessionId })).structuredContent.recipe, before);
+  assert.equal((await call('scene_look', { sessionId })).content[0].data, imageBefore);
 });
 
 test('SDK stdio EOF closes the runtime without launching a scene', async () => {
@@ -437,7 +464,8 @@ test('branches off leaves the branch field and the variants advice out of the sc
     assert.ok(!JSON.stringify(tool.inputSchema).includes('"branch"'), `${toolName} must not offer a branch`);
   }
   const restore = tools.find(candidate => candidate.name === 'scene_restore');
-  assert.ok(restore.inputSchema.required.includes('checkpointId'));
+  assert.ok(!restore.inputSchema.required.includes('checkpointId'), 'a revision can stand in for the checkpoint');
+  assert.ok(restore.inputSchema.properties.revision);
   assert.ok(!client.getInstructions().includes('branch'));
 });
 
@@ -461,9 +489,10 @@ test('relations off leaves the relations field and the relations capabilities ou
     assert.ok((await schemaOf(true)).includes('"relations"'), `${toolName} offers relations by default`);
     assert.ok(!(await schemaOf(false)).includes('"relations"'), `${toolName} must not offer relations`);
   }
-  const capabilitiesOf = async relations => (await clients[relations].callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent.scene;
-  assert.ok('relations' in await capabilitiesOf(true));
-  assert.deepEqual(Object.keys(await capabilitiesOf(false)), ['rigging']);
+  const sceneTopicsOf = async relations => (await clients[relations].callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent.topics.scene;
+  assert.ok((await sceneTopicsOf(true)).includes('relations'));
+  assert.ok(!(await sceneTopicsOf(false)).includes('relations'));
+  assert.ok((await sceneTopicsOf(false)).includes('rigging'));
 });
 
 test('SDK dynamic batches create resources, reject dangling edits, and restore scene membership', async context => {
@@ -478,15 +507,18 @@ test('SDK dynamic batches create resources, reject dangling edits, and restore s
     { type: 'add-node', node: { id: 'mesh', parent: 'group', geometry: 'cube', material: 'paint' } },
   ] });
   assert.equal(added.isError, undefined);
-  assert.equal(added.structuredContent.inspection.counts.parts, 1);
+  assert.equal(added.structuredContent.inspection, undefined);
+  assert.equal((await call('scene_inspect', { sessionId })).structuredContent.counts.parts, 1);
   const invalid = await call('scene_apply', { sessionId, expectedRevision: 1, operations: [{ type: 'remove-geometry', id: 'cube' }] });
   assert.equal(invalid.isError, true);
   const inspected = (await call('scene_inspect', { sessionId })).structuredContent;
   assert.equal(inspected.revision, 1);
   assert.equal(inspected.counts.geometries, 1);
   const restored = await call('scene_restore', { sessionId, checkpointId: initial.checkpointId, expectedRevision: 1 });
-  assert.equal(restored.structuredContent.inspection.counts.parts, 0);
-  assert.equal(restored.structuredContent.inspection.counts.geometries, 0);
+  assert.equal(restored.structuredContent.inspection, undefined);
+  const afterRestore = (await call('scene_inspect', { sessionId })).structuredContent;
+  assert.equal(afterRestore.counts.parts, 0);
+  assert.equal(afterRestore.counts.geometries, 0);
 });
 
 test('a tool that takes a sessionId defaults to the active scene, and still rejects a session that is not active', async context => {

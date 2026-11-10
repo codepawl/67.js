@@ -59,7 +59,7 @@ Using Node directly also avoids shell-specific npm launcher behavior in MCP clie
 `--memory` accepts an integer from 32 to 384 MiB and defaults to 192. A 1920x1080 frame needs about 175 MiB of render targets (measured, 4 samples), so the default fits an empty room at that size and 256 leaves room for textures; raise it for textured scenes.
 
 `--assets` selects an absolute directory containing self-contained GLB files.
-The asset catalog reads regular files directly inside that directory, with limits of 64 files and 64 MiB per file. Decoding takes 1,000,000 vertices, 4,096 parts and 1,024 joints at most; `scene_capabilities` reports every number under `assets`. They are lower than the `loadGltf` defaults (256 MiB, 8,000,000 vertices) because the server hands the whole file to the preview page as one base64 string, which crashed the page from 80 MiB in a local Chrome test. A file over a limit fails with an error that names the limit and the value it hit; a larger scene loads through `loadGltf` in code (see [gltf.md](gltf.md)). All limits live in `src/agent-asset-limits.js`.
+The asset catalog reads regular files directly inside that directory, with limits of 64 files and 64 MiB per file. One call that places several assets, motion sources and sequence frames sends them to the preview page in one message, so their total is capped at 64 MiB too (`maxCombinedBytes`); a call over it fails with an error that names the limit and the total, and the agent places the rest in later calls. Decoding takes 1,000,000 vertices, 4,096 parts and 1,024 joints at most; `scene_capabilities` reports every number under `assets`. They are lower than the `loadGltf` defaults (256 MiB, 8,000,000 vertices) because the server hands the whole file to the preview page as one base64 string, which crashed the page from 80 MiB in a local Chrome test. A file over a limit fails with an error that names the limit and the value it hit; a larger scene loads through `loadGltf` in code (see [gltf.md](gltf.md)). All limits live in `src/agent-asset-limits.js`.
 Asset IDs bind file contents through SHA-256. Changed files require a runtime restart before they receive refreshed IDs.
 Catalog imports retain supported textures, skins, morphs and animation clips.
 The catalog takes self-contained GLB only. Poly Haven and similar sites ship a glTF folder (`.gltf`, `.bin` and textures): bundle it first with one command, then put the result in the catalog directory: `npx @gltf-transform/cli copy tree_01_1k.gltf tree_01.glb`. A recipe places a catalog asset with an `asset` node field (see [the scene guide](agent-scene.md#placed-catalog-assets)).
@@ -77,7 +77,7 @@ Every recorded agent run used Claude Code. This table says what was tried elsewh
 | Client or check | Result |
 |---|---|
 | Official MCP SDK client over stdio (`npm run smoke:mcp-package`) | Passes. |
-| MCP Inspector CLI 2.13.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Lists all 22 tools through `tools/list` in 7 s. `tools/call` of `scene_create` with the lamp recipe succeeds in 10 s. The CLI starts a new server for every command and the scene lives in the server, so it cannot follow with `scene_look`. That call fails with "No scene is active" and returns no image. The preview image is not testable through this CLI. |
+| MCP Inspector CLI 2.13.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Lists all 23 tools through `tools/list` in 7 s. `tools/call` of `scene_create` with the lamp recipe succeeds in 10 s. The CLI starts a new server for every command and the scene lives in the server, so it cannot follow with `scene_look`. That call fails with "No scene is active" and returns no image. The preview image is not testable through this CLI. |
 | Official MCP Python SDK 2.3.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Initialize, `tools/list` (22 tools), `scene_create` and `scene_look` in one session. `scene_look` returns a 20480 byte PNG. 11 s including the first `uv` download. |
 | JSON Schema 2020-12 validator with strict mode (Ajv 8), run in `npm test` | Every tool input schema compiles. |
 | Tool names and descriptions | Names are 9 to 24 characters from `[a-z_]`, within the 64-character limit OpenAI, Gemini and Anthropic share. No description is over 1024 characters. |
@@ -93,7 +93,7 @@ Known gaps, checked by `npm run check:tool-schemas`:
 
 ## Workflow
 
-1. Call `scene_capabilities` to read supported features and runtime limits.
+1. Call `scene_capabilities` for the topic index, then again with `topic` for the detail you need (limits, field lists).
 2. Call `scene_create` with a [scene recipe](agent-scene.md#recipe-contract).
 3. Call `scene_inspect` to read node IDs, bounds, counts, and the current revision.
 4. Call `scene_checkpoint` before an experiment.
@@ -105,9 +105,10 @@ Known gaps, checked by `npm run check:tool-schemas`:
 10. Call `scene_export_recipe` to retain the canonical recipe.
 11. Call `scene_dispose` to release the scene before creating another one.
 
-`scene_create`, `scene_apply`, and `scene_restore` return the session ID, current revision, inspection, and render status.
+`scene_create` returns the session ID, current revision, inspection, and render status. `scene_apply` and `scene_restore` return the same without the inspection, so an edit answer stays small; call `scene_inspect` to read the nodes.
 `scene_checkpoint` returns a checkpoint UUID scoped to its session UUID.
 A restore increments revision and keeps the checkpoint available.
+To undo the last edits without a checkpoint, call `scene_restore` with `revision` set to an earlier revision number. The session keeps the 4 revisions before the current one (every `scene_apply` and `scene_restore` leaves one behind), drops the oldest first, and an unknown or dropped revision fails with the revisions still kept. The restore is itself a revision, so it can be undone the same way.
 A stale revision or invalid command produces an error without publishing partial edits.
 SDK validation rejects unknown tool fields before dispatch.
 Backend errors return `isError: true` with a readable message.
@@ -121,19 +122,20 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
-| `scene_capabilities` | None | Features, limits, and backend information |
+| `scene_capabilities` | `topic` (optional) | A short index of topics; with a topic, its limits and fields (`motion`, `environment`, `materialFields`, `meshEdit`, `meshEdit.<op>`, `physics`, `jobs` and more) |
 | `scene_create` | `recipe` | Session ID, revision, inspection, and render status |
-| `scene_asset_catalog` | None | Configured catalog and content-bound GLB IDs |
+| `scene_asset_catalog` | None | Configured catalog and content-bound GLB, image, `.hdr` (kind `environment`) and `.cube` (kind `look`) IDs; an ID goes in `environment.hdri` or `environment.look`, see [agent-look](agent-look.md#catalog-hdris-and-looks) |
 | `scene_create_asset` | `recipe` using `67js.asset` | Imported scene ID, revision, inspection and render status |
 | `scene_inspect` | `sessionId`, optional `ids`, `limit`, `includeBounds` | Compact node records and revision |
-| `scene_apply` | `sessionId`, `expectedRevision`, `operations` | Updated revision, inspection, and render status |
+| `scene_apply` | `sessionId`, `expectedRevision`, `operations` | Updated revision, render status, results and diff |
+| `scene_walkmap` | `sessionId` or `assetId` (query a big catalog GLB), `min`, `max`, optional `cellSize`, `clearance`, `keepOut`, `streetY`, `includeCells` | Grid rows of `.` walkable, `x` blocked and `#` no surface, with counts; ground height and headroom per cell with `includeCells`. See [scene-query.md](scene-query.md) |
 | `mesh_inspect` | `sessionId`, optional `geometries` (up to 16 IDs) | Per geometry: polygon counts, face sizes, parts, face tags, bounds and lint problems with fixes |
 | `mesh_edit` | `sessionId`, `expectedRevision`, `geometry`, `edits`, optional `replace` | Updated revision, render status and the mesh report with per-edit results |
 | `mesh_stack` | `sessionId`, `expectedRevision`, `geometry`, optional `stack`, `apply` | Updated revision, render status and the mesh report with per-node results |
 | `scene_look` | `sessionId`, optional `width`, `height`, `motionTime`, `labels` | PNG image and metadata |
 | `scene_review` | `sessionId`, `expectedRevision`, `shots` (each with an optional `branch`), optional `width`, `height`, `labels` | Labeled PNG grid and metadata from an isolated snapshot |
 | `scene_checkpoint` | `sessionId` | Checkpoint ID, session ID, and revision |
-| `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId` or a `branch` | Updated revision, inspection, and render status |
+| `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId`, a `revision` or a `branch` | Updated revision and render status |
 | `scene_release_checkpoint` | `sessionId`, `checkpointId` | Release confirmation |
 | `scene_export_recipe` | `sessionId` | Canonical recipe and revision |
 | `scene_export_glb` | `sessionId`, optional `clip`, `motionTime`, `maxTextureSize` | A GLB file under `<jobs>/exports/` with a server-chosen name: path, bytes, SHA-256. See [GLB export](export-glb.md) |
@@ -152,12 +154,12 @@ Every error an agent can reach names what failed and what to do next. `tests/too
 
 ### Tool cost and diagnostics
 
-Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs` reports the bytes and estimated tokens of each schema and of each typical result, and `npm run tool-cost` fails a pull request when one grows past its allowance against the base branch (`bench/tool-cost/README.md`). The schemas total 173,216 bytes (about 49,500 tokens). To save space, a mesh geometry's `edits` and `stack` in a recipe, and `motion` in `scene_apply` and asset recipes, are advertised as plain objects: the full field list is in `mesh_edit`, `mesh_stack` and `scene_create`, and the backend still validates every field and names the valid choices when one is wrong. A small mesh change is far cheaper as `mesh_edit` (187 bytes in the measured case) than as a whole recipe rewrite (1,254 bytes with the dispose).
+Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs` reports the bytes and estimated tokens of each schema and of each typical result, and `npm run tool-cost` fails a pull request when one grows past its allowance against the base branch (`bench/tool-cost/README.md`). The schemas total 189,144 bytes (about 54,000 tokens, measured 2026-11-07). To save space, a mesh geometry's `edits` and `stack` in a recipe, and `motion` in `scene_apply` and asset recipes, are advertised as plain objects: the full field list is in `mesh_edit`, `mesh_stack` and `scene_create`, and the backend still validates every field and names the valid choices when one is wrong. A small mesh change is far cheaper as `mesh_edit` (187 bytes in the measured case) than as a whole recipe rewrite (1,254 bytes with the dispose).
 
 `mesh_inspect` lint adds warnings for `intersecting-parts`, `self-intersection`, `thin-wall`, `floating-part` and `asymmetric`. They never set `ok` to false, run within face budgets, and list any check they skipped in `skippedChecks`. `scene_inspect` returns a `diagnostics` list only when there is something to say: ignored material fields, blended transmission, unused materials or geometries, and for imported assets the decoder's not-drawn features, rigs with no joints or no skin, and assets with no clips. Each item has `kind`, `severity`, `target`, `message` and `fix`.
 
 The recipe uses `format: '67js.scene'` and `schemaVersion: 1`.
-Supported geometry types are `box`, `cylinder`, `sphere`, `torus`, `lathe`, `extrude`, `tube`, `curve`, `text`, and `mesh`. The fields of `curve` and `text` are listed by `scene_capabilities` (`curveText.details`) and not repeated in every tool schema. Text uses the bundled font only; the MCP accepts no font file or URL.
+Supported geometry types are `box`, `cylinder`, `sphere`, `torus`, `lathe`, `extrude`, `tube`, `curve`, `text`, `grid`, `terrain`, and `mesh`. The fields of `curve` and `text` are listed by `scene_capabilities` (`curveText.details`) and not repeated in every tool schema. Text uses the bundled font only; the MCP accepts no font file or URL.
 A `mesh` geometry starts from one of the others as `base` and replays an edit log; see [mesh.md](mesh.md).
 Geometry fields remain flat inside each geometry record.
 Set operations use `set-node`, `set-material`, or `set-camera`, with fields directly on each command.
@@ -200,6 +202,17 @@ References must resolve after the complete batch. Removing a parent leaves its c
 Reparent or remove those children before the parent removal command to avoid rejection.
 The [scene contract](agent-scene.md) defines the geometry fields, transforms, materials, and atomic validation rules.
 
+## Call log
+
+To see which tools agents use, set `SIXTYSEVENJS_MCP_LOG=<file path>` before starting the server. It appends one JSON line per tool call: `time`, `tool`, `durationMs`, `ok`, `error` (`tool_error` or `thrown`, only on failure) and `resultBytes`. It never writes arguments, scene content or paths. With the variable unset nothing is written.
+
+```sh
+SIXTYSEVENJS_MCP_LOG=calls.jsonl npx 67js-mcp
+node scripts/summarize-mcp-log.mjs calls.jsonl other.jsonl
+```
+
+The script prints calls, errors, error rate and median duration per tool, most called first.
+
 ## Limits
 
 | Budget | Limit |
@@ -209,6 +222,7 @@ The [scene contract](agent-scene.md) defines the geometry fields, transforms, ma
 | Geometries and materials | 256 each |
 | Operations per batch | 256 |
 | Checkpoints per session | 8 |
+| Earlier revisions kept per session for `scene_restore` with `revision` | 4 |
 | Geometry input points | 4096 per input, including all extrusion contours |
 | Extrusion holes | 128 |
 | Unique geometry vertices | 250000 |
@@ -231,6 +245,7 @@ Camera matrices must remain finite at every supported preview aspect ratio, from
 Geometry resources remain immutable. Remove an unused definition and add its replacement in one batch, or add a new resource ID and rebind its nodes.
 Checkpoints retain their resource handles for exact restoration. Active, checkpoint and staged geometry share a bounded allocation budget.
 Release unused checkpoints to free that ownership before adding detail.
+The kept revisions share geometry buffers with the live scene, so four cost a recipe copy each (a few kilobytes) plus any geometry a later edit removed. That removed geometry counts in the same budget, and an edit that would exceed it drops the oldest kept revisions first instead of failing.
 
 The preview reconciles rigid parts, textured ones with the `replace-textured-parts` addon, while retaining shader programs, render targets and shared geometry buffers.
 A scene with material patterns gets a new renderer on each topology change instead. Skinned and morphed parts are not streamed either; `replaceParts` rejects adding or removing them.

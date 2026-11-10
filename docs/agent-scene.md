@@ -66,7 +66,7 @@ Call `loadAgentSceneModules(operations)` before `apply` when the operations add 
 ## Recipe contract
 
 The recipe must contain `format`, `schemaVersion`, `geometries`, `materials`, and `nodes`.
-The optional `camera` object supplies a perspective camera.
+The optional `camera` object supplies a perspective camera, or an orthographic one with `projection: 'orthographic'` and `orthoScale` (view height in metres, default 4). The lens is `fov` (vertical degrees) or `focalLength` in millimetres with `sensorWidth` (default 36); giving both is an error. `shift: [x, y]` moves the frame by a fraction of its width and height, positive right and up. `fStop` (0.7 to 64) turns on depth of field focused on `target` (1.4 or lower is full blur) and cannot be combined with `effects.depthOfField.blur`. The path tracer draws perspective cameras without shift.
 All objects reject unknown keys.
 Inputs must contain plain, finite, acyclic JSON data without accessors, sparse arrays, or executable values.
 JSON nesting has a fixed maximum of 64 levels.
@@ -107,7 +107,7 @@ The defaults are `surface`, `[0.5, 0.5, 0.5]`, `0`, `0.5`, `0`, opacity `1`, `op
 The tag can be `surface`, `unlit`, `liquid`, `foam`, `water`, `foliage` or `grass` (the last two sway in `environment.wind`) and remains fixed during editing.
 `liquid` refracts and tints what lies behind it: its color is the light one metre lets through, so `[0.56, 0.84, 0.88]` is clear water. `foam` draws soft blended droplets.
 `water` is a flat mirror sheet (a plane or thin box). The largest one sets the water level: everything below it fades by `exp(-absorption * depth)` per colour channel (`absorption` is RGB per metre), and its shadows are lifted and softened with depth times `turbidity` (0 clear to 1 murky). `waterPreset` fills both: `lake` (default), `sea` or `river`. A shadow on the surface is faint and never darkens the reflection; give the sheet an `opacity` below one when the bed should show. The sun's leg to a bed is bent at n = 1.33 and absorbed over `depth / cos(theta_t)`, so a clear lake keeps little shadow contrast on a bed 4 m down, and a murky river keeps about a quarter.
-Any `opacity` below one draws the material blended after opaque geometry, which suits glass, windows and visors. `alphaMode` accepts `opaque` or `blend`; cutout masking needs a texture and is not available in procedural recipes.
+Any `opacity` below one draws the material blended after opaque geometry, which suits glass, windows and visors. `alphaMode` accepts `opaque`, `blend` or `add` (additive light for sparks, trails and glow); cutout masking needs a texture and is not available in procedural recipes.
 `doubleSided` draws and lights both faces of thin sheets.
 Changing the tag, opacity, blending, sidedness or pattern replaces the affected parts in the renderer; color, metallic, roughness and emission edits keep them.
 Set liquid optics with `environment.liquid`: `thickness`, `ior`, `refraction`, `scattering`, `foamOpacity` and `foamSoftness`.
@@ -172,11 +172,14 @@ texture images, so no text from a recipe ever reaches the shader. The language s
 | `roughness`, `metallic` | The metallic-roughness map. A material that has either output defaults the matching factor to 1 |
 | `emission` | The emissive map. The material `emission` defaults to 1 when the graph has it |
 | `height` | A normal map, so it gives bump. `bump` (0 to 4, default 1) scales the relief |
+| `opacity` | The alpha of the base colour map. The material blends unless `alphaMode` says otherwise. The path tracer cuts it out at 0.5 |
+| `clearcoat` | A per-pixel mask of the clear coat (the red channel of `layerMaps.clearcoatTexture`). The material `clearcoat` defaults to 1. The rasterizer and the CPU path tracer read it |
+| `transmission` | A per-pixel mask of transmission (`transmissionMap`). The material `transmission` defaults to 1. Only the CPU path tracer reads the mask; the rasterizer and GPU tracers use the factor |
 
 Nodes: `uv` (`"u"`, `"v"` or `"both"`), `noise`, `voronoi` (`output`: `distance`, `edge` or `cell`, a random value per cell),
 `wave` (`sine`, `saw` or `triangle` along `u`, `v` or `diagonal`), `checker`, `gradient` (`u`, `v` or `radial`), `ramp`
 (2 to 8 stops of numbers or colours), `vec`, and the maths nodes `add`, `sub`, `mul`, `div`, `min`, `max`, `pow`, `abs`, `floor`,
-`fract`, `sqrt`, `invert`, `clamp`, `smoothstep` and `mix`. Maths nodes work on each component of a vector. Every texture
+`fract`, `sqrt`, `invert`, `clamp`, `smoothstep` and `mix`. Mixing nodes: `layer` (`base`, `top`, `mask`, `edge` 0.5, `softness` 0.1) puts `top` over `base` where the mask passes the edge, so `{ "layer": { "base": [0.45, 0.18, 0.06], "top": [0.1, 0.35, 0.7], "mask": chipMask } }` is paint over rust; `hue` (`color`, `shift` in turns, `saturation`, `value`) and `curve` (`value`, 2 to 8 `points` `[x, y]` with rising x, straight segments). Maths nodes work on each component of a vector. Every texture
 node takes `at`, a vector expression such as `{ "add": [{ "uv": "both" }, { "mul": [{ "vec": [0.1, 0, 0] }, 1] }] }`, to warp
 it. Scales and counts are whole numbers (1 to 64, even for `checker`), so every texture node tiles. `noise` is Blender's Noise Texture
 (2D, detail `octaves - 1`, roughness 0.5, lacunarity 2, normalized; `seed` moves the lattice by whole cells) with the lattice
@@ -225,7 +228,7 @@ Normal transforms must also remain finite.
 Cached local geometry bounds provide a conservative world Float32 check from eight corners per mesh.
 The check bounds the sum of absolute matrix products, so intermediate shader arithmetic cannot overflow before cancellation.
 
-The camera contains `eye`, `target`, `up`, `fov`, `near`, and `far`.
+The camera contains `eye`, `target`, `up`, `fov`, `near`, and `far`, plus the optional `projection`, `orthoScale`, `focalLength`, `sensorWidth`, `shift` and `fStop` when the recipe sets them.
 Its defaults are `[4, 3, 5]`, `[0, 0, 0]`, `[0, 1, 0]`, `45`, `0.1`, and `1000`.
 FOV uses degrees and ranges between zero and 180.
 The clipping range must satisfy `0 < near < far` at Float32 precision.
@@ -255,9 +258,25 @@ Give exactly one point source. `grid` is `{ counts: [nx, ny, nz], spacing: [dx, 
 on the triangles of a recipe geometry in proportion to their area; they are in that geometry's own space, so parent
 the group to the node that carries it. `seed` (default 0) fixes the placement. `where` is a number
 [field expression](mesh.md#field-expressions) over the points (position, normal, index): points where it is 0 are
-dropped. `yaw` turns each instance randomly about up, `alignToNormal` (surface only) tilts up to the surface normal, and `scale`
+dropped. `curve` is `{ points, count, length, closed, fillet }`: `count` points at equal arc length along the polyline through `points` (2 to 256, the first and last on its ends unless `closed`), or `length` spacing in metres between samples (not both `count` and `length`), with `fillet` rounding every corner by that radius (reduced where it does not fit). `yaw` turns each instance randomly about up, `alignToNormal` (surface or curve) turns up to the surface normal or the direction of the curve, and `scale`
 is a random uniform `[min, max]`. At most 2048 candidate points per node, and the scene's node limit still applies.
 The group's own scale applies to the spacing and the points, because they are in its space.
+
+`place` shapes the points once the source made them, and every choice is seeded and repeatable:
+
+```text
+"place": { "spacing": 1.4,
+           "density": { "saturate": { "sub": [1.4, { "mul": [0.1, { "length": [{ "attr": "position" }] }] }] } },
+           "variants": ["rockRound", "rockTall", { "geometry": "rockBlock", "material": "moss" }],
+           "size": { "vec": [1, { "add": [0.6, { "mul": [0.5, { "fract": { "mul": [{ "attr": "index" }, 0.37] } }] }] }, 1] } }
+```
+
+- `spacing`: Poisson-disk minimum distance. Points are kept in order, so a point is dropped when a kept one is closer; give enough candidates (`count`) to fill the area. Runs after `where` and `density`.
+- `density`: number field, the chance (0 to 1) that a point stays. Same seed, same points.
+- `variants`: 1 to 16 geometry ids or `{ geometry, material }`. Each point takes one at random, or the one `variant` (a number field, rounded down and wrapped) names. The node needs only a material when it lists variants.
+- `rotation`: vector field of extra Euler angles in radians, turned after `yaw` and `alignToNormal`. `size`: number or vector field, a scale per point, multiplied by the `scale` range and kept from 0.001 to 1000.
+- `at`: with a `surface` source, `"vertices"` (welded by position) or `"faces"` (centres, normal of the face) place on the mesh itself; `count` is then the most points allowed, and more is an error.
+- `realize` (on `instances` or `place`): when `true`, merges the placed instances into one realized mesh per material under the group node, bounded by `maxVertices`.
 
 ### Placed catalog assets
 
@@ -307,6 +326,16 @@ An asset placement with a `crowd` field fills its group node with `count` (1 to 
 
 Three node fields fix what looks wrong where meshes meet; `add-node` and `set-node` take all of them. `blend: { "radius": 0.15 }` (metres, 0.005 to 2) softens the seam where a rock or trunk cuts into the ground and needs a preview with depth; see [mesh-blend.md](mesh-blend.md). `decal: true` and `depthLayer` (0 to 4) stop z-fighting on flush faces; see `depthBias` in `scene_capabilities`.
 
+### Visibility and render flags
+
+Five node fields change how a node renders; `add-node` and `set-node` take them, and `scene_capabilities` lists them as `renderFlags`.
+
+- `visible: false` hides the node and every child: nothing is drawn and nothing casts a shadow, but the parts stay in their batches, so a film can cut between shots without parking parts out of view. Key it in a motion track with `{ "kind": "node", "id": "robot", "property": "visible", "keyframes": [{ "time": 0, "value": 1 }, { "time": 2, "value": 0 }] }`; values are 1 or 0 and the track steps by default.
+- `castShadow: false` and `receiveShadow: false` (mesh nodes) stop a mesh casting or receiving shadows. Both default to true; glass casts none unless `castShadow` is set.
+- `holdout: true` writes zero colour and zero alpha where the mesh covers, and still hides what is behind it and still casts its shadow. `shadowCatcher: true` draws only the shadow it receives, black with the shadow as premultiplied alpha, and casts none. Both are for compositing over footage and need a transparent canvas: `new Renderer67(canvas, parts, { transparent: true })`. A node is never both. The shadow catcher shows the sun shadow only.
+
+Parts with different `castShadow`, `receiveShadow`, `holdout` or `shadowCatcher` values batch apart; `visible` never splits a batch. `receiveShadow`, `holdout` and `shadowCatcher` changes need `replaceParts`, not `updateParts`.
+
 ### Relations between parts
 
 A mesh node can list `relations` that place it against other mesh nodes, so a resized body keeps its handle where it
@@ -354,7 +383,7 @@ Final resource references and hierarchy must be valid before publication.
 | --- | --- |
 | `set-node` | `id`, optional `translation`, `rotation`, `scale`, `parent`, `label`, `geometry`, `material` |
 | `set-material` | `id`, optional `color`, `metallic`, `roughness`, `emission`, `emissiveColor`, `pattern`, `map` |
-| `set-camera` | Optional `eye`, `target`, `up`, `fov`, `near`, `far` directly on the command |
+| `set-camera` | Optional `eye`, `target`, `up`, `fov`, `near`, `far`, `projection`, `orthoScale`, `focalLength`, `sensorWidth`, `shift`, `fStop` directly on the command; `focalLength` replaces `fov` and `fov` replaces `focalLength` |
 | `add-geometry` | `geometry`, containing a complete geometry record |
 | `remove-geometry` | `id` |
 | `add-material` | `material`, containing a complete material record |

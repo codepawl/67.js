@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { Script, createContext } from 'node:vm';
 import { mat4 } from 'gl-matrix';
-import { createAgentScene, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, loadAllAgentSceneModules, allAgentSceneModulesLoaded } from '../../src/agent-scene.js';
+import { createAgentScene, applyCameraFields, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, loadAllAgentSceneModules, allAgentSceneModulesLoaded } from '../../src/agent-scene.js';
 import { normalizeBlend } from '../../src/mesh-blend.js';
 import { applyProjection } from '../../src/camera.js';
+import { effectsWithFStop } from '../../src/camera-effects.js';
 import { resolveAgentShadow, agentEnvironmentMap } from '../../src/agent-look.js';
 import { agentSceneModule, agentSceneModuleLoaded } from '../../src/agent-scene-modules.js';
 import { createAgentAssetScene } from '../../src/agent-asset.js';
@@ -12,7 +13,10 @@ import { hasPatternTextures } from '../../scripts/agent-preview-textures.js';
 import { assetCopyKey, recipeAssetNeeds } from '../../src/agent-scene-assets.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../../src/agent-branches.js';
 import { sessionProblem } from '../../src/agent-errors.js';
+import { describeApplication } from '../../src/agent-apply-report.js';
+import { framingProblems, exposureProblems, lumaShares } from '../../src/frame-checks.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../../src/agent-asset-limits.js';
+import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from '../../scripts/agent-walkmap.js';
 
 // Runs the preview page's adapter code in a VM with a fault-injected renderer, the way the MCP preview runs it in a browser.
 const source = (await readFile(new URL('../../scripts/agent-preview-browser.js', import.meta.url), 'utf8')).replace(/^import .+;\r?$/gm, '');
@@ -28,8 +32,9 @@ export function previewHarness() {
   const tiles = [];
   const makeCanvas = () => ({ width: 768, height: 512,
     replaceWith() {}, toDataURL: () => 'data:image/png;base64,cG5n',
-    getContext: kind => kind === '2d' ? { fillRect() {}, fillText() {}, strokeText() {},
-      drawImage: () => tiles.push(renders.at(-1)) } : { getExtension: () => null } });
+    getContext(kind) { const target = this; return kind === '2d' ? { fillRect() {}, fillText() {}, strokeText() {},
+      drawImage: () => { if (target.width !== 64) tiles.push(renders.at(-1)); },
+      getImageData: (x, y, width, height) => ({ data: new Uint8ClampedArray(width * height * 4).fill(128) }) } : { getExtension: () => null }; } });
   const canvas = makeCanvas();
   class FaultInjectedRenderer {
     memoryPlan = { estimatedBytes: 1024 };
@@ -77,15 +82,15 @@ export function previewHarness() {
     // The harness loads Manifold from node_modules directly, so the preview's served-file loader is ignored.
     setManifoldModuleLoader: () => {},
     needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader: () => {},
-    parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
-    applyProjection, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
+    sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, describeApplication, framingProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
+    applyProjection, applyCameraFields, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
     // Line art needs a real renderer with render passes, so the fault-injected one gets a no-op install.
     agentSceneModule: name => (name === 'lineArt' ? { installLineArt: renderer => renderer } : name === 'userPass' ? { ...agentSceneModule(name), installUserPasses: renderer => renderer } : agentSceneModule(name)), agentSceneModuleLoaded, createBranchStore, printableLabel,
     Renderer67: FaultInjectedRenderer, skyOpenness: () => 1, fogSkyVisibility: () => null,
     // The fault-injected renderer has no floor part; the automatic floor is covered by agent-ground.test.js and the live smokes.
     agentGroundPlacement: () => null, createAgentGround: () => null, placeAgentGround: () => {}, FLOOR_COLOR: [0.22, 0.22, 0.21], groundBounceEnvironment: (parts, environment) => environment,
     // The optional addons only plug stages into a real renderer; the fault-injected one needs none.
-    installCameraEffects: renderer => renderer, installRenderPasses: renderer => renderer, installDepthPrecision: renderer => renderer,
+    installCameraEffects: renderer => renderer, effectsWithFStop, installRenderPasses: renderer => renderer, installDepthPrecision: renderer => renderer,
     installMeshBlend: renderer => Object.assign(renderer, { meshBlend: { radii: new Map() } }), normalizeBlend,
   });
   // Evaluate only trusted repository adapter code; inject the driver boundary for failure cases.

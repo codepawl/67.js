@@ -3,6 +3,8 @@ import './brand.js';
 import { vec4 } from 'gl-matrix';
 import { Renderer67 } from './renderer.js';
 import { createNatureWorld } from './nature.js';
+import { installMeshBlend } from './mesh-blend.js';
+import { createFlagAnimation } from './nature-flag.js';
 
 const renderParameters = new URLSearchParams(location.search);
 const canvas = document.querySelector('#viewport');
@@ -15,6 +17,7 @@ const state = {
 };
 let world = createNatureWorld();
 let renderer;
+let flagAnimation = null;
 let scheduledFrame = 0;
 let lastFrameTime = 0;
 let dragging;
@@ -64,6 +67,7 @@ function environment() {
 }
 
 function renderFrame() {
+  flagAnimation?.update(state.time, state.wind);
   renderer?.render({ ...camera(), time: state.time, wind: state.wind, waterRipple: state.waterRipple, rippleTime: state.rippleTime, environment: environment(), effects: { saturation: 1.06, contrast: 1.03, temperature: (1 - state.daylight) * 0.1, vignette: 0.07, bloom: { strength: 0.1, threshold: 1.2, radius: 1.3 } } });
 }
 
@@ -97,10 +101,15 @@ function updateStatistics() {
 }
 
 function initializeRenderer() {
-  renderer = new Renderer67(canvas, world.parts, {
-    world: true, ground: false, hdr: true, environment: world.environment,
+  // ?softening=0 draws the valley without the seam blend, the flagpole and the flag, to compare frames and frame time.
+  const softening = renderParameters.get('softening') !== '0';
+  const parts = softening ? world.parts : world.parts.filter(part => part !== world.flag && part.name !== 'Flagpole').map(({ blend, ...part }) => part);
+  renderer = new Renderer67(canvas, parts, {
+    world: true, ground: false, hdr: true, depth: softening, environment: world.environment,
     pixelRatio: renderParameters.get('export') === '1' ? 1 : 1.25, memoryBudgetMiB: Number(renderParameters.get('memory') ?? 256), samples: Number(renderParameters.get('samples') ?? 4),
   });
+  if (softening) installMeshBlend(renderer);
+  flagAnimation = softening ? createFlagAnimation(renderer, world.flag) : null;
   updateStatistics();
   renderFrame();
   invalidate();

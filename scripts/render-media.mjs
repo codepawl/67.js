@@ -1,18 +1,19 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname, basename } from 'node:path';
 import { FILM_DURATION } from '../src/film.js';
 import { RENDER_PRESETS } from '../src/budget.js';
 import { createFrameEncoder } from './frame-encoder.mjs';
+import { prepareFileScene, readCameraKeys } from './file-scene.mjs';
 import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, installFrameReaderInPage, startFrameServer, startVideoEncoderInPage } from './gpu-frame-reader.mjs';
 
 function argumentsFrom(values) {
   const result = {};
-  const allowed = new Set(['kind', 'backend', 'scene', 'preset', 'width', 'height', 'fps', 'duration', 'time', 'memory', 'assembly', 'output', 'audio', 'encoder', 'start', 'aspect', 'asset', 'capture', 'jpeg-quality']);
+  const allowed = new Set(['kind', 'backend', 'scene', 'preset', 'width', 'height', 'fps', 'duration', 'time', 'memory', 'assembly', 'output', 'audio', 'encoder', 'start', 'aspect', 'asset', 'config', 'camera', 'root', 'capture', 'jpeg-quality']);
   for (let index = 0; index < values.length; index += 2) {
     if (!values[index].startsWith('--') || values[index + 1] === undefined) throw new Error('Every option needs a value.');
     const name = values[index].slice(2);
@@ -30,8 +31,11 @@ export function parseRenderOptions(values) {
   const presetName = options.preset ?? (backend === 'cpu' ? 'cpu' : 'balanced');
   const preset = RENDER_PRESETS[presetName];
   const aspect = options.aspect ?? 'landscape';
-  if (!preset || !['image', 'video', 'stills'].includes(kind) || !['gpu', 'cpu'].includes(backend) || !['film', 'nature', 'object', 'motion', 'view2d', 'assets', 'modeling'].includes(scene) || !['landscape', 'portrait', 'square'].includes(aspect)) throw new Error('Unknown render kind, backend, scene, aspect or preset.');
+  if (!preset || !['image', 'video', 'stills'].includes(kind) || !['gpu', 'cpu'].includes(backend) || !['film', 'nature', 'object', 'motion', 'view2d', 'assets', 'modeling', 'file'].includes(scene) || !['landscape', 'portrait', 'square'].includes(aspect)) throw new Error('Unknown render kind, backend, scene, aspect or preset.');
   if (options.asset && scene !== 'assets') throw new Error('The asset file option requires --scene assets.');
+  if (scene === 'file' && !options.config) throw new Error('--scene file needs --config <scene.json>.');
+  if ((options.config || options.camera || options.root) && scene !== 'file') throw new Error('--config, --camera and --root require --scene file.');
+  const cameraKeys = options.camera ? readCameraKeys(options.camera) : null;
   const numberOption = (name, fallback, minimum, maximum) => {
     const value = Number(options[name] ?? fallback);
     if (!Number.isFinite(value) || value < minimum || value > maximum) throw new Error(`${name} must be between ${minimum} and ${maximum}.`);
@@ -47,11 +51,13 @@ export function parseRenderOptions(values) {
   const width = Math.round(numberOption('width', defaultWidth, 64, 4096));
   const height = Math.round(numberOption('height', defaultHeight, 64, 4096));
   if (kind === 'video' && (width % 2 || height % 2)) throw new Error('Video dimensions must be even for yuv420p output.');
-  const fps = numberOption('fps', preset.fps, 1, 60);
+  const fps = numberOption('fps', cameraKeys?.fps ?? preset.fps, 1, 60);
   const duration = numberOption('duration', scene === 'film' ? FILM_DURATION : ['motion', 'modeling'].includes(scene) ? 12 : 32, 0.1, 240);
   const time = numberOption('time', scene === 'assets' ? 0 : 3, 0, 3600);
   const start = numberOption('start', 0, 0, 3600);
-  const memory = numberOption('memory', preset.memoryBudgetMiB, 32, 1024);
+  // A scene file carries its own budget (the Bistro needs about 1.4 GiB for textures), so it is the default and the cap is higher.
+  const sceneFileBudget = scene === 'file' ? JSON.parse(readFileSync(resolve(options.config), 'utf8')).renderer?.memoryBudgetMiB : undefined;
+  const memory = numberOption('memory', sceneFileBudget ?? preset.memoryBudgetMiB, 32, scene === 'file' ? 8192 : 1024);
   const assembly = numberOption('assembly', 0, 0, 1);
   const captureFormat = options.capture ?? (kind === 'video' ? 'auto' : 'png');
   if (!['auto', 'webcodecs', 'raw', 'jpeg', 'png'].includes(captureFormat)) throw new Error('Capture must be auto, webcodecs, raw, jpeg or png.');
@@ -62,7 +68,7 @@ export function parseRenderOptions(values) {
   const encoderBackend = options.encoder ?? (backend === 'cpu' ? 'cpu' : 'auto');
   if (!['auto', 'cpu', 'gpu'].includes(encoderBackend)) throw new Error('Encoder must be auto, cpu or gpu.');
   const audio = options.audio ?? (scene === 'film' ? 'artifacts/critical-score.wav' : null);
-  return { options, kind, backend, scene, presetName, preset, aspect, width, height, fps, duration, time, start, memory, assembly, output, encoderBackend, audio, captureFormat, jpegQuality };
+  return { cameraKeys, options, kind, backend, scene, presetName, preset, aspect, width, height, fps, duration, time, start, memory, assembly, output, encoderBackend, audio, captureFormat, jpegQuality };
 }
 
 export async function selectEncoderBackend(requested, probe) {
@@ -122,7 +128,9 @@ export async function renderMedia(values = process.argv.slice(2)) {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const ffmpeg = process.platform === 'win32' ? resolve(process.env.USERPROFILE, '.local/bin/ffmpeg.exe') : 'ffmpeg';
   const encoderBackend = kind === 'video' ? await selectEncoderBackend(plan.encoderBackend, () => probeNvenc(ffmpeg)) : null;
-  const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+  const chrome = process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : 'C:/Program Files/Google/Chrome/Application/chrome.exe';
   const serverPort = await freePort();
   const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--config', 'scripts/render-vite.config.mjs', '--host', '127.0.0.1', '--port', String(serverPort), '--strictPort'], { cwd: root, windowsHide: true, stdio: 'pipe' });
   let browser;
@@ -150,14 +158,27 @@ export async function renderMedia(values = process.argv.slice(2)) {
     });
     const args = ['--enable-webgl', '--ignore-gpu-blocklist'];
     if (backend === 'cpu') args.push('--use-angle=swiftshader', '--enable-unsafe-swiftshader');
+    else if (process.platform === 'darwin') args.push('--use-angle=metal', '--enable-gpu');
     browser = await chromium.launch({ headless: true, ...(existsSync(chrome) ? { executablePath: chrome } : {}), args });
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     const route = scene === 'object' ? 'object.html' : `${scene}.html`;
     const query = new URLSearchParams({ export: '1', width: String(width), height: String(height), aspect, memory: String(memory), samples: String(backend === 'cpu' ? 1 : preset.samples) });
+    if (scene === 'file') {
+      const world = prepareFileScene({ configPath: options.config, root: options.root });
+      await page.route('**/__file/**', async (request) => {
+        const { pathname } = new URL(request.request().url());
+        if (pathname === '/__file/config.json') await request.fulfill({ json: world.description });
+        else if (pathname === '/__file/camera.json' && plan.cameraKeys) await request.fulfill({ json: plan.cameraKeys });
+        else if (pathname.startsWith('/__file/asset/')) await request.fulfill({ path: world.assets[Number(pathname.split('/')[3])] });
+        else await request.fulfill({ status: 404, body: 'not found' });
+      });
+    }
     await page.goto(`http://127.0.0.1:${serverPort}/${route}?${query}`);
-    await page.waitForFunction((mode) => window.__scene?.renderer || (mode === 'film' ? window.__filmReady : mode === 'nature' ? window.__nature?.renderer : mode === 'object' ? window.__studio?.renderer : false), scene, { timeout: 60000 });
+    await page.waitForFunction((mode) => window.__fileSceneError || window.__scene?.renderer || (mode === 'film' ? window.__filmReady : mode === 'nature' ? window.__nature?.renderer : mode === 'object' ? window.__studio?.renderer : false), scene, { timeout: 60000 });
+    const fileSceneError = await page.evaluate(() => window.__fileSceneError);
+    if (fileSceneError) throw new Error(`Scene file failed to load: ${fileSceneError}`);
     if (options.asset) {
       await page.locator('#file').setInputFiles(resolve(options.asset));
       await page.waitForFunction(() => document.querySelector('#notice').hidden || document.querySelector('#notice').textContent.startsWith('⚠'));

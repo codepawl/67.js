@@ -120,8 +120,15 @@ try {
       await page.locator('#doc-search').fill('');
       await page.locator('#doc-toc a[href="#models-and-ai-agents"]').click();
       assert.match(page.url(),/models-and-ai-agents/);
-      await page.locator('#doc-toc a[href="#getting-started"]').click();
-      assert.equal(await page.locator('#getting-started ol li').count(), 3);
+      await page.locator('#doc-toc a[href="#first-scene"]').click();
+      assert.ok(await page.locator('#first-scene .doc-step').count() >= 5);
+      assert.ok(await page.locator('#first-scene .live-example').count() >= 3);
+      const firstExample = page.locator('.live-example').first();
+      await firstExample.locator('.live-run').click();
+      await page.waitForFunction(() => document.querySelector('.live-example')?.dataset.ready === 'true');
+      assert.equal(await firstExample.locator('.live-status[data-kind=error]').count(), 0);
+      await page.evaluate(() => { location.hash = '#getting-started'; });
+      await page.waitForURL(/#first-scene$/);
       const headerBounds = await page.locator('.navigation').boundingBox();
       const copyBounds = await page.locator('#copy-doc-page').boundingBox();
       assert.ok(copyBounds.y >= headerBounds.y + headerBounds.height, 'Sticky header covers Copy page');
@@ -129,12 +136,12 @@ try {
       assert.ok(await page.locator('.code-block').count() >= 2);
       assert.equal(await page.locator('#copy-doc-page').count(), 1);
       await page.locator('#copy-doc-page').click();
-      assert.match(await page.evaluate(() => window.__copiedText), /^## Getting started/);
+      assert.match(await page.evaluate(() => window.__copiedText), /^# Your first scene/);
       assert.ok(!(await page.evaluate(() => window.__copiedText)).includes('## Parts and geometry'));
       const firstCode = page.locator('.code-block').first();
       await firstCode.locator('.copy-code').click();
       assert.equal(await page.evaluate(() => window.__copiedText), await firstCode.locator('code').textContent());
-      report.interactions.push('Grouped docs, selected articles, search, deep links and labeled syntax highlighting');
+      report.interactions.push('Grouped docs, start pages, a running live example, old-link aliases, search, deep links and labeled syntax highlighting');
     }
     if (route === '/object.html') {
       await page.locator('[data-view="face"]').click();

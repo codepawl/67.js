@@ -7,6 +7,10 @@ import { createSharedTextures, loadGltf } from './gltf.js';
 import { loadHdri } from './hdri.js';
 import { createCascadedShadows } from './cascaded-shadows.js';
 import { applyWaterReflection, attachWaterReflection } from './water-reflection.js';
+
+// The mirror redraws every second lit frame while the camera moves: about 1.3 ms off the orbiting port frame
+// (issue #504), and An saw no stutter in a side-by-side. A still camera keeps its picture either way.
+const WATER_REFLECTION_OPTIONS = { updateEvery: 2 };
 import { createDownloadMeter, downloadBlob, readByteLength, readPartRanks } from './showcase-download.js';
 
 // Each scene lives in public/showcase/<id>/scene.json: its GLB, sky, camera, renderer and frame options, and credits.
@@ -262,7 +266,7 @@ async function finishWorld(world) {
     const reflection = description.waterReflection ? applyWaterReflection(allParts) : { parts: allParts, surface: null };
     renderer.replaceParts(reflection.parts);
     detachReflection();
-    attachWaterReflection(renderer, reflection.surface);
+    attachWaterReflection(renderer, reflection.surface, WATER_REFLECTION_OPTIONS);
     applyLimits(description, allParts, homeView);
     if (fullMap) scene.frame = { ...scene.frame, environment: { map: fullMap } };
     window.__showcase.complete = true;
@@ -330,7 +334,7 @@ async function selectScene(id) {
       shadowCascades,
       environment: { ...(rendererOptions.environment ?? {}), map },
     });
-    const detachReflection = attachWaterReflection(renderer, reflection.surface);
+    const detachReflection = attachWaterReflection(renderer, reflection.surface, WATER_REFLECTION_OPTIONS);
     scene = { frame: { exposure: description.exposure ?? 1, ...(description.frame ?? {}) } };
     orbitFromCamera(description.eye, description.target);
     applyLimits(description, asset.parts);

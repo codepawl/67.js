@@ -1,6 +1,7 @@
 import { viewTransformShader } from './shader-registry.js';
 import { AGX_CONSTANTS, NEUTRAL_CONSTANTS, namedLook } from './view-transform.js';
-import { VIEW_TRANSFORM_NAMES } from './view-transform-names.js';
+import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
+import { catalogLook } from './look-catalog.js';
 
 // The GLSL of the AgX and Khronos PBR Neutral view transforms and of the look LUT. It lives outside shaders.js so a
 // scene on the default curve never downloads it: the renderer asks for it only when it is given viewTransform: 'agx' or
@@ -86,6 +87,7 @@ const namedLooks = new Map();
 /** A look as the renderer draws it: a name from LOOK_NAMES is built once, a parsed .cube look is used as is. */
 function resolveLook(look) {
   if (typeof look !== 'string') return look;
+  if (!LOOK_NAMES.includes(look)) return catalogLook(look);
   if (!namedLooks.has(look)) namedLooks.set(look, namedLook(look));
   return namedLooks.get(look);
 }

@@ -59,7 +59,7 @@ const triangleArea = (positions, first, second, third) => {
   return Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx) / 2;
 };
 
-function signedVolume({ positions, indices }) {
+export function signedVolume({ positions, indices }) {
   let volume = 0;
   for (let triangle = 0; triangle < indices.length; triangle += 3) {
     const [first, second, third] = [indices[triangle], indices[triangle + 1], indices[triangle + 2]];
@@ -136,7 +136,7 @@ export function sectionLoops(geometries, axis, at) {
  * Count separate outer tips around the thinnest axis (gear teeth, star points). Vertices near the outer radius are
  * joined when a triangle edge runs between them along the rim, so a wide flat tooth tip still counts once.
  */
-function countTips(geometries, bounds) {
+export function countTips(geometries, bounds) {
   const extents = [0, 1, 2].map(axis => bounds.max[axis] - bounds.min[axis]);
   const thinAxis = extents.indexOf(Math.min(...extents));
   const [firstAxis, secondAxis] = [0, 1, 2].filter(axis => axis !== thinAxis);
@@ -199,7 +199,7 @@ function surfaceHeightAt({ positions, indices }, pointX, pointZ) {
   return null;
 }
 
-function lineHits(geometries, axis, point) {
+export function lineHits(geometries, axis, point) {
   const axisIndex = { x: 0, y: 1, z: 2 }[axis];
   const [firstAxis, secondAxis] = [0, 1, 2].filter(candidate => candidate !== axisIndex);
   let hits = 0;
@@ -391,6 +391,9 @@ export async function measureRecipe(recipe) {
   const problemKinds = new Set();
   let uvParts = 0;
   let worstUvStretch = 0;
+  let topologyScoreSum = 0;
+  const valence = { regular: 0, poles3: 0, poles5: 0, poles6Plus: 0 };
+  const quadQuality = { meanAngleError: 0, maxAngleError: 0, maxAspect: 1, maxWarp: 0 };
   for (const geometry of geometries) {
     for (let vertex = 0; vertex < geometry.positions.length / 3; vertex++) {
       for (let axis = 0; axis < 3; axis++) {
@@ -410,11 +413,24 @@ export async function measureRecipe(recipe) {
     parts += report.parts.count;
     closedParts += report.parts.closed;
     eulerCharacteristic += report.counts.vertices - report.counts.edges + report.counts.faces;
+    topologyScoreSum += report.topologyScore;
+    valence.regular += report.valence.regular;
+    valence.poles3 += report.valence.poles3;
+    valence.poles5 += report.valence.poles5;
+    valence.poles6Plus += report.valence.poles6Plus;
+    quadQuality.meanAngleError += report.quadQuality.meanAngleError;
+    quadQuality.maxAngleError = Math.max(quadQuality.maxAngleError, report.quadQuality.maxAngleError);
+    quadQuality.maxAspect = Math.max(quadQuality.maxAspect, report.quadQuality.maxAspect);
+    quadQuality.maxWarp = Math.max(quadQuality.maxWarp, report.quadQuality.maxWarp);
     // Spatial warnings are advice, not pass or fail: a mug handle is meant to break symmetry.
     const gradedProblems = report.problems.filter(problem => !(problem.kind in GEOMETRY_PROBLEMS));
     for (const problem of gradedProblems) problemKinds.add(problem.kind);
     lintProblems += gradedProblems.length;
   }
+  if (usedGeometries.length > 0) {
+    quadQuality.meanAngleError = Math.round(quadQuality.meanAngleError / usedGeometries.length * 1e4) / 1e4;
+  }
+  const topologyScore = usedGeometries.length > 0 ? Math.round(topologyScoreSum / usedGeometries.length * 1e4) / 1e4 : 0;
   const allClosed = closedParts === parts;
   return {
     nodes: geometries.length,
@@ -433,6 +449,9 @@ export async function measureRecipe(recipe) {
     size: [0, 1, 2].map(axis => bounds.max[axis] - bounds.min[axis]),
     lintProblems,
     problemKinds: [...problemKinds],
+    valence,
+    quadQuality,
+    topologyScore,
     uv: { parts: uvParts, of: geometries.length, stretch: worstUvStretch },
     tips: countTips(geometries, bounds),
     section: (axis, at) => sectionLoops(geometries, axis, at),

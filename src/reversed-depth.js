@@ -12,6 +12,10 @@ import { compileProgram, fullscreenVertex } from './gl-program.js';
 import { shaderTransforms } from './shader-registry.js';
 
 export const FAR_TO_NEAR_LIMIT = 1e4;
+// A float depth buffer resolves about 2^-23 of the value, so the constant part of a depth-layer offset moves a surface by well
+// under a micrometre, less than the rounding of a part's own matrix (issue #593: 2 um flush pairs kept flickering). The slope
+// part scales with the surface's own depth gradient, so it is the term that separates two flush faces; 16 cleared the metro film.
+const REVERSED_LAYER_SLOPE_SCALE = 16;
 const ZERO_VECTOR = new Float32Array(4);
 const DEFAULT_NEAR = 0.1;
 
@@ -148,6 +152,7 @@ function useFloatDepthTargets(renderer) {
  * `renderer.reversedDepth` is true once it is on. A browser without EXT_clip_control, or a benchmark renderer, stays standard.
  */
 export function installReversedDepth(renderer, mode = 'auto') {
+  if (mode === false) renderer.reversedDepth ??= false;
   if (mode === false || renderer.reversedDepth !== undefined) return renderer;
   const context = renderer.context;
   const original = {
@@ -246,7 +251,7 @@ export function installReversedDepth(renderer, mode = 'auto') {
     // The core pulls a decal toward the eye with a negative offset; reversed depth grows toward the eye, so the sign flips.
     renderer.applyDepthLayer = function applyDepthLayerReversed(layer) {
       original.applyDepthLayer.call(this, layer);
-      if (layer && clipControl.active) context.polygonOffset(layer, layer * 4);
+      if (layer && clipControl.active) context.polygonOffset(layer * REVERSED_LAYER_SLOPE_SCALE, layer * 4);
     };
     renderer.resolveFrame = function resolveFrameStandard(...parameters) {
       endReversed();

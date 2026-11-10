@@ -143,7 +143,7 @@ Repeated instances retain shared meshes while their signed weights remain indepe
 The export contains editable targets and a static pose, rather than baked vertex positions.
 It does not serialize animation clips. Skinning and material textures still fail explicitly at export.
 
-The source importer opens these snapshots. Morph import requires authored base normals and rejects tangent targets.
+The source importer opens these snapshots. Morph import generates base normals when none are authored (dropping the morph normal deltas) and rejects tangent targets.
 The source [exporter](export-glb.md) also preserves opaque vertex colors, UVs and independent active HDR emission.
 Skinning, textures, procedural shaders and animation clips still prevent a complete asset roundtrip.
 

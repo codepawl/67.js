@@ -86,8 +86,13 @@ rebuilding the topology.
 
 ## Lint
 
-`lintMesh(mesh)` returns `{ ok, counts, parts, tags, bounds, problems }`. Each problem has `kind`, `severity`,
-`count`, up to eight sample indices and a suggested `fix`:
+`lintMesh(mesh, { geometry = false })` returns `{ ok, counts, parts, valence, quadQuality, topologyScore, tags, bounds, problems }`:
+
+- `valence` counts interior vertices by edge degree: `{ regular, poles3, poles5, poles6Plus }` (boundary vertices on open rims are left out).
+- `quadQuality` summarizes quad faces: `{ meanAngleError, maxAngleError, maxAspect, maxWarp }` (angles in degrees from $90^\circ$ and across the quad diagonal).
+- `topologyScore` is a normalized score in $[0, 1]$ (`0` when `ok` is `false`) combining quad share, interior regular/pole valence and quad angle/planarity health.
+
+Each problem has `kind`, `severity`, `count`, up to eight sample indices and a suggested `fix`:
 
 | Kind | Severity | Sample indices |
 | --- | --- | --- |
@@ -97,8 +102,10 @@ rebuilding the topology.
 | `degenerate-face` | error | faces with near-zero area |
 | `boundary-edge` | warning | edges with one face (open surfaces) |
 | `loose-vertex` | warning | vertices used by no face |
+| `non-planar-quad` | warning (`geometry: true`) | quads folded by more than 45 degrees across their diagonal |
+| `skewed-quad` | warning (`geometry: true`) | quads with a corner more than 60 degrees from a right angle (outside radial pole fans) |
 
-`ok` is false when any error is present. Self-intersections and wall thickness are not checked yet.
+`ok` is false when any error is present. With `geometry: true`, spatial checks (`intersecting-parts`, `self-intersection`, `thin-wall`, `floating-part`, `asymmetric`) and quad distortion warnings are included.
 
 ## Selection and edits
 
@@ -204,9 +211,21 @@ and misses. `evaluateMeshStack(mesh, stack, { cache, cacheKey })` runs a stack o
 The `mesh_stack` tool sets the whole stack in one revision. `apply: n` moves the first `n` nodes into the edit log,
 as Blender's Apply modifier, which leaves the result unchanged.
 
+### Shape keys
+
+A recipe `mesh` geometry may carry `shapeKeys` (up to 16), named offsets from the finished mesh that become glTF morph targets.
+A key is `{ "name": "blink", "offsets": [{ "select": { "tag": "lid" }, "offset": [0, -0.1, 0] }] }`, a list of moves like the
+`translate` edit, or `{ "name": "squash", "edits": [...] }`, mesh edits that only move vertices (`set_position`, `displace`,
+`sculpt`, `simple_deform`, `lattice`, `hook`, `wave`) run on the mesh after the stack. A key that adds or removes vertices is
+refused with the vertex counts. `value` (0 to 1) is the weight without motion.
+
+Animate a key with the existing morph track: `{ "kind": "morph", "id": "blink", "property": "weight", "keyframes": [...] }`. Weights
+from 0 to 1 add up, so two keys blend. A GLB export writes the targets, their names as `mesh.extras.targetNames` and the weights.
+Normals stay those of the base mesh. Test: `tests/mesh-shape-keys.test.js`.
+
 ### Whole-mesh modifiers
 
-`weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `weighted_normal` and `smooth_by_angle` take no selection and no name, and work as edits or stack nodes. Their fields and defaults are plain data in `MESH_MODIFIER_NOTES` (`src/agent-scene-capabilities.js`), which `scene_capabilities` returns as `meshModifiers`; the code is in `src/mesh-modifiers.js` and `src/mesh-restructure.js`.
+`weld`, `triangulate`, `edge_split`, `smooth`, `simple_deform`, `cast`, `screw`, `wireframe`, `skin`, `lattice`, `curve`, `hook`, `wave`, `bounding_box`, `convex_hull`, `ocean`, `weighted_normal` and `smooth_by_angle` take no selection and no name, and work as edits or stack nodes. Their fields and defaults are plain data in `MESH_MODIFIER_NOTES` (`src/agent-scene-capabilities.js`), which `scene_capabilities` returns as `meshModifiers`; the code is in `src/mesh-modifiers.js` and `src/mesh-restructure.js`.
 
 | op | fields | does |
 | --- | --- | --- |
@@ -225,6 +244,9 @@ as Blender's Apply modifier, which leaves the result unchanged.
 | `wave` | `height` (0.5), `width` (1.5), `narrowness` (1.5), `speed` (0.25), `time` (0), `timeOffset`, `start`, `cyclic` (true), `axes` (xy), `normal` | A travelling gaussian ripple along z, equal to Blender Wave at the same frame. |
 | `weighted_normal` | `angle` (30), `weight` (50, 1 to 100) | Stores one shading normal per corner: faces around a vertex share it unless the edge is sharp or bends more than the angle, each face counting by its area to the power weight / 50. Put it last in the stack. |
 | `smooth_by_angle` | `angle` (30), `ignoreSharp` (false) | Marks edges bending more than the angle sharp and the others smooth, over the geometry `smoothAngle`; sharp edges made by hand, and the 12 of a box, stay sharp unless `ignoreSharp` is set. |
+| `bounding_box` | none | Replaces the mesh with the axis-aligned box around all its vertices: 8 vertices and 6 quads. Tags and attributes are dropped. |
+| `convex_hull` | none | Replaces the mesh with its convex hull, outward triangles on the extreme vertices only, from at most 8192 vertices. A mesh whose vertices lie on one line or in one plane has no hull and is refused. Tags and attributes are dropped. |
+| `ocean` | `axis` (y, the up axis), `windSpeed` (10 m/s, above 0 to 60), `direction` (0 degrees from +x toward +z), `choppiness` (1, 0 to 4), `size` (100 m, 1 to 10000), `seed` (0), `time` (0 s), `resolution` (8, 1 to 16) | A seeded sea like Blender's Ocean modifier, without the FFT: a sum of travelling waves on a lattice of wave vectors with a Phillips spectrum for the wind, so the surface repeats every `size` metres and the same seed and time give identical vertices. Waves lift the up axis; choppiness pulls vertices toward the crests along the other two. The squeeze of that move is written as the vertex group `foam` (0 flat, 1 folded). Waves cost (2 x resolution + 1)^2 - 1 per vertex, capped at 50 million evaluations. A box base has few vertices across a flat face (bevel 0 has none inside it), so run `subdivide_edges` with `cuts` first, or the waves have nothing to move. For an open sea: delete every face but the top, `subdivide_edges` with 16 cuts, `subdivide` 4 levels (about 74,000 vertices), scale the sheet to hundreds of metres, then `ocean` with a `size` of 50 (smaller than the wind's longest wave, so the sea has short chop), and a `vertex_color` field that mixes deep blue to white by `{ "attr": "group", "name": "foam" }`. |
 
 `triangulate` and `edge_split` check their output size before building it, against the same vertex and face limits as the other edits. Each op has cases in `tests/fixtures/blender/cases.json` and matches Blender 5.2 with no listed difference. `screw` and `wireframe` have cases in the same fixtures (the volume of the open screw strips differs by winding, listed in `differences.json`); `wave` matches Blender on two cases; `skin`, `lattice`, `curve` and `hook` are not compared with Blender, because each needs a second object there. The two normal modifiers are tested by their own properties, because the Blender comparison does not measure normals. Not yet: `shrinkwrap` and `scatter_on_surface` as stack nodes (`instances` already scatters), and cast shapes other than the sphere.
 
@@ -254,6 +276,7 @@ Operators that take numbers also take vectors and work on each component; a numb
 | Comparison and logic | `lt` `lte` `gt` `gte` `eq` give 1 or 0; `and` `or` `not`; `if: [condition, a, b]` |
 | Motion only | `"time"` and `{ "node", "property", "component", "space" }` read time and node values in a driver; a field rejects them, and a driver rejects the field inputs below. |
 | Vectors | `vec: [x, y, z]`, `dot` `cross` `distance`, `length` `normalize`, `x` `y` `z` read a component |
+| Rotation | `rotate: [vector, axis, angle]` turns a vector about an axis (radians; a zero axis does nothing); `align: [direction]` gives the Euler angles (X then Y then Z, radians) that turn +Y onto the direction; `transform: [point, move, euler, size]` scales, rotates, then moves a point (only the point is required) |
 | Attributes | `{ "attr": "position" \| "normal" }` with optional `component`, `{ "attr": "index" }`, `{ "attr": "tag", "name": "top" }` |
 | Random | `{ "noise": { "scale", "seed", "octaves", "at" } }` smooth value noise in 0 to 1 at a position (default the element's), `{ "random": { "seed" } }` a number in 0 to 1 per element |
 
@@ -269,7 +292,16 @@ Uses:
   expressions evaluated on the input positions, so vertex order never matters. It moves the vertices of the selected faces.
 - `displace` (`select`, `field`, `strength`, `midlevel`, `direction`) is Blender's Displace modifier with a field as
   the texture: each vertex moves by `(field - midlevel) * strength` along `normal` (default), `x`, `y` or `z`.
+  `displace` also takes `group`, the name of a vertex group: each move is scaled by the vertex's weight.
 - Both are also stack nodes, so a late change reuses the cached earlier nodes.
+- `vertex_group` (`name`, `select`, and one of `weight`, `field` or `gradient`) writes the weights, 0 to 1, of a named group for the
+  vertices of the selected faces; the others keep theirs (0 in a new group). `gradient` is `{ "axis": "y", "range": [0, 1], "weights": [0, 1] }`,
+  a straight blend between the weights at the two ends of the range along the axis. Up to 32 groups. `displace` reads one with
+  `group`, and a cloth sheet holds the vertices of weight 0.5 or more with `pinGroup` (see [physics.md](physics.md)). Groups are
+  point attributes: run `vertex_group` after the shape edits, because a stack node that rebuilds the mesh (`mirror`, `array`) drops them.
+- `vertex_color` (`select`, and one of `color`, `field` or `gradient`) sets the corner colors of the selected faces. `color` is
+  `[r, g, b]` from 0 to 1, `field` a vector expression of the vertex, and `gradient` is `{ "axis": "y", "range": [0, 1], "colors": [[0, 0, 1], [1, 0, 0]] }`.
+  The renderer multiplies the material color by it and a GLB export writes it as `COLOR_0`. Faces not selected stay white until painted.
 - `instances` on a recipe node repeats its geometry at points; see [agent-scene.md](agent-scene.md#instances-on-points).
 
 Blender comparison: `tests/blender-golden.test.js` runs `set_position` against a Geometry Nodes Set Position node

@@ -11,6 +11,7 @@ import '/src/view-transform-shader.js';
 import '/src/liquid-shader.js';
 import '/src/splat-shader.js';
 import '/src/subsurface-shader.js';
+import '/src/fog-shader.js';
 import { skyOpenness } from '/src/closed-room.js';
 import { fogSkyVisibility } from '/src/fog-sky-visibility.js';
 import { createCascadedShadows } from '/src/cascaded-shadows.js';
@@ -31,7 +32,27 @@ function withDerivedGroundBounce(scene, drawnParts) {
   const lit = GROUND_BOUNCE ? groundBounceEnvironment(drawnParts, scene.environment) : scene.environment;
   // ?sunBounce=<n> sets environment.sunBounce on every scene (default 1, 0 draws without the sunlit patches' lights).
   const sunBounce = new URLSearchParams(location.search).get('sunBounce');
-  return withSunBounce(drawnParts, sunBounce === null ? lit : { ...lit, sunBounce: Number(sunBounce) });
+  const started = performance.now();
+  const withLights = withSunBounce(drawnParts, sunBounce === null ? lit : { ...lit, sunBounce: Number(sunBounce) });
+  // The time the sunlit patches took to find (the search runs once for these parts; later calls hit the cache), read by render-gpu.mjs.
+  window.sunBounceSeconds = Math.max(window.sunBounceSeconds ?? 0, (performance.now() - started) / 1000);
+  window.sunBounceLights = (withLights.pointLights ?? []).slice((lit.pointLights ?? []).length);
+  return withSunBounceExperiment(withLights, (lit.pointLights ?? []).length);
+}
+
+// ?sunBounceRange=<k> cuts each sunlit patch's light off at k times its height above the patch, and ?sunBounceGain=<g> multiplies
+// its intensity: switches for fitting the bounce, not used by a recipe.
+function withSunBounceExperiment(environment, ownLightCount) {
+  const query = new URLSearchParams(location.search);
+  const rangeFactor = query.get('sunBounceRange');
+  const gain = query.get('sunBounceGain');
+  if ((rangeFactor === null && gain === null) || !environment.pointLights || environment.pointLights.length === ownLightCount) return environment;
+  const pointLights = environment.pointLights.map((light, index) => (index < ownLightCount ? light : {
+    ...light,
+    range: rangeFactor === null ? light.range : Number(rangeFactor) * light.radius,
+    intensity: light.intensity * (gain === null ? 1 : Number(gain)),
+  }));
+  return { ...environment, pointLights };
 }
 
 // ?reversedDepth=on draws with reversed-Z (issue #310); the scenes draw with the standard depth buffer otherwise.
@@ -46,6 +67,12 @@ const WATER_REFLECTION = { off: false, ssr: 'ssr' }[new URLSearchParams(location
 const FLOOR_SKY_PARAMETER = new URLSearchParams(location.search).get('floorSky');
 const FLOOR_SKY_EXPERIMENT = FLOOR_SKY_PARAMETER !== null && FLOOR_SKY_PARAMETER !== '0';
 const floorSkyReports = {};
+// ?glossy=0 is a measurement switch (issue #506): every material loses its metallic and specular, so the frame shows diffuse light and emission only.
+const GLOSSY_OFF = new URLSearchParams(location.search).get('glossy') === '0';
+
+function removeGlossy(scene) {
+  for (const part of scene.parts) part.material = { ...part.material, metallic: 0, specular: 0, clearcoat: 0 };
+}
 
 function withFloorSky(id, parts, scene) {
   const environment = FLOOR_SKY_PARAMETER === '0' ? { ...scene.environment, floorSkyTrace: false } : scene.environment;
@@ -150,25 +177,30 @@ function describeScene(id, scene) {
 // Blender always gets the original parts: the bake is 67js's approximation of what Cycles computes.
 async function bakeScene(scene, bakeOptions) {
   if (bakeOptions.preset) {
-    return bakeScenePreset(scene, bakeOptions.preset);
+    return bakeScenePreset(scene, bakeOptions.preset, bakeOptions.irradianceGrid, { bounces: bakeOptions.bounces, gridFog: bakeOptions.gridFog });
   }
   const { bakeLightmapsAsync } = await import('/src/light-bake-gpu.js');
   const { pointLights, keyColor, lightDirection } = scene.environment;
   const started = performance.now();
   // A scene as large as a hall can need its own texel density to stay under the bake's texel limit.
-  const baked = await bakeLightmapsAsync(scene.parts, { pointLights, keyColor, lightDirection }, { ...scene.bakeOptions, ...bakeOptions });
+  // The native backend traces in the host process; bake-compare.mjs exposes it to the page.
+  const texelTracer = bakeOptions.backend === 'native' ? (await import('/scripts/native-bake-page.js')).traceTexelsOnNative : undefined;
+  const baked = await bakeLightmapsAsync(scene.parts, { pointLights, keyColor, lightDirection }, { ...scene.bakeOptions, ...bakeOptions, texelTracer });
   return { parts: baked.parts, report: baked.report, seconds: (performance.now() - started) / 1000 };
 }
 
 // The bake an agent gets from `bake: { preset }`: the same settings and budget fit as a recipe. Probes stay out of it and come
 // from --probes, as in the other rows.
-async function bakeScenePreset(scene, preset) {
+async function bakeScenePreset(scene, preset, irradianceGrid = false, overrides = {}) {
   const { normalizeAgentBake, bakeAgentParts } = await import('/src/agent-bake.js');
-  const settings = normalizeAgentBake({ preset, probes: false });
+  const settings = normalizeAgentBake({ preset, probes: false, ...(overrides.bounces ? { bounces: overrides.bounces } : {}), ...(irradianceGrid ? { irradianceGrid } : {}), ...(overrides.gridFog ? { gridFog: true } : {}) });
   const started = performance.now();
   let baked;
   try {
-    baked = bakeAgentParts(scene.parts, new Map(scene.parts.map(part => [part.name, part.matrix])), scene.environment, settings);
+    // The recipe path bakes on a kernel worker (90 s); ?kernelWorkers=off keeps the page's thread (20 s) to compare.
+    const { buildWithKernels } = await import('/src/kernel-offload.js');
+    const available = new URLSearchParams(location.search).get('kernelWorkers') !== 'off';
+    baked = await buildWithKernels(() => bakeAgentParts(scene.parts, new Map(scene.parts.map(part => [part.name, part.matrix])), scene.environment, settings), { available: available && typeof Worker === 'function' });
   } catch (error) {
     // A recipe would get this error and no bake: the scene is drawn unbaked and the row says so.
     return { parts: scene.parts, report: { refused: error.message, texels: 0 }, seconds: 0 };
@@ -207,14 +239,17 @@ async function probeScene(scene, id, drawnParts, mode) {
   return { parts: placed.parts, report: placed.report, seconds: (performance.now() - started) / 1000 };
 }
 
-async function renderReferenceScene(id, { describe, ambientOcclusion = 0, ambientOcclusionRadius = 0.5, bake = null, cascades = 0, backgroundOnly = false, probes = false, ambient = null, fill = null, key = null, viewTransform = null, bloom = null }) {
+async function renderReferenceScene(id, { describe, ambientOcclusion = 0, ambientOcclusionRadius = 0.5, bake = null, cascades = 0, backgroundOnly = false, probes = false, ambient = null, fill = null, key = null, viewTransform = null, bloom = null, volumeFog = null }) {
   const scene = await SCENES[id]();
+  if (GLOSSY_OFF) removeGlossy(scene);
   // A view transform (agx, neutral) replaces the ACES fit in the shaders, as environment.viewTransform does in a recipe.
   if (viewTransform) scene.environment = { ...scene.environment, viewTransform };
   // A measurement switch: 0 removes the world's light from every surface, to show how much of a picture comes from it.
   if (ambient !== null) scene.environment = { ...scene.environment, ambientIntensity: ambient };
   if (fill !== null) scene.environment = { ...scene.environment, fillIntensity: fill };
   if (key !== null) scene.environment = { ...scene.environment, keyIntensity: key };
+  // Fields merged into the scene's volumeFog, to compare fog controls on the same scene.
+  if (volumeFog) scene.environment = { ...scene.environment, volumeFog: { ...scene.environment.volumeFog, ...volumeFog } };
   const baked = bake ? await bakeScene(scene, bake) : null;
   const probed = probes ? await probeScene(scene, id, baked ? baked.parts : scene.parts, probes) : null;
   scene.environment = withDerivedGroundBounce(scene, probed ? probed.parts : baked ? baked.parts : scene.parts);
@@ -302,7 +337,7 @@ async function compareBakeBackends(id, variants) {
   const results = {};
   let reference = null;
   for (const [name, bakeOptions] of Object.entries(variants)) {
-    if (bakeOptions.backend === 'gpu') await bakeScene(scene, { ...bakeOptions, samples: 1 });
+    if (bakeOptions.backend !== 'cpu') await bakeScene(scene, { ...bakeOptions, samples: 1 });
     const baked = await bakeScene(scene, bakeOptions);
     const radiance = baked.parts.map(lightmapRadiance);
     reference ??= radiance;
@@ -356,8 +391,8 @@ async function renderReferencePathTracedFeatures(id, options) {
 
 window.renderReferencePathTracedFeatures = renderReferencePathTracedFeatures;
 
-// Traces a scene recipe the way an agent render job does (parts, environment map and camera of the agent scene).
-async function renderRecipePathTraced(recipe, options) {
+// Builds the parts, environment and camera of a scene recipe the way an agent render job does.
+async function loadRecipeTraceScene(recipe) {
   const { createAgentScene, loadAllAgentSceneModules, needsMeshBooleans, loadMeshBooleans, setManifoldModuleLoader } = await import('/src/agent-scene.js');
   const { agentEnvironmentMap } = await import('/src/agent-look.js');
   await loadAllAgentSceneModules();
@@ -366,9 +401,14 @@ async function renderRecipePathTraced(recipe, options) {
     await loadMeshBooleans();
   }
   const scene = createAgentScene(recipe);
-  const { renderPathTracedImage } = await import('/src/path-tracer.js');
   const environment = scene.environment;
-  const result = await renderPathTracedImage({ parts: scene.parts, environment: { ...environment, map: agentEnvironmentMap(environment) }, camera: scene.camera }, options);
+  return { parts: scene.parts, environment: { ...environment, map: agentEnvironmentMap(environment) }, camera: scene.camera };
+}
+
+// Traces a scene recipe the way an agent render job does (parts, environment map and camera of the agent scene).
+async function renderRecipePathTraced(recipe, options) {
+  const { renderPathTracedImage } = await import('/src/path-tracer.js');
+  const result = await renderPathTracedImage(await loadRecipeTraceScene(recipe), options);
   const canvas = document.createElement('canvas');
   canvas.width = result.width;
   canvas.height = result.height;
@@ -381,3 +421,79 @@ window.renderReferenceScene = renderReferenceScene;
 window.loadBarnLampVariant = loadBarnLampVariant;
 window.renderReferencePathTraced = renderReferencePathTraced;
 window.referenceSceneIds = Object.keys(SCENES);
+
+async function loadTraceSceneFor(source) {
+  if (typeof source === 'string') {
+    const scene = await REFERENCE_SCENES[source]();
+    return { parts: applyLightLinks(scene.parts, scene.environment), environment: scene.environment, camera: scene.camera };
+  }
+  return loadRecipeTraceScene(source);
+}
+
+function rgbaToBase64Png(rgba, width, height) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').putImageData(new ImageData(rgba, width, height), 0, 0);
+  return canvas.toDataURL('image/png').split(',')[1];
+}
+
+const median = values => [...values].sort((first, second) => first - second)[Math.floor(values.length / 2)];
+
+// Draws a scene progressively (issue #623) and saves the image after each count in `checkpoints` (samples at full size).
+// `stepSeconds` is the time of the drawing steps alone (reduced sizes included), `snapshotSeconds` one read back and filter.
+async function renderProgressiveCheckpoints(source, options, checkpoints) {
+  const scene = await loadTraceSceneFor(source);
+  const { createProgressiveTracer } = await import('/src/path-tracer-progressive.js');
+  const setupStarted = performance.now();
+  const tracer = await createProgressiveTracer(scene, options);
+  const setupSeconds = (performance.now() - setupStarted) / 1000;
+  const results = [];
+  let stepSeconds = 0;
+  for (let stepIndex = 0; results.length < checkpoints.length; stepIndex++) {
+    const started = performance.now();
+    const drawn = await tracer.step();
+    stepSeconds += (performance.now() - started) / 1000;
+    const fullSamples = drawn.divisor === 1 ? drawn.samples : 0;
+    if (fullSamples !== checkpoints[results.length]) continue;
+    const snapshotStarted = performance.now();
+    const snapshot = tracer.snapshot();
+    const snapshotSeconds = (performance.now() - snapshotStarted) / 1000;
+    results.push({ samples: fullSamples, stepSeconds, snapshotSeconds, image: rgbaToBase64Png(snapshot.rgba, snapshot.width, snapshot.height) });
+  }
+  const report = { gpu: tracer.gpu, compileSeconds: tracer.compileSeconds, setupSeconds };
+  tracer.dispose();
+  return { results, report };
+}
+
+// Time of one sample of every pixel at full size, `frames` times (the first `warmup` frames are not counted).
+async function measureProgressiveFrameTime(source, options, frames = 200, warmup = 5) {
+  const scene = await loadTraceSceneFor(source);
+  const { createProgressiveTracer } = await import('/src/path-tracer-progressive.js');
+  const tracer = await createProgressiveTracer(scene, options, { resolutionDivisors: [1] });
+  const times = [];
+  for (let frame = 0; frame < frames + warmup; frame++) {
+    const started = performance.now();
+    await tracer.step();
+    if (frame >= warmup) times.push(performance.now() - started);
+  }
+  tracer.dispose();
+  return { frames, medianMilliseconds: median(times), minimumMilliseconds: Math.min(...times), maximumMilliseconds: Math.max(...times) };
+}
+
+window.renderProgressiveCheckpoints = renderProgressiveCheckpoints;
+window.measureProgressiveFrameTime = measureProgressiveFrameTime;
+
+window.loadTraceSceneFor = loadTraceSceneFor;
+
+// The masked leaf cards of bench/native-tracer/cutout-scene.js on the path tracer's gpu or webgpu backend, as the PNG of the
+// tone mapped pixels (bench/native-tracer/cutout-gpu.mjs writes it).
+window.renderCutoutScene = async function renderCutoutScene(leafCount, options) {
+  const [{ buildCutoutParts, CUTOUT_CAMERA, CUTOUT_ENVIRONMENT }, { renderPathTracedImage }] = await Promise.all([import('/bench/native-tracer/cutout-scene.js'), import('/src/path-tracer.js')]);
+  const result = await renderPathTracedImage({ parts: buildCutoutParts(leafCount), environment: CUTOUT_ENVIRONMENT, camera: CUTOUT_CAMERA }, { ...options, denoise: false });
+  const canvas = document.createElement('canvas');
+  canvas.width = result.width;
+  canvas.height = result.height;
+  canvas.getContext('2d').putImageData(new ImageData(result.rgba, result.width, result.height), 0, 0);
+  return { image: canvas.toDataURL('image/png').split(',')[1], report: result.report };
+};

@@ -129,3 +129,8 @@ otherwise to promote the sale, use or other dealings in this Font Software witho
 Foundation or Bitstream Inc., respectively. For further information, contact: fonts at gnome dot org.
 
 Source: https://dejavu-fonts.github.io/ (version 2.37).
+
+
+## HDRI environments in assets/looks
+
+`sky-clouds.hdr` and `studio-softbox.hdr` are 128 x 64 area averages of the 1k Poly Haven HDRIs `kloofendal_48d_partly_cloudy_puresky` and `studio_small_03`, published under CC0 1.0 (https://polyhaven.com/license). `teal-orange.cube` and `noir.cube` were made for 67js and are CC0.

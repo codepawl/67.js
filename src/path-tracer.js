@@ -1,4 +1,6 @@
+import { cameraFieldOfView } from './camera.js';
 import { pointLightFalloff } from './ray-query.js';
+import { profileGain } from './light-profile.js';
 import { buildTraceScene, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
 import { denoiseRadiance } from './path-tracer-denoise.js';
 import { acesChannel, displayColor } from './view-transform.js';
@@ -7,6 +9,7 @@ import {
   buildFrame, createSurface, environmentPdf, environmentRadiance, evaluateSurface, luminance, mirrorWeight, prepareSurface,
   roughnessToAlpha, sampleEnvironment, sampleGlass, sampleSurface, setWhiteDiffuse, splitSubsurface,
 } from './path-tracer-shading.js';
+import { buildLightTree, chooseLightFromTree, LIGHT_TREE_FIRST_HIT_LIGHTS, resolveLightSelection } from './path-tracer-light-tree.js';
 import { createRandomWalk, WALK_OUTCOME } from './path-tracer-subsurface.js';
 import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval } from './path-tracer-volume.js';
 
@@ -28,7 +31,7 @@ export const PATH_TRACER_LIMITS = Object.freeze({
 });
 export const MAX_TRACE_PIXELS = 2_073_600;
 export const MAX_TRACE_RAY_WORK = 4_000_000_000;
-const ALPHA_STEP_LIMIT = 8;
+const ALPHA_STEP_LIMIT = 64;
 const WORKER_BAND_ROWS = 8;
 // Held in a constant so the bundler leaves the URL alone: the worker is its own package entry, built beside this file.
 const WORKER_FILE = './path-tracer-worker.js';
@@ -45,9 +48,13 @@ const IGNORED_LAYERS = [
   ['iridescence', material => material.iridescence > 0],
   ['sheen', material => (material.sheenColor ?? []).some(channel => channel !== 0)],
   ['moss', material => material.moss > 0],
-  ['splat layers', material => Boolean(material.layers || material.layerMaps)],
+  ['splat layers', material => Boolean(material.layers || Object.keys(material.layerMaps ?? {}).some(name => name !== 'clearcoatTexture'))],
   ['lightMap', material => Boolean(material.lightMap)],
 ];
+
+function hasGraphOpacity(material) {
+  return material.pattern?.type === 'graph' && Object.hasOwn(material.pattern.graph ?? {}, 'opacity');
+}
 
 function boundedInteger(options, name) {
   const limit = PATH_TRACER_LIMITS[name];
@@ -70,6 +77,8 @@ function boundedNumber(options, name) {
 // Kept equal to PATH_TRACER_DENOISERS in path-tracer-capabilities.js by tests/path-tracer-denoise-oidn.test.js; the
 // capabilities file stays out of this bundle.
 export const PATH_TRACER_DENOISERS = Object.freeze(['wavelet', 'oidn', 'none']);
+export const SAMPLING_PATTERNS = Object.freeze(['random', 'blue-noise-first']);
+export const LIGHT_SELECTIONS = Object.freeze(['auto', 'uniform', 'importance', 'tree']);
 
 /**
  * `denoise` is true (the wavelet filter) or false (none), or a name: "wavelet", "oidn" or "none". "oidn" is the optional
@@ -82,6 +91,9 @@ function denoiserNamed(value) {
   if (PATH_TRACER_DENOISERS.includes(value)) return value;
   throw new TypeError(`Path tracer denoise must be a boolean or one of ${PATH_TRACER_DENOISERS.join(', ')}.`);
 }
+
+// "webgpu" is the WGSL compute tracer (src/path-tracer-webgpu.js, loaded only for that backend).
+const PATH_TRACER_BACKENDS = ['cpu', 'gpu', 'webgpu'];
 
 export function normalizePathTracerOptions(options = {}) {
   if (options === null || typeof options !== 'object') throw new TypeError('Path tracer options must be an object.');
@@ -99,10 +111,20 @@ export function normalizePathTracerOptions(options = {}) {
     viewTransform: options.viewTransform ?? 'aces',
     look: options.look ?? null,
     backend: options.backend ?? 'cpu',
+    samplingPattern: options.samplingPattern ?? 'random',
+    lightSelection: options.lightSelection ?? 'auto',
   };
   result.denoise = result.denoiser !== 'none';
   if (!VIEW_TRANSFORM_NAMES.includes(result.viewTransform)) throw new RangeError(`Path tracer viewTransform must be one of ${VIEW_TRANSFORM_NAMES.join(', ')}.`);
-  if (result.backend !== 'cpu' && result.backend !== 'gpu') throw new TypeError('Path tracer backend must be "cpu" or "gpu".');
+  if (!PATH_TRACER_BACKENDS.includes(result.backend)) throw new TypeError('Path tracer backend must be "cpu", "gpu" or "webgpu".');
+  if (!SAMPLING_PATTERNS.includes(result.samplingPattern)) throw new RangeError(`Path tracer samplingPattern must be one of ${SAMPLING_PATTERNS.join(', ')}.`);
+  if (!LIGHT_SELECTIONS.includes(result.lightSelection)) throw new RangeError(`Path tracer lightSelection must be one of ${LIGHT_SELECTIONS.join(', ')}.`);
+  if (result.backend !== 'gpu' && result.samplingPattern !== 'random') {
+    throw new RangeError('Path tracer samplingPattern "blue-noise-first" needs backend "gpu"; the CPU reference and the WebGPU tracer draw random samples.');
+  }
+  if (result.lightSelection === 'importance' && result.backend !== 'gpu') {
+    throw new RangeError('Path tracer lightSelection "importance" needs backend "gpu"; the CPU reference and the WebGPU tracer pick lights uniformly; "tree" also runs on the WebGPU tracer.');
+  }
   if (result.width * result.height > MAX_TRACE_PIXELS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_PIXELS} pixels.`);
   if (result.width * result.height * result.samples * (result.bounces + 1) > MAX_TRACE_RAY_WORK) throw new RangeError('This path trace would need too much ray work: lower the size, samples or bounces.');
   return result;
@@ -119,7 +141,9 @@ export function createCamera(camera, width, height) {
   const eye = finiteVector(camera.eye, 'eye');
   const target = finiteVector(camera.target, 'target');
   const up = finiteVector(camera.up ?? [0, 1, 0], 'up');
-  if (typeof camera.fov !== 'number' || !(camera.fov > 1 && camera.fov < 170)) throw new RangeError('Path tracer camera fov must be between 1 and 170 degrees.');
+  if (camera.projection === 'orthographic' || camera.shift) throw new RangeError('The path tracer draws perspective cameras without lens shift. Render those without the renderer option.');
+  const fov = camera.focalLength === undefined ? camera.fov : cameraFieldOfView(camera, width / height);
+  if (typeof fov !== 'number' || !(fov > 1 && fov < 170)) throw new RangeError('Path tracer camera fov must be between 1 and 170 degrees.');
   const forward = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
   const forwardLength = Math.hypot(...forward);
   if (forwardLength === 0) throw new RangeError('Path tracer camera eye and target must differ.');
@@ -129,7 +153,7 @@ export function createCamera(camera, width, height) {
   if (rightLength === 0) throw new RangeError('Path tracer camera up must not be parallel to its view.');
   for (let axis = 0; axis < 3; axis++) right[axis] /= rightLength;
   const above = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
-  const halfHeight = Math.tan(camera.fov * Math.PI / 360);
+  const halfHeight = Math.tan(fov * Math.PI / 360);
   return { eye, forward, right, above, halfHeight, halfWidth: halfHeight * width / height };
 }
 
@@ -161,7 +185,7 @@ function createHit() {
     distance: 0, material: null,
     point: new Float64Array(3), normal: new Float64Array(3), color: new Float64Array(3),
     texel: new Float64Array(4), mapTexel: new Float64Array(4), emission: new Float64Array(3),
-    metallic: 0, roughness: 0,
+    metallic: 0, roughness: 0, clearcoat: 0, transmission: 0,
   };
 }
 
@@ -336,6 +360,16 @@ function fillHit(scene, triangleId, originX, originY, originZ, directionX, direc
   }
   hit.metallic = material.metallic;
   hit.roughness = material.roughness;
+  hit.clearcoat = material.clearcoat;
+  hit.transmission = material.transmission;
+  if (material.clearcoatTexture) {
+    sampleTexture(material.clearcoatTexture, u, v, hit.mapTexel);
+    hit.clearcoat *= hit.mapTexel[0];
+  }
+  if (material.transmissionTexture) {
+    sampleTexture(material.transmissionTexture, u, v, hit.mapTexel);
+    hit.transmission *= hit.mapTexel[0];
+  }
   if (material.surfaceTexture) {
     sampleTexture(material.surfaceTexture, u, v, hit.mapTexel);
     hit.roughness *= hit.mapTexel[1];
@@ -385,13 +419,20 @@ function occluded(scene, originX, originY, originZ, directionX, directionY, dire
   let startY = originY;
   let startZ = originZ;
   let remaining = limit;
+  // An any-hit trace returns the first hit traversal meets, not the nearest. A solid one shadows the point wherever it lies;
+  // a transparent one says nothing about what sits before it, so the walk then retraces for nearest hits and steps through.
+  let anyHit = true;
   for (let attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
-    const found = scene.tracer.trace(startX, startY, startZ, directionX, directionY, directionZ, remaining, true);
+    const found = scene.tracer.trace(startX, startY, startZ, directionX, directionY, directionZ, remaining, anyHit);
     if (found.nearestTriangle < 0) return false;
     // Only a cutout material needs its texture read to know whether the ray passes through: skip the interpolation for the rest.
     if (scene.materials[scene.triangleMaterial[found.nearestTriangle]].alphaCutoff === 0) return true;
     const alpha = fillHit(scene, found.nearestTriangle, startX, startY, startZ, directionX, directionY, directionZ, found.nearestDistance, hit);
     if (alpha >= hit.material.alphaCutoff) return true;
+    if (anyHit) {
+      anyHit = false;
+      continue;
+    }
     const advance = found.nearestDistance + scene.surfaceOffset;
     remaining -= advance;
     if (remaining <= 0) return false;
@@ -427,7 +468,7 @@ function createPathTracer(scene, options) {
   let featuresRecorded = false;
   const { lights, environment } = scene;
   if (lights.sun) buildFrame(lights.sun.direction, sunFrame);
-  const sunCosineMax = Math.cos(SUN_ANGULAR_RADIUS);
+  const sunCosineMax = Math.cos(lights.sun?.angularRadius ?? SUN_ANGULAR_RADIUS);
 
   function addRadiance(depth, red, green, blue) {
     let clampedRed = red;
@@ -565,7 +606,7 @@ function createPathTracer(scene, options) {
     const inside = axisCosine - light.cosineHalfAngle;
     if (inside <= 0) return;
     const mask = light.blend > 0 && inside < light.blend ? smoothstep(inside / light.blend) : 1;
-    const strength = light.intensity * pointLightFalloff(distanceSquared, light) * mask;
+    const strength = light.intensity * pointLightFalloff(distanceSquared, light) * mask * (light.profile ? profileGain(light.profile, axisCosine) : 1);
     for (let channel = 0; channel < 3; channel++) lightRadiance[channel] = light.color[channel] * strength;
     addDirect(depth, normal, distance - scene.surfaceOffset, fullWeight);
   }
@@ -581,7 +622,7 @@ function createPathTracer(scene, options) {
     if (distance < 1e-6) return;
     const emitCosine = -(light.normal[0] * lightDirection[0] + light.normal[1] * lightDirection[1] + light.normal[2] * lightDirection[2]);
     if (emitCosine <= 0) return;
-    const strength = light.intensity * emitCosine / distanceSquared;
+    const strength = light.intensity * emitCosine / distanceSquared * (light.profile ? profileGain(light.profile, emitCosine) : 1);
     for (let channel = 0; channel < 3; channel++) lightRadiance[channel] = light.color[channel] * strength;
     addDirect(depth, normal, distance - scene.surfaceOffset, fullWeight);
   }
@@ -611,6 +652,41 @@ function createPathTracer(scene, options) {
     if (environment) sampleEnvironmentLight(depth, normal);
   }
 
+  const lightCount = lights.points.length + lights.spots.length + lights.areas.length;
+  const useLightTree = resolveLightSelection(options.lightSelection, lights) === 'tree' && lightCount > 1;
+  const lightTree = useLightTree ? buildLightTree(lights) : null;
+  const drawRandom = () => random.next();
+  function sampleLightByIndex(depth, normal, index) {
+    if (index < lights.points.length) return samplePointLight(depth, normal, lights.points[index]);
+    index -= lights.points.length;
+    if (index < lights.spots.length) return sampleSpotLight(depth, normal, lights.spots[index]);
+    return sampleAreaLight(depth, normal, lights.areas[index - lights.spots.length]);
+  }
+
+  /** One emitter by the light tree: the sun and the sky keep a uniform share, the local lights share theirs down the tree. */
+  function addOneLightByTree(depth, normal) {
+    const lightsShare = lightCount / emitterCount;
+    let remaining = Math.floor(random.next() * emitterCount);
+    if (lights.sun) {
+      if (remaining === 0) {
+        selectionProbability = 1 / emitterCount;
+        return sampleSun(depth, normal);
+      }
+      remaining--;
+    }
+    if (remaining >= lightCount) {
+      selectionProbability = 1 / emitterCount;
+      return sampleEnvironmentLight(depth, normal);
+    }
+    const picked = chooseLightFromTree(lightTree, hit.point[0], hit.point[1], hit.point[2], normal[0], normal[1], normal[2], drawRandom);
+    selectionProbability = 1 / emitterCount;
+    if (picked.lightIndex < 0) return;
+    selectionProbability = lightsShare * picked.probability;
+    sampleLightByIndex(depth, normal, picked.lightIndex);
+    // The sky is drawn with its uniform share whatever light was chosen: that share weighs the next escape ray.
+    selectionProbability = 1 / emitterCount;
+  }
+
   function addOneLight(depth, normal) {
     selectionProbability = 1 / emitterCount;
     let remaining = Math.floor(random.next() * emitterCount);
@@ -627,7 +703,9 @@ function createPathTracer(scene, options) {
   }
 
   function addLights(depth, normal) {
-    if (depth === 0 || emitterCount <= 1) addEveryLight(depth, normal);
+    const firstHitByTree = useLightTree && lightCount > LIGHT_TREE_FIRST_HIT_LIGHTS;
+    if ((depth === 0 && !firstHitByTree) || emitterCount <= 1) addEveryLight(depth, normal);
+    else if (useLightTree) addOneLightByTree(depth, normal);
     else addOneLight(depth, normal);
   }
 
@@ -770,7 +848,7 @@ function createPathTracer(scene, options) {
       normal[0] = hit.normal[0] * facing;
       normal[1] = hit.normal[1] * facing;
       normal[2] = hit.normal[2] * facing;
-      const isGlass = material.transmission > 0 && random.next() < material.transmission;
+      const isGlass = hit.transmission > 0 && random.next() < hit.transmission;
       if (!featuresRecorded) {
         recordFeatures(normal, isGlass);
         featuresRecorded = true;
@@ -790,7 +868,7 @@ function createPathTracer(scene, options) {
         }
         afterMirror = true;
       } else {
-        prepareSurface(surface, material, hit.metallic, hit.roughness, hit.color, normal, viewX, viewY, viewZ);
+        prepareSurface(surface, material, hit.metallic, hit.roughness, hit.color, normal, viewX, viewY, viewZ, hit.clearcoat);
         const subsurface = material.subsurface;
         if (subsurface) splitSubsurface(surface, subsurface.weight);
         addLights(depth, normal);
@@ -855,7 +933,8 @@ export function describeIgnoredFeatures(parts, environment) {
     const material = part.material ?? {};
     for (const field of IGNORED_MAP_FIELDS) if (material[field]) notes.add(`${field} is ignored.`);
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
-    if (material.alphaMode === 'blend') notes.add('Blended transparency is traced as opaque.');
+    if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');
+    if (material.layerMaps?.clearcoatTexture || material.transmissionMap) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
     for (const [name, isUsed] of IGNORED_LAYERS) if (isUsed(material)) notes.add(`${name} is ignored.`);
   }
   return [...notes];
@@ -1040,11 +1119,13 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
   const threads = typeof Worker === 'function' ? options.threads : 1;
   let gpuName = null;
   let gpuCompileSeconds = 0;
-  if (options.backend === 'gpu') {
-    const { traceOnGpu } = await import('./path-tracer-gpu.js');
+  let gpuKernelCompiles = 0;
+  if (options.backend === 'gpu' || options.backend === 'webgpu') {
+    const { traceOnGpu, gpuKernelCompileCount } = await (options.backend === 'webgpu' ? import('./path-tracer-webgpu.js') : import('./path-tracer-gpu.js'));
     const traced = await traceOnGpu(scene, view, options, shouldStop);
     gpuName = traced.gpu;
     gpuCompileSeconds = traced.compileSeconds;
+    gpuKernelCompiles = gpuKernelCompileCount();
     copyBand(buffers, traced, 0, width);
   } else if (threads > 1) {
     await renderBandsInWorkers(scene, view, { ...options, threads }, buffers, shouldStop);
@@ -1061,10 +1142,13 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
     report: {
       width, height, samples: options.samples, bounces: options.bounces, seed: options.seed, denoised: options.denoiser === 'wavelet',
       denoiser: options.denoiser, threads,
-      backend: options.backend, ...(gpuName ? { gpu: gpuName, gpuCompileSeconds } : {}),
+      backend: options.backend, ...(gpuName ? { gpu: gpuName, gpuCompileSeconds, gpuKernelCompiles } : {}),
       averageSamples: totalSamples(samplesTaken) / pixelCount, noiseThreshold: options.noiseThreshold,
       triangles: scene.indices.length / 3, tracedSeconds, seconds: (performance.now() - started) / 1000,
       ignored: describeIgnoredFeatures(parts, environment),
     },
   };
 }
+
+// Cook is the public name of the path tracer.
+export const Cook = renderPathTracedImage;

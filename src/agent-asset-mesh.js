@@ -1,4 +1,5 @@
 import { agentSceneModule } from './agent-scene-modules.js';
+import { invalidField, withFieldPrefix } from './field-error.js';
 import { generateCutterGeometry } from './agent-scene.js';
 import { IMPORTED_MESH_EDIT_LIMITS } from './mesh-operations.js';
 import { MESH_SMOOTH_ANGLE_DEFAULT } from './agent-scene-capabilities.js';
@@ -19,20 +20,20 @@ function partIdList(records) {
 export function normalizeMeshEditEntries(input, records) {
   if (input === undefined) return [];
   if (!Array.isArray(input) || input.length > IMPORTED_MESH_EDIT_LIMITS.maxEditedParts) {
-    throw new RangeError(`meshEdits must be an array of at most ${IMPORTED_MESH_EDIT_LIMITS.maxEditedParts} parts.`);
+    throw invalidField('meshEdits', Array.isArray(input) ? input.length : input, `an array of at most ${IMPORTED_MESH_EDIT_LIMITS.maxEditedParts} parts, such as [{ "id": "mesh-0", "edits": [] }]`);
   }
   const seen = new Set();
   const entries = [];
-  for (const entry of input) {
+  for (const [index, entry] of input.entries()) {
     const unknownKey = Object.keys(entry ?? {}).find(key => key !== 'id' && key !== 'edits');
     if (!entry || typeof entry !== 'object' || unknownKey || !Array.isArray(entry.edits)) {
-      throw new TypeError('Each meshEdits entry is { id, edits } with an edits array.');
+      throw invalidField(`meshEdits[${index}]${unknownKey ? `.${unknownKey}` : ''}`, unknownKey ? entry[unknownKey] : entry, 'an object with only id and edits, such as { "id": "mesh-0", "edits": [] }', TypeError);
     }
     if (!records.some(record => record.id === entry.id) || seen.has(entry.id)) {
-      throw new RangeError(`Unknown or repeated mesh ID: ${entry.id}. Imported mesh IDs are ${partIdList(records.slice(0, 8))}...; scene_inspect lists them.`);
+      throw invalidField(`meshEdits[${index}].id`, entry.id, `an imported mesh ID used once, such as ${partIdList(records.slice(0, 3))}; scene_inspect lists them`);
     }
     seen.add(entry.id);
-    agentSceneModule('mesh').normalizeMeshEdits(entry.edits);
+    withFieldPrefix(`meshEdits[${index}]`, () => agentSceneModule('mesh').normalizeMeshEdits(entry.edits));
     if (entry.edits.length) entries.push({ id: entry.id, edits: structuredClone(entry.edits) });
   }
   return entries;
@@ -41,13 +42,13 @@ export function normalizeMeshEditEntries(input, records) {
 /** The recipe's meshEdits after one `edit-mesh` operation: edits append to the part's log, or replace it. */
 export function meshEditEntriesAfter(entries, operation, records) {
   if (!records.some(record => record.id === operation.geometry)) {
-    throw new RangeError(`Unknown mesh ID: ${operation.geometry}. Imported mesh IDs are ${partIdList(records.slice(0, 8))}...; scene_inspect lists them.`);
+    throw invalidField('geometry', operation.geometry, `an imported mesh ID such as ${partIdList(records.slice(0, 3))}; scene_inspect lists them`);
   }
   if (typeof operation.replace !== 'undefined' && typeof operation.replace !== 'boolean') {
-    throw new TypeError('replace must be boolean.');
+    throw invalidField('replace', operation.replace, 'true or false', TypeError);
   }
   if (!Array.isArray(operation.edits)) {
-    throw new TypeError('edit-mesh needs an edits array.');
+    throw invalidField('edits', operation.edits, 'an array of edits, such as [{ "op": "subdivide", "levels": 1 }]', TypeError);
   }
   const existing = entries.find(entry => entry.id === operation.geometry);
   const edits = operation.replace || !existing ? operation.edits : [...existing.edits, ...operation.edits];

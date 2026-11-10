@@ -87,7 +87,7 @@ export function closedRoomDiagnostic(share, litByLampsOnly = false) {
   }
   return diagnostic('closed-room-without-bake', 'warning', 'bake',
     `${Math.round(share * 100)} percent of rays from the middle of the scene hit a wall, so this is a closed room, and without a bake the world's light still reaches it: the room renders lifted and grey, with weak contact shadows.`,
-    'Add "bake": { "preset": "standard" } (scene_apply set-bake). It darkens what the sky cannot see and adds bounced light; measured against Cycles it halves the error of a closed room.');
+    'Add "bake": { "preset": "standard" } (scene_apply set-bake). It darkens what the sky cannot see and adds bounced light, halving the indirect-light error of a closed room.');
 }
 
 /**

@@ -51,6 +51,11 @@ own mesh report:
 | workshop | Long: a whole scene, a floor slab with a table, a chair and a mug, 12 parts that rest on each other |
 | robot-shot | Long: the robot with both hands placed by IK, then a side-on camera, checked from the exported recipe |
 
+| camera-closeup, camera-orbit | Frame the statue in a close-up; a 6 second camera orbit of at least 180 degrees (`scenes.mjs`) |
+| light-key-fill, light-spot-shadow | A warm sun plus a cool point fill; one shadow-casting spotlight aimed at the statue |
+| look-metal, look-fog | A polished gold material; a thin cool fog with a readable exposure |
+| sunset-timelapse, film-reveal | Sun direction and colour tracks over 4 s; a 6 second dolly-in reveal with an exposure fade |
+
 `references.mjs` holds one hand-built solution per task. `tests/agent-modeling-suite.test.js` checks that every
 reference passes and that broken variants fail. That keeps a wrong checker from costing an agent run.
 
@@ -71,6 +76,38 @@ the session, goes to `results/<run>.json`. Grade one recipe by hand with
 
 Compare runs only when they use the same model and suite version. A single run per task is noisy, so read differences
 of one or two tasks as noise.
+
+### The agent bench
+
+`bench.mjs` is the whole bench in one command. It runs the 28 tasks of `suite.mjs` (8 modeling, 3 revision, 3 scene,
+3 look, 4 light, 3 camera, 2 animation, 2 film), k times each, on each model, through headless `claude -p` with the 67js
+MCP config. It calls `run.mjs` once per model, so every run is a fresh session in its own empty temp folder with only the
+67js tools, and the grader reads the exported recipe, never the transcript. Graders are the checks above plus the state
+checks in `scene-checks.mjs` (camera aim and orbit, lights, materials, fog, sun and camera tracks) and the rendered-look
+check, and every task has a reference solution that the tests grade. Runs use the Claude Code subscription (there is no API
+key), so the summary reports tokens, calls and seconds and never dollars.
+
+The baseline, on the current main. It is long (28 tasks, 3 runs, 3 models run one after another), so start it in the
+background:
+
+```sh
+node bench/agent-modeling/bench.mjs --claude <path to claude> --models haiku,sonnet,opus --runs 3 --label baseline --backend cpu
+```
+
+It prints a table with pass@1 (average success over all runs), pass^k (share of tasks that passed on all k runs),
+`any of k`, calls, input and output tokens and seconds per run, then a line per model by kind. The file
+`results/bench-<label>.json` holds that summary and every run's record. `--smoke` runs the two smoke tasks once to prove the
+pipeline, `--tasks a,b` picks tasks, and `--resume` (same label, models and `--runs`) continues a stopped bench.
+
+To compare a branch with the baseline, run the same command with another label on the branch, then:
+
+```sh
+node bench/agent-modeling/compare-bench.mjs bench/agent-modeling/results/bench-baseline.json bench/agent-modeling/results/bench-<branch label>.json
+```
+
+It prints the totals side by side per model and the tasks whose pass count changed, and exits with 1 when a model's pass@1
+drops by more than `--tolerance` (0.05). Use the same models, `--runs` and backend on both sides. A task that moves by one
+run out of three is noise; read the totals and the tasks that moved by two runs or more.
 
 ### Several runs and several models
 
@@ -390,3 +427,60 @@ Not run:
 | Gemini CLI | Needs a Google sign-in or API key, which this setup does not have |
 | VS Code | Interactive client behind a Copilot subscription that is not set up here |
 | Claude Desktop | A GUI app that cannot be driven without computer use |
+
+### Antigravity CLI (2026-11-07)
+
+`llms-only.mjs --agent agy --agy <agy executable> --model <model>` drives the Antigravity CLI, which offers Gemini 4 Argon, Gemini 3.8 Flash and GPT-OSS 120B. Headless mode denies every shell command, so the runner passes a session-only settings file (`--settings`, never saved) with one rule, `permissions.allow: ["command(*)"]`, and removes it after the run. The CLI cannot switch its web tools off, so the runner records any web tool call as `usedWeb` and fails it. Run `npm run build:lib` first: the pack skips scripts, and the runner stops when `build/` is missing. With 2 attempts per model (`results/2026-11-07-agy.json`): Gemini 4 Argon 2 of 2, Gemini 3.8 Flash 2 of 2, GPT-OSS 120B 0 of 2 (it searched the web in every attempt despite the prompt, then timed out waiting for the page). One Gemini 4 Argon PNG was 768 px, which the check accepts because it requires a minimum side only. The MCP suite is not run through this CLI: `agy` reads MCP servers only from its global config, and `--settings` rejects `mcpServers`.
+
+## Agent friendliness: 67js MCP against three.js by code (2026-11-07, issue #31)
+
+The three.js half of issue #31 and the 67js side of the same table. The Blender MCP half is in the next section. Model `sonnet`, headless `claude -p` on the subscription, 6 suite tasks (`crate`, `bolt`, `window`, `table`, `fence`, `bracket`), 1 run each per system, so 12 records in `results/2026-11-07-threejs-vs-67js.json`. Tokens and tool calls are reported; there is no API dollar figure.
+
+- 67js MCP: `run.mjs`, the task prompt behind the usual MCP preamble.
+- three.js: `threejs.mjs`, the same task text behind a different preamble. The agent gets an empty folder with `three` installed from npm, Bash, Read, Write, Edit, Glob and Grep, no web and no MCP. It writes `build.mjs`, which builds the object, writes `geometry.json` (world-space triangles per mesh) and renders `scene.png` with headless Chrome on SwiftShader.
+- Same grading: the task's own checks run on `geometry.json` (corners welded before the closed-surface, hole and loop counts; the grader passes the suite's reference geometry of all six tasks, see `tests/agent-threejs-grade.test.js`), and the look score is the suite's silhouette overlap from the three fixed cameras. A three.js run passes when every check passes and `scene.png` is a real picture.
+
+| System | Pass | Mean tool calls | Mean tokens (in+out) | Mean look | Mean wall seconds |
+| --- | --- | --- | --- | --- | --- |
+| 67js MCP | 6/6 | 3.2 | 375k | 0.932 | 24 |
+| three.js by code | 5/6 | 8.8 | 269k | 0.926 | 359 |
+| Blender MCP (official server) | 6/6 | 3.8 | 177k | 0.926 | 517 |
+
+| Task | System | Pass | Tool calls (errors) | Look | Failure |
+| --- | --- | --- | --- | --- | --- |
+| crate | 67js MCP | yes | 4 (0) | 1.000 | |
+| crate | three.js | yes | 9 (1) | 1.000 | |
+| bolt | 67js MCP | yes | 2 (0) | 1.000 | |
+| bolt | three.js | yes | 7 (3) | 0.964 | |
+| window | 67js MCP | yes | 4 (0) | 1.000 | |
+| window | three.js | no, 4/5 | 11 (0) | 1.000 | closed-surface check: the frame has open or doubled edges |
+| table | 67js MCP | yes | 2 (0) | 0.592 | |
+| table | three.js | yes | 8 (1) | 0.592 | |
+| fence | 67js MCP | yes | 2 (0) | 1.000 | |
+| fence | three.js | yes | 11 (1) | 1.000 | |
+| bracket | 67js MCP | yes | 5 (0) | 1.000 | |
+| bracket | three.js | yes | 7 (0) | 1.000 | |
+
+- Measured: 67js needed about a third of the tool calls and finished in about 24 s against about 6 minutes, most of the three.js time going to getting headless Chrome to write a PNG. Both systems built the same shapes: the look means are within noise, and `table` scores 0.592 for both, which points at the task's reference rather than at either system.
+- Tokens are not lower for 67js: inferred: the MCP tool schemas and server instructions are re-read on every call, so its input tokens are higher even with fewer calls. The three.js `table` run reports only 44k input tokens although it ran 871 s, so treat that one count as unreliable.
+- 67js failures: none in the checks. One harness fault: the `bracket` look images failed because the look page could not fetch the boolean wasm (`both async and sync fetching of the wasm failed`), which threw away the whole look record, silhouette included. The silhouette was scored again afterwards from the exported recipe, and the record carries `imagesError`. `scoreLook` should score the silhouette before it renders images.
+- A first attempt of the 67js run failed on every task because the checkout had no `build/mcp` folder (`npm run build:lib` creates it); those results were discarded. The first three.js run stopped after `bolt` when its process disappeared, so `window`, `table`, `fence` and `bracket` were run again as a second run and joined with `compare-threejs.mjs`.
+- Limits: 1 run per cell, one model, tasks the 67js suite was built around (they favour 67js's checks, not three.js). The `window` three.js failure label came from an earlier wording of the same check.
+
+### Blender MCP half (2026-11-07, issue #31)
+
+The official Blender MCP server (Blender Lab, v1.0.3, add-on and server) driving Blender 5.1.2, same model, same six tasks, 1 run each, in `results/2026-11-07-blender-mcp.json`. The server runs model-written Python with no guards, so `blender.mjs` never runs it on the benchmark machine: Blender (headless, `--command blender_mcp`) and the HTTP MCP server run inside a throwaway Docker container (`blender-container/`, x86_64 under Rosetta on an Apple silicon laptop, one scratch folder mounted, a fresh container per task). `claude -p` reaches the server through an SSH port forward and gets only the MCP tools: no Bash and no file tools on its own machine. The prompt asks the agent to leave `geometry.json` (world-space triangles, Y up) and `scene.png` in the container's `/work`; the script copies them back and grades them exactly like the three.js run.
+
+| Task | Pass | Tool calls (errors) | Tokens in / out | Look | Wall seconds |
+| --- | --- | --- | --- | --- | --- |
+| crate | yes, 8/8 | 4 (1) | 179k / 3k | 1.000 | 590 |
+| bolt | yes, 7/7 | 4 (1) | 179k / 3k | 0.964 | 609 |
+| window | yes, 5/5 | 4 (1) | 181k / 4k | 1.000 | 611 |
+| table | yes, 6/6 | 5 (1) | 207k / 3k | 0.592 | 625 |
+| fence | yes, 6/6 | 2 (0) | 116k / 3k | 1.000 | 38 |
+| bracket | yes, 6/6 | 4 (1) | 182k / 4k | 1.000 | 626 |
+
+- Measured: no failures. Tool calls exclude the `ToolSearch` call that loads the one tool the agent uses (`execute_blender_code`), as in the other runs. Look matches the other two systems (`table` 0.592 again, so it is the reference).
+- Wall time is not a fair figure. Measured in the transcripts: `crate` hit Claude Code's 300 s no-response abort on its render call while the files were still written; the other four runs with an error and about 600 s show the same wall time. Inferred: the render is a CPU Cycles render of an x86 Blender under emulation, which a native Blender would finish much faster; `fence`, whose render stayed under the limit, took 38 s. Treat the 517 s mean as environment cost, not as Blender MCP latency.
+- Every run but `fence` spent one call on a failed first attempt (a Python traceback or the timeout) and then repaired it. The tool takes raw `bpy` code, so the agent writes the mesh code, the Z-up to Y-up conversion and the export itself, as in the three.js run; unlike three.js it needs no browser for the picture.
+- Limits: 1 run per cell, one model, tasks built around 67js. The server's own screenshot and render tools were never used; the agents rendered from their own code. The container has outbound network access (the model's code could reach the internet); only the scratch folder is shared with the host.

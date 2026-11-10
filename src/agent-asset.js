@@ -1,5 +1,5 @@
 import { mat4, mat3 } from 'gl-matrix';
-import { createAgentScene } from './agent-scene.js';
+import { createAgentScene, REVISION_HISTORY_LIMIT } from './agent-scene.js';
 import { environmentPatchWithSetup } from './agent-look.js';
 import { assetDiagnostics } from './agent-diagnostics.js';
 import { fitPerspectiveDistance } from './camera.js';
@@ -12,6 +12,7 @@ import { createFootLock } from './foot-lock.js';
 import { clipFromGltfAnimation, createAssetLayerEvaluator, morphClipFromGltfAnimation } from './skeleton-pose.js';
 import { registerAgentSceneModule, agentSceneModule } from './agent-scene-modules.js';
 import { normalizeMeshEditEntries, meshEditEntriesAfter, realizeMeshEdits, meshEditSignature } from './agent-asset-mesh.js';
+import { invalidField, withFieldPrefix } from './field-error.js';
 
 registerAgentSceneModule('motion', agentMotion);
 
@@ -44,11 +45,11 @@ export const AGENT_ASSET_CAPABILITIES = Object.freeze({
 function knownKeys(value, fields, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
-    throw new TypeError(`${label} must be a plain JSON object.`);
+    throw invalidField(label, value, 'a plain JSON object, such as {}', TypeError);
   }
   for (const key of Object.keys(value)) {
     if (!fields.includes(key)) {
-      throw new TypeError(`Unknown ${label} field: ${key}. Allowed fields: ${fields.join(", ")}.`);
+      throw invalidField(`${label}.${key}`, value[key], `no such field; use one of ${fields.join(', ')}`, TypeError);
     }
   }
 }
@@ -128,21 +129,24 @@ function copiedJson(input) {
 function vector(value, length, label) {
   if (!Array.isArray(value) || value.length !== length ||
       !value.every(component => typeof component === 'number' && Number.isFinite(Math.fround(component)))) {
-    throw new TypeError(`${label} requires ${length} finite Float32 numbers.`);
+    throw invalidField(label, value, `an array of ${length} finite numbers, such as [${Array(length).fill(1).join(', ')}]`, TypeError);
   }
   return [...value];
 }
 
-function rootFrom(input = {}) {
-  knownKeys(input, ROOT_FIELDS, 'root');
+function rootFrom(input = {}, path = 'root') {
+  knownKeys(input, ROOT_FIELDS, path);
   const root = {
-    translation: vector(input.translation === undefined ? [0, 0, 0] : input.translation, 3, 'root translation'),
-    rotation: vector(input.rotation === undefined ? [0, 0, 0, 1] : input.rotation, 4, 'root rotation'),
-    scale: vector(input.scale === undefined ? [1, 1, 1] : input.scale, 3, 'root scale'),
+    translation: vector(input.translation === undefined ? [0, 0, 0] : input.translation, 3, `${path}.translation`),
+    rotation: vector(input.rotation === undefined ? [0, 0, 0, 1] : input.rotation, 4, `${path}.rotation`),
+    scale: vector(input.scale === undefined ? [1, 1, 1] : input.scale, 3, `${path}.scale`),
   };
   const rotationLength = Math.hypot(...root.rotation);
   if (rotationLength === 0 || root.scale.some(component => Math.fround(component) <= 0)) {
-    throw new RangeError('Root needs a nonzero quaternion and positive Float32 scales.');
+    if (rotationLength === 0) {
+      throw invalidField(`${path}.rotation`, input.rotation, 'a quaternion that is not all zero, such as [0, 0, 0, 1]');
+    }
+    throw invalidField(`${path}.scale`, root.scale, 'positive numbers, such as [1, 1, 1]');
   }
   root.rotation = root.rotation.map(component => component / rotationLength);
   return root;
@@ -328,7 +332,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   const initialRecipe = copiedJson(inputRecipe);
   const assetId = initialRecipe?.assetId;
   if (typeof assetId !== 'string' || !/^[a-f0-9]{64}$/i.test(assetId)) {
-    throw new TypeError('assetId must contain 64 SHA256 hexadecimal characters.');
+    throw invalidField('assetId', assetId, '64 hexadecimal characters, such as "ab12..." (the SHA256 that scene_create_asset returned)', TypeError);
   }
   const canonicalAssetId = assetId.toLowerCase();
   const cameraOmitted = !Object.hasOwn(initialRecipe, 'camera');
@@ -344,6 +348,8 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   let motionTime = null;
   let sampledCamera;
   const checkpoints = new Map();
+  // Earlier recipes, oldest first. A published recipe is never edited in place, so the reference is a safe snapshot.
+  const revisionHistory = [];
   const materialOutputs = new Map([...materials].map(([source, record]) => {
     const output = {};
     for (const [field, value] of Object.entries(source)) {
@@ -375,15 +381,15 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     }
     const sourceNode = sourceNodes.get(id);
     if (!sourceNode) {
-      throw new RangeError(`Unknown mesh ID: ${id}. Imported mesh IDs look like mesh-0, mesh-1; call scene_inspect without ids to list them, or with kind hierarchy for source nodes.`);
+      throw invalidField('geometry', id, 'an imported mesh ID such as "mesh-0"; call scene_inspect without ids to list them, or with kind hierarchy for source nodes');
     }
     const partIds = sourceNode.meshIds ?? [];
     if (partIds.length === 0) {
-      throw new RangeError(`Source node ${id} has no mesh of its own. Inspect a mesh ID such as mesh-0, or call scene_inspect with kind hierarchy to see which nodes hold parts.`);
+      throw invalidField('geometry', id, 'a source node with a mesh of its own, or a mesh ID such as "mesh-0"; call scene_inspect with kind hierarchy to see which nodes hold parts');
     }
     if (partIds.length > 1) {
       const listed = partIds.slice(0, 8).join(', ');
-      throw new RangeError(`Source node ${id} holds ${partIds.length} parts: ${listed}${partIds.length > 8 ? ', ...' : ''}. Pass the part IDs you want.`);
+      throw invalidField('geometry', id, `one part ID, such as "${partIds[0]}"; this source node holds ${partIds.length} parts: ${listed}${partIds.length > 8 ? ', ...' : ''}`);
     }
     return records.find(value => value.id === partIds[0]);
   }
@@ -438,18 +444,20 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     knownKeys(candidate, ['format', 'schemaVersion', 'assetId', 'camera', ...LOOK_FIELDS, 'root', 'animation', 'materialOverrides', 'nodeOverrides', 'motion', 'physics', 'meshEdits'], 'asset recipe');
     if (candidate.format !== '67js.asset' || candidate.schemaVersion !== 1 ||
         typeof candidate.assetId !== 'string' || candidate.assetId.toLowerCase() !== canonicalAssetId) {
-      throw new RangeError('Expected the bound 67js.asset schemaVersion 1 assetId.');
+      const wrongField = candidate.format !== '67js.asset' ? 'format' : candidate.schemaVersion !== 1 ? 'schemaVersion' : 'assetId';
+      const expectedValue = wrongField === 'format' ? '"67js.asset"' : wrongField === 'schemaVersion' ? '1' : `the bound asset ID, such as "${canonicalAssetId.slice(0, 8)}..."`;
+      throw invalidField(wrongField, candidate[wrongField], expectedValue);
     }
     const overrides = candidate.materialOverrides === undefined ? [] : candidate.materialOverrides;
     if (!Array.isArray(overrides) || overrides.length > materialRecords.size) {
-      throw new RangeError('materialOverrides must be an array within the decoded material count.');
+      throw invalidField('materialOverrides', Array.isArray(overrides) ? `${overrides.length} entries` : overrides, `an array of at most ${materialRecords.size} entries, one per decoded material, such as []`);
     }
     const seen = new Set();
-    const definitions = overrides.map(override => {
-      knownKeys(override, ['id', ...MATERIAL_FIELDS], 'material override');
+    const definitions = overrides.map((override, index) => {
+      knownKeys(override, ['id', ...MATERIAL_FIELDS], `materialOverrides[${index}]`);
       const original = materialRecords.get(override.id);
       if (!original || seen.has(override.id)) {
-        throw new RangeError('Material override IDs must exist and be distinct.');
+        throw invalidField(`materialOverrides[${index}].id`, override.id, `the ID of a decoded material, used once; one of ${[...materialRecords.keys()].slice(0, 5).join(', ')}`);
       }
       seen.add(override.id);
       return { id: override.id, ...original.baseline, ...override };
@@ -467,29 +475,33 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     const animation = candidate.animation === undefined ? null : candidate.animation;
     if (animation !== null) {
       knownKeys(animation, ['clip', 'time'], 'animation');
+      const clipCount = asset.animations.length;
       const clip = asset.animations[animation.clip];
       if (!Number.isInteger(animation.clip) || !clip || !Number.isFinite(animation.time) ||
           animation.time < 0 || animation.time > clip.duration) {
-        throw new RangeError('Animation needs an existing clip and time within its duration.');
+        if (!Number.isInteger(animation.clip) || !clip) {
+          throw invalidField('animation.clip', animation.clip, clipCount === 0 ? 'no animation, since this asset has no clips; drop it, such as null' : `a clip index from 0 to ${clipCount - 1}, such as 0`);
+        }
+        throw invalidField('animation.time', animation.time, `seconds from 0 to ${clip.duration}, such as 0`);
       }
     }
     const nodeOverrides = candidate.nodeOverrides === undefined ? [] : candidate.nodeOverrides;
     if (!Array.isArray(nodeOverrides) || nodeOverrides.length > sourceNodes.size) {
-      throw new RangeError('nodeOverrides must fit the decoded source-node count.');
+      throw invalidField('nodeOverrides', Array.isArray(nodeOverrides) ? `${nodeOverrides.length} entries` : nodeOverrides, `an array of at most ${sourceNodes.size} entries, one per source node, such as []`);
     }
     const seenNodes = new Set();
-    const normalizedNodes = nodeOverrides.map(override => {
-      knownKeys(override, ['id', ...ROOT_FIELDS], 'node override');
+    const normalizedNodes = nodeOverrides.map((override, index) => {
+      knownKeys(override, ['id', ...ROOT_FIELDS], `nodeOverrides[${index}]`);
       const node = sourceNodes.get(override.id);
       if (!node || seenNodes.has(override.id) || !node.editable) {
-        throw new RangeError('Node override IDs must exist, be editable and be distinct.');
+        throw invalidField(`nodeOverrides[${index}].id`, override.id, 'the ID of an editable source node, used once; call scene_inspect with kind hierarchy to list them');
       }
       seenNodes.add(override.id);
       const fields = Object.keys(override).filter(field => field !== 'id');
       if (!fields.length) {
-        throw new RangeError('Node overrides need at least one local transform component.');
+        throw invalidField(`nodeOverrides[${index}]`, override, 'an id plus at least one of translation, rotation or scale, such as { "id": "node-1", "translation": [0, 1, 0] }');
       }
-      const transform = rootFrom(Object.fromEntries(fields.map(field => [field, override[field]])));
+      const transform = rootFrom(Object.fromEntries(fields.map(field => [field, override[field]])), `nodeOverrides[${index}]`);
       return { id: override.id, ...Object.fromEntries(fields.map(field => [field, transform[field]])) };
     });
     const result = copiedJson({
@@ -502,7 +514,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       result.meshEdits = meshEdits;
     }
     if ((candidate.motion?.ik?.length || candidate.motion?.footLock) && Math.max(...result.root.scale) - Math.min(...result.root.scale) > 1e-3 * Math.max(...result.root.scale)) {
-      throw new RangeError('Motion ik and footLock need a uniform asset root scale.');
+      throw invalidField('root.scale', result.root.scale, 'the same number on every axis, such as [1, 1, 1], because motion ik and footLock need a uniform asset root scale');
     }
     result.motion = agentMotion.normalizeAgentMotion(candidate.motion, motionRecipe(result));
     if (candidate.physics !== undefined && candidate.physics !== null) {
@@ -530,7 +542,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     return {
       nodes: [...sourceNodes.values()].filter(node => node.editable),
       materials: [...baselines.values()], camera: candidate.camera,
-      buildDrive, normalizeDrive: input => agentSceneModule('drive').normalizeDrive(input), ikHierarchy: [...sourceNodes.values()], clipLayerContext, morphTargets: [...morphTargetIndex.keys()],
+      buildDrive, normalizeDrive: (input, path) => agentSceneModule('drive').normalizeDrive(input, path), ikHierarchy: [...sourceNodes.values()], clipLayerContext, morphTargets: [...morphTargetIndex.keys()],
       ikRootMatrix: Array.from(mat4.fromRotationTranslationScale(mat4.create(), root.rotation, root.translation, [root.scale[0], root.scale[0], root.scale[0]])),
     };
   }
@@ -748,6 +760,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         parts = buildParts(editedParts);
         topologyRevision++;
       }
+      const previousRecipe = recipe;
       if (transientTime === undefined) {
         recipe = candidate;
         sampler = stagedSampler;
@@ -762,6 +775,12 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
         matrices = stagedMatrices;
       }
       if (increment) {
+        if (transientTime === undefined) {
+          revisionHistory.push({ revision, recipe: previousRecipe });
+          while (revisionHistory.length > REVISION_HISTORY_LIMIT) {
+            revisionHistory.shift();
+          }
+        }
         revision++;
       }
       return revision;
@@ -813,7 +832,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
   function expected(options) {
     knownKeys(options, ['expectedRevision'], 'transaction options');
     if (!Number.isSafeInteger(options.expectedRevision) || options.expectedRevision !== revision) {
-      throw new RangeError('expectedRevision must match the current revision.');
+      throw invalidField('expectedRevision', options.expectedRevision, `the current revision, such as ${revision}`);
     }
   }
 
@@ -850,7 +869,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     provideMotionSources,
     sampleMotion(time) {
       if (time !== null && (!Number.isFinite(time) || time < 0 || time > 3600)) {
-        throw new RangeError('Motion sample time must be null or within zero and 3600.');
+        throw invalidField('motionTime', time, 'null, or seconds from 0 to 3600, such as 0.5');
       }
       publish(recipe, false, false, time);
       return motionTime;
@@ -860,7 +879,7 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       knownKeys(frame, ['animation', 'motionTime'], 'asset frame');
       const time = frame.motionTime === undefined ? motionTime : frame.motionTime;
       if (time !== null && (!Number.isFinite(time) || time < 0 || time > 3600)) {
-        throw new RangeError('Motion sample time must be null or within zero and 3600.');
+        throw invalidField('motionTime', time, 'null, or seconds from 0 to 3600, such as 0.5');
       }
       publish(recipe, false, false, time, frame.animation);
       return motionTime;
@@ -868,14 +887,15 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     apply(inputOperations, options = {}) {
       expected(options);
       if (!Array.isArray(inputOperations) || !inputOperations.length || inputOperations.length > MAX_OPERATIONS) {
-        throw new RangeError('Asset operations must contain 1 to 256 commands.');
+        throw invalidField('operations', Array.isArray(inputOperations) ? `${inputOperations.length} commands` : inputOperations, `an array of 1 to ${MAX_OPERATIONS} commands, such as [{ "type": "set-root", "translation": [0, 1, 0] }]`);
       }
       const operations = copiedJson(inputOperations);
       const candidate = structuredClone(recipe);
-      for (const operation of operations) {
+      for (const [operationIndex, operation] of operations.entries()) {
+        const path = `operations[${operationIndex}]`;
         const lookField = Object.hasOwn(LOOK_OPERATIONS, operation.type) ? LOOK_OPERATIONS[operation.type] : null;
         if (lookField) {
-          knownKeys(operation, ['type', lookField], 'operation');
+          knownKeys(operation, ['type', lookField], path);
           const patch = operation[lookField];
           knownKeys(patch, Object.keys(candidate[lookField]), lookField);
           const nested = lookField === 'environment' ? 'volumeFog' : lookField === 'effects' ? 'bloom' : null;
@@ -886,39 +906,39 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
           }
           candidate[lookField] = merged;
         } else if (operation.type === 'set-camera') {
-          knownKeys(operation, ['type', ...Object.keys(candidate.camera)], 'operation');
+          knownKeys(operation, ['type', ...Object.keys(candidate.camera)], path);
           for (const field of Object.keys(candidate.camera)) {
             if (Object.hasOwn(operation, field)) {
               candidate.camera[field] = operation[field];
             }
           }
         } else if (operation.type === 'set-root') {
-          knownKeys(operation, ['type', ...ROOT_FIELDS], 'operation');
+          knownKeys(operation, ['type', ...ROOT_FIELDS], path);
           for (const field of ROOT_FIELDS) {
             if (Object.hasOwn(operation, field)) {
               candidate.root[field] = operation[field];
             }
           }
         } else if (operation.type === 'set-motion') {
-          knownKeys(operation, ['type', 'motion'], 'operation');
+          knownKeys(operation, ['type', 'motion'], path);
           if (!Object.hasOwn(operation, 'motion')) {
-            throw new TypeError('set-motion requires a motion record or explicit null.');
+            throw invalidField(`${path}.motion`, undefined, 'a motion record, or null to clear it, such as null', TypeError);
           }
           candidate.motion = operation.motion;
         } else if (operation.type === 'set-physics') {
-          knownKeys(operation, ['type', 'physics'], 'operation');
+          knownKeys(operation, ['type', 'physics'], path);
           if (!Object.hasOwn(operation, 'physics')) {
-            throw new TypeError('set-physics requires physics; use null to clear it.');
+            throw invalidField(`${path}.physics`, undefined, 'a physics record, or null to clear it, such as null', TypeError);
           }
           candidate.physics = operation.physics;
         } else if (operation.type === 'set-asset-node') {
-          knownKeys(operation, ['type', 'id', ...ROOT_FIELDS], 'operation');
+          knownKeys(operation, ['type', 'id', ...ROOT_FIELDS], path);
           if (!sourceNodes.has(operation.id)) {
-            throw new RangeError(`Unknown source-node ID: ${operation.id}.`);
+            throw invalidField(`${path}.id`, operation.id, 'the ID of a source node; call scene_inspect with kind hierarchy to list them');
           }
           const fields = ROOT_FIELDS.filter(field => Object.hasOwn(operation, field));
           if (!fields.length) {
-            throw new TypeError('set-asset-node needs a local transform component.');
+            throw invalidField(path, operation, 'an id plus at least one of translation, rotation or scale, such as { "type": "set-asset-node", "id": "node-1", "translation": [0, 1, 0] }', TypeError);
           }
           let override = candidate.nodeOverrides.find(value => value.id === operation.id);
           if (!override) {
@@ -929,10 +949,10 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
             override[field] = operation[field];
           }
         } else if (operation.type === 'set-animation') {
-          knownKeys(operation, ['type', 'clip', 'time'], 'operation');
+          knownKeys(operation, ['type', 'clip', 'time'], path);
           if (operation.clip === null) {
             if (Object.hasOwn(operation, 'time')) {
-              throw new TypeError('Returning to the initial pose requires clip:null with time omitted.');
+              throw invalidField(`${path}.time`, operation.time, 'no time when clip is null, which returns to the initial pose; drop time', TypeError);
             }
             candidate.animation = null;
           } else {
@@ -942,9 +962,9 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
             candidate.animation = { clip, time };
           }
         } else if (operation.type === 'set-material') {
-          knownKeys(operation, ['type', 'id', ...MATERIAL_FIELDS], 'operation');
+          knownKeys(operation, ['type', 'id', ...MATERIAL_FIELDS], path);
           if (!materialRecords.has(operation.id)) {
-            throw new RangeError(`Unknown material ID: ${operation.id}.`);
+            throw invalidField(`${path}.id`, operation.id, `the ID of a decoded material, one of ${[...materialRecords.keys()].slice(0, 5).join(', ')}`);
           }
           let override = candidate.materialOverrides.find(value => value.id === operation.id);
           if (!override) {
@@ -957,10 +977,10 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
             }
           }
         } else if (operation.type === 'edit-mesh') {
-          knownKeys(operation, ['type', 'geometry', 'edits', 'replace'], 'operation');
-          candidate.meshEdits = meshEditEntriesAfter(candidate.meshEdits ?? [], operation, records);
+          knownKeys(operation, ['type', 'geometry', 'edits', 'replace'], path);
+          candidate.meshEdits = withFieldPrefix(path, () => meshEditEntriesAfter(candidate.meshEdits ?? [], operation, records));
         } else {
-          throw new TypeError('Unsupported asset operation. Imported parts take edit-mesh (mesh_edit with a mesh ID such as mesh-0); other geometry changes are unavailable.');
+          throw invalidField(`${path}.type`, operation.type, 'one of set-camera, set-root, set-motion, set-physics, set-asset-node, set-animation, set-material or edit-mesh, such as "set-root"; imported parts take edit-mesh with a mesh ID such as mesh-0', TypeError);
         }
       }
       return publish(candidate);
@@ -971,23 +991,29 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       const limit = options.limit === undefined ? 64 : options.limit;
       if (!Number.isInteger(limit) || limit < 1 || limit > 256 ||
           (options.includeBounds !== undefined && typeof options.includeBounds !== 'boolean')) {
-        throw new RangeError('Inspection needs limit from 1 to 256 and boolean includeBounds.');
+        if (options.includeBounds !== undefined && typeof options.includeBounds !== 'boolean') {
+          throw invalidField('includeBounds', options.includeBounds, 'true or false');
+        }
+        throw invalidField('limit', limit, 'a whole number from 1 to 256, such as 64');
       }
       const offset = options.offset === undefined ? 0 : options.offset;
       if (!Number.isInteger(offset) || offset < 0 || offset > 4096 ||
           (options.kind !== undefined && !['meshes', 'hierarchy'].includes(options.kind))) {
-        throw new RangeError('Inspection kind must be meshes or hierarchy with an offset from zero to 4096.');
+        if (options.kind !== undefined && !['meshes', 'hierarchy'].includes(options.kind)) {
+          throw invalidField('kind', options.kind, 'one of meshes, hierarchy');
+        }
+        throw invalidField('offset', offset, 'a whole number from 0 to 4096, such as 0');
       }
       if (options.kind === 'hierarchy') {
         if (options.includeBounds) {
-          throw new TypeError('Hierarchy inspection has no deformed silhouette bounds. Drop includeBounds, or inspect without kind to get mesh bounds.');
+          throw invalidField('includeBounds', options.includeBounds, 'false for kind hierarchy, which has no deformed silhouette bounds; drop it, or inspect without kind to get mesh bounds', TypeError);
         }
         if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > sourceNodes.size)) {
-          throw new RangeError('Hierarchy IDs must fit the source-node count.');
+          throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${sourceNodes.size} source-node IDs, such as []`);
         }
         const selected = options.ids === undefined ? [...sourceNodes.values()] : options.ids.map(id => {
           if (!sourceNodes.has(id)) {
-            throw new RangeError(`Unknown source-node ID: ${id}.`);
+            throw invalidField('ids', id, 'the ID of a source node; call scene_inspect with kind hierarchy to list them');
           }
           return sourceNodes.get(id);
         });
@@ -998,12 +1024,12 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
           motion: recipe.motion ? { duration: recipe.motion.duration, loop: recipe.motion.loop, tracks: recipe.motion.tracks.length, time: motionTime } : null };
       }
       if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.length > records.length)) {
-        throw new RangeError('Inspection IDs must be an array within the decoded part count.');
+        throw invalidField('ids', Array.isArray(options.ids) ? `${options.ids.length} IDs` : options.ids, `an array of at most ${records.length} mesh IDs, such as ["mesh-0"]`);
       }
       const selected = options.ids === undefined ? records : options.ids.map(id => partRecordFor(id));
       const visible = selected.slice(offset, offset + limit);
       if (options.includeBounds && visible.reduce((total, record) => total + geometryOf(record).positions.length / 3, 0) > MAX_INSPECTION_VERTICES) {
-        throw new RangeError('Bounds inspection exceeds two million authored base vertices. Select fewer meshes.');
+        throw invalidField('ids', `${visible.length} meshes`, 'fewer meshes, under two million authored base vertices in all, such as ["mesh-0"]');
       }
       const nodes = visible.map(record => {
         const index = Number(record.id.slice(5));
@@ -1049,12 +1075,12 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       knownKeys(options, ['geometries'], 'mesh inspection');
       const requested = options.geometries ?? records.slice(0, MAX_MESH_REPORTS).map(record => record.id);
       if (!Array.isArray(requested) || requested.length > MAX_MESH_REPORTS) {
-        throw new RangeError(`Inspect at most ${MAX_MESH_REPORTS} mesh IDs per call.`);
+        throw invalidField('geometries', Array.isArray(requested) ? `${requested.length} IDs` : requested, `an array of at most ${MAX_MESH_REPORTS} mesh IDs, such as ["mesh-0"]`);
       }
       const meshes = requested.map(id => {
         const index = records.findIndex(record => record.id === id);
         if (index < 0) {
-          throw new RangeError(`Unknown mesh ID: ${id}. Imported mesh IDs look like mesh-0, mesh-1; scene_inspect lists them.`);
+          throw invalidField('geometries', id, 'an imported mesh ID such as "mesh-0"; scene_inspect lists them');
         }
         const record = records[index];
         const edited = editedParts.get(id);
@@ -1073,9 +1099,13 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
       });
       return { revision, meshes, truncated: false };
     },
+    /** The surfaces a scene query walks: every part with its geometry, world matrix and material ID. */
+    queryParts() {
+      return records.map(record => ({ id: record.id, geometry: geometryOf(record), matrix: matrices[Number(record.id.slice(5))], material: record.material.id }));
+    },
     checkpoint() {
       if (checkpoints.size >= MAX_CHECKPOINTS) {
-        throw new RangeError('Asset checkpoint budget exhausted. Release a checkpoint.');
+        throw invalidField('checkpoints', `${checkpoints.size} saved`, `at most ${MAX_CHECKPOINTS} saved checkpoints; release one first, such as with scene_release_checkpoint`);
       }
       const handle = Object.freeze({});
       checkpoints.set(handle, structuredClone(recipe));
@@ -1084,13 +1114,25 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     restore(handle, options = {}) {
       expected(options);
       if (!checkpoints.has(handle)) {
-        throw new RangeError('Unknown or released asset checkpoint. Save one with scene_checkpoint, or use a checkpointId that scene_checkpoint returned and you have not released.');
+        throw invalidField('checkpointId', 'unknown or released', 'a checkpointId that scene_checkpoint returned and you have not released, such as the last one returned');
       }
       return publish(checkpoints.get(handle));
     },
+    /** Go back to an earlier revision that apply or restore left behind; no checkpoint is needed. */
+    restoreRevision(target, options = {}) {
+      expected(options);
+      const entry = revisionHistory.find(candidate => candidate.revision === target);
+      if (!entry) {
+        const kept = revisionHistory.map(candidate => candidate.revision);
+        throw invalidField('revision', target, kept.length > 0
+          ? `one of the kept revisions: ${kept.join(', ')} (the last ${REVISION_HISTORY_LIMIT} are kept; older ones are dropped)`
+          : 'a revision this session kept, but none is kept yet because nothing has been edited; apply an edit first');
+      }
+      return publish(entry.recipe);
+    },
     releaseCheckpoint(handle) {
       if (!checkpoints.delete(handle)) {
-        throw new RangeError('Unknown or released asset checkpoint. Save one with scene_checkpoint, or use a checkpointId that scene_checkpoint returned and you have not released.');
+        throw invalidField('checkpointId', 'unknown or released', 'a checkpointId that scene_checkpoint returned and you have not released, such as the last one returned');
       }
     },
   });

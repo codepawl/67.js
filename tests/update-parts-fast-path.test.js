@@ -13,7 +13,7 @@ function createPart(name, material = {}) {
 
 function createRenderer(parts) {
   const renderer = Object.create(Renderer67.prototype);
-  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 41), castShadow: true, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false, pass: 'opaque' };
+  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42), castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false, pass: 'opaque' };
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData() {} };
   renderer.partLocations = new Map(parts.map((part, index) => [part, {
     batch, index, geometry: GEOMETRY, map: null, normalMatrix: mat3.create(), layerState: materialLayerState({}), skin: null,
@@ -56,10 +56,10 @@ test('matrix, colour, emission and roughness changes update through the fast pat
   parts[1].material.roughness = 0.6;
   parts[1].material.emission = 2;
   assert.equal(renderer.updateParts(parts), 2);
-  assert.equal(batch.instanceData[41 + 12], 5);
-  assert.deepEqual(Array.from(batch.instanceData.subarray(41 + 25, 41 + 28)).map(value => Math.round(value * 10)), [9, 8, 7]);
-  assert.equal(Math.round(batch.instanceData[41 + 29] * 10), 6);
-  assert.equal(batch.instanceData[41 + 30], 2);
+  assert.equal(batch.instanceData[42 + 12], 5);
+  assert.deepEqual(Array.from(batch.instanceData.subarray(42 + 25, 42 + 28)).map(value => Math.round(value * 10)), [9, 8, 7]);
+  assert.equal(Math.round(batch.instanceData[42 + 29] * 10), 6);
+  assert.equal(batch.instanceData[42 + 30], 2);
 });
 
 test('rejections still throw after the fast path has been taken', () => {

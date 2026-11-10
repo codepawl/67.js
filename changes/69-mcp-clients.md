@@ -1,1 +1,0 @@
-- Add `npm run smoke:mcp-clients` (issue #69). It drives the CPU MCP server through the pinned MCP Inspector CLI 2.13.0 and the official Python SDK 2.3.0. Both list 22 tools and create a scene, and the Python client gets a PNG back from `scene_look`. The Inspector CLI cannot, because it starts a new server per command, and `docs/mcp.md` records that.

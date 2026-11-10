@@ -1,4 +1,5 @@
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
+import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from './look-catalog.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from './light-limits.js';
 import {
   MESH_EDIT_OPERATIONS, MAX_MESH_EDITS, STACK_OPERATIONS, MAX_STACK_NODES,
@@ -49,10 +50,11 @@ export const MATERIAL_PATTERN_TYPES =Object.freeze(['noise', 'wood', 'planks', '
 export const MAX_MATERIAL_PATTERNS = 16;
 // A material graph bakes to textures on the CPU and never becomes shader text. Its node and depth limits are the field
 // expression limits; maxWork is work units per pixel times pixels, so a costly graph needs a smaller texture.
-export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height']);
+export const MATERIAL_GRAPH_OUTPUTS = Object.freeze(['color', 'roughness', 'metallic', 'emission', 'height', 'opacity', 'clearcoat', 'transmission', 'aov']);
 export const MATERIAL_GRAPH_OPERATORS = Object.freeze([
   'uv', 'vec', 'ramp', 'noise', 'voronoi', 'wave', 'checker', 'gradient',
   'add', 'sub', 'mul', 'div', 'min', 'max', 'pow', 'abs', 'floor', 'fract', 'sqrt', 'invert', 'clamp', 'smoothstep', 'mix',
+  'layer', 'hue', 'curve',
 ]);
 export const MATERIAL_GRAPH_LIMITS = Object.freeze({ maxNodes: MAX_FIELD_NODES, maxDepth: MAX_FIELD_DEPTH, maxStops: 8, maxWork: 30_000_000 });
 // Curve and text geometry. A text geometry is bounded by vertices per curve segment: the bundled font stays under
@@ -67,25 +69,24 @@ export const CURVE_TEXT_DETAILS = Object.freeze({
 });
 export const MATERIAL_MAPPINGS = Object.freeze(['box', 'uv']);
 export const MATERIAL_GRAPH_NODES = Object.freeze({
-  outputs: 'color (linear RGB; a number is grey), roughness, metallic, emission (colour; defaults to 1), height (becomes a normal map).',
-  node: 'A number, [x, y, z], or an object with exactly one operator.',
+  outputs: 'color (linear RGB; a number is grey), roughness, metallic, emission (defaults to 1), height (normal map), opacity (alpha), clearcoat, transmission (masks), aov (linear RGB or scalar).',
   textures: Object.freeze({
     noise: '{"noise":{"scale":8,"seed":1,"octaves":4}}',
     voronoi: '{"voronoi":{"scale":6,"output":"distance"|"edge"|"cell"}}',
-    wave: 'ripple along z (normal true: along normals) from start [0,0] over axes xy, x or y: height 0.5, width 1.5, narrowness 0-50 (1.5), speed 0.25 per frame, time 0 (frame), timeOffset 0, cyclic true.',
-    checker: '{"checker":{"count":8}} (even count)',
+    wave: '{"wave":{"frequency":4,"direction":"u"|"v"|"diagonal","shape":"sine"|"saw"|"triangle"}}',
+    checker: '{"checker":{"count":8}} (even)',
     gradient: '{"gradient":{"type":"u"|"v"|"radial"}}',
-    note: 'Each takes "at", a vector such as {"uv":"both"}, to warp it. Scales are whole numbers 1 to 64 so it tiles.',
+    note: 'Each takes "at", a vector such as {"uv":"both"}. Scales are whole numbers 1-64.',
   }),
-  uv: '{"uv":"u"|"v"|"both"} are the coordinates.',
-  ramp: '{"ramp":{"value":node,"stops":[[0,[r,g,b]],[1,[r,g,b]]]}} maps a number to colours, 2 to 8 stops rising from 0 to 1.',
-  maths: 'add sub mul div min max pow take [a,b]; abs floor fract sqrt invert take one node; clamp smoothstep mix take [a,b,c]; {"vec":[r,g,b]}. Numbers combine with vectors per component.',
-  example: '{"color":{"ramp":{"value":{"noise":{"scale":8}},"stops":[[0,[0.1,0.05,0.02]],[1,[0.6,0.4,0.2]]]}},"height":{"noise":{"scale":8}}}',
-  mapping: 'box (default) projects along the object axes and needs no UVs; uv follows geometry UVs, so the mesh needs a uv_unwrap node or geometry.uvs. size and axis only apply to box.',
+  uv: '{"uv":"u"|"v"|"both"} coordinates.',
+  ramp: '{"ramp":{"value":node,"stops":[[0,[r,g,b]],[1,[r,g,b]]]}} 2-8 stops rising from 0 to 1.',
+  mixing: '{"layer":{"base","top","mask","edge","softness"}}; {"hue":{"color","shift","saturation","value"}}; {"curve":{"value","points":[[x,y]]}}.',
+  maths: 'add sub mul div min max pow take [a,b]; abs floor fract sqrt invert take one node; clamp smoothstep mix take [a,b,c]; {"vec":[r,g,b]}.',
+  mapping: 'box (default) projects along object axes, no UVs; uv follows geometry UVs. size and axis only apply to box.',
 });
 
 // Recipe textures are opaque patterns, so cutout masking has nothing to cut.
-export const RECIPE_ALPHA_MODES = Object.freeze(['opaque', 'blend']);
+export const RECIPE_ALPHA_MODES = Object.freeze(['opaque', 'blend', 'add']);
 
 // Named lighting setups (see lighting-setups.js) and the occlusion strength that recipes get when they set none.
 export const LIGHTING_SETUP_NAMES = Object.freeze(['daylight', 'overcast', 'sunset', 'studio']);
@@ -93,12 +94,15 @@ export const DEFAULT_LIGHTING_SETUP = 'daylight';
 export const DEFAULT_AMBIENT_OCCLUSION = 0;
 
 // Render passes a render job can write next to the lit image (see RENDER_PASS_MODES in renderer.js, which must list the same names).
-export const RENDER_PASS_NAMES = Object.freeze(['albedo', 'normal', 'emission', 'depth', 'objectId']);
+export const RENDER_PASS_NAMES = Object.freeze(['albedo', 'normal', 'emission', 'depth', 'objectId', 'diffuse', 'glossy', 'shadow', 'ao', 'mist', 'position', 'velocity', 'uv', 'transmission', 'volume', 'environment', 'cryptomatte', 'aov']);
 // Video encoders a render job can choose (nvenc is h264_nvenc and fails the job when the GPU or ffmpeg lacks it), the
 // longest video, and the audio file names a job may mix in from the --audio folder: one path segment with a known
 // extension, no drive or protocol syntax.
 export const VIDEO_ENCODERS = Object.freeze(['cpu', 'nvenc']);
 export const MAXIMUM_VIDEO_SECONDS = 60;
+// File formats of an image or stills job (8-bit PNG by default, 16-bit PNG, OpenEXR) and the highest video frame rate.
+export const RENDER_OUTPUT_FORMATS = Object.freeze(['png', 'png16', 'exr']);
+export const MAXIMUM_JOB_FPS = 60;
 /** Recipe bake presets and ranges. A bake inline on the page fails the edit after 20 s, before the 30 s page deadline; on a worker it has 90 s. */
 export const BAKE_PRESETS = Object.freeze({
   draft: Object.freeze({ samples: 32, bounces: 1, texelsPerUnit: 3 }),
@@ -106,7 +110,7 @@ export const BAKE_PRESETS = Object.freeze({
   // An alias of standard: measured on the five reference rooms, no samples and density mix within the 20 s limit scored better (bench/reference/README.md).
   fine: Object.freeze({ samples: 128, bounces: 3, texelsPerUnit: 6 }),
 });
-export const BAKE_RANGES = Object.freeze({ samples: [1, 256], bounces: [1, 3], texelsPerUnit: [1, 12] });
+export const BAKE_RANGES = Object.freeze({ samples: [1, 256], bounces: [1, 8], texelsPerUnit: [1, 12] });
 export const BAKE_MAXIMUM_SECONDS = 20;
 /** The limit when the bake runs on a worker, which does not block the page: a busy machine still finishes a preset. */
 export const BAKE_WORKER_MAXIMUM_SECONDS = 90;
@@ -148,32 +152,54 @@ export const MESH_MODIFIER_NOTES = Object.freeze({
   lattice: 'divisions [2,2,2] (2-8) control points over the mesh bounds; moves up to 64 of {point:[i,j,k], offset:[x,y,z]}; trilinear blend.',
   curve: 'bends the mesh along path, 2 to 64 points [x,y,z] through a Catmull-Rom spline. The coordinate along axis (x) is the distance from the path start, the other two become offsets in a twist-free frame; past the ends the mesh continues straight. Model the mesh along the axis starting at 0.',
   hook: 'vertices within radius 1 of center [0,0,0] move by translation [0,0,0] times strength 0-1 (1); falloff smooth, linear or constant.',
-  wave: 'a gaussian ripple of height 0.5 along z (normal true: along the vertex normal) that travels from start [0,0] over axes xy (default), x or y; width 1.5, narrowness 0 to 50 (1.5), speed 0.25 per frame, time 0 (a frame number), timeOffset 0, cyclic true repeats it. Matches Blender Wave at the same frame.',
+  wave: 'a gaussian ripple of height 0.5 along z (normal true: along the vertex normal) travelling from start [0,0] over axes xy (default), x or y; width 1.5, narrowness 0-50 (1.5), speed 0.25 per frame, time 0 (a frame), timeOffset 0, cyclic true repeats it. Matches Blender Wave.',
   weighted_normal: 'corner normals weighted by face area ^ (weight/50), weight 1-100 (50), smoothed across edges under angle 30 that are not sharp. Put it last in the stack.',
   smooth_by_angle: 'edges bending over angle 30 (0-180) become sharp, others smooth, over smoothAngle; ignoreSharp true also clears hand-made sharp edges.',
+  bounding_box: 'becomes its axis-aligned box.',
+  convex_hull: 'becomes its convex hull, up to 8192 vertices.',
+  ocean: 'seeded sea: lifts axis (y) by waves of windSpeed 10 m/s (0-60) toward direction 0 deg, size 100 m (repeats), seed 0, time 0 s, resolution 8 (1-16); choppiness 1 (0-4) pulls points to crests. Writes group foam.',
+});
+
+// Vertex colors and groups. Details stay here so the tool schemas stay small.
+export const MESH_ATTRIBUTE_NOTES = Object.freeze({
+  vertex_group: 'name (required) sets the weights 0-1 of the vertices of the selected faces; the rest keep theirs. One of weight (1), field or gradient { axis x|y|z, range [low, high], weights [atLow, atHigh] }. Max 32 groups. displace takes group: name and scales each move by the weight; cloth takes pinGroup. A stack node that rebuilds the mesh drops groups.',
+  vertex_color: 'sets the corner colors (0-1, linear, white until set) of the selected faces. One of color [r, g, b], field (vector expression of the vertex) or gradient { axis, range [low, high], colors [[r,g,b] atLow, [r,g,b] atHigh] }. Drawn, written as COLOR_0 in a GLB, and multiplies the material color.',
+});
+
+// Shape keys on a recipe mesh. Details stay here so the tool schemas stay small.
+export const MESH_SHAPE_KEY_NOTES = Object.freeze({
+  shapeKeys: 'On a mesh geometry, at most 16: { name, offsets, value } or { name, edits, value }. offsets is a list of { select, offset: [x,y,z], falloff } moves like the translate edit; edits are vertex-moving mesh edits run after the stack. value (0, 0 to 1) is the weight without motion. Each key becomes a glTF morph target. Animate it with a motion track { kind: "morph", id: <key name>, property: "weight", keyframes }.',
 });
 
 // Organic shaping edits. Details stay here so the tool schemas stay small.
 export const MESH_SCULPT_NOTES = Object.freeze({
-  sculpt: 'strokes run in order on the vertices of the selected faces; other vertices stay, so a tag confines them. A stroke has type inflate (along the vertex normal), displace (along direction, needed) or smooth (strength 0 to 1), center and radius, strength in mesh units (negative pushes in). Falloff is smooth to zero at the radius. For bulges, dents and softened forms.',
-  shrinkwrap: 'target is a primitive record placed by translation, rotation and scale. mode nearest (default) moves each selected vertex to the closest point; project moves it along direction (needed) to the first hit. offset (default 0) stands it off along the normal, on the side it came from. maxDistance limits the search; onMiss error (default) or keep. To lay a flat grid sheet onto a curved target as a decal, use enough cells to follow the curve, then solidify.',
+  sculpt: 'strokes run in order on the vertices of the selected faces; a tag confines them. A stroke has type inflate (along the vertex normal), displace (along direction, needed) or smooth (strength 0-1), center and radius, strength in mesh units. Falloff is smooth to zero at the radius.',
+  shrinkwrap: 'target is a primitive record placed by translation, rotation and scale. mode nearest (default) moves each selected vertex to the closest point; project moves it along direction (needed) to the first hit. offset (0) stands it off along the normal. maxDistance limits the search; onMiss error (default) or keep. For a decal, use enough grid cells, then solidify.',
 });
 
 export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   format: '67js.scene', schemaVersion: 1,
-  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'grid', 'terrain', 'mesh']),
-  terrain: 'One mesh, x and z from -size/2 to size/2, hills about y = 0. size 40 m (1-2000), resolution 64 cells (2-256), seed 1, amplitude 1 m (0-200), holes up to 16 of {center:[x,z],radius} with no surface inside; radius a few cells or more.',
-  placedAssets: 'Node field asset:{id,materials?,clip?,drive?} turns a group node into a catalog GLB (id from asset_catalog; scene_create_asset is one asset alone). Its transform places it. materials:[{name,color,metallic,roughness,opacity,emission,emissiveColor}] override source materials by name. clip:{index,start=0,speed=1,loop=true} plays that clip from scene time start, on a decoded copy of its own; scene_apply set-motion tracks move the node as usual and scene time seeks the clip. Copies of one asset share geometry and materials and draw as one batch. drive:{path | legs, cruiseSpeed | speed, wheels, lights} drives a car along a path in the placement frame on a decoded copy of its own (fields as motion.drive in an asset recipe, docs/vehicle.md; no tail-light glow). scene_inspect assets adds its wheels, rejectedNames and light signals. At most 512 placements, 16 assets, 16 playing a clip or driving. Render jobs do not draw placed assets yet; scene_look does.',
-  navigation: 'scene_inspect path:{ground,from:[x,z],to:[x,z]} returns a route over the ground node around its holes, steep slopes and the nodes in avoid:[ids] (box footprints), as keyframes [{time,value:[x,y,z]}] for a node translation track with interpolation LINEAR. radius 0.3 m is how far the walker position stays from holes and avoided nodes; maxSlope 40 degrees; cellSize defaults to radius; give seconds for the whole walk or speed (1.4 m/s); lift raises y, such as half the walker height. Ground and avoided nodes are read at their authored pose. Errors name an unwalkable start or goal, or one that cannot be reached.',
+  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh']),
+  camera: 'eye, target, up, near, far, then fov (vertical degrees) or focalLength (mm, with sensorWidth mm, 36; not both). projection orthographic with orthoScale (view height in m, default 4). shift [x, y] moves the frame by a fraction of its size. fStop (0.7-64) turns on depth of field focused on target; 1.4 or lower is full blur; effects.depthOfField.blur must stay 0. Orthographic/shifted cameras use the rasterizer.',
+  terrain: 'One mesh, x and z from -size/2 to size/2, hills about y = 0. size 40 m (1-2000), resolution 64 cells (2-256), seed 1, amplitude 1 m (0-200), holes up to 16 of {center:[x,z],radius}, no surface inside; radius a few cells or more.',
+  placedAssets: 'Node field asset:{id,materials?,clip?,drive?} turns a group node into a catalog GLB (id from asset_catalog). Its transform places it. materials:[{name,color,metallic,roughness,opacity,emission,emissiveColor}] override source materials by name. clip:{index,start=0,speed=1,loop=true} plays that clip from scene time start; set-motion tracks move the node and scene time seeks the clip. drive:{path | legs, cruiseSpeed | speed, wheels, lights} drives a car along a path in the placement frame (docs/vehicle.md). Max 512 placements, 16 assets, 16 animated.',
+  navigation: 'scene_inspect path:{ground,from:[x,z],to:[x,z]} returns a route over the ground node around its holes, steep slopes and the nodes in avoid:[ids] (box footprints), as keyframes [{time,value:[x,y,z]}] for a translation track with interpolation LINEAR. radius 0.3 m; maxSlope 40 degrees; cellSize defaults to radius; seconds or speed (1.4 m/s); lift adds y.',
   meshEdits: Object.freeze({ operations: Object.freeze(Object.keys(MESH_EDIT_OPERATIONS)), maxEdits: MAX_MESH_EDITS }),
   meshStack: Object.freeze({ operations: STACK_OPERATIONS, maxNodes: MAX_STACK_NODES }),
   meshModifiers: MESH_MODIFIER_NOTES,
   meshSculpt: MESH_SCULPT_NOTES,
+  meshAttributes: MESH_ATTRIBUTE_NOTES,
+  meshShapeKeys: MESH_SHAPE_KEY_NOTES,
   fieldExpressions: Object.freeze({
     operators: FIELD_OPERATOR_NAMES, attributes: FIELD_ATTRIBUTES,
     maxNodes: MAX_FIELD_NODES, maxDepth: MAX_FIELD_DEPTH, maxElements: MAX_FIELD_ELEMENTS,
+    rotation: 'rotate [v, axis, rad]; align [dir]: Euler of +Y to dir; transform [p, move, euler, size].',
+    surfaces: 'nearest {surface, at, read distance|point|normal}; raycast {surface, at, direction, read hit|distance|point|normal, miss}. at defaults to position; rays go forward. surface: geometry id (instances where) or record (mesh edits). attr group + name reads a vertex group.',
   }),
-  instancing: Object.freeze({ sources: INSTANCE_SOURCES, maxCandidatePoints: MAX_INSTANCE_CANDIDATES }),
+  instancing: Object.freeze({
+    sources: INSTANCE_SOURCES, maxCandidatePoints: MAX_INSTANCE_CANDIDATES,
+    place: 'place {at vertices|faces, spacing, density 0-1, variants [id|{geometry, material}], variant, rotation Euler, size}; the last are fields.',
+  }),
   operations: Object.freeze([
     'set-node', 'set-material', 'set-camera', 'add-node', 'remove-node',
     'add-geometry', 'remove-geometry', 'add-material', 'remove-material',
@@ -190,7 +216,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   alphaModes: RECIPE_ALPHA_MODES,
   materialPatterns: MATERIAL_PATTERN_TYPES, maxMaterialPatterns: MAX_MATERIAL_PATTERNS,
   materialMappings: MATERIAL_MAPPINGS,
-  renderPasses: Object.freeze({ names: RENDER_PASS_NAMES, files: 'render-<pass>.png or frame-N-<pass>.png, raw and unantialiased; opaque and cutout geometry only', depth: `16 bits in red and green over ${RENDER_PASS_DEPTH_RANGE} m`, objectId: '24 bits in RGB; the job result lists the part names' }),
+  renderPasses: Object.freeze({ names: RENDER_PASS_NAMES, files: 'render-<pass>.png/.exr or frame-N-<pass>.png/.exr (multilayer: true packs all into render.exr)', depth: `16 bits in red and green over ${RENDER_PASS_DEPTH_RANGE} m`, objectId: '24 bits in RGB; metrics.objectNames lists parts', cryptomatte: 'R object hash, G material hash, B coverage; metrics.cryptomatte holds manifests', aov: 'material.aov or pattern.graph.aov linear RGB' }),
   // Recipe timeline (src/film-timeline.js), rendered with settings.timeline; the rest is in docs/agent-render-jobs.md.
   filmTimeline: Object.freeze({
     maxShots: 64, maxTotalSeconds: 60, maxShotSeconds: 30,
@@ -208,13 +234,15 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   // (mesh_inspect gives localToWorldScale and localAxesInWorld) on a welded mesh with axis tags and a material tag.
   importedMeshEdits: Object.freeze({
     ...IMPORTED_MESH_EDIT_LIMITS,
-    transfer: 'New vertices take skin weights, morph deltas and colours from the nearest original surface point; faces left without UVs read the nearest original UV island. Not supported: mesh_stack, relations, instancing.',
-    rejects: 'On a skinned or morphed part an edit farther than maxTransferFraction of the part bounds diagonal from the original surface; booleans on open parts (fill_holes first).',
+    transfer: 'New vertices take skin weights, morph deltas and colours from the nearest original surface point; faces without UVs read the nearest UV island. Unsupported: mesh_stack, relations, instancing.',
+    rejects: 'Skinned or morphed part: an edit farther than maxTransferFraction of the bounds diagonal from the original surface; booleans on open parts (fill_holes first).',
   }),
   fixedResources: false, dynamicTopology: true, checkpoints: true, positiveScaleOnly: true,
   gltfImport: 'Optional extensions and line primitives load with a warning; unlit and punctual lights are read.',
   authoredLook: true, maxPointLights: MAX_POINT_LIGHTS,
-  lightingSetups: LIGHTING_SETUP_NAMES, defaultLightingSetup: DEFAULT_LIGHTING_SETUP,
+  catalogLooks: Object.freeze({ hdri: 'environment.hdri', hdris: BUNDLED_ENVIRONMENT_NAMES, cubeLooks: BUNDLED_CUBE_LOOK_NAMES, look: 'environment.look', catalogId: '64-hex ID of a .hdr or .cube in scene_asset_catalog', note: 'environmentIntensity and environmentRotation apply; keyIntensity 0 if the HDRI has a sun' }),
+  physicalSky: 'environment.sky {type:physical, sunElevation, sunRotation, turbidity, groundAlbedo, aerialPerspective} drives key, sky, fog',
+  lightingSetups: LIGHTING_SETUP_NAMES,defaultLightingSetup: DEFAULT_LIGHTING_SETUP,
   ambientOcclusion: Object.freeze({ default: DEFAULT_AMBIENT_OCCLUSION, defaultRadius: 0.5, off: 0 }),
   // Local lights: spot and rectangular area lights. Shadows share one 2048 x 3072 depth atlas of 24 tiles; a shadowed
   // point light uses 6 tiles and a shadowed spot light 1. Area lights cast no shadow. Recipes reach light linking and cascaded sun shadows through lightLinking and shadowCascades below.
@@ -228,24 +256,25 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     choose: 'agx for lit scenes and Blender comparisons, neutral for product and brand colour, aces for contrast; needs loadAgentSceneModules',
   }),
   // Flush surfaces flicker (z-fighting). scene_inspect and renderer.diagnostics warn with coplanar-overlap; these fix it at draw time.
+  renderFlags: Object.freeze({ nodeFields: Object.freeze(['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher']), motion: 'node track property visible: 1 or 0, STEP', note: 'visible:false hides a node and children; holdout and shadowCatcher need a transparent canvas (Renderer67 transparent:true); flags split batches.' }),
   depthBias: Object.freeze({ nodeFields: Object.freeze(['decal', 'depthLayer']), maxDepthLayer: 4, environment: 'environment.resolveCoplanar', modes: Object.freeze(['offset']), warning: 'coplanar-overlap', note: 'decal wins over the surface below; depthLayer stacks decals; resolveCoplanar offset biases the smaller part of a flagged pair.' }),
   proceduralMotion: true,
-  motionIk: Object.freeze(['two-bone', 'aim']),
+  motionIk: Object.freeze(['two-bone', 'aim', 'chain', 'spline']),
   // Authored rigs: armatures expand into bone nodes, and a node `skin` binds a mesh with automatic weights (four influences).
   // Node relations place a mesh node against other mesh nodes (world bounds), solved again after every edit.
   relations: Object.freeze({
     maxPerNode: 8, maxNodes: 256, sides: Object.freeze(['+x', '-x', '+y', '-y', '+z', '-z']),
     kinds: Object.freeze({
-      attach: 'to, side, offset: touch the face of the target on side and centre on the other axes; offset is the distance, negative sinks in',
+      attach: 'to, side, offset: touch the target face on side and centre on the other axes; offset is distance, negative sinks in',
       gap: 'to, side, offset: as attach on that axis only',
       flush: 'to, side, offset: own face on side level with the same face of the target',
       align: 'to, axis, at (min, center, max), offset: anchor on one axis',
       centered: 'to, axes (default x, y, z): centre on those axes',
     }),
-    notes: 'Optional region (a mesh tag) uses only those faces of the target. One relation per axis, no loops, mesh nodes only. A relation replaces translation on its axes. set-node with relations [] removes them.',
+    notes: 'Region (mesh tag): target faces only. One relation per axis, no loops, mesh nodes only. A relation sets translation on its axes. set-node with relations [] removes them.',
   }),
   rigging: Object.freeze({ presets: Object.freeze(['humanoid', 'quadruped']), maxArmatures: 16, maxBones: 128, maxInfluences: 4, weights: 'bone-distance' }),
-  motionConstraints: Object.freeze(['copy_location', 'copy_rotation', 'copy_scale', 'limit_location', 'limit_rotation', 'track_to', 'child_of', 'floor']),
+  motionConstraints: Object.freeze(['copy_location', 'copy_rotation', 'copy_scale', 'limit_location', 'limit_rotation', 'track_to', 'child_of', 'floor', 'copy_transforms', 'limit_distance', 'limit_scale', 'stretch_to', 'locked_track', 'transformation', 'action', 'maintain_volume', 'damped_track', 'pivot', 'follow_path', 'clamp_to', 'shrinkwrap', 'armature']),
   motionDrivers: Object.freeze({ maxDrivers: 32, maxConstraints: 32, maxExpressionParts: 64, maxExpressionDepth: 8 }),
   // Recipe physics: Rapier (an optional peer) bakes bodies on nodes offline; playback is a seek into the bake.
   physics: Object.freeze({
@@ -260,24 +289,33 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   cloth: Object.freeze({
     sheetGeometry: 'grid { segments 1-64 }: unit sheet in XY facing +Z, sized by node scale; any triangle mesh works',
     defaults: Object.freeze({ stiffness: 0.9, bend: 0.1, density: 0.2, damping: 0.3, friction: 0.3, thickness: 0.01, colliderShape: 'box' }),
-    notes: 'density kg/m2, damping 1/s, thickness m, wind m/s steady. Pin edges are of the local bounds. Colliders { node, shape ball|box } are fixed fits to geometry bounds and, like sheets, root nodes with no motion track or physics body. Moving: { attach, shape ball|capsule, radius, offset, to, toOffset } or { armature, radiusFraction, exclude } (a capsule per bone). Sheet pinTo { node, weight } rides the pinned edges on a node. No self collision.',
+    notes: 'density kg/m2, damping 1/s, thickness m, wind m/s steady. Colliders { node, shape ball|box } fit geometry bounds; like sheets they are root nodes without a motion track or body. Moving: { attach, shape ball|capsule, radius, offset, to, toOffset } or { armature, radiusFraction, exclude }. Sheet pinGroup: a vertex group whose vertices (weight 0.5 or more) are held. Sheet pinTo { node, weight } rides pinned edges on a node. No self collision.',
     limits: Object.freeze({ maxSheets: 8, maxColliders: 16, maxMovingColliders: 64, maxDuration: 10, maxParticles: 5000, framesPerSecond: 60, substeps: 4, iterations: 8 }),
   }),
   // Recipe particles: closed-form from seeded launch values, so any time is computed directly and a seek never replays.
   particles: Object.freeze({
-    emitter: 'System node keeps its geometry as the particle shape (keep it low-poly); node transform does not move particles. Fields (defaults): node, seed (1), count (100), rate (per second; omit for a burst at 0), lifetime, speed, size (each number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc, position, halfExtents, radius }, scale constant|shrink|grow, drag (1/s, 0), floor (world y where particles land and rest).',
-    hair: 'type hair grows strands from a read-only root surface node into node (its own geometry is ignored). Fields (defaults): surface, seed, count, length (m, number or [min, max], 0.1), segments (1-8, 4), width (m, 0.004), droop (0.5), lean (0.2), sway (tip travel m, off), swayRate (Hz, 0.5). Triangular tapering tubes, no UVs.',
-    sectionFields: 'systems, gravity ([0,-9.81,0]), wind (m/s; moves emitter particles only with drag > 0, and sets the hair sway direction)',
-    notes: 'A particle is a pure function of seed, index and time; raising count keeps earlier ones. No collision but the floor, no bounce, rotation, colour or alpha; no hair collision, combing or clumping. Report: maxAlive and endsAt per system.',
+    emitter: 'System node geometry is the particle shape; its transform does not move them. Fields (defaults): node, seed (1), count (100), rate (per second; omit: burst at 0), lifetime, speed, size (number or [min, max]; 1, 1, 0.05), direction ([0,1,0]), spread (cone degrees, 30), emitter { shape point|box|sphere|disc, position, halfExtents, radius }, scale constant|shrink|grow, drag (1/s, 0), floor (world y they land on).',
+    hair: 'type hair grows strands from a read-only root surface node into node (its own geometry is ignored). Fields (defaults): surface, seed, count, length (m, number or [min, max], 0.1), segments (1-8, 4), width (m, 0.004), droop (0.5), lean (0.2), sway (tip travel m, off), swayRate (Hz, 0.5). Tapering tubes, no UVs.',
+    sectionFields: 'systems, gravity ([0,-9.81,0]), wind (m/s; moves emitter particles only with drag > 0, and sets the hair sway direction), fields (also cloth; wind, turbulence, vortex, drag, magnet: docs/physics.md)',
+    collision: 'colliders [node ids], bounce 0-1 (0.3 with colliders), friction 0-1 (0.5), spin deg/s, color [[r,g,b] birth, [r,g,b] death], alpha [birth, death].',
+    notes: 'Pure function of seed, index and time; raising count keeps earlier ones. No hair collision.',
     limits: Object.freeze({ maxSystems: 4, maxParticlesPerSystem: 2000, maxParticles: 4000, maxVertices: 100000, maxLifetime: 60 }),
   }),
   // Recipe bake: bounced light written into lightmaps at build time (src/light-bake.js, loaded on demand).
   bake: Object.freeze({
-    fields: 'preset, or samples (1-256), bounces (1-3), texelsPerUnit (1-12) over it; probes room by default, false for none, or up to 4 {position, radius?}. Same recipe, same bytes.',
+    fields: 'preset, or samples (1-256), bounces (1-8), texelsPerUnit (1-12) over it; irradianceGrid true or 8-48 nodes: baked bounced diffuse light in place of lightmaps (opt in, static); gridFog true adds the fog (sunlit closed rooms); probes room by default, false for none, or up to 4 {position, radius?}; rebake true bakes each sampled pose (4 kept).',
     presets: BAKE_PRESETS,
-    notes: 'Bounced light from point, spot, area and key lights. Reruns when parts, lights, materials or bake change. Skips alpha, skin, morph, hair, cloth (bake.skipped). A preset shrinks to fit, never refuses (bake.used, bake.reduction); explicit settings fail over maxPathWork or past maxSeconds. No environment map or specular. Probes: specular only, none in glTF.',
+    notes: 'Bounced light from point, spot, area and key lights. Skips alpha, skin, morph, hair, cloth (bake.skipped). A preset shrinks to fit (bake.used, bake.reduction); explicit settings fail over maxPathWork or past maxSeconds. No environment map or specular; probes are specular, not in glTF.',
     limits: Object.freeze({ maxSeconds: BAKE_MAXIMUM_SECONDS, workerMaxSeconds: BAKE_WORKER_MAXIMUM_SECONDS, maxPathWork: BAKE_EXPLICIT_PATH_WORK_LIMIT, maxPointLights: MAX_POINT_LIGHTS }),
   }),
+  motionLook: Object.freeze({
+    light: 'id point:N, spot:N or area:N (index in its list): position, color, intensity; direction on spot and area',
+    sun: 'direction, color, intensity (lightDirection, keyColor, keyIntensity)',
+    environment: 'skyTop, skyBottom, fogColor, fogDensity, volumeFogDensity, ambientIntensity, fillIntensity, environmentIntensity, environmentRotation',
+    effects: 'exposure, focusDistance (needs effects.depthOfField.blur above 0; an fStop camera focuses on its target)',
+    note: 'Same keyframes and easing as other tracks. After sampleMotion, scene.environment and scene.effects hold the sampled values.',
+  }),
+  motionModifiers: 'Track extrapolation constant|linear; modifiers [{type: cycles|stepped|noise|generator|limits|envelope, ...}], 8 at most; cycles and stepped remap time first.',
   motionLimits: Object.freeze({ maxTracks: 128, maxKeyframesPerTrack: 64, maxKeyframes: 2048, maxDuration: 30 }),
 });
 

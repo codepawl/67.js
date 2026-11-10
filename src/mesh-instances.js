@@ -1,6 +1,13 @@
 import { quat } from 'gl-matrix';
 import { INSTANCE_SOURCES, MAX_INSTANCE_CANDIDATES } from './mesh-operations.js';
 import { evaluateField, pointSetContext, seededRandom } from './mesh-fields.js';
+import { MAX_CURVE_POINTS, curveLength, filletCurve, resampleCurve } from './curve-operations.js';
+import { createTriangleSurfaceIndex } from './mesh-query.js';
+import './mesh-field-surfaces.js';
+import './field-rotation.js';
+import {
+  checkedPlace, clampedSize, eulerQuaternion, mergeRealizedInstances, meshPoints, pickVariant, thinByDensity, thinBySpacing,
+} from './mesh-instance-placement.js';
 
 // Instance on points: a node with an `instances` record becomes a group node plus one child node per point, all
 // sharing the node's geometry and material, so the renderer draws them in one instanced call. Points come from a
@@ -12,15 +19,38 @@ import { evaluateField, pointSetContext, seededRandom } from './mesh-fields.js';
 //                    "where": { "gt": [{ "attr": "position", "component": "x" }, 0] },
 //                    "yaw": true, "alignToNormal": false, "scale": [0.7, 1.3] } }
 //
+// "place" adds Poisson spacing, a density field, variants, and per-point rotation and size from fields; see
+// mesh-instance-placement.js. `place.at` makes a surface source give its vertices or face centres.
+//
 // Points are in the group's own space: the group takes the node's translation, rotation and scale, and its parent.
 // Put the group under the node that carries the surface geometry to place instances on that node's surface.
 
 export { MAX_INSTANCE_CANDIDATES };
 const MAX_COORDINATE = 1e6;
 const SOURCES = INSTANCE_SOURCES;
-const INSTANCE_FIELDS = Object.freeze([...SOURCES, 'seed', 'where', 'yaw', 'alignToNormal', 'scale']);
+const INSTANCE_FIELDS = Object.freeze([...SOURCES, 'seed', 'where', 'yaw', 'alignToNormal', 'scale', 'place', 'realize']);
 const MAX_SEED = 0x7fffffff;
+const CURVE_FILLET_SEGMENTS = 8;
 const UP = Object.freeze([0, 1, 0]);
+const REALIZED_MAX_ENTRIES = 128;
+const realizedGeometries = new Map();
+
+export function realizedGeometry(key) {
+  return realizedGeometries.get(key);
+}
+
+export function realizedVertexCount(key) {
+  const geometry = realizedGeometries.get(key);
+  return geometry ? geometry.positions.length / 3 : 0;
+}
+
+function storeRealizedGeometry(key, geometry) {
+  if (realizedGeometries.has(key)) realizedGeometries.delete(key);
+  realizedGeometries.set(key, geometry);
+  while (realizedGeometries.size > REALIZED_MAX_ENTRIES) {
+    realizedGeometries.delete(realizedGeometries.keys().next().value);
+  }
+}
 
 const CHANNEL_SCATTER = 20;
 const CHANNEL_YAW = 10;
@@ -141,33 +171,78 @@ export function surfacePoints(geometry, count, seed) {
   return { positions, normals };
 }
 
-function candidatePoints(spec, seed, resolveSurface) {
+// Points at equal arc length along a polyline, optionally with rounded corners; the "normal" of each point is the
+// direction of travel, so alignToNormal turns up along the curve.
+function curvePoints(source) {
+  plainRecord(source, 'curve', ['points', 'count', 'length', 'closed', 'fillet']);
+  if (!Array.isArray(source.points) || source.points.length < 2 || source.points.length > MAX_CURVE_POINTS) {
+    throw instanceError(`curve points are 2 to ${MAX_CURVE_POINTS} positions.`);
+  }
+  const corners = source.points.map(point => coordinates(point, 'curve point'));
+  const closed = source.closed === true;
+  if (source.closed !== undefined && typeof source.closed !== 'boolean') throw instanceError('curve closed must be boolean.');
+  if ((source.count === undefined) === (source.length === undefined)) {
+    throw instanceError('curve needs count or length, not both.');
+  }
+  if (source.length !== undefined && !(typeof source.length === 'number' && Number.isFinite(source.length) && source.length > 0 && source.length <= MAX_COORDINATE)) {
+    throw instanceError('curve length is a spacing above 0.');
+  }
+  if (source.fillet !== undefined && !(typeof source.fillet === 'number' && source.fillet > 0 && source.fillet <= MAX_COORDINATE)) {
+    throw instanceError('curve fillet is a radius above 0.');
+  }
+  const path = source.fillet === undefined ? corners : filletCurve(corners, source.fillet, CURVE_FILLET_SEGMENTS, closed);
+  const minimumCount = closed ? 3 : 2;
+  const rawCount = source.count !== undefined
+    ? source.count
+    : closed
+      ? Math.max(minimumCount, Math.round(curveLength(path, true) / source.length))
+      : Math.max(minimumCount, Math.floor(curveLength(path, false) / source.length) + 1);
+  const count = wholeNumber(rawCount, minimumCount, MAX_INSTANCE_CANDIDATES, 'curve count');
+  const samples = resampleCurve(path, count, closed);
+  const positions = new Float64Array(count * 3);
+  const normals = new Float64Array(count * 3);
+  samples.forEach(({ point, direction }, index) => {
+    positions.set(point, index * 3);
+    normals.set(direction, index * 3);
+  });
+  return { positions, normals };
+}
+
+function candidatePoints(spec, seed, resolveSurface, place) {
   const sourceName = SOURCES.filter(name => Object.hasOwn(spec, name));
   if (sourceName.length !== 1) throw instanceError(`give exactly one point source: ${SOURCES.join(', ')}.`);
   if (sourceName[0] === 'grid') return gridPoints(spec.grid);
   if (sourceName[0] === 'scatter') return scatterPoints(spec.scatter, seed);
+  if (sourceName[0] === 'curve') return curvePoints(spec.curve);
   const source = plainRecord(spec.surface, 'surface', ['geometry', 'count']);
   const count = wholeNumber(source.count, 1, MAX_INSTANCE_CANDIDATES, 'surface count');
   if (typeof source.geometry !== 'string') throw instanceError('surface needs a geometry id.');
+  if (place.at) return meshPoints(resolveSurface(source.geometry), place.at, count);
   return surfacePoints(resolveSurface(source.geometry), count, seed);
 }
 
-function keptIndices(spec, points) {
+// Evaluate a field expression over every candidate point; a missing expression gives null.
+function pointField(expression, points, resolveSurface, kind) {
+  if (expression === undefined) return null;
   const count = points.positions.length / 3;
-  const kept = [];
-  if (spec.where === undefined) {
-    for (let index = 0; index < count; index++) kept.push(index);
-    return kept;
-  }
   const normals = points.normals ?? Float64Array.from({ length: count * 3 }, (unused, position) => UP[position % 3]);
-  const { values } = evaluateField(spec.where, pointSetContext(points.positions, normals), { kind: 'scalar' });
-  for (let index = 0; index < count; index++) {
-    if (values[index] !== 0) kept.push(index);
-  }
+  const loadSurface = surface => {
+    if (typeof surface !== 'string') throw instanceError('a field reads a surface by its geometry id.');
+    return createTriangleSurfaceIndex(resolveSurface(surface));
+  };
+  return evaluateField(expression, pointSetContext(points.positions, normals, loadSurface), kind ? { kind } : {});
+}
+
+function keptIndices(spec, place, points, fields, seed) {
+  const count = points.positions.length / 3;
+  let kept = Array.from({ length: count }, (unused, index) => index);
+  if (fields.where) kept = kept.filter(index => fields.where.values[index] !== 0);
+  if (fields.density) kept = thinByDensity(kept, fields.density.values, seed);
+  if (place.spacing) kept = thinBySpacing(kept, points.positions, place.spacing);
   return kept;
 }
 
-function instanceRotation(spec, seed, candidate, normals) {
+function instanceRotation(spec, seed, candidate, normals, turns) {
   const rotation = quat.create();
   if (spec.alignToNormal && normals) {
     const normal = [normals[candidate * 3], normals[candidate * 3 + 1], normals[candidate * 3 + 2]];
@@ -177,21 +252,23 @@ function instanceRotation(spec, seed, candidate, normals) {
     const turn = quat.setAxisAngle(quat.create(), UP, seededRandom(candidate, CHANNEL_YAW, seed) * Math.PI * 2);
     quat.multiply(rotation, rotation, turn);
   }
+  if (turns) quat.multiply(rotation, rotation, eulerQuaternion(turns[candidate * 3], turns[candidate * 3 + 1], turns[candidate * 3 + 2]));
   return Array.from(rotation);
 }
 
-function instanceScale(spec, seed, candidate) {
-  if (spec.scale === undefined) return 1;
-  return spec.scale[0] + (spec.scale[1] - spec.scale[0]) * seededRandom(candidate, CHANNEL_SCALE, seed);
+function instanceScale(spec, seed, candidate, sizes) {
+  const uniform = spec.scale === undefined ? 1 : spec.scale[0] + (spec.scale[1] - spec.scale[0]) * seededRandom(candidate, CHANNEL_SCALE, seed);
+  if (!sizes) return [uniform, uniform, uniform];
+  return clampedSize(sizes.values, candidate, sizes.kind === 'vector').map(size => size * uniform);
 }
 
 function checkedSpec(spec) {
   plainRecord(spec, 'instances', INSTANCE_FIELDS);
   const seed = spec.seed === undefined ? 0 : wholeNumber(spec.seed, 0, MAX_SEED, 'seed');
-  for (const flag of ['yaw', 'alignToNormal']) {
+  for (const flag of ['yaw', 'alignToNormal', 'realize']) {
     if (spec[flag] !== undefined && typeof spec[flag] !== 'boolean') throw instanceError(`${flag} must be boolean.`);
   }
-  if (spec.alignToNormal && !Object.hasOwn(spec, 'surface')) throw instanceError('alignToNormal needs a surface source, because only a surface has normals.');
+  if (spec.alignToNormal && !Object.hasOwn(spec, 'surface') && !Object.hasOwn(spec, 'curve')) throw instanceError('alignToNormal needs a surface or curve source, because only those have normals.');
   if (spec.scale !== undefined) {
     const range = spec.scale;
     if (!Array.isArray(range) || range.length !== 2 || !range.every(entry => typeof entry === 'number' && Number.isFinite(entry) && entry > 0 && entry <= 1000) || range[0] > range[1]) {
@@ -201,12 +278,23 @@ function checkedSpec(spec) {
   return seed;
 }
 
+// The fields a spec reads, evaluated once over all candidate points.
+function placementFields(spec, place, points, resolveSurface) {
+  return {
+    where: pointField(spec.where, points, resolveSurface, 'scalar'),
+    density: pointField(place.density, points, resolveSurface, 'scalar'),
+    variant: pointField(place.variant, points, resolveSurface, 'scalar'),
+    rotation: pointField(place.rotation, points, resolveSurface, 'vector'),
+    size: pointField(place.size, points, resolveSurface),
+  };
+}
+
 /**
  * Replace each node that has an `instances` record with a group node and its instance children. `resolveSurface(id)`
  * returns the render geometry ({ positions, normals, indices }) for a surface source. Nodes without `instances` pass
  * through untouched.
  */
-export function expandInstancedNodes(nodes, { resolveSurface, maxNodes }) {
+export function expandInstancedNodes(nodes, { resolveSurface, maxNodes, maxVertices }, geometries) {
   if (!Array.isArray(nodes)) return nodes;
   const expanded = [];
   for (const node of nodes) {
@@ -215,17 +303,55 @@ export function expandInstancedNodes(nodes, { resolveSurface, maxNodes }) {
       continue;
     }
     const { instances: spec, geometry, material, ...group } = node;
-    if (typeof geometry !== 'string' || typeof material !== 'string') throw instanceError(`node ${JSON.stringify(String(node.id).slice(0, 48))} needs geometry and material ids to instance.`);
+    const place = checkedPlace(spec?.place);
+    if (typeof material !== 'string' || (typeof geometry !== 'string' && !place.variants)) throw instanceError(`node ${JSON.stringify(String(node.id).slice(0, 48))} needs geometry and material ids to instance.`);
     const seed = checkedSpec(spec);
-    const points = candidatePoints(spec, seed, resolveSurface);
+    if (place.at && !Object.hasOwn(spec, 'surface')) throw instanceError('place.at needs a surface source.');
+    const points = candidatePoints(spec, seed, resolveSurface, place);
+    const fields = placementFields(spec, place, points, resolveSurface);
     expanded.push(group);
-    for (const [slot, candidate] of keptIndices(spec, points).entries()) {
-      const scale = instanceScale(spec, seed, candidate);
-      expanded.push({
-        id: `${node.id}.${slot}`, parent: node.id, geometry, material,
+    const placements = keptIndices(spec, place, points, fields, seed).map((candidate, slot) => {
+      const variant = place.variants ? pickVariant(place.variants, fields.variant?.values, candidate, seed) : { geometry, material };
+      return {
+        slot, geometry: variant.geometry, material: variant.material ?? material,
         translation: [points.positions[candidate * 3], points.positions[candidate * 3 + 1], points.positions[candidate * 3 + 2]],
-        rotation: instanceRotation(spec, seed, candidate, points.normals),
-        scale: [scale, scale, scale],
+        rotation: instanceRotation(spec, seed, candidate, points.normals, fields.rotation?.values),
+        scale: instanceScale(spec, seed, candidate, fields.size),
+      };
+    });
+    if (spec.realize || place.realize) {
+      const byMaterial = new Map();
+      for (const item of placements) {
+        if (!byMaterial.has(item.material)) byMaterial.set(item.material, []);
+        byMaterial.get(item.material).push({
+          geometry: resolveSurface(item.geometry),
+          translation: item.translation, rotation: item.rotation, scale: item.scale,
+        });
+      }
+      let groupIndex = 0;
+      for (const [materialId, entries] of byMaterial) {
+        const merged = mergeRealizedInstances(entries, maxVertices);
+        const childId = `${node.id}.${groupIndex}`;
+        const geometryId = `${node.id}.realized.${groupIndex}`;
+        let subdivisions = 1;
+        while (subdivisions <= 128 && realizedGeometries.has(JSON.stringify({ type: 'box', bevel: 0, subdivisions }))) subdivisions++;
+        const base = { type: 'box', bevel: 0, subdivisions };
+        storeRealizedGeometry(JSON.stringify(base), merged);
+        const registered = geometries?.push({ id: geometryId, type: 'mesh', base });
+        expanded.push({
+          id: childId, parent: node.id, geometry: geometryId, material: materialId,
+          translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1],
+          ...(typeof registered === 'number' ? {} : { realizedGeometry: merged }),
+        });
+        groupIndex++;
+        if (expanded.length > maxNodes) throw new RangeError(`Instances expand past the limit of ${maxNodes} nodes.`);
+      }
+      continue;
+    }
+    for (const item of placements) {
+      expanded.push({
+        id: `${node.id}.${item.slot}`, parent: node.id, geometry: item.geometry, material: item.material,
+        translation: item.translation, rotation: item.rotation, scale: item.scale,
       });
       if (expanded.length > maxNodes) throw new RangeError(`Instances expand past the limit of ${maxNodes} nodes.`);
     }

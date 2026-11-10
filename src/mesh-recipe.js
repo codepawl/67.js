@@ -1,4 +1,6 @@
 import { editMesh, meshData } from './mesh-edit.js';
+import { invalidField } from './field-error.js';
+import { editField } from './mesh-edit-field.js';
 import { countSelected, selectFaces } from './mesh-select.js';
 import {
   extrudeFaceRegion, extrudeIndividual, insetRegion, insetIndividual, deleteFaces, flipFaces, translateFaces, mergeByDistance, tagFaces,
@@ -14,11 +16,18 @@ import { unwrapUv } from './mesh-uv.js';
 import { runKernel, KernelDeferred } from './kernel-offload.js';
 import { validateField } from './mesh-fields.js';
 import { setPosition, displaceMesh, DISPLACE_DIRECTIONS } from './mesh-field-edits.js';
+import { normalizeVertexColorEdit, normalizeVertexGroupEdit, setVertexColor, setVertexGroup } from './mesh-attribute-edits.js';
 import { subdivideMesh, subdivisionSize, MAX_SUBDIVISION_LEVELS, MAX_CREASE_SHARPNESS } from './mesh-subdivide.js';
 import { decimateMesh } from './mesh-decimate.js';
 import { isModifierOperation, normalizeModifierEdit, runModifierEdit } from './mesh-modifiers.js';
 import { sculptMesh, checkSculptBudget } from './mesh-sculpt.js';
 import { shrinkwrapMesh } from './mesh-shrinkwrap.js';
+import { triangulatedSurface } from './mesh-surface-distance.js';
+import { createTriangleSurfaceIndex } from './mesh-query.js';
+import './mesh-field-surfaces.js';
+import './field-rotation.js';
+import './mesh-hull-modifiers.js';
+import './mesh-ocean-modifier.js';
 import { remeshMesh, remeshGridSize, MAX_REMESH_RESOLUTION } from './mesh-remesh.js';
 import {
   MESH_EDIT_OPERATIONS, MAX_MESH_EDITS, STACK_OPERATIONS, MAX_STACK_NODES, SCULPT_STROKE_TYPES, MAX_SCULPT_STROKES, SHRINKWRAP_MODES,
@@ -31,19 +40,26 @@ const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/;
 const MAX_OFFSET = 1e6;
 
 
-function editError(index, message) {
-  return new TypeError(`Mesh edit ${index} (${message})`);
+// A failure inside an edit keeps its field path when it has one, so the agent sees edits[2].maxDistance, and otherwise
+// gets the edit position and name in front of the message.
+function editFailure(error, index, label) {
+  if (typeof error?.fieldPath === 'string' && error.message.startsWith(error.fieldPath)) {
+    error.message = `edits[${index}].${error.message}`;
+    error.fieldPath = `edits[${index}].${error.fieldPath}`;
+    return error;
+  }
+  return new error.constructor(`Mesh edit ${index} (${label}): ${error.message}`);
 }
 
 function finiteNumber(value, index, label, { minimum = -MAX_OFFSET, maximum = MAX_OFFSET, exclusiveMinimum = false } = {}) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum || (exclusiveMinimum && value === minimum)) {
-    throw editError(index, `${label} must be a number ${exclusiveMinimum ? 'above' : 'from'} ${minimum}${maximum < MAX_OFFSET ? ` to ${maximum}` : ''}`);
+    throw editField(index, label, value, `a number ${exclusiveMinimum ? 'above' : 'from'} ${minimum}${maximum < MAX_OFFSET ? ` to ${maximum}` : ''}, such as ${exclusiveMinimum ? minimum + 1 : Math.min(Math.max(1, minimum), maximum)}`);
   }
   return value;
 }
 
 function vector(value, index, label) {
-  if (!Array.isArray(value) || value.length !== 3) throw editError(index, `${label} needs three numbers`);
+  if (!Array.isArray(value) || value.length !== 3) throw editField(index, label, value, 'an array of three numbers, such as [0, 1, 0]');
   return value.map(component => finiteNumber(component, index, label));
 }
 
@@ -51,7 +67,7 @@ function checkedField(expression, index, label, kind) {
   try {
     validateField(expression, { kind });
   } catch (error) {
-    throw editError(index, `${label}: ${error.message}`);
+    throw editField(index, label, expression, `a ${kind} field expression such as ${kind === 'vector' ? '[0, 1, 0]' : '0.5'} (${error.message})`);
   }
   return expression;
 }
@@ -60,60 +76,60 @@ function checkedField(expression, index, label, kind) {
 function normalizePlacement(edit, normalized, index) {
   normalized.translation = edit.translation === undefined ? [0, 0, 0] : vector(edit.translation, index, 'translation');
   normalized.scale = edit.scale === undefined ? [1, 1, 1] : vector(edit.scale, index, 'scale');
-  if (normalized.scale.some(value => value <= 0)) throw editError(index, 'scale components must be positive');
+  if (normalized.scale.some(value => value <= 0)) throw editField(index, 'scale', normalized.scale, 'three numbers above 0, such as [1, 1, 1]');
   if (edit.rotation === undefined) {
     normalized.rotation = [0, 0, 0, 1];
     return;
   }
-  if (!Array.isArray(edit.rotation) || edit.rotation.length !== 4) throw editError(index, 'rotation is an XYZW quaternion');
+  if (!Array.isArray(edit.rotation) || edit.rotation.length !== 4) throw editField(index, 'rotation', edit.rotation, 'an XYZW quaternion of four numbers, such as [0, 0, 0, 1]');
   const rotation = edit.rotation.map(component => finiteNumber(component, index, 'rotation'));
   const length = Math.hypot(...rotation);
-  if (length === 0) throw editError(index, 'rotation quaternion must be nonzero');
+  if (length === 0) throw editField(index, 'rotation', rotation, 'a nonzero XYZW quaternion, such as [0, 0, 0, 1]');
   normalized.rotation = rotation.map(component => component / length);
 }
 
 function normalizeStroke(stroke, index, strokeIndex) {
   const label = `strokes[${strokeIndex}]`;
-  if (!stroke || typeof stroke !== 'object' || Array.isArray(stroke)) throw editError(index, `${label} must be an object`);
+  if (!stroke || typeof stroke !== 'object' || Array.isArray(stroke)) throw editField(index, label, stroke, `an object such as { "type": "${SCULPT_STROKE_TYPES[0]}", "center": [0, 0, 0], "radius": 0.5, "strength": 0.2 }`);
   for (const key of Object.keys(stroke)) {
-    if (!['type', 'center', 'radius', 'strength', 'direction'].includes(key)) throw editError(index, `${label} does not take ${key}; fields: type, center, radius, strength, direction`);
+    if (!['type', 'center', 'radius', 'strength', 'direction'].includes(key)) throw editField(index, `${label}.${key}`, stroke[key], `one of the stroke fields type, center, radius, strength, direction; remove "${key}"`);
   }
-  if (!SCULPT_STROKE_TYPES.includes(stroke.type)) throw editError(index, `${label}.type must be one of ${SCULPT_STROKE_TYPES.join(', ')}`);
+  if (!SCULPT_STROKE_TYPES.includes(stroke.type)) throw editField(index, `${label}.type`, stroke.type, `one of ${SCULPT_STROKE_TYPES.join(', ')}`);
   const normalized = {
     type: stroke.type,
     center: vector(stroke.center, index, `${label}.center`),
     radius: finiteNumber(stroke.radius, index, `${label}.radius`, { minimum: 0, exclusiveMinimum: true }),
     strength: finiteNumber(stroke.strength, index, `${label}.strength`),
   };
-  if (stroke.type === 'smooth' && (normalized.strength < 0 || normalized.strength > 1)) throw editError(index, `${label}.strength of a smooth stroke is from 0 to 1`);
+  if (stroke.type === 'smooth' && (normalized.strength < 0 || normalized.strength > 1)) throw editField(index, `${label}.strength`, normalized.strength, 'a number from 0 to 1 for a smooth stroke, such as 0.5');
   if (stroke.type === 'displace') {
     normalized.direction = vector(stroke.direction, index, `${label}.direction`);
-    if (normalized.direction.every(component => component === 0)) throw editError(index, `${label}.direction must be nonzero`);
+    if (normalized.direction.every(component => component === 0)) throw editField(index, `${label}.direction`, normalized.direction, 'a nonzero direction, such as [0, 0, 1]');
   } else if (stroke.direction !== undefined) {
-    throw editError(index, `${label}.direction applies only to a displace stroke`);
+    throw editField(index, `${label}.direction`, stroke.direction, 'left out, because only a displace stroke takes direction');
   }
   return normalized;
 }
 
 /** Validate an edit list without running it. Returns normalized copies with default names filled in. */
 export function normalizeMeshEdits(edits) {
-  if (!Array.isArray(edits)) throw new TypeError('edits must be an array.');
+  if (!Array.isArray(edits)) throw invalidField('edits', edits, 'an array of edits, such as [{ "op": "subdivide", "levels": 1 }]', TypeError);
   if (edits.length > MAX_MESH_EDITS) throw new RangeError(`A mesh holds at most ${MAX_MESH_EDITS} edits. Apply fewer or start from a new base.`);
   return edits.map((edit, index) => {
-    if (!edit || typeof edit !== 'object' || Array.isArray(edit)) throw editError(index, 'each edit must be an object');
+    if (!edit || typeof edit !== 'object' || Array.isArray(edit)) throw invalidField(`edits[${index}]`, edit, 'an object such as { "op": "subdivide", "levels": 1 }', TypeError);
     const definition = MESH_EDIT_OPERATIONS[edit.op];
-    if (!definition) throw editError(index, `op must be one of ${Object.keys(MESH_EDIT_OPERATIONS).join(', ')}`);
+    if (!definition) throw editField(index, 'op', edit.op, `one of ${Object.keys(MESH_EDIT_OPERATIONS).join(', ')}`);
     for (const key of Object.keys(edit)) {
-      if (key !== 'op' && !definition.fields.includes(key)) throw editError(index, `${edit.op} does not take ${key}; fields: ${definition.fields.join(', ')}`);
+      if (key !== 'op' && !definition.fields.includes(key)) throw editField(index, key, edit[key], `one of the fields ${edit.op} takes: ${definition.fields.join(', ')}; remove "${key}"`);
     }
     const normalized = { op: edit.op };
     if (definition.fields.includes('select')) {
-      if (edit.select === undefined && ['delete', 'tag', 'dissolve_faces'].includes(edit.op)) throw editError(index, `${edit.op} needs select`);
+      if (edit.select === undefined && ['delete', 'tag', 'dissolve_faces'].includes(edit.op)) throw editField(index, 'select', edit.select, 'a face rule such as { "all": true } or { "tag": "top" }');
       normalized.select = edit.select ?? { all: true };
     }
     if (definition.fields.includes('name')) {
-      const name = edit.name ?? (edit.op === 'tag' ? undefined : `${edit.op.split('_')[0]}-${index + 1}`);
-      if (typeof name !== 'string' || !NAME_PATTERN.test(name)) throw editError(index, 'name must be 1 to 48 letters, digits, dots, dashes or underscores');
+      const name = edit.name ?? (['tag', 'vertex_group'].includes(edit.op) ? undefined : `${edit.op.split('_')[0]}-${index + 1}`);
+      if (typeof name !== 'string' || !NAME_PATTERN.test(name)) throw editField(index, 'name', name, '1 to 48 letters, digits, dots, dashes or underscores, such as "lid.cap"');
       normalized.name = name;
     }
     switch (edit.op) {
@@ -122,8 +138,8 @@ export function normalizeMeshEdits(edits) {
         normalized.offset = finiteNumber(edit.offset, index, 'offset');
         if (edit.direction !== undefined) normalized.direction = vector(edit.direction, index, 'direction');
         if (edit.alongNormals !== undefined) {
-          if (typeof edit.alongNormals !== 'boolean') throw editError(index, 'alongNormals must be boolean');
-          if (edit.alongNormals && edit.direction !== undefined) throw editError(index, 'alongNormals and direction cannot be combined');
+          if (typeof edit.alongNormals !== 'boolean') throw editField(index, 'alongNormals', edit.alongNormals, 'true or false');
+          if (edit.alongNormals && edit.direction !== undefined) throw editField(index, 'direction', edit.direction, 'left out when alongNormals is true');
           normalized.alongNormals = edit.alongNormals;
         }
         break;
@@ -136,13 +152,13 @@ export function normalizeMeshEdits(edits) {
         normalized.offset = vector(edit.offset, index, 'offset');
         if (edit.falloff !== undefined) {
           const falloff = edit.falloff;
-          if (!falloff || typeof falloff !== 'object') throw editError(index, 'falloff must be { radius, curve, connected }');
+          if (!falloff || typeof falloff !== 'object') throw editField(index, 'falloff', falloff, 'an object such as { "radius": 1, "curve": "smooth", "connected": false }');
           for (const key of Object.keys(falloff)) {
-            if (!['radius', 'curve', 'connected'].includes(key)) throw editError(index, `falloff does not take ${key}`);
+            if (!['radius', 'curve', 'connected'].includes(key)) throw editField(index, `falloff.${key}`, falloff[key], `one of the falloff fields radius, curve, connected; remove "${key}"`);
           }
           const curve = falloff.curve ?? 'smooth';
-          if (!Object.hasOwn(FALLOFF_CURVES, curve)) throw editError(index, `falloff curve must be one of ${Object.keys(FALLOFF_CURVES).join(', ')}`);
-          if (falloff.connected !== undefined && typeof falloff.connected !== 'boolean') throw editError(index, 'falloff.connected must be boolean');
+          if (!Object.hasOwn(FALLOFF_CURVES, curve)) throw editField(index, 'falloff.curve', curve, `one of ${Object.keys(FALLOFF_CURVES).join(', ')}`);
+          if (falloff.connected !== undefined && typeof falloff.connected !== 'boolean') throw editField(index, 'falloff.connected', falloff.connected, 'true or false');
           normalized.falloff = {
             radius: finiteNumber(falloff.radius, index, 'falloff.radius', { minimum: 0, exclusiveMinimum: true }),
             curve, connected: falloff.connected ?? false,
@@ -150,10 +166,10 @@ export function normalizeMeshEdits(edits) {
         }
         break;
       case 'boolean': {
-        if (!BOOLEAN_OPERATIONS.includes(edit.operation)) throw editError(index, `operation must be one of ${BOOLEAN_OPERATIONS.join(', ')}`);
+        if (!BOOLEAN_OPERATIONS.includes(edit.operation)) throw editField(index, 'operation', edit.operation, `one of ${BOOLEAN_OPERATIONS.join(', ')}`);
         normalized.operation = edit.operation;
         if (!edit.cutter || typeof edit.cutter !== 'object' || Array.isArray(edit.cutter) || typeof edit.cutter.type !== 'string') {
-          throw editError(index, 'cutter must be a primitive record such as { "type": "cylinder", "segments": 32 }');
+          throw editField(index, 'cutter', edit.cutter, 'a primitive record such as { "type": "cylinder", "segments": 32 }');
         }
         normalized.cutter = edit.cutter;
         normalizePlacement(edit, normalized, index);
@@ -161,36 +177,36 @@ export function normalizeMeshEdits(edits) {
       }
       case 'sculpt':
         if (!Array.isArray(edit.strokes) || edit.strokes.length < 1 || edit.strokes.length > MAX_SCULPT_STROKES) {
-          throw editError(index, `strokes must be an array of 1 to ${MAX_SCULPT_STROKES} brush strokes`);
+          throw editField(index, 'strokes', edit.strokes, `an array of 1 to ${MAX_SCULPT_STROKES} brush strokes, such as [{ "type": "${SCULPT_STROKE_TYPES[0]}", "center": [0, 0, 0], "radius": 0.5, "strength": 0.2 }]`);
         }
         normalized.strokes = edit.strokes.map((stroke, strokeIndex) => normalizeStroke(stroke, index, strokeIndex));
         break;
       case 'shrinkwrap':
         if (!edit.target || typeof edit.target !== 'object' || Array.isArray(edit.target) || typeof edit.target.type !== 'string') {
-          throw editError(index, 'target must be a primitive record such as { "type": "sphere", "radius": 0.5 }');
+          throw editField(index, 'target', edit.target, 'a primitive record such as { "type": "sphere", "radius": 0.5 }');
         }
         normalized.target = edit.target;
         normalizePlacement(edit, normalized, index);
-        if (!SHRINKWRAP_MODES.includes(edit.mode ?? 'nearest')) throw editError(index, `mode must be one of ${SHRINKWRAP_MODES.join(', ')}`);
+        if (!SHRINKWRAP_MODES.includes(edit.mode ?? 'nearest')) throw editField(index, 'mode', edit.mode, `one of ${SHRINKWRAP_MODES.join(', ')}`);
         normalized.mode = edit.mode ?? 'nearest';
         if (normalized.mode === 'project') {
           normalized.direction = vector(edit.direction, index, 'direction');
-          if (normalized.direction.every(component => component === 0)) throw editError(index, 'direction must be nonzero');
+          if (normalized.direction.every(component => component === 0)) throw editField(index, 'direction', normalized.direction, 'a nonzero direction, such as [0, -1, 0]');
         } else if (edit.direction !== undefined) {
-          throw editError(index, 'direction applies only to mode project');
+          throw editField(index, 'direction', edit.direction, 'left out unless mode is "project"');
         }
         normalized.offset = edit.offset === undefined ? 0 : finiteNumber(edit.offset, index, 'offset', { minimum: 0 });
         if (edit.maxDistance !== undefined) normalized.maxDistance = finiteNumber(edit.maxDistance, index, 'maxDistance', { minimum: 0 });
-        if (!['error', 'keep'].includes(edit.onMiss ?? 'error')) throw editError(index, 'onMiss must be error or keep');
+        if (!['error', 'keep'].includes(edit.onMiss ?? 'error')) throw editField(index, 'onMiss', edit.onMiss, '"error" or "keep"');
         normalized.onMiss = edit.onMiss ?? 'error';
         break;
       case 'mirror':
-        if (!['x', 'y', 'z'].includes(edit.axis ?? 'x')) throw editError(index, 'axis must be x, y or z');
+        if (!['x', 'y', 'z'].includes(edit.axis ?? 'x')) throw editField(index, 'axis', edit.axis, '"x", "y" or "z"');
         normalized.axis = edit.axis ?? 'x';
         normalized.merge = edit.merge === undefined ? 0.001 : finiteNumber(edit.merge, index, 'merge', { minimum: 0, maximum: 1e3 });
         break;
       case 'array':
-        if (!Number.isInteger(edit.count ?? 2) || (edit.count ?? 2) < 1 || (edit.count ?? 2) > 256) throw editError(index, 'count must be an integer from 1 to 256');
+        if (!Number.isInteger(edit.count ?? 2) || (edit.count ?? 2) < 1 || (edit.count ?? 2) > 256) throw editField(index, 'count', edit.count, 'a whole number from 1 to 256, such as 4');
         normalized.count = edit.count ?? 2;
         normalized.offset = edit.offset === undefined ? [0, 0, 0] : vector(edit.offset, index, 'offset');
         normalized.relativeOffset = edit.relativeOffset === undefined ? (edit.offset === undefined ? [1, 0, 0] : [0, 0, 0]) : vector(edit.relativeOffset, index, 'relativeOffset');
@@ -199,35 +215,35 @@ export function normalizeMeshEdits(edits) {
       case 'solidify':
         normalized.thickness = finiteNumber(edit.thickness, index, 'thickness', { minimum: 0, exclusiveMinimum: true });
         normalized.offset = edit.offset === undefined ? -1 : finiteNumber(edit.offset, index, 'offset', { minimum: -1, maximum: 1 });
-        if (edit.evenThickness !== undefined && typeof edit.evenThickness !== 'boolean') throw editError(index, 'evenThickness must be boolean');
+        if (edit.evenThickness !== undefined && typeof edit.evenThickness !== 'boolean') throw editField(index, 'evenThickness', edit.evenThickness, 'true or false');
         normalized.evenThickness = edit.evenThickness ?? true;
         break;
       case 'bevel':
         if (edit.edges !== undefined && (!edit.edges || typeof edit.edges !== 'object' || Array.isArray(edit.edges))) {
-          throw editError(index, 'edges must be a rule: { "between": [faceRule, faceRule] }, { "angle": degrees }, { "boundaryOf": faceRule } or { "all": true }');
+          throw editField(index, 'edges', edit.edges, 'an edge rule such as { "all": true }, { "angle": 30 }, { "between": [faceRule, faceRule] } or { "boundaryOf": faceRule }');
         }
         normalized.edges = edit.edges ?? { angle: 30 };
         normalized.width = finiteNumber(edit.width, index, 'width', { minimum: 0, exclusiveMinimum: true });
-        if (!Number.isInteger(edit.segments ?? 1) || (edit.segments ?? 1) < 1 || (edit.segments ?? 1) > 16) throw editError(index, 'segments must be an integer from 1 to 16');
+        if (!Number.isInteger(edit.segments ?? 1) || (edit.segments ?? 1) < 1 || (edit.segments ?? 1) > 16) throw editField(index, 'segments', edit.segments, 'a whole number from 1 to 16, such as 3');
         normalized.segments = edit.segments ?? 1;
         normalized.profile = edit.profile === undefined ? 0.5 : finiteNumber(edit.profile, index, 'profile', { minimum: 0, maximum: 1 });
-        if (edit.clampOverlap !== undefined && typeof edit.clampOverlap !== 'boolean') throw editError(index, 'clampOverlap must be boolean');
+        if (edit.clampOverlap !== undefined && typeof edit.clampOverlap !== 'boolean') throw editField(index, 'clampOverlap', edit.clampOverlap, 'true or false');
         normalized.clampOverlap = edit.clampOverlap ?? true;
         break;
       case 'loop_cut':
         if (!edit.edges || typeof edit.edges !== 'object' || Array.isArray(edit.edges)) {
-          throw editError(index, 'edges must be a rule that picks the ring, for example { "along": [0, 1, 0] } for the vertical edges');
+          throw editField(index, 'edges', edit.edges, 'a rule that picks the ring, such as { "along": [0, 1, 0] } for the vertical edges');
         }
         normalized.edges = edit.edges;
-        if (!Number.isInteger(edit.cuts ?? 1) || (edit.cuts ?? 1) < 1 || (edit.cuts ?? 1) > 16) throw editError(index, 'cuts must be an integer from 1 to 16');
+        if (!Number.isInteger(edit.cuts ?? 1) || (edit.cuts ?? 1) < 1 || (edit.cuts ?? 1) > 16) throw editField(index, 'cuts', edit.cuts, 'a whole number from 1 to 16, such as 1');
         normalized.cuts = edit.cuts ?? 1;
-        if (edit.factor !== undefined && normalized.cuts !== 1) throw editError(index, 'factor applies only to a single cut');
+        if (edit.factor !== undefined && normalized.cuts !== 1) throw editField(index, 'factor', edit.factor, 'left out when cuts is above 1, because factor applies only to a single cut');
         normalized.factor = edit.factor === undefined ? 0.5 : finiteNumber(edit.factor, index, 'factor', { minimum: 0, maximum: 1 });
-        if (normalized.factor === 0 || normalized.factor === 1) throw editError(index, 'factor must be strictly between 0 and 1');
+        if (normalized.factor === 0 || normalized.factor === 1) throw editField(index, 'factor', normalized.factor, 'a number above 0 and below 1, such as 0.5');
         break;
       case 'uv_unwrap':
         if (edit.seams !== undefined && (!edit.seams || typeof edit.seams !== 'object' || Array.isArray(edit.seams))) {
-          throw editError(index, 'seams must be an edge rule, for example { "angle": 60 } or { "boundaryOf": { "tag": "lid.cap" } }');
+          throw editField(index, 'seams', edit.seams, 'an edge rule such as { "angle": 60 } or { "boundaryOf": { "tag": "lid.cap" } }');
         }
         normalized.seams = edit.seams ?? { angle: 60 };
         normalized.margin = edit.margin === undefined ? 0.01 : finiteNumber(edit.margin, index, 'margin', { minimum: 0, maximum: 0.2 });
@@ -235,23 +251,23 @@ export function normalizeMeshEdits(edits) {
         break;
       case 'subdivide':
         if (!Number.isInteger(edit.levels ?? 1) || (edit.levels ?? 1) < 1 || (edit.levels ?? 1) > MAX_SUBDIVISION_LEVELS) {
-          throw editError(index, `levels must be an integer from 1 to ${MAX_SUBDIVISION_LEVELS}`);
+          throw editField(index, 'levels', edit.levels, `a whole number from 1 to ${MAX_SUBDIVISION_LEVELS}, such as 1`);
         }
         normalized.levels = edit.levels ?? 1;
         if (edit.crease !== undefined) {
           if (!edit.crease || typeof edit.crease !== 'object' || Array.isArray(edit.crease)) {
-            throw editError(index, 'crease must be an edge rule, for example { "angle": 60 } or { "between": [faceRule, faceRule] }');
+            throw editField(index, 'crease', edit.crease, 'an edge rule such as { "angle": 60 } or { "between": [faceRule, faceRule] }');
           }
           normalized.crease = edit.crease;
           normalized.sharpness = edit.sharpness === undefined
             ? MAX_CREASE_SHARPNESS
             : finiteNumber(edit.sharpness, index, 'sharpness', { minimum: 0, maximum: MAX_CREASE_SHARPNESS, exclusiveMinimum: true });
         } else if (edit.sharpness !== undefined) {
-          throw editError(index, 'sharpness needs a crease rule');
+          throw editField(index, 'sharpness', edit.sharpness, 'left out unless a crease rule is given, such as "crease": { "angle": 60 }');
         }
         break;
       case 'set_position':
-        if (edit.position === undefined && edit.offset === undefined) throw editError(index, 'set_position needs a position or an offset expression');
+        if (edit.position === undefined && edit.offset === undefined) throw editField(index, 'position', undefined, 'a vector field expression such as [0, 1, 0], given as position or as offset');
         if (edit.position !== undefined) normalized.position = checkedField(edit.position, index, 'position', 'vector');
         if (edit.offset !== undefined) normalized.offset = checkedField(edit.offset, index, 'offset', 'vector');
         break;
@@ -259,18 +275,28 @@ export function normalizeMeshEdits(edits) {
         normalized.field = checkedField(edit.field, index, 'field', 'scalar');
         normalized.strength = edit.strength === undefined ? 1 : finiteNumber(edit.strength, index, 'strength');
         normalized.midlevel = edit.midlevel === undefined ? 0.5 : finiteNumber(edit.midlevel, index, 'midlevel');
-        if (edit.direction !== undefined && !DISPLACE_DIRECTIONS.includes(edit.direction)) throw editError(index, `direction must be one of ${DISPLACE_DIRECTIONS.join(', ')}`);
+        if (edit.direction !== undefined && !DISPLACE_DIRECTIONS.includes(edit.direction)) throw editField(index, 'direction', edit.direction, `one of ${DISPLACE_DIRECTIONS.join(', ')}`);
         normalized.direction = edit.direction ?? 'normal';
+        if (edit.group !== undefined) {
+          if (typeof edit.group !== 'string' || !NAME_PATTERN.test(edit.group)) throw editField(index, 'group', edit.group, '1 to 48 letters, digits, dots, dashes or underscores naming a vertex group, such as "mask"');
+          normalized.group = edit.group;
+        }
+        break;
+      case 'vertex_group':
+        normalizeVertexGroupEdit(edit, normalized, index, { finiteNumber, checkedField });
+        break;
+      case 'vertex_color':
+        normalizeVertexColorEdit(edit, normalized, index, { finiteNumber, checkedField });
         break;
       case 'decimate':
         normalized.ratio = finiteNumber(edit.ratio, index, 'ratio', { minimum: 0, maximum: 1, exclusiveMinimum: true });
         break;
       case 'remesh':
-        if ((edit.voxelSize === undefined) === (edit.resolution === undefined)) throw editError(index, 'remesh needs exactly one of voxelSize or resolution');
+        if ((edit.voxelSize === undefined) === (edit.resolution === undefined)) throw editField(index, 'voxelSize', edit.voxelSize, 'exactly one of voxelSize and resolution, such as "voxelSize": 0.1');
         if (edit.voxelSize !== undefined) normalized.voxelSize = finiteNumber(edit.voxelSize, index, 'voxelSize', { minimum: 0, exclusiveMinimum: true });
         if (edit.resolution !== undefined) {
           if (!Number.isInteger(edit.resolution) || edit.resolution < 4 || edit.resolution > MAX_REMESH_RESOLUTION) {
-            throw editError(index, `resolution must be an integer from 4 to ${MAX_REMESH_RESOLUTION}`);
+            throw editField(index, 'resolution', edit.resolution, `a whole number from 4 to ${MAX_REMESH_RESOLUTION}, such as 32`);
           }
           normalized.resolution = edit.resolution;
         }
@@ -289,7 +315,7 @@ export function normalizeMeshEdits(edits) {
 function checkSubdivideBudget(mesh, edit, limits, index) {
   const size = subdivisionSize(mesh, edit.levels);
   if (size.vertices > limits.maxVertices || size.faces > limits.maxFaces) {
-    throw new RangeError(`Mesh edit ${index} (subdivide) would make ${size.vertices} vertices and ${size.faces} faces, over the limit of ${limits.maxVertices} vertices and ${limits.maxFaces} faces. Lower levels, or use a simpler mesh.`);
+    throw editField(index, 'levels', edit.levels, `a number of levels that keeps the mesh within ${limits.maxVertices} vertices and ${limits.maxFaces} faces (this edit would make ${size.vertices} vertices and ${size.faces} faces), such as 1, or use a simpler mesh`, RangeError);
   }
 }
 
@@ -299,7 +325,7 @@ function checkArrayBudget(mesh, edit, limits, index) {
     try {
       checkSculptBudget(mesh, edit.strokes.length);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (sculpt): ${error.message}`);
+      throw editFailure(error, index, `sculpt`);
     }
     return;
   }
@@ -311,7 +337,7 @@ function checkArrayBudget(mesh, edit, limits, index) {
     try {
       remeshGridSize(mesh, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (remesh): ${error.message}`);
+      throw editFailure(error, index, `remesh`);
     }
     return;
   }
@@ -319,7 +345,7 @@ function checkArrayBudget(mesh, edit, limits, index) {
   const vertices = mesh.vertexCount * edit.count;
   const faces = mesh.faceCount * edit.count;
   if (vertices > limits.maxVertices || faces > limits.maxFaces) {
-    throw new RangeError(`Mesh edit ${index} (array) would make ${vertices} vertices and ${faces} faces, over the limit of ${limits.maxVertices} vertices and ${limits.maxFaces} faces. Lower count, or use a simpler mesh.`);
+    throw editField(index, 'count', edit.count, `a count that keeps the mesh within ${limits.maxVertices} vertices and ${limits.maxFaces} faces (this edit would make ${vertices} vertices and ${faces} faces), such as 2, or use a simpler mesh`, RangeError);
   }
 }
 
@@ -357,7 +383,16 @@ function runShrinkwrap(current, edit, resolveCutter) {
 }
 
 /** Run one normalized edit on MeshData and describe what it did. */
+// Field inputs that read another surface take a geometry record here, built by the same resolver as a boolean cutter.
+function surfaceLoader(resolveCutter) {
+  return surface => {
+    if (!resolveCutter || typeof surface === 'string') throw new TypeError('A mesh edit field reads a surface given as a geometry record such as { "type": "terrain", ... }, not an id.');
+    return createTriangleSurfaceIndex(triangulatedSurface(resolveCutter(surface)));
+  };
+}
+
 function runEdit(current, edit, index, { resolveCutter, limits }) {
+  const loadSurface = surfaceLoader(resolveCutter);
   const result = { op: edit.op };
   if (edit.name) result.name = edit.name;
   if (isModifierOperation(edit.op)) {
@@ -365,7 +400,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = runModifierEdit(current, edit, limits);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     Object.assign(result, outcome.result);
     return { mesh: outcome.mesh, result };
@@ -376,14 +411,14 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       cutter = transformMesh(resolveCutter(edit.cutter), edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (boolean cutter): ${error.message}`);
+      throw editFailure(error, index, `boolean cutter`);
     }
     const cutTag = `${edit.name}.cut`;
     let outcome;
     try {
       outcome = meshBoolean(current, cutter, edit.operation, { cutTag });
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (boolean ${edit.operation}): ${error.message}`);
+      throw editFailure(error, index, `boolean ${edit.operation}`);
     }
     result.operation = edit.operation;
     result.tags = { [cutTag]: outcome.cutterFaces };
@@ -400,7 +435,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = loopCut(current, edit.edges, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (loop_cut): ${error.message}`);
+      throw editFailure(error, index, `loop_cut`);
     }
     result.rings = outcome.rings;
     result.closedRings = outcome.closedRings;
@@ -413,7 +448,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = bevelEdges(current, edit.edges, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (bevel): ${error.message}`);
+      throw editFailure(error, index, `bevel`);
     }
     result.edges = outcome.bevelEdges;
     result.width = outcome.width;
@@ -426,7 +461,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = runCutEdit(current, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     Object.assign(result, outcome.result);
     const tags = tagSummary(outcome.mesh, edit.name);
@@ -436,11 +471,26 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
   if (edit.op === 'set_position' || edit.op === 'displace') {
     let outcome;
     try {
-      outcome = edit.op === 'set_position' ? setPosition(current, edit) : displaceMesh(current, edit);
+      outcome = edit.op === 'set_position' ? setPosition(current, edit, loadSurface) : displaceMesh(current, edit, loadSurface);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     result.movedVertices = outcome.movedVertices;
+    return { mesh: outcome.mesh, result };
+  }
+  if (edit.op === 'vertex_group' || edit.op === 'vertex_color') {
+    let outcome;
+    try {
+      outcome = edit.op === 'vertex_group' ? setVertexGroup(current, edit, loadSurface) : setVertexColor(current, edit, loadSurface);
+    } catch (error) {
+      throw editFailure(error, index, `${edit.op}`);
+    }
+    if (edit.op === 'vertex_group') {
+      result.group = edit.name;
+      result.assignedVertices = outcome.assignedVertices;
+    } else {
+      result.assignedCorners = outcome.assignedCorners;
+    }
     return { mesh: outcome.mesh, result };
   }
   if (edit.op === 'sculpt' || edit.op === 'shrinkwrap') {
@@ -448,7 +498,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = edit.op === 'sculpt' ? sculptMesh(current, edit) : runShrinkwrap(current, edit, resolveCutter);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+      throw editFailure(error, index, `${edit.op}`);
     }
     result.movedVertices = outcome.movedVertices;
     if (outcome.missedVertices) result.missedVertices = outcome.missedVertices;
@@ -459,7 +509,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       subdivided = subdivideMesh(current, { levels: edit.levels, crease: edit.crease, sharpness: edit.sharpness });
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (subdivide): ${error.message}`);
+      throw editFailure(error, index, `subdivide`);
     }
     result.levels = edit.levels;
     return { mesh: subdivided, result };
@@ -469,7 +519,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = decimateMesh(current, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (decimate): ${error.message}`);
+      throw editFailure(error, index, `decimate`);
     }
     result.triangles = outcome.triangles;
     if (!outcome.reachedTarget) result.stoppedEarly = true;
@@ -480,7 +530,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
     try {
       outcome = remeshMesh(current, edit);
     } catch (error) {
-      throw new error.constructor(`Mesh edit ${index} (remesh): ${error.message}`);
+      throw editFailure(error, index, `remesh`);
     }
     result.voxelSize = Number(outcome.voxelSize.toPrecision(5));
     return { mesh: outcome.mesh, result };
@@ -494,7 +544,7 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
       if (error instanceof KernelDeferred) {
         throw error;
       }
-      throw new error.constructor(`Mesh edit ${index} (uv_unwrap): ${error.message}`);
+      throw editFailure(error, index, `uv_unwrap`);
     }
     result.islands = outcome.islands;
     result.seamEdges = outcome.seamEdges;
@@ -514,10 +564,10 @@ function runEdit(current, edit, index, { resolveCutter, limits }) {
   try {
     mask = selectFaces(current, edit.select);
   } catch (error) {
-    throw new error.constructor(`Mesh edit ${index} (${edit.op}): ${error.message}`);
+    throw editFailure(error, index, `${edit.op}`);
   }
   const selected = countSelected(mask);
-  if (selected === 0) throw new RangeError(`Mesh edit ${index} (${edit.op}) selects no faces. Check the rule with mesh_inspect tags and counts.`);
+  if (selected === 0) throw editField(index, 'select', edit.select, 'a rule that matches at least one face, such as { "all": true } (check tags and counts with mesh_inspect)', RangeError);
   result.selected = selected;
   const editable = editMesh(current);
   let created = null;

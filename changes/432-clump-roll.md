@@ -1,1 +1,0 @@
-- Far tree levels look as bright from every side. Every standing clump card of a crown used to face one world direction, so level 2 of a conifer drew at 0.80 of level 0 from one side and 0.27 from the other two. Each clump now rolls its standing card by the golden angle from the last (issue #432).

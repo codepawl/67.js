@@ -30,6 +30,7 @@ async function walk(label, createSession) {
     frame: () => preview.frame({ sessionId, rendererTime: 0 }),
     exportGlb: () => preview.exportGlb({ sessionId, maximumBytes: 32 * 1024 * 1024 }),
     inspectMeshes: () => preview.inspectMeshes({ sessionId }),
+    walkMap: () => preview.walkMap({ sessionId, min: [-2, -2], max: [2, 2], cellSize: 1 }),
     exportRecipe: () => preview.exportRecipe({ sessionId }),
   };
   if (label === 'recipe') {

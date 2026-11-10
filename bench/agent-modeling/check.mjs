@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { measureAssetRecipe, measureRecipe } from './measure.mjs';
 import { taskById } from './tasks.mjs';
+import { checkSceneState, isSceneCheck } from './scene-checks.mjs';
 import { REQUIRED_HUMANOID_BONES } from '../../src/retarget.js';
 
 const AXES = { x: 0, y: 1, z: 2 };
@@ -201,7 +202,7 @@ function checkLitPainting(check, measures) {
   return { pass: problems.length === 0, detail: problems.join('; ') || `place ${placeIndex + 1}, ${shadowed} of ${total} points in shadow` };
 }
 
-function checkOne(check, measures) {
+export function checkOne(check, measures) {
   switch (check.kind) {
     case 'lint':
       return { pass: measures.lintProblems === 0 && measures.closedParts === measures.parts, detail: measures.lintProblems ? measures.problemKinds.join(', ') : `${measures.closedParts}/${measures.parts} parts closed` };
@@ -414,6 +415,7 @@ function checkOne(check, measures) {
       return { pass: everyPart && measures.uv.stretch <= check.maxStretch, detail: everyPart ? `stretch ${round(measures.uv.stretch)}` : `${measures.uv.parts}/${measures.uv.of} nodes have UVs` };
     }
     default:
+      if (isSceneCheck(check.kind)) return checkSceneState(check, measures.recipe);
       throw new TypeError(`Unknown check kind ${check.kind}.`);
   }
 }
@@ -444,6 +446,7 @@ export async function gradeRecipe(task, recipe) {
     // Keep the reason: a browser or page error must show in the check's detail, not read as a dim picture.
     measures.renderedLook = await measureRenderedLook(recipe).catch(error => ({ drawError: error.message }));
   }
+  measures.recipe = recipe;
   const results = task.checks.map(check => ({ kind: check.kind, ...(check.label ? { label: check.label } : {}), ...checkOne(check, measures) }));
   const passed = results.filter(result => result.pass).length;
   return { pass: passed === results.length, passed, total: results.length, results };

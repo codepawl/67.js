@@ -1,1 +1,0 @@
-- `worldBounds` (used by `applyWaterReflection`, `findWaterSurface` and the probe code) keeps its minimum and maximum in scalars instead of arrays indexed by axis (issue #406). On the AIS port film, `applyWaterReflection` falls from about 160 ms to 80 ms; the bounds are bit-equal and the frame is pixel-identical.

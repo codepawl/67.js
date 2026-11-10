@@ -103,20 +103,21 @@ Renderer disposal deletes every cached GPU texture. Asset disposal closes each s
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `alphaMode` | `'opaque'` | `'opaque'`, `'mask'` (cutout) or `'blend'` (translucent). |
+| `alphaMode` | `'opaque'` | `'opaque'`, `'mask'` (cutout), `'blend'` (translucent) or `'add'` (additive light). |
 | `alphaCutoff` | `0.5` | Mask only. Fragments with alpha below it are discarded. |
-| `opacity` | `1` | Multiplies the base map alpha. Ignored by `opaque`. |
+| `opacity` | `1` | Multiplies the base map alpha. Ignored by `opaque`. For `blend` and `add` it is a per-part value that `updateParts` may change every frame. |
 | `doubleSided` | `false` | Draws both faces and flips the normal on back faces so each side lights correctly. |
 
 Final alpha is the base map alpha (when `material.map` is set) times `opacity`. Vertex colors stay RGB.
 
 - `mask` discards below `alphaCutoff` in the color pass and in the shadow pass, so shadows follow the cutout shape. With MSAA the edge uses alpha-to-coverage, sharpened by `fwidth`, so leaf edges stay smooth.
 - `blend` draws after all opaque and masked batches. Texels with alpha 1 (opacity 1) are drawn first as a cutout that writes depth, so an opaque baked mesh hides what lies behind it in any order; the translucent texels then blend with depth writes off. Batches sort back to front by their mean distance to the eye, and instances inside one batch sort by translation distance each frame. Intersecting translucent surfaces and large meshes can still show ordering artifacts. Blend parts skip shadows unless `castShadow: true` is set, and then they cast a fully opaque shadow.
-- `alphaMode`, `alphaCutoff`, `opacity` and `doubleSided` are batch state like `castShadow`. Parts that differ never share a draw call, and `updateParts` rejects changes after upload. Rebuild the renderer to change them.
+- `add` draws after all opaque, masked and blend batches with blending `SRC_ALPHA, ONE`: the colour times opacity is added to the frame, so overlaps brighten and opacity 0 adds nothing. It tests depth, writes none, needs no sorting and skips shadows unless `castShadow: true` is set. Fog fades additive light to black instead of mixing it toward the fog colour, so distant sparks dim rather than glow as fog. Additive parts do not occlude bounce, sky-visibility or closed-room checks, like blend parts.
+- `alphaMode`, `alphaCutoff`, `doubleSided` and, for `mask`, `opacity` are batch state like `castShadow`. Parts that differ never share a draw call, and `updateParts` rejects changes after upload. Rebuild the renderer to change them. The opacity of `blend` and `add` parts is stored per instance (the last float of each instance), so parts that differ only in opacity share one batch and `updateParts` changes it without a rebuild; a fading trail or particle needs one part, not one per opacity step.
 - Invalid values (unknown mode, cutoff or opacity outside zero to one, a non-boolean `doubleSided`) throw.
 - The benchmark preset ignores alpha.
 
-glTF import maps `alphaMode` MASK and BLEND, `alphaCutoff`, `doubleSided` and `baseColorFactor[3]` (to `opacity`) onto these fields, and keeps the base color texture alpha. `exportGlb` writes them back.
+glTF import maps `alphaMode` MASK and BLEND, `alphaCutoff`, `doubleSided` and `baseColorFactor[3]` (to `opacity`) onto these fields, and keeps the base color texture alpha. `exportGlb` writes them back. glTF has no additive blending, so an `add` material is exported as `BLEND` and loads back as `blend`.
 
 ## Moss layer
 
@@ -167,7 +168,7 @@ glTF import and export carry these layers through `KHR_materials_clearcoat`, `tr
 ## Baked graphs and UV patterns
 
 A recipe material `pattern` of type `graph` bakes a bounded node graph into `map`, `normalMap` (from the graph's height),
-`metallicRoughnessMap` and `emissiveMap`, each only when the graph has that output. With `mapping: "uv"` the descriptors carry
+`metallicRoughnessMap` and `emissiveMap`, each only when the graph has that output; `opacity` goes into the alpha of `map`, `clearcoat` into `layerMaps.clearcoatTexture` and `transmission` into `transmissionMap`. With `mapping: "uv"` the descriptors carry
 `boxMapScale: 0`, so the renderer samples every map, the emissive map included, with the geometry's UV channel 0, and GLB
 export writes the maps with the authored UVs. With the default `box` mapping the maps are projected along the object axes.
 The graph never becomes shader source: the shader gains no code per graph. See "Material graphs" in agent-scene.md.

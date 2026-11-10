@@ -113,10 +113,10 @@ test('camera-only motion compiles an empty ordinary clip and retains the static 
 test('strict schema, final references, duplicate tracks and allocation bounds reject invalid authoring', () => {
   assert.throws(() => normalizeAgentMotion(motion([]), recipe), /at least one/);
   assert.throws(() => normalizeAgentMotion({ ...motion([]), unknown: true }, recipe), /field/);
-  assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), id: 'missing' }]), recipe), /not found/);
-  assert.throws(() => normalizeAgentMotion(motion([track('emission', 0, 1), track('emission', 0, 1)]), recipe), /Duplicate/);
-  assert.throws(() => normalizeAgentMotion(motion([{ kind: 'camera', id: 'camera', property: 'fov', keyframes: [{ time: 0, value: 45 }] }]), recipe), /cannot have/);
-  assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), keyframes: [{ time: 0, value: 0, outTangent: 1 }] }]), recipe), /Tangents/);
+  assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), id: 'missing' }]), recipe), /motion\.tracks\[0\]\.id: got "missing"; expected the ID of a material in this recipe/);
+  assert.throws(() => normalizeAgentMotion(motion([track('emission', 0, 1), track('emission', 0, 1)]), recipe), /repeats an earlier track/);
+  assert.throws(() => normalizeAgentMotion(motion([{ kind: 'camera', id: 'camera', property: 'fov', keyframes: [{ time: 0, value: 45 }] }]), recipe), /motion\.tracks\[0\]\.id: got "camera"; expected a field left out, since camera tracks have no ID/);
+  assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), keyframes: [{ time: 0, value: 0, outTangent: 1 }] }]), recipe), /keyframes\[0\]\.outTangent: got 1; expected a field left out unless the track interpolation is CUBICSPLINE/);
   assert.throws(() => normalizeAgentMotion(motion([{ ...track('emission', 0, 1), interpolation: 'CUBICSPLINE' }]), recipe), /tangent/i);
   assert.throws(() => normalizeAgentMotion(motion(Array(129)), recipe), /bounded/);
   const tooManyKeys = Array.from({ length: 65 }, (_, index) => ({ time: index / 64, value: 0 }));
@@ -145,7 +145,7 @@ test('invalid cubic scale and material overshoot throw without clamping or parti
     const sampler = compileAgentMotion(motion([track('emission', 0, 1), { ...channel, interpolation: 'CUBICSPLINE' }]), recipe);
     const output = sampler.sample(0);
     const before = snapshot(output);
-    assert.throws(() => sampler.sample(0.5), /positive|negative/);
+    assert.throws(() => sampler.sample(0.5), /positive numbers|numbers of 0 or more/);
     assert.deepEqual(snapshot(output), before);
     sampler.sample(1);
     sampler.sample(0);
@@ -166,7 +166,7 @@ test('radiance overflow, camera midpose collisions and cubic lens overshoot pres
     const sampler = compileAgentMotion(input, recipe);
     const output = sampler.sample(0);
     const before = snapshot(output);
-    assert.throws(() => sampler.sample(0.5), /radiance|distinct|field of view/);
+    assert.throws(() => sampler.sample(0.5), /materials\.[^.]+\.emission: got|distinct|field of view/);
     assert.deepEqual(snapshot(output), before);
   }
 });
@@ -176,7 +176,7 @@ test('unlit radiance uses the authored base color when emissiveColor is absent',
   const sampler = compileAgentMotion(motion([track('emission', 0, 200000)]), unlitRecipe);
   const output = sampler.sample(0);
   const before = snapshot(output);
-  assert.throws(() => sampler.sample(0.5), /unlit radiance/);
+  assert.throws(() => sampler.sample(0.5), /unlit emissiveColor times emission/);
   assert.deepEqual(snapshot(output), before);
   assert.equal(sampler.sample(0.25).materials.get('bulb').emission, 50000);
 });

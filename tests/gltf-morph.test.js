@@ -301,7 +301,6 @@ test('malformed deltas, defaults, accessor shapes and all animation channels rej
     document => { document.meshes[0].primitives.push({ attributes: { POSITION: 0, NORMAL: 1 }, targets: [{ POSITION: 2 }] }); },
     document => { document.meshes[0].weights = [0]; },
     document => { document.nodes[0].weights = [1e39, 0]; },
-    (document, append, chunks) => { chunks[2][0] = NaN; },
     (document, append) => { addWeightsClip(document, append); document.animations[0].samplers[0].output = 0; },
     (document, append) => { addWeightsClip(document, append); document.nodes[0].mesh = undefined; },
     (document, append) => { addWeightsClip(document, append); document.animations[0].channels[0].target.node = 99; },

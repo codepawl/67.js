@@ -130,19 +130,19 @@ test('one tree grows at the node transform and validation names the problem', ()
   assert.equal(single.parts.length, 2);
   assert.equal(single.parts[0].matrix[12], 4);
   const bad = (vegetation, pattern) => assert.throws(() => createAgentScene({ ...stillRecipe(), nodes: [{ id: 'hills', geometry: 'ground', material: 'grass' }, { id: 'marker', geometry: 'marker', material: 'steel' }, { id: 'forest', vegetation }] }), pattern);
-  bad({ mix: { broadleaf: 1 }, scatter: { ground: 'marker' } }, /terrain/);
-  bad({ mix: { oak: 1 }, scatter: { ground: 'hills' } }, /species/);
-  bad({ species: 'broadleaf', mix: { birch: 1 } }, /exactly one/);
-  bad({ species: 'grass' }, /species must be/);
-  bad({ mix: { grass: 1 }, scatter: { ground: 'hills', density: 4 } }, /try about/);
+  bad({ mix: { broadleaf: 1 }, scatter: { ground: 'marker' } }, /vegetation\.scatter\.ground: got "marker"; expected the ID of a node that draws a terrain geometry/);
+  bad({ mix: { oak: 1 }, scatter: { ground: 'hills' } }, /vegetation\.mix: got "oak"; expected species names among/);
+  bad({ species: 'broadleaf', mix: { birch: 1 } }, /vegetation\.species: got "broadleaf"; expected exactly one of species/);
+  bad({ species: 'grass' }, /vegetation\.species: got "grass"; expected one of broadleaf/);
+  bad({ mix: { grass: 1 }, scatter: { ground: 'hills', density: 4 } }, /vegetation\.scatter\.density: got 4; expected a density that tries at most/);
 });
 
 test('environment.wind validates and survives export', () => {
   const scene = createAgentScene(forestRecipe());
   assert.deepEqual(scene.environment.wind, { strength: 0.8, direction: 30 });
   assert.deepEqual(scene.exportRecipe().environment.wind, { strength: 0.8, direction: 30 });
-  assert.throws(() => createAgentScene({ ...forestRecipe(), environment: { wind: { strength: 9 } } }), /strength/);
-  assert.throws(() => createAgentScene({ ...forestRecipe(), environment: { wind: { speed: 1 } } }), /Unknown wind field/);
+  assert.throws(() => createAgentScene({ ...forestRecipe(), environment: { wind: { strength: 9 } } }), /environment\.wind\.strength: got 9; expected a number from 0 to 4/);
+  assert.throws(() => createAgentScene({ ...forestRecipe(), environment: { wind: { speed: 1 } } }), /environment\.wind\.speed: got 1; expected no such field; use one of strength, direction/);
 });
 
 test('an imported tree with a foliage override gets the swaying tag and shares it between placements', async () => {
@@ -162,5 +162,5 @@ test('an imported tree with a foliage override gets the swaying tag and shares i
   assert.equal(material('a').tag, 'foliage');
   assert.equal(material('a'), material('b'));
   assert.notEqual(material('plain').tag, 'foliage');
-  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ id: 'a', asset: { id, materials: [{ name: 'Leaves', tag: 'water' }] } }] }, {}, { assets }), /tag must be one of/);
+  assert.throws(() => createAgentScene({ ...recipe, nodes: [{ id: 'a', asset: { id, materials: [{ name: 'Leaves', tag: 'water' }] } }] }, {}, { assets }), /^RangeError: nodes\[0\]\.asset\.materials\[0\]\.tag: got "water"; expected one of surface, foliage, grass/);
 });

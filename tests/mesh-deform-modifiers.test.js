@@ -35,10 +35,10 @@ test('lattice moves a control point fully at its vertex and by the blend elsewhe
 });
 
 test('lattice refuses bad grids and moves with the limit in the message', () => {
-  assert.throws(() => normalizeMeshEdits([{ op: 'lattice', divisions: [9, 2, 2] }]), /divisions must be an integer from 2 to 8/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'lattice', divisions: [2, 2, 2], moves: [{ point: [2, 0, 0], offset: [0, 0, 1] }] }]), /point must be an integer from 0 to 1/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'lattice', divisions: [9, 2, 2] }]), /edits\[0\]\.divisions: got 9; expected a whole number from 2 to 8/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'lattice', divisions: [2, 2, 2], moves: [{ point: [2, 0, 0], offset: [0, 0, 1] }] }]), /edits\[0\]\.moves\[0\]\.point: got 2; expected a whole number from 0 to 1/);
   assert.throws(() => normalizeMeshEdits([{ op: 'lattice', moves: new Array(65).fill({ point: [0, 0, 0], offset: [0, 0, 0] }) }]), /at most 64/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'lattice', moves: [{ point: [0, 0, 0] }] }]), /offset needs three numbers/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'lattice', moves: [{ point: [0, 0, 0] }] }]), /edits\[0\]\.moves\[0\]\.offset: got undefined; expected an array of three numbers/);
 });
 
 test('curve leaves a beam alone on a straight path along its axis and bends it along an arc', () => {
@@ -53,9 +53,9 @@ test('curve leaves a beam alone on a straight path along its axis and bends it a
 });
 
 test('curve names its limits', () => {
-  assert.throws(() => normalizeMeshEdits([{ op: 'curve', path: [[0, 0, 0]] }]), /path needs 2 to 64 points/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'curve', path: [[0, 0, 0], [1, 0, 0]], axis: 'q' }]), /axis must be x, y or z/);
-  assert.throws(() => run(beam(), { op: 'curve', path: [[1, 1, 1], [1, 1, 1]] }), /path has no length/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'curve', path: [[0, 0, 0]] }]), /edits\[0\]\.path: got \[\[0,0,0\]\]; expected an array of 2 to 64 points/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'curve', path: [[0, 0, 0], [1, 0, 0]], axis: 'q' }]), /edits\[0\]\.axis: got "q"; expected one of "x", "y", "z"/);
+  assert.throws(() => run(beam(), { op: 'curve', path: [[1, 1, 1], [1, 1, 1]] }), /edits\[0\]\.path: got \[\[1,1,1\],\[1,1,1\]\]; expected points that are apart/);
 });
 
 test('hook pulls the vertices inside the radius by the falloff weight and none outside', () => {
@@ -65,9 +65,9 @@ test('hook pulls the vertices inside the radius by the falloff weight and none o
   near(raised[0], 2.5, 'the one vertex at the centre moves the whole translation');
   const soft = run(cube(), { op: 'hook', center: [0.5, 0.5, 0.5], radius: 1.2, translation: [0, 0, 1], strength: 0.5 });
   assert.ok(soft.positions[2 + 3 * 6] > 0.5 && soft.positions[2 + 3 * 6] < 1.1);
-  assert.throws(() => normalizeMeshEdits([{ op: 'hook', radius: 0 }]), /radius must be a number above 0/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'hook', falloff: 'sharp' }]), /falloff must be one of smooth, linear, constant/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'hook', strength: 2 }]), /strength must be a number from 0 to 1/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'hook', radius: 0 }]), /edits\[0\]\.radius: got 0; expected a number above 0/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'hook', falloff: 'sharp' }]), /edits\[0\]\.falloff: got "sharp"; expected one of smooth, linear, constant/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'hook', strength: 2 }]), /edits\[0\]\.strength: got 2; expected a number from 0 to 1/);
 });
 
 test('wave lifts vertices inside its ring along z, moves with time and can follow the normal', () => {
@@ -82,9 +82,9 @@ test('wave lifts vertices inside its ring along z, moves with time and can follo
   assert.equal(later.positions[2], 0, 'the single ripple has left the face');
   const alongNormal = run(flat, { op: 'wave', normal: true });
   assert.ok(Math.abs(alongNormal.positions[2]) > 0 && alongNormal.positions[0] === 0);
-  assert.throws(() => normalizeMeshEdits([{ op: 'wave', axes: 'z' }]), /axes must be one of xy, x, y/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'wave', narrowness: 51 }]), /narrowness must be a number from 0 to 50/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'wave', start: [1] }]), /start needs two numbers/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'wave', axes: 'z' }]), /edits\[0\]\.axes: got "z"; expected one of xy, x, y/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'wave', narrowness: 51 }]), /edits\[0\]\.narrowness: got 51; expected a number from 0 to 50/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'wave', start: [1] }]), /edits\[0\]\.start: got \[1\]; expected an array of two numbers/);
 });
 
 test('the deforming modifiers run as stack nodes', () => {

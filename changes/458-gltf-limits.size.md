@@ -1,2 +1,0 @@
-- scene:gltf-box: +311 bytes gzip against main (77828 to 78139), still under its goal of 80000. The limit checks collect every overrun into one error that names each option, its measured value and the value that fits, so an agent needs one failed call instead of one per limit. Down from +566 for the first version with full sentences per check.
-- scene:gltf-box+lazy: +311 bytes gzip against main (95421 to 95732), the same change.

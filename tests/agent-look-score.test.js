@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { judgeRecord } from '../bench/agent-modeling/judge.mjs';
-import { scoreSilhouette } from '../bench/agent-modeling/look.mjs';
+import { scoreLook, scoreSilhouette } from '../bench/agent-modeling/look.mjs';
 import { REFERENCES } from '../bench/agent-modeling/references.mjs';
 import { intersectionOverUnion, rasterizeSilhouette } from '../bench/agent-modeling/silhouette.mjs';
 import { TASKS } from '../bench/agent-modeling/tasks.mjs';
@@ -69,4 +69,14 @@ test('a judge record needs four whole scores in range and keeps its criteria apa
   assert.throws(() => judgeRecord([3, 2, 3]), RangeError);
   assert.throws(() => judgeRecord([4, 0, 0, 0]), RangeError);
   assert.throws(() => judgeRecord([1.5, 0, 0, 0]), RangeError);
+});
+
+test('a failing image step keeps the silhouette score and records imagesError', async () => {
+  const failingImages = async () => {
+    throw new Error('could not fetch the boolean module\nstack detail');
+  };
+  const look = await scoreLook('table', REFERENCES.table, { imageDirectory: 'unused', renderImages: failingImages });
+  assert.equal(look.silhouette.mean, 1);
+  assert.equal(look.imagesError, 'could not fetch the boolean module');
+  assert.equal(look.images, undefined);
 });

@@ -83,7 +83,6 @@ test('invalid authored poses roll back decoder private state and complete adapte
     const before = pose(scene);
     const canonical = scene.exportRecipe();
     for (const commands of [
-      [{ type: 'set-asset-node', id: 'node-3', scale: [1e-40, 1e-40, 1e-40] }],
       [{ type: 'set-asset-node', id: 'node-3', rotation: [0, 0, 0, 0] }],
       [{ type: 'set-asset-node', id: 'mesh-0', translation: [1, 0, 0] }],
       [{ type: 'set-asset-node', id: 'node-3' }],

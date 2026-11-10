@@ -1,7 +1,10 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { runKernel } from './kernel-offload.js';
+import { bakeClothWithFields } from './cloth-fields.js';
+import { normalizeForceFields } from './force-fields.js';
 import { bakeCloth, sampleClothFrames, weldVertices, CLOTH_LIMITS } from './cloth.js';
 import { recomputeNormals } from './geometry-normals.js';
+import { invalidField } from './field-error.js';
 import { bakingContext, boundedArray, finiteNumber, knownKeys, rootNodeWithGeometry, vectorOfThree } from './agent-recipe-checks.js';
 import { boneNodeId, boneTails, restWorldMatrix } from './rig.js';
 // Matches the ragdoll's bone capsule radius (src/ragdoll.js), without loading the ragdoll for one number.
@@ -20,8 +23,8 @@ const MIN_BONE_LENGTH = 1e-4;
 const PIN_EDGES = ['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
 const COLLIDER_SHAPES = ['ball', 'box'];
 const MOVING_SHAPES = ['ball', 'capsule'];
-const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'sheets', 'colliders'];
-const SHEET_FIELDS = ['node', 'pin', 'pinTo', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
+const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'fields', 'sheets', 'colliders'];
+const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
 const PIN_TO_FIELDS = ['node', 'weight'];
 const FIXED_COLLIDER_FIELDS = ['node', 'shape'];
 // A ball or capsule that rides on a node: the capsule runs from `attach` (plus offset) to `to` (plus toOffset).
@@ -29,99 +32,111 @@ const MOVING_COLLIDER_FIELDS = ['attach', 'shape', 'radius', 'offset', 'to', 'to
 // One capsule per bone of an armature, radius a fraction of the bone length as the ragdoll fits it.
 const FITTED_COLLIDER_FIELDS = ['armature', 'radiusFraction', 'exclude'];
 const PIN_TOLERANCE = 1e-4;
+// A vertex of the pin group is held when its weight is at least this much.
+const PIN_GROUP_THRESHOLD = 0.5;
+const GROUP_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/;
 const NO_PATCHES = new Map();
 
-function normalizeSheet(input, context) {
-  knownKeys(input, SHEET_FIELDS, 'cloth sheet');
-  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, 'Cloth sheet');
+function normalizeSheet(input, context, path) {
+  knownKeys(input, SHEET_FIELDS, path);
+  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, `${path}.node`);
   const sheet = { node: input.node };
   if (input.pin !== undefined) {
-    const edges = boundedArray(input.pin, PIN_EDGES.length, 'Cloth pin');
-    for (const edge of edges) {
+    const edges = boundedArray(input.pin, PIN_EDGES.length, `${path}.pin`);
+    edges.forEach((edge, index) => {
       if (!PIN_EDGES.includes(edge)) {
-        throw new RangeError(`Cloth pin must be one of ${PIN_EDGES.join(', ')}.`);
+        throw invalidField(`${path}.pin[${index}]`, edge, `one of ${PIN_EDGES.join(', ')}`);
       }
-    }
+    });
     sheet.pin = [...new Set(edges)];
   }
+  if (input.pinGroup !== undefined) {
+    if (typeof input.pinGroup !== 'string' || !GROUP_NAME_PATTERN.test(input.pinGroup)) {
+      throw invalidField(`${path}.pinGroup`, input.pinGroup, 'the name of a vertex group on the sheet mesh, such as "hem"');
+    }
+    sheet.pinGroup = input.pinGroup;
+  }
   if (input.pinTo !== undefined) {
-    knownKeys(input.pinTo, PIN_TO_FIELDS, 'cloth pinTo');
-    if (!sheet.pin?.length) {
-      throw new RangeError('Cloth pinTo moves the pinned edges, so the sheet needs pin too.');
+    knownKeys(input.pinTo, PIN_TO_FIELDS, `${path}.pinTo`);
+    if (!sheet.pin?.length && !sheet.pinGroup) {
+      throw invalidField(`${path}.pinTo`, input.pinTo, 'a sheet that also sets pin (such as ["top"]) or pinGroup, because pinTo moves the pinned vertices');
     }
-    const target = existingNode(input.pinTo.node, context, 'Cloth pinTo');
+    const target = existingNode(input.pinTo.node, context, `${path}.pinTo.node`);
     if (target === input.node) {
-      throw new RangeError('Cloth pinTo cannot name the sheet itself.');
+      throw invalidField(`${path}.pinTo.node`, target, 'a node other than the sheet itself, such as a pole or a hand');
     }
-    sheet.pinTo = { node: target, weight: input.pinTo.weight === undefined ? 1 : finiteNumber(input.pinTo.weight, 'Cloth pinTo weight', 0.01, 1) };
+    sheet.pinTo = { node: target, weight: input.pinTo.weight === undefined ? 1 : finiteNumber(input.pinTo.weight, `${path}.pinTo.weight`, 0.01, 1) };
   }
   const ranges = { stiffness: [0.01, 1], bend: [0, 1], density: [0.01, 10], damping: [0, 100], friction: [0, 1], thickness: [0, 0.5] };
   for (const [field, [minimum, maximum]] of Object.entries(ranges)) {
-    if (input[field] !== undefined) sheet[field] = finiteNumber(input[field], `Cloth ${field}`, minimum, maximum);
+    if (input[field] !== undefined) sheet[field] = finiteNumber(input[field], `${path}.${field}`, minimum, maximum);
   }
   return sheet;
 }
 
-function existingNode(nodeId, context, label) {
+function existingNode(nodeId, context, path) {
   if (typeof nodeId !== 'string' || !context.recipeNodes.has(nodeId)) {
-    throw new RangeError(`${label} node was not found: ${String(nodeId).slice(0, 64)}.`);
+    throw invalidField(path, nodeId, 'the ID of a node in the recipe, such as "pole"');
   }
   return nodeId;
 }
 
-function normalizeMovingCollider(input, context) {
-  knownKeys(input, MOVING_COLLIDER_FIELDS, 'cloth moving collider');
+function normalizeMovingCollider(input, context, path) {
+  knownKeys(input, MOVING_COLLIDER_FIELDS, path);
   const shape = input.shape ?? 'ball';
   if (!MOVING_SHAPES.includes(shape)) {
-    throw new RangeError(`Cloth moving collider shape must be one of ${MOVING_SHAPES.join(', ')}.`);
+    throw invalidField(`${path}.shape`, shape, `one of ${MOVING_SHAPES.join(', ')}`);
   }
-  if ((shape === 'capsule') !== (input.to !== undefined)) {
-    throw new RangeError('A capsule collider needs to (the node its other end rides on); a ball takes no to.');
+  if (shape === 'capsule' && input.to === undefined) {
+    throw invalidField(`${path}.to`, input.to, 'the ID of the node the capsule other end rides on, such as "hand"');
+  }
+  if (shape === 'ball' && input.to !== undefined) {
+    throw invalidField(`${path}.to`, input.to, 'nothing for a ball; drop it or set shape to "capsule"');
   }
   const collider = {
-    attach: existingNode(input.attach, context, 'Cloth collider attach'), shape,
-    radius: finiteNumber(input.radius, 'Cloth collider radius', MIN_MOVING_RADIUS, MAX_MOVING_RADIUS),
+    attach: existingNode(input.attach, context, `${path}.attach`), shape,
+    radius: finiteNumber(input.radius, `${path}.radius`, MIN_MOVING_RADIUS, MAX_MOVING_RADIUS),
   };
-  if (input.offset !== undefined) collider.offset = vectorOfThree(input.offset, 'Cloth collider offset', OFFSET_LIMIT);
+  if (input.offset !== undefined) collider.offset = vectorOfThree(input.offset, `${path}.offset`, OFFSET_LIMIT);
   if (shape === 'capsule') {
-    collider.to = existingNode(input.to, context, 'Cloth collider to');
-    if (input.toOffset !== undefined) collider.toOffset = vectorOfThree(input.toOffset, 'Cloth collider toOffset', OFFSET_LIMIT);
+    collider.to = existingNode(input.to, context, `${path}.to`);
+    if (input.toOffset !== undefined) collider.toOffset = vectorOfThree(input.toOffset, `${path}.toOffset`, OFFSET_LIMIT);
   } else if (input.toOffset !== undefined) {
-    throw new RangeError('A ball collider takes no toOffset.');
+    throw invalidField(`${path}.toOffset`, input.toOffset, 'nothing for a ball; drop it or set shape to "capsule"');
   }
   return collider;
 }
 
-function normalizeFittedCollider(input, recipe) {
-  knownKeys(input, FITTED_COLLIDER_FIELDS, 'cloth fitted collider');
+function normalizeFittedCollider(input, recipe, path) {
+  knownKeys(input, FITTED_COLLIDER_FIELDS, path);
   const armature = (recipe.armatures ?? []).find(candidate => candidate.id === input.armature);
   if (!armature) {
-    throw new RangeError(`Cloth collider armature was not found: ${JSON.stringify(String(input.armature).slice(0, 48))}. Add it to the recipe armatures.`);
+    throw invalidField(`${path}.armature`, input.armature, 'the ID of an armature in the recipe armatures, such as "rig"');
   }
   const collider = { armature: armature.id };
-  if (input.radiusFraction !== undefined) collider.radiusFraction = finiteNumber(input.radiusFraction, 'Cloth collider radiusFraction', 0.02, 0.5);
+  if (input.radiusFraction !== undefined) collider.radiusFraction = finiteNumber(input.radiusFraction, `${path}.radiusFraction`, 0.02, 0.5);
   if (input.exclude !== undefined) {
     const names = new Set(armature.bones.map(bone => bone.name));
-    collider.exclude = [...new Set(boundedArray(input.exclude, MAX_MOVING_COLLIDERS, 'Cloth collider exclude'))];
+    collider.exclude = [...new Set(boundedArray(input.exclude, MAX_MOVING_COLLIDERS, `${path}.exclude`))];
     for (const name of collider.exclude) {
-      if (!names.has(name)) throw new RangeError(`Cloth collider exclude names a bone that ${armature.id} does not have: ${JSON.stringify(String(name).slice(0, 48))}.`);
+      if (!names.has(name)) throw invalidField(`${path}.exclude`, name, `a bone name of ${armature.id}, such as "${armature.bones[0]?.name ?? 'spine'}"`);
     }
   }
   return collider;
 }
 
-function normalizeCollider(input, context, recipe) {
+function normalizeCollider(input, context, recipe, path) {
   if (input !== null && typeof input === 'object' && Object.hasOwn(input, 'attach')) {
-    return normalizeMovingCollider(input, context);
+    return normalizeMovingCollider(input, context, path);
   }
   if (input !== null && typeof input === 'object' && Object.hasOwn(input, 'armature')) {
-    return normalizeFittedCollider(input, recipe);
+    return normalizeFittedCollider(input, recipe, path);
   }
-  knownKeys(input, FIXED_COLLIDER_FIELDS, 'cloth collider');
-  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, 'Cloth collider');
+  knownKeys(input, FIXED_COLLIDER_FIELDS, path);
+  rootNodeWithGeometry(input.node, context.recipeNodes, context.claimedNodes, context.motionNodeIds, context.physicsNodeIds, `${path}.node`);
   const shape = input.shape ?? 'box';
   if (!COLLIDER_SHAPES.includes(shape)) {
-    throw new RangeError(`Cloth collider shape must be one of ${COLLIDER_SHAPES.join(', ')}.`);
+    throw invalidField(`${path}.shape`, shape, `one of ${COLLIDER_SHAPES.join(', ')}`);
   }
   return { node: input.node, shape };
 }
@@ -133,20 +148,21 @@ export function normalizeAgentCloth(input, recipe) {
   }
   knownKeys(input, CLOTH_FIELDS, 'cloth');
   const context = bakingContext(recipe);
-  const result = { duration: finiteNumber(input.duration, 'Cloth duration', 0.1, MAX_DURATION_SECONDS) };
-  result.sheets = boundedArray(input.sheets, MAX_SHEETS, 'Cloth sheets').map(sheet => normalizeSheet(sheet, context));
+  const result = { duration: finiteNumber(input.duration, 'cloth.duration', 0.1, MAX_DURATION_SECONDS) };
+  result.sheets = boundedArray(input.sheets, MAX_SHEETS, 'cloth.sheets').map((sheet, index) => normalizeSheet(sheet, context, `cloth.sheets[${index}]`));
   if (!result.sheets.length) {
-    throw new RangeError('Cloth needs at least one sheet. Use null to clear it.');
+    throw invalidField('cloth.sheets', result.sheets, 'at least one sheet, such as [{ "node": "banner", "pin": ["top"] }]; use cloth: null to clear it');
   }
-  if (input.gravity !== undefined) result.gravity = vectorOfThree(input.gravity, 'Cloth gravity', 1000);
-  if (input.wind !== undefined) result.wind = vectorOfThree(input.wind, 'Cloth wind', 100);
+  if (input.gravity !== undefined) result.gravity = vectorOfThree(input.gravity, 'cloth.gravity', 1000);
+  if (input.wind !== undefined) result.wind = vectorOfThree(input.wind, 'cloth.wind', 100);
+  if (input.fields !== undefined) result.fields = normalizeForceFields(input.fields, 'Cloth force field');
   if (input.colliders !== undefined) {
-    const entries = boundedArray(input.colliders, MAX_COLLIDERS + MAX_MOVING_COLLIDERS, 'Cloth colliders');
-    boundedArray(entries.filter(entry => !Object.hasOwn(entry ?? {}, 'attach') && !Object.hasOwn(entry ?? {}, 'armature')), MAX_COLLIDERS, 'Cloth colliders on fixed nodes');
-    result.colliders = entries.map(collider => normalizeCollider(collider, context, recipe));
+    const entries = boundedArray(input.colliders, MAX_COLLIDERS + MAX_MOVING_COLLIDERS, 'cloth.colliders');
+    boundedArray(entries.filter(entry => !Object.hasOwn(entry ?? {}, 'attach') && !Object.hasOwn(entry ?? {}, 'armature')), MAX_COLLIDERS, 'cloth.colliders');
+    result.colliders = entries.map((collider, index) => normalizeCollider(collider, context, recipe, `cloth.colliders[${index}]`));
     const movingCount = movingColliderSpecs(result, recipe).length;
     if (movingCount > MAX_MOVING_COLLIDERS) {
-      throw new RangeError(`Cloth moving colliders are limited to ${MAX_MOVING_COLLIDERS} balls and capsules, counting one per armature bone; this has ${movingCount}.`);
+      throw invalidField('cloth.colliders', `${movingCount} moving colliders`, `at most ${MAX_MOVING_COLLIDERS} balls and capsules, counting one per armature bone; exclude bones or drop colliders`);
     }
   }
   return result;
@@ -189,9 +205,21 @@ function colliderFor(collider, node, geometry) {
   return { kind: 'box', center, axes, halfExtents };
 }
 
-// Particles on the requested edges of the sheet's local bounds, so 'top' is the row of highest local y.
-function pinnedParticles(localPositions, representatives, pin) {
-  if (!pin?.length) return [];
+// The weights of the sheet's pin group per render vertex, or null without one. A name the mesh lacks is an error that lists the groups it has.
+function pinGroupWeights(sheet, geometry) {
+  if (!sheet.pinGroup) return null;
+  const weights = geometry.vertexGroups?.[sheet.pinGroup];
+  if (!weights) {
+    const known = Object.keys(geometry.vertexGroups ?? {});
+    throw invalidField('cloth.sheets[].pinGroup', sheet.pinGroup, `a vertex group of node ${sheet.node} (known groups: ${known.join(', ') || 'none'}); make one with a vertex_group mesh edit`);
+  }
+  return weights;
+}
+
+// Particles on the requested edges of the sheet's local bounds, so 'top' is the row of highest local y, plus the particles
+// whose vertex weighs at least half in the pin group.
+function pinnedParticles(localPositions, representatives, pin, groupWeights = null) {
+  if (!pin?.length && !groupWeights) return [];
   const particlePositions = representatives.map(vertex => localPositions.subarray(vertex * 3, vertex * 3 + 3));
   const { minimum, maximum } = localBounds(particlePositions.reduce((all, point) => [...all, ...point], []));
   const tolerance = PIN_TOLERANCE * Math.max(maximum[0] - minimum[0], maximum[1] - minimum[1], 1e-6);
@@ -204,7 +232,9 @@ function pinnedParticles(localPositions, representatives, pin) {
   };
   const pinned = [];
   particlePositions.forEach((point, particle) => {
-    if (pin.some(edge => tests[edge](point))) pinned.push(particle);
+    const onPinnedEdge = pin?.some(edge => tests[edge](point));
+    const inPinGroup = groupWeights !== null && groupWeights[representatives[particle]] >= PIN_GROUP_THRESHOLD;
+    if (onPinnedEdge || inPinGroup) pinned.push(particle);
   });
   return pinned;
 }
@@ -348,15 +378,15 @@ function bakeSheet(sheet, cloth, node, geometry, colliders, frameCount, movingSe
     }
     worldPositions.set(world, particle * 3);
   });
-  const pinned = pinnedParticles(geometry.positions, welded.representatives, sheet.pin);
+  const pinned = pinnedParticles(geometry.positions, welded.representatives, sheet.pin, pinGroupWeights(sheet, geometry));
   const needsMoving = Boolean(movingSetup && (sheet.pinTo || movingSetup.specs.length));
   const moving = needsMoving ? createMovingBodies(sheet, pinned, worldPositions, movingSetup, frameCount) : null;
   const recording = Object.freeze({ ...runKernel('cloth', [worldPositions, welded.triangles, {
     pinned: sheet.pinTo ? [] : pinned, moving,
-    gravity: cloth.gravity, wind: cloth.wind, stiffness: sheet.stiffness, bend: sheet.bend,
+    gravity: cloth.gravity, wind: cloth.wind, fields: cloth.fields, stiffness: sheet.stiffness, bend: sheet.bend,
     density: sheet.density, damping: sheet.damping, friction: sheet.friction, thickness: sheet.thickness,
     colliders, frameCount, framesPerSecond: FRAMES_PER_SECOND,
-  }], bakeCloth) });
+  }], bakeClothWithFields) });
   return { recording, welded, inverse: mat4.invert(mat4.create(), matrix), geometry, particleScratch: new Float32Array(recording.particleCount * 3), live: liveGeometry(geometry) };
 }
 
@@ -403,7 +433,7 @@ function sheetReport(baked, node, sheet) {
   const round = values => values.map(value => Number(value.toFixed(4)));
   return {
     node: node.id, particles: recording.particleCount, triangles: welded.triangles.length / 3, vertices: geometry.positions.length / 3,
-    pinned: pinnedParticles(geometry.positions, welded.representatives, sheet.pin).length,
+    pinned: pinnedParticles(geometry.positions, welded.representatives, sheet.pin, pinGroupWeights(sheet, geometry)).length,
     finalBoundsMin: round(minimum), finalBoundsMax: round(maximum),
   };
 }
@@ -435,7 +465,7 @@ export function bakeAgentCloth(cloth, recipe, geometries, motionSampler = null) 
     /** Particle counts and where each sheet ends, as numbers an agent can read without a picture. */
     report() {
       reportCache ??= {
-        duration: cloth.duration, frames: frameCount, gravity: cloth.gravity ?? [0, -9.81, 0], wind: cloth.wind ?? [0, 0, 0],
+        duration: cloth.duration, frames: frameCount, gravity: cloth.gravity ?? [0, -9.81, 0], wind: cloth.wind ?? [0, 0, 0], fields: cloth.fields ?? [],
         sheets: cloth.sheets.map(sheet => sheetReport(baked.get(sheet.node), nodes.get(sheet.node), sheet)),
       };
       return structuredClone(reportCache);

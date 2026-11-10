@@ -1,5 +1,171 @@
 # Changelog
 
+## 0.17.0
+
+- bake.gridFog: the sun the fog scatters is dimmed by the fog between it and the sun (#543)
+- bake.gridFog: true (with irradianceGrid) lets the irradiance grid scatter in the scene's volume fog, off by default, for sunlit closed rooms with fog (#543)
+- An irradiance grid bake runs on the kernel worker with its 90 s limit instead of the page's 20 s, so 8 grid bounces fit a hall like temple-hall (#543)
+- Volume fog: opt-in `scatterOctaves`, `multiScatter`, `multiExtinction`, `multiAnisotropy`, `keyTransmittance` and `surfaceTransmittance` approximate multiple scattering of the sun in the haze and dim the sun by the haze between it and a point or surface. Off by default; the scenes without them render the same (#543)
+- The publish workflow waits up to five minutes for the registry to serve a new version instead of two. The 0.16.0 publish succeeded, but the registry took longer than two minutes, so the check failed and skipped the release page.
+- `applyAnimation(time, clip, { checks: false })` and `renderer.updateParts(parts, { checks: false })` skip the per-frame pose checks for clips you trust, and frames on the same clip no longer reset and snapshot every node. Eight animated characters: update CPU 1.6 ms to 1.3 ms with checks, 0.9 ms without.
+- Skinned character frames cost less CPU: palette math reads joint matrices in place and a normal pose allocates nothing, so eight animated characters update about 0.1 ms faster (#572)
+- Animating an imported glTF character costs about a third of the CPU it did: `applyAnimation` prepares the pose once instead of twice, reuses its rollback snapshot, and skin validation checks each distinct set of joint weights once instead of every vertex. Eight RobotExpressive characters went from 4.5 ms to about 1.5 ms per frame.
+- Add a per-frame density and velocity `field` to volume fog (also `renderer.setFogField`), flow-advected noise (`flowStrength`, `flowPeriod`), a `profile` choice, and scattering from up to 8 point and spot lights in the fog (issue #573). A fog without a field or lights draws exactly as before.
+- Breaking: a renderer that draws `environment.volumeFog` needs `import '@codepawlhq/67js/addons/fog-shader'` first (recipes, the film and the MCP server load it on their own), which takes about 2.5 KB gzip out of the core (#577)
+- Motion blur and bloom no longer leave a ghost of the previous frame after a seek (#578)
+- A few mirrored skin vertices (a finger pinched between two joints) no longer fail the frame. They draw pinched, and `renderer.diagnostics` lists `skin-reflected-vertices` with the count and the joints and weights of the first one (#581)
+- Materials accept `alphaMode: 'add'` for additive glow, and the opacity of blend and add parts changes each frame through `updateParts` without a new batch. (#586)
+- Volume fog takes `detailOctaves`, `detailAmount`, `warp` and `contrast` for wispier mist, `profileSoftness` for where a layer top starts to fade, and `keyScattering` to scale only the key light shafts (#586)
+- Metal with detailed normal and roughness maps no longer sparkles from frame to frame at grazing angles; `environment.specularAntiAliasing` sets the strength (#588)
+- resolveCoplanar: resolveFlushParts no longer layers pairs that lie on one plane to within a micrometre (the depth buffer already settles them) and settles chains of equal-sized parts, so it stops adding flicker on dense scenes (#593)
+- A film with a very long lens (far / near over 10,000, such as near 0.08 and far 9000) now switches to reversed-Z float depth on its own: `Renderer67` loads `reversed-depth.js` as a separate chunk on the first such frame and every frame after it draws with it (`await renderer.reversedDepthReady` to have it from frame one; `reversedDepth: false` keeps the 24-bit buffer). On the metro film, 24-bit depth could not tell surfaces 2 micrometres apart at 2.6 m, and stairs, canopy panels, handrails and steel flickered between frames; those pairs went from thousands of flipping pixels to under 60 (#593)
+- `resolveCoplanar` is now a function, `resolveFlushParts` from `67js/addons/coplanar-overlap`, so the plane-keyed search stays out of the core bundle. Its depth layers also work under reversed depth: the slope part of the offset is 16 times larger there, because the constant part moves a surface by under a micrometre in a float depth buffer (#593)
+- motion.constraints: adds copy_transforms, limit_distance, limit_scale, stretch_to, locked_track, transformation and action, each one scene_motion call (#595)
+- Recipes gain `cone`, `icoSphere`, `circle` (filled or ring) and `line` geometries, and `plane` is accepted as an alias of `grid` (#596)
+- Fields can read other surfaces: `nearest` (distance, point or normal of the closest point on a surface) and `raycast` (hit, distance, point or normal along a direction, with a `miss` value), plus `attr: group` to read a vertex group back. In `instances` the surface is a geometry id, so a scatter can avoid a path mesh and follow terrain; in `set_position`, `displace`, `vertex_group` and `vertex_color` it is a geometry record, and `vertex_group` stores the result by name (#597)
+- Force fields: a `fields` list on the recipe `particles` and `cloth` sections accelerates particles, hair and cloth through one shared evaluation, with wind, turbulence, vortex, drag and magnet types, `strength`, `falloff`, `radius` and `seed`. The same seed gives the same frames (#598).
+- Ocean modifier: the `ocean` mesh edit and stack node turn a flat grid into a seeded sea (Phillips spectrum for the wind, `choppiness`, `size`, `seed`, `time`) and write the vertex group `foam` where the surface folds. The same seed and time give identical vertices. Part of #599.
+- Per-object motion blur: `effects.motionBlur.objects` (0 to 1, off by default) smears each part that moves during the shutter along its own screen path, while the still background stays sharp; it replaces camera motion blur on that frame and loads on demand (#600)
+- render jobs: passes now include `diffuse`, `glossy`, `shadow`, `ao` and `mist` next to albedo, normal, emission, depth and objectId; diffuse + glossy + emission add back to the lit image, and `exr` keeps values above 1 (#601)
+- Three named post steps join defocus (`effects.depthOfField`) in the look: `effects.colorBalance` (`lift`, `gamma`, `gain`, each three numbers), `effects.glare` (`streaks`, `count`, `angle`, `fogGlow`, `threshold`, `size`) and `effects.lensDistortion` (`distortion`, `dispersion`). Each is off until a recipe names it and draws nothing at its neutral values, so a recipe without them renders the same pixels as before. Their code is a lazy module that loads only for a recipe that names one; `installPostSteps(renderer)` from `src/post-steps.js` adds the stages (#602)
+- `scene_inspect` reports a `bake-stale` warning when motion has moved a light, the sun or a part off the pose a light bake was traced at; a scene without motion or without a bake pays nothing. `bake.rebake: true` bakes each pose a render or seek samples (the last 4 are kept, about 0.7 s each on a small room), so the baked light matches the frame and the warning does not apply. Material animation is not checked, see docs/light-bake.md (#603)
+- MCP scene_create and set-environment now accept the 16 point, 8 spot and 7 area lights the engine renders, read from one limits file, not 8 point and 4 area (#604)
+- Motion tracks animate lights, the sun, sky and fog, exposure and focus distance, so a sunset, a lamp flicker or a rack focus plays from a recipe (#605)
+- Nodes take visible (keyable in a motion track), castShadow, receiveShadow, holdout and shadowCatcher, so films hide parts without parking them and renders composite over footage (#606)
+- Scene cameras take projection orthographic with orthoScale, focalLength with sensorWidth (instead of fov), shift [x, y] and fStop for depth of field, in recipes and set-camera (#607)
+- environment.hdri and a .cube environment.look: shipped HDRIs (sky-clouds, studio-softbox) and looks (teal-orange, noir), or catalog files by ID, work from recipes and MCP (#608)
+- Material graphs: new outputs `opacity` (base texture alpha), `clearcoat` and `transmission` (per-pixel masks), and mixing nodes `layer` (mask-blended layers such as paint over rust), `hue` and `curve`. The rasterizer reads opacity and clearcoat, the CPU path tracer all three. Graphs without them bake the same (#609)
+- A recipe mesh takes `shapeKeys` (named offsets or move-only edits), animated by the existing morph tracks and written as morph targets in a GLB (#610)
+- Render jobs gain four optional output settings, all off by default so a plain job writes the same bytes: `transparent: true` (PNG with alpha, for `image` and `stills`), `format: "png16"` or `"exr"` (16-bit PNG and OpenEXR from a half-float frame, passes included: depth in metres as float32 `Z`, object IDs as float32 `id`), `region: { x, y, width, height }` (a crop of the whole frame, for `image`, `stills` and `video`) and `fps` up to 60. The encoders are small hand-written Node code with no new dependency. `docs/agent-render-jobs.md` has the details.
+- Area lights can cast soft shadows: `castShadow: true` on an `areaLights` entry takes one tile of the local shadow atlas, and the penumbra widens with the rectangle and with the gap between blocker and receiver. Cost is 16 blocker taps and 32 filter taps per lit pixel, only for a shadowed area light.
+- `environment.sunAngularRadius` (radians, 0.0005 to 0.2) softens the sun shadow in the raster through the cascades (at least one slice is used) and sets the sun disk of the path tracer, which was fixed at 0.0087. Without the field nothing changes.
+- IES profiles: `ies` on spot and area lights takes a bundled name (`wide-flood`, `downlight`, `narrow-spot`, `batwing`) or `{ angles, candela }`; `parseIesPhotometry` reads an LM-63 file into that shape. The raster and the CPU path tracer read the same 16 samples. The GPU path tracer and the light bake ignore profiles.
+- `vertex_group` and `vertex_color` mesh edits write named weights and vertex colors; `displace` and cloth `pinGroup` read a group, and colors export as `COLOR_0` (#613)
+- Particle collision and look (#614): an emitter system takes `colliders` (static root nodes, bounced off by triangle), `bounce` and `friction` (also for the floor), `spin`, and `color` and `alpha` over life. A fast particle cannot tunnel through a thin mesh, a slow bounce settles, and the same seed gives the same frames after any seek. Alpha multiplies the vertex colors, a fade to black, because the renderer has no per-vertex alpha.
+- Field math and curves: field expressions gain `rotate`, `align` and `transform` for rotation and matrix math. Instances take a `curve` source (`points`, `count`, `closed`, `fillet`) that places points at equal arc length, rounds corners and, with `alignToNormal`, turns each instance along the curve. The `bounding_box` and `convex_hull` modifiers replace a mesh with its box or hull (#615).
+- Render jobs take `settings.renderer.backend: "gpu"` to path trace on the GPU, film and stills jobs can path trace every frame with one kernel compile, and recipe bakes run on the GPU when the page can, with `scene_inspect` naming the backend (#622)
+- The light tree splits by the surface area orientation heuristic, draws 90 percent by the angle-aware measure, runs on the WebGPU tracer (megakernel and wavefront), and `lightSelection` defaults to `"auto"`: the tree for a scene with more than 8 local lights, uniform otherwise (#623)
+- Path tracer `lightSelection: "tree"`: a light tree after Conty and Kulla (2018) as Cycles builds it, on the CPU reference and the WebGL2 kernel. On the new 24 lamp `many-lights` scene it scores 0.0617 against Cycles at 64 samples (uniform 0.1471) and takes 38 ms per full size sample against 72 ms; it stays off by default because it scores worse than uniform on `brick-room` and `light-linking` (issue #623)
+- `67js/addons/path-tracer-progressive` draws the GPU path tracer one sample per pixel per step, starting at a quarter of the size, and `samplingPattern: "blue-noise-first"` and `lightSelection: "importance"` are new GPU options, both off by default (#623)
+- Real-time WebGPU path tracer (#624): `update({ parts })` with the same part count keeps the history and the radiance cache, follows a part that only moved or turned (its matrix changed) through a per-part motion table, and rejects history on a part whose geometry changed, so a moving object leaves no trail; `followPartMotion: false` turns the following off for comparison
+- `createRealtimeTracer(scene, { backend: 'webgpu' })` runs the real-time path tracer (#624) as WebGPU compute: the WebGPU megakernel with the radiance cache lookup and record built in, a cache update with atomic fixed point sums, and the temporal denoiser, a-trous filter and upsample as compute passes in one command buffer, with the picture copied to `canvas`. On the RTX 3060 the demo room at its own camera takes about 20 ms a frame at 1920 by 1080 (traced at 960 by 540) against 36 ms on WebGL2, and the kernel compiles in about 0.5 s against 11 s. WebGL2 stays the default and the fallback: without WebGPU the tracer's `backend` is `"gpu"` and `fallbackReason` says why. On the WebGPU backend `frame(camera, { wait: true }).done` and `readFrame()` are promises. The denoiser also rejects history where the material at the first hit differs (WebGPU backend only)
+- `67js/addons/path-tracer-realtime` (`createRealtimeTracer(scene, options)`, then `frame(camera)`) is a real-time view of the WebGL2 path tracer: one path per pixel and frame at half the output size, two bounces whose last hit reads a spatial hash radiance cache, and a temporal denoiser (reprojection, variance, a-trous passes) that upsamples to the output size and draws to a canvas; the scene is static, motion vectors come from the camera, and primary hits are traced rather than rasterized (#624)
+- The WebGPU path tracer (`backend: 'webgpu'`) now traces volume fog and subsurface scattering, compiled into the megakernel only for a scene that uses them, and `bakeLightmapsAsync(..., { backend: 'webgpu' })` bakes lightmap texels on WebGPU with the same report fields. On the `fog` and `subsurface` reference scenes it is within 0.0039 FLIP of WebGL2 (480 by 270, 32 samples, no denoiser), and the `lit-interior` bake gives the same light as WebGL2 in 0.54 s against 0.76 s. The wavefront kernel still refuses fog and subsurface with a clear error. No default changes (#625)
+- The path tracer has a third backend, `backend: 'webgpu'`: the WebGL2 kernel written as WGSL compute (`src/path-tracer-webgpu.js`, loaded only for this backend, so the core bundle does not grow). It compiles in about a second instead of 8 to 20, matches the WebGL2 backend within 0.002 FLIP on the 16 reference scenes, and traces the demo room faster. It throws a clear error without `navigator.gpu`, and names volume fog and subsurface scattering (not ported yet) so callers fall back to `gpu`. No default changes (#625)
+- Recipe light bakes run on the native ray query tracer when `packages/render-native` is built: `bake.backend` is `native`, with the page's GPU kernel as the fallback (`bake.backendNote` says why). `bakeLightmapsAsync` takes `backend: "native"` with a `texelTracer`.
+- `renderer.maxSeconds` is honoured by `renderer.backend: "native"`: a trace that passes it fails the job instead of falling back.
+- The native tracer asks the hardware about alpha cutouts itself: cutout triangles are their own geometry and the kernel confirms a candidate hit when its colour map alpha reaches the cutoff, so rays no longer step through transparent texels (8 steps at most before).
+- Shadow rays on the CPU, WebGL2 and WebGPU tracers no longer leak light through dense alpha cutouts. Their any-hit walk took the first hit traversal met as if it were the nearest, so a transparent texel far along the ray let it skip closer leaves. A solid any-hit still ends the walk; a transparent one now retraces for nearest hits. On 300 masked leaf cards the four backends agree within FLIP 0.0004, down from 0.043 between native and the rest.
+- The native tracer (renderer.backend "native", recipe bakes) now traces volume fog and subsurface scattering with the same walk as the WebGPU megakernel, compiled in only for a scene that uses them, and honours `noiseThreshold` on the GPU: after 16 samples, and then every 8, a converged pixel draws no more, and `metrics.pathTracer.averageSamples` reports the mean a pixel drew. `JS67_NATIVE_TRACER=off` keeps a job on the gpu or cpu backend whatever is installed; a native job without the package gives the cpu backend's bytes and report fields (#626)
+- Fixed: the CPU, WebGL2 and WebGPU path tracers gave up after 8 transparent cutout texels on one ray, so dense foliage showed holes and lost shadows; the limit is now 64, and the foliage reference scene matches the native tracer to FLIP 0.001
+- renderer.backend "native" on render jobs (image, stills, video): hardware ray queries through the optional @codepawlhq/67js-render-native package, then the usual wavelet or OIDN denoise and PNG. Without the package, its binary or a Vulkan ray query adapter the job runs on gpu (cpu on a cpu runtime) and metrics.pathTracer.backendNote says why (#626)
+- `@codepawlhq/67js-render-native` is an optional Rust addon that traces a scene on the GPU with Vulkan ray queries, with a bench against the browser WGSL kernel (#626)
+- The path tracer draws the textures and cutouts of loaded glTF files, which it used to trace untextured (#635)
+- The agent bench has a committed baseline for main: 28 tasks, 3 runs each, on Haiku (pass@1 99%) and Sonnet (pass@1 95%).
+- bench: `bench/agent-modeling/bench.mjs` runs a 28-task agent bench (modeling, revision, scene, look, light, camera, animation and film tasks, each with an automatic grader) k times per model through headless `claude -p`, and prints pass@1, pass^k, calls, tokens and time per model; `compare-bench.mjs` diffs a branch against a baseline file (#647)
+- MCP tool schemas shrink from 196,826 to about 66,000 bytes (#648). The tools list common fields and one line naming the rest, the strict schema still checks every call, and scene_capabilities answers with a short index and serves each recipe part by topic (motion, environment, materialFields, meshEdit, meshEdit.<op> and more). CI now has absolute ceilings for the schema total and each tool.
+- The `build-67js-scene` and `render-67js-media` skills are rewritten for agents that use 67js through MCP: short entry files, references for look, light, camera, film and animation, render jobs and error recovery, and a working tool call for lens and depth of field, light caps, animated lights, sun and sky, catalog HDRIs and looks, `bake.gridFog`, fog multiple scattering, depth fixes and render flags. Evals under `skills/*/evals` run through `claude -p` with `scripts/run-skill-evals.mjs` (issue #649)
+- A Claude Code plugin: `/plugin marketplace add codepawl/67.js` then `/plugin install 67js@67js` adds the 67js MCP server (started with `npx` from the npm package) and the build-67js-scene and render-67js-media skills (#650)
+- `npm run plugin:sync` copies the package.json version into the plugin manifests, and a test fails when they differ (#650)
+- scene_apply and mesh_edit answer with one entry per operation (index, op, target, what changed, a warning when nothing changed) and a diff of node, material and geometry IDs added, removed and changed; entries past 20 are counted, not listed (#651)
+- scene_review, scene_look and the render result warn, with a field and a value to try, on an empty frame (`empty-frame`), a subject out of frame or too small (`subject-out-of-frame`, `subject-too-small`) and a black or clipped frame (`exposure-black`, `exposure-clipped`). The `bake-stale` warning of #603 now also arrives in a look, a review shot and a render job's metrics, not only in scene_inspect. They are in the frame's `diagnostics`, and a render job keeps one entry per warning (#652)
+- Mesh edit validation errors (cut, deform, generator, modifier, normal and attribute edits, and the parameter checks of the edit log) now read `edits[2].divisions: got 9; expected a whole number from 2 to 8, such as 2.`: the field path, the value received and a range, a list of choices or an example. Inside a recipe the path starts at the geometry (`geometries[0].edits[2].levels`). Size-limit errors for subdivide, array and subdivide_edges now name the field to lower (#653)
+- Errors for motion tracks and IK, clip layers, part relations, branches, path queries and crowds now name the field, the value and an example: `nodes[1].relations[0].side: got "+w"; expected one of +x, -x, +y, -y, +z, -z, the face of "a" it sits against.` The shared motion helpers (`bounded`, `denseArray`, `knownKeys`) keep their wording for now (#653)
+- The same readable errors now cover vegetation (`nodes[3].vegetation.scatter.density: got 9; expected a number from 0.0001 to 4, such as 1.`), `environment.wind`, particles and hair, cloth sheets and colliders, and image sequence maps: each names the full field path, the value received and an accepted example or range (#653)
+- The same readable errors now cover physics bodies, joints and ragdolls, vehicle drives (`motion.drive`, wheels, path, speed, lights), asset recipes and operations (root, overrides, animation, inspect, checkpoints), placed assets and the shrinkwrap edit: `motion.drive.wheels[1].node: got "Nope"; expected the name of a node in the asset, such as one scene_inspect lists.` The mesh-edit parameter checks that still say `Mesh edit 2 (...)` are not converted yet (#653)
+- Validation errors in the scene core now read `nodes[1].decal: got "yes"; expected true or false.`: scene operations (remove, set, inspect, checkpoints, revision), camera lens fields, geometry fields (points, holes, base, cutter), armatures, cloth and particle checks (`Cloth gravity: got [0,1]; expected three numbers, such as [0, 1, 0].`), terrain (`terrain.size: got 0; expected a number from 1 to 2000, such as 40.`) and mesh regions. Size limits and engine invariants keep their older wording (#653)
+- Validation errors for materials, nodes, the camera, lights, fog, bake, mesh edits and motion now read `materials[2].emissiveColor: got [-1,0,0]; expected three numbers of 0 or more, such as [1, 0.5, 0.2].`: the full field path, the value received (cut at 40 characters) and a range, a list of choices or an example. Schema errors from the MCP tools add the received value too (`recipe.materials.0.color.2: Too big: expected number to be <=1 (got 2)`). Mesh edit errors keep the position of the edit (`edits[1].segments`). Not every message in the engine is converted yet; the rest keep their older wording (#653)
+- llms.txt is now a task map; its tool list is generated from the MCP registry (`npm run llms`) and a test fails when it is stale (#654)
+- mcp: every tool has a title and annotations (only scene_dispose, scene_render_release and scene_release_checkpoint are destructive), six tools declare a small outputSchema with structuredContent, and scene_render_result returns the PNG as image content plus a resource link to each file (#655)
+- set-environment accepts the optional volumeFog fields (scatterOctaves, multiScatter, multiExtinction, ...) after creation, and the MCP schema names scatterOctaves and multiScatter (#661).
+- set-environment accepts the opt-in volume fog fields (scatterOctaves, multiScatter, multiExtinction, multiAnisotropy, keyTransmittance, surfaceTransmittance and the rest) on a scene that did not set them at creation, and the MCP schema lists them (#661).
+- MCP: shipped HDRI and .cube look names (sky-clouds, teal-orange and the rest) load in the packaged server built by npm run build:lib; they failed with "The URL must be of scheme file" (#664)
+- Parts with a mirrored (negative-determinant) matrix, such as a flipped billboard, now render with the right side lit and culled instead of ghosted or pale; the renderer batches them apart and glTF no longer flips winding itself (#680, #681)
+- Add multi-bone `chain` IK (with `pole`, `poleAngle`, `stretch`, `iterations` and per-joint `limits`) and `spline` IK along Catmull-Rom curves to `addons/skeleton-pose` and recipe `motion.ik` (#689).
+- Motion tracks take `extrapolation` (`constant` or `linear`) and `modifiers`: `cycles` (repeat, offset, mirror, with counts), `stepped`, `noise` (seeded), `generator`, `limits` and `envelope`, sampled the same in sampleMotion, camera paths and render jobs (#690)
+- Add `maintain_volume`, `damped_track`, `pivot`, `follow_path`, `clamp_to`, `shrinkwrap` and `armature` motion constraints, plus `floor` `useRotation` and `copy_transforms`/`transformation` `mix` modes (#691).
+- Add `cylinder`, `cone` and `compound` collider shapes, `spring` joints, joint `motor` controls, timed `events` (`impulse`, `kinematicPose`, `jointMotor`) and `fields` (force fields on dynamic rigid bodies) to physics definitions and recipe `physics` sections (#692).
+- Instancing: `instances` takes a `place` record with Poisson-disk `spacing`, a `density` field, `variants` of geometry and material picked at random or by a `variant` field, per-point `rotation` and `size` fields, and `at: "vertices"` or `"faces"` on a surface source to place on a mesh's own vertices and face centres. All of it is seeded (#698).
+- Add `curve.length` spacing and `realize` (into one mesh per material) for recipe `instances`.
+- `environment.sky: { type: 'physical', sunElevation, sunRotation, turbidity, groundAlbedo, aerialPerspective }` drives the key light direction and colour, the sky map, the background gradient and the distance haze from one sun, so a time of day is one parameter. Recipes without `sky` render byte for byte as before. (#705)
+- Add `ozone`, `sunDisc`, and time-of-day `environment` motion tracks for `environment.sky` (`type: "physical"`).
+- Add `position`, `velocity`, `uv`, `transmission`, `volume`, `environment`, `cryptomatte` and `aov` render passes (`material.aov` and material graph `aov` outputs), plus `multilayer: true` OpenEXR render jobs (#706).
+- Unprojected ambient occlusion samples in view space rather than world space so cameras far from the origin do not quantize distant wall normals into vertical stripes (#713).
+- `scene_apply`, `scene_restore` and `mesh_edit` answers no longer carry the node inspection: they return the revision, the render status, the scene diagnostics when there are any, a result per operation and the diff. The results and diff of a 20-operation batch stay under 2 KB (the render status adds about 1 KB on top) instead of about 8 KB for the whole answer. Call `scene_inspect` to read the nodes (#718)
+- Keep mesh-leaf tree and blade grass vertex and material colors within `[0, 1]` while preserving their rendered `baseColor * vertexTint` product so `exportGlb` accepts mesh vegetation directly.
+- Report interior vertex valence (regular and poles), quad quality metrics and a normalized `topologyScore` in `lintMesh` and `mesh_inspect` (#731).
+- Fixed: automatic `objectReflections` skip with a reported reason when a scene has more than 256 other parts instead of failing `createAgentScene`, and `Renderer67.dispose()` deletes `liquidProgram` so transmissive scenes release every WebGL program (#733, #734).
+- The README opens on a Bistro street render under a Poly Haven sky, with two more Bistro views and the three showcase worlds below it. The Bistro scene is credited under CC BY 4.0.
+- Add a Blender 5.2 inventory script and a report that compares it with the ledger and agent surface, with a ranked list of missing features
+- The scene skill lists the film glitches to check before a film goes out: specular sparkle, matte rails, depth of field motes, lens ghosts, sun shaft sources and dot-matrix signs.
+- The goal and its scope now live in docs/goal.md instead of a tracking issue
+- The README banner is a full-width Bistro street render with the wordmark on the left, and the showcase table lists the airport, data center and port worlds again.
+- The README follows the same layout as the other CodePawl repos: a banner with the wordmark and three renders, flat-square badges, a showcase table, an install section that starts with a prompt to paste into an agent, and a License heading.
+- The changelog groups its entries under headings, and 0.16.0 is rewritten as a short summary
+- The scene skill points agents at the scene_capabilities topics for field detail, drops the notes for the fixed fog schema (#661) and packaged catalog (#664) gaps, and its HDRI, look and fog eval checks the shipped names and 3 scatter octaves again.
+- The tagline is now "3D engine that AI agents drive" on the site, the package and the README banner
+
+## 0.16.0
+
+### Highlights
+
+- GPU path tracer: `backend: 'gpu'` renders the 1080p demo room in about 40 s, against 586 s on the CPU. The light bake can use it too (#302)
+- Outlines and toon shading with `environment.lines` (#285)
+- Subsurface scattering for skin, wax and leaves with the material `subsurface` block (#283)
+- 3D Gaussian splats from a standard PLY file, as an addon (#288)
+- `environment.viewTransform` picks ACES, AgX or neutral, and AgX now matches Blender 5.2 (#282)
+- Easing curves and `cubic-bezier` on keyframes, within 1e-4 of Blender (#286)
+
+### Agents and MCP
+
+- Recipes place catalog GLB assets next to terrain and procedural meshes, and render jobs draw them (#320)
+- A `vegetation` node plants one tree or a seeded forest over terrain, with seasons and wind (#321)
+- `motion.drive` drives a car model along a path with real steering, reverse and brake lights (#322)
+- Crowds of up to 1,000 walkers draw in one batch per material (#323)
+- Clips retarget between characters, feet stay planted, and morph targets key by name (#325)
+- Materials can play an image sequence as their colour map (#339)
+- The new `scene_walkmap` tool finds where a character can walk (#553)
+- The MCP schema now accepts every environment and node field the engine reads (#490)
+
+### Rendering
+
+- Up to 16 point, 8 spot and 7 area lights, from 8, 8 and 4 (#261)
+- Water got depth fade, soft shadows on the bed, refraction, and a reflection that survives rough water and costs less (#349)
+- Default fog fits the scene size, so the far side of a big world no longer fades out (#263)
+- `volumeFog` takes `heightFalloff` for valley mist that thins with height
+- Sunlit rooms get softer bounced light by default, and `bake.irradianceGrid` adds Cycles-like multi-bounce light (#506)
+- Far trees no longer pop darker when they switch level, and big forests can use impostor cards (#432)
+- Reversed-Z depth and a z-fighting warning that names both parts and the fix (#310)
+- Mesh blend softens the seam where a rock or a trunk meets the ground (#478)
+- Your own post passes and a GLSL hook on materials (#405)
+- Plain scenes draw faster, and far shadow cascades redraw less often (#388)
+
+### glTF
+
+- Many more real-world files load: meshopt, WebP, spec-gloss, optional extensions, skeleton-only clips and common Sketchfab defects (#496)
+- KTX2 textures stay GPU-compressed, about a quarter of the memory (#304)
+- Large texture sets scale down instead of throwing, and the default limits are higher (#260)
+
+### Animation and physics
+
+- Cloth follows moving characters, and steps live with pins and tearing (#326)
+- `renderer.updateParts` is about 6 times faster for matrix and colour updates (#299)
+
+### Tools, docs and site
+
+- Video export encodes in the browser: a 4,488-frame film took 21 s instead of 140 s (#301)
+- Path traced jobs can use Intel Open Image Denoise (#303)
+- The docs are now interactive learn pages with live examples, plus an API reference (#508)
+- The showcase worlds show their first frame sooner and stream the rest in (#445)
+- Agent benchmarks against three.js code and the Blender MCP on the same tasks (#31)
+
+### Breaking changes
+
+- Skin, morph, water, foliage, terrain, liquid and splat shaders moved into addons. A renderer that draws those parts without the import throws and names it. Recipes and loaders import them on their own (#281)
+- glTF limit errors are one `RangeError` that names every limit the file goes over. Match on the option name, not the old message (#458)
+- `material.lightMask` defaults to `-1`, every light (#261)
+- `normalizeAgentLook` returns `fogDensity: null` for fog that fits the scene (#263)
+
 ## 0.15.0
 
 - Add `fog-valley` and `fog-room` to the reference suite (part of issue #165, which stays open). Against Cycles `fog-room` scores 0.1953 (EEVEE 0.3730) and `fog-valley` 0.1967 (EEVEE 0.1952), so the fog constants of #161 hold on both. Scaling the fog ambient by the share of the sky the volume sees was measured and not kept: it worsened the region of `temple-hall` (0.2305 to 0.2513), so #164 is not fixed. See `bench/reference/README.md`.

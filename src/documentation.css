@@ -1,5 +1,5 @@
 .doc-install-link { display:inline-flex; align-items:center; gap:8px; }
-.documentation .docs-page { display:grid; grid-template-columns:244px minmax(0,780px); justify-content:center; gap:52px; max-width:1440px; margin-inline:auto; padding:36px 40px 64px; }
+.documentation .docs-page { --docs-ok:#7bd88f; --docs-warning:#f2b84b; --docs-tip:#a6c1ff; display:grid; grid-template-columns:244px minmax(0,760px) 196px; justify-content:center; gap:48px; max-width:1440px; margin-inline:auto; padding:36px 40px 64px; }
 .docs-sidebar { position:sticky; top:calc(var(--navigation-height,80px) + 24px); align-self:start; max-height:calc(100vh - var(--navigation-height,80px) - 48px); overflow-y:auto; padding:0 5px 12px; }
 .docs-title { display:block; font-size:21px; font-weight:600; letter-spacing:-.5px; margin:5px 0 25px; }
 .documentation .docs-search { display:block; margin:0; }
@@ -24,6 +24,7 @@
 .documentation .doc-copy-status { margin:0 0 12px; font-size:12px; color:var(--muted); }
 .doc-copy-status:empty { display:none; }
 .doc-copy-fallback { width:100%; min-height:160px; margin-bottom:24px; padding:14px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); font:13px/1.6 ui-monospace,Consolas,monospace; }
+.documentation #doc-article:focus { outline:none; }
 .documentation #doc-article section { margin:0; scroll-margin-top:calc(var(--navigation-height,80px) + 72px); }
 .documentation #doc-article h1 { font-size:clamp(30px,3vw,42px); font-weight:600; letter-spacing:-1.2px; margin:0 0 28px; line-height:1.15; }
 .documentation #doc-article p { color:var(--text); font-size:15px; line-height:1.8; margin:0 0 23px; }
@@ -47,6 +48,7 @@
 .doc-pagination span { color:var(--muted); font-size:12px; }
 .doc-pagination strong { font-size:14px; font-weight:500; }
 .docs-sidebar, .doc-actions, .doc-pagination, .navigation { user-select:none; }
+@media (max-width:1279px) { .documentation .docs-page { grid-template-columns:244px minmax(0,780px); } .doc-outline { display:none; } }
 @media (max-width:1200px) and (min-width:1051px) { .documentation .docs-page { gap:30px; grid-template-columns:220px minmax(0,1fr); padding:30px; } }
 @media (max-width:1050px) {
   .documentation .docs-page { display:block; padding:28px 30px 50px; }
@@ -84,3 +86,110 @@
 @media (max-width:760px) {
   .documentation #doc-article .change-entry { grid-template-columns:minmax(0,1fr); row-gap:2px; padding:11px 0; }
 }
+
+/* Teaching pages: headings, steps, lists, pictures, callouts, cards and the outline. */
+.documentation #doc-article h2 { font-size:24px; font-weight:600; letter-spacing:-.4px; line-height:1.3; margin:52px 0 16px; scroll-margin-top:calc(var(--navigation-height,80px) + 24px); }
+.documentation #doc-article h3 { font-size:18px; font-weight:600; margin:36px 0 12px; scroll-margin-top:calc(var(--navigation-height,80px) + 24px); }
+.documentation #doc-article h2.doc-step { display:flex; align-items:center; gap:14px; }
+.doc-step-number { display:inline-grid; place-items:center; flex:none; width:34px; height:34px; border-radius:10px; background:var(--surface); font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+.documentation #doc-article ul { color:var(--text); margin:0 0 26px; padding-left:22px; font-size:15px; line-height:1.75; }
+.documentation #doc-article ul li { margin:6px 0; }
+.documentation #doc-article li strong, .documentation #doc-article p strong { font-weight:600; }
+.doc-figure { margin:28px 0; }
+.doc-figure img, .doc-figure video { display:block; width:100%; height:auto; border-radius:var(--panel-radius); background:#101014; }
+.doc-figure video { aspect-ratio:16 / 9; object-fit:cover; }
+.doc-figure figcaption { margin-top:10px; font-size:13px; color:var(--muted); text-align:center; }
+.doc-callout { display:grid; grid-template-columns:20px minmax(0,1fr); gap:12px; align-items:start; margin:24px 0; padding:16px 18px; border-radius:var(--radius); background:var(--bg); }
+.doc-callout .icon { width:20px; height:20px; margin-top:3px; }
+.doc-callout-tip .icon { color:var(--docs-tip); }
+.doc-callout-note .icon { color:var(--muted); }
+.doc-callout-warning .icon { color:var(--docs-warning); }
+.documentation #doc-article .doc-callout p { margin:0; font-size:14px; line-height:1.7; }
+.doc-check { display:flex; align-items:center; gap:10px; margin:0 0 24px; padding:12px 16px; border-radius:var(--radius); background:var(--bg); font-size:14px; }
+.doc-check .icon { flex:none; width:20px; height:20px; }
+.doc-check-ok .icon { color:var(--docs-ok); }
+.doc-check-failed .icon { color:var(--docs-warning); }
+.code-language { display:inline-flex; align-items:center; gap:7px; }
+.code-language .icon { width:15px; height:15px; }
+.code-output pre code { color:var(--muted) !important; }
+.install-block { margin:25px 0; }
+.install-tabs { display:flex; flex-wrap:wrap; gap:4px; margin:0 0 8px; user-select:none; }
+.documentation .install-tabs button { display:inline-flex; align-items:center; gap:8px; min-height:36px; padding:7px 12px; font-size:13px; color:var(--muted); background:transparent; }
+.documentation .install-tabs button:hover { color:var(--text); }
+.documentation .install-tabs button[aria-pressed=true] { color:var(--text); background:var(--surface); }
+.install-tabs .package-logo { width:16px; height:16px; }
+.install-block .code-block { margin:0; }
+.doc-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:24px 0 32px; }
+.documentation #doc-article .doc-card { display:flex; flex-direction:column; gap:6px; padding:16px 18px; border-radius:var(--radius); background:var(--bg); color:var(--text); text-decoration:none; overflow:hidden; transition:background-color var(--site-motion-quick,110ms) ease; }
+.documentation #doc-article .doc-card:hover { background:var(--surface); }
+.doc-card img { display:block; width:calc(100% + 36px); max-width:none; margin:-16px -18px 8px; aspect-ratio:16 / 9; object-fit:cover; }
+.doc-card strong { display:flex; align-items:center; gap:8px; font-size:15px; font-weight:600; }
+.doc-card strong .icon { width:16px; height:16px; color:var(--muted); }
+.doc-card span { font-size:13px; line-height:1.6; color:var(--muted); }
+.doc-cards, .doc-card { user-select:none; }
+.doc-outline { position:sticky; top:calc(var(--navigation-height,80px) + 24px); align-self:start; max-height:calc(100vh - var(--navigation-height,80px) - 48px); overflow-y:auto; padding-top:52px; user-select:none; }
+.documentation .doc-outline h2 { font-size:13px; font-weight:650; margin:0 0 10px; letter-spacing:0; }
+.documentation .doc-outline a { display:block; padding:6px 0; font-size:13px; line-height:1.45; color:var(--muted); text-decoration:none; }
+.documentation .doc-outline a:hover { color:var(--text); }
+
+/* Live examples: the result on top, then the toolbar and the editable code. */
+.live-example { margin:28px 0 32px; border-radius:var(--panel-radius); background:var(--bg); overflow:hidden; }
+.live-stage { position:relative; display:grid; place-items:center; width:100%; background:#101014; overflow:hidden; }
+/* Renderer67 shifts the studio view to the right on canvases wider than 700 px, so examples stay at 700 px to keep the subject centred. */
+.live-poster, .live-frame { position:absolute; top:0; left:50%; translate:-50% 0; width:min(100%, 700px); height:100%; border:0; }
+.live-poster { object-fit:cover; }
+.live-frame { background:#101014; }
+.documentation .live-start { position:relative; display:inline-flex; align-items:center; gap:8px; min-height:42px; padding:10px 18px; font-size:14px; background:#171717d9; color:var(--text); backdrop-filter:blur(8px); }
+.live-start .icon { width:16px; height:16px; }
+.live-example.is-running .live-start { visibility:hidden; }
+.documentation .live-console { display:block; max-height:140px; margin:0; padding:10px 20px; border:0; border-radius:0; background:#0c0c10; overflow:auto; font:12px/1.6 ui-monospace,Consolas,monospace; color:var(--muted); white-space:pre-wrap; overflow-wrap:anywhere; }
+.documentation .live-console[hidden] { display:none; }
+.live-console-line { display:block; }
+.live-console-line[data-level=warn] { color:var(--docs-warning); }
+.live-console-line[data-level=error] { color:var(--text); }
+.live-toolbar { display:flex; align-items:center; gap:6px; padding:10px 12px 0 18px; user-select:none; }
+.live-file { font:12px ui-monospace,Consolas,monospace; color:var(--muted); }
+.documentation .live-status { display:inline-flex; align-items:center; gap:7px; margin:0 auto 0 10px; min-width:0; font-size:12px; line-height:1.4; color:var(--muted); }
+.live-status .icon { flex:none; width:15px; height:15px; }
+.live-status[data-kind=ok] .icon { color:var(--docs-ok); }
+.live-status[data-kind=error] { color:var(--text); }
+.live-status[data-kind=error] .icon { color:var(--docs-warning); }
+.documentation .live-toolbar button { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:6px 10px; font-size:12px; background:transparent; color:var(--muted); }
+.documentation .live-toolbar button:hover:not(:disabled) { color:var(--text); background:var(--surface); }
+.documentation .live-toolbar button:disabled { opacity:.45; cursor:default; }
+.live-toolbar .icon { width:14px; height:14px; margin:0; }
+.live-editor { position:relative; max-height:440px; overflow:auto; font:13px/1.75 ui-monospace,Consolas,monospace; }
+.live-editor pre, .live-editor textarea { margin:0; padding:12px 20px 20px; font:inherit; white-space:pre; tab-size:2; letter-spacing:0; word-spacing:0; }
+.documentation .live-editor pre { position:absolute; inset:0 auto auto 0; min-width:100%; border:0; border-radius:0; background:transparent; overflow:visible; pointer-events:none; }
+.live-editor pre code { display:block; padding:0; background:transparent; color:var(--text); }
+.live-editor textarea { position:relative; display:block; width:100%; min-height:100%; border:0; outline:0; resize:none; overflow:hidden; background:transparent; color:transparent; caret-color:var(--text); -webkit-text-fill-color:transparent; }
+.live-editor textarea::selection { background:#a6c1ff40; }
+.live-editor:focus-within { box-shadow:inset 0 0 0 2px var(--focus); border-radius:0 0 var(--panel-radius) var(--panel-radius); }
+
+@media (max-width:760px) {
+  .doc-cards { grid-template-columns:minmax(0,1fr); }
+  .documentation #doc-article h2 { font-size:21px; margin-top:44px; }
+  .doc-step-number { width:30px; height:30px; font-size:14px; }
+  .live-editor { font-size:12px; max-height:360px; }
+  .live-editor pre, .live-editor textarea { padding:10px 14px 16px; }
+  .live-toolbar { padding:8px 8px 0 14px; flex-wrap:wrap; }
+  .documentation .live-status { order:5; flex-basis:100%; margin:6px 0 0; }
+  .documentation .live-status:empty { display:none; }
+}
+
+/* API reference: a filter, then one block per module and one row per export. */
+.api-filter { display:block; margin:8px 0 10px; }
+.api-filter > span { display:block; font-size:13px; color:var(--muted); margin-bottom:8px; }
+.documentation .api-filter input { width:100%; min-height:44px; padding:11px 13px; font-size:14px; border-radius:var(--radius); background:var(--bg); border:1px solid var(--border); color:var(--text); }
+.documentation #doc-article .api-count { font-size:13px; color:var(--muted); margin:0 0 8px; }
+.documentation #doc-article .api-module h3 { display:flex; align-items:baseline; gap:10px; margin:40px 0 6px; font-size:17px; }
+.api-module h3 code { background:none !important; padding:0 !important; font-size:16px !important; }
+.api-module h3 span { font-size:12px; font-weight:500; color:var(--muted); }
+.documentation #doc-article .api-import { margin:0 0 12px; font-size:13px; color:var(--muted); }
+.api-entry { margin:0 0 6px; padding:14px 16px; border-radius:var(--radius); background:var(--bg); scroll-margin-top:calc(var(--navigation-height,80px) + 24px); }
+.api-entry-heading { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; }
+.documentation #doc-article .api-entry h4 { margin:0; font:600 14px ui-monospace,Consolas,monospace; min-width:0; overflow-wrap:anywhere; }
+.api-kind { font-size:12px; color:var(--muted); }
+.documentation #doc-article .api-source { margin-left:auto; font-size:12px; color:var(--muted); }
+.documentation .docs .api-entry pre { padding:6px 0 0; font-size:12.5px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+.documentation #doc-article .api-entry p { margin:6px 0 0; font-size:13.5px; line-height:1.65; color:var(--muted); }

@@ -1,7 +1,7 @@
 // Draws reference scenes with the path tracer on the CPU and on the GPU, same seed, and writes the images and timings.
-//   node bench/reference/gpu-compare.mjs <output directory> <scene id>,<scene id> [--samples 64] [--backend cpu|gpu|both]
-//     [--width 960] [--height 540] [--bounces 8] [--no-denoise] [--threads 8]
-// Files are <scene>-pathtracer-<backend>.png and timings.json. Run it through bash ~/.agents/tools/gpu-lock.sh: the GPU
+//   node bench/reference/gpu-compare.mjs <output directory> <scene id>,<scene id> [--samples 64] [--backend cpu|gpu|webgpu|both]
+//     [--light-selection uniform|importance|tree] [--width 960] [--height 540] [--bounces 8] [--no-denoise] [--threads 8]
+// Files are <scene>-pathtracer-<backend>.png and timings.json. Run it through the GPU lock script (gpu-lock.sh): the GPU
 // backend takes the whole GPU for seconds at a time.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
@@ -27,6 +27,7 @@ const options = {
   width: Number(valueAfter('--width', 960)),
   height: Number(valueAfter('--height', 540)),
   samples: Number(valueAfter('--samples', 64)),
+  lightSelection: valueAfter('--light-selection', 'uniform'),
   bounces: Number(valueAfter('--bounces', 8)),
   threads: Number(valueAfter('--threads', 8)),
   denoise: !argumentsGiven.includes('--no-denoise'),
@@ -35,7 +36,7 @@ const options = {
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 await mkdir(outputDirectory, { recursive: true });
-const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, logLevel: 'silent' });
+const server = await createServer({ server: { host: '127.0.0.1', port: 0, fs: { strict: false } }, logLevel: 'silent' });
 await server.listen();
 const serverUrl = `http://127.0.0.1:${server.httpServer.address().port}`;
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--enable-webgl', '--ignore-gpu-blocklist', '--disable-renderer-backgrounding'] });
@@ -51,9 +52,18 @@ try {
       const isRecipe = id.endsWith('.json');
       const recipe = isRecipe ? JSON.parse(await readFile(id, 'utf8')) : null;
       const name = isRecipe ? recipeName(id) : id;
-      const result = isRecipe
-        ? await page.evaluate(([sceneRecipe, tracerOptions]) => window.renderRecipePathTraced(sceneRecipe, tracerOptions), [recipe, { ...options, backend }])
-        : await page.evaluate(([sceneId, tracerOptions]) => window.renderReferencePathTraced(sceneId, tracerOptions), [id, { ...options, backend }]);
+      let result;
+      try {
+        result = isRecipe
+          ? await page.evaluate(([sceneRecipe, tracerOptions]) => window.renderRecipePathTraced(sceneRecipe, tracerOptions), [recipe, { ...options, backend }])
+          : await page.evaluate(([sceneId, tracerOptions]) => window.renderReferencePathTraced(sceneId, tracerOptions), [id, { ...options, backend }]);
+      } catch (error) {
+        // The webgpu backend names the scene features it does not trace; record that and go on with the next scene.
+        if (backend !== 'webgpu' || !/does not trace/.test(error.message)) throw error;
+        timings[`${name}:${backend}`] = { unsupported: error.message.replace(/^.*Error: /, '') };
+        console.log(name, backend, 'unsupported:', error.message.split('\n')[0]);
+        continue;
+      }
       await writeFile(`${outputDirectory}/${name}-pathtracer-${backend}.png`, Buffer.from(result.image, 'base64'));
       const { seconds, tracedSeconds, samples, triangles, gpu, gpuCompileSeconds } = result.report;
       timings[`${name}:${backend}`] = { seconds: Number(seconds.toFixed(2)), tracedSeconds: Number(tracedSeconds.toFixed(2)), samples, triangles, gpu, compileSeconds: gpuCompileSeconds };

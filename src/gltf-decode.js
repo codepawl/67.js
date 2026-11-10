@@ -143,13 +143,21 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
 
   function uniqueName(originalName) {
     const sanitized = sanitizeNodeName(originalName);
-    if (usedNames.has(sanitized)) {
-      const count = usedNames.get(sanitized) + 1;
-      usedNames.set(sanitized, count);
-      return `${sanitized}_${count}`;
+    if (!usedNames.has(sanitized)) {
+      usedNames.set(sanitized, 0);
+      return sanitized;
     }
-    usedNames.set(sanitized, 0);
-    return sanitized;
+    // A later node may really be called "Bone_1", so skip suffixes that are taken: names stay unique and clip
+    // tracks, which address nodes by name, never collide.
+    let count = usedNames.get(sanitized);
+    let candidate;
+    do {
+      count++;
+      candidate = `${sanitized}_${count}`;
+    } while (usedNames.has(candidate));
+    usedNames.set(sanitized, count);
+    usedNames.set(candidate, 0);
+    return candidate;
   }
 
   function imageBytes(index) {

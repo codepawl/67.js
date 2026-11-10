@@ -164,17 +164,22 @@ function decomposeMatrix(matrix) {
   };
 }
 
+/** The inverse of a matrix, or the identity when it has none (a joint authored at zero scale). */
+function invertOrIdentity(matrix) {
+  return mat4.invert(mat4.create(), matrix) ?? mat4.create();
+}
+
 /**
  * Build a rig from an imported skin pose. The bind pose becomes the rest pose.
  * `rootMatrix` is the world matrix of whatever sits above the root joints (for example a scaled Armature node).
  */
 export function createRigFromSkin(skin, { rootMatrix = mat4.create() } = {}) {
   if (!skin?.joints || !skin.inverseBindMatrices) throw new TypeError('A skin with joints and inverseBindMatrices is required.');
-  const bindWorldMatrices = skin.joints.map((_, index) => mat4.invert(mat4.create(), skin.inverseBindMatrices.subarray(index * 16, index * 16 + 16)));
-  const inverseRoot = mat4.invert(mat4.create(), rootMatrix);
+  const bindWorldMatrices = skin.joints.map((_, index) => invertOrIdentity(skin.inverseBindMatrices.subarray(index * 16, index * 16 + 16)));
+  const inverseRoot = invertOrIdentity(rootMatrix);
   const joints = skin.joints.map((joint, index) => {
     const parentWorld = joint.parent >= 0 ? bindWorldMatrices[joint.parent] : rootMatrix;
-    const inverseParent = joint.parent >= 0 ? mat4.invert(mat4.create(), parentWorld) : inverseRoot;
+    const inverseParent = joint.parent >= 0 ? invertOrIdentity(parentWorld) : inverseRoot;
     const local = mat4.multiply(mat4.create(), inverseParent, bindWorldMatrices[index]);
     return { name: joint.name, parent: joint.parent, ...decomposeMatrix(local) };
   });

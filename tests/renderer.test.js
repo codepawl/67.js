@@ -13,7 +13,7 @@ function part(name, geometry = {}, map) {
 function retainedRenderer(parts) {
   const writes = [];
   const renderer = Object.create(Renderer67.prototype);
-  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 41).fill(7), castShadow: true, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false };
+  const batch = { instanceBuffer: {}, instanceData: new Float32Array(parts.length * 42).fill(7), castShadow: true, receivesShadow: true, compositeMode: 0, alphaMode: 'opaque', alphaCutoff: 0, opacity: 1, doubleSided: false };
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData(target, offset, data) { writes.push({ target, offset, data: Array.from(data) }); } };
   renderer.partLocations = new Map(parts.map((item, index) => [item, {
     batch, index, geometry: item.geometry, map: item.material.map ?? null, normalMatrix: mat3.create(), layerState: materialLayerState(item.material), skin: item.skin ?? null,
@@ -83,7 +83,7 @@ function alphaPart(name, geometry, materialFields) {
   return { ...base, material: { ...base.material, ...materialFields } };
 }
 
-test('alpha mode, cutoff, opacity and double-sided state partition batches', () => {
+test('alpha mode, cutoff and double-sided state partition batches, while blend and add opacity does not', () => {
   const geometry = {};
   const parts = [
     alphaPart('opaque', geometry, {}),
@@ -94,9 +94,13 @@ test('alpha mode, cutoff, opacity and double-sided state partition batches', () 
     alphaPart('glass', geometry, { alphaMode: 'blend', opacity: 0.3 }),
     alphaPart('faint glass', geometry, { alphaMode: 'blend', opacity: 0.1 }),
     alphaPart('opaque with ignored opacity', geometry, { opacity: 0.2 }),
+    alphaPart('spark', geometry, { alphaMode: 'add', opacity: 0.5 }),
+    alphaPart('flare', geometry, { alphaMode: 'add', opacity: 1 }),
   ];
   const groups = groupParts(parts);
   assert.equal(groups.length, 6);
+  assert.deepEqual(groups.find(group => group[0].name === 'glass').map(item => item.name), ['glass', 'faint glass'], 'two blend parts with different opacity share a batch');
+  assert.deepEqual(groups.find(group => group[0].name === 'spark').map(item => item.name), ['spark', 'flare'], 'add parts share a batch whatever their opacity');
   assert.deepEqual(groups[0].map(item => item.name), ['opaque', 'opaque with ignored opacity']);
   assert.deepEqual(groups[1].map(item => item.name), ['leaf', 'second leaf']);
 });
@@ -119,11 +123,10 @@ test('blend batches skip shadows by default and alpha state cannot change after 
   assert.equal(groupParts([glass, { ...glass, castShadow: true }]).length, 2);
   const { renderer, batch, writes } = retainedRenderer([glass]);
   batch.alphaMode = 'blend';
-  batch.opacity = 0.5;
   batch.castShadow = false;
   renderer.updateParts([glass]);
   assert.equal(writes.length, 1);
-  for (const change of [{ alphaMode: 'mask' }, { opacity: 0.6 }, { doubleSided: true }]) {
+  for (const change of [{ alphaMode: 'mask' }, { alphaMode: 'add' }, { doubleSided: true }]) {
     glass.material = { ...glass.material, ...change };
     assert.throws(() => renderer.updateParts([glass]), /require a new renderer/);
     glass.material = alphaPart('glass', geometry, { alphaMode: 'blend', opacity: 0.5 }).material;
@@ -131,15 +134,49 @@ test('blend batches skip shadows by default and alpha state cannot change after 
   assert.equal(writes.length, 1);
 });
 
+test('updateParts changes the opacity of blend and add parts without a new batch', () => {
+  const geometry = {};
+  for (const alphaMode of ['blend', 'add']) {
+    const trail = alphaPart('trail', geometry, { alphaMode, opacity: 0.5 });
+    const { renderer, batch, writes } = retainedRenderer([trail]);
+    batch.alphaMode = alphaMode;
+    batch.castShadow = false;
+    for (const opacity of [0.25, 0.75, 0]) {
+      trail.material = { ...trail.material, opacity };
+      renderer.updateParts([trail]);
+      assert.equal(batch.instanceData[41], opacity, `${alphaMode} opacity reaches the instance data`);
+    }
+    assert.equal(writes.length, 3);
+  }
+  const leaf = alphaPart('leaf', geometry, { alphaMode: 'mask', opacity: 0.5 });
+  const { renderer, batch } = retainedRenderer([leaf]);
+  batch.alphaMode = 'mask';
+  batch.opacity = 0.5;
+  leaf.material = { ...leaf.material, opacity: 0.6 };
+  assert.throws(() => renderer.updateParts([leaf]), /require a new renderer/);
+});
+
+test('opaque and mask parts keep an instance opacity of one', () => {
+  for (const fields of [{}, { alphaMode: 'mask', opacity: 0.4 }]) {
+    const item = alphaPart('solid', {}, fields);
+    const { renderer, batch } = retainedRenderer([item]);
+    batch.alphaMode = item.material.alphaMode ?? 'opaque';
+    batch.opacity = fields.opacity ?? 1;
+    batch.alphaCutoff = fields.alphaMode === 'mask' ? 0.5 : 0;
+    renderer.updateParts([item]);
+    assert.equal(batch.instanceData[41], 1);
+  }
+});
+
 test('blend instances upload back to front by distance to the eye', () => {
   const uploads = [];
   const renderer = Object.create(Renderer67.prototype);
   renderer.context = { ARRAY_BUFFER: 34962, bindBuffer() {}, bufferSubData(target, offset, data) { uploads.push(Array.from(data)); } };
-  const instanceData = new Float32Array(3 * 41);
-  [1, 9, 4].forEach((distance, index) => { instanceData[index * 41 + 14] = -distance; instanceData[index * 41] = index; });
+  const instanceData = new Float32Array(3 * 42);
+  [1, 9, 4].forEach((distance, index) => { instanceData[index * 42 + 14] = -distance; instanceData[index * 42] = index; });
   const batch = { instanceBuffer: {}, instanceData, instanceCount: 3 };
   renderer.uploadSortedInstances(batch, [0, 0, 0]);
-  const order = [0, 1, 2].map(rank => uploads[0][rank * 41]);
+  const order = [0, 1, 2].map(rank => uploads[0][rank * 42]);
   assert.deepEqual(order, [1, 2, 0]);
 });
 
@@ -459,8 +496,12 @@ test('skin palette and influence textures cache by pose and geometry identity an
   renderer.buffers = [];
   renderer.textures = new Map();
   renderer.partLocations = new Map();
+  renderer.liquidProgram = 'liquidProgram';
+  const deletedPrograms = [];
+  renderer.context.deleteProgram = (program) => { if (program) deletedPrograms.push(program); };
   renderer.dispose();
   assert.deepEqual(deleted, [palette.texture, influences.texture]);
+  assert.deepEqual(deletedPrograms, ['liquidProgram']);
   assert.equal(renderer.skinTextures.size, 0);
   assert.equal(renderer.influenceTextures.size, 0);
 });
@@ -538,6 +579,7 @@ test('blend batches draw their opaque texels with depth writes before the blende
   const state = { depthMask: true, blend: false };
   const context = new Proxy({}, {
     get(target, name) {
+      if (name === 'blendFuncSeparate') return (...functions) => blendFunctions.push(functions.join());
       if (name === 'depthMask') return (value) => { state.depthMask = value; };
       if (name === 'enable') return (capability) => { if (capability === 'BLEND') state.blend = true; };
       if (name === 'disable') return (capability) => { if (capability === 'BLEND') state.blend = false; };
@@ -545,21 +587,85 @@ test('blend batches draw their opaque texels with depth writes before the blende
       return () => {};
     },
   });
+  const blendFunctions = [];
+  context.blendFuncSeparate = (...functions) => blendFunctions.push(functions.join());
   const renderer = Object.create(Renderer67.prototype);
   renderer.context = context;
   renderer.uniforms = { shadowMap: 'shadowMap' };
   renderer.canvas = { width: 4, height: 4 };
-  const baked = { alphaMode: 'blend', alphaCutoff: 0, opacity: 1, instanceCount: 1, instanceData: new Float32Array(41) };
-  const glass = { alphaMode: 'blend', alphaCutoff: 0, opacity: 0.3, instanceCount: 1, instanceData: new Float32Array(41) };
-  renderer.batches = [baked, glass];
+  const baked = { alphaMode: 'blend', alphaCutoff: 0, opacity: 1, instanceCount: 1, instanceData: new Float32Array(42).fill(1) };
+  const glass = { alphaMode: 'blend', alphaCutoff: 0, opacity: 1, instanceCount: 1, instanceData: new Float32Array(42).fill(0.3) };
+  const glow = { alphaMode: 'add', alphaCutoff: 0, opacity: 1, instanceCount: 1, instanceData: new Float32Array(42).fill(0.8) };
+  renderer.batches = [glow, baked, glass];
   renderer.uploadSortedInstances = () => {};
   renderer.drawAlphaBatch = (batch) => {
-    draws.push({ opacity: batch.opacity, depthMask: state.depthMask, blend: state.blend, alphaMode: batch.alphaMode, alphaCutoff: batch.alphaCutoff });
+    draws.push({ opacity: batch.instanceData[41], blendFunction: blendFunctions.at(-1), depthMask: state.depthMask, blend: state.blend, alphaMode: batch.alphaMode, alphaCutoff: batch.alphaCutoff });
   };
   renderer.drawBlendBatches({ eye: [0, 0, 0] });
-  assert.equal(draws.length, 3);
-  assert.deepEqual(draws[0], { opacity: 1, depthMask: true, blend: false, alphaMode: 'mask', alphaCutoff: 0.999 });
-  assert.ok(draws.slice(1).every(draw => draw.blend && !draw.depthMask && draw.alphaMode === 'blend'));
-  assert.equal(draws.filter(draw => draw.opacity === 0.3).length, 1, 'a translucent material has no opaque texels to draw first');
+  assert.equal(draws.length, 4);
+  assert.deepEqual(draws[0], { opacity: 1, blendFunction: undefined, depthMask: true, blend: false, alphaMode: 'mask', alphaCutoff: 0.999 });
+  assert.ok(draws.slice(1).every(draw => draw.blend && !draw.depthMask));
+  assert.deepEqual(draws.map(draw => draw.alphaMode), ['mask', 'blend', 'blend', 'add'], 'add draws after every blend batch');
+  assert.equal(draws[3].blendFunction, 'SRC_ALPHA,ONE,ZERO,ONE', 'add sums source and frame');
+  assert.equal(draws[1].blendFunction, 'SRC_ALPHA,ONE_MINUS_SRC_ALPHA,ONE,ONE_MINUS_SRC_ALPHA');
+  assert.equal(draws.filter(draw => draw.opacity === Math.fround(0.3)).length, 1, 'a translucent material has no opaque texels to draw first');
   assert.equal(baked.alphaCutoff, 0);
+});
+
+test('resize keeps the projection centered at 699 px and 1440 px', () => {
+  const renderer = Object.create(Renderer67.prototype);
+  renderer.context = { getParameter: () => 8192 };
+  renderer.projection = new Float32Array(16);
+  renderer.pixelRatio = 1;
+  renderer.multisampleSamples = 1;
+  renderer.memoryBudgetMiB = 64;
+  renderer.geometryBytes = 0;
+  renderer.textureBytes = 0;
+  renderer.hdr = false;
+  renderer.benchmark = true;
+  renderer.depth = false;
+  renderer.world = null;
+  for (const width of [699, 1440]) {
+    renderer.canvas = { clientWidth: width, clientHeight: 500, width: 0, height: 0 };
+    renderer.resize();
+    assert.equal(renderer.projection[8], 0);
+  }
+});
+
+test('drawAmbientOcclusion unprojects in view space so far camera coordinates do not quantize distant normals', () => {
+  const uploaded = {};
+  const renderer = Object.create(Renderer67.prototype);
+  renderer.canvas = { width: 540, height: 960 };
+  renderer.depthTexture = 'depth';
+  renderer.projection = mat4.perspective(mat4.create(), (52 * Math.PI) / 180, 540 / 960, 0.05, 400);
+  renderer.view = mat4.lookAt(mat4.create(), [6000.3, 1.0, 9.2], [6000.0, 1.4, -20.0], [0, 1, 0]);
+  renderer.viewProjection = mat4.multiply(mat4.create(), renderer.projection, renderer.view);
+  renderer.inverseViewProjection = mat4.invert(mat4.create(), renderer.viewProjection);
+  renderer.occlusionTarget = { texture: 'ao', framebuffer: 'fbo', width: 270, height: 480 };
+  renderer.occlusionProgram = 'program';
+  renderer.occlusionUniforms = {
+    sceneDepth: 'sceneDepth', inverseViewProjection: 'inverseViewProjection',
+    radius: 'radius', projectionScale: 'projectionScale', aspect: 'aspect', orthographic: 'orthographic',
+  };
+  renderer.context = {
+    FRAMEBUFFER: 1, TEXTURE_2D: 2, TEXTURE1: 3, DEPTH_TEST: 4, CULL_FACE: 5, TRIANGLES: 6,
+    bindFramebuffer() {}, viewport() {}, disable() {}, bindVertexArray() {}, useProgram() {}, activeTexture() {}, bindTexture() {},
+    uniform1i(name, value) { uploaded[name] = value; },
+    uniform1f(name, value) { uploaded[name] = value; },
+    uniformMatrix4fv(name, transpose, value) { uploaded[name] = new Float32Array(value); },
+    drawArrays() {},
+  };
+  renderer.drawAmbientOcclusion({ eye: [6000.3, 1.0, 9.2], projection: 'perspective' }, { ambientOcclusionRadius: 0.5 });
+  const matrix = uploaded.inverseViewProjection;
+  const clipZ = (-renderer.projection[10] * 129.2 + renderer.projection[14]) / 129.2;
+  const unprojectX = (column) => {
+    const clipX = ((column + 0.5) / 270) * 2 - 1;
+    const x = Math.fround(Math.fround(Math.fround(matrix[0] * clipX) + Math.fround(matrix[8] * clipZ)) + matrix[12]);
+    const w = Math.fround(Math.fround(Math.fround(matrix[3] * clipX) + Math.fround(matrix[11] * clipZ)) + matrix[15]);
+    return Math.fround(x / w);
+  };
+  for (let column = 0; column < 269; column++) {
+    const step = unprojectX(column + 1) - unprojectX(column);
+    assert.ok(step > 0.25 && step < 0.27, `column ${column} step ${step} must not quantize to zero`);
+  }
 });

@@ -2,7 +2,7 @@
 
 ## Report a problem
 
-Email legal@codepawl.com with the steps to reproduce the problem. Do not open a public issue for a vulnerability.
+Report it privately on GitHub: open the [Security tab](https://github.com/codepawl/67.js/security/advisories/new) and choose "Report a vulnerability", with the steps to reproduce the problem. If you cannot use GitHub, email legal@codepawl.com. Do not open a public issue for a vulnerability.
 
 ## Supported versions
 

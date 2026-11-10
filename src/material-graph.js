@@ -334,6 +334,105 @@ function compileMath(name, node, state, depth) {
   return liftComponentwise(operands.map(operand => compileNode(operand, state, depth + 1)), compute);
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Mixing nodes: a layer put over another where a mask passes, a hue shift and a curve.
+
+function compileScalarInput(node, state, depth, label) {
+  const compiled = compileNode(node, state, depth + 1);
+  if (compiled.kind !== 'scalar') throw graphError(`${label} needs a number.`);
+  return compiled;
+}
+
+function compileLayer(node, state, depth) {
+  const settings = textureSettings(node, 'layer', ['base', 'top', 'mask', 'edge', 'softness']);
+  for (const required of ['base', 'top', 'mask']) {
+    if (settings[required] === undefined) throw graphError(`layer needs "${required}".`);
+  }
+  const edge = settings.edge ?? 0.5;
+  const softness = settings.softness ?? 0.1;
+  if (!finiteLiteral(edge) || !finiteLiteral(softness) || softness < 0) throw graphError('layer edge is a number and softness a number from 0.');
+  const base = compileNode(settings.base, state, depth + 1);
+  const top = compileNode(settings.top, state, depth + 1);
+  const mask = compileScalarInput(settings.mask, state, depth, 'layer "mask"');
+  const coverage = scalarValue((u, v) => {
+    const value = mask.evaluate(u, v);
+    return softness === 0 ? (value >= edge ? 1 : 0) : smoothStep(edge - softness, edge + softness, value);
+  });
+  return liftComponentwise([base, top, coverage], mixNumbers);
+}
+
+function rgbToHsv(red, green, blue) {
+  const high = Math.max(red, green, blue);
+  const spread = high - Math.min(red, green, blue);
+  let hue = 0;
+  if (spread > 0) {
+    if (high === red) hue = ((green - blue) / spread + 6) % 6;
+    else if (high === green) hue = (blue - red) / spread + 2;
+    else hue = (red - green) / spread + 4;
+  }
+  return [hue / 6, high === 0 ? 0 : spread / high, high];
+}
+
+function hsvToRgb(hue, saturation, value) {
+  const channel = offset => {
+    const sector = (offset + hue * 6) % 6;
+    return value * (1 - saturation * Math.max(0, Math.min(sector, 4 - sector, 1)));
+  };
+  return [channel(5), channel(3), channel(1)];
+}
+
+function compileHue(node, state, depth) {
+  const settings = textureSettings(node, 'hue', ['color', 'shift', 'saturation', 'value']);
+  const saturation = settings.saturation ?? 1;
+  const brightness = settings.value ?? 1;
+  for (const factor of [saturation, brightness]) {
+    if (typeof factor !== 'number' || !Number.isFinite(factor) || factor < 0 || factor > 4) throw graphError('hue saturation and value are numbers from 0 to 4.');
+  }
+  const color = compileNode(settings.color, state, depth + 1);
+  if (color.kind !== 'vector') throw graphError('hue "color" needs a colour such as [r, g, b].');
+  const shift = compileScalarInput(settings.shift ?? 0, state, depth, 'hue "shift"');
+  state.cost += 4;
+  const [red, green, blue] = color.parts;
+  // The three channels read the same pixel in a row, so the last result is kept instead of converting three times.
+  let lastU = NaN;
+  let lastV = NaN;
+  let lastResult = [0, 0, 0];
+  const shifted = (u, v) => {
+    if (u !== lastU || v !== lastV) {
+      const [hue, sourceSaturation, sourceValue] = rgbToHsv(finiteOrZero(red(u, v)), finiteOrZero(green(u, v)), finiteOrZero(blue(u, v)));
+      lastResult = hsvToRgb(fract(hue + finiteOrZero(shift.evaluate(u, v))), clampUnit(sourceSaturation * saturation), sourceValue * brightness);
+      lastU = u;
+      lastV = v;
+    }
+    return lastResult;
+  };
+  return vectorValue((u, v) => shifted(u, v)[0], (u, v) => shifted(u, v)[1], (u, v) => shifted(u, v)[2]);
+}
+
+function compileCurve(node, state, depth) {
+  const settings = textureSettings(node, 'curve', ['value', 'points']);
+  const { points } = settings;
+  if (!Array.isArray(points) || points.length < 2 || points.length > MATERIAL_GRAPH_LIMITS.maxStops) throw graphError(`curve needs 2 to ${MATERIAL_GRAPH_LIMITS.maxStops} points.`);
+  let previousX = -Infinity;
+  for (const point of points) {
+    if (!Array.isArray(point) || point.length !== 2 || !point.every(finiteLiteral) || point[0] <= previousX) throw graphError('curve points are [x, y] with x rising.');
+    previousX = point[0];
+  }
+  const remap = input => {
+    if (input <= points[0][0]) return points[0][1];
+    for (let index = 1; index < points.length; index++) {
+      if (input <= points[index][0]) {
+        const [fromX, fromY] = points[index - 1];
+        const [toX, toY] = points[index];
+        return mixNumbers(fromY, toY, (input - fromX) / (toX - fromX));
+      }
+    }
+    return points[points.length - 1][1];
+  };
+  state.cost += 2;
+  return liftComponentwise([compileNode(settings.value, state, depth + 1)], remap);
+}
+
 const TEXTURE_COMPILERS = new Map([
   ['noise', compileNoise], ['voronoi', compileVoronoi], ['wave', compileWave], ['checker', compileChecker], ['gradient', compileGradient],
 ]);
@@ -359,12 +458,15 @@ function compileNode(node, state, depth) {
   if (name === 'uv') return compileCoordinates(node);
   if (name === 'vec') return compileVector(node, state, depth);
   if (name === 'ramp') return compileRamp(node, state, depth);
+  if (name === 'layer') return compileLayer(node, state, depth);
+  if (name === 'hue') return compileHue(node, state, depth);
+  if (name === 'curve') return compileCurve(node, state, depth);
   if (TEXTURE_COMPILERS.has(name)) return TEXTURE_COMPILERS.get(name)(node, state, depth);
   if (MATH_OPERATORS.has(name)) return compileMath(name, node, state, depth);
   throw graphError(`unknown operator ${describeKey(name)}. Use one of ${MATERIAL_GRAPH_OPERATORS.join(', ')}.`);
 }
 
-const SCALAR_OUTPUTS = ['roughness', 'metallic', 'height'];
+const SCALAR_OUTPUTS = ['roughness', 'metallic', 'height', 'opacity', 'clearcoat', 'transmission'];
 
 /**
  * Check a graph and compile each output. Limits on nodes, depth and work per pixel are enforced here, before any
@@ -410,6 +512,14 @@ function sampleChannels(compiled, u, v) {
   return [finiteOrZero(compiled.parts[0](u, v)), finiteOrZero(compiled.parts[1](u, v)), finiteOrZero(compiled.parts[2](u, v))];
 }
 
+const unitByte = value => Math.round(clampUnit(finiteOrZero(value)) * 255);
+
+// A mask is read from the red channel, as glTF reads clearcoatTexture and transmissionTexture.
+function writeMask(data, offset, value) {
+  data[offset] = unitByte(value);
+  data[offset + 3] = 255;
+}
+
 function writeColor(data, offset, channels) {
   for (let channel = 0; channel < 3; channel++) data[offset + channel] = linearToSrgbByte(channels[channel]);
   data[offset + 3] = 255;
@@ -419,10 +529,14 @@ function writeColor(data, offset, channels) {
 export function bakeMaterialGraph(graph, { resolution, bump }) {
   const compiled = compileMaterialGraph(graph);
   checkMaterialGraphWork(compiled, resolution);
-  const { color, roughness, metallic, emission, height } = compiled.outputs;
+  const { color, roughness, metallic, emission, height, opacity, clearcoat, transmission, aov } = compiled.outputs;
   const pixelCount = resolution * resolution;
-  const colorData = color ? new Uint8ClampedArray(pixelCount * 4) : null;
+  // Opacity travels in the alpha of the base texture, so an opacity-only graph still gets a (white) base texture.
+  const colorData = color || opacity ? new Uint8ClampedArray(pixelCount * 4).fill(255) : null;
+  const clearcoatData = clearcoat ? new Uint8ClampedArray(pixelCount * 4) : null;
+  const transmissionData = transmission ? new Uint8ClampedArray(pixelCount * 4) : null;
   const emissionData = emission ? new Uint8ClampedArray(pixelCount * 4) : null;
+  const aovData = aov ? new Uint8ClampedArray(pixelCount * 4) : null;
   const surfaceData = roughness || metallic ? new Uint8ClampedArray(pixelCount * 4) : null;
   for (let row = 0; row < resolution; row++) {
     for (let column = 0; column < resolution; column++) {
@@ -431,7 +545,15 @@ export function bakeMaterialGraph(graph, { resolution, bump }) {
       const v = (row + 0.5) / resolution;
       const offset = pixel * 4;
       if (color) writeColor(colorData, offset, sampleChannels(color, u, v));
+      if (opacity) colorData[offset + 3] = unitByte(opacity.evaluate(u, v));
+      if (clearcoat) writeMask(clearcoatData, offset, clearcoat.evaluate(u, v));
+      if (transmission) writeMask(transmissionData, offset, transmission.evaluate(u, v));
       if (emission) writeColor(emissionData, offset, sampleChannels(emission, u, v));
+      if (aov) {
+        const channels = sampleChannels(aov, u, v);
+        for (let channel = 0; channel < 3; channel++) aovData[offset + channel] = unitByte(channels[channel]);
+        aovData[offset + 3] = 255;
+      }
       if (surfaceData) {
         surfaceData[offset] = 255;
         surfaceData[offset + 1] = roughness ? Math.round(clampUnit(finiteOrZero(roughness.evaluate(u, v))) * 255) : 255;
@@ -445,6 +567,10 @@ export function bakeMaterialGraph(graph, { resolution, bump }) {
     map: descriptor(colorData, 'srgb'),
     emissiveMap: descriptor(emissionData, 'srgb'),
     metallicRoughnessMap: descriptor(surfaceData, 'linear'),
+    // The rasterizer binds clearcoatTexture from layerMaps; transmission has no layer slot, so the tracer reads transmissionMap.
+    layerMaps: clearcoatData ? { clearcoatTexture: descriptor(clearcoatData, 'linear') } : undefined,
+    transmissionMap: descriptor(transmissionData, 'linear'),
+    aovMap: descriptor(aovData, 'linear'),
     normalMap: descriptor(height ? normalMapFromHeightFunction((u, v) => finiteOrZero(height.evaluate(u, v)), resolution, bump) : null, 'linear'),
   };
 }

@@ -247,6 +247,36 @@ test('lintMesh names open, non-manifold, inverted and loose problems with fixes'
   assert.ok(lintMesh(flipped).problems.some(problem => problem.kind === 'inconsistent-winding'));
 });
 
+test('lintMesh reports valence, quad quality, topologyScore and quad distortion warnings', () => {
+  const cube = unitCube();
+  const cubeReport = lintMesh(cube);
+  assert.deepEqual(cubeReport.valence, { regular: 0, poles3: 8, poles5: 0, poles6Plus: 0 });
+  assert.deepEqual(cubeReport.quadQuality, { meanAngleError: 0, maxAngleError: 0, maxAspect: 1, maxWarp: 0 });
+  assert.equal(cubeReport.topologyScore, 0.875);
+
+  const sheet = grid(3, 3);
+  const sheetReport = lintMesh(sheet);
+  assert.deepEqual(sheetReport.valence, { regular: 4, poles3: 0, poles5: 0, poles6Plus: 0 }, 'boundary vertices are excluded from interior valence counts');
+  assert.equal(sheetReport.topologyScore, 1);
+
+  const sphereMesh = meshFromGeometry(sphere(16, 8));
+  const sphereReport = lintMesh(sphereMesh);
+  assert.equal(sphereReport.valence.poles6Plus, 2, 'the two UV sphere poles have valence 16');
+  assert.equal(sphereReport.valence.regular, 16 * 7, 'interior rings are regular valence-4 vertices');
+  assert.ok(sphereReport.topologyScore > 0.7 && sphereReport.topologyScore < 1);
+
+  // Fold one quad across its diagonal and skew another corner past 75 degrees from a right angle.
+  const warped = polygonMesh([0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1], [[0, 1, 2, 3]]);
+  const warpedGeom = lintMesh(warped, { geometry: true });
+  assert.ok(warpedGeom.quadQuality.maxWarp > 45);
+  assert.ok(warpedGeom.problems.some(problem => problem.kind === 'non-planar-quad'));
+
+  const skewed = polygonMesh([0, 0, 0, 2, 0, 0, 2.5, 0, 0.1, 0.5, 0, 0.1], [[0, 1, 2, 3]]);
+  const skewedGeom = lintMesh(skewed, { geometry: true });
+  assert.ok(skewedGeom.quadQuality.maxAngleError > 75);
+  assert.ok(skewedGeom.problems.some(problem => problem.kind === 'skewed-quad'));
+});
+
 test('gatherRenderPositions follows a deform-only edit', () => {
   const mesh = meshFromGeometry(sphere(16, 8));
   const { geometry, renderVertexSource } = extractRender(mesh);

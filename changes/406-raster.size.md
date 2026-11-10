@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: 83 bytes gzip for scalar bounds in `worldBounds`, which halves `applyWaterReflection` on a scene with millions of vertices (160 ms to 80 ms on the AIS port)

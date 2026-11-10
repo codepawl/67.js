@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { readAcceptedBundles } from '../scripts/size-base.mjs';
-import { budgetsFrom, ceilingProblems, compareCostsToBase, costAllowance, costsFrom } from '../scripts/tool-cost-growth.mjs';
+import { budgetsFrom, ceilingProblems, compareCostsToBase, costAllowance, costsFrom, hardCeilingProblems } from '../scripts/tool-cost-growth.mjs';
 
 const report = {
   schemaTotal: { bytes: 20000 },
@@ -59,6 +59,16 @@ test('release ceilings are listed as problems, and a release resets them', () =>
   const reset = budgetsFrom(measured, budgets);
   assert.deepEqual(ceilingProblems(measured, reset), []);
   assert.equal(reset.schemaOtherToolBytes, 4000);
+});
+
+test('absolute ceilings fail the total, a large tool, any other tool and the default capabilities answer', () => {
+  const ceilings = { schemaTotalBytes: 19000, schemaToolBytes: { scene_create: 12500 }, schemaOtherToolBytes: 7000, resultBytes: { scene_capabilities: 250 } };
+  const problems = hardCeilingProblems(costsFrom(report), ceilings);
+  assert.equal(problems.length, 2 + 1);
+  assert.match(problems[0], /tool-total is 20000 bytes, over its absolute ceiling of 19000 by 1000/);
+  assert.match(problems[1], /tool:scene_apply is 8000 bytes, over its absolute ceiling of 7000 by 1000/);
+  assert.match(problems[2], /result:scene_capabilities is 300 bytes, over its absolute ceiling of 250 by 50/);
+  assert.deepEqual(hardCeilingProblems(costsFrom(report), { ...ceilings, schemaTotalBytes: 20000, schemaOtherToolBytes: 8000, resultBytes: {} }), []);
 });
 
 function runGit(folder, ...args) {

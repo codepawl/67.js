@@ -2,6 +2,7 @@ import { mat4 } from 'gl-matrix';
 import { leafTextureDescriptor } from './vegetation-textures.js';
 import { SPECIES, createTree, scatterVegetation, levelForDistance } from './vegetation.js';
 import { createRecipeTerrain } from './agent-terrain.js';
+import { invalidField } from './field-error.js';
 
 // Recipe vegetation: a group node with a `vegetation` field grows one tree, or scatters trees over a terrain node. The
 // result reuses the placed-asset channel of agent-scene.js: generated geometries (type "asset"), materials (assetSource)
@@ -21,81 +22,83 @@ const GRASS_CARD_COLOR = [80, 128, 40];
 const BARE_SEASON = 0.9;
 const DECIDUOUS_SPECIES = new Set(['broadleaf', 'birch', 'bush']);
 
-function knownKeys(value, allowed, label) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
+function knownKeys(value, allowed, path) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidField(path, value, 'an object, such as {}', TypeError);
+  }
   for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) throw new TypeError(`Unknown ${label} field: ${key}. Allowed fields: ${allowed.join(', ')}.`);
+    if (!allowed.includes(key)) throw invalidField(`${path}.${key}`, value[key], `no such field; use one of ${allowed.join(', ')}`, TypeError);
   }
 }
 
-function numberWithin(value, minimum, maximum, label) {
+function numberWithin(value, minimum, maximum, path) {
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new RangeError(`${label} must be a number from ${minimum} to ${maximum}.`);
+    throw invalidField(path, value, `a number from ${minimum} to ${maximum}, such as ${Math.min(Math.max(1, minimum), maximum)}`);
   }
   return value;
 }
 
-function planePoint(value, label) {
+function planePoint(value, path) {
   if (!Array.isArray(value) || value.length !== 2 || value.some(component => !Number.isFinite(component))) {
-    throw new TypeError(`${label} must be [x, z] in metres.`);
+    throw invalidField(path, value, '[x, z] in metres, such as [0, 0]', TypeError);
   }
   return [...value];
 }
 
-function normalizeExclusion(value) {
-  knownKeys(value, EXCLUSION_FIELDS, 'vegetation exclusion');
+function normalizeExclusion(value, path) {
+  knownKeys(value, EXCLUSION_FIELDS, path);
   if (value.min !== undefined || value.max !== undefined) {
-    const min = planePoint(value.min, 'exclusion min');
-    const max = planePoint(value.max, 'exclusion max');
-    if (max[0] <= min[0] || max[1] <= min[1]) throw new RangeError('exclusion max must be above min on both axes.');
+    const min = planePoint(value.min, `${path}.min`);
+    const max = planePoint(value.max, `${path}.max`);
+    if (max[0] <= min[0] || max[1] <= min[1]) throw invalidField(`${path}.max`, max, `[x, z] above min ${JSON.stringify(min)} on both axes`);
     return { min, max };
   }
-  const radius = numberWithin(value.radius, 0.01, 2000, 'exclusion radius');
+  const radius = numberWithin(value.radius, 0.01, 2000, `${path}.radius`);
   if (value.node !== undefined) {
-    if (typeof value.node !== 'string' || !value.node) throw new TypeError('exclusion node must be a node ID.');
+    if (typeof value.node !== 'string' || !value.node) throw invalidField(`${path}.node`, value.node, 'a node ID, such as "pond"', TypeError);
     return { node: value.node, radius };
   }
-  return { center: planePoint(value.center, 'exclusion center'), radius };
+  return { center: planePoint(value.center, `${path}.center`), radius };
 }
 
-function normalizeScatter(value) {
-  knownKeys(value, SCATTER_FIELDS, 'vegetation scatter');
-  if (typeof value.ground !== 'string' || !value.ground) throw new TypeError('vegetation scatter needs ground: the ID of a terrain node.');
+function normalizeScatter(value, path) {
+  knownKeys(value, SCATTER_FIELDS, path);
+  if (typeof value.ground !== 'string' || !value.ground) throw invalidField(`${path}.ground`, value.ground, 'the ID of a terrain node, such as "ground"', TypeError);
   const result = {
     ground: value.ground,
-    density: numberWithin(value.density ?? 0.012, 0.0001, 4, 'scatter density'),
-    slopeLimit: numberWithin(value.slopeLimit ?? 32, 0, 90, 'scatter slopeLimit'),
-    variants: numberWithin(value.variants ?? 3, 1, VEGETATION_LIMITS.maxVariants, 'scatter variants'),
+    density: numberWithin(value.density ?? 0.012, 0.0001, 4, `${path}.density`),
+    slopeLimit: numberWithin(value.slopeLimit ?? 32, 0, 90, `${path}.slopeLimit`),
+    variants: numberWithin(value.variants ?? 3, 1, VEGETATION_LIMITS.maxVariants, `${path}.variants`),
     exclude: [],
   };
-  if (!Number.isInteger(result.variants)) throw new RangeError('scatter variants must be a whole number.');
+  if (!Number.isInteger(result.variants)) throw invalidField(`${path}.variants`, result.variants, `a whole number from 1 to ${VEGETATION_LIMITS.maxVariants}, such as 3`);
   if (value.exclude !== undefined) {
     if (!Array.isArray(value.exclude) || value.exclude.length > VEGETATION_LIMITS.maxExclusions) {
-      throw new RangeError(`scatter exclude lists at most ${VEGETATION_LIMITS.maxExclusions} areas.`);
+      throw invalidField(`${path}.exclude`, Array.isArray(value.exclude) ? `${value.exclude.length} areas` : value.exclude, `a list of at most ${VEGETATION_LIMITS.maxExclusions} areas, such as [{ "center": [0, 0], "radius": 5 }]`);
     }
-    result.exclude = value.exclude.map(normalizeExclusion);
+    result.exclude = value.exclude.map((entry, index) => normalizeExclusion(entry, `${path}.exclude[${index}]`));
   }
   if (value.area !== undefined) {
-    knownKeys(value.area, ['min', 'max'], 'scatter area');
-    result.area = { min: planePoint(value.area.min, 'area min'), max: planePoint(value.area.max, 'area max') };
+    knownKeys(value.area, ['min', 'max'], `${path}.area`);
+    result.area = { min: planePoint(value.area.min, `${path}.area.min`), max: planePoint(value.area.max, `${path}.area.max`) };
     if (result.area.max[0] <= result.area.min[0] || result.area.max[1] <= result.area.min[1]) {
-      throw new RangeError('scatter area max must be above min on both axes.');
+      throw invalidField(`${path}.area.max`, result.area.max, `[x, z] above min ${JSON.stringify(result.area.min)} on both axes`);
     }
   }
   if (value.scale !== undefined) {
-    if (!Array.isArray(value.scale) || value.scale.length !== 2) throw new TypeError('scatter scale must be [min, max].');
-    result.scale = [numberWithin(value.scale[0], 0.1, 10, 'scatter scale min'), numberWithin(value.scale[1], 0.1, 10, 'scatter scale max')];
-    if (result.scale[1] < result.scale[0]) throw new RangeError('scatter scale max must not be below min.');
+    if (!Array.isArray(value.scale) || value.scale.length !== 2) throw invalidField(`${path}.scale`, value.scale, '[min, max], such as [0.8, 1.2]', TypeError);
+    result.scale = [numberWithin(value.scale[0], 0.1, 10, `${path}.scale[0]`), numberWithin(value.scale[1], 0.1, 10, `${path}.scale[1]`)];
+    if (result.scale[1] < result.scale[0]) throw invalidField(`${path}.scale`, value.scale, '[min, max] with max not below min, such as [0.8, 1.2]');
   }
   return result;
 }
 
 /** Validate environment.wind: strength 0 to 4 (0.3) and direction in degrees (0 toward +x, 90 toward +z). */
 export function normalizeWind(value) {
-  knownKeys(value, ['strength', 'direction'], 'wind');
+  knownKeys(value, ['strength', 'direction'], 'environment.wind');
   return {
-    strength: numberWithin(value.strength ?? 0.3, 0, 4, 'wind.strength'),
-    direction: numberWithin(value.direction ?? 0, -360, 360, 'wind.direction'),
+    strength: numberWithin(value.strength ?? 0.3, 0, 4, 'environment.wind.strength'),
+    direction: numberWithin(value.direction ?? 0, -360, 360, 'environment.wind.direction'),
   };
 }
 
@@ -112,37 +115,38 @@ function mergedRuntime(placed, vegetation) {
 
 /** Validate the `vegetation` field of a node (`node` is the whole node, which must be a group). Returns the canonical form kept in the recipe. */
 export function normalizeVegetation(value, node) {
-  if (node && (node.geometry !== undefined || node.skin !== undefined || node.asset !== undefined)) {
-    throw new TypeError(`Node ${node.id}: a node that grows vegetation is a group; drop geometry, material, skin and asset.`);
+  const conflict = node && ['geometry', 'skin', 'asset'].find(field => node[field] !== undefined);
+  if (conflict) {
+    throw invalidField(conflict, node[conflict], 'nothing, because a node that grows vegetation is a group; drop geometry, material, skin and asset', TypeError);
   }
   knownKeys(value, VEGETATION_FIELDS, 'vegetation');
   const result = {};
   if ((value.species === undefined) === (value.mix === undefined)) {
-    throw new TypeError('vegetation needs exactly one of species (one tree) or mix (a scatter, species weights).');
+    throw invalidField('vegetation.species', value.species, 'exactly one of species (one tree, such as "broadleaf") or mix (a scatter, such as { "broadleaf": 3, "bush": 1 })', TypeError);
   }
   if (value.species !== undefined) {
     if (!SCATTER_SPECIES.includes(value.species) || (!value.scatter && !SPECIES[value.species])) {
-      throw new RangeError(`vegetation species must be one of ${(value.scatter ? SCATTER_SPECIES : Object.keys(SPECIES)).join(', ')}.`);
+      throw invalidField('vegetation.species', value.species, `one of ${(value.scatter ? SCATTER_SPECIES : Object.keys(SPECIES)).join(', ')}`);
     }
     result.species = value.species;
   } else {
-    if (!value.scatter) throw new TypeError('vegetation mix needs scatter. A single tree takes species.');
-    if (!value.mix || typeof value.mix !== 'object' || Array.isArray(value.mix)) throw new TypeError('vegetation mix must map species to weights.');
+    if (!value.scatter) throw invalidField('vegetation.scatter', value.scatter, 'a scatter, such as { "ground": "ground" }, because mix needs one; a single tree takes species', TypeError);
+    if (!value.mix || typeof value.mix !== 'object' || Array.isArray(value.mix)) throw invalidField('vegetation.mix', value.mix, 'an object that maps species to weights, such as { "broadleaf": 3, "bush": 1 }', TypeError);
     result.mix = {};
     for (const [name, weight] of Object.entries(value.mix)) {
-      if (!SCATTER_SPECIES.includes(name)) throw new RangeError(`vegetation mix species must be among ${SCATTER_SPECIES.join(', ')}; got ${name}.`);
-      result.mix[name] = numberWithin(weight, 0, 100, `mix ${name}`);
+      if (!SCATTER_SPECIES.includes(name)) throw invalidField('vegetation.mix', name, `species names among ${SCATTER_SPECIES.join(', ')}`);
+      result.mix[name] = numberWithin(weight, 0, 100, `vegetation.mix.${name}`);
     }
-    if (!Object.values(result.mix).some(weight => weight > 0)) throw new RangeError('vegetation mix needs one positive weight.');
+    if (!Object.values(result.mix).some(weight => weight > 0)) throw invalidField('vegetation.mix', value.mix, 'at least one positive weight, such as { "broadleaf": 1 }');
   }
-  result.seed = numberWithin(value.seed ?? 1, -2147483648, 2147483647, 'vegetation seed');
-  if (value.height !== undefined) result.height = numberWithin(value.height, 0.2, 80, 'vegetation height');
+  result.seed = numberWithin(value.seed ?? 1, -2147483648, 2147483647, 'vegetation.seed');
+  if (value.height !== undefined) result.height = numberWithin(value.height, 0.2, 80, 'vegetation.height');
   result.leaves = value.leaves ?? 'cards';
-  if (result.leaves !== 'cards' && result.leaves !== 'mesh') throw new RangeError('vegetation leaves must be cards or mesh.');
-  result.season = numberWithin(value.season ?? 0, 0, 1, 'vegetation season');
-  if (value.cullDistance !== undefined) result.cullDistance = numberWithin(value.cullDistance, 1, 100_000, 'vegetation cullDistance');
-  result.distanceScale = numberWithin(value.distanceScale ?? 1, 0.1, 10, 'vegetation distanceScale');
-  if (value.scatter !== undefined) result.scatter = normalizeScatter(value.scatter);
+  if (result.leaves !== 'cards' && result.leaves !== 'mesh') throw invalidField('vegetation.leaves', result.leaves, '"cards" or "mesh"');
+  result.season = numberWithin(value.season ?? 0, 0, 1, 'vegetation.season');
+  if (value.cullDistance !== undefined) result.cullDistance = numberWithin(value.cullDistance, 1, 100_000, 'vegetation.cullDistance');
+  result.distanceScale = numberWithin(value.distanceScale ?? 1, 0.1, 10, 'vegetation.distanceScale');
+  if (value.scatter !== undefined) result.scatter = normalizeScatter(value.scatter, 'vegetation.scatter');
   return result;
 }
 
@@ -186,7 +190,7 @@ function groundTerrain(recipe, scatter) {
   const ground = recipe.nodes.find(node => node.id === scatter.ground);
   const definition = ground && recipe.geometries.find(geometry => geometry.id === ground.geometry);
   if (definition?.type !== 'terrain') {
-    throw new RangeError(`vegetation scatter ground ${JSON.stringify(scatter.ground.slice(0, 48))} must be a node drawing a terrain geometry. Give the group node the same transform as the ground.`);
+    throw invalidField('vegetation.scatter.ground', scatter.ground, 'the ID of a node that draws a terrain geometry, such as "ground"; give the group node the same transform as the ground');
   }
   return { definition, terrain: createRecipeTerrain(definition) };
 }
@@ -206,7 +210,7 @@ function exclusionTest(recipe, scatter, terrain) {
     let center = entry.center;
     if (entry.node) {
       const target = recipe.nodes.find(node => node.id === entry.node);
-      if (!target) throw new RangeError(`vegetation exclusion names node ${JSON.stringify(entry.node.slice(0, 48))}, which is not in the recipe.`);
+      if (!target) throw invalidField('vegetation.scatter.exclude[].node', entry.node, 'the ID of a node in the recipe, such as "pond"');
       center = [target.translation[0], target.translation[2]];
     }
     return (x, z) => Math.hypot(x - center[0], z - center[1]) <= entry.radius;
@@ -221,7 +225,7 @@ export function scatterOptionsFor(recipe, vegetation) {
   const area = scatterArea(scatter, definition);
   const candidates = (area.maxX - area.minX) * (area.maxZ - area.minZ) * scatter.density;
   if (candidates > VEGETATION_LIMITS.maxCandidates) {
-    throw new RangeError(`This scatter would try about ${Math.round(candidates)} trees. Lower density or give a smaller area; the limit is ${VEGETATION_LIMITS.maxInstances} placed instances.`);
+    throw invalidField('vegetation.scatter.density', scatter.density, `a density that tries at most ${VEGETATION_LIMITS.maxCandidates} trees over the area (this tries about ${Math.round(candidates)}); lower it or give a smaller area`);
   }
   return {
     area, density: scatter.density, terrainHeight: terrain.heightAt, slopeLimit: scatter.slopeLimit,
@@ -237,7 +241,7 @@ function grow(recipe, vegetation) {
   }
   const scattered = scatterVegetation(scatterOptionsFor(recipe, vegetation));
   if (scattered.instances.length > VEGETATION_LIMITS.maxInstances) {
-    throw new RangeError(`This scatter placed ${scattered.instances.length} instances; the limit is ${VEGETATION_LIMITS.maxInstances}. Lower density or give a smaller area.`);
+    throw invalidField('vegetation.scatter.density', vegetation.scatter.density, `a density that places at most ${VEGETATION_LIMITS.maxInstances} instances (this placed ${scattered.instances.length}); lower it or give a smaller area`);
   }
   return { variants: Object.values(scattered.variants).flat(), instances: scattered.instances };
 }
@@ -340,7 +344,7 @@ export function expandVegetation(recipe, limits, cache, placedRuntime) {
     });
   }
   if (recipe.nodes.length + generatedNodes.length > limits.maxNodes) {
-    throw new RangeError(`Vegetation expands to ${generatedNodes.length} part nodes, which with the ${recipe.nodes.length} authored nodes exceeds maxNodes ${limits.maxNodes}. Lower density or cull far trees with cullDistance.`);
+    throw invalidField('vegetation.scatter.density', `${generatedNodes.length} generated part nodes`, `a density that keeps authored plus generated nodes (${recipe.nodes.length} authored) within maxNodes ${limits.maxNodes}; lower it or cull far trees with cullDistance`);
   }
   recipe.nodes.push(...generatedNodes);
   return mergedRuntime(placedRuntime, runtime);

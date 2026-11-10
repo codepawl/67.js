@@ -129,7 +129,7 @@ test('sculpt refuses hostile strokes before running them', () => {
     { strokes: [null] },
     { strokes: [stroke], alsoThis: true },
   ];
-  for (const edit of bad) assert.throws(() => normalizeMeshEdits([{ op: 'sculpt', ...edit }]), /Mesh edit 0|does not take/, JSON.stringify(edit).slice(0, 80));
+  for (const edit of bad) assert.throws(() => normalizeMeshEdits([{ op: 'sculpt', ...edit }]), /Mesh edit 0|does not take|edits\[0\]\./, JSON.stringify(edit).slice(0, 80));
 });
 
 test('sculpt stops when the vertex visits would be too many', () => {
@@ -166,7 +166,7 @@ test('shrinkwrap project follows a direction and honours placement and select', 
 
 test('shrinkwrap misses are an error or kept in place, and maxDistance bounds the search', () => {
   const far = sheet(4, 0.4, 5);
-  assert.throws(() => run(far, [{ op: 'shrinkwrap', target: SPHERE_TARGET, maxDistance: 1 }]), /Mesh edit 0 \(shrinkwrap\).*no surface/);
+  assert.throws(() => run(far, [{ op: 'shrinkwrap', target: SPHERE_TARGET, maxDistance: 1 }]), /^RangeError: edits\[0\]\.onMiss: got "error"; expected "keep", such as onMiss "keep", to leave vertices that find no surface in place/);
   const kept = run(far, [{ op: 'shrinkwrap', target: SPHERE_TARGET, maxDistance: 1, onMiss: 'keep' }]);
   assert.equal(kept.results[0].missedVertices, 25);
   assert.equal(kept.results[0].movedVertices, 0);
@@ -206,7 +206,7 @@ test('shrinkwrap refuses hostile fields before running them', () => {
     { translation: [1e9, 0, 0] },
     { colour: 'red' },
   ];
-  for (const change of bad) assert.throws(() => normalizeMeshEdits([{ ...base, ...change }]), /Mesh edit 0|does not take/, JSON.stringify(change));
+  for (const change of bad) assert.throws(() => normalizeMeshEdits([{ ...base, ...change }]), /Mesh edit 0|does not take|edits\[0\]\./, JSON.stringify(change));
   assert.throws(() => applyMeshEdits(sheet(2, 0.5, 1.5), [base]), /target resolver/);
 });
 

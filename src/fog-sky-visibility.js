@@ -19,6 +19,25 @@ function packCells(grid, bounce) {
   return cells;
 }
 
+// The irradiance grid's mean light at the centre of each cell, in the layout fogBounceGrid returns.
+function gridBounce(irradianceGrid, size, minimum, maximum) {
+  const data = new Float32Array(size[0] * size[1] * size[2] * 3);
+  const point = [0, 0, 0];
+  let cellIndex = 0;
+  for (let z = 0; z < size[2]; z++) {
+    for (let y = 0; y < size[1]; y++) {
+      for (let x = 0; x < size[0]; x++) {
+        [x, y, z].forEach((index, axis) => {
+          point[axis] = minimum[axis] + (index + 0.5) / size[axis] * (maximum[axis] - minimum[axis]);
+        });
+        data.set(irradianceGrid.meanRadiance(point), cellIndex * 3);
+        cellIndex++;
+      }
+    }
+  }
+  return data;
+}
+
 function uploadGrid(context, grid, bounce) {
   const texture = context.createTexture();
   context.bindTexture(context.TEXTURE_3D, texture);
@@ -47,8 +66,12 @@ export function fogSkyVisibility(parts, volume, context, environment = {}) {
   let entry = uploaded.get(parts);
   if (entry?.context !== context || entry.key !== key) {
     const grid = skyVisibilityGrid(parts, volume.minimum, volume.maximum);
-    // The sun is left out of the bounce: see docs/volumetric.md.
-    const bounce = grid && fogBounceGrid(parts, grid.size, volume.minimum, volume.maximum, { pointLights: environment.pointLights });
+    // The sun is left out of the bounce: see docs/volumetric.md. A scene with an irradiance grid already holds the sun's
+    // bounce, the lights and the emission over several bounces, so the fog reads the grid instead of tracing its own.
+    const irradianceGrid = parts.find(part => part.material?.irradianceGrid)?.material.irradianceGrid;
+    const bounce = !grid ? null
+      : irradianceGrid ? gridBounce(irradianceGrid, grid.size, volume.minimum, volume.maximum)
+        : fogBounceGrid(parts, grid.size, volume.minimum, volume.maximum, { pointLights: environment.pointLights });
     entry = { context, key, texture: grid && uploadGrid(context, grid, bounce) };
     uploaded.set(parts, entry);
   }

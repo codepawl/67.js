@@ -2,6 +2,7 @@
 // A strand is a function of its seed and the time only, so a seek repeats exactly.
 
 import { createGenerator, cross, normalized } from './particles.js';
+import { addFieldAcceleration } from './force-fields.js';
 
 export const HAIR_LIMITS = Object.freeze({ maxSegments: 8, ringSides: 3, taperAtTip: 0.15 });
 
@@ -76,6 +77,21 @@ export function createStrandRoots(settings, positions, normals, indices) {
   return { count: settings.count, roots, directions, lengths, phases };
 }
 
+// Metres of tip displacement for each m/s2 of force field acceleration at a strand's root: a strand is a light, stiff
+// cantilever, so a field leans it instead of flying it.
+const FIELD_COMPLIANCE = 0.02;
+const NO_VELOCITY = Object.freeze([0, 0, 0]);
+
+// Where the fields push the tip of a strand, clamped to its length so a strong field bends it but never stretches it.
+function fieldOffset(strands, index, fields, time) {
+  const acceleration = [0, 0, 0];
+  const root = [strands.roots[index * 3], strands.roots[index * 3 + 1], strands.roots[index * 3 + 2]];
+  for (const field of fields) addFieldAcceleration(field, root, NO_VELOCITY, time, acceleration);
+  const strength = Math.hypot(...acceleration);
+  const scale = strength > 0 ? Math.min(FIELD_COMPLIANCE, strands.lengths[index] / strength) : 0;
+  return acceleration.map(component => component * scale);
+}
+
 // Ring centres of one strand: the direction bends toward gravity at every segment, and the tip sways sideways.
 function strandPoints(strands, index, settings, time) {
   const points = [];
@@ -83,10 +99,11 @@ function strandPoints(strands, index, settings, time) {
   let direction = [strands.directions[index * 3], strands.directions[index * 3 + 1], strands.directions[index * 3 + 2]];
   let point = [strands.roots[index * 3], strands.roots[index * 3 + 1], strands.roots[index * 3 + 2]];
   const swing = settings.sway ? settings.sway.amplitude * Math.sin(Math.PI * 2 * settings.sway.rate * time + strands.phases[index]) : 0;
+  const pushed = settings.fields?.length ? fieldOffset(strands, index, settings.fields, time) : NO_VELOCITY;
   for (let ring = 0; ring <= settings.segments; ring++) {
     const along = ring / settings.segments;
     const swayDirection = settings.sway?.direction ?? [0, 0, 0];
-    points.push({ center: point.map((value, axis) => value + swayDirection[axis] * swing * along * along), direction });
+    points.push({ center: point.map((value, axis) => value + (swayDirection[axis] * swing + pushed[axis]) * along * along), direction });
     direction = normalized([direction[0], direction[1] - settings.droop / settings.segments, direction[2]]);
     point = point.map((value, axis) => value + direction[axis] * segmentLength);
   }

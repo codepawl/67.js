@@ -19,12 +19,13 @@ function validateFloatChannel(values, length, label, bounded = false) {
   }
 }
 
-const GLTF_ALPHA_MODES = { mask: 'MASK', blend: 'BLEND' };
+// glTF has no additive blending, so an add material is written as BLEND and loads back as blend.
+const GLTF_ALPHA_MODES = { mask: 'MASK', blend: 'BLEND', add: 'BLEND' };
 
 function writeAlphaFields(gltfMaterial, material) {
   const alphaMode = material.alphaMode ?? 'opaque';
   if (alphaMode !== 'opaque') {
-    if (!Object.hasOwn(GLTF_ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask' or 'blend'.");
+    if (!Object.hasOwn(GLTF_ALPHA_MODES, alphaMode)) throw new Error("alphaMode must be 'opaque', 'mask', 'blend' or 'add'.");
     gltfMaterial.alphaMode = GLTF_ALPHA_MODES[alphaMode];
     validateFactor(material.opacity ?? 1, 'opacity');
     gltfMaterial.pbrMetallicRoughness.baseColorFactor[3] = material.opacity ?? 1;
@@ -303,7 +304,9 @@ export function exportGlb(parts, options = {}) {
     const meshKey = `${geometry.indices}:${material}`;
     if (!meshes.has(meshKey)) {
       meshes.set(meshKey, document.meshes.length);
-      document.meshes.push({ primitives: [{ ...geometry, material }] });
+      // glTF has no field for morph target names; the common convention is mesh.extras.targetNames.
+      const targetNames = part.geometry.morphTargetNames;
+      document.meshes.push({ primitives: [{ ...geometry, material }], ...(targetNames ? { extras: { targetNames } } : {}) });
     }
     const host = part.skin ? null : hostOfPart(partIndex, hierarchy, worldCache);
     // The mesh node of an imported asset is one of its nodes: keep the mesh on it instead of nesting a same-named node.

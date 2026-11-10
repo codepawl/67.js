@@ -14,18 +14,23 @@ import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
 import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS } from '../src/agent-scene-capabilities.js';
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
+import { chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
-import { AGENT_ASSET_LIMITS } from '../src/agent-asset-limits.js';
+import { geometryOnlyGlb } from './agent-query-asset.mjs';
+import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
+import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
-import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME } from './agent-render-jobs.mjs';
+import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
+import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
 import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, startVideoEncoderInPage } from './gpu-frame-reader.mjs';
 import { audioInputArguments, createAudioLibrary, measureStreamSeconds } from './job-audio.mjs';
 import { filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline } from '../src/film-timeline.js';
 import { isPreviewHost } from './preview-host.mjs';
 import { normalizeReview, REVIEW_LIMITS } from './agent-review.mjs';
+import { mergeFrameDiagnostics } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
 import { sessionProblem } from '../src/agent-errors.js';
 
@@ -42,6 +47,7 @@ const MAXIMUM_QUEUED_CALLS = 16;
 const MAXIMUM_GLB_BYTES = 32 * 1024 * 1024;
 const MAXIMUM_KEPT_GLBS = 8;
 const EVALUATION_TIMEOUT_MS = 30000;
+const QUERY_ONLY_TIMEOUT_MS = 120000;
 /** A bake runs on a worker for up to its own limit, so a call that bakes gets that much more than a plain call. */
 const BAKE_EVALUATION_TIMEOUT_MS = EVALUATION_TIMEOUT_MS + BAKE_WORKER_MAXIMUM_SECONDS * 1000;
 
@@ -74,6 +80,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   if (!['gpu', 'cpu'].includes(backend)) {
     throw new RangeError('backend must be gpu or cpu.');
   }
+  let nativeTracerLocator;
   if (!Number.isInteger(memory) || memory < 32 || memory > MAXIMUM_MEMORY_MIB) {
     throw new RangeError(`memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
@@ -146,7 +153,26 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   async function placedAssetData(value) {
     const needs = recipeAssetNeeds(value);
     const entries = await Promise.all(needs.map(async ({ id }) => [id, (await (await catalog()).read(id)).toString('base64')]));
-    return { ...(needs.length ? { assetData: Object.fromEntries(entries) } : {}), ...(await sequenceFrameData(value)) };
+    return { ...(needs.length ? { assetData: Object.fromEntries(entries) } : {}), ...(await sequenceFrameData(value)), ...(await lookFileData(value)) };
+  }
+
+  /** The HDRI and .cube files a recipe names: shipped ones by name from assets/looks, the others by catalog ID. The page decodes them. */
+  async function lookFileData(value) {
+    const { environments, looks } = catalogLookReferences(value);
+    // Derived from previewUrl (build/mcp/preview.js in the repo and the package), not from import.meta.url: the bundler
+    // inlines a literal `new URL(..., import.meta.url)` as a data URL, and the bundled server sits two folders below the package root.
+    const shippedLooksUrl = new URL('../../assets/looks/', previewUrl);
+    const lookData = {};
+    for (const [kind, references] of [['environment', environments], ['look', looks]]) {
+      for (const reference of references) {
+        const shipped = BUNDLED_ENVIRONMENT_NAMES.includes(reference) || BUNDLED_CUBE_LOOK_NAMES.includes(reference);
+        const bytes = shipped
+          ? await readFile(new URL(`${reference}.${kind === 'environment' ? 'hdr' : 'cube'}`, shippedLooksUrl))
+          : await (await catalog()).read(reference);
+        lookData[reference] = kind === 'environment' ? { kind, base64: bytes.toString('base64') } : { kind, text: bytes.toString('utf8') };
+      }
+    }
+    return Object.keys(lookData).length ? { lookData } : {};
   }
 
   /** Bytes of the catalog images a recipe or edit list uses as map sequence frames, base64 by asset id. The page decodes them. */
@@ -298,6 +324,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         return url.origin === origin ? route.continue() : route.abort();
       });
       page.setDefaultTimeout(15000);
+      if (backend === 'gpu') await page.exposeFunction('__67jsNativeBake', answerNativeBake);
       if (!kernelWorkers) {
         await page.addInitScript(() => { globalThis.__67jsKernelWorkers = 'off'; });
       }
@@ -312,6 +339,22 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       phase = 'failed';
       await shutdownResources();
       throw error;
+    }
+  }
+
+  // The page's bridge to the native tracer for recipe bakes: `probe` says whether it can run, `trace` bakes the texels the page
+  // packed. A failure comes back as `{ error }` so the page falls back to its own GPU kernel, and the cause is remembered, so
+  // later bakes and render jobs skip the attempt.
+  async function answerNativeBake(request) {
+    nativeTracerLocator ??= createNativeTracerLocator();
+    const found = await nativeTracerLocator.find();
+    if (request.action === 'probe') return { available: Boolean(found.tracer) };
+    if (!found.tracer) return { error: found.reason };
+    try {
+      return traceTexelsNative({ tracer: found.tracer, request, maxSeconds: BAKE_WORKER_MAXIMUM_SECONDS });
+    } catch (error) {
+      if (!isNativeTimeLimitError(error)) nativeTracerLocator.markUnusable(error.message);
+      return { error: error.message };
     }
   }
 
@@ -331,6 +374,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   }
 
   async function evaluate(method, input, target = page, timeoutMs = EVALUATION_TIMEOUT_MS) {
+    assertCombinedAssetBytes(input);
     let timer;
     let timedOut = false;
     try {
@@ -387,7 +431,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       jobPage.setDefaultTimeout(15000);
       await jobPage.goto(origin);
       await jobPage.waitForFunction(() => Boolean(window.__agentPreview));
-      const input = { sessionId: jobId, recipe: snapshot.recipe, memoryBudgetMiB: memory, backend,
+      const input = { sessionId: jobId, recipe: snapshot.recipe, memoryBudgetMiB: memory, backend, ...(settings.transparent ? { transparent: true } : {}),
         ...(snapshot.assetBytes ? { data: snapshot.assetBytes.toString('base64'), ...(await motionSources([snapshot.recipe.motion])) } : await placedAssetData(snapshot.recipe)) };
       const created = await jobPage.evaluate(({ method, input }) => window.__agentPreview[method](input),
         { method: snapshot.assetBytes ? 'createAsset' : 'create', input });
@@ -396,6 +440,26 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       if (width < 64 || height < 64) throw new Error('Render budget reduced the job below its minimum output size.');
       await jobPage.setViewportSize({ width, height });
       const session = await jobPage.context().newCDPSession(jobPage);
+      const region = settings.region;
+      if (settings.format && settings.format !== 'png') await jobPage.evaluate(prepareInput => window.__agentPreview.prepareFloatOutput(prepareInput), { sessionId: jobId });
+      // A memory budget can shrink the frame below the size the region was chosen for.
+      if (region && (region.x + region.width > width || region.y + region.height > height)) {
+        throw new Error(`The region lies outside the rendered frame, which the memory budget reduced to ${width}x${height}.`);
+      }
+      const outputWidth = region?.width ?? width;
+      const outputHeight = region?.height ?? height;
+      const format = settings.format ?? 'png';
+      const highPrecision = format !== 'png';
+      const artifactExtension = format === 'exr' ? 'exr' : 'png';
+      const artifactMimeType = format === 'exr' ? 'image/x-exr' : 'image/png';
+      // A transparent canvas shows the page behind it in a screenshot, so the page and the browser's default are made clear.
+      if (settings.transparent) {
+        await session.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
+        await jobPage.evaluate(() => {
+          document.documentElement.style.background = 'transparent';
+          document.body.style.background = 'transparent';
+        });
+      }
       const artifacts = [];
       const timeline = settings.timeline ? snapshot.recipe.timeline : undefined;
       const audio = settings.audio ? await prepareAudio(settings) : undefined;
@@ -405,13 +469,14 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         frameReceiver = createFrameReceiver({ maximumBytes: width * height * 4 });
         activeFrameReceiver = frameReceiver;
         const frameSocketUrl = `ws://127.0.0.1:${httpServer.address().port}${frameReceiver.path}`;
-        if (settings.encoder === 'nvenc') {
+        // A path traced frame is a PNG made outside the page's drawing buffer, so the browser encoder has nothing to encode.
+        if (settings.encoder === 'nvenc' && !settings.renderer && !region) {
           const pageEncoder = await startVideoEncoderInPage(jobPage, frameSocketUrl,
             { width, height, fps: settings.fps, quantizer: DEFAULT_PAGE_ENCODER_QUANTIZER });
           pageEncodes = pageEncoder.supported;
         }
         encoder = createFrameEncoder({ executable: ffmpeg, output: join(directory, 'render.mp4.partial'),
-          fps: settings.fps, format: pageEncodes ? 'h264' : 'jpeg', width, height, signal, maximumFrameBytes: MAXIMUM_JOB_FRAME_BYTES, backend: settings.encoder === 'nvenc' ? 'gpu' : 'cpu',
+          fps: settings.fps, format: pageEncodes ? 'h264' : settings.renderer ? 'png' : 'jpeg', width: outputWidth, height: outputHeight, signal, maximumFrameBytes: MAXIMUM_JOB_FRAME_BYTES, backend: settings.encoder === 'nvenc' ? 'gpu' : 'cpu',
           audioArguments: settings.audio ? audioInputArguments(audio.path, settings.audio.offset) : [],
           audioCodec: settings.audio?.track === 'pcm' ? 'pcm' : 'aac' });
         if (pageEncodes) frameReceiver.onChunk(chunk => encoder.writeChunk(chunk));
@@ -425,7 +490,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         // A timeline job reads one clock for the shot, the motion and the renderer, so a seek matches the frame in a video.
         const timelineTime = timeline ? Math.min(filmTimelineDuration(timeline), settings.timeline.start + elapsed) : undefined;
         const shotSample = timeline ? sampleFilmTimeline(timeline, snapshot.recipe, timelineTime) : undefined;
-        const frameInput = { sessionId: jobId,
+        const frameInput = { sessionId: jobId, ...(highPrecision ? { floatOutput: true } : {}),
           rendererTime: (settings.rendererTime?.start ?? 0) + (timelineTime ?? elapsed) * (settings.rendererTime?.rate ?? 1),
           ...(settings.motion ? { motionTime: settings.motion.start + elapsed } : {}),
           ...(shotSample?.motionTime == null ? {} : { motionTime: shotSample.motionTime }),
@@ -435,21 +500,51 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           ...(settings.animation ? { animation: { clip: settings.animation.clip, time: settings.animation.start + elapsed } } : {}) };
         const renderStarted = performance.now();
         if (settings.renderer) {
+          const { type, ...tracerOptions } = settings.renderer;
+          if (settings.renderer.backend === 'gpu' && backend === 'cpu') throw new Error('renderer.backend "gpu" needs a runtime on the GPU backend, and this one runs on SwiftShader.');
           const choice = await chooseDenoiser(settings.renderer.denoise);
-          let traced = await jobPage.evaluate(input => window.__agentPreview.pathTrace(input), { ...frameInput, options: { width, height, ...settings.renderer, denoise: choice.denoise, threads: PATH_TRACER_THREADS } });
-          if (traced.features) {
-            traced = await finishWithOidn({ traced, denoiser: choice.denoiser, drawLinear: input => jobPage.evaluate(drawInput => window.__agentPreview.finishPathTrace(drawInput), input) });
+          nativeTracerLocator ??= createNativeTracerLocator();
+          const trace = await chooseTraceBackend({ requested: settings.renderer.backend, runtimeBackend: backend, locator: nativeTracerLocator });
+          const traceOptions = { width, height, ...tracerOptions, backend: trace.backend === 'native' ? 'gpu' : trace.backend, denoise: choice.denoise, threads: PATH_TRACER_THREADS };
+          let traced;
+          let backendNote = trace.note;
+          if (trace.backend === 'native') {
+            try {
+              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold } });
+              traced = await traceFrameNative({ tracer: trace.tracer, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
+                seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
+                maxSeconds: tracerOptions.maxSeconds, noiseThreshold: tracerOptions.noiseThreshold });
+            } catch (error) {
+              // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
+              if (isNativeTimeLimitError(error)) throw error;
+              nativeTracerLocator.markUnusable(error.message);
+              backendNote = (await nativeTracerLocator.find()).reason;
+              traceOptions.backend = backend === 'cpu' ? 'cpu' : 'gpu';
+              backendNote += ' The ' + traceOptions.backend + ' backend ran instead.';
+            }
           }
+          if (!traced) {
+            traced = await jobPage.evaluate(input => window.__agentPreview.pathTrace(input), { ...frameInput, options: traceOptions });
+            if (traced.features) {
+              traced = await finishWithOidn({ traced, denoiser: choice.denoiser, drawLinear: input => jobPage.evaluate(drawInput => window.__agentPreview.finishPathTrace(drawInput), input) });
+            }
+          }
+          if (backendNote) traced.report.backendNote = backendNote;
           if (choice.note) traced.report.denoiserNote = choice.note;
           metrics.renderSeconds += (performance.now() - renderStarted) / 1000;
           metrics.width = width;
           metrics.height = height;
           metrics.pathTracer = traced.report;
           const tracedBytes = Buffer.from(traced.data, 'base64');
-          if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced image exceeded 12 MiB.');
-          await writeFile(join(directory, 'render.png.partial'), tracedBytes, { flag: 'wx' });
-          artifacts.push({ temporary: 'render.png.partial', filename: 'render.png', mimeType: 'image/png' });
-          await progress({ frames: 1, maximumPendingFrames: 1 });
+          if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced frame exceeded 12 MiB.');
+          if (encoder) {
+            await encoder.writeFrame(tracedBytes);
+          } else {
+            const filename = settings.kind === 'image' ? 'render.png' : `frame-${frame}.png`;
+            await writeFile(join(directory, `${filename}.partial`), tracedBytes, { flag: 'wx' });
+            artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: 'image/png' });
+          }
+          await progress({ frames: frame + 1, maximumPendingFrames: 1 });
           continue;
         }
         // A video frame is read in the same task as its draw, because the browser clears the drawing buffer after presenting.
@@ -460,7 +555,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           window.__finishDraw();
           const drawMilliseconds = performance.now() - drawStarted;
           return { ...result, drawMilliseconds, pageEncoded: await window.__encodeFrame(encodeIndex) };
-        }, { input: frameInput, encodeIndex: pageEncodes ? frame : null });
+        }, { input: { ...frameInput, diagnose: frame === 0 }, encodeIndex: pageEncodes ? frame : null });
         const roundTripSeconds = (performance.now() - renderStarted) / 1000;
         const drawSeconds = rendered.pageEncoded ? rendered.drawMilliseconds / 1000 : roundTripSeconds;
         metrics.renderSeconds += drawSeconds;
@@ -470,6 +565,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         metrics.width = width;
         metrics.height = height;
         metrics.estimatedBytes = rendered.estimatedBytes;
+        mergeFrameDiagnostics(metrics, rendered.diagnostics);
         async function captureFrameBytes() {
           if (rendered.pageEncoded) {
             signal.throwIfAborted();
@@ -478,6 +574,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           const captureStarted = performance.now();
           const captured = await session.send('Page.captureScreenshot', { fromSurface: true,
             format: settings.kind === 'video' ? 'jpeg' : 'png',
+            ...(region ? { clip: { ...region, scale: 1 } } : {}),
             ...(settings.kind === 'video' ? { quality: 95 } : { optimizeForSpeed: true }) });
           const captureBytes = Buffer.from(captured.data, 'base64');
           metrics.captureSeconds += (performance.now() - captureStarted) / 1000;
@@ -485,22 +582,64 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           signal.throwIfAborted();
           return captureBytes;
         }
+        // 16-bit PNG and EXR come from a float readback of the same frame (or of its pass), encoded here.
+        async function readFloatPass(pass) {
+          const read = await jobPage.evaluate(readInput => window.__agentPreview.readFloat(readInput),
+            { sessionId: jobId, source: pass ? 'pass' : 'frame', ...(region ? { region } : {}) });
+          const readBytes = Buffer.from(read.data, 'base64');
+          const pixels = new Float32Array(readBytes.buffer.slice(readBytes.byteOffset, readBytes.byteOffset + readBytes.length));
+          return { pixels, width: read.width, height: read.height };
+        }
+        async function captureHighPrecisionBytes(pass) {
+          const captureStarted = performance.now();
+          const read = await jobPage.evaluate(readInput => window.__agentPreview.readFloat(readInput),
+            { sessionId: jobId, source: pass ? 'pass' : 'frame', ...(region ? { region } : {}) });
+          const readBytes = Buffer.from(read.data, 'base64');
+          const pixels = new Float32Array(readBytes.buffer.slice(readBytes.byteOffset, readBytes.byteOffset + readBytes.length));
+          const encodedBytes = encodeRenderOutput({ format, pixels, width: read.width, height: read.height, pass,
+            hasAlpha: settings.transparent === true, depthRange: RENDER_PASS_DEPTH_RANGE });
+          metrics.captureSeconds += (performance.now() - captureStarted) / 1000;
+          if (encodedBytes.length > MAXIMUM_JOB_FRAME_BYTES * HIGH_PRECISION_FRAME_FACTOR) throw new Error('Rendered frame exceeded the high-precision size limit.');
+          signal.throwIfAborted();
+          return encodedBytes;
+        }
         async function writeArtifact(filename, artifactBytes) {
           await writeFile(join(directory, `${filename}.partial`), artifactBytes, { flag: 'wx' });
-          artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: 'image/png' });
+          artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: artifactMimeType });
         }
-        const bytes = await captureFrameBytes();
+        const bytes = settings.multilayer ? undefined : (highPrecision ? await captureHighPrecisionBytes(undefined) : await captureFrameBytes());
         if (encoder) {
           if (bytes) await encoder.writeFrame(bytes);
         }
         else {
           const stem = settings.kind === 'image' ? 'render' : `frame-${frame}`;
-          await writeArtifact(`${stem}.png`, bytes);
+          if (settings.multilayer) {
+            const captureStarted = performance.now();
+            const beautyRead = await readFloatPass(undefined);
+            const passPixels = {};
+            for (const pass of settings.passes ?? []) {
+              const passInfo = await jobPage.evaluate(input => window.__agentPreview.frame(input),
+                { ...frameInput, floatOutput: false, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE, passFloat: true });
+              passPixels[pass] = (await readFloatPass(pass)).pixels;
+              if (pass === 'depth') metrics.depthRangeMetres = RENDER_PASS_DEPTH_RANGE;
+              if (pass === 'objectId') {
+                metrics.objectNames = passInfo.objectNames.slice(0, MAXIMUM_OBJECT_NAMES);
+                metrics.objectNamesTruncated = passInfo.objectNames.length > MAXIMUM_OBJECT_NAMES;
+              }
+              if (pass === 'cryptomatte') metrics.cryptomatte = passInfo.cryptomatte;
+            }
+            const encodedBytes = encodeMultilayerExr({ width: beautyRead.width, height: beautyRead.height, beauty: beautyRead.pixels, passes: passPixels, hasAlpha: settings.transparent === true, depthRange: RENDER_PASS_DEPTH_RANGE });
+            metrics.captureSeconds += (performance.now() - captureStarted) / 1000;
+            if (encodedBytes.length > MAXIMUM_JOB_FRAME_BYTES * HIGH_PRECISION_FRAME_FACTOR) throw new Error('Rendered frame exceeded the high-precision size limit.');
+            await writeArtifact(`${stem}.exr`, encodedBytes);
+          } else {
+          await writeArtifact(`${stem}.${artifactExtension}`, bytes);
           // Passes follow the lit image of the same instant, so each seek yields every file for that frame.
           for (const pass of settings.passes ?? []) {
             const passInfo = await jobPage.evaluate(input => window.__agentPreview.frame(input),
-              { ...frameInput, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE });
-            await writeArtifact(`${stem}-${pass}.png`, await captureFrameBytes());
+              { ...frameInput, floatOutput: false, pass, passDepthRange: RENDER_PASS_DEPTH_RANGE, ...(highPrecision ? { passFloat: true } : {}) });
+            await writeArtifact(`${stem}-${pass}.${artifactExtension}`, highPrecision ? await captureHighPrecisionBytes(pass) : await captureFrameBytes());
+            if (pass === 'cryptomatte') metrics.cryptomatte = passInfo.cryptomatte;
             if (pass === 'depth') metrics.depthRangeMetres = RENDER_PASS_DEPTH_RANGE;
             if (pass === 'objectId') {
               metrics.objectNames = passInfo.objectNames.slice(0, MAXIMUM_OBJECT_NAMES);
@@ -508,6 +647,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             }
           }
         }
+          }
         metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
         const heap = await session.send('Runtime.getHeapUsage');
         metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, heap.usedSize);
@@ -588,7 +728,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         availableIn: packageMetadata.version,
         assets: {
           configured: Boolean(assetRoot), formats: ['self-contained GLB', 'PNG, JPEG or WebP image (map sequence frame)'],
-          maximumBytes: AGENT_ASSET_LIMITS.maxBytes, maximumAssets: AGENT_ASSET_LIMITS.maxAssets,
+          maximumBytes: AGENT_ASSET_LIMITS.maxBytes, maximumAssets: AGENT_ASSET_LIMITS.maxAssets, maximumCombinedBytes: AGENT_ASSET_LIMITS.maxCombinedBytes,
           maximumVertices: AGENT_ASSET_LIMITS.maxVertices, maximumParts: AGENT_ASSET_LIMITS.maxParts, maximumTexturePixels: AGENT_ASSET_LIMITS.maxTexturePixels,
           maximumJoints: AGENT_ASSET_LIMITS.maxJoints, maximumClips: AGENT_ASSET_LIMITS.maxClips,
           commands: ['set-root', 'set-asset-node', 'set-motion', 'set-animation', 'set-material', 'set-camera', 'set-environment', 'set-effects', 'set-shadow'],
@@ -635,6 +775,20 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     },
     inspectMeshes(input) {
       return enqueue(() => invoke('inspectMeshes', input));
+    },
+    walkMap({ assetId, ...input }) {
+      if (assetId === undefined) return enqueue(() => invoke('walkMap', input));
+      if (input.sessionId !== undefined) return Promise.reject(new TypeError('scene_walkmap takes a sessionId or an assetId, not both.'));
+      // Query-only: the preview page parses the textureless geometry and queries it, with no scene and no render, so it may
+      // pass the render vertex cap. The page keeps one scene and asks for the file only when it does not hold it.
+      return enqueue(async () => {
+        await boot();
+        const request = { ...input, assetId };
+        const cached = await evaluate('queryOnlyWalkMap', request, page, QUERY_ONLY_TIMEOUT_MS);
+        if (!cached.needsData) return cached;
+        const stripped = geometryOnlyGlb(await (await catalog()).read(assetId));
+        return evaluate('queryOnlyWalkMap', { ...request, data: stripped.toString('base64') }, page, QUERY_ONLY_TIMEOUT_MS);
+      });
     },
     setMeshStack(input) {
       return enqueue(async () => {
@@ -829,7 +983,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         if (input.branch !== undefined) {
           return invoke('keepBranch', { sessionId: input.sessionId, name: validateBranchName(input.branch), expectedRevision: input.expectedRevision });
         }
-        if (input.checkpointId === undefined) throw new TypeError('Restore needs a checkpointId or a branch.');
+        if (input.revision === undefined && input.checkpointId === undefined) throw new TypeError('Restore needs a checkpointId, a revision or a branch.');
         return invoke('restore', input);
       });
     },
@@ -909,8 +1063,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         cancelReview?.(new Error('The agent runtime is closing.'));
         closing = (async () => {
           try {
-            await reviewPage?.close().catch(() => {});
+            // The job store goes first: a client that closes the connection waits only a couple of seconds before it kills this
+            // process, and the lock must be given back before the slower browser shutdown.
             if (jobsPromise) await (await jobsPromise).close();
+            await reviewPage?.close().catch(() => {});
           } finally {
             await queue;
             await shutdownResources();

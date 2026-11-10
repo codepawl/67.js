@@ -61,6 +61,19 @@ function draw() {
 For a frame loop, update shadow bounds and mark shadows dirty only when projector controls or geometry change.
 Use `replaceParts` when `topologyRevision` changes, as described in the scene guide.
 
+## Catalog HDRIs and looks
+
+A recipe names a file; it never carries a path or a URL, and nothing is downloaded. Two kinds of entries exist:
+
+| Entry | Field | Source |
+| --- | --- | --- |
+| `sky-clouds` | `environment.hdri` | Poly Haven `kloofendal_48d_partly_cloudy_puresky`, CC0, shrunk to 128 x 64 |
+| `studio-softbox` | `environment.hdri` | Poly Haven `studio_small_03`, CC0, shrunk to 128 x 64 |
+| `teal-orange`, `noir` | `environment.look` | made for 67js, CC0, 9 points per side |
+| 64-character ID | either | a `.hdr` or `.cube` file (4 MiB at most) in the MCP `--assets` directory, listed by `scene_asset_catalog` as kind `environment` or `look` |
+
+The four shipped files total about 100 KB. For a bigger HDRI, put a 1k or 2k `.hdr` (for example from Poly Haven) in the assets directory and use its ID. Outside MCP, decode with `parseRadianceHdr` or `parseCube` and register with `registerCatalogEnvironment(name, data)` or `registerCatalogLook(name, look)` from `src/look-catalog.js` before building the scene. The look needs the `view-transform-shader` module (`loadAgentSceneModules` loads it). Render jobs light the scene with the same entries.
+
 ## Atomic look commands
 
 | Operation | Payload |
@@ -106,10 +119,13 @@ Sky colors use display RGB, matching the renderer's existing environment contrac
 | Field | Default | Range or meaning |
 | --- | --- | --- |
 | `world` | `false` | Boolean world presentation flag. With `true` the setup environment is also the background |
+| `hdri` | absent | A shipped HDRI (`sky-clouds`, `studio-softbox`) or the 64-character ID of a `.hdr` file in `scene_asset_catalog`. It lights, reflects and (with `world: true`) forms the background instead of the setup sky; `environmentIntensity` is its strength and `environmentRotation` turns it about the vertical axis. The setup still gives the key light, so set `keyIntensity: 0` when the HDRI has its own sun. `null` clears. See [Catalog HDRIs and looks](#catalog-hdris-and-looks) |
 | `ground` | on | Absent unless set. `false` removes the preview's automatic floor and contact shadow |
 | `resolveCoplanar` | off | `'offset'` puts the smaller part of each coplanar pair (see the `coplanar-overlap` warning) on the next depth layer, drawn with a polygon offset; `false` or absent leaves parts as authored. Geometry never moves. Parts that set `decal` or `depthLayer` keep their own |
-| `objectReflections` | on | Absent unless set. Each smooth metal part (`metallic` 0.5 or more, `roughness` 0.6 or less; at most 8 such parts) gets a reflection probe of the scene around it, so a chrome sphere shows the floor and its neighbours. `false` turns it off. Probes are traced at rest, so a part that moves reflects the scene as it started. `scene_inspect` names them in `reflections` |
+| `objectReflections` | on | Absent unless set. Each smooth metal part (`metallic` 0.5 or more, `roughness` 0.6 or less; at most 8 such parts, in a scene with at most 256 other parts) gets a reflection probe of the scene around it, so a chrome sphere shows the floor and its neighbours. `false` turns it off. Probes are traced at rest, so a part that moves reflects the scene as it started. `scene_inspect` names them in `reflections` |
+| `sky` | absent | Absent unless set. `{ type: 'physical', sunElevation, sunRotation, turbidity, groundAlbedo, aerialPerspective, ozone, sunDisc }`: one time-of-day control. `sunElevation` -90 to 90 degrees (default 45), `sunRotation` degrees clockwise from -Z seen from above (0), `turbidity` 1 to 10 haze (3), `groundAlbedo` 0 to 1 (0.3), `aerialPerspective` 0 to 4 scales the distance haze (1; 0 for none), `ozone` 0 to 10 Chappuis-band absorption (1), `sunDisc` boolean (true). The sky sets `lightDirection`, `keyColor` (the sun reddens and dims with air mass and sets below the horizon), `skyTop`, `skyBottom`, `fogColor` and `fogDensity`, and replaces the setup's environment map with the sky, so those fields no longer take your values while a sky is set. `environment` motion tracks can animate `sunElevation`, `sunRotation`, `turbidity`, `groundAlbedo`, `aerialPerspective` and `ozone` for time-of-day arcs. A `set-environment` patch changes the fields it names and keeps the rest; `sky: null` in a patch keeps the last derived values as plain fields. It is an analytic single-scattering approximation (Rayleigh, aerosol and ozone, Kasten-Young air mass), not Blender's Nishita integration: no clouds. Raster first: the path tracer backends read the same environment map and key light, but are not yet checked against it. |
 | `floorSkyTrace` | on | Absent unless set. A closed room a sun lights gets the sky each floor texel sees traced into its floor (`applyFloorSkyVisibility`, strength 0.2), so shadowed floors under a roof or between walls get less world and sky light; it makes the dark end of halls closer to Cycles. Open scenes and rooms lit by lamps alone are left as they are. `false` turns it off; a value that is not a boolean is refused. It loads lazily with a recipe that names its sun (`keyColor` or `keyIntensity`), costs about 1 s of trace when the scene is built and adds triangles to the floor (0.1 to 0.4 ms per frame in the reference halls). |
+| `specularAntiAliasing` | `1` | Absent unless set. `0` to `4`. Widens highlights where the shading normal or normal map detail changes within a pixel (geometric specular anti-aliasing plus a Toksvig term read from the filtered normal map length), so grainy or scanned metal stops sparkling from frame to frame at grazing angles. `0` gives a highlight that follows every texel; above `1` is softer. |
 | `sunBounce` | `1` | Absent unless set. A number of 0 or more. A closed room a sun lights gets a few point lights at its sunlit patches (`withSunBounce`, found when the scene is prepared), so the floor, walls and pillars around a patch are lit by the light it bounces and the far end of the room less. `0` turns it off and gives the look without it; `1` is fitted to Cycles; above `1` is stronger. A value that is not a number of 0 or more is refused. Open scenes and rooms with no sun are left as they are. It loads lazily with the sun, and the lights take up to 6 of the 16 point light slots. |
 | `setup` | `daylight` | `daylight`, `overcast`, `sunset` or `studio`. See Lighting setups |
 | `environmentIntensity` | `1` | `0` to `100`. Scales the setup's environment light and reflections |
@@ -211,6 +227,8 @@ These controls reuse `resolveVolumeFog` and its existing domain rules.
 | `noiseScale` | `0.3` | `0.001` to `100` |
 | `maxDistance` | `100` | `0.01` to `10000` |
 | `shadowAmbient` | derived from the scene: 0.15 in a closed room, 1 under open sky | `0` to `1` |
+| `scatterOctaves`, `multiScatter`, `multiExtinction`, `multiAnisotropy`, `keyTransmittance`, `surfaceTransmittance` | `1`, `0.5`, `0.5`, `0.5`, `0`, `0` | Integer `1` to `4`, then `0` to `1` each; off by default, see [volume fog](https://67js.codepawl.com/volumetric.md) |
+| `detailOctaves`, `detailAmount`, `warp`, `contrast`, `profileSoftness`, `keyScattering` | `1`, `0.5`, `0`, `1`, `0.5`, `1` | Integer `1` to `3`, `0` to `1`, `0` to `4`, `0` to `4`, `0` to `0.95`, `0` to `10`; see [volume fog](https://67js.codepawl.com/volumetric.md) |
 
 Fog bounds reject dimensions that collapse after Float32 rounding.
 The current volume supports one directional scattering source.
@@ -240,12 +258,26 @@ Ambient occlusion reads the depth texture, so it needs the HDR depth target that
 | `depthOfField.blur` | `0` | `0` to `1`. Lens blur from depth, off by default; the widest circle is 5 percent of the image height |
 | `depthOfField.focusDistance` | `5` | `0.01` to `100000` metres from the camera that stay sharp |
 | `motionBlur.shutter` | `0` | `0` to `0.5` seconds of camera motion to smear |
+| `motionBlur.objects` | `0` | `0` to `1`. How much of each moving part's own motion to smear over the same shutter; `0` leaves it off |
+| `colorBalance.lift` | `[0, 0, 0]` | Three numbers, `-1` to `1`. Raises the shadows per channel and fades out toward white |
+| `colorBalance.gamma` | `[1, 1, 1]` | Three numbers, `0.1` to `4`. Bends the midtones; above `1` is brighter |
+| `colorBalance.gain` | `[1, 1, 1]` | Three numbers, `0` to `4`. Scales the highlights |
+| `glare.streaks` | `0` | `0` to `1`. Thin star streaks from every pixel above the threshold, bright at the core and fading to the tip |
+| `glare.count` | `4` | Whole number, `1` to `8`. Arms spaced evenly around the circle: `2` is one straight line (a horizontal anamorphic streak at angle `0`), `4` a plus, `6` a six-point star |
+| `glare.angle` | `0` | `-360` to `360` degrees. Turns the first arm from the horizontal; `45` turns a plus into an X |
+| `glare.fogGlow` | `0` | `0` to `1`. A soft halo around the same bright pixels |
+| `glare.threshold` | `1` | `0` to `10`. Peak scene brightness (linear, before tone mapping) from which a pixel glares |
+| `glare.size` | `0.15` | `0.01` to `1`. Streak length and halo radius as a fraction of the image height |
+| `lensDistortion.distortion` | `0` | `-1` to `1`. Above `0` is barrel, below is pincushion |
+| `lensDistortion.dispersion` | `0` | `0` to `1`. Red and blue split apart toward the edges, up to 3 percent of the distance from the center |
 
 Depth of field and motion blur are deterministic: they read the frame, its depth and the camera, with fixed sample patterns, so a seek to a time gives the same pixels as playing to it.
 Depth of field applies to every render, including `scene_look`.
 Motion blur needs camera `motion` tracks and a render job with `settings.motion`: the job samples the camera at `motion.start + elapsed - shutter` as well, and smears each pixel along the screen movement between the two.
-It follows camera motion only; moving objects are not blurred.
+With `motionBlur.objects` above zero, a part that moves between `motion.start + elapsed - shutter` and `motion.start + elapsed` also smears along its own screen path while the still background stays sharp (`1` is the full shutter). It reads each pixel's part from an object ID pass, so it costs a second draw of the frame, and it replaces the camera smear on that frame, since it covers the camera's motion too. A part is moved as one rigid body by its node transform: a skinned or morphed part, an imported asset and a translucent part are not smeared per object.
 Both effects compile their shader and allocate their targets the first time a frame uses them, and a scene that leaves them at zero pays nothing.
+
+The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `glare` and `lensDistortion`. Each is its own group, off until a recipe names it, and a group at its neutral values draws nothing. They run on the resolved HDR frame, before bloom and tone mapping, in this order: depth of field, motion blur, glare, lens distortion, color balance. Like the two above they are deterministic, and `colorBalance`, `glare` and `lensDistortion` load their code and shaders only for a recipe that names one.
 
 ## Directional shadows
 

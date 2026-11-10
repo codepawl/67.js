@@ -1,179 +1,73 @@
 # 67js
 
-> A WebGL2 toolkit for interactive browser scenes and deterministic PNG/MP4 output. Reuse the scene across preview and export.
+> A 3D engine that AI agents drive. Real-time WebGL2 scenes in the browser, and deterministic PNG, MP4 and GLB output from the same scene.
 
-This file is a compact map for LLMs and coding agents. The linked guide contains the API contract and runnable examples.
-Unreleased changes, with issue numbers and breaking flags, are in changelog.json next to release.json on the site. Check it before you rely on a feature from the docs.
-The installed package determines available APIs. Release metadata describes the website's release, which can differ from a local checkout.
+67js has an MCP server (`67js-mcp`, 23 tools) that builds, edits, looks at and renders scenes from JSON recipes.
+The same engine is a JavaScript library for pages and Node. The library API is in the guide below.
+Scenes are plain data with stable IDs, so an agent can edit by ID and check each change with a rendered image.
 
-## Read only what your task needs
+## Connect
 
-Version `0.5.0` adds `67js/addons/agent-scene` and the `67js-mcp` command.
-Version `0.6.0` adds asynchronous snapshot render jobs. Read `/agent-render-jobs.md` for submission, progress, cancellation and artifact results.
+- npm package: `@codepawlhq/67js`. The MCP server is its `67js-mcp` binary. Node.js 20.19 or newer and an installed Chrome are required.
+- Claude Code plugin, which adds the server and both skills: `/plugin marketplace add codepawl/67.js`, then `/plugin install 67js@67js`.
+- Any other MCP client: `npm install 67js@npm:@codepawlhq/67js`, then run Node on `node_modules/67js/bin/67js-mcp.mjs --backend gpu --memory 192` over stdio. Use the absolute path.
+- Setup, flags and client notes: [mcp.md](https://67js.codepawl.com/mcp.md).
+- Skills in the package: `skills/build-67js-scene` (build and light) and `skills/render-67js-media` (stills and video).
 
-Version `0.8.0` adds imported source-node overrides and motion. Read `/agent-character-motion.md` for joint IDs, layering and pose ownership.
+## Start
 
-Variants: `scene_apply` with a `branch` name forks without editing, `scene_review` shots take a `branch`, `scene_restore` with `branch` keeps one; `labels: true` on `scene_look` and `scene_review` prints and returns part names and lint with pixel positions.
-Version `0.9.0` adds `scene_review`. Read `/agent-review.md` for a labeled PNG grid of up to four views or poses.
-Review uses an isolated snapshot with separate camera and clock settings. It preserves the source revision and preview pose.
+1. Call `scene_capabilities`. It reports the recipe fields, limits and budgets, and it is the source for field detail.
+2. Create a scene, call `scene_inspect` for IDs and the revision, edit in small batches, and call `scene_look` after each batch.
+3. Checkpoint before a risky change. Restore it if the picture is worse. Call `scene_dispose` when finished.
 
-Version `0.7.0` adds recipe motion and atomic set-motion authoring. Read `/agent-motion.md` before generating tracks.
-Use scene_look motionTime for absolute procedural preview seeks. Omit it to preserve the last pose, or use null for the authored base.
+## To do X, call Y
 
-Preview seeks do not advance revisions. Creation, edits and restore sample zero when motion exists.
-Jobs use settings.motion.start plus elapsed time. Imported clips and renderer shader time retain separate controls.
+- Create a scene: `scene_capabilities`, then `scene_create` with a JSON recipe, or `scene_asset_catalog` and `scene_create_asset` for a GLB. [Docs](https://67js.codepawl.com/agent-scene.md)
+- Edit parts, transforms and the camera: `scene_inspect` for stable IDs and the revision, then `scene_apply` with `expectedRevision`. [Docs](https://67js.codepawl.com/agent-scene.md)
+- Shape geometry: `mesh_inspect`, `mesh_edit`, `mesh_stack`. [Docs](https://67js.codepawl.com/mesh.md)
+- Materials, looks, HDRI, fog, effects: `scene_apply` with `set-material`, `set-environment`, `set-effects`, `set-shadow`; `scene_asset_catalog` lists HDRI and look IDs. [Docs](https://67js.codepawl.com/agent-look.md)
+- Lights and shadows: `scene_apply` with `set-environment` (sun, sky, point lights) and `set-shadow`. [Docs](https://67js.codepawl.com/lighting.md)
+- Camera and lens: `scene_apply` with `set-camera`; check the framing with `scene_look` or `scene_review`. [Docs](https://67js.codepawl.com/camera-path.md)
+- Animation: `scene_apply` with `set-motion`; preview with `scene_look` and `motionTime`. [Docs](https://67js.codepawl.com/agent-motion.md)
+- Imported character motion: `scene_inspect` with `kind: hierarchy`, then `scene_apply` with `set-asset-node`. [Docs](https://67js.codepawl.com/agent-character-motion.md)
+- Bake light: Put `bakes` in the recipe; `scene_capabilities` lists the fields. [Docs](https://67js.codepawl.com/light-bake.md)
+- Review the result: `scene_look` for one PNG, `scene_review` for a labeled grid of up to four views. [Docs](https://67js.codepawl.com/agent-review.md)
+- Render a still or a video: `scene_render_submit`, poll `scene_render_status`, read `scene_render_result`, then `scene_render_release`. [Docs](https://67js.codepawl.com/agent-render-jobs.md)
+- Export a model: `scene_export_glb`, or `scene_export_recipe` for the JSON recipe. [Docs](https://67js.codepawl.com/export-glb.md)
+- Recover from an error: `scene_restore` to a `scene_checkpoint`, or `scene_inspect` for the current revision and retry; every error names its next step. [Docs](https://67js.codepawl.com/mcp.md)
 
-Read `/agent-scene.md` for versioned JSON recipes, stable IDs, expected revisions, atomic edits and bounded checkpoints.
-Use `session.inspect()` for compact object facts and `session.exportRecipe()` for detached JSON.
-Keep renderer-facing geometry immutable. Call `renderer.updateParts(session.parts)` after a successful edit or restore.
-This addon does not expose an MCP server or a render job queue.
+## All tools
 
-The npm package includes a prebuilt stdio MCP server. After alias installation, run `npx 67js-mcp --backend gpu --memory 192` with Node.js 20.19+ and installed Chrome.
-Install with `npm install 67js@npm:@codepawlhq/67js` so imports stay `67js`. A plain `npm install @codepawlhq/67js` puts the package in `node_modules/@codepawlhq/67js` instead.
-For MCP clients, invoke Node directly with the absolute path to `node_modules/67js/bin/67js-mcp.mjs`. Read `/mcp.md` for configuration.
-The browser starts only when creating a scene. No source checkout, Vite build or browser download is required.
+- `scene_capabilities`: Index of supported recipe features and runtime budgets; pass topic for the detail of one.
+- `scene_create`: Create the single active render scene from a JSON recipe.
+- `scene_asset_catalog`: List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory.
+- `scene_create_asset`: Create the active scene from a catalog GLB and editable asset recipe.
+- `scene_inspect`: Read revision, counts and selected nodes.
+- `scene_walkmap`: Walkable map on a grid: rows of . walkable, x blocked, # no surface.
+- `mesh_inspect`: Check recipe geometries as polygon meshes: vertex, edge and face counts, triangles/quads/n-gons, connected and closed parts, face tags...
+- `mesh_edit`: Append edits to a recipe mesh geometry or an imported asset part such as mesh-0 (or replace its edit log), atomically like scene_apply:...
+- `mesh_stack`: Set the non-destructive modifier stack of a recipe mesh geometry (ops and fields: scene_capabilities meshModifiers), evaluated after its...
+- `scene_apply`: Atomically edit transforms, look, camera or materials.
+- `scene_look`: Render the active scene as a bounded PNG, optionally with part labels.
+- `scene_review`: Compare one to four independent camera or motion samples in one labeled PNG grid.
+- `scene_checkpoint`: Save a private recipe snapshot.
+- `scene_restore`: Restore a checkpoint atomically using the current revision.
+- `scene_release_checkpoint`: Release one checkpoint slot.
+- `scene_export_recipe`: Read a detached canonical JSON recipe for reproduction.
+- `scene_export_glb`: Write the active scene as a GLB file in the configured jobs folder, under a server-chosen name (the result has the path, byte count and...
+- `scene_dispose`: Dispose the active scene and its checkpoints, releasing renderer resources.
+- `scene_render_submit`: Start one asynchronous snapshot job in the configured private job store.
+- `scene_render_status`: Read render job state and durable frame progress.
+- `scene_render_cancel`: Request cancellation of one job.
+- `scene_render_result`: Read completed local output paths, MIME types, byte counts, SHA-256 digests and measured render metrics.
+- `scene_render_release`: Delete the owned files and record for a terminal job, freeing store quota.
 
-Read `/mcp.md` before configuring it. Start with `scene_capabilities`, create a recipe and inspect its stable IDs.
+Call `scene_capabilities` for field detail. This list is generated from the server's tool registry by `scripts/generate-llms.mjs`.
 
-Read `/agent-asset.md` for imported asset sessions available since `0.5.0` and the `67js/addons/agent-asset` addon.
-Configure --assets with an absolute GLB directory, then call scene_asset_catalog and scene_create_asset with a content-bound asset ID.
-Imported scenes preserve supported maps, skins, morphs and clips. Their topology remains fixed.
+## Docs
 
-Use scene_inspect kind:hierarchy with offset/limit to find source node-N IDs and editable joints. Mesh-N IDs describe primitives.
-Use set-asset-node for local TRS and set-motion for source-node, material and camera tracks. Preserve the decoded rig and textures.
-Use set-root for asset placement and set-animation for absolute clip/time sampling. Checkpoint before sampling or relighting.
-
-Read `/agent-look.md` for recipe environment, effects and shadow fields.
-Use `set-environment`, `set-effects` and `set-shadow` for atomic partial look patches.
-Nested volumeFog/bloom fields merge. pointLights replaces the list. Volume fog requires HDR/depth support.
-
-Checkpoint before relighting, inspect the PNG, then restore or export the full recipe. Point lights do not cast local shadows.
-
-Checkpoint, apply small revisioned batches, then use `scene_look` to assess the actual PNG.
-Restore failed experiments and release unused checkpoints. Export the recipe and dispose the scene when finished.
-The runtime keeps one browser scene alive, serializes calls, caps PNG responses and releases resources on stdin EOF.
-
-Use `add-geometry`, `add-material` and `add-node` records to build a scene from an empty recipe.
-Use explicit removal commands and `set-node` geometry/material fields to rebind meshes. Final batch references must resolve.
-Removing a parent requires `recursive: true` or reparenting/removing its children in the same batch.
-
-Active, checkpoint and staged geometry share a budget. Release unused checkpoints before increasing detail.
-Topology changes reconcile rigid, untextured GPU parts. Geometry stays immutable and surviving shared buffers remain allocated.
-
-Tools accept bounded JSON and configured local assets. They expose no arbitrary code, remote asset providers or caller-selected file paths.
-
-- [Release metadata](https://67js.codepawl.com/release.json): package name, version, publication status, install command, module URL and commit.
-- [Complete plain-text guide](https://67js.codepawl.com/guide.md): renderer, parts, materials, cameras, animation, lifecycle, export and troubleshooting. The section "Render a PNG from a script without MCP" is a tested script for an agent with no MCP client.
-- [GLB contract](https://67js.codepawl.com/gltf.md): supported assets and conversion limits. Read before selecting or importing a model.
-- [Documentation](https://67js.codepawl.com/docs.html): the human reading interface for the same guide.
-
-Use guide headings to locate a task. Parts and geometry covers scene construction. Renderer reference covers options and diagnostics.
-Images and films covers the repository CLI. Performance and memory covers allocation planning. Models and AI agents covers completion evidence.
-
-## Installation and API discovery
-
-1. Read release metadata before choosing the published version or browser module URL.
-2. Install the short import alias with `npm install 67js@npm:@codepawlhq/67js`.
-3. Compare the imported `VERSION` with your installed package metadata.
-4. Read the matching guide section before generating API calls.
-
-Without the alias, imports use `@codepawlhq/67js`. Aliased core imports use `67js`.
-Addon paths include `67js/addons/model`, `67js/addons/nature`, `67js/addons/film`, `67js/addons/motion`, `67js/addons/canvas2d` and `67js/addons/gltf`.
-The core exports `Renderer67`, `box`, `cylinder`, `sphere`, `torus`, camera helpers, animation helpers, effects and budget helpers.
-Exact signatures and defaults are in the guide. Names from Three.js are not substitutes for 67js APIs.
-
-## Build a scene
-
-1. Define the subject, camera, interaction, output dimensions and memory budget.
-2. Create uniquely named parts with shared geometry, materials and finite invertible column-major matrices.
-3. Set explicit MSAA, HDR, pixel ratio and `memoryBudgetMiB` options.
-4. Reuse one renderer and update existing parts through `updateParts`.
-5. Render on demand for static scenes and pause continuous playback when hidden.
-6. Provide keyboard controls and honor reduced motion.
-7. Disconnect observers, cancel animation frames and dispose owned resources during teardown.
-
-Material RGB values are linear. Repeated meshes share geometry object identity, rather than separate copies with equal values.
-`updateParts` changes retained parts. A different graph requires a new renderer after disposal.
-`memoryPlan` reports actual dimensions and estimated allocation. The planner can reduce dimensions to fit the budget.
-
-## Choose a working recipe
-
-- [Object studio](https://67js.codepawl.com/object.html): orbit, camera presets, material finishes and exploded assemblies.
-- [Nature world](https://67js.codepawl.com/nature.html): outdoor lighting, wind and water interaction.
-- [Motion study](https://67js.codepawl.com/motion.html): keyframes, absolute timeline samples and framing.
-- [2D and axis views](https://67js.codepawl.com/view2d.html): orthographic cameras and flat geometry.
-- [Asset viewer](https://67js.codepawl.com/assets.html): opaque GLB meshes, textures and rigid node animation.
-
-The npm archive includes `skills/build-67js-scene/SKILL.md` and `skills/render-67js-media/SKILL.md`.
-These contain scene and export procedures. A skill runtime is optional. The plain-text guide works independently.
-
-## Export and verify
-
-Offline media commands require a repository checkout with Chrome and FFmpeg. They are not commands provided by the npm library.
-GPU rasterization and GPU encoding are separate choices. CPU export can use SwiftShader. NVENC requires supported hardware.
-
-1. Read the media skill and select the smallest suitable preset.
-2. Export one deterministic frame or a short trial before a full film.
-3. Keep one scene renderer and one pending capture, with encoder backpressure.
-4. Inspect representative rendered frames and exercise the requested interactions.
-5. Verify dimensions, duration, frame count and audio with FFprobe for video.
-6. Report reproduction commands, output paths, actual backend and observed failures.
-
-Successful compilation does not prove visual quality. Screenshots must show actual rendered output, including a narrow viewport for browser UI.
-Allocation estimates are not measured total RAM or VRAM. Node RSS and browser JS heap exclude some driver and browser allocations.
-Report estimates separately from observed process metrics. Reduce resolution, MSAA, texture size or scene detail when allocation fails.
-
-## Limits and honest claims
-
-67js currently uses WebGL2. It is not API-compatible with Three.js and is not a complete Blender editor.
-There is no WebGPU backend or complete mesh editor.
-
-Version `0.4.0` includes the APIs below. Check VERSION and release.json against the installed package before using them.
-The current source adds GPU skinning, relative POSITION/NORMAL morphs, weight animation and an optional Rapier physics addon.
-Read `docs/skinning.md`, `docs/morph-targets.md`, `docs/gltf-morph.md` and `docs/physics.md` in the matching checkout before using these features.
-Source morphs require authored base normals. Tangent targets and per-target flat normal generation remain unsupported.
-
-The source GLB exporter preserves opaque linear vertex colors, UVs and independent HDR emission with current morph weights.
-Read `docs/export-glb.md` in the matching checkout. Exported GLBs contain a static pose, not serialized animation clips or skeletons.
-Texture export remains unsupported and fails explicitly. Procedural shaders and scene environments are not serialized into glTF materials.
-
-`addons/sculpt` accepts serializable inflate, displace and smooth strokes and returns new static geometry.
-Read `docs/sculpt.md`. Construct the result before the renderer: changing uploaded CPU positions does not update GPU geometry buffers.
-
-`addons/surface` creates projector-clipped curved patches. Read `docs/surface.md` for target-local projector and clearance units.
-Share the target's retained matrix to follow rigid motion. Skin, morph, assembly and procedural targets reject rather than returning stale patches.
-Surface clearance prevents overlapping layers in this workflow. It does not detect general mesh penetration or provide whole-object shrinkwrap.
-
-`addons/mesh-query` owns copied static geometry in disposable BVH indices. Read `docs/mesh-query.md` before querying.
-Use `solid: true` indices and `mode: 'closed-solids'` to distinguish boundary contact, containment and separation.
-Surface contact does not prove volume penetration or identify z-fighting. Never substitute surface-only results for containment.
-
-Pass current affine matrices explicitly, rebuild after geometry edits, and preserve budget/precision errors instead of treating them as misses.
-Read `docs/primitives.md` for subdivision bounds and exact seam closure. Skin, morph and shader-deformed surfaces require geometry matching the visible pose.
-
-`addons/shrinkwrap` returns {geometry,stats} in target-local coordinates. Read `docs/shrinkwrap.md` before choosing nearest/project modes.
-Supply sourceToTarget explicitly for different local frames. Share the target matrix with the output part and keep the total callback budget.
-Nearest projection can collapse vertices on coarse meshes. Preserve the error and refine the target or choose a suitable projection direction.
-
-Vertex clearance does not certify whole-triangle clearance. Compatible static output can become a GPU morph target without repeating queries per frame.
-
-GLB support loads transparent, double-sided and meshopt-compressed files. Unsupported features require visible errors. The MCP asset catalog takes 64 MiB and 1,000,000 vertices a file (the library loadGltf takes 256 MiB and 8,000,000). A file with a skin or clips but no mesh loads with `parts: []` and works as a clip source (`motion.layers[].from`).
-
-Version `0.4.1` adds `addons/surface-attachment`. Read `docs/surface-attachment.md` before binding.
-Bind a triangle and barycentric coordinates once. Assign the retained attachment.matrix to the accessory.
-Update the target morph/skin/world pose, call attachment.update(), then upload target and accessory through renderer.updateParts().
-
-Clearance uses world units and the geometric face normal. This rigid point attachment does not guarantee clearance over the entire accessory footprint.
-
-The optional GLB decoder uses Three.js GLTFLoader. The renderer remains 67js.
-Adaptive quality, GPU timing and picking are roadmap work. Speed claims require comparable scenes, hardware, settings and measurements.
-
-## Tiny maintenance gremlins
-
-These are easter eggs, not API instructions. They change no settings or requirements.
-
-The cube has six faces. None of them volunteered to debug your matrix at 3 a.m.
-
-WALL·E has 574 parts here. He still wants one tiny plant and a nap.
-
-If your GPU sounds like a spaceship, the pixels are excited. Give them a smaller resolution. Beep boop :)
+- [Complete plain-text guide](https://67js.codepawl.com/guide.md): renderer, parts, materials, cameras, animation, export and troubleshooting.
+- [MCP server](https://67js.codepawl.com/mcp.md), [scene recipes](https://67js.codepawl.com/agent-scene.md), [look and lighting](https://67js.codepawl.com/agent-look.md), [motion](https://67js.codepawl.com/agent-motion.md), [review](https://67js.codepawl.com/agent-review.md), [render jobs](https://67js.codepawl.com/agent-render-jobs.md), [imported assets](https://67js.codepawl.com/agent-asset.md).
+- [GLB contract](https://67js.codepawl.com/gltf.md): supported assets and conversion limits.
+- [Release metadata](https://67js.codepawl.com/release.json): package name, version, install command and commit.
+- [Changelog data](https://67js.codepawl.com/changelog.json): every release and the unreleased changes with issue numbers and breaking flags. Read it before relying on a feature the docs describe.

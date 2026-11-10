@@ -20,19 +20,23 @@ const MODULE_LOADERS = {
   layerShaders: () => import('./material-layer-shaders.js'),
   liquidShader: () => import('./liquid-shader.js'),
   subsurfaceShader: () => import('./subsurface-shader.js'),
+  fogShader: () => import('./fog-shader.js'),
   worldMaterials: () => import('./world-material-shader.js'),
   terrain: () => import('./agent-terrain.js'),
   navigation: () => import('./agent-navigation.js'),
   lightLinking: () => import('./light-linking.js'),
-  cascades: () => import('./cascaded-shadows.js'),
+  cascades: () => import('./light-modules.js'),
   assets: () => import('./agent-scene-assets.js'),
   vegetation: () => import('./agent-vegetation.js'),
   crowd: () => import('./agent-crowd.js'),
   lineArt: () => import('./line-art.js'),
   viewTransform: () => import('./view-transform-shader.js'),
   coplanar: () => import('./coplanar-overlap.js'),
+  physicalSky: () => import('./physical-sky.js'),
   floorSky: () => import('./floor-sky-visibility.js'),
   userPass: () => import('./user-pass.js'),
+  objectMotionBlur: () => import('./object-motion-blur.js'),
+  postSteps: () => import('./post-steps.js'),
   materialSnippet: () => import('./material-snippet.js'),
 };
 
@@ -60,12 +64,15 @@ const MODULE_MARKERS = {
   layerShaders: ['"anisotropy"', '"iridescence"'],
   liquidShader: ['"transmission"', '"liquid"', '"foam"'],
   subsurfaceShader: ['"subsurface"'],
+  // Any mention loads it, because an edit can set the density through a path or the environment of an operation.
+  fogShader: ['volumeFog'],
   worldMaterials: ['"tag":"water"', '"waterPreset"', '"absorption"', '"turbidity"', '"vegetation":{', '"tag":"foliage"', '"tag":"grass"', '"tag":"terrain"', '"tag":"fire"', '"tag":"smoke"', '"moss"'],
   terrain: ['"type":"terrain"'],
   // No recipe text asks for it, only the path option of scene_inspect does, so a host loads it with loadAllAgentSceneModules.
   navigation: [],
   lightLinking: ['"affects"', '"keyAffects"'],
-  cascades: ['"shadowCascades"'],
+  // The cascade module also loads light-shapes (soft area shadows, IES profiles), so these markers bring both.
+  cascades: [/"(?:shadowCascades|sunAngularRadius|ies)"|"areaLights":\[\{/],
   assets: ['"asset":{', '"sequence":{'],
   vegetation: ['"vegetation":{', '"wind":{'],
   crowd: ['"crowd":{'],
@@ -75,8 +82,12 @@ const MODULE_MARKERS = {
   coplanar: ['"resolveCoplanar"'],
   // A closed room a sun lights gets the floor sky trace by default. The recipe text can not say whether a room is closed, so a recipe that names its sun loads it and the module skips an open scene.
   floorSky: ['"keyColor"', '"keyIntensity"'],
+  physicalSky: ['"type":"physical"'],
   userPass: ['"postPasses"'],
   materialSnippet: ['"snippet":{'],
+  // Only a motionBlur object that sets a non-zero `objects` loads it; the common `"shutter":0` look does not.
+  objectMotionBlur: [/"motionBlur":\{[^}]*"objects":(?!0[,}])/],
+  postSteps: [/"(?:colorBalance|glare|lensDistortion)"/],
 };
 
 /** Whether a recipe, operation list or edit list contains a boolean edit, which needs loadMeshBooleans() first. */

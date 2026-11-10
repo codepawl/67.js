@@ -66,13 +66,16 @@ for (const chunk of manifest.previewChunks) {
   assert.equal(createHash('sha256').update(bytes).digest('hex'), chunk.sha256);
 }
 const cli = join(installedRoot, 'bin', '67js-mcp.mjs');
-const version = spawnSync(process.execPath, [cli, '--version'], { cwd: consumer, encoding: 'utf8', windowsHide: true });
+// MCP_SERVER_RUNTIME runs the installed server under another runtime, such as bun, while this script stays on Node.
+const serverRuntime = process.env.MCP_SERVER_RUNTIME || process.execPath;
+const runtimeLabel = process.env.MCP_SERVER_RUNTIME ? `-${process.env.MCP_SERVER_RUNTIME.replace(/^.*[\/]/, '').replace(/.exe$/, '')}` : '';
+const version = spawnSync(serverRuntime, [cli, '--version'], { cwd: consumer, encoding: 'utf8', windowsHide: true });
 assert.equal(version.status, 0, version.stderr);
 assert.equal(version.stdout.trim(), metadata.version);
-const help = spawnSync(process.execPath, [cli, '--help'], { cwd: consumer, encoding: 'utf8', windowsHide: true });
+const help = spawnSync(serverRuntime, [cli, '--help'], { cwd: consumer, encoding: 'utf8', windowsHide: true });
 assert.equal(help.status, 0, help.stderr);
 assert.match(help.stdout, /--assets/);
-const invalid = spawnSync(process.execPath, [cli, '--memory', '0'], { cwd: consumer, encoding: 'utf8', windowsHide: true });
+const invalid = spawnSync(serverRuntime, [cli, '--memory', '0'], { cwd: consumer, encoding: 'utf8', windowsHide: true });
 assert.equal(invalid.status, 1);
 assert.equal(invalid.stdout, '');
 assert.match(invalid.stderr, /32 to 384/);
@@ -90,7 +93,7 @@ await mkdir(assets);
 await writeFile(join(assets, 'textured-rig.glb'), await createTexturedRigFixture());
 const results = [];
 for (const era of ['modern', 'legacy']) {
-  const transport = new PatientStdioClientTransport({ command: process.execPath,
+  const transport = new PatientStdioClientTransport({ command: serverRuntime,
     args: [cli, '--backend', 'cpu', '--memory', '96', '--assets', assets], cwd: consumer, stderr: 'pipe' });
   let diagnostics = '';
   transport.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
@@ -117,10 +120,10 @@ for (const era of ['modern', 'legacy']) {
     const connectMs = performance.now() - start;
     processId = transport.pid;
     assert.equal(client.getServerVersion().version, metadata.version);
-    assert.equal((await client.listTools()).tools.length, 22);
+    assert.equal((await client.listTools()).tools.length, 23);
     const capabilities = (await call('scene_capabilities')).structuredContent;
     assert.equal(capabilities.phase, 'idle');
-    assert.equal(capabilities.preview.maximumActiveScenes, 1);
+    assert.equal((await call('scene_capabilities', { topic: 'preview' })).structuredContent.value.maximumActiveScenes, 1);
     assert.equal(capabilities.availableIn, metadata.version);
     if (protocolOnly) {
       results.push({ era, tools: 18, connectMs, browserStarted: false });
@@ -153,7 +156,7 @@ for (const era of ['modern', 'legacy']) {
       const exported = (await call('scene_export_recipe', { sessionId: rig.sessionId })).structuredContent;
       assert.equal(exported.recipe.animation.time, 1.1);
       await mkdir('artifacts', { recursive: true });
-      await writeFile(`artifacts/mcp-package-${era}.png`, bent);
+      await writeFile(`artifacts/mcp-package-${era}${runtimeLabel}.png`, bent);
       results.push({ era, tools: 18, connectMs, importedTexture: true, importedSkin: true, undoPngExact: true, reverseSeekPngExact: true });
       // Keep the final rig active to prove EOF closes its renderer and owned browser.
     }
@@ -165,9 +168,9 @@ for (const era of ['modern', 'legacy']) {
   assert.throws(() => process.kill(processId, 0), /ESRCH/);
 }
 const report = { packageName: metadata.name, version: metadata.version, archiveBytes: packed.size, cli,
-  published, protocolOnly,
+  published, protocolOnly, serverRuntime,
   runtimeDevelopmentDependencies: false, nativeShimVersion: true, builtOutputHashesMatch: true,
   sourceCommit: manifest.sourceCommit, eofWithActiveScene: !protocolOnly, results };
 await mkdir('artifacts', { recursive: true });
-await writeFile(`artifacts/mcp-package-${published ? 'published' : protocolOnly ? 'protocol' : 'cpu'}.json`, JSON.stringify(report, null, 2));
+await writeFile(`artifacts/mcp-package-${published ? 'published' : protocolOnly ? 'protocol' : 'cpu'}${runtimeLabel}.json`, JSON.stringify(report, null, 2));
 console.log(JSON.stringify(report));

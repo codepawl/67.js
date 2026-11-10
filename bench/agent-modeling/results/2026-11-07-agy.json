@@ -1,0 +1,206 @@
+{
+  "run": "2026-11-07-agy",
+  "date": "2026-11-07T16:19:43.731Z",
+  "client": "Antigravity CLI (agy), headless, --settings with permissions.allow command(*), no MCP",
+  "task": "llms-only-png",
+  "runsPerModel": 2,
+  "note": "MCP suite not run: agy only reads MCP servers from its global config, and --settings rejects mcpServers. A 768x768 PNG from gemini-4-argon-medium attempt 1 passed because the check requires a minimum side only. gpt-oss-120b-medium ignored the no-internet instruction and called search_web in every attempt.",
+  "byModel": {
+    "gemini-3.8-flash-medium": {
+      "passed": 2,
+      "runs": 2
+    },
+    "gemini-4-argon-medium": {
+      "passed": 2,
+      "runs": 2
+    },
+    "gpt-oss-120b-medium": {
+      "passed": 0,
+      "runs": 2
+    }
+  },
+  "records": [
+    {
+      "task": "llms-only-png",
+      "attempt": 1,
+      "pass": true,
+      "detail": "512x512, 15973 colours, 84% differ from the corner",
+      "filesWritten": [
+        "llms.txt",
+        "package.json",
+        "render.mjs",
+        "scene.png"
+      ],
+      "model": "gemini-3.8-flash-medium",
+      "agent": "agy",
+      "usedWeb": false,
+      "toolCalls": 106,
+      "toolErrors": 1,
+      "toolsByName": {
+        "run_command": 77,
+        "read_file": 3,
+        "write_file": 4,
+        "manage_task": 22
+      },
+      "turns": 1,
+      "costUsd": null,
+      "inputTokens": 507011,
+      "outputTokens": 59018,
+      "wallSeconds": 547,
+      "stopped": "SUCCESS",
+      "requestedModel": "gemini-3.8-flash-medium"
+    },
+    {
+      "task": "llms-only-png",
+      "attempt": 2,
+      "pass": true,
+      "detail": "512x512, 12231 colours, 98% differ from the corner",
+      "filesWritten": [
+        "llms.txt",
+        "package.json",
+        "render.mjs",
+        "scene.png"
+      ],
+      "model": "gemini-3.8-flash-medium",
+      "agent": "agy",
+      "usedWeb": false,
+      "toolCalls": 38,
+      "toolErrors": 2,
+      "toolsByName": {
+        "read_file": 5,
+        "run_command": 26,
+        "manage_task": 4,
+        "write_file": 2,
+        "schedule": 1
+      },
+      "turns": 1,
+      "costUsd": null,
+      "inputTokens": 202678,
+      "outputTokens": 21615,
+      "wallSeconds": 255,
+      "stopped": "SUCCESS",
+      "requestedModel": "gemini-3.8-flash-medium"
+    },
+    {
+      "task": "llms-only-png",
+      "attempt": 1,
+      "pass": true,
+      "detail": "768x768, 20570 colours, 74% differ from the corner",
+      "filesWritten": [
+        "llms.txt",
+        "package.json",
+        "render.mjs",
+        "scene.png"
+      ],
+      "model": "gemini-4-argon-medium",
+      "agent": "agy",
+      "usedWeb": false,
+      "toolCalls": 22,
+      "toolErrors": 1,
+      "toolsByName": {
+        "read_file": 14,
+        "write_file": 3,
+        "run_command": 3,
+        "schedule": 2
+      },
+      "turns": 1,
+      "costUsd": null,
+      "inputTokens": 75531,
+      "outputTokens": 8769,
+      "wallSeconds": 275,
+      "stopped": "SUCCESS",
+      "requestedModel": "gemini-4-argon-medium"
+    },
+    {
+      "task": "llms-only-png",
+      "attempt": 2,
+      "pass": true,
+      "detail": "512x512, 14257 colours, 68% differ from the corner",
+      "filesWritten": [
+        "llms.txt",
+        "package.json",
+        "render.mjs",
+        "scene.png"
+      ],
+      "model": "gemini-4-argon-medium",
+      "agent": "agy",
+      "usedWeb": false,
+      "toolCalls": 36,
+      "toolErrors": 4,
+      "toolsByName": {
+        "read_file": 20,
+        "run_command": 7,
+        "write_file": 5,
+        "manage_task": 4
+      },
+      "turns": 1,
+      "costUsd": null,
+      "inputTokens": 148779,
+      "outputTokens": 16480,
+      "wallSeconds": 499,
+      "stopped": "SUCCESS",
+      "requestedModel": "gemini-4-argon-medium"
+    },
+    {
+      "task": "llms-only-png",
+      "attempt": 1,
+      "pass": false,
+      "detail": "used a web tool; the file does not exist",
+      "filesWritten": [
+        "llms.txt",
+        "package.json",
+        "render.mjs"
+      ],
+      "model": "gpt-oss-120b-medium",
+      "agent": "agy",
+      "usedWeb": true,
+      "toolCalls": 23,
+      "toolErrors": 1,
+      "toolsByName": {
+        "read_file": 5,
+        "search_web": 4,
+        "run_command": 5,
+        "write_file": 1,
+        "manage_task": 5,
+        "edit_file": 3
+      },
+      "turns": null,
+      "costUsd": null,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "wallSeconds": 900,
+      "stopped": "no result",
+      "requestedModel": "gpt-oss-120b-medium"
+    },
+    {
+      "task": "llms-only-png",
+      "attempt": 2,
+      "pass": false,
+      "detail": "used a web tool; the file does not exist",
+      "filesWritten": [
+        "llms.txt",
+        "package.json",
+        "render.mjs"
+      ],
+      "model": "gpt-oss-120b-medium",
+      "agent": "agy",
+      "usedWeb": true,
+      "toolCalls": 40,
+      "toolErrors": 3,
+      "toolsByName": {
+        "read_file": 8,
+        "search_web": 6,
+        "run_command": 19,
+        "write_file": 2,
+        "edit_file": 5
+      },
+      "turns": 1,
+      "costUsd": null,
+      "inputTokens": 92186,
+      "outputTokens": 21354,
+      "wallSeconds": 349,
+      "stopped": "SUCCESS",
+      "requestedModel": "gpt-oss-120b-medium"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { mat4, quat } from 'gl-matrix';
-import { box, cylinder, sphere } from './geometry.js';
+import { box, cylinder, grid, sphere } from './geometry.js';
 import './world-material-shader.js';
 
 const FULL_TURN = Math.PI * 2;
@@ -17,6 +17,24 @@ function randomGenerator(seed) {
     mixed ^= mixed + Math.imul(mixed ^ mixed >>> 7, mixed | 61);
     return ((mixed ^ mixed >>> 14) >>> 0) / 4294967296;
   };
+}
+
+// Seam softening where a rock or a trunk meets the ground (mesh-blend.js), in metres. One radius per group keeps the
+// instanced batches culled.
+const ROCK_BLEND = Object.freeze({ radius: 0.16 });
+const TRUNK_BLEND = Object.freeze({ radius: 0.12 });
+
+export const FLAG_SIZE = Object.freeze({ width: 1.2, height: 0.75, segments: 12 });
+
+// A flat sheet in world space, hanging from the pole at `topRight` and streaming toward -x over the bridge. nature-flag.js moves its vertices every frame.
+function createFlagPart(topRight) {
+  const sheet = grid(FLAG_SIZE.segments);
+  for (let vertex = 0; vertex < sheet.positions.length; vertex += 3) {
+    sheet.positions[vertex] = topRight[0] - FLAG_SIZE.width + (sheet.positions[vertex] + 0.5) * FLAG_SIZE.width;
+    sheet.positions[vertex + 1] = topRight[1] - (0.5 - sheet.positions[vertex + 1]) * FLAG_SIZE.height;
+    sheet.positions[vertex + 2] = topRight[2];
+  }
+  return { name: 'Flag', geometry: sheet, matrix: mat4.create(), material: { ...material('cloth', [0.64, 0.09, 0.06], 0.78), doubleSided: true } };
 }
 
 function material(tag, color, roughness = 0.9, metallic = 0) {
@@ -230,8 +248,10 @@ export function createNatureWorld({ seed = 67, detail = 'balanced' } = {}) {
   const reedMesh = grassTuft(5, 5, true);
   const blossomMesh = flowerHead(sphere(8, 5));
 
-  function add(name, mesh, position, scale, surface, rotation) {
-    parts.push({ name, geometry: mesh, matrix: transform(position, scale, rotation), material: surface });
+  function add(name, mesh, position, scale, surface, rotation, blend) {
+    const part = { name, geometry: mesh, matrix: transform(position, scale, rotation), material: surface };
+    if (blend) part.blend = blend;
+    parts.push(part);
   }
   function streamCenter(depth) {
     return Math.sin(depth * 0.09 + 0.7) * 3.7 + Math.sin(depth * 0.034) * 3;
@@ -284,7 +304,7 @@ export function createNatureWorld({ seed = 67, detail = 'balanced' } = {}) {
   function tree(horizontal, depth, height, evergreen, index) {
     const ground = terrainHeight(horizontal, depth);
     const trunkRadius = height * (evergreen ? 0.033 : 0.047);
-    add(`Tree ${index} trunk`, trunkMesh, [horizontal, ground + height * 0.44, depth], [trunkRadius, height * 0.88, trunkRadius], evergreen ? bark : birchBark, [0.025, random() * FULL_TURN, 0.035]);
+    add(`Tree ${index} trunk`, trunkMesh, [horizontal, ground + height * 0.44, depth], [trunkRadius, height * 0.88, trunkRadius], evergreen ? bark : birchBark, [0.025, random() * FULL_TURN, 0.035], TRUNK_BLEND);
     const mesh = depth < -29 ? distantCanopyMesh : canopyMesh;
     const yaw = random() * FULL_TURN;
     if (evergreen) {
@@ -344,11 +364,12 @@ export function createNatureWorld({ seed = 67, detail = 'balanced' } = {}) {
     const horizontal = streamCenter(depth) + side * (streamWidth(depth) + random() * 2.4);
     const radius = 0.15 + random() ** 2 * 0.95;
     const ground = terrainHeight(horizontal, depth);
-    add(`River stone ${index}`, rockMesh, [horizontal, ground + radius * 0.19, depth], [radius * 1.3, radius * 0.64, radius], stones[index % stones.length], [random() * 0.3, random() * FULL_TURN, random() * 0.4]);
+    add(`River stone ${index}`, rockMesh, [horizontal, ground + radius * 0.19, depth], [radius * 1.3, radius * 0.64, radius], stones[index % stones.length], [random() * 0.3, random() * FULL_TURN, random() * 0.4], ROCK_BLEND);
   }
-  add('Glacial boulder', rockMesh, [-7.8, terrainHeight(-7.8, 12) + 0.6, 12], [2.3, 1.25, 1.65], stones[1], [0.1, 0.4, 0.2]);
-  add('Moss on glacial boulder', rockMesh, [-7.85, terrainHeight(-7.8, 12) + 1.56, 12], [1.65, 0.25, 1.14], foliage[0], [0.1, 0.4, 0.2]);
+  add('Glacial boulder', rockMesh, [-7.8, terrainHeight(-7.8, 12) + 0.6, 12], [2.3, 1.25, 1.65], stones[1], [0.1, 0.4, 0.2], ROCK_BLEND);
+  add('Moss on glacial boulder', organicSphere(12, 8, 4, 0.11), [-7.85, terrainHeight(-7.8, 12) + 1.56, 12], [1.65, 0.25, 1.14], foliage[0], [0.1, 0.4, 0.2]);
 
+  const stemMesh = cylinder(10);
   const flowerPatches = [[-7, 16], [8, 4], [-11, -3], [4, -18]];
   for (let index = 0; index < settings.flowers; index++) {
     const patch = flowerPatches[index % flowerPatches.length];
@@ -357,7 +378,7 @@ export function createNatureWorld({ seed = 67, detail = 'balanced' } = {}) {
     if (Math.abs(horizontal - streamCenter(depth)) < streamWidth(depth) + 0.7) continue;
     const ground = terrainHeight(horizontal, depth);
     const height = 0.3 + random() * 0.36;
-    add(`Wildflower ${index} stem`, trunkMesh, [horizontal, ground + height / 2, depth], [0.013, height, 0.013], meadow[2]);
+    add(`Wildflower ${index} stem`, stemMesh, [horizontal, ground + height / 2, depth], [0.013, height, 0.013], meadow[2]);
     add(`Wildflower ${index} blossom`, blossomMesh, [horizontal, ground + height, depth], [1, 1, 1], flowerColors[index % flowerColors.length], [0.1, random() * FULL_TURN, 0.12]);
   }
 
@@ -384,11 +405,17 @@ export function createNatureWorld({ seed = 67, detail = 'balanced' } = {}) {
       add(`Bridge post cap ${side} ${post}`, timberMesh, [x, 2.3, bridgeDepth + side * 0.88], [0.21, 0.08, 0.21], iron);
     }
   }
+  const flagPoleX = bridgeCenter + bridgeLength / 2;
+  const flagPoleDepth = bridgeDepth + 0.88;
+  add('Flagpole', cylinder(10), [flagPoleX, 3.3, flagPoleDepth], [0.06, 2, 0.06], warmWood);
+  const flag = createFlagPart([flagPoleX - 0.03, 4.25, flagPoleDepth]);
+  parts.push(flag);
   const camera = { eye: [15, 8, 23], target: [-2, 2, -12] };
   return {
     name: 'Silverwater valley',
     description: 'A winding alpine stream, sunlit birches, wildflower meadows and distant snowfields.',
     parts,
+    flag,
     camera,
     bounds: worldBounds(parts),
     environment: {

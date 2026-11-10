@@ -34,6 +34,8 @@ export function finishProgram(context, { program, shaders }) {
   shaders.forEach((shader) => context.deleteShader(shader));
   if (!linked) {
     context.deleteProgram(program);
+    // On a lost context every link reports false with a null log; the context is gone, so there is nothing to report (#541).
+    if (context.isContextLost()) return program;
     throw new Error(failedShader ? `Shader compilation failed: ${message}` : `Shader linking failed: ${message}`);
   }
   return program;

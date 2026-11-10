@@ -112,6 +112,10 @@ A `two-bone` solver takes `root`, `middle` and `end` node IDs, each a descendant
 point the middle node bends toward; give one, because a straight limb has no bend direction of its own. `keepEndRotation`
 defaults to `true`, so a gripper or foot keeps its world rotation.
 
+A `chain` solver (alias `ik`) takes `chain` (2 to 16 node IDs from base to end) or `root` and `end`, `target`, optional `pole`, `poleAngle` (-180 to 180 degrees), `stretch` (boolean or 0 to 1), `iterations` (1 to 64, default 16), `limits` (joint node ID to `{ x, y, z }` degree ranges), `keepEndRotation` and `weight`.
+
+A `spline` solver (alias `spline_ik`) takes `chain` (or `root` and `end`), `curve` (2 to 64 `[x, y, z]` points or `{ "nodes": [ids] }` whose world positions define the Catmull-Rom spline), optional `stretch` (boolean or 0 to 1, default `true`) and `weight`.
+
 An `aim` solver takes `joint`, or `joints` from the base of a chain to the aiming node, which then share the turn.
 `worldForward` is the world direction the character faces at rest, which is the one to use on imported rigs because their
 bone axes vary. Otherwise `forward` is the aiming node's local axis (default `[0, 0, 1]`). `maxAngle` limits the whole
@@ -201,6 +205,36 @@ uniform scale. `true` takes the defaults:
 The lock reads the layers only: tracks and `ik` are applied after it. `scene_inspect` returns `footLock.feet` with the
 planted phases per foot. The hips do not move, so a ground far from the character's floor can be out of reach.
 
+### Light, sun, sky and exposure tracks
+
+On a scene recipe (not an imported asset) four more kinds animate the look, with the keyframes, interpolations and `easing` of
+any other track. `light` takes an `id` of `point:N`, `spot:N` or `area:N` (the index in `environment.pointLights` and so on) and
+the properties `position`, `color`, `intensity`, plus `direction` on spot and area lights. `sun` (no ID) takes `direction`,
+`color` and `intensity`, which set `lightDirection`, `keyColor` and `keyIntensity`. `environment` takes `skyTop`, `skyBottom`,
+`fogColor`, `fogDensity`, `volumeFogDensity`, `ambientIntensity`, `fillIntensity`, `environmentIntensity` and
+`environmentRotation` (radians; these dim and turn the sky map shown when `environment.world` is true). `effects` takes `exposure`
+and `focusDistance`, which needs `effects.depthOfField.blur` above 0 (a camera with an `fStop` focuses on its target, so move the
+camera `target` track for a rack focus). Values keep the range of the environment field, and an unknown light, property or kind
+fails with the valid ones. Untracked values keep their authored value, and a scene with no such track renders as before.
+
+After `scene.sampleMotion(time)`, `scene.environment` and `scene.effects` return the sampled values (the exported recipe keeps
+the authored ones), so a renderer that reads them per frame follows the tracks without a rebuild. Baked light (`bake`) is computed
+once and does not follow a moving light.
+
+```js
+// A sunset: the sun drops to the horizon, the sky map turns and dims, the exposure rises to compensate.
+const sunset = {
+  duration: 4,
+  tracks: [
+    { kind: 'sun', property: 'direction', keyframes: [{ time: 0, value: [-1, 4, 1] }, { time: 4, value: [-4, 0.3, 1] }] },
+    { kind: 'sun', property: 'color', keyframes: [{ time: 0, value: [3, 2.8, 2.5] }, { time: 4, value: [3.4, 1.4, 0.6] }] },
+    { kind: 'environment', property: 'environmentIntensity', keyframes: [{ time: 0, value: 1 }, { time: 4, value: 0.4 }] },
+    { kind: 'light', id: 'point:0', property: 'intensity', keyframes: [{ time: 0, value: 0 }, { time: 4, value: 3 }] },
+    { kind: 'effects', property: 'exposure', keyframes: [{ time: 0, value: 1 }, { time: 4, value: 1.4 }] },
+  ],
+};
+```
+
 ### Morph weight tracks
 
 A track `{ "kind": "morph", "id": "eyeBlinkLeft", "property": "weight", "keyframes": [...] }` keys the weight (0 to 1) of every
@@ -245,10 +279,28 @@ own transform under its parent.
 | `limit_rotation` | `x`, `y`, `z` as `[min, max]` degrees, `space` | Clamp the Euler angles per axis |
 | `track_to` | `target`, `trackAxis` (default `-z`), `upAxis` (default `y`), `worldUp` (default `[0, 1, 0]`) | Turn the node so its track axis points at the target and its up axis leans toward `worldUp`. Blender's up is Z, so its numbers match with `worldUp: [0, 0, 1]` |
 | `child_of` | `target`, `inverse` (`rest` or `none`) | The node follows the target: its world matrix becomes target * inverse * its own. `rest` uses the inverse of the target's rest matrix, so the node stays put until the target moves; Blender's default is `none` |
-| `floor` | `target`, `axis` (default `+y`), `offset` | Keep the node on the positive side of the plane through the target, along `axis`, plus `offset` |
+| `floor` | `target`, `axis` (default `+y`), `offset`, `useRotation` | Keep the node on the positive side of the plane through the target, along `axis` (rotated by the target when `useRotation` is true), plus `offset` |
 
-Not covered yet: `use_*` switches on `child_of`, `limit_scale`, `copy_transforms`, `damped_track`, `locked_track`,
-`stretch_to`, bone sub-targets and `head_tail`.
+| `copy_transforms` | `target`, `mix` (`replace`, `before`, `after`) | The node's world matrix becomes or multiplies with the target's |
+| `limit_distance` | `target`, `distance`, `mode` (`inside` default, `outside`, `surface`) | Keep the node's world position inside, outside or on the sphere of that radius around the target |
+| `limit_scale` | `x`, `y`, `z` as `[min, max]` above 0, `space` | Clamp the scale per axis |
+| `stretch_to` | `target`, `restLength` (default: the rest distance), `volume` (`xz` default, `x`, `z`, `none`), `bulge` (0 to 4, default 1), `worldUp` | Aim +y at the target, scale y by distance over `restLength` and x and z by that ratio to the power of minus `bulge` (its square root for `xz`). Z leans toward `worldUp` |
+| `locked_track` | `target`, `trackAxis` (default `+y`), `lockAxis` (default `z`) | Turn only about the node's own lock axis so the track axis points toward the target |
+| `transformation` | `target`, `source`, `destination` (`translation`, `rotation` or `scale`), `map` (the source axis for each destination x, y, z), `fromMin`, `fromMax` (per source axis), `toMin`, `toMax` (per destination axis), `mix` (`replace`, `add`, `multiply`), `space` | The target's channel, clamped to its range, sets, adds to or multiplies the node's channel over its range. Rotation is Euler degrees |
+| `action` | `target`, `source`, `axis`, `min`, `max`, `destination`, `keys` (2 to 16 of `{ at, value }`, `at` 0 to 1 rising), `space` | Read the curve where the target's channel sits between `min` and `max`; its value sets the node's channel |
+| `maintain_volume` | `freeAxis` (default `y`), `volume` (default `1`), `space` | Scale the two non-free axes by `sqrt(volume / freeScale)` to preserve volume |
+| `damped_track` | `target`, `trackAxis` (default `+y`) | Rotate the node by the shortest arc that aligns `trackAxis` with the vector to the target |
+| `pivot` | `target` (optional), `offset` (default `[0, 0, 0]`) | Orbit the node's translation around `target + offset` (or rest position + `offset`) by its rotation |
+| `follow_path` | `points` (2 to 64 `[x, y, z]`), `closed`, `followCurve`, `forwardAxis` (default `-z`), `upAxis` (default `y`), `offset`, `duration` (default `1`) | Move the node along the Catmull-Rom curve over `duration`, optionally orienting `forwardAxis` along the tangent |
+| `clamp_to` | `points` (2 to 64 `[x, y, z]`), `mainAxis` (`auto`, `x`, `y`, `z`), `cyclic` | Place the node along the curve where its coordinate on `mainAxis` sits within the curve's span |
+| `shrinkwrap` | `target`, `mode` (`nearest`, `project`, `surface`), `projectAxis` (default `-y`), `distance` (default `0`) | Snap the node onto the target's bounding surface or along `projectAxis` at `distance` |
+| `armature` | `targets` (1 to 8 of `{ target, weight }`) | Blend `child_of` transforms from multiple target nodes by their weights |
+
+Over MCP, the seven newest types (`copy_transforms` to `action`) take `node`, `type` and `args`, an object holding every other
+field above (`target`, `influence` and the type's own); the validator names the allowed fields when one is wrong. Direct fields
+also work from code, but not both for the same key.
+
+Not covered yet: `use_*` switches on `child_of`, `damped_track`, bone sub-targets and `head_tail`.
 
 ## Drivers
 

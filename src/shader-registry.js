@@ -15,6 +15,13 @@ export const layerTextureSupport = {};
 // view-transform-shader.js sets apply(source, kind, viewTransform, hasLook), bindLook(renderer, program) and dispose(renderer).
 export const viewTransformShader = {};
 
+// light-profile.js sets profile(ies), the 16 samples of a profile as an array. light-shapes.js sets update(state, spotLights, areaLights, environment) and normalize(input, environment): the lighting state and
+// recipe hooks for area light shadows, IES profiles and the sun angle. update sets state.extraFeatures and state.bind.
+export const lightShapeSupport = {};
+
+// post-steps.js sets fields (the effects it adds to the look) and resolve(effects), which returns those effects resolved.
+export const postStepSupport = { fields: [] };
+
 // texture-update.js sets update(renderer, descriptor, update): the body of renderer.updateTexture.
 export const textureUpdateSupport = {};
 
@@ -45,7 +52,7 @@ export function registerShaderFeatureCode(feature, slots) {
 }
 
 // The addon that registers each feature's code; a feature not listed here is registered by material-layer-shaders.
-const FEATURE_ADDONS = { splat: 'splat-shader', liquid: 'liquid-shader', worldMaterials: 'world-material-shader', subsurface: 'subsurface-shader' };
+const FEATURE_ADDONS = { splat: 'splat-shader', liquid: 'liquid-shader', worldMaterials: 'world-material-shader', subsurface: 'subsurface-shader', volumeFog: 'fog-shader' };
 
 export function requireFeatureCode(feature) {
   const slots = registeredFeatureCode.get(feature);
@@ -68,7 +75,7 @@ export const MAX_MORPH_TARGETS = 64;
 
 // skinning.js and morph.js set the JavaScript half of skinned and morphed parts: validation, texture layout and packing.
 // The renderer calls them only for a part with a skin or morph targets, so a renderer without those parts never carries them.
-const deformationSupport = {};
+export const deformationSupport = {};
 
 export function registerDeformationSupport(functions) {
   Object.assign(deformationSupport, functions);

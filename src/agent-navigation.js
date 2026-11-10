@@ -1,6 +1,7 @@
 // The path query of scene_inspect: a route over a ground node that goes around holes and obstacles, returned as
 // keyframes that can go straight into a node translation track. It loads on demand, so the scene entry does not carry it.
 import { createNavmesh } from './navmesh.js';
+import { invalidField } from './field-error.js';
 
 export const NAVIGATION_FIELDS = ['ground', 'from', 'to', 'avoid', 'radius', 'maxSlope', 'cellSize', 'seconds', 'speed', 'lift', 'spacing'];
 
@@ -14,7 +15,7 @@ function rounded(value) {
 function numberOption(value, label, minimum, maximum) {
   if (value === undefined) return undefined;
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new RangeError(`path ${label} must be a number from ${minimum} to ${maximum}.`);
+    throw invalidField(`path.${label}`, value, `a number from ${minimum} to ${maximum}, such as ${Math.min(Math.max(1, minimum), maximum)}`);
   }
   return value;
 }
@@ -26,7 +27,7 @@ function numberOption(value, label, minimum, maximum) {
 export function queryAgentPath(query, ground, avoidBounds) {
   const seconds = numberOption(query.seconds, 'seconds', 0.1, 600);
   const speed = numberOption(query.speed, 'speed', 0.01, 100);
-  if (seconds !== undefined && speed !== undefined) throw new RangeError('path takes seconds or speed, not both.');
+  if (seconds !== undefined && speed !== undefined) throw invalidField('path.speed', speed, 'speed or seconds, not both; leave speed out when seconds is set, such as { "seconds": 4 }');
   const lift = numberOption(query.lift, 'lift', -MAXIMUM_LIFT, MAXIMUM_LIFT) ?? 0;
   const navmesh = createNavmesh({
     positions: ground.positions,
@@ -56,11 +57,11 @@ export function queryAgentPath(query, ground, avoidBounds) {
 
 /** The path option of scene_inspect: checks the query, resolves the ground and avoided node IDs through `nodeGeometry` and finds the route. */
 export function resolvePathQuery(query, nodeGeometry, boundsFor) {
-  if (query === null || typeof query !== 'object' || Array.isArray(query)) throw new TypeError('path must be an object.');
+  if (query === null || typeof query !== 'object' || Array.isArray(query)) throw invalidField('path', query, 'an object such as { "ground": "floor", "from": [0, 0, 0], "to": [5, 0, 5] }', TypeError);
   for (const key of Object.keys(query)) {
-    if (!NAVIGATION_FIELDS.includes(key)) throw new TypeError(`Unknown path field: ${key}. Allowed fields: ${NAVIGATION_FIELDS.join(', ')}.`);
+    if (!NAVIGATION_FIELDS.includes(key)) throw invalidField(`path.${key}`, query[key], `a known field, one of ${NAVIGATION_FIELDS.join(', ')}`, TypeError);
   }
-  if (query.avoid !== undefined && (!Array.isArray(query.avoid) || query.avoid.length > 64)) throw new RangeError('path avoid must list at most 64 node IDs.');
+  if (query.avoid !== undefined && (!Array.isArray(query.avoid) || query.avoid.length > 64)) throw invalidField('path.avoid', query.avoid, 'a list of at most 64 node IDs, such as ["wall"]');
   const { geometry, worldMatrix } = nodeGeometry(query.ground, 'ground');
   const positions = new Float32Array(geometry.positions.length);
   for (let offset = 0; offset < positions.length; offset += 3) {

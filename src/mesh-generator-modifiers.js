@@ -1,6 +1,8 @@
 import { createMeshData } from './mesh-data.js';
 import { vertexNormals, faceNormals } from './mesh-normals.js';
 import { evaluateField, meshFieldContext } from './mesh-fields.js';
+import { invalidField } from './field-error.js';
+import { editInteger, editBoolean, editAxis } from './mesh-edit-field.js';
 
 // Modifiers that build new surface from the mesh they are given: screw revolves its edges, wireframe turns its faces into
 // struts and skin puts a square tube on every edge. Each one checks the size of its result against the limits before it
@@ -173,7 +175,7 @@ function skinRadii(mesh, radius) {
   const { values } = evaluateField(radius, meshFieldContext(mesh, 'point'), { kind: 'scalar' });
   for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
     if (!(values[vertex] > 0) || !Number.isFinite(values[vertex])) {
-      throw new RangeError(`skin radius must be above zero at every vertex; vertex ${vertex} has ${values[vertex]}. Change the radius field, for example wrap it in max.`);
+      throw invalidField('radius', values[vertex], `above 0 at every vertex, such as 0.1 (vertex ${vertex} breaks this); change the radius field, for example wrap it in max`);
     }
   }
   return values;
@@ -227,14 +229,14 @@ export function skinMesh(mesh, { radius }, limits) {
   };
 }
 
-export function normalizeGeneratorEdit(edit, normalized, index, { finiteNumber, integerInRange, checkedField }) {
+export function normalizeGeneratorEdit(edit, normalized, index, { finiteNumber, checkedField }) {
   switch (edit.op) {
     case 'screw':
       normalized.axis = edit.axis ?? 'z';
-      if (!Object.hasOwn(AXIS_NAMES, normalized.axis)) throw new TypeError(`Mesh edit ${index} (axis must be x, y or z)`);
+      editAxis(normalized.axis, index);
       normalized.angle = edit.angle === undefined ? 360 : finiteNumber(edit.angle, index, 'angle', { minimum: -3600, maximum: 3600 });
-      normalized.steps = edit.steps === undefined ? 16 : integerInRange(edit.steps, index, 'steps', 1, MAX_SCREW_STEPS);
-      normalized.iterations = edit.iterations === undefined ? 1 : integerInRange(edit.iterations, index, 'iterations', 1, MAX_SCREW_ITERATIONS);
+      normalized.steps = edit.steps === undefined ? 16 : editInteger(edit.steps, index, 'steps', 1, MAX_SCREW_STEPS);
+      normalized.iterations = edit.iterations === undefined ? 1 : editInteger(edit.iterations, index, 'iterations', 1, MAX_SCREW_ITERATIONS);
       normalized.lift = edit.lift === undefined ? 0 : finiteNumber(edit.lift, index, 'lift', { minimum: -1e4, maximum: 1e4 });
       break;
     case 'wireframe':
@@ -242,9 +244,8 @@ export function normalizeGeneratorEdit(edit, normalized, index, { finiteNumber, 
       normalized.offset = edit.offset === undefined ? 0 : finiteNumber(edit.offset, index, 'offset', { minimum: -1, maximum: 1 });
       normalized.evenOffset = edit.evenOffset ?? true;
       normalized.replace = edit.replace ?? true;
-      if (typeof normalized.evenOffset !== 'boolean' || typeof normalized.replace !== 'boolean') {
-        throw new TypeError(`Mesh edit ${index} (evenOffset and replace must be booleans)`);
-      }
+      editBoolean(normalized.evenOffset, index, 'evenOffset');
+      editBoolean(normalized.replace, index, 'replace');
       break;
     case 'skin':
       if (edit.radius === undefined) {

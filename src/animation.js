@@ -47,7 +47,7 @@ function normalizedValue(property, value) {
     if (!Number.isFinite(length) || length < 1e-8) throw new RangeError('Rotation keyframes need a finite nonzero quaternion length.');
     return Object.freeze(result.map(component => component / length));
   }
-  if (property === 'scale' && result.some(component => component <= 0)) throw new RangeError('Scale keyframes must stay positive.');
+  if (property === 'scale' && result.some(component => component < 0)) throw new RangeError('Scale keyframes cannot be negative. Zero is allowed and hides the node.');
   return Object.freeze(result);
 }
 
@@ -85,7 +85,9 @@ export function createAnimationClip({ duration, loop = false, tracks = [] } = {}
     for (let index = 1; index < keyframes.length; index++) {
       if (keyframes[index].time === keyframes[index - 1].time) throw new RangeError('Keyframe times must be distinct.');
     }
-    return Object.freeze({ target: track.target, property: track.property, interpolation, keyframes: Object.freeze(keyframes) });
+    const effects = track.extrapolation === undefined && track.modifiers === undefined ? null : trackEffects?.normalize(track);
+    if (effects === undefined) throw new Error('Import animation-modifiers.js.');
+    return Object.freeze({ target: track.target, property: track.property, interpolation, keyframes: Object.freeze(keyframes), ...(effects ? { effects } : {}) });
   });
   return Object.freeze({ duration, loop, tracks: Object.freeze(compiled) });
 }
@@ -157,6 +159,17 @@ function sampleTrackInto(track, time, output) {
   return output;
 }
 
+let trackEffects = null;
+
+/** Called by animation-modifiers.js when it loads, so the modifier code stays out of bundles that never use it. */
+export function registerTrackEffects(handlers) {
+  trackEffects = handlers;
+}
+
+function sampleTrack(track, time, output) {
+  return track.effects ? trackEffects.sample(track, time, output, sampleTrackInto, constrainSample) : sampleTrackInto(track, time, output);
+}
+
 /**
  * Linear keyframes that trace a track with eased segments, for formats with no easing (glTF). Each segment gets
  * `stepsPerSegment` linear pieces; a track without easing comes back unchanged.
@@ -181,7 +194,8 @@ export function bakeEasedKeyframes(track, stepsPerSegment) {
 
 function normalizedTime(clip, time) {
   if (!Number.isFinite(time)) throw new TypeError('Animation time must be finite.');
-  if (!clip.loop) return Math.max(0, Math.min(clip.duration, time));
+  // A clip that does not loop passes the time through: keyframes lie within the duration, so tracks hold their ends anyway, and extrapolation and cycles need the time past them.
+  if (!clip.loop) return time;
   const remainder = time % clip.duration;
   return remainder < 0 ? remainder + clip.duration : remainder;
 }
@@ -189,7 +203,7 @@ function normalizedTime(clip, time) {
 export function sampleAnimationClip(clip, time) {
   const clipTime = normalizedTime(clip, time);
   return clip.tracks.map(track => {
-    const output = sampleTrackInto(track, clipTime, new Float64Array(PROPERTY_SIZES[track.property]));
+    const output = sampleTrack(track, clipTime, new Float64Array(PROPERTY_SIZES[track.property]));
     const value = output.length === 1 ? output[0] : Array.from(output);
     return { target: track.target, property: track.property, value };
   });
@@ -207,7 +221,7 @@ export function compileAnimationSampler(clip) {
     sample(time) {
       const clipTime = normalizedTime(clip, time);
       for (let index = 0; index < tracks.length; index++) {
-        sampleTrackInto(clip.tracks[index], clipTime, tracks[index].output);
+        sampleTrack(clip.tracks[index], clipTime, tracks[index].output);
       }
       return tracks;
     },
@@ -263,7 +277,7 @@ export function createAnimationPlayer(clip, parts) {
     apply(time) {
       const clipTime = normalizedTime(clip, time);
       for (const compiled of compiledTracks) {
-        sampleTrackInto(compiled.track, clipTime, compiled.output);
+        sampleTrack(compiled.track, clipTime, compiled.output);
       }
       for (const binding of compiledBindings) {
         if (binding.hasTransform) {

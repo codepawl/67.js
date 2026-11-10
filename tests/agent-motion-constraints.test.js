@@ -192,7 +192,7 @@ test('drivers and constraints reject anything that is not bounded data', () => {
     duration: 1, tracks: [{ kind: 'node', id: 'lamp', property: 'translation', keyframes: [{ time: 0, value: [0, 0, 0] }] }],
     drivers: [{ target: { kind: 'node', id: 'lamp', property: 'translation', component: 'x' }, expression: 1 }],
   });
-  assert.throws(() => createAgentScene(clash), /clashes with a track/);
+  assert.throws(() => createAgentScene(clash), /a track on .* already moves/);
   const constraint = fields => nodeRecipe([{ id: 'lamp' }, { id: 'ball' }], motionWith([{ type: 'copy_location', node: 'lamp', target: 'ball', ...fields }]));
   assert.throws(() => createAgentScene(constraint({ target: 'lamp' })), /itself/);
   assert.throws(() => createAgentScene(constraint({ axes: ['w'] })), /distinct axes/);

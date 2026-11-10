@@ -3,6 +3,7 @@
 // --bake [<id>,<id>] [--bake-preset <name>] bakes bounced light into the named scenes (every scene when no ids follow) before 67js draws them;
 // Blender still gets the plain scene.
 // --probes [<id>,<id>] adds reflection probes (src/reflection-probes.js) to the named scenes, on top of --bake when both are given.
+// --no-glossy draws the scenes with metallic 0 and specular 0 on every material (and, in the harness, no sky reflection), the 67js side of render-blender.py --no-glossy (issue #506).
 // --ambient <scale> multiplies the light the world gives every surface (0 removes it); with --skip-blender it measures what the world adds.
 // --path-tracer [--samples <n>] [--noise-threshold <n>] [--scene <id>] draws the scenes with the offline path tracer (src/path-tracer.js) instead, keeps the
 // Cycles renders of an earlier run, and scores them into path-tracer.json (--path-tracer-backend gpu draws them with the GPU tracer and
@@ -102,6 +103,14 @@ const cascadesFlag = argumentsGiven.indexOf('--cascades');
 const cascades = cascadesFlag >= 0 ? Number(argumentsGiven[cascadesFlag + 1]) : 0;
 const ambientFlag = argumentsGiven.indexOf('--ambient');
 const ambient = ambientFlag >= 0 ? Number(argumentsGiven[ambientFlag + 1]) : null;
+// --key <scale> multiplies the sun and --fog-density <density> replaces the volume fog's density (0 removes the haze): measurement switches that split a picture into its light components (issue #543).
+const keyFlag = argumentsGiven.indexOf('--key');
+const keyScale = keyFlag >= 0 ? Number(argumentsGiven[keyFlag + 1]) : null;
+const fogDensityFlag = argumentsGiven.indexOf('--fog-density');
+// --fog-set name=value,name=value replaces any other volume fog fields, for example scatterOctaves=3,keyTransmittance=1.
+const fogSetFlag = argumentsGiven.indexOf('--fog-set');
+const fogSet = fogSetFlag >= 0 ? Object.fromEntries(argumentsGiven[fogSetFlag + 1].split(',').map(pair => pair.split('=')).map(([name, value]) => [name, Number(value)])) : {};
+const fogDensity = fogDensityFlag >= 0 || fogSetFlag >= 0 ? { ...fogSet, ...(fogDensityFlag >= 0 ? { density: Number(argumentsGiven[fogDensityFlag + 1]) } : {}) } : null;
 const pathTracerFlag = argumentsGiven.includes('--path-tracer');
 const samplesFlag = argumentsGiven.indexOf('--samples');
 const pathTracerSamples = samplesFlag >= 0 ? Number(argumentsGiven[samplesFlag + 1]) : 64;
@@ -117,7 +126,7 @@ const sceneIdsGiven = lookIds ?? (sceneFlag >= 0 ? argumentsGiven[sceneFlag + 1]
 // The fresh bake.json lands in the work directory and is checked against the committed one (compare-scores.mjs); --update-baseline replaces
 // the committed bake.json and images/<id>-baked.jpg with it.
 const bakeScoreRun = bakedSceneIds !== null && !sceneSet && !pathTracerFlag;
-const bakeVariantFlags = ['--sky-only', '--bake-preset', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
+const bakeVariantFlags = ['--no-glossy', '--sky-only', '--bake-preset', '--bake-grid', '--bake-grid-fog', '--no-bake-worker', '--bake-bounces', '--bake-backend', '--bake-samples', '--bake-density', '--probes', '--ambient', '--key', '--fog-density', '--fog-set', '--ambient-occlusion', '--cascades', '--no-object-probes', '--object-probes', '--no-water', '--ssr-water', '--no-ground-bounce', '--floor-sky', '--floor-sky-rooms', '--no-floor-sky'];
 const bakeScoreIsBaseline = bakeScoreRun && argumentsGiven.includes('--update-baseline') && !bakeVariantFlags.some(flag => argumentsGiven.includes(flag));
 const onlyScenes = sceneIdsGiven ?? (bakeScoreRun ? bakedSceneIds : null);
 const skipCpu = skipCpuFlag || bakeScoreRun || Boolean(viewTransform);
@@ -131,7 +140,7 @@ async function renderBackend(backend, serverUrl, graphics) {
     page.on('console', message => message.text().includes('GL_') && console.log('PAGE', message.text().slice(0, 200)));
     // Each scene gets a fresh page, so a large scene leaves no GL state or memory behind for the next one.
     const openHarness = async () => {
-      const harnessQuery = [sceneSet ? `set=${sceneSet}` : null, argumentsGiven.includes('--no-water') ? 'water=off' : argumentsGiven.includes('--ssr-water') ? 'water=ssr' : null, argumentsGiven.includes('--no-ground-bounce') ? 'groundBounce=off' : null, floorSkyStrength ? `floorSky=${floorSkyStrength}` : argumentsGiven.includes('--no-floor-sky') ? 'floorSky=0' : null, argumentsGiven.includes('--floor-sky-rooms') ? 'floorSkyRooms=1' : null, sunBounceQuery].filter(Boolean).join('&');
+      const harnessQuery = [sceneSet ? `set=${sceneSet}` : null, argumentsGiven.includes('--no-glossy') ? 'glossy=0' : null, argumentsGiven.includes('--no-bake-worker') ? 'kernelWorkers=off' : null, argumentsGiven.includes('--no-water') ? 'water=off' : argumentsGiven.includes('--ssr-water') ? 'water=ssr' : null, argumentsGiven.includes('--no-ground-bounce') ? 'groundBounce=off' : null, floorSkyStrength ? `floorSky=${floorSkyStrength}` : argumentsGiven.includes('--no-floor-sky') ? 'floorSky=0' : null, argumentsGiven.includes('--floor-sky-rooms') ? 'floorSkyRooms=1' : null, sunBounceQuery].filter(Boolean).join('&');
       await page.goto(`${serverUrl}/bench/reference/harness.html${harnessQuery ? `?${harnessQuery}` : ''}`, { timeout: PAGE_LOAD_TIMEOUT });
       await page.waitForFunction(() => window.renderReferenceScene, null, { timeout: PAGE_LOAD_TIMEOUT });
     };
@@ -147,8 +156,8 @@ async function renderBackend(backend, serverUrl, graphics) {
       // Object probes are on by default, as in a recipe, so the baseline scores what a user gets.
       const objectProbesThisScene = !argumentsGiven.includes('--no-object-probes') && (objectProbeSceneIds === null || objectProbeSceneIds.includes(id));
       const probes = probesThisScene || (objectProbesThisScene ? 'objects' : false);
-      const bake = bakesThisScene ? { ...skyOnlyOptions, ...(bakePreset ? { preset: bakePreset } : {}), ...(bakeBackend ? { backend: bakeBackend } : {}), ...(bakeSamples ? { samples: bakeSamples } : {}), ...(bakeDensity ? { texelsPerUnit: bakeDensity } : {}) } : null;
-      const result = await page.evaluate(([sceneId, shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bakeOptions, cascadeCount, withProbes, ambientScale, selectedViewTransform]) => window.renderReferenceScene(sceneId, { describe: shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bake: bakeOptions, cascades: cascadeCount, probes: withProbes, ambient: ambientScale, viewTransform: selectedViewTransform }), [id, describe, ambientOcclusion, ambientOcclusionRadius, bake, cascades, probes, ambient, viewTransform]);
+      const bake = bakesThisScene ? { ...skyOnlyOptions, ...(bakePreset ? { preset: bakePreset } : {}), ...(argumentsGiven.includes('--bake-grid') ? { irradianceGrid: Number(argumentsGiven[argumentsGiven.indexOf('--bake-grid') + 1]) || true } : {}), ...(argumentsGiven.includes('--bake-grid-fog') ? { gridFog: true } : {}), ...(argumentsGiven.includes('--bake-bounces') ? { bounces: Number(argumentsGiven[argumentsGiven.indexOf('--bake-bounces') + 1]) } : {}), ...(bakeBackend ? { backend: bakeBackend } : {}), ...(bakeSamples ? { samples: bakeSamples } : {}), ...(bakeDensity ? { texelsPerUnit: bakeDensity } : {}) } : null;
+      const result = await page.evaluate(([sceneId, shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bakeOptions, cascadeCount, withProbes, ambientScale, selectedViewTransform, keyScaleGiven, fogGiven]) => window.renderReferenceScene(sceneId, { describe: shouldDescribe, ambientOcclusion, ambientOcclusionRadius, bake: bakeOptions, cascades: cascadeCount, probes: withProbes, ambient: ambientScale, viewTransform: selectedViewTransform, key: keyScaleGiven, volumeFog: fogGiven }), [id, describe, ambientOcclusion, ambientOcclusionRadius, bake, cascades, probes, ambient, viewTransform, keyScale, fogDensity]);
       if (result.glError !== 0) throw new Error(`${id} on ${backend} gave WebGL error ${result.glError}.`);
       graphics[backend] = result.graphics;
       await writeFile(`${WORK_DIRECTORY}/${id}-${backend}.png`, Buffer.from(result.image, 'base64'));

@@ -27,8 +27,7 @@ Position deltas require finite ordered `min` and `max` bounds.
 A target channel also requires its corresponding base attribute.
 Unsupported semantics, including `TANGENT`, fail explicitly before resource decoding.
 
-Morph primitives require authored base normals.
-The bridge rejects missing base normals instead of silently preserving normals when a target requires new flat normals.
+A morph primitive without authored base normals loads with generated base normals; its morph NORMAL deltas are dropped and a warning is reported.
 Per-target flat normal generation remains unsupported.
 
 The converted geometry stores relative Float32 deltas in `geometry.morphTargets`.

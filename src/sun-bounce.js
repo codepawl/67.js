@@ -1,6 +1,7 @@
 import { buildWorld, cosineDirection, hashUnit, radicalInverse, sceneScale } from './light-bake.js';
 import { createTracer } from './ray-query.js';
-import { CLOSED_ROOM_SHARE, closedRoomShare } from './closed-room.js';
+import { CLOSED_ROOM_SHARE } from './closed-room.js';
+import { fittedClosedRoomShare } from './fitted-closed-room.js';
 import { partDiffuseAlbedo } from './ground-bounce.js';
 import { MAX_POINT_LIGHTS } from './light-limits.js';
 
@@ -14,6 +15,8 @@ import { MAX_POINT_LIGHTS } from './light-limits.js';
 
 export const SUN_BOUNCE_PATCH_LIGHTS = 6;
 export const SUN_BOUNCE_SAMPLES = 20_000;
+// The first pass only finds which triangles an enclosed, lit sample lands on.
+const COARSE_SAMPLES = 5000;
 const ROOM_RAYS = 16;
 // Share of the room rays that must hit something for a lit sample to count as inside the room (a roof's outer side hits nothing).
 const ENCLOSED_SHARE = 0.75;
@@ -23,11 +26,15 @@ const CLUSTER_PASSES = 6;
 const LIFT_IN_RADII = 1;
 // Fitted against Cycles on the reference halls (docs/lighting.md); environment.sunBounce multiplies it.
 export const SUN_BOUNCE_GAIN = 0.3;
+// The strength a scene gets when it sets no `environment.sunBounce`.
+export const DEFAULT_SUN_BOUNCE = 1;
+// A light closer than this share of the scene to a surface blows up as 1/d^2 into a hard speck, so a patch with less free space in front is left out.
+const MINIMUM_LIFT_SHARE = 0.03;
 const KEY_THRESHOLD = 1e-3;
 const EXCLUDED_TAGS = new Set(['liquid', 'foam', 'unlit', 'fire', 'smoke']);
 
 function isBounceSurface(part) {
-  return part.material?.alphaMode !== 'blend' && !((part.material?.emission ?? 0) > 0) && !EXCLUDED_TAGS.has(part.material?.tag);
+  return !['blend', 'add'].includes(part.material?.alphaMode) && !((part.material?.emission ?? 0) > 0) && !EXCLUDED_TAGS.has(part.material?.tag);
 }
 
 function sunOf(environment) {
@@ -42,7 +49,9 @@ function hasSun(environment) {
   return Boolean(environment.lightDirection) && (environment.keyIntensity ?? 1) * (keyColor[0] + keyColor[1] + keyColor[2]) > KEY_THRESHOLD;
 }
 
-// Lit, enclosed samples of the room's surfaces: position, outward normal and the flux the sample reflects, per channel.
+// Lit, enclosed samples of the room's surfaces (position, outward normal and the flux the sample reflects, per channel) and the
+// tracer that found them. A coarse pass first finds the triangles an enclosed, lit sample lands on; the fine pass then spends
+// its samples there, so a lawn outside a window does not take nearly all of them.
 function sampleLitSurfaces(parts, sun) {
   const world = buildWorld(parts);
   const tracer = createTracer(world);
@@ -53,7 +62,7 @@ function sampleLitSurfaces(parts, sun) {
   const corner = (triangle, slot, axis) => positions[indices[triangle * 3 + slot] * 3 + axis];
   const normals = new Float32Array(triangleCount * 3);
   const areas = new Float32Array(triangleCount);
-  let sunFacingArea = 0;
+  const facesSun = new Uint8Array(triangleCount);
   for (let triangle = 0; triangle < triangleCount; triangle++) {
     const edgeOne = [0, 1, 2].map(axis => corner(triangle, 1, axis) - corner(triangle, 0, axis));
     const edgeTwo = [0, 1, 2].map(axis => corner(triangle, 2, axis) - corner(triangle, 0, axis));
@@ -63,38 +72,51 @@ function sampleLitSurfaces(parts, sun) {
     areas[triangle] = length / 2;
     for (let axis = 0; axis < 3; axis++) normals[triangle * 3 + axis] = cross[axis] / length;
     const cosine = normals[triangle * 3] * sun.direction[0] + normals[triangle * 3 + 1] * sun.direction[1] + normals[triangle * 3 + 2] * sun.direction[2];
-    if (cosine > 0 && isBounceSurface(parts[triangleOwner[triangle]])) sunFacingArea += areas[triangle];
+    if (cosine > 0 && isBounceSurface(parts[triangleOwner[triangle]])) facesSun[triangle] = 1;
   }
-  const sampleArea = sunFacingArea / SUN_BOUNCE_SAMPLES;
-  const samples = [];
   const fan = [0, 0, 0];
-  let carried = 0;
-  for (let triangle = 0; triangle < triangleCount; triangle++) {
-    const normal = [normals[triangle * 3], normals[triangle * 3 + 1], normals[triangle * 3 + 2]];
-    const cosine = normal[0] * sun.direction[0] + normal[1] * sun.direction[1] + normal[2] * sun.direction[2];
-    if (cosine <= 0 || areas[triangle] === 0 || !isBounceSurface(parts[triangleOwner[triangle]])) continue;
-    carried += areas[triangle] / sampleArea;
-    for (let slot = 0; carried >= 1; slot++, carried -= 1) {
-      let firstWeight = hashUnit(triangle, slot, 1);
-      let secondWeight = hashUnit(triangle, slot, 2);
-      if (firstWeight + secondWeight > 1) {
-        firstWeight = 1 - firstWeight;
-        secondWeight = 1 - secondWeight;
-      }
-      const point = [0, 1, 2].map(axis => corner(triangle, 0, axis) + firstWeight * (corner(triangle, 1, axis) - corner(triangle, 0, axis)) + secondWeight * (corner(triangle, 2, axis) - corner(triangle, 0, axis)));
-      const origin = point.map((value, axis) => value + normal[axis] * offset);
-      if (tracer.trace(origin[0], origin[1], origin[2], sun.direction[0], sun.direction[1], sun.direction[2], Infinity, true).nearestTriangle >= 0) continue;
-      let blocked = 0;
-      for (let ray = 0; ray < ROOM_RAYS; ray++) {
-        cosineDirection(normal, (ray + 0.5) / ROOM_RAYS, radicalInverse(ray + 1), fan);
-        if (tracer.trace(origin[0], origin[1], origin[2], fan[0], fan[1], fan[2], Infinity, true).nearestTriangle >= 0) blocked++;
-      }
-      if (blocked / ROOM_RAYS < ENCLOSED_SHARE) continue;
-      const albedo = albedoOfPart[triangleOwner[triangle]];
-      samples.push({ point, normal, flux: sun.irradiance.map((channel, index) => channel * cosine * sampleArea * albedo[index]) });
+
+  // About `count` samples over the triangles of `domain`, by area; only the lit ones inside the room are kept.
+  function drawSamples(domain, count) {
+    let domainArea = 0;
+    for (let triangle = 0; triangle < triangleCount; triangle++) {
+      if (domain[triangle]) domainArea += areas[triangle];
     }
+    const samples = [];
+    if (domainArea === 0) return samples;
+    const sampleArea = domainArea / count;
+    let carried = 0;
+    for (let triangle = 0; triangle < triangleCount; triangle++) {
+      if (!domain[triangle]) continue;
+      const normal = [normals[triangle * 3], normals[triangle * 3 + 1], normals[triangle * 3 + 2]];
+      const cosine = normal[0] * sun.direction[0] + normal[1] * sun.direction[1] + normal[2] * sun.direction[2];
+      carried += areas[triangle] / sampleArea;
+      for (let slot = 0; carried >= 1; slot++, carried -= 1) {
+        let firstWeight = hashUnit(triangle, slot, 1);
+        let secondWeight = hashUnit(triangle, slot, 2);
+        if (firstWeight + secondWeight > 1) {
+          firstWeight = 1 - firstWeight;
+          secondWeight = 1 - secondWeight;
+        }
+        const point = [0, 1, 2].map(axis => corner(triangle, 0, axis) + firstWeight * (corner(triangle, 1, axis) - corner(triangle, 0, axis)) + secondWeight * (corner(triangle, 2, axis) - corner(triangle, 0, axis)));
+        const origin = point.map((value, axis) => value + normal[axis] * offset);
+        if (tracer.trace(origin[0], origin[1], origin[2], sun.direction[0], sun.direction[1], sun.direction[2], Infinity, true).nearestTriangle >= 0) continue;
+        let blocked = 0;
+        for (let ray = 0; ray < ROOM_RAYS; ray++) {
+          cosineDirection(normal, (ray + 0.5) / ROOM_RAYS, radicalInverse(ray + 1), fan);
+          if (tracer.trace(origin[0], origin[1], origin[2], fan[0], fan[1], fan[2], Infinity, true).nearestTriangle >= 0) blocked++;
+        }
+        if (blocked / ROOM_RAYS < ENCLOSED_SHARE) continue;
+        const albedo = albedoOfPart[triangleOwner[triangle]];
+        samples.push({ triangle, point, normal, flux: sun.irradiance.map((channel, index) => channel * cosine * sampleArea * albedo[index]) });
+      }
+    }
+    return samples;
   }
-  return samples;
+
+  const roomTriangles = new Uint8Array(triangleCount);
+  for (const sample of drawSamples(facesSun, COARSE_SAMPLES)) roomTriangles[sample.triangle] = 1;
+  return { samples: drawSamples(roomTriangles, SUN_BOUNCE_SAMPLES), tracer };
 }
 
 function luminanceOf(flux) {
@@ -136,7 +158,7 @@ function clusterSamples(samples, count, scale) {
   return centres.map((centre, index) => samples.filter((sample, sampleIndex) => assignment[sampleIndex] === index)).filter(group => group.length > 0);
 }
 
-function lightOfPatch(group, strength) {
+function lightOfPatch(group, strength, tracer, probeOffset, sceneSize) {
   const flux = [0, 0, 0];
   const centre = [0, 0, 0];
   const facing = [0, 0, 0];
@@ -154,7 +176,10 @@ function lightOfPatch(group, strength) {
   const normal = facing.map(component => component / facingLength);
   const middle = centre.map(component => component / weight);
   const radius = Math.sqrt(group.reduce((total, sample) => total + luminanceOf(sample.flux) * sample.point.reduce((sum, value, axis) => sum + (value - middle[axis]) ** 2, 0), 0) / weight);
-  const lift = Math.max(radius * LIFT_IN_RADII, 0.05);
+  const freeDistance = probeOffset + tracer.trace(middle[0] + normal[0] * probeOffset, middle[1] + normal[1] * probeOffset, middle[2] + normal[2] * probeOffset, normal[0], normal[1], normal[2], Infinity, false).nearestDistance;
+  const minimumLift = sceneSize * MINIMUM_LIFT_SHARE;
+  if (freeDistance / 2 < minimumLift) return null;
+  const lift = Math.max(Math.min(radius * LIFT_IN_RADII, freeDistance / 2), minimumLift);
   // Spread over the half space in front of the patch: intensity = flux / (2 pi).
   const intensity = flux.map(channel => (strength * SUN_BOUNCE_GAIN * channel) / (2 * Math.PI));
   const peak = Math.max(...intensity, 1e-9);
@@ -167,20 +192,21 @@ function lightOfPatch(group, strength) {
  * `maximumLights` caps how many patches there are.
  */
 export function findSunBounceLights(parts, environment, { strength = 1, maximumLights = SUN_BOUNCE_PATCH_LIGHTS } = {}) {
-  if (strength <= 0 || maximumLights <= 0 || !hasSun(environment) || parts.some(part => part.material?.lightMap)) return [];
-  const share = closedRoomShare(parts, new Map(parts.map(part => [part.name, part.matrix])));
+  if (strength <= 0 || maximumLights <= 0 || !hasSun(environment) || parts.some(part => part.material?.lightMap || part.material?.irradianceGrid)) return [];
+  const share = fittedClosedRoomShare(parts, new Map(parts.map(part => [part.name, part.matrix])));
   if (share === null || share < CLOSED_ROOM_SHARE) return [];
   const surfaces = parts.filter(isBounceSurface);
   const sun = sunOf(environment);
-  let samples;
+  let sampled;
   try {
-    samples = sampleLitSurfaces(surfaces, sun);
+    sampled = sampleLitSurfaces(surfaces, sun);
   } catch {
     return [];
   }
+  const { samples, tracer } = sampled;
   if (samples.length === 0) return [];
   const sceneSize = Math.max(...[0, 1, 2].map(axis => Math.max(...samples.map(sample => sample.point[axis])) - Math.min(...samples.map(sample => sample.point[axis]))), 1e-3);
-  return clusterSamples(samples, maximumLights, sceneSize).map(group => lightOfPatch(group, strength));
+  return clusterSamples(samples, maximumLights, sceneSize).map(group => lightOfPatch(group, strength, tracer, sceneSize * 1e-3, sceneSize)).filter(Boolean);
 }
 
 const lightsOfParts = new WeakMap();
@@ -190,7 +216,7 @@ const lightsOfParts = new WeakMap();
  * them; 0 returns the environment itself. The patches are found once for these parts and this sun and kept.
  */
 export function withSunBounce(parts, environment) {
-  const strength = environment.sunBounce ?? 1;
+  const strength = environment.sunBounce ?? DEFAULT_SUN_BOUNCE;
   if (strength <= 0 || !hasSun(environment)) return environment;
   const existing = environment.pointLights ?? [];
   const room = Math.min(SUN_BOUNCE_PATCH_LIGHTS, MAX_POINT_LIGHTS - existing.length);

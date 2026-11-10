@@ -1,3 +1,4 @@
+import { invalidField } from './field-error.js';
 import { createCrowd } from './retarget.js';
 import { bakeCrowdPalette, createCrowdParts, createCrowdRig } from './crowd-skinning.js';
 import { jsonMaterial, materialOutput, registerCrowdModule } from './agent-scene-assets.js';
@@ -13,24 +14,24 @@ const CROWD_FIELDS = ['clip', 'count', 'seed', 'layout', 'spacing', 'columns', '
 
 function numberWithin(value, minimum, maximum, label) {
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new RangeError(`crowd ${label} must be a number from ${minimum} to ${maximum}.`);
+    throw invalidField(`crowd.${label}`, value, `a number from ${minimum} to ${maximum}, such as ${Math.min(Math.max(1, minimum), maximum)}`);
   }
   return value;
 }
 
 /** Validate the `crowd` field of an asset placement. Returns the canonical form kept in the recipe. */
 export function normalizeCrowd(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('crowd must be an object.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidField('crowd', value, 'an object such as { "count": 50, "layout": "grid" }', TypeError);
   for (const key of Object.keys(value)) {
-    if (!CROWD_FIELDS.includes(key)) throw new TypeError(`Unknown crowd field: ${key}. Allowed fields: ${CROWD_FIELDS.join(', ')}.`);
+    if (!CROWD_FIELDS.includes(key)) throw invalidField(`crowd.${key}`, value[key], `a known field, one of ${CROWD_FIELDS.join(', ')}`, TypeError);
   }
   if (!Number.isInteger(value.count) || value.count < 1 || value.count > CROWD_LIMITS.maxInstances) {
-    throw new RangeError(`crowd count must be an integer from 1 to ${CROWD_LIMITS.maxInstances}.`);
+    throw invalidField('crowd.count', value.count, `an integer from 1 to ${CROWD_LIMITS.maxInstances}, such as 50`);
   }
   const layout = value.layout ?? 'grid';
-  if (layout !== 'grid' && layout !== 'scatter') throw new RangeError('crowd layout must be grid or scatter.');
+  if (layout !== 'grid' && layout !== 'scatter') throw invalidField('crowd.layout', layout, 'one of grid or scatter');
   const clip = value.clip ?? 0;
-  if (!Number.isInteger(clip) || clip < 0) throw new RangeError('crowd clip must be a non-negative clip index.');
+  if (!Number.isInteger(clip) || clip < 0) throw invalidField('crowd.clip', clip, 'a clip index of 0 or more, such as 0');
   const result = {
     clip,
     count: value.count,
@@ -44,12 +45,12 @@ export function normalizeCrowd(value) {
   if (value.columns !== undefined) result.columns = Math.round(numberWithin(value.columns, 1, CROWD_LIMITS.maxInstances, 'columns'));
   if (value.size !== undefined) result.size = numberWithin(value.size, 0.1, 100_000, 'size');
   for (const flag of ['randomYaw', 'morphs', 'lods']) {
-    if (value[flag] !== undefined && typeof value[flag] !== 'boolean') throw new TypeError(`crowd ${flag} must be boolean.`);
+    if (value[flag] !== undefined && typeof value[flag] !== 'boolean') throw invalidField(`crowd.${flag}`, value[flag], 'true or false', TypeError);
   }
   result.randomYaw = value.randomYaw ?? false;
   result.morphs = value.morphs ?? false;
   result.lods = value.lods ?? true;
-  if ((value.farDistance === undefined) !== (value.farRate === undefined)) throw new TypeError('crowd farDistance and farRate go together.');
+  if ((value.farDistance === undefined) !== (value.farRate === undefined)) throw invalidField(value.farDistance === undefined ? 'crowd.farDistance' : 'crowd.farRate', undefined, 'both farDistance and farRate, or neither, such as { "farDistance": 40, "farRate": 8 }', TypeError);
   if (value.farDistance !== undefined) {
     result.farDistance = numberWithin(value.farDistance, 0.1, 100_000, 'farDistance');
     result.farRate = numberWithin(value.farRate, 1, 60, 'farRate');
@@ -81,7 +82,7 @@ function buildCrowd(asset, assetId, settings) {
 export function expandCrowd(recipe, node, asset, copy, cache, runtime, limits) {
   const { id: assetId, crowd: settings } = node.asset;
   if (!asset.animations[settings.clip]) {
-    throw new RangeError(`Node ${node.id}: asset ${assetId.slice(0, 12)} has ${asset.animations.length} clips, so crowd clip ${settings.clip} does not exist.`);
+    throw invalidField(`nodes.${node.id}.asset.crowd.clip`, settings.clip, `a clip index from 0 to ${asset.animations.length - 1} (asset ${assetId.slice(0, 12)} has ${asset.animations.length} clips)`);
   }
   const key = `crowd:${node.id}:${assetId}:${copy}:${JSON.stringify(settings)}`;
   if (cache.get(key)?.asset !== asset) {
@@ -97,7 +98,7 @@ export function expandCrowd(recipe, node, asset, copy, cache, runtime, limits) {
   const built = cache.get(key);
   const rigPartCount = built.rig.parts.length;
   if (recipe.nodes.length + settings.count * rigPartCount > limits.maxNodes) {
-    throw new RangeError(`Node ${node.id}: a crowd of ${settings.count} makes ${settings.count * rigPartCount} part nodes (${rigPartCount} per instance), which with the ${recipe.nodes.length} authored nodes exceeds maxNodes ${limits.maxNodes}. Lower count or raise maxNodes.`);
+    throw invalidField(`nodes.${node.id}.asset.crowd.count`, settings.count, `a count whose part nodes (${rigPartCount} per instance) fit in maxNodes ${limits.maxNodes} beside the ${recipe.nodes.length} authored nodes, so at most ${Math.max(0, Math.floor((limits.maxNodes - recipe.nodes.length) / rigPartCount))}`);
   }
   const prefix = `crowd:${assetId.slice(0, 12)}:${copy}`;
   const materialIds = built.rig.parts.map((rigPart, index) => {

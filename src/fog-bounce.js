@@ -20,7 +20,7 @@ const GOLDEN_ANGLE =Math.PI * (3 - Math.sqrt(5));
  * `lighting` holds `pointLights`, `keyColor` and `lightDirection`, as the light bake takes them.
  */
 export function fogBounceGrid(parts, size, minimum, maximum, lighting) {
-  const surfaces = parts.filter(part => part.material?.alphaMode !== 'blend');
+  const surfaces = parts.filter(part => !['blend', 'add'].includes(part.material?.alphaMode));
   let world;
   let lights;
   try {

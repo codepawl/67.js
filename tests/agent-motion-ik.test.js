@@ -160,23 +160,89 @@ test('recipes export and reload with their ik', () => {
 test('mistakes say what to pass', () => {
   const create = (ik, overrides) => createAgentScene(armRecipe({ duration: 1, tracks: [], ik }, overrides));
   assert.throws(() => createAgentScene(armRecipe({ duration: 1, tracks: [] })), /at least one track, IK solver, constraint or driver/);
-  assert.throws(() => create([{ type: 'fabrik', target: [0, 0, 0] }]), /type must be two-bone or aim/);
-  assert.throws(() => create([armIk([0, 0, 0], { root: 'nope' })]), /root must be a node ID/);
-  assert.throws(() => create([armIk({ node: 'nope' })]), /target node must be a node ID/);
-  assert.throws(() => create([armIk('here')]), /target must be \[x, y, z\]/);
+  assert.throws(() => create([{ type: 'fabrik', target: [0, 0, 0] }]), /motion\.ik\[0\]\.type: got "fabrik"; expected one of two-bone, aim, chain or spline/);
+  assert.throws(() => create([armIk([0, 0, 0], { root: 'nope' })]), /motion\.ik\[0\]\.root: got "nope"; expected a node ID in this recipe/);
+  assert.throws(() => create([armIk({ node: 'nope' })]), /motion\.ik\[0\]\.target\.node: got "nope"; expected a node ID/);
+  assert.throws(() => create([armIk('here')]), /motion\.ik\[0\]\.target: got "here"; expected \[x, y, z\]/);
   assert.throws(() => create([armIk([0, 0, 0], { end: 'ball' })]), /end must descend from middle/);
-  assert.throws(() => create([armIk([0, 0, 0], { weight: 3 })]), /weight must be within/);
-  assert.throws(() => create([{ type: 'aim', target: [0, 0, 0] }]), /needs joint, or joints/);
-  assert.throws(() => create([armIk([0, 0, 0])], { elbow: { scale: [1, 2, 1] } }), /non-uniform scale.*child node/);
+  assert.throws(() => create([armIk([0, 0, 0], { weight: 3 })]), /weight: got 3; expected a number from/);
+  assert.throws(() => create([{ type: 'aim', target: [0, 0, 0] }]), /joint: got undefined; expected joint, or joints/);
+  assert.throws(() => create([armIk([0, 0, 0])], { elbow: { scale: [1, 2, 1] } }), /nodes\.elbow\.scale: got \[1,2,1\]; expected a uniform scale.*child node/);
   assert.doesNotThrow(() => create([armIk([0.4, 1.5, 0.3])], { tip: { scale: [0.1, 0.2, 0.3] } }));
   assert.doesNotThrow(() => create([{ type: 'aim', joint: 'lamp', target: [0, 0, 0] }], { lamp: { scale: [0.2, 0.2, 0.3] } }));
   assert.throws(() => createAgentScene(armRecipe({
     duration: 1,
     tracks: [{ kind: 'node', id: 'elbow', property: 'scale', keyframes: [{ time: 0, value: [1, 1, 1] }] }],
     ik: [armIk([0, 0, 0])],
-  })), /cannot have a scale track/);
+  })), /no scale track on node/);
   assert.throws(() => create([{ type: 'aim', joint: 'lamp', target: [0, 0, 0], forward: [0, 0, 1], worldForward: [0, 0, 1] }]), /forward or worldForward, not both/);
-  assert.deepEqual([...AGENT_SCENE_CAPABILITIES.motionIk], ['two-bone', 'aim']);
+  assert.deepEqual([...AGENT_SCENE_CAPABILITIES.motionIk], ['two-bone', 'aim', 'chain', 'spline']);
+});
+
+test('recipe chain IK and spline IK reach targets, stretch and follow curve nodes', () => {
+  const nodes = [
+    { id: 'b0', translation: [0, 1, 0] },
+    { id: 'b1', parent: 'b0', translation: [0.4, 0, 0] },
+    { id: 'b2', parent: 'b1', translation: [0.4, 0, 0] },
+    { id: 'b3', parent: 'b2', translation: [0.4, 0, 0] },
+    { id: 'tip', parent: 'b3', translation: [0.4, 0, 0], geometry: 'box', material: 'paint', scale: [0.05, 0.05, 0.05] },
+    { id: 'c0', translation: [0, 1, 0] },
+    { id: 'c1', translation: [0.6, 1.5, 0] },
+    { id: 'c2', translation: [1.2, 1.5, 0] },
+    { id: 'c3', translation: [1.8, 1, 0] },
+  ];
+  const makeRecipe = ik => ({
+    format: '67js.scene', schemaVersion: 1,
+    geometries: [{ id: 'box', type: 'box', bevel: 0 }],
+    materials: SEGMENT_MATERIALS,
+    nodes,
+    motion: { duration: 1, tracks: [], ik },
+  });
+
+  // 4-bone chain with pole, poleAngle, stretch and limits.
+  const chainScene = createAgentScene(makeRecipe([{
+    type: 'chain',
+    chain: ['b0', 'b1', 'b2', 'b3', 'tip'],
+    target: [2.0, 1, 0],
+    pole: [0.8, 2, 0],
+    poleAngle: 10,
+    stretch: true,
+    iterations: 20,
+    keepEndRotation: true,
+    limits: { b0: { z: [-90, 90] } },
+  }]));
+  chainScene.sampleMotion(0);
+  assertClose(worldPosition(chainScene, 'tip'), [2.0, 1, 0], 1e-2);
+  assert.equal(chainScene.inspect().motionIk[0].reached, true);
+
+  // Spline IK using control nodes and static points.
+  const splineScene = createAgentScene(makeRecipe([{
+    type: 'spline',
+    root: 'b0',
+    end: 'tip',
+    curve: { nodes: ['c0', 'c1', 'c2', 'c3'] },
+    stretch: 1,
+  }]));
+  splineScene.sampleMotion(0);
+  assertClose(worldPosition(splineScene, 'tip'), [1.8, 1, 0], 2e-2);
+
+  const staticSpline = createAgentScene(makeRecipe([{
+    type: 'spline_ik',
+    chain: ['b0', 'b1', 'b2', 'b3', 'tip'],
+    curve: [[0, 1, 0], [1, 1.4, 0], [2, 1, 0]],
+    stretch: true,
+  }]));
+  staticSpline.sampleMotion(0);
+  assertClose(worldPosition(staticSpline, 'tip'), [2, 1, 0], 2e-2);
+
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'chain', chain: ['b0', 'tip'], root: 'b0', end: 'tip', target: [0, 0, 0] }])), /chain, or root and end, not both/);
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'chain', chain: ['b0'], target: [0, 0, 0] }])), /2 to 16 node IDs/);
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'chain', target: [0, 0, 0] }])), /expected chain.*or root and end/);
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'chain', root: 'b0', end: 'tip', target: [0, 0, 0], iterations: 1.5 }])), /whole number of iterations/);
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'chain', chain: ['b0', 'b1', 'tip'], target: [0, 0, 0], limits: { c0: { x: [-10, 10] } } }])), /a node ID in the chain/);
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'spline', root: 'b0', end: 'tip', curve: [[0, 0, 0]] }])), /2 to 64 .* points/);
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'spline', root: 'b0', end: 'tip', curve: { nodes: ['c0'] } }])), /2 to 64 node IDs/);
+  assert.throws(() => createAgentScene(makeRecipe([{ type: 'spline', root: 'b0', end: 'tip', curve: 'bad' }])), /points or { "nodes"/);
 });
 
 test('a node named like a humanoid bone is not mapped to another node', () => {

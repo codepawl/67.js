@@ -1,3 +1,4 @@
+import { invalidField } from './field-error.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from './light-limits.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { readTriangle } from './triangle-math.js';
@@ -16,7 +17,7 @@ export const BAKE_LIMITS = Object.freeze({
   maxResolution: { minimum: 4, maximum: 256, fallback: 128 },
   texelsPerUnit: { minimum: 0.5, maximum: 64, fallback: 6 },
   samples: { minimum: 1, maximum: 512, fallback: 128 },
-  bounces: { minimum: 1, maximum: 4, fallback: 3 },
+  bounces: { minimum: 1, maximum: 8, fallback: 3 },
   maxSeconds: { minimum: 1, maximum: 600, fallback: 60 },
 });
 // Total ray work (texels x samples x bounces x rays per hit) a bake may ask for, checked before any ray is traced.
@@ -26,6 +27,7 @@ export const MAX_BAKE_TRIANGLES = 200_000;
 export const MAX_BAKE_PARTS = 256;
 // The GPU tracer takes as many parts as the path tracer does (MAX_TRACE_PARTS); the CPU bake keeps 256.
 export const MAX_GPU_BAKE_PARTS = 1024;
+const BAKE_BACKENDS = ['cpu', 'gpu', 'webgpu', 'native'];
 export const MAX_BAKE_POINT_LIGHTS = MAX_POINT_LIGHTS;
 export const MAX_BAKE_SPOT_LIGHTS = MAX_SPOT_LIGHTS;
 export const MAX_BAKE_AREA_LIGHTS = MAX_AREA_LIGHTS;
@@ -54,7 +56,7 @@ function boundedNumber(options, name) {
   const limit = BAKE_LIMITS[name];
   const value = options[name] ?? limit.fallback;
   if (!Number.isFinite(value) || value < limit.minimum || value > limit.maximum) {
-    throw new RangeError(`Light bake ${name} must be a number from ${limit.minimum} to ${limit.maximum}.`);
+    throw invalidField(`bake.${name}`, value, `a number from ${limit.minimum} to ${limit.maximum}, such as ${limit.fallback}`);
   }
   return name === 'samples' || name === 'bounces' || name === 'maxResolution' ? Math.floor(value) : value;
 }
@@ -65,7 +67,7 @@ export function normalizeBakeOptions(options = {}) {
   const normalized = {};
   for (const name of Object.keys(BAKE_LIMITS)) normalized[name] = boundedNumber(options, name);
   normalized.backend = options.backend ?? 'cpu';
-  if (normalized.backend !== 'cpu' && normalized.backend !== 'gpu') throw new TypeError('Light bake backend must be "cpu" or "gpu".');
+  if (!BAKE_BACKENDS.includes(normalized.backend)) throw invalidField('bake.backend', normalized.backend, 'one of "cpu", "gpu", "webgpu" or "native"', TypeError);
   return normalized;
 }
 
@@ -235,7 +237,7 @@ export function averageMapColor(map) {
   return sum.map(total => total / (AVERAGE_GRID * AVERAGE_GRID));
 }
 
-function diffuseAlbedo(material) {
+export function diffuseAlbedo(material) {
   const keep = 1 - (material.metallic ?? 0);
   const mapAverage = averageMapColor(material.map);
   return material.color.map((channel, index) => Math.max(channel, 0) * keep * mapAverage[index]);
@@ -335,7 +337,7 @@ export function cosineDirection(normal, firstUnit, secondUnit, out) {
  * Builds the function that returns the irradiance (light power per area, before the albedo and 1/pi of a diffuse
  * surface) of the direct lights at a point, with shadow rays against the world.
  */
-export function createDirectIrradiance(tracer, lights, offset, scale) {
+export function createDirectIrradiance(tracer, lights, offset, scale, sunReaching = null) {
   const result = [0, 0, 0];
   const shadowReach = scale * 1e6;
   function addLight(point, normal, toLight, distance, power) {
@@ -350,6 +352,7 @@ export function createDirectIrradiance(tracer, lights, offset, scale) {
   }
   const toLight = [0, 0, 0];
   const power = [0, 0, 0];
+  const sunPower = [0, 0, 0];
   // Aims `toLight` at a light's position and returns the distance, or 0 when the point sits on the light.
   function aimAtPosition(point, lightX, lightY, lightZ) {
     const deltaX = lightX - point[0];
@@ -420,7 +423,16 @@ export function createDirectIrradiance(tracer, lights, offset, scale) {
     for (let index = 0; index < lights.areaLights.length; index++) {
       if (lightReaches(lights.areaLights[index], owner)) addAreaLight(point, normal, lights.areaLights[index], index);
     }
-    if (lights.sun && lightReaches(lights.sun, owner)) addLight(point, normal, lights.sun.direction, shadowReach, lights.sun.color);
+    if (lights.sun && lightReaches(lights.sun, owner)) {
+      if (!sunReaching) {
+        addLight(point, normal, lights.sun.direction, shadowReach, lights.sun.color);
+      } else {
+        // The fog dims the sun on its way to the surface.
+        const reaching = sunReaching(point);
+        for (let channel = 0; channel < 3; channel++) sunPower[channel] = lights.sun.color[channel] * reaching;
+        addLight(point, normal, lights.sun.direction, shadowReach, sunPower);
+      }
+    }
     return result;
   };
 }
@@ -451,16 +463,20 @@ const SCRATCH_TRIANGLE = new Float64Array(9);
  * The mean radiance arriving at one texel from other surfaces: cosine-weighted paths of up to `bounces` reflections,
  * each hit adding its own emission and its direct light. The caller multiplies by the texel's albedo.
  */
-export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces }) {
+export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, directIrradiance, offset, samples, bounces, medium = null, fogScatterLimit = 8 }) {
+  const scatterSum = [0, 0, 0];
+  const singleScatterSum = [0, 0, 0];
   const direction = [0, 0, 0];
   const origin = [0, 0, 0];
   const normal = [0, 0, 0];
   const hitPoint = [0, 0, 0];
   const throughput = [1, 1, 1];
-  return function gather(point, surfaceNormal, texelIndex, sum) {
+  return function gather(point, surfaceNormal, texelIndex, sum, fogLight = null) {
     sum[0] = 0;
     sum[1] = 0;
     sum[2] = 0;
+    scatterSum.fill(0);
+    singleScatterSum.fill(0);
     const rotation = hashUnit(texelIndex, 1, 7);
     // Rays that leave the scene on their first leg see the sky, so the share of them is how much sky this point sees.
     let escaped = 0;
@@ -474,15 +490,28 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
       throughput[0] = 1;
       throughput[1] = 1;
       throughput[2] = 1;
-      for (let bounce = 0; bounce < bounces; bounce++) {
+      let bounce = 0;
+      let leg = 0;
+      let fogScatters = 0;
+      while (bounce < bounces) {
         const hit = tracer.trace(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], Infinity, false);
-        if (hit.nearestTriangle < 0) {
+        // The tracer reuses its hit record, and the fog traces rays of its own, so the hit is read first.
+        const hitTriangle = hit.nearestTriangle;
+        const hitDistance = hit.nearestDistance;
+        // The fog may scatter the path inside this leg: the path then goes on from the scattering point.
+        if (medium && medium(origin, direction, hitTriangle < 0 ? Infinity : hitDistance, throughput, scatterSum, texelIndex, sample, leg++, singleScatterSum)) {
+          if (++fogScatters >= fogScatterLimit) break;
+          continue;
+        }
+        if (hitTriangle < 0) {
           if (bounce === 0) escaped++;
+          // A path the fog scattered brings the sky's light with it: the sky lights the fog through the openings.
+          if (fogScatters > 0) medium.addSky(throughput, scatterSum);
           break;
         }
-        for (let axis = 0; axis < 3; axis++) hitPoint[axis] = origin[axis] + direction[axis] * hit.nearestDistance;
-        hitNormal(world, hit.nearestTriangle, direction, normal);
-        const owner = world.triangleOwner[hit.nearestTriangle];
+        for (let axis = 0; axis < 3; axis++) hitPoint[axis] = origin[axis] + direction[axis] * hitDistance;
+        hitNormal(world, hitTriangle, direction, normal);
+        const owner = world.triangleOwner[hitTriangle];
         const albedo = albedoOfPart[owner];
         const emission = emissionOfPart[owner];
         const irradiance = directIrradiance(hitPoint, normal, owner);
@@ -495,9 +524,15 @@ export function createGatherer({ world, tracer, albedoOfPart, emissionOfPart, di
         origin[1] = hitPoint[1] + normal[1] * offset;
         origin[2] = hitPoint[2] + normal[2] * offset;
         cosineDirection(normal, hashUnit(texelIndex, sample, bounce * 2 + 11), hashUnit(texelIndex, sample, bounce * 2 + 12), direction);
+        bounce++;
       }
     }
-    for (let channel = 0; channel < 3; channel++) sum[channel] /= samples;
+    // `sum` holds the fog's light too; `fogLight`, when given, gets the single scattered sun alone, the part the fog on screen adds itself.
+    for (let channel = 0; channel < 3; channel++) {
+      scatterSum[channel] /= samples;
+      sum[channel] = sum[channel] / samples + scatterSum[channel];
+      if (fogLight) fogLight[channel] = singleScatterSum[channel] / samples;
+    }
     return escaped / samples;
   };
 }
@@ -868,7 +903,7 @@ function createSkyVisibilityGatherer({ tracer, offset, samples }) {
 export function planLightmaps(parts, lighting, options = {}) {
   const settings = normalizeBakeOptions(options);
   const lights = normalizeLights(lighting);
-  const maximumParts = settings.backend === 'gpu' ? MAX_GPU_BAKE_PARTS : MAX_BAKE_PARTS;
+  const maximumParts = settings.backend !== 'cpu' ? MAX_GPU_BAKE_PARTS : MAX_BAKE_PARTS;
   if (!Array.isArray(parts) || parts.length === 0 || parts.length > maximumParts) throw new RangeError(`Light bake takes from 1 to ${maximumParts} parts.`);
   parts.forEach(validatePart);
   const triangleTotal = parts.reduce((total, part) => total + part.geometry.indices.length / 3, 0);
@@ -1011,7 +1046,7 @@ export function finishLightmaps(plan, settings, rasterized, gathered, sizes) {
 /** Traces a plan with the given settings (samples, bounces, texelsPerUnit, maxSeconds) and returns the baked parts and the report. */
 export function traceLightmaps(plan, tracedSettings) {
   const settings = { ...plan.settings, ...tracedSettings };
-  if (settings.backend !== 'cpu') throw new TypeError('Light bake backend "gpu" is asynchronous: use bakeLightmapsAsync from light-bake-gpu.js.');
+  if (settings.backend !== 'cpu') throw new TypeError(`Light bake backend "${settings.backend}" is asynchronous: use bakeLightmapsAsync from light-bake-gpu.js.`);
   const sizes = checkedBakeSize(plan, settings);
   const rasterized = rasterizeEntries(plan, settings);
   return finishLightmaps(plan, settings, rasterized, gatherOnCpu(plan, settings, rasterized), sizes);

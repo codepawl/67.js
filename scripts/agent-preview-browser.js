@@ -1,9 +1,10 @@
+import { encodeNativeTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
-import { createAgentScene, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
+import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
 import { skyOpenness } from '../src/closed-room.js';
 import { fogSkyVisibility } from '../src/fog-sky-visibility.js';
-import { installCameraEffects } from '../src/camera-effects.js';
+import { installCameraEffects, effectsWithFStop } from '../src/camera-effects.js';
 import { installRenderPasses } from '../src/render-passes.js';
 import { installMeshBlend, normalizeBlend } from '../src/mesh-blend.js';
 import { installDepthPrecision } from '../src/reversed-depth.js';
@@ -21,11 +22,17 @@ import '../src/texture-update.js';
 import { updatePartVertices } from '../src/update-part-vertices.js';
 import { hasPatternTextures } from './agent-preview-textures.js';
 import { TEXTURE_SEQUENCE_LIMITS } from '../src/texture-sequence-limits.js';
+import { registerCatalogEnvironment, registerCatalogLook } from '../src/look-catalog.js';
+import { parseRadianceHdr } from '../src/hdri.js';
+import { parseCube } from '../src/view-transform.js';
 import { weightTracksFromGltfAnimation } from '../src/export-skeleton.js';
 import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem } from '../src/agent-errors.js';
+import { describeApplication } from '../src/agent-apply-report.js';
+import { framingProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
+import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from './agent-walkmap.js';
 
 let active = null;
 let canvas = document.querySelector('canvas');
@@ -72,17 +79,38 @@ function candidateCamera(record, operations) {
   const camera = record.scene.exportRecipe().camera;
   for (const operation of operations) {
     if (operation.type === 'set-camera') {
-      for (const field of ['eye', 'target', 'up', 'fov', 'near', 'far']) {
-        if (Object.hasOwn(operation, field)) {
-          camera[field] = operation[field];
-        }
-      }
+      applyCameraFields(camera, operation);
     }
   }
   return createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [], camera }).camera;
 }
 
-function renderInfo(renderer) {
+const EXPOSURE_PROBE_SIZE = 64;
+let exposureProbe;
+
+/** Luma shares of a 64 by 64 copy of the frame just drawn; the copy is a read of the drawing buffer, so call it in the draw's task. */
+function sampleFrameShares() {
+  exposureProbe ??= Object.assign(document.createElement('canvas'), { width: EXPOSURE_PROBE_SIZE, height: EXPOSURE_PROBE_SIZE });
+  const context = exposureProbe.getContext('2d', { willReadFrequently: true });
+  context.drawImage(canvas, 0, 0, EXPOSURE_PROBE_SIZE, EXPOSURE_PROBE_SIZE);
+  return lumaShares(context.getImageData(0, 0, EXPOSURE_PROBE_SIZE, EXPOSURE_PROBE_SIZE).data);
+}
+
+/**
+ * Warnings about the frame just drawn from `camera`: framing, a stale bake and exposure (when `exposure` is given, the
+ * effects.exposure drawn with). Imported assets have no part bounds or bake, so they get the exposure check only.
+ */
+function viewProblems(record, camera, exposure) {
+  const problems = [];
+  const boxes = record.scene.worldBounds?.();
+  if (boxes) problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes }));
+  if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());
+  if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure }));
+  return problems;
+}
+
+function renderInfo(renderer, viewWarnings = []) {
+  const diagnostics = [...(renderer.diagnostics ?? []), ...viewWarnings];
   const context = renderer.context;
   const debug = context.getExtension('WEBGL_debug_renderer_info');
   return {
@@ -99,7 +127,7 @@ function renderInfo(renderer) {
     morphTextures: renderer.morphTextures?.size ?? 0,
     gpuBuffers: renderer.buffers?.length ?? 0,
     drawBatches: renderer.batches?.length ?? 0,
-    ...(renderer.diagnostics?.length ? { diagnostics: renderer.diagnostics } : {}),
+    ...(diagnostics.length ? { diagnostics } : {}),
   };
 }
 
@@ -118,6 +146,14 @@ async function decodeSequenceFrame(id, base64) {
     return { width: bitmap.width, height: bitmap.height, data };
   } finally {
     bitmap.close();
+  }
+}
+
+// HDRI and .cube files a recipe names, by bundled name or catalog ID: { kind: 'environment', base64 } or { kind: 'look', text }.
+function registerLookData(lookData) {
+  for (const [reference, entry] of Object.entries(lookData ?? {})) {
+    if (entry.kind === 'environment') registerCatalogEnvironment(reference, parseRadianceHdr(bytesFromBase64(entry.base64)));
+    else registerCatalogLook(reference, parseCube(entry.text));
   }
 }
 
@@ -248,7 +284,17 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   syncMeshBlend(record);
   record.renderer.userPasses?.set(record.scene.postPasses ?? []);
   applyRecipeWindHeading(record.renderer, environment);
-  record.renderer.render({ ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...frameOptions });
+  const { objectMotion, ...renderOptions } = frameOptions;
+  const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
+  if (effects.colorBalance || effects.glare || effects.lensDistortion) agentSceneModule('postSteps').installPostSteps(record.renderer);
+  if (objectMotion) {
+    // Object motion blur reads each pixel's part from the object ID pass, drawn first; the lit frame then smears along each part's motion.
+    const { installObjectMotionBlur, packObjectMotion } = agentSceneModule('objectMotionBlur');
+    if (!frame.pass) installObjectMotionBlur(record.renderer);
+    if (!frame.pass) record.renderer.render({ ...frame, pass: 'objectId', previousCamera: undefined });
+    frame.objectMotion = packObjectMotion(record.renderer, objectMotion.current, objectMotion.previous);
+  }
+  record.renderer.render(frame);
   const error = record.renderer.context.getError();
   if (error !== 0) {
     throw new Error(`WebGL render failed with error ${error}.`);
@@ -268,28 +314,40 @@ function syncMeshBlend(record) {
   record.renderer.meshBlend.radii = radii;
 }
 
-function status(record) {
+function renderStatus(record) {
   const render = renderInfo(record.renderer);
   record.lastRender = render;
   return {
     sessionId: record.sessionId,
     revision: record.scene.revision,
     topologyRevision: record.scene.topologyRevision,
-    inspection: record.scene.inspect(),
     render,
   };
+}
+
+function status(record) {
+  const { sessionId, revision, topologyRevision, render } = renderStatus(record);
+  return { sessionId, revision, topologyRevision, inspection: record.scene.inspect(), render };
+}
+
+// The answer to an edit stays short: it holds no node list, because every answer stays in the agent's context.
+// An agent that needs the node list calls scene_inspect. The scene's own warnings (closed room without a bake, stale bake,
+// coplanar overlap, ignored material fields) still ride along, only when there are any.
+function sceneDiagnostics(record) {
+  const { diagnostics } = record.scene.inspect();
+  return diagnostics?.length ? { diagnostics } : {};
 }
 
 function mutationStatus(record) {
   try {
     draw(record);
-    return { ...status(record), committed: true, renderSucceeded: true };
+    return { ...renderStatus(record), ...sceneDiagnostics(record), committed: true, renderSucceeded: true };
   } catch (error) {
     return {
       sessionId: record.sessionId,
       revision: record.scene.revision,
-      inspection: record.scene.inspect(),
       render: record.lastRender ?? null,
+      ...sceneDiagnostics(record),
       committed: true,
       renderSucceeded: false,
       renderError: error.message,
@@ -338,7 +396,7 @@ function cascadesFor(scene) {
   return count > 0 ? agentSceneModule('cascades').createCascadedShadows({ count }) : null;
 }
 
-function initializeRenderer(scene, { memoryBudgetMiB, backend }) {
+function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = false }) {
   probeSnippets(scene);
   const placement = agentGroundPlacement(scene.parts, scene.environment);
   const renderer = installDepthPrecision(installRenderPasses(installCameraEffects(new Renderer67(canvas, scene.parts, {
@@ -354,6 +412,7 @@ function initializeRenderer(scene, { memoryBudgetMiB, backend }) {
     pixelRatio: 1,
     samples: backend === 'cpu' ? 1 : 4,
     memoryBudgetMiB,
+    transparent,
   }))));
   // Outlines, toon light and polylines draw only for a frame that carries environment.lines; user passes run last, on the finished frame.
   // Mesh blend installs before line art, so its stage runs first and the lines draw over the blended colour; it blends only the
@@ -370,8 +429,8 @@ function withCameraOverrides(camera, overrides) {
 }
 
 // The camera at the start of the shutter interval, sampled from time so the same seek always gives the same blur.
-function previousCameraFor(record, motionTime) {
-  const shutter = record.scene.effects.motionBlur.shutter;
+function previousCameraFor(record, motionTime, forVelocity = false) {
+  const shutter = record.scene.effects.motionBlur.shutter || (forVelocity ? 1 / 24 : 0);
   if (shutter <= 0 || motionTime === undefined || record.asset) return undefined;
   record.scene.sampleMotion(Math.max(0, motionTime - shutter));
   const previousCamera = record.scene.camera;
@@ -379,15 +438,29 @@ function previousCameraFor(record, motionTime) {
   return previousCamera;
 }
 
-function createPreview(scene, { sessionId, memoryBudgetMiB, backend }, asset, placedAssets, sequenceFrames) {
+// The parts' world matrices now and at the start of the shutter, sampled from time like the previous camera. Only a scene that
+// asks for object blur (and has motion to sample) pays for it; an imported asset animates by skin, which this does not follow.
+function objectMotionFor(record, motionTime, forVelocity = false) {
+  const { shutter: blurShutter, objects } = record.scene.effects.motionBlur;
+  const shutter = blurShutter || (forVelocity ? 1 / 24 : 0);
+  if (!(shutter > 0 && (objects > 0 || forVelocity)) || motionTime === undefined || record.asset) return undefined;
+  const { sampleWorldMatrices } = agentSceneModule('objectMotionBlur');
+  const current = sampleWorldMatrices(record.scene.parts);
+  record.scene.sampleMotion(Math.max(0, motionTime - shutter));
+  const previous = sampleWorldMatrices(record.scene.parts);
+  record.scene.sampleMotion(motionTime);
+  return { current, previous };
+}
+
+function createPreview(scene, { sessionId, memoryBudgetMiB, backend, transparent = false }, asset, placedAssets, sequenceFrames) {
   if (active) {
     throw new Error('Dispose the current scene before creating another.');
   }
   validatePreviewCamera(scene.camera);
   let renderer;
   try {
-    renderer = initializeRenderer(scene, { memoryBudgetMiB, backend });
-    const record = { scene, renderer, asset, placedAssets, sessionId, options: { memoryBudgetMiB, backend },
+    renderer = initializeRenderer(scene, { memoryBudgetMiB, backend, transparent });
+    const record = { scene, renderer, asset, placedAssets, sessionId, options: { memoryBudgetMiB, backend, transparent },
       checkpoints: new Map(), branches: createBranchStore(), rendererTopology: scene.topologyRevision, rendererTextured: sceneIsTextured(scene), sequenceFrames };
     draw(record);
     const result = status(record);
@@ -412,6 +485,7 @@ setPhysicsModuleLoader(() => import(/* @vite-ignore */ new URL('/vendor/rapier.j
 // The preview bundle is one file, so the on-demand scene modules load together on the first call and later calls stay
 // synchronous. The boolean engine is WebAssembly and loads asynchronously, once, only for calls that need it.
 
+let queryOnly;
 const ASSET_DECODE_LIMITS = agentAssetDecodeOptions();
 
 // An agent cannot pass loadGltf options, so a limit error names the catalog limits instead of "Fix: pass { ... }".
@@ -500,14 +574,23 @@ function useKernelWorkers() {
   return kernelWorkersAvailable() && globalThis.__67jsKernelWorkers !== 'off';
 }
 
-function buildSceneOffMainThread(recipe, options) {
+// A recipe bake runs on the native tracer when the host offers it, on the GPU when the page has float render targets, and on
+// the CPU everywhere else.
+async function pageKernelsFor(recipe, backend) {
+  if (!recipe.bake || backend !== 'gpu') return undefined;
+  const { gpuBakeKernels } = await import('../src/agent-bake-gpu.js');
+  return gpuBakeKernels({ texelTracer: await nativeTexelTracerIfAvailable() });
+}
+
+async function buildSceneOffMainThread(recipe, options, backend) {
+  const pageKernels = await pageKernelsFor(recipe, backend);
   return buildWithKernels(() => {
     const scene = createAgentScene(recipe, {}, options);
     for (const part of scene.parts) {
       void part.material.map;
     }
     return scene;
-  });
+  }, { pageKernels });
 }
 
 function seekForExport(record, motionTime) {
@@ -669,7 +752,7 @@ window.__agentPreview = {
       geometries: [], materials: [], nodes: [], camera: { ...record.scene.camera, ...shot.camera } }).camera;
     validatePreviewCamera(camera);
     draw(record, shot.rendererTime, camera);
-    const render = renderInfo(record.renderer);
+    const render = renderInfo(record.renderer, viewProblems(record, camera, record.scene.effects.exposure));
     if (render.width < 64 || render.height < 64) throw new Error('Render budget reduced review below its minimum output size.');
     const context = reviewGrid.getContext('2d');
     const x = index % columns * width;
@@ -721,7 +804,7 @@ window.__agentPreview = {
   },
   // `pass` draws one render pass instead of the lit image. Object ID frames also list the part behind each ID.
   // `camera` overrides camera fields and `depthOfField` the blur and focus distance (a timeline shot); `brightness` scales exposure for a dip through black.
-  frame({ sessionId, animation, motionTime, rendererTime = 0, pass, passDepthRange, camera: cameraOverrides, depthOfField: depthOfFieldOverrides, brightness = 1 }) {
+  frame({ sessionId, animation, motionTime, rendererTime = 0, pass, passDepthRange, passFloat = false, floatOutput = false, camera: cameraOverrides, depthOfField: depthOfFieldOverrides, brightness = 1, diagnose = false }) {
     const record = requireSession(sessionId);
     if (!Number.isFinite(brightness) || brightness < 0 || brightness > 1) throw new RangeError('Invalid frame brightness.');
     if (!Number.isFinite(rendererTime) || rendererTime < 0 || rendererTime > 3600) throw new RangeError('Invalid render time.');
@@ -732,16 +815,33 @@ window.__agentPreview = {
       record.scene.sampleMotion(motionTime);
     }
     const shotCamera = cameraOverrides ? withCameraOverrides(record.scene.camera, cameraOverrides) : undefined;
-    const sampledPreviousCamera = pass ? undefined : previousCameraFor(record, motionTime);
+    const forVelocity = pass === 'velocity';
+    const sampledPreviousCamera = (!pass || forVelocity) ? previousCameraFor(record, motionTime, forVelocity) : undefined;
     const previousCamera = sampledPreviousCamera && cameraOverrides ? withCameraOverrides(sampledPreviousCamera, cameraOverrides) : sampledPreviousCamera;
+    const objectMotion = (!pass || forVelocity) ? objectMotionFor(record, motionTime, forVelocity) : undefined;
     const exposure = record.scene.effects.exposure * brightness;
     const shotEffects = depthOfFieldOverrides
       ? { ...record.scene.effects, depthOfField: { ...record.scene.effects.depthOfField, ...depthOfFieldOverrides } }
       : undefined;
-    draw(record, rendererTime, shotCamera, { pass, passDepthRange, previousCamera,
+    const outputFramebuffer = floatOutput && !pass ? record.floatModule.outputFor(record, canvas).framebuffer : undefined;
+    draw(record, rendererTime, shotCamera, { pass, passDepthRange, passFloat, previousCamera, outputFramebuffer, ...(objectMotion ? { objectMotion } : {}),
       ...(brightness === 1 ? {} : { exposure }), ...(shotEffects ? { effects: shotEffects } : {}) });
-    const info = renderInfo(record.renderer);
-    return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() } : info;
+    // The first lit frame of a job is checked; a pass or a fade has no exposure to judge.
+    const checkLitFrame = diagnose && !pass && !floatOutput && brightness === 1;
+    const info = renderInfo(record.renderer, pass ? [] : viewProblems(record, shotCamera ?? record.scene.camera, checkLitFrame ? record.scene.effects.exposure : undefined));
+    return pass === 'objectId' ? { ...info, objectNames: record.renderer.passSupport.objectNames() }
+      : pass === 'cryptomatte' ? { ...info, cryptomatte: record.renderer.passSupport.cryptomatteManifest() }
+      : info;
+  },
+  // Reads the last frame as RGBA float32, rows bottom to top, cropped to `region` (pixels from the top left): the lit image
+  // when it was drawn with floatOutput, a pass when it was drawn with passFloat. Base64 of the float bytes.
+  // 16-bit PNG and EXR output load their module here, so a scene that never asks for them does not carry it.
+  async prepareFloatOutput({ sessionId }) {
+    requireSession(sessionId).floatModule = await import('../src/float-output.js');
+  },
+  readFloat({ sessionId, source, region }) {
+    const record = requireSession(sessionId);
+    return record.floatModule.readFrame(record, canvas, source, region);
   },
   // Offline path trace of the scene at one instant. The tracer loads here, on first use, and not with the preview.
   async pathTrace({ sessionId, animation, motionTime, options }) {
@@ -770,6 +870,28 @@ window.__agentPreview = {
       return { features, report: result.report };
     }
     return { data: encodeTracedPng(result.rgba, result.width, result.height), report: result.report };
+  },
+  // The scene at one instant packed into the tables the native ray query tracer reads (renderer.backend "native"). The job
+  // runner traces them outside the page; each table comes back as base64 bytes.
+  async exportNativeScene({ sessionId, animation, motionTime, options }) {
+    const record = requireSession(sessionId);
+    if (record.asset && (animation !== undefined || motionTime !== undefined)) {
+      record.scene.sampleFrame({ ...(animation === undefined ? {} : { animation }),
+        ...(motionTime === undefined ? {} : { motionTime }) });
+    } else if (motionTime !== undefined) {
+      record.scene.sampleMotion(motionTime);
+    }
+    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene }, pack, { buildNativeInput }] = await Promise.all([
+      import('../src/path-tracer.js'), import('../src/path-tracer-scene.js'), import('../src/path-tracer-gpu-pack.js'),
+      import('../packages/render-native/pack-input.mjs'),
+    ]);
+    const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
+    const traceScene = buildTraceScene(record.scene.parts, environment);
+    const camera = createCamera(record.scene.camera, options.width, options.height);
+    const input = buildNativeInput(traceScene, camera, options, pack);
+    const tables = encodeNativeTables(input);
+    const ignored = describeIgnoredFeatures(record.scene.parts, environment);
+    return { tables, triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, ignored };
   },
   // The PNG of linear pixels (three floats each, base64) that a denoiser outside the page returned, or of the wavelet
   // filter over the kept features when none came back.
@@ -808,7 +930,8 @@ window.__agentPreview = {
     }
   },
   create(input) {
-    if (active) throw new Error('Dispose the current scene before creating another.');
+    registerLookData(input.lookData);
+    if (active)throw new Error('Dispose the current scene before creating another.');
     if (recipeAssetNeeds(input.recipe).length) return this.createWithAssets(input);
     // Only a recipe with image sequences waits for its frames to decode; any other create stays synchronous.
     const build = sequenceFrames => {
@@ -819,7 +942,7 @@ window.__agentPreview = {
         finishBuildReport(startedAt);
         return createPreview(scene, input, undefined, undefined, sequenceFrames);
       }
-      return buildSceneOffMainThread(input.recipe, { sequenceFrames }).then(scene => {
+      return buildSceneOffMainThread(input.recipe, { sequenceFrames }, input.backend).then(scene => {
         finishBuildReport(startedAt);
         return createPreview(scene, input, undefined, undefined, sequenceFrames);
       });
@@ -851,7 +974,20 @@ window.__agentPreview = {
     if (!allAgentSceneModulesLoaded()) return loadAllAgentSceneModules().then(() => this.inspectMeshes({ sessionId, ...options }));
     return { sessionId, ...scene.inspectMeshes(options) };
   },
+  async queryOnlyWalkMap({ data, ...input }) {
+    queryOnly ??= createQueryOnlyCache(parseGltf);
+    return queryOnly.walkMap({ ...input, bytes: data === undefined ? undefined : bytesFromBase64(data) });
+  },
+  async walkMap({ sessionId, clearance = 2, groundRange, keepOut, streetY, includeCells = false, ...options }) {
+    const record = requireSession(sessionId);
+    if (!allAgentSceneModulesLoaded()) await loadAllAgentSceneModules();
+    const started = performance.now();
+    const query = sceneQueryFor(record);
+    const map = query.walkMap(walkOptionsFor(options, keepOut, streetY));
+    return { sessionId, revision: record.scene.revision, ...summarizeWalkMap(map, { clearance, groundRange, keepOut, includeCells }), skippedParts: query.skipped.length, milliseconds: Math.round(performance.now() - started) };
+  },
   apply(input) {
+    registerLookData(input.lookData);
     if (input.sequenceData) {
       const { sequenceFrames } = requireSession(input.sessionId);
       if (!sequenceFrames) throw new Error('This scene was created from an imported asset and has no image sequences.');
@@ -888,8 +1024,10 @@ window.__agentPreview = {
     if (fogDensity > 0 && !record.renderer.capabilities.hdr) {
       throw new Error('Volumetric fog requires HDR support; this preview cannot enable it.');
     }
+    const before = typeof record.scene.exportRecipe === 'function' ? record.scene.exportRecipe() : null;
     record.scene.apply(operations, { expectedRevision });
-    return mutationStatus(record);
+    const report = before ? describeApplication(before, record.scene.exportRecipe(), operations) : {};
+    return { ...mutationStatus(record), ...report };
   },
   editMesh({ sessionId, expectedRevision, geometry, edits, replace }) {
     const record = requireSession(sessionId);
@@ -922,7 +1060,7 @@ window.__agentPreview = {
       record.scene.sampleMotion(motionTime);
     }
     draw(record);
-    const render = renderInfo(record.renderer);
+    const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure));
     record.lastRender = render;
     const labels = withLabels ? collectLabels(record, record.scene.camera, canvas.width, canvas.height) : undefined;
     return {
@@ -938,8 +1076,12 @@ window.__agentPreview = {
     record.checkpoints.set(checkpointId, { handle, fogDensity: record.scene.environment.volumeFog.density });
     return { sessionId, checkpointId, revision: record.scene.revision };
   },
-  restore({ sessionId, checkpointId, expectedRevision }) {
+  restore({ sessionId, checkpointId, revision, expectedRevision }) {
     const record = requireSession(sessionId);
+    if (revision !== undefined) {
+      record.scene.restoreRevision(revision, { expectedRevision });
+      return mutationStatus(record);
+    }
     if (!record.checkpoints.has(checkpointId)) {
       throw new Error('Unknown or released checkpoint.');
     }

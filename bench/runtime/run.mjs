@@ -16,9 +16,10 @@ const BACKENDS = {
   gpu: { arguments: SHARED_ARGUMENTS, frames: 120 },
   cpu: { arguments: [...SHARED_ARGUMENTS, '--use-angle=swiftshader', '--enable-unsafe-swiftshader'], frames: 15 },
 };
-const ENGINES = ['67js', 'three', 'three-instanced', '67js-no-lod', '67js-no-culling', '67js-ldr', '67js-one-sample', '67js-ldr-one-sample', 'three-one-sample', '67js-light'];
+const ENGINES = ['67js', 'three', 'three-instanced', '67js-no-lod', '67js-no-culling', '67js-ldr', '67js-one-sample', '67js-ldr-one-sample', 'three-one-sample', '67js-light', '67js-trusted'];
 // Ablations of the HDR target and MSAA, which cost something in every scene. They run only when named with --engine.
-const FEATURE_ENGINES = new Set(['67js-light', '67js-ldr', '67js-one-sample', '67js-ldr-one-sample', 'three-one-sample']);
+// 67js-trusted animates characters with checks off (applyAnimation and updateParts { checks: false }).
+const FEATURE_ENGINES = new Set(['67js-trusted', '67js-light', '67js-ldr', '67js-one-sample', '67js-ldr-one-sample', 'three-one-sample']);
 const INSTANCED_SCENES = new Set(['instanced-objects']);
 // Ablations of this renderer's own culling and level selection, which only a scene that has them can show.
 const ABLATION_SCENES = new Set(['large-outdoor']);
@@ -87,6 +88,7 @@ function summarize({ image: _image, repeatable: _repeatable, glError: _glError, 
   return {
     firstFrameMilliseconds: rounded(result.firstFrameMilliseconds, 0),
     updateMilliseconds: rounded(result.updateMilliseconds),
+    updatePartsMilliseconds: result.updatePartsMilliseconds === null ? null : rounded(result.updatePartsMilliseconds),
     renderCpuMilliseconds: rounded(result.renderCpuMilliseconds),
     gpuMilliseconds: rounded(result.gpuMilliseconds),
     fullFrameMilliseconds: rounded(result.fullFrameMilliseconds),
@@ -120,7 +122,7 @@ async function runBackend(backendName, serverUrl, report) {
         report.results[backendName][sceneId] ??= {};
         report.results[backendName][sceneId][engine] = { ...summarize(result), gpuBusyBefore };
         const summary = report.results[backendName][sceneId][engine];
-        console.log(`${backendName} ${sceneId.padEnd(20)} ${engine.padEnd(16)} first ${summary.firstFrameMilliseconds} ms, render ${summary.renderCpuMilliseconds} ms, frame ${summary.fullFrameMilliseconds} ms, ${summary.drawCalls} draws, ${summary.triangles} tris, gpu mem ${summary.gpuMegabytes} MB, heap ${summary.heapMegabytes} MB, busy ${gpuBusyBefore}%${summary.renderTargets ? `
+        console.log(`${backendName} ${sceneId.padEnd(20)} ${engine.padEnd(16)} first ${summary.firstFrameMilliseconds} ms, update ${summary.updateMilliseconds} ms${summary.updatePartsMilliseconds === null ? "" : ` (updateParts ${summary.updatePartsMilliseconds})`}, render ${summary.renderCpuMilliseconds} ms, frame ${summary.fullFrameMilliseconds} ms, ${summary.drawCalls} draws, ${summary.triangles} tris, gpu mem ${summary.gpuMegabytes} MB, heap ${summary.heapMegabytes} MB, busy ${gpuBusyBefore}%${summary.renderTargets ? `
   targets: ${summary.renderTargets.map(target => `${target.name} ${target.megabytes} MB`).join(", ")}` : ""}`);
       }
     }

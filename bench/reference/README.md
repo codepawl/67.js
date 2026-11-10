@@ -1846,3 +1846,25 @@ The contrast is now read at x = 0.9 m, not 0.65 m, for both renderers: at 4 m th
 | river 4 m | -0.001, -0.002, -0.006 | 0.211, 0.210, 0.120 | 0.251, 0.242, 0.156 | 0.5408 | 0.4491 |
 
 Every row is within 0.05 of Cycles in each channel (largest gap 0.040, river 4 m red). The dry pool scores 0.34 to 0.48 by itself, so FLIP moves less than the contrast. `tests/water-shadows-render.test.js` now expects the clear lake to follow `exp(-absorption * depth * (1 + 1 / cos(theta_t)))` and every preset's contrast to stay at or above 0; the river at 4 m, which it expected below 0.05, is expected between 0.1 and 0.35.
+
+## Shadow contrast of the halls and `dark-shaft` after sun bounce, measured and nothing kept (2026-11-06, part of issue #197)
+
+Main at `ce50d2e` (after #434, #462 and #465), 960 x 540. The default scenes are GPU frames against fresh Blender 5.2.2 Cycles arrays; the four temple options are GPU frames against Cycles arrays rendered on the GPU in the same run. Measured with `shadow-depth.py` (display luminance, 67js / Cycles). `top 5%` and `bottom 30%` are the mean display luminance of the pixels where Cycles is brightest and darkest.
+
+| Scene | p1 | p5 | p25 | contrast (log2) | floor | lit-level | top 5% | bottom 30% |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `dark-shaft` | 0.044 / 0.033 | 0.044 / 0.035 | 0.048 / 0.048 | 2.23 / 1.75 | 0.85 | 1.20 | | |
+| `temple-hall` | 0.024 / 0.021 | 0.024 / 0.023 | 0.036 / 0.029 | 1.69 / 1.75 | 0.92 | 0.89 | | |
+| `temple-hall-a` | 0.049 / 0.036 | 0.063 / 0.038 | 0.067 / 0.050 | 1.16 / 1.29 | 0.73 | 0.66 | 0.26 / 0.36 | 0.071 / 0.045 |
+| `temple-hall-b` | 0.072 / 0.037 | 0.072 / 0.040 | 0.076 / 0.049 | 0.85 / 1.80 | 1.41 | 0.70 | 0.28 / 0.38 | 0.077 / 0.044 |
+| `temple-hall-c` | 0.035 / 0.017 | 0.038 / 0.019 | 0.052 / 0.024 | 1.36 / 1.97 | 1.68 | 1.06 | 0.30 / 0.35 | 0.052 / 0.021 |
+| `temple-hall-rose` | 0.136 / 0.040 | 0.138 / 0.043 | 0.258 / 0.064 | 1.03 / 1.56 | 1.64 | 1.11 | 0.55 / 0.54 | 0.229 / 0.055 |
+
+What it says (measured, causes marked):
+
+- The sun bounce of #462 closed most of the contrast gap in the two default rooms: `temple-hall` is within 0.06 log2 of Cycles, and `dark-shaft` now overshoots (2.23 against 1.75), so it is not a target for more depth. Its p1 is still light (0.044 against 0.033), a flat floor of 8-bit values at the darkest tiles.
+- The grand halls are not done. `temple-hall-b` (0.85 against 1.80) and `-c` (1.36 against 1.97) keep the gap, and it has two sides. In `-a` and `-b` the sunlit pixels are too dim (the top 5% of Cycles pixels are 0.26 and 0.28 against 0.36 and 0.38, while p99.9 matches), so the lit side is the larger part of `-a`. In `-b`, `-c` and `-rose` the shadowed side is too light (floor 1.41, 1.68, 1.64; the darkest 30% of pixels are 1.7 to 4 times Cycles).
+- `temple-hall-rose` is lit by emissive glass, not by a sun, so the floor sky trace and sun bounce do not apply to it; its dark end is 4 times Cycles (0.229 against 0.055). A fix there is a different term (light from emissive parts, occluded), not a deeper sun shadow.
+- Not isolated: why the lit side of `-a` and `-b` is 25 to 30 percent dim. Candidates still to test, one each: fog in the beam taking light that Cycles keeps, the sun bounce lights (about 0.3 gain) lighting walls rather than the lit floor, and the unshadowed bounce lights lifting the shadow side.
+
+No engine change was made and no frame cost changes. The megacity and mountain options were not re-measured in this pass. Box 2 stays open for `temple-hall-b`, `-c` and `-rose`.

@@ -1,2 +1,0 @@
-- entry:path-tracer: grows by about 1,040 bytes gzip for the subsurface random walk (path-tracer-subsurface.js) and the shading split, which the tracer carries for every scene because the walk runs inside its path loop.
-- entry:path-tracer+lazy: the same 1,040 bytes.

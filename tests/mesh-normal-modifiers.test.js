@@ -69,9 +69,9 @@ test('a higher weight leans further toward the large face and sharp bends stay s
 });
 
 test('the normal modifiers name their limits and run as stack nodes', () => {
-  assert.throws(() => normalizeMeshEdits([{ op: 'weighted_normal', weight: 0 }]), /weight must be a number from 1 to 100/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'weighted_normal', angle: 181 }]), /angle must be a number from 0 to 180/);
-  assert.throws(() => normalizeMeshEdits([{ op: 'smooth_by_angle', ignoreSharp: 1 }]), /ignoreSharp must be a boolean/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'weighted_normal', weight: 0 }]), /edits\[0\]\.weight: got 0; expected a number from 1 to 100/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'weighted_normal', angle: 181 }]), /edits\[0\]\.angle: got 181; expected a number from 0 to 180/);
+  assert.throws(() => normalizeMeshEdits([{ op: 'smooth_by_angle', ignoreSharp: 1 }]), /edits\[0\]\.ignoreSharp: got 1; expected true or false/);
   const outcome = evaluateMeshStack(cube(), [{ op: 'smooth_by_angle', angle: 100 }, { op: 'weighted_normal' }]);
   assert.equal(outcome.results.length, 2);
   assert.ok(outcome.mesh.attributes.corner.normal);

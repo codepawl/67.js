@@ -55,7 +55,7 @@ Imported clips retain separate absolute sampling through `settings.animation`.
 ## Timeline, audio and encoder
 
 A recipe `timeline` plays shots one after another over the recipe's motion clock. It is small on purpose: the video sequence
-editor is a non-goal of the engine (issue #23), so there are no layers, overlaps, trimming or crossfades. Shots cut, or dip through black.
+editor is a non-goal of the engine (`docs/goal.md`), so there are no layers, overlaps, trimming or crossfades. Shots cut, or dip through black.
 
 ```json
 { "timeline": { "shots": [
@@ -105,7 +105,7 @@ and a click placed on a cut in a WAV lands on the decoded cut frame within a fra
 
 ## Render passes
 
-`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth` and `objectId`.
+`image` and `stills` jobs accept `settings.passes`, a list of `albedo`, `normal`, `emission`, `depth`, `objectId`, `diffuse`, `glossy`, `shadow`, `ao`, `mist`, `position`, `velocity`, `uv`, `transmission`, `volume`, `environment`, `cryptomatte` and `aov`.
 Each frame writes its lit image and then one PNG per pass: `render.png` and `render-<pass>.png` for an image, `frame-N.png` and `frame-N-<pass>.png` for stills.
 Passes are raw data at the lit image's size: no tone mapping, grading, bloom, depth of field or antialiasing, so values stay exact at silhouettes.
 Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky and the environment background do not.
@@ -117,6 +117,21 @@ Only opaque and cutout geometry appears. Liquid, foam and blended parts, the sky
 | `emission` | Emissive colour times strength, clamped to 1 |
 | `depth` | Metres from the camera over 100 m as a 16-bit value, high byte in red and low byte in green. Background is `255, 255, 0` |
 | `objectId` | 24-bit ID, low byte in red, then green, then blue. Zero is background |
+| `diffuse` | Linear diffuse light (every light, sky and bounce) times exposure, before fog and without emission. Background 0 |
+| `glossy` | Linear specular light (each light's lobe and the sky reflection) times exposure, before fog. Background 0 |
+| `shadow` | Sun shadow visibility, 1 lit and 0 shadowed. Background 1 |
+| `ao` | Ambient occlusion the shader applies (occlusion map, vertex sky visibility, room term). Background 1 |
+| `mist` | Fog amount `1 - exp(-distance * fogDensity)`. Background 1 |
+| `position` | World-space XYZ in metres (float in `exr`, mapped over `±100 m` into `0..1` in `png` and `png16`). Background 0 |
+| `velocity` | Screen-space motion vector `(dx, dy)` in normalized screen coordinates from camera and object motion (signed in `exr`, `vel * 0.5 + 0.5` in `png` and `png16`). Background 0 |
+| `uv` | Primary texture coordinate `(U, V)` in red and green (`U, V` channels in `exr`). Background 0 |
+| `transmission` | Transmitted light for materials with `transmission > 0`, scaled by `transmissionMap`. Background 0 |
+| `volume` | Volumetric / fog scattering contribution along the view ray. Background 0 |
+| `environment` | Image-based / sky environment lighting contribution times exposure. Background 0 |
+| `cryptomatte` | Deterministic float hash per object in red, per material in green and coverage `1` in blue (`metrics.cryptomatte` holds the `{ objects, materials }` manifest). Background 0 |
+| `aov` | Custom material AOV from `material.aov` (`0..1` scalar or RGB) and/or a material graph's `aov` output. Background 0 |
+
+The lighting passes hold linear values above 1, so write them as `exr` (a `png` or `png16` file clamps at 1). They add back to the lit image: `diffuse + glossy + emission * exposure` is the radiance before fog, and with an open world the lit image is that radiance mixed toward the fog colour by `mist`, then tone mapped. `tests/lighting-passes.test.js` checks the sum against the beauty frame (mean difference under 1.5 display levels, under 2% of samples off by more than 4). Not covered: unlit parts, the editor floor, parts that a probe or irradiance grid changes after the sky term, and anything the lit image adds after the shader (bloom, grading, depth of field).
 
 `scene_render_result` metrics carry `objectNames`, the part name for ID 1, 2 and so on (the first 1000, with `objectNamesTruncated`), and `depthRangeMetres`.
 IDs follow draw order, which groups parts by shared geometry, so read the names list and not node order.
@@ -125,16 +140,34 @@ Videos hold the lit image only.
 A seek to any frame gives the same pixels: a job samples each frame from its time and keeps no state between frames.
 `npm run smoke:render-passes` proves it through MCP: it renders eight stills with every pass, then renders frame 3 again as an image in a different order of seeks and compares the bytes of the lit image and all five passes.
 
+## Output options: transparent, 16-bit PNG, EXR, region and 60 fps
+
+Four optional settings, each off by default. A job without them writes the same bytes as before.
+
+| Setting | Meaning |
+| --- | --- |
+| `transparent: true` | `image` and `stills`: the lit image keeps alpha (a PNG of colour type 6). The sky, the environment background and the automatic ground are not drawn, so give the scene its own ground or a `shadowCatcher` node (see `renderFlags` in `scene_capabilities`). Volume fog is refused. Passes ignore it. |
+| `format` | `image` and `stills`: `png` (8-bit, default), `png16` or `exr`. The lit image is drawn into a half-float target and read back, so the file holds the same graded display colour as the 8-bit PNG (within one 8-bit step) with 16-bit steps. |
+| `multilayer: true` | With `format: "exr"` and `passes`: writes one OpenEXR file per frame (`render.exr` or `frame-N.exr`) containing `Combined.R/G/B(/A)` and `<pass>.<channel>` for every requested pass (`depth.Z`, `objectId.id`, `position.X/Y/Z`, `velocity.X/Y`, `uv.U/V`, `<pass>.R/G/B`). |
+| `region: { x, y, width, height }` | Pixels from the top left, each side at least 16. The frame is rendered whole and the crop is kept, so the look is the same as the full frame. Works for `image`, `stills` and `video` (a video region has even sides). Not with `renderer`. |
+| `fps` | Up to 60 for video, within the 900 frame limit. |
+
+`png16` writes `render.png` (RGB, or RGBA with `transparent`; alpha is straight) and one PNG per pass. A depth pass is a 16-bit gray PNG holding the raw step 0 to 65535 over 100 m, an `objectId` pass is a 16-bit gray PNG of the ID (a scene with more than 65535 objects fails: use `exr`), and `albedo`, `normal` and `emission` are 16-bit RGB with the same values as the 8-bit pass.
+`exr` writes `render.exr` (half-float R, G, B and A when transparent; alpha stays premultiplied) and `render-<pass>.exr`. `depth` is one float32 channel `Z` in metres (the far limit, 100, is background), `objectId` one float32 channel `id` (0 is background), and `albedo`, `normal` and `emission` are half-float RGB. Files use ZIP compression and open in Blender, Nuke and OpenEXR tools.
+Passes in these formats are drawn into half-float targets, so albedo, normal and emission carry half-float precision, not the 8 bits of the default passes.
+The path tracer writes an 8-bit PNG of the whole frame: `transparent`, `format` and `region` are refused with `renderer`. H.264 has no alpha, so `transparent` and `format` are refused for video. 16-bit and EXR output need `EXT_color_buffer_float`; without it the job fails with a message that says to use `png`.
+A `png16` or `exr` frame is up to four times the 8-bit frame limit (48 MiB). A region with the browser H.264 encoder (`encoder: "nvenc"`) uses screenshot frames instead.
+
 ## Path tracer
 
-An `image` job can ask for the offline [path tracer](https://github.com/codepawl/67.js/blob/main/docs/path-tracer.md) with `settings.renderer`:
+An `image`, `stills` or `video` job can ask for the offline [path tracer](https://github.com/codepawl/67.js/blob/main/docs/path-tracer.md) with `settings.renderer`:
 
 ```json
 { "kind": "image", "width": 960, "height": 540,
-  "renderer": { "type": "pathTracer", "samples": 64, "bounces": 8, "denoise": true, "seed": 0, "maxSeconds": 120 } }
+  "renderer": { "type": "pathTracer", "backend": "gpu", "samples": 64, "bounces": 8, "denoise": true, "seed": 0, "maxSeconds": 120 } }
 ```
 
-Every field after `type` is optional. Limits: `samples` 1 to 1024, `bounces` 1 to 16, `seed` 0 to 2147483647, `maxSeconds` 1 to 600 (the job's deadline is `maxSeconds` plus 60 seconds; a 1920 by 1080 still of a 180,000 triangle room at 64 samples took 246 s, so give a large still `maxSeconds` 600). `passes` and the other kinds are refused with it. The tracer loads in the job page on demand, uses eight threads at below-normal priority, stops pixels that have converged (`report.averageSamples`), and writes `render.png`; `scene_render_result` metrics carry `pathTracer` with the samples, threads, seconds and what the scene asked for that was not drawn. The same recipe and seed give the same PNG. A job that passes `maxSeconds` fails and writes no image.
+Every field after `type` is optional. `backend` is `cpu` (the default, byte-identical on SwiftShader smokes), `gpu`, which traces in a WebGL2 shader and needs a runtime started on the GPU backend (a `--backend cpu` runtime refuses it), or `native`, which traces on hardware ray queries (Vulkan) through the optional `@codepawlhq/67js-render-native` package. A native job exports the scene from the job page, traces it in the job runner, then denoises (wavelet or OIDN) and writes the PNG as the other backends do. It never fails for lack of the package: without it, without its built binary or without a Vulkan ray query adapter the job runs on `gpu` (`cpu` on a cpu runtime) and `metrics.pathTracer.backendNote` says why; `metrics.pathTracer.backend` always names what ran. The look up costs one import and is cached per process. Native traces volume fog and subsurface scattering with the same walk as the WebGPU megakernel, honours `maxSeconds`, and honours `noiseThreshold` on the GPU (after 16 samples, and then every 8, a converged pixel draws no more; `report.averageSamples` is the mean a pixel drew). The `gpu` fallback ignores `noiseThreshold`. The report in `metrics.pathTracer` names the `backend` that ran, the `gpu`, `gpuCompileSeconds` and `gpuKernelCompiles`. A `stills` or `video` job traces every frame with the same options: the kernel compiles once per job page and each frame reuses it, so a film shows `gpuKernelCompiles: 1`. A video of traced frames goes through the ffmpeg encoder (the browser H.264 encoder has no drawn frame to read), `maxSeconds` limits each frame, and the job deadline is `maxSeconds` times the frame count plus 60 seconds, up to the job ceiling. Limits: `samples` 1 to 1024, `bounces` 1 to 16, `seed` 0 to 2147483647, `maxSeconds` 1 to 600 (the job's deadline is `maxSeconds` plus 60 seconds; a 1920 by 1080 still of a 180,000 triangle room at 64 samples took 246 s, so give a large still `maxSeconds` 600). `passes` are refused with it. The tracer loads in the job page on demand, uses eight threads at below-normal priority, stops pixels that have converged (`report.averageSamples`), and writes `render.png`; `scene_render_result` metrics carry `pathTracer` with the samples, threads, seconds and what the scene asked for that was not drawn. The same recipe and seed give the same PNG. A job that passes `maxSeconds` fails and writes no image.
 
 ## Controller API
 
@@ -278,11 +311,11 @@ This conservative repair step prevents two recovery processes from deleting a ne
 | Retained records | 32 |
 | Total store bytes | 512 MiB |
 | Combined output bytes per job | 128 MiB |
-| PNG artifact bytes | 12 MiB each (a 1920x1080 frame) |
+| PNG artifact bytes | 12 MiB each (a 1920x1080 frame); 48 MiB each for `png16` and `exr` |
 | Snapshot JSON | 1 MiB |
 | Asset bytes | 64 MiB |
 | Dimensions | 64 to 1920 pixels each, at most 1920x1080 pixels in all (1080x1920 fits) |
-| Video frame rate | 1 to 30 fps |
+| Video frame rate | 1 to 60 fps |
 | Duration | 0.1 to 60 seconds |
 | Maximum video frames | 900 |
 | Still frames | 8 |

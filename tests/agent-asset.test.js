@@ -82,7 +82,7 @@ test('failed commands and Float32 root staging leave pose, recipe, materials, an
   assert.deepEqual(pose(asset), checkpointPose);
   assert.deepEqual(Array.from(scene.parts[0].matrix), matrix);
   assert.equal(scene.revision, 0);
-  assert.throws(() => scene.apply([{ type: 'set-root', translation: [2, 0, 0] }, { type: 'add-node', node: {} }], { expectedRevision: 0 }), /Unsupported/);
+  assert.throws(() => scene.apply([{ type: 'set-root', translation: [2, 0, 0] }, { type: 'add-node', node: {} }], { expectedRevision: 0 }), /^TypeError: operations\[1\]\.type: got "add-node"; expected one of set-camera, set-root/);
   assert.deepEqual(scene.exportRecipe(), checkpointRecipe);
   scene.apply([{ type: 'set-animation', time: 0.25 }], { expectedRevision: 0 });
   assert.equal(scene.revision, 1);
@@ -120,8 +120,8 @@ test('checkpoint handles are private, bounded, revision checked, and restore ide
   const asset = await fixture();
   const scene = createAgentAssetScene(asset, recipe());
   const handles = Array.from({ length: 8 }, () => scene.checkpoint());
-  assert.throws(() => scene.checkpoint(), /budget/);
-  assert.throws(() => scene.restore({}, { expectedRevision: 0 }), /Unknown/);
+  assert.throws(() => scene.checkpoint(), /^RangeError: checkpoints: got .*; expected at most 8 saved checkpoints; release one first, such as/);
+  assert.throws(() => scene.restore({}, { expectedRevision: 0 }), /^RangeError: checkpointId: got .*; expected a checkpointId that scene_checkpoint returned and you have not released, such as/);
   const parts = scene.parts;
   scene.apply([{ type: 'set-root', scale: [2, 2, 2] }], { expectedRevision: 0 });
   assert.throws(() => scene.restore(handles[0], { expectedRevision: 0 }), /expectedRevision/);
@@ -130,8 +130,8 @@ test('checkpoint handles are private, bounded, revision checked, and restore ide
   assert.equal(scene.revision, 2);
   assert.deepEqual(scene.exportRecipe().root.scale, [1, 1, 1]);
   scene.releaseCheckpoint(handles[0]);
-  assert.throws(() => scene.releaseCheckpoint(handles[0]), /Unknown/);
-  assert.throws(() => scene.restore(handles[0], { expectedRevision: 2 }), /Unknown/);
+  assert.throws(() => scene.releaseCheckpoint(handles[0]), /^RangeError: checkpointId: got .*; expected a checkpointId that scene_checkpoint returned and you have not released, such as/);
+  assert.throws(() => scene.restore(handles[0], { expectedRevision: 2 }), /^RangeError: checkpointId: got .*; expected a checkpointId that scene_checkpoint returned and you have not released, such as/);
   scene.checkpoint();
   asset.dispose();
 });
@@ -157,8 +157,8 @@ test('ordinary JSON, strict schemas, numeric domains, budgets, and stale revisio
   assert.throws(() => createAgentAssetScene(asset, { ...recipe(), extra: 'x'.repeat(1024 * 1024) }), /1 MiB/);
   const scene = createAgentAssetScene(asset, recipe());
   assert.throws(() => scene.apply([{ type: 'set-root', scale: [2, 2, 2] }]), /expectedRevision/);
-  assert.throws(() => scene.apply([{ type: 'set-animation', clip: null, time: 0 }], { expectedRevision: 0 }), /omitted/);
-  assert.throws(() => scene.inspect({ ids: ['mesh-9'] }), /Unknown/);
+  assert.throws(() => scene.apply([{ type: 'set-animation', clip: null, time: 0 }], { expectedRevision: 0 }), /^TypeError: operations\[0\]\.time: got 0; expected no time when clip is null/);
+  assert.throws(() => scene.inspect({ ids: ['mesh-9'] }), /^RangeError: geometry: got "mesh-9"; expected an imported mesh ID such as "mesh-0"/);
   assert.throws(() => createAgentAssetScene({ ...asset, animations: Array(257).fill(asset.animations[0]) }, recipe()), /budgets/);
   assert.throws(() => createAgentAssetScene({ ...asset, parts: Array(4097).fill(asset.parts[0]) }, recipe()), /budgets/);
   asset.dispose();
@@ -182,7 +182,7 @@ test('detached matrices and replaced pose buffers fail before publishing canonic
 test('nonanimated assets support root edits and detached exports while clips reject', async () => {
   const asset = await fixture(document => { document.animations = []; });
   const scene = createAgentAssetScene(asset, recipe());
-  assert.throws(() => scene.apply([{ type: 'set-animation', clip: 0 }], { expectedRevision: 0 }), /existing clip/);
+  assert.throws(() => scene.apply([{ type: 'set-animation', clip: 0 }], { expectedRevision: 0 }), /^RangeError: animation\.clip: got 0; expected no animation, since this asset has no clips; drop it, such as null/);
   const exported = scene.exportRecipe();
   exported.root.translation[0] = 100;
   const camera = scene.camera;
