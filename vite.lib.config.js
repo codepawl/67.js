@@ -107,6 +107,7 @@ export default defineConfig({
         cloth: 'src/cloth.js',
         runtime: 'src/runtime.js',
         input: 'src/input.js',
+        audio: 'src/audio.js',
         'update-part-vertices':'src/update-part-vertices.js',
         'replace-textured-parts': 'src/replace-textured-parts.js',
         // Page of the MCP preview. It imports the engine chunks above instead of bundling its own copy.
