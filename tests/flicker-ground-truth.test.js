@@ -263,6 +263,7 @@ test('an exact frame showing a face off the ray, or a colour no face has, is not
   assert.equal(outcome.offRay, 1);
   assert.equal(outcome.offRayEdge, 1, 'the middle of the plaque sits on its diagonal, a seam of the ray cast');
   assert.equal(outcome.offRayInterior, 0);
+  assert.equal(outcome.offRayUnexplained, 0);
   assert.equal(outcome.flipUpperBound, 0);
   assert.equal(outcome.blended, 1);
   assert.equal(outcome.swapped, 0);
@@ -281,7 +282,20 @@ test('an offRay pixel on a triangle edge of the ray cast is split off from one i
   assert.equal(outcome.offRay, 2);
   assert.equal(outcome.offRayEdge, 1);
   assert.equal(outcome.offRayInterior, 1);
+  assert.equal(outcome.offRayUnexplained, 1);
   assert.equal(outcome.flipUpperBound, 1);
+});
+
+test('an offRay pixel a few bytes from the colour expected is a rounding step of the frame, not an upper-bound flip', () => {
+  const parts = [...wallWithPlaque(0.01), wallPart('neighbour-colour', 2, 2, 0, [0, 0, 0.99])];
+  parts[2].matrix = new Float32Array([...IDENTITY.slice(0, 12), 500, 0, 0, 1]);
+  const world = collectWorldTriangles(parts, () => null);
+  const cast = castPixelOwners(world, CAMERA, WIDTH, HEIGHT);
+  const outcome = compareExact(paintExactFrame(cast, pixel => (pixel === CENTRE + 4 ? [0, 0, 252] : null)), world, cast);
+  assert.equal(outcome.offRayInterior, 1);
+  assert.equal(outcome.offRaySmallGap, 1);
+  assert.equal(outcome.offRayUnexplained, 0);
+  assert.equal(outcome.flipUpperBound, 0);
 });
 
 // A wall under seven more faces, each 1 cm in front of the last: the wall is the eighth hit of every ray through the middle.
