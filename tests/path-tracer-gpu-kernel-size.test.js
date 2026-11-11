@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { buildFragmentSource } from '../src/path-tracer-gpu-shader.js';
@@ -34,7 +35,21 @@ for (const [name, variant] of Object.entries(VARIANTS)) {
   });
 }
 
-test('the plain kernel stays under its source size', () => {
-  const kilobytes = buildFragmentSource().length / 1024;
-  assert.ok(kilobytes < 48, `the plain kernel is ${kilobytes.toFixed(1)} KB; it was 46 KB when the cold first draw measured 27 s`);
+// Measured source sizes in KB (plain 45.3, subsurface 50.3, texelBake 45.5, blueNoise 45.3, importance 45.3, tree 49.5, radianceCache 47.4,
+// everything 56.4); each limit leaves about 1.5 KB. The plain kernel measured 27 s cold at 46 KB.
+const SIZE_LIMIT_KILOBYTES = { plain: 47, subsurface: 52, texelBake: 47, blueNoise: 47, importance: 47, tree: 51, radianceCache: 49, everything: 58 };
+
+for (const [name, variant] of Object.entries(VARIANTS)) {
+  test(`the ${name} kernel stays under its source size`, () => {
+    const kilobytes = buildFragmentSource(variant).length / 1024;
+    assert.ok(kilobytes < SIZE_LIMIT_KILOBYTES[name], `the ${name} kernel is ${kilobytes.toFixed(1)} KB, limit ${SIZE_LIMIT_KILOBYTES[name]} KB; measure bench/reference/cold-draw.mjs before raising it`);
+  });
+}
+
+test('one scene links one kernel: the gpu backend builds a program from one place and every kernel has one main', () => {
+  const backend = readFileSync(new URL('../src/path-tracer-gpu.js', import.meta.url), 'utf8');
+  assert.equal(backend.match(/= createProgram\(gl,/g).length, 1, 'createProgram(gl, variant) is called from one place');
+  for (const variant of Object.values(VARIANTS)) {
+    assert.equal(buildFragmentSource(variant).match(/void main\s*\(/g).length, 1);
+  }
 });
