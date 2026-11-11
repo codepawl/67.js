@@ -162,6 +162,8 @@ export const LOBE_PROBE_CASES = [
     wo: [0.5, 0.3, 0.8124],
     frontFace: true,
     expectWhiteFurnace: true,
+    // Blender 5.3 Cycles measures this albedo; Cycles loses energy at anisotropy 0.7 (docs/cycles-parity.md).
+    furnaceExpectedAlbedo: 0.9831,
     expectChiSquare: true,
     material: {
       baseColor: [1.0, 1.0, 1.0],
@@ -179,6 +181,8 @@ export const LOBE_PROBE_CASES = [
     wo: [0.5, 0.3, 0.8124],
     frontFace: true,
     expectWhiteFurnace: true,
+    // Blender 5.3 Cycles measures this albedo; Cycles loses energy at anisotropy 0.7 (docs/cycles-parity.md).
+    furnaceExpectedAlbedo: 0.9848,
     expectChiSquare: true,
     material: {
       baseColor: [1.0, 1.0, 1.0],
@@ -596,6 +600,7 @@ async function runLobeProbeCase(probeCase, options) {
     wo: probeCase.wo,
     frontFace: probeCase.frontFace,
     expectWhiteFurnace: probeCase.expectWhiteFurnace,
+    furnaceExpectedAlbedo: probeCase.furnaceExpectedAlbedo ?? 1.0,
     expectColorOrder: probeCase.expectColorOrder ?? null,
     expectChiSquare: probeCase.expectChiSquare,
     sampleCount,

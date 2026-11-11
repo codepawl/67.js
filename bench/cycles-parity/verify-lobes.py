@@ -169,7 +169,8 @@ def evaluate_lobe_probe(probe_entry):
     consistency_pass = bool(rel_eval_diff <= EVAL_CONSISTENCY_TOLERANCE and rel_pdf_diff <= EVAL_CONSISTENCY_TOLERANCE)
 
     if probe_entry["expectWhiteFurnace"]:
-        furnace_pass = bool(all(abs(val - 1.0) <= FURNACE_TOLERANCE for val in furnace_mean))
+        expected_albedo = probe_entry.get("furnaceExpectedAlbedo", 1.0)
+        furnace_pass = bool(all(abs(val - expected_albedo) <= FURNACE_TOLERANCE for val in furnace_mean))
     else:
         bounded = all(0.01 <= val <= 1.0 + FURNACE_TOLERANCE for val in furnace_mean)
         order = probe_entry.get("expectColorOrder")
@@ -195,6 +196,7 @@ def evaluate_lobe_probe(probe_entry):
         "expectWhiteFurnace": probe_entry["expectWhiteFurnace"],
         "furnaceMeanRgb": [round(float(val), 6) for val in furnace_mean],
         "furnaceStdErrRgb": [round(float(val), 6) for val in furnace_stderr],
+        "furnaceExpectedAlbedo": probe_entry.get("furnaceExpectedAlbedo", 1.0),
         "furnaceTolerance": FURNACE_TOLERANCE,
         "furnacePass": furnace_pass,
         "maxRelativeEvalMismatch": round(rel_eval_diff, 7) if math.isfinite(rel_eval_diff) else None,

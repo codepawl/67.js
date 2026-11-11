@@ -275,8 +275,8 @@ Evaluated across `20` `probeCyclesLobe` cases (`N = 262,144` samples each, `1024
 | `conductor-ggx-medium` | `glossy_ggx` | `[0.9999, 0.9999, 0.9999]` | `0` / `0` | `0.2616` (`1.039`, dof `512`) | **Pass** |
 | `conductor-ggx-rough-grazing` | `glossy_ggx` | `[1.0002, 1.0002, 1.0002]` | `0` / `0` | `0.0760` (`1.091`, dof `512`) | **Pass** |
 | `conductor-f82-gold-oblique` | `glossy_ggx` | `[0.9973, 0.7723, 0.3310]` | `0` / `0` | `0.5270` (`0.995`, dof `512`) | **Pass** |
-| `anisotropic-ggx-unrotated` | `anisotropic_ggx` | `[0.9957, 0.9957, 0.9957]` | `0` / `0` | `0.9291` (`0.905`, dof `466`) | **Pass** |
-| `anisotropic-ggx-rotated` | `anisotropic_ggx` | `[0.9972, 0.9972, 0.9972]` | `0` / `0` | `0.6095` (`0.980`, dof `457`) | **Pass** |
+| `anisotropic-ggx-unrotated` | `anisotropic_ggx` | `[0.9828, 0.9828, 0.9828]` (expects `0.9831`) | `0` / `0` | `0.9291` (`0.905`, dof `466`) | **Pass** |
+| `anisotropic-ggx-rotated` | `anisotropic_ggx` | `[0.9846, 0.9846, 0.9846]` (expects `0.9848`) | `0` / `0` | `0.6095` (`0.980`, dof `457`) | **Pass** |
 | `glass-ggx-frontface-sharp` | `glass_ggx` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | singular (`—`) | **Pass** |
 | `glass-ggx-frontface-rough` | `glass_ggx` | `[1.0005, 1.0005, 1.0005]` | `0` / `0` | `0.8493` (`0.922`, dof `353`) | **Pass** |
 | `glass-ggx-backface-subcritical` | `glass_ggx` | `[1.0004, 1.0004, 1.0004]` | `0` / `0` | `0.8372` (`0.937`, dof `487`) | **Pass** |
@@ -286,6 +286,14 @@ Evaluated across `20` `probeCyclesLobe` cases (`N = 262,144` samples each, `1024
 | `coat-ggx-over-metal-rough` | `coat_ggx` | `[1.0001, 1.0001, 1.0001]` | `0` / `0` | `0.2026` (`1.052`, dof `512`) | **Pass** |
 | `sheen-over-diffuse-rough` | `sheen` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | `0.5533` (`0.990`, dof `511`) | **Pass** |
 | `sheen-over-diffuse-grazing` | `sheen` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | `0.5333` (`0.994`, dof `511`) | **Pass** |
+
+The two `anisotropic-ggx-*` probes (white base color, metallic `1`, roughness `0.35`, anisotropy `0.7`, multiscatter GGX) do not expect `1.0`: Cycles 5.3 itself loses energy for anisotropic GGX (the measured albedo is below 1 at anisotropy `0.7`), so the probes carry `furnaceExpectedAlbedo` (Blender 5.3 Cycles measurement, same `0.01` tolerance). The isotropic probes keep `1.0`. Measured with [`bench/cycles-parity/furnace-albedo.py`](../bench/cycles-parity/furnace-albedo.py): Blender 5.3.0 Cycles on OptiX, an orthographic camera looking down `wo = (0.5, 0.3, 0.8124)` at an infinite plane with a Principled BSDF (base color `1`, metallic `1`, roughness `0.35`, Multiscatter GGX, tangent `+X`), uniform white world of strength `1`, Standard view transform, no denoise, no clamp, `8192` spp, `64 x 64` pixels, so each pixel is the directional albedo (standard error under `0.02 %`).
+
+| Material | Cycles 5.3 albedo | Cook albedo |
+| --- | --- | --- |
+| isotropic control (anisotropy `0`) | `1.0004` | not probed at this angle; the isotropic probes pass at `1.0` within `0.0004` |
+| anisotropic, rotation `0.0` | `0.9831` | `0.9828` |
+| anisotropic, rotation `0.2` | `0.9848` | `0.9846` |
 
 | Sphere Furnace Scene (`traceNative`, `512` spp, `bounces = 64`) | Full-Image Mean | Center Mean | Limb Mean | Gate |
 | --- | --- | --- | --- | --- |
