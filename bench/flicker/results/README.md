@@ -20,3 +20,18 @@ for 18,367 of the 18,590 (`offRayNearColour` 8,261 within 2, `offRaySmallGap` 10
 consecutive colours, so a rounding step of the frame names an unrelated triangle. Only 215 interior pixels are further off
 (`offRayUnexplained`), so the true flips are at most `flipUpperBound` = 8 + 215 = 223 of 5.9 million contested pixels. With the
 flush pass off the same bound is 129,361. Reproduce with `probe.mjs --configs "reversed=1,facets=2,shadows=0,hits=6;reversed=1,facets=2,shadows=0,hits=32;reversed=1,facets=2,shadows=0,offset=0,hits=6"`.
+
+`melbourne-drape-single-sample-1280x720.json` is the same 12 spots with 4 samples (`samples=4`) and with 1 sample (the default of `facets=2`
+since #751), flush pass on, and 1 sample with the pass off (`offset=0`). The 18,590 `offRay` pixels of the 4-sample frame were the MSAA
+resolve: a pixel shared by two faces resolves to the average of their ids, and ids of neighbouring triangles are neighbouring numbers, so
+the average names a third, valid triangle (a pixel that the ray through its centre cannot match). `viewer.js` `colourStepDetails()` shows
+it: the wrong pixels differ from the expected id in one or two channels, never three, by a few bytes, in runs along thin faces. With
+1 sample the same frames hold 8 wrong pixels in 5.9 million contested ones, no swapped pixel and no true flip (`flipUpperBound` 1); the
+8 "true flips" of the 4-sample frame were blends too. With the flush pass off the 1-sample frame still shows 119,404 flipped pixels, so the
+probe still sees fighting. Reproduce with `probe.mjs --configs "reversed=1,facets=2,shadows=0,samples=4;reversed=1,facets=2,shadows=0;reversed=1,facets=2,shadows=0,offset=0"`.
+
+`effects-melbourne-drape-1280x720.json` is `effects-probe.mjs` on the Melbourne drape at the same 12 spots (per-part colours, `ids=1`, shadows
+off, reversed-Z float, 4 samples, D3D11): AO, line art and DOF through the stacked scene with the flush pass on, against the same scene with the
+pass off. `spurious` counts the pixels an effect changes where the plain frame has no colour edge within 2 px. On a real city AO and DOF
+change many such pixels by design (real occlusion, a blur of a shaded gradient), so the absolute counts say nothing; the two sides are
+the comparison. Summed over 12 spots, flush on / off: AO 2,066,622 / 2,052,039, DOF 822,357 / 824,561, line art 44,654 / 50,794.

@@ -182,7 +182,8 @@ function validatePart(part, geometry) {
 function traceGeometry(part) {
   // Faces hidden under a face on the same plane are cut away for the rasteriser (flush-resolve.js); rays get the same
   // geometry, or the two faces would split the hits between them.
-  const geometry = part.skin ? skinnedGeometry(part) : liftRankedTriangles(part, flushOrderOf(part)?.geometry ?? part.geometry);
+  const traced = part.skin ? skinnedGeometry(part) : flushOrderOf(part)?.geometry ?? part.geometry;
+  const geometry = liftRankedTriangles(part, traced);
   const { boxMapScale = 0, boxMapAxis = 1 } = part.material ?? {};
   if (!(boxMapScale > 0)) return geometry;
   return boxProjectedGeometry(geometry, columnLengths(part.matrix ?? IDENTITY_MATRIX), boxMapScale, boxMapAxis);

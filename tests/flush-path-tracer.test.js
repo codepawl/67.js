@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { resolveFlushParts } from '../src/coplanar-overlap.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { liftRankedTriangles } from '../src/flush-lift.js';
+import { setFlushOrder } from '../src/depth-layer.js';
 
 // The path tracer draws the cut geometry of the flush pass (path-tracer-scene.js), but a rank is a rasteriser bias it cannot use.
 // Where the pass ranks two faces on one plane instead of cutting one away, the rays see both at the same distance and the
@@ -65,4 +66,20 @@ test('a lift moves only ranked triangles, along their front normal, on copied ve
   const step = 1e-4 + (1 * 1 + 0) * 2 ** -19;
   for (let vertex = 4; vertex < 10; vertex++) assert.ok(Math.abs(lifted.positions[vertex * 3 + 2] - step) < 1e-9, 'lifted by one rank along +z');
   assert.equal(lifted.normals.length, lifted.positions.length);
+});
+
+test('a skinned part with ranked triangles is lifted at its pose, so the ranked face is hit first', async () => {
+  const skinned = (name, color) => {
+    const part = quadPart(name, 1, color);
+    part.geometry.skinIndices = new Uint16Array([0, 0, 0, 0]);
+    part.geometry.skinWeights = new Float32Array([1, 1, 1, 1]);
+    part.skin = { jointMatrices: new Float32Array(IDENTITY) };
+    return part;
+  };
+  const lower = skinned('lower', RED);
+  const upper = skinned('upper', GREEN);
+  // The flush search leaves deforming parts out (flush-search.js), so no pass ranks a skinned part today; the order is set by hand.
+  setFlushOrder(upper, { indices: upper.geometry.indices, ranges: [{ start: 0, count: 6, rank: 1 }], triangleRanks: new Uint8Array([1, 1]) });
+  assert.deepEqual(await centreAlbedo([lower, upper]), GREEN);
+  assert.deepEqual(await centreAlbedo([upper, lower]), GREEN, 'the rank wins in either part order');
 });
