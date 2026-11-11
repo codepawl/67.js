@@ -970,7 +970,7 @@ export function toneMapToRgba8(linear, width, height, { viewTransform = 'aces', 
 }
 
 /** Names what this scene asks for that the path tracer does not draw, so a result never claims more than it traced. */
-export function describeIgnoredFeatures(parts, environment) {
+export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
   const notes = new Set();
   const fog = environment?.volumeFog;
   if (fog?.density > 0 && (fog.noiseAmount ?? 0.5) > 0) notes.add('volumeFog is traced as a uniform medium: noiseAmount, noiseScale and drift are ignored.');
@@ -982,6 +982,7 @@ export function describeIgnoredFeatures(parts, environment) {
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
     if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');
     if (material.layerMaps?.clearcoatTexture || material.transmissionMap) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
+    if (material.emissionFresnel > 0 && backend !== 'cpu') notes.add('emission fresnel is ignored by the GPU path tracers; the cpu backend applies it.');
     for (const [name, isUsed] of IGNORED_LAYERS) if (isUsed(material)) notes.add(`${name} is ignored.`);
   }
   return [...notes];
@@ -1193,7 +1194,7 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
       backend: options.backend, ...(gpuName ? { gpu: gpuName, gpuCompileSeconds, gpuKernelCompiles } : {}),
       averageSamples: totalSamples(samplesTaken) / pixelCount, noiseThreshold: options.noiseThreshold,
       triangles: scene.indices.length / 3, tracedSeconds, seconds: (performance.now() - started) / 1000,
-      ignored: describeIgnoredFeatures(parts, environment),
+      ignored: describeIgnoredFeatures(parts, environment, options.backend),
     },
   };
 }

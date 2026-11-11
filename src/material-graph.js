@@ -657,7 +657,7 @@ export function compileMaterialGraph(graph, { size = 1, images } = {}) {
   const names = Object.keys(graph);
   if (names.length === 0) throw graphError(`graph needs at least one output: ${MATERIAL_GRAPH_OUTPUTS.join(', ')}.`);
   const state = { nodeCount: 0, cost: 0, size, images };
-  const outputs = {};
+  const outputs = Object.create(null);
   let emissionFresnel;
   for (const name of names) {
     let node = graph[name];
