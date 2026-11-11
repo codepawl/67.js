@@ -26,6 +26,10 @@ A full world that fails to arrive or to build is asked for again after 4, 10 and
 
 The options (`--near-pixels`, `--far-pixels` and others) are read by `parseArguments` in the script. The geometry the first view lacks lies outside the first 5 s of the flight, so `src/hero-lab/loop/hold.js` slows the flight from 2.5 s while the full world is pending and stops it at 5 s, until the full world is in (or has been given up on). The cost is that on a very slow link the frame is almost still for most of the wait (at 1.6 Mbit/s the first view appears at about 14 s and the swap lands at about 64 s); the alternative is holes at the edges of the picture, and the page before this change showed nothing at all for that time.
 
+## An animated world
+
+The chip fab is the one world with an animation clip: engineers walk, hoist vehicles and pods ride the rails. `src/hero-lab/loop/world.js` plays the clip from the first frame the world draws, with its time modulo the clip length (`loopedClipTime`), so a world that stays on screen longer than the clip, because the next one is still building, keeps moving instead of stopping on the last pose. That only works for a clip whose last pose is its first. `node scripts/hero-clip-loop.mjs <in.glb> <out.glb> --walk-source <UAL1_Standard.glb> --walk-clip Walk_Loop --engineer-speed 0.83` turns the one-way clip into a 24 s patrol that goes out and back with a rounded turn, faces each engineer along its path and plays the Quaternius Walk_Loop (CC0) at the speed that keeps the planted foot still. `tests/hero-chipfab-animation.test.js` checks the loop seam, the facing, the step and the slide on the committed GLB.
+
 ## Measuring
 
 ```sh

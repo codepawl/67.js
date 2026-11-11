@@ -45,7 +45,7 @@ export const SCENES = [
     id: 'chipfab',
     name: 'Chip fab',
     description: '/showcase/chipfab/scene.json',
-    seconds: 11, // the merged clip is 12 s: 11 s on screen plus the fade
+    seconds: 11, // the merged clip is a 24 s patrol that loops, so a world held longer than this keeps moving
     scrim: 0.6,
     near: 0.3,
     far: 400,

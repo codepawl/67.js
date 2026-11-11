@@ -12,6 +12,7 @@ import { applyWaterReflection, attachWaterReflection } from '../../water-reflect
 import { readPartRanks } from '../../showcase-download.js';
 import { prepareEffects } from './effects.js';
 import { createSlicer, yieldToPage } from '../../cooperative.js';
+import { loopedClipTime } from './clip-time.js';
 
 // The water mirror is off in the loop: once the camera moves between two draws the port world drew only its sky (the same happens
 // on hero-b.html?scene=port when the camera is set by hand; with the mirror off every pose draws). Turn it on again when that is fixed.
@@ -282,10 +283,10 @@ export async function buildWorld(download, canvas, overrides = {}) {
       // While a swap replaces the parts the canvas keeps its last frame: a half-built world is never drawn.
       if (disposed || drawsHeld) return false;
       lastDraw = { camera: { eye: [...camera.eye], target: [...camera.target], fov: camera.fov }, seconds };
-      // A GLB with an animation clip (vehicles on rails, people walking) plays from the world's first drawn frame.
+      // A GLB with an animation clip (vehicles on rails, people walking) plays from the world's first drawn frame and loops.
       if (animated) {
         animationOrigin ??= seconds;
-        const clipSeconds = seconds - animationOrigin;
+        const clipSeconds = loopedClipTime(seconds - animationOrigin, animated.animations[0].duration);
         // The shadow map follows the clip 8 times a second, not on every frame.
         const shadowStep = Math.floor(clipSeconds * 8);
         renderer.updateParts(animated.applyAnimation(clipSeconds, 0), { shadows: shadowStep !== animationShadowStep });
