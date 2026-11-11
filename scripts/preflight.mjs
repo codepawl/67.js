@@ -39,8 +39,16 @@ function isNewChangeNote(path) {
   return path.startsWith('changes/') && path.endsWith('.md') && path !== 'changes/README.md';
 }
 
+const RELEASE_SKIP_REASON = 'a release: the version changed, so the notes are folded and the budgets reset (CONTRIBUTING.md#release)';
+
+// True when the package version differs between two package.json texts. A release branch is the only change that bumps it.
+export function isVersionBump(basePackageText, headPackageText) {
+  if (!basePackageText || !headPackageText) return false;
+  return JSON.parse(basePackageText).version !== JSON.parse(headPackageText).version;
+}
+
 // Decides which checks apply to a list of changed paths. Pure, so tests can call it without git.
-export function planChecks(changedPaths, { skipTests = false } = {}) {
+export function planChecks(changedPaths, { skipTests = false, release = false } = {}) {
   const paths = changedPaths.map(path => path.replace(/\\/g, '/'));
   const changesShippedCode = paths.some(path => shippedCodePattern.test(path));
   const changesToolCode = paths.some(path => toolCodePattern.test(path));
@@ -50,16 +58,19 @@ export function planChecks(changedPaths, { skipTests = false } = {}) {
   checks.push({
     name: 'protected files',
     kind: 'inline',
-    failure: protectedEdits.length ? protectedEdits.map(path => `${path}: ${PROTECTED_FILES[path]}`).join('\n') : null,
+    skipped: release ? RELEASE_SKIP_REASON : null,
+    failure: !release && protectedEdits.length ? protectedEdits.map(path => `${path}: ${PROTECTED_FILES[path]}`).join('\n') : null,
     fix: 'Revert the edits named above: git checkout origin/main -- <file>',
   });
 
-  const needsNote = paths.some(path => userFacingPattern.test(path));
+  const needsNote = !release && paths.some(path => userFacingPattern.test(path));
   const hasNote = paths.some(path => isNewChangeNote(path) && !path.endsWith('.size.md'));
+  let noteSkipReason = needsNote ? null : 'no change under src/, bin/, packages/ or skills/';
+  if (release) noteSkipReason = RELEASE_SKIP_REASON;
   checks.push({
     name: 'change note',
     kind: 'inline',
-    skipped: needsNote ? null : 'no change under src/, bin/, packages/ or skills/',
+    skipped: noteSkipReason,
     failure: needsNote && !hasNote ? 'The branch changes shipped code but adds no changes/<issue>.md.' : null,
     fix: 'Add changes/<issue>.md with one bullet, such as "- `bar` takes a `foo` option (#123)" (changes/README.md).',
   });
@@ -224,7 +235,8 @@ async function main(args) {
 
   const changedPaths = changedPathsSince(baseRef);
   console.log(`${changedPaths.length} files changed since ${baseRef}.`);
-  const checks = planChecks(changedPaths, { skipTests: args.includes('--skip-tests') });
+  const release = isVersionBump(git(['show', `${baseRef}:package.json`]), readFileSync(join(root, 'package.json'), 'utf8'));
+  const checks = planChecks(changedPaths, { skipTests: args.includes('--skip-tests'), release });
   const results = await runChecks(checks);
   const manualChecks = manualChecksFor(changedPaths);
   printSummary(results, manualChecks);
