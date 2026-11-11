@@ -1,0 +1,1 @@
+- Loading a world no longer stalls the page on the GPU process: a linked shader program is accepted without reading shader status and logs, the shadow framebuffer is checked once per size and the anisotropy limit is read once; sliced `replaceParts` also groups appended parts that share a geometry or batch with earlier ones (#779)

@@ -1,4 +1,5 @@
 import { cameraFieldOfView } from './camera.js';
+import { fresnelSchlick } from './material-layers.js';
 import { pointLightFalloff } from './ray-query.js';
 import { profileGain } from './light-profile.js';
 import { buildTraceScene, refuseLocalVolumes, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
@@ -11,7 +12,7 @@ import {
 } from './path-tracer-shading.js';
 import { buildLightTree, chooseLightFromTree, LIGHT_TREE_FIRST_HIT_LIGHTS, resolveLightSelection } from './path-tracer-light-tree.js';
 import { createRandomWalk, WALK_OUTCOME } from './path-tracer-subsurface.js';
-import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval, createLocalVolumeCrossing } from './path-tracer-volume.js';
+import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval, createLocalVolumeCrossing, meanEnvironmentRadiance } from './path-tracer-volume.js';
 
 // Offline still renderer: unidirectional path tracing on the CPU with next-event estimation for every light, the
 // environment map drawn by importance, and a wavelet denoiser. It reads the same parts, materials, lights and camera
@@ -798,7 +799,15 @@ function createPathTracer(scene, options) {
     return henyeyGreensteinPhase(volume.anisotropy, cosine);
   }
 
-  const crossLocalVolumes = scene.localVolumes ? createLocalVolumeCrossing(scene.localVolumes) : null;
+  // A scattering local volume is lit by the sky's mean radiance and by the sun through a shadow ray, as the rasterizer lights it.
+  const localVolumeLighting = scene.localVolumes?.some(volume => volume.scatter > 0)
+    ? {
+      sun: lights.sun,
+      ambient: meanEnvironmentRadiance(environment),
+      sunVisibility: (pointX, pointY, pointZ) => (occluded(scene, pointX, pointY, pointZ, lights.sun.direction[0], lights.sun.direction[1], lights.sun.direction[2], scene.farDistance, shadowHit) ? 0 : 1),
+    }
+    : null;
+  const crossLocalVolumes = scene.localVolumes ? createLocalVolumeCrossing(scene.localVolumes, localVolumeLighting) : null;
   const localEmitted = new Float64Array(3);
 
   const walkSubsurface = createRandomWalk(scene, random, intersect);
@@ -888,7 +897,10 @@ function createPathTracer(scene, options) {
         recordFeatures(normal, isGlass);
         featuresRecorded = true;
       }
-      addRadiance(depth, throughput[0] * hit.emission[0], throughput[1] * hit.emission[1], throughput[2] * hit.emission[2]);
+      const emissionScale = hit.material.emissionFresnel > 0
+        ? fresnelSchlick(-(direction[0] * normal[0] + direction[1] * normal[1] + direction[2] * normal[2]), hit.material.emissionFresnel)
+        : 1;
+      addRadiance(depth, throughput[0] * hit.emission[0] * emissionScale, throughput[1] * hit.emission[1] * emissionScale, throughput[2] * hit.emission[2] * emissionScale);
       const viewX = -direction[0];
       const viewY = -direction[1];
       const viewZ = -direction[2];
@@ -958,7 +970,7 @@ export function toneMapToRgba8(linear, width, height, { viewTransform = 'aces', 
 }
 
 /** Names what this scene asks for that the path tracer does not draw, so a result never claims more than it traced. */
-export function describeIgnoredFeatures(parts, environment) {
+export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
   const notes = new Set();
   const fog = environment?.volumeFog;
   if (fog?.density > 0 && (fog.noiseAmount ?? 0.5) > 0) notes.add('volumeFog is traced as a uniform medium: noiseAmount, noiseScale and drift are ignored.');
@@ -970,6 +982,7 @@ export function describeIgnoredFeatures(parts, environment) {
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
     if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');
     if (material.layerMaps?.clearcoatTexture || material.transmissionMap) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
+    if (material.emissionFresnel > 0 && backend !== 'cpu') notes.add('emission fresnel is ignored by the GPU path tracers; the cpu backend applies it.');
     for (const [name, isUsed] of IGNORED_LAYERS) if (isUsed(material)) notes.add(`${name} is ignored.`);
   }
   return [...notes];
@@ -1181,7 +1194,7 @@ export async function renderPathTracedImage({ parts, environment = {}, camera },
       backend: options.backend, ...(gpuName ? { gpu: gpuName, gpuCompileSeconds, gpuKernelCompiles } : {}),
       averageSamples: totalSamples(samplesTaken) / pixelCount, noiseThreshold: options.noiseThreshold,
       triangles: scene.indices.length / 3, tracedSeconds, seconds: (performance.now() - started) / 1000,
-      ignored: describeIgnoredFeatures(parts, environment),
+      ignored: describeIgnoredFeatures(parts, environment, options.backend),
     },
   };
 }

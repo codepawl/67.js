@@ -83,7 +83,8 @@ test('the sticky comment is found only when the Actions bot wrote it', () => {
 });
 
 test('the workflow keeps Claude read-only and runs from the base branch', () => {
-  const workflow = readFileSync(new URL('../.github/workflows/claude-triage.yml', import.meta.url), 'utf8');
+  // A Windows checkout may have CRLF line ends. The patterns below match LF, as on CI.
+  const workflow = readFileSync(new URL('../.github/workflows/claude-triage.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   assert.match(workflow, /permissions:\n\s+contents: read\n\s+issues: write\n\s+pull-requests: write\n/);
   assert.doesNotMatch(workflow, /contents: write|actions: write|id-token|workflows: write/);
   assert.match(workflow, /anthropics\/claude-code-action@[0-9a-f]{40} # v1\.\d+\.\d+/);

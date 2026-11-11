@@ -178,6 +178,45 @@ function plaqueCloseUp() {
   };
 }
 
+// The ground truth for the stacked traps: the same picture as a flat tiling, no face over another, so nothing can fight and the
+// flush pass has nothing to rank or cut. The effects probe compares an effect on the stacked scene with the same effect here.
+// A rectangle of the given size, minus an inner rectangle of the same centre, as four strips (top, bottom, left, right).
+function frameStrips(centre, width, height, innerWidth, innerHeight, colour) {
+  const bandHeight = (height - innerHeight) / 2;
+  const bandWidth = (width - innerWidth) / 2;
+  const [x, y, z] = centre;
+  return [
+    wallQuad([x, y + (height - bandHeight) / 2, z], width, bandHeight, colour),
+    wallQuad([x, y - (height - bandHeight) / 2, z], width, bandHeight, colour),
+    wallQuad([x - (width - bandWidth) / 2, y, z], bandWidth, innerHeight, colour),
+    wallQuad([x + (width - bandWidth) / 2, y, z], bandWidth, innerHeight, colour),
+  ];
+}
+
+function tiledPlaque(distance) {
+  return {
+    parts: [
+      part('wall', frameStrips([0, 2, 0], 10, 4, 2, 1, faceColour(0))),
+      part('plaque', [wallQuad([0, 2, 0], 2, 1, faceColour(1))]),
+    ],
+    eye: [distance * 0.3, 2 + distance * 0.1, distance],
+    target: [0, 2, 0],
+  };
+}
+
+// Ring `index` of exactStack is quad `index` minus quad `index + 1`; the last one is whole.
+function tiledStack() {
+  const count = 30;
+  const widthOf = index => 6 - index * 0.18;
+  const heightOf = index => 4 - index * 0.12;
+  const quads = [];
+  for (let index = 0; index < count - 1; index++) {
+    quads.push(...frameStrips([0, 2, 0], widthOf(index), heightOf(index), widthOf(index + 1), heightOf(index + 1), faceColour(index)));
+  }
+  quads.push(wallQuad([0, 2, 0], widthOf(count - 1), heightOf(count - 1), faceColour(count - 1)));
+  return { parts: [part('stack', quads)], eye: [3, 3, 9], target: [0, 2, 0] };
+}
+
 export const TRAPS = {
   'plaque-2m': () => plaqueOnWall(2),
   'plaque-20m': () => plaqueOnWall(20),
@@ -190,4 +229,11 @@ export const TRAPS = {
   'stack-30-exact': exactStack,
   'instanced-flush': instancedFlush,
   'plaque-closeup-0.5m': plaqueCloseUp,
+};
+
+// Each stacked trap that has a flat tiling, under the name of the trap it stands in for. Kept apart so probe.mjs --traps does not run them.
+export const TILED_TRAPS = {
+  'plaque-2m': () => tiledPlaque(2),
+  'plaque-20m': () => tiledPlaque(20),
+  'stack-30-exact': tiledStack,
 };

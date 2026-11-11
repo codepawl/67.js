@@ -1,0 +1,902 @@
+[
+ {
+  "trap": "roofs",
+  "effect": "ao",
+  "plain": {
+   "small": 16000,
+   "large": 13718,
+   "maximum": 167,
+   "firstX": null
+  },
+  "staged": {
+   "small": 15965,
+   "large": 13690,
+   "maximum": 159,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 165267,
+   "reference": 164643
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "roofs",
+  "effect": "dof",
+  "plain": {
+   "small": 16000,
+   "large": 13718,
+   "maximum": 167,
+   "firstX": null
+  },
+  "staged": {
+   "small": 26487,
+   "large": 16375,
+   "maximum": 167,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 157834,
+   "reference": 162950
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "roofs",
+  "effect": "lines",
+  "plain": {
+   "small": 16000,
+   "large": 13718,
+   "maximum": 167,
+   "firstX": null
+  },
+  "staged": {
+   "small": 18174,
+   "large": 14041,
+   "maximum": 167,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 5547,
+   "reference": 7427
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "bridge",
+  "effect": "ao",
+  "plain": {
+   "small": 548,
+   "large": 262,
+   "maximum": 111,
+   "firstX": null
+  },
+  "staged": {
+   "small": 546,
+   "large": 256,
+   "maximum": 93,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 153955,
+   "reference": 153424
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "bridge",
+  "effect": "dof",
+  "plain": {
+   "small": 548,
+   "large": 262,
+   "maximum": 111,
+   "firstX": null
+  },
+  "staged": {
+   "small": 1067,
+   "large": 0,
+   "maximum": 26,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 68638,
+   "reference": 68191
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "bridge",
+  "effect": "lines",
+  "plain": {
+   "small": 548,
+   "large": 262,
+   "maximum": 111,
+   "firstX": null
+  },
+  "staged": {
+   "small": 504,
+   "large": 169,
+   "maximum": 111,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 1603,
+   "reference": 1603
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "river",
+  "effect": "ao",
+  "plain": {
+   "small": 15328,
+   "large": 0,
+   "maximum": 32,
+   "firstX": null
+  },
+  "staged": {
+   "small": 15079,
+   "large": 0,
+   "maximum": 32,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 98403,
+   "reference": 98706
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "river",
+  "effect": "dof",
+  "plain": {
+   "small": 15328,
+   "large": 0,
+   "maximum": 32,
+   "firstX": null
+  },
+  "staged": {
+   "small": 13255,
+   "large": 0,
+   "maximum": 24,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 58156,
+   "reference": 57652
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "river",
+  "effect": "lines",
+  "plain": {
+   "small": 15328,
+   "large": 0,
+   "maximum": 32,
+   "firstX": null
+  },
+  "staged": {
+   "small": 15123,
+   "large": 1,
+   "maximum": 34,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 1070,
+   "reference": 1069
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "overview",
+  "effect": "ao",
+  "plain": {
+   "small": 2978,
+   "large": 1251,
+   "maximum": 146,
+   "firstX": null
+  },
+  "staged": {
+   "small": 2959,
+   "large": 1189,
+   "maximum": 140,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 8025,
+   "reference": 8021
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "overview",
+  "effect": "dof",
+  "plain": {
+   "small": 2978,
+   "large": 1251,
+   "maximum": 146,
+   "firstX": null
+  },
+  "staged": {
+   "small": 2731,
+   "large": 687,
+   "maximum": 127,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 5590,
+   "reference": 5599
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "overview",
+  "effect": "lines",
+  "plain": {
+   "small": 2978,
+   "large": 1251,
+   "maximum": 146,
+   "firstX": null
+  },
+  "staged": {
+   "small": 2713,
+   "large": 962,
+   "maximum": 138,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 721,
+   "reference": 721
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass0",
+  "effect": "ao",
+  "plain": {
+   "small": 37614,
+   "large": 36070,
+   "maximum": 151,
+   "firstX": null
+  },
+  "staged": {
+   "small": 37571,
+   "large": 35522,
+   "maximum": 150,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 317606,
+   "reference": 317558
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass0",
+  "effect": "dof",
+  "plain": {
+   "small": 37614,
+   "large": 36070,
+   "maximum": 151,
+   "firstX": null
+  },
+  "staged": {
+   "small": 41357,
+   "large": 34711,
+   "maximum": 141,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 56202,
+   "reference": 55910
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass0",
+  "effect": "lines",
+  "plain": {
+   "small": 37614,
+   "large": 36070,
+   "maximum": 151,
+   "firstX": null
+  },
+  "staged": {
+   "small": 39790,
+   "large": 36262,
+   "maximum": 151,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 4105,
+   "reference": 6958
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass1",
+  "effect": "ao",
+  "plain": {
+   "small": 2725,
+   "large": 1433,
+   "maximum": 155,
+   "firstX": null
+  },
+  "staged": {
+   "small": 2714,
+   "large": 1411,
+   "maximum": 155,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 211960,
+   "reference": 211733
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass1",
+  "effect": "dof",
+  "plain": {
+   "small": 2725,
+   "large": 1433,
+   "maximum": 155,
+   "firstX": null
+  },
+  "staged": {
+   "small": 2163,
+   "large": 801,
+   "maximum": 99,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 42415,
+   "reference": 42124
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass1",
+  "effect": "lines",
+  "plain": {
+   "small": 2725,
+   "large": 1433,
+   "maximum": 155,
+   "firstX": null
+  },
+  "staged": {
+   "small": 2985,
+   "large": 1664,
+   "maximum": 155,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 5687,
+   "reference": 5709
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass2",
+  "effect": "ao",
+  "plain": {
+   "small": 20852,
+   "large": 4683,
+   "maximum": 172,
+   "firstX": null
+  },
+  "staged": {
+   "small": 18756,
+   "large": 4391,
+   "maximum": 160,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 257731,
+   "reference": 254959
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass2",
+  "effect": "dof",
+  "plain": {
+   "small": 20852,
+   "large": 4683,
+   "maximum": 172,
+   "firstX": null
+  },
+  "staged": {
+   "small": 21952,
+   "large": 5310,
+   "maximum": 172,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 29251,
+   "reference": 28859
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass2",
+  "effect": "lines",
+  "plain": {
+   "small": 20852,
+   "large": 4683,
+   "maximum": 172,
+   "firstX": null
+  },
+  "staged": {
+   "small": 20117,
+   "large": 4865,
+   "maximum": 172,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 6540,
+   "reference": 6144
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass3",
+  "effect": "ao",
+  "plain": {
+   "small": 16864,
+   "large": 14428,
+   "maximum": 126,
+   "firstX": null
+  },
+  "staged": {
+   "small": 16332,
+   "large": 14413,
+   "maximum": 126,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 113029,
+   "reference": 110998
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass3",
+  "effect": "dof",
+  "plain": {
+   "small": 16864,
+   "large": 14428,
+   "maximum": 126,
+   "firstX": null
+  },
+  "staged": {
+   "small": 18477,
+   "large": 14664,
+   "maximum": 126,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 16007,
+   "reference": 16067
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass3",
+  "effect": "lines",
+  "plain": {
+   "small": 16864,
+   "large": 14428,
+   "maximum": 126,
+   "firstX": null
+  },
+  "staged": {
+   "small": 16922,
+   "large": 14408,
+   "maximum": 126,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 2701,
+   "reference": 4062
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass4",
+  "effect": "ao",
+  "plain": {
+   "small": 8582,
+   "large": 6985,
+   "maximum": 174,
+   "firstX": null
+  },
+  "staged": {
+   "small": 8562,
+   "large": 6938,
+   "maximum": 170,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 125730,
+   "reference": 125399
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass4",
+  "effect": "dof",
+  "plain": {
+   "small": 8582,
+   "large": 6985,
+   "maximum": 174,
+   "firstX": null
+  },
+  "staged": {
+   "small": 11641,
+   "large": 6523,
+   "maximum": 73,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 72736,
+   "reference": 72187
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass4",
+  "effect": "lines",
+  "plain": {
+   "small": 8582,
+   "large": 6985,
+   "maximum": 174,
+   "firstX": null
+  },
+  "staged": {
+   "small": 9156,
+   "large": 6613,
+   "maximum": 162,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 4291,
+   "reference": 4354
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass5",
+  "effect": "ao",
+  "plain": {
+   "small": 4880,
+   "large": 3667,
+   "maximum": 161,
+   "firstX": null
+  },
+  "staged": {
+   "small": 4865,
+   "large": 3650,
+   "maximum": 154,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 129981,
+   "reference": 130549
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass5",
+  "effect": "dof",
+  "plain": {
+   "small": 4880,
+   "large": 3667,
+   "maximum": 161,
+   "firstX": null
+  },
+  "staged": {
+   "small": 7766,
+   "large": 1878,
+   "maximum": 110,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 126825,
+   "reference": 126663
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass5",
+  "effect": "lines",
+  "plain": {
+   "small": 4880,
+   "large": 3667,
+   "maximum": 161,
+   "firstX": null
+  },
+  "staged": {
+   "small": 5882,
+   "large": 3886,
+   "maximum": 159,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 5774,
+   "reference": 6132
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass6",
+  "effect": "ao",
+  "plain": {
+   "small": 778,
+   "large": 655,
+   "maximum": 73,
+   "firstX": null
+  },
+  "staged": {
+   "small": 779,
+   "large": 653,
+   "maximum": 72,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 308532,
+   "reference": 308538
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass6",
+  "effect": "dof",
+  "plain": {
+   "small": 778,
+   "large": 655,
+   "maximum": 73,
+   "firstX": null
+  },
+  "staged": {
+   "small": 1946,
+   "large": 0,
+   "maximum": 19,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 103874,
+   "reference": 103356
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass6",
+  "effect": "lines",
+  "plain": {
+   "small": 778,
+   "large": 655,
+   "maximum": 73,
+   "firstX": null
+  },
+  "staged": {
+   "small": 756,
+   "large": 570,
+   "maximum": 73,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 2950,
+   "reference": 2950
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass7",
+  "effect": "ao",
+  "plain": {
+   "small": 14765,
+   "large": 11725,
+   "maximum": 125,
+   "firstX": null
+  },
+  "staged": {
+   "small": 14622,
+   "large": 137,
+   "maximum": 119,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 176403,
+   "reference": 167511
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass7",
+  "effect": "dof",
+  "plain": {
+   "small": 14765,
+   "large": 11725,
+   "maximum": 125,
+   "firstX": null
+  },
+  "staged": {
+   "small": 20571,
+   "large": 1,
+   "maximum": 33,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 84829,
+   "reference": 85003
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ },
+ {
+  "trap": "glass7",
+  "effect": "lines",
+  "plain": {
+   "small": 14765,
+   "large": 11725,
+   "maximum": 125,
+   "firstX": null
+  },
+  "staged": {
+   "small": 14694,
+   "large": 11639,
+   "maximum": 125,
+   "firstX": null
+  },
+  "spurious": {
+   "flushOn": 3665,
+   "reference": 3665
+  },
+  "flush": {
+   "cutParts": 4,
+   "ranked": 4,
+   "leftovers": 0
+  }
+ }
+]

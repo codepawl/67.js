@@ -3,6 +3,7 @@
   "title": "Container port",
   "blurb": "A container ship at berth between quay cranes and a stacked yard.",
   "glb": "/showcase/port/scene.glb",
+  "glbFirstView": "/showcase/port/scene.first.glb",
   "glbRest": ["/showcase/port/scene.rest.glb"],
   "hdriPreview": "/showcase/port/sky.preview.hdr",
   "hdri": "/showcase/port/sky.hdr",

@@ -1,0 +1,1 @@
+- The path tracer lifts faces the flush pass ranked instead of cutting, so the face in front is hit first and the one behind no longer shows through (#751)

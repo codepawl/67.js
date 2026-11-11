@@ -85,6 +85,16 @@ const ANISOTROPY_MAIN_SETUP = `  if (materialAnisotropy.x > 0.0) {
   }
 `;
 
+// A material graph's fresnel factor of emission (material-graph.js): Schlick's curve for the IOR in materialEmissionFresnel,
+// the same curve as fresnelSchlick in material-layers.js, which the CPU path tracer uses.
+registerShaderFeatureCode('emissionFresnel', Object.freeze({
+  declarations: 'uniform float materialEmissionFresnel;\n',
+  emissionHook: `  float emissionNormalIncidence = (materialEmissionFresnel - 1.0) / (materialEmissionFresnel + 1.0);
+  emissionNormalIncidence *= emissionNormalIncidence;
+  emission *= emissionNormalIncidence + (1.0 - emissionNormalIncidence) * pow(1.0 - clamp(dot(normal, viewDirection), 0.0, 1.0), 5.0);
+`,
+}));
+
 registerShaderFeatureCode('anisotropy', Object.freeze({
   declarations: ANISOTROPY_DECLARATIONS,
   illuminateSpecular: ANISOTROPY_ILLUMINATE_SPECULAR,

@@ -1,9 +1,9 @@
 name: CodeQL
 
+# No push trigger: every change to main arrives through a pull request that CodeQL already scanned.
+# The weekly run refreshes the alert list of main.
 on:
   pull_request:
-  push:
-    branches: [main]
   schedule:
     - cron: '17 3 * * 1'
 

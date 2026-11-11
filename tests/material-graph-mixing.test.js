@@ -107,6 +107,16 @@ test('opacity blends the material, and the tracer cuts it out and says what it i
   assert.ok(notes.some(note => /clearcoat and transmission masks are read by the CPU tracer/.test(note)));
 });
 
+test('describeIgnoredFeatures names a fresnel emission factor on the GPU backends only', () => {
+  const parts = [{ material: { emission: 1, emissionFresnel: 1.5 } }];
+  const fresnelNote = /emission fresnel is ignored by the GPU path tracers/;
+  assert.ok(!describeIgnoredFeatures(parts, {}).some(note => fresnelNote.test(note)));
+  assert.ok(!describeIgnoredFeatures(parts, {}, 'cpu').some(note => fresnelNote.test(note)));
+  assert.ok(describeIgnoredFeatures(parts, {}, 'gpu').some(note => fresnelNote.test(note)));
+  assert.ok(describeIgnoredFeatures(parts, {}, 'webgpu').some(note => fresnelNote.test(note)));
+  assert.ok(!describeIgnoredFeatures([{ material: { emission: 1 } }], {}, 'gpu').some(note => fresnelNote.test(note)));
+});
+
 test('scene_capabilities lists the new outputs and mixing nodes', () => {
   const { outputs, operators, nodes } = AGENT_SCENE_CAPABILITIES.materialGraph;
   for (const name of ['opacity', 'clearcoat', 'transmission']) assert.ok(outputs.includes(name), name);

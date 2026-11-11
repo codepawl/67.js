@@ -2,7 +2,7 @@
 
 This file covers setup, how to send a change, the checks it must pass, the code style and the release flow.
 Coding agents can start with [AGENTS.md](AGENTS.md), the short version. Everyone follows the [code of conduct](CODE_OF_CONDUCT.md).
-To ask a question or report a bug, see [SUPPORT.md](SUPPORT.md).
+To ask a question or report a bug, see [SUPPORT.md](SUPPORT.md). Questions, ideas and finished work go in [Discussions](https://github.com/codepawl/67.js/discussions); a bug or a planned change goes in an issue.
 A maintainer gives a first answer to every issue and pull request within about 7 days.
 Coding agents are welcome to open pull requests. There is no disclosure box: the person who opens the pull request answers for it.
 
@@ -93,7 +93,7 @@ Paste the table into the pull request. The bench runs through a Claude Code logi
 
 ### Look changes
 
-A change to shaders, lighting, materials, the default render or a post step changes how every scene looks. Add a before and an after picture to the pull request. A bot adds the label `hold:look-approval`. Only the owner removes it, and nothing with that label merges.
+A change to shaders, lighting, materials, the default render or a post step changes how every scene looks. Add a before and an after picture to the pull request. A bot adds the label `hold:look-approval`. Only the owner removes it, and nothing with that label merges. Once the owner removes it, the check counts the look as approved and stops asking for pictures.
 
 ### Who runs the GPU and person checks
 
@@ -157,6 +157,11 @@ Keep site assets out of the npm package: the `files` list in `package.json` deci
 ## Release
 
 Maintainers make releases. `package.json` holds the version, and the publish workflow runs when it changes on `main`.
+
+A minor release ships about once a week, give or take one to three days. A maintainer picks the issues that must be in it,
+waits a few days at most for the issues that should be in it, and moves the rest to the next release. A look change still
+waiting for the owner's approval does not hold a release back. A serious bug ships alone as a patch release, without
+waiting for the week.
 
 1. Update the version in `package.json` and in `src/version.js`, run `npm run plugin:sync` to copy it into `.claude-plugin/marketplace.json`, then run `npm run changes:fold`. It writes the files in `changes/` into `CHANGELOG.md` as that version's section and deletes them. Read `npm run changes` first to see what it will fold. It also deletes the `changes/*.size.md` notes.
 2. Run `npm run size:release` and `npm run tool-cost:release`. They reset the size budgets, the baseline and the tool cost ceilings to the release numbers. Read the diffs of `bench/size/budgets.json` and `bench/tool-cost-budgets.json`.

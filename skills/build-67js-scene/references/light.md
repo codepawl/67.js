@@ -87,10 +87,15 @@ A motion track that moves a light, the sun or a part leaves the baked light behi
 
 The fix is automatic. Depth precision needs no setting, and faces that lie flush or a few millimetres apart, inside
 one mesh or across parts, are ranked per triangle at draw time so the face in front always wins; geometry never moves.
-`scene_inspect` returns `flush.ranked`, the number of parts that got ranks. You only act on what is left:
+`scene_inspect` returns `flush.ranked`, the number of parts that got ranks. Do not offset, nudge or thicken faces by hand,
+and do not add `decal` to fix a flicker: near-flush faces (glass a centimetre off a wall, nested facades) are ranked or cut
+from the drawn copy for you, and the parts stay as you made them. Whatever the pass could not settle comes back as
+`coplanar-overlap` diagnostics, the largest first, each with a `reason` and a `fix`. No diagnostic means nothing is left.
+You only act on those:
 
-- A `coplanar-overlap` diagnostic with `reason: "rank-overflow"` means more than 15 faces are stacked a small gap apart,
-  wider than the gap that is cut away: remove the duplicate faces. The other reasons (`double-sided-gap`, `unchecked`, `collapsed-node`) carry their own `fix`.
+- `reason: "rank-overflow"` means more than 15 faces are stacked a small gap apart, wider than the gap that is cut away,
+  so the deepest may flicker far away: remove the duplicate faces (usually a layer exported twice). The other reasons
+  (`double-sided-gap`, `unchecked`, `collapsed-node`) carry their own `fix`.
 - To choose which of two flush nodes wins, set `decal: true` on the one on top (a sticker on a surface) or `depthLayer`
   (1 to 4) to stack several.
 - `environment.resolveCoplanar: false` opts out; `scene_inspect` then lists each flush pair as `coplanar-overlap`.

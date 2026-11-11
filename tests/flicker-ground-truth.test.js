@@ -82,6 +82,26 @@ test('a pixel with another colour next to it is an edge, not a judged pixel', ()
   assert.ok(outcome.edge > 0);
 });
 
+test('the ray cast reports the depth of the visible face in front of the camera, and 0 for the background', () => {
+  const { cast } = castWallWithPlaque(1);
+  assert.ok(Math.abs(cast.distance[CENTRE] - 9) < 0.01, `plaque at ${cast.distance[CENTRE]}`);
+  assert.ok(Math.abs(cast.distance[0] - 10) < 0.01, `wall at ${cast.distance[0]}`);
+  const empty = castPixelOwners(collectWorldTriangles([], () => null), CAMERA, WIDTH, HEIGHT);
+  assert.ok(empty.distance.every(distance => distance === 0));
+});
+
+test('a swapped pixel is marked 2 in the mismatch mask and a merely wrong one 1', () => {
+  const { world, cast } = castWallWithPlaque(0.01);
+  const swappedPixel = CENTRE;
+  const wrongPixel = CENTRE + 2;
+  const pixels = paintFrame(cast, pixel => (pixel === swappedPixel ? WALL_PIXEL : pixel === wrongPixel ? [20, 200, 20] : null));
+  const outcome = compareWithGroundTruth({ pixels, world, cast, width: WIDTH, height: HEIGHT });
+  assert.equal(outcome.mismatchMask[swappedPixel], 2);
+  assert.equal(outcome.mismatchMask[wrongPixel], 1);
+  assert.equal(outcome.swapped, 1);
+  assert.equal(outcome.wrong, 2);
+});
+
 test('a plaque exactly on the wall leaves the plaque alone at its place once the flush pass ran', () => {
   const parts = wallWithPlaque(0);
   resolveFlushParts(parts);
@@ -183,4 +203,132 @@ test('failingTraps flags a swapped pixel with the flush pass on and ignores runs
     { trap: 'stacked', configuration: 'reversed0', swapped: 7 },
     { trap: 'missing', configuration: 'reversed0', swapped: null },
   ]);
+});
+
+test('failingTraps judges an exact run on true flips, not on the swaps the flush pass asked for', async () => {
+  const { failingTraps } = await import('../bench/flicker/verdict.js');
+  const results = [
+    { trap: 'lifted', configuration: 'reversed1-facets2', truth: { swapped: 900, flipped: 0, ranked: 900 } },
+    { trap: 'flipping', configuration: 'reversed0-facets2', truth: { swapped: 5, flipped: 3, ranked: 2 } },
+  ];
+  assert.deepEqual(failingTraps(results), [{ trap: 'flipping', configuration: 'reversed0-facets2', swapped: 5, flipped: 3 }]);
+});
+
+// The bytes a face of this colour shows in an unlit frame painted one colour per face.
+const exactBytes = colour => colour.map(channel => Math.round(channel * 255));
+
+// A frame that shows exactly the face the ray cast names, except where `override` gives other bytes.
+function paintExactFrame(cast, override = () => null) {
+  const pixels = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+  for (let pixel = 0; pixel < WIDTH * HEIGHT; pixel++) {
+    const owner = cast.owner[pixel];
+    const truth = owner === NO_TRIANGLE ? [0, 0, 0] : owner >= 2 ? [0, 0, 255] : [255, 0, 0];
+    pixels.set([...(override(pixel) ?? truth), 255], pixel * 4);
+  }
+  return pixels;
+}
+
+function compareExact(pixels, world, cast) {
+  return compareWithGroundTruth({ pixels, world, cast, width: WIDTH, height: HEIGHT, exact: exactBytes });
+}
+
+test('an exact frame with the right face everywhere has no wrong pixel', () => {
+  const { world, cast } = castWallWithPlaque(0.01);
+  assert.deepEqual(world.keyColours, [[1e7, 0, 0], [0, 0, 1e7]]);
+  const outcome = compareExact(paintExactFrame(cast), world, cast);
+  assert.equal(outcome.wrong, 0);
+  assert.ok(outcome.contested > 0);
+});
+
+test('an exact frame showing the wall through the plaque counts one true visibility flip', () => {
+  const { world, cast } = castWallWithPlaque(0.01);
+  const outcome = compareExact(paintExactFrame(cast, pixel => (pixel === CENTRE ? [255, 0, 0] : null)), world, cast);
+  assert.equal(outcome.wrong, 1);
+  assert.equal(outcome.swapped, 1);
+  assert.equal(outcome.flipped, 1);
+  assert.equal(outcome.ranked, 0);
+  assert.equal(outcome.mismatchMask[CENTRE], 2);
+});
+
+test('a face lifted over a nearer one by its rank is swapped but not a flip', () => {
+  const { world, cast } = castWallWithPlaque(-0.0005);
+  world.ranks[0] = 0;
+  world.ranks[1] = 0;
+  world.ranks[2] = 1;
+  world.ranks[3] = 1;
+  const outcome = compareExact(paintExactFrame(cast, pixel => (pixel === CENTRE ? [0, 0, 255] : null)), world, cast);
+  assert.equal(outcome.swapped, 1);
+  assert.equal(outcome.ranked, 1);
+  assert.equal(outcome.flipped, 0);
+});
+
+test('an exact frame showing a face off the ray, or a colour no face has, is not depth fighting', () => {
+  const parts = [...wallWithPlaque(0.01), wallPart('far-side', 2, 2, 0, [0, 1, 0])];
+  parts[2].matrix = new Float32Array([...IDENTITY.slice(0, 12), 500, 0, 0, 1]);
+  const world = collectWorldTriangles(parts, () => null);
+  const cast = castPixelOwners(world, CAMERA, WIDTH, HEIGHT);
+  const outcome = compareExact(paintExactFrame(cast, pixel => (pixel === CENTRE ? [0, 255, 0] : pixel === CENTRE + 1 ? [7, 7, 7] : null)), world, cast);
+  assert.equal(outcome.wrong, 2);
+  assert.equal(outcome.offRay, 1);
+  assert.equal(outcome.offRayEdge, 1, 'the middle of the plaque sits on its diagonal, a seam of the ray cast');
+  assert.equal(outcome.offRayInterior, 0);
+  assert.equal(outcome.offRayUnexplained, 0);
+  assert.equal(outcome.flipUpperBound, 0);
+  assert.equal(outcome.blended, 1);
+  assert.equal(outcome.swapped, 0);
+  assert.equal(outcome.flipped, 0);
+});
+
+test('an offRay pixel on a triangle edge of the ray cast is split off from one in the interior of a face', () => {
+  const parts = [...wallWithPlaque(0.01), wallPart('far-side', 2, 2, 0, [0, 1, 0])];
+  parts[2].matrix = new Float32Array([...IDENTITY.slice(0, 12), 500, 0, 0, 1]);
+  const world = collectWorldTriangles(parts, () => null);
+  const cast = castPixelOwners(world, CAMERA, WIDTH, HEIGHT);
+  const seam = [...cast.owner.keys()].find(pixel => cast.owner[pixel] >= 2 && cast.owner[pixel + 1] >= 2 && cast.owner[pixel] !== cast.owner[pixel + 1]
+    && cast.owner[pixel - WIDTH] >= 2 && cast.owner[pixel + WIDTH] >= 2);
+  assert.ok(seam > 0, 'the plaque diagonal has a pixel whose neighbours are all plaque');
+  const outcome = compareExact(paintExactFrame(cast, pixel => (pixel === seam ? [0, 255, 0] : pixel === CENTRE - 5 * WIDTH ? [0, 255, 0] : null)), world, cast);
+  assert.equal(outcome.offRay, 2);
+  assert.equal(outcome.offRayEdge, 1);
+  assert.equal(outcome.offRayInterior, 1);
+  assert.equal(outcome.offRayUnexplained, 1);
+  assert.equal(outcome.flipUpperBound, 1);
+});
+
+test('an offRay pixel a few bytes from the colour expected is a rounding step of the frame, not an upper-bound flip', () => {
+  const parts = [...wallWithPlaque(0.01), wallPart('neighbour-colour', 2, 2, 0, [0, 0, 0.99])];
+  parts[2].matrix = new Float32Array([...IDENTITY.slice(0, 12), 500, 0, 0, 1]);
+  const world = collectWorldTriangles(parts, () => null);
+  const cast = castPixelOwners(world, CAMERA, WIDTH, HEIGHT);
+  const outcome = compareExact(paintExactFrame(cast, pixel => (pixel === CENTRE + 4 ? [0, 0, 252] : null)), world, cast);
+  assert.equal(outcome.offRayInterior, 1);
+  assert.equal(outcome.offRaySmallGap, 1);
+  assert.equal(outcome.offRayUnexplained, 0);
+  assert.equal(outcome.flipUpperBound, 0);
+});
+
+// A wall under seven more faces, each 1 cm in front of the last: the wall is the eighth hit of every ray through the middle.
+function deepStack() {
+  const parts = [wallPart('wall', 12, 12, 0, RED)];
+  for (let layer = 1; layer <= 7; layer++) {
+    parts.push(wallPart(`layer-${layer}`, 4, 4, layer * 0.01, layer === 7 ? BLUE : [0, layer / 10, 0]));
+  }
+  const world = collectWorldTriangles(parts, () => null);
+  return { world, cast: (hitsPerPixel) => castPixelOwners(world, CAMERA, WIDTH, HEIGHT, hitsPerPixel) };
+}
+
+test('a face deeper than the hits kept per ray is offRay, and a flip once the cast keeps enough hits', () => {
+  const { world, cast: castWith } = deepStack();
+  const showWall = pixel => (pixel === CENTRE + 4 ? [255, 0, 0] : null);
+  const shallow = castWith(6);
+  const shallowOutcome = compareExact(paintExactFrame(shallow, showWall), world, shallow);
+  assert.equal(shallowOutcome.offRayInterior, 1);
+  assert.equal(shallowOutcome.flipped, 0);
+  assert.equal(shallowOutcome.flipUpperBound, 1);
+  const deep = castWith(8);
+  assert.equal(deep.hitsPerPixel, 8);
+  const deepOutcome = compareExact(paintExactFrame(deep, showWall), world, deep);
+  assert.equal(deepOutcome.offRay, 0);
+  assert.equal(deepOutcome.flipped, 1);
+  assert.equal(deepOutcome.flipUpperBound, 1);
 });

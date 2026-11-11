@@ -73,7 +73,7 @@ const MAP_SHADER_FEATURES = ['baseMap', 'normalMap', 'metallicRoughnessMap', 'oc
 // Part or material fields that name their shader feature and switch it on when set.
 const PRESENT_SHADER_FEATURES = ['skin', 'crowd', 'morph', 'lightMap', 'waterReflection'];
 // Material fields that name their shader feature and switch it on above zero.
-const POSITIVE_SHADER_FEATURES = ['moss', 'anisotropy', 'iridescence', 'toon', 'boxMapScale'];
+const POSITIVE_SHADER_FEATURES = ['moss', 'anisotropy', 'iridescence', 'toon', 'boxMapScale', 'emissionFresnel'];
 // Tags whose look the main fragment shader draws with code that other tags never reach.
 const TAG_SHADER_FEATURES = new Set(['floor', 'water', 'foliage', 'terrain', 'grass', 'fire', 'smoke', 'unlit']);
 
@@ -449,31 +449,47 @@ const morphSupport = () => requireDeformationSupport('validateMorphGeometry', 'm
 const hasSkinData = part => Boolean(part.skin || part.geometry.skinIndices || part.geometry.skinWeights);
 const hasMorphData = part => Boolean(part.morph || part.geometry.morphTargets !== undefined);
 
-export function groupParts(parts, batching = true) {
-  const groups = new Map();
+function validatePartForGrouping(part, morphInfos) {
+  validateTransform(part);
+  validatePartFlags(part);
+  if (hasSkinData(part)) {
+    const { validateSkinGeometry, validateSkinPose } = skinSupport();
+    validateSkinGeometry(part.geometry, part.skin);
+    if (part.skin) validateSkinPose(part.skin, part.geometry, part.matrix);
+  }
+  if (part.skin && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Skinned parts require a standard material tag.');
+  if (hasMorphData(part)) {
+    const { validateMorphGeometry, validateMorphPose, validateMorphTransform } = morphSupport();
+    if (!morphInfos.has(part.geometry)) morphInfos.set(part.geometry, validateMorphGeometry(part.geometry, part.morph));
+    else validateMorphPose(part.morph, morphInfos.get(part.geometry));
+    if (part.morph) validateMorphTransform(part.morph, morphInfos.get(part.geometry), part.matrix, part.skin);
+  }
+  if (part.morph && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Morphed parts require a standard material tag.');
+}
+
+/**
+ * Groups parts into batches one part at a time, in the order they arrive: a batch starts at the first part with its key and
+ * collects every later part with the same key. Adding parts later gives the batches a single call over all of them would give.
+ */
+function createPartGrouper(batching) {
+  // One flat map from a compact string key to a batch: a nested map per key value cost about 12 KB for every batch.
+  const batchesByKey = new Map();
   const batches = [];
   const morphInfos = new Map();
   const materialKeyValues = new Map();
   const materialKeyTails = new Map();
-  for (const part of parts) {
-    validateTransform(part);
-    validatePartFlags(part);
-    if (hasSkinData(part)) {
-      const { validateSkinGeometry, validateSkinPose } = skinSupport();
-      validateSkinGeometry(part.geometry, part.skin);
-      if (part.skin) validateSkinPose(part.skin, part.geometry, part.matrix);
+  // A key value (a geometry, a material map, a flag) is replaced by a small number, so the key stays a short string.
+  const valueNumbers = new Map();
+  function numberOf(value) {
+    let number = valueNumbers.get(value);
+    if (number === undefined) {
+      number = valueNumbers.size;
+      valueNumbers.set(value, number);
     }
-    if (part.skin && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Skinned parts require a standard material tag.');
-    if (hasMorphData(part)) {
-      const { validateMorphGeometry, validateMorphPose, validateMorphTransform } = morphSupport();
-      if (!morphInfos.has(part.geometry)) morphInfos.set(part.geometry, validateMorphGeometry(part.geometry, part.morph));
-      else validateMorphPose(part.morph, morphInfos.get(part.geometry));
-      if (part.morph) validateMorphTransform(part.morph, morphInfos.get(part.geometry), part.matrix, part.skin);
-    }
-    if (part.morph && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Morphed parts require a standard material tag.');
-    const key = batching ? part.geometry : part;
-    if (!groups.has(key)) groups.set(key, new Map());
-    let maps = groups.get(key);
+    return number;
+  }
+  function addPart(part) {
+    validatePartForGrouping(part, morphInfos);
     // Thousands of parts share a few materials, so the material half of the key is built once per material.
     let materialValues = materialKeyValues.get(part.material);
     if (!materialValues) {
@@ -485,37 +501,53 @@ export function groupParts(parts, batching = true) {
       materialTail = [renderPass(part.material), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)];
       materialKeyTails.set(part.material, materialTail);
     }
-    for (const value of [...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail]) {
-      if (!maps.has(value)) maps.set(value, new Map());
-      maps = maps.get(value);
-    }
-    if (!maps.has('parts')) {
-      const batch = [];
-      maps.set('parts', batch);
+    const values = [batching ? part.geometry : part, ...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail];
+    const key = values.map(numberOf).join(',');
+    let batch = batchesByKey.get(key);
+    if (!batch) {
+      batch = [];
+      batchesByKey.set(key, batch);
       batches.push(batch);
     }
-    maps.get('parts').push(part);
+    batch.push(part);
   }
-  return batches;
+  return {
+    batches,
+    addParts(parts) {
+      for (const part of parts) addPart(part);
+    },
+  };
+}
+
+export function groupParts(parts, batching = true) {
+  const grouper = createPartGrouper(batching);
+  grouper.addParts(parts);
+  return grouper.batches;
 }
 
 /**
- * Groups a world that grows by whole geometries, as replaceParts({ retainedUnchanged: true }) receives it in slices.
- * When `parts` starts with the parts of `previous` and no appended part shares a geometry with them, the earlier batches
- * are exactly what groupParts would build again, so only the appended parts are grouped and validated.
- * Anything else groups the whole list. Returns the batches and the state to pass on the next call.
+ * Groups a world that grows, as replaceParts({ retainedUnchanged: true }) receives it in slices.
+ * When `parts` starts with the parts of `previous`, the appended parts join the batches built so far: a new part lands in the
+ * batch that already has its key, or starts a batch after the others, which is where groupParts over the whole list puts it. Only
+ * the appended parts are grouped and validated. Anything else, including a state left behind by a failed call, groups the whole list.
+ * Returns the batches and the state to pass on the next call. The batches of a state that continues grow in place, so use them
+ * before grouping again.
  */
 export function groupPartsIncrementally(previous, parts, batching = true) {
-  const startsWithPrevious = Boolean(previous) && batching && previous.parts.length <= parts.length &&
+  const startsWithPrevious = Boolean(previous?.intact) && batching && previous.parts.length <= parts.length &&
     previous.parts.every((part, index) => part === parts[index]);
-  const appended = startsWithPrevious ? parts.slice(previous.parts.length) : null;
-  if (appended && appended.every(part => !previous.geometries.has(part.geometry))) {
+  if (startsWithPrevious) {
+    // The grouper changes as it takes parts, so a call that throws leaves this state unusable.
+    previous.intact = false;
+    const appended = parts.slice(previous.parts.length);
+    previous.grouper.addParts(appended);
     for (const part of appended) previous.geometries.add(part.geometry);
-    const batches = [...previous.batches, ...groupParts(appended, batching)];
-    return { batches, state: { parts: parts.slice(), geometries: previous.geometries, batches } };
+    const { grouper, geometries } = previous;
+    return { batches: grouper.batches, state: { parts: parts.slice(), geometries, batches: grouper.batches, grouper, intact: true } };
   }
-  const batches = groupParts(parts, batching);
-  return { batches, state: { parts: parts.slice(), geometries: new Set(parts.map(part => part.geometry)), batches } };
+  const grouper = createPartGrouper(batching);
+  grouper.addParts(parts);
+  return { batches: grouper.batches, state: { parts: parts.slice(), geometries: new Set(parts.map(part => part.geometry)), batches: grouper.batches, grouper, intact: true } };
 }
 
 /**
@@ -959,7 +991,7 @@ export class Renderer67 {
 
   finishMainProgram(pendingProgram) {
     this.program = finishProgram(this.context, pendingProgram);
-    this.uniforms = Object.fromEntries(['materialDielectric', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', 'wearEnabled', 'wearMetal', 'wearDirt', 'wearShape', 'wearDirtShape', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', 'tintShadowMap', 'tintBlind', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
+    this.uniforms = Object.fromEntries(['materialDielectric', 'materialEmissionFresnel', 'materialCoat', 'materialSheen', 'materialAnisotropy', 'materialIridescence', 'lightLinkMask', 'boxMapScale', 'boxMapAxis', 'lightMap', 'lightMapScale', 'hasLightMap', 'viewProjection', 'flushBias', 'clipPerMetre', 'lightProjection', 'eye', 'armorColor', 'armorSurface', 'exposure', 'inspection', 'shadowMap', 'shadowBiasPerSlope', ...MAP_UNIFORMS, ...MAP_FLAGS, ...SKIN_UNIFORMS, ...MORPH_UNIFORMS, 'normalScale', 'occlusionStrength', 'materialMoss', 'wearEnabled', 'wearMetal', 'wearDirt', 'wearShape', 'wearDirtShape', ...SPLAT_UNIFORMS, 'hdrEnabled', 'time', 'wind', 'worldMode', 'daylight', 'fogColor', 'lightDirection', 'fogDensity', 'waterRipple', 'rippleTime', 'explosionProgress', 'explosionCenter', 'assemblyAmount', 'renderPassMode', 'renderPassDepthRange', 'renderPassObjectBase', 'baseColor', 'surface', 'instanceEmission', 'instanceOpacity', 'boxNormalMatrix', 'shadowBlind', 'compositeMode', 'tintShadowMap', 'tintBlind', ...ALPHA_UNIFORMS].map((name) => [name, this.context.getUniformLocation(this.program, name)]));
     for (const name of LIGHT_UNIFORMS) {
       this.uniforms[name] = this.context.getUniformLocation(this.program, name);
     }
@@ -998,8 +1030,9 @@ export class Renderer67 {
     const context = this.context;
     const extension = context.getExtension('EXT_texture_filter_anisotropic');
     if (!extension) return;
-    const supported = context.getParameter(extension.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-    context.texParameterf(target, extension.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(MAX_TEXTURE_ANISOTROPY, supported));
+    // The limit is fixed for the context, and asking for it is a round trip to the GPU process, so it is asked once.
+    this.supportedAnisotropy ??= Math.min(MAX_TEXTURE_ANISOTROPY, context.getParameter(extension.MAX_TEXTURE_MAX_ANISOTROPY_EXT));
+    context.texParameterf(target, extension.TEXTURE_MAX_ANISOTROPY_EXT, this.supportedAnisotropy);
   }
 
   createTexture(map) {
@@ -1617,7 +1650,12 @@ export class Renderer67 {
     context.framebufferTexture2D(context.FRAMEBUFFER, context.DEPTH_ATTACHMENT, context.TEXTURE_2D, this.shadowTexture, 0);
     context.drawBuffers([context.NONE]);
     context.readBuffer(context.NONE);
-    if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) throw new Error('Shadow framebuffer is incomplete.');
+    // The status is a round trip to the GPU process. The attachment only changes with the map size, so it is checked once per size,
+    // not on each of the several refreshes a second an animated world makes.
+    if (this.shadowFramebufferCheckedSize !== mapSize) {
+      if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) throw new Error('Shadow framebuffer is incomplete.');
+      this.shadowFramebufferCheckedSize = mapSize;
+    }
     const light = resolveShadowLight(this.world, this.activeLightDirection, this.shadowBounds);
     const lightView = mat4.lookAt(mat4.create(), light.eye, light.target, light.up ?? [0, 1, 0]);
     mat4.ortho(this.lightProjection, -light.extent, light.extent, -light.extent, light.extent, light.near, light.far);
@@ -2212,7 +2250,7 @@ export class Renderer67 {
     context.activeTexture(context.TEXTURE0);
     context.bindTexture(context.TEXTURE_2D, sourceTexture);
     // The fog's glow reads blurred copies of the frame from its mip chain, so a tap is smooth instead of one speckled pixel.
-    if (volume.density > 0) {
+    if (volume.density > 0 || (localVolumes && this.localVolumeBuffers.blurred)) {
       context.generateMipmap(context.TEXTURE_2D);
       context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR_MIPMAP_LINEAR);
       this.mipmappedTexture = sourceTexture;
@@ -2225,7 +2263,7 @@ export class Renderer67 {
     context.bindTexture(context.TEXTURE_2D, this.depthTexture ?? this.whiteTexture);
     context.uniform1i(post.uniforms.sceneDepth, 1);
     fogSupport?.bindUniforms(this, post, volume, environment, frame);
-    if (localVolumes) requireFeatureCode('volumeFog').support.bindLocalVolumes(this, post, frame);
+    if (localVolumes) requireFeatureCode('volumeFog').support.bindLocalVolumes(this, post, frame, environment);
     context.activeTexture(context.TEXTURE2);
     context.bindTexture(context.TEXTURE_2D, effects.bloom.strength > 0 ? this.bloomTargets[1].texture : this.whiteTexture);
     context.uniform1i(post.uniforms.bloomTexture, 2);
@@ -2512,6 +2550,7 @@ export class Renderer67 {
       this.context.uniform3f(this.uniforms.materialIridescence, layers[18], layers[19], layers[20]);
       this.context.uniform1i(this.uniforms.lightLinkMask, layers[21]);
       this.context.uniform1f(this.uniforms.materialToon, layers[22]);
+      this.context.uniform1f(this.uniforms.materialEmissionFresnel, layers[24]);
       this.context.uniform1f(this.uniforms.boxMapScale, batch.mapState[12]);
       this.context.uniform1i(this.uniforms.boxMapAxis, batch.mapState[13]);
       if (this.shaderFeatures?.has('splat')) requireSplatSupport().bind(this, batch.splat);
@@ -2585,7 +2624,7 @@ export class Renderer67 {
     this.requireFeatureNames(shaderFeaturesOfLighting(this.lighting));
     const passMode = this.preparePass(frame);
     this.renderingPass = passMode > 0;
-    this.volumeShadowWanted = volume.density > 0;
+    this.volumeShadowWanted = volume.density > 0 || (Array.isArray(environment.localVolumes) && environment.localVolumes.some(localVolume => localVolume?.scatter > 0));
     if (casterChanged || this.shadowMapSizeWanted() !== this.shadowMapSize) {
       this.assemblyAmount = assemblyAmount;
       this.createShadowMap();

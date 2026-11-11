@@ -7,10 +7,15 @@ import './loop/loop.css';
 import { clamp, prefersReducedMotion, showStageError, smoothstep, startLoop, metrics } from './stage.js';
 import { SCENES } from './loop/scenes.js';
 import { createFlight } from './loop/camera.js';
-import { buildWorld, fetchWorld } from './loop/world.js';
+import { buildWorld, fetchDetail, fetchWorld } from './loop/world.js';
+import { createPlayOnDemand } from './loop/play-on-demand.js';
+import { advanceHold } from './loop/hold.js';
+import { buildWithFallback, completeDetail } from './loop/detail.js';
 
 const parameters = new URLSearchParams(location.search);
 const captureMode = parameters.has('capture');
+// ?detail=hold keeps the first view on screen until window.__loop.releaseDetail() is called (to compare the two on one pose), also on a link fast enough to skip it.
+const holdDetail = parameters.get('detail') === 'hold';
 const measureMode = parameters.has('measure');
 
 const FADE_SECONDS = 1;
@@ -80,11 +85,11 @@ async function buildFrom(download) {
 
 // Fetches the next world right away; building it (parsing and GPU upload) waits until the current world has played a moment
 // so the upload does not land on the opening frames, unless a visitor asked for it.
-function prepare(index, { immediately = false } = {}) {
-  const entry = { index, world: null, error: null, permit: null, skipped: false };
+function prepare(index, { immediately = false, firstView = false } = {}) {
+  const entry = { index, world: null, error: null, permit: null, skipped: false, detail: null };
   entry.permission = new Promise(resolve => { entry.permit = resolve; });
   if (immediately) entry.permit();
-  entry.ready = fetchWorld(SCENES[index].description)
+  entry.ready = fetchWorld(SCENES[index].description, { firstView, ...(holdDetail ? { measureLink: () => null } : {}) })
     .then(async download => {
       note('fetched', { scene: SCENES[index].id, bytes: download.bytes });
       loopState.bytes ??= {};
@@ -92,7 +97,7 @@ function prepare(index, { immediately = false } = {}) {
       await entry.permission;
       if (entry.skipped) return;
       const started = performance.now();
-      const world = await buildFrom(download);
+      const { world, builtFrom } = await buildWithFallback(download, buildFrom);
       await new Promise(resolve => setTimeout(resolve, 0));
       // The world joins the loop only after its first draw has linked every program and allocated every target, so the fade never waits on the driver.
       const warmStarted = performance.now();
@@ -103,7 +108,8 @@ function prepare(index, { immediately = false } = {}) {
         return;
       }
       entry.world = world;
-      note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started) });
+      if (builtFrom.isFirstView) entry.detail = followDetail(entry, builtFrom);
+      note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started), firstView: Boolean(builtFrom.isFirstView) });
       loopState.peakWorlds = Math.max(loopState.peakWorlds, loopState.worldsAlive());
     })
     .catch(error => {
@@ -112,6 +118,38 @@ function prepare(index, { immediately = false } = {}) {
     });
   pending = entry;
   return entry;
+}
+
+// ---- Detail: a world that started on its first view gets the full world once it has arrived.
+let releaseDetailGate = () => {};
+const detailGate = holdDetail ? new Promise(resolve => { releaseDetailGate = resolve; }) : Promise.resolve();
+
+// Follows the full world of an entry that started on its first view. `done` resolves with 'ready' (swapped in), 'failed' (given up,
+// the first view stays) or 'freed' (the world left the loop first).
+function followDetail(entry, download) {
+  const scene = SCENES[entry.index].id;
+  const detail = { state: 'pending', done: null };
+  detail.done = completeDetail({
+    world: entry.world,
+    pendingDetail: download.detail,
+    fetchAgain: () => fetchDetail(entry.world.description),
+    gate: detailGate,
+    onFailure: (attempt, error) => note('detail-failed', { scene, attempt, message: error.message }),
+  }).then(outcome => {
+    if (outcome.state === 'ready') {
+      note('detailed', { scene, bytes: outcome.bytes, ms: outcome.milliseconds });
+      loopState.bytes[scene] = (loopState.bytes[scene] ?? 0) + outcome.bytes;
+    }
+    detail.state = outcome.state;
+    return outcome.state;
+  });
+  return detail;
+}
+
+// Slows the flight of a world that is still on its first view, so the camera does not reach the close shots before the detail does.
+function holdFlight(entry, seconds) {
+  const flightPosition = clock - entry.startedAt - entry.held;
+  advanceHold(entry, seconds, flightPosition, entry.detail?.state);
 }
 
 function discardPending() {
@@ -214,7 +252,7 @@ function drawWorld(entry, flightSeconds, sceneTime) {
 }
 
 function startTransition() {
-  incoming = { index: pending.index, world: pending.world, startedAt: clock };
+  incoming = { index: pending.index, world: pending.world, startedAt: clock, held: 0, rate: 1, detail: null };
   pending = null;
   skipRequested = false;
   root.style.setProperty('--scrim', String(SCENES[incoming.index].scrim));
@@ -236,7 +274,8 @@ function finishTransition() {
 function tick(seconds) {
   clock += seconds;
   const scene = SCENES[active.index];
-  const activeSeconds = clock - active.startedAt;
+  if (!incoming && !prefersReducedMotion) holdFlight(active, seconds);
+  const activeSeconds = clock - active.startedAt - active.held;
   if (pending?.error) {
     const failed = pending.index;
     pending = null;
@@ -261,25 +300,76 @@ function tick(seconds) {
   paintIndicator(incoming ? 1 : prefersReducedMotion ? 0 : activeSeconds / scene.seconds);
 }
 
-// The poster is the largest paint, so the first world's download (about 12 MB) starts only after the poster has arrived.
-function posterLoaded() {
+// How the page loads the hero, decided by the inline script in index.html: 'live', 'deferred' (a phone) or 'poster' (light path).
+const POSTER_IDLE_TIMEOUT_MS = 3000;
+const playButton = document.querySelector('#play-live');
+let heroMode = window.__heroMode ?? 'live';
+let liveStarted = false;
+
+// The phone path waits until the poster has painted and the page has nothing else to do, so the download and the build never compete with it.
+async function posterVisibleAndPageIdle() {
   const poster = document.querySelector('#poster');
-  if (!poster || poster.complete) return Promise.resolve();
-  return new Promise(resolve => {
-    poster.addEventListener('load', resolve, { once: true });
-    poster.addEventListener('error', resolve, { once: true });
-  });
+  if (poster && !poster.complete) {
+    await new Promise(resolve => {
+      poster.addEventListener('load', resolve, { once: true });
+      poster.addEventListener('error', resolve, { once: true });
+    });
+  }
+  await poster?.decode?.().catch(() => {});
+  await new Promise(resolve => (window.requestIdleCallback ? window.requestIdleCallback(resolve, { timeout: POSTER_IDLE_TIMEOUT_MS }) : setTimeout(resolve, 1200)));
 }
 
+function showPosterOnly() {
+  paintScene(0);
+  stage.setAttribute('aria-label', `A still of the live 3D scene: ${SCENES[0].name}`);
+  playButton.hidden = false;
+  playButton.addEventListener('click', playOnDemand);
+}
+
+const playOnDemand = playButton ? createPlayOnDemand({
+  playButton,
+  beginLive,
+  showError: message => showStageError(stage, message),
+  focusTarget: stage,
+  // The poster keeps its slow pan while it fades out, then the page switches to the live layout.
+  onLive: () => { heroMode = 'live'; document.documentElement.dataset.heroMode = 'live'; },
+}) : null;
+
 async function start() {
-  await posterLoaded();
-  const first = prepare(0, { immediately: true });
+  if (heroMode === 'poster' && playButton) {
+    showPosterOnly();
+    return;
+  }
+  if (heroMode === 'deferred') await posterVisibleAndPageIdle();
+  await beginLive();
+}
+
+async function beginLive() {
+  if (liveStarted) return;
+  liveStarted = true;
+  try {
+    await startLive();
+  } catch (error) {
+    liveStarted = false;
+    throw error;
+  }
+}
+
+async function startLive() {
+  const first = prepare(0, { immediately: true, firstView: true });
   await first.ready;
   if (first.error) throw first.error;
-  active = { index: 0, world: first.world, startedAt: 0, drawn: false };
+  active = { index: 0, world: first.world, startedAt: 0, drawn: false, held: 0, rate: 1, detail: first.detail };
   active.world.canvas.style.opacity = '1';
   paintScene(0);
-  prepare(1);
+  loopState.releaseDetail = () => {
+    releaseDetailGate();
+    return first.detail ? first.detail.done : Promise.resolve('ready');
+  };
+  loopState.detail = () => first.detail?.state ?? 'ready';
+  // The next world's files wait for the full first world, so the two do not share the link.
+  if (first.detail) first.detail.done.then(state => { if (state !== 'freed') prepare(1); });
+  else prepare(1);
 
   window.addEventListener('resize', () => [active, incoming].forEach(entry => entry?.world.resize()));
   if (captureMode) {
@@ -294,6 +384,8 @@ async function start() {
       tick(seconds);
       revealPoster();
     };
+    // A recorder wants whole worlds, unless it asked to see the first view.
+    if (first.detail && !holdDetail) await first.detail.done;
     loopState.ready = true;
     return;
   }
