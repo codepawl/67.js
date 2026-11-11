@@ -125,6 +125,89 @@ test('self collision pushes two unjoined particles apart and skips joined ones',
   assert.ok(connectedPairs({ stretchCount: 1, firsts: [0], seconds: [1] }, 3).has(1));
 });
 
+// The solver as it was on main before the pair list: walks the cells on every iteration. Kept here as the byte for byte reference.
+function referenceSelfCollision(radius, particleCount, joined) {
+  const cellSize = radius * 2;
+  const cells = new Map();
+  const cellOf = new Int32Array(particleCount * 3);
+  const cellKey = (x, y, z) => (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) | 0;
+  return {
+    build(positions) {
+      cells.clear();
+      for (let particle = 0; particle < particleCount; particle++) {
+        for (let axis = 0; axis < 3; axis++) cellOf[particle * 3 + axis] = Math.floor(positions[particle * 3 + axis] / cellSize);
+        const key = cellKey(cellOf[particle * 3], cellOf[particle * 3 + 1], cellOf[particle * 3 + 2]);
+        const members = cells.get(key);
+        if (members) members.push(particle);
+        else cells.set(key, [particle]);
+      }
+    },
+    solve(positions, inverseMasses) {
+      const reach = radius * 2;
+      for (let particle = 0; particle < particleCount; particle++) {
+        const [cx, cy, cz] = [cellOf[particle * 3], cellOf[particle * 3 + 1], cellOf[particle * 3 + 2]];
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dz = -1; dz <= 1; dz++) {
+              for (const other of cells.get(cellKey(cx + dx, cy + dy, cz + dz)) ?? []) {
+                if (other <= particle || joined.has(particle * particleCount + other)) continue;
+                pushApart(positions, inverseMasses, particle, other, reach);
+              }
+            }
+          }
+        }
+      }
+    },
+  };
+}
+
+function pushApart(positions, inverseMasses, first, second, reach) {
+  const delta = [0, 1, 2].map(axis => positions[second * 3 + axis] - positions[first * 3 + axis]);
+  const distanceSquared = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+  const weightSum = inverseMasses[first] + inverseMasses[second];
+  if (distanceSquared >= reach * reach || distanceSquared < 1e-18 || weightSum === 0) return;
+  const distance = Math.sqrt(distanceSquared);
+  const correction = (reach - distance) / distance / weightSum;
+  for (let axis = 0; axis < 3; axis++) {
+    positions[first * 3 + axis] -= delta[axis] * correction * inverseMasses[first];
+    positions[second * 3 + axis] += delta[axis] * correction * inverseMasses[second];
+  }
+}
+
+test('the pair list gives exactly the positions the per-iteration cell walk gave', () => {
+  const particleCount = 300;
+  let seed = 12345;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const start = new Float64Array(particleCount * 3).map(() => random() * 0.12);
+  const inverseMasses = new Float64Array(particleCount).map((_, index) => (index % 7 === 0 ? 0 : 1 + (index % 3)));
+  const joined = new Set([1, 2, 3, 40]);
+  const listed = Float64Array.from(start);
+  const walked = Float64Array.from(start);
+  const listedContacts = createSelfCollision(0.01, particleCount, joined);
+  const walkedContacts = referenceSelfCollision(0.01, particleCount, joined);
+  for (let substep = 0; substep < 3; substep++) {
+    listedContacts.build(listed);
+    walkedContacts.build(walked);
+    for (let iteration = 0; iteration < 4; iteration++) {
+      listedContacts.solve(listed, inverseMasses);
+      walkedContacts.solve(walked, inverseMasses);
+    }
+  }
+  assert.notDeepEqual([...listed], [...start], 'the cluster really had contacts to resolve');
+  assert.deepEqual([...listed], [...walked]);
+});
+
+test('self collision throws, naming the radius, when particles pile past the pair limit instead of dropping contacts', () => {
+  const particleCount = 200;
+  const pile = new Float64Array(particleCount * 3);
+  for (let particle = 0; particle < particleCount; particle++) pile[particle * 3] = particle * 1e-6;
+  const contacts = createSelfCollision(0.01, particleCount, new Set());
+  assert.throws(() => contacts.build(pile), /selfCollision found more than 12800 particle pairs.*smaller selfCollision radius/);
+});
+
 test('a recipe sheet takes bendModel and rejects an unknown one with the field and the choices', async () => {
   const { createAgentScene } = await import('../src/agent-scene.js');
   await import('./support/load-agent-scene-modules.mjs');

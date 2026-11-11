@@ -38,7 +38,11 @@ export function createSelfCollision(radius, particleCount, joined) {
   let pairs = new Int32Array(Math.min(pairCapacity, particleCount * 8) * 2);
   let pairCount = 0;
   function addPair(first, second) {
-    if (pairCount >= pairCapacity) return;
+    if (pairCount >= pairCapacity) {
+      throw new RangeError(
+        `Cloth selfCollision found more than ${pairCapacity} particle pairs within reach (${SELF_COLLISION_LIMITS.pairsPerParticle} a particle); the sheet is piled too densely. Use a smaller selfCollision radius or a coarser grid.`,
+      );
+    }
     if ((pairCount + 1) * 2 > pairs.length) {
       const grown = new Int32Array(Math.min(pairCapacity, pairCount * 2) * 2);
       grown.set(pairs);
