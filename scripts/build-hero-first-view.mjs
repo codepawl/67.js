@@ -1,7 +1,7 @@
 // Builds the "first view" of a hero world: the whole world as one small GLB (coarse meshes, small textures) that the home page can
 // download and draw within a few seconds on a slow link, while the full world streams in behind it.
 //
-//   node scripts/build-hero-first-view.mjs [--scene port] [--world-error 0.3] [--uv-weight 1] [--max-texture 256] [--webp-quality 70] [--output <file>]
+//   node scripts/build-hero-first-view.mjs [--scene port] [--world-error 1.1] [--uv-weight 1] [--max-texture 256] [--webp-quality 70] [--output <file>]
 //
 // The full world is the committed pair public/showcase/<scene>/scene.glb and scene.rest.glb. This script joins them in memory,
 // runs scripts/simplify-hero-glb.mjs on the join with one coarse level and a small texture cap, and recodes the textures as WebP
@@ -14,12 +14,12 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, EXTMeshoptCompression } from '@gltf-transform/extensions';
-import { dequantize, mergeDocuments, meshopt } from '@gltf-transform/functions';
+import { dequantize, mergeDocuments, meshopt, prune } from '@gltf-transform/functions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import { recodeGlbTextures } from './recode-glb-textures.mjs';
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
-const DEFAULTS = { scene: 'port', worldError: 0.3, uvWeight: 1, maxTexture: 256, webpQuality: 70, output: '' };
+const DEFAULTS = { scene: 'port', worldError: 1.1, uvWeight: 1, maxTexture: 256, webpQuality: 70, output: '' };
 
 export function parseArguments(argv) {
   const options = { ...DEFAULTS };
@@ -60,12 +60,31 @@ async function readJoinedWorld(directory) {
   return { io, document };
 }
 
+// A simplification that prunes a whole primitive leaves one with no vertices; the meshopt encoder asserts on its zero-length streams.
+export function removeEmptyPrimitives(document) {
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      const position = primitive.getAttribute('POSITION');
+      const indices = primitive.getIndices();
+      const hasNoVertices = !position || position.getCount() === 0;
+      const hasNoTriangles = indices && indices.getCount() === 0;
+      if (hasNoVertices || hasNoTriangles) primitive.dispose();
+    }
+  }
+  for (const node of document.getRoot().listNodes()) {
+    const mesh = node.getMesh();
+    if (mesh && mesh.listPrimitives().length === 0) node.setMesh(null);
+  }
+}
+
 // The simplifier writes float attributes; the meshopt step quantizes them and compresses the vertex streams.
 async function quantizedCopy(path, outputPath) {
   const io = new NodeIO()
     .registerExtensions([...ALL_EXTENSIONS, EXTMeshoptCompression])
     .registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
   const document = await io.read(path);
+  removeEmptyPrimitives(document);
+  await document.transform(prune({ keepLeaves: false }));
   await document.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 16, quantizeNormal: 8, quantizeTexcoord: 16 }));
   await io.write(outputPath, document);
 }
