@@ -1,6 +1,6 @@
 name: Feature request
 description: Something 67js or its MCP tools should be able to do.
-labels: [enhancement]
+labels: [enhancement, needs-triage]
 body:
   - type: markdown
     attributes:
@@ -24,12 +24,32 @@ body:
     id: done-when
     attributes:
       label: Done when
-      description: How we will know it works, as a checklist.
+      description: How we will know it works. Write one checkbox line for each result, starting with "- [ ]". Contributors copy this list into their pull request.
       placeholder: |
         - [ ] An agent can ... in one tool call
         - [ ] A test covers ...
     validations:
       required: true
+  - type: dropdown
+    id: goal
+    attributes:
+      label: Goal (optional)
+      description: Which part of the goal this serves. Choose "Not sure" and the maintainer sets it.
+      options:
+        - Not sure
+        - capable (do more, like Blender)
+        - light (stay small and fast, like three.js)
+        - ai (make agents succeed in fewer calls)
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority (optional)
+      description: How soon you need it. The maintainer sets the final priority.
+      options:
+        - Not sure
+        - must (blocks something)
+        - should (clearly useful)
+        - could (nice to have)
   - type: checkboxes
     id: contribute
     attributes:

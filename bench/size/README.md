@@ -63,7 +63,7 @@ A bundle that the base does not have is reported and never fails. A bundle that 
 
 The table in the output shows each bundle, the base size, the growth and the allowance. The release budgets in `budgets.json` are printed as a report and do not fail a pull request.
 
-The goals in `budgets.json` (`lit-box`, `gltf-box`, `agent-scene`) also gate: a goal scene that was at or under its goal on the base and goes over it fails, even inside its allowance, because many small accepted increases otherwise add up past the goal. Only a `- goal:<scene>: <why>` line accepts that, and An approves those lines. A `scene:<name>` line does not. A scene already over its goal on the base may not grow by more than 8 bytes (two builds of the same source differ by a few bytes gzip), even inside its allowance, until work brings it back under; the same `- goal:<scene>:` line is the only way past.
+The goals in `budgets.json` (`lit-box`, `gltf-box`, `agent-scene`) also gate: a goal scene that was at or under its goal on the base and goes over it fails, even inside its allowance, because many small accepted increases otherwise add up past the goal. Only a `- goal:<scene>: <why>` line accepts that, and the maintainer approves those lines. A `scene:<name>` line does not. A scene already over its goal on the base may not grow by more than 8 bytes (two builds of the same source differ by a few bytes gzip), even inside its allowance, until work brings it back under; the same `- goal:<scene>:` line is the only way past.
 
 ## When a check fails
 

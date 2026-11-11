@@ -1,6 +1,6 @@
 name: Bug report
 description: Something renders wrong, throws, crashes or runs slower than it should.
-labels: [bug]
+labels: [bug, needs-triage]
 body:
   - type: markdown
     attributes:
@@ -19,6 +19,16 @@ body:
         - Other
     validations:
       required: true
+  - type: dropdown
+    id: goal
+    attributes:
+      label: Goal (optional)
+      description: Which part of the goal this touches. Choose "Not sure" and the maintainer sets it.
+      options:
+        - Not sure
+        - capable (it cannot do something it should)
+        - light (it is too big or too slow)
+        - ai (an agent trips on it)
   - type: textarea
     id: what-happened
     attributes:
