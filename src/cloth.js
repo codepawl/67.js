@@ -420,7 +420,8 @@ function followAnchors(positions, moving, targets, softOnly) {
 // From its release substep on, the anchored particles are ordinary cloth: they keep their speed and fall with the rest.
 function releaseAnchors(cloth, moving) {
   moving.anchorParticles.forEach(particle => {
-    cloth.trackFixed[particle] = 0;
+    // fill writes one slot of the typed array, never a named property, whatever the particle value is.
+    cloth.trackFixed.fill(0, particle, particle + 1);
     setParticleInverseMass(cloth, particle);
   });
 }
