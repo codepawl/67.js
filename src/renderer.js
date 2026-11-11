@@ -449,28 +449,36 @@ const morphSupport = () => requireDeformationSupport('validateMorphGeometry', 'm
 const hasSkinData = part => Boolean(part.skin || part.geometry.skinIndices || part.geometry.skinWeights);
 const hasMorphData = part => Boolean(part.morph || part.geometry.morphTargets !== undefined);
 
-export function groupParts(parts, batching = true) {
+function validatePartForGrouping(part, morphInfos) {
+  validateTransform(part);
+  validatePartFlags(part);
+  if (hasSkinData(part)) {
+    const { validateSkinGeometry, validateSkinPose } = skinSupport();
+    validateSkinGeometry(part.geometry, part.skin);
+    if (part.skin) validateSkinPose(part.skin, part.geometry, part.matrix);
+  }
+  if (part.skin && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Skinned parts require a standard material tag.');
+  if (hasMorphData(part)) {
+    const { validateMorphGeometry, validateMorphPose, validateMorphTransform } = morphSupport();
+    if (!morphInfos.has(part.geometry)) morphInfos.set(part.geometry, validateMorphGeometry(part.geometry, part.morph));
+    else validateMorphPose(part.morph, morphInfos.get(part.geometry));
+    if (part.morph) validateMorphTransform(part.morph, morphInfos.get(part.geometry), part.matrix, part.skin);
+  }
+  if (part.morph && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Morphed parts require a standard material tag.');
+}
+
+/**
+ * Groups parts into batches one part at a time, in the order they arrive: a batch starts at the first part with its key and
+ * collects every later part with the same key. Adding parts later gives the batches a single call over all of them would give.
+ */
+function createPartGrouper(batching) {
   const groups = new Map();
   const batches = [];
   const morphInfos = new Map();
   const materialKeyValues = new Map();
   const materialKeyTails = new Map();
-  for (const part of parts) {
-    validateTransform(part);
-    validatePartFlags(part);
-    if (hasSkinData(part)) {
-      const { validateSkinGeometry, validateSkinPose } = skinSupport();
-      validateSkinGeometry(part.geometry, part.skin);
-      if (part.skin) validateSkinPose(part.skin, part.geometry, part.matrix);
-    }
-    if (part.skin && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Skinned parts require a standard material tag.');
-    if (hasMorphData(part)) {
-      const { validateMorphGeometry, validateMorphPose, validateMorphTransform } = morphSupport();
-      if (!morphInfos.has(part.geometry)) morphInfos.set(part.geometry, validateMorphGeometry(part.geometry, part.morph));
-      else validateMorphPose(part.morph, morphInfos.get(part.geometry));
-      if (part.morph) validateMorphTransform(part.morph, morphInfos.get(part.geometry), part.matrix, part.skin);
-    }
-    if (part.morph && PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Morphed parts require a standard material tag.');
+  function addPart(part) {
+    validatePartForGrouping(part, morphInfos);
     const key = batching ? part.geometry : part;
     if (!groups.has(key)) groups.set(key, new Map());
     let maps = groups.get(key);
@@ -496,26 +504,43 @@ export function groupParts(parts, batching = true) {
     }
     maps.get('parts').push(part);
   }
-  return batches;
+  return {
+    batches,
+    addParts(parts) {
+      for (const part of parts) addPart(part);
+    },
+  };
+}
+
+export function groupParts(parts, batching = true) {
+  const grouper = createPartGrouper(batching);
+  grouper.addParts(parts);
+  return grouper.batches;
 }
 
 /**
- * Groups a world that grows by whole geometries, as replaceParts({ retainedUnchanged: true }) receives it in slices.
- * When `parts` starts with the parts of `previous` and no appended part shares a geometry with them, the earlier batches
- * are exactly what groupParts would build again, so only the appended parts are grouped and validated.
- * Anything else groups the whole list. Returns the batches and the state to pass on the next call.
+ * Groups a world that grows, as replaceParts({ retainedUnchanged: true }) receives it in slices.
+ * When `parts` starts with the parts of `previous`, the appended parts join the batches built so far: a new part lands in the
+ * batch that already has its key, or starts a batch after the others, which is where groupParts over the whole list puts it. Only
+ * the appended parts are grouped and validated. Anything else, including a state left behind by a failed call, groups the whole list.
+ * Returns the batches and the state to pass on the next call. The batches of a state that continues grow in place, so use them
+ * before grouping again.
  */
 export function groupPartsIncrementally(previous, parts, batching = true) {
-  const startsWithPrevious = Boolean(previous) && batching && previous.parts.length <= parts.length &&
+  const startsWithPrevious = Boolean(previous?.intact) && batching && previous.parts.length <= parts.length &&
     previous.parts.every((part, index) => part === parts[index]);
-  const appended = startsWithPrevious ? parts.slice(previous.parts.length) : null;
-  if (appended && appended.every(part => !previous.geometries.has(part.geometry))) {
+  if (startsWithPrevious) {
+    // The grouper changes as it takes parts, so a call that throws leaves this state unusable.
+    previous.intact = false;
+    const appended = parts.slice(previous.parts.length);
+    previous.grouper.addParts(appended);
     for (const part of appended) previous.geometries.add(part.geometry);
-    const batches = [...previous.batches, ...groupParts(appended, batching)];
-    return { batches, state: { parts: parts.slice(), geometries: previous.geometries, batches } };
+    const { grouper, geometries } = previous;
+    return { batches: grouper.batches, state: { parts: parts.slice(), geometries, batches: grouper.batches, grouper, intact: true } };
   }
-  const batches = groupParts(parts, batching);
-  return { batches, state: { parts: parts.slice(), geometries: new Set(parts.map(part => part.geometry)), batches } };
+  const grouper = createPartGrouper(batching);
+  grouper.addParts(parts);
+  return { batches: grouper.batches, state: { parts: parts.slice(), geometries: new Set(parts.map(part => part.geometry)), batches: grouper.batches, grouper, intact: true } };
 }
 
 /**
@@ -998,8 +1023,9 @@ export class Renderer67 {
     const context = this.context;
     const extension = context.getExtension('EXT_texture_filter_anisotropic');
     if (!extension) return;
-    const supported = context.getParameter(extension.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-    context.texParameterf(target, extension.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(MAX_TEXTURE_ANISOTROPY, supported));
+    // The limit is fixed for the context, and asking for it is a round trip to the GPU process, so it is asked once.
+    this.supportedAnisotropy ??= Math.min(MAX_TEXTURE_ANISOTROPY, context.getParameter(extension.MAX_TEXTURE_MAX_ANISOTROPY_EXT));
+    context.texParameterf(target, extension.TEXTURE_MAX_ANISOTROPY_EXT, this.supportedAnisotropy);
   }
 
   createTexture(map) {
@@ -1617,7 +1643,12 @@ export class Renderer67 {
     context.framebufferTexture2D(context.FRAMEBUFFER, context.DEPTH_ATTACHMENT, context.TEXTURE_2D, this.shadowTexture, 0);
     context.drawBuffers([context.NONE]);
     context.readBuffer(context.NONE);
-    if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) throw new Error('Shadow framebuffer is incomplete.');
+    // The status is a round trip to the GPU process. The attachment only changes with the map size, so it is checked once per size,
+    // not on each of the several refreshes a second an animated world makes.
+    if (this.shadowFramebufferCheckedSize !== mapSize) {
+      if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) throw new Error('Shadow framebuffer is incomplete.');
+      this.shadowFramebufferCheckedSize = mapSize;
+    }
     const light = resolveShadowLight(this.world, this.activeLightDirection, this.shadowBounds);
     const lightView = mat4.lookAt(mat4.create(), light.eye, light.target, light.up ?? [0, 1, 0]);
     mat4.ortho(this.lightProjection, -light.extent, light.extent, -light.extent, light.extent, light.near, light.far);
