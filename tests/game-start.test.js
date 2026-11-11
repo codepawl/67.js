@@ -66,3 +66,16 @@ test('a start that fails after the renderer exists disposes the renderer and ret
     restore();
   }
 });
+
+test('a vehicle game starts a vehicle controller with a chase camera', async () => {
+  const restore = withAnimationFrameStubs();
+  try {
+    const recipe = gameRecipe();
+    recipe.game = { ...recipe.game, player: { ...recipe.game.player, controller: 'vehicle', maximumSpeed: 30 }, camera: 'chase' };
+    const game = await startGame({}, recipe, { replay: EMPTY_RECORDING, showStatus: false, createRenderer: () => standInRenderer() });
+    assert.equal(typeof game.controller.state.forwardSpeed, 'number');
+    game.dispose();
+  } finally {
+    restore();
+  }
+});

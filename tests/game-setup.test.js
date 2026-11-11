@@ -30,9 +30,16 @@ function recipeWith(game) {
 test('a minimal setup gets its defaults', () => {
   const setup = normalizeGameSetup({ player: { node: 'creature' } }, NODE_IDS);
   assert.deepEqual(setup, {
-    player: { node: 'creature', controller: 'character', walkSpeed: 3, runSpeed: 6, jumpSpeed: 7, footOffset: 0 },
+    player: { node: 'creature', controller: 'character', walkSpeed: 3, runSpeed: 6, jumpSpeed: 7, maximumSpeed: 20, footOffset: 0 },
     camera: 'follow', input: 'keyboard', physics: false, ground: 0,
   });
+});
+
+test('a vehicle with a chase camera keeps its top speed', () => {
+  const setup = normalizeGameSetup({ player: { node: 'creature', controller: 'vehicle', maximumSpeed: 30 }, camera: 'chase' }, NODE_IDS);
+  assert.equal(setup.player.controller, 'vehicle');
+  assert.equal(setup.player.maximumSpeed, 30);
+  assert.equal(setup.camera, 'chase');
 });
 
 test('each bad field names itself and says what to pass', () => {
@@ -41,9 +48,10 @@ test('each bad field names itself and says what to pass', () => {
   const cases = [
     [{}, /player must be an object/],
     [{ player: { node: 'creatur' } }, /player\.node names "creatur".*Use one of: creature, coin-1/],
-    [{ player, camera: 'orbit' }, /camera is "orbit". Use one of: follow, first-person, top-down/],
+    [{ player, camera: 'orbit' }, /camera is "orbit". Use one of: follow, first-person, top-down, chase/],
     [{ player, input: 'mouse' }, /input is "mouse". Use one of: keyboard, gamepad, touch/],
-    [{ player: { ...player, controller: 'car' } }, /player\.controller is "car". Use one of: character/],
+    [{ player: { ...player, controller: 'car' } }, /player\.controller is "car". Use one of: character, vehicle/],
+    [{ player: { ...player, maximumSpeed: 101 } }, /player\.maximumSpeed must be a number from 0 to 100/],
     [{ player: { ...player, walkSpeed: 101 } }, /player\.walkSpeed must be a number from 0 to 100/],
     [{ player: { ...player, jumpSpeed: Infinity } }, /player\.jumpSpeed must be a number/],
     [{ player, physics: 'yes' }, /physics must be true or false/],

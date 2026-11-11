@@ -17,6 +17,7 @@ import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../sr
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
 import { responseFormatField, chosenFormat, conciseReview, conciseJobStatus, conciseJobResult, withoutNotes } from './mcp-response-format.mjs';
 import { createCallLogger, CALL_LOG_ENVIRONMENT_VARIABLE } from './mcp-call-log.mjs';
+import { startUpdateCheck, updateNoticeText, describeUpdateCheck } from '../src/mcp-update-check.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
 
 describeSchemaInputsWithReceivedValues();
@@ -858,7 +859,9 @@ function jsonResult(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }
 
-export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true, callLogPath = process.env[CALL_LOG_ENVIRONMENT_VARIABLE] } = {}) {
+export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true, callLogPath = process.env[CALL_LOG_ENVIRONMENT_VARIABLE], updateAvailable = () => null } = {}) {
+  const newerVersion = updateAvailable();
+  let updateReported = false;
   const logCall = createCallLogger(callLogPath);
   // Without branches the schemas carry no branch field and the instructions do not mention variants (a benchmark switch).
   const branchField = branches ? { branch: branchName.optional().describe('Fork: store the result as this branch (up to 8), leaving the scene unchanged.') } : {};
@@ -867,7 +870,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   const restoreCheckpointId = checkpointFields.checkpointId.optional();
   const branchInstructions = branches ? ' To try variants, give scene_apply a branch name for each (the scene stays put), compare them in one scene_review with a branch per shot, then keep the best with scene_restore and its branch.' : '';
   const server = new McpServer({ name: '67js-scene', version }, {
-    instructions: 'Start with scene_capabilities. Create a procedural recipe with scene_create, or select a configured GLB digest from scene_asset_catalog and use scene_create_asset. Pass its sessionId to work on several open scenes; without it the last used scene is used. Inspect stable IDs and save a checkpoint before editing. Apply small batches with the current expectedRevision and check committed, revision and renderSucceeded. A committed edit can have a separate renderError; do not retry it with an old revision.'+branchInstructions+' Pass labels: true to scene_look or scene_review to match part names to the image. Use scene_look to judge the actual image, or scene_review with the current expectedRevision to compare independent camera and motion samples in one grid while preserving the source pose. When jobs are configured, scene_render_submit captures an immutable snapshot. Poll scene_render_status, cancel when needed, and retrieve verified local artifact metadata with scene_render_result after completion. Preview rendering and edits pause during a job; source revision and checkpoints survive. Release outputs with scene_render_release. Export the final recipe and dispose the scene when finished. No arbitrary JavaScript, remote URLs or caller-selected output paths are exposed.',
+    instructions: 'Start with scene_capabilities. Create a procedural recipe with scene_create, or select a configured GLB digest from scene_asset_catalog and use scene_create_asset. Pass its sessionId to work on several open scenes; without it the last used scene is used. Inspect stable IDs and save a checkpoint before editing. Apply small batches with the current expectedRevision and check committed, revision and renderSucceeded. A committed edit can have a separate renderError; do not retry it with an old revision.'+branchInstructions+' Pass labels: true to scene_look or scene_review to match part names to the image. Use scene_look to judge the actual image, or scene_review with the current expectedRevision to compare independent camera and motion samples in one grid while preserving the source pose. When jobs are configured, scene_render_submit captures an immutable snapshot. Poll scene_render_status, cancel when needed, and retrieve verified local artifact metadata with scene_render_result after completion. Preview rendering and edits pause during a job; source revision and checkpoints survive. Release outputs with scene_render_release. Export the final recipe and dispose the scene when finished. No arbitrary JavaScript, remote URLs or caller-selected output paths are exposed.'+(newerVersion ? updateNoticeText(newerVersion) : ''),
   });
   let closePromise;
   server.server.onclose = () => {
@@ -903,7 +906,11 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   }
   register('scene_capabilities', 'Index of supported recipe features and runtime budgets; pass topic for the detail of one. Read it before authoring. Does not launch a browser.', z.strictObject({ topic: z.string().min(1).max(64).optional().describe('A name from the index, or name.branch such as meshEdit.bevel. Leave out for the index.'), response_format: responseFormatField }), readOnly, async ({ topic, response_format }) => {
     const answer = answerCapabilities(relations ? await runtime.capabilities() : withoutRelationsAdvice(await runtime.capabilities()), topic, outlineSources);
-    return jsonResult(chosenFormat('scene_capabilities', response_format) === 'concise' && answer.fields !== undefined ? { ...answer, fields: withoutNotes(answer.fields) } : answer);
+    const shown = chosenFormat('scene_capabilities', response_format) === 'concise' && answer.fields !== undefined ? { ...answer, fields: withoutNotes(answer.fields) } : answer;
+    // Once per server: the first answer carries the update offer, later ones stay unchanged.
+    const pendingUpdate = updateReported ? null : updateAvailable();
+    updateReported = updateReported || pendingUpdate !== null;
+    return jsonResult(pendingUpdate === null ? shown : { ...shown, updateAvailable: pendingUpdate });
   });
   register('scene_create', 'Create a render scene from a JSON recipe; the result has its sessionId. Several scenes stay open; past the cap the least recently used one is closed.', z.strictObject({ recipe: relations ? recipe : recipeWithoutRelations }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.create(argumentsValue)));
   register('scene_asset_catalog', 'List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory. No arbitrary paths or downloads.', z.strictObject({}), readOnly, async () => jsonResult(await runtime.assetCatalog()));
@@ -958,6 +965,10 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   return server;
 }
 
+export async function runCheckUpdateCli({ version = packageMetadata.version } = {}) {
+  console.log(await describeUpdateCheck({ currentVersion: version }));
+}
+
 export async function runMcpCli({ argumentsValue = process.argv.slice(2),
   previewUrl = new URL(/* @vite-ignore */ '../build/mcp/preview.js', import.meta.url), version = packageMetadata.version } = {}) {
   const options = { backend: 'gpu', memory: 192 };
@@ -973,8 +984,10 @@ export async function runMcpCli({ argumentsValue = process.argv.slice(2),
     throw new Error(`Backend must be cpu or gpu, and memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
+  // Not awaited: the check fills in while the client connects and never delays or fails the start.
+  const updateCheck = startUpdateCheck({ currentVersion: version });
   const { createAgentRuntime } = await import('./agent-runtime.mjs');
-  const handle = serveStdio(() => createAgentMcpServer(createAgentRuntime({ ...options, previewUrl }), { version, branches: options.branches !== 'off', relations: options.relations !== 'off' }), {
+  const handle = serveStdio(() => createAgentMcpServer(createAgentRuntime({ ...options, previewUrl }), { version, branches: options.branches !== 'off', relations: options.relations !== 'off', updateAvailable: updateCheck.current }), {
     transport: new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 2 * 1024 * 1024 }),
     onerror: error => console.error(`67js MCP error: ${error.message}`),
   });

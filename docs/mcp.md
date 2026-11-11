@@ -217,6 +217,17 @@ References must resolve after the complete batch. Removing a parent leaves its c
 Reparent or remove those children before the parent removal command to avoid rejection.
 The [scene contract](agent-scene.md) defines the geometry fields, transforms, materials, and atomic validation rules.
 
+## Updates
+
+`npx -y -p @codepawlhq/67js 67js-mcp` reuses the copy npx cached on the first run, so a server can stay on an old version without anyone noticing. Each start therefore asks the npm registry once whether a newer version exists:
+
+- **What is sent:** one `GET https://registry.npmjs.org/@codepawlhq/67js/latest`, the same request `npm view` makes. It has no body and no identifier of ours. The registry sees what any HTTP request shows.
+- **When:** in the background, so startup is never slower. The answer is cached in `<user cache folder>/67js/update-check.json` (`$XDG_CACHE_HOME`, else `%LOCALAPPDATA%` on Windows, else `~/.cache`), and the registry is asked at most once a day. A timeout of 2 seconds ends a slow request. Offline or a registry error is silent.
+- **What the agent sees:** when a newer stable version exists, the server `instructions` gain a short notice and the first `scene_capabilities` result carries `updateAvailable` with `current`, `latest`, `releaseNotes`, and the `update` command for each install route (`plugin`, `npx`, `project`). The first start after a new release may show the notice only in `scene_capabilities`, because `instructions` are read once and the answer can arrive after that. The agent tells the user and updates only after a yes.
+- **Turn it off:** set `SIXTYSEVENJS_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`, or run with `CI` set. Nothing is requested or written then.
+- **Ask by hand:** `67js-mcp --version` prints the running version. `67js-mcp --check-update` asks the registry now, prints the current and latest versions and exits.
+- **Update:** plugin, `/plugin marketplace update 67js` then `/plugin update 67js@67js`; `npx`, run `npx -y -p @codepawlhq/67js@latest 67js-mcp --version` once; project, `npm install @codepawlhq/67js@latest`. Restart the client afterwards. The library itself makes no network request, and the plugin keeps its pinned start command.
+
 ## Call log
 
 To see which tools agents use, set `SIXTYSEVENJS_MCP_LOG=<file path>` before starting the server. It appends one JSON line per tool call: `time`, `tool`, `durationMs`, `ok`, `error` (`tool_error` or `thrown`, only on failure) and `resultBytes`. It never writes arguments, scene content or paths. With the variable unset nothing is written.

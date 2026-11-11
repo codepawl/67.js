@@ -16,6 +16,7 @@ The MCP server takes input from AI agents, and that input can come from a prompt
 - It reads assets only from the configured catalog, and it fetches no remote URLs for assets.
 - It writes render output and GLB exports (`scene_export_glb`, under `exports/`, server-chosen names) only to the configured jobs folder.
 - It bounds every collection, count and size before it allocates memory.
+- Its one outbound request is a fixed GET to the npm registry for the latest version number, in the background, at most once a day, off with `SIXTYSEVENJS_NO_UPDATE_CHECK=1`, `NO_UPDATE_NOTIFIER=1` or `CI`. No tool call can change the URL or send data ([docs/mcp.md](docs/mcp.md#updates)).
 
 `docs/mcp.md` describes each limit and its boundary tests.
 
