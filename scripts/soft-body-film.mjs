@@ -58,30 +58,48 @@ const POLE_KEYFRAMES = [
   { time: 3, value: [0, 0.012, 2.0] },
 ];
 export const FLAG_FILM_SECONDS = 3;
+// The fine flag: a 64 by 64 grid for 4 s with dihedral bending, so the cloth folds in many soft ripples instead of one crease.
+export const FINE_FLAG_FILM_SECONDS = 4;
+const FINE_FLAG_SEGMENTS = 63;
+const FINE_FLAG_BEND = 0.15;
+// Creases stay: past 0.3 rad of bending the rest angle follows the cloth by a fifth of the excess a substep, so folds made in the fall are kept
+// (without it the sheet pulls its folds flat again and ends as a smooth layer). Damping 3 calms the landing. Static friction holds a layer
+// where it lies on the floor, and the pole lets go as it lands, so no corner stays pinned up like a tent and the heap is left to rest.
+const FINE_FLAG_CREASE = { bendYield: 0.3, bendSet: 0.2, damping: 3, friction: 0.6, staticFriction: 1 };
+const FINE_FLAG_LANDING_SECONDS = 0.8;
+// The camera frames the fall from afar, then moves in over the landing so the heap fills the picture.
+const FINE_FLAG_CAMERA_TRACKS = [
+  { kind: 'camera', property: 'eye', interpolation: 'SMOOTH', keyframes: [{ time: 0, value: [1.5, 1.2, 3.6] }, { time: 0.7, value: [1.5, 1.2, 3.6] }, { time: 1.3, value: [0.85, 0.75, 1.55] }, { time: 4, value: [0.85, 0.75, 1.55] }] },
+  { kind: 'camera', property: 'target', interpolation: 'SMOOTH', keyframes: [{ time: 0, value: [0, 0.9, 0] }, { time: 0.7, value: [0, 0.9, 0] }, { time: 1.3, value: [0, 0.03, 0] }, { time: 4, value: [0, 0.03, 0] }] },
+];
 // A deep red and cream striped cloth on a mid grey floor, lit by a grazing key from the side so every fold casts a shadow and bends the stripes.
 const FLAG_LOOK = { lightDirection: [-0.9, 0.3, 0.45], keyIntensity: 1.5, fillIntensity: 0.12, ambientIntensity: 0.15 };
 const FLAG_STRIPES = { type: 'graph', mapping: 'uv', resolution: 256, graph: { color: { layer: { base: [0.35, 0.015, 0.04], top: [0.85, 0.78, 0.62], mask: { wave: { frequency: 8, direction: 'v', shape: 'saw' } }, edge: 0.5, softness: 0.02 } } } };
 
 /**
  * A flag hung from a pole by its top edge. The pole swings from side to side while it falls, so the sheet ripples, lands on the floor and
- * drags the cloth into a crumpled ridge on a thin layer. The sheet sets thickness 3.5 mm, which also sets the self collision radius,
+ * is let go there, so the cloth settles as a crumpled heap that stays put (fine only; the 38 by 38 film drags it into a ridge). The sheet sets thickness 3.5 mm, which also sets the self collision radius,
  * so layers stack 6 mm apart instead of 3.7 cm.
  */
-export function foldingFlagRecipe({ selfCollision = true } = {}) {
+export function foldingFlagRecipe({ selfCollision = true, fine = false } = {}) {
+  const seconds = fine ? FINE_FLAG_FILM_SECONDS : FLAG_FILM_SECONDS;
+  const landing = POLE_KEYFRAMES.findIndex(keyframe => keyframe.time === FINE_FLAG_LANDING_SECONDS);
+  const keyframes = fine ? [...POLE_KEYFRAMES.slice(0, landing + 1), { time: seconds, value: POLE_KEYFRAMES[landing].value }] : POLE_KEYFRAMES;
+  const bending = fine ? { bendModel: 'dihedral', bend: FINE_FLAG_BEND, ...FINE_FLAG_CREASE } : { bend: 0.0002 };
   return baseRecipe({
-    geometries: [{ id: 'flag', type: 'grid', segments: 38 }],
+    geometries: [{ id: 'flag', type: 'grid', segments: fine ? FINE_FLAG_SEGMENTS : 38 }],
     materials: [{ id: 'fabric', color: [1, 1, 1], doubleSided: true, pattern: FLAG_STRIPES }],
     nodes: [
       { id: 'flag', geometry: 'flag', material: 'fabric', translation: [0, 1.5, 0], scale: [1.6, 1, 1] },
       { id: 'pole', translation: [0, 2.0, 0] },
     ],
-    motion: { duration: FLAG_FILM_SECONDS, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes: POLE_KEYFRAMES }] },
-    camera: { eye: [2.2, 1.7, 5.4], target: [0, 0.6, 0.8] },
+    motion: { duration: seconds, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes }, ...(fine ? FINE_FLAG_CAMERA_TRACKS : [])] },
+    camera: fine ? { eye: [1.5, 1.2, 3.6], target: [0, 0.9, 0], fov: 42 } : { eye: [2.2, 1.7, 5.4], target: [0, 0.6, 0.8] },
     floorColor: [0.28, 0.28, 0.3],
     environment: FLAG_LOOK,
     cloth: {
-      duration: FLAG_FILM_SECONDS,
-      sheets: [{ node: 'flag', pin: ['topLeft', 'topRight'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, bend: 0.0002, damping: 1.5, friction: 0.4, thickness: 0.002 }],
+      duration: seconds,
+      sheets: [{ node: 'flag', pin: ['topLeft', 'topRight'], pinTo: fine ? { node: 'pole', releaseAt: FINE_FLAG_LANDING_SECONDS } : { node: 'pole' }, selfCollision, stiffness: 0.6, damping: 1.5, friction: 0.4, ...bending, thickness: 0.002 }],
       colliders: [{ node: 'ground', shape: 'box' }],
     },
   });
@@ -178,6 +196,38 @@ export function measureLanding(frames, restHeight) {
     }
   }
   return { contact, maxDentFrame: deepest, maxDentDepth: restHeight - deepestHeight, restHeight };
+}
+
+/**
+ * How often the sheet's height turns from rising to falling (or back) along the middle row and the middle column of its grid, ignoring
+ * wiggles under `deadband` metres: the number of folds a line across the cloth crosses.
+ */
+export function foldCrossings(vertices, side, deadband = 0.0005) {
+  const countAlong = line => {
+    let crossings = 0;
+    let direction = 0;
+    let anchor = vertices[line[0] * 3 + 1];
+    for (const vertex of line) {
+      const height = vertices[vertex * 3 + 1];
+      if (direction >= 0 && height < anchor - deadband) {
+        if (direction === 1) crossings++;
+        direction = -1;
+        anchor = height;
+      } else if (direction <= 0 && height > anchor + deadband) {
+        if (direction === -1) crossings++;
+        direction = 1;
+        anchor = height;
+      } else if ((direction >= 0 && height > anchor) || (direction <= 0 && height < anchor)) {
+        anchor = height;
+      }
+    }
+    return crossings;
+  };
+  const middle = Math.floor(side / 2);
+  return {
+    row: countAlong(Array.from({ length: side }, (_, column) => middle * side + column)),
+    column: countAlong(Array.from({ length: side }, (_, row) => row * side + middle)),
+  };
 }
 
 /** Smallest distance between two vertices that no triangle edge joins: the closest two layers of a fold come. */
