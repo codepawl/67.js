@@ -1,0 +1,1 @@
+- Add the Cook `FORMAT-v2` scene packer (`pack-input-v2.mjs`), multi-BLAS/TLAS Cycles host session, and `probeCyclesLobe` entry-point runner in `packages/render-native`.

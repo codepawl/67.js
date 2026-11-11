@@ -13,7 +13,9 @@ use crate::host::film::{
     image_accumulation_bytes, image_workgroups, pad_texel_vectors, resolve_image, resolve_texels,
     texel_accumulation_bytes, texel_workgroups,
 };
-use crate::host::session::{prepare_scene, trace_samples, JobShape};
+use crate::host::session::{
+    prepare_cycles_scene, prepare_scene, run_cycles_lobe_probe, trace_cycles_samples, trace_samples, JobShape,
+};
 
 const KERNEL_SOURCE: &str = include_str!("kernel.wgsl");
 /// The texel entry point of the light bake, appended to the kernel for a bake only.
@@ -36,6 +38,28 @@ pub struct NativeTraceInput {
 }
 
 #[napi(object)]
+pub struct NativeTraceInputV2 {
+    pub schema_version: u32,
+    pub kernel_params: Uint8Array,
+    pub instances: Uint8Array,
+    pub instance_count: u32,
+    pub triangles: Uint8Array,
+    pub triangle_count: u32,
+    pub materials: Uint8Array,
+    pub material_count: u32,
+    pub emissive_triangles: Uint8Array,
+    pub emissive_triangle_count: u32,
+    pub lights: Uint8Array,
+    pub light_count: u32,
+    pub light_tree_nodes: Uint8Array,
+    pub light_tree_node_count: u32,
+    pub texture_descriptors: Uint8Array,
+    pub texture_count: u32,
+    pub texture_texels: Uint32Array,
+    pub environment_texels: Float32Array,
+}
+
+#[napi(object)]
 pub struct NativeTraceOptions {
     pub width: u32,
     pub height: u32,
@@ -44,6 +68,28 @@ pub struct NativeTraceOptions {
     pub max_seconds: Option<f64>,
     /// Selects `"legacy"` (default) or `"cycles"`.
     pub kernel: Option<String>,
+}
+
+#[napi(object)]
+pub struct NativeCyclesTraceOptions {
+    pub width: u32,
+    pub height: u32,
+    pub samples: u32,
+    pub samples_per_dispatch: Option<u32>,
+    pub max_seconds: Option<f64>,
+    pub bootstrap_kernel: Option<bool>,
+}
+
+#[napi(object)]
+pub struct ProbeCyclesLobeOptions {
+    pub width: u32,
+    pub height: u32,
+    pub kernel_params: Uint8Array,
+    pub materials: Uint8Array,
+    pub texture_descriptors: Option<Uint8Array>,
+    pub texture_texels: Option<Uint32Array>,
+    pub max_seconds: Option<f64>,
+    pub bootstrap_kernel: Option<bool>,
 }
 
 #[napi(object)]
@@ -109,8 +155,10 @@ fn select_kernel_source(requested_kernel: Option<&str>) -> Result<(String, bool)
     match kernel_name {
         "legacy" => Ok((KERNEL_SOURCE.to_string(), true)),
         "cycles" => {
-            let source = cycles::assemble_cycles_kernel()?;
-            Ok((source, false))
+            let _ = cycles::assemble_cycles_kernel()?;
+            Err(failure(
+                "traceScene requires FORMAT-v2 buffers when kernel is \"cycles\"; call traceNative or traceSceneCycles.",
+            ))
         }
         other => Err(failure(format!(
             "Invalid native kernel {other:?}: pass \"legacy\" or \"cycles\" in options.kernel or JS67_NATIVE_KERNEL."
@@ -118,7 +166,7 @@ fn select_kernel_source(requested_kernel: Option<&str>) -> Result<(String, bool)
     }
 }
 
-/// Traces the packed scene on the GPU with hardware ray queries.
+/// Traces the packed legacy v1 scene on the GPU with hardware ray queries.
 #[napi]
 pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Result<NativeTraceResult> {
     let (source, rewrite_specialization_flags) = select_kernel_source(options.kernel.as_deref())?;
@@ -153,6 +201,60 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
         acceleration_build_seconds: prepared.acceleration_build_seconds,
         traced_seconds,
     })
+}
+
+/// Traces a packed `FORMAT-v2` scene on the GPU using the assembled Cycles-parity WGSL kernel.
+#[napi]
+pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceOptions) -> Result<NativeTraceResult> {
+    let source = cycles::assemble_cycles_kernel_entry("main", options.bootstrap_kernel.unwrap_or(false))?;
+    let pixel_count = options.width as u64 * options.height as u64;
+    let accumulation_bytes = image_accumulation_bytes(options.width, options.height);
+    let prepared = prepare_cycles_scene(
+        &input,
+        source,
+        options.width,
+        options.height,
+        options.samples,
+        accumulation_bytes,
+    )?;
+    let groups = image_workgroups(options.width, options.height);
+    let samples_per_dispatch = options.samples_per_dispatch.unwrap_or(1).max(1);
+    let (sums, traced_seconds) = trace_cycles_samples(
+        &prepared,
+        options.samples,
+        samples_per_dispatch,
+        groups,
+        accumulation_bytes,
+        options.max_seconds,
+    )?;
+    let resolved = resolve_image(&sums, pixel_count);
+    Ok(NativeTraceResult {
+        rgba: Float32Array::new(resolved.rgba),
+        albedo: Float32Array::new(resolved.albedo),
+        normal: Float32Array::new(resolved.normal),
+        depth: Float32Array::new(resolved.depth),
+        variance: Float32Array::new(resolved.variance),
+        average_samples: resolved.average_samples,
+        adapter: prepared.adapter_name,
+        backend: prepared.backend_name,
+        features: prepared.features,
+        setup_seconds: prepared.setup_seconds,
+        compile_seconds: prepared.compile_seconds,
+        upload_seconds: prepared.upload_seconds,
+        acceleration_build_seconds: prepared.acceleration_build_seconds,
+        traced_seconds,
+    })
+}
+
+/// Dispatches `"test_lobe_samples"` on the assembled Cycles WGSL shader and returns all 4 raw `film_accumulation` planes.
+#[napi]
+pub fn probe_cycles_lobe(options: ProbeCyclesLobeOptions) -> Result<Float32Array> {
+    let source = cycles::assemble_cycles_kernel_entry(
+        "test_lobe_samples",
+        options.bootstrap_kernel.unwrap_or(false),
+    )?;
+    let raw_planes = run_cycles_lobe_probe(&options, source)?;
+    Ok(Float32Array::new(raw_planes))
 }
 
 /// The light that reaches each lightmap texel: `options.samples` cosine weighted paths from every texel, traced with the
