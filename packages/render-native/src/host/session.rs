@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use napi::Result;
 use wgpu::util::DeviceExt;
 
+use crate::cycles::{specialize_cycles_kernel, CYCLES_LUT_WORDS};
 use crate::host::accel::{
     build_acceleration_structure, build_cycles_acceleration_structure, build_empty_cycles_acceleration,
     create_vertex_buffer, unpack_triangles, CyclesAcceleration, INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS,
@@ -12,6 +15,105 @@ use crate::host::device::{failure, layout_entry, open_device, storage_buffer, st
 use crate::host::film::{image_accumulation_bytes, read_accumulation};
 use crate::host::textures::{upload_cycles_scene_buffers, upload_scene_buffers};
 use crate::{NativeTraceInput, NativeTraceInputV2, ProbeCyclesLobeOptions};
+
+// ---- In-process device and pipeline cache ----
+//
+// Opening a Vulkan device and compiling SPIR-V pipelines dominates per-call latency.
+// We cache both across back-to-back calls in the same Node process.
+//
+// wgpu 23+ backs Device and Queue with Arc, making them Clone.
+
+struct CachedDevice {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    adapter_name: String,
+    backend_name: String,
+    features: String,
+    /// Static 118,848-byte LUT storage buffer for Cycles binding 12.
+    lut_buffer: wgpu::Buffer,
+    /// Bind group layout for the Cycles kernel (bindings 0..=12).
+    cycles_bind_group_layout: wgpu::BindGroupLayout,
+    /// Compiled Cycles compute pipelines keyed by `(entry_point, specialized_source)`.
+    cycles_pipelines: HashMap<(String, String), wgpu::ComputePipeline>,
+}
+
+static DEVICE_CACHE: OnceLock<Mutex<Option<CachedDevice>>> = OnceLock::new();
+
+fn device_cache() -> &'static Mutex<Option<CachedDevice>> {
+    DEVICE_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// Returns cloned device/queue/metadata from the cache, opening once per process.
+/// On device loss the cache is invalidated and an error returned (caller retries on next call).
+fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, String)> {
+    let mut guard = device_cache().lock().unwrap();
+    // Invalidate on device loss.
+    if let Some(ref cached) = *guard {
+        if cached.device.poll(wgpu::PollType::Poll).is_err() {
+            *guard = None;
+        }
+    }
+    if guard.is_none() {
+        let (device, queue, adapter_info) = open_device()?;
+        let lut_bytes: &[u8] = bytemuck::cast_slice(&CYCLES_LUT_WORDS[..]);
+        let lut_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cycles LUT binding 12"),
+            contents: lut_bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let cycles_bind_group_layout = create_cycles_bind_group_layout(&device);
+        let has_ray_query = device.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+        *guard = Some(CachedDevice {
+            device,
+            queue,
+            adapter_name: adapter_info.name,
+            backend_name: format!("{:?}", adapter_info.backend),
+            features: if has_ray_query { "EXPERIMENTAL_RAY_QUERY".to_string() } else { String::new() },
+            lut_buffer,
+            cycles_bind_group_layout,
+            cycles_pipelines: HashMap::new(),
+        });
+    }
+    let cached = guard.as_ref().unwrap();
+    Ok((
+        cached.device.clone(),
+        cached.queue.clone(),
+        cached.adapter_name.clone(),
+        cached.backend_name.clone(),
+        cached.features.clone(),
+    ))
+}
+
+/// Looks up or compiles and caches a Cycles `ComputePipeline` for `(entry_point, specialized_source)`.
+fn get_or_compile_cycles_pipeline(entry_point: &str, specialized_source: String) -> Result<wgpu::ComputePipeline> {
+    let key = (entry_point.to_string(), specialized_source);
+    {
+        let guard = device_cache().lock().unwrap();
+        let cached = guard.as_ref().expect("device cache empty after get_cached_device");
+        if let Some(existing) = cached.cycles_pipelines.get(&key) {
+            return Ok(existing.clone());
+        }
+    }
+    let compiled = with_cycles_cache(|device, _queue, layout, _lut| {
+        compile_compute_pipeline(device, key.1.clone(), entry_point, layout)
+    })?;
+    let mut guard = device_cache().lock().unwrap();
+    if let Some(ref mut cached) = *guard {
+        cached.cycles_pipelines.insert(key, compiled.clone());
+    }
+    Ok(compiled)
+}
+
+/// Returns the cached Cycles bind group layout and LUT buffer, with cloned device/queue.
+/// Panics only if the cache is empty (should not happen after `get_cached_device` succeeds).
+fn with_cycles_cache<F, T>(f: F) -> T
+where
+    F: FnOnce(&wgpu::Device, &wgpu::Queue, &wgpu::BindGroupLayout, &wgpu::Buffer) -> T,
+{
+    let guard = device_cache().lock().unwrap();
+    let cached = guard.as_ref().expect("device cache empty after get_cached_device");
+    f(&cached.device, &cached.queue, &cached.cycles_bind_group_layout, &cached.lut_buffer)
+}
 
 const PARAMETER_BYTES: usize = 16 * 16;
 const VOLUME_DENSITY_BYTE_OFFSET: usize = 51 * 4;
@@ -128,7 +230,8 @@ fn create_cycles_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
         layout_entry(1, wgpu::BindingType::AccelerationStructure { vertex_return: false }),
     ];
     layout_entries.extend((2..=10).map(|binding| storage_entry(binding, true)));
-    layout_entries.push(storage_entry(11, false));
+    layout_entries.push(storage_entry(11, false)); // film_accumulation (read_write)
+    layout_entries.push(storage_entry(12, true));  // cycles_lut (read-only, 118 848 bytes)
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("cycles path tracer"),
         entries: &layout_entries,
@@ -207,6 +310,7 @@ fn create_cycles_bind_group(
     tlas: &wgpu::Tlas,
     buffers: &[wgpu::Buffer],
     accumulation: &wgpu::Buffer,
+    lut_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     let mut entries = vec![
         wgpu::BindGroupEntry { binding: 0, resource: parameters.as_entire_binding() },
@@ -221,6 +325,10 @@ fn create_cycles_bind_group(
     entries.push(wgpu::BindGroupEntry {
         binding: 11,
         resource: accumulation.as_entire_binding(),
+    });
+    entries.push(wgpu::BindGroupEntry {
+        binding: 12,
+        resource: lut_buffer.as_entire_binding(),
     });
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("cycles path tracer"),
@@ -420,12 +528,14 @@ pub(crate) fn prepare_cycles_scene(
         TEXTURE_DESCRIPTOR_BYTES,
     )?;
 
-    let (device, queue, adapter_info) = open_device()?;
+    // Use cached device; open once per process.
+    let (device, queue, adapter_name, backend_name, features) = get_cached_device()?;
     let setup_seconds = setup_started.elapsed().as_secs_f64();
 
     let compile_started = Instant::now();
-    let bind_group_layout = create_cycles_bind_group_layout(&device);
-    let pipeline = compile_compute_pipeline(&device, shader_source, "main", &bind_group_layout)?;
+    // Specialise the kernel source for this scene (replaces SCENE_HAS_* sentinels).
+    let specialized_source = specialize_cycles_kernel(&shader_source, input);
+    let pipeline = get_or_compile_cycles_pipeline("main", specialized_source)?;
     let compile_seconds = compile_started.elapsed().as_secs_f64();
 
     let upload_started = Instant::now();
@@ -443,16 +553,18 @@ pub(crate) fn prepare_cycles_scene(
     )?;
     let acceleration_build_seconds = build_started.elapsed().as_secs_f64();
 
-    let bind_group = create_cycles_bind_group(
-        &device,
-        &bind_group_layout,
-        &uploaded.parameters,
-        &acceleration.tlas,
-        &uploaded.buffers,
-        &uploaded.accumulation,
-    );
-    let has_ray_query = device.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
-    let features = if has_ray_query { "EXPERIMENTAL_RAY_QUERY" } else { "" };
+    // Bind group: take layout and LUT reference under a brief lock, build the group, then release.
+    let bind_group = with_cycles_cache(|device, _queue, layout, lut| {
+        create_cycles_bind_group(
+            device,
+            layout,
+            &uploaded.parameters,
+            &acceleration.tlas,
+            &uploaded.buffers,
+            &uploaded.accumulation,
+            lut,
+        )
+    });
     Ok(PreparedCyclesScene {
         device,
         queue,
@@ -460,9 +572,9 @@ pub(crate) fn prepare_cycles_scene(
         bind_group,
         accumulation: uploaded.accumulation,
         parameters: uploaded.parameters,
-        adapter_name: adapter_info.name,
-        backend_name: format!("{:?}", adapter_info.backend),
-        features: features.to_string(),
+        adapter_name,
+        backend_name,
+        features,
         setup_seconds,
         compile_seconds,
         upload_seconds,
@@ -510,7 +622,14 @@ pub(crate) fn trace_cycles_samples(
 
         sample_offset += batch_samples;
         dispatch_count += 1;
-        if dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= samples {
+        // When no time limit is set poll every 4 dispatches (excluding the final batch, which
+        // `read_accumulation` waits on directly) to drain staging belts without stalling each batch.
+        let should_poll = if max_seconds.is_some() {
+            dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= samples
+        } else {
+            sample_offset < samples && dispatch_count % SAMPLES_PER_WAIT == 0
+        };
+        if should_poll {
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
             if let Some(limit) = max_seconds {
                 if trace_started.elapsed().as_secs_f64() > limit {
@@ -553,9 +672,8 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
         }
     }
 
-    let (device, queue, _) = open_device()?;
-    let bind_group_layout = create_cycles_bind_group_layout(&device);
-    let pipeline = compile_compute_pipeline(&device, shader_source, "test_lobe_samples", &bind_group_layout)?;
+    let (device, queue, _, _, _) = get_cached_device()?;
+    let pipeline = get_or_compile_cycles_pipeline("test_lobe_samples", shader_source)?;
     let acceleration = build_empty_cycles_acceleration(&device, &queue);
     let accumulation_bytes = image_accumulation_bytes(options.width, options.height);
 
@@ -595,14 +713,17 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
-    let bind_group = create_cycles_bind_group(
-        &device,
-        &bind_group_layout,
-        &parameters,
-        &acceleration.tlas,
-        &buffers,
-        &accumulation,
-    );
+    let bind_group = with_cycles_cache(|_device, _queue, layout, lut| {
+        create_cycles_bind_group(
+            &device,
+            layout,
+            &parameters,
+            &acceleration.tlas,
+            &buffers,
+            &accumulation,
+            lut,
+        )
+    });
 
     let started = Instant::now();
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

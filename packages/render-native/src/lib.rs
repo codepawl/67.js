@@ -218,7 +218,26 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
         accumulation_bytes,
     )?;
     let groups = image_workgroups(options.width, options.height);
-    let samples_per_dispatch = options.samples_per_dispatch.unwrap_or(1).max(1);
+    let samples_per_dispatch = match options.samples_per_dispatch {
+        Some(n) => n.max(1),
+        None => {
+            // Auto-select a batch that keeps GPU utilisation high without coarse progress steps.
+            // With a wall-clock limit use step=1 for tight responsiveness below 2 s; otherwise
+            // batch by pixel count so each dispatch is a worthwhile chunk.
+            let pixel_count = options.width as u64 * options.height as u64;
+            let batch = match options.max_seconds {
+                Some(limit) if limit < 2.0 => 1,
+                _ => {
+                    if pixel_count <= 1_000_000 {
+                        options.samples.min(32)
+                    } else {
+                        options.samples.min(16)
+                    }
+                }
+            };
+            batch.max(1)
+        }
+    };
     let (sums, traced_seconds) = trace_cycles_samples(
         &prepared,
         options.samples,

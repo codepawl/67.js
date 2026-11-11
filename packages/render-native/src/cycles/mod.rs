@@ -1,11 +1,439 @@
+mod luts;
+
+pub(crate) use luts::CYCLES_LUT_WORDS;
+
 use napi::Result;
 
 use crate::host::device::failure;
+use crate::NativeTraceInputV2;
 
 const KERNEL_MANIFEST_SOURCE: &str = include_str!("kernel-manifest.txt");
 const BOOTSTRAP_MAIN_SOURCE: &str = include_str!("bootstrap_main.wgsl");
 
 include!(concat!(env!("OUT_DIR"), "/cycles_manifest_files.rs"));
+
+// ---- KernelParamsV2 byte offsets (verified against pack-input-v2.mjs and abi.wgsl) ----
+const KP_KERNEL_FLAGS_BYTE: usize = 32;    // u32[8]
+const KP_ENV_WIDTH_BYTE: usize = 192;      // u32[48]
+const KP_ENV_HEIGHT_BYTE: usize = 196;     // u32[49]
+const KP_ENV_TOTAL_WEIGHT_BYTE: usize = 220; // f32[55]
+const KP_VOLUME_DENSITY_BYTE: usize = 236;  // f32[59]
+
+// ---- MaterialRecord byte offsets (256-byte stride, verified against pack-input-v2.mjs) ----
+const MAT_METALLIC_BYTE: usize = 12;           // f32[3]
+const MAT_ANISOTROPY_BYTE: usize = 44;         // f32[11]
+const MAT_TRANSMISSION_WEIGHT_BYTE: usize = 52; // f32[13]
+const MAT_COAT_WEIGHT_BYTE: usize = 76;         // f32[19]
+const MAT_THIN_FILM_THICKNESS_BYTE: usize = 88; // f32[22]
+const MAT_SHEEN_WEIGHT_BYTE: usize = 108;       // f32[27]
+const MAT_FLAGS_BYTE: usize = 192;             // u32[48]
+const MAT_ALPHA_MODE_BYTE: usize = 196;        // u32[49]
+const MAT_METALLIC_ROUGHNESS_TEX_BYTE: usize = 212; // i32[53]
+const MAT_NORMAL_TEX_BYTE: usize = 216;        // i32[54]
+const MAT_TRANSMISSION_TEX_BYTE: usize = 224;  // i32[56]
+const MAT_COAT_ROUGHNESS_TEX_BYTE: usize = 228; // i32[57]
+const MAT_COAT_NORMAL_TEX_BYTE: usize = 236;   // i32[59]
+const MAT_SHEEN_TEX_BYTE: usize = 240;         // i32[60]
+const MAT_ANISOTROPY_TEX_BYTE: usize = 244;    // i32[61]
+const MAT_ALPHA_TEX_BYTE: usize = 248;         // i32[62]
+const MAT_BUMP_TEX_BYTE: usize = 252;          // i32[63]
+const MATERIAL_RECORD_STRIDE: usize = 256;
+
+// MaterialRecord.flags bits
+const MATERIAL_FLAG_THIN_WALLED: u32 = 2;
+const MATERIAL_FLAG_TRANSPARENT_SHADOW: u32 = 4;
+const MATERIAL_FLAG_F82_METALLIC: u32 = 32;
+
+// ---- LightRecord byte offsets (128-byte stride, verified against pack-input-v2.mjs) ----
+const LIGHT_TYPE_BYTE: usize = 12;            // u32[3]
+const LIGHT_RADIUS_BYTE: usize = 44;          // f32[11]
+const LIGHT_GROUP_MASK_LO_BYTE: usize = 120;  // u32[30]
+const LIGHT_GROUP_MASK_HI_BYTE: usize = 124;  // u32[31]
+const LIGHT_RECORD_STRIDE: usize = 128;
+
+// ---- InstanceRecord byte offsets (160-byte stride) ----
+const INSTANCE_LIGHT_GROUP_MASK_LO_BYTE: usize = 120; // u32[30]
+const INSTANCE_LIGHT_GROUP_MASK_HI_BYTE: usize = 124; // u32[31]
+const INSTANCE_RECORD_STRIDE: usize = 160;
+
+// ---- Alpha modes ----
+const ALPHA_MODE_MASK: u32 = 1;
+const ALPHA_MODE_BLEND: u32 = 2;
+
+// ---- Light types ----
+const LIGHT_TYPE_AREA_RECT: u32 = 2;
+const LIGHT_TYPE_AREA_DISK: u32 = 3;
+
+fn read_u32_le(bytes: &[u8], byte_offset: usize) -> u32 {
+    u32::from_le_bytes(bytes[byte_offset..byte_offset + 4].try_into().unwrap())
+}
+
+fn read_i32_le(bytes: &[u8], byte_offset: usize) -> i32 {
+    i32::from_le_bytes(bytes[byte_offset..byte_offset + 4].try_into().unwrap())
+}
+
+fn read_f32_le(bytes: &[u8], byte_offset: usize) -> f32 {
+    f32::from_le_bytes(bytes[byte_offset..byte_offset + 4].try_into().unwrap())
+}
+
+/// Specializes the assembled Cycles kernel source for the given scene input, replacing
+/// `const SCENE_HAS_*: bool = true;` sentinel declarations with the actual scene-derived values.
+/// The sentinel pattern is `true` (conservative default) so the kernel compiles and renders
+/// correctly even without specialization; specialization disables dead branches for performance.
+///
+/// NOTE: Only replaces in `trace_scene_cycles` / `prepare_cycles_scene`. In `probe_cycles_lobe`
+/// all flags stay `true` (which is the unspecialized default).
+pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2) -> String {
+    let kp = &input.kernel_params;
+    let mats = &input.materials;
+    let lights = &input.lights;
+    let instances = &input.instances;
+
+    // --- KernelParamsV2 fields ---
+    let kernel_flags = read_u32_le(kp, KP_KERNEL_FLAGS_BYTE);
+    let volume_density = read_f32_le(kp, KP_VOLUME_DENSITY_BYTE);
+    let env_width = read_u32_le(kp, KP_ENV_WIDTH_BYTE);
+    let env_height = read_u32_le(kp, KP_ENV_HEIGHT_BYTE);
+    let env_total_weight = read_f32_le(kp, KP_ENV_TOTAL_WEIGHT_BYTE);
+
+    let has_volume = (kernel_flags & 2) != 0 && volume_density > 0.0;
+    let has_env_importance = env_width > 0 && env_height > 0 && env_total_weight > 0.0;
+    let has_emissive_triangles = input.emissive_triangle_count > 0;
+    let has_analytic_lights = input.light_count > 0;
+
+    // --- Per-material flags ---
+    let mat_count = input.material_count as usize;
+    let mut has_alpha_mask = false;
+    let mut has_transparent = false;
+    let mut has_glass = false;
+    let mut has_coat = false;
+    let mut has_sheen = false;
+    let mut has_anisotropy = false;
+    let mut has_thin_film = false;
+    let mut has_f82 = false;
+    let mut has_normal_map = false;
+    let mut max_closure_lobes: u32 = if mat_count > 0 { 1 } else { 4 };
+
+    for m in 0..mat_count {
+        let base = m * MATERIAL_RECORD_STRIDE;
+        if base + MATERIAL_RECORD_STRIDE > mats.len() {
+            break;
+        }
+        let mat = &mats[base..base + MATERIAL_RECORD_STRIDE];
+        let metallic = read_f32_le(mat, MAT_METALLIC_BYTE);
+        let metallic_roughness_tex = read_i32_le(mat, MAT_METALLIC_ROUGHNESS_TEX_BYTE);
+        let flags = read_u32_le(mat, MAT_FLAGS_BYTE);
+        let alpha_mode = read_u32_le(mat, MAT_ALPHA_MODE_BYTE);
+        let alpha_tex = read_i32_le(mat, MAT_ALPHA_TEX_BYTE);
+        let anisotropy = read_f32_le(mat, MAT_ANISOTROPY_BYTE);
+        let anisotropy_tex = read_i32_le(mat, MAT_ANISOTROPY_TEX_BYTE);
+        let transmission_weight = read_f32_le(mat, MAT_TRANSMISSION_WEIGHT_BYTE);
+        let transmission_tex = read_i32_le(mat, MAT_TRANSMISSION_TEX_BYTE);
+        let coat_weight = read_f32_le(mat, MAT_COAT_WEIGHT_BYTE);
+        let coat_roughness_tex = read_i32_le(mat, MAT_COAT_ROUGHNESS_TEX_BYTE);
+        let thin_film_thickness = read_f32_le(mat, MAT_THIN_FILM_THICKNESS_BYTE);
+        let sheen_weight = read_f32_le(mat, MAT_SHEEN_WEIGHT_BYTE);
+        let sheen_tex = read_i32_le(mat, MAT_SHEEN_TEX_BYTE);
+        let normal_tex = read_i32_le(mat, MAT_NORMAL_TEX_BYTE);
+        let coat_normal_tex = read_i32_le(mat, MAT_COAT_NORMAL_TEX_BYTE);
+        let bump_tex = read_i32_le(mat, MAT_BUMP_TEX_BYTE);
+
+        if alpha_mode == ALPHA_MODE_MASK || alpha_tex >= 0 {
+            has_alpha_mask = true;
+        }
+        if alpha_mode == ALPHA_MODE_BLEND || (flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0 {
+            has_transparent = true;
+        }
+        if transmission_weight > 0.0 || transmission_tex >= 0 {
+            has_glass = true;
+        }
+        if coat_weight > 0.0 || coat_roughness_tex >= 0 {
+            has_coat = true;
+        }
+        if sheen_weight > 0.0 || sheen_tex >= 0 {
+            has_sheen = true;
+        }
+        if anisotropy > 0.0 || anisotropy_tex >= 0 {
+            has_anisotropy = true;
+        }
+        if thin_film_thickness > 0.0 {
+            has_thin_film = true;
+        }
+        if (flags & MATERIAL_FLAG_F82_METALLIC) != 0 {
+            has_f82 = true;
+        }
+        if normal_tex >= 0 || coat_normal_tex >= 0 || bump_tex >= 0 {
+            has_normal_map = true;
+        }
+
+        let trans_lobe = u32::from(
+            alpha_mode == ALPHA_MODE_BLEND
+                || alpha_mode == ALPHA_MODE_MASK
+                || alpha_tex >= 0
+                || (flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0,
+        );
+        let sheen_lobe = u32::from(sheen_weight > 1.0e-5 || sheen_tex >= 0);
+        let coat_lobe = u32::from(coat_weight > 1.0e-5 || coat_roughness_tex >= 0);
+        let glass_lobes = if transmission_weight > 1.0e-5 || transmission_tex >= 0 {
+            if (flags & MATERIAL_FLAG_THIN_WALLED) != 0 { 2 } else { 1 }
+        } else {
+            0
+        };
+        let pure_metal = metallic >= 1.0 - 1.0e-5 && metallic_roughness_tex < 0;
+        let pure_glass = !pure_metal && transmission_weight >= 1.0 - 1.0e-5 && transmission_tex < 0 && metallic <= 1.0e-5 && metallic_roughness_tex < 0;
+        let base_lobes = if pure_metal {
+            1
+        } else if pure_glass {
+            glass_lobes.max(1)
+        } else {
+            u32::from(metallic > 1.0e-5 || metallic_roughness_tex >= 0) + glass_lobes + 2
+        };
+        let mat_lobes = (trans_lobe + sheen_lobe + coat_lobe + base_lobes).clamp(1, 4);
+        max_closure_lobes = max_closure_lobes.max(mat_lobes);
+    }
+
+    // --- Per-light flags ---
+    let light_count = input.light_count as usize;
+    let mut has_finite_lights = false;
+
+    for l in 0..light_count {
+        let base = l * LIGHT_RECORD_STRIDE;
+        if base + LIGHT_RECORD_STRIDE > lights.len() {
+            break;
+        }
+        let light = &lights[base..base + LIGHT_RECORD_STRIDE];
+        let light_type = read_u32_le(light, LIGHT_TYPE_BYTE);
+        let radius = read_f32_le(light, LIGHT_RADIUS_BYTE);
+
+        let finite = light_type == LIGHT_TYPE_AREA_RECT
+            || light_type == LIGHT_TYPE_AREA_DISK
+            || ((light_type == 0 || light_type == 1) && radius > 0.0);
+        if finite {
+            has_finite_lights = true;
+        }
+    }
+
+    // --- Per-instance and per-light light-linking flags ---
+    let instance_count = input.instance_count as usize;
+    let mut has_light_linking = false;
+
+    for i in 0..instance_count {
+        let base = i * INSTANCE_RECORD_STRIDE;
+        if base + INSTANCE_RECORD_STRIDE > instances.len() {
+            break;
+        }
+        let inst = &instances[base..base + INSTANCE_RECORD_STRIDE];
+        let lo = read_u32_le(inst, INSTANCE_LIGHT_GROUP_MASK_LO_BYTE);
+        let hi = read_u32_le(inst, INSTANCE_LIGHT_GROUP_MASK_HI_BYTE);
+        if lo != 0xFFFFFFFF || hi != 0xFFFFFFFF {
+            has_light_linking = true;
+            break;
+        }
+    }
+    if !has_light_linking {
+        for l in 0..light_count {
+            let base = l * LIGHT_RECORD_STRIDE;
+            if base + LIGHT_RECORD_STRIDE > lights.len() {
+                break;
+            }
+            let light = &lights[base..base + LIGHT_RECORD_STRIDE];
+            let lo = read_u32_le(light, LIGHT_GROUP_MASK_LO_BYTE);
+            let hi = read_u32_le(light, LIGHT_GROUP_MASK_HI_BYTE);
+            if lo != 0xFFFFFFFF || hi != 0xFFFFFFFF {
+                has_light_linking = true;
+                break;
+            }
+        }
+    }
+
+    // --- Apply replacements ---
+    // The sentinel pattern `const SCENE_HAS_*: bool = true;` is replaced with the computed value.
+    // If the pattern is absent (kernel not yet updated), the source is returned unchanged.
+    let mut result = source.to_string();
+    macro_rules! specialize {
+        ($flag:ident, $value:expr) => {
+            let marker = concat!("const SCENE_HAS_", stringify!($flag), ": bool = true;");
+            if $value {
+                // already `true` — no replacement needed
+            } else {
+                result = result.replace(marker, concat!("const SCENE_HAS_", stringify!($flag), ": bool = false;"));
+            }
+        };
+    }
+    specialize!(VOLUME, has_volume);
+    specialize!(ALPHA_MASK, has_alpha_mask);
+    specialize!(TRANSPARENT, has_transparent);
+    specialize!(GLASS, has_glass);
+    specialize!(COAT, has_coat);
+    specialize!(SHEEN, has_sheen);
+    specialize!(ANISOTROPY, has_anisotropy);
+    specialize!(THIN_FILM, has_thin_film);
+    specialize!(F82, has_f82);
+    specialize!(NORMAL_MAP, has_normal_map);
+    specialize!(EMISSIVE_TRIANGLES, has_emissive_triangles);
+    specialize!(ANALYTIC_LIGHTS, has_analytic_lights);
+    specialize!(FINITE_LIGHTS, has_finite_lights);
+    specialize!(ENV_IMPORTANCE, has_env_importance);
+    specialize!(LIGHT_LINKING, has_light_linking);
+    if max_closure_lobes < 4 {
+        result = result.replace(
+            "const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES",
+            &format!("const MAX_CLOSURE_LOBES: u32 = {max_closure_lobes}u; // SPECIALIZE_LOBES"),
+        );
+    }
+    result
+}
+
+#[cfg(test)]
+mod specialization_tests {
+    use super::*;
+
+    fn dummy_input(kp: &[u8], mats: &[u8], lights: &[u8], instances: &[u8]) -> NativeTraceInputV2 {
+        use napi::bindgen_prelude::{Float32Array, Uint32Array, Uint8Array};
+        NativeTraceInputV2 {
+            schema_version: 2,
+            kernel_params: Uint8Array::new(kp.to_vec()),
+            instances: Uint8Array::new(instances.to_vec()),
+            instance_count: (instances.len() / INSTANCE_RECORD_STRIDE) as u32,
+            triangles: Uint8Array::new(vec![0u8; 224]),
+            triangle_count: 1,
+            materials: Uint8Array::new(mats.to_vec()),
+            material_count: (mats.len() / MATERIAL_RECORD_STRIDE) as u32,
+            emissive_triangles: Uint8Array::new(vec![0u8; 96]),
+            emissive_triangle_count: 0,
+            lights: Uint8Array::new(lights.to_vec()),
+            light_count: (lights.len() / LIGHT_RECORD_STRIDE) as u32,
+            light_tree_nodes: Uint8Array::new(vec![0u8; 64]),
+            light_tree_node_count: 1,
+            texture_descriptors: Uint8Array::new(vec![0u8; 32]),
+            texture_count: 1,
+            texture_texels: Uint32Array::new(vec![0u32; 4]),
+            environment_texels: Float32Array::new(vec![0f32; 4]),
+        }
+    }
+
+    fn make_kp(kernel_flags: u32, volume_density: f32, env_width: u32, env_height: u32, env_total_weight: f32) -> Vec<u8> {
+        let mut kp = vec![0u8; 320];
+        // magic & version at bytes 0-7
+        kp[0..4].copy_from_slice(&0x36375054u32.to_le_bytes());
+        kp[4..8].copy_from_slice(&2u32.to_le_bytes());
+        kp[KP_KERNEL_FLAGS_BYTE..KP_KERNEL_FLAGS_BYTE + 4].copy_from_slice(&kernel_flags.to_le_bytes());
+        kp[KP_VOLUME_DENSITY_BYTE..KP_VOLUME_DENSITY_BYTE + 4].copy_from_slice(&volume_density.to_bits().to_le_bytes());
+        kp[KP_ENV_WIDTH_BYTE..KP_ENV_WIDTH_BYTE + 4].copy_from_slice(&env_width.to_le_bytes());
+        kp[KP_ENV_HEIGHT_BYTE..KP_ENV_HEIGHT_BYTE + 4].copy_from_slice(&env_height.to_le_bytes());
+        kp[KP_ENV_TOTAL_WEIGHT_BYTE..KP_ENV_TOTAL_WEIGHT_BYTE + 4].copy_from_slice(&env_total_weight.to_bits().to_le_bytes());
+        kp
+    }
+
+    fn make_mat(transmission_weight: f32, coat_weight: f32, sheen_weight: f32,
+                anisotropy: f32, thin_film_thickness: f32, flags: u32,
+                alpha_mode: u32, normal_tex: i32, alpha_tex: i32) -> Vec<u8> {
+        let mut mat = vec![0u8; MATERIAL_RECORD_STRIDE];
+        mat[MAT_TRANSMISSION_WEIGHT_BYTE..MAT_TRANSMISSION_WEIGHT_BYTE + 4].copy_from_slice(&transmission_weight.to_bits().to_le_bytes());
+        mat[MAT_COAT_WEIGHT_BYTE..MAT_COAT_WEIGHT_BYTE + 4].copy_from_slice(&coat_weight.to_bits().to_le_bytes());
+        mat[MAT_SHEEN_WEIGHT_BYTE..MAT_SHEEN_WEIGHT_BYTE + 4].copy_from_slice(&sheen_weight.to_bits().to_le_bytes());
+        mat[MAT_ANISOTROPY_BYTE..MAT_ANISOTROPY_BYTE + 4].copy_from_slice(&anisotropy.to_bits().to_le_bytes());
+        mat[MAT_THIN_FILM_THICKNESS_BYTE..MAT_THIN_FILM_THICKNESS_BYTE + 4].copy_from_slice(&thin_film_thickness.to_bits().to_le_bytes());
+        mat[MAT_FLAGS_BYTE..MAT_FLAGS_BYTE + 4].copy_from_slice(&flags.to_le_bytes());
+        mat[MAT_ALPHA_MODE_BYTE..MAT_ALPHA_MODE_BYTE + 4].copy_from_slice(&alpha_mode.to_le_bytes());
+        mat[MAT_NORMAL_TEX_BYTE..MAT_NORMAL_TEX_BYTE + 4].copy_from_slice(&normal_tex.to_le_bytes());
+        mat[MAT_ALPHA_TEX_BYTE..MAT_ALPHA_TEX_BYTE + 4].copy_from_slice(&alpha_tex.to_le_bytes());
+        // All tex indices default to -1 (INVALID = 0xFFFFFFFF)
+        for &offset in &[MAT_METALLIC_ROUGHNESS_TEX_BYTE, MAT_TRANSMISSION_TEX_BYTE,
+                          MAT_COAT_ROUGHNESS_TEX_BYTE, MAT_COAT_NORMAL_TEX_BYTE,
+                          MAT_SHEEN_TEX_BYTE, MAT_ANISOTROPY_TEX_BYTE, MAT_BUMP_TEX_BYTE] {
+            if mat[offset..offset + 4] == [0u8; 4] {
+                mat[offset..offset + 4].copy_from_slice(&(-1i32).to_le_bytes());
+            }
+        }
+        mat
+    }
+
+    fn make_default_inst() -> Vec<u8> {
+        let mut inst = vec![0u8; INSTANCE_RECORD_STRIDE];
+        // Default all-ones light group mask (no linking)
+        inst[INSTANCE_LIGHT_GROUP_MASK_LO_BYTE..INSTANCE_LIGHT_GROUP_MASK_LO_BYTE + 4].copy_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        inst[INSTANCE_LIGHT_GROUP_MASK_HI_BYTE..INSTANCE_LIGHT_GROUP_MASK_HI_BYTE + 4].copy_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        inst
+    }
+
+    fn make_default_light() -> Vec<u8> {
+        let mut light = vec![0u8; LIGHT_RECORD_STRIDE];
+        light[LIGHT_GROUP_MASK_LO_BYTE..LIGHT_GROUP_MASK_LO_BYTE + 4].copy_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        light[LIGHT_GROUP_MASK_HI_BYTE..LIGHT_GROUP_MASK_HI_BYTE + 4].copy_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        light
+    }
+
+    #[test]
+    fn specialize_all_false_on_empty_opaque_scene() {
+        let kp = make_kp(0, 0.0, 0, 0, 0.0);
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let inst = make_default_inst();
+        let lights = make_default_light();
+        let input = dummy_input(&kp, &mat, &lights, &inst);
+        // Build a source with every sentinel
+        let source = "const SCENE_HAS_VOLUME: bool = true;\n\
+                      const SCENE_HAS_GLASS: bool = true;\n\
+                      const SCENE_HAS_COAT: bool = true;\n\
+                      const SCENE_HAS_SHEEN: bool = true;\n\
+                      const SCENE_HAS_ANISOTROPY: bool = true;\n\
+                      const SCENE_HAS_THIN_FILM: bool = true;\n\
+                      const SCENE_HAS_F82: bool = true;\n\
+                      const SCENE_HAS_NORMAL_MAP: bool = true;\n\
+                      const SCENE_HAS_ALPHA_MASK: bool = true;\n\
+                      const SCENE_HAS_TRANSPARENT: bool = true;\n\
+                      const SCENE_HAS_EMISSIVE_TRIANGLES: bool = true;\n\
+                      const SCENE_HAS_ANALYTIC_LIGHTS: bool = true;\n\
+                      const SCENE_HAS_FINITE_LIGHTS: bool = true;\n\
+                      const SCENE_HAS_ENV_IMPORTANCE: bool = true;\n\
+                      const SCENE_HAS_LIGHT_LINKING: bool = true;\n\
+                      const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES";
+        let result = specialize_cycles_kernel(source, &input);
+        assert!(result.contains("const SCENE_HAS_VOLUME: bool = false;"), "VOLUME should be false");
+        assert!(result.contains("const SCENE_HAS_GLASS: bool = false;"), "GLASS should be false");
+        assert!(result.contains("const SCENE_HAS_COAT: bool = false;"), "COAT should be false");
+        assert!(result.contains("const SCENE_HAS_SHEEN: bool = false;"), "SHEEN should be false");
+        assert!(result.contains("const SCENE_HAS_ANISOTROPY: bool = false;"), "ANISOTROPY should be false");
+        assert!(result.contains("const SCENE_HAS_THIN_FILM: bool = false;"), "THIN_FILM should be false");
+        assert!(result.contains("const SCENE_HAS_F82: bool = false;"), "F82 should be false");
+        assert!(result.contains("const SCENE_HAS_NORMAL_MAP: bool = false;"), "NORMAL_MAP should be false");
+        assert!(result.contains("const SCENE_HAS_ALPHA_MASK: bool = false;"), "ALPHA_MASK should be false");
+        assert!(result.contains("const SCENE_HAS_TRANSPARENT: bool = false;"), "TRANSPARENT should be false");
+        assert!(result.contains("const SCENE_HAS_EMISSIVE_TRIANGLES: bool = false;"), "EMISSIVE_TRIANGLES should be false");
+        // light_count is 1 (lights has 128 bytes) so ANALYTIC_LIGHTS=true; but no finite lights
+        assert!(result.contains("const SCENE_HAS_FINITE_LIGHTS: bool = false;"), "FINITE_LIGHTS should be false");
+        assert!(result.contains("const SCENE_HAS_ENV_IMPORTANCE: bool = false;"), "ENV_IMPORTANCE should be false");
+        assert!(result.contains("const SCENE_HAS_LIGHT_LINKING: bool = false;"), "LIGHT_LINKING should be false");
+        assert!(result.contains("const MAX_CLOSURE_LOBES: u32 = 2u; // SPECIALIZE_LOBES"), "MAX_CLOSURE_LOBES should be 2u");
+    }
+
+    #[test]
+    fn specialize_glass_and_volume_on_matching_scene() {
+        let kp = make_kp(2, 1.0, 1920, 1080, 42.0); // KERNEL_FLAG_HAS_VOLUME=2, volume>0, env
+        let mat = make_mat(0.5, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1); // transmission_weight > 0
+        let inst = make_default_inst();
+        let lights = vec![0u8; LIGHT_RECORD_STRIDE];
+        let input = dummy_input(&kp, &mat, &lights, &inst);
+        let source = "const SCENE_HAS_VOLUME: bool = true;\nconst SCENE_HAS_GLASS: bool = true;\nconst SCENE_HAS_ENV_IMPORTANCE: bool = true;";
+        let result = specialize_cycles_kernel(source, &input);
+        // These should stay true (not replaced)
+        assert!(result.contains("const SCENE_HAS_VOLUME: bool = true;"), "VOLUME should stay true");
+        assert!(result.contains("const SCENE_HAS_GLASS: bool = true;"), "GLASS should stay true");
+        assert!(result.contains("const SCENE_HAS_ENV_IMPORTANCE: bool = true;"), "ENV_IMPORTANCE should stay true");
+    }
+
+    #[test]
+    fn specialize_no_change_when_no_markers() {
+        let kp = make_kp(0, 0.0, 0, 0, 0.0);
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let inst = make_default_inst();
+        let lights = vec![0u8; LIGHT_RECORD_STRIDE];
+        let input = dummy_input(&kp, &mat, &lights, &inst);
+        let source = "fn main() { let x = 1; }";
+        let result = specialize_cycles_kernel(source, &input);
+        assert_eq!(result, source, "Source without markers should be unchanged");
+    }
+}
 
 /// Parses `kernel-manifest.txt`, stripping any UTF-8 BOM and ignoring blank lines and `#` comments, and returns relative WGSL paths in order.
 pub(crate) fn parse_kernel_manifest(manifest_text: &str) -> Vec<&str> {
