@@ -35,6 +35,7 @@ submit call fails: tell the user which launch option is missing.
 
 ## Rules
 
+- When `scene_capabilities` returns `updateAvailable`, tell the user and ask whether to update; run the command only after a yes.
 - Smallest output that meets the need: a still before a video, a 2 second slice before the full film.
   Every film round starts as a small, low-quality preview with sound; full quality only after sign-off.
 - Time is deterministic. A frame depends on its time only, so a seek gives the same pixels as the frame in a video.
