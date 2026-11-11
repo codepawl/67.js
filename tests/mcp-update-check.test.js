@@ -98,6 +98,30 @@ test('registry errors, bad bodies and thrown fetches stay silent', async () => {
   }
 });
 
+test('a failed request is remembered for a day and keeps the last known version', async () => {
+  await withCacheFolder(async cachePath => {
+    await startUpdateCheck({ currentVersion: '0.19.0', env: {}, fetchImpl: registryAnswer('0.20.0'), now: () => NOW, cachePath }).settled;
+    const offline = countingFetch(async () => { throw new Error('offline'); });
+    const later = NOW + UPDATE_CHECK_INTERVAL_MS;
+    const failed = startUpdateCheck({ currentVersion: '0.19.0', env: {}, fetchImpl: offline, now: () => later, cachePath });
+    await failed.settled;
+    assert.equal(failed.current().latest, '0.20.0');
+    assert.deepEqual(JSON.parse(await readFile(cachePath, 'utf8')), { checkedAt: later, latest: '0.20.0' });
+    const nextStart = startUpdateCheck({ currentVersion: '0.19.0', env: {}, fetchImpl: offline, now: () => later + 1, cachePath });
+    await nextStart.settled;
+    assert.equal(offline.calls.length, 1, 'no second request on the same day');
+  });
+  await withCacheFolder(async cachePath => {
+    const offline = countingFetch(async () => { throw new Error('offline'); });
+    await startUpdateCheck({ currentVersion: '0.19.0', env: {}, fetchImpl: offline, now: () => NOW, cachePath }).settled;
+    assert.deepEqual(JSON.parse(await readFile(cachePath, 'utf8')), { checkedAt: NOW, latest: null });
+    const nextStart = startUpdateCheck({ currentVersion: '0.19.0', env: {}, fetchImpl: offline, now: () => NOW + 1, cachePath });
+    await nextStart.settled;
+    assert.equal(nextStart.current(), null);
+    assert.equal(offline.calls.length, 1);
+  });
+});
+
 test('a registry that never answers is cut off at the timeout', async () => {
   await withCacheFolder(async cachePath => {
     const hanging = (url, { signal }) => new Promise((resolve, reject) => {

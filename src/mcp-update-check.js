@@ -64,7 +64,8 @@ export function updateNoticeText(updateAvailable) {
 function readCache(cachePath) {
   try {
     const cached = JSON.parse(readFileSync(cachePath, 'utf8'));
-    if (typeof cached.checkedAt === 'number' && STABLE_VERSION.test(cached.latest)) {
+    // latest is null after a failed request: the day still counts, so an offline user is asked once a day, not every start.
+    if (typeof cached.checkedAt === 'number' && (cached.latest === null || STABLE_VERSION.test(cached.latest))) {
       return cached;
     }
   } catch {
@@ -106,7 +107,7 @@ export function startUpdateCheck({
     const cached = readCache(cachePath);
     latest = cached?.latest ?? null;
     if (cached === null || now() - cached.checkedAt >= UPDATE_CHECK_INTERVAL_MS || cached.checkedAt > now()) {
-      settled = refreshCache({ fetchImpl, now, cachePath, timeoutMs }).then(found => {
+      settled = refreshCache({ fetchImpl, now, cachePath, timeoutMs, previousLatest: latest }).then(found => {
         latest = found ?? latest;
       }).catch(() => {});
     }
@@ -117,14 +118,11 @@ export function startUpdateCheck({
   };
 }
 
-async function refreshCache({ fetchImpl, now, cachePath, timeoutMs }) {
+async function refreshCache({ fetchImpl, now, cachePath, timeoutMs, previousLatest }) {
   const found = await fetchLatestVersion(fetchImpl, timeoutMs);
-  if (found === null) {
-    return null;
-  }
   try {
     await mkdir(dirname(cachePath), { recursive: true });
-    await writeFile(cachePath, JSON.stringify({ checkedAt: now(), latest: found }));
+    await writeFile(cachePath, JSON.stringify({ checkedAt: now(), latest: found ?? previousLatest }));
   } catch {
     // An unwritable cache only means the next start asks again.
   }
