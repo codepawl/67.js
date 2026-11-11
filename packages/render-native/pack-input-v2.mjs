@@ -1617,10 +1617,13 @@ function packKernelParamsV2({
   u32[70] = Math.max(1, Math.round(Number(options.adaptiveMinSamples ?? 16))) >>> 0;
   u32[71] = 0;
 
+  const rawFilterGlossy = Number(options.filterGlossy ?? options.blurGlossy ?? 1.0);
+  const filterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
+
   f32[72] = Number(options.exposure ?? 1.0);
   f32[73] = packedEnvironment.envWidth > 0 && packedEnvironment.envTotalWeight > 0 ? 1.0 : 0.0;
   u32[74] = 0;
-  u32[75] = 0;
+  f32[75] = filterGlossy;
 
   u32[76] = 0;
   u32[77] = 0;

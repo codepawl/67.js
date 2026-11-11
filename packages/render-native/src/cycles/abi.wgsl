@@ -179,7 +179,7 @@ struct KernelParamsV2 {
   film_exposure: f32,
   background_mis_weight: f32,
   sobol_table_offset: u32,
-  reserved_u0: u32,
+  filter_glossy: f32,
 
   reserved_tail: vec4<u32>,
 }

@@ -47,15 +47,15 @@ function quadGeometry(z = 0) {
   };
 }
 
-function makeCheckerRgba8(width = 4, height = 4, cutoutLeftHalf = false) {
+function makeCheckerRgba8(width = 4, height = 4, cutoutLeftHalf = false, neutralWhite = false) {
   const data = new Uint8Array(width * height * 4);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
       const bright = (x + y) % 2 === 0;
-      data[idx] = bright ? 240 : 60;
-      data[idx + 1] = bright ? 180 : 40;
-      data[idx + 2] = bright ? 100 : 20;
+      data[idx] = neutralWhite ? 255 : (bright ? 240 : 60);
+      data[idx + 1] = neutralWhite ? 255 : (bright ? 180 : 40);
+      data[idx + 2] = neutralWhite ? 255 : (bright ? 100 : 20);
       data[idx + 3] = cutoutLeftHalf && x < width / 2 ? 0 : 255;
     }
   }
@@ -449,7 +449,7 @@ test('upgradeNativeInputV1ToV2 preserves textures, lights, subsurface, volume, a
 });
 
 test('Cycles v2 host executes multi-BLAS/TLAS ray queries, cutout alpha masking, v1 auto-upgrade, and probeCyclesLobe on GPU', { skip: !findNativeAddon() }, () => {
-  const cutoutImage = makeCheckerRgba8(4, 4, true); // left half alpha=0, right half alpha=255
+  const cutoutImage = makeCheckerRgba8(4, 4, true, true); // left half alpha=0, right half opaque neutral white
   const sharedQuad = quadGeometry(0);
   const camera = createCamera({ eye: [0, 0, 2.4], target: [0, 0, 0], fov: 50 }, 16, 16);
 

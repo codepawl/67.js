@@ -66,9 +66,17 @@ export function traceNative(input, options = {}) {
     }
     return addon.traceScene(input, { width, height, samples, maxSeconds, kernel: selectedKernel });
   }
-  const v2Input = input?.schemaVersion === FORMAT_V2_VERSION
+  let v2Input = input?.schemaVersion === FORMAT_V2_VERSION
     ? input
     : upgradeNativeInputV1ToV2(input, options);
+  const explicitFilterGlossy = options.filterGlossy ?? options.blurGlossy;
+  if (input?.schemaVersion === FORMAT_V2_VERSION && explicitFilterGlossy !== undefined) {
+    const rawFilterGlossy = Number(explicitFilterGlossy);
+    const resolvedFilterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
+    const patchedParams = new Uint8Array(v2Input.kernelParams);
+    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(300, resolvedFilterGlossy, true);
+    v2Input = { ...v2Input, kernelParams: patchedParams };
+  }
   return addon.traceSceneCycles(v2Input, {
     width,
     height,
