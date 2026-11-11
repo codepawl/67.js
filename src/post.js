@@ -191,6 +191,11 @@ function explosionFunctionFor(enabledSteps) {
 function fogCodeFor(enabledSteps) {
   let declarations = '';
   let functions = '';
+  if (enabledSteps.has('volume') || enabledSteps.has('local')) {
+    const code = requireFeatureCode('volumeFog');
+    declarations += code.keyDeclarations;
+    functions += code.keyFunctions;
+  }
   if (enabledSteps.has('volume')) {
     const code = requireFeatureCode('volumeFog');
     declarations += code.postDeclarations;

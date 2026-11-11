@@ -23,7 +23,8 @@ permissions:
   issues: write
 
 concurrency:
-  group: pr-metadata
+  # One queue per pull request, so a run for one pull request never replaces the pending run of another.
+  group: pr-metadata-${{ github.event.pull_request.number || 'sweep' }}
   cancel-in-progress: false
 
 jobs:

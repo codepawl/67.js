@@ -349,9 +349,21 @@ test('a dry run changes nothing and a hold label that was added before is not ad
     files: [{ filename: 'src/lighting.js' }],
     events: [{ event: 'labeled', label: { name: 'hold:look-approval' } }],
   });
-  await checkOnePullRequest({ github: removedByOwner, repo: {}, number: 5, now: 0, reopened: false, dryRun: false, log() {} });
+  const approved = await checkOnePullRequest({ github: removedByOwner, repo: {}, number: 5, now: 0, reopened: false, dryRun: false, log() {} });
   const added = removedByOwner.calls.filter(call => call.name === 'addLabels').flatMap(call => call.params.labels);
   assert.ok(!added.includes('hold:look-approval'));
+  assert.ok(!approved.result.contributorFixes.some(item => item.id === 'look-without-image'));
+  assert.ok(!approved.result.maintainerTodos.some(todo => todo.startsWith('Look change')));
+});
+
+test('a look change the owner approved by removing the hold label needs no picture', () => {
+  const files = [file('src/lighting.js'), file('changes/12.md')];
+  const approved = checkPullRequest({ pr: pullRequest({ lookApproved: true }), files });
+  assert.deepEqual(approved.contributorFixes, []);
+  assert.ok(!approved.addLabels.includes('hold:look-approval'));
+  assert.ok(!approved.maintainerTodos.some(todo => todo.startsWith('Look change')));
+  const waiting = checkPullRequest({ pr: pullRequest({ lookApproved: false }), files });
+  assert.deepEqual(waiting.contributorFixes.map(item => item.id), ['look-without-image']);
 });
 
 test('the CI gate fails a shipped change without a note and a protected file edit', () => {

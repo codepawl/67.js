@@ -93,7 +93,7 @@ Paste the table into the pull request. The bench runs through a Claude Code logi
 
 ### Look changes
 
-A change to shaders, lighting, materials, the default render or a post step changes how every scene looks. Add a before and an after picture to the pull request. A bot adds the label `hold:look-approval`. Only the owner removes it, and nothing with that label merges.
+A change to shaders, lighting, materials, the default render or a post step changes how every scene looks. Add a before and an after picture to the pull request. A bot adds the label `hold:look-approval`. Only the owner removes it, and nothing with that label merges. Once the owner removes it, the check counts the look as approved and stops asking for pictures.
 
 ### Who runs the GPU and person checks
 

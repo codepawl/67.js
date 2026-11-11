@@ -11,7 +11,7 @@ import {
 } from './path-tracer-shading.js';
 import { buildLightTree, chooseLightFromTree, LIGHT_TREE_FIRST_HIT_LIGHTS, resolveLightSelection } from './path-tracer-light-tree.js';
 import { createRandomWalk, WALK_OUTCOME } from './path-tracer-subsurface.js';
-import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval, createLocalVolumeCrossing } from './path-tracer-volume.js';
+import { henyeyGreensteinPhase, sampleHenyeyGreensteinCosine, volumeInterval, createLocalVolumeCrossing, meanEnvironmentRadiance } from './path-tracer-volume.js';
 
 // Offline still renderer: unidirectional path tracing on the CPU with next-event estimation for every light, the
 // environment map drawn by importance, and a wavelet denoiser. It reads the same parts, materials, lights and camera
@@ -798,7 +798,15 @@ function createPathTracer(scene, options) {
     return henyeyGreensteinPhase(volume.anisotropy, cosine);
   }
 
-  const crossLocalVolumes = scene.localVolumes ? createLocalVolumeCrossing(scene.localVolumes) : null;
+  // A scattering local volume is lit by the sky's mean radiance and by the sun through a shadow ray, as the rasterizer lights it.
+  const localVolumeLighting = scene.localVolumes?.some(volume => volume.scatter > 0)
+    ? {
+      sun: lights.sun,
+      ambient: meanEnvironmentRadiance(environment),
+      sunVisibility: (pointX, pointY, pointZ) => (occluded(scene, pointX, pointY, pointZ, lights.sun.direction[0], lights.sun.direction[1], lights.sun.direction[2], scene.farDistance, shadowHit) ? 0 : 1),
+    }
+    : null;
+  const crossLocalVolumes = scene.localVolumes ? createLocalVolumeCrossing(scene.localVolumes, localVolumeLighting) : null;
   const localEmitted = new Float64Array(3);
 
   const walkSubsurface = createRandomWalk(scene, random, intersect);
