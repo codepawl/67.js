@@ -137,15 +137,56 @@ export function measureLinkMegabits(url) {
   return (entry.encodedBodySize * 8) / seconds / 1e6;
 }
 
+async function fetchFirstViewFiles(description) {
+  const paths = [description.glbFirstView];
+  try {
+    const [models, sky] = await Promise.all([Promise.all(paths.map(fetchBlob)), fetchBlob(description.hdriPreview)]);
+    return { paths, models, sky };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchWorld(descriptionUrl, { firstView = false, measureLink = measureLinkMegabits } = {}) {
   const description = await readDescription(descriptionUrl);
   if (!firstView || !hasFirstView(description)) return fetchDetail(description);
-  const paths = [description.glbFirstView];
-  const [models, sky] = await Promise.all([Promise.all(paths.map(fetchBlob)), fetchBlob(description.hdriPreview)]);
+  const firstViewFiles = await fetchFirstViewFiles(description);
+  // A first view that is missing or corrupt must not cost the visitor the hero: the full world, which the page serves anyway, takes its place.
+  if (!firstViewFiles) return fetchDetail(description);
+  const { paths, models, sky } = firstViewFiles;
   if ((measureLink(description.glbFirstView) ?? 0) > FAST_LINK_MEGABITS) return fetchDetail(description);
   const detail = fetchDetail(description);
   detail.catch(() => {});
   return { description, paths, models, sky, bytes: bytesOf(models, sky), isFirstView: true, detail };
+}
+
+// The part of a swap that holds the draws: the sky prefilter, then the parts. Resolves false when the world was freed on the way.
+// One replaceParts call, not slices: the draws are held either way, and measured on the port the slices made the hold twice as long.
+export async function replaceRendererWorld(renderer, parts, environmentMap, isFreed) {
+  const prefilterStart = performance.now();
+  await renderer.prepareEnvironmentInSlices(environmentMap, createSlicer(SLICE_MILLISECONDS));
+  recordSwapPhase('prefilter', prefilterStart);
+  if (isFreed()) return false;
+  const replaceStart = performance.now();
+  renderer.replaceParts(parts);
+  recordSwapPhase('replaceParts', replaceStart);
+  return !isFreed();
+}
+
+// Leaves the length of one phase of the swap in window.__phases, next to the laps of buildWorld, for the load measurement.
+function recordSwapPhase(name, start) {
+  const phases = globalThis.window?.__phases;
+  if (phases) phases.push(['swap', name, Math.round(start), Math.round(performance.now())]);
+}
+
+// The first draw of a swapped world at the pose of its last frame, so the next frame does not link or allocate. A world that was
+// never drawn (a page opened in a background tab) has no pose, and its first real frame does that work.
+export async function prepareFrameAtLastPose(renderer, lastDraw, frameFor) {
+  if (!lastDraw) return false;
+  const prepareStart = performance.now();
+  await renderer.prepareFrame(frameFor(lastDraw.camera, lastDraw.seconds));
+  recordSwapPhase('prepareFrame', prepareStart);
+  return true;
 }
 
 async function parseFiles(download, sharedTextures) {
@@ -272,9 +313,8 @@ export async function buildWorld(download, canvas, overrides = {}) {
       if (disposed) return false;
       drawsHeld = true;
       try {
-        await renderer.prepareEnvironmentInSlices(fullMap, createSlicer(SLICE_MILLISECONDS));
-        if (disposed) return false;
-        renderer.replaceParts(fullWhole.parts);
+        const replaced = await replaceRendererWorld(renderer, fullWhole.parts, fullMap, () => disposed);
+        if (!replaced) return false;
         detachReflection();
         detachReflection = attachWaterReflection(renderer, fullWhole.surface);
         effects = fullEffects;
@@ -282,8 +322,7 @@ export async function buildWorld(download, canvas, overrides = {}) {
         animationOrigin = null;
         upgradedMap = fullMap;
         isFirstView = false;
-        const pose = lastDraw?.camera ?? { eye: frame.eye, target: frame.target, fov: frame.fov };
-        await renderer.prepareFrame(frameFor(pose, lastDraw?.seconds ?? 0));
+        await prepareFrameAtLastPose(renderer, lastDraw, frameFor);
         return !disposed;
       } catch (error) {
         // A world freed in the middle of its swap has no renderer left to finish on: that ends the swap, it does not fail it.

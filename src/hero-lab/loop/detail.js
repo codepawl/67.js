@@ -41,3 +41,15 @@ export async function completeDetail({
     }
   }
 }
+
+// Builds a downloaded world. A first view that does not parse or upload is not the end of the hero: the full world, which is already
+// on its way, is built instead. Resolves with the world and the download it was built from.
+export async function buildWithFallback(download, build) {
+  try {
+    return { world: await build(download), builtFrom: download };
+  } catch (error) {
+    if (!download.isFirstView) throw error;
+    const fullDownload = await download.detail;
+    return { world: await build(fullDownload), builtFrom: fullDownload };
+  }
+}

@@ -10,7 +10,7 @@ import { createFlight } from './loop/camera.js';
 import { buildWorld, fetchDetail, fetchWorld } from './loop/world.js';
 import { createPlayOnDemand } from './loop/play-on-demand.js';
 import { advanceHold } from './loop/hold.js';
-import { completeDetail } from './loop/detail.js';
+import { buildWithFallback, completeDetail } from './loop/detail.js';
 
 const parameters = new URLSearchParams(location.search);
 const captureMode = parameters.has('capture');
@@ -97,7 +97,7 @@ function prepare(index, { immediately = false, firstView = false } = {}) {
       await entry.permission;
       if (entry.skipped) return;
       const started = performance.now();
-      const world = await buildFrom(download);
+      const { world, builtFrom } = await buildWithFallback(download, buildFrom);
       await new Promise(resolve => setTimeout(resolve, 0));
       // The world joins the loop only after its first draw has linked every program and allocated every target, so the fade never waits on the driver.
       const warmStarted = performance.now();
@@ -108,8 +108,8 @@ function prepare(index, { immediately = false, firstView = false } = {}) {
         return;
       }
       entry.world = world;
-      if (download.isFirstView) entry.detail = followDetail(entry, download);
-      note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started), firstView: Boolean(download.isFirstView) });
+      if (builtFrom.isFirstView) entry.detail = followDetail(entry, builtFrom);
+      note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started), firstView: Boolean(builtFrom.isFirstView) });
       loopState.peakWorlds = Math.max(loopState.peakWorlds, loopState.worldsAlive());
     })
     .catch(error => {

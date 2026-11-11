@@ -9,6 +9,7 @@
 // up, with brotli for text, as a CDN would. Network time comes from the DevTools throttle, which GPU load does not change.
 //   posterEndMs    responseEnd of the poster image
 //   firstFrameMs   the first draw on a world canvas (the first live 3D frame)
+//   swapMs, swapHeldMs, swapLongestGapMs   how long the swap to the full world took, how long its draws were held (sky prefilter, replaceParts, prepared draw), and the longest gap between animation frames around it
 //   detailMs       when the full world is drawn (the 'detailed' loop event); without staged loading it equals firstFrameMs
 //   bytesBeforeFirstFrame, bytesTotal   transfer bytes (compressed size on the wire) up to the first live frame, and up to detailMs
 import { createServer } from 'node:http';
@@ -87,6 +88,15 @@ async function startServer(root) {
 // first live 3D frame a visitor sees. The poster fades out only after that.
 function installFrameTimer(marker) {
   window.__firstWorldDraw = null;
+  // Gaps between animation frames over 50 ms: the main thread was blocked. The swap to the full world should leave none that is long.
+  window.__frameGaps = [];
+  let previousFrameAt = performance.now();
+  const watchFrameGaps = now => {
+    if (now - previousFrameAt > 50) window.__frameGaps.push([Math.round(previousFrameAt), Math.round(now - previousFrameAt)]);
+    previousFrameAt = now;
+    requestAnimationFrame(watchFrameGaps);
+  };
+  requestAnimationFrame(watchFrameGaps);
   new MutationObserver(() => {
     if (window.__firstWorldDraw === null && document.querySelector('#stage')?.dataset.live === 'true') {
       window.__firstWorldDraw = performance.now();
@@ -143,7 +153,9 @@ async function measureOnce(browser, options, viewportName, conditionName) {
     const events = window.__loop?.events ?? [];
     const detailed = events.find(event => event.kind === 'detailed');
     const failed = events.find(event => event.kind === 'failed');
-    return { first: window.__firstWorldDraw, detailed: detailed?.at ?? null, failed: failed?.message ?? null, state: window.__loop?.detail?.() ?? null, mode: window.__heroMode };
+    const swapEnd = detailed?.at ?? Infinity;
+    const swapGaps = (window.__frameGaps ?? []).filter(([at, gap]) => at + gap > swapEnd - (detailed?.ms ?? 0) - 100 && at < swapEnd + 100);
+    return { first: window.__firstWorldDraw, detailed: detailed?.at ?? null, swapMs: detailed?.ms ?? null, swapHeldMs: (window.__phases ?? []).filter(phase => phase[0] === "swap").reduce((total, phase) => total + phase[3] - phase[2], 0), swapLongestGapMs: swapGaps.length ? Math.max(...swapGaps.map(([, gap]) => gap)) : 0, failed: failed?.message ?? null, state: window.__loop?.detail?.() ?? null, mode: window.__heroMode };
   });
   const deadline = Date.now() + options.timeoutSeconds * 1000;
   let status = await finished();
@@ -164,6 +176,9 @@ async function measureOnce(browser, options, viewportName, conditionName) {
     posterEndMs: poster,
     firstFrameMs,
     detailMs,
+    swapMs: status.swapMs,
+    swapLongestGapMs: status.swapLongestGapMs,
+    swapHeldMs: status.swapHeldMs,
     bytesBeforeFirstFrame: bytes.atFirstFrame,
     bytesAtDetail: detailMs === null ? null : bytesAt(bytes, detailMs),
     errors: [...errors, ...(status.failed ? [status.failed] : [])],
@@ -193,6 +208,9 @@ async function runMatrix(browser, options) {
         firstFrameMs: median(runs.map(run => run.firstFrameMs)),
         firstFrameRangeMs: [Math.min(...runs.map(run => run.firstFrameMs ?? Infinity)), Math.max(...runs.map(run => run.firstFrameMs ?? 0))],
         detailMs: median(runs.map(run => run.detailMs)),
+        swapMs: median(runs.map(run => run.swapMs)),
+        swapHeldMs: median(runs.map(run => run.swapHeldMs)),
+        swapLongestGapMs: median(runs.map(run => run.swapLongestGapMs)),
         detailRangeMs: [Math.min(...runs.map(run => run.detailMs ?? Infinity)), Math.max(...runs.map(run => run.detailMs ?? 0))],
         bytesBeforeFirstFrame: median(runs.map(run => run.bytesBeforeFirstFrame)),
         bytesAtDetail: median(runs.map(run => run.bytesAtDetail)),

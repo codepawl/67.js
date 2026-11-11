@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { afterEach, beforeEach, test } from 'node:test';
-import { completeDetail } from '../src/hero-lab/loop/detail.js';
+import { buildWithFallback, completeDetail } from '../src/hero-lab/loop/detail.js';
 import { advanceHold, FIRST_VIEW_COVERS_SECONDS, HOLD_FROM_SECONDS, HOLD_RATE, holdTargetRate } from '../src/hero-lab/loop/hold.js';
-import { FAST_LINK_MEGABITS, fetchWorld, hasFirstView } from '../src/hero-lab/loop/world.js';
+import { FAST_LINK_MEGABITS, fetchWorld, hasFirstView, prepareFrameAtLastPose, replaceRendererWorld } from '../src/hero-lab/loop/world.js';
 
 const DESCRIPTION_URL = '/showcase/port/scene.json';
 const description = {
@@ -247,4 +247,66 @@ test('the first view the port description names exists and stays within its byte
   const firstViewBytes = statSync(new URL(`../public${published.glbFirstView}`, import.meta.url)).size;
   assert.ok(firstViewBytes <= 2_100_000, `first view is ${firstViewBytes} bytes`);
   assert.ok(existsSync(new URL(`../public${published.hdriPreview}`, import.meta.url)));
+});
+
+test('fetchWorld falls back to the full world when the first view model or sky is missing', async () => {
+  for (const missing of [description.glbFirstView, description.hdriPreview]) {
+    installFetch();
+    const original = globalThis.fetch;
+    globalThis.fetch = url => (url === missing ? Promise.resolve({ ok: false, status: 404 }) : original(url));
+    const download = await fetchWorld(DESCRIPTION_URL, { firstView: true, measureLink: slowLink });
+    assert.equal(download.isFirstView, undefined, missing);
+    assert.deepEqual(download.paths, [description.glb, ...description.glbRest], missing);
+  }
+});
+
+test('a first view that fails to build is replaced by the full world, and a full world that fails to build is not hidden', async () => {
+  const firstViewDownload = { isFirstView: true, detail: Promise.resolve({ id: 'full' }) };
+  const built = [];
+  const build = async download => {
+    built.push(download);
+    if (download.isFirstView) throw new Error('first view does not parse');
+    return { world: download.id };
+  };
+  const result = await buildWithFallback(firstViewDownload, build);
+  assert.deepEqual(result.world, { world: 'full' });
+  assert.equal(result.builtFrom.isFirstView, undefined);
+  assert.equal(built.length, 2);
+  await assert.rejects(buildWithFallback({ id: 'full' }, async () => { throw new Error('full does not parse'); }), /full does not parse/);
+});
+
+function fakeRenderer(calls) {
+  return {
+    prepareEnvironmentInSlices: async () => { calls.push('environment'); },
+    replaceParts: () => { calls.push('replaceParts'); },
+    prepareFrame: async () => { calls.push('prepareFrame'); },
+  };
+}
+
+const fakeParts = [{ geometry: { indices: [0, 1, 2] } }, { geometry: { indices: [0, 1, 2] } }];
+
+test('the swap prefilters the sky before it replaces the parts, and stops when the world is freed on the way', async () => {
+  const calls = [];
+  assert.equal(await replaceRendererWorld(fakeRenderer(calls), fakeParts, {}, () => false), true);
+  assert.equal(calls[0], 'environment');
+  assert.ok(calls.length > 1 && calls.slice(1).every(name => name === 'replaceParts'));
+  const freedCalls = [];
+  assert.equal(await replaceRendererWorld(fakeRenderer(freedCalls), fakeParts, {}, () => true), false);
+  assert.deepEqual(freedCalls, ['environment']);
+});
+
+test('the swap prepares a draw at the last pose, and none when the world was never drawn', async () => {
+  const calls = [];
+  const frames = [];
+  const frameFor = (camera, seconds) => {
+    frames.push([camera, seconds]);
+    return { camera };
+  };
+  assert.equal(await prepareFrameAtLastPose(fakeRenderer(calls), null, frameFor), false);
+  assert.deepEqual(calls, []);
+  assert.equal(frames.length, 0, 'no pose, so no frame is built from a missing eye');
+  const camera = { eye: [1, 2, 3], target: [0, 0, 0], fov: 40 };
+  assert.equal(await prepareFrameAtLastPose(fakeRenderer(calls), { camera, seconds: 7 }, frameFor), true);
+  assert.deepEqual(calls, ['prepareFrame']);
+  assert.deepEqual(frames, [[camera, 7]]);
 });
