@@ -136,6 +136,8 @@ pub struct NativeTraceResult {
     pub variance: Float32Array,
     /// The mean number of samples a pixel drew: below the requested count when `noise_threshold` stopped converged pixels.
     pub average_samples: f64,
+    /// The samples each dispatch drew, as given or as chosen automatically (Cycles kernel only; absent for the legacy kernel).
+    pub samples_per_dispatch: Option<u32>,
     pub adapter: String,
     pub backend: String,
     /// "EXPERIMENTAL_RAY_QUERY" when the device the trace ran on was opened with ray queries (the tracer needs them).
@@ -192,6 +194,7 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
         depth: Float32Array::new(resolved.depth),
         variance: Float32Array::new(resolved.variance),
         average_samples: resolved.average_samples,
+        samples_per_dispatch: None,
         adapter: prepared.adapter_name,
         backend: prepared.backend_name,
         features: prepared.features,
@@ -254,6 +257,7 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
         depth: Float32Array::new(resolved.depth),
         variance: Float32Array::new(resolved.variance),
         average_samples: resolved.average_samples,
+        samples_per_dispatch: Some(samples_per_dispatch),
         adapter: prepared.adapter_name,
         backend: prepared.backend_name,
         features: prepared.features,
