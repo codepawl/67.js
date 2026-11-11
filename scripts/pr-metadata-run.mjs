@@ -1,7 +1,7 @@
 // GitHub glue of the `PR metadata` workflow. It reads a pull request and its file list through the API, never checks out the
 // pull request's code, and runs the pure rules of pr-metadata-check.mjs and pr-metadata-flow.mjs on them.
 // `github` is the Octokit client that actions/github-script passes in. Tests pass a fake with the same few methods.
-import { checkPullRequest, isAutoCloseExempt, LOOK_HOLD_LABEL } from './pr-metadata-check.mjs';
+import { checkPullRequest, isAutoCloseExempt, isLookPath, LOOK_HOLD_LABEL } from './pr-metadata-check.mjs';
 import {
   CLOSE_MARKER,
   REMINDER_MARKER,
@@ -30,10 +30,13 @@ function toCheckInput(pullRequest, files) {
   };
 }
 
-// The owner may remove hold:look-approval. Add it only if it was never added, so a removal sticks.
-async function labelWasEverAdded({ github, repo, number, label }) {
+// Only the owner removes hold:look-approval, after seeing the pictures. A look change whose hold label was added and is gone
+// now is approved: the removal sticks and no picture is asked for again.
+async function lookWasApproved({ github, repo, number, input }) {
+  const touchesLook = input.files.some(file => isLookPath(file.filename));
+  if (!touchesLook || input.pr.labels.includes(LOOK_HOLD_LABEL)) return false;
   const events = await github.paginate(github.rest.issues.listEvents, { ...repo, issue_number: number, per_page: 100 });
-  return events.some(event => event.event === 'labeled' && event.label?.name === label);
+  return events.some(event => event.event === 'labeled' && event.label?.name === LOOK_HOLD_LABEL);
 }
 
 export async function checkOnePullRequest({ github, repo, number, now, reopened, dryRun, log }) {
@@ -41,6 +44,7 @@ export async function checkOnePullRequest({ github, repo, number, now, reopened,
   if (pullRequest.state !== 'open') return { skipped: 'closed' };
   const files = await github.paginate(github.rest.pulls.listFiles, { ...repo, pull_number: number, per_page: 100 });
   const input = toCheckInput(pullRequest, files);
+  input.pr.lookApproved = await lookWasApproved({ github, repo, number, input });
   const result = checkPullRequest(input);
   const exempt = isAutoCloseExempt(input.pr);
   const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: number, per_page: 100 });
@@ -61,10 +65,7 @@ export async function checkOnePullRequest({ github, repo, number, now, reopened,
     if (!dryRun) await action();
   };
 
-  let addLabels = result.addLabels;
-  if (addLabels.includes(LOOK_HOLD_LABEL) && await labelWasEverAdded({ github, repo, number, label: LOOK_HOLD_LABEL })) {
-    addLabels = addLabels.filter(label => label !== LOOK_HOLD_LABEL);
-  }
+  const addLabels = result.addLabels;
   if (addLabels.length > 0) {
     await act(`add labels ${addLabels.join(', ')}`, () => github.rest.issues.addLabels({ ...repo, issue_number: number, labels: addLabels }));
   }

@@ -1,7 +1,9 @@
 // Checks the description and the files of a pull request against CONTRIBUTING.md. Pure: it reads no network and no disk,
 // so tests call it with plain objects. The `PR metadata` workflow (.github/workflows/pr-metadata.yml) runs it on the base branch.
 //
-// Input:  { pr: { body, title, author, authorAssociation, labels, milestone, draft }, files: [{ filename, additions, deletions }] }
+// Input:  { pr: { body, title, author, authorAssociation, labels, milestone, draft, lookApproved }, files: [{ filename, additions, deletions }] }
+//         lookApproved is true when hold:look-approval was added and the owner removed it later. The pictures were then
+//         reviewed, so the look change needs no picture in the description and no new hold label.
 // Output: { contributorFixes: [{ id, message, docsAnchor }], maintainerTodos: [string], addLabels: [string], removeLabels: [string] }
 //
 // A contributor fix is something the author can change. Labels and the milestone are the maintainer's job, so a gap there
@@ -167,7 +169,7 @@ function contributorFixesFor(pr, files, light) {
   }
 
   const touchesLook = paths.some(isLookPath);
-  if (touchesLook && !imagePattern.test(body)) {
+  if (touchesLook && !pr.lookApproved && !imagePattern.test(body)) {
     fixes.push(fix(
       'look-without-image',
       'This changes how a scene looks, so add a before and an after picture to the description.',
@@ -184,7 +186,7 @@ function maintainerTodosFor(pr, files, contributorFixes) {
   if (!labels.some(label => ['bug', 'enhancement', 'documentation'].includes(label))) todos.push('Set a type label (bug, enhancement or documentation).');
   if (!pr.milestone) todos.push('Set a milestone.');
   const paths = files.map(file => normalizePath(file.filename));
-  if (paths.some(isLookPath)) todos.push('Look change: only the owner removes hold:look-approval after seeing the pictures.');
+  if (!pr.lookApproved && paths.some(isLookPath)) todos.push('Look change: only the owner removes hold:look-approval after seeing the pictures.');
   const needsToolBench = paths.some(path => toolOrSkillPathPattern.test(path));
   if (needsToolBench && contributorFixes.length === 0 && benchOptOutPattern.test(pr.body ?? '')) {
     todos.push('Run the agent bench for this pull request (bench/agent-modeling).');
@@ -204,7 +206,8 @@ export function checkPullRequest({ pr, files }) {
   if (classificationMissing && !labels.includes(NEEDS_TRIAGE_LABEL)) addLabels.push(NEEDS_TRIAGE_LABEL);
   if (!classificationMissing && labels.includes(NEEDS_TRIAGE_LABEL)) removeLabels.push(NEEDS_TRIAGE_LABEL);
 
-  if (files.some(file => isLookPath(file.filename)) && !labels.includes(LOOK_HOLD_LABEL)) addLabels.push(LOOK_HOLD_LABEL);
+  const needsHold = !pr.lookApproved && files.some(file => isLookPath(file.filename));
+  if (needsHold && !labels.includes(LOOK_HOLD_LABEL)) addLabels.push(LOOK_HOLD_LABEL);
 
   if (!isAutoCloseExempt(pr)) {
     if (contributorFixes.length > 0 && !labels.includes(NEEDS_AUTHOR_LABEL)) addLabels.push(NEEDS_AUTHOR_LABEL);
