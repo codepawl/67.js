@@ -112,7 +112,7 @@ async function runCli() {
   const traceSource = await reconstructTraceSceneSource(description);
   const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, options.width, options.height);
-  const nativeInput = packSceneForKernel(traceScene, camera, options);
+  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, parts: traceSource.parts });
   const sceneBuildSeconds = (performance.now() - buildStarted) / 1000;
   const traced = renderNative.traceNative(nativeInput, {
     width: options.width,

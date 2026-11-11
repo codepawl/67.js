@@ -552,7 +552,7 @@ async function runFurnaceSceneCase(sceneCase, sphereGeometry, whiteEnvironment, 
     maxSeconds: 300,
   };
   const nativeInput = typeof renderNative.buildNativeInputV2 === 'function'
-    ? renderNative.buildNativeInputV2(traceScene, camera, traceOptions, packModule)
+    ? renderNative.buildNativeInputV2(traceScene, camera, { ...traceOptions, parts }, packModule)
     : renderNative.buildNativeInput(traceScene, camera, traceOptions, packModule);
   const traced = renderNative.traceNative(nativeInput, traceOptions);
   const pixelCount = options.sceneWidth * options.sceneHeight;
