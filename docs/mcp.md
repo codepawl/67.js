@@ -197,7 +197,7 @@ Nested `volumeFog` and `bloom` fields merge. `pointLights` replaces the complete
 
 `environment.lines` turns on outlines, toon light and polylines, and `lines: null` removes them. A material takes `toon` for its own light steps. The code loads only for a recipe that uses either. See [line art](line-art.md).
 
-`postPasses` (set with `set-post-passes`, `null` clears) adds full-screen GLSL passes after the finished frame. See [user passes](user-passes.md) for the rules. A compile failure comes back as `renderError` with the log mapped to the snippet's lines, and the session stays usable.
+`postPasses` (set with `set-post-passes`, `null` clears) adds full-screen GLSL passes after the finished frame. A pass may list `objects` (part names) to read which part is under a pixel with `objectSlotAt`. See [user passes](user-passes.md) for the rules. A compile failure comes back as `renderError` with the log mapped to the snippet's lines, and the session stays usable.
 
 The preview allocates depth support at creation so enabling fog does not recreate render targets.
 Active volume fog requires HDR support. Unsupported previews reject that edit before committing.

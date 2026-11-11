@@ -322,7 +322,8 @@ vec3 terrainNoise(vec2 position) {
 // Wind ripples the mesh is too coarse to carry: eight travelling waves from 3 m down to 0.15 m, about 0.15 rms slope in all, which
 // is what breaks a sun glint into facets. The wavelengths step by an irrational ratio and the directions by the golden angle, and
 // each wave's phase and strength drift with slow noise, so no pair of waves repeats the same blob pattern over the water. A wave
-// fades out once a pixel is wider than a quarter of its length, so far water does not shimmer; the slope variance the faded waves
+// stays whole while a pixel is under a fifth of its length and is gone at half (two pixels per wave, the limit of one sample per
+// pixel), so far water does not shimmer but keeps every wave a pixel can still show; the slope variance the faded waves
 // took with them comes back as lostVariance, to widen the glint instead.
 vec2 waterDetailSlope(vec2 position, float footprint, out float lostVariance) {
   vec2 slope = vec2(0.0);
@@ -330,7 +331,7 @@ vec2 waterDetailSlope(vec2 position, float footprint, out float lostVariance) {
   float wavenumber = 2.1;
   float angle = 0.4;
   for (int index = 0; index < 8; index++) {
-    float visible = 1.0 - smoothstep(0.06, 0.2, footprint * wavenumber / 6.2831853);
+    float visible = 1.0 - smoothstep(0.2, 0.5, footprint * wavenumber / 6.2831853);
     vec2 direction = vec2(cos(angle), sin(angle));
     float drift = terrainNoise(position * wavenumber * 0.09 + float(index) * 9.17).x - 0.5;
     float strength = 0.15 + 1.7 * terrainNoise(position * wavenumber * 0.06 + float(index) * 23.9 + 4.0).x;

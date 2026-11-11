@@ -60,8 +60,22 @@ function creatureSample() {
     when: { type: 'enter', zone: `coin-zone-${index + 1}`, tag: 'player' },
     do: [{ type: 'add', variable: 'score', value: 1 }, { type: 'hide', part: `coin-${index + 1}` }],
   }));
+  // The head bobs while the creature moves: the exported page must play this graph, not only carry it.
+  const HEAD_REST = [0, 0.35, -0.6];
+  const HEAD_BOB_HEIGHT = 0.2;
+  const animation = {
+    clips: {
+      idle: { duration: 1, loop: true, tracks: [{ target: 'head', property: 'translation', keyframes: [{ time: 0, value: HEAD_REST }, { time: 1, value: HEAD_REST }] }] },
+      bob: {
+        duration: 0.5, loop: true,
+        tracks: [{ target: 'head', property: 'translation', keyframes: [{ time: 0, value: HEAD_REST }, { time: 0.25, value: [0, HEAD_REST[1] + HEAD_BOB_HEIGHT, HEAD_REST[2]] }, { time: 0.5, value: HEAD_REST }] }],
+      },
+    },
+    parameters: { speed: { type: 'number' } },
+    layers: [{ name: 'base', states: [{ name: 'move', blend: { parameter: 'speed', motions: [{ clip: 'idle', threshold: 0 }, { clip: 'bob', threshold: 1 }] } }] }],
+  };
   const game = {
-    player: { node: 'creature', footOffset: 0.5 },
+    player: { node: 'creature', footOffset: 0.5, animation },
     camera: 'follow',
     input: 'keyboard',
     rules: {
@@ -75,7 +89,7 @@ function creatureSample() {
   };
   // Hold forward and run from sample 1, press jump at sample 40, and let go at sample 240.
   const replay = { version: 1, samples: 260, truncated: false, events: [[1, 'keyboard/KeyW', 1], [1, 'keyboard/ShiftLeft', 1], [40, 'keyboard/Space', 1], [42, 'keyboard/Space', 0], [240, 'keyboard/KeyW', 0], [240, 'keyboard/ShiftLeft', 0]] };
-  return { recipe, game, replay, title: 'Creature run', expectedScore: 3 };
+  return { recipe, game, replay, title: 'Creature run', expectedScore: 3, headRestHeight: HEAD_REST[1] };
 }
 
 function driveSample() {
@@ -115,7 +129,7 @@ function driveSample() {
 const SAMPLES = { creature: creatureSample, drive: driveSample };
 const sampleName = process.argv[3] ?? 'creature';
 assert.ok(SAMPLES[sampleName], `Unknown sample "${sampleName}". Use one of: ${Object.keys(SAMPLES).join(', ')}.`);
-const { recipe, game, replay, title, expectedScore } = SAMPLES[sampleName]();
+const { recipe, game, replay, title, expectedScore, headRestHeight } = SAMPLES[sampleName]();
 
 function serveFolder(folder) {
   const server = createServer(async (request, response) => {
@@ -160,6 +174,13 @@ try {
   page.on('pageerror', error => problems.push(error.message));
   page.on('console', message => { if (message.type() === 'error') problems.push(message.text()); });
   await page.goto(`http://127.0.0.1:${server.address().port}/?replay=replay.json`);
+  if (headRestHeight !== undefined) {
+    // While the replay runs, the speed parameter rises and the bob clip lifts the head off its rest height.
+    await page.waitForFunction(restHeight => {
+      const head = window.__game?.scene.exportRecipe().nodes.find(node => node.id === 'head');
+      return head && Math.abs(head.translation[1] - restHeight) > 0.02;
+    }, headRestHeight, { timeout: 60000, polling: 'raf' });
+  }
   await page.waitForFunction(() => window.__game?.rules?.state.status === 'won', null, { timeout: 60000 }).catch(async error => {
     const snapshot = await page.evaluate(() => ({ rules: window.__game?.rules?.state, player: window.__game?.controller?.state?.position })).catch(() => null);
     throw new Error(`${error.message}\npage problems: ${problems.join(' | ')}\nstate: ${JSON.stringify(snapshot)}`);
@@ -168,6 +189,10 @@ try {
   assert.equal(state.status, 'won');
   assert.equal(state.variables.score, expectedScore);
   assert.deepEqual(problems, []);
+  if (game.player.animation) {
+    const speed = await page.evaluate(() => window.__game.animation.get('speed'));
+    assert.ok(speed >= 0, 'the exported page has a live animation graph with a speed parameter');
+  }
   await page.screenshot({ path: join(directory, 'won.png') });
   console.log(JSON.stringify({ ok: true, bytes: exported.bytes, files: exported.files, step: state.step, screenshot: join(directory, 'won.png') }));
 } catch (error) {

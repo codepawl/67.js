@@ -1,4 +1,5 @@
 import { MATERIAL_GRAPH_LIMITS, MATERIAL_GRAPH_OUTPUTS, MATERIAL_GRAPH_OPERATORS } from './agent-scene-capabilities.js';
+import { EMISSION_FRESNEL_IOR_RANGE } from './material-layers.js';
 import { clampUnit, smoothStep, wrapCell, hashCell, cellularNoise, linearToSrgbByte, createImage, normalMapFromHeightFunction } from './material-texture-kit.js';
 
 // A bounded material node graph. Like a field expression (src/mesh-fields.js), a graph is data and never code: it is
@@ -577,6 +578,37 @@ function compileImage(node, state, depth) {
   return vectorValue(at(0, srgbToLinear), at(1, srgbToLinear), at(2, srgbToLinear));
 }
 
+// Fresnel depends on the angle between the view and the surface, which a texture baked from u and v cannot hold. The
+// renderers evaluate it per pixel instead, so it is accepted only as a factor of emission: {"fresnel":{"ior":1.5}} on
+// its own, or in a "mul" with the rest of the emission. The graph bakes the rest; the factor travels as emissionFresnel.
+function readFresnelIor(node) {
+  const settings = textureSettings(node, 'fresnel', ['ior']);
+  const [minimum, maximum] = EMISSION_FRESNEL_IOR_RANGE;
+  const ior = settings.ior ?? 1.5;
+  if (typeof ior !== 'number' || !Number.isFinite(ior) || ior < minimum || ior > maximum) {
+    throw graphError(`fresnel ior must be a number from ${minimum} to ${maximum}, got ${describeKey(ior)}. Use 1.5 for glass.`);
+  }
+  return ior;
+}
+
+function isFresnelNode(node) {
+  return isPlainObject(node) && Object.keys(node).length === 1 && Object.hasOwn(node, 'fresnel');
+}
+
+function compileFresnelOutsideEmission() {
+  throw graphError('fresnel depends on the view angle and renders per pixel, so it only works as a factor of emission, such as {"emission":{"mul":[[1,0.6,0.2],{"fresnel":{"ior":1.5}}]}}.');
+}
+
+// Splits an emission node into what bakes and the fresnel IOR the renderer applies, or returns it unchanged.
+function splitEmissionFresnel(node) {
+  if (isFresnelNode(node)) return { base: 1, ior: readFresnelIor(node) };
+  const operands = isPlainObject(node) && Object.keys(node).length === 1 ? node.mul : undefined;
+  if (!Array.isArray(operands) || operands.length !== 2) return { base: node };
+  const fresnelSlot = operands.findIndex(isFresnelNode);
+  if (fresnelSlot < 0) return { base: node };
+  return { base: operands[1 - fresnelSlot], ior: readFresnelIor(operands[fresnelSlot]) };
+}
+
 const TEXTURE_COMPILERS = new Map([
   ['image', compileImage], ['noise', compileNoise], ['whiteNoise', compileWhiteNoise], ['brick', compileBrick], ['voronoi', compileVoronoi], ['wave', compileWave], ['checker', compileChecker], ['gradient', compileGradient],
 ]);
@@ -607,6 +639,7 @@ function compileNode(node, state, depth) {
   if (name === 'layer') return compileLayer(node, state, depth);
   if (name === 'hue') return compileHue(node, state, depth);
   if (name === 'curve') return compileCurve(node, state, depth);
+  if (name === 'fresnel') return compileFresnelOutsideEmission();
   if (TEXTURE_COMPILERS.has(name)) return TEXTURE_COMPILERS.get(name)(node, state, depth);
   if (MATH_OPERATORS.has(name)) return compileMath(name, node, state, depth);
   throw graphError(`unknown operator ${describeKey(name)}. Use one of ${MATERIAL_GRAPH_OPERATORS.join(', ')}.`);
@@ -616,7 +649,7 @@ const SCALAR_OUTPUTS = ['roughness', 'metallic', 'height', 'opacity', 'clearcoat
 
 /**
  * Check a graph and compile each output. `size` is the metres one texture tile covers, which object and world coordinates report. Limits on nodes, depth and work per pixel are enforced here, before any
- * pixel is evaluated. Returns { outputs: { name: compiled }, nodeCount, cost }.
+ * pixel is evaluated. Returns { outputs: { name: compiled }, emissionFresnel (an IOR, or undefined), nodeCount, cost }.
  */
 export function compileMaterialGraph(graph, { size = 1, images } = {}) {
   if (!isPlainObject(graph)) throw graphError(`graph must be an object with outputs: ${MATERIAL_GRAPH_OUTPUTS.join(', ')}.`);
@@ -624,12 +657,20 @@ export function compileMaterialGraph(graph, { size = 1, images } = {}) {
   const names = Object.keys(graph);
   if (names.length === 0) throw graphError(`graph needs at least one output: ${MATERIAL_GRAPH_OUTPUTS.join(', ')}.`);
   const state = { nodeCount: 0, cost: 0, size, images };
-  const outputs = {};
-  for (const name of names) {
-    outputs[name] = compileNode(graph[name], state, 0);
+  const outputs = Object.create(null);
+  let emissionFresnel;
+  for (const name of MATERIAL_GRAPH_OUTPUTS) {
+    if (!names.includes(name)) continue;
+    let node = graph[name];
+    if (name === 'emission') {
+      const split = splitEmissionFresnel(node);
+      node = split.base;
+      emissionFresnel = split.ior;
+    }
+    outputs[name] = compileNode(node, state, 0);
     if (SCALAR_OUTPUTS.includes(name) && outputs[name].kind !== 'scalar') throw graphError(`${name} needs a number, not a vector.`);
   }
-  return { outputs, nodeCount: state.nodeCount, cost: state.cost };
+  return { outputs, emissionFresnel, nodeCount: state.nodeCount, cost: state.cost };
 }
 
 /** Throw when a graph is too costly to bake at this size. Called while normalizing, so a bad scene fails at once. */
@@ -735,6 +776,8 @@ export function bakeMaterialGraph(graph, { resolution, bump, size = 1 }, images)
     layerMaps: clearcoatData ? { clearcoatTexture: descriptor(clearcoatData, 'linear') } : undefined,
     transmissionMap: descriptor(transmissionData, 'linear'),
     aovMap: descriptor(aovData, 'linear'),
+    // Not a texture: the renderers multiply the emission by Schlick's Fresnel of this IOR per pixel.
+    emissionFresnel: compiled.emissionFresnel,
     normalMap: descriptor(height ? normalMapFromHeightFunction((u, v) => finiteOrZero(height.evaluate(u, v)), resolution, bump) : null, 'linear'),
   };
 }

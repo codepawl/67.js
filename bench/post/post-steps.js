@@ -3,6 +3,8 @@ import { Renderer67 } from '/src/renderer.js';
 import { box } from '/src/geometry.js';
 import { installCameraEffects } from '/src/camera-effects.js';
 import { installRenderPasses } from '/src/render-passes.js';
+const userPassPath = '/src/user-pass.js';
+const userPassModule = await import(/* @vite-ignore */ userPassPath).catch(() => null);
 
 // The named steps are an optional module: this harness loads it only when the source tree has it, so the same page also
 // draws the default picture of an older tree.
@@ -54,6 +56,19 @@ const CASES = {
   'key-chroma-masked': { composite: { background: { color: [0.9, 0.35, 0.1] }, key: { chroma: { color: GREEN_SCREEN, tolerance: 0.25 } }, mask: { depth: { near: 0, far: 3 } } } },
   'key-luma': { composite: { background: { color: [0.1, 0.2, 0.6] }, key: { luma: { low: 0.05, high: 0.3 } } } },
 };
+// A user pass that reads the object ID pass: it tints only the part it lists, as a snippet would to grade one object.
+const USER_PASS_CASES = {
+  'user-pass-hero': [{
+    name: 'tint-hero',
+    objects: ['hero'],
+    fragment: [
+      'vec4 userPass(vec2 uv) {',
+      '  vec4 color = texture(sceneColor, uv);',
+      '  return objectSlotAt(uv) == 0 ? vec4(color.r * 1.4, color.g * 0.6, color.b * 0.4, color.a) : color;',
+      '}',
+    ].join('\n'),
+  }],
+};
 const GREEN_CASES = ['green-default', 'key-chroma', 'key-chroma-masked'];
 const camera = { eye: [3.4, 1.8, 4.6], target: [0, 0.8, -1], fov: 45 };
 
@@ -71,9 +86,13 @@ async function drawCase(name, { warmupFrames = 4, measuredFrames = 20 } = {}) {
   const canvas = document.querySelector('canvas');
   const renderer = installRenderPasses(installCameraEffects(new Renderer67(canvas, sceneParts(GREEN_CASES.includes(name)), { ground: false, hdr: true, depth: true, samples: 4, pixelRatio: 1, memoryBudgetMiB: 1024, environment })));
   if (postSteps) postSteps.installPostSteps(renderer);
+  if (USER_PASS_CASES[name] && userPassModule) {
+    userPassModule.installUserPasses(renderer);
+    renderer.userPasses.set(userPassModule.normalizeUserPasses(USER_PASS_CASES[name]));
+  }
   renderer.resize();
   const frame = { ...camera, environment, time: 0, exposure: 1, effects: { ambientOcclusion: 0, ...CASES[name] } };
-  const usesObjects = postSteps?.usesObjectMask(postSteps.resolvePostSteps(frame.effects)) ?? false;
+  const usesObjects = Boolean(USER_PASS_CASES[name]) || (postSteps?.usesObjectMask(postSteps.resolvePostSteps(frame.effects)) ?? false);
   const drawFrame = () => {
     // A mask by parts reads the object ID pass, drawn first.
     if (usesObjects) renderer.render({ ...frame, pass: 'objectId' });
@@ -102,5 +121,5 @@ async function drawCase(name, { warmupFrames = 4, measuredFrames = 20 } = {}) {
 }
 
 window.hasPostSteps = Boolean(postSteps);
-window.caseNames = Object.keys(CASES);
+window.caseNames = [...Object.keys(CASES), ...Object.keys(USER_PASS_CASES)];
 window.drawCase = drawCase;

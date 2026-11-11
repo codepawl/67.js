@@ -92,6 +92,17 @@ export function validateMaterialLayers(material) {
   }
 }
 
+// A material graph's {"fresnel":{"ior":n}} factor of emission (material-graph.js) reaches the renderers as `emissionFresnel`:
+// the IOR, or 0 for none. The raster shader and the CPU path tracer both evaluate this same curve per pixel.
+export const EMISSION_FRESNEL_IOR_RANGE = Object.freeze([1.01, 3]);
+
+/** Schlick's Fresnel reflectance of a dielectric at the cosine between the view and the normal: 1 at grazing angles. */
+export function fresnelSchlick(cosine, ior) {
+  const normalIncidence = ((ior - 1) / (ior + 1)) ** 2;
+  const clamped = Math.min(Math.max(cosine, 0), 1);
+  return normalIncidence + (1 - normalIncidence) * (1 - clamped) ** 5;
+}
+
 export function materialLayerValue(material, field) {
   return material[field] ?? MATERIAL_LAYER_DEFAULTS[field];
 }
@@ -135,7 +146,8 @@ export function materialLayerState(material) {
     material.lightMask ?? ALL_LIGHTS_MASK,
     materialLayerValue(material, 'toon'),
     material.subsurface ? JSON.stringify(material.subsurface) : '',
+    material.emissionFresnel ?? 0,
   ];
 }
 
-export const MATERIAL_LAYER_STATE_LENGTH = 24;
+export const MATERIAL_LAYER_STATE_LENGTH = 25;

@@ -118,7 +118,7 @@ function hasUniformSurroundings(keyAt, width, height, x, y) {
  * - `tied`: contested pixels where the scene itself does not say which face is in front (the flush pass off, or a seam); left out of the other counts;
  * - `unjudged`: contested pixels whose face has too few clean pixels to know its colour;
  * - `edge`: pixels left out for having another colour next to them.
- * `mismatchMask` marks the wrong pixels for a picture.
+ * `mismatchMask` marks the wrong pixels for a picture: 1 for a wrong pixel, 2 for a swapped one.
  */
 export function compareWithGroundTruth({ pixels, world, cast, width, height, threshold = DEFAULT_COLOUR_THRESHOLD }) {
   const keyAt = new Int32Array(width * height);
@@ -169,6 +169,7 @@ export function compareWithGroundTruth({ pixels, world, cast, width, height, thr
         const rival = references[cast.rivals[pixel * RIVALS_PER_PIXEL + slot]];
         if (rival && channelDistance(pixels, pixel * 4, rival) <= threshold) {
           result.swapped++;
+          mismatchMask[pixel] = 2;
           break;
         }
       }

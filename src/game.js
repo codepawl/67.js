@@ -64,6 +64,21 @@ function nodeTranslation(nodes, id) {
   return position;
 }
 
+// The node a controller or follower moves: its feet position and the heading about the vertical axis.
+function characterOperation(id, position, yaw, footOffset) {
+  return { type: 'set-node', id, translation: [position[0], position[1] + footOffset, position[2]], rotation: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)] };
+}
+
+// Copies the controller's state into the graph parameters that the animation's `drive` names.
+function parameterSystem(animation, controllerState) {
+  return {
+    name: 'animation-parameters',
+    fixedUpdate() {
+      for (const [parameter, source] of Object.entries(animation.drive)) animation.graph.set(parameter, controllerState[source]);
+    },
+  };
+}
+
 function litEnvironment(scene, hasAutomaticGround) {
   const environment = scene.environment;
   return groundBounceEnvironment(scene.parts, { ...environment, map: agentEnvironmentMap(environment) }, { automaticAlbedo: hasAutomaticGround ? FLOOR_COLOR : null });
@@ -80,6 +95,11 @@ function describeState(state) {
   const variables = Object.entries(state.variables).map(([name, value]) => `${name} ${value}`).join('   ');
   const verdict = state.status === 'won' ? '   YOU WIN' : state.status === 'lost' ? '   GAME OVER' : '';
   return `${variables}${verdict}`;
+}
+
+async function loadAnimationRuntime() {
+  const [{ createGameAnimation }, { createPathFollower }] = await Promise.all([import('./game-animation.js'), import('./npc-follower.js')]);
+  return { createGameAnimation, createPathFollower };
 }
 
 /**
@@ -134,6 +154,10 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
   const start = nodeTranslation(recipe.nodes, game.player.node);
   const body = { position: [0, 0, 0], rotationY: 0 };
   let rig = null;
+  // The animation graph runtime loads only for a recipe that declares an animation or an NPC, so other games do not carry it.
+  const hasAnimation = Boolean(game.player.animation) || (game.npcs?.length ?? 0) > 0;
+  const { createGameAnimation, createPathFollower } = hasAnimation ? await loadAnimationRuntime() : {};
+  const playerAnimation = game.player.animation ? createGameAnimation(game.player.animation, recipe.nodes, game.player.node) : null;
   const startPosition = [start[0], start[1] - footOffset, start[2]];
   const controller = game.player.controller === 'vehicle'
     ? createVehicleController({ input, position: startPosition, ground: game.ground, maximumSpeed: game.player.maximumSpeed, node: body })
@@ -147,12 +171,28 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
       faceCamera: game.camera === 'first-person',
       cameraYaw: () => rig?.yaw ?? 0,
       node: body,
+      ...(playerAnimation?.hasRootMotion ? { rootMotion: () => playerAnimation.graph.rootMotion.delta } : {}),
     });
   rig = cameraRigFor(game.camera, controller, input);
 
   const nodeIds = new Set(recipe.nodes.map(node => node.id));
   const rules = game.rules ? createGameRules(game.rules, { input, getPartPosition: id => (id === game.player.node ? [...controller.state.position] : undefined) }) : null;
   const shownNodes = new Map();
+  const animatedCharacters = [];
+  const animationSystems = [];
+  if (playerAnimation) {
+    animatedCharacters.push(playerAnimation);
+    animationSystems.push(parameterSystem(playerAnimation, controller.state), playerAnimation.graph.system());
+  }
+  const npcs = (game.npcs ?? []).map(npc => {
+    const animation = createGameAnimation(npc.animation, recipe.nodes, npc.node);
+    const start = nodeTranslation(recipe.nodes, npc.node);
+    const follower = createPathFollower({ graph: animation.graph, position: [start[0], start[1] - npc.footOffset, start[2]], yaw: npc.yaw, cruiseSpeed: npc.cruiseSpeed });
+    follower.follow(npc.path);
+    animatedCharacters.push(animation);
+    animationSystems.push(follower.system(), animation.graph.system());
+    return { node: npc.node, footOffset: npc.footOffset, follower, graph: animation.graph };
+  });
   let drawnTopology = scene.topologyRevision;
   const status = showStatus && rules ? createStatusLine(canvas) : null;
   if (status) cleanups.push(() => status.remove());
@@ -161,7 +201,9 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
     name: 'scene',
     update(deltaSeconds, context) {
       const position = controller.positionAt(context.alpha);
-      const operations = [{ type: 'set-node', id: game.player.node, translation: [position[0], position[1] + footOffset, position[2]], rotation: [0, Math.sin(body.rotationY / 2), 0, Math.cos(body.rotationY / 2)] }];
+      const operations = [characterOperation(game.player.node, position, body.rotationY, footOffset)];
+      for (const npc of npcs) operations.push(characterOperation(npc.node, npc.follower.state.position, npc.follower.state.yaw, npc.footOffset));
+      for (const animation of animatedCharacters) operations.push(...animation.operations());
       for (const part of rules?.state.parts ?? []) {
         if (!nodeIds.has(part.id) || part.id === game.player.node || shownNodes.get(part.id) === part.visible) continue;
         shownNodes.set(part.id, part.visible);
@@ -181,7 +223,7 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
   const baseCamera = scene.camera;
   const runtime = createRuntime(renderer, {
     fixedRate: 60,
-    systems: [input, controller, rig, ...(rules ? [rules] : []), sceneSystem],
+    systems: [input, controller, ...animationSystems, rig, ...(rules ? [rules] : []), sceneSystem],
     frame: context => ({ ...baseCamera, ...rig.pose(context), environment, time: context.elapsedSeconds }),
   });
   cleanups.push(() => runtime.dispose());
@@ -191,5 +233,5 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
   resize();
   runtime.start();
 
-  return { scene, runtime, rules, input, controller, renderer };
+  return { scene, runtime, rules, input, controller, renderer, animation: playerAnimation?.graph ?? null, npcs };
 }

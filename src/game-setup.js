@@ -1,4 +1,5 @@
 import { validateGameRules } from './game-rules.js';
+import { normalizeGameAnimation } from './game-animation.js';
 
 // The `game` section of a scene recipe: which node the player controls, how, with what camera and input, and the rules
 // that decide when the game is won. It is plain data. The runtime in src/game.js reads it; nothing in it is code.
@@ -13,10 +14,13 @@ export const GAME_SETUP_LIMITS = Object.freeze({
   maxVehicleSpeed: 100,
   maxFootOffset: 100,
   maxGround: 10000,
+  maxNpcs: 16,
+  maxPathPoints: 256,
 });
 
-const SETUP_FIELDS = ['player', 'camera', 'input', 'physics', 'ground', 'rules'];
-const PLAYER_FIELDS = ['node', 'controller', 'walkSpeed', 'runSpeed', 'jumpSpeed', 'maximumSpeed', 'footOffset'];
+const SETUP_FIELDS = ['player', 'camera', 'input', 'physics', 'ground', 'rules', 'npcs'];
+const PLAYER_FIELDS = ['node', 'controller', 'walkSpeed', 'runSpeed', 'jumpSpeed', 'maximumSpeed', 'footOffset', 'animation'];
+const NPC_FIELDS = ['node', 'path', 'cruiseSpeed', 'footOffset', 'yaw', 'animation'];
 
 function fail(path, problem) {
   throw new RangeError(`Game setup ${path} ${problem}`);
@@ -46,7 +50,7 @@ function boundedNumber(value, fallback, minimum, maximum, path) {
   return value;
 }
 
-function normalizePlayer(player, nodeIds) {
+function normalizePlayer(player, nodeIds, nodes) {
   requireRecord(player, 'player');
   rejectUnknownFields(player, PLAYER_FIELDS, 'player');
   if (typeof player.node !== 'string' || !nodeIds.has(player.node)) {
@@ -62,7 +66,55 @@ function normalizePlayer(player, nodeIds) {
     maximumSpeed: boundedNumber(player.maximumSpeed, 20, 0, GAME_SETUP_LIMITS.maxVehicleSpeed, 'player.maximumSpeed'),
     footOffset: boundedNumber(player.footOffset, 0, -GAME_SETUP_LIMITS.maxFootOffset, GAME_SETUP_LIMITS.maxFootOffset, 'player.footOffset'),
   };
+  if (player.animation !== undefined) normalized.animation = normalizeGameAnimation(player.animation, nodes, player.node, { path: 'player.animation' });
   return normalized;
+}
+
+function isAncestor(nodes, ancestorId, nodeId) {
+  const parentById = new Map(nodes.map(node => [node.id, node.parent]));
+  for (let id = parentById.get(nodeId); id !== undefined; id = parentById.get(id)) {
+    if (id === ancestorId) return true;
+  }
+  return false;
+}
+
+function normalizePath(path, label) {
+  const valid = Array.isArray(path) && path.length >= 1 && path.length <= GAME_SETUP_LIMITS.maxPathPoints
+    && path.every(point => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every(Number.isFinite));
+  if (!valid) fail(`${label}.path`, `must be 1 to ${GAME_SETUP_LIMITS.maxPathPoints} waypoints, each [x, z] in metres, such as [[0, -4], [6, -4]].`);
+  return path.map(point => [point[0], point[point.length - 1]]);
+}
+
+function normalizeNpc(npc, index, { nodeIds, nodes, taken }) {
+  const label = `npcs[${index}]`;
+  requireRecord(npc, label);
+  rejectUnknownFields(npc, NPC_FIELDS, label);
+  if (typeof npc.node !== 'string' || !nodeIds.has(npc.node)) {
+    fail(`${label}.node`, `names ${JSON.stringify(npc.node)}, which is not a node of the scene. Use one of: ${[...nodeIds].slice(0, 12).join(', ')}.`);
+  }
+  for (const other of taken) {
+    if (other === npc.node || isAncestor(nodes, other, npc.node) || isAncestor(nodes, npc.node, other)) {
+      fail(`${label}.node`, `is "${npc.node}", which overlaps the character "${other}" (same node, or one inside the other). Give each character its own separate node.`);
+    }
+  }
+  taken.push(npc.node);
+  if (npc.animation === undefined) fail(`${label}.animation`, 'is required: an NPC walks through an animation graph with rootMotion and a number parameter "speed". See scene_capabilities topic game.');
+  const animation = normalizeGameAnimation(npc.animation, nodes, npc.node, { path: `${label}.animation`, driven: false });
+  if (!animation.rootMotion) fail(`${label}.animation.rootMotion`, 'is required for an NPC: the follower moves by the root motion of the clips. Add { "bone": "<child node id the walk clip translates>" }.');
+  if (animation.parameters?.speed?.type !== 'number') fail(`${label}.animation.parameters.speed`, 'must be declared as { "type": "number" }: the follower sets it to blend idle, walk and run.');
+  return {
+    node: npc.node,
+    path: normalizePath(npc.path, label),
+    cruiseSpeed: boundedNumber(npc.cruiseSpeed, 2.2, 0.01, GAME_SETUP_LIMITS.maxSpeed, `${label}.cruiseSpeed`),
+    footOffset: boundedNumber(npc.footOffset, 0, -GAME_SETUP_LIMITS.maxFootOffset, GAME_SETUP_LIMITS.maxFootOffset, `${label}.footOffset`),
+    yaw: boundedNumber(npc.yaw, 0, -2 * Math.PI, 2 * Math.PI, `${label}.yaw`),
+    animation,
+  };
+}
+
+function normalizeNpcs(npcs, context) {
+  if (!Array.isArray(npcs) || npcs.length > GAME_SETUP_LIMITS.maxNpcs) fail('npcs', `must be a list of at most ${GAME_SETUP_LIMITS.maxNpcs} NPCs, each { node, path, animation }.`);
+  return npcs.map((npc, index) => normalizeNpc(npc, index, context));
 }
 
 function normalizeRules(rules, playerNode) {
@@ -80,13 +132,15 @@ function normalizeRules(rules, playerNode) {
 }
 
 /**
- * Check a recipe `game` section against the recipe's node ids and return a normalised copy with every default filled in.
- * The rules document is checked by validateGameRules. Errors name the field and say what to pass.
+ * Check a recipe `game` section against the recipe nodes (a list of nodes, or a Set of node ids when there is no animation) and return
+ * a normalised copy with every default filled in. The rules document is checked by validateGameRules. Errors name the field and say what to pass.
  */
-export function normalizeGameSetup(game, nodeIds) {
+export function normalizeGameSetup(game, nodeSource) {
+  const nodes = Array.isArray(nodeSource) ? nodeSource : [];
+  const nodeIds = Array.isArray(nodeSource) ? new Set(nodeSource.map(node => node.id)) : nodeSource;
   requireRecord(game, 'game');
   rejectUnknownFields(game, SETUP_FIELDS, 'game');
-  const player = normalizePlayer(game.player, nodeIds);
+  const player = normalizePlayer(game.player, nodeIds, nodes);
   if (game.physics !== undefined && typeof game.physics !== 'boolean') fail('physics', `must be true or false, got ${JSON.stringify(game.physics)}.`);
   const normalized = {
     player,
@@ -95,6 +149,7 @@ export function normalizeGameSetup(game, nodeIds) {
     physics: game.physics ?? false,
     ground: boundedNumber(game.ground, 0, -GAME_SETUP_LIMITS.maxGround, GAME_SETUP_LIMITS.maxGround, 'ground'),
   };
+  if (game.npcs !== undefined) normalized.npcs = normalizeNpcs(game.npcs, { nodeIds, nodes, taken: [player.node] });
   if (game.rules !== undefined) normalized.rules = normalizeRules(game.rules, player.node);
   return normalized;
 }
