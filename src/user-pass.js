@@ -2,6 +2,7 @@ import { compileProgram, fullscreenVertex } from './gl-program.js';
 import {
   SNIPPET_LIMITS, requireKnownFields, validateShaderSnippet, validateSnippetUniforms, snippetUniformDeclarations, mapShaderInfoLog,
 } from './shader-snippet-validator.js';
+import { MAXIMUM_MASK_OBJECTS, resolveObjectNames, objectIdentifierSlots, unbindMask } from './post-mask.js';
 
 // User post-process passes: fragment snippets that run on the finished frame, after the stock effects, the grade and the
 // view transform, as the last step before the canvas. The core renderer carries nothing for them. installUserPasses wraps
@@ -9,10 +10,10 @@ import {
 // A snippet is checked by shader-snippet-validator.js before it is ever compiled.
 
 /** Names the engine provides to a snippet; a uniform cannot take one. */
-export const USER_PASS_INPUTS = Object.freeze(['sceneColor', 'sceneDepth', 'resolution', 'time', 'depthAt', 'worldPointAt', 'worldNormalAt', 'userPass']);
+export const USER_PASS_INPUTS = Object.freeze(['sceneColor', 'sceneDepth', 'resolution', 'time', 'depthAt', 'worldPointAt', 'worldNormalAt', 'objectSlotAt', 'sceneObjectIds', 'userPass']);
 export const USER_PASS_SCALE = Object.freeze({ min: 0.05, max: 1 });
 const PASS_NAME_PATTERN = /^[a-z][A-Za-z0-9-]{0,31}$/;
-const PASS_FIELDS = ['name', 'fragment', 'uniforms', 'scale'];
+const PASS_FIELDS = ['name', 'fragment', 'uniforms', 'scale', 'objects'];
 const ENTRY_FUNCTION = Object.freeze({ pattern: /\bvec4\s+userPass\s*\(\s*vec2\s+[A-Za-z_]\w*\s*\)\s*\{/, example: 'vec4 userPass(vec2 uv) { return texture(sceneColor, uv); }' });
 
 /**
@@ -38,14 +39,16 @@ export function normalizeUserPasses(input) {
     }
     validateShaderSnippet(entry.fragment, { label: `Post pass "${entry.name}" fragment`, requiredFunction: ENTRY_FUNCTION });
     const uniforms = validateSnippetUniforms(entry.uniforms, { label: `Post pass "${entry.name}"`, reservedNames: USER_PASS_INPUTS });
-    return { name: entry.name, fragment: entry.fragment, uniforms, scale };
+    const normalized = { name: entry.name, fragment: entry.fragment, uniforms, scale };
+    if (entry.objects !== undefined) normalized.objects = resolveObjectNames(entry.objects, `postPasses[${index}].objects`);
+    return normalized;
   });
 }
 
 /** What scene_capabilities reports under postPasses; it lives here so the scene entry does not carry the text. */
 export const USER_PASS_CAPABILITIES = Object.freeze({
-  fields: 'name, fragment (defines vec4 userPass(vec2 uv)), uniforms, scale 0.05-1 (1)',
-  inputs: 'sceneColor, sceneDepth (sampler2D), resolution (vec2, this pass), time (s), depthAt(uv), worldPointAt(uv), worldNormalAt(uv, from depth); gl_FragCoord',
+  fields: 'name, fragment (defines vec4 userPass(vec2 uv)), uniforms, scale 0.05-1 (1), objects (1-16 part names)',
+  inputs: 'sceneColor, sceneDepth (sampler2D), resolution (vec2, this pass), time (s), depthAt(uv), worldPointAt(uv), worldNormalAt(uv, from depth), objectSlotAt(uv) (position of the part under uv in the pass objects list, or -1); gl_FragCoord',
   uniforms: 'a number is float, [x,y(,z(,w))] is vec2-4, {type:"int",value} is int; name ^[a-z][A-Za-z0-9]{0,31}$',
   rules: 'no # lines, while, do, uniform/layout declarations, gl_ names but gl_FragCoord, or u67_ names; for loops only as for (int i = 0; i < N; i++) { } with literal bounds, 64 iterations at most, loop work under 4096',
   limits: Object.freeze({ maxPasses: SNIPPET_LIMITS.maxPasses, maxBytes: SNIPPET_LIMITS.maxBytes, maxUniforms: SNIPPET_LIMITS.maxUniforms, maxLoopIterations: SNIPPET_LIMITS.maxLoopIterations, maxLoopWork: SNIPPET_LIMITS.maxLoopWork }),
@@ -57,6 +60,7 @@ export function describeUserPasses(passes) {
   return passes.map(pass => ({
     name: pass.name,
     scale: pass.scale,
+    ...(pass.objects ? { objects: pass.objects } : {}),
     uniforms: Object.entries(pass.uniforms).map(([name, { type }]) => `${name}:${type}`),
     fragmentBytes: pass.fragment.length,
   }));
@@ -71,11 +75,26 @@ uniform sampler2D sceneDepth;
 uniform mat4 u67_inverseViewProjection;
 uniform vec2 resolution;
 uniform float time;
+uniform sampler2D sceneObjectIds;
+uniform int u67_objectCount;
+uniform int u67_objectIds[${MAXIMUM_MASK_OBJECTS}];
+uniform int u67_objectSlots[${MAXIMUM_MASK_OBJECTS}];
 out vec4 u67_output;
 float depthAt(vec2 uv) { return texture(sceneDepth, uv).r; }
 vec3 worldPointAt(vec2 uv) {
   vec4 point = u67_inverseViewProjection * vec4(uv * 2.0 - 1.0, depthAt(uv) * 2.0 - 1.0, 1.0);
   return point.xyz / point.w;
+}
+// Which entry of the pass objects list is under uv: -1 for the background, a part not in the list, or a pass with no objects.
+int objectSlotAt(vec2 uv) {
+  if (u67_objectCount == 0) return -1;
+  vec3 idBytes = floor(texelFetch(sceneObjectIds, ivec2(uv * vec2(textureSize(sceneObjectIds, 0))), 0).rgb * 255.0 + 0.5);
+  int identifier = int(idBytes.r + idBytes.g * 256.0 + idBytes.b * 65536.0);
+  for (int slot = 0; slot < ${MAXIMUM_MASK_OBJECTS}; slot++) {
+    if (slot >= u67_objectCount) break;
+    if (u67_objectIds[slot] == identifier) return u67_objectSlots[slot];
+  }
+  return -1;
 }
 // Normal from the depth buffer: the cross product of the smaller step in x and in y, facing the camera.
 vec3 worldNormalAt(vec2 uv) {
@@ -200,7 +219,7 @@ export function installUserPasses(renderer) {
         throw compilationError(pass, error, built);
       }
       if (entry) releaseEntry(context, entry);
-      const names = ['sceneColor', 'sceneDepth', 'u67_inverseViewProjection', 'resolution', 'time', ...Object.keys(pass.uniforms)];
+      const names = ['sceneColor', 'sceneDepth', 'sceneObjectIds', 'u67_objectCount', 'u67_objectIds', 'u67_objectSlots', 'u67_inverseViewProjection', 'resolution', 'time', ...Object.keys(pass.uniforms)];
       state.entries[index] = {
         pass, source: built.source, program, target: null,
         locations: Object.fromEntries(names.map(name => [name, context.getUniformLocation(program, name)])),
@@ -245,7 +264,22 @@ export function installUserPasses(renderer) {
     context.uniform2f(locations.resolution, width, height);
     context.uniform1f(locations.time, frame.time ?? 0);
     for (const [name, uniform] of Object.entries(pass.uniforms)) setUniformValue(context, locations[name], uniform);
+    const { identifiers, slots } = pass.objects ? objectIdentifierSlots(renderer, pass.objects) : { identifiers: [], slots: [] };
+    context.uniform1i(locations.u67_objectCount, identifiers.length);
+    if (identifiers.length > 0) {
+      const padded = new Int32Array(MAXIMUM_MASK_OBJECTS);
+      padded.set(identifiers);
+      context.uniform1iv(locations.u67_objectIds, padded);
+      const paddedSlots = new Int32Array(MAXIMUM_MASK_OBJECTS);
+      paddedSlots.set(slots);
+      context.uniform1iv(locations.u67_objectSlots, paddedSlots);
+      context.activeTexture(context.TEXTURE2);
+      context.bindTexture(context.TEXTURE_2D, renderer.passSupport.texture);
+      context.uniform1i(locations.sceneObjectIds, 2);
+    }
     context.drawArrays(context.TRIANGLES, 0, 3);
+    // The next frame draws into the object ID target, so it must not stay bound as a texture.
+    if (identifiers.length > 0) unbindMask(context);
   }
 
   function copyToCanvas(texture, width, height) {

@@ -19,7 +19,7 @@ function checkedKeys(group, allowed, name) {
   }
 }
 
-function resolveObjectNames(objects, name) {
+export function resolveObjectNames(objects, name) {
   if (!Array.isArray(objects) || objects.length === 0 || objects.length > MAXIMUM_MASK_OBJECTS) {
     throw new TypeError(`${name} must be a list of 1 to ${MAXIMUM_MASK_OBJECTS} part names.`);
   }
@@ -89,19 +89,28 @@ float maskAt(vec2 coordinate) {
 }
 `;
 
-function objectIdentifiers(renderer, names) {
+/** Resolves each name to its part IDs. `slots[i]` is the index in `names` of the name that produced `identifiers[i]`, so a name that matches several parts keeps one slot. */
+export function objectIdentifierSlots(renderer, names) {
   if (!renderer.passSupport) throw new Error('A mask by objects needs installRenderPasses(renderer) and the object ID pass drawn first.');
   const known = renderer.passSupport.objectNames();
   const identifiers = [];
-  for (const name of names) {
+  const slots = [];
+  names.forEach((name, slot) => {
     const matches = known.flatMap((candidate, index) => (candidate === name ? [index + 1] : []));
     if (matches.length === 0) {
       throw new Error(`Mask object "${name}" is not a part in the frame. Fix: use a part name such as ${known.slice(0, 8).map(part => `"${part}"`).join(', ') || '(the scene has no opaque parts)'}.`);
     }
-    identifiers.push(...matches);
-  }
+    for (const identifier of matches) {
+      identifiers.push(identifier);
+      slots.push(slot);
+    }
+  });
   if (identifiers.length > MAXIMUM_MASK_OBJECTS) throw new RangeError(`The mask names ${identifiers.length} parts; the limit is ${MAXIMUM_MASK_OBJECTS}. Fix: name fewer parts.`);
-  return identifiers;
+  return { identifiers, slots };
+}
+
+export function objectIdentifiers(renderer, names) {
+  return objectIdentifierSlots(renderer, names).identifiers;
 }
 
 /** Sets the mask uniforms of a stage. A step with no mask gets a mask of one everywhere. Leaves texture unit 1 active. */
