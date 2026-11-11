@@ -365,7 +365,9 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
     const region = boundsOverlapRegion(first.bounds, second.bounds, tolerance);
     if (!region || resolvedByLayer(first.part, second.part) || listed >= MAXIMUM_LISTED_PAIRS) return;
     const extents = [region[3] - region[0], region[4] - region[1], region[5] - region[2]].sort((smallest, largest) => smallest - largest);
-    const faceArea = extents[1] * extents[2];
+    // Finite bounds can still overflow when subtracted (a flat box 1e308 long): 0 * Infinity is NaN, and a NaN rank would index
+    // past the bins. The face area is capped so the rank stays a number.
+    const faceArea = Math.min(extents[1] * extents[2] || 0, Number.MAX_VALUE);
     const flatBonus = extents[0] <= tolerance ? PRIORITY_BINS / 2 : 0;
     const sizeRank = Math.max(0, Math.min(PRIORITY_BINS / 2 - 1, Math.floor(Math.log10(Math.max(faceArea, 1e-6)) + 6)));
     bins[PRIORITY_BINS - 1 - (flatBonus + sizeRank)].push(first, second, region);
