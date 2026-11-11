@@ -11,7 +11,8 @@ const decide = (overrides = {}, event = {}) =>
   decideTriage({ eventName: 'pull_request_target', action: 'opened', item: { ...outsider, ...overrides }, ...event });
 // Parsed instead of matched, so the test says which hosts and paths survive and not just which substring does.
 const linkedAddresses = text => (text.match(/https?:\/\/[^\s)]+/g) ?? []).map(address => new URL(address));
-const workflow = readFileSync(new URL('../.github/workflows/claude-triage.yml', import.meta.url), 'utf8');
+// A Windows checkout may have CRLF line ends. The patterns below match LF, as on CI.
+const workflow = readFileSync(new URL('../.github/workflows/claude-triage.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 test('a push or a reopen never starts another run', () => {
   for (const action of ['synchronize', 'reopened']) assert.equal(decide({}, { action }).run, false, action);
