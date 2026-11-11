@@ -113,6 +113,7 @@ pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2)
     let mut has_f82 = false;
     let mut has_normal_map = false;
     let mut max_closure_lobes: u32 = if mat_count > 0 { 1 } else { 4 };
+    let mut max_closure_candidates: u32 = if mat_count > 0 { 1 } else { 7 };
 
     for m in 0..mat_count {
         let base = m * MATERIAL_RECORD_STRIDE;
@@ -188,8 +189,9 @@ pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2)
         } else {
             u32::from(metallic > 1.0e-5 || metallic_roughness_tex >= 0) + glass_lobes + 2
         };
-        let mat_lobes = (trans_lobe + sheen_lobe + coat_lobe + base_lobes).clamp(1, 4);
-        max_closure_lobes = max_closure_lobes.max(mat_lobes);
+        let candidate_lobes = trans_lobe + sheen_lobe + coat_lobe + base_lobes;
+        max_closure_candidates = max_closure_candidates.max(candidate_lobes.clamp(1, 7));
+        max_closure_lobes = max_closure_lobes.max(candidate_lobes.clamp(1, 4));
     }
 
     // --- Per-light flags ---
@@ -279,6 +281,12 @@ pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2)
         result = result.replace(
             "const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES",
             &format!("const MAX_CLOSURE_LOBES: u32 = {max_closure_lobes}u; // SPECIALIZE_LOBES"),
+        );
+    }
+    if max_closure_candidates < 7 {
+        result = result.replace(
+            "const MAX_CLOSURE_CANDIDATES: u32 = 7u; // SPECIALIZE_CANDIDATES",
+            &format!("const MAX_CLOSURE_CANDIDATES: u32 = {max_closure_candidates}u; // SPECIALIZE_CANDIDATES"),
         );
     }
     result
@@ -387,7 +395,8 @@ mod specialization_tests {
                       const SCENE_HAS_FINITE_LIGHTS: bool = true;\n\
                       const SCENE_HAS_ENV_IMPORTANCE: bool = true;\n\
                       const SCENE_HAS_LIGHT_LINKING: bool = true;\n\
-                      const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES";
+                      const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES
+                      const MAX_CLOSURE_CANDIDATES: u32 = 7u; // SPECIALIZE_CANDIDATES";
         let result = specialize_cycles_kernel(source, &input);
         assert!(result.contains("const SCENE_HAS_VOLUME: bool = false;"), "VOLUME should be false");
         assert!(result.contains("const SCENE_HAS_GLASS: bool = false;"), "GLASS should be false");
@@ -405,6 +414,10 @@ mod specialization_tests {
         assert!(result.contains("const SCENE_HAS_ENV_IMPORTANCE: bool = false;"), "ENV_IMPORTANCE should be false");
         assert!(result.contains("const SCENE_HAS_LIGHT_LINKING: bool = false;"), "LIGHT_LINKING should be false");
         assert!(result.contains("const MAX_CLOSURE_LOBES: u32 = 2u; // SPECIALIZE_LOBES"), "MAX_CLOSURE_LOBES should be 2u");
+        assert!(
+            result.contains("const MAX_CLOSURE_CANDIDATES: u32 = 2u; // SPECIALIZE_CANDIDATES"),
+            "MAX_CLOSURE_CANDIDATES should be 2u"
+        );
     }
 
     #[test]

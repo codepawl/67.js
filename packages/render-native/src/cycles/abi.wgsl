@@ -89,7 +89,26 @@ const ALPHA_MODE_MASK: u32 = 1u;
 const ALPHA_MODE_BLEND: u32 = 2u;
 
 // Closure lobe capacity and `Lobe.lobe_type` discriminants.
-const MAX_CLOSURE_LOBES: u32 = 4u;
+const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES
+const MAX_CLOSURE_CANDIDATES: u32 = 7u; // SPECIALIZE_CANDIDATES
+
+// Scene feature flags. The host rewrites `true` to `false` for features the packed scene never uses,
+// so the guarded code is dead in that pipeline. `true` is the safe default.
+const SCENE_HAS_VOLUME: bool = true;
+const SCENE_HAS_ALPHA_MASK: bool = true;
+const SCENE_HAS_TRANSPARENT: bool = true;
+const SCENE_HAS_GLASS: bool = true;
+const SCENE_HAS_COAT: bool = true;
+const SCENE_HAS_SHEEN: bool = true;
+const SCENE_HAS_ANISOTROPY: bool = true;
+const SCENE_HAS_THIN_FILM: bool = true;
+const SCENE_HAS_F82: bool = true;
+const SCENE_HAS_NORMAL_MAP: bool = true;
+const SCENE_HAS_EMISSIVE_TRIANGLES: bool = true;
+const SCENE_HAS_ANALYTIC_LIGHTS: bool = true;
+const SCENE_HAS_FINITE_LIGHTS: bool = true;
+const SCENE_HAS_ENV_IMPORTANCE: bool = true;
+const SCENE_HAS_LIGHT_LINKING: bool = true;
 const LOBE_NONE: u32 = 0u;
 const LOBE_DIFFUSE: u32 = 1u;
 const LOBE_GLOSSY_GGX: u32 = 2u;
@@ -468,7 +487,7 @@ struct Lobe {
 
 // Stacked multi-lobe surface closure evaluated/sampled at `ShadingPoint`.
 struct Closure {
-  lobes: array<Lobe, 4>,
+  lobes: array<Lobe, MAX_CLOSURE_LOBES>,
 
   emission: vec3<f32>,
   lobe_count: u32,

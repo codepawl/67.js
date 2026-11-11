@@ -364,7 +364,7 @@ fn int_trace_shadow(
     }
   }
 
-  if ((kernel_params.kernel_flags & KERNEL_FLAG_HAS_VOLUME) != 0u && kernel_params.volume_density > 0.0) {
+  if (SCENE_HAS_VOLUME && (kernel_params.kernel_flags & KERNEL_FLAG_HAS_VOLUME) != 0u && kernel_params.volume_density > 0.0) {
     let overlap = int_volume_segment_overlap(ray_origin, ray_dir, 0.0, shadow_t_max);
     if (overlap.y > overlap.x) {
       transmittance *= exp(-kernel_params.volume_density * (overlap.y - overlap.x));
@@ -693,7 +693,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let limit_volume = kernel_params.max_volume_bounces + 1u;
   let sample_count = max(kernel_params.samples_per_dispatch, 1u);
   let exposure = select(1.0, kernel_params.film_exposure, kernel_params.film_exposure > 0.0);
-  let has_world_volume = (kernel_params.kernel_flags & KERNEL_FLAG_HAS_VOLUME) != 0u && kernel_params.volume_density > 0.0;
+  let has_world_volume = SCENE_HAS_VOLUME && (kernel_params.kernel_flags & KERNEL_FLAG_HAS_VOLUME) != 0u && kernel_params.volume_density > 0.0;
   let filter_glossy_enabled = kernel_params.filter_glossy > 0.0;
   let inv_filter_glossy = select(1.0e30, 1.0 / max(kernel_params.filter_glossy, 1.0e-8), filter_glossy_enabled);
 
@@ -809,11 +809,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           recorded_features = true;
         }
 
-        if (kernel_params.light_count > 0u) {
+        if (SCENE_HAS_ANALYTIC_LIGHTS && kernel_params.light_count > 0u) {
           let light_samp = lgt_sample_analytic_light(scatter_pos, 0xFFFFFFFFu, 0xFFFFFFFFu, smp_next_1d(&rng), smp_next_2d(&rng));
           int_accumulate_volume_direct_sample(light_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
         }
-        if (kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
+        if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
           let env_samp = lgt_sample_environment(smp_next_4d(&rng));
           int_accumulate_volume_direct_sample(env_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
         }
@@ -942,7 +942,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         direct_sample.valid = 0u;
         direct_sample.pdf = 0.0;
         if (direct_source == 0u) {
-          if (kernel_params.light_count > 0u) {
+          if (SCENE_HAS_ANALYTIC_LIGHTS && kernel_params.light_count > 0u) {
             direct_sample = lgt_sample_analytic_light(
               point.position,
               point.light_group_mask_lo,
@@ -952,11 +952,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             );
           }
         } else if (direct_source == 1u) {
-          if (kernel_params.emissive_triangle_count > 0u) {
+          if (SCENE_HAS_EMISSIVE_TRIANGLES && kernel_params.emissive_triangle_count > 0u) {
             direct_sample = lgt_sample_emissive_triangle(point, smp_next_1d(&rng), smp_next_2d(&rng));
           }
         } else {
-          if (kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
+          if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
             direct_sample = lgt_sample_environment(smp_next_4d(&rng));
           }
         }

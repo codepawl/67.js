@@ -46,6 +46,9 @@ fn lgt_power_heuristic(pdf_a: f32, pdf_b: f32) -> f32 {
 }
 
 fn lgt_links_match(receiver_lo: u32, receiver_hi: u32, emitter_lo: u32, emitter_hi: u32) -> bool {
+  if (!SCENE_HAS_LIGHT_LINKING) {
+    return true;
+  }
   return ((receiver_lo & emitter_lo) | (receiver_hi & emitter_hi)) != 0u;
 }
 
@@ -871,7 +874,7 @@ fn lgt_eval_escaped_ray(
   if (!is_transparent_background_ray) {
     let env_radiance = lgt_eval_hdri_radiance(ray_dir);
     var env_mis = 1.0;
-    if (!is_camera_ray && !mis_skip && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
+    if (!is_camera_ray && !mis_skip && SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
       let pdf_env = lgt_environment_pdf(ray_dir);
       env_mis = lgt_power_heuristic(prev_bsdf_pdf, pdf_env);
     }

@@ -379,12 +379,9 @@ fn closure_thin_glass_fresnel(
 
 fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
   var closure: Closure;
-  closure.lobes = array<Lobe, 4>(
-    closure_empty_lobe(),
-    closure_empty_lobe(),
-    closure_empty_lobe(),
-    closure_empty_lobe(),
-  );
+  for (var lobe_slot: u32 = 0u; lobe_slot < MAX_CLOSURE_LOBES; lobe_slot = lobe_slot + 1u) {
+    closure.lobes[lobe_slot] = closure_empty_lobe();
+  }
   closure.emission = vec3<f32>(0.0);
   closure.lobe_count = 0u;
   closure.absorption_sigma = vec3<f32>(0.0);
@@ -425,13 +422,13 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     base_color = max(base_color * bc_tex.rgb, vec3<f32>(0.0));
     tex_alpha = bc_tex.a;
   }
-  if (mat.alpha_tex >= 0) {
+  if (SCENE_HAS_ALPHA_MASK && mat.alpha_tex >= 0) {
     tex_alpha = tex_alpha * closure_sample_texture(mat.alpha_tex, point).r;
   }
 
   var opacity = 1.0;
   let raw_alpha = clamp(mat.alpha * tex_alpha, 0.0, 1.0);
-  if (mat.alpha_mode == ALPHA_MODE_MASK) {
+  if (SCENE_HAS_ALPHA_MASK && mat.alpha_mode == ALPHA_MODE_MASK) {
     if (raw_alpha < mat.alpha_cutoff) {
       let trans_lobe = closure_transparent_setup_lobe(smooth_normal, vec3<f32>(1.0));
       closure.lobes[0] = trans_lobe;
@@ -439,7 +436,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
       closure.total_sample_weight = trans_lobe.sample_weight;
       return closure;
     }
-  } else if (mat.alpha_mode == ALPHA_MODE_BLEND) {
+  } else if (SCENE_HAS_TRANSPARENT && mat.alpha_mode == ALPHA_MODE_BLEND) {
     opacity = raw_alpha;
     if (opacity <= 0.0) {
       let trans_lobe = closure_transparent_setup_lobe(smooth_normal, vec3<f32>(1.0));
@@ -458,35 +455,35 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     metallic = clamp(metallic * mr_tex.b, 0.0, 1.0);
   }
 
-  var transmission_weight = clamp(mat.transmission_weight, 0.0, 1.0);
-  if (mat.transmission_tex >= 0) {
+  var transmission_weight = select(0.0, clamp(mat.transmission_weight, 0.0, 1.0), SCENE_HAS_GLASS);
+  if (SCENE_HAS_GLASS && mat.transmission_tex >= 0) {
     transmission_weight = clamp(transmission_weight * closure_sample_texture(mat.transmission_tex, point).r, 0.0, 1.0);
   }
 
-  var coat_weight = max(mat.coat_weight, 0.0);
+  var coat_weight = select(0.0, max(mat.coat_weight, 0.0), SCENE_HAS_COAT);
   var coat_roughness = clamp(mat.coat_roughness, 0.0, 1.0);
-  if (mat.coat_weight_roughness_tex >= 0) {
+  if (SCENE_HAS_COAT && mat.coat_weight_roughness_tex >= 0) {
     let cwr_tex = closure_sample_texture(mat.coat_weight_roughness_tex, point);
     coat_weight = max(coat_weight * cwr_tex.r, 0.0);
     coat_roughness = clamp(coat_roughness * cwr_tex.g, 0.0, 1.0);
   }
   var coat_tint = max(mat.coat_tint, vec3<f32>(0.0));
-  if (mat.coat_tint_tex >= 0) {
+  if (SCENE_HAS_COAT && mat.coat_tint_tex >= 0) {
     coat_tint = max(coat_tint * closure_sample_texture(mat.coat_tint_tex, point).rgb, vec3<f32>(0.0));
   }
 
-  var sheen_weight = max(mat.sheen_weight, 0.0);
+  var sheen_weight = select(0.0, max(mat.sheen_weight, 0.0), SCENE_HAS_SHEEN);
   var sheen_tint = max(mat.sheen_tint, vec3<f32>(0.0));
   var sheen_roughness = clamp(mat.sheen_roughness, 0.0, 1.0);
-  if (mat.sheen_color_roughness_tex >= 0) {
+  if (SCENE_HAS_SHEEN && mat.sheen_color_roughness_tex >= 0) {
     let scr_tex = closure_sample_texture(mat.sheen_color_roughness_tex, point);
     sheen_tint = max(sheen_tint * scr_tex.rgb, vec3<f32>(0.0));
     sheen_roughness = clamp(sheen_roughness * scr_tex.a, 0.0, 1.0);
   }
 
-  var anisotropic = clamp(mat.anisotropy, 0.0, 1.0);
+  var anisotropic = select(0.0, clamp(mat.anisotropy, 0.0, 1.0), SCENE_HAS_ANISOTROPY);
   var aniso_rotation = mat.anisotropy_rotation;
-  if (mat.anisotropy_tex >= 0) {
+  if (SCENE_HAS_ANISOTROPY && mat.anisotropy_tex >= 0) {
     let ani_tex = closure_sample_texture(mat.anisotropy_tex, point);
     anisotropic = clamp(anisotropic * ani_tex.b, 0.0, 1.0);
     let dir_xy = ani_tex.rg * 2.0 - vec2<f32>(1.0);
@@ -500,20 +497,25 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     emission_color = max(emission_color * closure_sample_texture(mat.emission_tex, point).rgb, vec3<f32>(0.0));
   }
 
-  var shading_n = closure_apply_normal_map(mat.normal_tex, mat.normal_scale, point, smooth_normal, frame_t, frame_b);
-  shading_n = closure_apply_bump_map(mat.bump_tex, mat.bump_distance, point, shading_n, frame_t, frame_b);
+  var shading_n = smooth_normal;
+  if (SCENE_HAS_NORMAL_MAP) {
+    shading_n = closure_apply_normal_map(mat.normal_tex, mat.normal_scale, point, smooth_normal, frame_t, frame_b);
+    shading_n = closure_apply_bump_map(mat.bump_tex, mat.bump_distance, point, shading_n, frame_t, frame_b);
+  }
 
   var raw_coat_n = bsdf_mf_safe_normalize_fallback(point.coat_normal, shading_n);
-  raw_coat_n = closure_apply_normal_map(mat.coat_normal_tex, mat.coat_normal_scale, point, raw_coat_n, frame_t, frame_b);
+  if (SCENE_HAS_NORMAL_MAP) {
+    raw_coat_n = closure_apply_normal_map(mat.coat_normal_tex, mat.coat_normal_scale, point, raw_coat_n, frame_t, frame_b);
+  }
 
   let preserve_energy = (mat.flags & MATERIAL_FLAG_MULTISCATTER_GGX) != 0u;
   let thin_walled = (mat.flags & MATERIAL_FLAG_THIN_WALLED) != 0u;
 
-  var candidates: array<Lobe, 7>;
+  var candidates: array<Lobe, MAX_CLOSURE_CANDIDATES>;
   var cand_count: u32 = 0u;
   var layer_weight = vec3<f32>(1.0);
 
-  if (opacity < 1.0) {
+  if (SCENE_HAS_TRANSPARENT && opacity < 1.0) {
     let trans_lobe = closure_transparent_setup_lobe(shading_n, vec3<f32>(1.0 - opacity));
     if (trans_lobe.sample_weight > 0.0) {
       candidates[cand_count] = trans_lobe;
@@ -522,7 +524,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     layer_weight = vec3<f32>(opacity);
   }
 
-  if (sheen_weight > CLOSURE_WEIGHT_CUTOFF) {
+  if (SCENE_HAS_SHEEN && sheen_weight > CLOSURE_WEIGHT_CUTOFF) {
     let sheen_n = bsdf_mf_safe_normalize_fallback(mix(shading_n, raw_coat_n, clamp(coat_weight, 0.0, 1.0)), shading_n);
     let sheen_w = sheen_weight * sheen_tint * layer_weight;
     let sheen_setup = closure_sheen_setup_lobe(sheen_n, wo_dir, sheen_w, sheen_roughness);
@@ -533,7 +535,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     }
   }
 
-  if (coat_weight > CLOSURE_WEIGHT_CUTOFF) {
+  if (SCENE_HAS_COAT && coat_weight > CLOSURE_WEIGHT_CUTOFF) {
     let coat_w = coat_weight * layer_weight;
     let coat_setup = bsdf_coat_setup_lobe(
       point.geometric_normal,
@@ -564,7 +566,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
   if ((mat.flags & MATERIAL_FLAG_F82_METALLIC) == 0u && all(specular_tint == vec3<f32>(0.0))) {
     specular_tint = vec3<f32>(1.0);
   }
-  let thin_film_thickness = mat.thin_film_thickness;
+  let thin_film_thickness = select(0.0, mat.thin_film_thickness, SCENE_HAS_THIN_FILM);
   let thin_film_ior = select(0.0, max(mat.thin_film_ior, 1e-5), thin_film_thickness > BSDF_MF_THINFILM_CUTOFF);
 
   var alpha_x = roughness * roughness;
@@ -603,7 +605,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     layer_weight = layer_weight * (1.0 - metallic);
   }
 
-  if (transmission_weight > CLOSURE_WEIGHT_CUTOFF && bsdf_mf_max_component(layer_weight) > CLOSURE_WEIGHT_CUTOFF) {
+  if (SCENE_HAS_GLASS && transmission_weight > CLOSURE_WEIGHT_CUTOFF && bsdf_mf_max_component(layer_weight) > CLOSURE_WEIGHT_CUTOFF) {
     let trans_w = transmission_weight * layer_weight;
     if (thin_walled) {
       let cos_no = max(dot(valid_refl_n, wo_dir), 0.0);
@@ -725,7 +727,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     }
   }
 
-  if (cand_count <= MAX_CLOSURE_LOBES) {
+  if (MAX_CLOSURE_CANDIDATES <= MAX_CLOSURE_LOBES || cand_count <= MAX_CLOSURE_LOBES) {
     for (var i: u32 = 0u; i < cand_count; i = i + 1u) {
       closure.lobes[i] = candidates[i];
       closure.total_sample_weight = closure.total_sample_weight + candidates[i].sample_weight;
