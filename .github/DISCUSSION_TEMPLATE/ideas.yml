@@ -1,0 +1,29 @@
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing discussions](https://github.com/codepawl/67.js/discussions) and the [roadmap](https://github.com/codepawl/67.js/blob/main/ROADMAP.md) first. A maintainer turns an agreed idea into an issue.
+        Leave out local paths, tokens and personal data: discussions are public.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What 67js should do that it does not do today.
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: Which agent or person task it serves
+      description: The job someone is trying to finish, and where 67js gets in the way now.
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: How success is measured
+      description: A number or a check that tells us it worked, for example fewer tool calls for a task, a smaller bundle, a faster frame, or a render that matches a reference.
+    validations:
+      required: true

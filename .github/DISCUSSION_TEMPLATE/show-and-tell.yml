@@ -1,0 +1,29 @@
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Show what you made with 67js.
+        Leave out local paths, tokens and personal data: discussions are public. Check the picture and the calls you paste before you post.
+  - type: textarea
+    id: picture
+    attributes:
+      label: Picture or render
+      description: Drag in a still, a short video or a link to a live page.
+    validations:
+      required: true
+  - type: textarea
+    id: tool-calls
+    attributes:
+      label: MCP tool calls used
+      description: The `scene_*` tools you called, in order, or the code you wrote. Rough is fine.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: 67js version
+      description: Run `npm ls @codepawlhq/67js`.
+      placeholder: 0.16.0
+    validations:
+      required: true
