@@ -36,7 +36,7 @@ const imagePattern = /!\[[^\]]*\]\([^)]+\)|<img\b|github\.com\/user-attachments\
 const benchOptOutPattern = /(?:\bno|\bwithout|not have|n't have|\bcannot|can't|can not|\bunable to)\b[^.\n]*\b(?:claude code|bench)\b|\bmaintainers?\b[^.\n]*\b(?:run|runs|running)\b[^.\n]*\bbench|\bbench\b[^.\n]*\bmaintainers?\b[^.\n]*\brun/i;
 // A body that says the tool schemas did not change needs no bench table.
 const schemasUnchangedPattern = /\bschemas?\b[^.\n]*\b(?:unchanged|not changed|did not change|do not change|don't change|are the same|stay the same)\b|\bno (?:tool )?schema changes?\b|\bunchanged\b[^.\n]*\bschemas?\b/i;
-const checkedHeadings = ['How I checked it', 'Ran', 'Checks', 'Tests', 'Verification', 'How I tested it'];
+const checkedHeadings = ['How I checked it', 'Ran', 'Checks', 'Checked', 'Tests', 'Verification', 'How I tested it'];
 const fencedBlockPattern = /```/;
 const commandLinePattern = /^\s*(?:[$>]\s*)?(?:npm|node|npx)\s+\S/m;
 
