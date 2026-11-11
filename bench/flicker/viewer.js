@@ -10,7 +10,7 @@ import { installCameraEffects } from '../../src/camera-effects.js';
 import { installLineArt, resolveLineArt } from '../../src/line-art.js';
 import { resolveEffects } from '../../src/effects.js';
 import { TRAPS, TILED_TRAPS } from './traps.js';
-import { collectWorldTriangles, castPixelOwners, compareWithGroundTruth } from './ground-truth.js';
+import { collectWorldTriangles, castPixelOwners, compareWithGroundTruth, COLOUR_KEY_SCALE } from './ground-truth.js';
 import { DEFAULT_HITS_PER_PIXEL } from './pixel-cast.js';
 
 // One flat colour per part, no textures, so a pixel's colour says which part owns it and a changed colour is a changed owner.
@@ -102,6 +102,9 @@ const options = {
   // facets=2: the colour of every triangle is its own number, drawn unlit, so the frame tells exactly which face is shown at a pixel.
   triangleIds: parameters.get('facets') === '2',
   // hits=N keeps the N nearest faces per ray in the ray cast (default 6, at most 64): a deeper stack than that shows up as offRay.
+  // samples=N sets the MSAA sample count. A facets=2 frame defaults to 1: the resolve of 4 samples blends the ids of faces that share a pixel into
+  // another valid id, which the ray through the pixel centre cannot match (see colourStepDetails); one sample shows the face under the centre.
+  samples: Math.max(1, Math.floor(Number(parameters.get('samples')) || (parameters.get('facets') === '2' ? 1 : 4))),
   hitsPerPixel: Math.min(64, Math.max(1, Number(parameters.get('hits')) || DEFAULT_HITS_PER_PIXEL)),
 };
 // effect=ao|dof|lines|all draws the frame through that screen-space stage (issue #751, effects on cut geometry): the renderer gets a
@@ -164,12 +167,15 @@ function markDirty() {
   context.clearRect(0, 0, overlay.width, overlay.height);
 }
 
+// The largest ambient occlusion radius the effects accept (metres); a city-sized scene would ask for more.
+const MAXIMUM_AO_RADIUS = 100;
+
 // The stage settings of the effect= parameter: strong enough that a seam shows, and the focus at the pivot so depth of field blurs
 // the surfaces in front and behind it.
 function effectSettings() {
   const settings = {};
   const effects = {};
-  if (usesEffect('ao')) Object.assign(effects, { ambientOcclusion: 1, ambientOcclusionRadius: Math.max(extent / 40, 0.05) });
+  if (usesEffect('ao')) Object.assign(effects, { ambientOcclusion: 1, ambientOcclusionRadius: Math.min(Math.max(extent / 40, 0.05), MAXIMUM_AO_RADIUS) });
   if (usesEffect('dof')) effects.depthOfField = { blur: 0.6, focusDistance: camera.distance };
   settings.effects = resolveEffects(effects);
   if (usesEffect('lines')) settings.lines = resolveLineArt({ width: 1.5, boundaries: true, creaseAngle: 30, depthJump: 0.08 });
@@ -227,7 +233,7 @@ async function build() {
   const size = bounds.maximum.map((value, axis) => value - bounds.minimum[axis]);
   extent = Math.max(...size);
   renderer = new Renderer67(canvas, loaded.parts, {
-    ground: false, hdr: !options.triangleIds, samples: 4, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
+    ground: false, hdr: !options.triangleIds, samples: options.samples, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
     reversedDepth: options.reversed ? 'auto' : false,
     resolveCoplanar: options.offset ? resolveAndReport : false,
     ...(effectName ? { depth: true } : {}),
@@ -379,6 +385,37 @@ function swapDetails(limit = 12) {
         .map((triangle, slot) => ({ triangle, distance: cast.hitDistances[group.sample * cast.hitsPerPixel + slot], rank: world.ranks[triangle], colour: world.keyColours[world.keyOf[triangle]] })),
     },
   }));
+}
+
+// The wrong pixels of the current frame that show another face's id, with the bytes drawn and the bytes expected (exact frames only).
+// Says how far apart they are per channel and where on the frame they sit, so a rounding step of the frame can be told from a
+// face the ray cast misses: channels counts the pixels by how many of the three channels differ, largest by the largest channel gap.
+function colourStepDetails(limit = 12) {
+  const { width, height } = canvas;
+  const scratch = document.createElement('canvas');
+  scratch.width = width;
+  scratch.height = height;
+  const context = scratch.getContext('2d', { willReadFrequently: true });
+  renderer.render(frameFor(0));
+  const pixels = new Uint8ClampedArray(readFrame(context));
+  const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
+  const cast = castPixelOwners(world, frameFor(0), width, height, options.hitsPerPixel);
+  const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
+  const channels = [0, 0, 0, 0];
+  const largest = {};
+  const samples = [];
+  for (let pixel = 0; pixel < mismatchMask.length; pixel++) {
+    if (mismatchMask[pixel] !== 1) continue;
+    const expected = shownByte(world.keyColours[world.keyOf[cast.owner[pixel]]].map(channel => channel / COLOUR_KEY_SCALE));
+    const shown = [pixels[pixel * 4], pixels[pixel * 4 + 1], pixels[pixel * 4 + 2]];
+    const gaps = shown.map((byte, channel) => byte - expected[channel]);
+    channels[gaps.filter(gap => gap !== 0).length]++;
+    const gap = Math.max(...gaps.map(Math.abs));
+    largest[gap] = (largest[gap] ?? 0) + 1;
+    if (samples.length < limit && gap <= 16) samples.push({ x: pixel % width, y: Math.floor(pixel / width), expected, shown, alpha: pixels[pixel * 4 + 3] });
+  }
+  renderer.render(frameFor(0));
+  return { channels, largest, samples };
 }
 
 async function probe() {
@@ -607,7 +644,7 @@ function frameBase64() {
 }
 
 window.flicker = {
-  frameBase64, setCamera, probe, truth, swapDetails, build, options, frameWholeScene,
+  frameBase64, setCamera, probe, truth, swapDetails, colourStepDetails, build, options, frameWholeScene,
   get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.(), flush: flushReport }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
   traps: Object.keys(TRAPS),

@@ -15,7 +15,7 @@ export { castPixelOwners, NO_TRIANGLE };
 
 const NORMAL_KEY_SCALE = 100;
 // Fine enough that triangle ids painted as 24-bit colours stay apart as keys, however a frame encodes them.
-const COLOUR_KEY_SCALE = 1e7;
+export const COLOUR_KEY_SCALE = 1e7;
 export const DEFAULT_COLOUR_THRESHOLD = 40;
 const MINIMUM_REFERENCE_PIXELS = 3;
 // A shown colour this close (largest channel, in bytes) to the one the ray cast expects is a rounding step of the frame, not another face.
