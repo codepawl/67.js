@@ -27,7 +27,7 @@ try {
   await page.goto(`${serverUrl}/bench/post/post-steps.html`, { timeout: PAGE_LOAD_TIMEOUT });
   await page.waitForFunction(() => window.drawCase, null, { timeout: PAGE_LOAD_TIMEOUT });
   const hasPostSteps = await page.evaluate(() => window.hasPostSteps);
-  const names = (await page.evaluate(() => window.caseNames)).filter(name => hasPostSteps || !/color-balance|glare|lens|grade|sharpen|kuwahara|posterize|pixelate/.test(name));
+  const names = (await page.evaluate(() => window.caseNames)).filter(name => hasPostSteps || !/color-balance|user-pass|glare|lens|grade|sharpen|kuwahara|posterize|pixelate/.test(name));
   await mkdir(outputFolder, { recursive: true });
   const medians = new Map(names.map(name => [name, []]));
   const hashes = {};

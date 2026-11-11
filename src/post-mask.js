@@ -19,7 +19,7 @@ function checkedKeys(group, allowed, name) {
   }
 }
 
-function resolveObjectNames(objects, name) {
+export function resolveObjectNames(objects, name) {
   if (!Array.isArray(objects) || objects.length === 0 || objects.length > MAXIMUM_MASK_OBJECTS) {
     throw new TypeError(`${name} must be a list of 1 to ${MAXIMUM_MASK_OBJECTS} part names.`);
   }
@@ -89,7 +89,7 @@ float maskAt(vec2 coordinate) {
 }
 `;
 
-function objectIdentifiers(renderer, names) {
+export function objectIdentifiers(renderer, names) {
   if (!renderer.passSupport) throw new Error('A mask by objects needs installRenderPasses(renderer) and the object ID pass drawn first.');
   const known = renderer.passSupport.objectNames();
   const identifiers = [];

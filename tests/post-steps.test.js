@@ -11,6 +11,7 @@ import { agentSceneModulesNeeded, loadAgentSceneModules } from '../src/agent-sce
 import { installCameraEffects } from '../src/camera-effects.js';
 import { installPostSteps, resolvePostSteps, glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment, compositeFragment, usesObjectMask } from '../src/post-steps.js';
 import { createAgentScene } from '../src/agent-scene.js';
+import { normalizeUserPasses, buildPassFragment, installUserPasses, describeUserPasses } from '../src/user-pass.js';
 
 function recordingContext(calls) {
   return new Proxy({}, {
@@ -183,6 +184,40 @@ test('a composite step resolves a background and a key, and says what to pass wh
   assert.throws(() => resolvePostSteps({ ...masked, lensDistortion: { distortion: 0.2 } }), /composite.mask cannot be combined with lensDistortion/);
 });
 
+const PASS_FRAGMENT = 'vec4 userPass(vec2 uv) { return objectSlotAt(uv) == 0 ? vec4(1.0) : texture(sceneColor, uv); }';
+
+test('a user pass lists the parts it reads and says what to pass when the list is wrong', () => {
+  const [pass] = normalizeUserPasses([{ name: 'tint', fragment: PASS_FRAGMENT, objects: ['hero', 'floor'] }]);
+  assert.deepEqual(pass.objects, ['hero', 'floor']);
+  assert.deepEqual(describeUserPasses([pass])[0].objects, ['hero', 'floor']);
+  assert.equal(Object.hasOwn(normalizeUserPasses([{ name: 'plain', fragment: 'vec4 userPass(vec2 uv) { return texture(sceneColor, uv); }' }])[0], 'objects'), false);
+  assert.throws(() => normalizeUserPasses([{ name: 'tint', fragment: PASS_FRAGMENT, objects: [] }]), /postPasses\[0\]\.objects must be a list of 1 to 16 part names/);
+  assert.throws(() => normalizeUserPasses([{ name: 'tint', fragment: PASS_FRAGMENT, objects: [3] }]), /postPasses\[0\]\.objects\[0\] must be a part name/);
+  assert.throws(() => normalizeUserPasses([{ name: 'tint', fragment: PASS_FRAGMENT, objects: Array(17).fill('a') }]), /1 to 16 part names/);
+  assert.throws(() => normalizeUserPasses([{ name: 'tint', fragment: PASS_FRAGMENT, uniforms: { objectSlotAt: 1 } }]), /objectSlotAt/);
+  assert.match(buildPassFragment(pass).source, /int objectSlotAt\(vec2 uv\)/);
+});
+
+test('a user pass binds the object ID pass for its parts and unbinds it after the draw', () => {
+  const calls = [];
+  const context = recordingContext(calls);
+  const renderer = {
+    context, canvas: { width: 16, height: 9 }, postStages: [], depthTexture: 'depth', whiteTexture: 'white',
+    inverseViewProjection: mat4.create(), resolveFrame() {}, benchmark: false,
+    passSupport: { texture: 'ids', objectNames: () => ['floor', 'hero'] },
+  };
+  installUserPasses(renderer);
+  renderer.userPasses.set([{ name: 'tint', fragment: PASS_FRAGMENT, objects: ['hero'] }]);
+  renderer.resolveFrame({ time: 0 });
+  const uploaded = calls.find(call => call[0] === 'uniform1iv');
+  assert.deepEqual(Array.from(uploaded[2]).slice(0, 2), [2, 0], 'the hero part has object ID 2, and the rest of the list is padded');
+  assert.ok(calls.some(call => call[0] === 'bindTexture' && call[2] === 'ids'));
+  const afterDraw = calls.slice(calls.findLastIndex(call => call[0] === 'drawArrays') + 1);
+  assert.ok(afterDraw.some(call => call[0] === 'bindTexture' && call[2] === null), 'the object ID texture is unbound after the draw');
+  renderer.userPasses.set([{ name: 'tint', fragment: PASS_FRAGMENT, objects: ['missing'] }]);
+  assert.throws(() => renderer.resolveFrame({ time: 0 }), /Mask object "missing" is not a part in the frame/);
+});
+
 test('the shaders keep their fixed sample patterns and read no history', () => {
   for (const fragment of [glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment, compositeFragment]) {
     assert.match(fragment, /^#version 300 es/);
@@ -195,7 +230,7 @@ test('the shaders keep their fixed sample patterns and read no history', () => {
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const rendersEnabled = process.env.RENDER_TESTS === '1' && existsSync(chromePath);
 const STEP_CASES = ['defocus', 'color-balance', 'glare-streaks', 'glare-streaks-6', 'glare-anamorphic', 'glare-fog', 'lens-distortion', 'lens-dispersion',
-  'grade-hero', 'grade-depth', 'sharpen', 'kuwahara', 'posterize', 'pixelate', 'pixelate-hero', 'key-chroma', 'key-luma'];
+  'grade-hero', 'grade-depth', 'user-pass-hero', 'sharpen', 'kuwahara', 'posterize', 'pixelate', 'pixelate-hero', 'key-chroma', 'key-luma'];
 
 test('each named step changes the picture and the default still keeps its hash', { skip: !rendersEnabled, timeout: 300000 }, () => {
   const output = execFileSync('node', ['bench/post/post-steps.mjs', '--rounds=1', `--out=${join(tmpdir(), 'post-steps-test')}`], { encoding: 'utf8' });
@@ -213,6 +248,9 @@ test('each named step changes the picture and the default still keeps its hash',
   assert.deepEqual(summary['grade-hero'].regions.floor, summary.default.regions.floor);
   assert.notDeepEqual(summary['color-balance'].regions.floor, summary.default.regions.floor);
   assert.deepEqual(summary['pixelate-hero'].regions.floor, summary.default.regions.floor);
+  // A user pass that lists the hero part and tints where objectSlotAt says 0 changes the hero and leaves the floor alone.
+  assert.notDeepEqual(summary['user-pass-hero'].regions.hero, summary.default.regions.hero);
+  assert.deepEqual(summary['user-pass-hero'].regions.floor, summary.default.regions.floor);
   // Hash of the default still as origin/main drew it before the named steps (bench/post/post-steps.mjs --root=<origin/main checkout>).
   assert.equal(summary.default.hash, '8741ffc3aaace9a8');
 });

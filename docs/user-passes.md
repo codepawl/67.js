@@ -20,6 +20,7 @@ Passes run in order on the finished frame: after depth of field, motion blur, li
 | `fragment` | GLSL ES 3.00 text that defines `vec4 userPass(vec2 uv)`. Helper functions and `const` values may come before it. 4096 bytes at most. |
 | `uniforms` | Named values. A number is a `float`; `[x, y]`, `[x, y, z]` and `[x, y, z, w]` are `vec2`, `vec3` and `vec4`; an int is `{ "type": "int", "value": 4 }`. |
 | `scale` | 0.05 to 1 (default 1). The pass renders at this fraction of the width and height, and whatever reads it enlarges it with nearest filtering. A `scale` of 0.25 on the last pass is a pixel-art downscale. |
+| `objects` | Optional list of 1 to 16 part names (node ids, as the object ID pass lists them). `objectSlotAt(uv)` tells which of them is under a pixel. The preview and render jobs draw the object ID pass first when a pass lists parts. |
 
 You do not declare uniforms or the version line; the engine writes them. A snippet sees these names:
 
@@ -31,6 +32,7 @@ You do not declare uniforms or the version line; the engine writes them. A snipp
 | `time` | `float` | Frame time in seconds. |
 | `depthAt(uv)`, `worldPointAt(uv)` | functions | Raw depth, and the world position of the pixel. |
 | `worldNormalAt(uv)` | function | The surface normal, found from neighbouring depth samples. It is exact on flat faces and wrong at silhouettes and in the sky. |
+| `objectSlotAt(uv)` | function | The position in the pass's `objects` list of the part under `uv`, or -1 for the background, any other part, and a pass with no `objects`. Edges are hard: an object ID cannot be antialiased. A name that is not a part in the frame fails the render and lists part names to use. |
 | `gl_FragCoord` | `vec4` | The pixel position inside this pass. |
 
 ## Limits and rules

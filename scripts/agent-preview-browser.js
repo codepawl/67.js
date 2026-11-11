@@ -365,11 +365,13 @@ function draw(record, time = 0, camera = record.scene.camera, frameOptions = {})
   }
   record.renderer.world = environment.world;
   syncMeshBlend(record);
-  record.renderer.userPasses?.set(record.scene.postPasses ?? []);
+  const postPasses = record.scene.postPasses ?? [];
+  record.renderer.userPasses?.set(postPasses);
   applyRecipeWindHeading(record.renderer, environment);
   const { objectMotion, ...renderOptions } = frameOptions;
   const frame = { ...camera, environment: litEnvironment(record.scene.parts, environment, Boolean(record.renderer.groundPart)), effects, exposure: effects.exposure, time, lines: environment.lines, ...windFrame(environment), ...renderOptions, effects: effectsWithFStop(renderOptions.effects ?? effects, camera) };
-  let needsObjectIds = Boolean(objectMotion);
+  // Object motion blur, a mask by parts and a user pass with `objects` all read the object ID pass.
+  let needsObjectIds = Boolean(objectMotion) || postPasses.some(pass => pass.objects);
   if (effects.colorBalance || effects.glare || effects.lensDistortion || effects.stylize || effects.composite) {
     const postSteps = agentSceneModule('postSteps');
     postSteps.installPostSteps(record.renderer);
