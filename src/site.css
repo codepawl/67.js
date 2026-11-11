@@ -382,7 +382,7 @@ body.site > main > section { scroll-margin-top: 96px; }
 .site .tiers p { color: var(--muted); max-width: 70ch; }
 .site .tiers p a { text-decoration: underline; }
 .site .tier-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.site .tier-row { display: grid; grid-template-columns: 0.9fr 1.1fr 1.8fr 1.2fr 1.6fr 1.6fr; gap: 12px; padding: 12px 16px; border-radius: var(--panel-radius); background: var(--bg); font-size: 13.5px; }
+.site .tier-row { display: grid; grid-template-columns: 0.8fr 1fr 1.5fr 1.4fr 1.1fr 1.4fr 1.4fr; gap: 12px; padding: 12px 16px; border-radius: var(--panel-radius); background: var(--bg); font-size: 13.5px; }
 .site .tier-row > span { min-width: 0; overflow-wrap: anywhere; }
 .site .tier-row > span:first-child { color: var(--text); font-weight: 600; }
 .site .tier-head { background: none; padding-top: 0; padding-bottom: 0; color: var(--muted); font-size: 12.5px; }

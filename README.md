@@ -74,6 +74,7 @@ Cook cpu needs no card, so VRAM does not apply.
 [docs/cycles-parity.md](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md) has the Cook against Cycles method on one scene.
 
 The experimental real-time path tracer is not the realtime-high tier.
+These figures come from lit-interior only, measured before the idle gate with the card 17 to 20 percent busy.
 On the WebGPU backend it draws a frame in 5.6 ms.
 FLIP drops under 0.20 after 16 frames (0.15 s) and under 0.10 after 64 frames (0.41 s).
 It ends at 0.056 after 256 frames.
@@ -254,10 +255,10 @@ The [render skill](skills/render-67js-media/SKILL.md) lists every preset and fla
 
 ## Performance
 
-Each number below comes from this repository's benchmarks. The RTX 3060 was shared with other jobs.
+Each number below comes from this repository's benchmarks.
 
 - **Bundle size.** On `lit-box`, 67js is 58,788 bytes gzip and three.js is 133,797 (2.28 times smaller). This is the `npm run size` result on 2026-11-11. The goal of 50,000 bytes is not met yet. [bench/size/README.md](bench/size/README.md) has every scene.
-- **Path tracing on the GPU.** One run on 2026-11-03 traced the 1920 by 1080 demo room (181,708 triangles, 64 samples, 8 bounces). The 8-thread CPU tracer took 585.9 s. The WebGL2 GPU tracer took 58.15 s, and that figure includes 10.3 s of shader compile. Whether the CPU figure is end to end is not recorded. [docs/webgpu-decision.md](docs/webgpu-decision.md) has the method.
+- **Path tracing on the GPU.** One run on 2026-11-03, on a shared machine, traced the 1920 by 1080 demo room (181,708 triangles, 64 samples, 8 bounces). The 8-thread CPU tracer took 585.9 s. The WebGL2 GPU tracer took 58.15 s, and that figure includes 10.3 s of shader compile. Whether the CPU figure is end to end is not recorded, so read the two as separate figures, not a speedup. [docs/webgpu-decision.md](docs/webgpu-decision.md) has the method.
 - **Cook against Cycles.** See [Quality tiers](#quality-tiers) and [docs/cycles-parity.md](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md).
 
 [docs/verification.md](docs/verification.md) has older results and their limits.

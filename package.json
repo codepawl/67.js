@@ -3,8 +3,8 @@
   "version": "0.19.0",
   "private": false,
   "type": "module",
-  "description": "3D engine that AI agents drive: a WebGL2 rasterizer, a path tracer on CPU, WebGL2 and Vulkan (WebGPU opt-in), an MCP server, and PNG, MP4 and GLB export",
-  "keywords": ["webgl2", "webgpu", "path-tracing", "mcp", "ai-agents", "3d", "performance"],
+  "description": "3D engine that AI agents drive: a WebGL2 rasterizer, a path tracer on CPU and WebGL2 (Vulkan with an optional package, WebGPU opt-in), an MCP server, and PNG, MP4 and GLB export",
+  "keywords": ["webgl2", "webgpu", "path-tracing", "mcp", "ai-agents", "3d"],
   "license": "MIT",
   "homepage": "https://67js.codepawl.com",
   "repository": {
