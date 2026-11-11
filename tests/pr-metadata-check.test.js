@@ -137,6 +137,8 @@ test('detail text in src/agent-scene-capabilities.js alone needs no bench table'
 test('a section named Ran, or a fenced block, counts as how I checked it', () => {
   const ran = ['## What changed', '', 'Adds a thing.', '', 'Closes #12', '', '## Ran', '', 'npm run preflight passed, 14 checks ok.', ''].join('\n');
   assert.deepEqual(fixIds({ pr: pullRequest({ body: ran }), files: shippedFiles }), []);
+  const checked = ran.replace('## Ran', '## Checked');
+  assert.deepEqual(fixIds({ pr: pullRequest({ body: checked }), files: shippedFiles }), []);
   const fence = '`'.repeat(3);
   const fenced = ['## What changed', '', 'Closes #12', '', fence, 'node --test tests/a.test.js', '# pass 4', fence, ''].join('\n');
   assert.deepEqual(fixIds({ pr: pullRequest({ body: fenced }), files: shippedFiles }), []);

@@ -39,7 +39,7 @@ The `Test` workflow runs this check on every pull request, so `git push --no-ver
 
 ### Describe how you checked it
 
-Under **How I checked it** (or **Ran**, **Checks**, **Tests**, **Verification**), paste the commands you ran and what they printed. A line such as `npm run preflight: 14 checks ok` is enough. This applies to agents too: show the commands and their results.
+Under **How I checked it** (or **Ran**, **Checks**, **Checked**, **Tests**, **Verification**), paste the commands you ran and what they printed. A line such as `npm run preflight: 14 checks ok` is enough. This applies to agents too: show the commands and their results.
 
 ### Keep private data out
 
