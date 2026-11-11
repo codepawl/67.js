@@ -659,7 +659,8 @@ export function compileMaterialGraph(graph, { size = 1, images } = {}) {
   const state = { nodeCount: 0, cost: 0, size, images };
   const outputs = Object.create(null);
   let emissionFresnel;
-  for (const name of names) {
+  for (const name of MATERIAL_GRAPH_OUTPUTS) {
+    if (!names.includes(name)) continue;
     let node = graph[name];
     if (name === 'emission') {
       const split = splitEmissionFresnel(node);
