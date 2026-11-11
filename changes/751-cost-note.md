@@ -1,0 +1,1 @@
+- Measured what the #751 flicker fix costs in bundle bytes, render-target and geometry memory and frame time, and noted it in the size file (#751)
