@@ -150,6 +150,11 @@ uniform highp sampler2D localMeshVolumes;
 // Each volume is marched on its own between its entry and exit (cut at the first surface) and composited nearest first: the colour
 // behind it is dimmed by exp(-absorption * profile * step) and its emission is added, both per colour channel.
 const LOCAL_VOLUME_FUNCTIONS = `
+// Interleaved gradient noise (Jimenez 2014): the start offsets of neighbouring pixels stay far apart, so the march error is a fine, even dither
+// and not the clumps a white-noise hash leaves, which read as grain at 8 to 16 steps.
+float localVolumeJitter() {
+  return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+}
 // Value noise on a hash of plain multiplies, adds and fract, which rounds the same way on SwiftShader, where it was measured, and is unchecked on hardware GPUs (a sine hash does not: its error
 // grows with the argument). local-volume-noise.js repeats it for the CPU path tracer, so keep the two in step.
 float localVolumeCellHash(vec3 cell) {
@@ -311,7 +316,7 @@ vec3 localVolumes(vec3 background) {
     }
     int steps = int(localVolumeSteps[nearest].x);
     float stepSize = (exitDistance - entry) / float(steps);
-    float jitter = hash(vec3(gl_FragCoord.xy, float(nearest) + 1.0));
+    float jitter = fract(localVolumeJitter() + float(nearest) * 0.618034);
     float scatterAlbedo = localVolumeSteps[nearest].z;
     for (int step = 0; step < 32; step++) {
       if (step >= steps) break;
