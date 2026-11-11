@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   FORMAT_V2_MAGIC,
   FORMAT_V2_VERSION,
+  KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
   STRUCT_STRIDES_V2,
   buildNativeInput,
   buildNativeInputV2,
@@ -552,4 +553,167 @@ test('Cycles v2 host executes multi-BLAS/TLAS ray queries, cutout alpha masking,
   assert.ok(rawBytesProbe.every(Number.isFinite));
 
   assert.throws(() => probeCyclesLobe({ width: 8, height: 8, wo: [0, 0, 0], bootstrapKernel: true }), /non-zero finite 3D vector/);
+});
+
+// ---------------------------------------------------------------------------
+// Boundary validation: shared filterGlossy offset constant
+// ---------------------------------------------------------------------------
+
+test('KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET equals 300 (f32[75] * 4)', () => {
+  assert.equal(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, 300);
+  // Verify pack-input-v2 writes filterGlossy at that offset.
+  const parts = [{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }];
+  const scene = buildTraceScene(parts, {});
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
+  const v2 = buildNativeInputV2(scene, camera, { width: 8, height: 8, samples: 1, filterGlossy: 2.5 });
+  const kp = new DataView(v2.kernelParams.buffer, v2.kernelParams.byteOffset, v2.kernelParams.byteLength);
+  assert.ok(Math.abs(kp.getFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, true) - 2.5) < 1e-6, 'filterGlossy at byte 300');
+});
+
+// ---------------------------------------------------------------------------
+// Boundary validation: width and height
+// ---------------------------------------------------------------------------
+
+test('buildNativeInputV2 rejects non-finite, non-integer, out-of-range width and height', () => {
+  const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
+  const ok = { width: 8, height: 8, samples: 1 };
+  const build = (opts) => buildNativeInputV2(minimalScene, camera, { ...ok, ...opts });
+
+  // NaN
+  assert.throws(() => build({ width: NaN }), /width/, 'width NaN');
+  assert.throws(() => build({ height: NaN }), /height/, 'height NaN');
+  // Infinity
+  assert.throws(() => build({ width: Infinity }), /width/, 'width Infinity');
+  assert.throws(() => build({ height: -Infinity }), /height/, 'height -Infinity');
+  // Float
+  assert.throws(() => build({ width: 1.5 }), /width/, 'width float');
+  assert.throws(() => build({ height: 8.3 }), /height/, 'height float');
+  // Zero
+  assert.throws(() => build({ width: 0 }), /width/, 'width 0');
+  assert.throws(() => build({ height: 0 }), /height/, 'height 0');
+  // Negative
+  assert.throws(() => build({ width: -1 }), /width/, 'width -1');
+  assert.throws(() => build({ height: -100 }), /height/, 'height -100');
+  // Over bound
+  assert.throws(() => build({ width: 16385 }), /width/, 'width 16385');
+  assert.throws(() => build({ height: 99999 }), /height/, 'height 99999');
+  // Exact bounds pass
+  assert.doesNotThrow(() => build({ width: 1, height: 1 }), 'min bounds');
+  assert.doesNotThrow(() => build({ width: 16384, height: 16384 }), 'max bounds');
+});
+
+// ---------------------------------------------------------------------------
+// Boundary validation: samples
+// ---------------------------------------------------------------------------
+
+test('buildNativeInputV2 rejects non-finite, non-integer, out-of-range samples', () => {
+  const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
+  const ok = { width: 8, height: 8, samples: 1 };
+  const build = (opts) => buildNativeInputV2(minimalScene, camera, { ...ok, ...opts });
+
+  assert.throws(() => build({ samples: NaN }), /samples/, 'samples NaN');
+  assert.throws(() => build({ samples: Infinity }), /samples/, 'samples Infinity');
+  assert.throws(() => build({ samples: -Infinity }), /samples/, 'samples -Infinity');
+  assert.throws(() => build({ samples: 1.5 }), /samples/, 'samples float');
+  assert.throws(() => build({ samples: 0 }), /samples/, 'samples 0');
+  assert.throws(() => build({ samples: -1 }), /samples/, 'samples -1');
+  assert.throws(() => build({ samples: 1048577 }), /samples/, 'samples 1048577');
+  // Exact bounds pass
+  assert.doesNotThrow(() => build({ samples: 1 }), 'samples 1');
+  assert.doesNotThrow(() => build({ samples: 1048576 }), 'samples 1048576');
+});
+
+// ---------------------------------------------------------------------------
+// Boundary validation: samplesPerDispatch (optional)
+// ---------------------------------------------------------------------------
+
+test('buildNativeInputV2 accepts undefined samplesPerDispatch but rejects invalid values', () => {
+  const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
+  const ok = { width: 8, height: 8, samples: 1 };
+  const build = (opts) => buildNativeInputV2(minimalScene, camera, { ...ok, ...opts });
+
+  // undefined: must be accepted (addon chooses default)
+  assert.doesNotThrow(() => build({ samplesPerDispatch: undefined }), 'undefined');
+  // Invalid values
+  assert.throws(() => build({ samplesPerDispatch: NaN }), /samplesPerDispatch/, 'NaN');
+  assert.throws(() => build({ samplesPerDispatch: Infinity }), /samplesPerDispatch/, 'Infinity');
+  assert.throws(() => build({ samplesPerDispatch: 1.5 }), /samplesPerDispatch/, 'float');
+  assert.throws(() => build({ samplesPerDispatch: 0 }), /samplesPerDispatch/, 'zero');
+  assert.throws(() => build({ samplesPerDispatch: -1 }), /samplesPerDispatch/, 'negative');
+  assert.throws(() => build({ samplesPerDispatch: 65537 }), /samplesPerDispatch/, '65537');
+  // Exact bounds pass
+  assert.doesNotThrow(() => build({ samplesPerDispatch: 1 }), 'min 1');
+  assert.doesNotThrow(() => build({ samplesPerDispatch: 65536 }), 'max 65536');
+});
+
+// ---------------------------------------------------------------------------
+// Boundary validation: bounce limits (non-finite / negative / float / over-bound rejection)
+// ---------------------------------------------------------------------------
+
+test('buildNativeInputV2 rejects non-finite and out-of-range bounce limit values', () => {
+  const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
+  const ok = { width: 8, height: 8, samples: 1 };
+  const build = (opts) => buildNativeInputV2(minimalScene, camera, { ...ok, ...opts });
+
+  const bounceFields = [
+    'bounces', 'maxBounces',
+    'diffuseBounces', 'maxDiffuseBounces',
+    'glossyBounces', 'maxGlossyBounces',
+    'transmissionBounces', 'maxTransmissionBounces',
+    'volumeBounces', 'maxVolumeBounces',
+    'transparentBounces', 'maxTransparentBounces',
+    'minBounceRr',
+  ];
+
+  for (const field of bounceFields) {
+    // Infinity previously packed to 0 (now rejected)
+    assert.throws(() => build({ [field]: Infinity }), new RegExp(field), `${field}: Infinity`);
+    assert.throws(() => build({ [field]: -Infinity }), new RegExp(field), `${field}: -Infinity`);
+    assert.throws(() => build({ [field]: NaN }), new RegExp(field), `${field}: NaN`);
+    assert.throws(() => build({ [field]: -1 }), new RegExp(field), `${field}: -1`);
+    assert.throws(() => build({ [field]: 1.5 }), new RegExp(field), `${field}: 1.5`);
+    assert.throws(() => build({ [field]: 1025 }), new RegExp(field), `${field}: 1025`);
+    // Valid bounds pass
+    assert.doesNotThrow(() => build({ [field]: 0 }), `${field}: 0`);
+    assert.doesNotThrow(() => build({ [field]: 1024 }), `${field}: 1024`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Boundary validation: upgradeNativeInputV1ToV2 validates options too
+// ---------------------------------------------------------------------------
+
+test('upgradeNativeInputV1ToV2 validates width, height, samples, samplesPerDispatch, and bounce fields', () => {
+  // Minimal valid v1 input (parameters = 256-byte Uint8Array with triangleCount = 0 triangle data).
+  const parameters = new Uint8Array(256);
+  const v1Input = { parameters, triangleCount: 0, triangles: new Float32Array(0), materials: new Float32Array(0) };
+
+  assert.throws(() => upgradeNativeInputV1ToV2(v1Input, { width: NaN }), /width/, 'width NaN');
+  assert.throws(() => upgradeNativeInputV1ToV2(v1Input, { height: Infinity }), /height/, 'height Inf');
+  assert.throws(() => upgradeNativeInputV1ToV2(v1Input, { samples: 0 }), /samples/, 'samples 0');
+  assert.throws(() => upgradeNativeInputV1ToV2(v1Input, { samplesPerDispatch: -1 }), /samplesPerDispatch/, 'spd -1');
+  assert.throws(() => upgradeNativeInputV1ToV2(v1Input, { bounces: Infinity }), /bounces/, 'bounces Inf');
+  assert.throws(() => upgradeNativeInputV1ToV2(v1Input, { maxGlossyBounces: 1.5 }), /maxGlossyBounces/, 'float');
+  // Valid options pass
+  assert.doesNotThrow(
+    () => upgradeNativeInputV1ToV2(v1Input, { width: 32, height: 32, samples: 4, bounces: 8 }),
+    'valid options'
+  );
+});
+
+test('traceNative and probeCyclesLobe validate options at the public boundary even on pre-built v2 inputs', () => {
+  const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
+  const v2Input = buildNativeInputV2(minimalScene, camera, { width: 8, height: 8, samples: 1 });
+
+  assert.throws(() => traceNative(v2Input, { width: Infinity, height: 8, samples: 1, kernel: 'cycles' }), /width/);
+  assert.throws(() => traceNative(v2Input, { width: 8, height: 8, samples: NaN, kernel: 'cycles' }), /samples/);
+  assert.throws(() => traceNative(v2Input, { width: 8, height: 8, samples: 1, samplesPerDispatch: Infinity, kernel: 'cycles' }), /samplesPerDispatch/);
+  assert.throws(() => traceNative(v2Input, { width: 8, height: 8, samples: 1, bounces: Infinity, kernel: 'cycles' }), /bounces/);
+  assert.throws(() => traceNative(v2Input, { height: 8, samples: 1, kernel: 'cycles' }), /width/);
+  assert.throws(() => probeCyclesLobe({ width: 16385, height: 8 }), /16384/);
 });

@@ -83,6 +83,8 @@ def compute_tile_grid_ratios(reference_rgb, candidate_rgb):
     row_strips_cand = numpy.array_split(candidate_rgb, TILE_GRID_SIZE, axis=0)
     grid_ratios = []
     eligible_entries = []
+    dark_tile_abs_error_sum = 0.0
+    dark_tile_value_count = 0
     for row_index in range(TILE_GRID_SIZE):
         cols_ref = numpy.array_split(row_strips_ref[row_index], TILE_GRID_SIZE, axis=1)
         cols_cand = numpy.array_split(row_strips_cand[row_index], TILE_GRID_SIZE, axis=1)
@@ -108,7 +110,17 @@ def compute_tile_grid_ratios(reference_rgb, candidate_rgb):
                     "candidateMean": round(cand_mean, 5),
                     "channelRatios": channel_ratios,
                 })
+            else:
+                dark_tile_abs_error_sum += float(numpy.abs(cand_tile - ref_tile).sum())
+                dark_tile_value_count += int(ref_tile.size)
         grid_ratios.append(row_values)
+    total_tile_count = TILE_GRID_SIZE * TILE_GRID_SIZE
+    excluded_dark_tile_count = total_tile_count - len(eligible_entries)
+    excluded_dark_tile_mae = (
+        round(dark_tile_abs_error_sum / dark_tile_value_count, 6)
+        if dark_tile_value_count > 0
+        else None
+    )
     ratios_only = [entry["ratioExact"] for entry in eligible_entries]
     within_tolerance = [entry for entry in eligible_entries if entry["absDeviation"] <= TILE_RATIO_TOLERANCE]
     min_tile_index = min(range(len(eligible_entries)), key=lambda idx: eligible_entries[idx]["ratioExact"]) if eligible_entries else None
@@ -120,7 +132,10 @@ def compute_tile_grid_ratios(reference_rgb, candidate_rgb):
     return {
         "gridShape": [TILE_GRID_SIZE, TILE_GRID_SIZE],
         "eligibleMeanThreshold": TILE_ELIGIBLE_MEAN_THRESHOLD,
+        "totalTileCount": total_tile_count,
         "eligibleTileCount": len(eligible_entries),
+        "excludedDarkTileCount": excluded_dark_tile_count,
+        "excludedDarkTileMeanAbsError": excluded_dark_tile_mae,
         "withinFivePercentCount": len(within_tolerance),
         "outsideFivePercentCount": len(eligible_entries) - len(within_tolerance),
         "minRatio": round(min(ratios_only), 4) if ratios_only else None,
@@ -297,13 +312,16 @@ def format_parity_summary_line(comparison):
         flip_text += f" (ceil {gates['flipLdrCeiling']:.4f}, A/B {gates['flipLdrAVsB']:.4f}, pass={gates['flipPass']})"
     tile_text = (
         f"tiles={tile_grid['withinFivePercentCount']}/{tile_grid['eligibleTileCount']} "
+        f"(of {tile_grid['totalTileCount']} total, {tile_grid['excludedDarkTileCount']} dark excluded) "
         f"[{tile_grid['minRatio']}, {tile_grid['maxRatio']}] pass={gates['tileGridPass']}"
     )
+    rel_mse_trimmed = comparison.get("relMseTrimmed")
+    rel_mse_trimmed_text = f"{rel_mse_trimmed:.6f}" if rel_mse_trimmed is not None else "n/a"
     return (
         f"{os.path.basename(comparison['image'])}: "
         f"allGatesPass={gates['allGatesPass']} "
         f"RGB={ratios} (pass={gates['channelMeanPass']}) "
-        f"{tile_text} {flip_text} relMSE={comparison['relMse']:.6f}"
+        f"{tile_text} {flip_text} relMSE={comparison['relMse']:.6f} relMSETrimmed={rel_mse_trimmed_text}"
     )
 
 

@@ -16,7 +16,7 @@ CHI_SQUARE_MIN_EXPECTED = 5.0
 HISTOGRAM_PHI_BINS = 32
 HISTOGRAM_Z_BINS = 32
 EVAL_CONSISTENCY_TOLERANCE = 2e-3
-PDF_INTEGRAL_TOLERANCE = 0.015
+PDF_INTEGRAL_TOLERANCE = 0.005
 
 
 def regularized_gamma_upper(shape_a, value_x):
@@ -115,11 +115,8 @@ def evaluate_spherical_chi_square(mode_zero_rows, pdf_grid):
     observed_bins = numpy.bincount(flat_indices, minlength=HISTOGRAM_Z_BINS * HISTOGRAM_PHI_BINS).astype(numpy.float64)
 
     expected_probs = bin_probabilities.ravel().copy()
-    if raw_pdf_integral > 1.0:
-        expected_probs = expected_probs / raw_pdf_integral
-        invalid_prob = 0.0
-    else:
-        invalid_prob = max(0.0, 1.0 - raw_pdf_integral)
+    # Do not rescale when integral > 1; fail hard via integral_valid check below.
+    invalid_prob = max(0.0, 1.0 - raw_pdf_integral)
     all_observed = numpy.append(observed_bins, float(invalid_count))
     all_expected = numpy.append(expected_probs, invalid_prob) * float(sample_count)
     pooled_obs, pooled_exp, leaked_zero_pdf = pool_histogram_bins(all_observed, all_expected)
@@ -387,6 +384,28 @@ def run_self_test():
             "imagePath": furnace_dark_rim_path,
         })
         assert not scene_bad["pass"] and not scene_bad["limbPass"], "Dark-rim grazing energy loss was not rejected"
+
+        # Verify that a synthetic PDF integrating to 1.006 fails without rescaling.
+        over_integral_grid = build_synthetic_pdf_grid(
+            grid_h, grid_w,
+            lambda z, _p: numpy.maximum(z, 0.0) / math.pi * (1.006 / 1.0),
+        )
+        over_integral_m1 = os.path.join(temp_dir, "over-integral-m1.npy")
+        numpy.save(over_integral_m1, over_integral_grid)
+        over_integral_res = evaluate_lobe_probe({
+            "id": "self-over-integral",
+            "family": "diffuse",
+            "frontFace": True,
+            "wo": [0, 0, 1],
+            "expectWhiteFurnace": True,
+            "expectChiSquare": True,
+            "modeZeroPath": lambert_m0,
+            "modeOnePath": over_integral_m1,
+        })
+        assert not over_integral_res["pass"], (
+            f"PDF integral {over_integral_res['chiSquare']['rawPdfIntegral']:.4f} "
+            "should FAIL (> 1.005) — no rescaling"
+        )
 
     print(json.dumps({
         "selfTest": "ok",

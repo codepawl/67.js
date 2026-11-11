@@ -734,6 +734,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var prev_recv_lo = 0xFFFFFFFFu;
     var prev_recv_hi = 0xFFFFFFFFu;
     var terminate_on_hit = false;
+    var terminate_on_next_surface = false;
 
     var bounce = 0u;
     var diffuse_bounces = 0u;
@@ -793,7 +794,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       if (volume_scattered) {
-        if (terminate_on_hit) {
+        if (terminate_on_hit || terminate_on_next_surface) {
           break;
         }
         if (in_medium) {
@@ -908,12 +909,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
       }
 
+      if (terminate_on_next_surface) {
+        break;
+      }
+
       if (terminate_on_hit) {
         if (closure.lobe_count > 0u && closure.lobes[0].lobe_type == LOBE_TRANSPARENT && closure.total_sample_weight > 0.0) {
-          if (transparent_bounces < kernel_params.max_transparent_bounces) {
+          if (kernel_params.max_transparent_bounces > 0u && transparent_bounces < kernel_params.max_transparent_bounces) {
             let trans_prob = clamp(closure.lobes[0].sample_weight / closure.total_sample_weight, 0.0, 1.0);
             if (trans_prob > 0.0 && smp_next_1d(&rng) < trans_prob) {
               transparent_bounces += 1u;
+              if (transparent_bounces >= kernel_params.max_transparent_bounces) {
+                terminate_on_next_surface = true;
+              }
               throughput *= closure.lobes[0].weight / trans_prob;
               ray_t_min = surface_hit.t + max(kernel_params.ray_epsilon, 1.0e-6);
               self_instance = point.instance_index;
@@ -961,10 +969,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       if (bsdf_sample.sampled_lobe_type == LOBE_TRANSPARENT) {
-        if (transparent_bounces >= kernel_params.max_transparent_bounces) {
+        if (kernel_params.max_transparent_bounces == 0u || transparent_bounces >= kernel_params.max_transparent_bounces) {
           break;
         }
         transparent_bounces += 1u;
+        if (transparent_bounces >= kernel_params.max_transparent_bounces) {
+          terminate_on_next_surface = true;
+        }
         throughput *= bsdf_sample.eval / bsdf_sample.pdf;
         ray_t_min = surface_hit.t + max(kernel_params.ray_epsilon, 1.0e-6);
         self_instance = point.instance_index;

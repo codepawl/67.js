@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2011-2026 Blender Foundation
+// SPDX-License-Identifier: Apache-2.0
+
 enable wgpu_ray_query;
 
 // Cycles-parity native kernel ABI header (`FORMAT-v2.md`).

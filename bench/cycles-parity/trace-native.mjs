@@ -77,6 +77,9 @@ function parseTraceArguments(argumentList) {
     filterGlossy: parseNumberOption(argumentList, '--filter-glossy', 1.0, 0),
     fireflyClamp: parseNumberOption(argumentList, '--firefly-clamp', 1e9, 0),
     noiseThreshold: parseNumberOption(argumentList, '--noise-threshold', 0, 0),
+    samplesPerDispatch: argumentList.includes('--samples-per-dispatch')
+      ? parseIntegerOption(argumentList, '--samples-per-dispatch', 16, 1)
+      : undefined,
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
   };
 }
@@ -113,7 +116,9 @@ async function runCli() {
   const traceSource = await reconstructTraceSceneSource(description);
   const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, options.width, options.height);
-  const samplesPerDispatch = options.noiseThreshold > 0 ? 8 : Math.min(options.samples, 16);
+  const samplesPerDispatch = options.samplesPerDispatch !== undefined
+    ? options.samplesPerDispatch
+    : (options.noiseThreshold > 0 ? 8 : undefined);
   const nativeInput = packSceneForKernel(traceScene, camera, { ...options, samplesPerDispatch, parts: traceSource.parts });
   const sceneBuildSeconds = (performance.now() - buildStarted) / 1000;
   const traced = renderNative.traceNative(nativeInput, {
