@@ -74,7 +74,7 @@ The package is ESM. The tools need Node.js 20.19 or later, and rendering needs a
 
 A new minor version ships about once a week. The day is not fixed and can move by one to three days, so a release
 can wait for an important fix or go out early when its work is done. A serious bug gets a patch release at once.
-Before 1.0, a minor version can change the API. [CHANGELOG.md](CHANGELOG.md) lists each change and what to update.
+Before 1.0, a minor version can change the API. [CHANGELOG.md](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md) lists each change and what to update.
 
 npx keeps the copy it downloaded first, so the MCP server does not update by itself. To get the latest version, run
 `npm install 67js@npm:@codepawlhq/67js@latest` in a project, or start the server once with
