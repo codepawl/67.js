@@ -13,6 +13,8 @@ import {
   buildNativeInputV2,
   packMaterialRecordV2,
   upgradeNativeInputV1ToV2,
+  validateImagePixelCount,
+  validateMaxSeconds,
   validatePackOptions,
 } from './pack-input-v2.mjs';
 
@@ -129,6 +131,8 @@ export function probeCyclesLobe(options = {}) {
   if (!Number.isInteger(width) || width < 1 || width > 16384 || !Number.isInteger(height) || height < 1 || height > 16384) {
     throw new RangeError(`probeCyclesLobe requires integer \`width\` and \`height\` in [1, 16384]; got width=${width}, height=${height}.`);
   }
+  validateImagePixelCount(width, height, 'probeCyclesLobe');
+  validateMaxSeconds(options.maxSeconds, 'probeCyclesLobe');
   const wo = options.wo ?? [0, 0, 1];
   if (!Array.isArray(wo) && !ArrayBuffer.isView(wo) || wo.length !== 3) {
     throw new TypeError('probeCyclesLobe option `wo` must hold 3 numbers.');
@@ -178,6 +182,7 @@ export function probeCyclesLobe(options = {}) {
  * `buildNativeTexelInput`.
  */
 export function traceNativeTexels(input, texels, { samples, maxSeconds }) {
+  validateMaxSeconds(maxSeconds, 'traceNativeTexels');
   return loadAddon().traceTexels(input, texels, { samples, maxSeconds });
 }
 

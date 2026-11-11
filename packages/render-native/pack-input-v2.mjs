@@ -1434,8 +1434,52 @@ function packEnvironmentTexelsV2(environment, options = {}) {
   };
 }
 
+// The accumulation buffer holds 64 bytes per pixel and the device caps one storage buffer at 1 GiB.
+export const MAX_TRACE_PIXELS = 2 ** 24;
+// The most path samples (pixels times samplesPerDispatch) one dispatch may hold; it equals what the automatic batch picks at
+// the largest image (16 samples of 4096 x 4096), so a dispatch finishes well inside the GPU watchdog time.
+export const MAX_PATH_SAMPLES_PER_DISPATCH = 2 ** 28;
+
+function requireNumberType(value, name, callerName) {
+  if (typeof value !== 'number') {
+    const received = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    throw new TypeError(`${callerName}: \`${name}\` must be a number; got ${received}. Pass a number, not a string, boolean or array.`);
+  }
+}
+
+/** Rejects a `maxSeconds` that is not a finite number greater than zero; `undefined` means no time limit. */
+export function validateMaxSeconds(maxSeconds, callerName) {
+  if (maxSeconds === undefined) {
+    return;
+  }
+  requireNumberType(maxSeconds, 'maxSeconds', callerName);
+  if (!Number.isFinite(maxSeconds) || maxSeconds <= 0) {
+    throw new RangeError(`${callerName}: \`maxSeconds\` must be a finite number greater than 0; got ${maxSeconds}.`);
+  }
+}
+
+/** Rejects an image whose accumulation buffer would not fit one storage buffer on the device. */
+export function validateImagePixelCount(width, height, callerName) {
+  if (width * height > MAX_TRACE_PIXELS) {
+    throw new RangeError(
+      `${callerName}: \`width\` times \`height\` must be at most ${MAX_TRACE_PIXELS} pixels (4096 x 4096) so the accumulation buffer fits the device limit; got ${width} x ${height} = ${width * height}. Lower the resolution.`
+    );
+  }
+}
+
+/** Rejects a dispatch of `samplesPerDispatch` samples over `width * height` pixels that is too long for one GPU submission. */
+export function validateDispatchSize(width, height, samplesPerDispatch, callerName) {
+  if (width * height * samplesPerDispatch > MAX_PATH_SAMPLES_PER_DISPATCH) {
+    const largestAllowed = Math.max(1, Math.floor(MAX_PATH_SAMPLES_PER_DISPATCH / (width * height)));
+    throw new RangeError(
+      `${callerName}: \`samplesPerDispatch\` times \`width\` times \`height\` must be at most ${MAX_PATH_SAMPLES_PER_DISPATCH} path samples per dispatch; got ${samplesPerDispatch} x ${width} x ${height} = ${samplesPerDispatch * width * height}. Pass \`samplesPerDispatch\` of ${largestAllowed} or less.`
+    );
+  }
+}
+
 function requireFiniteIntegerInRange(value, name, min, max, callerName) {
-  const n = Number(value);
+  requireNumberType(value, name, callerName);
+  const n = value;
   if (!Number.isFinite(n)) {
     throw new RangeError(
       `${callerName}: \`${name}\` must be a finite integer in [${min}, ${max}]; got ${value === null ? 'null' : JSON.stringify(value)}.`
@@ -1480,6 +1524,13 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   }
   // samplesPerDispatch is optional (undefined means "let the addon choose"); only validate when provided.
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
+  validateMaxSeconds(options.maxSeconds, callerName);
+  if (width !== undefined && height !== undefined) {
+    validateImagePixelCount(width, height, callerName);
+    if (samplesPerDispatch !== undefined) {
+      validateDispatchSize(width, height, samplesPerDispatch, callerName);
+    }
+  }
 
   // Bounce limits — each is optional; when provided must be a finite integer in [0, 1024].
   const bounceFields = [

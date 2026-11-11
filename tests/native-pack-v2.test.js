@@ -13,6 +13,7 @@ import {
   traceNative,
   upgradeNativeInputV1ToV2,
 } from '../packages/render-native/index.mjs';
+import { validatePackOptions } from '../packages/render-native/pack-input-v2.mjs';
 import { createEnvironmentMap } from '../src/hdri.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
@@ -600,7 +601,9 @@ test('buildNativeInputV2 rejects non-finite, non-integer, out-of-range width and
   assert.throws(() => build({ height: 99999 }), /height/, 'height 99999');
   // Exact bounds pass
   assert.doesNotThrow(() => build({ width: 1, height: 1 }), 'min bounds');
-  assert.doesNotThrow(() => build({ width: 16384, height: 16384 }), 'max bounds');
+  assert.doesNotThrow(() => build({ width: 4096, height: 4096 }), 'max pixel count');
+  assert.doesNotThrow(() => build({ width: 16384, height: 1 }), 'max width');
+  assert.throws(() => build({ width: 16384, height: 16384 }), /pixels/, 'over the pixel limit');
 });
 
 // ---------------------------------------------------------------------------
@@ -716,4 +719,58 @@ test('traceNative and probeCyclesLobe validate options at the public boundary ev
   assert.throws(() => traceNative(v2Input, { width: 8, height: 8, samples: 1, bounces: Infinity, kernel: 'cycles' }), /bounces/);
   assert.throws(() => traceNative(v2Input, { height: 8, samples: 1, kernel: 'cycles' }), /width/);
   assert.throws(() => probeCyclesLobe({ width: 16385, height: 8 }), /16384/);
+});
+
+// ---------------------------------------------------------------------------
+// Boundary validation: pixel count, dispatch size, maxSeconds and number types
+// ---------------------------------------------------------------------------
+
+test('traceNative bounds the pixel count by the accumulation buffer and states the largest size', () => {
+  const minimalScene = buildTraceScene([{ name: 'q', geometry: quadGeometry(0), material: { color: [0.5, 0.5, 0.5] } }], {});
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 50 }, 8, 8);
+  const v2Input = buildNativeInputV2(minimalScene, camera, { width: 8, height: 8, samples: 1 });
+  const trace = (width, height) => traceNative(v2Input, { width, height, samples: 1, kernel: 'cycles' });
+
+  assert.throws(() => trace(16384, 16384), (error) => error instanceof RangeError && /16777216 pixels \(4096 x 4096\)/.test(error.message));
+  assert.throws(() => trace(4097, 4096), RangeError);
+  assert.throws(() => probeCyclesLobe({ width: 16384, height: 16384 }), /16777216 pixels/);
+  // The exact limits pass validation.
+  assert.doesNotThrow(() => validatePackOptions({ width: 4096, height: 4096, samples: 1 }, 'traceNative', true));
+  assert.doesNotThrow(() => validatePackOptions({ width: 16384, height: 1, samples: 1 }, 'traceNative', true));
+});
+
+test('traceNative bounds samplesPerDispatch times pixel count and says what to pass', () => {
+  const options = { width: 4096, height: 4096, samples: 64 };
+  assert.doesNotThrow(() => validatePackOptions({ ...options, samplesPerDispatch: 16 }, 'traceNative', true));
+  assert.throws(
+    () => validatePackOptions({ ...options, samplesPerDispatch: 17 }, 'traceNative', true),
+    (error) => error instanceof RangeError && /268435456 path samples per dispatch/.test(error.message) && /16 or less/.test(error.message),
+  );
+  assert.doesNotThrow(() => validatePackOptions({ width: 8, height: 8, samples: 1, samplesPerDispatch: 65536 }, 'traceNative', true));
+});
+
+test('traceNative validates maxSeconds when given', () => {
+  const base = { width: 8, height: 8, samples: 1 };
+  assert.doesNotThrow(() => validatePackOptions({ ...base, maxSeconds: undefined }, 'traceNative', true));
+  assert.doesNotThrow(() => validatePackOptions({ ...base, maxSeconds: 0.5 }, 'traceNative', true));
+  for (const invalid of [0, -1, NaN, Infinity, -Infinity]) {
+    assert.throws(() => validatePackOptions({ ...base, maxSeconds: invalid }, 'traceNative', true), /maxSeconds/, `maxSeconds ${invalid}`);
+  }
+  for (const invalid of ['5', true, [5], null, {}]) {
+    assert.throws(() => validatePackOptions({ ...base, maxSeconds: invalid }, 'traceNative', true), TypeError, `maxSeconds ${JSON.stringify(invalid)}`);
+  }
+  assert.throws(() => probeCyclesLobe({ width: 8, height: 8, maxSeconds: 0 }), /maxSeconds/);
+});
+
+test('pack options reject strings, booleans, arrays and null instead of coercing them', () => {
+  const base = { width: 8, height: 8, samples: 1 };
+  for (const field of ['width', 'height', 'samples', 'samplesPerDispatch', 'bounces', 'minBounceRr']) {
+    for (const invalid of ['8', true, [8], null]) {
+      assert.throws(
+        () => validatePackOptions({ ...base, [field]: invalid }, 'traceNative', true),
+        (error) => error instanceof TypeError && error.message.includes(field) && /must be a number/.test(error.message),
+        `${field} ${JSON.stringify(invalid)}`,
+      );
+    }
+  }
 });
