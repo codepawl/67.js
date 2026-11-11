@@ -26,6 +26,10 @@ A full world that fails to arrive or to build is asked for again after 4, 10 and
 
 The options (`--near-pixels`, `--far-pixels` and others) are read by `parseArguments` in the script. The geometry the first view lacks lies outside the first 5 s of the flight, so `src/hero-lab/loop/hold.js` slows the flight from 2.5 s while the full world is pending and stops it at 5 s, until the full world is in (or has been given up on). The cost is that on a very slow link the frame is almost still for most of the wait (at 1.6 Mbit/s the first view appears at about 14 s and the swap lands at about 64 s); the alternative is holes at the edges of the picture, and the page before this change showed nothing at all for that time.
 
+## Fixing the world itself
+
+The first view is cut from the full world, so a flaw in the world shows in both. The quay cranes of the port were decimated when the world was exported, and the machinery house on each crane's rear girder collapsed into a four-triangle wedge. `scripts/fix-port-crane-rear.mjs` removes those wedges from `scene.rest.glb` and adds a real house to each crane (cladding with panel ribs, orange frame bands, a door, a ladder and a roof rail) and a cabinet on each A-frame, using only materials already in the file. Run it on `scene.rest.glb`, then rebuild the first view with `build-hero-first-view.mjs`. Every new house is its own mesh: the crop cuts a mesh in place from the pose of the first node that uses it, so a mesh shared by several nodes loses the geometry the others need.
+
 ## Measuring
 
 ```sh
