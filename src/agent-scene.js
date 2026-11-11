@@ -959,7 +959,7 @@ function normalizeRecipe(input, limits) {
   if (Object.hasOwn(recipe, 'postPasses')) recipe.postPasses = agentSceneModule('userPass').normalizeUserPasses(recipe.postPasses ?? []);
   if (Object.hasOwn(recipe, 'game')) {
     if (recipe.game === null) delete recipe.game;
-    else recipe.game = agentSceneModule('game').normalizeGameSetup(recipe.game, new Set(recipe.nodes.map(node => node.id)));
+    else recipe.game = agentSceneModule('game').normalizeGameSetup(recipe.game, recipe.nodes);
   }
   recipe = copiedJson(recipe, limits.maxRecipeBytes);
   return recipe;
