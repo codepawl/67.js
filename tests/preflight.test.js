@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { manualChecksFor, planChecks } from '../scripts/preflight.mjs';
+import { isVersionBump, manualChecksFor, planChecks } from '../scripts/preflight.mjs';
 
 function checkNamed(checks, name) {
   return checks.find(check => check.name === name);
@@ -25,6 +25,19 @@ test('a size note alone does not count as a change note', () => {
   assert.ok(checkNamed(checks, 'change note').failure);
   const withNote = planChecks(['src/camera.js', 'changes/700.size.md', 'changes/700.md']);
   assert.equal(checkNamed(withNote, 'change note').failure, null);
+});
+
+test('a release (version bump) may edit protected files and fold every change note', () => {
+  const releasePaths = ['CHANGELOG.md', 'bench/size/budgets.json', 'bench/tool-cost-budgets.json', 'package.json', 'src/version.js', 'changes/700.md'];
+  const checks = planChecks(releasePaths, { release: true });
+  assert.equal(checkNamed(checks, 'protected files').failure, null);
+  assert.match(checkNamed(checks, 'protected files').skipped, /release/);
+  assert.equal(checkNamed(checks, 'change note').failure, null);
+  assert.equal(isVersionBump('{"version":"0.18.0"}', '{"version":"0.19.0"}'), true);
+  assert.equal(isVersionBump('{"version":"0.18.0"}', '{"version":"0.18.0","name":"x"}'), false);
+  assert.equal(isVersionBump(null, '{"version":"0.19.0"}'), false);
+  const notRelease = planChecks(releasePaths);
+  assert.match(checkNamed(notRelease, 'protected files').failure, /CHANGELOG\.md/);
 });
 
 test('editing a protected file fails with the alternative', () => {
