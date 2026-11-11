@@ -384,9 +384,9 @@ body.site > main > section { scroll-margin-top: 96px; }
 .site .tiers p a { text-decoration: underline; }
 .site .tiers #tiers-table { --rail-accent: #ff6a2b; --rail-size: 16px; position: relative; display: grid; padding-top: 54px; }
 .site .tier-rail { position: absolute; inset: 0 0 auto 0; height: 40px; color: var(--muted); font-size: 12.5px; line-height: 16px; user-select: none; pointer-events: none; }
-.site .tier-line { position: absolute; left: 0; right: 0; top: 29px; height: 4px; border-radius: 999px; overflow: hidden; background: linear-gradient(90deg, #ffffff26, #ff6a2bcc 70%, #f59e0b); box-shadow: 0 0 14px #ff6a2b40; }
+.site .tier-line { position: absolute; left: 0; right: 14px; top: 29px; height: 4px; border-radius: 999px; overflow: hidden; background: linear-gradient(90deg, #ffffff26, #ff6a2bcc 70%, #f59e0b); box-shadow: 0 0 14px #ff6a2b40; }
 .site .tier-line::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 18%; background: linear-gradient(90deg, transparent, #fff8, transparent); transform: translateX(-100%); animation: tier-glow 4.8s ease-in-out infinite; }
-.site .tier-rail::after { content: ""; position: absolute; right: 3px; top: 25.5px; width: 9px; height: 9px; border-top: 2.5px solid #f59e0b; border-right: 2.5px solid #f59e0b; border-radius: 1px 3px 1px 1px; transform: rotate(45deg); }
+.site .tier-rail::after { content: ""; position: absolute; right: 3px; top: 27px; width: 8px; height: 8px; border-top: 2.5px solid #f59e0b; border-right: 2.5px solid #f59e0b; border-radius: 1px 3px 1px 1px; transform: rotate(45deg); }
 .site .tier-end { position: absolute; top: 0; white-space: nowrap; }
 .site .tier-end.is-start { left: 0; }
 .site .tier-end.is-finish { right: 0; color: #ffb877; }
@@ -397,7 +397,7 @@ body.site > main > section { scroll-margin-top: 96px; }
 .site .tier-card:nth-child(2) { --node-fill: #ff6a2b70; }
 .site .tier-card:nth-child(4) { --node-fill: var(--rail-accent); }
 .site .tier-card:nth-child(4)::before { box-shadow: 0 0 0 4px #ff6a2b33, 0 0 16px #ff6a2b99; }
-.site .tier-card.is-planned::before { border: 0; border-radius: 0; background: repeating-conic-gradient(#ff6a2bcc 0 24deg, transparent 24deg 60deg); -webkit-mask: radial-gradient(circle, transparent 4.5px, #000 5px); mask: radial-gradient(circle, transparent 4.5px, #000 5px); }
+.site .tier-card.is-planned::before { border: 2px dashed #ff6a2b; background: var(--window); opacity: 1; }
 @keyframes tier-glow { 0% { transform: translateX(-100%); } 70%, 100% { transform: translateX(560%); } }
 @keyframes tier-glow-down { 0% { transform: translateY(-100%); } 70%, 100% { transform: translateY(560%); } }
 @media (prefers-reduced-motion: reduce) {
@@ -405,7 +405,8 @@ body.site > main > section { scroll-margin-top: 96px; }
 }
 .site .tier-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .site .tier-card { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 18px; border-radius: var(--panel-radius); background: var(--bg); }
-.site .tier-card.is-planned { opacity: 0.55; background: #ffffff08; }
+.site .tier-card.is-planned > * { opacity: 0.55; }
+.site .tier-card.is-planned { background: #ffffff08; }
 .site .tier-top { display: flex; align-items: center; gap: 10px; user-select: none; }
 .site .tier-top h3 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .site .tier-icon { flex: none; width: 28px; height: 28px; padding: 5px; border-radius: 9px; background: #ffffff12; fill: none; stroke: #ffb877; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; box-sizing: border-box; }
@@ -428,15 +429,14 @@ body.site > main > section { scroll-margin-top: 96px; }
 .site .tier-plan { margin: 0; font-size: 12.5px; }
 .site .tiers .tiers-note { font-size: 12.5px; }
 @media (max-width: 1000px) {
-  .site .tiers #tiers-table { padding: 0 0 0 48px; }
+  .site .tiers #tiers-table { padding: 30px 0 30px 48px; }
   .site .tier-cards { grid-template-columns: minmax(0, 1fr); }
-  .site .tier-rail { inset: 0 auto 0 0; width: 40px; height: auto; }
-  .site .tier-line { left: 10px; right: auto; top: 0; bottom: 0; width: 4px; height: auto; background: linear-gradient(180deg, #ffffff26, #ff6a2bcc 70%, #f59e0b); }
+  .site .tier-rail { inset: 0 auto 0 0; width: 100%; height: auto; font-size: 13px; }
+  .site .tier-line { left: 10px; right: auto; top: 0; bottom: 14px; width: 4px; height: auto; background: linear-gradient(180deg, #ffffff26, #ff6a2bcc 70%, #f59e0b); }
   .site .tier-line::after { top: 0; bottom: auto; left: 0; right: 0; width: auto; height: 18%; background: linear-gradient(180deg, transparent, #fff8, transparent); animation-name: tier-glow-down; }
-  .site .tier-rail::after { right: auto; left: 7.5px; top: auto; bottom: 1px; transform: rotate(135deg); }
-  .site .tier-end { writing-mode: vertical-rl; left: 24px; top: auto; right: auto; }
-  .site .tier-end.is-start { top: 0; left: 24px; }
-  .site .tier-end.is-finish { bottom: 0; right: auto; left: 24px; }
+  .site .tier-rail::after { right: auto; left: 6.75px; top: auto; bottom: 4px; transform: rotate(135deg); }
+  .site .tier-end.is-start { top: -2px; left: 30px; right: auto; }
+  .site .tier-end.is-finish { top: auto; bottom: -2px; left: 30px; right: auto; }
   .site .tier-card::before { left: calc(-36px - var(--rail-size) / 2); top: 24px; }
 }
 @media (max-width: 560px) {
