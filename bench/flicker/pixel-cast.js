@@ -165,5 +165,5 @@ export function castPixelOwners(world, camera, width, height) {
       if (!known) rivals[pixel * RIVALS_PER_PIXEL + stored++] = key;
     }
   }
-  return { owner, rivals, tied, distance };
+  return { owner, rivals, tied, distance, hitTriangles, hitDistances, hitsPerPixel: HITS_PER_PIXEL };
 }
