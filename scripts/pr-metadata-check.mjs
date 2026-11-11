@@ -98,11 +98,16 @@ export function isLightPullRequest(files) {
   });
 }
 
-// Owner, maintainers, collaborators and bots are never closed by the bot. The check still reports for them.
+// Dependabot and other GitHub App accounts cannot fill in a description template, so they get no contributor fixes.
+export function isBotAuthor(pr) {
+  return (pr.author ?? '').toLowerCase().endsWith('[bot]');
+}
+
+// Owner, maintainers, collaborators and bots are never closed by the bot.
 export function isAutoCloseExempt(pr) {
   const author = (pr.author ?? '').toLowerCase();
   return author === OWNER_LOGIN
-    || author.endsWith('[bot]')
+    || isBotAuthor(pr)
     || TRUSTED_ASSOCIATIONS.has(pr.authorAssociation ?? '');
 }
 
@@ -190,7 +195,7 @@ function maintainerTodosFor(pr, files, contributorFixes) {
 export function checkPullRequest({ pr, files }) {
   const labels = pr.labels ?? [];
   const light = isLightPullRequest(files);
-  const contributorFixes = contributorFixesFor(pr, files, light);
+  const contributorFixes = isBotAuthor(pr) ? [] : contributorFixesFor(pr, files, light);
   const maintainerTodos = maintainerTodosFor(pr, files, contributorFixes);
   const addLabels = [];
   const removeLabels = [];
