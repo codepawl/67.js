@@ -8,6 +8,7 @@ import { clamp, prefersReducedMotion, showStageError, smoothstep, startLoop, met
 import { SCENES } from './loop/scenes.js';
 import { createFlight } from './loop/camera.js';
 import { buildWorld, fetchWorld } from './loop/world.js';
+import { createPlayOnDemand } from './loop/play-on-demand.js';
 
 const parameters = new URLSearchParams(location.search);
 const captureMode = parameters.has('capture');
@@ -263,7 +264,6 @@ function tick(seconds) {
 
 // How the page loads the hero, decided by the inline script in index.html: 'live', 'deferred' (a phone) or 'poster' (light path).
 const POSTER_IDLE_TIMEOUT_MS = 3000;
-const PLAY_HANDOFF_MS = 800;
 const playButton = document.querySelector('#play-live');
 let heroMode = window.__heroMode ?? 'live';
 let liveStarted = false;
@@ -288,23 +288,14 @@ function showPosterOnly() {
   playButton.addEventListener('click', playOnDemand);
 }
 
-async function playOnDemand() {
-  playButton.disabled = true;
-  playButton.dataset.state = 'loading';
-  playButton.querySelector('.play-label').textContent = 'Loading 3D';
-  try {
-    await beginLive();
-  } catch (error) {
-    showStageError(stage, `Live view unavailable: ${error.message}`);
-    playButton.disabled = false;
-    delete playButton.dataset.state;
-    playButton.querySelector('.play-label').textContent = 'Play live 3D';
-    return;
-  }
-  playButton.hidden = true;
+const playOnDemand = playButton ? createPlayOnDemand({
+  playButton,
+  beginLive,
+  showError: message => showStageError(stage, message),
+  focusTarget: stage,
   // The poster keeps its slow pan while it fades out, then the page switches to the live layout.
-  setTimeout(() => { heroMode = 'live'; document.documentElement.dataset.heroMode = 'live'; }, PLAY_HANDOFF_MS);
-}
+  onLive: () => { heroMode = 'live'; document.documentElement.dataset.heroMode = 'live'; },
+}) : null;
 
 async function start() {
   if (heroMode === 'poster' && playButton) {

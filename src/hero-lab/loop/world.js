@@ -18,8 +18,11 @@ const WATER_MIRROR_ENABLED = false;
 // Lets the page draw and handle input between the phases of a build, so one phase never queues behind another.
 const yieldToMain = yieldToPage;
 
-// index.html starts the first world's files with the page and leaves their promises in window.__heroPrefetch; each is taken once.
-async function takePrefetched(url) {
+// index.html starts the first world's files once the poster has loaded and leaves their promises in window.__heroPrefetch; each is
+// taken once. Waiting for window.__heroPrefetchReady keeps this module from starting a second request for a file that is about to be
+// prefetched, and from competing with the poster.
+export async function takePrefetched(url) {
+  await window.__heroPrefetchReady;
   const promise = window.__heroPrefetch?.[url];
   if (!promise) return null;
   delete window.__heroPrefetch[url];

@@ -72,14 +72,15 @@
 .credits-panel p { margin: 0; padding: 8px 10px; color: var(--muted); font-size: 12px; }
 @media (hover: hover) and (pointer: fine) { .credits-panel a:hover { background: var(--surface-hover); } }
 
-/* Light path: no 3D is fetched until Play live 3D is pressed, so the poster drifts slowly and the scene tabs wait. */
+/* Light path: no 3D is fetched until Play live 3D is pressed, so the poster drifts once, slowly (40 s, then rests: a light device does not animate for as long as the page is open) and the scene tabs wait. */
 .hero-loop .play-live { grid-area: tabs; justify-self: start; }
 .hero-loop .play-live .play-icon { fill: currentColor; stroke: none; }
 .hero-loop .play-live .play-wait { display: none; stroke-dasharray: 3 4; transform-origin: 50% 50%; animation: ring-turn 1.4s linear infinite; }
 .hero-loop .play-live[data-state='loading'] .play-icon { display: none; }
 .hero-loop .play-live[data-state='loading'] .play-wait { display: block; }
 html[data-hero-mode='poster'] .hero-loop .scene-tabs { display: none; }
-html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: poster-pan 40s ease-in-out infinite alternate; will-change: transform; }
+html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: poster-pan 40s ease-in-out both; }
+.hero-loop .stage:focus { outline: none; }
 @keyframes poster-pan {
   from { transform: scale(1.04) translate3d(-1.5%, 0.6%, 0); }
   to { transform: scale(1.12) translate3d(1.5%, -1.2%, 0); }
@@ -108,7 +109,7 @@ html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: poster-pan 
 }
 @media (prefers-reduced-motion: reduce) {
   .hero-loop .scene-tab[data-state='loading'] .ring-track, .hero-loop .play-live .play-wait { animation: none; }
-  html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: none; will-change: auto; }
+  html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: none; }
   .hero-loop { transition: none; }
   .hero-loop .copy > * { animation: none; }
 }

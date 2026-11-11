@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import sharp from 'sharp';
-import { parseArguments, readGlb, recodeGlbTextures, writeGlb } from '../scripts/recode-glb-textures.mjs';
+import { declareWebpTextures, parseArguments, readGlb, recodeGlbTextures, writeGlb } from '../scripts/recode-glb-textures.mjs';
 
 async function noisyJpeg(size) {
   const raw = Buffer.alloc(size * size * 3);
@@ -23,6 +23,7 @@ async function buildGlb(size) {
       { buffer: 0, byteOffset: padded(geometry).length, byteLength: jpeg.length },
     ],
     images: [{ bufferView: 1, mimeType: 'image/jpeg' }],
+    textures: [{ source: 0, sampler: 0 }],
     extensionsUsed: ['EXT_meshopt_compression'],
     extensionsRequired: ['EXT_meshopt_compression'],
   };
@@ -42,6 +43,7 @@ test('textures become WebP and the meshopt data stays byte for byte', async () =
   const { json, binary } = readGlb(result.glb);
   assert.equal(json.images[0].mimeType, 'image/webp');
   assert.ok(json.extensionsRequired.includes('EXT_texture_webp'));
+  assert.deepEqual(json.textures[0], { sampler: 0, extensions: { EXT_texture_webp: { source: 0 } } });
   const meshopt = json.bufferViews[0].extensions.EXT_meshopt_compression;
   assert.deepEqual([...binary.subarray(meshopt.byteOffset, meshopt.byteOffset + meshopt.byteLength)], [...geometry]);
   const view = json.bufferViews[1];
@@ -65,4 +67,21 @@ test('an image whose WebP would be larger is left as it was', async () => {
   const { json } = readGlb(unchanged.glb);
   if (json.images[0].mimeType === 'image/jpeg') assert.equal(unchanged.imageBytesAfter, unchanged.imageBytesBefore);
   else assert.ok(unchanged.imageBytesAfter < unchanged.imageBytesBefore);
+});
+
+test('declareWebpTextures moves only the WebP images into the extension and does nothing without any', () => {
+  const json = {
+    images: [{ mimeType: 'image/webp' }, { mimeType: 'image/png' }],
+    textures: [{ source: 0 }, { source: 1, sampler: 2 }],
+    extensionsUsed: ['KHR_mesh_quantization'],
+  };
+  declareWebpTextures(json);
+  assert.deepEqual(json.textures[0], { extensions: { EXT_texture_webp: { source: 0 } } });
+  assert.deepEqual(json.textures[1], { source: 1, sampler: 2 });
+  assert.deepEqual(json.extensionsUsed, ['KHR_mesh_quantization', 'EXT_texture_webp']);
+  assert.deepEqual(json.extensionsRequired, ['EXT_texture_webp']);
+
+  const untouched = { images: [{ mimeType: 'image/png' }], textures: [{ source: 0 }] };
+  declareWebpTextures(untouched);
+  assert.deepEqual(untouched, { images: [{ mimeType: 'image/png' }], textures: [{ source: 0 }] });
 });

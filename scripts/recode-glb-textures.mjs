@@ -76,6 +76,23 @@ function dataRangeOf(view) {
   return { owner: view, buffer: view.buffer ?? 0 };
 }
 
+// EXT_texture_webp is a texture extension: a texture whose image is WebP points at it through
+// textures[i].extensions.EXT_texture_webp.source and, because the extension is required, carries no fallback source.
+export function declareWebpTextures(json) {
+  const webpImages = new Set();
+  (json.images ?? []).forEach((image, index) => {
+    if (image.mimeType === 'image/webp') webpImages.add(index);
+  });
+  if (webpImages.size === 0) return;
+  for (const texture of json.textures ?? []) {
+    if (!webpImages.has(texture.source)) continue;
+    texture.extensions = { ...texture.extensions, EXT_texture_webp: { source: texture.source } };
+    delete texture.source;
+  }
+  json.extensionsUsed = [...new Set([...(json.extensionsUsed ?? []), 'EXT_texture_webp'])];
+  json.extensionsRequired = [...new Set([...(json.extensionsRequired ?? []), 'EXT_texture_webp'])];
+}
+
 export async function recodeGlbTextures(buffer, options) {
   const { json, binary } = readGlb(buffer);
   const recodedByView = new Map();
@@ -115,12 +132,7 @@ export async function recodeGlbTextures(buffer, options) {
     owner.byteLength = bytes.length;
   });
 
-  if (json.images?.some(image => image.mimeType === 'image/webp')) {
-    const used = new Set([...(json.extensionsUsed ?? []), 'EXT_texture_webp']);
-    const required = new Set([...(json.extensionsRequired ?? []), 'EXT_texture_webp']);
-    json.extensionsUsed = [...used];
-    json.extensionsRequired = [...required];
-  }
+  declareWebpTextures(json);
   const packed = Buffer.concat(chunks);
   json.buffers[0].byteLength = packed.length;
   return { glb: writeGlb(json, packed), imageBytesBefore, imageBytesAfter, inputBytes: buffer.length };
