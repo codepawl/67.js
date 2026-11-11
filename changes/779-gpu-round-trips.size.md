@@ -1,0 +1,9 @@
+- entry:core: about 90 bytes gzip buy the removal of GPU process round trips from the frame path (shadow framebuffer status, shader status and logs of every linked program, the anisotropy limit), which stalled the page for 30 to 70 ms each on a busy card, and let sliced replaceParts group appended parts that share a batch
+- scene:lit-box: the same bytes as the core entry
+- scene:gltf-box: the same bytes as the core entry
+- scene:gltf-box+lazy: the same bytes as the core entry
+- scene:agent-scene: the same bytes as the core entry
+- scene:agent-scene+lazy: the same bytes as the core entry
+- goal:lit-box: the bytes are the cached reads that remove the round trips; no lighter form keeps the frame from waiting on the GPU process
+- goal:gltf-box: the bytes are the cached reads that remove the round trips; no lighter form keeps the frame from waiting on the GPU process
+- goal:agent-scene: the bytes are the cached reads that remove the round trips; no lighter form keeps the frame from waiting on the GPU process

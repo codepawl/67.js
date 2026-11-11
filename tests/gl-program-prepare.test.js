@@ -64,3 +64,21 @@ test('a finished program is not blocked while preparing, and preparation ends cl
   setPreparing(context, false);
   assert.doesNotThrow(() => finishProgram(context, { program: { id: 10 }, shaders: [] }));
 });
+
+test('a linked program is finished without reading shader status or logs, each a round trip to the GPU process', () => {
+  const context = fakeContext({ pollsUntilComplete: 0 });
+  const reads = [];
+  context.getShaderParameter = () => { reads.push("shader status"); return true; };
+  context.getShaderInfoLog = () => { reads.push("shader log"); return ""; };
+  context.getProgramInfoLog = () => { reads.push("program log"); return ""; };
+  compileProgram(context, "vertex", "fragment");
+  assert.deepEqual(reads, []);
+});
+
+test('a program that fails to link still reports the shader that failed', () => {
+  const context = fakeContext({ pollsUntilComplete: 0 });
+  context.getProgramParameter = () => false;
+  context.getShaderParameter = () => false;
+  context.getShaderInfoLog = () => "syntax error";
+  assert.throws(() => compileProgram(context, "vertex", "fragment"), /Shader compilation failed: syntax error/);
+});
