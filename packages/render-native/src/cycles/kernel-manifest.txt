@@ -1,0 +1,19 @@
+# Ordered WGSL module manifest for the Cycles-parity native kernel (`kernel: "cycles"`).
+# Blank lines and `#` comments are ignored; listed files are relative to `src/cycles/` and concatenated in order.
+#
+# Planned lane append order:
+#   abi.wgsl
+#   sampler.wgsl
+#   camera.wgsl
+#   filter.wgsl
+#   closure.wgsl
+#   bsdf_diffuse.wgsl
+#   bsdf_microfacet.wgsl
+#   bsdf_glass.wgsl
+#   bsdf_sheen.wgsl
+#   bsdf_coat.wgsl
+#   lights.wgsl
+#   light_tree.wgsl
+#   integrator.wgsl
+
+abi.wgsl

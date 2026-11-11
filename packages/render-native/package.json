@@ -10,6 +10,8 @@
   "files": [
     "index.mjs",
     "pack-input.mjs",
+    "pack-input-v2.mjs",
+    "FORMAT-v2.md",
     "build.mjs",
     "build.rs",
     "Cargo.toml",
