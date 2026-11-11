@@ -1,25 +1,27 @@
-// Builds the "first view" of a hero world: the whole world as one small GLB (coarse meshes, small textures) that the home page can
-// download and draw within a few seconds on a slow link, while the full world streams in behind it.
+// Builds the "first view" of a hero world: a crop of the full world that holds only what the camera sees during the first seconds of
+// the flight, small enough for the home page to download and draw within a few seconds on a slow link while the full world streams in.
 //
-//   node scripts/build-hero-first-view.mjs [--scene port] [--world-error 0.3] [--uv-weight 1] [--max-texture 256] [--webp-quality 70] [--output <file>]
+//   node scripts/build-hero-first-view.mjs [--scene port] [--flight-seconds 5] [--near-pixels 3] [--far-pixels 6]
+//        [--near-texture 512] [--far-texture 128] [--webp-quality 70] [--output <file>]
 //
-// The full world is the committed pair public/showcase/<scene>/scene.glb and scene.rest.glb. This script joins them in memory,
-// runs scripts/simplify-hero-glb.mjs on the join with one coarse level and a small texture cap, and recodes the textures as WebP
-// through scripts/recode-glb-textures.mjs. Every material of the full world stays, so the first view needs the same shader
-// programs and the page swaps to the full world with no recompile. Nothing is read from the network.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+// The full world is the committed pair public/showcase/<scene>/scene.glb and scene.rest.glb. This script joins them in memory and
+// reads the flight from src/hero-lab/loop/scenes.js. A triangle no camera pose of the first --flight-seconds sees is dropped. The
+// rest is cut into bands by its distance from the nearest pose, and each band is simplified until the error is --near-pixels on
+// screen (--far-pixels beyond 400 m), so near geometry keeps its mesh and the far yard is coarse. Textures of materials seen from
+// nearer than 400 m keep --near-texture pixels, the rest get --far-texture. Every material that is still in view keeps its name,
+// so the page swaps to the full world with few shader changes. Nothing is read from the network.
+import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, EXTMeshoptCompression } from '@gltf-transform/extensions';
-import { dequantize, mergeDocuments, meshopt } from '@gltf-transform/functions';
-import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
+import { dequantize, mergeDocuments, meshopt, prune } from '@gltf-transform/functions';
+import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer';
+import { CROP_DEFAULTS, cropDocument, sampleFlightPoses, scaleTexturesByDistance } from './hero-first-view-crop.mjs';
 import { recodeGlbTextures } from './recode-glb-textures.mjs';
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
-const DEFAULTS = { scene: 'port', worldError: 0.3, uvWeight: 1, maxTexture: 256, webpQuality: 70, output: '' };
+const DEFAULTS = { scene: 'port', flightSeconds: CROP_DEFAULTS.flightSeconds, nearPixels: CROP_DEFAULTS.nearPixels, farPixels: CROP_DEFAULTS.farPixels, nearTexture: 512, farTexture: 128, webpQuality: 70, output: '' };
 
 export function parseArguments(argv) {
   const options = { ...DEFAULTS };
@@ -60,37 +62,20 @@ async function readJoinedWorld(directory) {
   return { io, document };
 }
 
-// The simplifier writes float attributes; the meshopt step quantizes them and compresses the vertex streams.
-async function quantizedCopy(path, outputPath) {
-  const io = new NodeIO()
-    .registerExtensions([...ALL_EXTENSIONS, EXTMeshoptCompression])
-    .registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
-  const document = await io.read(path);
-  await document.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 16, quantizeNormal: 8, quantizeTexcoord: 16 }));
-  await io.write(outputPath, document);
-}
-
 export async function buildFirstView(options) {
   const directory = resolve(SCRIPT_DIRECTORY, '..', 'public', 'showcase', options.scene);
-  const workDirectory = mkdtempSync(join(tmpdir(), 'hero-first-view-'));
-  try {
-    const { io, document } = await readJoinedWorld(directory);
-    const joinedPath = join(workDirectory, 'joined.glb');
-    const simplifiedPath = join(workDirectory, 'simplified.glb');
-    await io.write(joinedPath, document);
-    const simplify = spawnSync(process.execPath, [
-      join(SCRIPT_DIRECTORY, 'simplify-hero-glb.mjs'), options.scene, joinedPath, simplifiedPath,
-      '--world-error', String(options.worldError), '--uv-weight', String(options.uvWeight), '--max-texture', String(options.maxTexture), '--prop-texture', String(options.maxTexture),
-      '--webp-quality', String(options.webpQuality),
-    ], { encoding: 'utf8' });
-    if (simplify.status !== 0) throw new Error(`simplify-hero-glb failed: ${simplify.stderr || simplify.stdout}`);
-    const quantizedPath = join(workDirectory, 'quantized.glb');
-    await quantizedCopy(simplifiedPath, quantizedPath);
-    const recoded = await recodeGlbTextures(readFileSync(quantizedPath), { webpQuality: options.webpQuality, maxTexture: options.maxTexture });
-    return { glb: recoded.glb, report: simplify.stdout.trim() };
-  } finally {
-    rmSync(workDirectory, { recursive: true, force: true });
-  }
+  await MeshoptSimplifier.ready;
+  const { io, document } = await readJoinedWorld(directory);
+  const poses = sampleFlightPoses(options.scene, options.flightSeconds);
+  const cropOptions = { ...CROP_DEFAULTS, flightSeconds: options.flightSeconds, nearPixels: options.nearPixels, farPixels: options.farPixels };
+  const { nearestByMaterial, totals } = cropDocument(document, poses, cropOptions);
+  await scaleTexturesByDistance(document, nearestByMaterial, { farFrom: cropOptions.farFrom, nearTexture: options.nearTexture, farTexture: options.farTexture, webpQuality: options.webpQuality });
+  await document.transform(prune({ keepLeaves: false }));
+  await document.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 16, quantizeNormal: 8, quantizeTexcoord: 16 }));
+  const written = Buffer.from(await io.writeBinary(document));
+  const recoded = await recodeGlbTextures(written, { webpQuality: options.webpQuality, maxTexture: options.nearTexture });
+  const report = `triangles per band ${totals.join('/')} (${totals.reduce((sum, count) => sum + count, 0)} total)`;
+  return { glb: recoded.glb, report };
 }
 
 async function main() {
