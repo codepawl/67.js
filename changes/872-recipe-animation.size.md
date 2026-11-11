@@ -1,0 +1,4 @@
+- entry:game: the web export now plays the animation graph, pose and path follower a recipe declares (about 19.8 KB gzip), the visible capability the issue asks for
+- entry:game+lazy: same code, counted with the lazy chunks (+11.1 KB gzip)
+- scene:agent-scene+lazy: the recipe validator builds the graph and pose once to refuse a bad animation with the field named (+8.8 KB gzip in the on-demand game module)
+- goal:agent-scene: the core scene bundle grows by about 49 bytes gzip for the shared-chunk import of the game module; the animation code itself loads only with a game recipe

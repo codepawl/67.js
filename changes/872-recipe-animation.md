@@ -1,0 +1,1 @@
+- A game recipe drives the animation state graph, blend spaces and path-following NPCs with `player.animation` and `npcs`, and the web export plays them (#872)
