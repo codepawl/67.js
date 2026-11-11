@@ -8,7 +8,7 @@ use std::time::Instant;
 use napi::Result;
 use wgpu::util::DeviceExt;
 
-use crate::cycles::{specialize_cycles_kernel, CYCLES_LUT_WORDS};
+use crate::cycles::{check_counts_match_kernel_params, specialize_cycles_kernel, CYCLES_LUT_WORDS};
 use crate::host::accel::{
     build_acceleration_structure, build_cycles_acceleration_structure, build_empty_cycles_acceleration,
     create_vertex_buffer, unpack_triangles, CyclesAcceleration, INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS,
@@ -602,6 +602,7 @@ pub(crate) fn prepare_cycles_scene(
 
     let compile_started = Instant::now();
     // Specialise the kernel source for this scene (replaces SCENE_HAS_* sentinels).
+    check_counts_match_kernel_params(input)?;
     let specialized_source = specialize_cycles_kernel(&shader_source, input);
     let pipeline = get_or_compile_cycles_pipeline("main", specialized_source)?;
     let compile_seconds = compile_started.elapsed().as_secs_f64();

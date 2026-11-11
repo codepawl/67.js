@@ -18,6 +18,13 @@ const KP_ENV_WIDTH_BYTE: usize = 192;      // u32[48]
 const KP_ENV_HEIGHT_BYTE: usize = 196;     // u32[49]
 const KP_ENV_TOTAL_WEIGHT_BYTE: usize = 220; // f32[55]
 const KP_VOLUME_DENSITY_BYTE: usize = 236;  // f32[59]
+const KP_INSTANCE_COUNT_BYTE: usize = 84;   // u32[21]
+const KP_TRIANGLE_COUNT_BYTE: usize = 88;   // u32[22]
+const KP_MATERIAL_COUNT_BYTE: usize = 92;   // u32[23]
+const KP_EMISSIVE_TRIANGLE_COUNT_BYTE: usize = 96; // u32[24]
+const KP_LIGHT_COUNT_BYTE: usize = 100;     // u32[25]
+const KP_LIGHT_TREE_NODE_COUNT_BYTE: usize = 104; // u32[26]
+const KP_TEXTURE_COUNT_BYTE: usize = 108;   // u32[27]
 
 // ---- MaterialRecord byte offsets (256-byte stride, verified against pack-input-v2.mjs) ----
 const MAT_METALLIC_BYTE: usize = 12;           // f32[3]
@@ -74,6 +81,84 @@ fn read_i32_le(bytes: &[u8], byte_offset: usize) -> i32 {
 
 fn read_f32_le(bytes: &[u8], byte_offset: usize) -> f32 {
     f32::from_le_bytes(bytes[byte_offset..byte_offset + 4].try_into().unwrap())
+}
+
+/// The weight below which `closure.wgsl` drops a layer (`CLOSURE_WEIGHT_CUTOFF`). The host bounds below use the
+/// same value and the same f32 arithmetic, so a lobe the kernel can add is never left out of the bound.
+const CLOSURE_WEIGHT_CUTOFF: f32 = 1.0e-5;
+
+/// The material fields that decide how many metal, glass, specular and diffuse lobes the kernel can build.
+struct BaseLayerInputs {
+    metallic: f32,
+    /// A metallic roughness texture multiplies metallic by a value in [0, 1], so metallic can be anything up to its record value.
+    metallic_from_texture: bool,
+    transmission_weight: f32,
+    transmission_from_texture: bool,
+    thin_walled: bool,
+}
+
+/// Upper bound on the lobes `closure_build` adds for the metal, glass, specular and diffuse layers of one material.
+/// It follows the kernel: each layer is added only while its weight exceeds the cutoff and the weight left for the
+/// layers below (never more than 1, shrinking by `1 - metallic` and `1 - transmission`) still exceeds it.
+/// A texture can only lower a weight, so it keeps a layer possible and stops the host assuming the weight is spent.
+fn base_layer_lobe_bound(inputs: &BaseLayerInputs) -> u32 {
+    let metallic = inputs.metallic.clamp(0.0, 1.0);
+    let transmission = inputs.transmission_weight.clamp(0.0, 1.0);
+    let mut remaining_weight: f32 = 1.0;
+    let mut lobes: u32 = 0;
+
+    let metal_possible = inputs.metallic_from_texture || metallic > CLOSURE_WEIGHT_CUTOFF;
+    if metal_possible {
+        lobes += 1;
+        if !inputs.metallic_from_texture {
+            remaining_weight *= 1.0 - metallic;
+        }
+    }
+
+    let glass_possible = (inputs.transmission_from_texture || transmission > CLOSURE_WEIGHT_CUTOFF)
+        && remaining_weight > CLOSURE_WEIGHT_CUTOFF;
+    if glass_possible {
+        lobes += if inputs.thin_walled { 2 } else { 1 };
+        if !inputs.transmission_from_texture {
+            remaining_weight *= 1.0 - transmission;
+        }
+    }
+
+    if remaining_weight > CLOSURE_WEIGHT_CUTOFF {
+        // One dielectric specular lobe and one diffuse lobe.
+        lobes += 2;
+    }
+    lobes
+}
+
+/// Checks that the counts the specializer reads from the napi input equal the counts the kernel reads from
+/// `kernel_params`, so the specialized flags and lobe bounds describe the data the shader really walks.
+pub(crate) fn check_counts_match_kernel_params(input: &NativeTraceInputV2) -> Result<()> {
+    let kernel_params = &input.kernel_params;
+    let counts = [
+        ("instanceCount", input.instance_count, KP_INSTANCE_COUNT_BYTE),
+        ("triangleCount", input.triangle_count, KP_TRIANGLE_COUNT_BYTE),
+        ("materialCount", input.material_count, KP_MATERIAL_COUNT_BYTE),
+        ("emissiveTriangleCount", input.emissive_triangle_count, KP_EMISSIVE_TRIANGLE_COUNT_BYTE),
+        ("lightCount", input.light_count, KP_LIGHT_COUNT_BYTE),
+        ("lightTreeNodeCount", input.light_tree_node_count, KP_LIGHT_TREE_NODE_COUNT_BYTE),
+        ("textureCount", input.texture_count, KP_TEXTURE_COUNT_BYTE),
+    ];
+    for (name, input_count, byte_offset) in counts {
+        if kernel_params.len() < byte_offset + 4 {
+            return Err(failure(format!(
+                "kernelParams holds {} bytes, too few to read {name} at byte {byte_offset}. Pass the 320 byte KernelParamsV2 block.",
+                kernel_params.len()
+            )));
+        }
+        let kernel_count = read_u32_le(kernel_params, byte_offset);
+        if kernel_count != input_count {
+            return Err(failure(format!(
+                "{name} is {input_count} in the input but {kernel_count} in kernelParams (byte {byte_offset}). The two must match; pack both from the same scene."
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Specializes the assembled Cycles kernel source for the given scene input, replacing
@@ -173,22 +258,15 @@ pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2)
                 || alpha_tex >= 0
                 || (flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0,
         );
-        let sheen_lobe = u32::from(sheen_weight > 1.0e-5 || sheen_tex >= 0);
-        let coat_lobe = u32::from(coat_weight > 1.0e-5 || coat_roughness_tex >= 0);
-        let glass_lobes = if transmission_weight > 1.0e-5 || transmission_tex >= 0 {
-            if (flags & MATERIAL_FLAG_THIN_WALLED) != 0 { 2 } else { 1 }
-        } else {
-            0
-        };
-        let pure_metal = metallic >= 1.0 - 1.0e-5 && metallic_roughness_tex < 0;
-        let pure_glass = !pure_metal && transmission_weight >= 1.0 - 1.0e-5 && transmission_tex < 0 && metallic <= 1.0e-5 && metallic_roughness_tex < 0;
-        let base_lobes = if pure_metal {
-            1
-        } else if pure_glass {
-            glass_lobes.max(1)
-        } else {
-            u32::from(metallic > 1.0e-5 || metallic_roughness_tex >= 0) + glass_lobes + 2
-        };
+        let sheen_lobe = u32::from(sheen_weight > CLOSURE_WEIGHT_CUTOFF || sheen_tex >= 0);
+        let coat_lobe = u32::from(coat_weight > CLOSURE_WEIGHT_CUTOFF || coat_roughness_tex >= 0);
+        let base_lobes = base_layer_lobe_bound(&BaseLayerInputs {
+            metallic,
+            metallic_from_texture: metallic_roughness_tex >= 0,
+            transmission_weight,
+            transmission_from_texture: transmission_tex >= 0,
+            thin_walled: (flags & MATERIAL_FLAG_THIN_WALLED) != 0,
+        });
         let candidate_lobes = trans_lobe + sheen_lobe + coat_lobe + base_lobes;
         max_closure_candidates = max_closure_candidates.max(candidate_lobes.clamp(1, 7));
         max_closure_lobes = max_closure_lobes.max(candidate_lobes.clamp(1, 4));
@@ -445,6 +523,130 @@ mod specialization_tests {
         let source = "fn main() { let x = 1; }";
         let result = specialize_cycles_kernel(source, &input);
         assert_eq!(result, source, "Source without markers should be unchanged");
+    }
+
+    fn opaque_inputs(metallic: f32, transmission_weight: f32) -> BaseLayerInputs {
+        BaseLayerInputs {
+            metallic,
+            metallic_from_texture: false,
+            transmission_weight,
+            transmission_from_texture: false,
+            thin_walled: false,
+        }
+    }
+
+    /// The lobes `closure_build` adds for the base layers of a white, opaque material, written from closure.wgsl.
+    fn kernel_base_lobes(metallic: f32, transmission_weight: f32, thin_walled: bool) -> u32 {
+        let metallic = metallic.clamp(0.0, 1.0);
+        let transmission = transmission_weight.clamp(0.0, 1.0);
+        let mut layer_weight: f32 = 1.0;
+        let mut lobes = 0;
+        if metallic > CLOSURE_WEIGHT_CUTOFF {
+            lobes += 1;
+            layer_weight *= 1.0 - metallic;
+        }
+        if transmission > CLOSURE_WEIGHT_CUTOFF && layer_weight > CLOSURE_WEIGHT_CUTOFF {
+            lobes += if thin_walled { 2 } else { 1 };
+            layer_weight *= 1.0 - transmission;
+        }
+        if layer_weight > CLOSURE_WEIGHT_CUTOFF {
+            lobes += 2;
+        }
+        lobes
+    }
+
+    #[test]
+    fn metallic_near_one_keeps_the_specular_and_diffuse_lobes_the_kernel_builds() {
+        assert_eq!(base_layer_lobe_bound(&opaque_inputs(1.0, 0.0)), 1);
+        assert_eq!(base_layer_lobe_bound(&opaque_inputs(0.999999, 0.0)), 1);
+        assert_eq!(base_layer_lobe_bound(&opaque_inputs(0.99999, 0.0)), 3);
+    }
+
+    #[test]
+    fn transmission_near_one_keeps_the_specular_and_diffuse_lobes_the_kernel_builds() {
+        assert_eq!(base_layer_lobe_bound(&opaque_inputs(0.0, 1.0)), 1);
+        assert_eq!(base_layer_lobe_bound(&opaque_inputs(0.0, 0.999999)), 1);
+        assert_eq!(base_layer_lobe_bound(&opaque_inputs(0.0, 0.99999)), 3);
+        let thin_walled = BaseLayerInputs { thin_walled: true, ..opaque_inputs(0.0, 1.0) };
+        assert_eq!(base_layer_lobe_bound(&thin_walled), 2);
+    }
+
+    #[test]
+    fn a_texture_keeps_every_layer_possible() {
+        let metallic_texture = BaseLayerInputs { metallic_from_texture: true, ..opaque_inputs(1.0, 0.0) };
+        assert_eq!(base_layer_lobe_bound(&metallic_texture), 3);
+        let transmission_texture = BaseLayerInputs { transmission_from_texture: true, ..opaque_inputs(0.0, 1.0) };
+        assert_eq!(base_layer_lobe_bound(&transmission_texture), 3);
+        let both_textures = BaseLayerInputs {
+            metallic_from_texture: true,
+            transmission_from_texture: true,
+            ..opaque_inputs(1.0, 1.0)
+        };
+        assert_eq!(base_layer_lobe_bound(&both_textures), 4);
+    }
+
+    #[test]
+    fn fully_metal_material_ignores_glass_the_kernel_never_reaches() {
+        assert_eq!(base_layer_lobe_bound(&opaque_inputs(1.0, 1.0)), 1);
+    }
+
+    #[test]
+    fn lobe_bound_never_falls_below_what_the_kernel_builds() {
+        let near_one = [
+            0.0, 1.0e-6, 1.0e-5, 1.1e-5, 0.5, 0.99, 0.9999, 0.99998, 0.999985, 0.99999, 0.9999905, 0.999995, 0.999999, 1.0, 1.5,
+        ];
+        for &metallic in &near_one {
+            for &transmission in &near_one {
+                for thin_walled in [false, true] {
+                    let inputs = BaseLayerInputs { thin_walled, ..opaque_inputs(metallic, transmission) };
+                    let bound = base_layer_lobe_bound(&inputs);
+                    let built = kernel_base_lobes(metallic, transmission, thin_walled);
+                    assert!(
+                        bound >= built,
+                        "metallic {metallic} transmission {transmission} thin {thin_walled}: bound {bound} below kernel {built}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn counts_check_accepts_matching_counts_and_names_a_mismatch() {
+        let mut kernel_params = make_kp(0, 0.0, 0, 0, 0.0);
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let inst = make_default_inst();
+        let lights = make_default_light();
+        let mut input = dummy_input(&kernel_params, &mat, &lights, &inst);
+        let counts = [
+            (KP_INSTANCE_COUNT_BYTE, input.instance_count),
+            (KP_TRIANGLE_COUNT_BYTE, input.triangle_count),
+            (KP_MATERIAL_COUNT_BYTE, input.material_count),
+            (KP_EMISSIVE_TRIANGLE_COUNT_BYTE, input.emissive_triangle_count),
+            (KP_LIGHT_COUNT_BYTE, input.light_count),
+            (KP_LIGHT_TREE_NODE_COUNT_BYTE, input.light_tree_node_count),
+            (KP_TEXTURE_COUNT_BYTE, input.texture_count),
+        ];
+        for (byte_offset, count) in counts {
+            kernel_params[byte_offset..byte_offset + 4].copy_from_slice(&count.to_le_bytes());
+        }
+        input = dummy_input(&kernel_params, &mat, &lights, &inst);
+        assert!(check_counts_match_kernel_params(&input).is_ok());
+
+        kernel_params[KP_MATERIAL_COUNT_BYTE..KP_MATERIAL_COUNT_BYTE + 4].copy_from_slice(&9u32.to_le_bytes());
+        let mismatched = dummy_input(&kernel_params, &mat, &lights, &inst);
+        let message = check_counts_match_kernel_params(&mismatched).unwrap_err().reason;
+        assert!(message.contains("materialCount"), "{message}");
+        assert!(message.contains('9'), "{message}");
+    }
+
+    #[test]
+    fn counts_check_rejects_a_short_kernel_params_block() {
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let inst = make_default_inst();
+        let lights = make_default_light();
+        let input = dummy_input(&[0u8; 16], &mat, &lights, &inst);
+        let message = check_counts_match_kernel_params(&input).unwrap_err().reason;
+        assert!(message.contains("320"), "{message}");
     }
 }
 
