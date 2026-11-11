@@ -1,1 +1,0 @@
-- NURBS splines take `order`, `knots` and `knotMode`, and `meshEdgesToSplines` turns mesh edge loops and chains into curve splines (#841)

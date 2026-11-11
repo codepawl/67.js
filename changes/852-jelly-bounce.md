@@ -1,1 +1,0 @@
-- A jelly `softBody` takes `bounce` (0 to 1, default 0): the share of its landing speed the body keeps when it turns around, so a jelly cube rebounds 0.07 m at 0, 0.15 m at 0.5 and 0.47 m at 1 from a 1.95 m drop; softness comes from the existing `shape` and `stiffness` (#852)

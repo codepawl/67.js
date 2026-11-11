@@ -1,1 +1,0 @@
-- `67js/addons/physics-jolt` adds `joltAdapter`, a second engine for the live physics runtime built on the optional `jolt-physics` package: the same contact and sensor events as Rapier on the same scene, queries, kinematic control and force fields, with recorded 500-box step times for both engines (part of #771)

@@ -1,3 +1,0 @@
-- entry:mesh: unsubdivide (a role search that tells a Catmull-Clark level apart from other quad meshes, with errors that name the quad) and circularize (loop walk, best plane, circle fit) are agent-facing modeling edits, about 2 KB gzip for both.
-- scene:agent-scene+lazy: unsubdivide and circularize are agent-facing modeling edits, loaded lazily with the mesh engine.
-- goal:agent-scene: the core bundle grows a few bytes gzip for the two edit names in the shared operation table.

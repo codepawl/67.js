@@ -1,1 +1,0 @@
-- The jolt adapter builds convexHull colliders from the flat xyz point array and frees its world when setup throws.

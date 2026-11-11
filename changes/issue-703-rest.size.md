@@ -1,2 +1,0 @@
-- scene:agent-scene+lazy: split_edges, delete_loose and flatten are agent-facing modeling edits (about 0.8 KB gzip for three edits, loaded lazily with the mesh engine).
-- goal:agent-scene: the core bundle grows 26 bytes gzip for the three edit names in the shared operation table; the geometry loads lazily.

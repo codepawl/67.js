@@ -1,1 +1,0 @@
-- Local volumes with `noiseAmount` now draw the same noise field in the CPU path tracer as in the rasterizer, whose noise moved to a hash that rounds the same on every GPU; the WebGL, WebGPU and progressive tracers still refuse local volumes, with a test each (#808)

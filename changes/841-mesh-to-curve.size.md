@@ -1,5 +1,0 @@
-- entry:modeling: 492 bytes gzip for NURBS order, knot vector and knot mode validation and sampling, the missing half of #701 (agent-facing curve control)
-- scene:agent-scene: 72 bytes gzip for the order, knots and knotMode curve fields
-- scene:agent-scene+lazy: 563 bytes gzip for the same fields and the mesh edge walk that turns loops and chains into splines
-- goal:agent-scene: 72 bytes gzip for NURBS order and knots, an agent-facing capability; needs An to accept
-- tool:scene_create: the curve topic text names order, knots and knotMode

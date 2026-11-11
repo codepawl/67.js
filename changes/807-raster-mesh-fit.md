@@ -1,1 +1,0 @@
-- `environment.localVolumes` with `shape: "mesh"` and `fit: "mesh"` now draws in the rasterizer: a mesh pass sums the length of each pixel's ray inside the closed part, exact for any number of shells, and the CPU path tracer and the rasterizer agree within 0.03 on the L-room test (#807)
