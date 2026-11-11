@@ -73,3 +73,14 @@ test('wind ripples break the glint into facets and the foam into streaks', () =>
   assert.match(shader, /1\.0 \/ \(1\.0 \/ 500\.0 \+ 0\.35 \* waterLostVariance\)/);
   assert.match(shader, /terrainNoise\(crestPosition \* vec2\(3\.1, 14\.0\)/);
 });
+
+test('a ripple stays whole down to five pixels per wave and is gone at the two-pixel limit of the sampling', () => {
+  const shader = createFragmentShader(['water', 'vertexColors']);
+  const fade = shader.match(/float visible = 1\.0 - smoothstep\(([\d.]+), ([\d.]+), footprint \* wavenumber/);
+  assert.ok(fade, 'the detail slope fades each wave by its pixel footprint');
+  const fadeStart = Number(fade[1]);
+  const fadeEnd = Number(fade[2]);
+  // footprint * wavenumber / 2pi is the pixel size in wavelengths: 0.2 is five pixels per wave, 0.5 is the Nyquist limit.
+  assert.ok(fadeStart >= 0.2, `the fade starts at ${fadeStart} pixels per wavelength, so waves that five pixels carry are thinned`);
+  assert.ok(fadeEnd <= 0.5, `the fade ends at ${fadeEnd} pixels per wavelength, so waves are still sampled below two pixels`);
+});
