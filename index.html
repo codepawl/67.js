@@ -176,9 +176,9 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
 
       <section id="tiers" class="tiers" aria-labelledby="tiers-title">
         <h2 id="tiers-title">Quality tiers, measured</h2>
-        <p class="tiers-caption">Six scenes, 960×540, RTX 3060. Bars show the slowest scene; shorter is faster.</p>
+        <p class="tiers-caption">Six scenes, 960×540, RTX 3060. Time bars show the slowest scene.</p>
         <div id="tiers-table">
-          <div class="tier-rail" aria-hidden="true"><span>Cheapest</span><svg viewBox="0 0 200 12" preserveAspectRatio="none"><path d="M0 6h192M186 1l7 5-7 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Best looking</span></div>
+          <div class="tier-rail" aria-hidden="true"><span class="tier-line"></span><span class="tier-end is-start">Cheapest</span><span class="tier-end is-finish">Best looking</span></div>
           <ol class="tier-cards">
           <li class="tier-card" data-tier="draft" data-glaze-ms="0.54-1.04" data-eevee-ms="56-59" data-flip-glaze="0.045-0.188" data-flip-eevee="0.041-0.562">
             <div class="tier-top"><svg class="tier-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg><h3>draft</h3></div>
@@ -189,6 +189,7 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
               <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>EEVEE 1 sample</span><span>56–59 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:100%"></span></span></div>
             </div>
             <div class="tier-bars is-quality" role="img" aria-label="FLIP error against Cycles, lower is better: Glaze 0.045 to 0.188, EEVEE 0.041 to 0.562">
+              <p class="tier-bars-title">Error vs Cycles, lower is better</p>
               <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Error, Glaze</span><span>0.045–0.188</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:7.5%;--w:23.8%"></span></span></div>
               <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Error, EEVEE</span><span>0.041–0.562</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:6.8%;--w:86.8%"></span></span></div>
             </div>
@@ -202,6 +203,7 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
               <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>EEVEE 64 samples</span><span>288–363 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:100%"></span></span></div>
             </div>
             <div class="tier-bars is-quality" role="img" aria-label="FLIP error against Cycles, lower is better: Glaze 0.03 to 0.197, EEVEE 0.042 to 0.562">
+              <p class="tier-bars-title">Error vs Cycles, lower is better</p>
               <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Error, Glaze</span><span>0.03–0.197</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:5%;--w:27.8%"></span></span></div>
               <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Error, EEVEE</span><span>0.042–0.562</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:7%;--w:86.7%"></span></span></div>
             </div>
@@ -219,12 +221,13 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
           <li class="tier-card" data-tier="final" data-cook-ms="1.73-4.24" data-cycles-ms="6.81-26.41" data-noise-time-x="1.05-4.02">
             <div class="tier-top"><svg class="tier-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 4h11l3.5 5-9 11L3 9z"/><path d="M3 9h18M9.5 9 12 20l2.5-11"/></svg><h3>final</h3></div>
             <p class="tier-for">Finished stills</p>
-            <p class="tier-big"><strong>1.73–4.24</strong> <span>ms a sample</span></p>
+            <p class="tier-big"><strong>1.73–4.24</strong> <span>ms per sample</span></p>
             <div class="tier-bars" role="img" aria-label="Per sample: Cook native 1.73 to 4.24 ms, Cycles OptiX 6.81 to 26.41 ms">
               <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Cook native</span><span>1.73–4.24 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:16.1%"></span></span></div>
               <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Cycles OptiX</span><span>6.81–26.41 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:100%"></span></span></div>
             </div>
             <div class="tier-bars is-quality" role="img" aria-label="Time to the same noise, Cycles is 1 times: Cook needs 1.05 to 4.02 times, on three of six scenes">
+              <p class="tier-bars-title">Time to same noise, lower is better</p>
               <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Same noise, Cycles</span><span>1×</span></span><span class="tier-track"><span class="tier-fill" style="--w:22.2%"></span></span></div>
               <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Same noise, Cook</span><span>1.05–4.02×</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:23.3%;--w:66%"></span></span></div>
             </div>
