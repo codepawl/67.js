@@ -58,6 +58,10 @@ const POLE_KEYFRAMES = [
   { time: 3, value: [0, 0.012, 2.0] },
 ];
 export const FLAG_FILM_SECONDS = 3;
+// The fine flag: a 64 by 64 grid for 4 s with dihedral bending, so the cloth folds in many soft ripples instead of one crease.
+export const FINE_FLAG_FILM_SECONDS = 4;
+const FINE_FLAG_SEGMENTS = 63;
+const FINE_FLAG_BEND = 0.15;
 // A deep red and cream striped cloth on a mid grey floor, lit by a grazing key from the side so every fold casts a shadow and bends the stripes.
 const FLAG_LOOK = { lightDirection: [-0.9, 0.3, 0.45], keyIntensity: 1.5, fillIntensity: 0.12, ambientIntensity: 0.15 };
 const FLAG_STRIPES = { type: 'graph', mapping: 'uv', resolution: 256, graph: { color: { layer: { base: [0.35, 0.015, 0.04], top: [0.85, 0.78, 0.62], mask: { wave: { frequency: 8, direction: 'v', shape: 'saw' } }, edge: 0.5, softness: 0.02 } } } };
@@ -67,21 +71,24 @@ const FLAG_STRIPES = { type: 'graph', mapping: 'uv', resolution: 256, graph: { c
  * drags the cloth into a crumpled ridge on a thin layer. The sheet sets thickness 3.5 mm, which also sets the self collision radius,
  * so layers stack 6 mm apart instead of 3.7 cm.
  */
-export function foldingFlagRecipe({ selfCollision = true } = {}) {
+export function foldingFlagRecipe({ selfCollision = true, fine = false } = {}) {
+  const seconds = fine ? FINE_FLAG_FILM_SECONDS : FLAG_FILM_SECONDS;
+  const keyframes = fine ? [...POLE_KEYFRAMES.slice(0, -1), { time: seconds, value: POLE_KEYFRAMES.at(-1).value }] : POLE_KEYFRAMES;
+  const bending = fine ? { bendModel: 'dihedral', bend: FINE_FLAG_BEND } : { bend: 0.0002 };
   return baseRecipe({
-    geometries: [{ id: 'flag', type: 'grid', segments: 38 }],
+    geometries: [{ id: 'flag', type: 'grid', segments: fine ? FINE_FLAG_SEGMENTS : 38 }],
     materials: [{ id: 'fabric', color: [1, 1, 1], doubleSided: true, pattern: FLAG_STRIPES }],
     nodes: [
       { id: 'flag', geometry: 'flag', material: 'fabric', translation: [0, 1.5, 0], scale: [1.6, 1, 1] },
       { id: 'pole', translation: [0, 2.0, 0] },
     ],
-    motion: { duration: FLAG_FILM_SECONDS, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes: POLE_KEYFRAMES }] },
+    motion: { duration: seconds, loop: false, tracks: [{ kind: 'node', id: 'pole', property: 'translation', interpolation: 'LINEAR', keyframes }] },
     camera: { eye: [2.2, 1.7, 5.4], target: [0, 0.6, 0.8] },
     floorColor: [0.28, 0.28, 0.3],
     environment: FLAG_LOOK,
     cloth: {
-      duration: FLAG_FILM_SECONDS,
-      sheets: [{ node: 'flag', pin: ['topLeft', 'topRight'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, bend: 0.0002, damping: 1.5, friction: 0.4, thickness: 0.002 }],
+      duration: seconds,
+      sheets: [{ node: 'flag', pin: ['topLeft', 'topRight'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, ...bending, damping: 1.5, friction: 0.4, thickness: 0.002 }],
       colliders: [{ node: 'ground', shape: 'box' }],
     },
   });

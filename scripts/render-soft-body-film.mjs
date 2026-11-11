@@ -1,5 +1,6 @@
 // Renders a preview MP4 of each soft body film (960 by 540, 60 fps, one video frame per simulation step), stills at contact
-// and at the deepest dent, a side-by-side still of the two with the measured size drawn on it, and one JSON of the numbers. Usage: node scripts/render-soft-body-film.mjs <output directory> [--flag-only]
+// and at the deepest dent, a side-by-side still of the two with the measured size drawn on it, and one JSON of the numbers. Usage: node scripts/render-soft-body-film.mjs <output directory> [--flag-only] [--fine]
+// --fine renders the 64 by 64 flag with dihedral bending (4 s) and implies --flag-only.
 // Run it through gpu-lock on a shared machine. It needs `npm run build:lib` first.
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
@@ -10,7 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createAgentScene } from '../src/agent-scene.js';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { FILM_FRAMES_PER_SECOND, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, normalSpread, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
+import { FILM_FRAMES_PER_SECOND, FINE_FLAG_FILM_SECONDS, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, normalSpread, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
 
 const PREVIEW = { width: 960, height: 540, fps: FILM_FRAMES_PER_SECOND };
 const FONT_FILE = 'C\\:/Windows/Fonts/arial.ttf';
@@ -123,17 +124,19 @@ dent ${landing.maxDentDepth.toFixed(4)} m`,
 
 async function main() {
   if (!existsSync(new URL('../build/mcp/server.mjs', import.meta.url))) throw new Error('Run npm run build:lib first: the MCP server is not built.');
-  const flagOnly = process.argv.includes('--flag-only');
+  const fine = process.argv.includes('--fine');
+  const flagOnly = fine || process.argv.includes('--flag-only');
+  const flagRecipe = options => foldingFlagRecipe({ ...options, fine });
   const directoryArgument = process.argv.slice(2).find(argument => !argument.startsWith('--'));
   const outputDirectory = resolve(directoryArgument ?? '');
   if (!directoryArgument) throw new Error('Pass the output directory: node scripts/render-soft-body-film.mjs <directory>');
   await mkdir(outputDirectory, { recursive: true });
 
   const jellyFrames = 120;
-  const flagFrames = FLAG_FILM_SECONDS * FILM_FRAMES_PER_SECOND;
+  const flagFrames = (fine ? FINE_FLAG_FILM_SECONDS : FLAG_FILM_SECONDS) * FILM_FRAMES_PER_SECOND;
   const jelly = flagOnly ? null : filmNumbers(jellyCubeRecipe(), 'cube', jellyFrames);
   const landing = flagOnly ? null : measureLanding(jelly.record.frames, axisRange(jelly.record.frames[0], 1).extent);
-  const flag = filmNumbers(foldingFlagRecipe(), 'flag', flagFrames);
+  const flag = filmNumbers(flagRecipe(), 'flag', flagFrames);
   const flagTouch = measureLanding(flag.record.frames, axisRange(flag.record.frames[0], 1).extent).contact;
   const flagMidFall = Math.round(flagTouch * 0.7);
   const flagSettling = Math.round(flagTouch * 2);
@@ -150,11 +153,11 @@ async function main() {
       stillTimes: { contact: landing.contact / FILM_FRAMES_PER_SECOND, 'max-dent': landing.maxDentFrame / FILM_FRAMES_PER_SECOND },
     });
     const flagFiles = await renderFilm(call, outputDirectory, {
-      name: 'folding-flag', recipe: foldingFlagRecipe(), nodeId: 'flag', frameCount: flagFrames, videoSeconds: flagFrames / FILM_FRAMES_PER_SECOND,
+      name: fine ? 'folding-flag-fine' : 'folding-flag', recipe: flagRecipe(), nodeId: 'flag', frameCount: flagFrames, videoSeconds: flagFrames / FILM_FRAMES_PER_SECOND,
       stillTimes: { start: 0, 'mid-fall': flagMidFall / FILM_FRAMES_PER_SECOND, 'first-touch': flagTouch / FILM_FRAMES_PER_SECOND, settling: flagSettling / FILM_FRAMES_PER_SECOND, 'final-rest': (flagFrames - 1) / FILM_FRAMES_PER_SECOND },
     });
-    const withoutSelfCollision = recordFilm(foldingFlagRecipe({ selfCollision: false }), 'flag', flagFrames);
-    const flagIndices = createAgentScene(foldingFlagRecipe()).parts.find(part => part.name === 'flag').geometry.indices;
+    const withoutSelfCollision = recordFilm(flagRecipe({ selfCollision: false }), 'flag', flagFrames);
+    const flagIndices = createAgentScene(flagRecipe()).parts.find(part => part.name === 'flag').geometry.indices;
     const lastFlagStep = flagFrames - 1;
     const jellyCube = flagOnly ? undefined : summarizeJelly(outputDirectory, jelly, jellyFiles, landing, jellyFrames);
     const flagStart = flag.record.frames[0];
@@ -189,7 +192,7 @@ async function main() {
         files: flagFiles.files,
       },
     };
-    await writeFile(join(outputDirectory, 'soft-body-film.json'), `${JSON.stringify(summary, null, 2)}\n`);
+    await writeFile(join(outputDirectory, fine ? 'soft-body-film-fine.json' : 'soft-body-film.json'), `${JSON.stringify(summary, null, 2)}\n`);
     console.log(JSON.stringify(summary, null, 2));
   } finally {
     await client.close();

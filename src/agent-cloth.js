@@ -2,6 +2,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { runKernel } from './kernel-offload.js';
 import { bakeClothWithFields } from './cloth-fields.js';
 import { normalizeForceFields } from './force-fields.js';
+import { BEND_MODELS } from './cloth-bending.js';
 import { bakeCloth, sampleClothFrames, weldVertices, CLOTH_LIMITS } from './cloth.js';
 import { recomputeNormals } from './geometry-normals.js';
 import { invalidField } from './field-error.js';
@@ -24,7 +25,7 @@ const PIN_EDGES = ['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bot
 const COLLIDER_SHAPES = ['ball', 'box'];
 const MOVING_SHAPES = ['ball', 'capsule'];
 const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'fields', 'sheets', 'colliders'];
-const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffnessGroup', 'softBody', 'selfCollision', 'stiffness', 'bend', 'density', 'damping', 'friction', 'thickness'];
+const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffnessGroup', 'softBody', 'selfCollision', 'stiffness', 'bend', 'bendModel', 'density', 'damping', 'friction', 'thickness'];
 const PIN_TO_FIELDS = ['node', 'weight'];
 const SOFT_BODY_FIELDS = ['shape', 'pressure', 'bounce'];
 // A stiffness group never goes fully limp: a zero weight would let its particles drift off.
@@ -88,6 +89,10 @@ function normalizeSheet(input, context, path) {
       throw invalidField(`${path}.pinTo.node`, target, 'a node other than the sheet itself, such as a pole or a hand');
     }
     sheet.pinTo = { node: target, weight: input.pinTo.weight === undefined ? 1 : finiteNumber(input.pinTo.weight, `${path}.pinTo.weight`, 0.01, 1) };
+  }
+  if (input.bendModel !== undefined) {
+    if (!BEND_MODELS.includes(input.bendModel)) throw invalidField(`${path}.bendModel`, input.bendModel, `one of ${BEND_MODELS.join(', ')}`);
+    sheet.bendModel = input.bendModel;
   }
   const ranges = { stiffness: [0.01, 1], bend: [0, 1], density: [0.01, 10], damping: [0, 100], friction: [0, 1], thickness: [0, 0.5] };
   for (const [field, [minimum, maximum]] of Object.entries(ranges)) {
@@ -416,7 +421,7 @@ function bakeSheet(sheet, cloth, node, geometry, colliders, frameCount, movingSe
   const recording = Object.freeze({ ...runKernel('cloth', [worldPositions, welded.triangles, {
     pinned: sheet.pinTo ? [] : pinned, moving,
     stiffnessWeights: stiffnessWeights(sheet, geometry, welded.representatives), softBody: sheet.softBody, selfCollision: sheet.selfCollision,
-    gravity: cloth.gravity, wind: cloth.wind, fields: cloth.fields, stiffness: sheet.stiffness, bend: sheet.bend,
+    gravity: cloth.gravity, wind: cloth.wind, fields: cloth.fields, stiffness: sheet.stiffness, bend: sheet.bend, bendModel: sheet.bendModel,
     density: sheet.density, damping: sheet.damping, friction: sheet.friction, thickness: sheet.thickness,
     colliders, frameCount, framesPerSecond: FRAMES_PER_SECOND,
   }], bakeClothWithFields) });

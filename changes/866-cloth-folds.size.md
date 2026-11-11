@@ -1,0 +1,4 @@
+- entry:cloth: the dihedral bend solver (1.3 KB gzip) is what lets a fine cloth fold softly; the self collision pair list replaces a per-iteration cell walk and makes it 3 times faster
+- scene:agent-scene: the bendModel field and its error check
+- scene:agent-scene+lazy: the cloth kernel is lazy-loaded with the scene, so it carries the dihedral solver
+- goal:agent-scene: the bytes are the cloth bend model of #866, which bakes a 64 by 64 flag; the lazy chunk is the only part of the scene that grew by more than the field itself
