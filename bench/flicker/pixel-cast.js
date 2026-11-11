@@ -129,7 +129,7 @@ function isTie(world, distances, triangles, base) {
 
 /**
  * Casts one ray through every pixel centre of a `width` x `height` image. `world` is the result of `collectWorldTriangles`,
- * `camera` the `{ eye, target, up, fov }` of the frame. Returns `{ owner, rivals, tied }`: `owner` is the visible triangle of
+ * `camera` the `{ eye, target, up, fov }` of the frame. Returns `{ owner, rivals, tied, distance }`: `distance` is the depth of the visible face in front of the camera (0 for the background); `owner` is the visible triangle of
  * each pixel (`NO_TRIANGLE` for the background), `rivals` holds up to two colour keys of other triangles on the same ray, or
  * -1, and `tied` marks pixels where two faces of different colour lie at one distance with one rank. Only the six nearest
  * faces of a ray are kept, which is enough to name its visible face and the faces right behind it.
@@ -150,10 +150,12 @@ export function castPixelOwners(world, camera, width, height) {
   const owner = new Int32Array(width * height).fill(NO_TRIANGLE);
   const rivals = new Int32Array(width * height * RIVALS_PER_PIXEL).fill(-1);
   const tied = new Uint8Array(width * height);
+  const distance = new Float64Array(width * height);
   for (let pixel = 0; pixel < width * height; pixel++) {
     const base = pixel * HITS_PER_PIXEL;
     if (hitTriangles[base] === NO_TRIANGLE) continue;
     owner[pixel] = hitTriangles[base];
+    distance[pixel] = hitDistances[base];
     tied[pixel] = isTie(world, hitDistances, hitTriangles, base) ? 1 : 0;
     const ownKey = world.keyOf[hitTriangles[base]];
     let stored = 0;
@@ -163,5 +165,5 @@ export function castPixelOwners(world, camera, width, height) {
       if (!known) rivals[pixel * RIVALS_PER_PIXEL + stored++] = key;
     }
   }
-  return { owner, rivals, tied };
+  return { owner, rivals, tied, distance };
 }

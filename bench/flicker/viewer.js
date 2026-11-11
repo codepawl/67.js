@@ -258,6 +258,75 @@ async function truth() {
   return { ...counts, triangles: world.count, castMilliseconds: Math.round(performance.now() - started), width, height };
 }
 
+// The triangles of another colour key that lie under the centre of triangle `target` within a decimetre of its plane, as
+// `{ triangle, offset, rank, key, facing }` with `offset` how far the target stands in front of it along the target's normal.
+function trianglesBehind(world, target) {
+  const corners = world.corners;
+  const point = index => [corners[index * 9], corners[index * 9 + 1], corners[index * 9 + 2]];
+  const centre = [0, 1, 2].map(axis => (corners[target * 9 + axis] + corners[target * 9 + 3 + axis] + corners[target * 9 + 6 + axis]) / 3);
+  const edgeOne = [0, 1, 2].map(axis => corners[target * 9 + 3 + axis] - point(target)[axis]);
+  const edgeTwo = [0, 1, 2].map(axis => corners[target * 9 + 6 + axis] - point(target)[axis]);
+  const normal = [edgeOne[1] * edgeTwo[2] - edgeOne[2] * edgeTwo[1], edgeOne[2] * edgeTwo[0] - edgeOne[0] * edgeTwo[2], edgeOne[0] * edgeTwo[1] - edgeOne[1] * edgeTwo[0]];
+  const length = Math.hypot(...normal);
+  const unit = normal.map(value => value / length);
+  const found = [];
+  for (let other = 0; other < world.count; other++) {
+    if (other === target || world.keyOf[other] === world.keyOf[target]) continue;
+    const first = point(other);
+    const second = [0, 1, 2].map(axis => corners[other * 9 + 3 + axis]);
+    const third = [0, 1, 2].map(axis => corners[other * 9 + 6 + axis]);
+    const side = [0, 1, 2].map(axis => second[axis] - first[axis]);
+    const back = [0, 1, 2].map(axis => third[axis] - first[axis]);
+    const otherNormal = [side[1] * back[2] - side[2] * back[1], side[2] * back[0] - side[0] * back[2], side[0] * back[1] - side[1] * back[0]];
+    const otherLength = Math.hypot(...otherNormal);
+    const alignment = (otherNormal[0] * unit[0] + otherNormal[1] * unit[1] + otherNormal[2] * unit[2]) / otherLength;
+    if (Math.abs(alignment) < 0.99) continue;
+    const offset = unit.reduce((sum, value, axis) => sum + value * (first[axis] - centre[axis]), 0);
+    if (Math.abs(offset) > 0.1) continue;
+    const projected = centre.map((value, axis) => value + unit[axis] * offset);
+    const signs = [[first, second], [second, third], [third, first]].map(([from, to]) => {
+      const edge = to.map((value, axis) => value - from[axis]);
+      const toPoint = projected.map((value, axis) => value - from[axis]);
+      const turn = [edge[1] * toPoint[2] - edge[2] * toPoint[1], edge[2] * toPoint[0] - edge[0] * toPoint[2], edge[0] * toPoint[1] - edge[1] * toPoint[0]];
+      return turn[0] * otherNormal[0] + turn[1] * otherNormal[1] + turn[2] * otherNormal[2];
+    });
+    if (signs.every(sign => sign >= 0)) found.push({ triangle: other, offset: -offset, rank: world.ranks[other], key: world.keyOf[other], facing: alignment > 0 ? 'same' : 'opposite' });
+  }
+  return found.slice(0, 6);
+}
+
+// The swapped pixels of the current frame grouped by the triangle that should be visible there: its part, rank and corners in
+// world space, the pixel count and the median distance. Lists the 'limit' largest groups; this is how a swap is traced to a face.
+function swapDetails(limit = 12) {
+  const { width, height } = canvas;
+  const scratch = document.createElement('canvas');
+  scratch.width = width;
+  scratch.height = height;
+  const context = scratch.getContext('2d', { willReadFrequently: true });
+  renderer.render(frameFor(0));
+  const pixels = new Uint8ClampedArray(readFrame(context));
+  const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
+  const cast = castPixelOwners(world, frameFor(0), width, height);
+  const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height });
+  const groups = new Map();
+  for (let pixel = 0; pixel < mismatchMask.length; pixel++) {
+    if (mismatchMask[pixel] !== 2) continue;
+    const group = groups.get(cast.owner[pixel]) ?? { triangle: cast.owner[pixel], pixels: 0, distances: [] };
+    group.pixels++;
+    const neighbours = [-1, 1, -width, width, -width - 1, -width + 1, width - 1, width + 1];
+    if (neighbours.some(step => cast.owner[pixel + step] !== cast.owner[pixel])) group.onTriangleEdge = (group.onTriangleEdge ?? 0) + 1;
+    group.distances.push(cast.distance[pixel]);
+    groups.set(cast.owner[pixel], group);
+  }
+  renderer.render(frameFor(0));
+  return [...groups.values()].sort((first, second) => second.pixels - first.pixels).slice(0, limit).map(group => ({
+    triangle: group.triangle, pixels: group.pixels, onTriangleEdge: group.onTriangleEdge ?? 0, rank: world.ranks[group.triangle], key: world.keyOf[group.triangle],
+    behind: trianglesBehind(world, group.triangle),
+    distance: group.distances.sort((first, second) => first - second)[group.distances.length >> 1],
+    corners: Array.from(world.corners.subarray(group.triangle * 9, group.triangle * 9 + 9)),
+  }));
+}
+
 async function probe() {
   if (!renderer) return null;
   if (!options.ids) {
@@ -472,7 +541,7 @@ bindControls();
 requestAnimationFrame(tick);
 document.querySelector('#speedValue').textContent = '';
 window.flicker = {
-  setCamera, probe, truth, build, options, frameWholeScene,
+  setCamera, probe, truth, swapDetails, build, options, frameWholeScene,
   get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.(), flush: flushReport }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
   traps: Object.keys(TRAPS),

@@ -74,6 +74,9 @@ try {
     const spots = JSON.parse(readFileSync(spotsFile, 'utf8'));
     for (const configuration of configurations) {
       await open(configuration);
+      // The flush pass of a large asset takes seconds; wait for the scene to be built, then for the pass when it is on.
+      await page.waitForFunction(() => window.flicker.info.bounds, null, { polling: 500 });
+      if (configuration.offset !== '0') await page.waitForFunction(() => window.flicker.info.flush, null, { polling: 500 });
       await page.waitForTimeout(1500);
       console.log(JSON.stringify({ flush: await page.evaluate(() => window.flicker.info.flush) }));
       const label = Object.entries(configuration).map(([key, value]) => `${key}${value}`).join('-');
