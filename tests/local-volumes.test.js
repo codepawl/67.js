@@ -58,6 +58,8 @@ test('the post program carries the local step only when asked, and a recipe name
   assert.equal(normalizeAgentLook({ environment }).environment.localVolumes[0].steps, 16);
   assert.equal('localVolumes' in normalizeAgentLook({}).environment, false);
   assert.throws(() => normalizeAgentLook({ environment: { localVolumes: [{ center: [0, 0, 0], size: [1, 1, -1] }] } }), /environment\.localVolumes\[0\]\.size/);
+  assert.equal(normalizeAgentLook({ environment: { localVolumes: [{ center: [0, 0, 0], size: [1, 1, 1], scatter: 0.6 }] } }).environment.localVolumes[0].scatter, 0.6);
+  assert.throws(() => normalizeAgentLook({ environment: { localVolumes: [{ center: [0, 0, 0], size: [1, 1, 1], scatter: 2 }] } }), /environment\.localVolumes\[0\]\.scatter/);
   assert.ok(agentSceneModulesNeeded({ environment }).includes('fogShader'));
 });
 

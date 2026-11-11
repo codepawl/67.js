@@ -1,0 +1,3 @@
+- entry:fog-shader: the round box fade in the volume profile, a few dozen bytes, so a faded smoke box shows no mitred creases.
+- scene:agent-scene+lazy: the same round fade in the CPU path tracer's volume profile, counted in the lazy bundle.
+- entry:path-tracer: the round fade in the CPU path tracer's profile, a few dozen bytes to match the rasterizer.

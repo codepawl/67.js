@@ -1,5 +1,5 @@
 import { resolveVolumeFog } from './volumetric.js';
-import { localVolumeInterval, localVolumeProfile } from './local-volumes.js';
+import { localVolumeInterval, localVolumeProfile, localVolumeStepCount, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { countOpenEdges } from './local-volume-parts.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
@@ -150,18 +150,94 @@ function marchMeshVolume(volume, spans, originX, originY, originZ, directionX, d
   }
 }
 
+/** The mean radiance of an environment map over the sphere (rows weighted by their solid angle), the sky term of a scattering local volume. */
+export function meanEnvironmentRadiance(environment) {
+  const mean = [0, 0, 0];
+  if (!environment) return mean;
+  const { width, height, channels, data, intensity } = environment;
+  let weightTotal = 0;
+  for (let row = 0; row < height; row++) {
+    const rowWeight = Math.sin(Math.PI * (row + 0.5) / height);
+    for (let column = 0; column < width; column++) {
+      for (let channel = 0; channel < 3; channel++) mean[channel] += data[(row * width + column) * channels + channel] * rowWeight;
+    }
+    weightTotal += rowWeight * width;
+  }
+  return mean.map(total => total * intensity / weightTotal);
+}
+
+const SUN_DEPTH_TAPS = 3;
+const SKY_DEPTH_TAPS = 1;
+// The up and four side directions the sky light is gathered from (the rasterizer's localVolumeSkyLight holds the same list).
+const SKY_DIRECTIONS = [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+
+/**
+ * The optical depth per colour channel between a point inside a volume and the volume's far side along a direction, from midpoint
+ * taps of its profile: the rasterizer's `localVolumeDepth`, so the lit side of a volume is brighter than the shaded side.
+ */
+function writeOpticalDepth(volume, x, y, z, direction, taps, span, out) {
+  const exitDistance = localVolumeInterval(volume, x, y, z, direction[0], direction[1], direction[2], Infinity, span) ? Math.max(span[1], 0) : 0;
+  let profileSum = 0;
+  for (let tap = 0; tap < taps; tap++) {
+    const distance = exitDistance * (tap + 0.5) / taps;
+    profileSum += Math.min(localVolumeProfile(volume, x + direction[0] * distance, y + direction[1] * distance, z + direction[2] * distance, false) * LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, 1);
+  }
+  for (let channel = 0; channel < 3; channel++) out[channel] = volume.absorption[channel] * volume.density * profileSum * exitDistance / taps;
+}
+
 /**
  * Builds the function that carries a ray through the scene's local volumes (environment.localVolumes). Each volume is marched with
  * its own step count between its entry and exit, nearest entry first: the emitted light is added in proportion to the throughput
- * so far, then the throughput is dimmed by exp(-absorption * profile * step). Emission and absorption do not scatter, so no light
- * sample is taken. A volume's `noiseAmount` modulates the profile with the rasterizer's own noise field. `jitter` (0 to 1) offsets the samples within a step.
+ * so far, then the throughput is dimmed by exp(-absorption * profile * step). A volume with `scatter` above 0 also returns that share
+ * of the light it extinguishes in the step, lit by the sky term and by the sun (phase function, shadow ray, and the volume's own
+ * optical depth toward the sun); `lighting` is `{ sun: { direction, color } | null, ambient: [red, green, blue], sunVisibility(x, y, z) }`,
+ * where sunVisibility is 1 or 0 for a shadow ray toward the sun. A volume's `noiseAmount` modulates the profile with the rasterizer's
+ * own noise field. `jitter` (0 to 1) offsets the samples within a step.
  * The returned function writes the emitted light into `emitted` and scales `throughput` in place.
  */
-export function createLocalVolumeCrossing(volumes) {
+export function createLocalVolumeCrossing(volumes, lighting = null) {
   const entries = new Float64Array(volumes.length);
   const exits = new Float64Array(volumes.length);
   const order = new Int32Array(volumes.length);
   const span = new Float64Array(2);
+  const sunDepth = new Float64Array(3);
+  const sunLight = new Float64Array(3);
+  const skyLight = new Float64Array(3);
+  const flattenedDirection = new Float64Array(3);
+
+  // Writes the sky term of a point inside a scattering volume: the mean sky radiance times what the volume's own depth leaves open in five directions.
+  function writeSkyLight(volume, x, y, z) {
+    skyLight.fill(0);
+    for (const direction of SKY_DIRECTIONS) {
+      writeOpticalDepth(volume, x, y, z, direction, SKY_DEPTH_TAPS, span, sunDepth);
+      for (let channel = 0; channel < 3; channel++) skyLight[channel] += Math.exp(-sunDepth[channel]) / SKY_DIRECTIONS.length;
+    }
+    for (let channel = 0; channel < 3; channel++) skyLight[channel] *= lighting.ambient[channel] * LOCAL_VOLUME_SKY_GAIN;
+  }
+
+  // Adds the light one step of a scattering volume sends back along the ray: scatter * (1 - exp(-extinction * width)) * (sky + sun).
+  function addScatteredLight(volume, x, y, z, directionX, directionY, directionZ, width, throughput, emitted) {
+    writeSkyLight(volume, x, y, z);
+    sunLight.fill(0);
+    const sun = lighting.sun;
+    if (sun && lighting.sunVisibility(x, y, z) > 0) {
+      const flattenedLength = Math.hypot(sun.direction[0], sun.direction[1] * LOCAL_VOLUME_SUN_FLATTEN, sun.direction[2]);
+      flattenedDirection[0] = sun.direction[0] / flattenedLength;
+      flattenedDirection[1] = sun.direction[1] * LOCAL_VOLUME_SUN_FLATTEN / flattenedLength;
+      flattenedDirection[2] = sun.direction[2] / flattenedLength;
+      writeOpticalDepth(volume, x, y, z, flattenedDirection, SUN_DEPTH_TAPS, span, sunDepth);
+      const cosine = sun.direction[0] * directionX + sun.direction[1] * directionY + sun.direction[2] * directionZ;
+      const phase = henyeyGreensteinPhase(0, cosine);
+      for (let channel = 0; channel < 3; channel++) {
+        sunLight[channel] = sun.color[channel] * phase * LOCAL_VOLUME_KEY_GAIN * Math.exp(-sunDepth[channel] * LOCAL_VOLUME_SHADOW_STRENGTH);
+      }
+    }
+    for (let channel = 0; channel < 3; channel++) {
+      const scattered = volume.scatter * (1 - Math.exp(-volume.absorption[channel] * volume.density * width));
+      emitted[channel] += throughput[channel] * scattered * (skyLight[channel] + sunLight[channel]);
+    }
+  }
+
   const meshScratch = new Float64Array(MAXIMUM_MESH_SEGMENTS * 2);
   const meshSpans = new Array(volumes.length);
   return function crossLocalVolumes(originX, originY, originZ, directionX, directionY, directionZ, length, jitter, throughput, emitted) {
@@ -193,12 +269,16 @@ export function createLocalVolumeCrossing(volumes) {
         continue;
       }
       const entry = entries[order[rank]];
-      const stepLength = (exits[order[rank]] - entry) / volume.steps;
-      for (let step = 0; step < volume.steps; step++) {
+      const stepCount = localVolumeStepCount(volume, exits[order[rank]] - entry);
+      const stepLength = (exits[order[rank]] - entry) / stepCount;
+      for (let step = 0; step < stepCount; step++) {
         const distance = entry + (step + jitter) * stepLength;
         const profile = localVolumeProfile(volume, originX + directionX * distance, originY + directionY * distance, originZ + directionZ * distance);
         if (profile <= 0) continue;
         const width = profile * stepLength;
+        if (volume.scatter > 0 && lighting) {
+          addScatteredLight(volume, originX + directionX * distance, originY + directionY * distance, originZ + directionZ * distance, directionX, directionY, directionZ, width, throughput, emitted);
+        }
         for (let channel = 0; channel < 3; channel++) {
           emitted[channel] += throughput[channel] * volume.emission[channel] * volume.emissionStrength * width;
           throughput[channel] *= Math.exp(-volume.absorption[channel] * volume.density * width);

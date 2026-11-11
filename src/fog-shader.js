@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes } from './local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_MAXIMUM_STEPS, LOCAL_VOLUME_STEPS_PER_NOISE_CELL, LOCAL_VOLUME_BLUR_PIXELS, LOCAL_VOLUME_BLUR_RATE, LOCAL_VOLUME_EDGE_WARP, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
@@ -89,10 +89,11 @@ function prepareLocalVolumes(renderer, input, frame) {
 }
 
 // Uploads the packed volumes. Their uniforms exist only in a program with the local step compiled in.
-function bindLocalVolumes(renderer, post, frame) {
+function bindLocalVolumes(renderer, post, frame, environment) {
   const context = renderer.context;
   const buffers = renderer.localVolumeBuffers;
   const locate = name => (post.uniforms[name] ??= context.getUniformLocation(post.program, name));
+  bindKeyLight(renderer, locate, environment);
   context.uniform1i(locate('localVolumeCount'), buffers.count);
   context.uniform1f(locate('localOrthographic'), frame.projection === 'orthographic' ? 1 : 0);
   context.uniform4fv(locate('localVolumeCenters[0]'), buffers.centers);
@@ -107,6 +108,32 @@ function bindLocalVolumes(renderer, post, frame) {
   context.uniform1i(locate('localMeshVolumes'), 7);
 }
 
+// The renderer's own sky gradient when a scene names none; drawSky in renderer.js holds the same two colours.
+const DEFAULT_SKY_TOP = [0.20, 0.38, 0.52];
+const DEFAULT_SKY_BOTTOM = [0.62, 0.70, 0.67];
+
+// The sky term of a scattering local volume: the mean of the sky gradient times the ambient intensity.
+function localSkyAmbient(renderer, environment) {
+  const top = environment.skyTop ?? DEFAULT_SKY_TOP;
+  const bottom = environment.skyBottom ?? DEFAULT_SKY_BOTTOM;
+  return [0, 1, 2].map(channel => 0.5 * (top[channel] + bottom[channel]) * renderer.lighting.ambientIntensity);
+}
+
+// The key light's shadow map, direction and colour, and the sky term, for volumes that scatter. The sampler always has the shadow map
+// on its unit, so the program is valid in a frame where no volume scatters.
+function bindKeyLight(renderer, locate, environment) {
+  const context = renderer.context;
+  if (renderer.shadowTexture) {
+    context.activeTexture(context.TEXTURE3);
+    context.bindTexture(context.TEXTURE_2D, renderer.shadowTexture);
+  }
+  context.uniform1i(locate('volumeShadowMap'), 3);
+  context.uniformMatrix4fv(locate('volumeLightProjection'), false, renderer.lightProjection);
+  context.uniform3fv(locate('volumeLightDirection'), environment.lightDirection);
+  context.uniform3fv(locate('volumeLightColor'), renderer.lighting.keyColor);
+  context.uniform3fv(locate('localSkyAmbient'), localSkyAmbient(renderer, environment));
+}
+
 const LOCAL_VOLUME_DECLARATIONS = `
 uniform int localVolumeCount;
 uniform float localOrthographic;
@@ -116,12 +143,18 @@ uniform vec4 localVolumeAbsorption[8];
 uniform vec4 localVolumeEmission[8];
 uniform vec4 localVolumeSteps[8];
 uniform vec4 localVolumeAxes[24];
+uniform vec3 localSkyAmbient;
 uniform highp sampler2D localMeshVolumes;
 `;
 
 // Each volume is marched on its own between its entry and exit (cut at the first surface) and composited nearest first: the colour
 // behind it is dimmed by exp(-absorption * profile * step) and its emission is added, both per colour channel.
 const LOCAL_VOLUME_FUNCTIONS = `
+// Interleaved gradient noise (Jimenez 2014): the start offsets of neighbouring pixels stay far apart, so the march error is a fine, even dither
+// and not the clumps a white-noise hash leaves, which read as grain at 8 to 16 steps.
+float localVolumeJitter() {
+  return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+}
 // Value noise on a hash of plain multiplies, adds and fract, which rounds the same way on SwiftShader, where it was measured, and is unchecked on hardware GPUs (a sine hash does not: its error
 // grows with the argument). local-volume-noise.js repeats it for the CPU path tracer, so keep the two in step.
 float localVolumeCellHash(vec3 cell) {
@@ -168,16 +201,93 @@ vec2 localVolumeInterval(int index, vec3 origin, vec3 direction) {
   }
   return vec2(entry, exitDistance);
 }
-float localVolumeProfile(int index, vec3 position) {
+// Where a fade position (0 at the core, 1 at the outer face) lands once the noise has pushed the edge in and out, most at the middle of the fade (local-volumes.js repeats it).
+float localVolumeWarpedFade(float position, float noiseAmount, float noise) {
+  float clamped = clamp(position, 0.0, 1.0);
+  return clamped + (0.5 - noise) * noiseAmount * ${LOCAL_VOLUME_EDGE_WARP.toFixed(3)} * 4.0 * clamped * (1.0 - clamped);
+}
+float localVolumeProfile(int index, vec3 position, bool withNoise) {
   vec3 offset = position - localVolumeCenters[index].xyz;
   if (localVolumeCenters[index].w < 0.5) offset = localVolumeLocal(index, offset);
   vec3 halfSize = localVolumeExtents[index].xyz;
-  float distanceRatio = localVolumeCenters[index].w > 0.5 ? length(offset) / halfSize.x : max(max(abs(offset.x) / halfSize.x, abs(offset.y) / halfSize.y), abs(offset.z) / halfSize.z);
   float falloff = localVolumeExtents[index].w;
-  float profile = falloff > 0.0 ? 1.0 - smoothstep(1.0 - falloff, 1.0, distanceRatio) : 1.0 - step(1.0, distanceRatio);
-  float noiseAmount = localVolumeAbsorption[index].w;
-  if (noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
+  float noiseAmount = withNoise ? localVolumeAbsorption[index].w : 0.0;
+  float noise = noiseAmount > 0.0 ? localVolumeNoise(position * localVolumeEmission[index].w) : 0.5;
+  float profile;
+  if (localVolumeCenters[index].w > 0.5) {
+    float distanceRatio = length(offset) / halfSize.x;
+    float fade = localVolumeWarpedFade((distanceRatio - (1.0 - falloff)) / max(falloff, 1e-6), noiseAmount, noise);
+    profile = falloff > 0.0 ? 1.0 - smoothstep(0.0, 1.0, fade) : 1.0 - step(1.0, distanceRatio);
+    if (distanceRatio >= 1.0) profile = 0.0;
+  } else {
+    vec3 ratios = abs(offset) / halfSize;
+    // The distance past the core box is round at the corners; the plain largest ratio fades along boxes with mitred creases (local-volumes.js repeats it).
+    float fadeDistance = length(max(ratios - (1.0 - falloff), 0.0));
+    float fade = localVolumeWarpedFade(fadeDistance / max(falloff, 1e-6), noiseAmount, noise);
+    profile = falloff > 0.0 ? 1.0 - smoothstep(0.0, 1.0, fade) : 1.0 - step(1.0, max(max(ratios.x, ratios.y), ratios.z));
+    if (max(max(ratios.x, ratios.y), ratios.z) >= 1.0) profile = 0.0;
+  }
+  if (noiseAmount > 0.0) profile *= mix(1.0, noise * 2.0, noiseAmount);
   return profile;
+}
+// The optical depth of a volume between a point inside it and its far side along a direction, from midpoint taps of its profile.
+vec3 localVolumeDepth(int index, vec3 position, vec3 direction, int taps) {
+  float exitDistance = max(localVolumeInterval(index, position, direction).y, 0.0);
+  float profileSum = 0.0;
+  for (int tap = 0; tap < 3; tap++) {
+    if (tap >= taps) break;
+    profileSum += min(localVolumeProfile(index, position + direction * (exitDistance * (float(tap) + 0.5) / float(taps)), false) * ${LOCAL_VOLUME_LIGHT_DEPTH_SATURATION.toFixed(3)}, 1.0);
+  }
+  return localVolumeAbsorption[index].rgb * (profileSum * exitDistance / float(taps));
+}
+// The sky light a point receives through the volume's own depth: the mean over the up and four side directions of what one tap leaves.
+// Without it the sky term is flat, so a thick smoke glows as evenly deep inside as at its edge and hides the key light's side.
+vec3 localVolumeSkyLight(int index, vec3 position) {
+  vec3 open = exp(-localVolumeDepth(index, position, vec3(0.0, 1.0, 0.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(1.0, 0.0, 0.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(-1.0, 0.0, 0.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(0.0, 0.0, 1.0), 1));
+  open += exp(-localVolumeDepth(index, position, vec3(0.0, 0.0, -1.0), 1));
+  return localSkyAmbient * (open * ${(0.2 * LOCAL_VOLUME_SKY_GAIN).toFixed(3)});
+}
+// The light a scattering volume receives at a point: the sky term and the key light through the shadow map, each through the volume's own depth.
+vec3 localVolumeInScatter(int index, vec3 position, vec3 direction) {
+  vec3 towardSun = normalize(volumeLightDirection);
+  float visibility = keyVisibility(position);
+  vec3 sunLight = vec3(0.0);
+  if (visibility > 0.001) {
+    vec3 lightDirection = normalize(vec3(towardSun.x, towardSun.y * ${LOCAL_VOLUME_SUN_FLATTEN.toFixed(3)}, towardSun.z));
+    vec3 lightDepth = localVolumeDepth(index, position, lightDirection, 3) * ${LOCAL_VOLUME_SHADOW_STRENGTH.toFixed(3)};
+    sunLight = volumeLightColor * (henyeyGreenstein(dot(direction, towardSun), 0.0) * visibility * ${LOCAL_VOLUME_KEY_GAIN.toFixed(3)}) * exp(-lightDepth);
+  }
+  return localVolumeSkyLight(index, position) + sunLight;
+}
+// The light behind a volume, blurred by the optical depth in front of it: taps of the frame spread over a disc whose radius grows with the depth,
+// each counted only where its surface lies at or past the ray's first volume entry, so an object in front of the volume is never smeared into it.
+vec3 localVolumeBlurred(vec3 background, float opticalDepth, float firstEntry, vec3 origin, vec3 direction) {
+  float radiusPixels = ${LOCAL_VOLUME_BLUR_PIXELS.toFixed(1)} * (resolution.y / 540.0) * (1.0 - exp(-${LOCAL_VOLUME_BLUR_RATE.toFixed(2)} * opticalDepth));
+  if (radiusPixels < 0.05) return background;
+  float lod = max(0.0, log2(radiusPixels * 0.5) - 1.0);
+  float footprint = exp2(lod) + 1.0;
+  vec3 sum = background;
+  float weight = 1.0;
+  for (int tap = 0; tap < 12; tap++) {
+    float index = float(tap) + 0.5;
+    vec2 offsetPixels = vec2(cos(index * 2.4), sin(index * 2.4)) * (radiusPixels * sqrt(index / 12.0));
+    vec2 coordinate = textureCoordinate + offsetPixels / resolution;
+    // The surface at the tap and one filter footprint to each side of it: the filter blends the colour of an object in front of the volume into a tap whose own depth is still the far one.
+    float nearestTap = 1e30;
+    for (int side = 0; side < 5; side++) {
+      vec2 shift = side == 0 ? vec2(0.0) : (side == 1 ? vec2(footprint, 0.0) : (side == 2 ? vec2(-footprint, 0.0) : (side == 3 ? vec2(0.0, footprint) : vec2(0.0, -footprint))));
+      vec2 sideCoordinate = coordinate + shift / resolution;
+      vec4 sidePoint = inverseViewProjection * vec4(sideCoordinate * 2.0 - 1.0, texture(sceneDepth, sideCoordinate).r * 2.0 - 1.0, 1.0);
+      nearestTap = min(nearestTap, sidePoint.w > 0.0 ? dot(sidePoint.xyz - origin * sidePoint.w, direction) / sidePoint.w : 1e30);
+    }
+    if (nearestTap < firstEntry) continue;
+    sum += textureLod(frameTexture, coordinate, lod).rgb;
+    weight += 1.0;
+  }
+  return mix(background, sum / weight, min(radiusPixels, 1.0));
 }
 vec3 localVolumes(vec3 background) {
   vec2 clipXY = textureCoordinate * 2.0 - 1.0;
@@ -216,6 +326,8 @@ vec3 localVolumes(vec3 background) {
   }
   vec3 transmittance = vec3(1.0);
   vec3 radiance = vec3(0.0);
+  float blurDepth = 0.0;
+  float blurEntry = 1e30;
   for (int pass = 0; pass < 8; pass++) {
     int nearest = -1;
     float nearestEntry = 1e29;
@@ -238,20 +350,54 @@ vec3 localVolumes(vec3 background) {
       vec3 gain = mix(vec3(insideLength), (1.0 - factor) / max(absorption, vec3(1e-6)), step(vec3(1e-6), absorption));
       radiance += transmittance * localVolumeEmission[nearest].rgb * gain;
       transmittance *= factor;
+      blurDepth += localVolumeSteps[nearest].w * dot(absorption, vec3(0.3333)) * insideLength;
+      blurEntry = min(blurEntry, entry);
       continue;
     }
     int steps = int(localVolumeSteps[nearest].x);
+    float noiseAmount = localVolumeAbsorption[nearest].w;
+    if (noiseAmount > 0.0) steps = min(${LOCAL_VOLUME_MAXIMUM_STEPS}, max(steps, int(ceil((exitDistance - entry) * localVolumeEmission[nearest].w * ${LOCAL_VOLUME_STEPS_PER_NOISE_CELL.toFixed(1)}))));
     float stepSize = (exitDistance - entry) / float(steps);
-    float jitter = hash(vec3(gl_FragCoord.xy, float(nearest) + 1.0));
+    float jitter = fract(localVolumeJitter() + float(nearest) * 0.618034);
+    float scatterAlbedo = localVolumeSteps[nearest].z;
     for (int step = 0; step < 32; step++) {
       if (step >= steps) break;
       vec3 position = origin + direction * (entry + (float(step) + jitter) * stepSize);
-      float profile = localVolumeProfile(nearest, position);
+      float profile = localVolumeProfile(nearest, position, true);
       radiance += transmittance * localVolumeEmission[nearest].rgb * (profile * stepSize);
-      transmittance *= exp(-localVolumeAbsorption[nearest].rgb * (profile * stepSize));
+      vec3 extinction = localVolumeAbsorption[nearest].rgb * (profile * stepSize);
+      if (scatterAlbedo > 0.0 && profile > 0.0) radiance += transmittance * (scatterAlbedo * (1.0 - exp(-extinction))) * localVolumeInScatter(nearest, position, direction);
+      transmittance *= exp(-extinction);
+      blurDepth += localVolumeSteps[nearest].w * dot(extinction, vec3(0.3333));
     }
+    blurEntry = min(blurEntry, entry);
   }
+  if (blurDepth > 0.0) background = localVolumeBlurred(background, blurDepth, blurEntry, origin, direction);
   return background * transmittance + radiance;
+}
+`;
+
+// The key light's side of the fog and of a scattering local volume: the shadow map, the light and the phase function. Both steps read these,
+// so post.js compiles this block in whenever either is on.
+const KEY_LIGHT_DECLARATIONS = `
+uniform highp sampler2DShadow volumeShadowMap;
+uniform mat4 volumeLightProjection;
+uniform vec3 volumeLightDirection;
+uniform vec3 volumeLightColor;
+`;
+
+const KEY_LIGHT_FUNCTIONS = `
+float henyeyGreenstein(float cosine, float anisotropy) {
+  return (1.0 - anisotropy * anisotropy) / (12.5663706 * pow(1.0 + anisotropy * anisotropy - 2.0 * anisotropy * cosine, 1.5));
+}
+// The share of the key light that reaches a point: the shadow map.
+float keyVisibility(vec3 position) {
+  vec4 lightPosition = volumeLightProjection * vec4(position, 1);
+  vec3 shadow = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
+  if (all(greaterThanEqual(shadow, vec3(0))) && all(lessThanEqual(shadow, vec3(1)))) {
+    return texture(volumeShadowMap, vec3(shadow.xy, shadow.z - 0.0008));
+  }
+  return 1.0;
 }
 `;
 
@@ -263,13 +409,11 @@ function packLights(renderer) {
 registerShaderFeatureCode('volumeFog', {
   // The JavaScript half, which the renderer calls for a frame that draws a volume fog.
   support: { packLights, bindUniforms, usesDetail: fogUsesDetail, prepareLocalVolumes, bindLocalVolumes },
+  keyDeclarations: KEY_LIGHT_DECLARATIONS,
+  keyFunctions: KEY_LIGHT_FUNCTIONS,
   localDeclarations: LOCAL_VOLUME_DECLARATIONS,
   localFunctions: LOCAL_VOLUME_FUNCTIONS,
   postDeclarations: `
-uniform highp sampler2DShadow volumeShadowMap;
-uniform mat4 volumeLightProjection;
-uniform vec3 volumeLightDirection;
-uniform vec3 volumeLightColor;
 uniform float volumeDensity;
 uniform vec3 volumeMinimum;
 uniform vec3 volumeMaximum;
@@ -309,9 +453,6 @@ uniform float orthographic;
 uniform highp sampler3D fogSkyVisibility;
 `,
   postFunctions: `
-float henyeyGreenstein(float cosine, float anisotropy) {
-  return (1.0 - anisotropy * anisotropy) / (12.5663706 * pow(1.0 + anisotropy * anisotropy - 2.0 * anisotropy * cosine, 1.5));
-}
 float fogLightAttenuation(float distanceSquared, float range, float radius) {
   float cutoff = 1.0;
   if (range > 0.0) {
@@ -390,15 +531,6 @@ float fogDensityFactor(vec3 position) {
   if (POST_FIELD) noise *= field.r * layerProfile((position.y - volumeMinimum.y) / max(field.g, 0.0001));
   else if (volumeHeightFalloff > 0.0) noise *= exp((volumeMinimum.y - position.y) / volumeHeightFalloff);
   return noise;
-}
-// The share of the key light that reaches a point: the shadow map.
-float keyVisibility(vec3 position) {
-  vec4 lightPosition = volumeLightProjection * vec4(position, 1);
-  vec3 shadow = lightPosition.xyz / lightPosition.w * 0.5 + 0.5;
-  if (all(greaterThanEqual(shadow, vec3(0))) && all(lessThanEqual(shadow, vec3(1)))) {
-    return texture(volumeShadowMap, vec3(shadow.xy, shadow.z - 0.0008));
-  }
-  return 1.0;
 }
 // The optical depth of the fog between a point and the sun, from three taps along the light direction up to the box exit.
 float sunOpticalDepth(vec3 position, vec3 towardSun) {
