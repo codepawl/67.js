@@ -1,6 +1,6 @@
 ---
 name: build-67js-scene
-description: Build, light, film and refine 3D scenes through the 67js MCP server (npm package @codepawlhq/67js). Use when an agent has the scene_* tools and must model parts, set materials, lights, HDRI, color looks, fog, lens and depth of field, animate a camera, lights, sun, sky and effects, bake light, fix z-fighting or recover from a tool error. Also for "làm cảnh 67js", "dựng cảnh 3D bằng 67js", "model bị răng cưa", "ánh sáng cảnh 67js", "đổ bóng", "sương mù 67js", "camera 67js". Image and video export is the render-67js-media skill.
+description: Build, light, film and refine 3D scenes, drawn by the WebGL2 rasterizer or the Cook path tracer, through the 67js MCP server (npm package @codepawlhq/67js). Use when an agent has the scene_* tools and must model parts, set materials, lights, HDRI, color looks, fog, lens and depth of field, animate a camera, lights, sun, sky and effects, bake light, fix z-fighting or recover from a tool error. Also for "làm cảnh 67js", "dựng cảnh 3D bằng 67js", "model bị răng cưa", "ánh sáng cảnh 67js", "đổ bóng", "sương mù 67js", "camera 67js". Image and video export is the render-67js-media skill.
 license: MIT
 ---
 

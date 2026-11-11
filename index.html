@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#09070f" />
-    <meta name="description" content="67js is a 3D engine that AI agents drive: Glaze real-time rendering, Cook path tracing, GLB, PNG and MP4 export, and an MCP server. Install with npm i @codepawlhq/67js." />
+    <meta name="description" content="67js is a 3D engine that AI agents drive: the Glaze rasterizer on WebGL2, the Cook path tracer on CPU, WebGL2, WebGPU and Vulkan, GLB, PNG and MP4 export, and an MCP server. Install with npm i @codepawlhq/67js." />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="67js" />
     <meta property="og:title" content="67js · 3D engine that AI agents drive" />
-    <meta property="og:description" content="Real-time WebGL2, offline path tracing and an MCP server in one npm package." />
+    <meta property="og:description" content="A WebGL2 rasterizer, a path tracer on CPU, WebGL2, WebGPU and Vulkan, and an MCP server in one npm package." />
     <meta property="og:url" content="https://67js.codepawl.com/" />
     <meta property="og:image" content="https://67js.codepawl.com/hero-lab/poster-b-port.webp" />
     <meta property="og:image:width" content="1440" />
@@ -85,7 +85,7 @@
       </div>
       <div class="copy">
         <h1>3D engine that<br />AI agents drive</h1>
-        <p class="lede">Real-time WebGL2 with Glaze, offline path tracing with Cook, and 24 MCP tools in one package.</p>
+        <p class="lede">Glaze draws real-time frames on WebGL2. Cook path traces on the CPU, WebGL2, WebGPU or Vulkan. 24 MCP tools drive both.</p>
         <div class="hero-actions">
           <a href="/docs.html#getting-started" data-icon="book">Get started</a>
           <a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm brand-npm" aria-hidden="true"></span>npm</a>
@@ -151,25 +151,25 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
       <section id="agents" class="agents" aria-labelledby="agents-title">
         <div class="agents-intro">
           <h2 id="agents-title">Built for agents</h2>
-          <p>An agent gets a live scene to edit, glaze in real time or cook with path tracing, and review.</p>
+          <p>An agent gets a live scene to edit, draws it with Glaze or Cook, and reviews the result.</p>
           <div class="code-block">
             <pre><code id="home-mcp" data-language="shell">npx 67js-mcp --backend gpu --memory 192</code></pre>
             <button data-copy-code="home-mcp" aria-label="Copy the MCP server command">Copy</button>
           </div>
           <div class="agent-size-bars" aria-label="Measured gzip bundle size on lit-box">
             <div class="size-bar-row">
-              <div class="size-bar-label"><span><strong>67js</strong> (lit-box)</span><span>50.9 KB gzip · 2.6× smaller</span></div>
-              <div class="size-bar-track"><span class="size-bar-fill is-67js" style="width: 38%"></span></div>
+              <div class="size-bar-label"><span><strong>67js</strong> (lit-box)</span><span>58.8 kB gzip · 2.3× smaller</span></div>
+              <div class="size-bar-track"><span class="size-bar-fill is-67js" style="width: 44%"></span></div>
             </div>
             <div class="size-bar-row">
-              <div class="size-bar-label"><span>three.js (lit-box)</span><span>133.8 KB gzip</span></div>
+              <div class="size-bar-label"><span>three.js (lit-box)</span><span>133.8 kB gzip</span></div>
               <div class="size-bar-track"><span class="size-bar-fill is-other" style="width: 100%"></span></div>
             </div>
           </div>
         </div>
         <div class="agent-cards">
           <a href="/mcp.md" data-icon="cube"><h3>24 MCP tools</h3><p>Create, edit, explode, blend and render over stdio.</p></a>
-          <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time WebGL2 frames or path-traced stills.</p></a>
+          <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time frames on WebGL2, or path-traced stills on CPU, WebGL2, WebGPU or Vulkan.</p></a>
           <a href="/agent-review.md" data-icon="image"><h3>Visual review</h3><p>Compare labeled views and normals from one snapshot.</p></a>
         </div>
       </section>

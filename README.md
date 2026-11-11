@@ -9,11 +9,28 @@
   <img alt="MCP server for agents" src="https://img.shields.io/badge/agents-MCP%20server-F7C948?style=flat-square&labelColor=0A1D1A">
 </p>
 
-67js is a WebGL2 renderer with addons for terrain, vegetation, characters, liquid, vehicles and media export.
+67js is a 3D engine for AI agents and for pages. It has a real-time rasterizer, a path tracer, addons for terrain, vegetation, characters, liquid, vehicles and media export, and an MCP server.
 A scene is plain data: each part has a geometry, a matrix and a material.
-An agent builds and changes a scene through an MCP server, looks at PNG previews and renders stills or MP4 video.
+An agent builds and changes a scene through the MCP server, looks at PNG previews and renders stills or MP4 video.
+The rasterizer runs on WebGL2. The path tracer runs on the CPU, on WebGL2, on WebGPU and, with an optional package, on Vulkan.
 The goal is to be as capable as Blender and as light as three.js. [docs/goal.md](https://github.com/codepawl/67.js/blob/main/docs/goal.md) defines each part.
 See the [showcase](https://67js.codepawl.com/showcase.html), the [documentation](https://67js.codepawl.com/docs.html), the [guide for agents](https://67js.codepawl.com/llms.txt) and the [changelog](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md). The [FAQ](https://67js.codepawl.com/docs.html#faq) answers common questions.
+
+## Renderers
+
+| Name | What it is | Runs on |
+| --- | --- | --- |
+| Glaze (`Renderer67`) | The real-time rasterizer | WebGL2 |
+| Cook | The path tracer, one still per job | CPU (default), WebGL2, WebGPU (a BVH in WGSL compute, because browsers have no hardware ray tracing), and Vulkan ray queries through the optional `packages/render-native` |
+| Real-time path tracer | A hybrid tracer with a radiance cache and a temporal denoiser. It is experimental, and the MCP server does not expose it | WebGPU, with a WebGL2 fallback |
+| Light bake | Baked lightmaps | CPU, WebGL2 and WebGPU |
+
+The roadmap in [issue 890](https://github.com/codepawl/67.js/issues/890) groups these into four quality tiers: draft, realtime, realtime-high and final.
+The names are working names. Draft is a low-resolution Glaze frame with cheap lighting. Realtime is Glaze. Final is Cook.
+Realtime-high is planned: Glaze on WebGPU with GPU-driven geometry, cached global illumination and temporal upscaling ([issue 901](https://github.com/codepawl/67.js/issues/901) and [issue 902](https://github.com/codepawl/67.js/issues/902)).
+It does not exist yet. The `quality` setting that picks a tier is planned too ([issue 904](https://github.com/codepawl/67.js/issues/904)), and so is refine-at-rest ([issue 903](https://github.com/codepawl/67.js/issues/903)).
+
+<!-- tiers-table -->
 
 ## Showcase
 
@@ -68,7 +85,7 @@ npm install 67js@npm:@codepawlhq/67js
 ```
 
 The registry name is `@codepawlhq/67js`. The command installs it under the alias `67js`, so imports stay short.
-The package is ESM. The tools need Node.js 20.19 or later, and rendering needs a WebGL2 browser.
+The package is ESM. The tools need Node.js 20.19 or later. Glaze and the WebGL2 path tracer need a WebGL2 browser. The WebGPU backends need a browser with WebGPU.
 
 ### Releases
 
@@ -123,7 +140,7 @@ The server needs a local Chrome installation.
 npx 67js-mcp --backend gpu --memory 192
 ```
 
-Use `--backend cpu` on a machine without a GPU.
+`--backend gpu` renders with hardware WebGL2 through Chrome. Use `--backend cpu` on a machine without a GPU.
 With bun, `bunx 67js-mcp` takes the same flags; CI runs the packaged server under bun on every pull request.
 An agent authors a [JSON recipe](docs/agent-scene.md), sets [lights and fog](docs/agent-look.md), imports [GLB assets](docs/agent-asset.md) and adds [motion](docs/agent-motion.md).
 It gets PNG previews back, compares up to four views in a [review grid](docs/agent-review.md) and runs [render jobs](docs/agent-render-jobs.md) for stills and MP4 video.
@@ -183,9 +200,16 @@ The [render skill](skills/render-67js-media/SKILL.md) lists every preset and fla
 2. Run `npm ci`.
 3. Run `npm run dev`. Vite prints the local URL.
 
-## Performance claims
+## Performance
 
-[verification.md](docs/verification.md) has the measured results and their limits.
+Numbers below come from this repository's benchmarks. Each states its conditions, and the RTX 3060 was shared with other jobs.
+
+- **Bundle size.** The `lit-box` scene is 58,788 bytes gzip in 67js and 133,797 bytes in three.js, which is 2.3 times smaller. Measured on 2026-11-11 with `npm run size`. [bench/size/README.md](bench/size/README.md) has every scene and the goals.
+- **Path tracing on the GPU.** The 1920 by 1080 still of the demo room (181,708 triangles, 64 samples, 8 bounces) took 585.9 s on the 8-thread CPU tracer and 58.15 s on the WebGL2 GPU tracer. Both times are end to end. This is one run from 2026-11-03. [docs/webgpu-decision.md](docs/webgpu-decision.md) has the method.
+
+<!-- TODO: Cook against Cycles is measured in pull request 921 (`docs/cycles-parity.md`). Link it here, with its conditions, after it merges. -->
+
+[docs/verification.md](docs/verification.md) has older results and their limits.
 They compare matching scenes on the same hardware. They do not show a general speed advantage over three.js or visual parity with Blender.
 
 ## Contributing
