@@ -85,7 +85,7 @@
       </div>
       <div class="copy">
         <h1>3D engine that<br />AI agents drive</h1>
-        <p class="lede">Glaze draws real-time frames on WebGL2. Cook path traces on the CPU or WebGL2, and on Vulkan with the optional render-native package. 24 MCP tools drive them.</p>
+        <p class="lede">Glaze draws real-time frames. Cook path traces stills. 24 MCP tools drive them.</p>
         <div class="hero-actions">
           <a href="/docs.html#getting-started" data-icon="book">Get started</a>
           <a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm brand-npm" aria-hidden="true"></span>npm</a>
@@ -169,26 +169,70 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
         </div>
         <div class="agent-cards">
           <a href="/mcp.md" data-icon="cube"><h3>24 MCP tools</h3><p>Create, edit, explode, blend and render over stdio.</p></a>
-          <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time frames on WebGL2, or path-traced stills on CPU or WebGL2, and on Vulkan with the optional render-native package.</p></a>
+          <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time frames, or path-traced stills.</p></a>
           <a href="/agent-review.md" data-icon="image"><h3>Visual review</h3><p>Compare labeled views and normals from one snapshot.</p></a>
         </div>
       </section>
 
       <section id="tiers" class="tiers" aria-labelledby="tiers-title">
         <h2 id="tiers-title">Quality tiers, measured</h2>
-        <p>Six scenes at 960x540 on an idle RTX 3060. Each value is the range of the per-scene medians across the scenes. FLIP is the error against a Cycles 4096-sample reference, lower is better. Tier names are working names, and the <code>quality</code> setting that picks one is planned.</p>
+        <p class="tiers-caption">Six scenes, 960×540, RTX 3060. Bars show the slowest scene; shorter is faster.</p>
         <div id="tiers-table">
-          <ul class="tier-list">
-            <li class="tier-row tier-head" aria-hidden="true"><span>Tier</span><span>For</span><span>Runs on</span><span>Trade-off</span><span>67js</span><span>Blender</span><span>FLIP error</span></li>
-            <li class="tier-row"><span data-label="Tier">draft</span><span data-label="For">A quick look while editing</span><span data-label="Runs on">Glaze, 0.5 scale, 1 sample, light shading</span><span data-label="Trade-off">Aliased edges, a quarter of the pixels enlarged</span><span data-label="67js">0.54 to 1.04 ms a frame</span><span data-label="Blender">EEVEE 1 sample: 56 to 59 ms a render call</span><span data-label="FLIP error">Glaze 0.045 to 0.188, EEVEE 0.041 to 0.562</span></li>
-            <li class="tier-row"><span data-label="Tier">realtime</span><span data-label="For">Interactive use</span><span data-label="Runs on">Glaze, defaults</span><span data-label="Trade-off">Indirect light is approximate</span><span data-label="67js">0.77 to 0.98 ms a frame</span><span data-label="Blender">EEVEE 64 samples: 288 to 363 ms a render call</span><span data-label="FLIP error">Glaze 0.030 to 0.197, EEVEE 0.042 to 0.562</span></li>
-            <li class="tier-row"><span data-label="Tier">realtime-high</span><span data-label="For">Better interactive frames</span><span data-label="Runs on">Planned: Glaze on WebGPU with a GI cache and upscaling (<a href="https://github.com/codepawl/67.js/issues/901">901</a>, <a href="https://github.com/codepawl/67.js/issues/902">902</a>)</span><span data-label="Trade-off">More VRAM</span><span data-label="67js">not measurable yet</span><span data-label="Blender">none</span><span data-label="FLIP error">none</span></li>
-            <li class="tier-row"><span data-label="Tier">final</span><span data-label="For">Finished stills</span><span data-label="Runs on">Cook native at 256 samples, Vulkan with the optional render-native package</span><span data-label="Trade-off">More samples than Cycles for the same noise</span><span data-label="67js">1.73 to 4.24 ms a sample</span><span data-label="Blender">Cycles OptiX: 6.81 to 26.41 ms a sample</span><span data-label="FLIP error">Cook native 0.019 to 0.080, Cycles 0.010 to 0.039</span></li>
-            <li class="tier-row"><span data-label="Tier">final</span><span data-label="For">Finished stills</span><span data-label="Runs on">Cook webgpu at 256 samples, library only</span><span data-label="Trade-off">3.3 to 4.1 times slower per sample than native, same image</span><span data-label="67js">5.88 to 17.33 ms a sample</span><span data-label="Blender">same Cycles</span><span data-label="FLIP error">Same as native</span></li>
-          </ul>
+          <div class="tier-rail" aria-hidden="true"><span>Cheapest</span><svg viewBox="0 0 200 12" preserveAspectRatio="none"><path d="M0 6h192M186 1l7 5-7 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Best looking</span></div>
+          <ol class="tier-cards">
+          <li class="tier-card" data-tier="draft" data-glaze-ms="0.54-1.04" data-eevee-ms="56-59" data-flip-glaze="0.045-0.188" data-flip-eevee="0.041-0.562">
+            <div class="tier-top"><svg class="tier-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg><h3>draft</h3></div>
+            <p class="tier-for">A quick look while editing</p>
+            <p class="tier-big"><strong>0.54–1.04</strong> <span>ms a frame</span></p>
+            <div class="tier-bars" role="img" aria-label="Glaze 0.54 to 1.04 ms a frame; EEVEE 1 sample 56 to 59 ms a render call">
+              <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>67js Glaze</span><span>0.54–1.04 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:1.8%"></span></span></div>
+              <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>EEVEE 1 sample</span><span>56–59 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:100%"></span></span></div>
+            </div>
+            <div class="tier-bars is-quality" role="img" aria-label="FLIP error against Cycles, lower is better: Glaze 0.045 to 0.188, EEVEE 0.041 to 0.562">
+              <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Error, Glaze</span><span>0.045–0.188</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:7.5%;--w:23.8%"></span></span></div>
+              <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Error, EEVEE</span><span>0.041–0.562</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:6.8%;--w:86.8%"></span></span></div>
+            </div>
+          </li>
+          <li class="tier-card" data-tier="realtime" data-glaze-ms="0.77-0.98" data-eevee-ms="288-363" data-flip-glaze="0.03-0.197" data-flip-eevee="0.042-0.562">
+            <div class="tier-top"><svg class="tier-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg><h3>realtime</h3></div>
+            <p class="tier-for">Interactive use</p>
+            <p class="tier-big"><strong>0.77–0.98</strong> <span>ms a frame</span></p>
+            <div class="tier-bars" role="img" aria-label="Glaze 0.77 to 0.98 ms a frame; EEVEE 64 samples 288 to 363 ms a render call">
+              <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>67js Glaze</span><span>0.77–0.98 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:0.3%"></span></span></div>
+              <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>EEVEE 64 samples</span><span>288–363 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:100%"></span></span></div>
+            </div>
+            <div class="tier-bars is-quality" role="img" aria-label="FLIP error against Cycles, lower is better: Glaze 0.03 to 0.197, EEVEE 0.042 to 0.562">
+              <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Error, Glaze</span><span>0.03–0.197</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:5%;--w:27.8%"></span></span></div>
+              <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Error, EEVEE</span><span>0.042–0.562</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:7%;--w:86.7%"></span></span></div>
+            </div>
+          </li>
+          <li class="tier-card is-planned" data-tier="realtime-high" data-status="planned">
+            <div class="tier-top"><svg class="tier-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/></svg><h3>realtime-high</h3></div>
+            <p class="tier-for">Better live frames</p>
+            <p class="tier-big"><strong>Planned</strong> <span>not measured</span></p>
+            <div class="tier-bars" aria-hidden="true">
+              <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>67js Glaze</span><span>?</span></span><span class="tier-track"><span class="tier-fill" style="--w:0%"></span></span></div>
+              <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Blender</span><span>?</span></span><span class="tier-track"><span class="tier-fill" style="--w:0%"></span></span></div>
+            </div>
+            <p class="tier-plan">WebGPU, GI cache, upscaling. Issues <a href="https://github.com/codepawl/67.js/issues/901">901</a> and <a href="https://github.com/codepawl/67.js/issues/902">902</a>.</p>
+          </li>
+          <li class="tier-card" data-tier="final" data-cook-ms="1.73-4.24" data-cycles-ms="6.81-26.41" data-noise-time-x="1.05-4.02">
+            <div class="tier-top"><svg class="tier-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 4h11l3.5 5-9 11L3 9z"/><path d="M3 9h18M9.5 9 12 20l2.5-11"/></svg><h3>final</h3></div>
+            <p class="tier-for">Finished stills</p>
+            <p class="tier-big"><strong>1.73–4.24</strong> <span>ms a sample</span></p>
+            <div class="tier-bars" role="img" aria-label="Per sample: Cook native 1.73 to 4.24 ms, Cycles OptiX 6.81 to 26.41 ms">
+              <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Cook native</span><span>1.73–4.24 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:16.1%"></span></span></div>
+              <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Cycles OptiX</span><span>6.81–26.41 ms</span></span><span class="tier-track"><span class="tier-fill" style="--w:100%"></span></span></div>
+            </div>
+            <div class="tier-bars is-quality" role="img" aria-label="Time to the same noise, Cycles is 1 times: Cook needs 1.05 to 4.02 times, on three of six scenes">
+              <div class="tier-row-bar is-other"><span class="tier-bar-label"><span>Same noise, Cycles</span><span>1×</span></span><span class="tier-track"><span class="tier-fill" style="--w:22.2%"></span></span></div>
+              <div class="tier-row-bar is-67js"><span class="tier-bar-label"><span>Same noise, Cook</span><span>1.05–4.02×</span></span><span class="tier-track"><span class="tier-fill is-range" style="--l:23.3%;--w:66%"></span></span></div>
+            </div>
+            <p class="tier-plan">Slower to the same noise. Not reached on metal, glass, outdoor-hdri. Vulkan needs the optional render-native package.</p>
+          </li>
+          </ol>
         </div>
-        <p>Glaze runs the realtime tier in under about 1 ms a frame (0.77 to 0.98 ms), measured with a pixel read. Cook native draws a sample 3.8 to 6.2 times faster than Cycles 5.3 OptiX, but needs more samples for the same noise: 6.6 to 19.0 times Cycles' samples on the three noise-limited scenes (lit-interior, spot-area, light-linking), which is 1.05 to 4.02 times Cycles' time for the sampling alone. On metal, glass and outdoor-hdri Cook does not reach Cycles' error, and the error there points to a bias, so no ratio is given. Cook cpu needs no card, so VRAM does not apply.</p>
-        <p>Glaze times are per frame. EEVEE times are one full background render call, including scene sync, with EEVEE ray tracing off and no global illumination. They are not a frame rate comparison. Per-scene tables: <a href="https://github.com/codepawl/67.js/blob/main/bench/tiers/results/matrix-960.table.md">bench/tiers on main</a> (live once pull requests 921 and 931 merge).</p>
+        <p class="tiers-note">Blender times are one whole EEVEE render call (scene sync, ray tracing off, no GI), not a frame rate. Details: <a href="https://github.com/codepawl/67.js/blob/main/bench/tiers/results/matrix-960.table.md">bench/tiers</a>.</p>
       </section>
 
       <section id="documentation" class="documentation-links" aria-labelledby="documentation-title">
