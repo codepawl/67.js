@@ -39,10 +39,10 @@ Native against Cycles repeats #921 (0.91 to 0.95 there): the sign of the differe
 
 The table above was measured on a card that other sessions kept at 17 to 100 percent, and a re-run on a card at 99 to 100 percent measured Glaze realtime at 11 ms a frame against 1.1 ms, and EEVEE default at 6.7 to 7.3 s against 1.1 s. Numbers from a busy card are not comparable, so the benchmark now measures the load and refuses to mix it in.
 
-One command runs everything (about an hour on an idle card for all six scenes at three repetitions, plus the six Cycles references):
+One command runs everything (about an hour on an idle card for all six scenes at three repetitions, plus the six Cycles references). To share a card with other jobs, put your job queue in front of it as one heavy job, because the driver itself runs the engines one after the other:
 
 ```sh
-GPU_LOCK_WEIGHT=heavy bash ~/.agents/tools/gpu-lock.sh node bench/tiers/run-all.mjs <work directory>
+node bench/tiers/run-all.mjs <work directory>
 ```
 
 - Idle gate ([`idle-gate.mjs`](idle-gate.mjs)): before each run it polls `nvidia-smi` once a second until utilisation is at or under 15 percent on 5 polls in a row, giving up after `--max-wait` seconds (default 600) with a message that names the load. It then samples the card for 3 s (the background figure, because the job drives utilisation itself once it starts), runs the command with a sampler beside it, and writes `{ background: { utilMean, utilMedian, utilMax, foreignProcesses }, run: { utilMedian, utilMax }, contended }` into the cell. A run whose background utilisation (mean of the 3 s) was over 30 percent is `contended`: it stays in the results file and is left out of every median. `--report-only` records the load without waiting, to check the plumbing on a busy card. The shell runners use the same helper through `node bench/tiers/idle-gate.mjs --out <file> -- <command>`.
