@@ -18,6 +18,9 @@ const NORMAL_KEY_SCALE = 100;
 const COLOUR_KEY_SCALE = 1e7;
 export const DEFAULT_COLOUR_THRESHOLD = 40;
 const MINIMUM_REFERENCE_PIXELS = 3;
+// A shown colour this close (largest channel, in bytes) to the one the ray cast expects is a rounding step of the frame, not another face.
+const OFF_BY_ONE_STEP = 2;
+const SMALL_COLOUR_GAP = 16;
 
 function transformPoint(matrix, x, y, z, target, offset) {
   target[offset] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
@@ -124,11 +127,23 @@ function shownRank(world, cast, pixel, key) {
   return -1;
 }
 
+// Whether any of the eight neighbours of a pixel has another visible triangle (or none): the pixel then sits within a pixel of an
+// edge, silhouette or crease of the ray cast, where the rasteriser and the cast may disagree about which side the centre is on.
+function touchesOwnerChange(owner, width, pixel) {
+  const own = owner[pixel];
+  for (let row = -1; row <= 1; row++) {
+    for (let column = -1; column <= 1; column++) {
+      if (owner[pixel + row * width + column] !== own) return true;
+    }
+  }
+  return false;
+}
+
 // Says what a wrong pixel of an exact frame shows. The colour names a face: when that face lies on the ray (one of its six nearest
 // hits) the pixel is swapped, and it is flipped when the face has no higher rank than the one the ray cast puts in front. A face
 // that is not on the ray is the rasteriser and the ray cast disagreeing about a pixel centre (offRay), and a colour that names no
 // face is a blend of two (blended). Neither is depth fighting.
-function classifyExactMismatch(result, mismatchMask, { pixels, pixel, world, cast, keyByColour }) {
+function classifyExactMismatch(result, mismatchMask, { pixels, pixel, width, world, cast, keyByColour, expected }) {
   const shownKey = keyByColour.get(`${pixels[pixel * 4]},${pixels[pixel * 4 + 1]},${pixels[pixel * 4 + 2]}`);
   if (shownKey === undefined) {
     result.blended++;
@@ -137,6 +152,13 @@ function classifyExactMismatch(result, mismatchMask, { pixels, pixel, world, cas
   const rank = shownRank(world, cast, pixel, shownKey);
   if (rank < 0) {
     result.offRay++;
+    const gap = channelDistance(pixels, pixel * 4, expected);
+    const atEdge = touchesOwnerChange(cast.owner, width, pixel);
+    if (atEdge) result.offRayEdge++;
+    else result.offRayInterior++;
+    if (gap <= OFF_BY_ONE_STEP) result.offRayNearColour++;
+    else if (gap <= SMALL_COLOUR_GAP) result.offRaySmallGap++;
+    if (!atEdge && gap > SMALL_COLOUR_GAP) result.offRayUnexplained++;
     return;
   }
   result.swapped++;
@@ -154,6 +176,13 @@ function classifyExactMismatch(result, mismatchMask, { pixels, pixel, world, cas
  * - `tied`: contested pixels where the scene itself does not say which face is in front (the flush pass off, or a seam); left out of the other counts;
  * - `unjudged`: contested pixels whose face has too few clean pixels to know its colour;
  * - `offRay` and `blended`: with `exact`, wrong pixels that show a face not on the ray, or no single face (see classifyExactMismatch);
+ * - `offRayEdge` and `offRayInterior`: `offRay` split by whether the pixel touches an owner change of the ray cast in its 3x3
+ *   neighbourhood. Edge pixels are the rasteriser and the cast disagreeing about a pixel centre. An interior pixel has no such excuse:
+ *   its face may be one deeper than `hitsPerPixel` of the cast, which would be a real flip. `offRayUnexplained` is the interior part
+ *   whose shown colour is also more than 16 bytes from the colour expected there, so `flipped + offRayUnexplained` is the upper bound
+ *   of true flips (`flipUpperBound`);
+ * - `offRayNearColour` and `offRaySmallGap`: offRay pixels whose shown colour is within 2 bytes, or 3 to 16, of the colour the ray cast
+ *   expects. Triangle numbers are neighbours in colour, so a rounding step of the frame can name another, unrelated triangle.
  * - `flipped`: with `exact`, the swapped pixels where the face shown has no higher rank than the face the ray cast puts in front, so
  *   a face behind covers one in front and nothing in the scene asked for it: a true visibility flip. The rest of `swapped` is
  *   `ranked`, a face that the flush pass deliberately lifts over the nearer one inside its bias, which is stable and not flicker;
@@ -187,7 +216,7 @@ export function compareWithGroundTruth({ pixels, world, cast, width, height, exa
     const source = bucket.cleanCount >= MINIMUM_REFERENCE_PIXELS ? bucket.clean : bucket.any;
     if (source[0].length >= MINIMUM_REFERENCE_PIXELS) references[key] = source.map(median);
   });
-  const result = { contested: 0, wrong: 0, swapped: 0, tied: 0, unjudged: 0, edge: 0, flipped: 0, ranked: 0, offRay: 0, blended: 0 };
+  const result = { contested: 0, wrong: 0, swapped: 0, tied: 0, unjudged: 0, edge: 0, flipped: 0, ranked: 0, offRay: 0, offRayEdge: 0, offRayInterior: 0, offRayNearColour: 0, offRaySmallGap: 0, offRayUnexplained: 0, blended: 0 };
   const keyByColour = new Map();
   references.forEach((reference, key) => { if (exact) keyByColour.set(reference.join(','), key); });
   const mismatchMask = new Uint8Array(width * height);
@@ -213,7 +242,7 @@ export function compareWithGroundTruth({ pixels, world, cast, width, height, exa
       result.wrong++;
       mismatchMask[pixel] = 1;
       if (exact) {
-        classifyExactMismatch(result, mismatchMask, { pixels, pixel, world, cast, keyByColour });
+        classifyExactMismatch(result, mismatchMask, { pixels, pixel, width, world, cast, keyByColour, expected: reference });
         continue;
       }
       for (let slot = 0; slot < RIVALS_PER_PIXEL; slot++) {
@@ -226,5 +255,5 @@ export function compareWithGroundTruth({ pixels, world, cast, width, height, exa
       }
     }
   }
-  return { ...result, mismatchMask };
+  return { ...result, flipUpperBound: result.flipped + result.offRayUnexplained, mismatchMask };
 }
