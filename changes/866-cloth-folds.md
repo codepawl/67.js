@@ -1,1 +1,1 @@
-- Cloth sheets take `bendModel: 'dihedral'` for many soft folds instead of one crease, self collision handles up to 5000 particles and runs about 3 times faster, and a 64 by 64 flag bakes a 4 second film in about 13 seconds (#866)
+- Cloth sheets take `bendModel: 'dihedral'` for many soft folds instead of one crease, `bendYield` and `bendSet` so a fold keeps its crease instead of being pulled flat again, self collision handles up to 5000 particles and runs about 3 times faster, and a 64 by 64 flag bakes a 4 second film in about 13 seconds (#866)

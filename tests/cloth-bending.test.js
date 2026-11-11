@@ -220,3 +220,90 @@ test('a recipe sheet takes bendModel and rejects an unknown one with the field a
   recipe.cloth.sheets[0].bend = 0.15;
   assert.ok(createAgentScene(recipe).parts.some(part => part.name === 'flag'));
 });
+
+// A scripted fold: the right half of a flat sheet is carried over the left half by its pins, then let go with no gravity.
+// Returns how far the free edge ends from the far side of the sheet, in metres (1 means flat again, 0 means still folded).
+function releasedFoldOpening(options) {
+  const segments = 10;
+  const sheet = grid(segments);
+  const side = segments + 1;
+  const foldedParticles = [];
+  const heldParticles = [];
+  for (let row = 0; row < side; row++) {
+    for (let column = 0; column < side; column++) {
+      (column > 5 ? foldedParticles : heldParticles).push(row * side + column);
+    }
+  }
+  const cloth = createCloth(sheet.positions, sheet.triangles, { gravity: [0, 0, 0], pinned: heldParticles, bend: 0.5, bendModel: 'dihedral', thickness: 0.002, damping: 2, ...options });
+  const secondsPerStep = 1 / 60;
+  const carrySteps = 60;
+  for (let step = 1; step <= carrySteps; step++) {
+    const angle = Math.PI * step / carrySteps;
+    for (const particle of foldedParticles) {
+      const along = sheet.positions[particle * 3] - 0.5;
+      cloth.pin(particle, [0.5 + along * Math.cos(angle), along * Math.sin(angle), sheet.positions[particle * 3 + 2]]);
+    }
+    cloth.step(secondsPerStep);
+  }
+  for (const particle of foldedParticles) cloth.unpin(particle);
+  for (let step = 0; step < 120; step++) cloth.step(secondsPerStep);
+  const tip = (5 * side + segments) * 3;
+  return Math.hypot(cloth.positions[tip], cloth.positions[tip + 1]);
+}
+
+test('with bendYield a fold made by a scripted move stays folded, and without it the sheet opens again', context => {
+  const plastic = releasedFoldOpening({ bendYield: 0.1, bendSet: 0.5 });
+  const elastic = releasedFoldOpening({});
+  context.diagnostic(`free edge ${plastic.toFixed(3)} m from the far side with bendYield, ${elastic.toFixed(3)} m without`);
+  assert.ok(plastic < 0.35, `the plastic sheet keeps its fold: free edge ${plastic} m from the far side`);
+  assert.ok(elastic > plastic + 0.25, `the elastic sheet opens (${elastic} m against ${plastic} m)`);
+  assert.deepEqual(releasedFoldOpening({ bendYield: 0.1, bendSet: 0.5 }), plastic, 'the plastic fold is deterministic');
+});
+
+// A 0.2 m square sheet lying on a floor under gravity tilted by `degrees`, which is the same as a floor tilted by that angle.
+function slideOnSlope(degrees, options) {
+  const segments = 4;
+  const sheet = grid(segments);
+  for (let index = 0; index < sheet.positions.length; index += 3) {
+    sheet.positions[index] = (sheet.positions[index] - 0.5) * 0.2;
+    sheet.positions[index + 1] = 0.0101;
+    sheet.positions[index + 2] = (sheet.positions[index + 2] - 0.5) * 0.2;
+  }
+  const radians = degrees * Math.PI / 180;
+  const floor = { kind: 'box', center: [0, -5, 0], axes: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], halfExtents: [20, 5, 20] };
+  const cloth = createCloth(sheet.positions, sheet.triangles, { gravity: [9.81 * Math.sin(radians), -9.81 * Math.cos(radians), 0], colliders: [floor], thickness: 0.01, friction: 0.3, damping: 0.3, ...options });
+  for (let step = 0; step < 90; step++) cloth.step(1 / 60);
+  let travel = 0;
+  for (let particle = 0; particle < cloth.particleCount; particle++) travel += cloth.positions[particle * 3] - sheet.positions[particle * 3];
+  return travel / cloth.particleCount;
+}
+
+test('the floor friction already holds a sheet on a slope below its friction angle', context => {
+  const slid = slideOnSlope(20, {});
+  context.diagnostic(`slide after 1.5 s at 20 degrees on a floor with friction 0.3: ${(slid * 1000).toFixed(2)} mm`);
+  assert.ok(Math.abs(slid) < 0.002, `the sheet stays put: slid ${slid} m`);
+});
+
+test('plasticity bakes the same frames twice with self collision and name bad values', () => {
+  const sheet = grid(10);
+  const options = { pinned: [0, 10], bend: 0.2, bendModel: 'dihedral', bendYield: 0.2, bendSet: 0.3, selfCollision: true, frameCount: 60, framesPerSecond: 60, thickness: 0.002 };
+  assert.deepEqual(bakeCloth(sheet.positions, sheet.triangles, options).frames, bakeCloth(sheet.positions, sheet.triangles, options).frames);
+  assert.throws(() => bakeCloth(sheet.positions, sheet.triangles, { ...options, bendModel: 'distance' }), /bendYield needs bendModel 'dihedral'/);
+  assert.throws(() => bakeCloth(sheet.positions, sheet.triangles, { ...options, bendYield: -1 }), /bendYield must be a number from 0 to 3\.14/);
+  assert.throws(() => bakeCloth(sheet.positions, sheet.triangles, { ...options, bendSet: 2 }), /bendSet must be a number from 0 to 1/);
+});
+
+test('a recipe sheet takes bendYield and bendSet and names a bendYield without the dihedral bend', async () => {
+  const { createAgentScene } = await import('../src/agent-scene.js');
+  await import('./support/load-agent-scene-modules.mjs');
+  const { foldingFlagRecipe } = await import('../scripts/soft-body-film.mjs');
+  const recipe = foldingFlagRecipe({ fine: true });
+  recipe.geometries[0].segments = 6;
+  Object.assign(recipe.cloth.sheets[0], { bendYield: 0.3, bendSet: 0.2 });
+  assert.ok(createAgentScene(recipe).parts.some(part => part.name === 'flag'));
+  recipe.cloth.sheets[0].bendModel = 'distance';
+  assert.throws(() => createAgentScene(recipe), /cloth\.sheets\[0\]\.bendYield.*dihedral/);
+  recipe.cloth.sheets[0].bendModel = 'dihedral';
+  recipe.cloth.sheets[0].bendSet = 5;
+  assert.throws(() => createAgentScene(recipe), /cloth\.sheets\[0\]\.bendSet/);
+});

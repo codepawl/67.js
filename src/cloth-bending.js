@@ -158,3 +158,20 @@ export function solveDihedrals(positions, inverseMasses, dihedrals) {
     }
   }
 }
+
+/**
+ * Bending plasticity: a fold keeps its crease like fabric does. Where a constraint's angle is further than `yieldAngle` from its rest
+ * angle, the rest angle moves `setRate` of the excess toward the current angle, so the cloth stops pulling that fold flat. Call it once
+ * per substep. The rest angle is always an angle the sheet has had, so it stays between 0 and pi.
+ */
+export function setDihedralCreases(positions, dihedrals, yieldAngle, setRate) {
+  const { count, quads, restAngles, stiffnesses } = dihedrals;
+  for (let constraint = 0; constraint < count; constraint++) {
+    if (stiffnesses[constraint] === 0) continue;
+    const cosine = cosineGradients(positions, quads, constraint * 4);
+    if (cosine === null) continue;
+    const deviation = Math.acos(cosine) - restAngles[constraint];
+    const excess = Math.abs(deviation) - yieldAngle;
+    if (excess > 0) restAngles[constraint] += Math.sign(deviation) * excess * setRate;
+  }
+}

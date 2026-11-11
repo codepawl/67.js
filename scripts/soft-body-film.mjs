@@ -62,6 +62,9 @@ export const FLAG_FILM_SECONDS = 3;
 export const FINE_FLAG_FILM_SECONDS = 4;
 const FINE_FLAG_SEGMENTS = 63;
 const FINE_FLAG_BEND = 0.15;
+// Creases stay: past 0.3 rad of bending the rest angle follows the cloth by a fifth of the excess a substep, so folds made in the fall are kept
+// when the pole drags the sheet (without it the sheet pulls its folds flat again and ends as a smooth layer). Damping 3 calms the landing.
+const FINE_FLAG_CREASE = { bendYield: 0.3, bendSet: 0.2, damping: 3 };
 // A deep red and cream striped cloth on a mid grey floor, lit by a grazing key from the side so every fold casts a shadow and bends the stripes.
 const FLAG_LOOK = { lightDirection: [-0.9, 0.3, 0.45], keyIntensity: 1.5, fillIntensity: 0.12, ambientIntensity: 0.15 };
 const FLAG_STRIPES = { type: 'graph', mapping: 'uv', resolution: 256, graph: { color: { layer: { base: [0.35, 0.015, 0.04], top: [0.85, 0.78, 0.62], mask: { wave: { frequency: 8, direction: 'v', shape: 'saw' } }, edge: 0.5, softness: 0.02 } } } };
@@ -74,7 +77,7 @@ const FLAG_STRIPES = { type: 'graph', mapping: 'uv', resolution: 256, graph: { c
 export function foldingFlagRecipe({ selfCollision = true, fine = false } = {}) {
   const seconds = fine ? FINE_FLAG_FILM_SECONDS : FLAG_FILM_SECONDS;
   const keyframes = fine ? [...POLE_KEYFRAMES.slice(0, -1), { time: seconds, value: POLE_KEYFRAMES.at(-1).value }] : POLE_KEYFRAMES;
-  const bending = fine ? { bendModel: 'dihedral', bend: FINE_FLAG_BEND } : { bend: 0.0002 };
+  const bending = fine ? { bendModel: 'dihedral', bend: FINE_FLAG_BEND, ...FINE_FLAG_CREASE } : { bend: 0.0002 };
   return baseRecipe({
     geometries: [{ id: 'flag', type: 'grid', segments: fine ? FINE_FLAG_SEGMENTS : 38 }],
     materials: [{ id: 'fabric', color: [1, 1, 1], doubleSided: true, pattern: FLAG_STRIPES }],
@@ -88,7 +91,7 @@ export function foldingFlagRecipe({ selfCollision = true, fine = false } = {}) {
     environment: FLAG_LOOK,
     cloth: {
       duration: seconds,
-      sheets: [{ node: 'flag', pin: ['topLeft', 'topRight'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, ...bending, damping: 1.5, friction: 0.4, thickness: 0.002 }],
+      sheets: [{ node: 'flag', pin: ['topLeft', 'topRight'], pinTo: { node: 'pole' }, selfCollision, stiffness: 0.6, damping: 1.5, ...bending, friction: 0.4, thickness: 0.002 }],
       colliders: [{ node: 'ground', shape: 'box' }],
     },
   });
@@ -185,6 +188,38 @@ export function measureLanding(frames, restHeight) {
     }
   }
   return { contact, maxDentFrame: deepest, maxDentDepth: restHeight - deepestHeight, restHeight };
+}
+
+/**
+ * How often the sheet's height turns from rising to falling (or back) along the middle row and the middle column of its grid, ignoring
+ * wiggles under `deadband` metres: the number of folds a line across the cloth crosses.
+ */
+export function foldCrossings(vertices, side, deadband = 0.0005) {
+  const countAlong = line => {
+    let crossings = 0;
+    let direction = 0;
+    let anchor = vertices[line[0] * 3 + 1];
+    for (const vertex of line) {
+      const height = vertices[vertex * 3 + 1];
+      if (direction >= 0 && height < anchor - deadband) {
+        if (direction === 1) crossings++;
+        direction = -1;
+        anchor = height;
+      } else if (direction <= 0 && height > anchor + deadband) {
+        if (direction === -1) crossings++;
+        direction = 1;
+        anchor = height;
+      } else if ((direction >= 0 && height > anchor) || (direction <= 0 && height < anchor)) {
+        anchor = height;
+      }
+    }
+    return crossings;
+  };
+  const middle = Math.floor(side / 2);
+  return {
+    row: countAlong(Array.from({ length: side }, (_, column) => middle * side + column)),
+    column: countAlong(Array.from({ length: side }, (_, row) => row * side + middle)),
+  };
 }
 
 /** Smallest distance between two vertices that no triangle edge joins: the closest two layers of a fold come. */

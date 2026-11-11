@@ -3,7 +3,7 @@
 // and playback is an interpolation between two recorded frames: a seek never runs the solver.
 
 import { assertClosedMesh, createShapeMatching, signedVolume, solveShapeMatching, solveVolume, SOFT_BODY_LIMITS } from './soft-body.js';
-import { BEND_MODELS, buildDihedrals, solveDihedrals } from './cloth-bending.js';
+import { BEND_MODELS, buildDihedrals, setDihedralCreases, solveDihedrals } from './cloth-bending.js';
 import { connectedPairs, createSelfCollision, maxSelfCollisionRadius, SELF_COLLISION_LIMITS } from './cloth-self-collision.js';
 
 export const CLOTH_LIMITS = Object.freeze({
@@ -19,6 +19,8 @@ export const CLOTH_LIMITS = Object.freeze({
 const DIHEDRAL_WORK = 5 / 2;
 // Bending is smooth and slow, so it is solved on every second iteration only.
 const DIHEDRAL_EVERY = 2;
+// Share of the bend beyond its yield that a fold keeps as its new rest angle each substep (bendYield).
+const DEFAULT_BEND_SET = 0.1;
 const AIR_DENSITY = 1.2;
 const WELD_DIGITS = 5;
 const GRAVITY_DEFAULT = Object.freeze([0, -9.81, 0]);
@@ -525,6 +527,7 @@ function tearOverstretched(cloth, substepSeconds) {
  * A sheet that steps one frame at a time, so pins, wind and colliders can change while it runs. It is the solver
  * `bakeCloth` records from: the same positions and options step to the same frames. Arguments and options are those of
  * `bakeCloth`, plus:
+ * - bendYield (radians, needs bendModel 'dihedral') and bendSet (0 to 1, default 0.1): past that bend angle a fold keeps bendSet of the excess as its new rest angle each substep, so creases stay (default off: the sheet pulls its folds flat).
  * - tearStretch: a stretch constraint breaks when its length passes this multiple of its rest length (default never).
  * - tearForce: a stretch constraint breaks when the tension it carries passes this many newtons (default never).
  * Returns { positions, step(deltaSeconds, { wind, colliders }), pin(index, position), unpin(index), isPinned(index),
@@ -547,6 +550,11 @@ export function createCloth(positions, triangles, options = {}) {
     throw new RangeError(`Cloth bendModel must be one of ${BEND_MODELS.join(', ')}; found ${bendModel}.`);
   }
   const constraints = buildConstraints(positions, triangles, particleCount, options.bend ?? 0.1, options.stiffness ?? 0.9, stiffnessWeights, bendModel);
+  const bendYield = options.bendYield === undefined ? null : checkUnit(options.bendYield, 'bendYield', Math.PI);
+  const bendSet = checkUnit(options.bendSet ?? DEFAULT_BEND_SET, 'bendSet', 1);
+  if (bendYield !== null && !constraints.dihedrals) {
+    throw new RangeError(`Cloth bendYield needs bendModel 'dihedral' and a bend above 0; found bendModel ${bendModel} and bend ${options.bend ?? 0.1}. Set both or drop bendYield.`);
+  }
   const extras = prepareExtras(options, positions, triangles, particleCount, constraints);
   checkWork(particleCount, constraints.count, triangles.length / 3, colliders.length + (moving?.colliderCount ?? 0), options.frameCount ?? 1, extras.workPerIteration + (constraints.dihedrals?.count ?? 0) * DIHEDRAL_WORK);
   const density = options.density ?? 0.2;
@@ -639,6 +647,7 @@ export function createCloth(positions, triangles, options = {}) {
         if (moving) followAnchors(state.positions, moving, anchorTargets, true);
         collide(state, previous, activeColliders, thickness, friction, contactNormals);
       }
+      if (bendYield !== null) setDihedralCreases(state.positions, constraints.dihedrals, bendYield, bendSet);
       if (tears) tearOverstretched(cloth, substepSeconds);
       cloth.impulses.fill(0);
       for (let index = 0; index < positions.length; index++) {

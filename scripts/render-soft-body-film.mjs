@@ -11,8 +11,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createAgentScene } from '../src/agent-scene.js';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { FILM_FRAMES_PER_SECOND, FINE_FLAG_FILM_SECONDS, FLAG_FILM_SECONDS, axisRange, foldingFlagRecipe, jellyCubeRecipe, measureLanding, normalSpread, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
+import { FILM_FRAMES_PER_SECOND, FINE_FLAG_FILM_SECONDS, FLAG_FILM_SECONDS, axisRange, foldCrossings, foldingFlagRecipe, jellyCubeRecipe, measureLanding, normalSpread, recordFilm, unjoinedMinimumDistance } from './soft-body-film.mjs';
 
+const FINE_FLAG_SIDE = 64;
 const PREVIEW = { width: 960, height: 540, fps: FILM_FRAMES_PER_SECOND };
 const FONT_FILE = 'C\\:/Windows/Fonts/arial.ttf';
 const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
@@ -180,6 +181,7 @@ async function main() {
           settling: meters(normalSpread(flag.record.frames[flagSettling], flagIndicesForSpread)),
           rest: meters(normalSpread(flag.record.frames[lastFlagStep], flagIndicesForSpread)),
         },
+        foldCrossings: fine ? { gridSide: FINE_FLAG_SIDE, settling: foldCrossings(flag.record.frames[flagSettling], FINE_FLAG_SIDE), rest: foldCrossings(flag.record.frames[lastFlagStep], FINE_FLAG_SIDE) } : undefined,
         midFallDepthMeters: meters(axisRange(flag.record.frames[flagMidFall], 2).extent),
         settlingStep: flagSettling,
         closestUnjoinedGapMeters: {

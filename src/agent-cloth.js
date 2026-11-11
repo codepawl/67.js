@@ -25,7 +25,7 @@ const PIN_EDGES = ['top', 'bottom', 'left', 'right', 'topLeft', 'topRight', 'bot
 const COLLIDER_SHAPES = ['ball', 'box'];
 const MOVING_SHAPES = ['ball', 'capsule'];
 const CLOTH_FIELDS = ['duration', 'gravity', 'wind', 'fields', 'sheets', 'colliders'];
-const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffnessGroup', 'softBody', 'selfCollision', 'stiffness', 'bend', 'bendModel', 'density', 'damping', 'friction', 'thickness'];
+const SHEET_FIELDS = ['node', 'pin', 'pinGroup', 'pinTo', 'stiffnessGroup', 'softBody', 'selfCollision', 'stiffness', 'bend', 'bendModel', 'bendYield', 'bendSet', 'density', 'damping', 'friction', 'thickness'];
 const PIN_TO_FIELDS = ['node', 'weight'];
 const SOFT_BODY_FIELDS = ['shape', 'pressure', 'bounce'];
 // A stiffness group never goes fully limp: a zero weight would let its particles drift off.
@@ -94,7 +94,10 @@ function normalizeSheet(input, context, path) {
     if (!BEND_MODELS.includes(input.bendModel)) throw invalidField(`${path}.bendModel`, input.bendModel, `one of ${BEND_MODELS.join(', ')}`);
     sheet.bendModel = input.bendModel;
   }
-  const ranges = { stiffness: [0.01, 1], bend: [0, 1], density: [0.01, 10], damping: [0, 100], friction: [0, 1], thickness: [0, 0.5] };
+  if (input.bendYield !== undefined && (input.bendModel ?? 'distance') !== 'dihedral') {
+    throw invalidField(`${path}.bendYield`, input.bendYield, "used with bendModel 'dihedral' only; set bendModel to 'dihedral' or drop bendYield");
+  }
+  const ranges = { stiffness: [0.01, 1], bend: [0, 1], density: [0.01, 10], damping: [0, 100], friction: [0, 1], thickness: [0, 0.5], bendYield: [0, Math.PI], bendSet: [0, 1] };
   for (const [field, [minimum, maximum]] of Object.entries(ranges)) {
     if (input[field] !== undefined) sheet[field] = finiteNumber(input[field], `${path}.${field}`, minimum, maximum);
   }
@@ -422,6 +425,7 @@ function bakeSheet(sheet, cloth, node, geometry, colliders, frameCount, movingSe
     pinned: sheet.pinTo ? [] : pinned, moving,
     stiffnessWeights: stiffnessWeights(sheet, geometry, welded.representatives), softBody: sheet.softBody, selfCollision: sheet.selfCollision,
     gravity: cloth.gravity, wind: cloth.wind, fields: cloth.fields, stiffness: sheet.stiffness, bend: sheet.bend, bendModel: sheet.bendModel,
+    bendYield: sheet.bendYield, bendSet: sheet.bendSet,
     density: sheet.density, damping: sheet.damping, friction: sheet.friction, thickness: sheet.thickness,
     colliders, frameCount, framesPerSecond: FRAMES_PER_SECOND,
   }], bakeClothWithFields) });
