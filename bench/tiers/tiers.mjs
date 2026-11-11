@@ -22,10 +22,14 @@ export const REALTIME_TIER = {
 };
 
 // The draft tier (planned name): the cheapest frame Glaze can draw today, with the settings that exist now.
+// Before 2026-11-11 this was only pixelRatio 0.5, 1 sample and light shading, which measured the same frame time as realtime on a small
+// scene (the cost there is the pixel read). Two more existing settings now apply: an 8 bit target instead of a half float one, and a
+// coarser level of detail.
 export const DRAFT_TIER = {
   label: 'draft (planned name)',
   rendererOptions: {
-    hdr: true,
+    // 8 bit colour target: half the bytes of the half float target on every pass. The depth buffer stays, the fog needs it.
+    hdr: false,
     depth: true,
     // Half the render scale: a quarter of the pixels, then shown at the viewport size by the browser or by the scorer.
     pixelRatio: 0.5,
@@ -34,6 +38,8 @@ export const DRAFT_TIER = {
     samples: 1,
     // 'light' shading drops the prefiltered environment lookup and the wide shadow filter and uses a cheaper Fresnel term.
     shading: 'light',
+    // Switch to a coarser mesh when it is 4 pixels off instead of 1 (the default), which fewer triangles draw.
+    lodPixelError: 4,
   },
   frameEffects: {
     // No ambient occlusion pass. Bloom is off unless a frame asks for it, and this one does not.
@@ -41,6 +47,15 @@ export const DRAFT_TIER = {
   },
   // Not a setting: the shadow map is 2048 by 2048 whenever a part casts (SHADOW_MAP_SIZE in src/renderer.js), so no cheaper shadow exists yet.
   notAvailable: ['smaller shadow map', 'screen space effects off by name'],
+};
+
+// Tiers that only explain the numbers, never a table row: each changes one thing between realtime and draft, to see what the score and the
+// time follow. Run them with run-glaze.mjs --tiers realtime-half,draft-full,draft-hdr,draft-before.
+export const DIAGNOSTIC_TIERS = {
+  'realtime-half': { label: 'realtime at 0.5 render scale', rendererOptions: { ...REALTIME_TIER.rendererOptions, pixelRatio: 0.5 }, frameEffects: REALTIME_TIER.frameEffects },
+  'draft-full': { label: 'draft with full shading', rendererOptions: { ...DRAFT_TIER.rendererOptions, shading: 'full' }, frameEffects: DRAFT_TIER.frameEffects },
+  'draft-hdr': { label: 'draft with a half float target', rendererOptions: { ...DRAFT_TIER.rendererOptions, hdr: true }, frameEffects: DRAFT_TIER.frameEffects },
+  'draft-before': { label: 'draft as of #931 (scale 0.5, light, hdr, default level of detail)', rendererOptions: { ...DRAFT_TIER.rendererOptions, hdr: true, lodPixelError: 1 }, frameEffects: DRAFT_TIER.frameEffects },
 };
 
 // The EEVEE 5.3 counterparts, applied by render-eevee.py. EEVEE draws its default of 64 samples for a final frame; the draft row

@@ -10,7 +10,7 @@ One scene, as the first step. The other five scenes of `bench/reference/scenes.j
 
 | Tier | For | What runs it today | 67js time | Blender equivalent and its time | Quality (FLIP vs Cycles 4096 spp, lower is better) | VRAM (card wide, shared) |
 | --- | --- | --- | --- | --- | --- | --- |
-| draft (planned name) | A quick look while editing | Glaze, 0.5 render scale, 1 sample, light shading | 1.20 ms a frame (0.88 to 2.43), first frame 11.9 ms | EEVEE 5.3, 1 sample: 99 ms a render call (76 to 157) | Glaze 0.188, EEVEE 0.562 | Glaze +62 MiB (render targets 39 MB), EEVEE +2,218 MiB |
+| draft (planned name) | A quick look while editing | Glaze, 0.5 render scale, 1 sample, light shading (measured before the 8 bit target and level of detail change below) | 1.20 ms a frame (0.88 to 2.43), first frame 11.9 ms | EEVEE 5.3, 1 sample: 99 ms a render call (76 to 157) | Glaze 0.188, EEVEE 0.562 | Glaze +62 MiB (render targets 39 MB), EEVEE +2,218 MiB |
 | realtime | Interactive use | Glaze, default settings | 1.11 ms a frame (1.05 to 1.24), first frame 9.7 ms | EEVEE 5.3 defaults, 64 samples: 1,127 ms a render call (716 to 1,891) | Glaze 0.197, EEVEE 0.562 | Glaze +119 MiB (render targets 65.7 MB), EEVEE +2,503 MiB |
 | realtime-high | Interactive, higher quality | Planned (#902), not measurable yet | none | none | none | none |
 | (not realtime-high) experimental real-time path tracer, WebGPU | Research | `src/path-tracer-realtime*.js`, not reachable from MCP | 5.6 ms a frame; FLIP under 0.20 after 16 frames (0.15 s), under 0.10 after 64 frames (0.41 s) | none | 0.056 after 256 frames | +243 MiB |
@@ -35,6 +35,36 @@ Conditions: lit-interior only, 960 by 540, 8 bounces, no denoiser on either side
 
 Native against Cycles repeats #921 (0.91 to 0.95 there): the sign of the difference moves with the load on the card, so read it as about equal. Native draws a sample 6.0 times faster and needs 6.9 times the samples, so the two nearly cancel.
 
+## Reproducible runs (idle gate, interleaving, table)
+
+The table above was measured on a card that other sessions kept at 17 to 100 percent, and a re-run on a card at 99 to 100 percent measured Glaze realtime at 11 ms a frame against 1.1 ms, and EEVEE default at 6.7 to 7.3 s against 1.1 s. Numbers from a busy card are not comparable, so the benchmark now measures the load and refuses to mix it in.
+
+One command runs everything (about an hour on an idle card for all six scenes at three repetitions, plus the six Cycles references):
+
+```sh
+GPU_LOCK_WEIGHT=heavy bash ~/.agents/tools/gpu-lock.sh node bench/tiers/run-all.mjs <work directory>
+```
+
+- Idle gate ([`idle-gate.mjs`](idle-gate.mjs)): before each run it polls `nvidia-smi` once a second until utilisation is at or under 15 percent on 5 polls in a row, giving up after `--max-wait` seconds (default 600) with a message that names the load. It then samples the card for 3 s (the background figure, because the job drives utilisation itself once it starts), runs the command with a sampler beside it, and writes `{ background: { utilMean, utilMedian, utilMax, foreignProcesses }, run: { utilMedian, utilMax }, contended }` into the cell. A run whose background utilisation (mean of the 3 s) was over 30 percent is `contended`: it stays in the results file and is left out of every median. `--report-only` records the load without waiting, to check the plumbing on a busy card. The shell runners use the same helper through `node bench/tiers/idle-gate.mjs --out <file> -- <command>`.
+- Interleaving ([`run-all.mjs`](run-all.mjs)): per repetition and scene the engines run back to back in one order that rotates by one place each repetition (Glaze draft, Glaze realtime, EEVEE lowest, EEVEE default, Cook native, Cycles, Cook webgpu), all at 960 by 540, scenes from lit-interior on. `--with-cook-gpu` and `--with-cook-cpu` add the slow backends. Cook native and Cycles run at each count of `--samples` (default 256,1024) so the equal-error figure is interpolated, not extrapolated. The results file `<work directory>/matrix-960.json` is rewritten after every cell and a finished cell is skipped on the next start (`--rerun-contended` repeats the contended ones).
+- Scores: `run-all.mjs` ends by running `score-tiers.py matrix`, which adds FLIP, display relMSE and relMSE to each cell. A Glaze draft cell has two FLIP figures: against the full reference after a bilinear enlargement, and against the reference reduced to the draft's own canvas.
+- Table: `node bench/tiers/make-table.mjs <work directory>/matrix-960.json` writes a Markdown and an HTML table per scene (medians with ranges, the conditions footnote, and the equal-error statement for Cook native and webgpu, computed from the results).
+- EEVEE has two times. The table uses the whole `bpy.ops.render.render` call, because that is what produces a picture and what the Glaze frame (draw plus pixel read) is compared with. Blender's own render time, from the render_pre to render_post handlers, is recorded beside it and printed in the same cell.
+
+### What draft changes against realtime
+
+Draft was 0.5 render scale, 1 sample and light shading, and it measured the same frame time as realtime because a 1 ms frame on this scene is mostly the pixel read that ends it. It now also uses an 8 bit target (`hdr: false`) and `lodPixelError: 4`, and page.js records a second figure, the time of 30 frames queued back to back with one read at the end. Lit-interior, 3 repetitions, Glaze only, 960 by 540 (measured 2026-11-11 with the card 60 to 75 percent busy from other jobs, so read the ratios, not the milliseconds; the reference here was Cycles at 256 samples, not 4096):
+
+| Variant | Queued frame | Frame with read | FLIP, enlarged to 960 by 540 | FLIP at its own size |
+| --- | --- | --- | --- | --- |
+| realtime | 0.55 ms | 1.34 ms | 0.201 | none |
+| draft (new) | 0.32 ms | 1.12 ms | 0.191 | 0.193 |
+| draft as of #931 (hdr, default level of detail) | 0.45 ms | 1.42 ms | 0.191 | 0.193 |
+| realtime at 0.5 render scale | 0.56 ms | 1.39 ms | 0.201 | 0.204 |
+| draft with full shading | 0.44 ms | 1.34 ms | 0.201 | 0.204 |
+
+So draft is 1.7 times cheaper in queued frame time, and the 8 bit target and the level of detail account for the step from 0.45 to 0.32 ms. Draft scores better than realtime because of the light shading, not the smaller canvas: with full shading the score is realtime's 0.201 at either size, and with light shading it is 0.191 at either size. On this scene the full shading's prefiltered environment lookup and wide shadow filter sit further from Cycles than the light model does; that is one scene and one reference, and the shading terms were not taken apart further. Run `node bench/tiers/run-all.mjs <work directory> --engines glaze-draft,glaze-realtime,glaze-realtime-half,glaze-draft-full,glaze-draft-hdr,glaze-draft-before` to repeat it.
+
 ## Method
 
 - `render-references.sh`: Cycles 4096 spp references through `bench/cycles-parity/render-cycles.py`. `run-final-tier.sh`: Cook cpu, gpu and webgpu (`run-cook.mjs`), native (`trace-native.mjs`) and Cycles, interleaved, three repetitions at 256 samples, once at 64 and 1,024, native also at 2,048 and 4,096. One Cook trace is limited to about 256 samples at this size ("too much ray work"), so larger counts are seeds 1 to n averaged (`run-cook-seeds.sh`, `score-tiers.py` stacks). The gpu stack stopped at 1,024 samples, because the seeds above 7 did not finish.
@@ -50,10 +80,10 @@ Native against Cycles repeats #921 (0.91 to 0.95 there): the sign of the differe
 - Peak card memory is the card's `memory.used` before against its peak, polled at 100 ms (`nvidia-smi`) or 50 ms (`measure-gpu-run.py`). It includes other jobs, so it is an upper bound. `memoryReport()` of the renderer, the exact size of Glaze's render targets, is in `results/glaze-lit-interior-960.json`.
 - The FLIP of Glaze here (0.197) is far below the 0.506 in `bench/reference/README.md`, which scores Glaze against a Blender 5.2.2 Cycles render with other settings. These Cycles settings and Blender 5.3 differ from that suite, so the numbers do not line up; they were not reconciled.
 - EEVEE has no global illumination with ray tracing off, so on an interior it loses on quality by a wide margin (it is darker, see FLIP). EEVEE with ray tracing on was not measured.
-- Glaze at 960 by 540 on this scene takes about a millisecond, which is close to the cost of the browser's pixel read, so the draft against realtime frame time cannot be told apart here. Draft is not faster than realtime in this measurement (1.20 against 1.11 ms; ranges overlap).
+- Glaze at 960 by 540 on this scene takes about a millisecond, which is close to the cost of the browser's pixel read, so the draft against realtime frame time could not be told apart in the table above (1.20 against 1.11 ms; ranges overlap). The queued-frame figure and the cheaper draft settings below address that; the table rows above were not re-measured.
 
 ## Not done
 
-- The other five scenes (`spot-area`, `light-linking`, `metal`, `glass`, `outdoor-hdri`) are exported (`scenes/`) but have no Cycles references or runs. Run `render-references.sh`, `run-eevee.sh` and `run-glaze.mjs` for them.
+- The other five scenes (`spot-area`, `light-linking`, `metal`, `glass`, `outdoor-hdri`) have no committed runs; `run-all.mjs` exports, references and measures them (the full matrix has not been run yet).
 - Lit-interior at 1920 by 1080 for the real-time rows, and the settle runs at that size.
 - three.js 0.187 against Glaze on `bench/runtime`'s scenes: not run here; `bench/runtime/README.md` has its own results.

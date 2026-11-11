@@ -3,6 +3,7 @@
 #   bash bench/tiers/run-eevee.sh <work directory> <scene,scene,...> [width] [repetitions]
 # Needs <work directory>/scenes/<scene>.json. Output: <work directory>/eevee/<scene>-<preset>-<width>-r<n>.{npy,json,metrics.json}
 set -u
+# Every run goes through bench/tiers/idle-gate.mjs: it waits for a quiet card and writes <prefix>.gate.json (TIER_GATE_MAX_WAIT seconds; TIER_GATE_REPORT_ONLY=1 records without waiting).
 WORK_DIRECTORY="$1"
 SCENE_LIST="$2"
 WIDTH="${3:-960}"
@@ -18,7 +19,7 @@ for repetition in $(seq 1 "$REPETITIONS"); do
     for preset in $PRESETS; do
       prefix="$WORK_DIRECTORY/eevee/$scene-$preset-$WIDTH-r$repetition"
       [ -f "$prefix.metrics.json" ] && continue
-      $GPU_LOCK uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$prefix.metrics.json" -- \
+      $GPU_LOCK node bench/tiers/idle-gate.mjs --out "$prefix.gate.json" -- uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$prefix.metrics.json" -- \
         "$BLENDER_BIN" -b --factory-startup --python bench/tiers/render-eevee.py -- "$WORK_DIRECTORY/scenes/$scene.json" "$prefix" \
         --preset "$preset" --width "$WIDTH" --height "$HEIGHT" --frames 10 2>&1 | grep "EEVEE_TIMING" | cut -c1-160
     done

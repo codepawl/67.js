@@ -4,6 +4,7 @@
 # Needs <work directory>/scenes/<scene>.json and the Cycles reference from render-references.sh. Light jobs go through gpu-lock one by one.
 # Per repetition and sample count the engines run back to back (cpu, gpu, webgpu, native, cycles), so a drifting load hits all of them.
 set -u
+# Every run goes through bench/tiers/idle-gate.mjs: it waits for a quiet card and writes <prefix>.gate.json (TIER_GATE_MAX_WAIT seconds; TIER_GATE_REPORT_ONLY=1 records without waiting).
 WORK_DIRECTORY="$1"
 SCENE="${2:-lit-interior}"
 REPETITIONS="${3:-3}"
@@ -16,14 +17,14 @@ mkdir -p "$LADDER_DIRECTORY"
 run_cook() {
   local backend="$1" samples="$2" repetition="$3"
   [ -f "$LADDER_DIRECTORY/$SCENE-cook-$backend-s$samples-r$repetition.json" ] && return
-  $GPU_LOCK node bench/tiers/run-cook.mjs "$LADDER_DIRECTORY" "$SCENE" --backend "$backend" --samples "$samples" --repetitions 1 --first-repetition "$repetition" 2>&1 | grep -v "^$" | tail -2
+  $GPU_LOCK node bench/tiers/idle-gate.mjs --out "$LADDER_DIRECTORY/$SCENE-cook-$backend-s$samples-r$repetition.gate.json" -- node bench/tiers/run-cook.mjs "$LADDER_DIRECTORY" "$SCENE" --backend "$backend" --samples "$samples" --repetitions 1 --first-repetition "$repetition" 2>&1 | grep -v "^$" | tail -2
 }
 
 run_measured() {
   local prefix="$1"
   shift
   [ -f "$prefix.metrics.json" ] && return
-  $GPU_LOCK uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$prefix.metrics.json" -- "$@" 2>&1 | tail -1 | cut -c1-200
+  $GPU_LOCK node bench/tiers/idle-gate.mjs --out "$prefix.gate.json" -- uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$prefix.metrics.json" -- "$@" 2>&1 | tail -1 | cut -c1-200
 }
 
 run_native() {

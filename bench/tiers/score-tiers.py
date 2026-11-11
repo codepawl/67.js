@@ -2,6 +2,7 @@
 
   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/tiers/score-tiers.py final <work directory> <scene> [--width 960]
   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/tiers/score-tiers.py raster <work directory> <scene>,<scene> [--width 960]
+  uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/tiers/score-tiers.py matrix <results json from run-all.mjs>
   uv run --no-project --python 3.12 --with flip-evaluator --with pillow --with numpy python -I bench/tiers/score-tiers.py settle <work directory> <scene> --bound 0.15,0.10
 
 final:  Cook (cpu, gpu, webgpu), the native tracer and Cycles at each sample count: relMSE, FLIP, time, and the equal-error and equal-time reading.
@@ -305,8 +306,54 @@ def score_settle(work_directory, scene, bounds, width):
     return result
 
 
+def downscale_display(display, width, height):
+    image = Image.fromarray(np.round(display * 255).astype(np.uint8))
+    return np.asarray(image.resize((width, height), Image.BOX), dtype=np.float32) / 255
+
+
+def score_matrix(results_path):
+    """Scores every ok cell of run-all.mjs's results file that has no `score` yet, against that scene's Cycles reference, and writes the file back.
+
+    A Glaze cell is a display-space PNG at the tier's own canvas size. flip is its score after a bilinear enlargement to the full size (what a
+    viewer sees); flipNative is its score against the reference reduced to the canvas size, which leaves the enlargement out.
+    """
+    results = read_json(results_path)
+    references = {}
+    scored = 0
+    for cell in results["cells"]:
+        if cell["status"] != "ok" or "score" in cell:
+            continue
+        scene = cell["scene"]
+        if scene not in references:
+            linear = COMPARE.load_linear_rgb_image(results["references"][scene]["path"])
+            references[scene] = (linear, display_of_linear(linear))
+        reference_linear, reference_display = references[scene]
+        width, height = cell["width"], cell["height"]
+        image = cell["image"]
+        if image["kind"] == "png-display":
+            native = (image["nativeWidth"], image["nativeHeight"])
+            test_display = load_png(image["path"], width, height)
+            score = {"flip": flip_score(reference_display, test_display), "displayRelMse": display_relative_mse(reference_display, test_display)}
+            if native != (width, height):
+                raw = load_png(image["path"], native[0], native[1])
+                score["flipNative"] = flip_score(downscale_display(reference_display, native[0], native[1]), raw)
+                score["nativeSize"] = f"{native[0]}x{native[1]}"
+        else:
+            linear = COMPARE.load_linear_rgb_image(image["path"])
+            display = display_of_linear(linear.astype(np.float32))
+            comparison = COMPARE.compare_image_pair(reference_linear, linear)
+            score = {"flip": flip_score(reference_display, display), "displayRelMse": display_relative_mse(reference_display, display), "relMse": comparison["relMse"], "channelMeanRatio": comparison["channelMeanRatio"]}
+        cell["score"] = score
+        scored += 1
+    Path(results_path).write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
+    print(f"scored {scored} cells in {results_path}")
+
+
 def main():
     arguments = sys.argv[1:]
+    if arguments[0] == "matrix":
+        score_matrix(arguments[1])
+        return
     command, work_directory, scene_text = arguments[0], arguments[1], arguments[2]
     width = int(flag_value(arguments, "--width", "960"))
     if command == "final":

@@ -9,12 +9,12 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
-import { DRAFT_TIER, REALTIME_TIER } from './tiers.mjs';
+import { DIAGNOSTIC_TIERS, DRAFT_TIER, REALTIME_TIER } from './tiers.mjs';
 
 const runFile = promisify(execFile);
 const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const SERVER_PORT = 5340;
-const TIERS = { draft: DRAFT_TIER, realtime: REALTIME_TIER };
+const TIERS = { draft: DRAFT_TIER, realtime: REALTIME_TIER, ...DIAGNOSTIC_TIERS };
 const argumentsGiven = process.argv.slice(2);
 const valueAfter = (flag, fallback) => (argumentsGiven.includes(flag) ? argumentsGiven[argumentsGiven.indexOf(flag) + 1] : fallback);
 const outputDirectory = resolve(argumentsGiven[0]);
@@ -24,6 +24,8 @@ const height = Number(valueAfter('--height', 540));
 const repetitions = Number(valueAfter('--repetitions', 3));
 const frameCount = Number(valueAfter('--frames', 10));
 const tierNames = valueAfter('--tiers', 'draft,realtime').split(',');
+// A driver that interleaves engines calls this once per repetition with --repetitions 1; this sets the number in the file names.
+const firstRepetition = Number(valueAfter('--first-repetition', 1));
 
 async function cardState() {
   const { stdout } = await runFile('nvidia-smi', ['--query-gpu=memory.used,utilization.gpu', '--format=csv,noheader,nounits']);
@@ -62,7 +64,7 @@ const browser = await chromium.launch({
 });
 const runs = [];
 try {
-  for (let repetition = 1; repetition <= repetitions; repetition++) {
+  for (let repetition = firstRepetition; repetition < firstRepetition + repetitions; repetition++) {
     const orderedTiers = repetition % 2 ? tierNames : [...tierNames].reverse();
     for (const sceneId of sceneIds) {
       for (const tierName of orderedTiers) {
@@ -76,7 +78,7 @@ try {
         await writeFile(`${outputDirectory}/${sceneId}-${tierName}-${width}-r${repetition}.png`, Buffer.from(result.image, 'base64'));
         const { image: _image, ...record } = result;
         runs.push({ repetition, width, height, tierName, card, ...record });
-        console.log(sceneId, tierName, `r${repetition}`, `first ${result.firstFrameMilliseconds.toFixed(1)} ms`, `median ${result.medianFrameMilliseconds.toFixed(2)} ms`, `canvas ${result.canvasWidth}x${result.canvasHeight}`, `card +${card.deltaMebibytes} MiB`, `util ${card.utilizationPeakPercent}%`);
+        console.log(sceneId, tierName, `r${repetition}`, `first ${result.firstFrameMilliseconds.toFixed(1)} ms`, `median ${result.medianFrameMilliseconds.toFixed(2)} ms`, `throughput ${result.throughputMilliseconds.toFixed(2)} ms`, `canvas ${result.canvasWidth}x${result.canvasHeight}`, `card +${card.deltaMebibytes} MiB`, `util ${card.utilizationPeakPercent}%`);
         await page.close();
       }
     }

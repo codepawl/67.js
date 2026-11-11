@@ -59,6 +59,26 @@ def apply_eevee_preset(scene, preset_name):
     return applied, effective
 
 
+class EngineRenderTimer:
+    """Blender's own render time: from the render_pre handler to render_post, which leaves out the Python call, the scene build and the file write."""
+
+    def __init__(self):
+        self.started = None
+        self.durations = []
+
+    def on_render_pre(self, *_):
+        self.started = time.perf_counter()
+
+    def on_render_post(self, *_):
+        if self.started is not None:
+            self.durations.append(time.perf_counter() - self.started)
+            self.started = None
+
+    def install(self):
+        bpy.app.handlers.render_pre.append(self.on_render_pre)
+        bpy.app.handlers.render_post.append(self.on_render_post)
+
+
 def main():
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     scene_json_path = os.path.abspath(argument_list[0])
@@ -80,6 +100,8 @@ def main():
     builder.configure_linear_exr_output(scene, width, height)
     applied, effective = apply_eevee_preset(scene, preset_name)
     scene_build_seconds = time.perf_counter() - build_started
+    engine_timer = EngineRenderTimer()
+    engine_timer.install()
     first_started = time.perf_counter()
     bpy.ops.render.render()
     first_frame_seconds = time.perf_counter() - first_started
@@ -88,6 +110,8 @@ def main():
         frame_started = time.perf_counter()
         bpy.ops.render.render()
         frame_seconds.append(time.perf_counter() - frame_started)
+    # engine_timer.durations holds the first render, then one per frame above; the handlers may not fire in every Blender build.
+    engine_frame_seconds = engine_timer.durations[1:1 + frame_count]
     exr_path = f"{output_prefix}.exr"
     scene.render.filepath = exr_path
     bpy.ops.render.render(write_still=True)
@@ -107,11 +131,14 @@ def main():
         "firstFrameSeconds": round(first_frame_seconds, 4),
         "frameSeconds": [round(value, 4) for value in frame_seconds],
         "medianFrameSeconds": round(statistics.median(frame_seconds), 4),
+        "engineFirstFrameSeconds": round(engine_timer.durations[0], 4) if engine_timer.durations else None,
+        "engineFrameSeconds": [round(value, 4) for value in engine_frame_seconds],
+        "engineMedianFrameSeconds": round(statistics.median(engine_frame_seconds), 4) if engine_frame_seconds else None,
         "viewTransform": scene.view_settings.view_transform,
     }
     with open(f"{output_prefix}.json", "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)
-    print("EEVEE_TIMING " + json.dumps({key: report[key] for key in ("preset", "firstFrameSeconds", "medianFrameSeconds", "effectiveSettings")}))
+    print("EEVEE_TIMING " + json.dumps({key: report[key] for key in ("preset", "firstFrameSeconds", "medianFrameSeconds", "engineMedianFrameSeconds", "effectiveSettings")}))
 
 
 main()

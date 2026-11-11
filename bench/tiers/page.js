@@ -41,8 +41,16 @@ window.renderTierScene = async function renderTierScene(sceneId, tier, frameCoun
     frameMilliseconds.push(performance.now() - started);
     if (index === frameCount - 1) image = pngOf(canvas);
   }
+  // Throughput: many draws queued back to back, then one pixel read. The per-frame figure above ends in a read each time, which on a fast
+  // scene is mostly the read and the driver round trip; this one is the card's work per frame, so draft against realtime shows.
+  const throughputFrames = 30;
+  const throughputStarted = performance.now();
+  for (let index = 0; index < throughputFrames; index++) renderer.render(frame);
+  finishDrawing();
+  const throughputMilliseconds = (performance.now() - throughputStarted) / throughputFrames;
   const debug = context.getExtension('WEBGL_debug_renderer_info');
   const result = {
+    throughputMilliseconds,
     sceneId,
     tier: tier.label,
     canvasWidth: canvas.width,
