@@ -1,5 +1,8 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
 
 use napi::Result;
@@ -23,18 +26,57 @@ use crate::{NativeTraceInput, NativeTraceInputV2, ProbeCyclesLobeOptions};
 //
 // wgpu 23+ backs Device and Queue with Arc, making them Clone.
 
+/// Most compiled pipelines kept at once. Each scene shape compiles its own specialized kernel, so a long
+/// lived process that renders many shapes would otherwise grow without bound.
+const MAX_CACHED_PIPELINES: usize = 32;
+
+/// A pipeline cache key: the entry point plus a 64 bit hash of the specialized source, so the cache never
+/// holds a second copy of a kernel text that is hundreds of kilobytes long.
+type PipelineKey = (String, u64);
+
+fn pipeline_key(entry_point: &str, specialized_source: &str) -> PipelineKey {
+    let mut hasher = DefaultHasher::new();
+    specialized_source.hash(&mut hasher);
+    (entry_point.to_string(), hasher.finish())
+}
+
+/// A map that holds at most `capacity` entries and starts over when a new key arrives at capacity.
+struct BoundedCache<Value> {
+    capacity: usize,
+    entries: HashMap<PipelineKey, Value>,
+}
+
+impl<Value: Clone> BoundedCache<Value> {
+    fn new(capacity: usize) -> Self {
+        BoundedCache { capacity, entries: HashMap::new() }
+    }
+
+    fn get(&self, key: &PipelineKey) -> Option<Value> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: PipelineKey, value: Value) {
+        if self.entries.len() >= self.capacity && !self.entries.contains_key(&key) {
+            self.entries.clear();
+        }
+        self.entries.insert(key, value);
+    }
+}
+
 struct CachedDevice {
     device: wgpu::Device,
     queue: wgpu::Queue,
     adapter_name: String,
     backend_name: String,
     features: String,
+    /// Set by the device lost callback; the next call then opens a fresh device and drops everything below.
+    device_lost: Arc<AtomicBool>,
     /// Static 118,848-byte LUT storage buffer for Cycles binding 12.
     lut_buffer: wgpu::Buffer,
     /// Bind group layout for the Cycles kernel (bindings 0..=12).
     cycles_bind_group_layout: wgpu::BindGroupLayout,
-    /// Compiled Cycles compute pipelines keyed by `(entry_point, specialized_source)`.
-    cycles_pipelines: HashMap<(String, String), wgpu::ComputePipeline>,
+    /// Compiled Cycles compute pipelines keyed by entry point and specialized source hash.
+    cycles_pipelines: BoundedCache<wgpu::ComputePipeline>,
 }
 
 static DEVICE_CACHE: OnceLock<Mutex<Option<CachedDevice>>> = OnceLock::new();
@@ -43,18 +85,39 @@ fn device_cache() -> &'static Mutex<Option<CachedDevice>> {
     DEVICE_CACHE.get_or_init(|| Mutex::new(None))
 }
 
-/// Returns cloned device/queue/metadata from the cache, opening once per process.
-/// On device loss the cache is invalidated and an error returned (caller retries on next call).
-fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, String)> {
-    let mut guard = device_cache().lock().unwrap();
-    // Invalidate on device loss.
-    if let Some(ref cached) = *guard {
-        if cached.device.poll(wgpu::PollType::Poll).is_err() {
+/// Locks a cache. A panic while the lock was held leaves half updated state, so a poisoned lock is
+/// recovered by resetting the cache to empty instead of failing every later call.
+fn lock_resetting_when_poisoned<Value>(cache: &Mutex<Option<Value>>) -> MutexGuard<'_, Option<Value>> {
+    match cache.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
             *guard = None;
+            cache.clear_poison();
+            guard
         }
+    }
+}
+
+fn lock_device_cache() -> MutexGuard<'static, Option<CachedDevice>> {
+    lock_resetting_when_poisoned(device_cache())
+}
+
+/// Returns cloned device/queue/metadata from the cache, opening once per process.
+/// When the device was lost the cache is dropped and a fresh device is opened.
+fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, String)> {
+    let mut guard = lock_device_cache();
+    let was_lost = guard.as_ref().is_some_and(|cached| cached.device_lost.load(Ordering::SeqCst));
+    if was_lost {
+        *guard = None;
     }
     if guard.is_none() {
         let (device, queue, adapter_info) = open_device()?;
+        let device_lost = Arc::new(AtomicBool::new(false));
+        let lost_flag = Arc::clone(&device_lost);
+        device.set_device_lost_callback(move |_reason, _message| {
+            lost_flag.store(true, Ordering::SeqCst);
+        });
         let lut_bytes: &[u8] = bytemuck::cast_slice(&CYCLES_LUT_WORDS[..]);
         let lut_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cycles LUT binding 12"),
@@ -69,9 +132,10 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
             adapter_name: adapter_info.name,
             backend_name: format!("{:?}", adapter_info.backend),
             features: if has_ray_query { "EXPERIMENTAL_RAY_QUERY".to_string() } else { String::new() },
+            device_lost,
             lut_buffer,
             cycles_bind_group_layout,
-            cycles_pipelines: HashMap::new(),
+            cycles_pipelines: BoundedCache::new(MAX_CACHED_PIPELINES),
         });
     }
     let cached = guard.as_ref().unwrap();
@@ -84,20 +148,24 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
     ))
 }
 
+fn cache_was_reset_failure() -> napi::Error {
+    failure("The GPU device was reset while the scene was being prepared. Run the render again.")
+}
+
 /// Looks up or compiles and caches a Cycles `ComputePipeline` for `(entry_point, specialized_source)`.
 fn get_or_compile_cycles_pipeline(entry_point: &str, specialized_source: String) -> Result<wgpu::ComputePipeline> {
-    let key = (entry_point.to_string(), specialized_source);
+    let key = pipeline_key(entry_point, &specialized_source);
     {
-        let guard = device_cache().lock().unwrap();
-        let cached = guard.as_ref().expect("device cache empty after get_cached_device");
+        let guard = lock_device_cache();
+        let cached = guard.as_ref().ok_or_else(cache_was_reset_failure)?;
         if let Some(existing) = cached.cycles_pipelines.get(&key) {
-            return Ok(existing.clone());
+            return Ok(existing);
         }
     }
     let compiled = with_cycles_cache(|device, _queue, layout, _lut| {
-        compile_compute_pipeline(device, key.1.clone(), entry_point, layout)
-    })?;
-    let mut guard = device_cache().lock().unwrap();
+        compile_compute_pipeline(device, specialized_source, entry_point, layout)
+    })??;
+    let mut guard = lock_device_cache();
     if let Some(ref mut cached) = *guard {
         cached.cycles_pipelines.insert(key, compiled.clone());
     }
@@ -105,14 +173,14 @@ fn get_or_compile_cycles_pipeline(entry_point: &str, specialized_source: String)
 }
 
 /// Returns the cached Cycles bind group layout and LUT buffer, with cloned device/queue.
-/// Panics only if the cache is empty (should not happen after `get_cached_device` succeeds).
-fn with_cycles_cache<F, T>(f: F) -> T
+/// Fails when the cache was reset since `get_cached_device` succeeded (device loss or a poisoned lock).
+fn with_cycles_cache<F, T>(f: F) -> Result<T>
 where
     F: FnOnce(&wgpu::Device, &wgpu::Queue, &wgpu::BindGroupLayout, &wgpu::Buffer) -> T,
 {
-    let guard = device_cache().lock().unwrap();
-    let cached = guard.as_ref().expect("device cache empty after get_cached_device");
-    f(&cached.device, &cached.queue, &cached.cycles_bind_group_layout, &cached.lut_buffer)
+    let guard = lock_device_cache();
+    let cached = guard.as_ref().ok_or_else(cache_was_reset_failure)?;
+    Ok(f(&cached.device, &cached.queue, &cached.cycles_bind_group_layout, &cached.lut_buffer))
 }
 
 const PARAMETER_BYTES: usize = 16 * 16;
@@ -564,7 +632,7 @@ pub(crate) fn prepare_cycles_scene(
             &uploaded.accumulation,
             lut,
         )
-    });
+    })?;
     Ok(PreparedCyclesScene {
         device,
         queue,
@@ -723,7 +791,7 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
             &accumulation,
             lut,
         )
-    });
+    })?;
 
     let started = Instant::now();
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -748,4 +816,56 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
         }
     }
     read_accumulation(&device, &queue, &accumulation, accumulation_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_key_separates_entry_points_and_sources() {
+        assert_eq!(pipeline_key("main", "source a"), pipeline_key("main", "source a"));
+        assert_ne!(pipeline_key("main", "source a"), pipeline_key("main", "source b"));
+        assert_ne!(pipeline_key("main", "source a"), pipeline_key("other", "source a"));
+    }
+
+    #[test]
+    fn bounded_cache_never_exceeds_capacity() {
+        let mut cache: BoundedCache<u32> = BoundedCache::new(3);
+        for index in 0..10u32 {
+            cache.insert(pipeline_key("main", &index.to_string()), index);
+            assert!(cache.entries.len() <= 3);
+        }
+        assert_eq!(cache.get(&pipeline_key("main", "9")), Some(9));
+    }
+
+    #[test]
+    fn bounded_cache_keeps_entries_when_a_known_key_is_replaced() {
+        let mut cache: BoundedCache<u32> = BoundedCache::new(2);
+        cache.insert(pipeline_key("main", "a"), 1);
+        cache.insert(pipeline_key("main", "b"), 2);
+        cache.insert(pipeline_key("main", "a"), 3);
+        assert_eq!(cache.get(&pipeline_key("main", "a")), Some(3));
+        assert_eq!(cache.get(&pipeline_key("main", "b")), Some(2));
+    }
+
+    #[test]
+    fn poisoned_lock_is_reset_instead_of_failing_later_calls() {
+        let cache = Arc::new(Mutex::new(Some(7u32)));
+        let panicking = Arc::clone(&cache);
+        let outcome = std::thread::spawn(move || {
+            let _guard = panicking.lock().unwrap();
+            panic!("panic while the cache lock is held");
+        })
+        .join();
+        assert!(outcome.is_err());
+        assert!(cache.is_poisoned());
+        {
+            let guard = lock_resetting_when_poisoned(&cache);
+            assert!(guard.is_none());
+        }
+        assert!(!cache.is_poisoned());
+        *lock_resetting_when_poisoned(&cache) = Some(9);
+        assert_eq!(*lock_resetting_when_poisoned(&cache), Some(9));
+    }
 }
