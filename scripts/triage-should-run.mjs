@@ -51,10 +51,16 @@ export function decideTriage({
   enabled = true,
   requireStickyForLaterSteps = false,
 }) {
+  const isDispatch = eventName === 'workflow_dispatch';
+  // A dry run is a maintainer naming one item. It posts and labels nothing, so the pause, ownership and hand-over rules
+  // do not apply. Only the daily run limit does, because a dry run still spends the subscription.
+  if (isDispatch) {
+    if (runsToday > MAX_RUNS_PER_DAY) return { run: false, reason: 'daily run limit reached' };
+    return { run: true, reason: 'maintainer dry run' };
+  }
   if (!enabled) return { run: false, reason: 'paused by TRIAGE_ENABLED' };
   const allowedActions = TRIGGERS[eventName];
   if (!allowedActions) return { run: false, reason: `event ${eventName} is not triaged` };
-  const isDispatch = eventName === 'workflow_dispatch';
   if (!isDispatch && !allowedActions.includes(action)) return { run: false, reason: `action ${action} is not triaged` };
   if (item.state && item.state !== 'open') return { run: false, reason: 'closed or merged' };
   if (item.merged === true) return { run: false, reason: 'closed or merged' };
