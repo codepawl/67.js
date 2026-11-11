@@ -18,7 +18,17 @@ const WATER_MIRROR_ENABLED = false;
 // Lets the page draw and handle input between the phases of a build, so one phase never queues behind another.
 const yieldToMain = yieldToPage;
 
+// index.html starts the first world's files with the page and leaves their promises in window.__heroPrefetch; each is taken once.
+async function takePrefetched(url) {
+  const promise = window.__heroPrefetch?.[url];
+  if (!promise) return null;
+  delete window.__heroPrefetch[url];
+  return promise.catch(() => null);
+}
+
 async function fetchBlob(url) {
+  const prefetched = await takePrefetched(url);
+  if (prefetched) return prefetched;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url} is not available (${response.status})`);
   return response.blob();
@@ -86,7 +96,7 @@ async function replacePartsInSlices(renderer, parts) {
 }
 
 export async function fetchWorld(descriptionUrl) {
-  const description = await (await fetch(descriptionUrl)).json();
+  const description = JSON.parse(await (await fetchBlob(descriptionUrl)).text());
   const paths = [description.glb, ...(description.glbRest ?? [])];
   const [models, sky] = await Promise.all([Promise.all(paths.map(fetchBlob)), fetchBlob(description.hdri)]);
   const bytes = models.reduce((total, model) => total + model.size, sky.size);

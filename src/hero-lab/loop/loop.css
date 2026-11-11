@@ -48,9 +48,9 @@
 
 .scene-bar { position: absolute; z-index: 4; right: clamp(16px, 4vw, 48px); bottom: clamp(24px, 5svh, 48px); display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; max-width: min(720px, 60vw); }
 .scene-tabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
-.hero-loop .scene-tab, .hero-loop .credits-toggle { display: inline-flex; text-shadow: 0 1px 12px rgb(9 7 15 / 0.9); align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color var(--hover) ease, color var(--hover) ease, transform var(--press) var(--ease-out); }
-.hero-loop .scene-tab svg, .hero-loop .credits-toggle svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.hero-loop .scene-tab:active, .hero-loop .credits-toggle:active { transform: scale(0.97); }
+.hero-loop .scene-tab, .hero-loop .credits-toggle, .hero-loop .play-live { display: inline-flex; text-shadow: 0 1px 12px rgb(9 7 15 / 0.9); align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color var(--hover) ease, color var(--hover) ease, transform var(--press) var(--ease-out); }
+.hero-loop .scene-tab svg, .hero-loop .credits-toggle svg, .hero-loop .play-live svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.hero-loop .scene-tab:active, .hero-loop .credits-toggle:active, .hero-loop .play-live:active { transform: scale(0.97); }
 .hero-loop .scene-tab[aria-current='true'] { background: rgb(255 255 255 / 0.1); color: var(--text); }
 .ring-track { stroke: rgb(255 255 255 / 0.22); }
 .ring-fill { stroke: currentColor; transform: rotate(-90deg); transform-origin: 50% 50%; opacity: 0; }
@@ -61,9 +61,9 @@
 @keyframes ring-turn { to { transform: rotate(360deg); } }
 @media (hover: hover) and (pointer: fine) {
   .attribution a:hover { color: var(--text); }
-  .hero-loop .scene-tab:hover, .hero-loop .credits-toggle:hover { background: rgb(255 255 255 / 0.08); color: var(--text); }
+  .hero-loop .scene-tab:hover, .hero-loop .credits-toggle:hover, .hero-loop .play-live:hover:not(:disabled) { background: rgb(255 255 255 / 0.08); color: var(--text); }
 }
-.attribution[hidden], .credits-panel[hidden] { display: none; }
+.attribution[hidden], .credits-panel[hidden], .hero-loop .play-live[hidden] { display: none; }
 .attribution { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-end; padding: 0 12px 4px; }
 .attribution a { display: inline-flex; align-items: center; min-height: 28px; color: var(--muted); font-size: 12px; text-shadow: 0 1px 12px rgb(9 7 15 / 0.9); transition: color var(--hover) ease; }
 .credits-panel { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 16px; background: var(--surface); }
@@ -71,6 +71,19 @@
 .credits-panel .credit-meta { color: var(--muted); font-size: 12px; }
 .credits-panel p { margin: 0; padding: 8px 10px; color: var(--muted); font-size: 12px; }
 @media (hover: hover) and (pointer: fine) { .credits-panel a:hover { background: var(--surface-hover); } }
+
+/* Light path: no 3D is fetched until Play live 3D is pressed, so the poster drifts slowly and the scene tabs wait. */
+.hero-loop .play-live { grid-area: tabs; justify-self: start; }
+.hero-loop .play-live .play-icon { fill: currentColor; stroke: none; }
+.hero-loop .play-live .play-wait { display: none; stroke-dasharray: 3 4; transform-origin: 50% 50%; animation: ring-turn 1.4s linear infinite; }
+.hero-loop .play-live[data-state='loading'] .play-icon { display: none; }
+.hero-loop .play-live[data-state='loading'] .play-wait { display: block; }
+html[data-hero-mode='poster'] .hero-loop .scene-tabs { display: none; }
+html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: poster-pan 40s ease-in-out infinite alternate; will-change: transform; }
+@keyframes poster-pan {
+  from { transform: scale(1.04) translate3d(-1.5%, 0.6%, 0); }
+  to { transform: scale(1.12) translate3d(1.5%, -1.2%, 0); }
+}
 
 @media (max-width: 1180px) {
   .hero-loop .scene-tab span { display: none; }
@@ -86,6 +99,7 @@
   .hero-loop .credits-toggle { grid-area: credits; }
   .attribution { align-items: flex-start; padding: 0 8px 8px; }
   .hero-loop .scene-tab, .hero-loop .credits-toggle { padding: 0 9px; }
+  .hero-loop .play-live { padding: 0 12px 0 9px; }
   .hero-loop .scene-tab[aria-current='true'] { padding: 0 12px 0 9px; }
   .credits-label { display: none; }
   .scene-tabs { justify-content: flex-start; }
@@ -93,7 +107,8 @@
   .hero-loop .scene-tab[aria-current='true'] span { display: inline; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hero-loop .scene-tab[data-state='loading'] .ring-track { animation: none; }
+  .hero-loop .scene-tab[data-state='loading'] .ring-track, .hero-loop .play-live .play-wait { animation: none; }
+  html[data-hero-mode='poster'] .hero-loop .stage .poster { animation: none; will-change: auto; }
   .hero-loop { transition: none; }
   .hero-loop .copy > * { animation: none; }
 }

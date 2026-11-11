@@ -261,18 +261,72 @@ function tick(seconds) {
   paintIndicator(incoming ? 1 : prefersReducedMotion ? 0 : activeSeconds / scene.seconds);
 }
 
-// The poster is the largest paint, so the first world's download (about 12 MB) starts only after the poster has arrived.
-function posterLoaded() {
+// How the page loads the hero, decided by the inline script in index.html: 'live', 'deferred' (a phone) or 'poster' (light path).
+const POSTER_IDLE_TIMEOUT_MS = 3000;
+const PLAY_HANDOFF_MS = 800;
+const playButton = document.querySelector('#play-live');
+let heroMode = window.__heroMode ?? 'live';
+let liveStarted = false;
+
+// The phone path waits until the poster has painted and the page has nothing else to do, so the download and the build never compete with it.
+async function posterVisibleAndPageIdle() {
   const poster = document.querySelector('#poster');
-  if (!poster || poster.complete) return Promise.resolve();
-  return new Promise(resolve => {
-    poster.addEventListener('load', resolve, { once: true });
-    poster.addEventListener('error', resolve, { once: true });
-  });
+  if (poster && !poster.complete) {
+    await new Promise(resolve => {
+      poster.addEventListener('load', resolve, { once: true });
+      poster.addEventListener('error', resolve, { once: true });
+    });
+  }
+  await poster?.decode?.().catch(() => {});
+  await new Promise(resolve => (window.requestIdleCallback ? window.requestIdleCallback(resolve, { timeout: POSTER_IDLE_TIMEOUT_MS }) : setTimeout(resolve, 1200)));
+}
+
+function showPosterOnly() {
+  paintScene(0);
+  stage.setAttribute('aria-label', `A still of the live 3D scene: ${SCENES[0].name}`);
+  playButton.hidden = false;
+  playButton.addEventListener('click', playOnDemand);
+}
+
+async function playOnDemand() {
+  playButton.disabled = true;
+  playButton.dataset.state = 'loading';
+  playButton.querySelector('.play-label').textContent = 'Loading 3D';
+  try {
+    await beginLive();
+  } catch (error) {
+    showStageError(stage, `Live view unavailable: ${error.message}`);
+    playButton.disabled = false;
+    delete playButton.dataset.state;
+    playButton.querySelector('.play-label').textContent = 'Play live 3D';
+    return;
+  }
+  playButton.hidden = true;
+  // The poster keeps its slow pan while it fades out, then the page switches to the live layout.
+  setTimeout(() => { heroMode = 'live'; document.documentElement.dataset.heroMode = 'live'; }, PLAY_HANDOFF_MS);
 }
 
 async function start() {
-  await posterLoaded();
+  if (heroMode === 'poster' && playButton) {
+    showPosterOnly();
+    return;
+  }
+  if (heroMode === 'deferred') await posterVisibleAndPageIdle();
+  await beginLive();
+}
+
+async function beginLive() {
+  if (liveStarted) return;
+  liveStarted = true;
+  try {
+    await startLive();
+  } catch (error) {
+    liveStarted = false;
+    throw error;
+  }
+}
+
+async function startLive() {
   const first = prepare(0, { immediately: true });
   await first.ready;
   if (first.error) throw first.error;
