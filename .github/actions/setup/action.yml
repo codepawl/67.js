@@ -14,7 +14,10 @@ runs:
       with:
         node-version: '24'
         registry-url: ${{ inputs.registry-url }}
+        # Publishing jobs (registry-url set) never restore a cache, so a poisoned cache cannot reach a release.
+        cache: ${{ inputs.registry-url == '' && 'npm' || '' }}
         package-manager-cache: false
+        cache-dependency-path: package-lock.json
     - run: npm install --global npm@12.1.0
       shell: bash
     - run: npm ci --ignore-scripts

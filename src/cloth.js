@@ -3,17 +3,24 @@
 // and playback is an interpolation between two recorded frames: a seek never runs the solver.
 
 import { assertClosedMesh, createShapeMatching, signedVolume, solveShapeMatching, solveVolume, SOFT_BODY_LIMITS } from './soft-body.js';
+import { BEND_MODELS, buildDihedrals, setDihedralCreases, solveDihedrals } from './cloth-bending.js';
 import { connectedPairs, createSelfCollision, maxSelfCollisionRadius, SELF_COLLISION_LIMITS } from './cloth-self-collision.js';
 
 export const CLOTH_LIMITS = Object.freeze({
   maxParticles: 5000,
   maxFrameParticles: 3_000_000,
-  // About 18 ns an operation measured on the dev machine, so the cap is a bake of roughly three seconds.
-  maxWork: 1.5e8,
+  // About 50 ns an operation measured with a 64 by 64 sheet and self collision (loaded dev machine), so the cap is a bake of roughly 20 seconds.
+  maxWork: 5e8,
   substeps: 4,
   iterations: 8,
 });
 
+// A dihedral bend costs about this many distance constraints.
+const DIHEDRAL_WORK = 5 / 2;
+// Bending is smooth and slow, so it is solved on every second iteration only.
+const DIHEDRAL_EVERY = 2;
+// Share of the bend beyond its yield that a fold keeps as its new rest angle each substep (bendYield).
+const DEFAULT_BEND_SET = 0.1;
 const AIR_DENSITY = 1.2;
 const WELD_DIGITS = 5;
 const GRAVITY_DEFAULT = Object.freeze([0, -9.81, 0]);
@@ -56,7 +63,7 @@ function defaultSelfCollisionRadius(longest, thickness) {
   return thickness > 0 ? Math.min(thickness, longest) : longest * 0.9;
 }
 
-function buildConstraints(positions, triangles, particleCount, bendStiffness, stretchStiffness, stiffnessWeights = null) {
+function buildConstraints(positions, triangles, particleCount, bendStiffness, stretchStiffness, stiffnessWeights = null, bendModel = 'distance') {
   const edgeNeighbours = new Map();
   for (let corner = 0; corner < triangles.length; corner += 3) {
     for (let side = 0; side < 3; side++) {
@@ -84,7 +91,8 @@ function buildConstraints(positions, triangles, particleCount, bendStiffness, st
   const stretchCount = firsts.length;
   // The bend constraint across an edge, so tearing the edge can drop it too (-1 where the edge has none).
   const bendOfEdge = new Int32Array(stretchCount).fill(-1);
-  if (bendStiffness > 0) {
+  const dihedrals = bendModel === 'dihedral' && bendStiffness > 0 ? buildDihedrals(positions, orderedEntries.map(([, entry]) => entry), bendStiffness, stiffnessWeights) : null;
+  if (bendStiffness > 0 && !dihedrals) {
     orderedEntries.forEach(([, entry], edge) => {
       if (entry.opposites.length === 2 && entry.opposites[0] !== entry.opposites[1]) {
         bendOfEdge[edge] = firsts.length;
@@ -100,7 +108,7 @@ function buildConstraints(positions, triangles, particleCount, bendStiffness, st
     const b = seconds[constraint] * 3;
     restLengths[constraint] = Math.hypot(positions[a] - positions[b], positions[a + 1] - positions[b + 1], positions[a + 2] - positions[b + 2]);
   }
-  return { count: firsts.length, stretchCount, bendOfEdge, firsts: Uint32Array.from(firsts), seconds: Uint32Array.from(seconds), stiffnesses: Float64Array.from(stiffnesses), restLengths };
+  return { dihedrals, count: firsts.length, stretchCount, bendOfEdge, firsts: Uint32Array.from(firsts), seconds: Uint32Array.from(seconds), stiffnesses: Float64Array.from(stiffnesses), restLengths };
 }
 
 // Rest area each particle represents (a third of its triangles), used to turn wind pressure into acceleration.
@@ -294,7 +302,7 @@ const PUSH_OUT = { ball: pushOutOfBall, capsule: pushOutOfCapsule, box: pushOutO
 
 // `contactNormals` (3 numbers per particle, or null) keeps the normal of the last collider each particle touched this
 // substep, so a bounce can send it back off the surface; it is zero where nothing was touched.
-function collide(state, previous, colliders, thickness, friction, contactNormals) {
+function collide(state, previous, colliders, thickness, friction, contactNormals, staticFriction = 0) {
   const { positions, inverseMasses, particleCount } = state;
   const point = [0, 0, 0];
   const normal = [0, 0, 0];
@@ -305,6 +313,9 @@ function collide(state, previous, colliders, thickness, friction, contactNormals
     point[1] = positions[offset + 1];
     point[2] = positions[offset + 2];
     for (const collider of colliders) {
+      const beforeX = point[0];
+      const beforeY = point[1];
+      const beforeZ = point[2];
       const touched = PUSH_OUT[collider.kind](point, collider, thickness, normal);
       if (!touched) continue;
       if (contactNormals) {
@@ -315,8 +326,14 @@ function collide(state, previous, colliders, thickness, friction, contactNormals
       // Friction removes part of the sideways travel this substep, so cloth drags over a surface instead of skating.
       const travel = [point[0] - previous[offset], point[1] - previous[offset + 1], point[2] - previous[offset + 2]];
       const along = travel[0] * normal[0] + travel[1] * normal[1] + travel[2] * normal[2];
+      // Static friction (Coulomb, as in position based dynamics): a sideways travel no longer than staticFriction times the depth the
+      // contact pushed the particle out is held completely, so a layer rests on the floor and on a slope below its friction angle.
+      const depth = Math.hypot(point[0] - beforeX, point[1] - beforeY, point[2] - beforeZ);
+      const sideways = Math.hypot(travel[0] - along * normal[0], travel[1] - along * normal[1], travel[2] - along * normal[2]);
+      const held = staticFriction > 0 && sideways <= staticFriction * depth;
+      const grip = held ? 1 : friction;
       for (let axis = 0; axis < 3; axis++) {
-        point[axis] -= (travel[axis] - along * normal[axis]) * friction;
+        point[axis] -= (travel[axis] - along * normal[axis]) * grip;
       }
     }
     positions[offset] = point[0];
@@ -398,6 +415,15 @@ function followAnchors(positions, moving, targets, softOnly) {
       positions[index] += (targets[anchor * 3 + axis] - positions[index]) * weight;
     }
   }
+}
+
+// From its release substep on, the anchored particles are ordinary cloth: they keep their speed and fall with the rest.
+function releaseAnchors(cloth, moving) {
+  moving.anchorParticles.forEach(particle => {
+    // fill writes one slot of the typed array, never a named property, whatever the particle value is.
+    cloth.trackFixed.fill(0, particle, particle + 1);
+    setParticleInverseMass(cloth, particle);
+  });
 }
 
 function checkWork(particleCount, constraintCount, triangleCount, colliderCount, frameCount, extraPerIteration = 0) {
@@ -488,6 +514,11 @@ function breakEdge(cloth, edge) {
   const { constraints, broken } = cloth;
   if (constraints.stiffnesses[edge] === 0) return;
   const bend = constraints.bendOfEdge[edge];
+  const dihedral = constraints.dihedrals?.ofEdge[edge] ?? -1;
+  if (dihedral >= 0 && constraints.dihedrals.stiffnesses[dihedral] !== 0) {
+    constraints.dihedrals.stiffnesses[dihedral] = 0;
+    broken.push(Object.freeze({ constraint: dihedral, first: constraints.dihedrals.quads[dihedral * 4], second: constraints.dihedrals.quads[dihedral * 4 + 1], kind: 'bend' }));
+  }
   for (const [constraint, kind] of [[edge, 'stretch'], [bend, 'bend']]) {
     if (constraint < 0 || constraints.stiffnesses[constraint] === 0) continue;
     constraints.stiffnesses[constraint] = 0;
@@ -514,6 +545,9 @@ function tearOverstretched(cloth, substepSeconds) {
  * A sheet that steps one frame at a time, so pins, wind and colliders can change while it runs. It is the solver
  * `bakeCloth` records from: the same positions and options step to the same frames. Arguments and options are those of
  * `bakeCloth`, plus:
+ * - bendYield (radians, needs bendModel 'dihedral') and bendSet (0 to 1, default 0.1): past that bend angle a fold keeps bendSet of the excess as its new rest angle each substep, so creases stay (default off: the sheet pulls its folds flat).
+ * - staticFriction (0 to 1, default 0): sideways travel up to this multiple of the contact depth is held completely on a collider, so cloth rests on a slope below its friction angle.
+ * - moving.releaseSubstep (default never): the substep from which the anchors are let go.
  * - tearStretch: a stretch constraint breaks when its length passes this multiple of its rest length (default never).
  * - tearForce: a stretch constraint breaks when the tension it carries passes this many newtons (default never).
  * Returns { positions, step(deltaSeconds, { wind, colliders }), pin(index, position), unpin(index), isPinned(index),
@@ -531,9 +565,18 @@ export function createCloth(positions, triangles, options = {}) {
     if (!Number.isInteger(particle) || particle < 0 || particle >= particleCount) throw new RangeError(`Cloth pinned particle ${particle} does not exist; there are ${particleCount}.`);
   }
   const stiffnessWeights = checkStiffnessWeights(options.stiffnessWeights, particleCount);
-  const constraints = buildConstraints(positions, triangles, particleCount, options.bend ?? 0.1, options.stiffness ?? 0.9, stiffnessWeights);
+  const bendModel = options.bendModel ?? 'distance';
+  if (!BEND_MODELS.includes(bendModel)) {
+    throw new RangeError(`Cloth bendModel must be one of ${BEND_MODELS.join(', ')}; found ${bendModel}.`);
+  }
+  const constraints = buildConstraints(positions, triangles, particleCount, options.bend ?? 0.1, options.stiffness ?? 0.9, stiffnessWeights, bendModel);
+  const bendYield = options.bendYield === undefined ? null : checkUnit(options.bendYield, 'bendYield', Math.PI);
+  const bendSet = checkUnit(options.bendSet ?? DEFAULT_BEND_SET, 'bendSet', 1);
+  if (bendYield !== null && !constraints.dihedrals) {
+    throw new RangeError(`Cloth bendYield needs bendModel 'dihedral' and a bend above 0; found bendModel ${bendModel} and bend ${options.bend ?? 0.1}. Set both or drop bendYield.`);
+  }
   const extras = prepareExtras(options, positions, triangles, particleCount, constraints);
-  checkWork(particleCount, constraints.count, triangles.length / 3, colliders.length + (moving?.colliderCount ?? 0), options.frameCount ?? 1, extras.workPerIteration);
+  checkWork(particleCount, constraints.count, triangles.length / 3, colliders.length + (moving?.colliderCount ?? 0), options.frameCount ?? 1, extras.workPerIteration + (constraints.dihedrals?.count ?? 0) * DIHEDRAL_WORK);
   const density = options.density ?? 0.2;
   const areas = particleAreas(positions, triangles, particleCount);
   const totalArea = areas.reduce((sum, area) => sum + area, 0);
@@ -562,6 +605,7 @@ export function createCloth(positions, triangles, options = {}) {
   const gravity = options.gravity ?? GRAVITY_DEFAULT;
   const damping = options.damping ?? 0.3;
   const friction = options.friction ?? 0.3;
+  const staticFriction = checkUnit(options.staticFriction ?? 0, 'staticFriction', 1);
   const thickness = options.thickness ?? 0.01;
   const previous = new Float64Array(positions.length);
   const contactNormals = extras.bounce > 0 ? new Float64Array(positions.length) : null;
@@ -573,6 +617,7 @@ export function createCloth(positions, triangles, options = {}) {
   const anchorStride = (moving?.anchorParticles.length ?? 0) * 3;
   const colliderStride = (moving?.colliderCount ?? 0) * MOVING_COLLIDER_NUMBERS;
   let substepsDone = 0;
+  let anchorsReleased = false;
 
   function step(deltaSeconds, frame = {}) {
     const wind = frame.wind ?? options.wind ?? [0, 0, 0];
@@ -591,10 +636,14 @@ export function createCloth(positions, triangles, options = {}) {
       previous.set(state.positions);
       let activeColliders = stepColliders;
       let anchorTargets = null;
+      if (moving && !anchorsReleased && substepsDone >= moving.releaseSubstep) {
+        releaseAnchors(cloth, moving);
+        anchorsReleased = true;
+      }
       if (moving) {
         anchorTargets = moving.anchorTrack.subarray(substepsDone * anchorStride, (substepsDone + 1) * anchorStride);
         activeColliders = stepColliders.concat(movingColliders(moving.colliderTrack, substepsDone * colliderStride, moving.colliderCount));
-        followAnchors(state.positions, moving, anchorTargets, false);
+        if (!anchorsReleased) followAnchors(state.positions, moving, anchorTargets, false);
       }
       // A pin travels to its target in even strides, so a fast gripper drags the cloth instead of teleporting.
       const progress = (substep + 1) / substeps;
@@ -619,10 +668,12 @@ export function createCloth(positions, triangles, options = {}) {
       extras.beforeIterations(state.positions, inverseMasses);
       for (let iteration = 0; iteration < CLOTH_LIMITS.iterations; iteration++) {
         solveDistances(state.positions, inverseMasses, constraints, cloth.impulses, pinImpulses);
+        if (constraints.dihedrals && iteration % DIHEDRAL_EVERY === 0) solveDihedrals(state.positions, inverseMasses, constraints.dihedrals);
         extras.duringIteration(state.positions, inverseMasses);
-        if (moving) followAnchors(state.positions, moving, anchorTargets, true);
-        collide(state, previous, activeColliders, thickness, friction, contactNormals);
+        if (moving && !anchorsReleased) followAnchors(state.positions, moving, anchorTargets, true);
+        collide(state, previous, activeColliders, thickness, friction, contactNormals, staticFriction);
       }
+      if (bendYield !== null) setDihedralCreases(state.positions, constraints.dihedrals, bendYield, bendSet);
       if (tears) tearOverstretched(cloth, substepSeconds);
       cloth.impulses.fill(0);
       for (let index = 0; index < positions.length; index++) {
@@ -710,9 +761,9 @@ export function createCloth(positions, triangles, options = {}) {
 
 /**
  * Simulate one sheet. `positions` are world-space rest positions (3 numbers per particle), `triangles` index them.
- * Options: pinned (particle indices that stay put), gravity, wind (m/s), applyFields (see cloth-fields.js), stiffness and bend (0 to 1), stiffnessWeights (one 0 to 1 per particle; a constraint is as stiff as its softer end),
+ * Options: pinned (particle indices that stay put), gravity, wind (m/s), applyFields (see cloth-fields.js), stiffness and bend (0 to 1), bendModel ('distance', the default, or 'dihedral': hold the angle between neighbouring triangles for many soft folds), stiffnessWeights (one 0 to 1 per particle; a constraint is as stiff as its softer end),
  * softBody ({ shape 0 to 1, pressure 0 to 3, bounce 0 to 1 }; pressure needs a closed mesh and holds that multiple of the rest volume; bounce gives back that fraction of the speed a particle hits a collider with, default 0), selfCollision (true or
- * { radius }, at most half the shortest edge; up to 2000 particles), density (kg/m2),
+ * { radius }, at most half the shortest edge; up to 5000 particles), density (kg/m2),
  * damping (1/s), friction (0 to 1), thickness (m), colliders ({ kind: 'ball', center, radius },
  * { kind: 'capsule', start, end, radius } or { kind: 'box', center, axes, halfExtents }), frameCount and framesPerSecond.
  * `moving` follows a body that moves with time, sampled ahead as plain numbers so it can cross to a worker. One entry per
