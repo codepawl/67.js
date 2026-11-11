@@ -23,8 +23,8 @@ const GLB_MAGIC = 0x46546c67;
 const JSON_CHUNK = 0x4e4f534a;
 const BINARY_CHUNK = 0x004e4942;
 const MESHOPT = 'EXT_meshopt_compression';
-const PREVIEW_SKY_WIDTH = 128;
-const PREVIEW_SKY_HEIGHT = 64;
+const PREVIEW_SKY_WIDTH = 256;
+const PREVIEW_SKY_HEIGHT = 128;
 // A 1x1 PNG that stands in for a shared texture's image in every file but the first. The page never decodes it: the later file
 // takes the texture the first file decoded, found by the key in the texture's extras.sharedTexture.
 const STAND_IN_IMAGE = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
