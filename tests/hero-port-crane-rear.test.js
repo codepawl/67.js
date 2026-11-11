@@ -12,6 +12,7 @@ import {
   createIo,
   findCraneCentres,
   findCollapsedHouseTriangles,
+  findLeftoverRailTriangles,
   fixCraneRear,
 } from '../scripts/fix-port-crane-rear.mjs';
 
@@ -125,4 +126,31 @@ test('the committed port world has six machinery houses and no collapsed house',
   const houseNode = document.getRoot().listNodes().find((node) => node.getName() === 'sts_house');
   const craneCentres = houses.map((node) => node.getTranslation()[0]);
   assert.equal(findCollapsedHouseTriangles(houseNode, craneCentres).length, 0, 'no sts_house triangle is left inside a house volume');
+});
+
+test('fixCraneRear removes the tilted yellow slab of the old rail and keeps yellow pieces elsewhere', () => {
+  const document = createCollapsedWorld();
+  const buffer = document.getRoot().listBuffers()[0];
+  const yellow = document.createMaterial('safety_yellow');
+  const slab = [[CRANE_CENTRE - 0.3, 62.5, -50.6], [CRANE_CENTRE - 0.3, 62.6, -56.5], [CRANE_CENTRE + 0.3, 63.3, -56.6]];
+  const girderRail = [[CRANE_CENTRE, 40, -20], [CRANE_CENTRE + 1, 40, -20], [CRANE_CENTRE, 41, -20]];
+  const railMesh = document.createMesh('rail').addPrimitive(createPrimitive(document, buffer, [...slab, ...girderRail], [0, 1, 2, 3, 4, 5], yellow));
+  const railNode = document.createNode('safety_yellow').setMesh(railMesh);
+  document.getRoot().listScenes()[0].addChild(railNode);
+  assert.equal(findLeftoverRailTriangles(railNode, [CRANE_CENTRE])[0].triangles.length, 1);
+
+  fixCraneRear(document);
+  assert.equal(railNode.getMesh().listPrimitives()[0].getIndices().getCount(), 3, 'only the girder rail piece is left');
+  assert.equal(findLeftoverRailTriangles(railNode, [CRANE_CENTRE]).length, 0);
+  assert.equal(fixCraneRear(document).changed, false);
+});
+
+test('the committed port world has no yellow rail piece left inside a house volume', async () => {
+  const io = await createIo();
+  const document = await io.read(DEFAULT_REST_PATH);
+  const houseCentres = document.getRoot().listNodes().filter((node) => node.getName() === HOUSE_NODE_NAME).map((node) => node.getTranslation()[0]);
+  for (const node of document.getRoot().listNodes()) {
+    if (!node.getMesh() || node.getName() === HOUSE_NODE_NAME) continue;
+    assert.deepEqual(findLeftoverRailTriangles(node, houseCentres), [], `${node.getName()} keeps no loose yellow rail piece around a house`);
+  }
 });

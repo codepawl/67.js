@@ -12,7 +12,8 @@
 // mesh (cladding with panel ribs, orange frame bands, a door, an access ladder, a roof rail) to six nodes, one per crane, and an
 // equipment cabinet on top of each A-frame. The new triangles use the materials already in the file, so the world gains no texture.
 // Rebuild the first view afterwards with `node scripts/build-hero-first-view.mjs`.
-// Running it twice is safe: a world that already has the houses is left alone.
+// It also removes the loose yellow rail pieces of the old house (see removeLeftoverRails). Running it twice is safe: a world that already
+// has the houses and no leftovers is left alone.
 import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -328,31 +329,75 @@ function removeTriangles(primitive, triangleNumbers) {
   indices.setArray(new ArrayType(kept));
 }
 
-// Applies the fix to a document read from scene.rest.glb. Returns what it did; `changed` is false when the houses are already there.
+// The yellow rail of the original house survived the decimation as loose pieces in the `safety_yellow` mesh: zero-area slivers and,
+// for each crane, one 0.6 x 6 m slab tilted from the roof edge to 4 m behind the rear wall. Seen from the hero camera it floats above
+// the machinery house, detached from the new roof rail. Triangles whose three vertices all lie in this box around a crane's house go.
+const LEFTOVER_RAIL_SEARCH = { minimumY: 62.2, maximumY: 63.6, minimumZ: -57, maximumZ: -35.3, halfWidth: 6.3 };
+const LEFTOVER_RAIL_MATERIAL = 'safety_yellow';
+
+export function findLeftoverRailTriangles(railNode, craneCentres) {
+  assertNoRotation(railNode);
+  const found = [];
+  for (const primitive of railNode.getMesh().listPrimitives()) {
+    if (primitive.getMaterial()?.getName() !== LEFTOVER_RAIL_MATERIAL) continue;
+    const positions = primitive.getAttribute('POSITION');
+    const indices = primitive.getIndices();
+    const triangles = [];
+    for (let triangle = 0; triangle < indices.getCount() / 3; triangle++) {
+      const vertices = [0, 1, 2].map((corner) => nodeWorldVertex(railNode, positions, indices.getScalar(triangle * 3 + corner)));
+      const insideSomeHouse = craneCentres.some((centre) => vertices.every(([x, y, z]) => Math.abs(x - centre) <= LEFTOVER_RAIL_SEARCH.halfWidth && y >= LEFTOVER_RAIL_SEARCH.minimumY && y <= LEFTOVER_RAIL_SEARCH.maximumY && z >= LEFTOVER_RAIL_SEARCH.minimumZ && z <= LEFTOVER_RAIL_SEARCH.maximumZ));
+      if (insideSomeHouse) triangles.push(triangle);
+    }
+    if (triangles.length > 0) found.push({ primitive, triangles });
+  }
+  return found;
+}
+
+function removeLeftoverRails(document, craneCentres) {
+  let removed = 0;
+  for (const node of document.getRoot().listNodes()) {
+    if (!node.getMesh() || node.getName() === HOUSE_NODE_NAME || node.getName() === APEX_NODE_NAME) continue;
+    for (const { primitive, triangles } of findLeftoverRailTriangles(node, craneCentres)) {
+      removeTriangles(primitive, triangles);
+      removed += triangles.length;
+    }
+  }
+  return removed;
+}
+
+// Applies the fix to a document read from scene.rest.glb. Returns what it did; `changed` is false when nothing was left to fix.
+// The two steps are independent, so a world that already has the houses still loses its leftover rail pieces.
 export function fixCraneRear(document) {
   const nodes = document.getRoot().listNodes();
-  if (nodes.some((node) => node.getName() === HOUSE_NODE_NAME)) return { changed: false, reason: 'already fixed' };
+  const existingHouses = nodes.filter((node) => node.getName() === HOUSE_NODE_NAME);
   const houseNode = nodes.find((node) => node.getName() === 'sts_house' && node.getMesh());
   const paintNode = nodes.find((node) => node.getName() === 'sts_paint' && node.getMesh());
   if (!houseNode || !paintNode) throw new Error('The world has no sts_house or sts_paint mesh: this is not the port rest file.');
-  const craneCentres = findCraneCentres(houseNode);
+  const housesPresent = existingHouses.length > 0;
+  const craneCentres = housesPresent ? existingHouses.map((node) => node.getTranslation()[0]).sort((first, second) => first - second) : findCraneCentres(houseNode);
   if (craneCentres.length === 0) throw new Error('No collapsed crane house found in sts_house; nothing to rebuild.');
-  const collapsed = findCollapsedHouseTriangles(houseNode, craneCentres);
-  removeTriangles(houseNode.getMesh().listPrimitives()[0], collapsed.map(({ triangle }) => triangle));
 
-  const scene = document.getRoot().listScenes()[0];
+  let collapsedCount = 0;
   const apexCentres = [];
-  // One mesh per node, never one shared mesh: the first-view crop cuts a mesh in place by the pose of the node it visits first.
-  for (const centre of craneCentres) {
-    const houseMesh = createMeshFromBuckets(document, HOUSE_NODE_NAME, buildMachineryHouse());
-    scene.addChild(document.createNode(HOUSE_NODE_NAME).setMesh(houseMesh).setTranslation([centre, 0, 0]));
-    if (hasApexBeam(paintNode, centre)) {
-      const apexMesh = createMeshFromBuckets(document, APEX_NODE_NAME, buildApexCabinet());
-      scene.addChild(document.createNode(APEX_NODE_NAME).setMesh(apexMesh).setTranslation([centre, 0, 0]));
-      apexCentres.push(centre);
+  if (!housesPresent) {
+    const collapsed = findCollapsedHouseTriangles(houseNode, craneCentres);
+    collapsedCount = collapsed.length;
+    removeTriangles(houseNode.getMesh().listPrimitives()[0], collapsed.map(({ triangle }) => triangle));
+    const scene = document.getRoot().listScenes()[0];
+    // One mesh per node, never one shared mesh: the first-view crop cuts a mesh in place by the pose of the node it visits first.
+    for (const centre of craneCentres) {
+      const houseMesh = createMeshFromBuckets(document, HOUSE_NODE_NAME, buildMachineryHouse());
+      scene.addChild(document.createNode(HOUSE_NODE_NAME).setMesh(houseMesh).setTranslation([centre, 0, 0]));
+      if (hasApexBeam(paintNode, centre)) {
+        const apexMesh = createMeshFromBuckets(document, APEX_NODE_NAME, buildApexCabinet());
+        scene.addChild(document.createNode(APEX_NODE_NAME).setMesh(apexMesh).setTranslation([centre, 0, 0]));
+        apexCentres.push(centre);
+      }
     }
   }
-  return { changed: true, craneCentres, apexCentres, removedTriangles: collapsed.length };
+  const removedRailTriangles = removeLeftoverRails(document, craneCentres);
+  if (housesPresent && removedRailTriangles === 0) return { changed: false, reason: 'already fixed' };
+  return { changed: true, craneCentres, apexCentres, removedTriangles: collapsedCount, removedRailTriangles };
 }
 
 export async function createIo() {
