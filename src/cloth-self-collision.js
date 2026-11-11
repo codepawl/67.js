@@ -2,7 +2,7 @@
 // apart, except two joined by an edge, which the stretch springs already hold. A spatial hash keeps the pass near linear;
 // particles and cells are visited in index order, so the result is the same on every run.
 
-export const SELF_COLLISION_LIMITS = Object.freeze({ maxParticles: 2000, workPerParticle: 10 });
+export const SELF_COLLISION_LIMITS = Object.freeze({ maxParticles: 5000, workPerParticle: 2, pairsPerParticle: 64 });
 
 function cellKey(x, y, z) {
   return (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) | 0;
@@ -30,10 +30,30 @@ export function maxSelfCollisionRadius(constraints) {
 
 export function createSelfCollision(radius, particleCount, joined) {
   const cellSize = radius * 2;
+  const reach = radius * 2;
   const cells = new Map();
   const cellOf = new Int32Array(particleCount * 3);
+  // The cells are fixed for a substep, so the pairs that can touch are listed once and the solver iterations only test their distance.
+  const pairCapacity = particleCount * SELF_COLLISION_LIMITS.pairsPerParticle;
+  let pairs = new Int32Array(Math.min(pairCapacity, particleCount * 8) * 2);
+  let pairCount = 0;
+  function addPair(first, second) {
+    if (pairCount >= pairCapacity) {
+      throw new RangeError(
+        `Cloth selfCollision found more than ${pairCapacity} particle pairs within reach (${SELF_COLLISION_LIMITS.pairsPerParticle} a particle); the sheet is piled too densely. Use a smaller selfCollision radius or a coarser grid.`,
+      );
+    }
+    if ((pairCount + 1) * 2 > pairs.length) {
+      const grown = new Int32Array(Math.min(pairCapacity, pairCount * 2) * 2);
+      grown.set(pairs);
+      pairs = grown;
+    }
+    pairs[pairCount * 2] = first;
+    pairs[pairCount * 2 + 1] = second;
+    pairCount++;
+  }
   return {
-    /** Sort the particles into cells; call once per substep. */
+    /** Sort the particles into cells and list the candidate pairs; call once per substep. */
     build(positions) {
       cells.clear();
       for (let particle = 0; particle < particleCount; particle++) {
@@ -48,10 +68,7 @@ export function createSelfCollision(radius, particleCount, joined) {
         if (members) members.push(particle);
         else cells.set(key, [particle]);
       }
-    },
-    /** Push apart every close pair that is not joined by an edge. */
-    solve(positions, inverseMasses) {
-      const reach = radius * 2;
+      pairCount = 0;
       for (let particle = 0; particle < particleCount; particle++) {
         const cx = cellOf[particle * 3];
         const cy = cellOf[particle * 3 + 1];
@@ -64,11 +81,17 @@ export function createSelfCollision(radius, particleCount, joined) {
               for (const other of members) {
                 if (other <= particle) continue;
                 if (joined.has(particle * particleCount + other)) continue;
-                separate(positions, inverseMasses, particle, other, reach);
+                addPair(particle, other);
               }
             }
           }
         }
+      }
+    },
+    /** Push apart every listed pair that is closer than the contact distance. */
+    solve(positions, inverseMasses) {
+      for (let pair = 0; pair < pairCount; pair++) {
+        separate(positions, inverseMasses, pairs[pair * 2], pairs[pair * 2 + 1], reach);
       }
     },
   };
