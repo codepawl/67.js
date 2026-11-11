@@ -518,35 +518,47 @@ fn int_ray_offset_origin(point: ShadingPoint, wi: vec3<f32>) -> vec3<f32> {
   return point.position + point.geometric_normal * (sign_ng * scale);
 }
 
-fn int_closure_albedo(closure: Closure, material: MaterialRecord) -> vec3<f32> {
-  if (closure.lobe_count == 0u) {
-    return clamp(material.base_color, vec3<f32>(0.0), vec3<f32>(1.0));
+fn int_apply_filter_glossy(closure: ptr<function, Closure>, inv_filter_glossy: f32, min_ray_pdf: f32) {
+  if (inv_filter_glossy >= 1.0e29) {
+    return;
   }
-  var sum_weight = vec3<f32>(0.0);
-  let count = min(closure.lobe_count, MAX_CLOSURE_LOBES);
+  let blur_pdf = inv_filter_glossy * min_ray_pdf;
+  if (blur_pdf >= 1.0) {
+    return;
+  }
+  let blur_roughness = sqrt(max(0.0, 1.0 - blur_pdf)) * 0.5;
+  let count = min((*closure).lobe_count, MAX_CLOSURE_LOBES);
   for (var i = 0u; i < count; i += 1u) {
-    if (closure.lobes[i].lobe_type != LOBE_TRANSPARENT) {
-      sum_weight += max(closure.lobes[i].weight, vec3<f32>(0.0));
+    let lobe_type = (*closure).lobes[i].lobe_type;
+    if (lobe_type == LOBE_GLOSSY_GGX || lobe_type == LOBE_GLASS_GGX || lobe_type == LOBE_COAT_GGX) {
+      (*closure).lobes[i].alpha_x = max(blur_roughness, (*closure).lobes[i].alpha_x);
+      (*closure).lobes[i].alpha_y = max(blur_roughness, (*closure).lobes[i].alpha_y);
     }
   }
-  return clamp(sum_weight, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
-fn int_is_singular_bsdf_sample(closure: Closure, sample: ClosureSample, check_eval: ClosureEval) -> bool {
-  if (check_eval.pdf <= 0.0) {
-    return true;
-  }
+fn int_is_singular_bsdf_sample(closure: Closure, point: ShadingPoint, sample: ClosureSample) -> bool {
   if (sample.sampled_lobe_type == LOBE_DIFFUSE || sample.sampled_lobe_type == LOBE_SHEEN) {
     return false;
   }
+  let wi_below = dot(point.geometric_normal, sample.wi) < 0.0;
   let count = min(closure.lobe_count, MAX_CLOSURE_LOBES);
   for (var i = 0u; i < count; i += 1u) {
     let lobe = closure.lobes[i];
-    if (lobe.lobe_type == sample.sampled_lobe_type) {
-      let max_alpha = max(lobe.alpha_x, lobe.alpha_y);
-      if (max_alpha <= 1.0e-3 && sample.pdf <= 1.0 && abs(check_eval.pdf - sample.pdf) > 1.0e-4) {
-        return true;
+    if (lobe.lobe_type != sample.sampled_lobe_type) {
+      continue;
+    }
+    if (lobe.lobe_type == LOBE_GLOSSY_GGX) {
+      let is_tw_trans = (lobe.flags & LOBE_FLAG_THIN_WALLED) != 0u;
+      if (is_tw_trans != wi_below) {
+        continue;
       }
+    }
+    if (bsdf_mf_is_singular(lobe.alpha_x, lobe.alpha_y)) {
+      return true;
+    }
+    if (lobe.lobe_type == LOBE_GLASS_GGX && wi_below && abs(lobe.ior - 1.0) < 1.0e-4) {
+      return true;
     }
   }
   return false;
@@ -682,6 +694,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let sample_count = max(kernel_params.samples_per_dispatch, 1u);
   let exposure = select(1.0, kernel_params.film_exposure, kernel_params.film_exposure > 0.0);
   let has_world_volume = (kernel_params.kernel_flags & KERNEL_FLAG_HAS_VOLUME) != 0u && kernel_params.volume_density > 0.0;
+  let filter_glossy_enabled = kernel_params.filter_glossy > 0.0;
+  let inv_filter_glossy = select(1.0e30, 1.0 / max(kernel_params.filter_glossy, 1.0e-8), filter_glossy_enabled);
 
   var batch_radiance = vec3<f32>(0.0);
   var batch_depth = 0.0;
@@ -716,6 +730,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var is_transparent_bg_ray = (kernel_params.kernel_flags & KERNEL_FLAG_TRANSPARENT_BACKGROUND) != 0u;
     var mis_skip = true;
     var prev_bsdf_pdf = 0.0;
+    var min_ray_pdf = 1.0e30;
     var prev_recv_lo = 0xFFFFFFFFu;
     var prev_recv_hi = 0xFFFFFFFFu;
     var terminate_on_hit = false;
@@ -830,6 +845,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         is_transparent_bg_ray = false;
         mis_skip = false;
         prev_bsdf_pdf = phase_pdf;
+        min_ray_pdf = min(phase_pdf, min_ray_pdf);
         prev_recv_lo = 0xFFFFFFFFu;
         prev_recv_hi = 0xFFFFFFFFu;
         continue;
@@ -861,15 +877,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
       let wo = -ray_dir;
       let point = int_build_shading_point(surface_hit, wo);
-      let closure = closure_build(point, wo);
+      var closure = closure_build(point, wo);
       let material = materials[point.material_index];
       let is_pure_transparent = closure.lobe_count == 1u && closure.lobes[0].lobe_type == LOBE_TRANSPARENT;
 
       if (!recorded_features && !is_pure_transparent) {
         first_depth = surface_hit.t;
-        first_albedo = int_closure_albedo(closure, material);
-        first_normal = point.shading_normal;
+        first_albedo = closure_eval_albedo(closure, wo);
+        first_normal = closure_eval_normal(closure);
         recorded_features = true;
+      }
+
+      if (!is_pure_transparent) {
+        int_apply_filter_glossy(&closure, inv_filter_glossy, min_ray_pdf);
       }
 
       if (closure.emission.x > 0.0 || closure.emission.y > 0.0 || closure.emission.z > 0.0) {
@@ -909,25 +929,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         break;
       }
 
-      if (kernel_params.light_count > 0u) {
-        let light_sample = lgt_sample_analytic_light(
-          point.position,
-          point.light_group_mask_lo,
-          point.light_group_mask_hi,
-          smp_next_1d(&rng),
-          smp_next_2d(&rng),
-        );
-        int_accumulate_direct_sample(light_sample, closure, point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
-      }
-
-      if (kernel_params.emissive_triangle_count > 0u) {
-        let tri_sample = lgt_sample_emissive_triangle(point, smp_next_1d(&rng), smp_next_2d(&rng));
-        int_accumulate_direct_sample(tri_sample, closure, point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
-      }
-
-      if (kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
-        let env_sample = lgt_sample_environment(smp_next_4d(&rng));
-        int_accumulate_direct_sample(env_sample, closure, point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
+      for (var direct_source = 0u; direct_source < 3u; direct_source += 1u) {
+        var direct_sample: LgtDirectSample;
+        direct_sample.valid = 0u;
+        direct_sample.pdf = 0.0;
+        if (direct_source == 0u) {
+          if (kernel_params.light_count > 0u) {
+            direct_sample = lgt_sample_analytic_light(
+              point.position,
+              point.light_group_mask_lo,
+              point.light_group_mask_hi,
+              smp_next_1d(&rng),
+              smp_next_2d(&rng),
+            );
+          }
+        } else if (direct_source == 1u) {
+          if (kernel_params.emissive_triangle_count > 0u) {
+            direct_sample = lgt_sample_emissive_triangle(point, smp_next_1d(&rng), smp_next_2d(&rng));
+          }
+        } else {
+          if (kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
+            direct_sample = lgt_sample_environment(smp_next_4d(&rng));
+          }
+        }
+        int_accumulate_direct_sample(direct_sample, closure, point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
       }
 
       let bsdf_sample = closure_sample(closure, wo, smp_next_3d(&rng));
@@ -947,13 +972,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         continue;
       }
 
-      let check_eval = closure_eval(closure, bsdf_sample.wi, wo);
-      let is_singular = int_is_singular_bsdf_sample(closure, bsdf_sample, check_eval);
+      let is_singular = int_is_singular_bsdf_sample(closure, point, bsdf_sample);
       throughput *= bsdf_sample.eval / bsdf_sample.pdf;
 
       bounce += 1u;
       let cos_ng_wi = dot(point.geometric_normal, bsdf_sample.wi);
-      let is_transmission = bsdf_sample.sampled_lobe_type == LOBE_GLASS_GGX && cos_ng_wi < 0.0;
+      let is_transmission = (bsdf_sample.sampled_lobe_type == LOBE_GLASS_GGX || bsdf_sample.sampled_lobe_type == LOBE_GLOSSY_GGX) && cos_ng_wi < 0.0;
 
       if (is_transmission) {
         transmission_bounces += 1u;
@@ -1008,7 +1032,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       is_camera_ray = false;
       is_transparent_bg_ray = false;
       mis_skip = is_singular;
-      prev_bsdf_pdf = select(check_eval.pdf, bsdf_sample.pdf, is_singular);
+      prev_bsdf_pdf = bsdf_sample.pdf;
+      min_ray_pdf = min(bsdf_sample.pdf, min_ray_pdf);
       prev_recv_lo = point.light_group_mask_lo;
       prev_recv_hi = point.light_group_mask_hi;
     }
