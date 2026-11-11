@@ -218,6 +218,29 @@ test('a user pass binds the object ID pass for its parts and unbinds it after th
   assert.throws(() => renderer.resolveFrame({ time: 0 }), /Mask object "missing" is not a part in the frame/);
 });
 
+test('a user pass slot is the position in its objects list, also when a name matches several parts', () => {
+  const calls = [];
+  const context = recordingContext(calls);
+  const renderer = {
+    context, canvas: { width: 16, height: 9 }, postStages: [], depthTexture: 'depth', whiteTexture: 'white',
+    inverseViewProjection: mat4.create(), resolveFrame() {}, benchmark: false,
+    passSupport: { texture: 'ids', objectNames: () => ['hero', 'hero', 'floor'] },
+  };
+  installUserPasses(renderer);
+  renderer.userPasses.set([{ name: 'tint', fragment: PASS_FRAGMENT, objects: ['hero', 'floor'] }]);
+  renderer.resolveFrame({ time: 0 });
+  const [identifiers, slots] = calls.filter(call => call[0] === 'uniform1iv').map(call => Array.from(call[2]));
+  assert.deepEqual(identifiers.slice(0, 4), [1, 2, 3, 0], 'both hero parts and the floor are uploaded');
+  assert.deepEqual(slots.slice(0, 3), [0, 0, 1], 'both hero parts report slot 0 and the floor reports slot 1');
+  // The shader walks the uploaded IDs and returns the matching slot entry; the same walk in JavaScript.
+  const slotOf = identifier => {
+    const index = identifiers.slice(0, 3).indexOf(identifier);
+    return index === -1 ? -1 : slots[index];
+  };
+  assert.deepEqual([1, 2, 3, 4].map(slotOf), [0, 0, 1, -1]);
+  assert.match(buildPassFragment(normalizeUserPasses([{ name: 'tint', fragment: PASS_FRAGMENT, objects: ['hero'] }])[0]).source, /return u67_objectSlots\[slot\]/);
+});
+
 test('the shaders keep their fixed sample patterns and read no history', () => {
   for (const fragment of [glareFragment, lensDistortionFragment, colorBalanceFragment, stylizeFragment, compositeFragment]) {
     assert.match(fragment, /^#version 300 es/);

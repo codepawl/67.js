@@ -2,7 +2,7 @@ import { compileProgram, fullscreenVertex } from './gl-program.js';
 import {
   SNIPPET_LIMITS, requireKnownFields, validateShaderSnippet, validateSnippetUniforms, snippetUniformDeclarations, mapShaderInfoLog,
 } from './shader-snippet-validator.js';
-import { MAXIMUM_MASK_OBJECTS, resolveObjectNames, objectIdentifiers, unbindMask } from './post-mask.js';
+import { MAXIMUM_MASK_OBJECTS, resolveObjectNames, objectIdentifierSlots, unbindMask } from './post-mask.js';
 
 // User post-process passes: fragment snippets that run on the finished frame, after the stock effects, the grade and the
 // view transform, as the last step before the canvas. The core renderer carries nothing for them. installUserPasses wraps
@@ -78,6 +78,7 @@ uniform float time;
 uniform sampler2D sceneObjectIds;
 uniform int u67_objectCount;
 uniform int u67_objectIds[${MAXIMUM_MASK_OBJECTS}];
+uniform int u67_objectSlots[${MAXIMUM_MASK_OBJECTS}];
 out vec4 u67_output;
 float depthAt(vec2 uv) { return texture(sceneDepth, uv).r; }
 vec3 worldPointAt(vec2 uv) {
@@ -91,7 +92,7 @@ int objectSlotAt(vec2 uv) {
   int identifier = int(idBytes.r + idBytes.g * 256.0 + idBytes.b * 65536.0);
   for (int slot = 0; slot < ${MAXIMUM_MASK_OBJECTS}; slot++) {
     if (slot >= u67_objectCount) break;
-    if (u67_objectIds[slot] == identifier) return slot;
+    if (u67_objectIds[slot] == identifier) return u67_objectSlots[slot];
   }
   return -1;
 }
@@ -218,7 +219,7 @@ export function installUserPasses(renderer) {
         throw compilationError(pass, error, built);
       }
       if (entry) releaseEntry(context, entry);
-      const names = ['sceneColor', 'sceneDepth', 'sceneObjectIds', 'u67_objectCount', 'u67_objectIds', 'u67_inverseViewProjection', 'resolution', 'time', ...Object.keys(pass.uniforms)];
+      const names = ['sceneColor', 'sceneDepth', 'sceneObjectIds', 'u67_objectCount', 'u67_objectIds', 'u67_objectSlots', 'u67_inverseViewProjection', 'resolution', 'time', ...Object.keys(pass.uniforms)];
       state.entries[index] = {
         pass, source: built.source, program, target: null,
         locations: Object.fromEntries(names.map(name => [name, context.getUniformLocation(program, name)])),
@@ -263,12 +264,15 @@ export function installUserPasses(renderer) {
     context.uniform2f(locations.resolution, width, height);
     context.uniform1f(locations.time, frame.time ?? 0);
     for (const [name, uniform] of Object.entries(pass.uniforms)) setUniformValue(context, locations[name], uniform);
-    const identifiers = pass.objects ? objectIdentifiers(renderer, pass.objects) : [];
+    const { identifiers, slots } = pass.objects ? objectIdentifierSlots(renderer, pass.objects) : { identifiers: [], slots: [] };
     context.uniform1i(locations.u67_objectCount, identifiers.length);
     if (identifiers.length > 0) {
       const padded = new Int32Array(MAXIMUM_MASK_OBJECTS);
       padded.set(identifiers);
       context.uniform1iv(locations.u67_objectIds, padded);
+      const paddedSlots = new Int32Array(MAXIMUM_MASK_OBJECTS);
+      paddedSlots.set(slots);
+      context.uniform1iv(locations.u67_objectSlots, paddedSlots);
       context.activeTexture(context.TEXTURE2);
       context.bindTexture(context.TEXTURE_2D, renderer.passSupport.texture);
       context.uniform1i(locations.sceneObjectIds, 2);
