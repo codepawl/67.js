@@ -380,6 +380,8 @@ export function particleStateAt(launches, index, forces, scaleMode, time, target
   if (age < 0 || age >= lifetime) {
     target.scale = 0;
     target.motionAge = 0;
+    // A spun particle is still rotated while it is hidden, so the angle must be a number, not whatever the last call left.
+    target.angle = launches.hasSpin ? launches.spinStart[index] : 0;
     for (let component = 0; component < 3; component++) target.position[component] = launches.origin[index * 3 + component];
     return target;
   }

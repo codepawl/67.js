@@ -6,7 +6,7 @@ import { groundBounceEnvironment } from './ground-bounce.js';
 import { createRuntime } from './runtime.js';
 import { createInput, gamepadSource, keyboardSource } from './input.js';
 import { replaySource, touchSource } from './input-sources.js';
-import { createCharacterController, createFirstPersonCamera, createFollowCamera, createTopDownCamera } from './player.js';
+import { createCharacterController, createChaseCamera, createFirstPersonCamera, createFollowCamera, createTopDownCamera, createVehicleController } from './player.js';
 import { createGameRules } from './game-rules.js';
 
 // Plays the `game` section of a scene recipe in a page: the scene, the input preset, the character controller, the camera rig
@@ -50,6 +50,7 @@ function cameraRigFor(kind, controller, input) {
   const rigOptions = { subject: controller.state, input };
   if (kind === 'first-person') return createFirstPersonCamera(rigOptions);
   if (kind === 'top-down') return createTopDownCamera(rigOptions);
+  if (kind === 'chase') return createChaseCamera(rigOptions);
   return createFollowCamera(rigOptions);
 }
 
@@ -133,17 +134,20 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
   const start = nodeTranslation(recipe.nodes, game.player.node);
   const body = { position: [0, 0, 0], rotationY: 0 };
   let rig = null;
-  const controller = createCharacterController({
-    input,
-    position: [start[0], start[1] - footOffset, start[2]],
-    ground: game.ground,
-    walkSpeed: game.player.walkSpeed,
-    runSpeed: game.player.runSpeed,
-    jumpSpeed: game.player.jumpSpeed,
-    faceCamera: game.camera === 'first-person',
-    cameraYaw: () => rig?.yaw ?? 0,
-    node: body,
-  });
+  const startPosition = [start[0], start[1] - footOffset, start[2]];
+  const controller = game.player.controller === 'vehicle'
+    ? createVehicleController({ input, position: startPosition, ground: game.ground, maximumSpeed: game.player.maximumSpeed, node: body })
+    : createCharacterController({
+      input,
+      position: startPosition,
+      ground: game.ground,
+      walkSpeed: game.player.walkSpeed,
+      runSpeed: game.player.runSpeed,
+      jumpSpeed: game.player.jumpSpeed,
+      faceCamera: game.camera === 'first-person',
+      cameraYaw: () => rig?.yaw ?? 0,
+      node: body,
+    });
   rig = cameraRigFor(game.camera, controller, input);
 
   const nodeIds = new Set(recipe.nodes.map(node => node.id));
