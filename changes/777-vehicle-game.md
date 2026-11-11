@@ -1,0 +1,1 @@
+- `set-game` can drive the player as an arcade car (`controller: "vehicle"`, `maximumSpeed`) with a `chase` camera, and the web smoke plays a driving course next to the creature run (#777)
