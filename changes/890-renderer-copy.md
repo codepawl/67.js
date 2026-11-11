@@ -1,1 +1,2 @@
 - The README, home page, `llms.txt`, package keywords and plugin text name every renderer backend (Glaze on WebGL2, Cook on CPU, WebGL2, WebGPU and Vulkan) and give measured numbers (#890)
+- The README and home page show a measured tier table (lit-interior, 960x540) from `bench/tiers`, with the realtime-high tier marked as planned (#890)
