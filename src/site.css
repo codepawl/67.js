@@ -397,7 +397,7 @@ body.site > main > section { scroll-margin-top: 96px; }
 .site .tier-card:nth-child(2) { --node-fill: #ff6a2b70; }
 .site .tier-card:nth-child(4) { --node-fill: var(--rail-accent); }
 .site .tier-card:nth-child(4)::before { box-shadow: 0 0 0 4px #ff6a2b33, 0 0 16px #ff6a2b99; }
-.site .tier-card.is-planned::before { border: 2px dashed #ff6a2b; background: var(--window); opacity: 1; }
+.site .tier-card.is-planned::before { border: 0; background: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ccircle cx=%278%27 cy=%278%27 r=%276.5%27 fill=%27none%27 stroke=%27%23ff6a2b%27 stroke-width=%272.2%27 stroke-dasharray=%273.4 2.4%27/%3E%3C/svg%3E") center / 100% no-repeat, var(--window); opacity: 1; }
 @keyframes tier-glow { 0% { transform: translateX(-100%); } 70%, 100% { transform: translateX(560%); } }
 @keyframes tier-glow-down { 0% { transform: translateY(-100%); } 70%, 100% { transform: translateY(560%); } }
 @media (prefers-reduced-motion: reduce) {
