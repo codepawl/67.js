@@ -299,3 +299,17 @@ test('parts with non-finite bounds are skipped, and the finite parts report as b
     assert.ok(withBroken.overlaps.some(overlap => overlap.smaller.name === 'marking'));
   }
 });
+
+// #839: bounds can be finite while the shared box of two parts overflows. A flat touching pair 1e308 long gave a face area of
+// 0 * Infinity, so the priority bin index was NaN and the bin lookup threw "reading 'push'".
+function overflowingStrip(name, firstZ) {
+  const reach = 1e308;
+  const positions = new Float64Array([-reach, 0, firstZ, reach, 0, firstZ, reach, 0, firstZ + 1, -reach, 0, firstZ + 1]);
+  const matrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  return { name, geometry: { positions, indices: new Uint32Array([0, 1, 2, 0, 2, 3]) }, matrix, material: {} };
+}
+
+test('a touching pair whose shared box overflows is searched without throwing', () => {
+  const strips = [overflowingStrip('stripOne', 0), overflowingStrip('stripTwo', 1)];
+  assert.doesNotThrow(() => findCoplanarOverlaps(strips));
+});
