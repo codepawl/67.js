@@ -377,6 +377,19 @@ fn closure_thin_glass_fresnel(
   return BsdfGlassFresnel(clamp(refl, vec3<f32>(0.0), vec3<f32>(1.0)), clamp(trans, vec3<f32>(0.0), vec3<f32>(1.0)), cos_t);
 }
 
+// Without pruning the lobe goes straight into the closure; with pruning it waits in the scratch array.
+// lobe_count doubles as the candidate count until closure_build finishes.
+fn closure_add_candidate(closure: ptr<function, Closure>, scratch: ptr<function, array<Lobe, CLOSURE_SCRATCH_LOBES>>, lobe: Lobe) {
+  let slot = (*closure).lobe_count;
+  if (CLOSURE_PRUNES_CANDIDATES) {
+    (*scratch)[slot] = lobe;
+  } else {
+    (*closure).lobes[slot] = lobe;
+    (*closure).total_sample_weight = (*closure).total_sample_weight + lobe.sample_weight;
+  }
+  (*closure).lobe_count = slot + 1u;
+}
+
 fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
   var closure: Closure;
   for (var lobe_slot: u32 = 0u; lobe_slot < MAX_CLOSURE_LOBES; lobe_slot = lobe_slot + 1u) {
@@ -511,15 +524,13 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
   let preserve_energy = (mat.flags & MATERIAL_FLAG_MULTISCATTER_GGX) != 0u;
   let thin_walled = (mat.flags & MATERIAL_FLAG_THIN_WALLED) != 0u;
 
-  var candidates: array<Lobe, MAX_CLOSURE_CANDIDATES>;
-  var cand_count: u32 = 0u;
+  var candidates: array<Lobe, CLOSURE_SCRATCH_LOBES>;
   var layer_weight = vec3<f32>(1.0);
 
   if (SCENE_HAS_TRANSPARENT && opacity < 1.0) {
     let trans_lobe = closure_transparent_setup_lobe(shading_n, vec3<f32>(1.0 - opacity));
     if (trans_lobe.sample_weight > 0.0) {
-      candidates[cand_count] = trans_lobe;
-      cand_count = cand_count + 1u;
+      closure_add_candidate(&closure, &candidates, trans_lobe);
     }
     layer_weight = vec3<f32>(opacity);
   }
@@ -529,8 +540,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     let sheen_w = sheen_weight * sheen_tint * layer_weight;
     let sheen_setup = closure_sheen_setup_lobe(sheen_n, wo_dir, sheen_w, sheen_roughness);
     if (sheen_setup.valid) {
-      candidates[cand_count] = sheen_setup.lobe;
-      cand_count = cand_count + 1u;
+      closure_add_candidate(&closure, &candidates, sheen_setup.lobe);
       layer_weight = closure_layering_weight(sheen_setup.layer_albedo, layer_weight);
     }
   }
@@ -548,8 +558,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
       preserve_energy,
     );
     if (coat_setup.lobe.sample_weight > 0.0) {
-      candidates[cand_count] = coat_setup.lobe;
-      cand_count = cand_count + 1u;
+      closure_add_candidate(&closure, &candidates, coat_setup.lobe);
     }
     layer_weight = closure_layering_weight(coat_setup.layer_albedo, layer_weight);
   }
@@ -599,8 +608,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
       preserve_energy,
     );
     if (metal_lobe.sample_weight > 0.0) {
-      candidates[cand_count] = metal_lobe;
-      cand_count = cand_count + 1u;
+      closure_add_candidate(&closure, &candidates, metal_lobe);
     }
     layer_weight = layer_weight * (1.0 - metallic);
   }
@@ -628,8 +636,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
         refl_lobe.diffuse_roughness = pres.w;
       }
       if (refl_lobe.sample_weight > 0.0) {
-        candidates[cand_count] = refl_lobe;
-        cand_count = cand_count + 1u;
+        closure_add_candidate(&closure, &candidates, refl_lobe);
       }
 
       let trans_alpha = closure_thin_glass_transmission_alpha(base_alpha, ior);
@@ -649,8 +656,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
         thin_trans_lobe.diffuse_roughness = pres_t.w;
       }
       if (thin_trans_lobe.sample_weight > 0.0) {
-        candidates[cand_count] = thin_trans_lobe;
-        cand_count = cand_count + 1u;
+        closure_add_candidate(&closure, &candidates, thin_trans_lobe);
       }
     } else {
       let glass_lobe = bsdf_glass_setup_lobe(
@@ -669,8 +675,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
         preserve_energy,
       );
       if (glass_lobe.sample_weight > 0.0) {
-        candidates[cand_count] = glass_lobe;
-        cand_count = cand_count + 1u;
+        closure_add_candidate(&closure, &candidates, glass_lobe);
       }
       if (mat.absorption_distance > 0.0) {
         let clamped_abs = clamp(mat.absorption_color, vec3<f32>(1e-6), vec3<f32>(1.0));
@@ -706,8 +711,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
       preserve_energy,
     );
     if (spec_setup.lobe.sample_weight > 0.0) {
-      candidates[cand_count] = spec_setup.lobe;
-      cand_count = cand_count + 1u;
+      closure_add_candidate(&closure, &candidates, spec_setup.lobe);
     }
     layer_weight = closure_layering_weight(spec_setup.layer_albedo, layer_weight);
   }
@@ -722,40 +726,43 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
       mat.diffuse_roughness,
     );
     if (diff_lobe.sample_weight > 0.0) {
-      candidates[cand_count] = diff_lobe;
-      cand_count = cand_count + 1u;
+      closure_add_candidate(&closure, &candidates, diff_lobe);
     }
   }
 
-  if (MAX_CLOSURE_CANDIDATES <= MAX_CLOSURE_LOBES || cand_count <= MAX_CLOSURE_LOBES) {
-    for (var i: u32 = 0u; i < cand_count; i = i + 1u) {
-      closure.lobes[i] = candidates[i];
-      closure.total_sample_weight = closure.total_sample_weight + candidates[i].sample_weight;
-    }
-    closure.lobe_count = cand_count;
-  } else {
-    var used_mask: u32 = 0u;
-    var out_idx: u32 = 0u;
-    if (candidates[0].lobe_type == LOBE_TRANSPARENT) {
-      closure.lobes[0] = candidates[0];
-      closure.total_sample_weight = closure.total_sample_weight + candidates[0].sample_weight;
-      used_mask = 1u;
-      out_idx = 1u;
-    }
-    for (; out_idx < MAX_CLOSURE_LOBES; out_idx = out_idx + 1u) {
-      var best_j: u32 = 0u;
-      var best_w: f32 = -1.0;
-      for (var j: u32 = 0u; j < cand_count; j = j + 1u) {
-        if (((used_mask >> j) & 1u) == 0u && candidates[j].sample_weight > best_w) {
-          best_w = candidates[j].sample_weight;
-          best_j = j;
-        }
+  if (CLOSURE_PRUNES_CANDIDATES) {
+    let cand_count = closure.lobe_count;
+    closure.lobe_count = 0u;
+    if (cand_count <= MAX_CLOSURE_LOBES) {
+      for (var i: u32 = 0u; i < cand_count; i = i + 1u) {
+        closure.lobes[i] = candidates[i];
+        closure.total_sample_weight = closure.total_sample_weight + candidates[i].sample_weight;
       }
-      used_mask = used_mask | (1u << best_j);
-      closure.lobes[out_idx] = candidates[best_j];
-      closure.total_sample_weight = closure.total_sample_weight + candidates[best_j].sample_weight;
+      closure.lobe_count = cand_count;
+    } else {
+      var used_mask: u32 = 0u;
+      var out_idx: u32 = 0u;
+      if (candidates[0].lobe_type == LOBE_TRANSPARENT) {
+        closure.lobes[0] = candidates[0];
+        closure.total_sample_weight = closure.total_sample_weight + candidates[0].sample_weight;
+        used_mask = 1u;
+        out_idx = 1u;
+      }
+      for (; out_idx < MAX_CLOSURE_LOBES; out_idx = out_idx + 1u) {
+        var best_j: u32 = 0u;
+        var best_w: f32 = -1.0;
+        for (var j: u32 = 0u; j < cand_count; j = j + 1u) {
+          if (((used_mask >> j) & 1u) == 0u && candidates[j].sample_weight > best_w) {
+            best_w = candidates[j].sample_weight;
+            best_j = j;
+          }
+        }
+        used_mask = used_mask | (1u << best_j);
+        closure.lobes[out_idx] = candidates[best_j];
+        closure.total_sample_weight = closure.total_sample_weight + candidates[best_j].sample_weight;
+      }
+      closure.lobe_count = MAX_CLOSURE_LOBES;
     }
-    closure.lobe_count = MAX_CLOSURE_LOBES;
   }
 
   return closure;

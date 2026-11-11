@@ -91,6 +91,8 @@ const ALPHA_MODE_BLEND: u32 = 2u;
 // Closure lobe capacity and `Lobe.lobe_type` discriminants.
 const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES
 const MAX_CLOSURE_CANDIDATES: u32 = 7u; // SPECIALIZE_CANDIDATES
+const CLOSURE_PRUNES_CANDIDATES: bool = MAX_CLOSURE_CANDIDATES > MAX_CLOSURE_LOBES;
+const CLOSURE_SCRATCH_LOBES: u32 = select(1u, MAX_CLOSURE_CANDIDATES, CLOSURE_PRUNES_CANDIDATES);
 
 // Scene feature flags. The host rewrites `true` to `false` for features the packed scene never uses,
 // so the guarded code is dead in that pipeline. `true` is the safe default.
