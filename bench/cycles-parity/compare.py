@@ -13,6 +13,34 @@ REL_MSE_EPSILON = 1e-2
 TILE_GRID_SIZE = 8
 TILE_ELIGIBLE_MEAN_THRESHOLD = 0.01
 TILE_RATIO_TOLERANCE = 0.05
+CHANNEL_MEAN_TOLERANCE = 0.02
+FLIP_NOISE_MARGIN = 0.02
+DISPLAY_GAMMA = 2.2
+
+
+def tone_map_like_67js(linear_rgb):
+    positive_color = numpy.maximum(linear_rgb, 0.0)
+    numerator = positive_color * (2.51 * positive_color + 0.03)
+    denominator = positive_color * (2.43 * positive_color + 0.59) + 0.14
+    mapped = numpy.clip(numerator / denominator, 0.0, 1.0)
+    return (mapped ** (1.0 / DISPLAY_GAMMA)).astype(numpy.float32)
+
+
+def compute_flip_scores(reference_rgb, candidate_rgb):
+    try:
+        import flip_evaluator
+    except ImportError as error:
+        raise RuntimeError("flip_evaluator is required for FLIP scoring. Run via 'uv run --no-project --with flip-evaluator ...' or pass --no-flip.") from error
+    reference_ldr = tone_map_like_67js(reference_rgb)
+    candidate_ldr = tone_map_like_67js(candidate_rgb)
+    _, mean_ldr, _ = flip_evaluator.evaluate(reference_ldr, candidate_ldr, "LDR", inputsRGB=True)
+    reference_hdr = numpy.maximum(reference_rgb, 0.0).astype(numpy.float32)
+    candidate_hdr = numpy.maximum(candidate_rgb, 0.0).astype(numpy.float32)
+    _, mean_hdr, _ = flip_evaluator.evaluate(reference_hdr, candidate_hdr, "HDR")
+    return {
+        "flipLdr": float(mean_ldr),
+        "flipHdr": float(mean_hdr),
+    }
 
 
 def load_linear_rgb_image(image_path):
@@ -74,17 +102,21 @@ def compute_tile_grid_ratios(reference_rgb, candidate_rgb):
                     "row": row_index,
                     "column": column_index,
                     "ratio": round(ratio, 4),
+                    "ratioExact": ratio,
                     "absDeviation": abs(ratio - 1.0),
                     "referenceMean": round(ref_mean, 5),
                     "candidateMean": round(cand_mean, 5),
                     "channelRatios": channel_ratios,
                 })
         grid_ratios.append(row_values)
-    ratios_only = [entry["ratio"] for entry in eligible_entries]
+    ratios_only = [entry["ratioExact"] for entry in eligible_entries]
     within_tolerance = [entry for entry in eligible_entries if entry["absDeviation"] <= TILE_RATIO_TOLERANCE]
+    min_tile_index = min(range(len(eligible_entries)), key=lambda idx: eligible_entries[idx]["ratioExact"]) if eligible_entries else None
+    max_tile_index = max(range(len(eligible_entries)), key=lambda idx: eligible_entries[idx]["ratioExact"]) if eligible_entries else None
     worst_tiles = sorted(eligible_entries, key=lambda entry: entry["absDeviation"], reverse=True)[:8]
-    for entry in worst_tiles:
+    for entry in eligible_entries:
         entry.pop("absDeviation", None)
+        entry.pop("ratioExact", None)
     return {
         "gridShape": [TILE_GRID_SIZE, TILE_GRID_SIZE],
         "eligibleMeanThreshold": TILE_ELIGIBLE_MEAN_THRESHOLD,
@@ -94,6 +126,8 @@ def compute_tile_grid_ratios(reference_rgb, candidate_rgb):
         "minRatio": round(min(ratios_only), 4) if ratios_only else None,
         "medianRatio": round(float(statistics.median(ratios_only)), 4) if ratios_only else None,
         "maxRatio": round(max(ratios_only), 4) if ratios_only else None,
+        "minTile": dict(eligible_entries[min_tile_index]) if min_tile_index is not None else None,
+        "maxTile": dict(eligible_entries[max_tile_index]) if max_tile_index is not None else None,
         "gridRatios": grid_ratios,
         "worstTiles": worst_tiles,
     }
@@ -130,13 +164,59 @@ def compute_part_breakdown(reference_rgb, candidate_rgb, parts_prefix):
     return breakdown
 
 
-def compare_image_pair(reference_rgb, candidate_rgb, parts_prefix=None):
+def build_parity_gates(raw_channel_ratios, tile_grid, candidate_flip, seed_ab_flip):
+    channel_mean_pass = all(abs(ratio - 1.0) <= CHANNEL_MEAN_TOLERANCE for ratio in raw_channel_ratios)
+    tile_grid_pass = tile_grid["outsideFivePercentCount"] == 0
+    gates = {
+        "channelMeanRatioExact": [round(float(ratio), 6) for ratio in raw_channel_ratios],
+        "channelMeanTolerance": CHANNEL_MEAN_TOLERANCE,
+        "channelMeanPass": bool(channel_mean_pass),
+        "tileGridTolerance": TILE_RATIO_TOLERANCE,
+        "tileGridEligibleCount": tile_grid["eligibleTileCount"],
+        "tileGridWithinFivePercentCount": tile_grid["withinFivePercentCount"],
+        "tileGridOutsideFivePercentCount": tile_grid["outsideFivePercentCount"],
+        "tileGridMinRatio": tile_grid["minRatio"],
+        "tileGridMaxRatio": tile_grid["maxRatio"],
+        "tileGridPass": bool(tile_grid_pass),
+    }
+    if candidate_flip is not None:
+        gates["flipLdrCandidateVsA"] = round(candidate_flip["flipLdr"], 6)
+        gates["flipHdrCandidateVsA"] = round(candidate_flip["flipHdr"], 6)
+    if candidate_flip is not None and seed_ab_flip is not None:
+        ceiling = seed_ab_flip["flipLdr"] + FLIP_NOISE_MARGIN
+        flip_pass = candidate_flip["flipLdr"] <= ceiling
+        gates["flipLdrAVsB"] = round(seed_ab_flip["flipLdr"], 6)
+        gates["flipHdrAVsB"] = round(seed_ab_flip["flipHdr"], 6)
+        gates["flipLdrMargin"] = FLIP_NOISE_MARGIN
+        gates["flipLdrCeiling"] = round(ceiling, 6)
+        gates["flipPass"] = bool(flip_pass)
+        gates["allGatesPass"] = bool(channel_mean_pass and tile_grid_pass and flip_pass)
+    else:
+        gates["flipLdrAVsB"] = None
+        gates["flipHdrAVsB"] = None
+        gates["flipLdrMargin"] = FLIP_NOISE_MARGIN
+        gates["flipLdrCeiling"] = None
+        gates["flipPass"] = None
+        gates["allGatesPass"] = None
+    return gates
+
+
+def compare_image_pair(reference_rgb, candidate_rgb, parts_prefix=None, include_flip=False, seed_ab_comparison=None):
     error_metrics = compute_relative_mse(reference_rgb, candidate_rgb)
     abs_diff = numpy.abs(candidate_rgb - reference_rgb)
     differing_mask = abs_diff.max(axis=-1) > 0.0
     ref_mean_channels = reference_rgb.reshape(-1, 3).mean(axis=0)
     cand_mean_channels = candidate_rgb.reshape(-1, 3).mean(axis=0)
-    channel_ratios = [round(float(cand_mean_channels[ch] / max(ref_mean_channels[ch], 1e-12)), 4) for ch in range(3)]
+    raw_channel_ratios = [float(cand_mean_channels[ch] / max(ref_mean_channels[ch], 1e-12)) for ch in range(3)]
+    channel_ratios = [round(ratio, 4) for ratio in raw_channel_ratios]
+    tile_grid = compute_tile_grid_ratios(reference_rgb, candidate_rgb)
+    candidate_flip = compute_flip_scores(reference_rgb, candidate_rgb) if include_flip else None
+    seed_ab_flip = None
+    if seed_ab_comparison is not None and seed_ab_comparison.get("flipLdr") is not None:
+        seed_ab_flip = {
+            "flipLdr": seed_ab_comparison["flipLdr"],
+            "flipHdr": seed_ab_comparison["flipHdr"],
+        }
     result = {
         **error_metrics,
         "differingPixelCount": int(differing_mask.sum()),
@@ -147,8 +227,14 @@ def compare_image_pair(reference_rgb, candidate_rgb, parts_prefix=None):
         "candidateChannelMean": [round(float(val), 6) for val in cand_mean_channels],
         "channelMeanRatio": channel_ratios,
         "scalarMeanRatio": round(float(cand_mean_channels.mean() / max(ref_mean_channels.mean(), 1e-12)), 4),
-        "tileGrid8x8": compute_tile_grid_ratios(reference_rgb, candidate_rgb),
+        "flipLdr": round(candidate_flip["flipLdr"], 6) if candidate_flip is not None else None,
+        "flipLdrRounded4": round(candidate_flip["flipLdr"], 4) if candidate_flip is not None else None,
+        "flipHdr": round(candidate_flip["flipHdr"], 6) if candidate_flip is not None else None,
+        "parityGates": build_parity_gates(raw_channel_ratios, tile_grid, candidate_flip, seed_ab_flip),
+        "tileGrid8x8": tile_grid,
     }
+    if seed_ab_comparison is not None:
+        result["seedAVsSeedB"] = seed_ab_comparison
     if parts_prefix is not None:
         result["partBreakdown"] = compute_part_breakdown(reference_rgb, candidate_rgb, parts_prefix)
     return result
@@ -202,27 +288,95 @@ def interpolate_equal_error_time(target_rel_mse, native_points, time_key):
     }
 
 
+def format_parity_summary_line(comparison):
+    gates = comparison["parityGates"]
+    tile_grid = comparison["tileGrid8x8"]
+    ratios = comparison["channelMeanRatio"]
+    flip_text = f"FLIP_LDR={comparison['flipLdr']:.4f}" if comparison["flipLdr"] is not None else "FLIP_LDR=n/a"
+    if gates["flipLdrCeiling"] is not None:
+        flip_text += f" (ceil {gates['flipLdrCeiling']:.4f}, A/B {gates['flipLdrAVsB']:.4f}, pass={gates['flipPass']})"
+    tile_text = (
+        f"tiles={tile_grid['withinFivePercentCount']}/{tile_grid['eligibleTileCount']} "
+        f"[{tile_grid['minRatio']}, {tile_grid['maxRatio']}] pass={gates['tileGridPass']}"
+    )
+    return (
+        f"{os.path.basename(comparison['image'])}: "
+        f"allGatesPass={gates['allGatesPass']} "
+        f"RGB={ratios} (pass={gates['channelMeanPass']}) "
+        f"{tile_text} {flip_text} relMSE={comparison['relMse']:.6f}"
+    )
+
+
 def run_pair_cli(argument_list):
     parts_prefix = None
+    reference_b_path = None
+    json_out_path = None
+    skip_flip = False
+    print_summary = False
     filtered = []
     index = 0
     while index < len(argument_list):
-        if argument_list[index] == "--parts":
+        token = argument_list[index]
+        if token == "--parts":
             parts_prefix = argument_list[index + 1]
             index += 2
             continue
-        filtered.append(argument_list[index])
+        if token == "--reference-b":
+            reference_b_path = argument_list[index + 1]
+            index += 2
+            continue
+        if token == "--json-out":
+            json_out_path = argument_list[index + 1]
+            index += 2
+            continue
+        if token == "--no-flip":
+            skip_flip = True
+            index += 1
+            continue
+        if token == "--summary":
+            print_summary = True
+            index += 1
+            continue
+        filtered.append(token)
         index += 1
     if len(filtered) < 2:
-        raise ValueError("Usage: compare.py [pair] [--parts <partsPrefix>] <referenceImage> <candidateImage> [<candidateImage>...]")
+        raise ValueError(
+            "Usage: compare.py [pair] [--reference-b <seed2Image>] [--parts <partsPrefix>] "
+            "[--json-out <outputPath>] [--no-flip] [--summary] <referenceImage> <candidateImage> [<candidateImage>...]"
+        )
     reference_rgb = load_linear_rgb_image(filtered[0])
+    include_flip = not skip_flip
+    seed_ab_comparison = None
+    if reference_b_path is not None:
+        reference_b_rgb = load_linear_rgb_image(reference_b_path)
+        if reference_b_rgb.shape != reference_rgb.shape:
+            raise ValueError(f"Resolution mismatch for --reference-b '{reference_b_path}': {reference_b_rgb.shape} vs {reference_rgb.shape}.")
+        seed_ab_comparison = compare_image_pair(reference_rgb, reference_b_rgb, include_flip=include_flip)
+        seed_ab_comparison["referenceAPath"] = filtered[0]
+        seed_ab_comparison["referenceBPath"] = reference_b_path
+    comparisons = []
     for candidate_path in filtered[1:]:
         candidate_rgb = load_linear_rgb_image(candidate_path)
         if candidate_rgb.shape != reference_rgb.shape:
             raise ValueError(f"Resolution mismatch for '{candidate_path}': {candidate_rgb.shape} vs {reference_rgb.shape}.")
-        comparison = compare_image_pair(reference_rgb, candidate_rgb, parts_prefix=parts_prefix)
+        comparison = compare_image_pair(
+            reference_rgb,
+            candidate_rgb,
+            parts_prefix=parts_prefix,
+            include_flip=include_flip,
+            seed_ab_comparison=seed_ab_comparison,
+        )
+        comparison["referenceImage"] = filtered[0]
         comparison["image"] = candidate_path
+        comparisons.append(comparison)
         print(json.dumps(comparison))
+        if print_summary:
+            print(format_parity_summary_line(comparison), file=sys.stderr)
+    if json_out_path is not None:
+        os.makedirs(os.path.dirname(os.path.abspath(json_out_path)), exist_ok=True)
+        payload = comparisons[0] if len(comparisons) == 1 else comparisons
+        with open(json_out_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
 
 
 def summarize_repeated_runs(records):

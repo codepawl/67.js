@@ -56,7 +56,9 @@ def wrap_with_gpu_lock(inner_command):
     bash_binary = os.environ.get("GIT_BASH_BIN")
     gpu_lock_script = os.environ.get("GPU_LOCK_SCRIPT")
     if bash_binary and gpu_lock_script:
-        return [bash_binary, gpu_lock_script, *inner_command]
+        normalized_script = gpu_lock_script.replace("\\", "/")
+        normalized_inner = [token.replace("\\", "/") if os.path.sep in token else token for token in inner_command]
+        return [bash_binary, normalized_script, *normalized_inner]
     return inner_command
 
 
