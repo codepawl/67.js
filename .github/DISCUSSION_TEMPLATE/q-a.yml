@@ -1,0 +1,39 @@
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing discussions](https://github.com/codepawl/67.js/discussions) and the [guide](https://67js.codepawl.com/docs) first. A bug goes in an [issue](https://github.com/codepawl/67.js/issues/new/choose).
+        Leave out local paths, tokens and personal data: discussions are public.
+  - type: input
+    id: version
+    attributes:
+      label: 67js version
+      description: Run `npm ls @codepawlhq/67js`.
+      placeholder: 0.16.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Node, OS and GPU
+      description: Node version, operating system, and your GPU. Write `--backend cpu` if you render on the CPU.
+      placeholder: Node 24, Windows 11, RTX 3060
+    validations:
+      required: true
+  - type: textarea
+    id: smallest-case
+    attributes:
+      label: The smallest scene or MCP call
+      description: The fewest lines or tool calls that show the question. Paste them as text.
+      render: js
+    validations:
+      required: true
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected and actual
+      description: What you wanted to happen, and what happened instead. Paste the full error text if there is one.
+    validations:
+      required: true
