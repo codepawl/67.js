@@ -1,4 +1,5 @@
 import { cameraFieldOfView } from './camera.js';
+import { fresnelSchlick } from './material-layers.js';
 import { pointLightFalloff } from './ray-query.js';
 import { profileGain } from './light-profile.js';
 import { buildTraceScene, refuseLocalVolumes, SUN_ANGULAR_RADIUS } from './path-tracer-scene.js';
@@ -896,7 +897,10 @@ function createPathTracer(scene, options) {
         recordFeatures(normal, isGlass);
         featuresRecorded = true;
       }
-      addRadiance(depth, throughput[0] * hit.emission[0], throughput[1] * hit.emission[1], throughput[2] * hit.emission[2]);
+      const emissionScale = hit.material.emissionFresnel > 0
+        ? fresnelSchlick(-(direction[0] * normal[0] + direction[1] * normal[1] + direction[2] * normal[2]), hit.material.emissionFresnel)
+        : 1;
+      addRadiance(depth, throughput[0] * hit.emission[0] * emissionScale, throughput[1] * hit.emission[1] * emissionScale, throughput[2] * hit.emission[2] * emissionScale);
       const viewX = -direction[0];
       const viewY = -direction[1];
       const viewZ = -direction[2];
