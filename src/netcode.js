@@ -1000,3 +1000,108 @@ export function createWebSocketTransport(socket, options = {}) {
     get stats() { return { ...stats }; },
   };
 }
+
+// A transport over several WebRTC data channels (or any channel-like objects with send(text), addEventListener and
+// readyState), one per peer. Your signalling code opens each RTCDataChannel and hands it over with addChannel(peerId, channel):
+// a host adds one per player, a client adds one for the host. A peer is listed while its channel is open, so a player who
+// disconnects leaves the peer list on its own; a channel that closes or errors is dropped and frees its peer slot. Nothing here opens a connection.
+export function createDataChannelTransport(options = {}) {
+  const id = requireName(options.id, 'createDataChannelTransport id');
+  const maximumMessageBytes = boundedInteger(options.maximumMessageBytes ?? NETCODE_LIMITS.defaultMessageBytes, 'createDataChannelTransport maximumMessageBytes', 256, NETCODE_LIMITS.maximumMessageBytes);
+  const openState = 'open';
+  const listeners = new Set();
+  const channels = new Map();
+  const stats = { sent: 0, received: 0, rejected: 0 };
+
+  function readMessage(text) {
+    if (typeof text !== 'string' || text.length > maximumMessageBytes) return undefined;
+    try {
+      const parsed = JSON.parse(text);
+      return isPlainObject(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function detach(entry) {
+    entry.channel.removeEventListener?.('message', entry.onMessage);
+    entry.channel.removeEventListener?.('close', entry.onClose);
+    entry.channel.removeEventListener?.('error', entry.onClose);
+  }
+
+  function pruneClosedChannels() {
+    for (const [peerId, entry] of channels) {
+      if (entry.channel.readyState !== 'closed') continue;
+      detach(entry);
+      channels.delete(peerId);
+    }
+  }
+
+  return {
+    id,
+    addChannel(peerId, channel) {
+      requireName(peerId, 'addChannel peerId');
+      if (channel === null || typeof channel !== 'object' || typeof channel.send !== 'function' || typeof channel.addEventListener !== 'function') {
+        throw new TypeError('addChannel needs a data-channel-like object with send(text) and addEventListener(type, listener), such as an RTCDataChannel.');
+      }
+      if (!channels.has(peerId) && channels.size >= NETCODE_LIMITS.maximumPeers) pruneClosedChannels();
+      if (!channels.has(peerId) && channels.size >= NETCODE_LIMITS.maximumPeers) {
+        throw new RangeError(`addChannel: at most ${NETCODE_LIMITS.maximumPeers} peers are supported; remove one with removeChannel(peerId) first.`);
+      }
+      const previous = channels.get(peerId);
+      if (previous) detach(previous);
+      const entry = {
+        channel,
+        onMessage(event) {
+          const message = readMessage(event?.data);
+          if (message === undefined) {
+            stats.rejected += 1;
+            return;
+          }
+          stats.received += 1;
+          for (const listener of [...listeners]) listener(peerId, message);
+        },
+        onClose() {
+          if (channels.get(peerId) !== entry) return;
+          detach(entry);
+          channels.delete(peerId);
+        },
+      };
+      channel.addEventListener('message', entry.onMessage);
+      channel.addEventListener('close', entry.onClose);
+      channel.addEventListener('error', entry.onClose);
+      channels.set(peerId, entry);
+    },
+    removeChannel(peerId) {
+      const entry = channels.get(peerId);
+      if (!entry) return;
+      detach(entry);
+      channels.delete(peerId);
+    },
+    peers: () => [...channels].filter(([, entry]) => entry.channel.readyState === openState).map(([peerId]) => peerId),
+    send(peerId, message) {
+      const entry = channels.get(peerId);
+      if (!entry || entry.channel.readyState !== openState) return;
+      const text = JSON.stringify(message);
+      if (text === undefined || text.length > maximumMessageBytes) {
+        throw new RangeError(`Data channel transport send: a message must be JSON of at most ${maximumMessageBytes} characters, got ${text === undefined ? 'a value JSON cannot hold' : text.length}.`);
+      }
+      entry.channel.send(text);
+      stats.sent += 1;
+    },
+    receive(callback) {
+      if (typeof callback !== 'function') throw new TypeError('transport.receive needs a callback (peerId, message) => void.');
+      listeners.add(callback);
+      return () => listeners.delete(callback);
+    },
+    close() {
+      for (const entry of channels.values()) {
+        detach(entry);
+        entry.channel.close?.();
+      }
+      channels.clear();
+      listeners.clear();
+    },
+    get stats() { return { ...stats }; },
+  };
+}

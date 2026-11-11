@@ -4,13 +4,14 @@ import { normalizeGameAnimation } from './game-animation.js';
 // The `game` section of a scene recipe: which node the player controls, how, with what camera and input, and the rules
 // that decide when the game is won. It is plain data. The runtime in src/game.js reads it; nothing in it is code.
 
-export const GAME_CAMERAS = Object.freeze(['follow', 'first-person', 'top-down']);
+export const GAME_CAMERAS = Object.freeze(['follow', 'first-person', 'top-down', 'chase']);
 export const GAME_INPUT_PRESETS = Object.freeze(['keyboard', 'gamepad', 'touch']);
-export const GAME_CONTROLLERS = Object.freeze(['character']);
+export const GAME_CONTROLLERS = Object.freeze(['character', 'vehicle']);
 
 export const GAME_SETUP_LIMITS = Object.freeze({
   maxSpeed: 100,
   maxJumpSpeed: 100,
+  maxVehicleSpeed: 100,
   maxFootOffset: 100,
   maxGround: 10000,
   maxNpcs: 16,
@@ -18,7 +19,7 @@ export const GAME_SETUP_LIMITS = Object.freeze({
 });
 
 const SETUP_FIELDS = ['player', 'camera', 'input', 'physics', 'ground', 'rules', 'npcs'];
-const PLAYER_FIELDS = ['node', 'controller', 'walkSpeed', 'runSpeed', 'jumpSpeed', 'footOffset', 'animation'];
+const PLAYER_FIELDS = ['node', 'controller', 'walkSpeed', 'runSpeed', 'jumpSpeed', 'maximumSpeed', 'footOffset', 'animation'];
 const NPC_FIELDS = ['node', 'path', 'cruiseSpeed', 'footOffset', 'yaw', 'animation'];
 
 function fail(path, problem) {
@@ -62,6 +63,7 @@ function normalizePlayer(player, nodeIds, nodes) {
     walkSpeed: boundedNumber(player.walkSpeed, 3, 0, GAME_SETUP_LIMITS.maxSpeed, 'player.walkSpeed'),
     runSpeed: boundedNumber(player.runSpeed, 6, 0, GAME_SETUP_LIMITS.maxSpeed, 'player.runSpeed'),
     jumpSpeed: boundedNumber(player.jumpSpeed, 7, 0, GAME_SETUP_LIMITS.maxJumpSpeed, 'player.jumpSpeed'),
+    maximumSpeed: boundedNumber(player.maximumSpeed, 20, 0, GAME_SETUP_LIMITS.maxVehicleSpeed, 'player.maximumSpeed'),
     footOffset: boundedNumber(player.footOffset, 0, -GAME_SETUP_LIMITS.maxFootOffset, GAME_SETUP_LIMITS.maxFootOffset, 'player.footOffset'),
   };
   if (player.animation !== undefined) normalized.animation = normalizeGameAnimation(player.animation, nodes, player.node, { path: 'player.animation' });

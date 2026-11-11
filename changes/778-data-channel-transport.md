@@ -1,0 +1,1 @@
+- The netcode addon gains `createDataChannelTransport`: one WebRTC data channel per peer, so a host player or server can sync players and props over WebRTC with the same authority and prediction code (part of #778)

@@ -215,8 +215,11 @@ export async function buildMcp({ outDir = join(root, 'build', 'mcp'), libraryDir
       throw new Error(`server.mjs includes scene engine code (${marker}). Import plain data from agent-scene-capabilities.js instead of agent-scene.js.`);
     }
   }
-  if (!server.exports.includes('createAgentMcpServer') || !server.exports.includes('runMcpCli')) {
-    throw new Error('Node bundle must export createAgentMcpServer and runMcpCli.');
+  // bin/67js-mcp.mjs imports each of these from the bundle.
+  const requiredExports = ['createAgentMcpServer', 'runMcpCli', 'runCheckUpdateCli'];
+  const missingExports = requiredExports.filter(name => !server.exports.includes(name));
+  if (missingExports.length > 0) {
+    throw new Error(`Node bundle must export ${missingExports.join(', ')}.`);
   }
   const licenses = await collectLicenses([...previewChunks.map(({ chunk }) => chunk), server]);
   const previewEntry = previewChunks.find(({ fileName }) => fileName === PREVIEW_ENTRY_FILE);

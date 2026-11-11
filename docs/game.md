@@ -37,10 +37,11 @@ A scene recipe can carry a `game` section. It names the node the player controls
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `player.node` | required | A node of the scene. The rules part with the same id follows the player |
-| `player.controller` | `character` | The [character controller](player.md) |
+| `player.controller` | `character` | `character` ([character controller](player.md)) or `vehicle` ([arcade car](player.md#vehicle-and-flight-controllers): W throttle, S reverse, A/D steer, Space brakes; `walkSpeed`, `runSpeed` and `jumpSpeed` are ignored) |
 | `player.walkSpeed`, `runSpeed`, `jumpSpeed` | 3, 6, 7 | Metres per second, 0 to 100 |
+| `player.maximumSpeed` | 20 | Top speed of a `vehicle`, metres per second, 0 to 100 |
 | `player.footOffset` | 0 | Metres from the node origin down to the feet. Zone checks use the feet |
-| `camera` | `follow` | `follow`, `first-person` or `top-down`, the [camera rigs](player.md#camera-rigs) |
+| `camera` | `follow` | `follow`, `first-person`, `top-down` or `chase` (behind the player, swinging round to its heading: use it with a `vehicle`), the [camera rigs](player.md#camera-rigs) |
 | `input` | `keyboard` | `keyboard` (WASD move, arrows look, Space jump, Shift run), `gamepad` (adds the first pad) or `touch` (adds a left-half stick and tap to jump) |
 | `player.animation` | none | An [animation graph](animation-graph.md) for the player, see [Animation and NPCs](#animation-and-npcs) |
 | `npcs` | none | Up to 16 characters that walk a path through their own graph, see [Animation and NPCs](#animation-and-npcs) |
@@ -54,7 +55,7 @@ A rules part named like a scene node is hidden and shown with it, which is how a
 
 `scene_export_web` writes one folder: `index.html`, `game.json` (the recipe) and `engine/` (the built 67js modules, found by following the imports from `build/game.js`). It runs from any static host with no server code, and the folder is bounded: the engine stays under 12 MiB, the recipe under 1 MiB, and the newest four builds are kept. Procedural scenes only; placed catalog assets and vegetation are refused with the fix. The page shows the variables and the verdict in a corner label and exposes the running game as `window.__game` (`rules.state`, `controller.state`, `scene`, `runtime`).
 
-`index.html?replay=name.json` plays a recording (`recordInput`, see [input](input.md#custom-and-scripted-input)) from the same folder instead of the keyboard. `scripts/smoke-game-web.mjs` builds a creature that collects 3 coins and reaches a goal through the MCP tools, exports it, and wins it from a replay in headless Chrome, with a head-bob animation graph that the page must play.
+`index.html?replay=name.json` plays a recording (`recordInput`, see [input](input.md#custom-and-scripted-input)) from the same folder instead of the keyboard. `scripts/smoke-game-web.mjs` builds a creature that collects 3 coins and reaches a goal through the MCP tools, exports it, and wins it from a replay in headless Chrome, with a head-bob animation graph that the page must play. `node scripts/smoke-game-web.mjs bin/67js-mcp.mjs drive` does the same for a car that passes 3 gates and reaches a finish line under a `chase` camera.
 
 ## From code
 
