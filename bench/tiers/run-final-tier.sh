@@ -8,7 +8,7 @@ WORK_DIRECTORY="$1"
 SCENE="${2:-lit-interior}"
 REPETITIONS="${3:-3}"
 BLENDER_BIN="${BLENDER_BIN:-C:/Program Files/Blender Foundation/Blender 5.3/blender.exe}"
-GPU_LOCK="$HOME/.agents/tools/gpu-lock.sh"
+GPU_LOCK="${GPU_LOCK:-}"  # set to a job queue command, for example GPU_LOCK="bash path/to/gpu-lock.sh", to share the card
 SCENE_JSON="$WORK_DIRECTORY/scenes/$SCENE.json"
 LADDER_DIRECTORY="$WORK_DIRECTORY/final-$SCENE"
 mkdir -p "$LADDER_DIRECTORY"
@@ -16,14 +16,14 @@ mkdir -p "$LADDER_DIRECTORY"
 run_cook() {
   local backend="$1" samples="$2" repetition="$3"
   [ -f "$LADDER_DIRECTORY/$SCENE-cook-$backend-s$samples-r$repetition.json" ] && return
-  bash "$GPU_LOCK" node bench/tiers/run-cook.mjs "$LADDER_DIRECTORY" "$SCENE" --backend "$backend" --samples "$samples" --repetitions 1 --first-repetition "$repetition" 2>&1 | grep -v "^$" | tail -2
+  $GPU_LOCK node bench/tiers/run-cook.mjs "$LADDER_DIRECTORY" "$SCENE" --backend "$backend" --samples "$samples" --repetitions 1 --first-repetition "$repetition" 2>&1 | grep -v "^$" | tail -2
 }
 
 run_measured() {
   local prefix="$1"
   shift
   [ -f "$prefix.metrics.json" ] && return
-  bash "$GPU_LOCK" uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$prefix.metrics.json" -- "$@" 2>&1 | tail -1 | cut -c1-200
+  $GPU_LOCK uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$prefix.metrics.json" -- "$@" 2>&1 | tail -1 | cut -c1-200
 }
 
 run_native() {

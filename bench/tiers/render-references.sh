@@ -6,7 +6,7 @@ set -u
 WORK_DIRECTORY="$1"
 SCENE_LIST="${2:-lit-interior,spot-area,light-linking,metal,glass,outdoor-hdri}"
 BLENDER_BIN="${BLENDER_BIN:-C:/Program Files/Blender Foundation/Blender 5.3/blender.exe}"
-GPU_LOCK="$HOME/.agents/tools/gpu-lock.sh"
+GPU_LOCK="${GPU_LOCK:-}"  # set to a job queue command, for example GPU_LOCK="bash path/to/gpu-lock.sh", to share the card
 REFERENCE_SAMPLES="${REFERENCE_SAMPLES:-4096}"
 mkdir -p "$WORK_DIRECTORY/reference"
 IFS=',' read -ra SCENES <<< "$SCENE_LIST"
@@ -16,7 +16,7 @@ for SCENE in "${SCENES[@]}"; do
     echo "skip $SCENE"
     continue
   fi
-  GPU_LOCK_WEIGHT=heavy bash "$GPU_LOCK" "$BLENDER_BIN" -b --factory-startup --python bench/cycles-parity/render-cycles.py -- \
+  GPU_LOCK_WEIGHT=heavy $GPU_LOCK "$BLENDER_BIN" -b --factory-startup --python bench/cycles-parity/render-cycles.py -- \
     "$WORK_DIRECTORY/scenes/$SCENE.json" "$PREFIX" --samples "$REFERENCE_SAMPLES" --bounces 8 --seed 1 > "$WORK_DIRECTORY/reference/$SCENE.log" 2>&1
   echo "done $SCENE exit $?"
 done

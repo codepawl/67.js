@@ -1,6 +1,6 @@
 // The experimental real-time path tracer (src/path-tracer-realtime*.js, not reachable from MCP) at rest: median frame time and checkpoints of the
 // accumulated picture, to find how long it takes to get under a FLIP bound. This is not the realtime-high tier (#902), which does not exist yet.
-//   [bash ~/.agents/tools/gpu-lock.sh] node bench/tiers/run-settle.mjs <output directory> <scene> --backend gpu|webgpu [--width 1920] [--height 1080] [--bounces 2] [--frames 256]
+//   [${GPU_LOCK}] node bench/tiers/run-settle.mjs <output directory> <scene> --backend gpu|webgpu [--width 1920] [--height 1080] [--bounces 2] [--frames 256]
 // Files: <scene>-<backend>-<width>.json and <scene>-<backend>-<width>-f<frame>.png, scored by score-tiers.py settle.
 import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';

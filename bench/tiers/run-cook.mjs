@@ -1,5 +1,5 @@
 // Cook (the path tracer) with the cpu, gpu (WebGL2) and webgpu backends on a reference scene, at a ladder of sample counts, in headless Chrome.
-//   [bash ~/.agents/tools/gpu-lock.sh] node bench/tiers/run-cook.mjs <output directory> <scene> --backend cpu|gpu|webgpu --samples 16,64,256 [--repetitions 3] [--width 960] [--height 540] [--threads 8]
+//   [${GPU_LOCK}] node bench/tiers/run-cook.mjs <output directory> <scene> --backend cpu|gpu|webgpu --samples 16,64,256 [--repetitions 3] [--width 960] [--height 540] [--threads 8]
 // Files: <scene>-cook-<backend>-s<samples>-r<n>.npy (linear RGB float32, rows from the top, as the Cycles script writes) and .json (the tracer's report,
 // wall time, and the card memory polled around the trace). Settings: 8 bounces, seed 1, no denoiser, fireflyClamp 1e9, noiseThreshold 0.
 import { execFile } from 'node:child_process';

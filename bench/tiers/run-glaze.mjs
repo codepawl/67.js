@@ -1,5 +1,5 @@
 // Draws reference scenes with the Glaze tiers (draft, realtime) in headless Chrome on the GPU and records frame times, memory and PNGs.
-//   [bash ~/.agents/tools/gpu-lock.sh] node bench/tiers/run-glaze.mjs <output directory> <scene,scene> [--width 960] [--height 540] [--repetitions 3] [--frames 10] [--tiers draft,realtime]
+//   [${GPU_LOCK}] node bench/tiers/run-glaze.mjs <output directory> <scene,scene> [--width 960] [--height 540] [--repetitions 3] [--frames 10] [--tiers draft,realtime]
 // Each repetition runs every scene and tier once on a fresh page, in an order that alternates between repetitions.
 // Files: <scene>-<tier>-r<n>.png and glaze.json. The card's memory is polled with nvidia-smi around each draw (card wide, so it includes other jobs).
 import { execFile } from 'node:child_process';
