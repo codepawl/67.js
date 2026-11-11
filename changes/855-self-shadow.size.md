@@ -1,0 +1,3 @@
+- entry:fog-shader: the sky term of a lit local volume gets its own depth through five short tap sets in the fog addon, so a thick smoke has a darker core instead of a flat glow.
+- scene:agent-scene+lazy: the same sky depth in the CPU path tracer's lit volume step, counted in the lazy bundle.
+- entry:path-tracer: the sky depth loop and its direction list in the CPU path tracer's lit volume step, a few hundred bytes for a darker core in thick smoke.
