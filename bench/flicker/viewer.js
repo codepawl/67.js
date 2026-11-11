@@ -18,9 +18,13 @@ function paintPartsByOwner(parts) {
   });
 }
 
+// An unlit surface leaves the renderer as pow(colour, 1 / 2.2) when the frame is not HDR.
+const DISPLAY_GAMMA = 2.2;
+
 // facets=1: one colour per triangle instead of per part. Two faces of one part that meet at a crease then differ in colour, so the
 // probe reads the crease as an edge and stops counting its ordinary anti-aliasing as flicker. Fighting triangles still differ.
 function paintTrianglesApart(parts) {
+  let triangleNumber = 0;
   for (const part of parts) {
     const { positions, normals, indices } = part.geometry;
     const triangleCount = indices.length / 3;
@@ -28,8 +32,11 @@ function paintTrianglesApart(parts) {
     const flatNormals = new Float32Array(triangleCount * 9);
     const colors = new Float32Array(triangleCount * 9);
     for (let triangle = 0; triangle < triangleCount; triangle++) {
-      const hue = (((triangle + 1) * 0.618034) % 1);
-      const colour = [0, 1 / 3, 2 / 3].map(offset => 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(2 * Math.PI * (hue + offset))));
+      triangleNumber++;
+      const hue = ((triangleNumber * 0.618034) % 1);
+      const colour = options.triangleIds
+        ? [triangleNumber & 255, (triangleNumber >> 8) & 255, (triangleNumber >> 16) & 255].map(byte => (byte / 255) ** DISPLAY_GAMMA)
+        : [0, 1 / 3, 2 / 3].map(offset => 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(2 * Math.PI * (hue + offset))));
       for (let corner = 0; corner < 3; corner++) {
         const source = indices[triangle * 3 + corner] * 3;
         const target = (triangle * 3 + corner) * 3;
@@ -40,7 +47,7 @@ function paintTrianglesApart(parts) {
     }
     part.geometry = { positions: flatPositions, normals: flatNormals, colors, indices: Uint32Array.from({ length: triangleCount * 3 }, (_, index) => index) };
     const { map, ...material } = part.material;
-    part.material = { ...material, color: [1, 1, 1], metallic: 0, roughness: 1 };
+    part.material = { ...material, color: [1, 1, 1], metallic: 0, roughness: 1, ...(options.triangleIds ? { tag: 'unlit' } : {}) };
   }
 }
 
@@ -86,7 +93,9 @@ const options = {
   ids: parameters.get('ids') === '1',
   // shadows=0 turns off casting and receiving, to tell shadow-edge aliasing apart from depth fighting.
   shadows: parameters.get('shadows') !== '0',
-  facets: parameters.get('facets') === '1',
+  facets: parameters.get('facets') === '1' || parameters.get('facets') === '2',
+  // facets=2: the colour of every triangle is its own number, drawn unlit, so the frame tells exactly which face is shown at a pixel.
+  triangleIds: parameters.get('facets') === '2',
 };
 const trapName = parameters.get('trap');
 
@@ -188,7 +197,7 @@ async function build() {
   const size = bounds.maximum.map((value, axis) => value - bounds.minimum[axis]);
   extent = Math.max(...size);
   renderer = new Renderer67(canvas, loaded.parts, {
-    ground: false, hdr: true, samples: 4, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
+    ground: false, hdr: !options.triangleIds, samples: 4, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
     reversedDepth: options.reversed ? 'auto' : false,
     resolveCoplanar: options.offset ? resolveAndReport : false,
   });
@@ -238,6 +247,9 @@ function readFrame(context) {
 // `totalChanged` counts every pixel whose owner changed, edges included. `clearOfEdges` is stricter than `changed`: an anti-aliased
 // edge blends two owners into a colour that is close to both, which the four-neighbour test reads as no edge, so this count also
 // leaves out pixels with a colour step anywhere within two pixels.
+// The bytes an unlit face of this colour shows: the triangle number that painted it, back from the gamma curve.
+const shownByte = colour => colour.map(channel => Math.round(255 * channel ** (1 / DISPLAY_GAMMA)));
+
 // The ground-truth probe (ground-truth.js): one frame, compared with a float64 ray cast that cannot z-fight. Needs flat colours
 // per part (ids=1) or per triangle (facets=1); the trap scenes bring their own. Returns the counts of compareWithGroundTruth
 // and the milliseconds the ray cast took.
@@ -253,7 +265,7 @@ async function truth() {
   const started = performance.now();
   const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
   const cast = castPixelOwners(world, frameFor(0), width, height);
-  const { mismatchMask, ...counts } = compareWithGroundTruth({ pixels, world, cast, width, height });
+  const { mismatchMask, ...counts } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
   renderer.render(frameFor(0));
   return { ...counts, triangles: world.count, castMilliseconds: Math.round(performance.now() - started), width, height };
 }
@@ -307,11 +319,11 @@ function swapDetails(limit = 12) {
   const pixels = new Uint8ClampedArray(readFrame(context));
   const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
   const cast = castPixelOwners(world, frameFor(0), width, height);
-  const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height });
+  const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
   const groups = new Map();
   for (let pixel = 0; pixel < mismatchMask.length; pixel++) {
     if (mismatchMask[pixel] !== 2) continue;
-    const group = groups.get(cast.owner[pixel]) ?? { triangle: cast.owner[pixel], pixels: 0, distances: [] };
+    const group = groups.get(cast.owner[pixel]) ?? { triangle: cast.owner[pixel], pixels: 0, distances: [], sample: pixel };
     group.pixels++;
     const neighbours = [-1, 1, -width, width, -width - 1, -width + 1, width - 1, width + 1];
     if (neighbours.some(step => cast.owner[pixel + step] !== cast.owner[pixel])) group.onTriangleEdge = (group.onTriangleEdge ?? 0) + 1;
@@ -324,6 +336,12 @@ function swapDetails(limit = 12) {
     behind: trianglesBehind(world, group.triangle),
     distance: group.distances.sort((first, second) => first - second)[group.distances.length >> 1],
     corners: Array.from(world.corners.subarray(group.triangle * 9, group.triangle * 9 + 9)),
+    sample: {
+      x: group.sample % width, y: Math.floor(group.sample / width),
+      drawnColour: [...pixels.subarray(group.sample * 4, group.sample * 4 + 3)],
+      hits: Array.from({ length: cast.hitsPerPixel }, (_, slot) => cast.hitTriangles[group.sample * cast.hitsPerPixel + slot]).filter(triangle => triangle >= 0)
+        .map((triangle, slot) => ({ triangle, distance: cast.hitDistances[group.sample * cast.hitsPerPixel + slot], rank: world.ranks[triangle], colour: world.keyColours[world.keyOf[triangle]] })),
+    },
   }));
 }
 
