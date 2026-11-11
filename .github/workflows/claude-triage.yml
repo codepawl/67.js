@@ -44,7 +44,8 @@ concurrency:
 jobs:
   triage:
     # Cheap early exit before a runner starts; scripts/triage-should-run.mjs checks the same things again.
-    if: ${{ vars.TRIAGE_ENABLED != 'false' && github.event.pull_request.draft != true && github.event.sender.type != 'Bot' && !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association || github.event.issue.author_association) }}
+    # A dry run (workflow_dispatch) posts nothing, so it runs while paused and on any item; the gate script decides.
+    if: ${{ github.event_name == 'workflow_dispatch' || (vars.TRIAGE_ENABLED != 'false' && github.event.pull_request.draft != true && github.event.sender.type != 'Bot' && !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association || github.event.issue.author_association)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

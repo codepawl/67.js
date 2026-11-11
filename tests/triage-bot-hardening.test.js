@@ -179,15 +179,19 @@ test('the dry run reads the item from a number, accepts only a plain number and 
   assert.equal(loadTriageItem({ issue: { number: 3 } }, 'o/r', () => ({ number: 3 })).number, 3);
 });
 
-test('a dry run passes the gate for an item an earlier run already triaged, but still skips maintainers and held items', () => {
+test('a dry run passes the gate for any item a maintainer names, even paused, and stops only at the daily limit', () => {
   const dispatch = (overrides = {}, event = {}) =>
     decideTriage({ eventName: 'workflow_dispatch', item: { ...outsider, ...overrides }, ...event });
   assert.equal(dispatch().run, true);
   assert.equal(dispatch({}, { alreadyTriaged: true }).run, true);
-  assert.equal(dispatch({ author_association: 'OWNER' }).run, false);
-  assert.equal(dispatch({ labels: [{ name: 'hold:look-approval' }] }).run, false);
-  assert.equal(dispatch({}, { maintainerActivity: 1 }).run, false);
-  assert.equal(dispatch({}, { enabled: false }).run, false);
+  assert.equal(dispatch({ author_association: 'OWNER' }).run, true);
+  assert.equal(dispatch({ labels: [{ name: 'hold:look-approval' }] }).run, true);
+  assert.equal(dispatch({}, { maintainerActivity: 1 }).run, true);
+  assert.equal(dispatch({}, { enabled: false }).run, true);
+  assert.equal(dispatch({ state: 'closed' }).run, true);
+  assert.equal(dispatch({}, { runsToday: 10000 }).run, false);
+  const pausedEvent = decideTriage({ eventName: 'issues', action: 'opened', item: outsider, enabled: false });
+  assert.equal(pausedEvent.run, false);
 });
 
 test('the workflow offers a number-only manual dry run, and the post and label scripts write nothing in it', () => {

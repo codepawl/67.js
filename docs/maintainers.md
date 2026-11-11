@@ -43,7 +43,7 @@ Each run uses the subscription behind that token, with the Sonnet model and at m
 
 ### Trying it without posting
 
-To see what the first pass would say about an item, open the Actions tab, pick "Claude triage", choose "Run workflow" and enter the issue or pull request number. The run applies the same gate and the same Claude step, then prints the comment and the labels it would add to the job log and the step summary. It posts no comment and adds no label. Only people with write access can start it. The gate still skips maintainer-authored items, drafts and items a maintainer has touched; the reason is in the "Decide whether the first pass applies" step. An earlier bot comment does not stop a dry run.
+To see what the first pass would say about an item, open the Actions tab, pick "Claude triage", choose "Run workflow" and enter the issue or pull request number. The run applies the same gate and the same Claude step, then prints the comment and the labels it would add to the job log and the step summary. It posts no comment and adds no label. Only people with write access can start it. A dry run works on any item you name, including your own, closed, held or already triaged items, and it runs while `TRIAGE_ENABLED` is `false`, so you can test the bot before turning it on. Only the daily run limit stops it, because it still uses the subscription. The "Decide whether the first pass applies" step prints the reason when it skips.
 
 ### Approval wording
 
