@@ -201,7 +201,10 @@ async function loadScene() {
   }
   const buildTrap = trapBuilder();
   options.ids = true;
-  return buildTrap();
+  const trap = buildTrap();
+  // facets=1|2 gives a trap the same per-triangle colours as a glTF, so the exact ground truth (facets=2) reads it.
+  if (options.facets) paintTrianglesApart(trap.parts);
+  return trap;
 }
 
 // What the flush pass did to the scene: how long it took, what it could not settle and how much it cut.
