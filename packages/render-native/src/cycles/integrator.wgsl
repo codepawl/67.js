@@ -884,8 +884,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
       if (!recorded_features && !is_pure_transparent) {
         first_depth = surface_hit.t;
-        first_albedo = closure_eval_albedo(closure, wo);
-        first_normal = closure_eval_normal(closure);
+        first_albedo = closure_eval_albedo(&closure, wo);
+        first_normal = closure_eval_normal(&closure);
         recorded_features = true;
       }
 

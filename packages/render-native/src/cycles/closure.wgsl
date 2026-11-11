@@ -284,28 +284,28 @@ fn closure_sheen_setup_lobe(
   return ClosureSheenSetup(lobe, layer_albedo, lobe.sample_weight > 0.0);
 }
 
-fn closure_sheen_eval(lobe: Lobe, wi: vec3<f32>) -> BsdfMfEval {
-  let local_wi = vec3<f32>(dot(wi, lobe.tangent), dot(wi, lobe.f82_or_tint), dot(wi, lobe.normal));
+fn closure_sheen_eval(lobe: ptr<function, Lobe>, wi: vec3<f32>) -> BsdfMfEval {
+  let local_wi = vec3<f32>(dot(wi, (*lobe).tangent), dot(wi, (*lobe).f82_or_tint), dot(wi, (*lobe).normal));
   if (local_wi.z <= 0.0) {
     return BsdfMfEval(vec3<f32>(0.0), 0.0);
   }
-  let a = lobe.alpha_x;
-  let b = lobe.alpha_y;
+  let a = (*lobe).alpha_x;
+  let b = (*lobe).alpha_y;
   let len_sqr = bsdf_mf_sqr(a * local_wi.x + b * local_wi.z) + bsdf_mf_sqr(a * local_wi.y) + bsdf_mf_sqr(local_wi.z);
   if (len_sqr <= 1e-20) {
     return BsdfMfEval(vec3<f32>(0.0), 0.0);
   }
   let val = INV_PI * local_wi.z * bsdf_mf_sqr(a / len_sqr);
-  return BsdfMfEval(lobe.weight * val, val);
+  return BsdfMfEval((*lobe).weight * val, val);
 }
 
 fn closure_sheen_sample(
-  lobe: Lobe,
+  lobe: ptr<function, Lobe>,
   geometric_normal: vec3<f32>,
   rand: vec2<f32>,
 ) -> BsdfMfSample {
-  let a = lobe.alpha_x;
-  let b = lobe.alpha_y;
+  let a = (*lobe).alpha_x;
+  let b = (*lobe).alpha_y;
   let disk = bsdf_diffuse_sample_uniform_disk(rand);
   let disk_z = sqrt(max(0.0, 1.0 - dot(disk, disk)));
   let unnorm = vec3<f32>(disk.x - disk_z * b, disk.y, disk_z * a);
@@ -317,13 +317,13 @@ fn closure_sheen_sample(
   if (local_wi.z <= 0.0) {
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
   }
-  let wi = local_wi.x * lobe.tangent + local_wi.y * lobe.f82_or_tint + local_wi.z * lobe.normal;
+  let wi = local_wi.x * (*lobe).tangent + local_wi.y * (*lobe).f82_or_tint + local_wi.z * (*lobe).normal;
   if (dot(geometric_normal, wi) <= 0.0) {
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
   }
   let denom = bsdf_mf_sqr(a * local_wi.x + b * local_wi.z) + bsdf_mf_sqr(a * local_wi.y) + bsdf_mf_sqr(local_wi.z);
   let val = INV_PI * local_wi.z * bsdf_mf_sqr(a / max(denom, 1e-20));
-  return BsdfMfSample(wi, val, lobe.weight * val, false);
+  return BsdfMfSample(wi, val, (*lobe).weight * val, false);
 }
 
 fn closure_transparent_setup_lobe(normal: vec3<f32>, weight: vec3<f32>) -> Lobe {
@@ -768,23 +768,23 @@ fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure {
   return closure;
 }
 
-fn closure_eval_single_lobe(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
-  if (lobe.lobe_type == LOBE_DIFFUSE) {
+fn closure_eval_single_lobe(lobe: ptr<function, Lobe>, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
+  if ((*lobe).lobe_type == LOBE_DIFFUSE) {
     let d = bsdf_diffuse_eval(lobe, wi, wo);
     return BsdfMfEval(d.value, d.pdf);
   }
-  if (lobe.lobe_type == LOBE_GLOSSY_GGX) {
-    let is_tw = (lobe.flags & LOBE_FLAG_THIN_WALLED) != 0u;
-    let eval_wo = select(wo, wo - 2.0 * dot(wo, lobe.normal) * lobe.normal, is_tw);
+  if ((*lobe).lobe_type == LOBE_GLOSSY_GGX) {
+    let is_tw = ((*lobe).flags & LOBE_FLAG_THIN_WALLED) != 0u;
+    let eval_wo = select(wo, wo - 2.0 * dot(wo, (*lobe).normal) * (*lobe).normal, is_tw);
     return bsdf_mf_eval(lobe, wi, eval_wo);
   }
-  if (lobe.lobe_type == LOBE_GLASS_GGX) {
+  if ((*lobe).lobe_type == LOBE_GLASS_GGX) {
     return bsdf_glass_eval(lobe, wi, wo);
   }
-  if (lobe.lobe_type == LOBE_COAT_GGX) {
+  if ((*lobe).lobe_type == LOBE_COAT_GGX) {
     return bsdf_coat_eval(lobe, wi, wo);
   }
-  if (lobe.lobe_type == LOBE_SHEEN) {
+  if ((*lobe).lobe_type == LOBE_SHEEN) {
     return closure_sheen_eval(lobe, wi);
   }
   return BsdfMfEval(vec3<f32>(0.0), 0.0);
@@ -798,12 +798,12 @@ fn closure_eval(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>) -
   var total_pdf = 0.0;
   let inv_total_w = 1.0 / (*closure).total_sample_weight;
   for (var i: u32 = 0u; i < (*closure).lobe_count; i = i + 1u) {
-    let lobe = (*closure).lobes[i];
-    if (lobe.sample_weight <= 0.0 || lobe.lobe_type == LOBE_TRANSPARENT) {
+    var lobe_copy = (*closure).lobes[i];
+    if (lobe_copy.sample_weight <= 0.0 || lobe_copy.lobe_type == LOBE_TRANSPARENT) {
       continue;
     }
-    let lobe_prob = lobe.sample_weight * inv_total_w;
-    let ev = closure_eval_single_lobe(lobe, wi, wo);
+    let lobe_prob = lobe_copy.sample_weight * inv_total_w;
+    let ev = closure_eval_single_lobe(&lobe_copy, wi, wo);
     total_value = total_value + ev.value;
     total_pdf = total_pdf + lobe_prob * ev.pdf;
   }
@@ -811,36 +811,36 @@ fn closure_eval(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>) -
 }
 
 fn closure_sample_single_lobe(
-  lobe: Lobe,
+  lobe: ptr<function, Lobe>,
   geometric_normal: vec3<f32>,
   wo: vec3<f32>,
   rand_xy: vec2<f32>,
   rand_lobe: f32,
 ) -> BsdfMfSample {
-  if (lobe.lobe_type == LOBE_DIFFUSE) {
+  if ((*lobe).lobe_type == LOBE_DIFFUSE) {
     let s = bsdf_diffuse_sample(lobe, geometric_normal, wo, rand_xy);
     return BsdfMfSample(s.wi, s.pdf, s.eval, false);
   }
-  if (lobe.lobe_type == LOBE_GLOSSY_GGX) {
-    let is_tw = (lobe.flags & LOBE_FLAG_THIN_WALLED) != 0u;
-    if (is_tw && bsdf_mf_is_singular(lobe.alpha_x, lobe.alpha_y)) {
-      return BsdfMfSample(-wo, CLOSURE_SINGULAR_WEIGHT, lobe.weight * CLOSURE_SINGULAR_WEIGHT, true);
+  if ((*lobe).lobe_type == LOBE_GLOSSY_GGX) {
+    let is_tw = ((*lobe).flags & LOBE_FLAG_THIN_WALLED) != 0u;
+    if (is_tw && bsdf_mf_is_singular((*lobe).alpha_x, (*lobe).alpha_y)) {
+      return BsdfMfSample(-wo, CLOSURE_SINGULAR_WEIGHT, (*lobe).weight * CLOSURE_SINGULAR_WEIGHT, true);
     }
     let samp_ng = select(geometric_normal, -geometric_normal, is_tw);
-    let samp_wo = select(wo, wo - 2.0 * dot(wo, lobe.normal) * lobe.normal, is_tw);
+    let samp_wo = select(wo, wo - 2.0 * dot(wo, (*lobe).normal) * (*lobe).normal, is_tw);
     return bsdf_mf_sample(lobe, samp_ng, samp_wo, rand_xy);
   }
-  if (lobe.lobe_type == LOBE_GLASS_GGX) {
+  if ((*lobe).lobe_type == LOBE_GLASS_GGX) {
     return bsdf_glass_sample(lobe, geometric_normal, wo, rand_xy, rand_lobe);
   }
-  if (lobe.lobe_type == LOBE_COAT_GGX) {
+  if ((*lobe).lobe_type == LOBE_COAT_GGX) {
     return bsdf_coat_sample(lobe, geometric_normal, wo, rand_xy);
   }
-  if (lobe.lobe_type == LOBE_SHEEN) {
+  if ((*lobe).lobe_type == LOBE_SHEEN) {
     return closure_sheen_sample(lobe, geometric_normal, rand_xy);
   }
-  if (lobe.lobe_type == LOBE_TRANSPARENT) {
-    return BsdfMfSample(-wo, CLOSURE_SINGULAR_WEIGHT, lobe.weight * CLOSURE_SINGULAR_WEIGHT, true);
+  if ((*lobe).lobe_type == LOBE_TRANSPARENT) {
+    return BsdfMfSample(-wo, CLOSURE_SINGULAR_WEIGHT, (*lobe).weight * CLOSURE_SINGULAR_WEIGHT, true);
   }
   return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
 }
@@ -862,62 +862,64 @@ fn closure_sample(closure: ptr<function, Closure>, wo: vec3<f32>, u: vec3<f32>) 
     cdf_prev = next_cdf;
   }
 
-  let chosen_lobe = (*closure).lobes[chosen_idx];
-  if (chosen_lobe.sample_weight <= 0.0) {
+  var chosen_lobe = (*closure).lobes[chosen_idx];
+  let chosen_sample_weight = chosen_lobe.sample_weight;
+  let chosen_lobe_type = chosen_lobe.lobe_type;
+  if (chosen_sample_weight <= 0.0) {
     return ClosureSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), LOBE_NONE);
   }
 
-  let lobe_prob = chosen_lobe.sample_weight / (*closure).total_sample_weight;
-  let u_lobe = clamp((cdf_target - cdf_prev) / max(chosen_lobe.sample_weight, 1e-20), 0.0, 0.99999994);
+  let lobe_prob = chosen_sample_weight / (*closure).total_sample_weight;
+  let u_lobe = clamp((cdf_target - cdf_prev) / max(chosen_sample_weight, 1e-20), 0.0, 0.99999994);
   let rand_xy = clamp(u.yz, vec2<f32>(0.0), vec2<f32>(0.99999994));
 
-  let s = closure_sample_single_lobe(chosen_lobe, (*closure).geometric_normal, wo, rand_xy, u_lobe);
+  let s = closure_sample_single_lobe(&chosen_lobe, (*closure).geometric_normal, wo, rand_xy, u_lobe);
   if (s.pdf <= 0.0) {
     return ClosureSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), LOBE_NONE);
   }
   if (s.is_singular) {
-    return ClosureSample(s.wi, lobe_prob * s.pdf, s.eval, chosen_lobe.lobe_type);
+    return ClosureSample(s.wi, lobe_prob * s.pdf, s.eval, chosen_lobe_type);
   }
 
   let mix_ev = closure_eval(closure, s.wi, wo);
   if (mix_ev.pdf <= 0.0) {
     return ClosureSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), LOBE_NONE);
   }
-  return ClosureSample(s.wi, mix_ev.pdf, mix_ev.value, chosen_lobe.lobe_type);
+  return ClosureSample(s.wi, mix_ev.pdf, mix_ev.value, chosen_lobe_type);
 }
 
-fn closure_eval_albedo(closure: Closure, wo: vec3<f32>) -> vec3<f32> {
+fn closure_eval_albedo(closure: ptr<function, Closure>, wo: vec3<f32>) -> vec3<f32> {
   var albedo = vec3<f32>(0.0);
-  for (var i: u32 = 0u; i < closure.lobe_count; i = i + 1u) {
-    let lobe = closure.lobes[i];
-    if (lobe.lobe_type == LOBE_DIFFUSE || lobe.lobe_type == LOBE_SHEEN) {
-      albedo = albedo + lobe.weight;
-    } else if (lobe.lobe_type == LOBE_GLOSSY_GGX) {
-      let fr = bsdf_mf_eval_glossy_fresnel(lobe, max(dot(lobe.normal, wo), 0.0));
-      albedo = albedo + lobe.weight * fr;
-    } else if (lobe.lobe_type == LOBE_GLASS_GGX) {
-      let gr = bsdf_glass_fresnel(lobe, max(dot(lobe.normal, wo), 0.0));
-      albedo = albedo + lobe.weight * (gr.reflectance + gr.transmittance);
-    } else if (lobe.lobe_type == LOBE_COAT_GGX) {
-      let fc = bsdf_mf_fresnel_dielectric_cos(max(dot(lobe.normal, wo), 0.0), lobe.ior);
-      albedo = albedo + lobe.weight * fc;
+  for (var i: u32 = 0u; i < (*closure).lobe_count; i = i + 1u) {
+    var lobe_copy = (*closure).lobes[i];
+    if (lobe_copy.lobe_type == LOBE_DIFFUSE || lobe_copy.lobe_type == LOBE_SHEEN) {
+      albedo = albedo + lobe_copy.weight;
+    } else if (lobe_copy.lobe_type == LOBE_GLOSSY_GGX) {
+      let fr = bsdf_mf_eval_glossy_fresnel(&lobe_copy, max(dot(lobe_copy.normal, wo), 0.0));
+      albedo = albedo + lobe_copy.weight * fr;
+    } else if (lobe_copy.lobe_type == LOBE_GLASS_GGX) {
+      let gr = bsdf_glass_fresnel(&lobe_copy, max(dot(lobe_copy.normal, wo), 0.0));
+      albedo = albedo + lobe_copy.weight * (gr.reflectance + gr.transmittance);
+    } else if (lobe_copy.lobe_type == LOBE_COAT_GGX) {
+      let fc = bsdf_mf_fresnel_dielectric_cos(max(dot(lobe_copy.normal, wo), 0.0), lobe_copy.ior);
+      albedo = albedo + lobe_copy.weight * fc;
     }
   }
   return clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
-fn closure_eval_normal(closure: Closure) -> vec3<f32> {
-  if (closure.lobe_count == 0u) {
-    return closure.geometric_normal;
+fn closure_eval_normal(closure: ptr<function, Closure>) -> vec3<f32> {
+  if ((*closure).lobe_count == 0u) {
+    return (*closure).geometric_normal;
   }
   var sum_n = vec3<f32>(0.0);
-  for (var i: u32 = 0u; i < closure.lobe_count; i = i + 1u) {
-    let lobe = closure.lobes[i];
-    if (lobe.lobe_type != LOBE_TRANSPARENT) {
-      sum_n = sum_n + lobe.normal * lobe.sample_weight;
+  for (var i: u32 = 0u; i < (*closure).lobe_count; i = i + 1u) {
+    var lobe_copy = (*closure).lobes[i];
+    if (lobe_copy.lobe_type != LOBE_TRANSPARENT) {
+      sum_n = sum_n + lobe_copy.normal * lobe_copy.sample_weight;
     }
   }
-  return bsdf_mf_safe_normalize_fallback(sum_n, closure.geometric_normal);
+  return bsdf_mf_safe_normalize_fallback(sum_n, (*closure).geometric_normal);
 }
 
 fn closure_pcg3d(v_in: vec3<u32>) -> vec3<u32> {

@@ -88,16 +88,16 @@ fn bsdf_glass_refract_angle(incident: vec3<f32>, normal: vec3<f32>, cos_theta_t:
   return (inv_eta * dot(normal, incident) + cos_theta_t) * normal - inv_eta * incident;
 }
 
-fn bsdf_glass_fresnel(lobe: Lobe, cos_theta_i: f32) -> BsdfGlassFresnel {
+fn bsdf_glass_fresnel(lobe: ptr<function, Lobe>, cos_theta_i: f32) -> BsdfGlassFresnel {
   let eval4 = bsdf_mf_generalized_schlick_eval(
-    lobe.f0,
-    lobe.ior,
-    lobe.thin_film_thickness,
-    lobe.thin_film_ior,
+    (*lobe).f0,
+    (*lobe).ior,
+    (*lobe).thin_film_thickness,
+    (*lobe).thin_film_ior,
     cos_theta_i,
   );
   let refl = clamp(eval4.xyz, vec3<f32>(0.0), vec3<f32>(1.0));
-  let trans = lobe.f82_or_tint * (vec3<f32>(1.0) - refl);
+  let trans = (*lobe).f82_or_tint * (vec3<f32>(1.0) - refl);
   return BsdfGlassFresnel(refl, trans, eval4.w);
 }
 
@@ -179,7 +179,7 @@ fn bsdf_glass_setup_lobe(
   let cos_no = max(dot(wo, normal), 0.0);
   var albedo_est = vec3<f32>(1.0);
   if (thin_film_thickness > BSDF_MF_THINFILM_CUTOFF) {
-    let fr = bsdf_glass_fresnel(lobe, cos_no);
+    let fr = bsdf_glass_fresnel(&lobe, cos_no);
     albedo_est = fr.reflectance + fr.transmittance;
   } else {
     let coords = bsdf_mf_albedo_coords(normal, tangent, wo, ax, ay);
@@ -200,15 +200,15 @@ fn bsdf_glass_setup_lobe(
   return lobe;
 }
 
-fn bsdf_glass_eval(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
-  let cos_no = dot(lobe.normal, wo);
-  let cos_ni = dot(lobe.normal, wi);
-  if (cos_no <= 0.0 || cos_ni == 0.0 || bsdf_mf_is_singular(lobe.alpha_x, lobe.alpha_y)) {
+fn bsdf_glass_eval(lobe: ptr<function, Lobe>, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
+  let cos_no = dot((*lobe).normal, wo);
+  let cos_ni = dot((*lobe).normal, wi);
+  if (cos_no <= 0.0 || cos_ni == 0.0 || bsdf_mf_is_singular((*lobe).alpha_x, (*lobe).alpha_y)) {
     return BsdfMfEval(vec3<f32>(0.0), 0.0);
   }
 
   let is_transmission = cos_ni < 0.0;
-  let eta = lobe.ior;
+  let eta = (*lobe).ior;
   if (is_transmission && abs(eta - 1.0) < 1e-4) {
     return BsdfMfEval(vec3<f32>(0.0), 0.0);
   }
@@ -224,7 +224,7 @@ fn bsdf_glass_eval(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
   let inv_len_h = inverseSqrt(len_h_sq);
   let half_vec = raw_h * inv_len_h;
 
-  let cos_nh = dot(lobe.normal, half_vec);
+  let cos_nh = dot((*lobe).normal, half_vec);
   let cos_ho = dot(half_vec, wo);
   let cos_hi = dot(half_vec, wi);
   if (cos_nh <= 0.0 || cos_ho <= 0.0) {
@@ -243,20 +243,20 @@ fn bsdf_glass_eval(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
   var ndf = 0.0;
   var lambda_wo = 0.0;
   var lambda_wi = 0.0;
-  if (lobe.alpha_x == lobe.alpha_y) {
-    let alpha2 = lobe.alpha_x * lobe.alpha_y;
-    let cross_nh = cross(lobe.normal, half_vec);
+  if ((*lobe).alpha_x == (*lobe).alpha_y) {
+    let alpha2 = (*lobe).alpha_x * (*lobe).alpha_y;
+    let cross_nh = cross((*lobe).normal, half_vec);
     ndf = bsdf_mf_d(alpha2, cos_nh, dot(cross_nh, cross_nh));
     lambda_wo = bsdf_mf_lambda(alpha2, cos_no);
     lambda_wi = bsdf_mf_lambda(alpha2, cos_ni);
   } else {
-    let frame = bsdf_mf_make_orthonormals_tangent(lobe.normal, lobe.tangent);
+    let frame = bsdf_mf_make_orthonormals_tangent((*lobe).normal, (*lobe).tangent);
     let local_h = vec3<f32>(dot(frame[0], half_vec), dot(frame[1], half_vec), cos_nh);
     let local_wo = vec3<f32>(dot(frame[0], wo), dot(frame[1], wo), cos_no);
     let local_wi = vec3<f32>(dot(frame[0], wi), dot(frame[1], wi), cos_ni);
-    ndf = bsdf_mf_aniso_d(lobe.alpha_x, lobe.alpha_y, local_h);
-    lambda_wo = bsdf_mf_aniso_lambda(lobe.alpha_x, lobe.alpha_y, local_wo);
-    lambda_wi = bsdf_mf_aniso_lambda(lobe.alpha_x, lobe.alpha_y, local_wi);
+    ndf = bsdf_mf_aniso_d((*lobe).alpha_x, (*lobe).alpha_y, local_h);
+    lambda_wo = bsdf_mf_aniso_lambda((*lobe).alpha_x, (*lobe).alpha_y, local_wo);
+    lambda_wi = bsdf_mf_aniso_lambda((*lobe).alpha_x, (*lobe).alpha_y, local_wi);
   }
 
   var jacobian = 0.25;
@@ -271,38 +271,38 @@ fn bsdf_glass_eval(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
     return BsdfMfEval(vec3<f32>(0.0), 0.0);
   }
   let spec_weight = select(coeff.reflectance, coeff.transmittance, is_transmission);
-  let energy_scale = lobe.diffuse_roughness;
-  let value = lobe.weight * spec_weight * (energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
+  let energy_scale = (*lobe).diffuse_roughness;
+  let value = (*lobe).weight * spec_weight * (energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
   return BsdfMfEval(value, pdf);
 }
 
 fn bsdf_glass_sample(
-  lobe: Lobe,
+  lobe: ptr<function, Lobe>,
   geometric_normal: vec3<f32>,
   wo: vec3<f32>,
   rand_xy: vec2<f32>,
   rand_lobe: f32,
 ) -> BsdfMfSample {
-  let cos_no = dot(lobe.normal, wo);
+  let cos_no = dot((*lobe).normal, wo);
   if (cos_no <= 0.0) {
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
   }
 
-  var singular = bsdf_mf_is_singular(lobe.alpha_x, lobe.alpha_y);
-  var half_vec = lobe.normal;
+  var singular = bsdf_mf_is_singular((*lobe).alpha_x, (*lobe).alpha_y);
+  var half_vec = (*lobe).normal;
   var frame = mat2x3<f32>(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0));
   var local_wo = vec3<f32>(0.0, 0.0, cos_no);
   var local_h = vec3<f32>(0.0, 0.0, 1.0);
 
   if (!singular) {
-    if (lobe.alpha_x == lobe.alpha_y) {
-      frame = bsdf_mf_make_orthonormals(lobe.normal);
+    if ((*lobe).alpha_x == (*lobe).alpha_y) {
+      frame = bsdf_mf_make_orthonormals((*lobe).normal);
     } else {
-      frame = bsdf_mf_make_orthonormals_tangent(lobe.normal, lobe.tangent);
+      frame = bsdf_mf_make_orthonormals_tangent((*lobe).normal, (*lobe).tangent);
     }
     local_wo = vec3<f32>(dot(frame[0], wo), dot(frame[1], wo), cos_no);
-    local_h = bsdf_mf_sample_vndf(local_wo, lobe.alpha_x, lobe.alpha_y, rand_xy);
-    half_vec = local_h.x * frame[0] + local_h.y * frame[1] + local_h.z * lobe.normal;
+    local_h = bsdf_mf_sample_vndf(local_wo, (*lobe).alpha_x, (*lobe).alpha_y, rand_xy);
+    half_vec = local_h.x * frame[0] + local_h.y * frame[1] + local_h.z * (*lobe).normal;
   }
 
   let cos_ho = dot(half_vec, wo);
@@ -318,7 +318,7 @@ fn bsdf_glass_sample(
 
   let pdf_reflect = bsdf_mf_average(coeff.reflectance) / sum_avg;
   let do_refract = rand_lobe >= pdf_reflect;
-  let eta = lobe.ior;
+  let eta = (*lobe).ior;
   let inv_eta = 1.0 / max(eta, 1e-6);
 
   var wi = 2.0 * cos_ho * half_vec - wo;
@@ -326,7 +326,7 @@ fn bsdf_glass_sample(
     wi = bsdf_glass_refract_angle(wo, half_vec, coeff.cos_theta_t, inv_eta);
   }
 
-  let cos_ni = dot(lobe.normal, wi);
+  let cos_ni = dot((*lobe).normal, wi);
   let cos_ngi = dot(geometric_normal, wi);
   if ((cos_ngi < 0.0) != do_refract || (cos_ni < 0.0) != do_refract || cos_ni == 0.0) {
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
@@ -343,25 +343,25 @@ fn bsdf_glass_sample(
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
   }
 
-  let energy_scale = lobe.diffuse_roughness;
+  let energy_scale = (*lobe).diffuse_roughness;
   if (singular) {
-    let throughput = lobe.weight * (spec_weight / branch_pdf) * energy_scale;
+    let throughput = (*lobe).weight * (spec_weight / branch_pdf) * energy_scale;
     return BsdfMfSample(wi, BSDF_GLASS_SINGULAR_WEIGHT, throughput * BSDF_GLASS_SINGULAR_WEIGHT, true);
   }
 
   var ndf = 0.0;
   var lambda_wo = 0.0;
   var lambda_wi = 0.0;
-  if (lobe.alpha_x == lobe.alpha_y) {
-    let alpha2 = lobe.alpha_x * lobe.alpha_y;
+  if ((*lobe).alpha_x == (*lobe).alpha_y) {
+    let alpha2 = (*lobe).alpha_x * (*lobe).alpha_y;
     ndf = bsdf_mf_d(alpha2, local_h.z, local_h.x * local_h.x + local_h.y * local_h.y);
     lambda_wo = bsdf_mf_lambda(alpha2, cos_no);
     lambda_wi = bsdf_mf_lambda(alpha2, cos_ni);
   } else {
     let local_wi = vec3<f32>(dot(frame[0], wi), dot(frame[1], wi), cos_ni);
-    ndf = bsdf_mf_aniso_d(lobe.alpha_x, lobe.alpha_y, local_h);
-    lambda_wo = bsdf_mf_aniso_lambda(lobe.alpha_x, lobe.alpha_y, local_wo);
-    lambda_wi = bsdf_mf_aniso_lambda(lobe.alpha_x, lobe.alpha_y, local_wi);
+    ndf = bsdf_mf_aniso_d((*lobe).alpha_x, (*lobe).alpha_y, local_h);
+    lambda_wo = bsdf_mf_aniso_lambda((*lobe).alpha_x, (*lobe).alpha_y, local_wo);
+    lambda_wi = bsdf_mf_aniso_lambda((*lobe).alpha_x, (*lobe).alpha_y, local_wi);
   }
 
   var jacobian = 0.25;
@@ -371,6 +371,6 @@ fn bsdf_glass_sample(
   }
   let common_factor = (ndf / cos_no) * jacobian;
   let pdf = branch_pdf * common_factor / (1.0 + lambda_wo);
-  let eval_val = lobe.weight * spec_weight * (energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
+  let eval_val = (*lobe).weight * spec_weight * (energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
   return BsdfMfSample(wi, pdf, eval_val, false);
 }

@@ -86,10 +86,10 @@ fn bsdf_coat_setup_lobe(
   return BsdfCoatSetup(lobe, layer_albedo);
 }
 
-fn bsdf_coat_eval(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
-  let cos_no = dot(lobe.normal, wo);
-  let cos_ni = dot(lobe.normal, wi);
-  if (cos_no <= 0.0 || cos_ni <= 0.0 || bsdf_mf_is_singular(lobe.alpha_x, lobe.alpha_y)) {
+fn bsdf_coat_eval(lobe: ptr<function, Lobe>, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
+  let cos_no = dot((*lobe).normal, wo);
+  let cos_ni = dot((*lobe).normal, wi);
+  if (cos_no <= 0.0 || cos_ni <= 0.0 || bsdf_mf_is_singular((*lobe).alpha_x, (*lobe).alpha_y)) {
     return BsdfMfEval(vec3<f32>(0.0), 0.0);
   }
   let sum_dir = wo + wi;
@@ -99,63 +99,63 @@ fn bsdf_coat_eval(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
   }
   let half_vec = sum_dir * inverseSqrt(sum_len_sq);
   let cos_ho = dot(half_vec, wo);
-  let cos_nh = dot(lobe.normal, half_vec);
+  let cos_nh = dot((*lobe).normal, half_vec);
   if (cos_ho <= 0.0 || cos_nh <= 0.0) {
     return BsdfMfEval(vec3<f32>(0.0), 0.0);
   }
-  let fresnel = bsdf_mf_fresnel_dielectric_cos(cos_ho, lobe.ior);
-  let alpha2 = lobe.alpha_x * lobe.alpha_y;
-  let cross_nh = cross(lobe.normal, half_vec);
+  let fresnel = bsdf_mf_fresnel_dielectric_cos(cos_ho, (*lobe).ior);
+  let alpha2 = (*lobe).alpha_x * (*lobe).alpha_y;
+  let cross_nh = cross((*lobe).normal, half_vec);
   let ndf = bsdf_mf_d(alpha2, cos_nh, dot(cross_nh, cross_nh));
   let lambda_wo = bsdf_mf_lambda(alpha2, cos_no);
   let lambda_wi = bsdf_mf_lambda(alpha2, cos_ni);
   let common_factor = 0.25 * ndf / cos_no;
   let pdf = common_factor / (1.0 + lambda_wo);
-  let energy_scale = lobe.diffuse_roughness;
-  let value = lobe.weight * (fresnel * energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
+  let energy_scale = (*lobe).diffuse_roughness;
+  let value = (*lobe).weight * (fresnel * energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
   return BsdfMfEval(value, pdf);
 }
 
 fn bsdf_coat_sample(
-  lobe: Lobe,
+  lobe: ptr<function, Lobe>,
   geometric_normal: vec3<f32>,
   wo: vec3<f32>,
   rand: vec2<f32>,
 ) -> BsdfMfSample {
-  let cos_no = dot(lobe.normal, wo);
+  let cos_no = dot((*lobe).normal, wo);
   if (cos_no <= 0.0) {
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
   }
-  let singular = bsdf_mf_is_singular(lobe.alpha_x, lobe.alpha_y);
-  var half_vec = lobe.normal;
+  let singular = bsdf_mf_is_singular((*lobe).alpha_x, (*lobe).alpha_y);
+  var half_vec = (*lobe).normal;
   var local_h = vec3<f32>(0.0, 0.0, 1.0);
   if (!singular) {
-    let frame = bsdf_mf_make_orthonormals(lobe.normal);
+    let frame = bsdf_mf_make_orthonormals((*lobe).normal);
     let local_wo = vec3<f32>(dot(frame[0], wo), dot(frame[1], wo), cos_no);
-    local_h = bsdf_mf_sample_vndf(local_wo, lobe.alpha_x, lobe.alpha_y, rand);
-    half_vec = local_h.x * frame[0] + local_h.y * frame[1] + local_h.z * lobe.normal;
+    local_h = bsdf_mf_sample_vndf(local_wo, (*lobe).alpha_x, (*lobe).alpha_y, rand);
+    half_vec = local_h.x * frame[0] + local_h.y * frame[1] + local_h.z * (*lobe).normal;
   }
   let cos_ho = dot(half_vec, wo);
   if (cos_ho <= 0.0) {
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
   }
   let wi = 2.0 * cos_ho * half_vec - wo;
-  let cos_ni = dot(lobe.normal, wi);
+  let cos_ni = dot((*lobe).normal, wi);
   if (cos_ni <= 0.0 || dot(geometric_normal, wi) <= 0.0) {
     return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
   }
-  let fresnel = bsdf_mf_fresnel_dielectric_cos(cos_ho, lobe.ior);
-  let energy_scale = lobe.diffuse_roughness;
+  let fresnel = bsdf_mf_fresnel_dielectric_cos(cos_ho, (*lobe).ior);
+  let energy_scale = (*lobe).diffuse_roughness;
   if (singular) {
-    let eval_sing = lobe.weight * (fresnel * energy_scale * BSDF_COAT_SINGULAR_WEIGHT);
+    let eval_sing = (*lobe).weight * (fresnel * energy_scale * BSDF_COAT_SINGULAR_WEIGHT);
     return BsdfMfSample(wi, BSDF_COAT_SINGULAR_WEIGHT, eval_sing, true);
   }
-  let alpha2 = lobe.alpha_x * lobe.alpha_y;
+  let alpha2 = (*lobe).alpha_x * (*lobe).alpha_y;
   let ndf = bsdf_mf_d(alpha2, local_h.z, local_h.x * local_h.x + local_h.y * local_h.y);
   let lambda_wo = bsdf_mf_lambda(alpha2, cos_no);
   let lambda_wi = bsdf_mf_lambda(alpha2, cos_ni);
   let common_factor = 0.25 * ndf / cos_no;
   let pdf = common_factor / (1.0 + lambda_wo);
-  let eval_val = lobe.weight * (fresnel * energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
+  let eval_val = (*lobe).weight * (fresnel * energy_scale * common_factor / (1.0 + lambda_wo + lambda_wi));
   return BsdfMfSample(wi, pdf, eval_val, false);
 }

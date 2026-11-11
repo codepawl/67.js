@@ -119,35 +119,35 @@ fn bsdf_diffuse_setup_lobe(
   return lobe;
 }
 
-fn bsdf_diffuse_eval(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfDiffuseEval {
-  let cos_ni = dot(lobe.normal, wi);
+fn bsdf_diffuse_eval(lobe: ptr<function, Lobe>, wi: vec3<f32>, wo: vec3<f32>) -> BsdfDiffuseEval {
+  let cos_ni = dot((*lobe).normal, wi);
   if (cos_ni <= 0.0) {
     return BsdfDiffuseEval(vec3<f32>(0.0), 0.0);
   }
   let pdf = cos_ni * INV_PI;
-  if (lobe.alpha_y <= 0.0) {
-    return BsdfDiffuseEval(lobe.weight * pdf, pdf);
+  if ((*lobe).alpha_y <= 0.0) {
+    return BsdfDiffuseEval((*lobe).weight * pdf, pdf);
   }
 
-  let cos_no = max(dot(lobe.normal, wo), 0.0);
+  let cos_no = max(dot((*lobe).normal, wo), 0.0);
   var s_term = dot(wi, wo) - cos_ni * cos_no;
   if (s_term > 0.0) {
     s_term = s_term / (max(cos_ni, cos_no) + BSDF_DIFFUSE_FLT_MIN);
   }
-  let single_scatter = lobe.alpha_x + lobe.alpha_y * s_term;
-  let e_l = lobe.alpha_x * PI + lobe.alpha_y * bsdf_diffuse_oren_nayar_g(cos_ni);
-  let multi_scatter = lobe.f82_or_tint * (1.0 - e_l);
+  let single_scatter = (*lobe).alpha_x + (*lobe).alpha_y * s_term;
+  let e_l = (*lobe).alpha_x * PI + (*lobe).alpha_y * bsdf_diffuse_oren_nayar_g(cos_ni);
+  let multi_scatter = (*lobe).f82_or_tint * (1.0 - e_l);
   let intensity = cos_ni * (vec3<f32>(single_scatter) + multi_scatter);
-  return BsdfDiffuseEval(lobe.weight * intensity, pdf);
+  return BsdfDiffuseEval((*lobe).weight * intensity, pdf);
 }
 
 fn bsdf_diffuse_sample(
-  lobe: Lobe,
+  lobe: ptr<function, Lobe>,
   geometric_normal: vec3<f32>,
   wo: vec3<f32>,
   rand: vec2<f32>,
 ) -> BsdfDiffuseSample {
-  let sampled = bsdf_diffuse_sample_cos_hemisphere(lobe.normal, rand);
+  let sampled = bsdf_diffuse_sample_cos_hemisphere((*lobe).normal, rand);
   let wi = sampled.xyz;
   if (sampled.w <= 0.0 || dot(geometric_normal, wi) <= 0.0) {
     return BsdfDiffuseSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0));
