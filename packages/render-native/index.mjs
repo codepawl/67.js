@@ -9,9 +9,11 @@ import {
   FORMAT_V2_MAGIC,
   FORMAT_V2_VERSION,
   STRUCT_STRIDES_V2,
+  KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
   buildNativeInputV2,
   packMaterialRecordV2,
   upgradeNativeInputV1ToV2,
+  validatePackOptions,
 } from './pack-input-v2.mjs';
 
 export { buildNativeInput, buildNativeTexelInput } from './pack-input.mjs';
@@ -19,6 +21,7 @@ export {
   FORMAT_V2_MAGIC,
   FORMAT_V2_VERSION,
   STRUCT_STRIDES_V2,
+  KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
   buildNativeInputV2,
   packMaterialRecordV2,
   upgradeNativeInputV1ToV2,
@@ -55,6 +58,7 @@ export function resolveNativeKernel(kernel) {
  * run that long. `kernel` selects `"legacy"` (default) or `"cycles"` (falling back to `JS67_NATIVE_KERNEL` when omitted).
  */
 export function traceNative(input, options = {}) {
+  validatePackOptions(options, 'traceNative', true);
   const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel } = options;
   const selectedKernel = resolveNativeKernel(kernel);
   const addon = loadAddon();
@@ -74,7 +78,7 @@ export function traceNative(input, options = {}) {
     const rawFilterGlossy = Number(explicitFilterGlossy);
     const resolvedFilterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
     const patchedParams = new Uint8Array(v2Input.kernelParams);
-    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(300, resolvedFilterGlossy, true);
+    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
     v2Input = { ...v2Input, kernelParams: patchedParams };
   }
   return addon.traceSceneCycles(v2Input, {
@@ -122,8 +126,8 @@ function buildProbeKernelParams({ width, height, mode, seed, wo, frontFace, mate
 export function probeCyclesLobe(options = {}) {
   const width = options.width ?? 512;
   const height = options.height ?? 512;
-  if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
-    throw new RangeError('probeCyclesLobe requires positive integer `width` and `height`.');
+  if (!Number.isInteger(width) || width < 1 || width > 16384 || !Number.isInteger(height) || height < 1 || height > 16384) {
+    throw new RangeError(`probeCyclesLobe requires integer \`width\` and \`height\` in [1, 16384]; got width=${width}, height=${height}.`);
   }
   const wo = options.wo ?? [0, 0, 1];
   if (!Array.isArray(wo) && !ArrayBuffer.isView(wo) || wo.length !== 3) {

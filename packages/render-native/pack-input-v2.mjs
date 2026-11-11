@@ -5,6 +5,10 @@ export const FORMAT_V2_MAGIC = 0x36375054;
 export const FORMAT_V2_VERSION = 2;
 export const INVALID_INDEX_V2 = 0xffffffff;
 
+// Byte offset of `filter_glossy` inside a `KernelParamsV2` buffer (u32[75] * 4 = 300).
+// Used in `packKernelParamsV2` and in `index.mjs` when patching a pre-built buffer.
+export const KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET = 300;
+
 export const STRUCT_STRIDES_V2 = Object.freeze({
   kernelParams: 320,
   instance: 160,
@@ -1430,6 +1434,70 @@ function packEnvironmentTexelsV2(environment, options = {}) {
   };
 }
 
+function requireFiniteIntegerInRange(value, name, min, max, callerName) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new RangeError(
+      `${callerName}: \`${name}\` must be a finite integer in [${min}, ${max}]; got ${value === null ? 'null' : JSON.stringify(value)}.`
+    );
+  }
+  if (!Number.isInteger(n)) {
+    throw new RangeError(
+      `${callerName}: \`${name}\` must be an integer (no fractional part); got ${value}.`
+    );
+  }
+  if (n < min || n > max) {
+    throw new RangeError(
+      `${callerName}: \`${name}\` must be in [${min}, ${max}]; got ${n}.`
+    );
+  }
+}
+
+function requireFiniteIntegerInRangeIfPresent(value, name, min, max, callerName) {
+  if (value === undefined) {
+    return;
+  }
+  requireFiniteIntegerInRange(value, name, min, max, callerName);
+}
+
+/**
+ * Validates public boundary options for `buildNativeInputV2`, `upgradeNativeInputV1ToV2`, and
+ * `traceNative`. Throws `RangeError` or `TypeError` with a descriptive message on failure.
+ */
+export function validatePackOptions(options, callerName, requireDimensionsAndSamples = false) {
+  if (!options || typeof options !== 'object') {
+    throw new TypeError(`${callerName}: \`options\` must be an object.`);
+  }
+  const { width, height, samples, samplesPerDispatch } = options;
+  if (requireDimensionsAndSamples || width !== undefined) {
+    requireFiniteIntegerInRange(width, 'width', 1, 16384, callerName);
+  }
+  if (requireDimensionsAndSamples || height !== undefined) {
+    requireFiniteIntegerInRange(height, 'height', 1, 16384, callerName);
+  }
+  if (requireDimensionsAndSamples || samples !== undefined) {
+    requireFiniteIntegerInRange(samples, 'samples', 1, 1048576, callerName);
+  }
+  // samplesPerDispatch is optional (undefined means "let the addon choose"); only validate when provided.
+  requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
+
+  // Bounce limits — each is optional; when provided must be a finite integer in [0, 1024].
+  const bounceFields = [
+    'bounces', 'maxBounces',
+    'diffuseBounces', 'maxDiffuseBounces',
+    'glossyBounces', 'maxGlossyBounces',
+    'transmissionBounces', 'maxTransmissionBounces',
+    'volumeBounces', 'maxVolumeBounces',
+    'transparentBounces', 'maxTransparentBounces',
+    'minBounceRr',
+  ];
+  for (const field of bounceFields) {
+    if (options[field] !== undefined) {
+      requireFiniteIntegerInRange(options[field], field, 0, 1024, callerName);
+    }
+  }
+}
+
 function effectiveCyclesClamp(value) {
   if (value === undefined || value === null) {
     return 0.0;
@@ -1623,7 +1691,8 @@ function packKernelParamsV2({
   f32[72] = Number(options.exposure ?? 1.0);
   f32[73] = packedEnvironment.envWidth > 0 && packedEnvironment.envTotalWeight > 0 ? 1.0 : 0.0;
   u32[74] = 0;
-  f32[75] = filterGlossy;
+  // KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4 = 75
+  f32[KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4] = filterGlossy;
 
   u32[76] = 0;
   u32[77] = 0;
@@ -2058,6 +2127,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   if (!camera || typeof camera !== 'object') {
     throw new TypeError('buildNativeInputV2 requires a camera object.');
   }
+  validatePackOptions(options, 'buildNativeInputV2');
 
   const textureCollector = createTextureCollector();
   const explicitInstances = options.instances ?? scene.instances;
@@ -2137,6 +2207,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
   if (!v1Input || !(v1Input.parameters instanceof Uint8Array) || v1Input.parameters.byteLength !== 256) {
     throw new TypeError('upgradeNativeInputV1ToV2 requires a v1 NativeTraceInput with a 256-byte parameters block, or a FORMAT-v2 input.');
   }
+  validatePackOptions(options, 'upgradeNativeInputV1ToV2');
 
   const paramBuffer = v1Input.parameters.buffer;
   const paramByteOffset = v1Input.parameters.byteOffset;
