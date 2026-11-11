@@ -506,6 +506,7 @@ struct ClosureSample {
 @group(0) @binding(9) var<storage, read> texture_texels: array<u32>;
 @group(0) @binding(10) var<storage, read> environment_texels: array<vec4<f32>>;
 @group(0) @binding(11) var<storage, read_write> film_accumulation: array<vec4<f32>>;
+@group(0) @binding(12) var<storage, read> cycles_lut: array<u32>;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Cross-lane closure interface contract (defined in Lane L4 `src/cycles/closure.wgsl`, called by Lane L3 integrator)
