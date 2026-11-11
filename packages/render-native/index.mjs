@@ -9,6 +9,7 @@ export { buildNativeInput, buildNativeTexelInput } from './pack-input.mjs';
 
 const PACKAGE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const ADDON_PATH = join(PACKAGE_DIRECTORY, 'build', 'render-native.node');
+const VALID_KERNELS = new Set(['legacy', 'cycles']);
 
 /** The path of the built addon, or null when `npm run build` has not run. */
 export function findNativeAddon() {
@@ -16,12 +17,29 @@ export function findNativeAddon() {
 }
 
 /**
+ * Resolves and validates the native kernel name from `kernel`, falling back to `JS67_NATIVE_KERNEL` and `'legacy'`.
+ */
+export function resolveNativeKernel(kernel) {
+  const envKernel = process.env.JS67_NATIVE_KERNEL;
+  const selectedKernel = kernel !== undefined
+    ? kernel
+    : (envKernel !== undefined && envKernel !== '' ? envKernel : 'legacy');
+  if (typeof selectedKernel !== 'string' || !VALID_KERNELS.has(selectedKernel)) {
+    throw new Error(
+      `Invalid native kernel ${JSON.stringify(selectedKernel)}: pass "legacy" or "cycles" in options.kernel or JS67_NATIVE_KERNEL.`
+    );
+  }
+  return selectedKernel;
+}
+
+/**
  * Traces the input on the GPU and resolves linear RGBA float data (`rgba`, width * height * 4, rows from the top, the
  * average of `samples` paths) with the adapter name and timings in seconds. `maxSeconds` makes the trace fail once it has
- * run that long.
+ * run that long. `kernel` selects `"legacy"` (default) or `"cycles"` (falling back to `JS67_NATIVE_KERNEL` when omitted).
  */
-export function traceNative(input, { width, height, samples, maxSeconds }) {
-  return loadAddon().traceScene(input, { width, height, samples, maxSeconds });
+export function traceNative(input, { width, height, samples, maxSeconds, kernel } = {}) {
+  const selectedKernel = resolveNativeKernel(kernel);
+  return loadAddon().traceScene(input, { width, height, samples, maxSeconds, kernel: selectedKernel });
 }
 
 /**
