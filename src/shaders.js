@@ -687,7 +687,7 @@ void main() {
 ${featureCode("surfaceHook")}  float alpha = surfaceAlpha(textureAlpha);
   vec3 emission = instanceEmission.rgb * surface.z;
   if (USES_EMISSIVE_MAP) emission *= (BOX_MAPPED ? sampleBox(emissiveMap) : texture(emissiveMap, mapUV(hasEmissiveMap))).rgb;
-  if (USES_RENDER_PASS) {
+${featureCode("emissionHook")}  if (USES_RENDER_PASS) {
     outputColor = vec4(renderPassValue(color, normal, emission), 1.0);
     return;
   }

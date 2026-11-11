@@ -135,6 +135,7 @@ function resolveMaterial(material) {
     roughness: material.roughness ?? 0.5,
     emission: emissionColor.map(channel => channel * emissionStrength),
     emissiveTexture: emissionStrength > 0 ? resolveTexture(material.emissiveMap) : null,
+    emissionFresnel: material.emissionFresnel ?? 0,
     clearcoat: material.clearcoat ?? 0,
     clearcoatTexture: resolveTexture(material.layerMaps?.clearcoatTexture),
     transmissionTexture: resolveTexture(material.transmissionMap),
