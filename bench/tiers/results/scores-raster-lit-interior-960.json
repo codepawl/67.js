@@ -1,0 +1,331 @@
+{
+ "width": 960,
+ "rows": [
+  {
+   "scene": "lit-interior",
+   "engine": "glaze",
+   "tier": "draft",
+   "width": 960,
+   "canvas": "480x270",
+   "firstFrameMilliseconds": {
+    "median": 11.925,
+    "min": 7.54,
+    "max": 23.94,
+    "runs": [
+     23.94,
+     7.54,
+     11.925
+    ]
+   },
+   "setupMilliseconds": {
+    "median": 32.32,
+    "min": 31.225,
+    "max": 239.32,
+    "runs": [
+     239.32,
+     31.225,
+     32.32
+    ]
+   },
+   "frameMilliseconds": {
+    "median": 1.2,
+    "min": 0.88,
+    "max": 2.43,
+    "runs": [
+     2.43,
+     1.2,
+     0.88
+    ]
+   },
+   "flip": {
+    "median": 0.1875,
+    "min": 0.1875,
+    "max": 0.1875,
+    "runs": [
+     0.1875,
+     0.1875,
+     0.1875
+    ]
+   },
+   "displayRelMse": {
+    "median": 0.0153,
+    "min": 0.0153,
+    "max": 0.0153,
+    "runs": [
+     0.0153,
+     0.0153,
+     0.0153
+    ]
+   },
+   "renderTargetMegabytes": 38.97,
+   "peakCardDeltaMebibytes": {
+    "median": 62,
+    "min": 41,
+    "max": 66,
+    "runs": [
+     66,
+     62,
+     41
+    ]
+   },
+   "cardUtilizationPeakPercent": {
+    "median": 67,
+    "min": 25,
+    "max": 72,
+    "runs": [
+     67,
+     72,
+     25
+    ]
+   },
+   "samples": 1
+  },
+  {
+   "scene": "lit-interior",
+   "engine": "glaze",
+   "tier": "realtime",
+   "width": 960,
+   "canvas": "960x540",
+   "firstFrameMilliseconds": {
+    "median": 9.715,
+    "min": 8.215,
+    "max": 15.965,
+    "runs": [
+     15.965,
+     9.715,
+     8.215
+    ]
+   },
+   "setupMilliseconds": {
+    "median": 35.495,
+    "min": 34.25,
+    "max": 165.275,
+    "runs": [
+     165.275,
+     35.495,
+     34.25
+    ]
+   },
+   "frameMilliseconds": {
+    "median": 1.11,
+    "min": 1.05,
+    "max": 1.235,
+    "runs": [
+     1.11,
+     1.235,
+     1.05
+    ]
+   },
+   "flip": {
+    "median": 0.1969,
+    "min": 0.1969,
+    "max": 0.1969,
+    "runs": [
+     0.1969,
+     0.1969,
+     0.1969
+    ]
+   },
+   "displayRelMse": {
+    "median": 0.014,
+    "min": 0.014,
+    "max": 0.014,
+    "runs": [
+     0.014,
+     0.014,
+     0.014
+    ]
+   },
+   "renderTargetMegabytes": 65.66,
+   "peakCardDeltaMebibytes": {
+    "median": 119,
+    "min": 117,
+    "max": 120,
+    "runs": [
+     117,
+     119,
+     120
+    ]
+   },
+   "cardUtilizationPeakPercent": {
+    "median": 41,
+    "min": 37,
+    "max": 59,
+    "runs": [
+     41,
+     37,
+     59
+    ]
+   },
+   "samples": 4
+  },
+  {
+   "scene": "lit-interior",
+   "engine": "eevee",
+   "tier": "lowest",
+   "width": 960,
+   "firstFrameMilliseconds": {
+    "median": 19176.8,
+    "min": 1429.4,
+    "max": 25002.0,
+    "runs": [
+     19176.8,
+     1429.4,
+     25002.0
+    ]
+   },
+   "frameMilliseconds": {
+    "median": 99.1,
+    "min": 76.1,
+    "max": 157.3,
+    "runs": [
+     157.3,
+     99.1,
+     76.1
+    ]
+   },
+   "flip": {
+    "median": 0.562,
+    "min": 0.562,
+    "max": 0.562,
+    "runs": [
+     0.562,
+     0.562,
+     0.562
+    ]
+   },
+   "displayRelMse": {
+    "median": 0.1612,
+    "min": 0.1612,
+    "max": 0.1612,
+    "runs": [
+     0.1612,
+     0.1612,
+     0.1612
+    ]
+   },
+   "linearRelMse": {
+    "median": 0.1757,
+    "min": 0.1757,
+    "max": 0.1757,
+    "runs": [
+     0.1757,
+     0.1757,
+     0.1757
+    ]
+   },
+   "peakCardDeltaMebibytes": {
+    "median": 2218.0,
+    "min": 2197.0,
+    "max": 2380.0,
+    "runs": [
+     2380.0,
+     2197.0,
+     2218.0
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 602.0,
+    "min": 574.27,
+    "max": 680.93,
+    "runs": [
+     680.93,
+     602.0,
+     574.27
+    ]
+   },
+   "effectiveSettings": {
+    "taa_render_samples": 1,
+    "use_raytracing": false,
+    "shadow_ray_count": 1,
+    "shadow_step_count": 1,
+    "use_volumetric_shadows": false,
+    "use_shadows": true
+   }
+  },
+  {
+   "scene": "lit-interior",
+   "engine": "eevee",
+   "tier": "default",
+   "width": 960,
+   "firstFrameMilliseconds": {
+    "median": 2072.2,
+    "min": 1494.4,
+    "max": 4715.0,
+    "runs": [
+     1494.4,
+     4715.0,
+     2072.2
+    ]
+   },
+   "frameMilliseconds": {
+    "median": 1127.3,
+    "min": 716.3,
+    "max": 1891.1,
+    "runs": [
+     1127.3,
+     1891.1,
+     716.3
+    ]
+   },
+   "flip": {
+    "median": 0.5618,
+    "min": 0.5618,
+    "max": 0.5618,
+    "runs": [
+     0.5618,
+     0.5618,
+     0.5618
+    ]
+   },
+   "displayRelMse": {
+    "median": 0.1602,
+    "min": 0.1602,
+    "max": 0.1602,
+    "runs": [
+     0.1602,
+     0.1602,
+     0.1602
+    ]
+   },
+   "linearRelMse": {
+    "median": 0.1753,
+    "min": 0.1753,
+    "max": 0.1753,
+    "runs": [
+     0.1753,
+     0.1753,
+     0.1753
+    ]
+   },
+   "peakCardDeltaMebibytes": {
+    "median": 2503.0,
+    "min": 2014.0,
+    "max": 3127.0,
+    "runs": [
+     3127.0,
+     2503.0,
+     2014.0
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 619.13,
+    "min": 612.46,
+    "max": 634.73,
+    "runs": [
+     634.73,
+     619.13,
+     612.46
+    ]
+   },
+   "effectiveSettings": {
+    "taa_render_samples": 64,
+    "use_raytracing": false,
+    "shadow_ray_count": 1,
+    "shadow_step_count": 6,
+    "use_volumetric_shadows": false,
+    "use_shadows": true
+   }
+  }
+ ]
+}

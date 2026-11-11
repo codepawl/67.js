@@ -359,6 +359,8 @@ async function compareBakeBackends(id, variants) {
 }
 
 window.measureReferenceFrameTime = measureReferenceFrameTime;
+// The scene preparation the suite uses, for bench/tiers/page.js, which draws the same scenes with other renderer options.
+window.referenceInternals = { SCENES, Renderer67, applyLightLinks, withDerivedGroundBounce, withFloorSky, skyOpenness, fogSkyVisibility };
 window.compareBakeBackends = compareBakeBackends;
 
 async function renderReferencePathTraced(id, options) {

@@ -1,0 +1,656 @@
+{
+ "width": 960,
+ "height": 540,
+ "frameCount": 10,
+ "repetitions": 3,
+ "runs": [
+  {
+   "repetition": 1,
+   "width": 960,
+   "height": 540,
+   "tierName": "draft",
+   "card": {
+    "beforeMebibytes": 3575,
+    "peakMebibytes": 3641,
+    "deltaMebibytes": 66,
+    "utilizationBeforePercent": 55,
+    "utilizationPeakPercent": 67
+   },
+   "sceneId": "lit-interior",
+   "tier": "draft (planned name)",
+   "canvasWidth": 480,
+   "canvasHeight": 270,
+   "setupMilliseconds": 239.31999999284744,
+   "firstFrameMilliseconds": 23.939999997615814,
+   "frameMilliseconds": [
+    2.5149999856948853,
+    3.9649999737739563,
+    1.8050000071525574,
+    1.8100000023841858,
+    2.2850000262260437,
+    1.7149999737739563,
+    1.5300000309944153,
+    3.8949999809265137,
+    2.4299999475479126,
+    2.9200000166893005
+   ],
+   "medianFrameMilliseconds": 2.4299999475479126,
+   "glError": 0,
+   "capabilities": {
+    "hdr": true,
+    "hdrRequested": true,
+    "hdrFallbackReason": null,
+    "samples": 1,
+    "maximumTextureSize": 16384,
+    "reversedDepth": true
+   },
+   "memoryReport": {
+    "totalBytes": 40859136,
+    "totalMegabytes": 38.97,
+    "targets": [
+     {
+      "name": "localShadowAtlas",
+      "width": 2048,
+      "height": 2560,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 20971520,
+      "megabytes": 20
+     },
+     {
+      "name": "shadowMap",
+      "width": 2048,
+      "height": 2048,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 16777216,
+      "megabytes": 16
+     },
+     {
+      "name": "multisampleColor",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 1036800,
+      "megabytes": 0.99
+     },
+     {
+      "name": "frameColor",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 1036800,
+      "megabytes": 0.99
+     },
+     {
+      "name": "multisampleDepth",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 518400,
+      "megabytes": 0.49
+     },
+     {
+      "name": "sceneDepth",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 518400,
+      "megabytes": 0.49
+     }
+    ]
+   },
+   "graphics": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002487) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  },
+  {
+   "repetition": 1,
+   "width": 960,
+   "height": 540,
+   "tierName": "realtime",
+   "card": {
+    "beforeMebibytes": 3602,
+    "peakMebibytes": 3719,
+    "deltaMebibytes": 117,
+    "utilizationBeforePercent": 35,
+    "utilizationPeakPercent": 41
+   },
+   "sceneId": "lit-interior",
+   "tier": "realtime",
+   "canvasWidth": 960,
+   "canvasHeight": 540,
+   "setupMilliseconds": 165.2750000357628,
+   "firstFrameMilliseconds": 15.964999973773956,
+   "frameMilliseconds": [
+    2.1200000047683716,
+    1.2900000214576721,
+    0.7450000047683716,
+    0.75,
+    1.1100000143051147,
+    0.85999995470047,
+    2.325000047683716,
+    1.274999976158142,
+    0.6899999976158142,
+    0.6899999976158142
+   ],
+   "medianFrameMilliseconds": 1.1100000143051147,
+   "glError": 0,
+   "capabilities": {
+    "hdr": true,
+    "hdrRequested": true,
+    "hdrFallbackReason": null,
+    "samples": 4,
+    "maximumTextureSize": 16384,
+    "reversedDepth": true
+   },
+   "memoryReport": {
+    "totalBytes": 68852736,
+    "totalMegabytes": 65.66,
+    "targets": [
+     {
+      "name": "localShadowAtlas",
+      "width": 2048,
+      "height": 2560,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 20971520,
+      "megabytes": 20
+     },
+     {
+      "name": "shadowMap",
+      "width": 2048,
+      "height": 2048,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 16777216,
+      "megabytes": 16
+     },
+     {
+      "name": "multisampleColor",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 4,
+      "bytes": 16588800,
+      "megabytes": 15.82
+     },
+     {
+      "name": "multisampleDepth",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 4,
+      "bytes": 8294400,
+      "megabytes": 7.91
+     },
+     {
+      "name": "frameColor",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 4147200,
+      "megabytes": 3.96
+     },
+     {
+      "name": "sceneDepth",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 2073600,
+      "megabytes": 1.98
+     }
+    ]
+   },
+   "graphics": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002487) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  },
+  {
+   "repetition": 2,
+   "width": 960,
+   "height": 540,
+   "tierName": "realtime",
+   "card": {
+    "beforeMebibytes": 3602,
+    "peakMebibytes": 3721,
+    "deltaMebibytes": 119,
+    "utilizationBeforePercent": 37,
+    "utilizationPeakPercent": 37
+   },
+   "sceneId": "lit-interior",
+   "tier": "realtime",
+   "canvasWidth": 960,
+   "canvasHeight": 540,
+   "setupMilliseconds": 35.49500000476837,
+   "firstFrameMilliseconds": 9.715000033378601,
+   "frameMilliseconds": [
+    2.10999995470047,
+    1.125,
+    1.375,
+    1.23499995470047,
+    1.0050000548362732,
+    0.6949999928474426,
+    0.8549999594688416,
+    1.3650000095367432,
+    1.8700000047683716,
+    0.875
+   ],
+   "medianFrameMilliseconds": 1.23499995470047,
+   "glError": 0,
+   "capabilities": {
+    "hdr": true,
+    "hdrRequested": true,
+    "hdrFallbackReason": null,
+    "samples": 4,
+    "maximumTextureSize": 16384,
+    "reversedDepth": true
+   },
+   "memoryReport": {
+    "totalBytes": 68852736,
+    "totalMegabytes": 65.66,
+    "targets": [
+     {
+      "name": "localShadowAtlas",
+      "width": 2048,
+      "height": 2560,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 20971520,
+      "megabytes": 20
+     },
+     {
+      "name": "shadowMap",
+      "width": 2048,
+      "height": 2048,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 16777216,
+      "megabytes": 16
+     },
+     {
+      "name": "multisampleColor",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 4,
+      "bytes": 16588800,
+      "megabytes": 15.82
+     },
+     {
+      "name": "multisampleDepth",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 4,
+      "bytes": 8294400,
+      "megabytes": 7.91
+     },
+     {
+      "name": "frameColor",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 4147200,
+      "megabytes": 3.96
+     },
+     {
+      "name": "sceneDepth",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 2073600,
+      "megabytes": 1.98
+     }
+    ]
+   },
+   "graphics": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002487) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  },
+  {
+   "repetition": 2,
+   "width": 960,
+   "height": 540,
+   "tierName": "draft",
+   "card": {
+    "beforeMebibytes": 3602,
+    "peakMebibytes": 3664,
+    "deltaMebibytes": 62,
+    "utilizationBeforePercent": 57,
+    "utilizationPeakPercent": 72
+   },
+   "sceneId": "lit-interior",
+   "tier": "draft (planned name)",
+   "canvasWidth": 480,
+   "canvasHeight": 270,
+   "setupMilliseconds": 31.224999964237213,
+   "firstFrameMilliseconds": 7.539999961853027,
+   "frameMilliseconds": [
+    1.199999988079071,
+    1.1550000309944153,
+    3.435000002384186,
+    1.5350000262260437,
+    0.7749999761581421,
+    4.6549999713897705,
+    1.4649999737739563,
+    1.0199999809265137,
+    0.9950000047683716,
+    1.0550000071525574
+   ],
+   "medianFrameMilliseconds": 1.199999988079071,
+   "glError": 0,
+   "capabilities": {
+    "hdr": true,
+    "hdrRequested": true,
+    "hdrFallbackReason": null,
+    "samples": 1,
+    "maximumTextureSize": 16384,
+    "reversedDepth": true
+   },
+   "memoryReport": {
+    "totalBytes": 40859136,
+    "totalMegabytes": 38.97,
+    "targets": [
+     {
+      "name": "localShadowAtlas",
+      "width": 2048,
+      "height": 2560,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 20971520,
+      "megabytes": 20
+     },
+     {
+      "name": "shadowMap",
+      "width": 2048,
+      "height": 2048,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 16777216,
+      "megabytes": 16
+     },
+     {
+      "name": "multisampleColor",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 1036800,
+      "megabytes": 0.99
+     },
+     {
+      "name": "frameColor",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 1036800,
+      "megabytes": 0.99
+     },
+     {
+      "name": "multisampleDepth",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 518400,
+      "megabytes": 0.49
+     },
+     {
+      "name": "sceneDepth",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 518400,
+      "megabytes": 0.49
+     }
+    ]
+   },
+   "graphics": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002487) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  },
+  {
+   "repetition": 3,
+   "width": 960,
+   "height": 540,
+   "tierName": "draft",
+   "card": {
+    "beforeMebibytes": 3622,
+    "peakMebibytes": 3663,
+    "deltaMebibytes": 41,
+    "utilizationBeforePercent": 25,
+    "utilizationPeakPercent": 25
+   },
+   "sceneId": "lit-interior",
+   "tier": "draft (planned name)",
+   "canvasWidth": 480,
+   "canvasHeight": 270,
+   "setupMilliseconds": 32.31999999284744,
+   "firstFrameMilliseconds": 11.924999952316284,
+   "frameMilliseconds": [
+    1.7050000429153442,
+    1.0649999976158142,
+    0.6850000023841858,
+    0.7450000047683716,
+    1.2699999809265137,
+    1.0250000357627869,
+    0.8349999785423279,
+    0.8799999952316284,
+    0.6899999976158142,
+    0.5699999928474426
+   ],
+   "medianFrameMilliseconds": 0.8799999952316284,
+   "glError": 0,
+   "capabilities": {
+    "hdr": true,
+    "hdrRequested": true,
+    "hdrFallbackReason": null,
+    "samples": 1,
+    "maximumTextureSize": 16384,
+    "reversedDepth": true
+   },
+   "memoryReport": {
+    "totalBytes": 40859136,
+    "totalMegabytes": 38.97,
+    "targets": [
+     {
+      "name": "localShadowAtlas",
+      "width": 2048,
+      "height": 2560,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 20971520,
+      "megabytes": 20
+     },
+     {
+      "name": "shadowMap",
+      "width": 2048,
+      "height": 2048,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 16777216,
+      "megabytes": 16
+     },
+     {
+      "name": "multisampleColor",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 1036800,
+      "megabytes": 0.99
+     },
+     {
+      "name": "frameColor",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 1036800,
+      "megabytes": 0.99
+     },
+     {
+      "name": "multisampleDepth",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 518400,
+      "megabytes": 0.49
+     },
+     {
+      "name": "sceneDepth",
+      "width": 480,
+      "height": 270,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 518400,
+      "megabytes": 0.49
+     }
+    ]
+   },
+   "graphics": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002487) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  },
+  {
+   "repetition": 3,
+   "width": 960,
+   "height": 540,
+   "tierName": "realtime",
+   "card": {
+    "beforeMebibytes": 3622,
+    "peakMebibytes": 3742,
+    "deltaMebibytes": 120,
+    "utilizationBeforePercent": 59,
+    "utilizationPeakPercent": 59
+   },
+   "sceneId": "lit-interior",
+   "tier": "realtime",
+   "canvasWidth": 960,
+   "canvasHeight": 540,
+   "setupMilliseconds": 34.25,
+   "firstFrameMilliseconds": 8.215000033378601,
+   "frameMilliseconds": [
+    3.4950000047683716,
+    1.800000011920929,
+    1.7199999690055847,
+    0.9650000333786011,
+    0.7899999618530273,
+    0.9000000357627869,
+    0.9199999570846558,
+    1.4200000166893005,
+    1.050000011920929,
+    0.824999988079071
+   ],
+   "medianFrameMilliseconds": 1.050000011920929,
+   "glError": 0,
+   "capabilities": {
+    "hdr": true,
+    "hdrRequested": true,
+    "hdrFallbackReason": null,
+    "samples": 4,
+    "maximumTextureSize": 16384,
+    "reversedDepth": true
+   },
+   "memoryReport": {
+    "totalBytes": 68852736,
+    "totalMegabytes": 65.66,
+    "targets": [
+     {
+      "name": "localShadowAtlas",
+      "width": 2048,
+      "height": 2560,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 20971520,
+      "megabytes": 20
+     },
+     {
+      "name": "shadowMap",
+      "width": 2048,
+      "height": 2048,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT24",
+      "samples": 1,
+      "bytes": 16777216,
+      "megabytes": 16
+     },
+     {
+      "name": "multisampleColor",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 4,
+      "bytes": 16588800,
+      "megabytes": 15.82
+     },
+     {
+      "name": "multisampleDepth",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 4,
+      "bytes": 8294400,
+      "megabytes": 7.91
+     },
+     {
+      "name": "frameColor",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "RGBA16F",
+      "samples": 1,
+      "bytes": 4147200,
+      "megabytes": 3.96
+     },
+     {
+      "name": "sceneDepth",
+      "width": 960,
+      "height": 540,
+      "layers": 1,
+      "format": "DEPTH_COMPONENT32F",
+      "samples": 1,
+      "bytes": 2073600,
+      "megabytes": 1.98
+     }
+    ]
+   },
+   "graphics": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002487) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+  }
+ ]
+}

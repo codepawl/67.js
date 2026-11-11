@@ -1,0 +1,159 @@
+{
+ "scene": "lit-interior",
+ "width": 960,
+ "bounds": [
+  0.2,
+  0.15,
+  0.1
+ ],
+ "backends": {
+  "gpu": {
+   "drawnBackend": "gpu",
+   "fallbackReason": null,
+   "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002487) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+   "compileSeconds": 5.676960000038147,
+   "medianFrameMilliseconds": 6.735000014305115,
+   "checkpoints": [
+    {
+     "frame": 1,
+     "elapsedSeconds": 6.138,
+     "flip": 0.3097
+    },
+    {
+     "frame": 2,
+     "elapsedSeconds": 6.146,
+     "flip": 0.2842
+    },
+    {
+     "frame": 4,
+     "elapsedSeconds": 6.163,
+     "flip": 0.2632
+    },
+    {
+     "frame": 8,
+     "elapsedSeconds": 6.193,
+     "flip": 0.2404
+    },
+    {
+     "frame": 16,
+     "elapsedSeconds": 6.251,
+     "flip": 0.1704
+    },
+    {
+     "frame": 32,
+     "elapsedSeconds": 6.366,
+     "flip": 0.1194
+    },
+    {
+     "frame": 64,
+     "elapsedSeconds": 6.583,
+     "flip": 0.0874
+    },
+    {
+     "frame": 128,
+     "elapsedSeconds": 7.017,
+     "flip": 0.0639
+    },
+    {
+     "frame": 256,
+     "elapsedSeconds": 7.894,
+     "flip": 0.0558
+    }
+   ],
+   "timeToBound": {
+    "0.2": {
+     "frame": 16,
+     "elapsedSeconds": 6.251
+    },
+    "0.15": {
+     "frame": 32,
+     "elapsedSeconds": 6.366
+    },
+    "0.1": {
+     "frame": 64,
+     "elapsedSeconds": 6.583
+    }
+   },
+   "card": {
+    "beforeMebibytes": 1434,
+    "peakMebibytes": 1501,
+    "deltaMebibytes": 67,
+    "utilizationBeforePercent": 20
+   }
+  },
+  "webgpu": {
+   "drawnBackend": "webgpu",
+   "fallbackReason": null,
+   "gpu": "nvidia ampere",
+   "compileSeconds": 1.4466650000214576,
+   "medianFrameMilliseconds": 5.555000007152557,
+   "checkpoints": [
+    {
+     "frame": 1,
+     "elapsedSeconds": 0.046,
+     "flip": 0.3094
+    },
+    {
+     "frame": 2,
+     "elapsedSeconds": 0.055,
+     "flip": 0.2839
+    },
+    {
+     "frame": 4,
+     "elapsedSeconds": 0.072,
+     "flip": 0.263
+    },
+    {
+     "frame": 8,
+     "elapsedSeconds": 0.1,
+     "flip": 0.2403
+    },
+    {
+     "frame": 16,
+     "elapsedSeconds": 0.146,
+     "flip": 0.1705
+    },
+    {
+     "frame": 32,
+     "elapsedSeconds": 0.24,
+     "flip": 0.1195
+    },
+    {
+     "frame": 64,
+     "elapsedSeconds": 0.414,
+     "flip": 0.0875
+    },
+    {
+     "frame": 128,
+     "elapsedSeconds": 0.774,
+     "flip": 0.064
+    },
+    {
+     "frame": 256,
+     "elapsedSeconds": 1.512,
+     "flip": 0.0558
+    }
+   ],
+   "timeToBound": {
+    "0.2": {
+     "frame": 16,
+     "elapsedSeconds": 0.146
+    },
+    "0.15": {
+     "frame": 32,
+     "elapsedSeconds": 0.24
+    },
+    "0.1": {
+     "frame": 64,
+     "elapsedSeconds": 0.414
+    }
+   },
+   "card": {
+    "beforeMebibytes": 1321,
+    "peakMebibytes": 1564,
+    "deltaMebibytes": 243,
+    "utilizationBeforePercent": 17
+   }
+  }
+ }
+}
