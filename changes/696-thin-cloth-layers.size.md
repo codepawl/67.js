@@ -1,2 +1,0 @@
-- entry:cloth: the self collision radius reads the sheet thickness, a four-line helper, so thin cloth can fold in layers 1 cm apart instead of about 4 cm (+19 bytes gzip).
-- goal:agent-scene: the scene_capabilities cloth note gains 33 bytes of text (nine words, 12 bytes gzip in entry:agent-scene) saying that thickness sets the self collision radius; no tool schema changed, so the tool cost gate reports no growth.

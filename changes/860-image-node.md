@@ -1,1 +1,0 @@
-- A material graph has an `image` node that reads a catalog image with the graph's coordinates and mapping (#860)

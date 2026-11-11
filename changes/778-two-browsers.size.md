@@ -1,1 +1,0 @@
-- entry:netcode: 364 bytes gzip for a BroadcastChannel transport, the second transport the two-browser sample needs; no scene bundle includes netcode.

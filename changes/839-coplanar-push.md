@@ -1,1 +1,0 @@
-- The coplanar diagnostics no longer throw "Cannot read properties of undefined (reading 'push')" mid-render when parts with non-finite bounds (a NaN vertex, an overflowed pose) share a plane; such parts are left out of the search (#839).

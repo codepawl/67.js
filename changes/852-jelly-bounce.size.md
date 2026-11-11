@@ -1,3 +1,0 @@
-- entry:cloth: 295 bytes gzip for the body-level bounce, the one new agent-facing control for how a jelly rebounds, which no existing knob gave (the rebound was 0.07 m whatever shape or damping was set)
-- scene:agent-scene+lazy: 376 bytes gzip for the same bounce, its recipe field and its scene_capabilities note
-- goal:agent-scene: the bounce is a functional capability an owner asked for after the jelly film; the 61 bytes it adds to the core bundle are the field check and the capabilities text

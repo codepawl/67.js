@@ -1,1 +1,0 @@
-- `createCameraClip` treats a ground function that returns a non-finite height as ground height 0, so the camera still stays above the floor instead of clipping being switched off (#772).

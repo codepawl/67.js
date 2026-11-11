@@ -1,1 +1,0 @@
-- `mesh_edit` gains `split_edges`, `delete_loose` and `flatten`; `unsubdivide`, `circularize` and `extrude_vertices` (not representable: a mesh has no loose edge) stay open on #703 (#703).
