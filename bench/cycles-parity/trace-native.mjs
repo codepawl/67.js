@@ -74,6 +74,7 @@ function parseTraceArguments(argumentList) {
     filterWidth: parseNumberOption(argumentList, '--filter-width', 1.0, 0.01),
     clampDirect: parseNumberOption(argumentList, '--clamp-direct', 0, 0),
     clampIndirect: parseNumberOption(argumentList, '--clamp-indirect', 0, 0),
+    filterGlossy: parseNumberOption(argumentList, '--filter-glossy', 1.0, 0),
     fireflyClamp: parseNumberOption(argumentList, '--firefly-clamp', 1e9, 0),
     noiseThreshold: parseNumberOption(argumentList, '--noise-threshold', 0, 0),
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
@@ -112,12 +113,14 @@ async function runCli() {
   const traceSource = await reconstructTraceSceneSource(description);
   const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, options.width, options.height);
-  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, parts: traceSource.parts });
+  const samplesPerDispatch = options.noiseThreshold > 0 ? 8 : Math.min(options.samples, 16);
+  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, samplesPerDispatch, parts: traceSource.parts });
   const sceneBuildSeconds = (performance.now() - buildStarted) / 1000;
   const traced = renderNative.traceNative(nativeInput, {
     width: options.width,
     height: options.height,
     samples: options.samples,
+    samplesPerDispatch,
     bounces: options.bounces,
     seed: options.seed,
     maxSeconds: options.maxSeconds,
@@ -126,6 +129,7 @@ async function runCli() {
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,
+    filterGlossy: options.filterGlossy,
   });
   const totalTraceSeconds = (performance.now() - totalStarted) / 1000;
   const postTraceRssMegabytes = process.memoryUsage().rss / (1024 * 1024);
