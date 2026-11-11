@@ -512,10 +512,10 @@ fn int_build_shading_point(surface_hit: IntSurfaceHit, wo: vec3<f32>) -> Shading
   return point;
 }
 
-fn int_ray_offset_origin(point: ShadingPoint, wi: vec3<f32>) -> vec3<f32> {
-  let sign_ng = select(-1.0, 1.0, dot(point.geometric_normal, wi) >= 0.0);
-  let scale = max(kernel_params.ray_epsilon, 1.0e-5 * max(1.0, max(abs(point.position.x), max(abs(point.position.y), abs(point.position.z)))));
-  return point.position + point.geometric_normal * (sign_ng * scale);
+fn int_ray_offset_origin(point: ptr<function, ShadingPoint>, wi: vec3<f32>) -> vec3<f32> {
+  let sign_ng = select(-1.0, 1.0, dot((*point).geometric_normal, wi) >= 0.0);
+  let scale = max(kernel_params.ray_epsilon, 1.0e-5 * max(1.0, max(abs((*point).position.x), max(abs((*point).position.y), abs((*point).position.z)))));
+  return (*point).position + (*point).geometric_normal * (sign_ng * scale);
 }
 
 fn int_apply_filter_glossy(closure: ptr<function, Closure>, inv_filter_glossy: f32, min_ray_pdf: f32) {
@@ -537,14 +537,14 @@ fn int_apply_filter_glossy(closure: ptr<function, Closure>, inv_filter_glossy: f
   }
 }
 
-fn int_is_singular_bsdf_sample(closure: Closure, point: ShadingPoint, sample: ClosureSample) -> bool {
+fn int_is_singular_bsdf_sample(closure: ptr<function, Closure>, point: ptr<function, ShadingPoint>, sample: ClosureSample) -> bool {
   if (sample.sampled_lobe_type == LOBE_DIFFUSE || sample.sampled_lobe_type == LOBE_SHEEN) {
     return false;
   }
-  let wi_below = dot(point.geometric_normal, sample.wi) < 0.0;
-  let count = min(closure.lobe_count, MAX_CLOSURE_LOBES);
+  let wi_below = dot((*point).geometric_normal, sample.wi) < 0.0;
+  let count = min((*closure).lobe_count, MAX_CLOSURE_LOBES);
   for (var i = 0u; i < count; i += 1u) {
-    let lobe = closure.lobes[i];
+    let lobe = (*closure).lobes[i];
     if (lobe.lobe_type != sample.sampled_lobe_type) {
       continue;
     }
@@ -566,8 +566,8 @@ fn int_is_singular_bsdf_sample(closure: Closure, point: ShadingPoint, sample: Cl
 
 fn int_accumulate_direct_sample(
   sample: LgtDirectSample,
-  closure: Closure,
-  point: ShadingPoint,
+  closure: ptr<function, Closure>,
+  point: ptr<function, ShadingPoint>,
   wo: vec3<f32>,
   throughput: vec3<f32>,
   medium_sigma: vec3<f32>,
@@ -601,8 +601,8 @@ fn int_accumulate_direct_sample(
       shadow_origin,
       sample.wi,
       sample.distance,
-      point.instance_index,
-      point.triangle_index,
+      (*point).instance_index,
+      (*point).triangle_index,
       sample.target_instance,
       sample.target_triangle,
     );
@@ -877,8 +877,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       let wo = -ray_dir;
-      let point = int_build_shading_point(surface_hit, wo);
-      var closure = closure_build(point, wo);
+      var point = int_build_shading_point(surface_hit, wo);
+      var closure = closure_build(&point, wo);
       let material = materials[point.material_index];
       let is_pure_transparent = closure.lobe_count == 1u && closure.lobes[0].lobe_type == LOBE_TRANSPARENT;
 
@@ -953,17 +953,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           }
         } else if (direct_source == 1u) {
           if (SCENE_HAS_EMISSIVE_TRIANGLES && kernel_params.emissive_triangle_count > 0u) {
-            direct_sample = lgt_sample_emissive_triangle(point, smp_next_1d(&rng), smp_next_2d(&rng));
+            direct_sample = lgt_sample_emissive_triangle(&point, smp_next_1d(&rng), smp_next_2d(&rng));
           }
         } else {
           if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
             direct_sample = lgt_sample_environment(smp_next_4d(&rng));
           }
         }
-        int_accumulate_direct_sample(direct_sample, closure, point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
+        int_accumulate_direct_sample(direct_sample, &closure, &point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
       }
 
-      let bsdf_sample = closure_sample(closure, wo, smp_next_3d(&rng));
+      let bsdf_sample = closure_sample(&closure, wo, smp_next_3d(&rng));
       if (bsdf_sample.pdf <= 0.0 || (bsdf_sample.eval.x <= 0.0 && bsdf_sample.eval.y <= 0.0 && bsdf_sample.eval.z <= 0.0)) {
         break;
       }
@@ -983,7 +983,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         continue;
       }
 
-      let is_singular = int_is_singular_bsdf_sample(closure, point, bsdf_sample);
+      let is_singular = int_is_singular_bsdf_sample(&closure, &point, bsdf_sample);
       throughput *= bsdf_sample.eval / bsdf_sample.pdf;
 
       bounce += 1u;
@@ -1034,7 +1034,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
       }
 
-      ray_origin = int_ray_offset_origin(point, bsdf_sample.wi);
+      ray_origin = int_ray_offset_origin(&point, bsdf_sample.wi);
       ray_dir = bsdf_sample.wi;
       ray_t_min = 0.0;
       ray_t_max = 1.0e30;

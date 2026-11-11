@@ -151,14 +151,14 @@ fn closure_sample_texture_uv(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f
   return mix(mix(c00, c10, tx), mix(c01, c11, tx), ty);
 }
 
-fn closure_sample_texture(tex_index: i32, point: ShadingPoint) -> vec4<f32> {
-  return closure_sample_texture_uv(tex_index, point.uv0, point.uv1);
+fn closure_sample_texture(tex_index: i32, point: ptr<function, ShadingPoint>) -> vec4<f32> {
+  return closure_sample_texture_uv(tex_index, (*point).uv0, (*point).uv1);
 }
 
 fn closure_apply_normal_map(
   tex_index: i32,
   strength: f32,
-  point: ShadingPoint,
+  point: ptr<function, ShadingPoint>,
   base_normal: vec3<f32>,
   tangent: vec3<f32>,
   bitangent: vec3<f32>,
@@ -182,7 +182,7 @@ fn closure_apply_normal_map(
 fn closure_apply_bump_map(
   tex_index: i32,
   bump_distance: f32,
-  point: ShadingPoint,
+  point: ptr<function, ShadingPoint>,
   base_normal: vec3<f32>,
   tangent: vec3<f32>,
   bitangent: vec3<f32>,
@@ -196,9 +196,9 @@ fn closure_apply_bump_map(
   }
   let du = vec2<f32>(1.0 / f32(desc.width), 0.0);
   let dv = vec2<f32>(0.0, 1.0 / f32(desc.height));
-  let h_c = bsdf_mf_average(closure_sample_texture_uv(tex_index, point.uv0, point.uv1).rgb);
-  let h_u = bsdf_mf_average(closure_sample_texture_uv(tex_index, point.uv0 + du, point.uv1 + du).rgb);
-  let h_v = bsdf_mf_average(closure_sample_texture_uv(tex_index, point.uv0 + dv, point.uv1 + dv).rgb);
+  let h_c = bsdf_mf_average(closure_sample_texture_uv(tex_index, (*point).uv0, (*point).uv1).rgb);
+  let h_u = bsdf_mf_average(closure_sample_texture_uv(tex_index, (*point).uv0 + du, (*point).uv1 + du).rgb);
+  let h_v = bsdf_mf_average(closure_sample_texture_uv(tex_index, (*point).uv0 + dv, (*point).uv1 + dv).rgb);
   let dh_du = (h_u - h_c) * f32(desc.width) * bump_distance;
   let dh_dv = (h_v - h_c) * f32(desc.height) * bump_distance;
   let perturbed = base_normal - dh_du * tangent - dh_dv * bitangent;
@@ -390,7 +390,7 @@ fn closure_add_candidate(closure: ptr<function, Closure>, scratch: ptr<function,
   (*closure).lobe_count = slot + 1u;
 }
 
-fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
+fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure {
   var closure: Closure;
   for (var lobe_slot: u32 = 0u; lobe_slot < MAX_CLOSURE_LOBES; lobe_slot = lobe_slot + 1u) {
     closure.lobes[lobe_slot] = closure_empty_lobe();
@@ -399,26 +399,26 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
   closure.lobe_count = 0u;
   closure.absorption_sigma = vec3<f32>(0.0);
   closure.total_sample_weight = 0.0;
-  closure.geometric_normal = point.geometric_normal;
-  closure.front_face = point.front_face;
+  closure.geometric_normal = (*point).geometric_normal;
+  closure.front_face = (*point).front_face;
 
   let wo_len_sq = dot(wo, wo);
   if (wo_len_sq <= 1e-16) {
     return closure;
   }
   let wo_dir = wo * inverseSqrt(wo_len_sq);
-  let mat = materials[point.material_index];
+  let mat = materials[(*point).material_index];
 
-  var vertex_color = point.vertex_color;
-  if (point.triangle_index < kernel_params.triangle_count) {
-    if ((triangles[point.triangle_index].flags & TRIANGLE_FLAG_HAS_VERTEX_COLORS) == 0u) {
+  var vertex_color = (*point).vertex_color;
+  if ((*point).triangle_index < kernel_params.triangle_count) {
+    if ((triangles[(*point).triangle_index].flags & TRIANGLE_FLAG_HAS_VERTEX_COLORS) == 0u) {
       vertex_color = vec3<f32>(1.0);
     }
   }
 
-  let smooth_normal = bsdf_mf_safe_normalize_fallback(point.shading_normal, point.geometric_normal);
-  var frame_t = point.tangent;
-  var frame_b = point.bitangent;
+  let smooth_normal = bsdf_mf_safe_normalize_fallback((*point).shading_normal, (*point).geometric_normal);
+  var frame_t = (*point).tangent;
+  var frame_b = (*point).bitangent;
   if (dot(frame_t, frame_t) < 1e-6 || dot(frame_b, frame_b) < 1e-6) {
     let fallback_frame = bsdf_mf_make_orthonormals(smooth_normal);
     frame_t = fallback_frame[0];
@@ -516,7 +516,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
     shading_n = closure_apply_bump_map(mat.bump_tex, mat.bump_distance, point, shading_n, frame_t, frame_b);
   }
 
-  var raw_coat_n = bsdf_mf_safe_normalize_fallback(point.coat_normal, shading_n);
+  var raw_coat_n = bsdf_mf_safe_normalize_fallback((*point).coat_normal, shading_n);
   if (SCENE_HAS_NORMAL_MAP) {
     raw_coat_n = closure_apply_normal_map(mat.coat_normal_tex, mat.coat_normal_scale, point, raw_coat_n, frame_t, frame_b);
   }
@@ -548,7 +548,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
   if (SCENE_HAS_COAT && coat_weight > CLOSURE_WEIGHT_CUTOFF) {
     let coat_w = coat_weight * layer_weight;
     let coat_setup = bsdf_coat_setup_lobe(
-      point.geometric_normal,
+      (*point).geometric_normal,
       raw_coat_n,
       wo_dir,
       coat_w,
@@ -570,7 +570,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
 
   let clamped_base_color = clamp(base_color, vec3<f32>(0.0), vec3<f32>(1.0));
   let ior = max(mat.ior, 1e-5);
-  let valid_refl_n = bsdf_mf_ensure_valid_specular_reflection(point.geometric_normal, wo_dir, shading_n);
+  let valid_refl_n = bsdf_mf_ensure_valid_specular_reflection((*point).geometric_normal, wo_dir, shading_n);
   var specular_tint = max(mat.f82_tint, vec3<f32>(0.0));
   if ((mat.flags & MATERIAL_FLAG_F82_METALLIC) == 0u && all(specular_tint == vec3<f32>(0.0))) {
     specular_tint = vec3<f32>(1.0);
@@ -665,7 +665,7 @@ fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure {
         wo_dir,
         trans_w,
         ior,
-        point.front_face,
+        (*point).front_face,
         specular_tint,
         sqrt(clamped_base_color),
         alpha_x,
@@ -790,15 +790,15 @@ fn closure_eval_single_lobe(lobe: Lobe, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfE
   return BsdfMfEval(vec3<f32>(0.0), 0.0);
 }
 
-fn closure_eval(closure: Closure, wi: vec3<f32>, wo: vec3<f32>) -> ClosureEval {
-  if (closure.lobe_count == 0u || closure.total_sample_weight <= 0.0) {
+fn closure_eval(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>) -> ClosureEval {
+  if ((*closure).lobe_count == 0u || (*closure).total_sample_weight <= 0.0) {
     return ClosureEval(vec3<f32>(0.0), 0.0);
   }
   var total_value = vec3<f32>(0.0);
   var total_pdf = 0.0;
-  let inv_total_w = 1.0 / closure.total_sample_weight;
-  for (var i: u32 = 0u; i < closure.lobe_count; i = i + 1u) {
-    let lobe = closure.lobes[i];
+  let inv_total_w = 1.0 / (*closure).total_sample_weight;
+  for (var i: u32 = 0u; i < (*closure).lobe_count; i = i + 1u) {
+    let lobe = (*closure).lobes[i];
     if (lobe.sample_weight <= 0.0 || lobe.lobe_type == LOBE_TRANSPARENT) {
       continue;
     }
@@ -845,33 +845,33 @@ fn closure_sample_single_lobe(
   return BsdfMfSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), false);
 }
 
-fn closure_sample(closure: Closure, wo: vec3<f32>, u: vec3<f32>) -> ClosureSample {
-  if (closure.lobe_count == 0u || closure.total_sample_weight <= 0.0) {
+fn closure_sample(closure: ptr<function, Closure>, wo: vec3<f32>, u: vec3<f32>) -> ClosureSample {
+  if ((*closure).lobe_count == 0u || (*closure).total_sample_weight <= 0.0) {
     return ClosureSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), LOBE_NONE);
   }
 
-  let cdf_target = clamp(u.x, 0.0, 0.99999994) * closure.total_sample_weight;
-  var chosen_idx: u32 = closure.lobe_count - 1u;
+  let cdf_target = clamp(u.x, 0.0, 0.99999994) * (*closure).total_sample_weight;
+  var chosen_idx: u32 = (*closure).lobe_count - 1u;
   var cdf_prev = 0.0;
-  for (var i: u32 = 0u; i < closure.lobe_count; i = i + 1u) {
-    let next_cdf = cdf_prev + closure.lobes[i].sample_weight;
-    if (cdf_target < next_cdf || i == closure.lobe_count - 1u) {
+  for (var i: u32 = 0u; i < (*closure).lobe_count; i = i + 1u) {
+    let next_cdf = cdf_prev + (*closure).lobes[i].sample_weight;
+    if (cdf_target < next_cdf || i == (*closure).lobe_count - 1u) {
       chosen_idx = i;
       break;
     }
     cdf_prev = next_cdf;
   }
 
-  let chosen_lobe = closure.lobes[chosen_idx];
+  let chosen_lobe = (*closure).lobes[chosen_idx];
   if (chosen_lobe.sample_weight <= 0.0) {
     return ClosureSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), LOBE_NONE);
   }
 
-  let lobe_prob = chosen_lobe.sample_weight / closure.total_sample_weight;
+  let lobe_prob = chosen_lobe.sample_weight / (*closure).total_sample_weight;
   let u_lobe = clamp((cdf_target - cdf_prev) / max(chosen_lobe.sample_weight, 1e-20), 0.0, 0.99999994);
   let rand_xy = clamp(u.yz, vec2<f32>(0.0), vec2<f32>(0.99999994));
 
-  let s = closure_sample_single_lobe(chosen_lobe, closure.geometric_normal, wo, rand_xy, u_lobe);
+  let s = closure_sample_single_lobe(chosen_lobe, (*closure).geometric_normal, wo, rand_xy, u_lobe);
   if (s.pdf <= 0.0) {
     return ClosureSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0), LOBE_NONE);
   }
@@ -964,7 +964,7 @@ fn test_lobe_samples(@builtin(global_invocation_id) gid: vec3<u32>) {
   point.light_group_mask_hi = 0xFFFFFFFFu;
 
   let wo = bsdf_mf_safe_normalize_fallback(kernel_params.camera_forward, vec3<f32>(0.0, 0.0, 1.0));
-  let closure = closure_build(point, wo);
+  var closure = closure_build(&point, wo);
   let mode = kernel_params.kernel_flags;
 
   var eval_wi = vec3<f32>(0.0);
@@ -1029,14 +1029,14 @@ fn test_lobe_samples(@builtin(global_invocation_id) gid: vec3<u32>) {
       f32(rng.y >> 8u) * CLOSURE_PCG_INV_24,
       f32(rng.z >> 8u) * CLOSURE_PCG_INV_24,
     );
-    samp = closure_sample(closure, wo, u);
+    samp = closure_sample(&closure, wo, u);
     eval_wi = samp.wi;
     do_eval = samp.pdf > 0.0;
   }
 
   var ev = ClosureEval(vec3<f32>(0.0), 0.0);
   if (do_eval) {
-    ev = closure_eval(closure, eval_wi, wo);
+    ev = closure_eval(&closure, eval_wi, wo);
   }
 
   if (mode == 1u) {

@@ -544,7 +544,7 @@ fn lgt_sample_analytic_light(
   return lgt_empty_sample();
 }
 
-fn lgt_sample_emissive_triangle(point: ShadingPoint, pick_u: f32, sample_uv: vec2<f32>) -> LgtDirectSample {
+fn lgt_sample_emissive_triangle(point: ptr<function, ShadingPoint>, pick_u: f32, sample_uv: vec2<f32>) -> LgtDirectSample {
   var out = lgt_empty_sample();
   let count = kernel_params.emissive_triangle_count;
   if (count == 0u) {
@@ -555,10 +555,10 @@ fn lgt_sample_emissive_triangle(point: ShadingPoint, pick_u: f32, sample_uv: vec
   if (emitter.selection_pdf <= 0.0 || emitter.area <= 0.0) {
     return out;
   }
-  if (!lgt_links_match(point.light_group_mask_lo, point.light_group_mask_hi, emitter.light_group_mask_lo, emitter.light_group_mask_hi)) {
+  if (!lgt_links_match((*point).light_group_mask_lo, (*point).light_group_mask_hi, emitter.light_group_mask_lo, emitter.light_group_mask_hi)) {
     return out;
   }
-  if (emitter.instance_index == point.instance_index && emitter.triangle_index == point.triangle_index) {
+  if (emitter.instance_index == (*point).instance_index && emitter.triangle_index == (*point).triangle_index) {
     return out;
   }
 
@@ -566,7 +566,7 @@ fn lgt_sample_emissive_triangle(point: ShadingPoint, pick_u: f32, sample_uv: vec
   let bary_u = 1.0 - su;
   let bary_v = sample_uv.y * su;
   let light_point = emitter.p0 + emitter.edge1 * bary_u + emitter.edge2 * bary_v;
-  let diff = light_point - point.position;
+  let diff = light_point - (*point).position;
   let dist_sq = dot(diff, diff);
   if (dist_sq <= 1.0e-16) {
     return out;

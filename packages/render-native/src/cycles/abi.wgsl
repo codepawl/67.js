@@ -548,7 +548,7 @@ struct ClosureSample {
 //
 // Exact WGSL signatures to be defined by Lane L4 (`src/cycles/closure.wgsl`):
 //
-//   fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure
-//   fn closure_eval(closure: Closure, wi: vec3<f32>, wo: vec3<f32>) -> ClosureEval
-//   fn closure_sample(closure: Closure, wo: vec3<f32>, u: vec3<f32>) -> ClosureSample
+//   fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure
+//   fn closure_eval(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>) -> ClosureEval
+//   fn closure_sample(closure: ptr<function, Closure>, wo: vec3<f32>, u: vec3<f32>) -> ClosureSample
 // ---------------------------------------------------------------------------------------------------------------------
