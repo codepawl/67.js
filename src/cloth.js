@@ -302,7 +302,7 @@ const PUSH_OUT = { ball: pushOutOfBall, capsule: pushOutOfCapsule, box: pushOutO
 
 // `contactNormals` (3 numbers per particle, or null) keeps the normal of the last collider each particle touched this
 // substep, so a bounce can send it back off the surface; it is zero where nothing was touched.
-function collide(state, previous, colliders, thickness, friction, contactNormals) {
+function collide(state, previous, colliders, thickness, friction, contactNormals, staticFriction = 0) {
   const { positions, inverseMasses, particleCount } = state;
   const point = [0, 0, 0];
   const normal = [0, 0, 0];
@@ -313,6 +313,9 @@ function collide(state, previous, colliders, thickness, friction, contactNormals
     point[1] = positions[offset + 1];
     point[2] = positions[offset + 2];
     for (const collider of colliders) {
+      const beforeX = point[0];
+      const beforeY = point[1];
+      const beforeZ = point[2];
       const touched = PUSH_OUT[collider.kind](point, collider, thickness, normal);
       if (!touched) continue;
       if (contactNormals) {
@@ -323,8 +326,14 @@ function collide(state, previous, colliders, thickness, friction, contactNormals
       // Friction removes part of the sideways travel this substep, so cloth drags over a surface instead of skating.
       const travel = [point[0] - previous[offset], point[1] - previous[offset + 1], point[2] - previous[offset + 2]];
       const along = travel[0] * normal[0] + travel[1] * normal[1] + travel[2] * normal[2];
+      // Static friction (Coulomb, as in position based dynamics): a sideways travel no longer than staticFriction times the depth the
+      // contact pushed the particle out is held completely, so a layer rests on the floor and on a slope below its friction angle.
+      const depth = Math.hypot(point[0] - beforeX, point[1] - beforeY, point[2] - beforeZ);
+      const sideways = Math.hypot(travel[0] - along * normal[0], travel[1] - along * normal[1], travel[2] - along * normal[2]);
+      const held = staticFriction > 0 && sideways <= staticFriction * depth;
+      const grip = held ? 1 : friction;
       for (let axis = 0; axis < 3; axis++) {
-        point[axis] -= (travel[axis] - along * normal[axis]) * friction;
+        point[axis] -= (travel[axis] - along * normal[axis]) * grip;
       }
     }
     positions[offset] = point[0];
@@ -406,6 +415,14 @@ function followAnchors(positions, moving, targets, softOnly) {
       positions[index] += (targets[anchor * 3 + axis] - positions[index]) * weight;
     }
   }
+}
+
+// From its release substep on, the anchored particles are ordinary cloth: they keep their speed and fall with the rest.
+function releaseAnchors(cloth, moving) {
+  moving.anchorParticles.forEach(particle => {
+    cloth.trackFixed[particle] = 0;
+    setParticleInverseMass(cloth, particle);
+  });
 }
 
 function checkWork(particleCount, constraintCount, triangleCount, colliderCount, frameCount, extraPerIteration = 0) {
@@ -528,6 +545,8 @@ function tearOverstretched(cloth, substepSeconds) {
  * `bakeCloth` records from: the same positions and options step to the same frames. Arguments and options are those of
  * `bakeCloth`, plus:
  * - bendYield (radians, needs bendModel 'dihedral') and bendSet (0 to 1, default 0.1): past that bend angle a fold keeps bendSet of the excess as its new rest angle each substep, so creases stay (default off: the sheet pulls its folds flat).
+ * - staticFriction (0 to 1, default 0): sideways travel up to this multiple of the contact depth is held completely on a collider, so cloth rests on a slope below its friction angle.
+ * - moving.releaseSubstep (default never): the substep from which the anchors are let go.
  * - tearStretch: a stretch constraint breaks when its length passes this multiple of its rest length (default never).
  * - tearForce: a stretch constraint breaks when the tension it carries passes this many newtons (default never).
  * Returns { positions, step(deltaSeconds, { wind, colliders }), pin(index, position), unpin(index), isPinned(index),
@@ -585,6 +604,7 @@ export function createCloth(positions, triangles, options = {}) {
   const gravity = options.gravity ?? GRAVITY_DEFAULT;
   const damping = options.damping ?? 0.3;
   const friction = options.friction ?? 0.3;
+  const staticFriction = checkUnit(options.staticFriction ?? 0, 'staticFriction', 1);
   const thickness = options.thickness ?? 0.01;
   const previous = new Float64Array(positions.length);
   const contactNormals = extras.bounce > 0 ? new Float64Array(positions.length) : null;
@@ -596,6 +616,7 @@ export function createCloth(positions, triangles, options = {}) {
   const anchorStride = (moving?.anchorParticles.length ?? 0) * 3;
   const colliderStride = (moving?.colliderCount ?? 0) * MOVING_COLLIDER_NUMBERS;
   let substepsDone = 0;
+  let anchorsReleased = false;
 
   function step(deltaSeconds, frame = {}) {
     const wind = frame.wind ?? options.wind ?? [0, 0, 0];
@@ -614,10 +635,14 @@ export function createCloth(positions, triangles, options = {}) {
       previous.set(state.positions);
       let activeColliders = stepColliders;
       let anchorTargets = null;
+      if (moving && !anchorsReleased && substepsDone >= moving.releaseSubstep) {
+        releaseAnchors(cloth, moving);
+        anchorsReleased = true;
+      }
       if (moving) {
         anchorTargets = moving.anchorTrack.subarray(substepsDone * anchorStride, (substepsDone + 1) * anchorStride);
         activeColliders = stepColliders.concat(movingColliders(moving.colliderTrack, substepsDone * colliderStride, moving.colliderCount));
-        followAnchors(state.positions, moving, anchorTargets, false);
+        if (!anchorsReleased) followAnchors(state.positions, moving, anchorTargets, false);
       }
       // A pin travels to its target in even strides, so a fast gripper drags the cloth instead of teleporting.
       const progress = (substep + 1) / substeps;
@@ -644,8 +669,8 @@ export function createCloth(positions, triangles, options = {}) {
         solveDistances(state.positions, inverseMasses, constraints, cloth.impulses, pinImpulses);
         if (constraints.dihedrals && iteration % DIHEDRAL_EVERY === 0) solveDihedrals(state.positions, inverseMasses, constraints.dihedrals);
         extras.duringIteration(state.positions, inverseMasses);
-        if (moving) followAnchors(state.positions, moving, anchorTargets, true);
-        collide(state, previous, activeColliders, thickness, friction, contactNormals);
+        if (moving && !anchorsReleased) followAnchors(state.positions, moving, anchorTargets, true);
+        collide(state, previous, activeColliders, thickness, friction, contactNormals, staticFriction);
       }
       if (bendYield !== null) setDihedralCreases(state.positions, constraints.dihedrals, bendYield, bendSet);
       if (tears) tearOverstretched(cloth, substepSeconds);

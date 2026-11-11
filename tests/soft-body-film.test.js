@@ -106,6 +106,15 @@ test('a 64 by 64 flag with dihedral bending and creases folds softly, keeps its 
   const settling = touch * 2;
   const spreadSettling = normalSpread(film.frames[settling], indices);
   assert.ok(spreadAtRest >= spreadSettling - 0.05, `the flag is as crumpled at rest (${spreadAtRest}) as at settling (${spreadSettling}), within 0.05`);
+  // The heap rests: nothing is pinned or pushed after the landing, so the layer 1 s after settling is the layer at the end (it used to spread flat again).
+  const spreadLater = normalSpread(film.frames[settling + 60], indices);
+  assert.ok(Math.abs(spreadAtRest - spreadLater) < 0.03, `the heap keeps its shape from 1 s after settling to the end (spread ${spreadLater} then ${spreadAtRest})`);
+  const footprint = axis => {
+    const values = [];
+    for (let index = axis; index < film.frames[last].length; index += 3) values.push(film.frames[last][index]);
+    return Math.max(...values) - Math.min(...values);
+  };
+  assert.ok(footprint(2) < 0.7, `the cloth lies as a compact heap, under 0.7 m deep (the sheet is 1 m tall), got ${footprint(2)} m`);
   const foldsAtRest = foldCrossings(film.frames[last], 64);
   assert.ok(foldsAtRest.row >= 15 && foldsAtRest.column >= 15, `a line across the rest layer crosses many folds (row ${foldsAtRest.row}, column ${foldsAtRest.column})`);
 
@@ -114,8 +123,8 @@ test('a 64 by 64 flag with dihedral bending and creases folds softly, keeps its 
   restHeights.sort((low, high) => low - high);
   const heightAt = share => restHeights[Math.floor(share * (restHeights.length - 1))];
   const highest = restHeights.at(-1);
-  assert.ok(highest < 0.08, `the rest layer is under 8 cm at its highest point, got ${highest} m`);
-  assert.ok(heightAt(0.5) > 0.003 && heightAt(0.5) < 0.012, `half of the cloth lies within 1.2 cm of the floor but not pressed flat (over 3 mm), got ${heightAt(0.5)} m`);
+  assert.ok(highest < 0.12, `the rest heap is under 12 cm at its highest point, got ${highest} m`);
+  assert.ok(heightAt(0.5) > 0.003 && heightAt(0.5) < 0.016, `half of the cloth lies within 1.6 cm of the floor but not pressed flat (over 3 mm), got ${heightAt(0.5)} m`);
   assert.ok(highest < heightAt(0.9) * 6, `no spike: the highest point (${highest} m) stays within 6 times the 90th percentile (${heightAt(0.9)} m)`);
 
   let closest = Infinity;
