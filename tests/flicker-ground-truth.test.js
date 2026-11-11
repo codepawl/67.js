@@ -205,6 +205,15 @@ test('failingTraps flags a swapped pixel with the flush pass on and ignores runs
   ]);
 });
 
+test('failingTraps judges an exact run on true flips, not on the swaps the flush pass asked for', async () => {
+  const { failingTraps } = await import('../bench/flicker/verdict.js');
+  const results = [
+    { trap: 'lifted', configuration: 'reversed1-facets2', truth: { swapped: 900, flipped: 0, ranked: 900 } },
+    { trap: 'flipping', configuration: 'reversed0-facets2', truth: { swapped: 5, flipped: 3, ranked: 2 } },
+  ];
+  assert.deepEqual(failingTraps(results), [{ trap: 'flipping', configuration: 'reversed0-facets2', swapped: 5, flipped: 3 }]);
+});
+
 // The bytes a face of this colour shows in an unlit frame painted one colour per face.
 const exactBytes = colour => colour.map(channel => Math.round(channel * 255));
 
