@@ -1,0 +1,1 @@
+- The README, home page, `llms.txt`, package keywords and plugin text name every renderer backend (Glaze on WebGL2, Cook on CPU, WebGL2, WebGPU and Vulkan) and give measured numbers (#890)
