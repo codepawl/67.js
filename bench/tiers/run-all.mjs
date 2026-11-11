@@ -71,7 +71,7 @@ async function exportSceneIfMissing(scene) {
   const sceneJson = join(workDirectory, 'scenes', `${scene}.json`);
   if (!existsSync(sceneJson)) {
     console.log(`export ${scene}`);
-    const exitCode = await run('node', ['bench/cycles-parity/export-scene.mjs', workDirectory, '--scene', scene], join(workDirectory, `export-${scene}.log`));
+    const exitCode = await run('node', ['--import', './bench/tiers/fetch-shim.mjs', 'bench/cycles-parity/export-scene.mjs', workDirectory, '--scene', scene], join(workDirectory, `export-${scene}.log`));
     if (exitCode !== 0) throw new Error(`Exporting ${scene} failed, see ${workDirectory}/export-${scene}.log.`);
   }
   return sceneJson;
