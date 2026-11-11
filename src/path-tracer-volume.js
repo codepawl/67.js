@@ -1,5 +1,5 @@
 import { resolveVolumeFog } from './volumetric.js';
-import { localVolumeInterval, localVolumeProfile, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
+import { localVolumeInterval, localVolumeProfile, localVolumeStepCount, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { countOpenEdges } from './local-volume-parts.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
@@ -269,8 +269,9 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
         continue;
       }
       const entry = entries[order[rank]];
-      const stepLength = (exits[order[rank]] - entry) / volume.steps;
-      for (let step = 0; step < volume.steps; step++) {
+      const stepCount = localVolumeStepCount(volume, exits[order[rank]] - entry);
+      const stepLength = (exits[order[rank]] - entry) / stepCount;
+      for (let step = 0; step < stepCount; step++) {
         const distance = entry + (step + jitter) * stepLength;
         const profile = localVolumeProfile(volume, originX + directionX * distance, originY + directionY * distance, originZ + directionZ * distance);
         if (profile <= 0) continue;

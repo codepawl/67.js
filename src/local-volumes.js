@@ -121,6 +121,19 @@ export const LOCAL_VOLUME_SHADOW_STRENGTH = 3;
 /** The share of the mean sky radiance the sky term of a scattering volume keeps. The sky lights the whole volume evenly, so a high share flattens the form the sun gives it. */
 export const LOCAL_VOLUME_SKY_GAIN = 0.5;
 
+/** Samples the march takes per cell of the density noise at least: fewer step over whole cells and the dither of the start offset shows as pixel-pitch grain (#855). */
+export const LOCAL_VOLUME_STEPS_PER_NOISE_CELL = 2;
+
+/**
+ * The samples a ray takes through a noisy volume: the volume's `steps`, raised so that each noise cell along `length` gets
+ * LOCAL_VOLUME_STEPS_PER_NOISE_CELL of them, up to LOCAL_VOLUME_MAXIMUM_STEPS. Without noise it is `steps`. The post shader repeats the rule.
+ */
+export function localVolumeStepCount(volume, length) {
+  if (!(volume.noiseAmount > 0)) return volume.steps;
+  const cellSteps = Math.ceil(length * volume.noiseScale * LOCAL_VOLUME_STEPS_PER_NOISE_CELL);
+  return Math.min(LOCAL_VOLUME_MAXIMUM_STEPS, Math.max(volume.steps, cellSteps));
+}
+
 /**
  * How much of the sun's elevation the depth toward the sun keeps (1 is the true direction). A low sun lights a smoke box through its top face as
  * quickly as through its side, so with the true direction the top edge glows as bright as the sunward edge and the gradient across the form is lost;
