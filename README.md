@@ -11,6 +11,7 @@
 
 67js is a 3D engine for AI agents and for pages. It has a real-time rasterizer, a path tracer, addons for terrain, vegetation, characters, liquid, vehicles and media export, and an MCP server.
 A scene is plain data: each part has a geometry, a matrix and a material.
+
 An agent builds and changes a scene through the MCP server, looks at PNG previews and renders stills or MP4 video.
 The rasterizer runs on WebGL2.
 The path tracer runs on the CPU, on WebGL2 and, with the optional `packages/render-native`, on Vulkan.
@@ -38,36 +39,39 @@ The tier names are working names.
 The `quality` setting that picks a tier is planned ([issue 904](https://github.com/codepawl/67.js/issues/904)), and so is refine-at-rest ([issue 903](https://github.com/codepawl/67.js/issues/903)).
 Realtime-high does not exist yet ([issue 901](https://github.com/codepawl/67.js/issues/901) and [issue 902](https://github.com/codepawl/67.js/issues/902)).
 
-These numbers are provisional.
-They come from one scene (`lit-interior`, 960x540), medians with ranges over 3 interleaved runs, on a card shared with other jobs.
+Six scenes at 960x540, medians over 3 interleaved runs on an idle card.
 FLIP is the error against a Cycles 4096-sample reference, and lower is better.
-The other five reference scenes were not run.
-The generator and raw results are in the [bench/tiers folder](https://github.com/codepawl/67.js/tree/main/bench/tiers), which lands with [pull request 931](https://github.com/codepawl/67.js/pull/931).
+Every value is the range of the per-scene medians across the six scenes.
+The full per-scene tables are in the [bench/tiers folder](https://github.com/codepawl/67.js/blob/main/bench/tiers/results/matrix-960.table.md). They land with [pull request 931](https://github.com/codepawl/67.js/pull/931), after [pull request 921](https://github.com/codepawl/67.js/pull/921) and before this one.
 
 <!-- tiers-table:start -->
 
-| Tier | For | Runs on | Trade-off | 67js time | Blender equivalent and its time | FLIP error | Card memory (shared) |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| draft | The cheapest preview | Glaze, 0.5 render scale, 1 sample | Low resolution and cheap lighting | 1.20 ms per frame (0.88 to 2.43) | EEVEE 5.3 at 1 sample: 99 ms per render call (76 to 157) | Glaze 0.188, EEVEE 0.562 | Glaze +62 MiB, EEVEE +2,218 MiB |
-| realtime | Interactive frames | Glaze, default settings | Rasterized lighting | 1.11 ms per frame (1.05 to 1.24) | EEVEE 5.3 defaults: 1,127 ms per render call (716 to 1,891) | Glaze 0.197, EEVEE 0.562 | Glaze +119 MiB, EEVEE +2,503 MiB |
-| realtime-high | Better real-time frames | Planned: Glaze on WebGPU with a GI cache, temporal accumulation and upscaling ([issue 901](https://github.com/codepawl/67.js/issues/901), [issue 902](https://github.com/codepawl/67.js/issues/902)) | More VRAM | not measurable yet | none | none | none |
-| final | Finished stills | Cook native (Vulkan ray queries) | A few seconds to a few minutes per frame | 6.05 ms per sample (4.7 to 6.4), 1.9 s at 256 samples | Cycles 5.3 OptiX: 36.2 ms per sample (28.7 to 220), 12.6 s at 256 samples | At 256 samples: Cook 0.080, Cycles 0.039 | Cook +622 MiB, Cycles +733 MiB |
-| final | Finished stills | Cook webgpu (WGSL compute, software BVH) | Slower per sample than native | 34.4 ms per sample (22.6 to 60.6) | same Cycles | same as native at the same samples | +456 MiB |
-| final | Finished stills | Cook gpu (WebGL2) | Adds 4.8 to 7.9 s of shader compile | 74.4 ms per sample (57.3 to 79.2) | same Cycles | same as native at the same samples | +496 MiB |
-| final | Finished stills | Cook cpu (JavaScript, 8 threads) | No card needed, slowest | 786 ms per sample (561 to 1,022) | same Cycles | same as native at the same samples | not a card job |
+| Tier | For | Runs on | Trade-off | 67js measured | Blender measured | FLIP vs Cycles |
+| --- | --- | --- | --- | --- | --- | --- |
+| draft | A quick look while editing | Glaze, 0.5 render scale, 1 sample, light shading, 8 bit target | Aliased edges, no environment lookup, a quarter of the pixels enlarged | 0.54 to 1.04 ms a frame with the pixel read; 0.26 to 0.33 ms queued back to back | EEVEE 5.3, 1 sample: 56 to 59 ms a render call | Glaze 0.045 to 0.188, EEVEE 0.041 to 0.562 |
+| realtime | Interactive use | Glaze, default settings | Indirect light is approximate | 0.77 to 0.98 ms a frame with the pixel read; 0.35 to 0.50 ms queued back to back | EEVEE 5.3, 64 samples: 288 to 363 ms a render call | Glaze 0.030 to 0.197, EEVEE 0.042 to 0.562 |
+| realtime-high | Better interactive frames | Planned: Glaze on WebGPU with a GI cache and upscaling ([issue 901](https://github.com/codepawl/67.js/issues/901), [issue 902](https://github.com/codepawl/67.js/issues/902)) | More VRAM | not measurable yet | none | none |
+| final | Finished stills | Cook native, 256 samples (Vulkan ray queries, optional `packages/render-native`) | More samples than Cycles for the same noise | 1.73 to 4.24 ms a sample; 0.71 to 1.32 s for 256 samples with setup | Cycles 5.3 OptiX: 6.81 to 26.41 ms a sample; 3.43 to 8.46 s for 256 samples with setup | Cook native 0.019 to 0.080, Cycles 0.010 to 0.039 |
+| final | Finished stills | Cook webgpu, 256 samples (WGSL compute, software BVH, library only) | Slower per sample than native, same image | 5.88 to 17.33 ms a sample; 1.94 to 4.86 s for 256 samples with setup | same Cycles | Same as native: FLIP between the two images 0.0000 to 0.0003 |
 
 <!-- tiers-table:end -->
 
-Do not read the final row as Cook being faster than Cycles.
-Cook native draws a sample about 5.4 times faster than Cycles, but it needs about 6.8 times more samples for the same error.
-At equal error the two take about the same time (0.91 to 0.95 of the Cycles time), and Cook renders about 1% brighter.
-That comparison covers one scene (`lit-interior`) at 960x540 with 8 bounces and no denoiser, on a shared RTX 3060 against Cycles 5.3 with OptiX.
-[docs/cycles-parity.md](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md) has the method and its limits. It lands with [pull request 921](https://github.com/codepawl/67.js/pull/921).
-
-The Glaze times are milliseconds per frame.
+Glaze runs the realtime tier in under about 1 ms a frame at 960x540 on these scenes (0.77 to 0.98 ms), measured with a pixel read.
 The EEVEE times are one full background render call, including scene sync, with EEVEE ray tracing off and no global illumination.
-The two columns are not a frame rate comparison.
-The draft tier is not faster than realtime here. At 960x540 a Glaze frame costs about as much as the browser pixel read, and the ranges overlap.
+They are not a frame rate comparison.
+The draft tier is not faster than realtime here. At 960x540 a Glaze frame costs about as much as the browser pixel read, so the queued figures are the ones that differ.
+
+Cook native draws a sample 3.8 to 6.2 times faster than Cycles 5.3 OptiX, but needs more samples for the same noise.
+On the three noise-limited scenes (lit-interior, spot-area and light-linking) it needs 6.6 to 19.0 times Cycles' samples for the same error.
+That makes it 1.05 to 4.02 times Cycles' time for the sampling alone, and 0.87 to 2.52 times with setup included.
+
+On metal, glass and outdoor-hdri the error falls slower than 1/N between 256 and 1024 samples, which points to bias.
+Cook does not reach Cycles' error there, so no equal-error ratio is given.
+Cook webgpu draws a sample 3.3 to 4.1 times slower than native.
+
+Cook gpu (WebGL2) and Cook cpu are not in this run.
+Cook cpu needs no card, so VRAM does not apply.
+[docs/cycles-parity.md](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md) has the Cook against Cycles method on one scene.
 
 The experimental real-time path tracer is not the realtime-high tier.
 On the WebGPU backend it draws a frame in 5.6 ms.
@@ -77,9 +81,8 @@ It ends at 0.056 after 256 frames.
 The WebGL2 fallback takes 6.7 ms per frame and 6.1 s for the first frame, which includes shader compile.
 It runs at 2 bounces against an 8-bounce reference.
 
-Machine: RTX 3060 12 GB, Intel i7-14700KF, headless Chrome 157 on D3D11, Node 24, Blender 5.3, measured 2026-11-11.
-The card was shared with other jobs in every run, so the ranges are wide.
-Card memory is the card-wide change while the job ran, an upper bound.
+Machine: RTX 3060 12 GB (driver 621.14), Intel i7-14700KF, Chrome 157 headless on D3D11, Node 24, Blender 5.3, measured 2026-11-11.
+The card was idle: each run waited for at most 15 percent utilisation, and 0 of 162 runs were contended.
 
 ## Showcase
 

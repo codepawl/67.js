@@ -1,6 +1,6 @@
 ---
 name: render-67js-media
-description: Export a 67js scene to PNG stills (Glaze, the WebGL2 rasterizer, or Cook, the path tracer on CPU, WebGL2 or Vulkan), render passes or an MP4 through the MCP render job tools (scene_render_submit, scene_render_status, scene_render_result) of the npm package @codepawlhq/67js. Use when an agent must render an image or video of a scene, play a camera or light animation to video, cut shots with a timeline, add a score, write depth or object-ID passes, path trace a still, choose GPU or CPU and an encoder, or stay inside memory limits. Also for "render ảnh 3D", "render video 3D", "xuất mp4", "export 67js", "render bị lỗi bộ nhớ", "chất lượng MSAA". Scene building is the build-67js-scene skill.
+description: Export a 67js scene to PNG stills (Glaze, the WebGL2 rasterizer, or Cook, the path tracer on CPU or WebGL2, and on Vulkan with the optional render-native package), render passes or an MP4 through the MCP render job tools (scene_render_submit, scene_render_status, scene_render_result) of the npm package @codepawlhq/67js. Use when an agent must render an image or video of a scene, play a camera or light animation to video, cut shots with a timeline, add a score, write depth or object-ID passes, path trace a still, choose GPU or CPU and an encoder, or stay inside memory limits. Also for "render ảnh 3D", "render video 3D", "xuất mp4", "export 67js", "render bị lỗi bộ nhớ", "chất lượng MSAA". Scene building is the build-67js-scene skill.
 license: MIT
 ---
 

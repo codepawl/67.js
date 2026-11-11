@@ -61,7 +61,7 @@ export function buildLlmsText(tools) {
   const toolLines = tools.map(tool => `- \`${tool.name}\`: ${summarize(tool.description ?? '')}`).join('\n');
   return `# 67js
 
-> A 3D engine that AI agents drive. Glaze draws real-time scenes on WebGL2, and Cook path traces stills on the CPU, WebGL2 or Vulkan. PNG, MP4 and GLB output comes from the same scene.
+> A 3D engine that AI agents drive. Glaze draws real-time scenes on WebGL2, and Cook path traces stills on the CPU or WebGL2, and on Vulkan with the optional render-native package. PNG, MP4 and GLB output comes from the same scene.
 
 67js has an MCP server (\`67js-mcp\`, ${tools.length} tools) that builds, edits, looks at and renders scenes from JSON recipes.
 The same engine is a JavaScript library for pages and Node. The library API is in the guide below.
