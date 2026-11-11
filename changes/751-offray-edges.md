@@ -1,0 +1,1 @@
+- The flicker probe splits offRay pixels into edge and interior ones, reports an upper bound of true flips, and keeps a configurable number of ray hits (#751)

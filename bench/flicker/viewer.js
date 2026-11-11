@@ -7,6 +7,7 @@ import { resolveFlushParts } from '../../src/coplanar-overlap.js';
 import { flushOrderOf } from '../../src/depth-layer.js';
 import { TRAPS } from './traps.js';
 import { collectWorldTriangles, castPixelOwners, compareWithGroundTruth } from './ground-truth.js';
+import { DEFAULT_HITS_PER_PIXEL } from './pixel-cast.js';
 
 // One flat colour per part, no textures, so a pixel's colour says which part owns it and a changed colour is a changed owner.
 function paintPartsByOwner(parts) {
@@ -96,6 +97,8 @@ const options = {
   facets: parameters.get('facets') === '1' || parameters.get('facets') === '2',
   // facets=2: the colour of every triangle is its own number, drawn unlit, so the frame tells exactly which face is shown at a pixel.
   triangleIds: parameters.get('facets') === '2',
+  // hits=N keeps the N nearest faces per ray in the ray cast (default 6, at most 64): a deeper stack than that shows up as offRay.
+  hitsPerPixel: Math.min(64, Math.max(1, Number(parameters.get('hits')) || DEFAULT_HITS_PER_PIXEL)),
 };
 const trapName = parameters.get('trap');
 
@@ -264,7 +267,7 @@ async function truth() {
   const pixels = new Uint8ClampedArray(readFrame(context));
   const started = performance.now();
   const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
-  const cast = castPixelOwners(world, frameFor(0), width, height);
+  const cast = castPixelOwners(world, frameFor(0), width, height, options.hitsPerPixel);
   const { mismatchMask, ...counts } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
   renderer.render(frameFor(0));
   return { ...counts, triangles: world.count, castMilliseconds: Math.round(performance.now() - started), width, height };
@@ -318,7 +321,7 @@ function swapDetails(limit = 12) {
   renderer.render(frameFor(0));
   const pixels = new Uint8ClampedArray(readFrame(context));
   const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
-  const cast = castPixelOwners(world, frameFor(0), width, height);
+  const cast = castPixelOwners(world, frameFor(0), width, height, options.hitsPerPixel);
   const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
   const groups = new Map();
   for (let pixel = 0; pixel < mismatchMask.length; pixel++) {
