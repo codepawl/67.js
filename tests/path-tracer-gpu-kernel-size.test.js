@@ -53,3 +53,12 @@ test('one scene links one kernel: the gpu backend builds a program from one plac
     assert.equal(buildFragmentSource(variant).match(/void main\s*\(/g).length, 1);
   }
 });
+
+test('the cold draw bench closes the browser of every run in a finally block, so a failed run does not hold the GPU', () => {
+  const bench = readFileSync(new URL('../bench/reference/cold-draw.mjs', import.meta.url), 'utf8');
+  const launchIndex = bench.indexOf('chromium.launch(');
+  const closeIndex = bench.indexOf('await browser.close();');
+  assert.ok(launchIndex >= 0 && closeIndex > launchIndex, 'the bench launches and closes a browser');
+  assert.match(bench.slice(launchIndex, closeIndex), /try \{[\s\S]*\} finally \{\s*$/, 'the close sits in the finally of a try that wraps the run');
+  assert.equal(bench.match(/await browser\.close\(\)/g).length, 1);
+});

@@ -22,19 +22,22 @@ try {
   for (let run = 0; run < runs; run++) {
     // A fresh browser per run: pages of one browser share the driver program cache, so a later page would start warm.
     const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--enable-webgl', '--ignore-gpu-blocklist', '--disable-renderer-backgrounding'] });
-    const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
-    page.on('pageerror', error => console.log('PAGE ERROR', error.message));
-    page.setDefaultTimeout(0);
-    await page.goto(`${serverUrl}/bench/reference/harness.html`, { timeout: 180000 });
-    await page.waitForFunction(() => window.profileColdFirstDraw, null, { timeout: 180000 });
-    const wallStart = performance.now();
-    const result = await page.evaluate(([scene, tracerOptions]) => window.profileColdFirstDraw(scene, tracerOptions), [source, options]);
-    // The phases must add up to the wall time of the call within 5 s (issue #861); the gap is time spent outside a named phase.
-    result.wallSeconds = Number(((performance.now() - wallStart) / 1000).toFixed(2));
-    const allPhases = Object.values(result.phases).reduce((sum, seconds) => sum + seconds, 0);
-    result.unexplainedSeconds = Number((result.wallSeconds - allPhases).toFixed(2));
-    console.log(JSON.stringify(result));
-    await browser.close();
+    try {
+      const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+      page.on('pageerror', error => console.log('PAGE ERROR', error.message));
+      page.setDefaultTimeout(0);
+      await page.goto(`${serverUrl}/bench/reference/harness.html`, { timeout: 180000 });
+      await page.waitForFunction(() => window.profileColdFirstDraw, null, { timeout: 180000 });
+      const wallStart = performance.now();
+      const result = await page.evaluate(([scene, tracerOptions]) => window.profileColdFirstDraw(scene, tracerOptions), [source, options]);
+      // The phases must add up to the wall time of the call within 5 s (issue #861); the gap is time spent outside a named phase.
+      result.wallSeconds = Number(((performance.now() - wallStart) / 1000).toFixed(2));
+      const allPhases = Object.values(result.phases).reduce((sum, seconds) => sum + seconds, 0);
+      result.unexplainedSeconds = Number((result.wallSeconds - allPhases).toFixed(2));
+      console.log(JSON.stringify(result));
+    } finally {
+      await browser.close();
+    }
   }
 } finally {
   await server.close();
