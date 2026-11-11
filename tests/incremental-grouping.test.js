@@ -150,3 +150,44 @@ test('a slice that shares geometries and keys with earlier parts joins their bat
   assert.equal(next.batches.length, batchCount);
   assert.equal(next.batches[0].at(-1), joining);
 });
+
+test('batches a renderer copied earlier stay equal to their prefix grouping after later appends', () => {
+  // Renderer67.uploadBatch keeps `[...parts]`; those copies must not change when the grouping grows in place.
+  const heldCopies = [];
+  let state = null;
+  for (let end = 5; end <= worldParts.length; end += 5) {
+    const prefix = worldParts.slice(0, end);
+    const grouped = groupPartsIncrementally(state, prefix);
+    heldCopies.push({ prefix, copies: grouped.batches.map(batch => [...batch]) });
+    state = grouped.state;
+  }
+  for (const { prefix, copies } of heldCopies) {
+    assert.ok(sameBatches(copies, groupParts(prefix)), `copies held at ${prefix.length} parts`);
+  }
+});
+
+test('the parts a state keeps are a copy, so later changes to the caller list do not reach it', () => {
+  const list = worldParts.slice(0, 10);
+  const grouped = groupPartsIncrementally(null, list);
+  list.push(makePart(500, geometries[5]));
+  assert.equal(grouped.state.parts.length, 10);
+  const next = groupPartsIncrementally(grouped.state, worldParts.slice(0, 10));
+  assert.ok(sameBatches(next.batches, groupParts(worldParts.slice(0, 10))));
+});
+
+test('a fallback regrouping leaves the batches returned earlier untouched', () => {
+  const grouped = groupPartsIncrementally(null, worldParts.slice(0, 15));
+  const before = grouped.batches.map(batch => [...batch]);
+  const reordered = [worldParts[1], worldParts[0], ...worldParts.slice(2, 20)];
+  groupPartsIncrementally(grouped.state, reordered);
+  assert.ok(sameBatches(grouped.batches, before));
+});
+
+test('parts that differ in one key value never share a batch', () => {
+  const geometry = geometries[0];
+  const shadowless = { ...makePart(600, geometry), material: materials[0], castShadow: false };
+  const shadowing = { ...makePart(601, geometry), material: materials[0] };
+  const otherMaterial = { ...makePart(602, geometry), material: { ...materials[1], alphaMode: 'blend', opacity: 0.5 } };
+  const grouped = groupPartsIncrementally(null, [shadowing, shadowless, otherMaterial]);
+  assert.equal(grouped.batches.length, 3);
+});

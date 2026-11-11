@@ -472,16 +472,24 @@ function validatePartForGrouping(part, morphInfos) {
  * collects every later part with the same key. Adding parts later gives the batches a single call over all of them would give.
  */
 function createPartGrouper(batching) {
-  const groups = new Map();
+  // One flat map from a compact string key to a batch: a nested map per key value cost about 12 KB for every batch.
+  const batchesByKey = new Map();
   const batches = [];
   const morphInfos = new Map();
   const materialKeyValues = new Map();
   const materialKeyTails = new Map();
+  // A key value (a geometry, a material map, a flag) is replaced by a small number, so the key stays a short string.
+  const valueNumbers = new Map();
+  function numberOf(value) {
+    let number = valueNumbers.get(value);
+    if (number === undefined) {
+      number = valueNumbers.size;
+      valueNumbers.set(value, number);
+    }
+    return number;
+  }
   function addPart(part) {
     validatePartForGrouping(part, morphInfos);
-    const key = batching ? part.geometry : part;
-    if (!groups.has(key)) groups.set(key, new Map());
-    let maps = groups.get(key);
     // Thousands of parts share a few materials, so the material half of the key is built once per material.
     let materialValues = materialKeyValues.get(part.material);
     if (!materialValues) {
@@ -493,16 +501,15 @@ function createPartGrouper(batching) {
       materialTail = [renderPass(part.material), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)];
       materialKeyTails.set(part.material, materialTail);
     }
-    for (const value of [...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail]) {
-      if (!maps.has(value)) maps.set(value, new Map());
-      maps = maps.get(value);
-    }
-    if (!maps.has('parts')) {
-      const batch = [];
-      maps.set('parts', batch);
+    const values = [batching ? part.geometry : part, ...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail];
+    const key = values.map(numberOf).join(',');
+    let batch = batchesByKey.get(key);
+    if (!batch) {
+      batch = [];
+      batchesByKey.set(key, batch);
       batches.push(batch);
     }
-    maps.get('parts').push(part);
+    batch.push(part);
   }
   return {
     batches,
