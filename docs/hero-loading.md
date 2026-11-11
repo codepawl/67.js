@@ -5,7 +5,7 @@ The hero on the home page plays a flight over the Port showcase world. The world
 ## Order of the files
 
 1. The poster image loads. Nothing else competes with it.
-2. When the poster has settled (or after 5 s), `index.html` starts the first view: `scene.json`, `scene.first.glb` (about 2 MB) and `sky.preview.hdr`.
+2. When the poster has settled (or after 5 s), `index.html` starts the first view: `scene.json`, `scene.first.glb` (about 2 MB) and `sky.preview.hdr` (256 by 128, 131 KB, a block average of the full `sky.hdr` at the same orientation; exposure, tone mapping, sun, fog and sky intensity come from the same `scene.json` for both, so only the sky's detail differs at the swap. Make it with `node scripts/downsample-hdr.mjs <sky.hdr> <sky.preview.hdr> 256 128`; the Fast 4G first frame budget keeps it under 150 KB).
 3. When those have settled, it starts the full world: `scene.glb`, `scene.rest.glb` and `sky.hdr`.
 4. `fetchWorld(url, { firstView: true })` in `src/hero-lab/loop/world.js` resolves as soon as the first view is in. It holds a `detail` promise for the full world.
 5. The world is built from the first view and draws. `completeDetail` (`src/hero-lab/loop/detail.js`) then waits for `detail`, parses it and calls `world.upgrade(detail)`. The upgrade uploads the textures and the sky while the first view keeps drawing. Only the swap itself (the sky prefilter, one `replaceParts` and a prepared draw) holds the draws: about 140 ms on a desktop and a phone viewport (`swapHeldMs` of `scripts/measure-hero-load.mjs`, GPU shared with other jobs). Feeding `replaceParts` in slices was tried and doubled the hold (swap 0.8 s to 1.5 s) without shortening the longest gap between frames (about 110 ms either way).

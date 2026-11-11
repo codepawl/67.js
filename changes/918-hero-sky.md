@@ -1,0 +1,1 @@
+- The home hero's first-view sky is now 256 by 128 (131 KB, was 128 by 64), so the sky at the swap to the full world differs 3 to 6 times less in mean colour (#918)
