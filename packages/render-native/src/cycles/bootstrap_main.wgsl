@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2011-2026 Blender Foundation
+// SPDX-License-Identifier: Apache-2.0
+//
 // Bootstrap entry points used only when `bootstrapKernel: true` is requested while `kernel-manifest.txt` has no
 // compute entry point yet. Never listed in `kernel-manifest.txt`, so zero symbols collide with integrator or closure modules.
 

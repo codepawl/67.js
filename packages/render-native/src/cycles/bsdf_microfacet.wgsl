@@ -3681,45 +3681,20 @@ fn bsdf_mf_sample_vndf(local_wo: vec3<f32>, alpha_x: f32, alpha_y: f32, rand: ve
 
 fn bsdf_mf_albedo_coords(
   normal: vec3<f32>,
-  tangent: vec3<f32>,
+  _tangent: vec3<f32>,
   wo: vec3<f32>,
   alpha_x: f32,
   alpha_y: f32,
 ) -> vec2<f32> {
   let cos_no = max(dot(wo, normal), 0.0);
-  if (alpha_x == alpha_y) {
-    return vec2<f32>(
-      bsdf_mf_alpha_to_roughness_index(alpha_x, alpha_y),
-      bsdf_mf_mu_to_y_index(cos_no),
-    );
-  }
-  let frame = bsdf_mf_make_orthonormals_tangent(normal, tangent);
-  let lx = dot(frame[0], wo);
-  let ly = dot(frame[1], wo);
-  let sin2 = lx * lx + ly * ly;
-  let ax2 = alpha_x * alpha_x;
-  let ay2 = alpha_y * alpha_y;
-  let a_rms = sqrt(0.5 * (ax2 + ay2));
-  let a_base = 0.82 * a_rms + 0.09 * (alpha_x + alpha_y);
-  var a_perp = a_rms;
-  var a_az = a_rms;
-  if (sin2 > 1e-8) {
-    let inv_sin2 = 1.0 / sin2;
-    a_perp = sqrt((ax2 * ly * ly + ay2 * lx * lx) * inv_sin2);
-    a_az = sqrt((ax2 * lx * lx + ay2 * ly * ly) * inv_sin2);
-  }
-  let a_eff = clamp(a_base + 0.22 * sin2 * (a_perp - a_rms), 1e-6, 1.0);
-  let mu_eff = cos_no * inverseSqrt(max(cos_no * cos_no + sin2 * (a_az / a_eff), 1e-12));
-  return vec2<f32>(sqrt(a_eff), bsdf_mf_mu_to_y_index(mu_eff));
+  return vec2<f32>(
+    bsdf_mf_alpha_to_roughness_index(alpha_x, alpha_y),
+    bsdf_mf_mu_to_y_index(cos_no),
+  );
 }
 
 fn bsdf_mf_albedo_avg_roughness(alpha_x: f32, alpha_y: f32) -> f32 {
-  if (alpha_x == alpha_y) {
-    return bsdf_mf_alpha_to_roughness_index(alpha_x, alpha_y);
-  }
-  let a_rms = sqrt(0.5 * (alpha_x * alpha_x + alpha_y * alpha_y));
-  let a_base = clamp(0.82 * a_rms + 0.09 * (alpha_x + alpha_y), 1e-6, 1.0);
-  return sqrt(a_base);
+  return bsdf_mf_alpha_to_roughness_index(alpha_x, alpha_y);
 }
 
 fn bsdf_mf_preserve_energy_glossy(
