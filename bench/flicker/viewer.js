@@ -644,7 +644,7 @@ function frameBase64() {
 }
 
 window.flicker = {
-  frameBase64, setCamera, probe, truth, swapDetails, colourStepDetails, colourStepDetails, build, options, frameWholeScene,
+  frameBase64, setCamera, probe, truth, swapDetails, colourStepDetails, build, options, frameWholeScene,
   get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.(), flush: flushReport }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
   traps: Object.keys(TRAPS),
