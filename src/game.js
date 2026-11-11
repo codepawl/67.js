@@ -8,8 +8,6 @@ import { createInput, gamepadSource, keyboardSource } from './input.js';
 import { replaySource, touchSource } from './input-sources.js';
 import { createCharacterController, createFirstPersonCamera, createFollowCamera, createTopDownCamera } from './player.js';
 import { createGameRules } from './game-rules.js';
-import { createGameAnimation } from './game-animation.js';
-import { createPathFollower } from './npc-follower.js';
 
 // Plays the `game` section of a scene recipe in a page: the scene, the input preset, the character controller, the camera rig
 // and the game rules, all run by the live runtime. scene_export_web writes a folder whose index.html calls startGame.
@@ -98,6 +96,11 @@ function describeState(state) {
   return `${variables}${verdict}`;
 }
 
+async function loadAnimationRuntime() {
+  const [{ createGameAnimation }, { createPathFollower }] = await Promise.all([import('./game-animation.js'), import('./npc-follower.js')]);
+  return { createGameAnimation, createPathFollower };
+}
+
 /**
  * Start the game a recipe describes on a canvas and return its parts: `scene`, `runtime`, `rules`, `input`, `controller`, `renderer`
  * and `dispose()`. Options: `replay` (a recording from recordInput; the keyboard is not attached) `showStatus` (default true) and `createRenderer` (tests pass a stand-in for the WebGL renderer).
@@ -150,6 +153,9 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
   const start = nodeTranslation(recipe.nodes, game.player.node);
   const body = { position: [0, 0, 0], rotationY: 0 };
   let rig = null;
+  // The animation graph runtime loads only for a recipe that declares an animation or an NPC, so other games do not carry it.
+  const hasAnimation = Boolean(game.player.animation) || (game.npcs?.length ?? 0) > 0;
+  const { createGameAnimation, createPathFollower } = hasAnimation ? await loadAnimationRuntime() : {};
   const playerAnimation = game.player.animation ? createGameAnimation(game.player.animation, recipe.nodes, game.player.node) : null;
   const controller = createCharacterController({
     input,

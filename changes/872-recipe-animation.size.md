@@ -1,4 +1,3 @@
-- entry:game: the web export now plays the animation graph, pose and path follower a recipe declares (about 19.8 KB gzip), the visible capability the issue asks for
-- entry:game+lazy: same code, counted with the lazy chunks (+11.1 KB gzip)
+- entry:game+lazy: the game entry now loads the animation graph, pose and path follower on demand, only for a recipe that declares an animation or an NPC. Of the +12.3 KB gzip, about 3.2 KB is the new recipe adapter (src/game-animation.js) and the rest is the existing graph, pose and clip runtime that the game entry did not carry before; it cannot shrink without dropping the feature, and the game entry itself grows only +0.5 KB because the runtime sits in a lazy chunk (first attempt: static import, +19.8 KB in the entry)
 - scene:agent-scene+lazy: the recipe validator builds the graph and pose once to refuse a bad animation with the field named (+8.8 KB gzip in the on-demand game module)
-- goal:agent-scene: the core scene bundle grows by about 49 bytes gzip for the shared-chunk import of the game module; the animation code itself loads only with a game recipe
+- goal:agent-scene: the core scene bundle grows by 49 bytes gzip and is already over its goal, so the goal line is needed; the animation code itself loads only with a game recipe
