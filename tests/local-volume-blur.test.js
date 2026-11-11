@@ -210,7 +210,7 @@ test('density is extinction per metre: a slab of density d and thickness t lets 
     const withoutBlur = await drawRaster(page, [occluder], [{ ...haze, blur: 0 }]);
     const withBlur = await drawRaster(page, [occluder], [haze]);
     let smear = 0;
-    for (let offset = 14; offset <= 16; offset++) smear = Math.max(smear, Math.abs(withBlur[(SIZE / 2) * SIZE + SIZE / 2 + offset] - withoutBlur[(SIZE / 2) * SIZE + SIZE / 2 + offset]));
+    for (let offset = 13; offset <= 16; offset++) smear = Math.max(smear, Math.abs(withBlur[(SIZE / 2) * SIZE + SIZE / 2 + offset] - withoutBlur[(SIZE / 2) * SIZE + SIZE / 2 + offset]));
     numbers.smearNextToObjectInFront = +smear.toFixed(5);
     assert.ok(smear < 0.005, `an object in front smeared into the volume by ${smear}`);
     if (process.env.LOCAL_VOLUME_BLUR_ARTIFACTS) {

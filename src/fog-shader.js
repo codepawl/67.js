@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_MAXIMUM_STEPS, LOCAL_VOLUME_STEPS_PER_NOISE_CELL, LOCAL_VOLUME_BLUR_PIXELS, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_MAXIMUM_STEPS, LOCAL_VOLUME_STEPS_PER_NOISE_CELL, LOCAL_VOLUME_BLUR_PIXELS, LOCAL_VOLUME_BLUR_RATE, LOCAL_VOLUME_EDGE_WARP, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
@@ -201,24 +201,33 @@ vec2 localVolumeInterval(int index, vec3 origin, vec3 direction) {
   }
   return vec2(entry, exitDistance);
 }
+// Where a fade position (0 at the core, 1 at the outer face) lands once the noise has pushed the edge in and out, most at the middle of the fade (local-volumes.js repeats it).
+float localVolumeWarpedFade(float position, float noiseAmount, float noise) {
+  float clamped = clamp(position, 0.0, 1.0);
+  return clamped + (0.5 - noise) * noiseAmount * ${LOCAL_VOLUME_EDGE_WARP.toFixed(3)} * 4.0 * clamped * (1.0 - clamped);
+}
 float localVolumeProfile(int index, vec3 position, bool withNoise) {
   vec3 offset = position - localVolumeCenters[index].xyz;
   if (localVolumeCenters[index].w < 0.5) offset = localVolumeLocal(index, offset);
   vec3 halfSize = localVolumeExtents[index].xyz;
   float falloff = localVolumeExtents[index].w;
+  float noiseAmount = withNoise ? localVolumeAbsorption[index].w : 0.0;
+  float noise = noiseAmount > 0.0 ? localVolumeNoise(position * localVolumeEmission[index].w) : 0.5;
   float profile;
   if (localVolumeCenters[index].w > 0.5) {
     float distanceRatio = length(offset) / halfSize.x;
-    profile = falloff > 0.0 ? 1.0 - smoothstep(1.0 - falloff, 1.0, distanceRatio) : 1.0 - step(1.0, distanceRatio);
+    float fade = localVolumeWarpedFade((distanceRatio - (1.0 - falloff)) / max(falloff, 1e-6), noiseAmount, noise);
+    profile = falloff > 0.0 ? 1.0 - smoothstep(0.0, 1.0, fade) : 1.0 - step(1.0, distanceRatio);
+    if (distanceRatio >= 1.0) profile = 0.0;
   } else {
     vec3 ratios = abs(offset) / halfSize;
     // The distance past the core box is round at the corners; the plain largest ratio fades along boxes with mitred creases (local-volumes.js repeats it).
     float fadeDistance = length(max(ratios - (1.0 - falloff), 0.0));
-    profile = falloff > 0.0 ? 1.0 - smoothstep(0.0, 1.0, fadeDistance / falloff) : 1.0 - step(1.0, max(max(ratios.x, ratios.y), ratios.z));
+    float fade = localVolumeWarpedFade(fadeDistance / max(falloff, 1e-6), noiseAmount, noise);
+    profile = falloff > 0.0 ? 1.0 - smoothstep(0.0, 1.0, fade) : 1.0 - step(1.0, max(max(ratios.x, ratios.y), ratios.z));
     if (max(max(ratios.x, ratios.y), ratios.z) >= 1.0) profile = 0.0;
   }
-  float noiseAmount = localVolumeAbsorption[index].w;
-  if (withNoise && noiseAmount > 0.0) profile *= mix(1.0, localVolumeNoise(position * localVolumeEmission[index].w) * 2.0, noiseAmount);
+  if (noiseAmount > 0.0) profile *= mix(1.0, noise * 2.0, noiseAmount);
   return profile;
 }
 // The optical depth of a volume between a point inside it and its far side along a direction, from midpoint taps of its profile.
@@ -256,18 +265,25 @@ vec3 localVolumeInScatter(int index, vec3 position, vec3 direction) {
 // The light behind a volume, blurred by the optical depth in front of it: taps of the frame spread over a disc whose radius grows with the depth,
 // each counted only where its surface lies at or past the ray's first volume entry, so an object in front of the volume is never smeared into it.
 vec3 localVolumeBlurred(vec3 background, float opticalDepth, float firstEntry, vec3 origin, vec3 direction) {
-  float radiusPixels = ${LOCAL_VOLUME_BLUR_PIXELS.toFixed(1)} * (resolution.y / 540.0) * (1.0 - exp(-opticalDepth));
+  float radiusPixels = ${LOCAL_VOLUME_BLUR_PIXELS.toFixed(1)} * (resolution.y / 540.0) * (1.0 - exp(-${LOCAL_VOLUME_BLUR_RATE.toFixed(2)} * opticalDepth));
   if (radiusPixels < 0.05) return background;
-  float lod = max(0.0, log2(radiusPixels * 0.5));
+  float lod = max(0.0, log2(radiusPixels * 0.5) - 1.0);
+  float footprint = exp2(lod) + 1.0;
   vec3 sum = background;
   float weight = 1.0;
   for (int tap = 0; tap < 12; tap++) {
     float index = float(tap) + 0.5;
     vec2 offsetPixels = vec2(cos(index * 2.4), sin(index * 2.4)) * (radiusPixels * sqrt(index / 12.0));
     vec2 coordinate = textureCoordinate + offsetPixels / resolution;
-    vec4 tapPoint = inverseViewProjection * vec4(coordinate * 2.0 - 1.0, texture(sceneDepth, coordinate).r * 2.0 - 1.0, 1.0);
-    float tapDistance = tapPoint.w > 0.0 ? dot(tapPoint.xyz - origin * tapPoint.w, direction) / tapPoint.w : 1e30;
-    if (tapDistance < firstEntry) continue;
+    // The surface at the tap and one filter footprint to each side of it: the filter blends the colour of an object in front of the volume into a tap whose own depth is still the far one.
+    float nearestTap = 1e30;
+    for (int side = 0; side < 5; side++) {
+      vec2 shift = side == 0 ? vec2(0.0) : (side == 1 ? vec2(footprint, 0.0) : (side == 2 ? vec2(-footprint, 0.0) : (side == 3 ? vec2(0.0, footprint) : vec2(0.0, -footprint))));
+      vec2 sideCoordinate = coordinate + shift / resolution;
+      vec4 sidePoint = inverseViewProjection * vec4(sideCoordinate * 2.0 - 1.0, texture(sceneDepth, sideCoordinate).r * 2.0 - 1.0, 1.0);
+      nearestTap = min(nearestTap, sidePoint.w > 0.0 ? dot(sidePoint.xyz - origin * sidePoint.w, direction) / sidePoint.w : 1e30);
+    }
+    if (nearestTap < firstEntry) continue;
     sum += textureLod(frameTexture, coordinate, lod).rgb;
     weight += 1.0;
   }

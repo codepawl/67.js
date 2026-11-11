@@ -1,5 +1,5 @@
 import { finiteRange } from './volumetric.js';
-import { localVolumeNoiseFactor } from './local-volume-noise.js';
+import { localVolumeNoise } from './local-volume-noise.js';
 
 // Local volumes: up to MAX_LOCAL_VOLUMES boxes, spheres or parts (shape "mesh") that absorb and emit light and, with `scatter`, scatter
 // the key light and the sky, for candle haze, smoke puffs and glowing fog in one place. They sit beside environment.volumeFog (the one scattering volume) and need no fog. The post pass marches
@@ -112,23 +112,26 @@ export const LOCAL_VOLUME_KEY_GAIN = 3;
  * ray running along the faded top or side skin is shaded by the whole volume, not by the skin's low density. With the plain profile that
  * skin is lit far above the core and reads as a bright rim around the form.
  */
-export const LOCAL_VOLUME_LIGHT_DEPTH_SATURATION = 3;
+export const LOCAL_VOLUME_LIGHT_DEPTH_SATURATION = 6;
 
 /**
  * How many times the volume's own depth toward the sun counts in the key light's attenuation. Counting it more than once keeps the shaded
  * side of the smoke clearly darker than the sunlit side, the way the many scatters of a real smoke take the light from its shade.
  */
-export const LOCAL_VOLUME_SHADOW_STRENGTH = 3;
+export const LOCAL_VOLUME_SHADOW_STRENGTH = 1.2;
 
 /** The share of the mean sky radiance the sky term of a scattering volume keeps. The sky lights the whole volume evenly, so a high share flattens the form the sun gives it. */
 export const LOCAL_VOLUME_SKY_GAIN = 0.5;
 
 /**
  * The widest blur, in pixels of a 540 row frame (it scales with the frame height), that the light behind a volume gets: the radius grows as
- * `cap * (1 - exp(-opticalDepth))`, so none at zero depth, most of the cap by an optical depth of 2, and it never passes the cap. A thick volume hides the
+ * `cap * (1 - exp(-LOCAL_VOLUME_BLUR_RATE * opticalDepth))`, so none at zero depth, most of the cap by an optical depth of 1.5, and it never passes the cap. A thick volume hides the
  * background anyway, a thin one shows it blurred (#855).
  */
-export const LOCAL_VOLUME_BLUR_PIXELS = 14;
+export const LOCAL_VOLUME_BLUR_PIXELS = 24;
+
+/** How fast the blur grows with optical depth: a thin wisp of optical depth 0.7 already blurs by about 15 px, so a haze visibly softens the horizon behind it (#855). */
+export const LOCAL_VOLUME_BLUR_RATE = 1.5;
 
 /** Samples the march takes per cell of the density noise at least: fewer step over whole cells and the dither of the start offset shows as pixel-pitch grain (#855). */
 export const LOCAL_VOLUME_STEPS_PER_NOISE_CELL = 2;
@@ -156,7 +159,20 @@ function fadeProfile(ratio) {
   return 1 - clamped * clamped * (3 - 2 * clamped);
 }
 
-/** The density factor of a volume at a point: 1 at the core, fading over the outer `falloff` share, times the noise factor (up to 2) when `noiseAmount` is above 0, as the post shader does. */
+/**
+ * How far the noise pushes the faded edge of a volume in and out, as a share of the fade width, at its largest (#855). The fade is a smooth
+ * ramp from the core to the edge of the form, so without this a box or a sphere keeps a flat top and flat sides under the noise and reads as
+ * a rounded rectangle, not a cloud. The push is zero at the core and at the outer face, so the core stays as thick and no step shows where the form ends.
+ */
+export const LOCAL_VOLUME_EDGE_WARP = 1;
+
+/** The fade position (0 at the core, 1 at the outer face) after the noise has pushed the edge: `position` moved by the noise, most at the middle of the fade. */
+export function warpedFadePosition(position, noiseAmount, noise) {
+  const clamped = Math.min(1, Math.max(0, position));
+  return clamped + (0.5 - noise) * noiseAmount * LOCAL_VOLUME_EDGE_WARP * 4 * clamped * (1 - clamped);
+}
+
+/** The density factor of a volume at a point: 1 at the core, fading over the outer `falloff` share, times the noise factor (up to 2) when `noiseAmount` is above 0, as the post shader does. With noise the fade edge is also pushed in and out (LOCAL_VOLUME_EDGE_WARP). */
 export function localVolumeProfile(volume, x, y, z, withNoise = true) {
   if (volume.shape === 'mesh') return 1;
   let offsetX = x - volume.center[0];
@@ -170,11 +186,13 @@ export function localVolumeProfile(volume, x, y, z, withNoise = true) {
     offsetX = alongX;
     offsetY = alongY;
   }
+  const noisy = withNoise && volume.noiseAmount > 0;
+  const noise = noisy ? localVolumeNoise(x * volume.noiseScale, y * volume.noiseScale, z * volume.noiseScale) : 0.5;
   let profile = 1;
   if (volume.shape === 'sphere') {
     const distance = Math.hypot(offsetX, offsetY, offsetZ) / volume.radius;
     if (distance >= 1) return 0;
-    if (volume.falloff > 0) profile = fadeProfile((distance - (1 - volume.falloff)) / volume.falloff);
+    if (volume.falloff > 0) profile = fadeProfile(warpedFadePosition((distance - (1 - volume.falloff)) / volume.falloff, noisy ? volume.noiseAmount : 0, noise));
   } else {
     const ratioX = Math.abs(offsetX) / (volume.size[0] / 2);
     const ratioY = Math.abs(offsetY) / (volume.size[1] / 2);
@@ -184,10 +202,10 @@ export function localVolumeProfile(volume, x, y, z, withNoise = true) {
       // The distance past the core box, which is round at the corners: the plain largest ratio fades along boxes with mitred creases.
       const core = 1 - volume.falloff;
       const fadeDistance = Math.hypot(Math.max(ratioX - core, 0), Math.max(ratioY - core, 0), Math.max(ratioZ - core, 0));
-      profile = fadeProfile(fadeDistance / volume.falloff);
+      profile = fadeProfile(warpedFadePosition(fadeDistance / volume.falloff, noisy ? volume.noiseAmount : 0, noise));
     }
   }
-  if (withNoise && volume.noiseAmount > 0) profile *= localVolumeNoiseFactor(volume, x, y, z);
+  if (noisy) profile *= 1 + (2 * noise - 1) * volume.noiseAmount;
   return profile;
 }
 
