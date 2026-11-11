@@ -5,7 +5,11 @@ import { Renderer67 } from '../../src/index.js';
 import { parseGltf } from '../../src/gltf.js';
 import { resolveFlushParts } from '../../src/coplanar-overlap.js';
 import { flushOrderOf } from '../../src/depth-layer.js';
-import { TRAPS } from './traps.js';
+import { installRenderPasses } from '../../src/render-passes.js';
+import { installCameraEffects } from '../../src/camera-effects.js';
+import { installLineArt, resolveLineArt } from '../../src/line-art.js';
+import { resolveEffects } from '../../src/effects.js';
+import { TRAPS, TILED_TRAPS } from './traps.js';
 import { collectWorldTriangles, castPixelOwners, compareWithGroundTruth } from './ground-truth.js';
 import { DEFAULT_HITS_PER_PIXEL } from './pixel-cast.js';
 
@@ -100,10 +104,20 @@ const options = {
   // hits=N keeps the N nearest faces per ray in the ray cast (default 6, at most 64): a deeper stack than that shows up as offRay.
   hitsPerPixel: Math.min(64, Math.max(1, Number(parameters.get('hits')) || DEFAULT_HITS_PER_PIXEL)),
 };
+// effect=ao|dof|lines|all draws the frame through that screen-space stage (issue #751, effects on cut geometry): the renderer gets a
+// depth texture, the add-ons install, and frameFor carries the stage settings. Without it nothing changes.
+const EFFECTS = new Set(['ao', 'dof', 'lines', 'all']);
+const effectName = parameters.get('effect');
+if (effectName && !EFFECTS.has(effectName)) throw new Error(`Unknown effect ${effectName}. Use one of: ${[...EFFECTS].join(', ')}.`);
+const usesEffect = name => effectName === name || effectName === 'all';
 const trapName = parameters.get('trap');
 
 // The trap name comes from the URL, so only the table's own entries count, never an inherited method such as toString.
 function trapBuilder() {
+  if (parameters.get('tiled') === '1') {
+    if (!Object.hasOwn(TILED_TRAPS, trapName)) throw new Error(`Trap ${trapName} has no flat tiling. Use one of: ${Object.keys(TILED_TRAPS).join(', ')}.`);
+    return TILED_TRAPS[trapName];
+  }
   if (!Object.hasOwn(TRAPS, trapName)) throw new Error(`Unknown trap ${trapName}. Use one of: ${Object.keys(TRAPS).join(', ')}.`);
   return TRAPS[trapName];
 }
@@ -150,10 +164,23 @@ function markDirty() {
   context.clearRect(0, 0, overlay.width, overlay.height);
 }
 
+// The stage settings of the effect= parameter: strong enough that a seam shows, and the focus at the pivot so depth of field blurs
+// the surfaces in front and behind it.
+function effectSettings() {
+  const settings = {};
+  const effects = {};
+  if (usesEffect('ao')) Object.assign(effects, { ambientOcclusion: 1, ambientOcclusionRadius: Math.max(extent / 40, 0.05) });
+  if (usesEffect('dof')) effects.depthOfField = { blur: 0.6, focusDistance: camera.distance };
+  settings.effects = resolveEffects(effects);
+  if (usesEffect('lines')) settings.lines = resolveLineArt({ width: 1.5, boundaries: true, creaseAngle: 30, depthJump: 0.08 });
+  return settings;
+}
+
 function frameFor(jitterPixels = 0) {
   const frame = { eye: eyePosition(), target: camera.pivot, up: [0, 1, 0], fov: FIELD_OF_VIEW, far: Math.max(extent * 2.5, 100, camera.distance * 2 + extent) };
   if (!options.nearFit) frame.near = 0.1;
   if (jitterPixels) frame.shift = [jitterPixels / canvas.width, 0];
+  if (effectName) Object.assign(frame, effectSettings());
   return frame;
 }
 
@@ -203,7 +230,13 @@ async function build() {
     ground: false, hdr: !options.triangleIds, samples: 4, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
     reversedDepth: options.reversed ? 'auto' : false,
     resolveCoplanar: options.offset ? resolveAndReport : false,
+    ...(effectName ? { depth: true } : {}),
   });
+  if (effectName) {
+    installRenderPasses(renderer);
+    installCameraEffects(renderer);
+    installLineArt(renderer);
+  }
   window.flickerRenderer = renderer;
   window.flickerParts = loaded.parts;
   document.querySelector('#drop').hidden = true;
@@ -561,8 +594,20 @@ async function loadTrap() {
 bindControls();
 requestAnimationFrame(tick);
 document.querySelector('#speedValue').textContent = '';
+// The frame as raw RGBA bytes in base64, for the effects probe to compare two scenes pixel by pixel.
+function frameBase64() {
+  const scratch = document.createElement('canvas');
+  scratch.width = canvas.width;
+  scratch.height = canvas.height;
+  renderer.render(frameFor(0));
+  const bytes = new Uint8Array(readFrame(scratch.getContext('2d', { willReadFrequently: true })).buffer.slice(0));
+  let text = '';
+  for (let start = 0; start < bytes.length; start += 32768) text += String.fromCharCode(...bytes.subarray(start, start + 32768));
+  return { width: canvas.width, height: canvas.height, base64: btoa(text) };
+}
+
 window.flicker = {
-  setCamera, probe, truth, swapDetails, build, options, frameWholeScene,
+  frameBase64, setCamera, probe, truth, swapDetails, build, options, frameWholeScene,
   get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.(), flush: flushReport }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
   traps: Object.keys(TRAPS),
