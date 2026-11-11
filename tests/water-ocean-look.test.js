@@ -81,6 +81,7 @@ test('a ripple stays whole down to five pixels per wave and is gone at the two-p
   const fadeStart = Number(fade[1]);
   const fadeEnd = Number(fade[2]);
   // footprint * wavenumber / 2pi is the pixel size in wavelengths: 0.2 is five pixels per wave, 0.5 is the Nyquist limit.
-  assert.ok(fadeStart >= 0.2, `the fade starts at ${fadeStart} pixels per wavelength, so waves that five pixels carry are thinned`);
-  assert.ok(fadeEnd <= 0.5, `the fade ends at ${fadeEnd} pixels per wavelength, so waves are still sampled below two pixels`);
+  assert.equal(fadeStart, 0.2, 'the fade starts at five pixels per wavelength');
+  assert.equal(fadeEnd, 0.5, 'the fade ends at two pixels per wavelength, the sampling limit');
+  assert.ok(fadeStart < fadeEnd, 'the fade runs from a smaller to a larger footprint');
 });
