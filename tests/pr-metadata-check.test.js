@@ -194,6 +194,22 @@ test('status:needs-author follows the contributor fixes, except for exempt autho
   assert.ok(!owner.addLabels.includes('status:needs-author'));
 });
 
+test('a bot author such as Dependabot gets no contributor fixes and no author label', () => {
+  const dependabotPullRequest = pullRequest({
+    author: 'dependabot[bot]',
+    authorAssociation: 'NONE',
+    title: 'Bump actions/checkout from 6 to 7',
+    body: 'Bumps actions/checkout.',
+    labels: [],
+    milestone: null,
+  });
+  const files = [file('src/scene.js')];
+  const result = checkPullRequest({ pr: dependabotPullRequest, files });
+  assert.deepEqual(result.contributorFixes, []);
+  assert.ok(!result.addLabels.includes('status:needs-author'));
+  assert.ok(fixIds({ pr: pullRequest({ author: 'someone', body: 'Bumps.', labels: [] }), files }).length > 0);
+});
+
 test('owner, members, collaborators and bots are exempt from auto close', () => {
   assert.ok(isAutoCloseExempt({ author: 'anxuanng', authorAssociation: 'NONE' }));
   assert.ok(isAutoCloseExempt({ author: 'AnXuanNg', authorAssociation: 'NONE' }));

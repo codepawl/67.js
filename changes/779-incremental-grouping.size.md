@@ -1,9 +1,0 @@
-- entry:core: the sliced grouping (groupPartsIncrementally and groupWorld, about 240 bytes gzip) takes the grouping step of a 100,000-part world loaded in 20 slices from about 2.5 to 3.2 s to about 0.2 to 0.3 s in total and its longest slice from about 250 to 320 ms to under 70 ms (node bench/incremental-grouping/run.mjs, 5 runs on a loaded machine)
-- scene:lit-box: same code as entry:core
-- scene:gltf-box: same code as entry:core
-- scene:gltf-box+lazy: same code as entry:core
-- scene:agent-scene: same code as entry:core
-- scene:agent-scene+lazy: same code as entry:core
-- goal:lit-box: the growth is the sliced grouping, not scene features; it is a functional gain for loading large worlds without a long freeze, and the lead accepts it
-- goal:gltf-box: the growth is the sliced grouping, not scene features; same measured gain
-- goal:agent-scene: the growth is the sliced grouping, not scene features; same measured gain

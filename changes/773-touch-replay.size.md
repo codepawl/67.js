@@ -1,1 +1,0 @@
-- entry:input: touch sticks and gestures, device motion, axis smoothing and input recording with replay are the rest of the input sources a game needs (about 2.3 KB gzip), and the addon loads only when imported.

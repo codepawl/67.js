@@ -1,1 +1,0 @@
-- entry:crowd-skinning: the crowd shader carries the same per-pixel wear blend (about 800 bytes gzip); crowd instances ignore wear but share the fragment shader, and a scene without wear draws byte for byte as before

@@ -4,14 +4,14 @@
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { planChecks } from './preflight.mjs';
+import { isVersionBump, planChecks } from './preflight.mjs';
 import { pullRequestBaseOf } from './size-base.mjs';
 
 const gateNames = new Set(['protected files', 'change note']);
 
 // Returns the failing gates for a list of changed paths. Pure, so tests can call it without git.
-export function failingGatesFor(changedPaths) {
-  return planChecks(changedPaths, { skipTests: true })
+export function failingGatesFor(changedPaths, { release = false } = {}) {
+  return planChecks(changedPaths, { skipTests: true, release })
     .filter(check => gateNames.has(check.name) && check.failure)
     .map(check => ({ name: check.name, failure: check.failure, fix: check.fix }));
 }
@@ -31,7 +31,9 @@ function baseRefFromArguments() {
 function main() {
   const baseRef = baseRefFromArguments();
   const changedPaths = git(['diff', '--name-only', baseRef, 'HEAD']).split('\n').filter(Boolean);
-  const failing = failingGatesFor(changedPaths);
+  const release = isVersionBump(git(['show', `${baseRef}:package.json`]), git(['show', 'HEAD:package.json']));
+  if (release) console.log('The package version changed, so this is a release: the protected file and change note gates do not apply.');
+  const failing = failingGatesFor(changedPaths, { release });
   for (const gate of failing) {
     console.error(`FAIL ${gate.name}: ${gate.failure}\n     Fix: ${gate.fix}`);
   }

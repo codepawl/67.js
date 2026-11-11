@@ -1,1 +1,0 @@
-- `replaceParts(parts, { retainedUnchanged: true })` groups only the parts appended since the last call when a world grows by whole geometries, so loading a large world in slices no longer regroups the whole prefix on every call; a floor that shares a geometry with a world part still groups with it (#779)

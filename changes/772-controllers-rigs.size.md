@@ -1,1 +1,0 @@
-- entry:player: vehicle and flight controllers, three more camera rigs, wall and ground camera pull-in and the controller registry that issue 772 asks for (+2755 bytes gzip, loaded only when the player addon is imported)

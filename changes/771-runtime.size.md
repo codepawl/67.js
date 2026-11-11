@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: the live physics runtime shares the baked solver's world builder and force field step, so src/physics.js exports them and gains a live-definition check; that adds about 80 bytes gzip to the lazy physics chunk, and the runtime itself ships only as the separate physics-runtime addon.

@@ -1,1 +1,0 @@
-- scene:agent-scene+lazy: the composite key (chroma and luma key over a colour or gradient background) adds 1171 bytes gzip to the lazy post-steps chunk, which loads only for a recipe that names a post step.

@@ -1,1 +1,0 @@
-- The coplanar search no longer throws "reading 'push'" for a touching pair whose shared box overflows to Infinity (a second route to a NaN priority bin, after non-finite bounds).

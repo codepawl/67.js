@@ -1,1 +1,0 @@
-- Motion drivers can now set the camera eye, target, fov and roll after the camera tracks, and a constraint `influence` expression can read custom properties, so one property can dolly the camera or fade a constraint in and out (#842)

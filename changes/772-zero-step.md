@@ -1,1 +1,0 @@
-- Fix: the vehicle and flight controllers ignore a zero-length step, so the runtime's first variable-mode tick no longer turns their speed and velocity into NaN.
