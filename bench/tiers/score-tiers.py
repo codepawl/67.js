@@ -311,6 +311,36 @@ def downscale_display(display, width, height):
     return np.asarray(image.resize((width, height), Image.BOX), dtype=np.float32) / 255
 
 
+def score_backend_agreement(results):
+    """Compares each Cook webgpu image with the Cook native image of the same scene, sample count and repetition, and stores the result as
+    score.versusNative. Both run the same kernel, so at equal samples the two images should agree to within sampling noise; this is the
+    evidence the tables use instead of an equal-error figure for webgpu."""
+    native_cells = {
+        (cell["scene"], cell["samples"], cell["repetition"]): cell
+        for cell in results["cells"]
+        if cell["status"] == "ok" and cell["engine"] == "cook-native"
+    }
+    compared = 0
+    for cell in results["cells"]:
+        if cell["status"] != "ok" or cell["engine"] != "cook-webgpu" or "score" not in cell or "versusNative" in cell["score"]:
+            continue
+        native = native_cells.get((cell["scene"], cell["samples"], cell["repetition"]))
+        if native is None:
+            continue
+        native_linear = COMPARE.load_linear_rgb_image(native["image"]["path"])
+        webgpu_linear = COMPARE.load_linear_rgb_image(cell["image"]["path"])
+        comparison = COMPARE.compare_image_pair(native_linear, webgpu_linear)
+        native_display = display_of_linear(native_linear.astype(np.float32))
+        webgpu_display = display_of_linear(webgpu_linear.astype(np.float32))
+        cell["score"]["versusNative"] = {
+            "relMse": comparison["relMse"],
+            "flip": flip_score(native_display, webgpu_display),
+            "displayRelMse": display_relative_mse(native_display, webgpu_display),
+        }
+        compared += 1
+    return compared
+
+
 def score_matrix(results_path):
     """Scores every ok cell of run-all.mjs's results file that has no `score` yet, against that scene's Cycles reference, and writes the file back.
 
@@ -345,8 +375,9 @@ def score_matrix(results_path):
             score = {"flip": flip_score(reference_display, display), "displayRelMse": display_relative_mse(reference_display, display), "relMse": comparison["relMse"], "channelMeanRatio": comparison["channelMeanRatio"]}
         cell["score"] = score
         scored += 1
+    agreement = score_backend_agreement(results)
     Path(results_path).write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
-    print(f"scored {scored} cells in {results_path}")
+    print(f"scored {scored} cells and {agreement} backend pairs in {results_path}")
 
 
 def main():

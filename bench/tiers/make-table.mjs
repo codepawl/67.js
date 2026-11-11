@@ -83,20 +83,11 @@ function plainFlip(grouped, label) {
   return value ? `${label} ${show(value, '')}` : null;
 }
 
-// Samples needed for the same relMSE as the reference engine's, and the time that takes. points: [{ samples, relMse }].
-function samplesForError(points, targetError) {
-  const ordered = [...points].sort((first, second) => first.samples - second.samples);
-  for (let index = 0; index + 1 < ordered.length; index++) {
-    const low = ordered[index];
-    const high = ordered[index + 1];
-    if (Math.min(low.relMse, high.relMse) <= targetError && targetError <= Math.max(low.relMse, high.relMse) && low.relMse !== high.relMse) {
-      const fraction = (Math.log(targetError) - Math.log(low.relMse)) / (Math.log(high.relMse) - Math.log(low.relMse));
-      return { samples: Math.exp(Math.log(low.samples) + fraction * (Math.log(high.samples) - Math.log(low.samples))), method: 'interpolated between measured counts' };
-    }
-  }
-  const nearest = ordered.reduce((best, point) => (Math.abs(Math.log(point.relMse / targetError)) < Math.abs(Math.log(best.relMse / targetError)) ? point : best));
-  return { samples: (nearest.samples * nearest.relMse) / targetError, method: `extrapolated from ${nearest.samples} samples as 1 over N` };
-}
+// Cook's relMSE is read as noise-limited only when it falls roughly as 1 over N between the two measured counts. A 1024 sample error above
+// this share of the 256 sample error (1/N would give 0.25) means the error is held up by something that more samples do not remove: a bias.
+const BIAS_LIMIT_RATIO = 0.4;
+const REFERENCE_SAMPLES = 256;
+const LONGER_SAMPLES = 1024;
 
 function countedPoints(scene, engine) {
   const sampleCounts = [...new Set(results.cells.filter(cell => cell.scene === scene && cell.engine === engine && cell.status === 'ok').map(cell => cell.samples))];
@@ -109,30 +100,80 @@ function countedPoints(scene, engine) {
   }).filter(Boolean);
 }
 
-// The equal-error statement for one Cook engine against Cycles: the samples it needs and the time ratio at that error.
-function equalErrorStatement(scene, engine, label) {
+// How one engine's relMSE moves between 256 and 1024 samples. 1/N gives a ratio of 0.25.
+function errorTrend(points) {
+  const short = points.find(point => point.samples === REFERENCE_SAMPLES);
+  const long = points.find(point => point.samples === LONGER_SAMPLES);
+  if (!short || !long || !(short.relMse > 1e-9)) return null;
+  const ratio = long.relMse / short.relMse;
+  return { short: short.relMse, long: long.relMse, ratio, biasLimited: ratio > BIAS_LIMIT_RATIO };
+}
+
+// Samples at which an error that falls as 1 over N from the longer measured count reaches the target.
+function samplesForError(longPoint, targetError) {
+  return (longPoint.samples * longPoint.relMse) / targetError;
+}
+
+// The equal-error assessment of Cook native against Cycles on one scene. Three outcomes:
+//   noise: both errors fall roughly as 1/N between 256 and 1024 samples, so the ratio is extrapolated from 1024 samples and printed.
+//   native-bias: Cook native's error falls slower than 1/N, so no ratio is given.
+//   target-floor: the Cycles 256 sample error itself falls slower than 1/N (a floor, not a noise level), so no ratio is given.
+function equalErrorAssessment(scene) {
   const cycles = countedPoints(scene, 'cycles');
-  const cook = countedPoints(scene, engine);
-  const reference = cycles.find(point => point.samples === 256) ?? cycles[0];
-  // A reference error of zero (the reference compared with itself) has no equal-error point.
-  if (!reference || cook.length === 0 || !(reference.relMse > 1e-9)) return null;
-  const needed = samplesForError(cook.map(point => ({ samples: point.samples, relMse: point.relMse })), reference.relMse);
-  const perSampleCook = median(cook.map(point => point.samplingSeconds / point.samples));
-  const setupCook = median(cook.map(point => point.totalSeconds - point.samplingSeconds));
+  const native = countedPoints(scene, 'cook-native');
+  const cyclesTrend = errorTrend(cycles);
+  const nativeTrend = errorTrend(native);
+  if (!cyclesTrend || !nativeTrend) return null;
+  const reference = cycles.find(point => point.samples === REFERENCE_SAMPLES);
+  const longNative = native.find(point => point.samples === LONGER_SAMPLES);
+  const assessment = { scene, cyclesTrend, nativeTrend, targetRelMse: reference.relMse, outcome: 'noise' };
+  if (nativeTrend.biasLimited) return { ...assessment, outcome: 'native-bias' };
+  if (cyclesTrend.biasLimited) return { ...assessment, outcome: 'target-floor' };
+  const needed = samplesForError(longNative, reference.relMse);
+  const perSampleNative = median(native.map(point => point.samplingSeconds / point.samples));
+  const setupNative = median(native.map(point => point.totalSeconds - point.samplingSeconds));
   const perSampleCycles = reference.samplingSeconds / reference.samples;
-  const samplingTime = needed.samples * perSampleCook;
-  const totalTime = samplingTime + setupCook;
+  const samplingTime = needed * perSampleNative;
+  const totalTime = samplingTime + setupNative;
   return {
-    engine, label, targetRelMse: reference.relMse, cyclesSamples: reference.samples, samplesNeeded: needed.samples, sampleRatio: needed.samples / reference.samples, method: needed.method,
-    perSampleSpeedup: perSampleCycles / perSampleCook, samplingSeconds: samplingTime, totalSeconds: totalTime,
+    ...assessment, samplesNeeded: needed, sampleRatio: needed / reference.samples, perSampleSpeedup: perSampleCycles / perSampleNative,
+    samplingSeconds: samplingTime, totalSeconds: totalTime, cyclesSamplingSeconds: reference.samplingSeconds,
     timeRatioSampling: samplingTime / reference.samplingSeconds, timeRatioTotal: totalTime / reference.totalSeconds,
   };
 }
 
-function equalErrorText(statement) {
-  if (!statement) return null;
+const relMseText = value => value.toExponential(2);
+
+function equalErrorText(assessment) {
+  if (!assessment) return null;
   const times = value => number(value, 2);
-  return `Equal error: ${statement.label} needs about ${number(statement.sampleRatio, 1)} times the samples of Cycles (${number(Math.round(statement.samplesNeeded), 0)} against ${statement.cyclesSamples}, to reach relMSE ${number(statement.targetRelMse, 4)}; ${statement.method}). It draws a sample ${times(statement.perSampleSpeedup)} times faster, so the time to equal error is ${times(statement.timeRatioSampling)} times Cycles' (sampling only) and ${times(statement.timeRatioTotal)} times with setup included (${number(statement.samplingSeconds, 1)} s against ${number(statement.samplingSeconds / statement.timeRatioSampling, 1)} s sampling).`;
+  const { cyclesTrend, nativeTrend } = assessment;
+  const measured = `relMSE ${relMseText(nativeTrend.short)} at ${REFERENCE_SAMPLES} samples and ${relMseText(nativeTrend.long)} at ${LONGER_SAMPLES}, against Cycles' ${relMseText(cyclesTrend.short)} at ${REFERENCE_SAMPLES} and ${relMseText(cyclesTrend.long)} at ${LONGER_SAMPLES}`;
+  if (assessment.outcome === 'native-bias') {
+    return `Equal error: Cook native does not reach Cycles' ${REFERENCE_SAMPLES}-sample error by ${LONGER_SAMPLES} samples (error falls slower than 1/N, likely a bias): ${measured}. No ratio is given.`;
+  }
+  if (assessment.outcome === 'target-floor') {
+    return `Equal error: Cook native does not reach Cycles' ${REFERENCE_SAMPLES}-sample error by ${LONGER_SAMPLES} samples, and Cycles' own error falls slower than 1/N here (a floor, not a noise level, likely a bias): ${measured}. No ratio is given.`;
+  }
+  return `Equal error: Cook native needs about ${number(assessment.sampleRatio, 1)} times the samples of Cycles (${number(Math.round(assessment.samplesNeeded), 0)} against ${REFERENCE_SAMPLES}, to reach relMSE ${relMseText(assessment.targetRelMse)}; extrapolated from ${LONGER_SAMPLES} samples as 1 over N, which both engines' measured errors support: ${measured}). It draws a sample ${times(assessment.perSampleSpeedup)} times faster, so the time to equal error is ${times(assessment.timeRatioSampling)} times Cycles' (sampling only) and ${times(assessment.timeRatioTotal)} times with setup included (${number(assessment.samplingSeconds, 1)} s against ${number(assessment.cyclesSamplingSeconds, 1)} s sampling).`;
+}
+
+// Cook webgpu runs the same kernel as native but at 256 samples only, so no equal-error figure is given: its per-sample speed against native,
+// and how closely its 256-sample image matches the native one (score.versusNative, from score-tiers.py).
+function webgpuAgreement(scene) {
+  const native = group(scene, 'cook-native', REFERENCE_SAMPLES);
+  const webgpu = group(scene, 'cook-webgpu', REFERENCE_SAMPLES);
+  const nativePerSample = metric(native, 'perSampleMilliseconds', 2);
+  const webgpuPerSample = metric(webgpu, 'perSampleMilliseconds', 2);
+  const versus = values => spread(webgpu.cells.map(cell => cell.score?.versusNative?.[values]).filter(value => typeof value === 'number'), 4);
+  if (!nativePerSample || !webgpuPerSample) return null;
+  return { slowdown: webgpuPerSample.median / nativePerSample.median, relMse: versus('relMse'), flip: versus('flip') };
+}
+
+function webgpuText(agreement) {
+  if (!agreement) return null;
+  const similarity = agreement.relMse ? ` Its ${REFERENCE_SAMPLES}-sample image matches native's at equal samples (relMSE between the two images ${relMseText(agreement.relMse.median)}, FLIP ${number(agreement.flip.median, 4)}).` : '';
+  return `Cook webgpu (measured at ${REFERENCE_SAMPLES} samples only) draws a sample ${number(agreement.slowdown, 1)} times slower than native.${similarity} It runs the same kernel, so no separate equal-error figure is given.`;
 }
 
 function rowsForScene(scene) {
@@ -141,15 +182,15 @@ function rowsForScene(scene) {
   const realtimeGlaze = group(scene, 'glaze-realtime');
   const realtimeEevee = group(scene, 'eevee-default');
   const native = group(scene, 'cook-native');
-  const cyclesAt = group(scene, 'cycles', native.cells[0]?.samples ?? 256);
-  const nativeAt = native.cells.length ? group(scene, 'cook-native', native.cells[0].samples) : native;
+  const cyclesAt = group(scene, 'cycles', REFERENCE_SAMPLES);
+  const nativeAt = group(scene, 'cook-native', REFERENCE_SAMPLES);
   const rows = [
     ['draft (planned name)', 'A quick look while editing', 'Glaze, 0.5 render scale, 1 sample, light shading, 8 bit target, coarser level of detail', 'Aliased edges, no environment lookup, a quarter of the pixels enlarged', glazeText(draftGlaze), eeveeText(draftEevee),
       flipText([glazeFlip(draftGlaze, 'Glaze'), plainFlip(draftEevee, 'EEVEE 1 sample')])],
     ['realtime', 'Interactive use', 'Glaze, default settings', 'No path-traced global illumination: indirect light is approximate', glazeText(realtimeGlaze), eeveeText(realtimeEevee),
       flipText([glazeFlip(realtimeGlaze, 'Glaze'), plainFlip(realtimeEevee, 'EEVEE 64 samples')])],
     ['realtime-high', 'Interactive, higher quality', 'Planned (#902), not measurable yet', 'none', 'none', 'none', 'none'],
-    ['final', 'Offline images', 'Cook native (Vulkan ray queries)', 'Needs more samples than Cycles for the same noise (see below)', countedText(nativeAt), `Cycles: ${countedText(cyclesAt)}`,
+    ['final', 'Offline images', 'Cook native (Vulkan ray queries)', 'Error against samples is in the equal-error note below', countedText(nativeAt), `Cycles: ${countedText(cyclesAt)}`,
       flipText([plainFlip(nativeAt, 'Cook native'), plainFlip(cyclesAt, 'Cycles')])],
   ];
   for (const [engine, label] of [['cook-webgpu', 'Cook webgpu (WGSL compute, software BVH)'], ['cook-gpu', 'Cook gpu (WebGL2)'], ['cook-cpu', 'Cook cpu (JavaScript threads)']]) {
@@ -172,11 +213,72 @@ function escapeHtml(text) {
   return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-const markdown = [];
-const html = [];
+// The cross-scene summary: for each figure, the lowest and highest per-scene median.
+function acrossScenes(read, digits = 1) {
+  const values = sceneIds.map(read).filter(value => typeof value === 'number' && Number.isFinite(value));
+  if (values.length === 0) return null;
+  return { low: Math.min(...values), high: Math.max(...values), count: values.length, digits };
+}
+function rangeText(figure, unit = '') {
+  if (!figure) return 'not run';
+  const suffix = unit ? ` ${unit}` : '';
+  return `${number(figure.low, figure.digits)} to ${number(figure.high, figure.digits)}${suffix}`;
+}
+const medianOf = (scene, engine, samples, name, scale = 1) => metric(group(scene, engine, samples), name, 3, scale)?.median;
+const flipOf = (scene, engine, samples, name = 'flip') => score(group(scene, engine, samples), name)?.median;
+
+function summaryRows() {
+  const glazeTier = engine => [
+    `${rangeText(acrossScenes(scene => medianOf(scene, engine, null, 'primaryMilliseconds'), 2), 'ms a frame with the pixel read')}; ${rangeText(acrossScenes(scene => medianOf(scene, engine, null, 'throughputMilliseconds'), 2), 'ms queued back to back')}`,
+  ];
+  const eeveeTier = engine => `${rangeText(acrossScenes(scene => medianOf(scene, engine, null, 'primaryMilliseconds'), 0), 'ms a render call')}`;
+  const flipRange = (engine, samples = null) => rangeText(acrossScenes(scene => flipOf(scene, engine, samples), 3));
+  return [
+    ['draft (planned name)', glazeTier('glaze-draft')[0], eeveeTier('eevee-lowest'), `Glaze ${flipRange('glaze-draft')}`, `EEVEE 1 sample ${flipRange('eevee-lowest')}`],
+    ['realtime', glazeTier('glaze-realtime')[0], eeveeTier('eevee-default'), `Glaze ${flipRange('glaze-realtime')}`, `EEVEE 64 samples ${flipRange('eevee-default')}`],
+    ['final (Cook native, 256 samples)',
+      `${rangeText(acrossScenes(scene => medianOf(scene, 'cook-native', REFERENCE_SAMPLES, 'perSampleMilliseconds'), 2), 'ms a sample')}; ${rangeText(acrossScenes(scene => medianOf(scene, 'cook-native', REFERENCE_SAMPLES, 'totalTraceSeconds'), 2), 's for 256 samples with setup')}`,
+      `Cycles ${rangeText(acrossScenes(scene => medianOf(scene, 'cycles', REFERENCE_SAMPLES, 'perSampleMilliseconds'), 2), 'ms a sample')}; ${rangeText(acrossScenes(scene => medianOf(scene, 'cycles', REFERENCE_SAMPLES, 'totalTraceSeconds'), 2), 's for 256 samples with setup')}`,
+      `Cook native ${flipRange('cook-native', REFERENCE_SAMPLES)}`, `Cycles ${flipRange('cycles', REFERENCE_SAMPLES)}`],
+  ];
+}
+
+function summaryLines(assessments) {
+  const noise = assessments.filter(assessment => assessment.outcome === 'noise');
+  const limited = assessments.filter(assessment => assessment.outcome !== 'noise');
+  const perSample = acrossScenes(scene => {
+    const native = medianOf(scene, 'cook-native', REFERENCE_SAMPLES, 'perSampleMilliseconds');
+    const cycles = medianOf(scene, 'cycles', REFERENCE_SAMPLES, 'perSampleMilliseconds');
+    return native && cycles ? cycles / native : null;
+  }, 1);
+  const range = (items, read, digits = 1) => rangeText(items.length ? { low: Math.min(...items.map(read)), high: Math.max(...items.map(read)), digits } : null);
+  const agreements = sceneIds.map(webgpuAgreement).filter(Boolean);
+  const slowdown = rangeText(acrossScenes(scene => webgpuAgreement(scene)?.slowdown, 1));
+  const matching = agreements.filter(agreement => agreement.relMse);
+  const lines = [
+    `Final, per-sample speed: Cook native draws a sample ${rangeText(perSample)} times faster than Cycles (256 samples, per-scene medians).`,
+  ];
+  if (noise.length > 0) {
+    lines.push(`Final, equal error, on the ${noise.length} noise-limited scene${noise.length === 1 ? '' : 's'} (${noise.map(item => item.scene).join(', ')}), where both engines' relMSE falls roughly as 1/N between 256 and 1024 samples: Cook native needs ${range(noise, item => item.sampleRatio)} times Cycles' samples (extrapolated from 1024 samples), which is ${range(noise, item => item.timeRatioSampling, 2)} times Cycles' time (sampling only) and ${range(noise, item => item.timeRatioTotal, 2)} times with setup included.`);
+  } else {
+    lines.push('Final, equal error: no scene is noise-limited, so no ratio is given.');
+  }
+  lines.push(`Bias-limited scenes (no equal-error ratio given; the 1024-sample error is above ${BIAS_LIMIT_RATIO} times the 256-sample error, where 1/N gives 0.25): ${limited.length ? limited.map(item => `${item.scene} (${item.outcome === 'native-bias' ? 'Cook native' : "Cycles' target"}: ${relMseText(item.outcome === 'native-bias' ? item.nativeTrend.short : item.cyclesTrend.short)} at 256, ${relMseText(item.outcome === 'native-bias' ? item.nativeTrend.long : item.cyclesTrend.long)} at 1024)`).join('; ') : 'none'}.`);
+  const matchingValues = matching.map(item => item.relMse.median);
+  const matchingText = matching.length ? `; its 256-sample image matches native's (relMSE between the two images ${relMseText(Math.min(...matchingValues))} to ${relMseText(Math.max(...matchingValues))}, FLIP between them ${number(Math.min(...matching.map(item => item.flip.median)), 4)} to ${number(Math.max(...matching.map(item => item.flip.median)), 4)})` : '';
+  lines.push(`Cook webgpu draws a sample ${slowdown} times slower than native (256 samples only, so it gets no equal-error figure)${matchingText}.`);
+  return lines;
+}
+
+const SUMMARY_COLUMNS = ['Tier', '67js time (range over scenes)', 'Blender time (range over scenes)', 'FLIP, 67js', 'FLIP, Blender'];
+const assessments = sceneIds.map(equalErrorAssessment).filter(Boolean);
+const summary = summaryLines(assessments);
+const summaryRowsList = summaryRows();
+const markdown = [`## Summary across ${sceneIds.length} scenes`, '', `| ${SUMMARY_COLUMNS.join(' | ')} |`, `| ${SUMMARY_COLUMNS.map(() => '---').join(' | ')} |`, ...summaryRowsList.map(row => `| ${row.join(' | ')} |`), '', ...summary.flatMap(line => [line, '']), '## Per scene', ''];
+const html = [`<h2>Summary across ${sceneIds.length} scenes</h2>`, '<table>', `<thead><tr>${SUMMARY_COLUMNS.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead>`, '<tbody>', ...summaryRowsList.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`), '</tbody>', '</table>', ...summary.map(line => `<p>${escapeHtml(line)}</p>`), '<h2>Per scene</h2>'];
 for (const scene of sceneIds) {
   const rows = rowsForScene(scene);
-  const statements = [['cook-native', 'Cook native'], ['cook-webgpu', 'Cook webgpu']].map(([engine, label]) => equalErrorText(equalErrorStatement(scene, engine, label))).filter(Boolean);
+  const statements = [equalErrorText(assessments.find(item => item.scene === scene)), webgpuText(webgpuAgreement(scene))].filter(Boolean);
   markdown.push(`### ${scene}`, '', `| ${COLUMNS.join(' | ')} |`, `| ${COLUMNS.map(() => '---').join(' | ')} |`, ...rows.map(row => `| ${row.map(cell => String(cell).replace(/\|/g, '/')).join(' | ')} |`), '', ...statements.flatMap(text => [text, '']));
   html.push(`<h3>${escapeHtml(scene)}</h3>`, '<table>', `<thead><tr>${COLUMNS.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead>`, '<tbody>', ...rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`), '</tbody>', '</table>', ...statements.map(text => `<p>${escapeHtml(text)}</p>`));
 }

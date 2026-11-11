@@ -4,7 +4,24 @@ Each row says what ran. The tier names are working names from the render roadmap
 
 Depends on #921 (`bench/cycles-parity`, [`docs/cycles-parity.md`](../../docs/cycles-parity.md)): the Cycles script, the native trace script, `compare.py` and `measure-gpu-run.py` are reused. The Cook against Cycles numbers on one scene are in that document; this suite repeats them with the other Cook backends beside them.
 
-## Result (lit-interior, 960 by 540, 2026-11-11)
+## Result (six scenes, 960 by 540, idle card, 2026-11-11)
+
+The full matrix: [`results/matrix-960.json`](results/matrix-960.json) (162 runs, three repetitions of every cell, Cook native and Cycles at 256 and 1,024 samples, Cook webgpu at 256), with the generated [`matrix-960.table.md`](results/matrix-960.table.md) and [`matrix-960.table.html`](results/matrix-960.table.html): the summary across scenes first, then one table per scene.
+
+Conditions: RTX 3060 12 GB (driver 621.14), Blender 5.3.0, Node 24.19.0, Chrome headless on D3D11 (ANGLE), 960 by 540, reference Cycles at 4,096 samples. The idle gate waited for at most 15 percent utilisation on 5 polls in a row (at most 900 s) before every run; 0 of 162 runs were contended. The results file keeps the paths of the session's work directory as `<work directory>/`; the images and `.npy` files stay out of the repository.
+
+```sh
+node bench/tiers/run-all.mjs <work directory> --samples 256,1024 --max-wait 900
+node bench/tiers/make-table.mjs <work directory>/matrix-960.json
+```
+
+`run-all.mjs` ends by running `score-tiers.py matrix`, which also compares each Cook webgpu image with the Cook native one of the same scene and repetition (`score.versusNative`). To rebuild the committed tables: `node bench/tiers/make-table.mjs bench/tiers/results/matrix-960.json`.
+
+How the equal-error statements are made: an error that is limited by noise falls as 1/N, so the relMSE at 1,024 samples is about a quarter of the one at 256. When a scene's 1,024-sample error is above 0.4 times its 256-sample error, `make-table.mjs` calls it bias-limited and prints the measured values without a ratio; it does the same when the Cycles 256-sample error that serves as the target is itself bias-limited. A ratio is extrapolated only from 1,024 samples and only on the other scenes. Cook webgpu was measured at 256 samples only, so it gets its per-sample speed against native and the difference between its image and native's at equal samples, never an equal-error figure.
+
+The table below this section, and the equal-error section after it, are the earlier single-scene result, measured on a shared card. Where they disagree with the matrix, the matrix is right; their equal-error figures extrapolated as 1/N without the check above.
+
+## Result (lit-interior, shared card, 2026-11-11)
 
 One scene, as the first step. The other five scenes of `bench/reference/scenes.js` export and render, but were not run (see "Not done"). The card was shared the whole time (see "Conditions").
 
