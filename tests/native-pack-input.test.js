@@ -205,8 +205,8 @@ test('cycles kernel manifest, signatures-only abi.wgsl, and FORMAT-v2.md agree b
   }
 
   const abiSource = readFileSync(new URL('../packages/render-native/src/cycles/abi.wgsl', import.meta.url), 'utf8');
-  assert.match(abiSource, /fn closure_eval\(closure: Closure, wi: vec3<f32>, wo: vec3<f32>\) -> ClosureEval/);
-  assert.match(abiSource, /fn closure_sample\(closure: Closure, wo: vec3<f32>, u: vec3<f32>\) -> ClosureSample/);
+  assert.match(abiSource, /fn closure_eval\(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>\) -> ClosureEval/);
+  assert.match(abiSource, /fn closure_sample\(closure: ptr<function, Closure>, wo: vec3<f32>, u: vec3<f32>\) -> ClosureSample/);
 
   const { uncommented, structs } = parseWgslStructs(abiSource);
   assert.doesNotMatch(uncommented, /\bfn\s+[A-Za-z_]\w*/, 'abi.wgsl must be signatures-only with no stub fn bodies');
