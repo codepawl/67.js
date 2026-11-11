@@ -8,6 +8,7 @@ import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { resolveTraceSubsurface } from './path-tracer-subsurface.js';
 import { lightShapeSupport } from './shader-registry.js';
 import { flushOrderOf } from './depth-layer.js';
+import { liftRankedTriangles } from './flush-lift.js';
 
 // The scene a path trace reads: every part flattened into one world-space triangle soup with per-vertex normals, UVs
 // and colours, one resolved material per part, the lights in plain arrays, and the environment map as a sampling table.
@@ -181,7 +182,7 @@ function validatePart(part, geometry) {
 function traceGeometry(part) {
   // Faces hidden under a face on the same plane are cut away for the rasteriser (flush-resolve.js); rays get the same
   // geometry, or the two faces would split the hits between them.
-  const geometry = part.skin ? skinnedGeometry(part) : flushOrderOf(part)?.geometry ?? part.geometry;
+  const geometry = part.skin ? skinnedGeometry(part) : liftRankedTriangles(part, flushOrderOf(part)?.geometry ?? part.geometry);
   const { boxMapScale = 0, boxMapAxis = 1 } = part.material ?? {};
   if (!(boxMapScale > 0)) return geometry;
   return boxProjectedGeometry(geometry, columnLengths(part.matrix ?? IDENTITY_MATRIX), boxMapScale, boxMapAxis);
