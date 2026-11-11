@@ -1,1 +1,1 @@
-- entry:netcode: the WebRTC data channel transport (about 417 bytes gzip) is what lets a host or server sync players and props over WebRTC, the transport #778 asks for beside WebSocket and BroadcastChannel
+- entry:netcode: the WebRTC data channel transport (6,949 to 7,446 bytes gzip, +497) is what lets a host or server sync players and props over WebRTC, the transport #778 asks for beside WebSocket and BroadcastChannel

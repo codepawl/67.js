@@ -8,15 +8,21 @@ const idleScheduler = { request: () => 1, cancel: () => {} };
 
 // Two connected data-channel-like ends, as RTCDataChannel pairs behave: send on one is a message event on the other.
 function createChannelPair() {
-  const ends = [0, 1].map(() => ({ readyState: 'open', listeners: new Set(), closed: false }));
+  // listeners holds message listeners; endListeners holds close and error listeners.
+  const ends = [0, 1].map(() => ({ readyState: 'open', listeners: new Set(), endListeners: new Set(), closed: false }));
   ends.forEach((end, index) => {
     const other = ends[1 - index];
+    const setFor = type => (type === 'message' ? end.listeners : end.endListeners);
     end.send = text => other.listeners.forEach(listener => listener({ data: text }));
-    end.addEventListener = (type, listener) => end.listeners.add(listener);
-    end.removeEventListener = (type, listener) => end.listeners.delete(listener);
+    end.addEventListener = (type, listener) => setFor(type).add(listener);
+    end.removeEventListener = (type, listener) => setFor(type).delete(listener);
     end.close = () => {
       end.closed = true;
       end.readyState = 'closed';
+    };
+    end.fireClose = () => {
+      end.readyState = 'closed';
+      [...end.endListeners].forEach(listener => listener({ type: 'close' }));
     };
   });
   return ends;
@@ -71,13 +77,75 @@ test('a data channel transport rejects bad options, channels, oversized and malf
   end.listeners.forEach(listener => listener({ data: 'not json' }));
   end.listeners.forEach(listener => listener({ data: 42 }));
   end.listeners.forEach(listener => listener({ data: 'x'.repeat(300) }));
-  assert.equal(transport.stats.rejected, 3);
+  for (const payload of ['null', '5', '[]', '"x"', 'true']) end.listeners.forEach(listener => listener({ data: payload }));
+  end.listeners.forEach(listener => listener(undefined));
+  assert.equal(transport.stats.rejected, 9);
+  assert.equal(transport.stats.received, 0);
   for (let index = 0; index < 31; index += 1) transport.addChannel(`peer-${index}`, createChannelPair()[0]);
   assert.throws(() => transport.addChannel('one-too-many', createChannelPair()[0]), /at most 32 peers/);
   transport.addChannel('b', createChannelPair()[0]);
   transport.close();
   assert.deepEqual(transport.peers(), []);
   assert.equal(end.listeners.size, 0);
+});
+
+test('a closed or errored channel is evicted, so players can come and go past the peer limit', () => {
+  const transport = createDataChannelTransport({ id: 'host' });
+  const hostEnds = [];
+  for (let index = 0; index < 32; index += 1) {
+    const [hostEnd] = createChannelPair();
+    hostEnds.push(hostEnd);
+    transport.addChannel(`player-${index}`, hostEnd);
+  }
+  hostEnds.forEach(end => end.fireClose());
+  assert.deepEqual(transport.peers(), []);
+  hostEnds.forEach(end => {
+    assert.equal(end.listeners.size, 0, 'the message listener is detached');
+    assert.equal(end.endListeners.size, 0, 'the close listener is detached');
+  });
+  const [freshEnd] = createChannelPair();
+  transport.addChannel('newcomer', freshEnd);
+  assert.deepEqual(transport.peers(), ['newcomer']);
+
+  // A channel that closes without an event is pruned when the cap is reached.
+  const quietTransport = createDataChannelTransport({ id: 'quiet' });
+  const quietEnds = [];
+  for (let index = 0; index < 32; index += 1) {
+    const [quietEnd] = createChannelPair();
+    quietEnds.push(quietEnd);
+    quietTransport.addChannel(`player-${index}`, quietEnd);
+  }
+  quietEnds.forEach(end => end.close());
+  quietTransport.addChannel('newcomer', createChannelPair()[0]);
+  assert.deepEqual(quietTransport.peers(), ['newcomer']);
+  quietEnds.forEach(end => assert.equal(end.listeners.size, 0));
+
+  // An error event evicts too.
+  const [errorEnd] = createChannelPair();
+  transport.addChannel('flaky', errorEnd);
+  errorEnd.fireClose();
+  assert.ok(!transport.peers().includes('flaky'));
+});
+
+test('adding a channel under an existing peer id replaces the old one, and a channel without close() is tolerated', () => {
+  const transport = createDataChannelTransport({ id: 'host' });
+  const heard = [];
+  transport.receive((peerId, message) => heard.push([peerId, message]));
+  const [oldEnd, oldRemote] = createChannelPair();
+  const [newEnd, newRemote] = createChannelPair();
+  transport.addChannel('player', oldEnd);
+  transport.addChannel('player', newEnd);
+  oldRemote.send('{"from":"old"}');
+  newRemote.send('{"from":"new"}');
+  assert.deepEqual(heard, [['player', { from: 'new' }]]);
+  assert.equal(oldEnd.endListeners.size, 0);
+  oldEnd.fireClose();
+  assert.deepEqual(transport.peers(), ['player'], 'the replaced channel closing does not evict the new one');
+
+  const bare = { readyState: 'open', send() {}, addEventListener() {} };
+  transport.addChannel('bare', bare);
+  transport.close();
+  assert.deepEqual(transport.peers(), []);
 });
 
 test('a host and two clients sync players and a driven prop over data channels', () => {

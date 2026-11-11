@@ -1004,7 +1004,7 @@ export function createWebSocketTransport(socket, options = {}) {
 // A transport over several WebRTC data channels (or any channel-like objects with send(text), addEventListener and
 // readyState), one per peer. Your signalling code opens each RTCDataChannel and hands it over with addChannel(peerId, channel):
 // a host adds one per player, a client adds one for the host. A peer is listed while its channel is open, so a player who
-// disconnects leaves the peer list on its own. Nothing here opens a connection.
+// disconnects leaves the peer list on its own; a channel that closes or errors is dropped and frees its peer slot. Nothing here opens a connection.
 export function createDataChannelTransport(options = {}) {
   const id = requireName(options.id, 'createDataChannelTransport id');
   const maximumMessageBytes = boundedInteger(options.maximumMessageBytes ?? NETCODE_LIMITS.defaultMessageBytes, 'createDataChannelTransport maximumMessageBytes', 256, NETCODE_LIMITS.maximumMessageBytes);
@@ -1016,7 +1016,8 @@ export function createDataChannelTransport(options = {}) {
   function readMessage(text) {
     if (typeof text !== 'string' || text.length > maximumMessageBytes) return undefined;
     try {
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      return isPlainObject(parsed) ? parsed : undefined;
     } catch {
       return undefined;
     }
@@ -1024,6 +1025,16 @@ export function createDataChannelTransport(options = {}) {
 
   function detach(entry) {
     entry.channel.removeEventListener?.('message', entry.onMessage);
+    entry.channel.removeEventListener?.('close', entry.onClose);
+    entry.channel.removeEventListener?.('error', entry.onClose);
+  }
+
+  function pruneClosedChannels() {
+    for (const [peerId, entry] of channels) {
+      if (entry.channel.readyState !== 'closed') continue;
+      detach(entry);
+      channels.delete(peerId);
+    }
   }
 
   return {
@@ -1033,6 +1044,7 @@ export function createDataChannelTransport(options = {}) {
       if (channel === null || typeof channel !== 'object' || typeof channel.send !== 'function' || typeof channel.addEventListener !== 'function') {
         throw new TypeError('addChannel needs a data-channel-like object with send(text) and addEventListener(type, listener), such as an RTCDataChannel.');
       }
+      if (!channels.has(peerId) && channels.size >= NETCODE_LIMITS.maximumPeers) pruneClosedChannels();
       if (!channels.has(peerId) && channels.size >= NETCODE_LIMITS.maximumPeers) {
         throw new RangeError(`addChannel: at most ${NETCODE_LIMITS.maximumPeers} peers are supported; remove one with removeChannel(peerId) first.`);
       }
@@ -1049,8 +1061,15 @@ export function createDataChannelTransport(options = {}) {
           stats.received += 1;
           for (const listener of [...listeners]) listener(peerId, message);
         },
+        onClose() {
+          if (channels.get(peerId) !== entry) return;
+          detach(entry);
+          channels.delete(peerId);
+        },
       };
       channel.addEventListener('message', entry.onMessage);
+      channel.addEventListener('close', entry.onClose);
+      channel.addEventListener('error', entry.onClose);
       channels.set(peerId, entry);
     },
     removeChannel(peerId) {
