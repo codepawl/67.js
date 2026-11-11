@@ -1,5 +1,5 @@
 import { registerShaderFeatureCode } from './shader-registry.js';
-import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_MAXIMUM_STEPS, LOCAL_VOLUME_STEPS_PER_NOISE_CELL, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
+import { resolveLocalVolumes, createLocalVolumeBuffers, packLocalVolumes, LOCAL_VOLUME_MAXIMUM_STEPS, LOCAL_VOLUME_STEPS_PER_NOISE_CELL, LOCAL_VOLUME_BLUR_PIXELS, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { bindLocalVolumeParts } from './local-volume-parts.js';
 import { drawMeshVolumes } from './mesh-volume-pass.js';
 import { FogFieldTexture, createFogLightBuffers, packFogLights, volumeShadowAmbient, DEFAULT_FLOW_STRENGTH, DEFAULT_FLOW_PERIOD, resolveFogDetail, fogUsesDetail } from './fog-field.js';
@@ -253,6 +253,26 @@ vec3 localVolumeInScatter(int index, vec3 position, vec3 direction) {
   }
   return localVolumeSkyLight(index, position) + sunLight;
 }
+// The light behind a volume, blurred by the optical depth in front of it: taps of the frame spread over a disc whose radius grows with the depth,
+// each counted only where its surface lies at or past the ray's first volume entry, so an object in front of the volume is never smeared into it.
+vec3 localVolumeBlurred(vec3 background, float opticalDepth, float firstEntry, vec3 origin, vec3 direction) {
+  float radiusPixels = ${LOCAL_VOLUME_BLUR_PIXELS.toFixed(1)} * (resolution.y / 540.0) * (1.0 - exp(-opticalDepth));
+  if (radiusPixels < 0.05) return background;
+  float lod = max(0.0, log2(radiusPixels * 0.5));
+  vec3 sum = background;
+  float weight = 1.0;
+  for (int tap = 0; tap < 12; tap++) {
+    float index = float(tap) + 0.5;
+    vec2 offsetPixels = vec2(cos(index * 2.4), sin(index * 2.4)) * (radiusPixels * sqrt(index / 12.0));
+    vec2 coordinate = textureCoordinate + offsetPixels / resolution;
+    vec4 tapPoint = inverseViewProjection * vec4(coordinate * 2.0 - 1.0, texture(sceneDepth, coordinate).r * 2.0 - 1.0, 1.0);
+    float tapDistance = tapPoint.w > 0.0 ? dot(tapPoint.xyz - origin * tapPoint.w, direction) / tapPoint.w : 1e30;
+    if (tapDistance < firstEntry) continue;
+    sum += textureLod(frameTexture, coordinate, lod).rgb;
+    weight += 1.0;
+  }
+  return mix(background, sum / weight, min(radiusPixels, 1.0));
+}
 vec3 localVolumes(vec3 background) {
   vec2 clipXY = textureCoordinate * 2.0 - 1.0;
   vec4 farPoint = inverseViewProjection * vec4(clipXY, 1.0, 1.0);
@@ -290,6 +310,8 @@ vec3 localVolumes(vec3 background) {
   }
   vec3 transmittance = vec3(1.0);
   vec3 radiance = vec3(0.0);
+  float blurDepth = 0.0;
+  float blurEntry = 1e30;
   for (int pass = 0; pass < 8; pass++) {
     int nearest = -1;
     float nearestEntry = 1e29;
@@ -312,6 +334,8 @@ vec3 localVolumes(vec3 background) {
       vec3 gain = mix(vec3(insideLength), (1.0 - factor) / max(absorption, vec3(1e-6)), step(vec3(1e-6), absorption));
       radiance += transmittance * localVolumeEmission[nearest].rgb * gain;
       transmittance *= factor;
+      blurDepth += localVolumeSteps[nearest].w * dot(absorption, vec3(0.3333)) * insideLength;
+      blurEntry = min(blurEntry, entry);
       continue;
     }
     int steps = int(localVolumeSteps[nearest].x);
@@ -328,8 +352,11 @@ vec3 localVolumes(vec3 background) {
       vec3 extinction = localVolumeAbsorption[nearest].rgb * (profile * stepSize);
       if (scatterAlbedo > 0.0 && profile > 0.0) radiance += transmittance * (scatterAlbedo * (1.0 - exp(-extinction))) * localVolumeInScatter(nearest, position, direction);
       transmittance *= exp(-extinction);
+      blurDepth += localVolumeSteps[nearest].w * dot(extinction, vec3(0.3333));
     }
+    blurEntry = min(blurEntry, entry);
   }
+  if (blurDepth > 0.0) background = localVolumeBlurred(background, blurDepth, blurEntry, origin, direction);
   return background * transmittance + radiance;
 }
 `;

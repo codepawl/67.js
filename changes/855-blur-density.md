@@ -1,0 +1,1 @@
+- A local volume blurs the light seen through it by its optical depth (new `blur` field, 0 to 1, default 1, at most 14 px of a 540 row frame, never smearing objects in front of the volume), and `density` is documented as extinction per metre with a table of thin haze and thick smoke values (#855)

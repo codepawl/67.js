@@ -8,7 +8,7 @@ import { localVolumeNoiseFactor } from './local-volume-noise.js';
 export const MAX_LOCAL_VOLUMES = 8;
 export const LOCAL_VOLUME_SHAPES = Object.freeze(['box', 'sphere', 'mesh']);
 export const LOCAL_VOLUME_FIT = Object.freeze(['bounds', 'mesh']);
-export const LOCAL_VOLUME_FIELDS = Object.freeze(['shape', 'part', 'fit', 'center', 'size', 'radius', 'density', 'falloff', 'absorption', 'emission', 'emissionStrength', 'scatter', 'noiseAmount', 'noiseScale', 'steps']);
+export const LOCAL_VOLUME_FIELDS = Object.freeze(['shape', 'part', 'fit', 'center', 'size', 'radius', 'density', 'falloff', 'absorption', 'emission', 'emissionStrength', 'scatter', 'blur', 'noiseAmount', 'noiseScale', 'steps']);
 export const LOCAL_VOLUME_MAXIMUM_STEPS = 32;
 
 function vectorField(value, minimum, maximum, label) {
@@ -32,6 +32,7 @@ function resolveLocalVolume(input, label) {
     emission: vectorField(input.emission ?? [0, 0, 0], 0, 1, `${label}.emission`),
     emissionStrength: finiteRange(input.emissionStrength ?? 1, 0, 1000, `${label}.emissionStrength`),
     scatter: finiteRange(input.scatter ?? 0, 0, 1, `${label}.scatter`),
+    blur: finiteRange(input.blur ?? 1, 0, 1, `${label}.blur`),
     noiseAmount: finiteRange(input.noiseAmount ?? 0, 0, 1, `${label}.noiseAmount`),
     noiseScale: finiteRange(input.noiseScale ?? 1, 0.001, 100, `${label}.noiseScale`),
     steps: finiteRange(input.steps ?? 16, 4, LOCAL_VOLUME_MAXIMUM_STEPS, `${label}.steps`),
@@ -69,7 +70,7 @@ export function resolveLocalVolumes(input, label = 'localVolumes') {
 /** The uniform arrays the post shader reads, one vec4 per volume. Pass resolved volumes. */
 export function createLocalVolumeBuffers() {
   const size = MAX_LOCAL_VOLUMES * 4;
-  return { count: 0, meshParts: [], centers: new Float32Array(size), extents: new Float32Array(size), absorption: new Float32Array(size), emission: new Float32Array(size), steps: new Float32Array(size), axes: new Float32Array(size * 3) };
+  return { count: 0, blurred: false, meshParts: [], centers: new Float32Array(size), extents: new Float32Array(size), absorption: new Float32Array(size), emission: new Float32Array(size), steps: new Float32Array(size), axes: new Float32Array(size * 3) };
 }
 
 const IDENTITY_AXES = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1]);
@@ -81,6 +82,7 @@ export function packLocalVolumes(volumes, buffers) {
   if (volumes.some(volume => volume.shape === 'mesh' && !volume.center)) throw new RangeError('A mesh volume names a part: bind it with bindLocalVolumeParts before packing');
   buffers.count = volumes.length;
   buffers.meshParts = [];
+  buffers.blurred = volumes.some(volume => volume.blur > 0 && volume.density > 0);
   volumes.forEach((volume, index) => {
     const at = index * 4;
     const half = volume.shape === 'sphere' ? [volume.radius, volume.radius, volume.radius] : volume.size.map(extent => extent / 2);
@@ -89,7 +91,7 @@ export function packLocalVolumes(volumes, buffers) {
     buffers.extents.set([...half, volume.falloff], at);
     buffers.absorption.set([...volume.absorption.map(channel => channel * volume.density), volume.noiseAmount], at);
     buffers.emission.set([...volume.emission.map(channel => channel * volume.emissionStrength), volume.noiseScale], at);
-    buffers.steps.set([volume.steps, packedShape === PACKED_SHAPE_MESH ? buffers.meshParts.length : 0, volume.scatter ?? 0, 0], at);
+    buffers.steps.set([volume.steps, packedShape === PACKED_SHAPE_MESH ? buffers.meshParts.length : 0, volume.scatter ?? 0, volume.blur ?? 0], at);
     if (packedShape === PACKED_SHAPE_MESH) buffers.meshParts.push({ part: volume.part, label: `environment.localVolumes[${index}]` });
     const axes = volume.axes ?? IDENTITY_AXES;
     for (let axis = 0; axis < 3; axis++) buffers.axes.set([axes[axis * 3], axes[axis * 3 + 1], axes[axis * 3 + 2], 0], (index * 3 + axis) * 4);
@@ -120,6 +122,13 @@ export const LOCAL_VOLUME_SHADOW_STRENGTH = 3;
 
 /** The share of the mean sky radiance the sky term of a scattering volume keeps. The sky lights the whole volume evenly, so a high share flattens the form the sun gives it. */
 export const LOCAL_VOLUME_SKY_GAIN = 0.5;
+
+/**
+ * The widest blur, in pixels of a 540 row frame (it scales with the frame height), that the light behind a volume gets: the radius grows as
+ * `cap * (1 - exp(-opticalDepth))`, so none at zero depth, most of the cap by an optical depth of 2, and it never passes the cap. A thick volume hides the
+ * background anyway, a thin one shows it blurred (#855).
+ */
+export const LOCAL_VOLUME_BLUR_PIXELS = 14;
 
 /** Samples the march takes per cell of the density noise at least: fewer step over whole cells and the dither of the start offset shows as pixel-pitch grain (#855). */
 export const LOCAL_VOLUME_STEPS_PER_NOISE_CELL = 2;
