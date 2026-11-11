@@ -44,13 +44,21 @@
         function startPrefetch() {
           if (started) return;
           started = true;
-          ['/showcase/port/scene.json', '/showcase/port/scene.glb', '/showcase/port/scene.rest.glb', '/showcase/port/sky.hdr'].forEach(function (href) {
-            prefetched[href] = fetch(href).then(function (response) {
+          // The first view (a small copy of the whole world) goes first and the full world's files start when those have settled, so
+          // the first 3D frame does not wait for the full 9 MB. The promises exist at once; world.js takes them by URL.
+          var firstViewFiles = ['/showcase/port/scene.json', '/showcase/port/scene.first.glb', '/showcase/port/sky.preview.hdr'];
+          var fullWorldFiles = ['/showcase/port/scene.glb', '/showcase/port/scene.rest.glb', '/showcase/port/sky.hdr'];
+          function download(href, startAfter) {
+            return startAfter.then(function () { return fetch(href); }).then(function (response) {
               if (!response.ok) throw new Error(href + ' is not available (' + response.status + ')');
               return response.blob();
             });
-            prefetched[href].catch(function () {});
-          });
+          }
+          var noWait = Promise.resolve();
+          firstViewFiles.forEach(function (href) { prefetched[href] = download(href, noWait); });
+          var firstViewSettled = Promise.all(firstViewFiles.map(function (href) { return prefetched[href].catch(function () {}); }));
+          fullWorldFiles.forEach(function (href) { prefetched[href] = download(href, firstViewSettled); });
+          firstViewFiles.concat(fullWorldFiles).forEach(function (href) { prefetched[href].catch(function () {}); });
           releaseReady();
         }
         // The poster <img> calls this from its load and error events.

@@ -7,11 +7,13 @@ import './loop/loop.css';
 import { clamp, prefersReducedMotion, showStageError, smoothstep, startLoop, metrics } from './stage.js';
 import { SCENES } from './loop/scenes.js';
 import { createFlight } from './loop/camera.js';
-import { buildWorld, fetchWorld } from './loop/world.js';
+import { buildWorld, fetchDetail, fetchWorld } from './loop/world.js';
 import { createPlayOnDemand } from './loop/play-on-demand.js';
 
 const parameters = new URLSearchParams(location.search);
 const captureMode = parameters.has('capture');
+// ?detail=hold keeps the first view on screen until window.__loop.releaseDetail() is called (to compare the two on one pose).
+const holdDetail = parameters.get('detail') === 'hold';
 const measureMode = parameters.has('measure');
 
 const FADE_SECONDS = 1;
@@ -20,6 +22,14 @@ const REDUCED_HOLD_SECONDS = 5;
 const REDUCED_FLIGHT_POSITION = 0.38;
 const BUILD_AFTER_SECONDS = 1.5;
 const STILL_SCENE_TIME = 1;
+// A world that starts on its first view flies at normal speed for HOLD_FROM_SECONDS, then slows to HOLD_RATE of that speed until the
+// full world has replaced the first view, and never holds longer than HOLD_BUDGET_SECONDS of flight in all.
+const HOLD_FROM_SECONDS = 2.5;
+const HOLD_RATE = 0.25;
+const HOLD_RAMP_PER_SECOND = 1.5;
+const HOLD_BUDGET_SECONDS = 8;
+// A full world that failed to arrive or to build is asked for again after these pauses (milliseconds), then given up on.
+const DETAIL_RETRY_DELAYS_MS = [4000, 10000, 20000];
 
 const root = document.querySelector('.hero-loop');
 const stage = document.querySelector('#stage');
@@ -81,11 +91,11 @@ async function buildFrom(download) {
 
 // Fetches the next world right away; building it (parsing and GPU upload) waits until the current world has played a moment
 // so the upload does not land on the opening frames, unless a visitor asked for it.
-function prepare(index, { immediately = false } = {}) {
-  const entry = { index, world: null, error: null, permit: null, skipped: false };
+function prepare(index, { immediately = false, firstView = false } = {}) {
+  const entry = { index, world: null, error: null, permit: null, skipped: false, detail: null };
   entry.permission = new Promise(resolve => { entry.permit = resolve; });
   if (immediately) entry.permit();
-  entry.ready = fetchWorld(SCENES[index].description)
+  entry.ready = fetchWorld(SCENES[index].description, { firstView })
     .then(async download => {
       note('fetched', { scene: SCENES[index].id, bytes: download.bytes });
       loopState.bytes ??= {};
@@ -104,7 +114,8 @@ function prepare(index, { immediately = false } = {}) {
         return;
       }
       entry.world = world;
-      note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started) });
+      if (download.isFirstView) entry.detail = followDetail(entry, download);
+      note('built', { scene: SCENES[index].id, ms: Math.round(performance.now() - started), firstView: Boolean(download.isFirstView) });
       loopState.peakWorlds = Math.max(loopState.peakWorlds, loopState.worldsAlive());
     })
     .catch(error => {
@@ -113,6 +124,59 @@ function prepare(index, { immediately = false } = {}) {
     });
   pending = entry;
   return entry;
+}
+
+// ---- Detail: a world that started on its first view gets the full world once it has arrived.
+let releaseDetailGate = () => {};
+const detailGate = holdDetail ? new Promise(resolve => { releaseDetailGate = resolve; }) : Promise.resolve();
+
+const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+// Follows the full world of an entry that started on its first view. `done` resolves with 'ready' (swapped in), 'failed' (given up,
+// the first view stays) or 'freed' (the world left the loop first). The first view keeps playing whatever happens.
+function followDetail(entry, download) {
+  const detail = { state: 'pending', done: null };
+  detail.done = completeDetail(entry, download).then(state => {
+    detail.state = state;
+    return state;
+  });
+  return detail;
+}
+
+async function completeDetail(entry, download) {
+  const scene = SCENES[entry.index].id;
+  let pendingDetail = download.detail;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const files = await pendingDetail;
+      await detailGate;
+      if (entry.world.disposed) return 'freed';
+      const started = performance.now();
+      const swapped = await entry.world.upgrade(files);
+      if (!swapped) return 'freed';
+      note('detailed', { scene, bytes: files.bytes, ms: Math.round(performance.now() - started) });
+      loopState.bytes[scene] = (loopState.bytes[scene] ?? 0) + files.bytes;
+      return 'ready';
+    } catch (error) {
+      if (entry.world.disposed) return 'freed';
+      note('detail-failed', { scene, attempt, message: error.message });
+      if (attempt >= DETAIL_RETRY_DELAYS_MS.length) return 'failed';
+      await pause(DETAIL_RETRY_DELAYS_MS[attempt]);
+      if (entry.world.disposed) return 'freed';
+      pendingDetail = fetchDetail(entry.world.description);
+      pendingDetail.catch(() => {});
+    }
+  }
+}
+
+// Slows the flight of a world that is still on its first view, so the camera does not reach the close shots before the detail does.
+function holdFlight(entry, seconds) {
+  const flightPosition = clock - entry.startedAt - entry.held;
+  const holding = entry.detail?.state === 'pending' && flightPosition >= HOLD_FROM_SECONDS && entry.held < HOLD_BUDGET_SECONDS;
+  const target = holding ? HOLD_RATE : 1;
+  const step = HOLD_RAMP_PER_SECOND * seconds;
+  entry.rate += Math.max(-step, Math.min(step, target - entry.rate));
+  entry.held += seconds * (1 - entry.rate);
 }
 
 function discardPending() {
@@ -215,7 +279,7 @@ function drawWorld(entry, flightSeconds, sceneTime) {
 }
 
 function startTransition() {
-  incoming = { index: pending.index, world: pending.world, startedAt: clock };
+  incoming = { index: pending.index, world: pending.world, startedAt: clock, held: 0, rate: 1, detail: null };
   pending = null;
   skipRequested = false;
   root.style.setProperty('--scrim', String(SCENES[incoming.index].scrim));
@@ -237,7 +301,8 @@ function finishTransition() {
 function tick(seconds) {
   clock += seconds;
   const scene = SCENES[active.index];
-  const activeSeconds = clock - active.startedAt;
+  if (!incoming && !prefersReducedMotion) holdFlight(active, seconds);
+  const activeSeconds = clock - active.startedAt - active.held;
   if (pending?.error) {
     const failed = pending.index;
     pending = null;
@@ -318,13 +383,20 @@ async function beginLive() {
 }
 
 async function startLive() {
-  const first = prepare(0, { immediately: true });
+  const first = prepare(0, { immediately: true, firstView: true });
   await first.ready;
   if (first.error) throw first.error;
-  active = { index: 0, world: first.world, startedAt: 0, drawn: false };
+  active = { index: 0, world: first.world, startedAt: 0, drawn: false, held: 0, rate: 1, detail: first.detail };
   active.world.canvas.style.opacity = '1';
   paintScene(0);
-  prepare(1);
+  loopState.releaseDetail = () => {
+    releaseDetailGate();
+    return first.detail ? first.detail.done : Promise.resolve('ready');
+  };
+  loopState.detail = () => first.detail?.state ?? 'ready';
+  // The next world's files wait for the full first world, so the two do not share the link.
+  if (first.detail) first.detail.done.then(state => { if (state !== 'freed') prepare(1); });
+  else prepare(1);
 
   window.addEventListener('resize', () => [active, incoming].forEach(entry => entry?.world.resize()));
   if (captureMode) {
@@ -339,6 +411,8 @@ async function startLive() {
       tick(seconds);
       revealPoster();
     };
+    // A recorder wants whole worlds, unless it asked to see the first view.
+    if (first.detail && !holdDetail) await first.detail.done;
     loopState.ready = true;
     return;
   }

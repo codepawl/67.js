@@ -1,7 +1,9 @@
 // One showcase world for the hero loop, built in two steps so the next world can be fetched while the current one plays:
 //   fetchWorld(descriptionUrl)  network only: the description, every GLB part and the sky, held as blobs.
 //   buildWorld(download, canvas) parses the parts, uploads them to the GPU and returns a world that draws on that canvas.
-// A world is whole before it is shown: the loop never draws the first part of a split world on its own.
+// A world is whole before it is shown: the loop never draws the first part of a split world on its own. The one exception is a
+// description with a first view (`glbFirstView`, `hdriPreview`): the whole world as a small, coarse copy that is drawn first and
+// replaced by the full world through world.upgrade() once the full files have arrived and been prepared.
 import { Renderer67, shaderFeatureRepresentatives } from '../../renderer.js';
 import { createSharedTextures, loadGltf } from '../../gltf.js';
 import { loadHdri } from '../../hdri.js';
@@ -53,7 +55,7 @@ const REPLACE_SLICES = 8;
 
 // Each texture upload is a synchronous GL call. The renderer caches uploads by descriptor, so uploading them here, a few
 // milliseconds at a time with a yield between slices, leaves nothing for replaceParts to do in one block.
-async function uploadTexturesInSlices(renderer, parts) {
+async function uploadTexturesInSlices(renderer, parts, isCancelled = () => false) {
   const seen = new Set();
   let sliceStart = performance.now();
   for (const part of parts) {
@@ -64,6 +66,7 @@ async function uploadTexturesInSlices(renderer, parts) {
       renderer.createTexture(descriptor);
       if (performance.now() - sliceStart > SLICE_MILLISECONDS) {
         await yieldToMain();
+        if (isCancelled()) return;
         sliceStart = performance.now();
       }
     }
@@ -98,16 +101,55 @@ async function replacePartsInSlices(renderer, parts) {
   renderer.replaceParts(parts, { retainedUnchanged: true });
 }
 
-export async function fetchWorld(descriptionUrl) {
-  const description = JSON.parse(await (await fetchBlob(descriptionUrl)).text());
+const bytesOf = (models, sky) => models.reduce((total, model) => total + model.size, sky.size);
+
+async function readDescription(descriptionUrl) {
+  return JSON.parse(await (await fetchBlob(descriptionUrl)).text());
+}
+
+// Every file of the full world.
+export async function fetchDetail(description) {
   const paths = [description.glb, ...(description.glbRest ?? [])];
   const [models, sky] = await Promise.all([Promise.all(paths.map(fetchBlob)), fetchBlob(description.hdri)]);
-  const bytes = models.reduce((total, model) => total + model.size, sky.size);
-  return { description, paths, models, sky, bytes };
+  return { description, paths, models, sky, bytes: bytesOf(models, sky) };
+}
+
+export function hasFirstView(description) {
+  return Boolean(description.glbFirstView && description.hdriPreview);
+}
+
+// Resolves with a download that is ready to build. With `firstView` and a description that has one, it holds the small files and a
+// `detail` promise for the full world, and resolves as soon as the small files are in; the full files are requested only then, so
+// the first view never shares the link with them. Otherwise it holds every file, as it always did.
+export async function fetchWorld(descriptionUrl, { firstView = false } = {}) {
+  const description = await readDescription(descriptionUrl);
+  if (!firstView || !hasFirstView(description)) return fetchDetail(description);
+  const paths = [description.glbFirstView];
+  const [models, sky] = await Promise.all([Promise.all(paths.map(fetchBlob)), fetchBlob(description.hdriPreview)]);
+  const detail = fetchDetail(description);
+  detail.catch(() => {});
+  return { description, paths, models, sky, bytes: bytesOf(models, sky), isFirstView: true, detail };
+}
+
+async function parseFiles(download, sharedTextures) {
+  const { description, paths, models } = download;
+  const files = [];
+  let animated = null;
+  for (const [index, model] of models.entries()) {
+    const loaded = await loadGltf(model, { baseUrl: baseUrlOf(paths[index]), sharedTextures, ...description.gltfOptions });
+    if (loaded.animations?.length) animated = loaded;
+    files.push({ parts: loaded.parts, ranks: await readPartRanks(model) });
+    await yieldToMain();
+  }
+  return { files, animated };
+}
+
+function readSky(description, sky) {
+  return loadHdri(description.hdri, { ...description.hdriOptions, fetchImplementation: async () => new Response(sky) });
 }
 
 export async function buildWorld(download, canvas, overrides = {}) {
-  const { description, paths, models, sky } = download;
+  const { description } = download;
   const timings = {};
   let lapStart = performance.now();
   const lap = name => {
@@ -117,29 +159,23 @@ export async function buildWorld(download, canvas, overrides = {}) {
     lapStart = now;
   };
   const sharedTextures = createSharedTextures();
-  const files = [];
-  let animated = null;
-  for (const [index, model] of models.entries()) {
-    const loaded = await loadGltf(model, { baseUrl: baseUrlOf(paths[index]), sharedTextures, ...description.gltfOptions });
-    if (loaded.animations?.length) animated = loaded;
-    files.push({ parts: loaded.parts, ranks: await readPartRanks(model) });
-    await yieldToMain();
-  }
+  const parsedFirst = await parseFiles(download, sharedTextures);
+  let animated = parsedFirst.animated;
   lap('parseMs');
   const options = description.renderer;
-  const environmentMap = await loadHdri(description.hdri, { ...description.hdriOptions, fetchImplementation: async () => new Response(sky) });
+  const environmentMap = await readSky(description, download.sky);
   await yieldToMain();
   lap('hdriMs');
-  const effects = prepareEffects(description.id, inWholeWorldOrder(files));
+  let effects = prepareEffects(description.id, inWholeWorldOrder(parsedFirst.files));
   if (effects?.needsFogAddon) await import('../../fog-shader.js');
   const surfaceOf = parts => (description.waterReflection && WATER_MIRROR_ENABLED ? applyWaterReflection(parts) : { parts, surface: null });
   // Parts that exist only for the effects join the whole world.
-  const extraParts = effects?.extraParts ?? [];
+  const wholeOf = (files, worldEffects) => surfaceOf([...inWholeWorldOrder(files), ...(worldEffects?.extraParts ?? [])]);
   // The renderer starts on a few parts that need the whole world's shader program, links it in the background, and takes the
   // rest through replaceParts in slices, the order the showcase page uses (a water mirror attached to a renderer built on the
   // whole world drew nothing after its first frame).
   const frame = { ...description.frame, exposure: description.exposure ?? 1 };
-  const whole = surfaceOf([...inWholeWorldOrder(files), ...extraParts]);
+  const whole = wholeOf(parsedFirst.files, effects);
   const renderer = new Renderer67(canvas, [...new Set([...shaderFeatureRepresentatives(whole.parts), ...whole.parts.filter(isPinnedPart)])], {
     ...options,
     ...overrides,
@@ -161,10 +197,20 @@ export async function buildWorld(download, canvas, overrides = {}) {
   await renderer.prepareEnvironmentInSlices(environmentMap, createSlicer(SLICE_MILLISECONDS));
   lap('environmentMs');
   await replacePartsInSlices(renderer, whole.parts);
-  const detachReflection = attachWaterReflection(renderer, whole.surface);
+  let detachReflection = attachWaterReflection(renderer, whole.surface);
   lap('rendererMs');
   let animationOrigin = null;
   let animationShadowStep = -1;
+  let disposed = false;
+  let drawsHeld = false;
+  let lastDraw = null;
+  let upgradedMap = null;
+  let isFirstView = Boolean(download.isFirstView);
+  const frameFor = (camera, seconds) => {
+    const drawn = effects ? effects.apply(renderer, seconds, frame) : frame;
+    const environment = upgradedMap ? { environment: { ...options.environment, map: upgradedMap } } : {};
+    return { ...drawn, ...environment, eye: camera.eye, target: camera.target, fov: camera.fov, time: seconds };
+  };
   return {
     id: description.id,
     title: description.title,
@@ -172,7 +218,12 @@ export async function buildWorld(download, canvas, overrides = {}) {
     canvas,
     renderer,
     timings,
+    get disposed() { return disposed; },
+    get isFirstView() { return isFirstView; },
     render(camera, seconds) {
+      // While a swap replaces the parts the canvas keeps its last frame: a half-built world is never drawn.
+      if (disposed || drawsHeld) return false;
+      lastDraw = { camera: { eye: [...camera.eye], target: [...camera.target], fov: camera.fov }, seconds };
       // A GLB with an animation clip (vehicles on rails, people walking) plays from the world's first drawn frame.
       if (animated) {
         animationOrigin ??= seconds;
@@ -182,16 +233,49 @@ export async function buildWorld(download, canvas, overrides = {}) {
         renderer.updateParts(animated.applyAnimation(clipSeconds, 0), { shadows: shadowStep !== animationShadowStep });
         animationShadowStep = shadowStep;
       }
-      const drawn = effects ? effects.apply(renderer, seconds, frame) : frame;
-      renderer.render({ ...drawn, eye: camera.eye, target: camera.target, fov: camera.fov, time: seconds });
+      renderer.render(frameFor(camera, seconds));
+      return true;
     },
     // The first draw while the canvas is still hidden: programs link on the driver's threads and targets allocate now, not on the first frame of a fade.
     // Resolves false when the driver took longer than the timeout and the draw ran in one block.
     warm(camera) {
       return renderer.prepareFrame({ ...frame, eye: camera.eye, target: camera.target, fov: camera.fov, time: 0 });
     },
+    // Replaces a first view with the full world, which `detail` holds. Everything slow (parsing, texture uploads) happens first
+    // while the first view keeps drawing; only the swap holds the draws: the sky prefilter, one replaceParts and a prepared draw at
+    // the pose of the last frame. Resolves true after the swap, false when the world was freed first.
+    async upgrade(detail) {
+      const parsed = await parseFiles(detail, createSharedTextures());
+      if (disposed) return false;
+      const fullEffects = prepareEffects(description.id, inWholeWorldOrder(parsed.files));
+      const fullWhole = wholeOf(parsed.files, fullEffects);
+      const fullMap = await readSky(description, detail.sky);
+      await yieldToMain();
+      await uploadTexturesInSlices(renderer, fullWhole.parts, () => disposed);
+      if (disposed) return false;
+      drawsHeld = true;
+      try {
+        await renderer.prepareEnvironmentInSlices(fullMap, createSlicer(SLICE_MILLISECONDS));
+        if (disposed) return false;
+        renderer.replaceParts(fullWhole.parts);
+        detachReflection();
+        detachReflection = attachWaterReflection(renderer, fullWhole.surface);
+        effects = fullEffects;
+        animated = parsed.animated;
+        animationOrigin = null;
+        upgradedMap = fullMap;
+        isFirstView = false;
+        const pose = lastDraw?.camera ?? { eye: frame.eye, target: frame.target, fov: frame.fov };
+        await renderer.prepareFrame(frameFor(pose, lastDraw?.seconds ?? 0));
+        return !disposed;
+      } finally {
+        drawsHeld = false;
+      }
+    },
     resize: () => renderer.resize(),
     dispose() {
+      if (disposed) return;
+      disposed = true;
       detachReflection();
       renderer.dispose();
       canvas.remove();
