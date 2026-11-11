@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { createAgentMcpServer } from '../scripts/mcp-server.mjs';
 import {
@@ -189,4 +191,34 @@ test('without a newer version the instructions and results carry no notice', asy
   assert.doesNotMatch(client.getInstructions(), /newer 67js/);
   const result = (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent;
   assert.equal('updateAvailable' in result, false);
+});
+
+const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
+const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
+
+// The real bin in a child process: the cache file is seeded through XDG_CACHE_HOME and is fresh, so no request is made.
+test('the started server reads a seeded cache and reports the newer version in instructions and the first scene_capabilities', { skip: !hasBuild && 'run npm run build:mcp first' }, async () => {
+  const cacheHome = await mkdtemp(join(tmpdir(), '67js-update-cli-'));
+  const cacheFile = join(cacheHome, '67js', 'update-check.json');
+  await mkdir(dirname(cacheFile), { recursive: true });
+  await writeFile(cacheFile, JSON.stringify({ checkedAt: Date.now(), latest: '99.0.0' }));
+  const { CI, NO_UPDATE_NOTIFIER, SIXTYSEVENJS_NO_UPDATE_CHECK, ...inheritedEnvironment } = process.env;
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry, '--backend', 'cpu'],
+    env: { ...inheritedEnvironment, XDG_CACHE_HOME: cacheHome },
+    stderr: 'ignore',
+  });
+  const client = new Client({ name: 'update-check-cli-test', version: '1' });
+  try {
+    await client.connect(transport);
+    assert.match(client.getInstructions(), /A newer 67js is out \(running \d+\.\d+\.\d+, latest 99\.0\.0/);
+    const first = (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent;
+    assert.equal(first.updateAvailable.latest, '99.0.0');
+    const second = (await client.callTool({ name: 'scene_capabilities', arguments: {} })).structuredContent;
+    assert.equal('updateAvailable' in second, false);
+  } finally {
+    await client.close();
+    await rm(cacheHome, { recursive: true, force: true });
+  }
 });

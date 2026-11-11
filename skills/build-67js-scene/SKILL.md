@@ -12,8 +12,6 @@ Start the server with `npx --package @codepawlhq/67js 67js-mcp --backend gpu --a
 
 ## Loop
 
-When the instructions or the first `scene_capabilities` result carry `updateAvailable`, tell the user a newer 67js exists and ask whether to update; run the command for their install route only after a yes.
-
 1. `scene_capabilities`: with no arguments it returns a short index of features, limits and topic names. Pass
    `topic` for the field list of one feature (`environment`, `materialFields`, `geometries`, `meshEdit.bevel`,
    `motion`) or `examples.scene_apply` for a complete call of a hard tool. Tool schemas list only common fields, so read the topic before a feature you have not used.
