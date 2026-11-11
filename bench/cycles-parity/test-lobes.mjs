@@ -313,6 +313,44 @@ export const LOBE_PROBE_CASES = [
       flags: MATERIAL_FLAG_MULTISCATTER_GGX | MATERIAL_FLAG_F82_METALLIC,
     },
   },
+  {
+    id: 'sheen-over-diffuse-rough',
+    family: 'sheen',
+    wo: [0.6, 0.0, 0.8],
+    frontFace: true,
+    expectWhiteFurnace: true,
+    expectChiSquare: true,
+    material: {
+      baseColor: [1.0, 1.0, 1.0],
+      metallic: 0.0,
+      roughness: 0.5,
+      ior: 1.0,
+      specularIorLevel: 0.0,
+      sheenWeight: 1.0,
+      sheenRoughness: 0.5,
+      sheenTint: [1.0, 1.0, 1.0],
+      flags: MATERIAL_FLAG_MULTISCATTER_GGX,
+    },
+  },
+  {
+    id: 'sheen-over-diffuse-grazing',
+    family: 'sheen',
+    wo: [0.95, 0.0, 0.31225],
+    frontFace: true,
+    expectWhiteFurnace: true,
+    expectChiSquare: true,
+    material: {
+      baseColor: [1.0, 1.0, 1.0],
+      metallic: 0.0,
+      roughness: 0.5,
+      ior: 1.0,
+      specularIorLevel: 0.0,
+      sheenWeight: 1.0,
+      sheenRoughness: 0.3,
+      sheenTint: [1.0, 1.0, 1.0],
+      flags: MATERIAL_FLAG_MULTISCATTER_GGX,
+    },
+  },
 ];
 
 export const FURNACE_SCENE_CASES = [
@@ -335,6 +373,10 @@ export const FURNACE_SCENE_CASES = [
   {
     id: 'furnace-scene-coat',
     material: { color: [1.0, 1.0, 1.0], metallic: 0.0, roughness: 0.5, clearcoat: 1.0, clearcoatRoughness: 0.2 },
+  },
+  {
+    id: 'furnace-scene-sheen',
+    material: { color: [1.0, 1.0, 1.0], metallic: 0.0, roughness: 0.5, sheenColor: [1.0, 1.0, 1.0], sheenRoughness: 0.4 },
   },
 ];
 
@@ -536,17 +578,20 @@ async function runFurnaceSceneCase(sceneCase, sphereGeometry, whiteEnvironment, 
   }];
   const traceScene = buildTraceScene(parts, whiteEnvironment);
   const camera = createCamera(cameraDescriptor, options.sceneWidth, options.sceneHeight);
+  const furnaceBounces = 64;
   const traceOptions = {
     width: options.sceneWidth,
     height: options.sceneHeight,
     samples: options.sceneSamples,
-    bounces: 8,
+    samplesPerDispatch: Math.min(options.sceneSamples, 16),
+    bounces: furnaceBounces,
     seed: options.seed,
     kernel: 'cycles',
     filterType: 'box',
     filterWidth: 1.0,
     clampDirect: 0.0,
     clampIndirect: 0.0,
+    filterGlossy: 0.0,
     fireflyClamp: 1e9,
     noiseThreshold: 0.0,
     maxSeconds: 300,
@@ -564,7 +609,7 @@ async function runFurnaceSceneCase(sceneCase, sphereGeometry, whiteEnvironment, 
     width: options.sceneWidth,
     height: options.sceneHeight,
     samples: options.sceneSamples,
-    bounces: 8,
+    bounces: furnaceBounces,
     cameraEyeZ: 3.2,
     cameraFovDegrees: 40,
     sphereRadius: 1.0,
@@ -594,7 +639,7 @@ async function runCli() {
   if (!options.skipScenes) {
     const selectedScenes = FURNACE_SCENE_CASES.filter((item) => !options.filter || item.id.includes(options.filter));
     if (selectedScenes.length > 0) {
-      const sphereGeometry = sphere(64, 40);
+      const sphereGeometry = sphere(128, 96);
       const constantWhite = new Float32Array(8 * 4 * 3).fill(1.0);
       const environmentMap = createEnvironmentMap({ width: 8, height: 4, data: constantWhite, showBackground: true });
       const whiteEnvironment = {
