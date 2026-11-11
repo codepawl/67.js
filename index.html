@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#09070f" />
-    <meta name="description" content="67js is a 3D engine that AI agents drive: the Glaze rasterizer on WebGL2, the Cook path tracer on CPU, WebGL2, WebGPU and Vulkan, GLB, PNG and MP4 export, and an MCP server. Install with npm i @codepawlhq/67js." />
+    <meta name="description" content="67js is a 3D engine that AI agents drive: the Glaze rasterizer on WebGL2, the Cook path tracer on CPU, WebGL2 and Vulkan, GLB, PNG and MP4 export, and an MCP server. Install with npm i @codepawlhq/67js." />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="67js" />
     <meta property="og:title" content="67js · 3D engine that AI agents drive" />
-    <meta property="og:description" content="A WebGL2 rasterizer, a path tracer on CPU, WebGL2, WebGPU and Vulkan, and an MCP server in one npm package." />
+    <meta property="og:description" content="A WebGL2 rasterizer, a path tracer on CPU, WebGL2 and Vulkan, and an MCP server in one npm package." />
     <meta property="og:url" content="https://67js.codepawl.com/" />
     <meta property="og:image" content="https://67js.codepawl.com/hero-lab/poster-b-port.webp" />
     <meta property="og:image:width" content="1440" />
@@ -85,7 +85,7 @@
       </div>
       <div class="copy">
         <h1>3D engine that<br />AI agents drive</h1>
-        <p class="lede">Glaze draws real-time frames on WebGL2. Cook path traces on the CPU, WebGL2, WebGPU or Vulkan. 24 MCP tools drive both.</p>
+        <p class="lede">Glaze draws real-time frames on WebGL2. Cook path traces on the CPU, WebGL2 or Vulkan. 24 MCP tools drive them.</p>
         <div class="hero-actions">
           <a href="/docs.html#getting-started" data-icon="book">Get started</a>
           <a href="https://www.npmjs.com/package/@codepawlhq/67js"><span class="package-logo package-logo-npm brand-npm" aria-hidden="true"></span>npm</a>
@@ -158,7 +158,7 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
           </div>
           <div class="agent-size-bars" aria-label="Measured gzip bundle size on lit-box">
             <div class="size-bar-row">
-              <div class="size-bar-label"><span><strong>67js</strong> (lit-box)</span><span>58.8 kB gzip · 2.3× smaller</span></div>
+              <div class="size-bar-label"><span><strong>67js</strong> (lit-box)</span><span>58.8 kB gzip · 2.28× smaller</span></div>
               <div class="size-bar-track"><span class="size-bar-fill is-67js" style="width: 44%"></span></div>
             </div>
             <div class="size-bar-row">
@@ -169,24 +169,28 @@ renderer.render({ eye: [58, 31, 84], target: [-8, 3, -18] });</code></pre>
         </div>
         <div class="agent-cards">
           <a href="/mcp.md" data-icon="cube"><h3>24 MCP tools</h3><p>Create, edit, explode, blend and render over stdio.</p></a>
-          <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time frames on WebGL2, or path-traced stills on CPU, WebGL2, WebGPU or Vulkan.</p></a>
+          <a href="/path-tracer.md" data-icon="code"><h3>Glaze + Cook</h3><p>Real-time frames on WebGL2, or path-traced stills on CPU, WebGL2 or Vulkan.</p></a>
           <a href="/agent-review.md" data-icon="image"><h3>Visual review</h3><p>Compare labeled views and normals from one snapshot.</p></a>
         </div>
       </section>
 
       <section id="tiers" class="tiers" aria-labelledby="tiers-title">
         <h2 id="tiers-title">Quality tiers, measured</h2>
-        <p>One scene at 960x540 on an RTX 3060 shared with other jobs. Medians of 3 runs. FLIP is the error against a Cycles 4096-sample reference, lower is better. Tier names are working names, and the <code>quality</code> setting that picks one is planned. Source: <a href="https://github.com/codepawl/67.js/pull/931">bench/tiers</a>, built on <a href="https://github.com/codepawl/67.js/pull/921">the Cook against Cycles run</a>.</p>
-        <ul class="tier-list">
-          <li class="tier-row tier-head" aria-hidden="true"><span>Tier</span><span>Runs on</span><span>67js</span><span>Blender</span><span>FLIP error</span></li>
-          <li class="tier-row"><span data-label="Tier">draft</span><span data-label="Runs on">Glaze, 0.5 scale, 1 sample</span><span data-label="67js">1.20 ms per frame</span><span data-label="Blender">EEVEE 1 sample: 99 ms</span><span data-label="FLIP error">0.188 (EEVEE 0.562)</span></li>
-          <li class="tier-row"><span data-label="Tier">realtime</span><span data-label="Runs on">Glaze, defaults</span><span data-label="67js">1.11 ms per frame</span><span data-label="Blender">EEVEE defaults: 1,127 ms</span><span data-label="FLIP error">0.197 (EEVEE 0.562)</span></li>
-          <li class="tier-row"><span data-label="Tier">realtime-high</span><span data-label="Runs on">Planned, issues 901 and 902</span><span data-label="67js">not measurable yet</span><span data-label="Blender">none</span><span data-label="FLIP error">none</span></li>
-          <li class="tier-row"><span data-label="Tier">final</span><span data-label="Runs on">Cook native, Vulkan</span><span data-label="67js">6.05 ms per sample</span><span data-label="Blender">Cycles OptiX: 36.2 ms per sample</span><span data-label="FLIP error">0.080 (Cycles 0.039)</span></li>
-          <li class="tier-row"><span data-label="Tier">final</span><span data-label="Runs on">Cook webgpu</span><span data-label="67js">34.4 ms per sample</span><span data-label="Blender">same Cycles</span><span data-label="FLIP error">same as native</span></li>
-          <li class="tier-row"><span data-label="Tier">final</span><span data-label="Runs on">Cook gpu, WebGL2</span><span data-label="67js">74.4 ms per sample</span><span data-label="Blender">same Cycles</span><span data-label="FLIP error">same as native</span></li>
-          <li class="tier-row"><span data-label="Tier">final</span><span data-label="Runs on">Cook cpu, 8 threads</span><span data-label="67js">786 ms per sample</span><span data-label="Blender">same Cycles</span><span data-label="FLIP error">same as native</span></li>
-        </ul>
+        <p>Provisional numbers from one scene (lit-interior, 960x540) on an RTX 3060 shared with other jobs. Medians of 3 runs, so the ranges are wide. FLIP is the error against a Cycles 4096-sample reference, lower is better. Tier names are working names, and the <code>quality</code> setting that picks one is planned.</p>
+        <div id="tiers-table">
+          <ul class="tier-list">
+            <li class="tier-row tier-head" aria-hidden="true"><span>Tier</span><span>For</span><span>Runs on</span><span>Trade-off</span><span>67js</span><span>Blender</span><span>FLIP error</span></li>
+            <li class="tier-row"><span data-label="Tier">draft</span><span data-label="For">The cheapest preview</span><span data-label="Runs on">Glaze, 0.5 scale, 1 sample</span><span data-label="Trade-off">Low resolution, cheap lighting</span><span data-label="67js">1.20 ms per frame</span><span data-label="Blender">EEVEE 1 sample: 99 ms per render call</span><span data-label="FLIP error">Glaze 0.188, EEVEE 0.562</span></li>
+            <li class="tier-row"><span data-label="Tier">realtime</span><span data-label="For">Interactive frames</span><span data-label="Runs on">Glaze, defaults</span><span data-label="Trade-off">Rasterized lighting</span><span data-label="67js">1.11 ms per frame</span><span data-label="Blender">EEVEE defaults: 1,127 ms per render call</span><span data-label="FLIP error">Glaze 0.197, EEVEE 0.562</span></li>
+            <li class="tier-row"><span data-label="Tier">realtime-high</span><span data-label="For">Better real-time frames</span><span data-label="Runs on">Planned: Glaze on WebGPU with a GI cache and upscaling (issues 901 and 902)</span><span data-label="Trade-off">More VRAM</span><span data-label="67js">not measurable yet</span><span data-label="Blender">none</span><span data-label="FLIP error">none</span></li>
+            <li class="tier-row"><span data-label="Tier">final</span><span data-label="For">Finished stills</span><span data-label="Runs on">Cook native, Vulkan</span><span data-label="Trade-off">A few seconds to a few minutes per frame</span><span data-label="67js">6.05 ms per sample</span><span data-label="Blender">Cycles OptiX: 36.2 ms per sample</span><span data-label="FLIP error">At 256 samples: Cook 0.080, Cycles 0.039</span></li>
+            <li class="tier-row"><span data-label="Tier">final</span><span data-label="For">Finished stills</span><span data-label="Runs on">Cook webgpu, opt-in</span><span data-label="Trade-off">Slower per sample than native</span><span data-label="67js">34.4 ms per sample</span><span data-label="Blender">same Cycles</span><span data-label="FLIP error">same as native at the same samples</span></li>
+            <li class="tier-row"><span data-label="Tier">final</span><span data-label="For">Finished stills</span><span data-label="Runs on">Cook gpu, WebGL2</span><span data-label="Trade-off">Adds 4.8 to 7.9 s of shader compile</span><span data-label="67js">74.4 ms per sample</span><span data-label="Blender">same Cycles</span><span data-label="FLIP error">same as native at the same samples</span></li>
+            <li class="tier-row"><span data-label="Tier">final</span><span data-label="For">Finished stills</span><span data-label="Runs on">Cook cpu, 8 threads</span><span data-label="Trade-off">No card needed, slowest</span><span data-label="67js">786 ms per sample</span><span data-label="Blender">same Cycles</span><span data-label="FLIP error">same as native at the same samples</span></li>
+          </ul>
+        </div>
+        <p>At equal error, Cook native and Cycles take about the same time. Cook native draws a sample about 5.4 times faster than Cycles but needs about 6.8 times more samples. The Cook time is 0.91 to 0.95 of the Cycles time, and Cook renders about 1% brighter. This is one scene at 960x540 with 8 bounces and no denoiser, against Cycles 5.3 with OptiX. <a href="https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md">docs/cycles-parity.md</a> has the method.</p>
+        <p>Glaze times are per frame. EEVEE times are one full background render call, including scene sync, with EEVEE ray tracing off and no global illumination. They are not a frame rate comparison. Raw results: <a href="https://github.com/codepawl/67.js/pull/931">the tier benchmark, pull request 931</a>.</p>
       </section>
 
       <section id="documentation" class="documentation-links" aria-labelledby="documentation-title">

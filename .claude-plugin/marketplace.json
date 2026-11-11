@@ -5,7 +5,7 @@
     "url": "https://67js.codepawl.com"
   },
   "metadata": {
-    "description": "67js, a 3D engine an AI agent drives through MCP, with a WebGL2 rasterizer and a path tracer on CPU, WebGL2, WebGPU and Vulkan."
+    "description": "67js, a 3D engine an AI agent drives through MCP, with a WebGL2 rasterizer and a path tracer on CPU, WebGL2 and Vulkan."
   },
   "plugins": [
     {
