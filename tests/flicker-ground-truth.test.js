@@ -82,6 +82,26 @@ test('a pixel with another colour next to it is an edge, not a judged pixel', ()
   assert.ok(outcome.edge > 0);
 });
 
+test('the ray cast reports the depth of the visible face in front of the camera, and 0 for the background', () => {
+  const { cast } = castWallWithPlaque(1);
+  assert.ok(Math.abs(cast.distance[CENTRE] - 9) < 0.01, `plaque at ${cast.distance[CENTRE]}`);
+  assert.ok(Math.abs(cast.distance[0] - 10) < 0.01, `wall at ${cast.distance[0]}`);
+  const empty = castPixelOwners(collectWorldTriangles([], () => null), CAMERA, WIDTH, HEIGHT);
+  assert.ok(empty.distance.every(distance => distance === 0));
+});
+
+test('a swapped pixel is marked 2 in the mismatch mask and a merely wrong one 1', () => {
+  const { world, cast } = castWallWithPlaque(0.01);
+  const swappedPixel = CENTRE;
+  const wrongPixel = CENTRE + 2;
+  const pixels = paintFrame(cast, pixel => (pixel === swappedPixel ? WALL_PIXEL : pixel === wrongPixel ? [20, 200, 20] : null));
+  const outcome = compareWithGroundTruth({ pixels, world, cast, width: WIDTH, height: HEIGHT });
+  assert.equal(outcome.mismatchMask[swappedPixel], 2);
+  assert.equal(outcome.mismatchMask[wrongPixel], 1);
+  assert.equal(outcome.swapped, 1);
+  assert.equal(outcome.wrong, 2);
+});
+
 test('a plaque exactly on the wall leaves the plaque alone at its place once the flush pass ran', () => {
   const parts = wallWithPlaque(0);
   resolveFlushParts(parts);
