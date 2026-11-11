@@ -62,7 +62,7 @@ Do not read the final row as Cook being faster than Cycles.
 Cook native draws a sample about 5.4 times faster than Cycles, but it needs about 6.8 times more samples for the same error.
 At equal error the two take about the same time (0.91 to 0.95 of the Cycles time), and Cook renders about 1% brighter.
 That comparison covers one scene (`lit-interior`) at 960x540 with 8 bounces and no denoiser, on a shared RTX 3060 against Cycles 5.3 with OptiX.
-[docs/cycles-parity.md](docs/cycles-parity.md) has the method and its limits. It lands with [pull request 921](https://github.com/codepawl/67.js/pull/921).
+[docs/cycles-parity.md](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md) has the method and its limits. It lands with [pull request 921](https://github.com/codepawl/67.js/pull/921).
 
 The Glaze times are milliseconds per frame.
 The EEVEE times are one full background render call, including scene sync, with EEVEE ray tracing off and no global illumination.
@@ -255,7 +255,7 @@ Each number below comes from this repository's benchmarks. The RTX 3060 was shar
 
 - **Bundle size.** On `lit-box`, 67js is 58,788 bytes gzip and three.js is 133,797 (2.28 times smaller). This is the `npm run size` result on 2026-11-11. The goal of 50,000 bytes is not met yet. [bench/size/README.md](bench/size/README.md) has every scene.
 - **Path tracing on the GPU.** One run on 2026-11-03 traced the 1920 by 1080 demo room (181,708 triangles, 64 samples, 8 bounces). The 8-thread CPU tracer took 585.9 s. The WebGL2 GPU tracer took 58.15 s, and that figure includes 10.3 s of shader compile. Whether the CPU figure is end to end is not recorded. [docs/webgpu-decision.md](docs/webgpu-decision.md) has the method.
-- **Cook against Cycles.** See [Quality tiers](#quality-tiers) and [docs/cycles-parity.md](docs/cycles-parity.md).
+- **Cook against Cycles.** See [Quality tiers](#quality-tiers) and [docs/cycles-parity.md](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md).
 
 [docs/verification.md](docs/verification.md) has older results and their limits.
 They compare matching scenes on the same hardware. They do not show a general speed advantage over three.js or visual parity with Blender.
