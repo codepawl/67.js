@@ -391,3 +391,22 @@ uv run --no-project --with numpy python bench/cycles-parity/verify-lobes.py --se
 # Set GIT_BASH_BIN="C:\Program Files\Git\bin\bash.exe" and GPU_LOCK_SCRIPT="<path-to-gpu-lock.sh>" to wrap every GPU step automatically.
 uv run --no-project --with numpy --with psutil python bench/cycles-parity/run-m0-suite.py $OutDir --scene lit-interior --repeats 3 --bounces 8 --mode all
 ```
+
+## Sampling and light selection (#895)
+
+Cook's `cycles` kernel draws its random numbers from an Owen-scrambled Sobol sequence (Burley 2020, hash-based scrambling, one scramble per pixel and per group of four dimensions) and picks lights through a light tree (Conty and Kulla 2018) once the analytic lights or the emissive triangles number more than 8. `sampler: 'pcg'` and `useLightTree: false` restore the earlier behaviour. The pixel filter is unchanged: `box` unless `filterType: 'blackman-harris'` is passed, which is what a Cycles reference at its default filter needs.
+
+Measured on the RTX 3060 at `480 × 270`, 8 bounces, `box` filter, two seeds per point, against a high-sample reference of the other variant with its own seed (`bench/cycles-parity/measure-sampler-noise.py`):
+
+| Scene | Comparison | Samples | `relMSE` before | `relMSE` after | Drop |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| `lit-interior` | PCG hash, then Sobol-Burley | 16 | 0.1024 | 0.0886 | 13.5% |
+| `lit-interior` | PCG hash, then Sobol-Burley | 64 | 0.02629 | 0.02022 | 23.1% |
+| `lit-interior` | PCG hash, then Sobol-Burley | 256 | 0.007130 | 0.004966 | 30.4% |
+| `lit-interior` with 500 point lights | uniform pick, then light tree | 16 | 0.09166 | 0.02193 | 76.1% |
+| `lit-interior` with 500 point lights | uniform pick, then light tree | 256 | 0.004423 | 0.001235 | 72.1% |
+| `lit-interior` with 500 point lights | uniform pick, then light tree | 1024 | 0.000993 | 0.000431 | 56.6% |
+
+On the 500-light scene (`make-many-lights-scene.mjs`) the tree costs about 4% more time per sample and reaches the 1024-sample error of the uniform pick in `9.6 s` of sampling instead of `25.3 s` (log-log interpolation over the 16 to 1024 ladder). The mean image of the tree over the uniform pick is `0.99996`, and the per-channel mean of Sobol-Burley at 256 samples is within `0.04%` of the reference, so neither change moves the image mean.
+
+Not done: the blue-noise arrangement of the per-pixel scrambles across the image (each pixel hashes its own scramble, so the error is white across pixels, not blue), and a light tree that stays on in scenes with a sun or with instances that restrict their light group. The image-match runs against Blender Cycles (`run-m1-parity.py`) need Blender, which this machine did not have on the path.

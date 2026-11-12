@@ -259,6 +259,120 @@ fn lgt_sample_ellipse_point(center: vec3<f32>, axis_u: vec3<f32>, size_u: f32, a
   return center + axis_u * (disk.x * 0.5 * size_u) + axis_v * (disk.y * 0.5 * size_v);
 }
 
+// Light tree walk (Conty and Kulla 2018, Cycles kernel/light/tree.h). Node 0 is a directory: `left_child` is the analytic
+// root and `right_or_first_emitter` the emissive root. The importance ignores the surface normal, so the chance of picking
+// an emitter is the same from the next-event sample and from the ray that later hits that emitter (MIS).
+const LGT_TREE_MINIMUM_SHARE: f32 = 0.1;
+
+fn lgt_tree_node_importance(node_index: u32, position: vec3<f32>) -> vec2<f32> {
+  let node = light_tree_nodes[node_index];
+  let center = 0.5 * (node.bounds_min + node.bounds_max);
+  let half_diagonal = 0.5 * length(node.bounds_max - node.bounds_min);
+  let delta = center - position;
+  let distance = length(delta);
+  let nearest = max(max(distance, half_diagonal), 1.0e-4);
+  let farthest = distance + half_diagonal;
+  let minimum_measure = node.energy / max(farthest * farthest, 1.0e-8);
+  if (distance <= half_diagonal) {
+    return vec2<f32>(node.energy / (nearest * nearest), minimum_measure);
+  }
+  let toward = delta / distance;
+  let ratio = half_diagonal / distance;
+  let theta_u = acos(sqrt(max(0.0, 1.0 - ratio * ratio)));
+  let theta = acos(clamp(-dot(node.cone_axis, toward), -1.0, 1.0));
+  let theta_prime = max(theta - node.theta_o - theta_u, 0.0);
+  if (theta_prime >= node.theta_e) {
+    return vec2<f32>(0.0, minimum_measure);
+  }
+  return vec2<f32>(node.energy * cos(theta_prime) / (nearest * nearest), minimum_measure);
+}
+
+// Chance of taking the left child, or -1 when both children are worth nothing.
+fn lgt_tree_left_probability(left: vec2<f32>, right: vec2<f32>) -> f32 {
+  let total_maximum = left.x + right.x;
+  let total_minimum = left.y + right.y;
+  if (!(total_minimum > 0.0)) {
+    return -1.0;
+  }
+  if (!(total_maximum > 0.0)) {
+    return left.y / total_minimum;
+  }
+  return (1.0 - LGT_TREE_MINIMUM_SHARE) * (left.x / total_maximum) + LGT_TREE_MINIMUM_SHARE * (left.y / total_minimum);
+}
+
+// Walks from `root_index` to a leaf with one random number, rescaled at each step. Returns the emitter index and writes the
+// chance of that whole path to `probability_out`, or returns INVALID_INDEX when nothing is worth sampling.
+fn lgt_tree_pick(root_index: u32, position: vec3<f32>, pick_u: f32, probability_out: ptr<function, f32>) -> u32 {
+  var node_index = root_index;
+  var remaining_u = pick_u;
+  var probability = 1.0;
+  for (var step = 0u; step < 40u; step += 1u) {
+    let node = light_tree_nodes[node_index];
+    if (node.left_child < 0) {
+      *probability_out = probability;
+      return node.right_or_first_emitter;
+    }
+    let left_index = u32(node.left_child);
+    let right_index = node.right_or_first_emitter;
+    let left_probability = lgt_tree_left_probability(
+      lgt_tree_node_importance(left_index, position),
+      lgt_tree_node_importance(right_index, position),
+    );
+    if (left_probability < 0.0) {
+      return INVALID_INDEX;
+    }
+    if (remaining_u < left_probability) {
+      node_index = left_index;
+      probability *= left_probability;
+      remaining_u = min(remaining_u / left_probability, 0.99999994);
+    } else {
+      let right_probability = 1.0 - left_probability;
+      if (right_probability <= 0.0) {
+        return INVALID_INDEX;
+      }
+      node_index = right_index;
+      probability *= right_probability;
+      remaining_u = min((remaining_u - left_probability) / right_probability, 0.99999994);
+    }
+  }
+  return INVALID_INDEX;
+}
+
+// The chance `lgt_tree_pick` has of ending at `leaf_index` from `position`, found by walking up to the root.
+fn lgt_tree_selection_probability(leaf_index: u32, position: vec3<f32>) -> f32 {
+  var node_index = leaf_index;
+  var probability = 1.0;
+  for (var step = 0u; step < 40u; step += 1u) {
+    let node = light_tree_nodes[node_index];
+    var parent_index = node.emitter_count_and_kind & 0xFFFFu;
+    if (node.left_child < 0) {
+      parent_index = u32(-1 - node.left_child);
+    }
+    if (parent_index == 0u) {
+      break;
+    }
+    let parent = light_tree_nodes[parent_index];
+    let left_index = u32(parent.left_child);
+    let left_probability = lgt_tree_left_probability(
+      lgt_tree_node_importance(left_index, position),
+      lgt_tree_node_importance(parent.right_or_first_emitter, position),
+    );
+    if (left_probability < 0.0) {
+      return 0.0;
+    }
+    probability *= select(1.0 - left_probability, left_probability, left_index == node_index);
+    node_index = parent_index;
+  }
+  return probability;
+}
+
+fn lgt_analytic_selection_pdf(light_index: u32, ray_origin: vec3<f32>) -> f32 {
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_USE_LIGHT_TREE) != 0u) {
+    return lgt_tree_selection_probability(1u + light_index, ray_origin);
+  }
+  return lights[light_index].selection_pdf;
+}
+
 fn lgt_binary_search_light_cdf(pick_u: f32, count: u32) -> u32 {
   var low = 0u;
   var high = count - 1u;
@@ -524,8 +638,19 @@ fn lgt_sample_analytic_light(
   if (count == 0u) {
     return lgt_empty_sample();
   }
-  let light_index = lgt_binary_search_light_cdf(pick_u, count);
-  let light = lights[light_index];
+  var light_index = INVALID_INDEX;
+  var selection_probability = 0.0;
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_USE_LIGHT_TREE) != 0u) {
+    light_index = lgt_tree_pick(u32(light_tree_nodes[0].left_child), shading_pos, pick_u, &selection_probability);
+  } else {
+    light_index = lgt_binary_search_light_cdf(pick_u, count);
+    selection_probability = lights[light_index].selection_pdf;
+  }
+  if (light_index == INVALID_INDEX) {
+    return lgt_empty_sample();
+  }
+  var light = lights[light_index];
+  light.selection_pdf = selection_probability;
   if (light.selection_pdf <= 0.0) {
     return lgt_empty_sample();
   }
@@ -550,8 +675,19 @@ fn lgt_sample_emissive_triangle(point: ptr<function, ShadingPoint>, pick_u: f32,
   if (count == 0u) {
     return out;
   }
-  let index = lgt_binary_search_emissive_cdf(pick_u, count);
-  let emitter = emissive_triangles[index];
+  var index = INVALID_INDEX;
+  var selection_probability = 0.0;
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_USE_EMISSIVE_LIGHT_TREE) != 0u) {
+    index = lgt_tree_pick(light_tree_nodes[0].right_or_first_emitter, (*point).position, pick_u, &selection_probability);
+    if (index == INVALID_INDEX) {
+      return out;
+    }
+  } else {
+    index = lgt_binary_search_emissive_cdf(pick_u, count);
+    selection_probability = emissive_triangles[index].selection_pdf;
+  }
+  var emitter = emissive_triangles[index];
+  emitter.selection_pdf = selection_probability;
   if (emitter.selection_pdf <= 0.0 || emitter.area <= 0.0) {
     return out;
   }
@@ -789,7 +925,7 @@ fn lgt_eval_analytic_lights_along_segment(
         let one_minus_cos = min(one_minus_cos_sphere, one_minus_cos_spot);
         pdf_solid_angle = 1.0 / max(TWO_PI * one_minus_cos, 1.0e-30);
       }
-      let pdf_nee = light.selection_pdf * pdf_solid_angle;
+      let pdf_nee = lgt_analytic_selection_pdf(index, ray_origin) * pdf_solid_angle;
       let mis_weight = select(lgt_power_heuristic(prev_bsdf_pdf, pdf_nee), 1.0, is_camera_ray || mis_skip);
       let medium_atten = select(vec3<f32>(1.0), exp(-medium_sigma * max(hit_t - t_min, 0.0)), in_medium);
       total += light.radiance * medium_atten * (spot_weight * falloff * mis_weight);
@@ -850,7 +986,7 @@ fn lgt_eval_analytic_lights_along_segment(
           continue;
         }
       }
-      let pdf_nee = light.selection_pdf * pdf_solid_angle;
+      let pdf_nee = lgt_analytic_selection_pdf(index, ray_origin) * pdf_solid_angle;
       let mis_weight = select(lgt_power_heuristic(prev_bsdf_pdf, pdf_nee), 1.0, is_camera_ray || mis_skip);
       let medium_atten = select(vec3<f32>(1.0), exp(-medium_sigma * max(hit_t - t_min, 0.0)), in_medium);
       total += light.radiance * medium_atten * (spread_weight * falloff * mis_weight);
@@ -917,6 +1053,7 @@ fn lgt_eval_escaped_ray(
 
 fn lgt_emissive_surface_weight(
   emissive_index: u32,
+  ray_origin: vec3<f32>,
   hit_distance: f32,
   ray_dir: vec3<f32>,
   is_camera_ray: bool,
@@ -945,6 +1082,10 @@ fn lgt_emissive_surface_weight(
   if (cos_light <= 1.0e-8) {
     return 0.0;
   }
-  let pdf_nee = emitter.selection_pdf * (hit_distance * hit_distance) / max(emitter.area * cos_light, 1.0e-20);
+  var selection_pdf = emitter.selection_pdf;
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_USE_EMISSIVE_LIGHT_TREE) != 0u) {
+    selection_pdf = lgt_tree_selection_probability(light_tree_nodes[0].light_group_mask_or + emissive_index, ray_origin);
+  }
+  let pdf_nee = selection_pdf * (hit_distance * hit_distance) / max(emitter.area * cos_light, 1.0e-20);
   return lgt_power_heuristic(prev_bsdf_pdf, pdf_nee);
 }

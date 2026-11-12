@@ -1,0 +1,1 @@
+- Cook samples with an Owen-scrambled Sobol sequence (Burley's hash scrambling) instead of white-noise hashes, picks lights through a light tree over the analytic lights and the emissive triangles once a kind has more than 8 emitters, and takes `sampler: 'pcg'` and `useLightTree` options to switch either back (#895)
