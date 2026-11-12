@@ -4,7 +4,7 @@
 # Stages: build, tests, identity, parity, size. Outputs go to artifacts/job-materials/ (identity-<tree>/, parity/).
 # The base branch is built in a second work tree next to this one, so one run compares real jobs of both.
 set -uo pipefail
-base_branch="$1"
+base_branch="${1#origin/}"
 shift
 out="artifacts/job-materials"
 mkdir -p "$out"
