@@ -1083,6 +1083,46 @@ With the fix, on one Modal container (NVIDIA A10) `[measured]`: the seven scenes
 
 `tests/native-transparent-bounces.test.js` pins the behaviour on a GPU (it skips without the addon): the image mean and the sky behind one layer at limits 0 and 1, and the image mean and the backdrop behind one layer at limit 2, against the Cycles means above with a tolerance of 0.5 percent.
 
+## One texture sampler for shading and alpha tests (#896, slice T1)
+
+The `cycles` kernel had three texture readers: `closure_sample_texture_uv` (shading), `int_sample_texture_channel` (the alpha of cutouts and blended surfaces for every ray) and an inline nearest read in `bootstrap_main.wgsl`. They now call one function, `texture_sample` in `closure.wgsl`, so a cutout is seen and shaded through the same wrap, filter and format. The `legacy` kernel is untouched. The texture pool also fails early now: a pool past the 1 GiB storage binding raises an error that names the size and the limit at `buildNativeInputV2` (and at the host, against the device's binding size), where the base build aborted the process in the device. The host no longer copies the pool once more before upload (`storage_buffer` borrows bytes that already fit), and the packer drops its per-texture arrays once they are joined.
+
+**Why pixels moved, and a packer bug the move exposed.** The packer pointed `alpha_tex` at the base colour map of every non-opaque material, and the kernel reads `alpha_tex` as a separate map through its red channel. A cutout's alpha was therefore the base alpha times the colour's red: texels that were not red enough turned transparent. In the old kernel the shading sampler decoded an sRGB map's red to linear and the integrator's alpha test read it raw, so visibility and shading disagreed; the shared sampler decodes it in both. The second commit stops setting `alpha_tex` from the base map (an explicit `alphaMap` still binds). Measured on an NVIDIA A10G (Modal), 64 spp, fixed seed, image bytes `[measured]`:
+
+| Scene | base against T1 sampler only | base against T1 plus packer fix |
+| --- | --- | --- |
+| `lit-interior`, `glass` (cycles, no mask) | identical | identical |
+| `brick-graph` (colour and normal map, no mask) | identical | identical |
+| `legacy` kernel, `lit-interior` and `tex-repeat` | identical | identical |
+| `tex-repeat`, sRGB mask map | 81,634 of 172,800 values differ | 104,138 differ |
+| `tex-repeat-linear`, same mask in a linear map | 3,253 differ (the sRGB decode of red accounts for the rest) | 96,810 differ |
+| `tex-wraps` (mask, blend, clamp, mirror, nearest, normal map) | 82,387 differ | 113,768 differ |
+
+The 3,253 left on `tex-repeat-linear` are not explained; an emulation of both samplers over a 3000 x 3000 UV grid differs at 108 of 9,000,000 cutoff decisions (exact ties at alpha 0.5 of the test texture), which fits a residual of a few pixels in this size, not proven. No site draws a random number. Every build is deterministic run to run.
+
+Against Cycles on `tex-repeat` (2048 spp, 960x540, seed 1; Cycles shows half of each strip opaque):
+
+| Build | Mean ratio (R, G, B) | relMSE (eps 0.01) | Tiles within 5 percent |
+| --- | --- | --- | --- |
+| base | 1.061, 0.971, 1.008 | 0.0215 | 31 of 64 |
+| T1 sampler only | 1.077, 0.978, 1.017 | 0.0272 | 31 of 64 |
+| T1 plus packer fix | 1.040, 1.039, 1.051 | 0.0039 | 39 of 64 |
+
+Cycles' own seed-to-seed relMSE is 1.7e-6. Cook with the fix is still 4 to 5 percent bright over the whole image, which no gate passes. Split on the same room (Cook over Cycles, mean ratio R, G, B): the room alone 1.000, 1.000, 1.000; both quads as flat untextured colours 1.000, 1.000, 1.000; the opaque sRGB colour-map quad alone 1.021, 1.028, 1.036; the mask quad alone 1.018, 1.025, 1.023. So the excess sits in the textured surfaces, not in the room or the cutout edge; the cause is not known.
+
+Texture cost on the same A10G, one scene per process `[measured]`:
+
+| | Base | T1 |
+| --- | --- | --- |
+| 256 textures of 512x512 (256 MiB), peak process memory, two runs | 2240 and 2161 MiB | 1753 and 1646 MiB |
+| same, upload seconds | 0.28 and 0.14 | 0.20 and 0.06 |
+| pool of 1100 MiB | process aborted in the device | `RangeError` at packing with size and limit |
+| cycles kernel WGSL | 6607 lines, 242,913 bytes | 6538 lines, 240,235 bytes |
+
+The number of textures is not limited by either build (2000 descriptors of 16x16 packed and rendered the same); the limit is the 1 GiB pool. Bindings, bind groups and struct sizes are unchanged.
+
+Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` writes `tex-repeat` (Cycles can render it), `tex-repeat-linear` and `tex-wraps` (clamp, mirror, nearest, blend and normal map; Cook only), `node bench/cycles-parity/texture-pool-bench.mjs --textures 256 --size 512` prints pack, setup, compile and upload seconds and peak memory.
+
 ## Instancing equivalence (#896, slice I2)
 
 Instanced against flattened on the `cycles` kernel, `bench/instancing/instancing-checks.mjs equivalence`: 200 copies of a 320-triangle icosphere on a grid, 128 x 96, 1024 samples, seed 1, NVIDIA GeForce RTX 4090. The flattened scene holds 64,000 triangles (64,200 with the degenerate one) and the instanced one 320 (321). The measures are in `bench/instancing/image-compare.mjs`: mean ratio of RGB, relative MSE with epsilon 0.01, and 8 x 8 tiles whose mean is within 5 percent (tiles too dark to compare are left out).

@@ -1094,7 +1094,7 @@ pub(crate) fn assemble_cycles_kernel() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_compute_entry_point, parse_kernel_manifest};
+    use super::{assemble_cycles_kernel, has_compute_entry_point, parse_kernel_manifest};
 
     #[test]
     fn parses_manifest_with_utf8_bom_and_comments() {
@@ -1114,5 +1114,28 @@ mod tests {
         assert!(has_compute_entry_point(source, "test_lobe_samples"));
         assert!(!has_compute_entry_point(source, "main"));
         assert!(!has_compute_entry_point(source, "helper"));
+    }
+
+    /// The texel pool is read in one function. A second reader would sample with its own wrap and filter, and a cutout
+    /// would then be seen through different texels than it is shaded with.
+    #[test]
+    fn the_kernel_reads_the_texel_pool_in_one_shared_sampler_only() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        let fetch_start = kernel.find("fn texture_fetch_texel(").expect("the shared texel fetch exists");
+        let fetch_end = fetch_start + kernel[fetch_start..].find("\n}").expect("the fetch function ends");
+        let reads_inside_fetch = kernel[fetch_start..fetch_end].matches("texture_texels[").count();
+        assert_eq!(kernel.matches("texture_texels[").count(), reads_inside_fetch);
+        assert!(reads_inside_fetch > 0);
+        assert!(!kernel.contains("fn int_sample_texture_channel"));
+        assert!(!kernel.contains("fn int_wrap_coord"));
+        assert!(kernel.contains("texture_sample(material.base_color_tex, uv0, uv1).a"));
+        assert!(kernel.contains("texture_sample(material.alpha_tex, uv0, uv1).r"));
+    }
+
+    #[test]
+    fn the_bootstrap_entry_samples_alpha_through_the_shared_sampler() {
+        let bootstrap = include_str!("bootstrap_main.wgsl");
+        assert!(!bootstrap.contains("texture_texels["));
+        assert!(bootstrap.contains("texture_sample("));
     }
 }

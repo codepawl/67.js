@@ -84,6 +84,11 @@ const TEXTURE_FORMAT_RGBA8_SRGB = 1;
 const TEXTURE_FORMAT_RGBA32_FLOAT = 2;
 const TEXTURE_FORMAT_RG16_FLOAT = 3;
 
+// All textures share one storage binding of 32-bit words. The native host opens its device with a binding of at most 1 GiB
+// (`open_device` in src/host/device.rs), so a pool past this size cannot be bound.
+export const TEXTURE_POOL_MAX_BYTES = 1 << 30;
+const BYTES_PER_MEBIBYTE = 1 << 20;
+
 const DEFAULT_HDRI_RADIANCE_LIMIT = 16;
 const SUN_DEFAULT_HALF_ANGLE = Math.PI / 360;
 const IDENTITY_MATRIX_4X4 = Object.freeze([
@@ -253,6 +258,27 @@ function createTextureCollector() {
   const descriptors = [];
   const wordChunks = [];
   let totalWords = 0;
+  let finished = null;
+
+  function packedWordCount(format, pixelCount) {
+    if (format === TEXTURE_FORMAT_RGBA32_FLOAT) {
+      return pixelCount * 4;
+    }
+    return Math.max(4, Math.ceil(pixelCount / 4) * 4);
+  }
+
+  // Checked before a texture is converted, so an oversize image fails fast instead of after allocating its words.
+  function assertRoomInPool(wordCount, width, height) {
+    if ((totalWords + wordCount) * 4 <= TEXTURE_POOL_MAX_BYTES) {
+      return;
+    }
+    const neededMebibytes = Math.ceil(wordCount * 4 / BYTES_PER_MEBIBYTE);
+    const usedMebibytes = Math.ceil(totalWords * 4 / BYTES_PER_MEBIBYTE);
+    throw new RangeError(
+      `The texture pool is full: the ${width}x${height} texture needs ${neededMebibytes} MiB and the ${descriptors.length} before it take ${usedMebibytes} MiB, ` +
+      `but one pool holds at most ${TEXTURE_POOL_MAX_BYTES / BYTES_PER_MEBIBYTE} MiB. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.`,
+    );
+  }
 
   function objectIdentity(dataBuffer) {
     if (!dataIdMap.has(dataBuffer)) {
@@ -309,6 +335,7 @@ function createTextureCollector() {
     }
 
     const pixelCount = width * height;
+    assertRoomInPool(packedWordCount(format, pixelCount), width, height);
     const dataOffset = totalWords;
     let packedWords;
     let sumR = 0;
@@ -390,7 +417,8 @@ function createTextureCollector() {
 
   function addPackedRgba8Words(words, width, height, isSrgb, repeat) {
     const pixelCount = width * height;
-    const alignedWords = Math.max(4, Math.ceil(pixelCount / 4) * 4);
+    const alignedWords = packedWordCount(TEXTURE_FORMAT_RGBA8_UNORM, pixelCount);
+    assertRoomInPool(alignedWords, width, height);
     const padded = new Uint32Array(alignedWords);
     padded.set(words.subarray(0, pixelCount));
     let sumR = 0;
@@ -431,6 +459,12 @@ function createTextureCollector() {
   }
 
   function finish() {
+    finished ??= buildFinishedTextures();
+    return finished;
+  }
+
+  // The per-texture word arrays are dropped once they are joined, so the host holds one copy of the pool, not two.
+  function buildFinishedTextures() {
     const textureCount = descriptors.length;
     const descriptorBuffer = new Uint8Array(Math.max(1, textureCount) * STRUCT_STRIDES_V2.textureDescriptor);
     for (let index = 0; index < textureCount; index++) {
@@ -442,6 +476,7 @@ function createTextureCollector() {
       texelBuffer.set(chunk, cursor);
       cursor += chunk.length;
     }
+    wordChunks.length = 0;
     return {
       textureDescriptors: descriptorBuffer,
       textureCount,
@@ -635,9 +670,10 @@ export function packMaterialRecordV2(material = {}, textureCollector = null) {
     ? collector.addTexture(material.bumpTexture ?? material.bumpMap, false)
     : { index: Number(material.bumpTex ?? -1), meanLinearRgb: [1, 1, 1] };
 
-  const alphaTexIndex = explicitAlphaTex.index >= 0
-    ? explicitAlphaTex.index
-    : (alphaMode !== ALPHA_MODE_OPAQUE ? baseTex.index : -1);
+  // The kernel reads the alpha of the base colour map itself (its alpha channel). `alpha_tex` is a separate map read through its
+  // red channel, so pointing it at the base colour map would multiply the alpha by the colour's red (and, for an sRGB map, by its
+  // linearised red): a cutout then loses every texel that is not red enough. Only an explicit alpha map sets it.
+  const alphaTexIndex = explicitAlphaTex.index;
 
   let flags = 0;
   if (material.multiscatterGgx !== false) {
@@ -2544,7 +2580,7 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
       normalTex: normalTex.index,
       metallicRoughnessTex: mrTex.index,
       emissionTex: emissionTex.index,
-      alphaTex: alphaCutoff > 0 && baseTex.index >= 0 ? baseTex.index : -1,
+      alphaTex: -1,
     }, null);
     packedMat.meanEmissiveRadiance = [
       packedMat.meanEmissiveRadiance[0] * emissionTex.meanLinearRgb[0],
