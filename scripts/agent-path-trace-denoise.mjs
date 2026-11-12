@@ -1,14 +1,25 @@
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 // The optional native denoiser is its own npm package, so the server never carries it. The name sits in a variable so the
 // bundler leaves the import alone and it resolves from the user's node_modules when a job asks for it.
 const OIDN_PACKAGE = '@codepawlhq/67js-denoise-oidn';
 
+// A source checkout keeps the package in packages/, beside scripts/ or, from the bundled server, two folders above build/mcp.
+const CHECKOUT_PACKAGE_URLS = ['../packages/denoise-oidn/index.mjs', '../../packages/denoise-oidn/index.mjs']
+  .map(relative => new URL(/* @vite-ignore */ relative, import.meta.url));
+
 async function loadOidnPackage() {
-  try {
-    const denoiser = await import(OIDN_PACKAGE);
-    return denoiser.findOidnBinary() ? denoiser : null;
-  } catch {
-    return null;
+  const checkoutSpecifiers = CHECKOUT_PACKAGE_URLS.filter(packageUrl => existsSync(fileURLToPath(packageUrl))).map(packageUrl => packageUrl.href);
+  for (const specifier of [OIDN_PACKAGE, ...checkoutSpecifiers]) {
+    try {
+      const denoiser = await import(/* @vite-ignore */ specifier);
+      if (denoiser.findOidnBinary()) return denoiser;
+    } catch {
+      // Try the next place the package may live.
+    }
   }
+  return null;
 }
 
 /**

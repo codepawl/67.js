@@ -95,3 +95,9 @@ test('explicit denoise values keep their meaning on native and the other backend
   assert.deepEqual(await chooseDenoiser('none', { preferOidn: true, loadOidn }), { denoise: 'none' });
   assert.deepEqual(await chooseDenoiser(true, { loadOidn }), { denoise: true });
 });
+
+test('a source checkout finds the fetched OIDN package without it being installed under node_modules', { skip: findOidnBinary() ? false : 'the oidnDenoise binary is not fetched' }, async () => {
+  const choice = await chooseDenoiser('oidn');
+  assert.equal(choice.denoise, 'oidn');
+  assert.equal(typeof choice.denoiser.denoiseWithOidn, 'function');
+});
