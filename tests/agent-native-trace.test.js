@@ -104,3 +104,64 @@ test('the wavelet filter and OIDN both run on the native features', async () => 
   const withWavelet = await traceFrameNative({ tracer: tracerRecording(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'wavelet' });
   assert.equal(withWavelet.report.denoiser, 'wavelet');
 });
+
+function tracerWithAtrous(calls, { failFilter = false } = {}) {
+  const pixels = 4 * 4;
+  const tracer = tracerRecording(calls);
+  const traceNative = tracer.traceNative;
+  tracer.traceNative = (tables, options) => {
+    const traced = traceNative(tables, options);
+    return options.denoise === 'atrous' ? { ...traced, denoisedRgba: new Float32Array(pixels * 4).fill(0.25) } : traced;
+  };
+  tracer.denoiseAtrous = input => {
+    calls.push({ afterwards: Object.keys(input).sort() });
+    if (failFilter) throw new Error('no adapter');
+    return { rgba: new Float32Array(pixels * 4).fill(0.25) };
+  };
+  return tracer;
+}
+
+const failingDenoiser = { OIDN_VERSION: 'test', async denoiseWithOidn() { throw new Error('binary crashed'); } };
+
+test('denoise "atrous" asks the cycles kernel for the filtered image and reports it', async () => {
+  const calls = [];
+  const traced = await traceFrameNative({ tracer: tracerWithAtrous(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'atrous', kernel: 'cycles' });
+  assert.equal(calls[0].denoise, 'atrous');
+  assert.equal(calls.length, 1);
+  assert.equal(traced.report.denoiser, 'atrous');
+  assert.equal(traced.report.denoised, true);
+  assert.equal(typeof traced.report.denoiseSeconds, 'number');
+});
+
+test('denoise "atrous" on the legacy kernel filters the traced image afterwards', async () => {
+  const calls = [];
+  const traced = await traceFrameNative({ tracer: tracerWithAtrous(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'atrous', kernel: 'legacy' });
+  assert.equal(calls[0].denoise, undefined);
+  assert.deepEqual(calls[1].afterwards, ['albedo', 'depth', 'height', 'normal', 'rgba', 'variance', 'width']);
+  assert.equal(traced.report.denoiser, 'atrous');
+});
+
+test('OIDN failing on native falls back to the GPU a-trous filter and says so', async () => {
+  const calls = [];
+  const traced = await traceFrameNative({ tracer: tracerWithAtrous(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'oidn', denoiser: failingDenoiser, kernel: 'cycles' });
+  assert.equal(traced.report.denoiser, 'atrous');
+  assert.match(traced.report.denoiserNote, /OIDN failed \(binary crashed\): the GPU a-trous filter ran instead/);
+});
+
+test('the wavelet filter is the last resort when the a-trous filter cannot run', async () => {
+  const traced = await traceFrameNative({ tracer: tracerWithAtrous([], { failFilter: true }), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'oidn', denoiser: failingDenoiser, kernel: 'legacy' });
+  assert.equal(traced.report.denoiser, 'wavelet');
+  assert.match(traced.report.denoiserNote, /OIDN failed.*a-trous filter failed \(no adapter\): the wavelet filter ran instead/);
+  const withoutFilter = await traceFrameNative({ tracer: tracerRecording([]), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'atrous', kernel: 'legacy' });
+  assert.equal(withoutFilter.report.denoiser, 'wavelet');
+  assert.match(withoutFilter.report.denoiserNote, /no a-trous filter/);
+});
+
+test('explicit wavelet and no filter never reach the a-trous filter', async () => {
+  const calls = [];
+  const wavelet = await traceFrameNative({ tracer: tracerWithAtrous(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'wavelet', kernel: 'cycles' });
+  const none = await traceFrameNative({ tracer: tracerWithAtrous(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'none', kernel: 'cycles' });
+  assert.equal(wavelet.report.denoiser, 'wavelet');
+  assert.equal(none.report.denoiser, 'none');
+  assert.ok(calls.every(call => call.denoise === undefined && !call.afterwards));
+});

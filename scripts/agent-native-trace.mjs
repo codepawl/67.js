@@ -108,12 +108,29 @@ export function chooseNativeKernel(environment = process.env) {
 }
 
 /**
- * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet" or
- * "oidn"; `denoiser` is the loaded OIDN package for "oidn". Throws when the tracer cannot run, so the caller can fall back.
+ * The traced colour after the GPU a-trous filter, three floats per pixel. The cycles kernel already returned it when the
+ * trace asked for `denoise: "atrous"`; otherwise (the legacy kernel, or the filter after OIDN failed) the tracer filters
+ * the traced image with its guide buffers. Throws when the installed package cannot filter.
+ */
+function atrousColor({ tracer, traced, width, height }) {
+  let filtered = traced.denoisedRgba;
+  if (!filtered) {
+    if (typeof tracer.denoiseAtrous !== 'function') throw new Error('the installed render-native package has no a-trous filter');
+    const { rgba, albedo, normal, depth, variance } = traced;
+    filtered = tracer.denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance }).rgba;
+  }
+  return withoutAlpha(filtered, width * height);
+}
+
+/**
+ * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet",
+ * "atrous" (the tracer's GPU filter, which is also where a missing or failing OIDN lands) or "oidn"; `denoiser` is the
+ * loaded OIDN package for "oidn". Throws when the tracer cannot run, so the caller can fall back.
  */
 export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel() }) {
   const started = performance.now();
-  const traced = tracer.traceNative(decodeTables(exported), { width, height, samples, maxSeconds, kernel, noiseThreshold });
+  const filtersInTrace = denoise === 'atrous' && kernel === 'cycles';
+  const traced = tracer.traceNative(decodeTables(exported), { width, height, samples, maxSeconds, kernel, noiseThreshold, ...(filtersInTrace ? { denoise: 'atrous' } : {}) });
   const tracedSeconds = (performance.now() - started) / 1000;
   const pixelCount = width * height;
   const features = { color: withoutAlpha(traced.rgba, pixelCount), albedo: traced.albedo, normal: traced.normal,
@@ -130,7 +147,17 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
       linear = await denoiser.denoiseWithOidn({ width, height, color: features.color, albedo: features.albedo, normal: features.normal });
       Object.assign(report, { denoised: true, denoiser: 'oidn', oidnVersion: denoiser.OIDN_VERSION });
     } catch (error) {
-      report.denoiserNote = `OIDN failed (${error.message}): the wavelet filter ran instead.`;
+      report.denoiserNote = `OIDN failed (${error.message}): the GPU a-trous filter ran instead.`;
+      denoise = 'atrous';
+    }
+  }
+  if (denoise === 'atrous') {
+    try {
+      linear = atrousColor({ tracer, traced, width, height });
+      Object.assign(report, { denoised: true, denoiser: 'atrous' });
+    } catch (error) {
+      const failure = `The GPU a-trous filter failed (${error.message}): the wavelet filter ran instead.`;
+      report.denoiserNote = [report.denoiserNote, failure].filter(Boolean).join(' ');
       denoise = 'wavelet';
     }
   }

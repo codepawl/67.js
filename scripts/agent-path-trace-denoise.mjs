@@ -26,7 +26,9 @@ async function loadOidnPackage() {
  * What a job's `settings.renderer.denoise` becomes. "oidn" needs the optional package and its binary; without them the
  * wavelet filter runs instead and `note` says so, so the job result never claims a denoiser that did not run.
  * `preferOidn` is set for the native backend: there the default (`true`) means OIDN with the albedo and normal guides when
- * it is installed, else the wavelet filter with the same guides, and the note says why. Explicit values keep their meaning.
+ * it is installed, and the GPU a-trous filter of the native tracer when it is not ("atrous", biased: it smooths), with a note
+ * that says why. An explicit "oidn" falls back the same way on native. Other backends fall back to the wavelet filter, and
+ * explicit values ("wavelet", "none", false) keep their meaning everywhere.
  */
 export async function chooseDenoiser(requested, { preferOidn = false, loadOidn = loadOidnPackage } = {}) {
   const defaultsToOidn = preferOidn && requested === true;
@@ -38,9 +40,9 @@ export async function chooseDenoiser(requested, { preferOidn = false, loadOidn =
       : { denoise: 'oidn', denoiser };
   }
   const reason = `needs ${OIDN_PACKAGE} and its binary (npm run fetch in that package, or OIDN_DENOISE_PATH)`;
-  return { denoise: 'wavelet', note: defaultsToOidn
-    ? `The native backend denoises with OIDN, which ${reason}: the wavelet filter ran instead.`
-    : `denoise "oidn" ${reason}: the wavelet filter ran instead.` };
+  const lead = defaultsToOidn ? 'The native backend denoises with OIDN, which' : 'denoise "oidn"';
+  if (preferOidn) return { denoise: 'atrous', note: `${lead} ${reason}: the GPU a-trous filter ran instead (it smooths, so it is biased; denoise "wavelet" picks the CPU filter).` };
+  return { denoise: 'wavelet', note: `${lead} ${reason}: the wavelet filter ran instead.` };
 }
 
 function floatsFromBase64(base64) {
