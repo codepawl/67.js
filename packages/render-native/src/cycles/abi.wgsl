@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2011-2026 Blender Foundation
+// SPDX-License-Identifier: Apache-2.0
+
 enable wgpu_ray_query;
 
 // Cycles-parity native kernel ABI header (`FORMAT-v2.md`).
@@ -86,7 +89,28 @@ const ALPHA_MODE_MASK: u32 = 1u;
 const ALPHA_MODE_BLEND: u32 = 2u;
 
 // Closure lobe capacity and `Lobe.lobe_type` discriminants.
-const MAX_CLOSURE_LOBES: u32 = 4u;
+const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES
+const MAX_CLOSURE_CANDIDATES: u32 = 7u; // SPECIALIZE_CANDIDATES
+const CLOSURE_PRUNES_CANDIDATES: bool = MAX_CLOSURE_CANDIDATES > MAX_CLOSURE_LOBES;
+const CLOSURE_SCRATCH_LOBES: u32 = select(1u, MAX_CLOSURE_CANDIDATES, CLOSURE_PRUNES_CANDIDATES);
+
+// Scene feature flags. The host rewrites `true` to `false` for features the packed scene never uses,
+// so the guarded code is dead in that pipeline. `true` is the safe default.
+const SCENE_HAS_VOLUME: bool = true;
+const SCENE_HAS_ALPHA_MASK: bool = true;
+const SCENE_HAS_TRANSPARENT: bool = true;
+const SCENE_HAS_GLASS: bool = true;
+const SCENE_HAS_COAT: bool = true;
+const SCENE_HAS_SHEEN: bool = true;
+const SCENE_HAS_ANISOTROPY: bool = true;
+const SCENE_HAS_THIN_FILM: bool = true;
+const SCENE_HAS_F82: bool = true;
+const SCENE_HAS_NORMAL_MAP: bool = true;
+const SCENE_HAS_EMISSIVE_TRIANGLES: bool = true;
+const SCENE_HAS_ANALYTIC_LIGHTS: bool = true;
+const SCENE_HAS_FINITE_LIGHTS: bool = true;
+const SCENE_HAS_ENV_IMPORTANCE: bool = true;
+const SCENE_HAS_LIGHT_LINKING: bool = true;
 const LOBE_NONE: u32 = 0u;
 const LOBE_DIFFUSE: u32 = 1u;
 const LOBE_GLOSSY_GGX: u32 = 2u;
@@ -179,7 +203,7 @@ struct KernelParamsV2 {
   film_exposure: f32,
   background_mis_weight: f32,
   sobol_table_offset: u32,
-  reserved_u0: u32,
+  filter_glossy: f32,
 
   reserved_tail: vec4<u32>,
 }
@@ -465,7 +489,7 @@ struct Lobe {
 
 // Stacked multi-lobe surface closure evaluated/sampled at `ShadingPoint`.
 struct Closure {
-  lobes: array<Lobe, 4>,
+  lobes: array<Lobe, MAX_CLOSURE_LOBES>,
 
   emission: vec3<f32>,
   lobe_count: u32,
@@ -503,6 +527,7 @@ struct ClosureSample {
 @group(0) @binding(9) var<storage, read> texture_texels: array<u32>;
 @group(0) @binding(10) var<storage, read> environment_texels: array<vec4<f32>>;
 @group(0) @binding(11) var<storage, read_write> film_accumulation: array<vec4<f32>>;
+@group(0) @binding(12) var<storage, read> cycles_lut: array<u32>;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Cross-lane closure interface contract (defined in Lane L4 `src/cycles/closure.wgsl`, called by Lane L3 integrator)
@@ -523,7 +548,7 @@ struct ClosureSample {
 //
 // Exact WGSL signatures to be defined by Lane L4 (`src/cycles/closure.wgsl`):
 //
-//   fn closure_build(point: ShadingPoint, wo: vec3<f32>) -> Closure
-//   fn closure_eval(closure: Closure, wi: vec3<f32>, wo: vec3<f32>) -> ClosureEval
-//   fn closure_sample(closure: Closure, wo: vec3<f32>, u: vec3<f32>) -> ClosureSample
+//   fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure
+//   fn closure_eval(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>) -> ClosureEval
+//   fn closure_sample(closure: ptr<function, Closure>, wo: vec3<f32>, u: vec3<f32>) -> ClosureSample
 // ---------------------------------------------------------------------------------------------------------------------

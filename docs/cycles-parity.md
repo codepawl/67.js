@@ -1,4 +1,4 @@
-# Cycles 5.3 Parity Baseline (M0)
+# Cycles 5.3 Parity Baseline & M1 Suite
 
 Milestone M0 measures today's native path tracer ([`packages/render-native`](../packages/render-native/README.md), legacy `kernel.wgsl` on `wgpu 30.0.1` Vulkan `EXPERIMENTAL_RAY_QUERY`) against **Blender 5.3.0 Cycles OptiX** under matched unbiased settings on a single reference scene before any Cycles-kernel port changes land.
 
@@ -7,7 +7,7 @@ All claims below are tagged `[measured]` (from benchmark artifacts produced by [
 ## Summary Verdict
 
 - **Per-sample speed vs equal-error speed (`T_eq`) `[measured]`**: On `lit-interior` (`960 × 540`, `8` bounces, unclamped, undenoised), 67js `render-native` traces `256` samples in **`2.101 s`** median sampling time (`2.381 s` total trace) vs **`11.371 s`** (`13.456 s` total trace) in Cycles 5.3 OptiX — **`5.41×` faster per sample (`0.185×` time)**. However, at `256` samples 67js has **`6.33×` higher `relMSE`** (`0.019762` vs `0.003121`) and still has not reached Cycles' 256-spp error at `1024` samples (`0.005135`). Extending the 67js ladder to `2048` (`0.002679`) and `4096` (`0.001453`) samples brackets Cycles' 256-spp `relMSE` at **`1,740.5` samples (`6.80×` as many samples)**, giving **`T_eq = 10.331 s` sampling (`T_eq / T_cycles = 0.909×`)** and **`12.886 s` total trace (`0.958×`)**. Nearly the entire `5.4×` raw ray-tracing speed lead on this 3,072-triangle room is consumed by higher Monte Carlo variance (no light tree on bounces, white-noise PCG instead of Sobol + blue noise).
-- **Setup latency (`T_sync`), RAM, and VRAM `[measured]`**: Warm per-call setup is **`0.244 s`** median in 67js (`0.026 s` JS pack + `0.164 s` Vulkan adapter/device + `0.005 s` WGSL compile + `0.009 s` upload + `0.002 s` BLAS/TLAS) vs **`2.012 s`** in headless Blender/Cycles (`~1.80 s` Python/mesh build + `~0.21 s` Cycles OptiX sync), even though 67js recreates its `wgpu` device, pipeline, and acceleration structures on every call. Peak process-tree RSS is **`287.0 MiB`** in 67js vs **`590.2 MiB`** in Blender (`0.49×`). Cycles reports **`Mem: 351.0 MiB`** peak render memory; uncontended 67js runs at `2048–4096` spp measure **`211–433 MiB`** card VRAM delta (`769–998 MiB` total card VRAM above a `558–565 MiB` desktop baseline).
+- **Setup latency (`T_sync`), RAM, and VRAM `[measured]`**: Warm per-call setup is **`0.244 s`** median in 67js (`0.026 s` JS pack + `0.164 s` Vulkan adapter/device + `0.005 s` WGSL compile + `0.009 s` upload + `0.002 s` BLAS/TLAS) vs **`2.012 s`** in headless Blender/Cycles (`~1.80 s` Python/mesh build + `~0.21 s` Cycles OptiX sync), with the `wgpu` device, bind group layout, lookup table buffer and compiled pipelines cached for the life of the Node process (a pipeline cache of at most 32 kernels, dropped when the device is lost); the device and adapter figure above was measured before that cache, and only the scene buffers and the acceleration structures are built again on each call. Peak process-tree RSS is **`287.0 MiB`** in 67js vs **`590.2 MiB`** in Blender (`0.49×`). Cycles reports **`Mem: 351.0 MiB`** peak render memory; uncontended 67js runs at `2048–4096` spp measure **`211–433 MiB`** card VRAM delta (`769–998 MiB` total card VRAM above a `558–565 MiB` desktop baseline).
 - **Radiometric bias (`[measured]`)**: At `4096` samples against Cycles `4096` spp (`Seed 1`, whose `Seed 1` vs `Seed 2` noise floor is `relMSE = 0.000285`), 67js global per-channel mean ratios are **`R = 1.0104, G = 1.0090, B = 1.0068`** (`+1.04% R, +0.90% G, +0.68% B`, scalar `1.0092`), and **all `64 / 64` tiles** in an `8 × 8` grid lie within `1 ± 0.05` (`min = 0.9849`, `median = 1.0034`, `max = 1.0280`). Fitting `relMSE(N) = B_bias + V / N` across `16..4096` spp isolates a systematic bias plateau **`B_bias = 0.000542`** (`~1.9×` the 4096-spp reference noise floor) driven by sphere point-light falloff near the ceiling (`+2.8%`) and missing multiscatter GGX + light-sphere reflections on the glossy table (`-2.1%`).
 
 ---
@@ -34,7 +34,8 @@ Exported losslessly from [`bench/reference/scenes.js`](../bench/reference/scenes
 | Resolution | `960 × 540` (`100%`) | `width: 960, height: 540` | Same pixel grid (`518,400` pixels) |
 | Bounces | `max_bounces = 8`, `diffuse = glossy = transmission = volume = transparent_max = 8` | `bounces: 8` | Cycles defaults to `diffuse = 4, glossy = 4, max = 12`; 67js uses one shared limit |
 | Caustics | `caustics_reflective = True`, `caustics_refractive = True` | Always traced | Match glossy-to-diffuse indirect transport |
-| Radiance clamping | `sample_clamp_direct = 0.0`, `sample_clamp_indirect = 0.0` (`FLT_MAX`) | `fireflyClamp: 1e9` | Cycles default `indirect = 10` clamps at `30` (`×3`); 67js default clamps peak channel to `20` at `depth > 0` |
+| Radiance clamping | `sample_clamp_direct = 0.0`, `sample_clamp_indirect = 0.0` (`FLT_MAX`) | `fireflyClamp: 1e9` (`clampDirect: 0, clampIndirect: 0` in `cycles`) | Cycles default `indirect = 10` clamps at `30` (`×3`); 67js default clamps peak channel to `20` at `depth > 0` |
+| Filter glossy | `filter_glossy = 1.0` (`bsdf_blur` on secondary glossy bounces) | `filterGlossy: 1.0` in `--kernel cycles` (none in `legacy`) | Matches Cycles secondary-bounce roughness blur (`alpha >= filter_glossy * min_ray_pdf`) on reflective/refractive caustics |
 | Denoising | `use_denoising = False` | Raw `traced.rgba` (no wavelet/OIDN) | Measure raw Monte Carlo estimator |
 | Adaptive sampling | `use_adaptive_sampling = False` | `noiseThreshold: 0` | Draw exact `N` samples at every pixel |
 | Pixel filter | `pixel_filter_type = 'BOX'`, `filter_width = 1.0` | Uniform jitter in `[0, 1)^2` | Cycles default Blackman-Harris `1.5 px` blurs/rings across pixel boundaries |
@@ -46,6 +47,7 @@ Exported losslessly from [`bench/reference/scenes.js`](../bench/reference/scenes
   - In **Cycles** (`intern/cycles/scene/integrator.cpp:227`, `kernel/integrator/path_state.h:146`, `shade_surface.h:840-867`), setting `max_bounces = B` stores `kintegrator->max_bounce = B + 1`. Camera hits start at `path.bounce = 0`. Surface direct-light NEE (`integrate_surface_direct_light`) executes at `path.bounce = 0, 1, ..., B` (`B + 1` surface vertices). After sampling the BSDF at `bounce = B`, `bounce` increments to `B + 1 == max_bounce`, which sets `PATH_RAY_TERMINATE_AFTER_TRANSPARENT`: ray `B + 1` is traced **only** to accumulate emission/background MIS if it hits a light or escapes, and terminates immediately on any opaque surface without shading.
   - In **67js** ([`packages/render-native/src/kernel.wgsl`](../packages/render-native/src/kernel.wgsl) lines `609-618`, `808-832`, `963-1048`), `tracePath` loops `for (var depth = 0; depth <= bounces; depth++)`, evaluating `addLights` (NEE) at `depth = 0, 1, ..., B` (`B + 1` surface vertices) and exiting after `depth = B` **without** tracing continuation ray `B + 1`.
   - **Subtle sky-MIS consequence `[source]` + `[measured]`**: For analytical lights (`point`, `spot`, `area`, `sun`), 67js uses pure NEE (`directWeight = 1 / selectionProbability`), so `bounces = B` matches Cycles `max_bounces = B` vertex-for-vertex (`B + 1` NEE evaluations). For the environment map (`weightMode = 1`), 67js multiplies NEE at `depth = B` by the MIS weight `p_env^2 / (p_env^2 + p_bsdf^2)` (`kernel.wgsl:609-613`) expecting `depth = B + 1` to add the complementary BSDF escape weight `p_bsdf^2 / (p_env^2 + p_bsdf^2)` in `addEscape`, which never runs on the final bounce `depth == B`.
+- **Transparent bounce limit of 0 `[source]`**: with `transparent_max = 0` the Cycles kernel lets the path through the first transparent surface before it terminates, while the Cook kernel stops at the first transparent surface (`integrator.wgsl`, the `max_transparent_bounces == 0` test). The parity scenes use a limit of 8, so none reaches this case.
 - **Empirical white-furnace sphere check (`color = [0.8, 0.8, 0.8]`, `roughness = 1.0`, `specular = 0.0`, constant `1.0` sky, `128 × 128`, `256` spp) `[measured]`**:
   - `B = 0`: Cycles center patch mean = **`0.79971`** (exact `0.8`, because ray `B + 1` completes background MIS) vs 67js = **`0.13334`** (`ratio = 0.16674 ≈ 1/6`, confirming analytically that $(1/4\pi)^2 / ((1/4\pi)^2 + (\cos\theta/\pi)^2)$ integrated over the cosine hemisphere equals `1/6`, so `0.8 / 6 = 0.13333` when ray `B + 1` is omitted).
   - `B = 1` and `B = 8`: Cycles = **`0.79971`** vs 67js = **`0.79923`** (**`ratio = 0.9994`**, within `0.06%`), because every ray from the convex sphere escapes at `depth = 1` and completes vertex `0`'s MIS pair.
@@ -197,6 +199,149 @@ Least-squares fit of $\text{relMSE}(N) = B_{\text{bias}} + \frac{V}{N}$ across t
 
 ---
 
+## 5. Milestone M1 6-Scene Reference Noise Floor, Parity Gates, and Lobe Furnace Harness
+
+![Three scenes rendered by the legacy kernel at 256 samples, the cycles kernel at 4096 samples and Blender Cycles 5.3 at 4096 samples](cycles-parity-comparison.jpg)
+
+Left to right: Cook's legacy kernel (256 samples), Cook's `cycles` kernel (4096 samples), Blender Cycles 5.3 (4096 samples). Linear output shown with the sRGB curve and no tone mapping.
+
+Milestone M1 expands parity verification for **Cook** (`packages/render-native` `--kernel cycles`) from `lit-interior` to six reference scenes from [`bench/reference/scenes.js`](../bench/reference/scenes.js): `spot-area`, `light-linking`, `metal`, `glass`, `outdoor-hdri`, and `lit-interior`. Every scene exports losslessly (`roundTripVerified = true`) via [`bench/cycles-parity/export-scene.mjs`](../bench/cycles-parity/export-scene.mjs) with Node asset loading handled in [`bench/cycles-parity/scene-bridge.mjs`](../bench/cycles-parity/scene-bridge.mjs) `[measured]`.
+
+### M1 Acceptance Gates
+
+Evaluated in [`bench/cycles-parity/compare.py`](../bench/cycles-parity/compare.py) (`--reference-b <seed2.npy>`) and orchestrated across all six scenes by [`bench/cycles-parity/run-m1-parity.py`](../bench/cycles-parity/run-m1-parity.py):
+
+1. **Global per-channel mean radiance**: `mean(Cook) / mean(Cycles_Seed1)` within **`1 ± 0.02`** (`[0.98, 1.02]`) on each of `(R, G, B)`.
+2. **`8 × 8` tile grid radiance**: every tile with `mean(Cycles_Seed1) > 0.01` has `mean(Cook) / mean(Cycles_Seed1)` within **`1 ± 0.05`** (`[0.95, 1.05]`).
+3. **Display-space FLIP (`LDR`)**: `FLIP_LDR(Cook, Cycles_Seed1) <= FLIP_LDR(Cycles_Seed1, Cycles_Seed2) + 0.02`, using the exact ACES-like tone map and `2.2` gamma curve from [`bench/reference/score.py`](../bench/reference/score.py) (`tone_map_like_67js`, float32 inputs to `flip_evaluator`). Scene-referred `FLIP_HDR` is recorded alongside `FLIP_LDR` as a diagnostic.
+4. **Closure white-furnace & sampling distribution gates**: evaluated in [`bench/cycles-parity/test-lobes.mjs`](../bench/cycles-parity/test-lobes.mjs) and [`bench/cycles-parity/verify-lobes.py`](../bench/cycles-parity/verify-lobes.py) across `20` `probeCyclesLobe` cases (`diffuse`, dielectric & conductor multiscatter `glossy_ggx`, F82-tint conductor, `anisotropic_ggx`, frontface/backface/TIR `glass_ggx`, `coat_ggx`, and `sheen`) plus `6` end-to-end uniform-sky sphere furnace scenes (`traceNative({ kernel: 'cycles' })`):
+   - Mode `0` Monte Carlo directional albedo `mean(samp.eval / samp.pdf)` within **`1 ± 0.01`** (`N = 262,144` samples per case) on white-albedo configurations (`1 ± 0.015` on the grazing limb of curved glass spheres), plus `closure_sample` vs `closure_eval` self-consistency (`<= 2 × 10⁻³`).
+   - Mode `0` vs Mode `1` (`1024 × 512` spherical `(cos_theta, phi)` quadrature aggregated into `32 × 32` directional bins, pooling `E_k < 5`) **Pearson $\chi^2$ goodness-of-fit `p >= 0.001`**.
+
+### Cycles 5.3 OptiX `4096`-spp Reference Noise Floor (`Seed 1` vs `Seed 2`)
+
+All six scenes were rendered in Blender `5.3.0` Cycles OptiX at `960 × 540`, `4096` samples (`seed = 1` and `seed = 2`), `bounces = 8` across all bounce types (`diffuse`, `glossy`, `transmission`, `volume`, `transparent_max`), `caustics_reflective = True`, `caustics_refractive = True`, direct/indirect clamps `0.0`, `filter_glossy = 1.0`, `BOX` filter width `1.0`, undenoised, `Raw` linear float32 EXR + `.npy` `[measured]`:
+
+| Scene | Triangles | `relMSE(A, B)` `[measured]` | `Seed 2 / Seed 1` Mean Ratio `(R, G, B)` | Eligible `8 × 8` Tiles (`mean > 0.01`) | Tile `[min, max]` | `FLIP_LDR(A, B)` | M1 `FLIP_LDR` Ceiling (`+0.02`) | `FLIP_HDR(A, B)` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `spot-area` | `3,024` | `0.000009` | `[1.000005, 1.000009, 1.000011]` | `47 / 47` | `[0.9995, 1.0004]` | `0.003934` | **`0.023934`** | `0.008907` |
+| `light-linking` | `5,988` | `0.000004` | `[1.000001, 1.000000, 0.999996]` | `64 / 64` | `[0.9998, 1.0001]` | `0.002808` | **`0.022808`** | `0.004260` |
+| `metal` | `18,520` | `0.003399` | `[0.999676, 0.999708, 0.999790]` | `64 / 64` | `[0.9945, 1.0016]` | `0.003733` | **`0.023733`** | `0.004250` |
+| `glass` | `12,156` | `0.000044` | `[0.999754, 0.999784, 0.999836]` | `64 / 64` | `[0.9838, 1.0004]` | `0.003390` | **`0.023390`** | `0.004339` |
+| `outdoor-hdri` | `5,028` | `0.000007` | `[1.000001, 1.000002, 1.000002]` | `64 / 64` | `[1.0000, 1.0001]` | `0.001520` | **`0.021520`** | `0.001687` |
+| `lit-interior` | `3,072` | `0.000285` | `[1.000022, 1.000047, 1.000045]` | `64 / 64` | `[0.9993, 1.0011]` | `0.016457` | **`0.036457`** | `0.018145` |
+
+*Light-linking audit `[measured]`*: Direct-only (`bounces = 0`, `32` spp) Cycles 5.3 OptiX verification with `--part-ids` confirmed exact per-receiver isolation on `light-linking`: `sphere-left` (`Point-0` `[1.0, 0.35, 0.2]`) measured `meanRGB = [0.33204, 0.11935, 0.07027]`, symmetric `sphere-right` (`Point-1` `[0.2, 0.45, 1.0]`) measured `meanRGB = [0.08664, 0.15207, 0.33205]`, and `stage-floor` (`Point-2` neutral) measured `meanRGB = [0.07034, 0.07033, 0.07033]` (`maxRGB = [0.1329, 0.1329, 0.1329]`, zero red/blue leakage).
+
+### Pre-M1 Legacy Kernel (`--kernel legacy`, `256` spp) Baseline Against M1 Gates
+
+Scored against `Cycles 4096 Seed 1` with `--reference-b Cycles 4096 Seed 2` (`2 / 6` scenes pass, `4 / 6` fail before the Cook `cycles` kernel lands) `[measured]`:
+
+| Scene | All Gates | Mean Ratio `(R, G, B)` (`±2%`) | `8 × 8` Tiles Within `±5%` | Tile `[min, max]` | `FLIP_LDR` | Ceiling | `relMSE` | Sampling (s) | Primary Pre-M1 Failure Cause `[source]` + `[measured]` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `spot-area` | **Pass** | `[1.0070, 1.0056, 1.0044]` | `47 / 47` | `[0.9812, 1.0231]` | `0.0231` | `0.0239` | `0.000863` | `1.007` | Within tolerance (analytic spot cone + rect area NEE) |
+| `light-linking` | **Fail** | `[1.0115, 1.0107, 1.0115]` | `64 / 64` | `[0.9992, 1.0304]` | **`0.0243`** | `0.0228` | `0.000872` | `1.136` | Full-sphere `r = 0.1 m` point-light jitter + PCG grain |
+| `metal` | **Fail** | `[0.9978, 0.9994, 0.9985]` | **`57 / 64`** | **`[0.9101, 1.1569]`** | **`0.0401`** | `0.0237` | `1.637659` | `1.369` | Missing F82 metallic tint, multiscatter GGX, and glossy sun/HDRI MIS |
+| `glass` | **Fail** | `[1.0095, 1.0097, 1.0114]` | **`61 / 64`** | **`[0.8423, 1.2842]`** | **`0.0319`** | `0.0234` | `0.005463` | `1.317` | Missing full microfacet glass refraction Jacobian, multiscatter, and caustics |
+| `outdoor-hdri` | **Pass** | `[1.0057, 1.0037, 1.0000]` | `64 / 64` | `[0.9981, 1.0208]` | `0.0173` | `0.0215` | `0.000287` | `0.491` | Open sky + `1°` sun NEE dominates smooth dielectric transport |
+| `lit-interior` | **Fail** | `[1.0104, 1.0091, 1.0069]` | `64 / 64` | `[0.9832, 1.0282]` | **`0.0801`** | `0.0365` | `0.019762` | `1.173` | `6.3×` higher Monte Carlo variance without Light Tree + Tabulated Sobol |
+
+### Milestone M1 Cook (`--kernel cycles`, `4096` spp) 6-Scene Parity Results
+
+Rendered on RTX 3060 (`wgpu 30.0.1` Vulkan `EXPERIMENTAL_RAY_QUERY`) at `960 × 540`, `4096` samples, `bounces = 8` across all ray types, clamps `0`, `filterGlossy = 1.0`, `BOX` filter width `1.0`, undenoised, linear float32 RGB, scored against `Cycles 4096 Seed 1` with `--reference-b Cycles 4096 Seed 2`. **All `6 / 6` scenes pass every M1 radiometric, spatial-tile, and `FLIP_LDR` gate `[measured]`**:
+
+| Scene | All Gates | Mean Ratio `(R, G, B)` (`±2%`) | `8 × 8` Tiles Within `±5%` | Tile `[min, max]` | `FLIP_LDR` | Ceiling | `FLIP_HDR` | `relMSE` | Setup / Sampling (s, GPU contention) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `spot-area` | **Pass** | `[1.0000, 1.0000, 1.0000]` | `47 / 47` | `[0.9992, 1.0009]` | `0.0071` | `0.0239` | `0.0148` | `0.000043` | `0.385` / `205.19` (`shared`) |
+| `light-linking` | **Pass** | `[1.0009, 1.0007, 1.0009]` | `64 / 64` | `[0.9993, 1.0028]` | `0.0100` | `0.0228` | `0.0136` | `0.000113` | `0.425` / `291.65` (`shared`) |
+| `metal` | **Pass** | `[0.9995, 0.9995, 0.9996]` | `64 / 64` | `[0.9935, 1.0059]` | `0.0055` | `0.0237` | `0.0061` | `0.005437` | `0.528` / `278.65` (`shared`) |
+| `glass` | **Pass** | `[0.9976, 0.9979, 0.9983]` | `64 / 64` | `[0.9822, 1.0000]` | `0.0073` | `0.0234` | `0.0094` | `0.000076` | `0.445` / `423.51` (`shared`) |
+| `outdoor-hdri` | **Pass** | `[0.9995, 0.9996, 0.9998]` | `64 / 64` | `[0.9987, 1.0001]` | `0.0029` | `0.0215` | `0.0032` | `0.000016` | `0.898` / `130.37` (`shared`) |
+| `lit-interior` | **Pass** | `[1.0032, 1.0035, 1.0034]` | `64 / 64` | `[1.0004, 1.0082]` | `0.0217` | `0.0365` | `0.0238` | `0.000543` | `0.584` / `521.67` (`shared`) |
+
+- **GPU contention note `[measured]`**: All six `4096`-spp Cook renders ran at `BelowNormal` priority under `gpu-lock` while `3–5` concurrent light-slot GPU processes (Blender, Node, Chrome/FFmpeg) shared the RTX 3060 (`gpuExclusive = false`, pre-run card VRAM `1,240–1,955 MiB`, card utilization `100%`). Cold Vulkan SPIR-V pipeline compilation of the Cycles WGSL kernel measured **`60.9 s`** once per driver cache before the speed work below, and about **`20 s`** after it (`0.15–0.18 s` warm). The sampling times in this table were taken before that speed work, on a shared card; the per-sample times are in the next section.
+- **Closed Phase A bias gaps `[source]` + `[measured]`**:
+  - **Solid-angle spherical cap & analytic emitter MIS** ([`lights.wgsl`](../packages/render-native/src/cycles/lights.wgsl), [`integrator.wgsl`](../packages/render-native/src/cycles/integrator.wgsl)): eliminates the `+2.80%` ceiling hotspot and `-2.06%` tabletop deficit on `lit-interior`, tightening per-part ratios to `[1.0014, 1.0061]` and all `64 / 64` tiles to `[1.0003, 1.0082]`.
+  - **Principled v2 closures** ([`closure.wgsl`](../packages/render-native/src/cycles/closure.wgsl)): dielectric & conductor multiscatter GGX (`table_ggx_E` / `E_avg`), F82 metallic tint, full microfacet glass reflection/refraction with Beer-Lambert volume absorption, clearcoat albedo scaling, and sheen bring `metal` (`relMSE` `1.638` → `0.00544`) and `glass` (`relMSE` `0.00546` → `0.000076`) into sub-percent agreement with Cycles 5.3.
+  - **Final-vertex background MIS & `filter_glossy`** ([`integrator.wgsl`](../packages/render-native/src/cycles/integrator.wgsl)): tracing the `B + 1` emission/background termination ray resolves Phase A Gap 4 (`B = 0` uniform-sky sphere exact), and matching Cycles `bsdf_blur` (`filter_glossy = 1.0`) eliminates secondary reflective/refractive floor caustic spikes on `metal` and `glass`.
+
+### Milestone M1 Closure White-Furnace & Pearson Chi-Square Results
+
+Evaluated across `20` `probeCyclesLobe` cases (`N = 262,144` samples each, `1024 × 512` quadrature grid aggregated into `32 × 32` bins) and `6` `traceNative({ kernel: 'cycles' })` sphere-in-uniform-sky furnace scenes (`128 × 128`, `512` spp, `bounces = 64`, `filterGlossy = 0`). **All `20 / 20` lobe probes and `6 / 6` sphere furnace scenes pass `[measured]`**:
+
+| Probe ID | Family | Furnace Mean `(R, G, B)` | Max Rel `eval` / `pdf` Mismatch | Pearson $\chi^2$ `pValue` ($\chi^2_\nu$, `dof`) | Gate |
+| --- | --- | --- | --- | --- | --- |
+| `diffuse-lambert-normal` | `diffuse` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | `0.2917` (`1.033`, dof `511`) | **Pass** |
+| `diffuse-principled-oblique` | `diffuse` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | `0.2917` (`1.033`, dof `511`) | **Pass** |
+| `dielectric-glossy-sharp-oblique` | `glossy_ggx` | `[0.9992, 0.9992, 0.9992]` | `0` / `0` | singular (`—`) | **Pass** |
+| `dielectric-glossy-rough-oblique` | `glossy_ggx` | `[1.0004, 1.0004, 1.0004]` | `0` / `0` | `0.5358` (`0.993`, dof `512`) | **Pass** |
+| `dielectric-glossy-grazing` | `glossy_ggx` | `[0.9979, 0.9979, 0.9979]` | `0` / `0` | `0.4251` (`1.010`, dof `512`) | **Pass** |
+| `conductor-ggx-sharp` | `glossy_ggx` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | singular (`—`) | **Pass** |
+| `conductor-ggx-medium` | `glossy_ggx` | `[0.9999, 0.9999, 0.9999]` | `0` / `0` | `0.2616` (`1.039`, dof `512`) | **Pass** |
+| `conductor-ggx-rough-grazing` | `glossy_ggx` | `[1.0002, 1.0002, 1.0002]` | `0` / `0` | `0.0760` (`1.091`, dof `512`) | **Pass** |
+| `conductor-f82-gold-oblique` | `glossy_ggx` | `[0.9973, 0.7723, 0.3310]` | `0` / `0` | `0.5270` (`0.995`, dof `512`) | **Pass** |
+| `anisotropic-ggx-unrotated` | `anisotropic_ggx` | `[0.9828, 0.9828, 0.9828]` (expects `0.9831`) | `0` / `0` | `0.9291` (`0.905`, dof `466`) | **Pass** |
+| `anisotropic-ggx-rotated` | `anisotropic_ggx` | `[0.9846, 0.9846, 0.9846]` (expects `0.9848`) | `0` / `0` | `0.6095` (`0.980`, dof `457`) | **Pass** |
+| `glass-ggx-frontface-sharp` | `glass_ggx` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | singular (`—`) | **Pass** |
+| `glass-ggx-frontface-rough` | `glass_ggx` | `[1.0005, 1.0005, 1.0005]` | `0` / `0` | `0.8493` (`0.922`, dof `353`) | **Pass** |
+| `glass-ggx-backface-subcritical` | `glass_ggx` | `[1.0004, 1.0004, 1.0004]` | `0` / `0` | `0.8372` (`0.937`, dof `487`) | **Pass** |
+| `glass-ggx-backface-tir` | `glass_ggx` | `[0.9992, 0.9992, 0.9992]` | `0` / `0` | `0.0541` (`1.117`, dof `396`) | **Pass** |
+| `coat-ggx-over-diffuse-sharp` | `coat_ggx` | `[0.9985, 0.9985, 0.9985]` | `0` / `0` | singular (`—`) | **Pass** |
+| `coat-ggx-over-diffuse-rough` | `coat_ggx` | `[0.9997, 0.9997, 0.9997]` | `0` / `0` | `0.6471` (`0.975`, dof `512`) | **Pass** |
+| `coat-ggx-over-metal-rough` | `coat_ggx` | `[1.0001, 1.0001, 1.0001]` | `0` / `0` | `0.2026` (`1.052`, dof `512`) | **Pass** |
+| `sheen-over-diffuse-rough` | `sheen` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | `0.5533` (`0.990`, dof `511`) | **Pass** |
+| `sheen-over-diffuse-grazing` | `sheen` | `[1.0000, 1.0000, 1.0000]` | `0` / `0` | `0.5333` (`0.994`, dof `511`) | **Pass** |
+
+The two `anisotropic-ggx-*` probes (white base color, metallic `1`, roughness `0.35`, anisotropy `0.7`, multiscatter GGX) do not expect `1.0`: Cycles 5.3 itself loses energy for anisotropic GGX (the measured albedo is below 1 at anisotropy `0.7`), so the probes carry `furnaceExpectedAlbedo` (Blender 5.3 Cycles measurement, same `0.01` tolerance). The isotropic probes keep `1.0`. Measured with [`bench/cycles-parity/furnace-albedo.py`](../bench/cycles-parity/furnace-albedo.py): Blender 5.3.0 Cycles on OptiX, an orthographic camera looking down `wo = (0.5, 0.3, 0.8124)` at an infinite plane with a Principled BSDF (base color `1`, metallic `1`, roughness `0.35`, Multiscatter GGX, tangent `+X`), uniform white world of strength `1`, Standard view transform, no denoise, no clamp, `8192` spp, `64 x 64` pixels, so each pixel is the directional albedo (standard error under `0.02 %`).
+
+| Material | Cycles 5.3 albedo | Cook albedo |
+| --- | --- | --- |
+| isotropic control (anisotropy `0`) | `1.0004` | not probed at this angle; the isotropic probes pass at `1.0` within `0.0004` |
+| anisotropic, rotation `0.0` | `0.9831` | `0.9828` |
+| anisotropic, rotation `0.2` | `0.9848` | `0.9846` |
+
+| Sphere Furnace Scene (`traceNative`, `512` spp, `bounces = 64`) | Full-Image Mean | Center Mean | Limb Mean | Gate |
+| --- | --- | --- | --- | --- |
+| `furnace-scene-diffuse` | `1.0000` | `1.0000` | `0.9999` | **Pass** |
+| `furnace-scene-dielectric-glossy` | `0.9995` | `1.0004` | `0.9992` | **Pass** |
+| `furnace-scene-metal` | `1.0001` | `1.0001` | `1.0001` | **Pass** |
+| `furnace-scene-glass` | `0.9947` | `0.9994` | `0.9934` | **Pass** |
+| `furnace-scene-coat` | `0.9994` | `1.0011` | `0.9981` | **Pass** |
+| `furnace-scene-sheen` | `0.9993` | `1.0008` | `0.9986` | **Pass** |
+
+### Selecting the kernel
+
+The native tracer runs the legacy kernel unless you ask for the Cycles-matching kernel (Cook's `cycles` kernel). Pass `kernel: 'cycles'` to `traceNative`, or set the environment variable `JS67_NATIVE_KERNEL=cycles` for a process; an explicit `kernel` option wins over the variable. Any other name throws an error that lists the two valid names. The `cycles` kernel reads a FORMAT-v2 scene pack ([`FORMAT-v2.md`](../packages/render-native/FORMAT-v2.md)), the legacy kernel a v1 pack, and passing one to the wrong kernel throws. The default image of every existing caller does not change.
+
+```js
+import { traceNative } from '@codepawlhq/67js-render-native';
+
+const result = traceNative(sceneInput, { width: 960, height: 540, samples: 256, kernel: 'cycles' });
+```
+
+### Speed of the `cycles` kernel
+
+Sampling time, `960 x 540`, `256` samples, `8` bounces, RTX 3060, interleaved runs through `gpu-lock`, two runs each `[measured]`:
+
+| Scene | Legacy kernel | `cycles` kernel | `cycles` / legacy |
+| --- | --- | --- | --- |
+| `lit-interior` | `0.92 s`, `0.93 s` | `2.86 s`, `2.86 s` | `3.1x` |
+| `metal` | `0.57 s`, `0.58 s` | `1.34 s`, `1.34 s` | `2.3x` |
+
+The `cycles` kernel is `2.3` to `3.1` times slower per sample than the legacy kernel and is opt-in. Its first version took `30.8 s` on `lit-interior` and `17.2 s` on `metal`; the speed work (per-scene kernel specialization, lookup tables in a storage buffer, passing closures and lobes by pointer, removing a scratch array) left the images bit-identical at the same seed and cut the compiled SPIR-V from `936 KB` to `306 KB`. A target of `2x` the legacy time was not reached.
+
+Against Cycles 5.3 OptiX on `lit-interior`, `256` samples took `11.4 s` (measured in an earlier session on the same machine). Relative MSE against the Cycles `4096`-sample reference at `256` samples on `lit-interior`:
+
+| Renderer | `relMSE` at `256` samples |
+| --- | --- |
+| Legacy kernel | `0.0198` |
+| `cycles` kernel | `0.0065` |
+| Cycles 5.3 OptiX | `0.0031` |
+
+These are per-sample times on one scene. An equal-error comparison between the `cycles` kernel and Cycles has not been measured directly, so nothing here says Cook is faster than Cycles in general. The Cycles `lit-interior` reference was not re-rendered with the current script (its scene file and image are byte-identical to the earlier run).
+
+---
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
@@ -212,23 +357,37 @@ $OutDir = "artifacts/cycles-parity"
 # 2. Build packages/render-native if build/render-native.node is not present yet
 node packages/render-native/build.mjs
 
-# 3. Export lit-interior scene JSON and verify byte-identical NativeTraceInput round-trip
-node bench/cycles-parity/export-scene.mjs $OutDir --scene lit-interior
+# 3. Export all 6 M1 reference scenes and verify byte-identical round-trip packing
+foreach ($Scene in @("spot-area", "light-linking", "metal", "glass", "outdoor-hdri", "lit-interior")) {
+  node bench/cycles-parity/export-scene.mjs $OutDir --scene $Scene
+}
 
-# 4. Run a single matched pair (Cycles 5.3 OptiX vs 67js render-native) through gpu-lock
-& "C:\Program Files\Git\bin\bash.exe" $env:GPU_LOCK_SCRIPT `
-  uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$OutDir/single/cycles-256.metrics.json" -- `
+# 4. Run a single matched 4096-spp pair (Cycles 5.3 OptiX vs Cook --kernel cycles) through gpu-lock
+$env:GPU_LOCK_WEIGHT = "heavy"
+bash $env:GPU_LOCK_SCRIPT `
+  uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$OutDir/references/spot-area-cycles-4096-seed1.metrics.json" -- `
   $env:BLENDER_BIN -b --factory-startup --python bench/cycles-parity/render-cycles.py -- `
-  "$OutDir/scenes/lit-interior.json" "$OutDir/single/cycles-256" --samples 256 --bounces 8 --seed 1
+  "$OutDir/scenes/spot-area.json" "$OutDir/references/spot-area-cycles-4096-seed1" --samples 4096 --bounces 8 --seed 1 --keep-exr
+Remove-Item Env:GPU_LOCK_WEIGHT -ErrorAction SilentlyContinue
 
-& "C:\Program Files\Git\bin\bash.exe" $env:GPU_LOCK_SCRIPT `
-  uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$OutDir/single/native-256.metrics.json" -- `
+bash $env:GPU_LOCK_SCRIPT `
+  uv run --no-project --with psutil python bench/cycles-parity/measure-gpu-run.py "$OutDir/harness/spot-area-cycles-4096.metrics.json" -- `
   node bench/cycles-parity/trace-native.mjs `
-  "$OutDir/scenes/lit-interior.json" "$OutDir/single/native-256" --samples 256 --bounces 8 --seed 1 --firefly-clamp 1000000000 --noise-threshold 0
+  "$OutDir/scenes/spot-area.json" "$OutDir/harness/spot-area-cycles-4096" --kernel cycles --samples 4096 --bounces 8 --seed 1
 
-uv run --no-project --with numpy python bench/cycles-parity/compare.py pair "$OutDir/single/cycles-256.npy" "$OutDir/single/native-256.npy"
+uv run --no-project --with numpy --with flip-evaluator python bench/cycles-parity/compare.py `
+  --reference-b "$OutDir/references/spot-area-cycles-4096-seed2.npy" --summary `
+  "$OutDir/references/spot-area-cycles-4096-seed1.npy" "$OutDir/harness/spot-area-cycles-4096.npy"
 
-# 5. Run or re-score the full M0 reference + 3x back-to-back ladder suite (writes <out-dir>/lit-interior-summary.json)
+# 5. Run the full 4096-spp 6-scene M1 parity suite and the 20-probe + 6-scene Lobe Furnace / Chi-Square suite
+uv run --no-project --with numpy --with pillow --with OpenEXR --with flip-evaluator --with psutil python bench/cycles-parity/run-m1-parity.py `
+  $OutDir --kernel cycles --samples 4096 --bounces 8 --seed 1 --reference-samples 4096 --json-out "$OutDir/harness/m1-cycles-s4096.json"
+
+bash $env:GPU_LOCK_SCRIPT node bench/cycles-parity/test-lobes.mjs "$OutDir/harness/lobes"
+uv run --no-project --with numpy python bench/cycles-parity/verify-lobes.py "$OutDir/harness/lobes" --json-out "$OutDir/harness/lobes/summary.json"
+uv run --no-project --with numpy python bench/cycles-parity/verify-lobes.py --self-test
+
+# 6. Run or re-score the M0 reference + 3x back-to-back ladder suite (writes <out-dir>/lit-interior-summary.json)
 # Set GIT_BASH_BIN="C:\Program Files\Git\bin\bash.exe" and GPU_LOCK_SCRIPT="<path-to-gpu-lock.sh>" to wrap every GPU step automatically.
 uv run --no-project --with numpy --with psutil python bench/cycles-parity/run-m0-suite.py $OutDir --scene lit-interior --repeats 3 --bounces 8 --mode all
 ```

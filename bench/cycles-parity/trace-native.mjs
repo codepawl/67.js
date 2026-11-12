@@ -1,14 +1,17 @@
 // Traces an exported scene JSON on packages/render-native and writes linear RGB float32 (.npy) plus timing JSON.
-//   node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--seed 1]
+//   node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1]
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../../src/path-tracer-scene.js';
-import { buildNativeInput, findNativeAddon, traceNative } from '../../packages/render-native/index.mjs';
+import * as renderNative from '../../packages/render-native/index.mjs';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
+
+const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
+const SUPPORTED_FILTERS = new Set(['box', 'blackman-harris']);
 
 function readFlagValue(argumentList, flagName, fallbackValue) {
   const flagIndex = argumentList.indexOf(flagName);
@@ -38,22 +41,54 @@ function parseNumberOption(argumentList, flagName, fallbackValue, minimumValue) 
   return parsed;
 }
 
+function parseKernelOption(argumentList) {
+  const kernel = String(readFlagValue(argumentList, '--kernel', 'legacy'));
+  if (!SUPPORTED_KERNELS.has(kernel)) {
+    throw new RangeError(`Option --kernel must be "legacy" or "cycles", got "${kernel}".`);
+  }
+  return kernel;
+}
+
+function parseFilterTypeOption(argumentList) {
+  const filterType = String(readFlagValue(argumentList, '--filter-type', 'box'));
+  if (!SUPPORTED_FILTERS.has(filterType)) {
+    throw new RangeError(`Option --filter-type must be "box" or "blackman-harris", got "${filterType}".`);
+  }
+  return filterType;
+}
+
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
     outputPrefix: resolve(argumentList[1]),
+    kernel: parseKernelOption(argumentList),
     width: parseIntegerOption(argumentList, '--width', 960, 16),
     height: parseIntegerOption(argumentList, '--height', 540, 16),
     samples: parseIntegerOption(argumentList, '--samples', 256, 1),
     bounces: parseIntegerOption(argumentList, '--bounces', 8, 0),
     seed: parseIntegerOption(argumentList, '--seed', 1, 0),
+    filterType: parseFilterTypeOption(argumentList),
+    filterWidth: parseNumberOption(argumentList, '--filter-width', 1.0, 0.01),
+    clampDirect: parseNumberOption(argumentList, '--clamp-direct', 0, 0),
+    clampIndirect: parseNumberOption(argumentList, '--clamp-indirect', 0, 0),
+    filterGlossy: parseNumberOption(argumentList, '--filter-glossy', 1.0, 0),
     fireflyClamp: parseNumberOption(argumentList, '--firefly-clamp', 1e9, 0),
     noiseThreshold: parseNumberOption(argumentList, '--noise-threshold', 0, 0),
+    samplesPerDispatch: argumentList.includes('--samples-per-dispatch')
+      ? parseIntegerOption(argumentList, '--samples-per-dispatch', 16, 1)
+      : undefined,
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
   };
+}
+
+function packSceneForKernel(traceScene, camera, options) {
+  if (options.kernel === 'cycles' && typeof renderNative.buildNativeInputV2 === 'function') {
+    return renderNative.buildNativeInputV2(traceScene, camera, options, packModule);
+  }
+  return renderNative.buildNativeInput(traceScene, camera, options, packModule);
 }
 
 function extractLinearRgb(rgbaPixels, pixelCount) {
@@ -71,7 +106,7 @@ function extractLinearRgb(rgbaPixels, pixelCount) {
 async function runCli() {
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   const options = parseTraceArguments(process.argv.slice(2));
-  if (!findNativeAddon()) {
+  if (!renderNative.findNativeAddon()) {
     throw new Error('The render-native addon is missing. Build packages/render-native before running trace-native.mjs.');
   }
   const description = JSON.parse(await readFile(options.sceneJsonPath, 'utf8'));
@@ -81,13 +116,25 @@ async function runCli() {
   const traceSource = await reconstructTraceSceneSource(description);
   const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, options.width, options.height);
-  const nativeInput = buildNativeInput(traceScene, camera, options, packModule);
+  const samplesPerDispatch = options.samplesPerDispatch !== undefined
+    ? options.samplesPerDispatch
+    : (options.noiseThreshold > 0 ? 8 : undefined);
+  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, samplesPerDispatch, parts: traceSource.parts });
   const sceneBuildSeconds = (performance.now() - buildStarted) / 1000;
-  const traced = traceNative(nativeInput, {
+  const traced = renderNative.traceNative(nativeInput, {
     width: options.width,
     height: options.height,
     samples: options.samples,
+    samplesPerDispatch,
+    bounces: options.bounces,
+    seed: options.seed,
     maxSeconds: options.maxSeconds,
+    kernel: options.kernel,
+    filterType: options.filterType,
+    filterWidth: options.filterWidth,
+    clampDirect: options.clampDirect,
+    clampIndirect: options.clampIndirect,
+    filterGlossy: options.filterGlossy,
   });
   const totalTraceSeconds = (performance.now() - totalStarted) / 1000;
   const postTraceRssMegabytes = process.memoryUsage().rss / (1024 * 1024);
@@ -97,15 +144,22 @@ async function runCli() {
   await writeFloat32Npy(npyPath, linearRgb, [options.height, options.width, 3]);
   const setupSeconds = sceneBuildSeconds + traced.setupSeconds + traced.compileSeconds + traced.uploadSeconds + traced.accelerationBuildSeconds;
   const report = {
-    engine: '67js-render-native',
+    engine: options.kernel === 'cycles' ? 'cook-render-native' : '67js-render-native',
+    kernel: traced.kernel ?? options.kernel,
+    inputSchemaVersion: nativeInput.schemaVersion ?? 1,
     sceneId: description.id,
     npyPath,
     width: options.width,
     height: options.height,
     samples: options.samples,
     averageSamples: traced.averageSamples,
+    samplesPerDispatch: traced.samplesPerDispatch ?? null,
     bounces: options.bounces,
     seed: options.seed,
+    filterType: options.filterType,
+    filterWidth: options.filterWidth,
+    clampDirect: options.clampDirect,
+    clampIndirect: options.clampIndirect,
     fireflyClamp: options.fireflyClamp,
     noiseThreshold: options.noiseThreshold,
     triangleCount: nativeInput.triangleCount,

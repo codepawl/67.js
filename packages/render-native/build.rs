@@ -4,8 +4,10 @@ use std::path::{Component, Path, PathBuf};
 
 fn parse_manifest_entries(manifest_text: &str) -> Vec<String> {
     let mut entries = Vec::new();
-    for raw_line in manifest_text.lines() {
-        let without_comment = raw_line.split('#').next().unwrap_or("");
+    let without_file_bom = manifest_text.trim_start_matches('\u{feff}');
+    for raw_line in without_file_bom.lines() {
+        let without_line_bom = raw_line.trim_start_matches('\u{feff}');
+        let without_comment = without_line_bom.split('#').next().unwrap_or("");
         let trimmed = without_comment.trim();
         if !trimmed.is_empty() {
             entries.push(trimmed.to_string());
@@ -49,7 +51,9 @@ fn main() {
 
     let cycles_directory = PathBuf::from("src").join("cycles");
     let manifest_path = cycles_directory.join("kernel-manifest.txt");
+    let bootstrap_path = cycles_directory.join("bootstrap_main.wgsl");
     println!("cargo:rerun-if-changed={}", manifest_path.display());
+    println!("cargo:rerun-if-changed={}", bootstrap_path.display());
 
     let manifest_text = fs::read_to_string(&manifest_path)
         .unwrap_or_else(|error| panic!("Could not read {}: {error}", manifest_path.display()));

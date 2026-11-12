@@ -113,17 +113,16 @@ test('resolveNativeKernel defaults to legacy, falls back to JS67_NATIVE_KERNEL, 
   }
 });
 
-test('traceNative fails cleanly without crashing when cycles kernel manifest has no main entry point', { skip: !findNativeAddon() }, () => {
+test('traceNative traces finite RGBA pixels on both legacy and cycles kernels', { skip: !findNativeAddon() }, () => {
   const input = buildNativeInput(buildTraceScene(plainParts, {}), camera, options, pack);
-  assert.throws(
-    () => traceNative(input, { ...options, kernel: 'cycles' }),
-    /Cycles native kernel.*@compute main/,
-  );
+  const cyclesResult = traceNative(input, { ...options, kernel: 'cycles' });
+  assert.equal(cyclesResult.rgba.length, options.width * options.height * 4);
+  assert.ok(cyclesResult.rgba.every(Number.isFinite));
+  assert.equal(cyclesResult.averageSamples, options.samples);
   withKernelEnv('cycles', () => {
-    assert.throws(
-      () => traceNative(input, options),
-      /Cycles native kernel.*@compute main/,
-    );
+    const envCyclesResult = traceNative(input, options);
+    assert.equal(envCyclesResult.rgba.length, options.width * options.height * 4);
+    assert.ok(envCyclesResult.rgba.every(Number.isFinite));
     const legacyResult = traceNative(input, { ...options, kernel: 'legacy' });
     assert.equal(legacyResult.rgba.length, options.width * options.height * 4);
     assert.ok(legacyResult.rgba.every(Number.isFinite));
@@ -206,8 +205,8 @@ test('cycles kernel manifest, signatures-only abi.wgsl, and FORMAT-v2.md agree b
   }
 
   const abiSource = readFileSync(new URL('../packages/render-native/src/cycles/abi.wgsl', import.meta.url), 'utf8');
-  assert.match(abiSource, /fn closure_eval\(closure: Closure, wi: vec3<f32>, wo: vec3<f32>\) -> ClosureEval/);
-  assert.match(abiSource, /fn closure_sample\(closure: Closure, wo: vec3<f32>, u: vec3<f32>\) -> ClosureSample/);
+  assert.match(abiSource, /fn closure_eval\(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>\) -> ClosureEval/);
+  assert.match(abiSource, /fn closure_sample\(closure: ptr<function, Closure>, wo: vec3<f32>, u: vec3<f32>\) -> ClosureSample/);
 
   const { uncommented, structs } = parseWgslStructs(abiSource);
   assert.doesNotMatch(uncommented, /\bfn\s+[A-Za-z_]\w*/, 'abi.wgsl must be signatures-only with no stub fn bodies');

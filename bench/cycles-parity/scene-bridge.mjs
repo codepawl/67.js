@@ -130,6 +130,59 @@ async function resolvePartGeometry(part, boxProjectedCache) {
   return byScale.get(cacheKey);
 }
 
+function ensureNodeImageData() {
+  if (typeof globalThis.ImageData === 'function') {
+    return;
+  }
+  globalThis.ImageData = class ImageData {
+    constructor(firstArgument, secondArgument, thirdArgument) {
+      if (typeof firstArgument === 'number') {
+        this.width = firstArgument;
+        this.height = secondArgument;
+        this.data = new Uint8ClampedArray(firstArgument * secondArgument * 4);
+        return;
+      }
+      if (firstArgument instanceof Uint8ClampedArray) {
+        this.data = firstArgument;
+      } else {
+        this.data = new Uint8ClampedArray(firstArgument.buffer, firstArgument.byteOffset, firstArgument.byteLength);
+      }
+      this.width = secondArgument;
+      this.height = thirdArgument ?? (this.data.length / (4 * secondArgument));
+    }
+  };
+}
+
+async function readRepositoryAsset(rootRelativeUrl) {
+  const cleanRelativePath = rootRelativeUrl.split(/[?#]/, 1)[0].slice(1);
+  const publicCandidatePath = join(REPOSITORY_ROOT_PATH, 'public', cleanRelativePath);
+  try {
+    return await readFile(publicCandidatePath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
+    return readFile(join(REPOSITORY_ROOT_PATH, cleanRelativePath));
+  }
+}
+
+async function runWithRepositoryAssetFetch(callback) {
+  ensureNodeImageData();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (typeof input === 'string' && input.startsWith('/')) {
+      const assetBytes = await readRepositoryAsset(input);
+      return new Response(assetBytes, { status: 200 });
+    }
+    return previousFetch(input, init);
+  };
+  try {
+    return await callback();
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+}
+
 export async function loadReferenceScene(sceneId) {
   const [{ REFERENCE_SCENES }, { applyLightLinks }] = await Promise.all([
     import('../../bench/reference/scenes.js'),
@@ -140,7 +193,7 @@ export async function loadReferenceScene(sceneId) {
     const availableIds = Object.keys(REFERENCE_SCENES).join(', ');
     throw new RangeError(`Unknown reference scene "${sceneId}". Pass one of: ${availableIds}.`);
   }
-  const rawScene = await sceneFactory();
+  const rawScene = await runWithRepositoryAssetFetch(() => sceneFactory());
   const linkedParts = applyLightLinks(rawScene.parts, rawScene.environment);
   return {
     rawScene,

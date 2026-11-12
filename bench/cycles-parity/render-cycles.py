@@ -164,6 +164,52 @@ def connect_vertex_colors(material, principled_node, material_entry):
     links.new(multiply_node.outputs["Color"], principled_node.inputs["Base Color"])
 
 
+def connect_emissive_map(material, principled_node, material_entry, emission_color, image_entries, built_images):
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    texture_node = nodes.new("ShaderNodeTexImage")
+    texture_node.image = unpack_shared_image(f"{material.name}-emissive", material_entry["emissiveMap"], image_entries, built_images)
+    multiply_node = nodes.new("ShaderNodeMixRGB")
+    multiply_node.blend_type = "MULTIPLY"
+    multiply_node.inputs[0].default_value = 1.0
+    set_linear_rgba_socket(multiply_node.inputs[2], emission_color)
+    links.new(texture_node.outputs["Color"], multiply_node.inputs[1])
+    links.new(multiply_node.outputs["Color"], principled_node.inputs["Emission Color"])
+
+
+def configure_anisotropy(principled_node, material_entry):
+    strength = material_entry.get("anisotropy", 0.0)
+    if strength <= 0.0:
+        return
+    alpha = material_entry.get("roughness", 0.5) ** 2
+    alpha_tangent = alpha + (1.0 - alpha) * (strength ** 2)
+    principled_node.inputs["Anisotropic"].default_value = min((1.0 - alpha / alpha_tangent) / 0.9, 1.0)
+    principled_node.inputs["Roughness"].default_value = (alpha * alpha_tangent) ** 0.25
+    principled_node.inputs["Anisotropic Rotation"].default_value = material_entry.get("anisotropyRotation", 0.0) / (2.0 * math.pi)
+    node_tree = principled_node.id_data
+    tangent_node = node_tree.nodes.new("ShaderNodeTangent")
+    tangent_node.direction_type = "UV_MAP"
+    tangent_node.uv_map = "UVMap"
+    node_tree.links.new(tangent_node.outputs["Tangent"], principled_node.inputs["Tangent"])
+
+
+def configure_thin_film(principled_node, material_entry):
+    if material_entry.get("iridescence", 0.0) <= 0.0:
+        return
+    principled_node.inputs["Thin Film Thickness"].default_value = material_entry.get("iridescenceThickness", 400.0)
+    principled_node.inputs["Thin Film IOR"].default_value = material_entry.get("iridescenceIor", 1.3)
+
+
+def configure_subsurface(principled_node, material_entry):
+    subsurface_block = material_entry.get("subsurface")
+    if not subsurface_block or subsurface_block.get("weight", 0.0) <= 0.0:
+        return
+    principled_node.subsurface_method = "RANDOM_WALK"
+    principled_node.inputs["Subsurface Weight"].default_value = subsurface_block["weight"]
+    principled_node.inputs["Subsurface Radius"].default_value = subsurface_block.get("radius", [1.0, 0.2, 0.1])
+    principled_node.inputs["Subsurface Scale"].default_value = subsurface_block.get("scale", 0.05)
+
+
 def configure_principled_layers(material, principled_node, material_entry):
     principled_node.inputs["Coat Weight"].default_value = material_entry.get("clearcoat", 0.0)
     principled_node.inputs["Coat Roughness"].default_value = material_entry.get("clearcoatRoughness", 0.0)
@@ -171,8 +217,16 @@ def configure_principled_layers(material, principled_node, material_entry):
     principled_node.inputs["Transmission Weight"].default_value = material_entry.get("transmission", default_transmission)
     default_ior = principled_node.inputs["IOR"].default_value
     principled_node.inputs["IOR"].default_value = material_entry.get("ior", default_ior)
+    sheen_color = material_entry.get("sheenColor", [0.0, 0.0, 0.0])
+    if any(sheen_color):
+        principled_node.inputs["Sheen Weight"].default_value = 1.0
+        set_linear_rgba_socket(principled_node.inputs["Sheen Tint"], sheen_color)
+        principled_node.inputs["Sheen Roughness"].default_value = material_entry.get("sheenRoughness", 0.0)
     principled_node.inputs["Specular IOR Level"].default_value = 0.5 * material_entry.get("specular", 1.0)
     set_linear_rgba_socket(principled_node.inputs["Specular Tint"], material_entry.get("specularColor", [1.0, 1.0, 1.0]))
+    configure_anisotropy(principled_node, material_entry)
+    configure_thin_film(principled_node, material_entry)
+    configure_subsurface(principled_node, material_entry)
     attenuation_distance = material_entry.get("attenuationDistance")
     if attenuation_distance:
         absorption_node = material.node_tree.nodes.new("ShaderNodeVolumeAbsorption")
@@ -198,6 +252,8 @@ def build_blender_material(material_name, material_entry, has_vertex_colors, ima
         emission_color = material_entry.get("emissiveColor", material_entry["color"])
         set_linear_rgba_socket(principled_node.inputs["Emission Color"], emission_color)
         principled_node.inputs["Emission Strength"].default_value = material_entry["emission"]
+        if "emissiveMap" in material_entry:
+            connect_emissive_map(material, principled_node, material_entry, emission_color, image_entries, built_images)
     if "map" in material_entry:
         connect_base_color_texture(material, principled_node, material_entry, has_vertex_colors, image_entries, built_images)
     elif has_vertex_colors:
@@ -491,12 +547,22 @@ def execute_timed_cycles_render(scene, exr_path):
     }
 
 
+def lower_process_priority():
+    if os.name != "nt":
+        return
+    import ctypes
+    below_normal_priority_class = 0x00004000
+    process_handle = ctypes.windll.kernel32.GetCurrentProcess()
+    ctypes.windll.kernel32.SetPriorityClass(process_handle, below_normal_priority_class)
+
+
 def main():
+    lower_process_priority()
     options = parse_cli_arguments()
     os.makedirs(os.path.dirname(options["output_prefix"]), exist_ok=True)
     with open(options["scene_json_path"], encoding="utf-8") as handle:
         description = json.load(handle)
-    repository_root = os.getcwd()
+    repository_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     build_started = time.perf_counter()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
