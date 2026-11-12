@@ -71,6 +71,29 @@ test('an addon that declares more than the bundle bound is skipped', () => {
   assert.match(skippedReason(folder), /above the server bound/);
 });
 
+test('conditional exports resolve to the import entry', () => {
+  const folder = installStarter(pack => {
+    pack.exports = { '.': { import: './src/index.js', require: './missing.cjs' } };
+    delete pack.main;
+  });
+  const { addons, skipped } = resolveAddons({ folder, names: ['67js-addon-starter'], version: VERSION });
+  assert.deepEqual(skipped, []);
+  assert.equal(addons[0].entry, 'src/index.js');
+});
+
+test('a broken entry skips the addon instead of stopping the server', () => {
+  const missingEntry = installStarter(pack => {
+    pack.exports = './dist/index.js';
+    delete pack.main;
+  });
+  assert.match(skippedReason(missingEntry), /entry file \.\/dist\/index\.js does not exist/);
+  const noEntry = installStarter(pack => {
+    pack.exports = { './extra': './src/index.js' };
+    delete pack.main;
+  });
+  assert.match(skippedReason(noEntry), /names no entry file/);
+});
+
 test('a package whose real path is outside the addons folder is refused', context => {
   const outside = installStarter();
   const folder = mkdtempSync(join(tmpdir(), 'addons-test-'));

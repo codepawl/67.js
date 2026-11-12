@@ -14,11 +14,28 @@ function isInside(folder, path) {
   return inside !== '' && !inside.startsWith('..') && !isAbsolute(inside);
 }
 
+// The ES module entry of a package: a string `exports`, its "." entry, or the import/default condition of either; else `main`.
 function entryOf(pack) {
-  return typeof pack.main === 'string' ? pack.main : pack.exports;
+  const exportsField = pack.exports;
+  const root = exportsField && typeof exportsField === 'object' && '.' in exportsField ? exportsField['.'] : exportsField;
+  if (typeof root === 'string') return root;
+  if (root && typeof root === 'object') {
+    const conditional = root.import ?? root.default;
+    if (typeof conditional === 'string') return conditional;
+  }
+  return typeof pack.main === 'string' ? pack.main : null;
 }
 
+// A broken package (a missing entry file, an unreadable folder) is skipped like any other failing addon: it never stops the server.
 function loadOne(name, addonsFolder, version) {
+  try {
+    return loadOneChecked(name, addonsFolder, version);
+  } catch (error) {
+    return { reason: `${name} could not be read (${error.message}). Reinstall it with npm install ${name} in ${addonsFolder}.` };
+  }
+}
+
+function loadOneChecked(name, addonsFolder, version) {
   if (!PACKAGE_NAME.test(name)) {
     return { reason: `"${name}" is not an npm package name. Pass the name as installed, such as my-addon or @scope/my-addon.` };
   }
@@ -37,10 +54,13 @@ function loadOne(name, addonsFolder, version) {
   if (pack['67js'].bundleBytes > MAXIMUM_ADDON_BUNDLE_BYTES) {
     return { reason: `${name} declares bundleBytes ${pack['67js'].bundleBytes}, above the server bound of ${MAXIMUM_ADDON_BUNDLE_BYTES} bytes (2 MiB). Ship a smaller entry file.` };
   }
-  const entryPath = resolve(realFolder, entryOf(pack));
+  const entry = entryOf(pack);
+  if (entry === null) return { reason: `${name} names no entry file. Set "exports" (or its "." import condition) or "main" to the ES module that exports registerAddon.` };
+  const entryPath = resolve(realFolder, entry);
+  if (!existsSync(entryPath)) return { reason: `${name} entry file ${entry} does not exist in the package. Rebuild or reinstall the addon.` };
   const realEntry = realpathSync(entryPath);
   if (!isInside(realFolder, realEntry)) return { reason: `${name} entry file resolves outside the package folder. Point main or exports inside the package.` };
-  if (!/\.m?js$/.test(realEntry)) return { reason: `${name} entry file ${entryOf(pack)} must be an ES module ending in .js or .mjs.` };
+  if (!/\.m?js$/.test(realEntry)) return { reason: `${name} entry file ${entry} must be an ES module ending in .js or .mjs.` };
   if (statSync(realEntry).size > MAXIMUM_ADDON_BUNDLE_BYTES) return { reason: `${name} entry file is above 2 MiB.` };
   return {
     addon: {
