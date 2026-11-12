@@ -1,17 +1,16 @@
 // Film of crates and a boat bobbing on ocean waves through the MCP render job, for the buoyancy docs and the pull request.
 // Usage: node scripts/render-buoyancy-film.mjs [--backend gpu|cpu] [--width 640] [--height 360] [--duration 4] [--out artifacts/982]
-// The boat is the CC0 Kenney Watercraft Kit `boat-fishing-small.glb`; it is downloaded next to the output on first use.
+// The boat is the CC0 Kenney Watercraft Kit (kenney.nl/assets/watercraft-kit). Put `boat-fishing-small.glb` and
+// `Textures/colormap.png` from its GLB folder in <out>/assets before the first run.
 // CHROME_PATH names another Chrome or Chromium executable. --vulkan wraps the Chrome it finds with the flags a Linux GPU box needs.
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync, writeFileSync, chmodSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
-const KIT_URL = 'https://raw.githubusercontent.com/leaukojo/carlito/HEAD/kit/raw/watercraft';
 const BOAT_FILE = 'boat-fishing-small.glb';
 const BOAT_SIZE = { width: 1.78, length: 3.87, hullHeight: 0.7 };
 
@@ -33,7 +32,7 @@ function vulkanChromeWrapper() {
   const names = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
   const found = names.map(name => spawnSync('which', [name], { encoding: 'utf8' }).stdout.trim()).find(Boolean);
   if (!found) throw new Error('No Chrome or Chromium on the PATH; install one or pass CHROME_PATH.');
-  const wrapper = join(tmpdir(), 'chrome-vulkan.sh');
+  const wrapper = join(jobsFolder, 'chrome-vulkan.sh');
   writeFileSync(wrapper, `#!/bin/sh
 exec ${found} --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist --no-sandbox "$@"
 `);
@@ -41,19 +40,12 @@ exec ${found} --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist
   return wrapper;
 }
 
-// Only these kit files are fetched, so a download can never write outside the asset folder.
-const KIT_FILES = new Map([[BOAT_FILE, BOAT_FILE], ['Textures/colormap.png', 'Textures/colormap.png']]);
+const KIT_FILES = [BOAT_FILE, 'Textures/colormap.png'];
 
-async function fetchKitFile(relativePath) {
-  const knownPath = KIT_FILES.get(relativePath);
-  if (!knownPath) throw new Error(`Unknown kit file ${relativePath}; add it to KIT_FILES first.`);
-  const target = join(assetFolder, knownPath);
-  const response = await fetch(`${KIT_URL}/${knownPath}`);
-  if (!response.ok) throw new Error(`Could not download ${knownPath}: HTTP ${response.status}`);
-  try {
-    await writeFile(target, Buffer.from(await response.arrayBuffer()), { flag: 'wx' });
-  } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
+function requireKitFiles() {
+  const missing = KIT_FILES.filter(name => !existsSync(join(assetFolder, name)));
+  if (missing.length) {
+    throw new Error(`Missing ${missing.join(', ')} in ${assetFolder}. Download the CC0 Kenney Watercraft Kit from kenney.nl/assets/watercraft-kit and copy those files from its GLB folder.`);
   }
 }
 
@@ -104,10 +96,8 @@ function buildRecipe(boatAssetId) {
   };
 }
 
-await mkdir(join(assetFolder, 'Textures'), { recursive: true });
 await mkdir(jobsFolder, { recursive: true });
-await fetchKitFile(BOAT_FILE);
-await fetchKitFile('Textures/colormap.png');
+requireKitFiles();
 
 const serverArguments = [resolve('bin/67js-mcp.mjs'), '--backend', backend, '--memory', '384', '--assets', assetFolder, '--jobs', jobsFolder];
 const browserPath = process.argv.includes('--vulkan') ? vulkanChromeWrapper() : process.env.CHROME_PATH;
