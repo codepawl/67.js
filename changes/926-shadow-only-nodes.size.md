@@ -3,3 +3,6 @@
 - scene:lit-box: same change as scene:agent-scene.
 - scene:gltf-box: same change as scene:agent-scene.
 - scene:gltf-box+lazy: same change as scene:agent-scene.
+- goal:lit-box: a node can cast a shadow while staying out of the picture, which a gobo outside the shot needs and no existing flag gives (#926); the growth is under 0.1 percent of the scene.
+- goal:gltf-box: a node can cast a shadow while staying out of the picture, which a gobo outside the shot needs and no existing flag gives (#926); the growth is under 0.1 percent of the scene.
+- goal:agent-scene: a node can cast a shadow while staying out of the picture, which a gobo outside the shot needs and no existing flag gives (#926); the growth is under 0.1 percent of the scene.
