@@ -561,6 +561,55 @@ renderer.render(frame);
 - The culling bounds and the shadow map follow the new positions.
 - Per vertex a cloth steps on welded particles, so copy each vertex from its particle (`weldVertices(...).particleOfVertex`) and recompute normals (`recomputeNormals`) before the call.
 
+## Settling props
+
+`@codepawlhq/67js/addons/settle` drops props as rigid bodies onto colliders, runs Rapier at 60 Hz for a bounded time and returns the resting transforms, so rubble, crates and pebbles lie against each other instead of hovering where they were placed. The caller keeps the result as static parts. Same seed and inputs give the same transforms byte for byte (they are rounded to 1e-5).
+
+```js
+import { loadPhysicsEngine } from '@codepawlhq/67js/addons/physics';
+import { settleInstances } from '@codepawlhq/67js/addons/settle';
+
+await loadPhysicsEngine();
+const { instances, report } = settleInstances({
+  colliders: [
+    { shape: 'box', translation: [0, -0.1, 0], halfExtents: [4, 0.1, 4] },
+    { shape: 'box', translation: [0, 1, -2], halfExtents: [4, 1, 0.2] },
+  ],
+  area: { min: [-2, -1.7], max: [2, -0.5] }, count: 80, size: [0.1, 0.25], seed: 5,
+});
+// instances: [{ translation, rotation (quaternion), size }]; report: { requested, placed, skipped, fellOff, unsettled, duration }
+```
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `colliders` | required | Up to 64 `box` ({ translation, rotation, halfExtents }) or `ball` ({ translation, radius }) shapes to land on. List earlier settled props here to stack on them. |
+| `shape` | `box` | Prop shape, `box` or `ball`. |
+| `area`, `count` or `density` | required | Where to scatter, and how many (256 at most) or how many per square metre. |
+| `instances` | none | Instead of `area`, `count`, `density` and `size`: your own start poses `[{ translation, rotation, size }]` (size is three edge lengths for a box, a diameter for a ball). |
+| `size` | `[0.1, 0.25]` | Smallest and largest edge (box) or diameter (ball), in metres. |
+| `aspect` | 0.3 | Per-axis edge variation of a box, 0 to 1. |
+| `rotation` | 1 | Start tumble, 0 (yaw only) to 1 (any orientation). |
+| `spacing` | 0.01 | Minimum gap between props and colliders at the start, so no prop starts overlapping. |
+| `maxSlope` | 60 | Props are not placed where the ground below is steeper than this, in degrees. |
+| `duration` | 3 | Seconds simulated, 0.5 to 6. |
+| `friction`, `restitution` | 0.6, 0.1 | Contact material of props and colliders. |
+
+A prop that falls off the world is left out (`report.fellOff`); one still moving at the end is kept (`report.unsettled`; raise `duration`). `report.skipped` counts rejected placement attempts, not props. Props use continuous collision detection, so thin ones do not tunnel through a floor.
+
+In a recipe the same step is the `settle` operation of `scene_apply` (see [Recipe settle](#recipe-settle)). Clutter tiles (`addons/clutter`) are streamed meshes, not instance lists, so to settle stones list the poses you want as `instances`.
+
+### Recipe settle
+
+```json
+{ "type": "settle", "settle": {
+  "id": "rubble", "geometry": "block", "material": ["stone", "rust"],
+  "colliders": ["floor", "wall"],
+  "area": { "min": [-2, -1.7], "max": [2, -0.5] }, "count": 80, "size": [0.1, 0.25], "seed": 5
+} }
+```
+
+`colliders` are node IDs. A node needs a `box` or `sphere` geometry (a sphere must have equal scale on all axes); a group node stands for its mesh children. `geometry` is a recipe `box` or `sphere` geometry and decides the prop shape; `material` is an ID or a list of up to 8 that props pick from by seed. The operation adds a group node `rubble` and one static child per resting prop, `rubble-0`, `rubble-1` and so on, with no physics section. List `rubble` in a later settle's `colliders` to stack on it. Settling needs the Rapier peer loaded like recipe physics does, and `scene_capabilities` topic `settle` has the field list. Remove the group and its children before settling again under the same ID.
+
 ## Force fields
 
 One list of up to 8 fields, `fields` on the `particles` section and on the `cloth` section, accelerates every particle, hair strand and cloth particle through the same evaluation (`src/force-fields.js`, `evaluateForceFields`). Each field has a `type`:

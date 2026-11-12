@@ -58,6 +58,7 @@ export default defineConfig({
         shrinkwrap: 'src/shrinkwrap.js',
         'surface-attachment': 'src/surface-attachment.js',
         physics: 'src/physics.js',
+        settle: 'src/settle.js',
         spume: 'src/spume.js',
         retarget: 'src/retarget.js',
         'crowd-skinning': 'src/crowd-skinning.js',
