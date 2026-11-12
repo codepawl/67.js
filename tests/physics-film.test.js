@@ -8,6 +8,7 @@ import { mkdtemp, rm, copyFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { inflateSync } from 'node:zlib';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -138,7 +139,66 @@ test('a 64 piece fractured wall renders as stills with the ball breaking it', as
   await call('scene_dispose', { sessionId });
 });
 
-const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { windowsHide: true }).status === 0;
+// Decodes an 8-bit RGB or RGBA PNG to its pixel bytes, undoing the row filters, so the horizon can be read without ffmpeg.
+function decodePng(bytes) {
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  const channels = bytes[25] === 6 ? 4 : 3;
+  const compressed = [];
+  for (let offset = 8; offset < bytes.length;) {
+    const length = bytes.readUInt32BE(offset);
+    if (bytes.toString('latin1', offset + 4, offset + 8) === 'IDAT') {
+      compressed.push(bytes.subarray(offset + 8, offset + 8 + length));
+    }
+    offset += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(compressed));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(stride * height);
+  for (let row = 0; row < height; row++) {
+    const filter = raw[row * (stride + 1)];
+    for (let index = 0; index < stride; index++) {
+      const value = raw[row * (stride + 1) + 1 + index];
+      const left = index >= channels ? pixels[row * stride + index - channels] : 0;
+      const up = row > 0 ? pixels[(row - 1) * stride + index] : 0;
+      const upLeft = row > 0 && index >= channels ? pixels[(row - 1) * stride + index - channels] : 0;
+      const estimate = left + up - upLeft;
+      const distances = [Math.abs(estimate - left), Math.abs(estimate - up), Math.abs(estimate - upLeft)];
+      const paeth = distances[0] <= distances[1] && distances[0] <= distances[2] ? left : (distances[1] <= distances[2] ? up : upLeft);
+      const predictor = [0, left, up, (left + up) >> 1, paeth][filter];
+      pixels[row * stride + index] = (value + predictor) & 255;
+    }
+  }
+  return { width, height, channels, pixels };
+}
+
+// The row of the biggest colour jump down the left edge, where only ground and sky show, never the wall or the shards.
+function horizonRowAtLeftEdge(image) {
+  const rowBytes = image.width * image.channels;
+  let bestRow = 0;
+  let bestJump = -1;
+  for (let row = 1; row < image.height; row++) {
+    let jump = 0;
+    for (let channel = 0; channel < 3; channel++) {
+      jump += Math.abs(image.pixels[row * rowBytes + channel] - image.pixels[(row - 1) * rowBytes + channel]);
+    }
+    if (jump > bestJump) {
+      bestJump = jump;
+      bestRow = row;
+    }
+  }
+  return bestRow;
+}
+
+test('the horizon stays on the same row in a fixed-camera physics film', async () => {
+  const sessionId = await createFracturedWall();
+  const frames = await stillBytes(await submitJob(sessionId, 'stills', { motion: { start: 0 } }));
+  const rows = frames.map(frame => horizonRowAtLeftEdge(decodePng(frame)));
+  assert.ok(Math.max(...rows) - Math.min(...rows) <= 1, `the horizon row at the left edge moved: ${rows.join(', ')}`);
+  await call('scene_dispose', { sessionId });
+});
+
+const hasFfmpeg =spawnSync('ffmpeg', ['-version'], { windowsHide: true }).status === 0;
 
 test('a 64 piece fractured wall encodes as video for the length of the bake', { skip: !hasFfmpeg && 'ffmpeg is not installed' }, async () => {
   const sessionId = await createFracturedWall();
