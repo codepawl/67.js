@@ -1,4 +1,4 @@
-import { textureDescriptorInfo } from './renderer.js';
+import { configureTexture, textureDescriptorInfo } from './renderer.js';
 import { createSlicer } from './cooperative.js';
 
 // Uploads a large texture a band of rows at a time, so no single texImage2D hands the driver the whole image at once.
@@ -99,7 +99,7 @@ export async function preloadRendererTextures(renderer, descriptors, { maximumBy
       }
       const previousBinding = context.getParameter(context.TEXTURE_BINDING_2D);
       context.bindTexture(context.TEXTURE_2D, texture);
-      renderer.configureTexture(info);
+      configureTexture(renderer, info);
       context.bindTexture(context.TEXTURE_2D, previousBinding);
       renderer.textures.set(map, texture);
     } catch (error) {
