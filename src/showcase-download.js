@@ -77,3 +77,11 @@ export async function readPartRanks(blob) {
   if (!extras?.partRankRuns) return extras?.partRanks ?? null;
   return extras.partRankRuns.flatMap(([first, count]) => Array.from({ length: count }, (unused, offset) => first + offset));
 }
+
+// Puts the parts of every file back in the order a one-piece load gives them, because the order sets how the renderer batches and
+// draws them. Each file lists the rank of its parts in that order (the split script writes it); without ranks the files join as they are.
+export function inWholeWorldOrder(files) {
+  if (files.some(file => !file.ranks || file.ranks.length !== file.parts.length)) return files.flatMap(file => file.parts);
+  const ranked = files.flatMap(file => file.parts.map((part, index) => ({ part, rank: file.ranks[index] })));
+  return ranked.sort((first, second) => first.rank - second.rank).map(entry => entry.part);
+}

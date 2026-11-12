@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createAgentRuntime } from '../scripts/agent-runtime.mjs';
 import { isPreviewHost } from '../scripts/preview-host.mjs';
 import { addonCapabilities, addonFileFor, addonImportMap } from '../scripts/mcp-addons.mjs';
+import { sampleBrowserHeap, exceedsMemoryGuard } from '../scripts/agent-memory-guard.mjs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -33,6 +34,8 @@ import { normalizeReview, REVIEW_LIMITS } from '../scripts/agent-review.mjs';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 import { ANNOTATE_LIMITS } from '../src/agent-annotate.js';
+import * as packLimits from '../src/pack-manifest.js';
+import { createPackRegistry } from '../scripts/agent-packs.mjs';
 
 test('runtime reports real scene capabilities without launching a browser and closes idempotently', async () => {
   const runtime = createAgentRuntime({ backend: 'cpu', memory: 64 });
@@ -127,6 +130,8 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     recipeAssetNeeds, gameAssetIds, sequenceFrameIds, catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, TEXTURE_SEQUENCE_CAPABILITIES, AGENT_ASSET_LIMITS, assertCombinedAssetBytes,
     audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName, sessionProblem, SCENE_STORE_LIMITS,
     runAnnotateSession: async () => ({ outcome: 'timeout' }), openInDefaultBrowser: async () => {}, ANNOTATE_LIMITS,
+    ...packLimits, createPackRegistry,
+    sampleBrowserHeap, exceedsMemoryGuard,
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
     runtimeOptions, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
     setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },

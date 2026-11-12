@@ -1,0 +1,28 @@
+{
+  "name": "@codepawlhq/67js-three-bridge",
+  "version": "0.1.0",
+  "description": "Optional addon that imports a three.js object tree as 67js parts and builds three.js meshes from 67js parts. Imports neither three nor 67js. Not part of the core archive.",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "README.md"
+  ],
+  "keywords": [
+    "67js-addon",
+    "three",
+    "threejs",
+    "gltf"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@codepawlhq/67js": ">=0.19.0 <1.0.0",
+    "three": ">=0.160.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}
