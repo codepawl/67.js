@@ -161,3 +161,21 @@ test('recipe physics supports cylinder, cone, compound shapes, spring joints, mo
   assert.throws(() => createAgentScene(recipe({ duration: 1, bodies: [{ node: 'ball' }], events: [{ time: 0.1, type: 'impulse', body: 'ball' }] })), /impulse or torqueImpulse/);
   assert.throws(() => createAgentScene(recipe({ duration: 1, bodies: [{ node: 'floor', type: 'kinematic', shape: 'box' }], events: [{ time: 0.1, type: 'kinematicPose', body: 'floor' }] })), /translation or rotation/);
 });
+
+test('a recipe fixed joint with breakImpulse breaks under a hard hit and the report lists it', () => {
+  const slab = { id: 'slab', geometry: 'slab', material: 'paint', translation: [0, 4, 0], scale: [0.6, 0.3, 0.6] };
+  const glue = { name: 'glue', type: 'fixed', bodyA: 'floor', bodyB: 'ball', anchorA: [0, 2.25, 0], anchorB: [0, 0, 0], breakImpulse: 2 };
+  const physics = joint => ({
+    duration: 1.5,
+    bodies: [{ node: 'floor', type: 'fixed' }, { node: 'ball', shape: 'ball', mass: 1 }, { node: 'slab', shape: 'box', mass: 5 }],
+    joints: [joint],
+  });
+  const scene = createAgentScene(recipe(physics(glue), [slab]));
+  scene.sampleMotion(1.5);
+  const report = scene.inspect({}).physics;
+  assert.equal(report.jointBreaks.length, 1);
+  assert.equal(report.jointBreaks[0].joint, 'glue');
+  assert.ok(report.jointBreaks[0].impulse >= 2);
+  assert.throws(() => createAgentScene(recipe(physics({ ...glue, type: 'spherical' }), [slab])), /breakImpulse/);
+  assert.throws(() => createAgentScene(recipe(physics({ ...glue, breakImpulse: 0 }), [slab])), /breakImpulse/);
+});
