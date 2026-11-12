@@ -1025,3 +1025,28 @@ Instanced against flattened on the `cycles` kernel, `bench/instancing/instancing
 The test (`tests/native-instancing-equivalence.test.js`) asks for a mean ratio and every tile ratio inside 0.98 to 1.02 and a relMSE under 5e-4, which is about the seed-to-seed noise of the flattened scene. The images are not bitwise equal, because the instanced kernel transforms rays into object space and the flattened scene stores world-space triangles. Mirrored copies are not in the table: the flattened path winds mirrored parts the wrong way until #1026, so that comparison waits for it.
 
 Scenes without shared geometry did not change. The packed tables (v1 for both kernels, v2 flattened, v2 with `instancing: true` but no sharing, and an instanced scene) and the traced pixels of the `legacy` and `cycles` kernels at 48 x 32 and 16 samples have the same SHA-256 on `origin/main` and on this branch, with both addons built in the same run.
+
+## Native job materials (#1036)
+
+A native render job on the `cycles` kernel used to send v1 material tables, which hold base colour, metallic, roughness, emission, clearcoat, transmission, ior, normal scale, the mask cutoff, subsurface, the light mask and four atlas textures. The page now exports FORMAT-v2 for every `cycles` job (instanced or not) and lays the rest of each material over those fields (`carriedMaterialFields` in `packages/render-native/job-input.mjs`): blend opacity, sheen, `specular` and `specularColor`, anisotropy, iridescence, attenuation, the clearcoat, transmission, sheen, anisotropy and coat normal maps, and the record fields a material may set by their record names. `docs/agent-render-jobs.md` lists what the report still says it ignores.
+
+Same scene, same 4096 samples, 192 x 128, box filter, 8 bounces, seed 1, against Cycles 5.3 (4096 spp, `render-cycles.py`), RTX 4090 `[measured]`. `before` is the v1 tables (what a job sent), `after` the export a job sends now, `bench` the scene packed with `buildNativeInputV2` as the parity benches do. The gates are those of the M1 suite: per-channel mean ratio within 2 percent, 8 x 8 tiles within 5 percent.
+
+| Scene (field) | Mean ratio RGB, before | Mean ratio RGB, after | relMSE (eps 0.01), before | relMSE, after | Tiles within 5 percent, before / after |
+|---|---|---|---|---|---|
+| `blend` (opacity 0.3 pane) | 0.9436, 1.0592, 1.1458 | 0.9997, 0.9998, 0.9998 | 3.81e-2 | 1.12e-5 | 41 / 64 to 64 / 64 |
+| `sheen` (sheenColor, sheenRoughness) | 0.9874, 0.9838, 0.9901 | 0.9996, 0.9996, 0.9996 | 5.33e-3 | 4.74e-6 | 55 / 64 to 64 / 64 |
+| `specular-tint` (specular 0.8, specularColor) | 0.9997, 1.0070, 1.0094 | 0.9997, 0.9997, 0.9997 | 5.68e-3 | 6.77e-6 | 64 / 64 to 64 / 64 |
+| `anisotropy` (0.7, rotated) | 1.0027, 1.0048, 1.0070 | 0.9997, 0.9997, 0.9997 | 2.36e-2 | 7.33e-6 | 55 / 64 to 64 / 64 |
+| `iridescence` (thickness 500, ior 1.4) | 1.0010, 1.0027, 1.0022 | 0.9997, 0.9997, 0.9997 | 7.74e-5 | 6.64e-6 | 64 / 64 to 64 / 64 |
+| `absorption` (attenuation 1 m, green) | 1.1030, 1.0356, 1.0885 | 0.9649, 0.9906, 0.9715 | 1.73e-1 | 1.60e-2 | 48 / 64 to 55 / 64 |
+| `composite` (blend pane over a sheen sphere) | 0.9828, 1.1051, 1.1714 | 0.9997, 0.9998, 0.9998 | 6.73e-2 | 1.14e-5 | 39 / 64 to 64 / 64 |
+
+- The job export and the `bench` packing give the same numbers for every scene except `anisotropy`, so the job path delivers the bench's input. `anisotropy` differs on purpose: the kernel reads the Cycles Principled parameters (a strength that stretches the roughness, a rotation in turns), while a 67js material holds the glTF strength and a rotation in radians. The job converts them as `render-cycles.py` does for Blender; `buildNativeInputV2` on the raw material does not (relMSE 2.26e-2, 55 of 64 tiles, because the lobe is the wrong shape).
+- `absorption` improves by a factor of 11 in relMSE but does not pass the 2 percent mean gate (red 0.9649, blue 0.9715) and has 9 tiles outside 5 percent, in the job export and the bench packing alike. The kernel applies the glTF attenuation exactly (transmittance equals `attenuationColor` after `attenuationDistance`); `render-cycles.py` gives Blender one grey density from the mean log of the colour `[inferred]`, so part of the gap is likely the reference, not the kernel. This was not separated.
+- The v1 tables are still what the legacy kernel and light bakes read. Not carried: `doubleSided` (a job traces every surface two sided, and carrying the 67js default `false` would cull the backs of every material), the `liquid` tag, `occlusionMap`, `lightMap`, `moss` and splat layers, the coat and sheen roughness maps (the record has one slot for each pair), and `thickness`.
+- A scene whose materials cannot be exported whole is traced from the v1 tables for that frame, with the reason in `materialsReason`.
+
+![Opaque pane before, blend pane after, Cycles 5.3 (left to right) for a blend pane over a sheen sphere](native-job-materials.jpg)
+
+Jobs that use none of these fields are unchanged: the tables of a flattened job (all of them, including the kernel parameters), the instanced input of a shared-geometry job, and the PNG of a real job on the demo room, a textured scene, a scene with 40 copies of one mesh and a scene with glass and clearcoat have the same bytes as on the base branch (`tests/native-job-materials.test.js`, `bench/job-materials`).
