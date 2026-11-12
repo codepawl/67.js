@@ -20,6 +20,9 @@ All integers and IEEE-754 `f32` values are **little-endian**. Every structured r
 | `9` | `texture_texels` | `storage, read` | `u32` | `4` | `4` | Packed RGBA8 / RGBA32F / RG16F texel words, IES profiles, Sobol tables |
 | `10` | `environment_texels` | `storage, read` | `vec4<f32>` | `16` | `16` | Linear HDRI texels followed by marginal/conditional CDF rows |
 | `11` | `film_accumulation` | `storage, read_write` | `vec4<f32>` | `16` | `16` | 4 planes of `image_width * image_height` vec4s (radiance+Z, albedo, normal, moments+count) |
+| `12` | `cycles_lut` | `storage, read` | `u32` | `4` | `4` | Static LUTs, then the two pixel filter tables |
+| `13` | `light_tree_emitters` | `storage, read` | `LightTreeEmitter` | `32` | `16` | Emitters in tree order, leaf by leaf (light tree revision 1, section 7b) |
+| `14` | `light_to_tree` | `storage, read` | `u32` | `4` | `4` | Emitter slot of every unified emitter (analytic lights, then emissive triangles) |
 
 ---
 
@@ -302,6 +305,34 @@ Total stride: **64 bytes** (`4 × 16 B`), alignment: **16 bytes**.
 | `52` | `4` | `4` | `u32` | `right_or_first_emitter` | Right child index (internal) or first emitter index (leaf) |
 | `56` | `4` | `4` | `u32` | `emitter_count_and_kind` | Bits `0..15`: leaf count; bit `16`: `0=LightRecord`, `1=EmissiveTriangleRecord`; bit `17`: distant subtree |
 | `60` | `4` | `4` | `u32` | `light_group_mask_or` | Bitwise OR of subtree low-32 light-linking masks |
+
+Light tree revision 1 (`LIGHT_TREE_REVISION` in `light-tree-v2.mjs`; `schemaVersion` stays `2` because the tables only add data) fills this table from `buildLightTree`, a translation of the build half of Cycles 5.3 `scene/light_tree.cpp`:
+
+- **Shape.** Node 0 is the root and children are written in pre-order, so a left child is its parent index plus 1. With sun lights and local emitters (analytic lights other than the sun, plus emissive triangles) the root is an inner node: left child the local tree, right child one distant leaf holding every sun light, as Cycles does. With only one kind the root is that tree or that leaf. The environment is not an emitter of this tree. With no emitters `light_tree_node_count` is `0` and the buffer holds one zeroed node.
+- **Split.** Top-down surface area orientation heuristic: 12 centroid buckets per axis, cost `energy * box area * cone measure` (`area == 0` uses the box diagonal), regularized by `max_extent / extent`. A node splits while a split is cheaper than a leaf or while it holds more than 8 emitters; a split with no cheaper cut falls back to the middle of the list. From depth 24 on nodes split by count, which bounds the depth at 46 so a 64-bit trail always fits. Leaves list their emitters in unified-index order. Emitters are sorted by centroid with the unified index as tie break, so the output is deterministic.
+- **Counts.** At most `4194304` emitters (`LIGHT_TREE_MAX_EMITTERS`) and `65535` emitters per leaf.
+- **Node fields.** `energy` is the sum of the children's energies (leaf: the sum of its emitters). `bounds_*` is the union of the emitters' boxes with energy above zero; a distant leaf and a zero-energy node store `0`. `theta_o`, `cone_axis`, `theta_e` are the merged bounding cone (Cycles `merge`). Internal node: `left_child >= 0`, `right_or_first_emitter` is the right child. Leaf: `left_child == -1`, `right_or_first_emitter` is the first slot in `light_tree_emitters` and bits `0..15` of `emitter_count_and_kind` are the emitter count. Higher bits of that word: bit `16` the subtree has an emissive triangle, bit `17` it is the distant leaf, bit `18` it has an analytic light (internal nodes OR their children's bits, so a mixed leaf sets both 16 and 18; the per-emitter kind in section 7b is authoritative).
+- **Emitter energy.** Emissive triangle `area * mean(|radiance|)`. Area light `mean(|radiance|) * area`. Point and spot `mean(|radiance|)` for a delta light, `mean(|radiance|) * pi * radius^2` otherwise. Sun `mean(|radiance|) * solid_angle`.
+- **Emitter cone.** Point `axis = direction, theta_o = pi, theta_e = pi/2`. Spot `theta_o = 0, theta_e = min(pi/2, acos(cos_half_angle))`. Area `theta_o = 0, theta_e = atan(tan_half_spread)` (`pi/2` for the default spread). Sun `theta_o = 0, theta_e = acos(cos_half_angle)`. Emissive triangle: the kernel emits from both sides, so the double-sided cone of Cycles, an in-plane axis with `theta_o = theta_e = pi/2`.
+- **Boxes.** Point and spot: position plus or minus the radius. Area: the four corners of the rectangle (also for disks, as Cycles does). Triangle: its three vertices.
+- Each `LightRecord.tree_leaf_index` (section 6) holds the node index of the leaf that owns the light.
+
+## 7b. Light Tree Emitters — `LightTreeEmitter` (`@binding(13)`) and `light_to_tree` (`@binding(14)`)
+
+`LightTreeEmitter` stride: **32 bytes**, alignment 16 bytes. Slots are in tree order, so the emitters of a leaf are contiguous. Unified emitter index `i` is an analytic light for `i < light_count` and emissive triangle `i - light_count` otherwise; `light_to_tree[i]` is its slot. Both tables are optional in the napi input (`lightTreeEmitters`, `lightTreeEmitterCount`, `lightToTree` come together or not at all); without them the host binds a zeroed record. The kernel does not read them yet.
+
+| Byte Offset | Size (B) | WGSL Type | Field | Description |
+| ---: | ---: | :--- | :--- | :--- |
+| `0` | `4` | `f32` | `energy` | Emitter energy as above |
+| `4` | `4` | `f32` | `theta_o` | Emitter cone `theta_o` |
+| `8` | `4` | `f32` | `theta_e` | Emitter cone `theta_e` |
+| `12` | `4` | `u32` | `kind_and_depth` | Bit `0` emissive triangle, bit `1` distant, bits `8..15` leaf depth (number of valid trail bits) |
+| `16` | `4` | `u32` | `record_index` | Index into `lights` or `emissive_triangles` |
+| `20` | `4` | `u32` | `leaf_node_index` | Owning leaf node |
+| `24` | `4` | `u32` | `bit_trail_low` | Trail bits `0..31`: bit `d` is set where the path from the root goes right at depth `d` |
+| `28` | `4` | `u32` | `bit_trail_high` | Trail bits `32..63` |
+
+The emitter cone axis is not stored: it is the `direction` of the light, or the in-plane axis `-normalize(edge1)` of a triangle.
 
 ---
 

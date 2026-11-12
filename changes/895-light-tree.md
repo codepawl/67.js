@@ -1,0 +1,1 @@
+- The Cook host builds the Cycles light tree (SAOH bounding volume tree over analytic lights and emissive triangles, sun lights in one distant leaf) into FORMAT-v2 binding 7 and two new bindings 13 and 14; the kernel does not read them yet (#895)

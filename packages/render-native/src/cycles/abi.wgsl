@@ -357,6 +357,21 @@ struct LightTreeNode {
   light_group_mask_or: u32,
 }
 
+// 32 bytes (2 x 16 B), alignment 16 B. One emitter of the light tree, in tree order (FORMAT-v2 section 7b).
+// `kind_and_depth`: bit 0 emissive triangle, bit 1 distant, bits 8..15 depth. `record_index` indexes `lights` or
+// `emissive_triangles`. `bit_trail_low` / `bit_trail_high` hold one bit per tree level, set where the path to the
+// emitter goes right.
+struct LightTreeEmitter {
+  energy: f32,
+  theta_o: f32,
+  theta_e: f32,
+  kind_and_depth: u32,
+  record_index: u32,
+  leaf_node_index: u32,
+  bit_trail_low: u32,
+  bit_trail_high: u32,
+}
+
 // 32 bytes (2 x 16 B), alignment 16 B.
 struct TextureDescriptor {
   @align(16) data_offset: u32,
@@ -530,6 +545,8 @@ struct ClosureSample {
 @group(0) @binding(10) var<storage, read> environment_texels: array<vec4<f32>>;
 @group(0) @binding(11) var<storage, read_write> film_accumulation: array<vec4<f32>>;
 @group(0) @binding(12) var<storage, read> cycles_lut: array<u32>;
+@group(0) @binding(13) var<storage, read> light_tree_emitters: array<LightTreeEmitter>;
+@group(0) @binding(14) var<storage, read> light_to_tree: array<u32>;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Cross-lane closure interface contract (defined in Lane L4 `src/cycles/closure.wgsl`, called by Lane L3 integrator)

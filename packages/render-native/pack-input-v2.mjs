@@ -1,6 +1,8 @@
 // Packs a 67js trace scene (or upgrades a legacy v1 input) into the FORMAT-v2 binary tables read by the Cycles-parity
 // native kernel (`FORMAT-v2.md` and `src/cycles/abi.wgsl`). Pure typed arrays with zero Node-only imports.
 
+import { buildLightTree } from './light-tree-v2.mjs';
+
 export const FORMAT_V2_MAGIC = 0x36375054;
 export const FORMAT_V2_VERSION = 2;
 export const INVALID_INDEX_V2 = 0xffffffff;
@@ -1292,55 +1294,27 @@ function packAnalyticLightsBuffer(entries) {
   };
 }
 
-function packRootLightTreeNode(packedLights, packedEmissives) {
-  const totalEmitters = packedLights.lightCount + packedEmissives.emissiveTriangleCount;
-  const buffer = new Uint8Array(STRUCT_STRIDES_V2.lightTreeNode);
-  if (totalEmitters === 0) {
-    return { lightTreeNodes: buffer, lightTreeNodeCount: 0 };
+// Builds the Cycles light tree over the packed lights and emissive triangles (light-tree-v2.mjs) and records the
+// owning leaf of every analytic light in its `tree_leaf_index` field.
+function packLightTree(packedLights, packedEmissives) {
+  const tree = buildLightTree(
+    packedLights.lights,
+    packedLights.lightCount,
+    packedEmissives.emissiveTriangles,
+    packedEmissives.emissiveTriangleCount
+  );
+  const lightWords = new Uint32Array(packedLights.lights.buffer, packedLights.lights.byteOffset, packedLights.lights.byteLength / 4);
+  const wordsPerLight = STRUCT_STRIDES_V2.light / 4;
+  for (let index = 0; index < packedLights.lightCount; index++) {
+    lightWords[index * wordsPerLight + 27] = tree.lightLeafIndices[index];
   }
-  const f32 = new Float32Array(buffer.buffer, 0, 16);
-  const u32 = new Uint32Array(buffer.buffer, 0, 16);
-  const i32 = new Int32Array(buffer.buffer, 0, 16);
-
-  const boundsMin = [Infinity, Infinity, Infinity];
-  const boundsMax = [-Infinity, -Infinity, -Infinity];
-  for (const candidate of [packedLights, packedEmissives]) {
-    if (!candidate.boundsMin) continue;
-    for (let axis = 0; axis < 3; axis++) {
-      boundsMin[axis] = Math.min(boundsMin[axis], candidate.boundsMin[axis]);
-      boundsMax[axis] = Math.max(boundsMax[axis], candidate.boundsMax[axis]);
-    }
-  }
-  if (!(boundsMin[0] <= boundsMax[0])) {
-    boundsMin.fill(-1);
-    boundsMax.fill(1);
-  }
-
-  const leafCount = Math.min(0xffff, totalEmitters);
-  const kindBit = packedLights.lightCount === 0 && packedEmissives.emissiveTriangleCount > 0 ? (1 << 16) : 0;
-  const distantBit = packedLights.hasDistant ? (1 << 17) : 0;
-
-  f32[0] = boundsMin[0];
-  f32[1] = boundsMin[1];
-  f32[2] = boundsMin[2];
-  f32[3] = packedLights.analyticLightTotalWeight + packedEmissives.emissiveTotalWeight;
-
-  f32[4] = boundsMax[0];
-  f32[5] = boundsMax[1];
-  f32[6] = boundsMax[2];
-  f32[7] = Math.PI;
-
-  f32[8] = 0;
-  f32[9] = 1;
-  f32[10] = 0;
-  f32[11] = Math.PI;
-
-  i32[12] = -1;
-  u32[13] = 0;
-  u32[14] = (leafCount | kindBit | distantBit) >>> 0;
-  u32[15] = (packedLights.maskOr | packedEmissives.maskOr) >>> 0;
-
-  return { lightTreeNodes: buffer, lightTreeNodeCount: 1 };
+  return {
+    lightTreeNodes: tree.nodes,
+    lightTreeNodeCount: tree.nodeCount,
+    lightTreeEmitters: tree.emitters,
+    lightTreeEmitterCount: tree.emitterCount,
+    lightToTree: tree.lightToTree,
+  };
 }
 
 function packEnvironmentTexelsV2(environment, options = {}) {
@@ -2233,7 +2207,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   const packedEmissives = packEmissiveTriangleBuffer(packedGeometry.emissiveList);
   const analyticEntries = buildAnalyticLightEntries(scene.lights);
   const packedLights = packAnalyticLightsBuffer(analyticEntries);
-  const packedLightTree = packRootLightTreeNode(packedLights, packedEmissives);
+  const packedLightTree = packLightTree(packedLights, packedEmissives);
   const packedEnvironment = packEnvironmentTexelsV2(scene.environment, options);
 
   const counts = {
@@ -2274,6 +2248,9 @@ export function buildNativeInputV2(scene, camera, options = {}) {
     lightCount: counts.lightCount,
     lightTreeNodes: packedLightTree.lightTreeNodes,
     lightTreeNodeCount: counts.lightTreeNodeCount,
+    lightTreeEmitters: packedLightTree.lightTreeEmitters,
+    lightTreeEmitterCount: packedLightTree.lightTreeEmitterCount,
+    lightToTree: packedLightTree.lightToTree,
     textureDescriptors: packedTextures.textureDescriptors,
     textureCount: counts.textureCount,
     textureTexels: packedTextures.textureTexels,
@@ -2644,7 +2621,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
   const packedEmissives = packEmissiveTriangleBuffer(emissiveList);
   const analyticEntries = buildAnalyticLightEntries(reconstructedLights);
   const packedLights = packAnalyticLightsBuffer(analyticEntries);
-  const packedLightTree = packRootLightTreeNode(packedLights, packedEmissives);
+  const packedLightTree = packLightTree(packedLights, packedEmissives);
   const packedEnvironment = packEnvironmentTexelsV2(reconstructedEnv, options);
 
   const mergedOptions = {
@@ -2694,6 +2671,9 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     lightCount: counts.lightCount,
     lightTreeNodes: packedLightTree.lightTreeNodes,
     lightTreeNodeCount: counts.lightTreeNodeCount,
+    lightTreeEmitters: packedLightTree.lightTreeEmitters,
+    lightTreeEmitterCount: packedLightTree.lightTreeEmitterCount,
+    lightToTree: packedLightTree.lightToTree,
     textureDescriptors: packedTextures.textureDescriptors,
     textureCount: counts.textureCount,
     textureTexels: packedTextures.textureTexels,

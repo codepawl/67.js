@@ -198,6 +198,9 @@ const MATERIAL_RECORD_BYTES: usize = 256;
 const EMISSIVE_TRIANGLE_RECORD_BYTES: usize = 96;
 const LIGHT_RECORD_BYTES: usize = 128;
 const LIGHT_TREE_NODE_BYTES: usize = 64;
+const LIGHT_TREE_EMITTER_BYTES: usize = 32;
+/// Buffers bound at 2..=10; the light tree emitter and light-to-tree buffers follow them for bindings 13 and 14.
+const CYCLES_SCENE_BUFFER_COUNT: usize = 9;
 const TEXTURE_DESCRIPTOR_BYTES: usize = 32;
 const CYCLES_SAMPLE_OFFSET_BYTE_OFFSET: u64 = 16;
 const LOBE_PROBE_WORKGROUP_SIZE: u32 = 64;
@@ -302,6 +305,8 @@ fn create_cycles_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     layout_entries.extend((2..=10).map(|binding| storage_entry(binding, true)));
     layout_entries.push(storage_entry(11, false)); // film_accumulation (read_write)
     layout_entries.push(storage_entry(12, true));  // cycles_lut (read-only: static LUTs, then the two pixel filter tables)
+    layout_entries.push(storage_entry(13, true));  // light_tree_emitters
+    layout_entries.push(storage_entry(14, true));  // light_to_tree
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("cycles path tracer"),
         entries: &layout_entries,
@@ -386,7 +391,7 @@ fn create_cycles_bind_group(
         wgpu::BindGroupEntry { binding: 0, resource: parameters.as_entire_binding() },
         wgpu::BindGroupEntry { binding: 1, resource: tlas.as_binding() },
     ];
-    for (offset, buffer) in buffers.iter().enumerate() {
+    for (offset, buffer) in buffers[..CYCLES_SCENE_BUFFER_COUNT].iter().enumerate() {
         entries.push(wgpu::BindGroupEntry {
             binding: 2 + offset as u32,
             resource: buffer.as_entire_binding(),
@@ -400,6 +405,12 @@ fn create_cycles_bind_group(
         binding: 12,
         resource: lut_buffer.as_entire_binding(),
     });
+    for (offset, buffer) in buffers[CYCLES_SCENE_BUFFER_COUNT..].iter().enumerate() {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 13 + offset as u32,
+            resource: buffer.as_entire_binding(),
+        });
+    }
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("cycles path tracer"),
         layout: bind_group_layout,
@@ -553,6 +564,38 @@ fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) 
     Ok(())
 }
 
+/// The emitter table and the emitter-to-slot table come together or not at all, and the slot table must cover
+/// every analytic light and emissive triangle of the input.
+fn validate_light_tree_tables(input: &NativeTraceInputV2) -> Result<()> {
+    let (emitters, emitter_count, light_to_tree) = match (
+        &input.light_tree_emitters,
+        input.light_tree_emitter_count,
+        &input.light_to_tree,
+    ) {
+        (None, None, None) => return Ok(()),
+        (Some(emitters), Some(emitter_count), Some(light_to_tree)) => (emitters, emitter_count, light_to_tree),
+        _ => {
+            return Err(failure(
+                "lightTreeEmitters, lightTreeEmitterCount and lightToTree must all be present or all absent. Pack them together with packTraceSceneV2.",
+            ))
+        }
+    };
+    validate_record_buffer("lightTreeEmitters", emitters, emitter_count, LIGHT_TREE_EMITTER_BYTES)?;
+    let unified_count = input.light_count as u64 + input.emissive_triangle_count as u64;
+    if emitter_count as u64 != unified_count {
+        return Err(failure(format!(
+            "lightTreeEmitterCount is {emitter_count} but the input has {unified_count} lights and emissive triangles. The tree must hold every emitter once."
+        )));
+    }
+    if (light_to_tree.len() as u64) < unified_count.max(1) {
+        return Err(failure(format!(
+            "lightToTree holds {} entries, fewer than the {unified_count} emitters of the input.",
+            light_to_tree.len()
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn prepare_cycles_scene(
     input: &NativeTraceInputV2,
     shader_source: String,
@@ -597,6 +640,7 @@ pub(crate) fn prepare_cycles_scene(
         input.texture_count,
         TEXTURE_DESCRIPTOR_BYTES,
     )?;
+    validate_light_tree_tables(input)?;
 
     // Use cached device; open once per process.
     let (device, queue, adapter_name, backend_name, features) = get_cached_device()?;
@@ -777,6 +821,8 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
         storage_buffer(&device, "probe texture descriptors", descriptor_slice),
         storage_buffer(&device, "probe texture texels", bytemuck::cast_slice(texel_slice)),
         storage_buffer(&device, "dummy environment texels", &[0u8; 16]),
+        storage_buffer(&device, "dummy light tree emitters", &[0u8; LIGHT_TREE_EMITTER_BYTES]),
+        storage_buffer(&device, "dummy light to tree", &[0u8; 4]),
     ];
     let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lobe probe accumulation"),
