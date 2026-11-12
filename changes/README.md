@@ -15,6 +15,8 @@ Other docs link here for the rule. Each note holds the changelog bullet exactly 
 
 Keep the bullet to one line a user can read in a few seconds: what they can do now, or what got better, and the issue number. Put the measurements, the method and the edge cases in the pull request and the docs, not here. Start a breaking change with `Breaking:`.
 
+A bullet may carry one picture or clip on the line below it: `  media: <url> <alt text>`. The URL is `https://` or a site path starting with `/`, and a `.mp4` or `.webm` plays as a muted loop. The site changelog shows it under the bullet, and `changes:fold` writes it into `CHANGELOG.md` as markdown (an image line, or a link line for a clip) so the GitHub release notes carry it too.
+
 Do not edit `CHANGELOG.md` in a pull request. Two pull requests then never touch the same file, so GitHub has nothing to conflict on.
 
 `npm run changes` prints the pending notes. At release time `npm run changes:fold` writes them into `CHANGELOG.md` as the section for the version in `package.json` and deletes the files. Then edit that section by hand before the release: merge bullets about the same feature, drop internal ones (benchmark scripts, CI, refactors with no visible effect), and sort the rest under `### Highlights`, `### Agents and MCP`, `### Rendering`, `### glTF`, `### Animation and physics`, `### Tools, docs and site` and `### Breaking changes`. The site shows each `###` heading, and every entry under `Breaking changes` gets the breaking mark.
