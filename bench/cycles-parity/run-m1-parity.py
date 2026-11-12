@@ -33,7 +33,8 @@ def parse_arguments():
     if not argument_list or argument_list[0].startswith("--"):
         raise ValueError(
             "Usage: run-m1-parity.py <workDirectory> [--kernel cycles|legacy] [--samples 1024] "
-            "[--bounces 8] [--seed 1] [--reference-samples 4096] [--noise-floor-only] [--score-only] [--skip-existing]"
+            "[--bounces 8] [--seed 1] [--reference-samples 4096] [--references-directory <dir>] "
+            "[--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--noise-floor-only] [--score-only] [--skip-existing]"
         )
     scenes_text = read_flag_value(argument_list, "--scenes", ",".join(M1_SCENES))
     scenes = [token.strip() for token in scenes_text.split(",") if token.strip()]
@@ -44,6 +45,11 @@ def parse_arguments():
         "bounces": int(read_flag_value(argument_list, "--bounces", "8")),
         "seed": int(read_flag_value(argument_list, "--seed", "1")),
         "reference_samples": int(read_flag_value(argument_list, "--reference-samples", "4096")),
+        "references_directory": os.path.abspath(
+            read_flag_value(argument_list, "--references-directory", os.path.join(os.path.abspath(argument_list[0]), "references"))
+        ),
+        "filter_type": read_flag_value(argument_list, "--filter-type", "box"),
+        "filter_width": read_flag_value(argument_list, "--filter-width", "1.0"),
         "node_binary": read_flag_value(argument_list, "--node-bin", "node"),
         "json_out": read_flag_value(argument_list, "--json-out", ""),
         "scenes": scenes,
@@ -70,8 +76,7 @@ def load_optional_json(file_path):
         return json.load(handle)
 
 
-def evaluate_noise_floor(work_dir, scene_id, ref_samples):
-    ref_dir = os.path.join(work_dir, "references")
+def evaluate_noise_floor(ref_dir, scene_id, ref_samples):
     prefix_a = os.path.join(ref_dir, f"{scene_id}-cycles-{ref_samples}-seed1")
     prefix_b = os.path.join(ref_dir, f"{scene_id}-cycles-{ref_samples}-seed2")
     rgb_a = load_linear_rgb_image(f"{prefix_a}.npy")
@@ -132,6 +137,10 @@ def run_trace_if_needed(options, scene_id, candidate_prefix):
         "1000000000",
         "--noise-threshold",
         "0",
+        "--filter-type",
+        options["filter_type"],
+        "--filter-width",
+        options["filter_width"],
     ]
     measure_cmd = [
         "uv",
@@ -153,7 +162,7 @@ def run_trace_if_needed(options, scene_id, candidate_prefix):
 def evaluate_candidate(options, scene_id, noise_entry):
     work_dir = options["work_directory"]
     ref_samples = options["reference_samples"]
-    ref_a_npy = os.path.join(work_dir, "references", f"{scene_id}-cycles-{ref_samples}-seed1.npy")
+    ref_a_npy = os.path.join(options["references_directory"], f"{scene_id}-cycles-{ref_samples}-seed1.npy")
     cand_dir = os.path.join(work_dir, "harness", f"{options['kernel']}-s{options['samples']}")
     os.makedirs(cand_dir, exist_ok=True)
     cand_prefix = os.path.join(cand_dir, f"{scene_id}-{options['kernel']}-{options['samples']}-seed{options['seed']}")
@@ -213,7 +222,7 @@ def strip_heavy_nested(noise_rows):
 def main():
     options = parse_arguments()
     noise_rows = [
-        evaluate_noise_floor(options["work_directory"], scene_id, options["reference_samples"])
+        evaluate_noise_floor(options["references_directory"], scene_id, options["reference_samples"])
         for scene_id in options["scenes"]
     ]
     if options["noise_floor_only"]:
