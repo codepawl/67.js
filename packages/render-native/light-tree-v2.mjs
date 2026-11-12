@@ -12,6 +12,8 @@ export const LIGHT_TREE_REVISION = 1;
 export const LIGHT_TREE_NODE_BYTES = 64;
 export const LIGHT_TREE_EMITTER_BYTES = 32;
 export const LIGHT_TREE_MAX_LEAF_EMITTERS = 8;
+// The kernel reads at most this many emitters of one leaf (`LTR_MAX_LEAF_EMITTERS` in light_tree.wgsl); only the distant leaf can hold more than 8.
+export const LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS = 32;
 export const LIGHT_TREE_MAX_EMITTERS = 4194304;
 export const LIGHT_TREE_BUCKET_COUNT = 12;
 export const LIGHT_TREE_MAX_DEPTH = 63;
@@ -273,7 +275,8 @@ function lightEmitter(view, index, unifiedIndex) {
 function triangleEmitter(view, index, unifiedIndex) {
   const floats = new Float32Array(view.buffer, view.byteOffset + index * EMISSIVE_TRIANGLE_BYTES, EMISSIVE_TRIANGLE_BYTES / 4);
   const words = new Uint32Array(view.buffer, view.byteOffset + index * EMISSIVE_TRIANGLE_BYTES, EMISSIVE_TRIANGLE_BYTES / 4);
-  assertFiniteNumbers(floats.subarray(0, 20), 'emissive triangle', index);
+  // Words 7, 11 and 15 are u32 indices; only the float fields are checked.
+  assertFiniteNumbers([...floats.subarray(0, 7), ...floats.subarray(8, 11), ...floats.subarray(12, 15), ...floats.subarray(16, 20)], 'emissive triangle', index);
   const origin = [floats[0], floats[1], floats[2]];
   const edgeOne = [floats[4], floats[5], floats[6]];
   const edgeTwo = [floats[8], floats[9], floats[10]];
@@ -548,8 +551,11 @@ function buildDistantLeaf(state, start, end, depth, trailLow, trailHigh) {
     emitter.trailHigh = trailHigh;
   }
   const count = end - start;
-  if (count > LIGHT_TREE_NODE_COUNT_MASK) {
-    throw new Error(`buildLightTree: ${count} distant lights exceed the leaf limit ${LIGHT_TREE_NODE_COUNT_MASK}.`);
+  if (count > LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS) {
+    throw new Error(
+      `buildLightTree: ${count} distant lights exceed the ${LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS} the kernel reads from one leaf. ` +
+        `Pass at most ${LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS} sun or distant lights, or merge some of them.`
+    );
   }
   state.nodes.push({
     measure,

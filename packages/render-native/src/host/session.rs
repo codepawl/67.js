@@ -564,19 +564,35 @@ fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) 
     Ok(())
 }
 
+/// Byte offset of `kernel_flags` in `KernelParamsV2` and its light-tree bit (`KERNEL_FLAG_USE_LIGHT_TREE` in pack-input-v2.mjs).
+const KERNEL_PARAMS_KERNEL_FLAGS_BYTE: usize = 32;
+const KERNEL_FLAG_USE_LIGHT_TREE: u32 = 1;
+
 /// The emitter table and the emitter-to-slot table come together or not at all, and the slot table must cover
 /// every analytic light and emissive triangle of the input.
-fn validate_light_tree_tables(input: &NativeTraceInputV2) -> Result<()> {
+pub(crate) fn validate_light_tree_tables(input: &NativeTraceInputV2) -> Result<()> {
     let (emitters, emitter_count, light_to_tree) = match (
         &input.light_tree_emitters,
         input.light_tree_emitter_count,
         &input.light_to_tree,
     ) {
-        (None, None, None) => return Ok(()),
+        (None, None, None) => {
+            let tree_flag_set = input
+                .kernel_params
+                .get(KERNEL_PARAMS_KERNEL_FLAGS_BYTE..KERNEL_PARAMS_KERNEL_FLAGS_BYTE + 4)
+                .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) & KERNEL_FLAG_USE_LIGHT_TREE != 0)
+                .unwrap_or(false);
+            if tree_flag_set && input.light_tree_node_count > 0 {
+                return Err(failure(
+                    "The light-tree kernel flag is set and the input has light tree nodes, but lightTreeEmitters, lightTreeEmitterCount and lightToTree are missing. Repack the scene with buildNativeInputV2.",
+                ));
+            }
+            return Ok(());
+        }
         (Some(emitters), Some(emitter_count), Some(light_to_tree)) => (emitters, emitter_count, light_to_tree),
         _ => {
             return Err(failure(
-                "lightTreeEmitters, lightTreeEmitterCount and lightToTree must all be present or all absent. Pack them together with packTraceSceneV2.",
+                "lightTreeEmitters, lightTreeEmitterCount and lightToTree must all be present or all absent. Pack them together with buildNativeInputV2.",
             ))
         }
     };

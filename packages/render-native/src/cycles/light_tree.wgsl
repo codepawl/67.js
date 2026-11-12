@@ -98,8 +98,9 @@ fn ltr_importance(
     return vec2<f32>(0.0);
   }
 
-  let safe_max_distance = max(max_distance, 1.0e-6);
-  let maximum_importance = abs(cos_min_incidence_angle * energy * cos_min_outgoing_angle / (safe_max_distance * safe_max_distance));
+  // Cycles divides the maximum importance by the nearest distance and the minimum importance by the farthest one.
+  let safe_min_distance = max(min_distance, 1.0e-6);
+  let maximum_importance = abs(cos_min_incidence_angle * energy * cos_min_outgoing_angle / (safe_min_distance * safe_min_distance));
 
   let cos_theta_plus_theta_u = cos_theta * cos_theta_u - sin_theta * sin_theta_u;
   if (cone_theta_e - cone_theta_o < 0.0 || cos_theta < 0.0 || cos_theta_u < 0.0 || cos_theta_plus_theta_u < cos(cone_theta_e - cone_theta_o)) {
@@ -107,8 +108,8 @@ fn ltr_importance(
   }
   let sin_theta_plus_theta_u = ltr_sin_from_cos(cos_theta_plus_theta_u);
   let cos_max_outgoing_angle = cos_theta_plus_theta_u * cos_theta_o - sin_theta_plus_theta_u * sin_theta_o;
-  let safe_min_distance = max(min_distance, 1.0e-6);
-  let minimum_importance = abs(cos_max_incidence_angle * energy * cos_max_outgoing_angle / (safe_min_distance * safe_min_distance));
+  let safe_max_distance = max(max_distance, 1.0e-6);
+  let minimum_importance = abs(cos_max_incidence_angle * energy * cos_max_outgoing_angle / (safe_max_distance * safe_max_distance));
   return vec2<f32>(maximum_importance, minimum_importance);
 }
 

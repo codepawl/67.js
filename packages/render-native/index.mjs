@@ -13,7 +13,11 @@ import {
   KERNEL_FLAG_WHITE_NOISE_SAMPLER,
   resolveUseLightTree,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
+  KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET,
+  KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET,
   KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET,
+  filterTypeCode,
+  resolveFilterParameters,
   buildNativeInputV2,
   packMaterialRecordV2,
   upgradeNativeInputV1ToV2,
@@ -87,6 +91,9 @@ export function traceNative(input, options = {}) {
     new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
     v2Input = { ...v2Input, kernelParams: patchedParams };
   }
+  if (input?.schemaVersion === FORMAT_V2_VERSION && hasFilterOptions(options)) {
+    v2Input = { ...v2Input, kernelParams: withFilterOptions(v2Input.kernelParams, options) };
+  }
   if (input?.schemaVersion === FORMAT_V2_VERSION && options.sampler !== undefined) {
     v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, options.sampler) };
   }
@@ -103,12 +110,48 @@ export function traceNative(input, options = {}) {
   });
 }
 
-function withLightSamplingFlag(v2Input, lightSampling) {
+function hasFilterOptions(options) {
+  return options.filterType !== undefined || options.pixelFilter !== undefined || options.filterWidth !== undefined;
+}
+
+// A packed input already carries its filter; explicit options replace it. A new type without a width gets that type's
+// default width, as the packer does; a width alone keeps the packed type.
+// Exported for tests; not part of the public API.
+export function withFilterOptions(kernelParams, options) {
+  const patchedParams = new Uint8Array(kernelParams);
+  const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
+  const requestedType = options.filterType ?? options.pixelFilter;
+  const filterType = requestedType !== undefined
+    ? filterTypeCode(requestedType)
+    : view.getUint32(KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET, true);
+  const filterWidth = options.filterWidth !== undefined || requestedType !== undefined
+    ? resolveFilterParameters({ filterType, filterWidth: options.filterWidth }).filterWidth
+    : view.getFloat32(KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET, true);
+  view.setUint32(KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET, filterType, true);
+  view.setFloat32(KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET, filterWidth, true);
+  return patchedParams;
+}
+
+function hasLightTreeEmitterTables(v2Input) {
+  return Boolean(v2Input.lightTreeEmitters && v2Input.lightToTree && v2Input.lightTreeEmitterCount !== undefined);
+}
+
+// Exported for tests; not part of the public API.
+export function withLightSamplingFlag(v2Input, lightSampling) {
   const patchedParams = new Uint8Array(v2Input.kernelParams);
   const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
   const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
   const emitterCount = (v2Input.lightCount ?? 0) + (v2Input.emissiveTriangleCount ?? 0);
-  const useTree = resolveUseLightTree(lightSampling, emitterCount, v2Input.lightTreeNodeCount ?? 0);
+  let lightTreeNodeCount = v2Input.lightTreeNodeCount ?? 0;
+  if (lightTreeNodeCount > 0 && !hasLightTreeEmitterTables(v2Input)) {
+    if (lightSampling === 'tree') {
+      throw new TypeError(
+        'traceNative: lightSampling "tree" needs the emitter tables (lightTreeEmitters, lightTreeEmitterCount, lightToTree), which this packed FORMAT-v2 input lacks. Repack the scene with buildNativeInputV2.'
+      );
+    }
+    lightTreeNodeCount = 0;
+  }
+  const useTree = resolveUseLightTree(lightSampling, emitterCount, lightTreeNodeCount);
   const patchedFlags = useTree
     ? (flags | KERNEL_FLAG_USE_LIGHT_TREE) >>> 0
     : (flags & ~KERNEL_FLAG_USE_LIGHT_TREE) >>> 0;

@@ -5,7 +5,8 @@
 // `KERNEL_FLAG_WHITE_NOISE_SAMPLER`:
 //   - default: Cycles 5.3 BLUE_NOISE_PURE, a translation of kernel/sample/{pattern,sobol_burley,util}.h and
 //     util/hash.h: one Owen-scrambled Sobol sequence (seed 0) where each pixel owns a section of
-//     `total_samples` consecutive indices, found by a base-4 Owen scrambled Morton code of the pixel.
+//     `total_samples` consecutive indices (modulo 2^32, as in Cycles, so sections can overlap when pixel rank times
+//     `total_samples` exceeds 2^32), found by a base-4 Owen scrambled Morton code of the pixel.
 //   - white: a stateless PCG4D hash per draw, unstratified across samples.
 // Sobol-Burley decisions are addressed by a dimension set. The path loop calls `smp_seek` before each decision so
 // that a bounce that skips a light kind does not shift the sets of the others (Cycles reserves PRNG_BOUNCE_NUM = 16

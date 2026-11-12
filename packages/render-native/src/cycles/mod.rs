@@ -416,6 +416,17 @@ mod specialization_tests {
         }
     }
 
+    #[test]
+    fn light_tree_flag_without_emitter_tables_is_rejected() {
+        let flagged = dummy_input(&make_kp(1, 0.0, 0, 0, 0.0), &[], &[], &[]);
+        let message = crate::host::session::validate_light_tree_tables(&flagged)
+            .expect_err("a flagged input without emitter tables must fail")
+            .to_string();
+        assert!(message.contains("buildNativeInputV2"), "{message}");
+        let unflagged = dummy_input(&make_kp(0, 0.0, 0, 0, 0.0), &[], &[], &[]);
+        assert!(crate::host::session::validate_light_tree_tables(&unflagged).is_ok());
+    }
+
     fn make_kp(kernel_flags: u32, volume_density: f32, env_width: u32, env_height: u32, env_total_weight: f32) -> Vec<u8> {
         let mut kp = vec![0u8; 320];
         // magic & version at bytes 0-7

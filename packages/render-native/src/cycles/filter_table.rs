@@ -73,7 +73,9 @@ fn invert_cdf_symmetric(resolution: usize, range: f32, cdf: &[f32]) -> Vec<f32> 
 /// Builds the Cycles filter table for `filter_width` (in pixels). Entry `i` is the sample position inside the
 /// pixel, in pixels from its corner, for the unit random number `i / (FILTER_TABLE_SIZE - 1)`. Entry 1023 stays 0,
 /// exactly as in Cycles: its even-sized symmetric table writes only entries 0..1022, so a unit random number above
-/// 1022/1023 interpolates toward 0 (about 0.1% of samples). It is kept so the kernel matches Cycles sample for sample.
+/// 1022/1023 interpolates toward 0 (about 0.1% of samples). It is kept so the Blackman-Harris and Gaussian tables match Cycles at
+/// filter width 1 (the kernel scales the sampled offset by the width, so the last interval differs at other widths). The box filter
+/// is analytic in the kernel and has no such quirk.
 pub(crate) fn build_filter_table(kind: FilterKind, filter_width: f32) -> Vec<f32> {
     let support_width = match kind {
         FilterKind::Gaussian => filter_width * 3.0,

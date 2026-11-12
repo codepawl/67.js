@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeInputV2 } from '../packages/render-native/index.mjs';
+import { buildNativeInputV2, withLightSamplingFlag } from '../packages/render-native/index.mjs';
+import { readFileSync } from 'node:fs';
 import {
   LIGHT_TREE_EMITTER_BYTES,
+  LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS,
   LIGHT_TREE_MAX_EMITTERS,
   LIGHT_TREE_NODE_BYTES,
   buildLightTree,
@@ -493,4 +495,55 @@ test('buildNativeInputV2 packs the tree, fills tree_leaf_index and keeps counts 
   }
   const kp = new Uint32Array(v2.kernelParams.buffer, v2.kernelParams.byteOffset, 80);
   assert.equal(kp[26], v2.lightTreeNodeCount, 'kernel params carry the node count');
+});
+
+test('the distant leaf limit matches the per-leaf clamp of the kernel', () => {
+  const kernelSource = readFileSync(new URL('../packages/render-native/src/cycles/light_tree.wgsl', import.meta.url), 'utf8');
+  const match = /const LTR_MAX_LEAF_EMITTERS: u32 = (\d+)u;/.exec(kernelSource);
+  assert.ok(match, 'light_tree.wgsl declares LTR_MAX_LEAF_EMITTERS');
+  assert.equal(Number(match[1]), LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS);
+});
+
+test('more distant lights than the kernel reads from one leaf are rejected with the allowed count', () => {
+  const allowed = LIGHT_TREE_KERNEL_MAX_LEAF_EMITTERS;
+  const suns = (count) => {
+    const bytes = new Uint8Array(count * LIGHT_BYTES);
+    for (let index = 0; index < count; index++) {
+      writeLight(bytes, index, { position: [0, 0, 0], type: TYPE_SUN, radiance: [1, 1, 1], direction: [0, 1, 0] });
+    }
+    return bytes;
+  };
+  assert.doesNotThrow(() => buildLightTree(suns(allowed), allowed, new Uint8Array(TRIANGLE_BYTES), 0));
+  assert.throws(
+    () => buildLightTree(suns(allowed + 1), allowed + 1, new Uint8Array(TRIANGLE_BYTES), 0),
+    new RegExp(`${allowed + 1} distant lights exceed the ${allowed} the kernel reads from one leaf. Pass at most ${allowed}`)
+  );
+});
+
+test('index words of an emissive triangle are not checked as floats', () => {
+  const triangles = makeTriangles(2, 61);
+  const words = new Uint32Array(triangles.buffer);
+  words[7] = 0xffffffff;
+  words[11] = 0x7fc00000;
+  words[15] = 0xffffffff;
+  assert.doesNotThrow(() => buildLightTree(makeLights(1, 62), 1, triangles, 2));
+});
+
+test('lightSampling on a packed v2 input without emitter tables is rejected for "tree" and ignored for "auto"', () => {
+  const kernelParams = new Uint8Array(320);
+  const staleInput = { kernelParams, lightCount: 40, emissiveTriangleCount: 0, lightTreeNodeCount: 1 };
+  const flagsOf = (params) => new DataView(params.buffer, params.byteOffset).getUint32(32, true);
+  assert.throws(
+    () => withLightSamplingFlag(staleInput, 'tree'),
+    /lightSampling "tree" needs the emitter tables .* Repack the scene with buildNativeInputV2/
+  );
+  assert.equal(flagsOf(withLightSamplingFlag(staleInput, 'auto')) & 1, 0);
+  const completeInput = {
+    ...staleInput,
+    lightTreeEmitters: new Uint8Array(32),
+    lightToTree: new Uint32Array(1),
+    lightTreeEmitterCount: 40,
+  };
+  assert.equal(flagsOf(withLightSamplingFlag(completeInput, 'tree')) & 1, 1);
+  assert.equal(flagsOf(withLightSamplingFlag(completeInput, 'uniform')) & 1, 0);
 });

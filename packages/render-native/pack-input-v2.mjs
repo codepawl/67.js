@@ -11,6 +11,9 @@ export const INVALID_INDEX_V2 = 0xffffffff;
 // Used in `packKernelParamsV2` and in `index.mjs` when patching a pre-built buffer.
 export const KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET = 300;
 export const KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET = 32;
+// Byte offsets of `filter_type` (u32[19]) and `filter_width` (f32[20]); the packer and `traceNative` share them.
+export const KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET = 76;
+export const KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET = 80;
 
 export const VALID_SAMPLERS = Object.freeze(['sobol-burley', 'white']);
 /** `auto` picks the light tree when the scene has more than `LIGHT_TREE_AUTO_MIN_EMITTERS` emitters. */
@@ -1586,7 +1589,7 @@ const FILTER_TYPE_CODES = Object.freeze({
   blackman_harris: 2,
 });
 
-function filterTypeCode(filter) {
+export function filterTypeCode(filter) {
   if (filter === 0 || filter === 1 || filter === 2) {
     return filter;
   }
@@ -1609,7 +1612,7 @@ export function validateFilterOptions(options, callerName) {
   }
 }
 
-function resolveFilterParameters(options = {}) {
+export function resolveFilterParameters(options = {}) {
   const filterType = filterTypeCode(options.filterType ?? options.pixelFilter ?? 0) ?? 0;
   const defaultWidth = filterType === 0 ? 1.0 : 1.5;
   const filterWidth = options.filterWidth ?? defaultWidth;
@@ -1726,9 +1729,9 @@ function packKernelParamsV2({
   u32[16] = maxVolumeBounces >>> 0;
   u32[17] = maxTransparentBounces >>> 0;
   u32[18] = minBounceRr >>> 0;
-  u32[19] = filterType >>> 0;
+  u32[KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET / 4] = filterType >>> 0;
 
-  f32[20] = filterWidth;
+  f32[KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET / 4] = filterWidth;
   u32[21] = counts.instanceCount >>> 0;
   u32[22] = counts.triangleCount >>> 0;
   u32[23] = counts.materialCount >>> 0;
