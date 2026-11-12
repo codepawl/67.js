@@ -1047,6 +1047,36 @@ export const REFERENCE_SCENES = {
     };
   },
 
+  // Issue #894: three blended layers of opacity 0.5 (red, green, blue, nearest first) in front of a lit grey backdrop, seen head on.
+  // The layers cover different parts of the frame, so the left third of the picture sees one layer, the middle third two and the
+  // right third three. The backdrop stops short of the top of the frame, where a uniform sky shows through the layers. The picture
+  // tells how many transparent surfaces a camera path passes at each transparent bounce limit and whether it still reaches the sky.
+  async 'transparent-bounces'() {
+    const lighting = constantLighting(0.3);
+    const cube = box(0, 1);
+    const layer = (name, color, depth, left, width) => part(
+      name,
+      wallQuad(1, 5),
+      [left + width / 2, -2, depth],
+      [width, 1, 1],
+      { color, roughness: 0.6, alphaMode: 'blend', opacity: 0.5 },
+    );
+    const parts = [
+      part('backdrop', cube, [0, 0.2, -2.05], [12, 3.2, 0.1], { color: [0.7, 0.7, 0.7], roughness: 0.9 }),
+      layer('layer-near-red', [0.9, 0.3, 0.25], 2, -3, 6),
+      layer('layer-middle-green', [0.3, 0.85, 0.35], 1, -0.863, 4.863),
+      layer('layer-far-blue', [0.3, 0.4, 0.9], 0, 1.078, 2.922),
+    ];
+    const pointLights = [
+      { position: [1, 2.5, 4.5], color: [1, 0.95, 0.9], intensity: 40, radius: 0.15, castShadow: true },
+    ];
+    return {
+      parts, blenderWorld: lighting.blenderWorld,
+      environment: environment(lighting, { pointLights }),
+      camera: { eye: [0, 0.7, 5], target: [0, 0.7, -2], up: [0, 1, 0], fov: 40, near: 0.05, far: 50 },
+    };
+  },
+
   // Issue #623: a 36 m corridor with 24 lamps (16 point, 8 spot) along the ceiling and nothing else lighting it, so most lamps are far from
   // any point and a light tree has something to choose. The lamps do not cast shadow maps (the rasterizer's atlas holds 24 tiles); the path tracer and Cycles shadow every light.
   async 'many-lights'() {

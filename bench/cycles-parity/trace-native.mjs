@@ -96,7 +96,7 @@ function parseLightSamplingOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -106,6 +106,10 @@ function parseTraceArguments(argumentList) {
     height: parseIntegerOption(argumentList, '--height', 540, 16),
     samples: parseIntegerOption(argumentList, '--samples', 256, 1),
     bounces: parseIntegerOption(argumentList, '--bounces', 8, 0),
+    // Transparent max bounces on its own; undefined keeps the pack default (the larger of --bounces and 8).
+    transparentBounces: argumentList.includes('--transparent-bounces')
+      ? parseIntegerOption(argumentList, '--transparent-bounces', 8, 0)
+      : undefined,
     seed: parseIntegerOption(argumentList, '--seed', 1, 0),
     filterType: parseFilterTypeOption(argumentList),
     sampler: parseSamplerOption(argumentList),
@@ -199,6 +203,7 @@ async function runCli() {
     samplesPerDispatch: traced.samplesPerDispatch ?? null,
     longestDispatchSeconds: traced.longestDispatchSeconds ?? null,
     bounces: options.bounces,
+    transparentBounces: options.transparentBounces ?? null,
     seed: options.seed,
     filterType: options.filterType,
     sampler: options.sampler,
