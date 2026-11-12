@@ -1220,3 +1220,46 @@ Same scene, same 4096 samples, 192 x 128, box filter, 8 bounces, seed 1, against
 ![Opaque pane before, blend pane after, Cycles 5.3 (left to right) for a blend pane over a sheen sphere](native-job-materials.jpg)
 
 Jobs that use none of these fields are unchanged: the tables of a flattened job (all of them, including the kernel parameters), the instanced input of a shared-geometry job, and the PNG of a real job on the demo room, a textured scene, a scene with 40 copies of one mesh and a scene with glass and clearcoat have the same bytes as on the base branch (`tests/native-job-materials.test.js`, `bench/job-materials`).
+
+## Sphere lights and Soft Falloff (#1040)
+
+Cook rendered a point light with a radius up to 41 percent brighter than Cycles on the Classroom scene (six lamps of radius 0.18 m inside shades). The cause is in the comparison, not in the kernel `[measured on small scenes, inferred for Classroom]`:
+
+- Blender 4 and later give a point or spot light the property `Light.use_soft_falloff`, on by default. With it on, Cycles builds a light with a radius as an oriented disk that faces the shading point (`intern/cycles/blender/light.cpp`: `set_is_sphere(!(mode & LA_USE_SOFT_FALLOFF))`; `kernel/light/point.h`, `point_light_sample`, the `else` branch). With it off, Cycles builds the sphere: it samples the cone of the sphere from outside, the surface from inside, and a path that hits the sphere uses the same pdf.
+- Cook implements the sphere (`lgt_sample_point_or_spot_light`, `lgt_sphere_solid_angle_pdf` in `lights.wgsl`), with the radiance `intensity / (pi r^2)` that Cycles uses (`eval_fac` in `PointLight::copy_to_kernel`), so the power does not change with the radius.
+- `render-cycles.py` never set the property, so every Cycles reference with a light radius used the disk and Cook the sphere. The two agree far from geometry (radius 0.05 m: 0.05 percent apart) and drift as the lamp grows or touches geometry.
+
+Fix: `render-cycles.py` sets `use_soft_falloff` explicitly, to off by default, so both renderers draw a sphere. `--soft-falloff default|on|off` keeps the Blender default (`default`) or the disk (`on`) available. The kernel and the packer are unchanged (SHA-256 of the Cook output is identical to `origin/main`, below). Cook has no disk light, so a scene authored in Blender with the default Soft Falloff still differs by the amounts in the left column.
+
+Cook over Cycles mean radiance (the three channels agree to 4 digits on grey diffuse scenes), 1024 spp, 480 x 270, 8 bounces, box filter, seed 1, one RTX 4090, Blender 5.3.0 OptiX, all materials grey diffuse, one lamp of intensity 8 at 1.6 m in the `lit-interior` room (`make-sphere-light-scenes.mjs`). "Before" is Cycles with the Blender default (disk), "after" is Cycles with Soft Falloff off `[measured]`:
+
+| Scene | Mean ratio before | Mean ratio after | Tiles within 5 % before / after | relMSE before / after | Cycles seed 2 over seed 1 relMSE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| bare room, radius 0 | 1.0001 | 1.0001 | 64 / 64 | 0.000471 / 0.000471 | 0.000543 |
+| bare room, radius 0.05 m | 1.0005 | 1.0001 | 64 / 64 | 0.000472 / 0.000471 | 0.000543 |
+| bare room, radius 0.18 m | 1.0059 | 1.0001 | 64 / 64 | 0.000506 / 0.000472 | 0.000543 |
+| bare room, radius 0.5 m | 1.0441 | 1.0001 | 54 / 64 to 64 / 64 | 0.002205 / 0.000480 | 0.000551 |
+| 0.18 m lamp inside an open-bottomed shade | 1.1584 | 1.0011 | 0 / 64 to 64 / 64 | 0.183 / 0.146 | 0.161 |
+| same shade, hidden from shadow rays | 1.0656 | 0.9918 | 18 / 64 to 62 / 64 | 0.0265 / 0.0228 | 0.0250 |
+| 0.18 m lamp poking through the shade walls | 5.1383 | 0.9901 | 0 / 64 to 64 / 64 | 412 / 0.120 | 0.120 |
+| same, hidden from shadow rays | 1.4710 | 0.9689 | 0 / 64 to 60 / 64 | 53.4 / 0.0529 | 0.0559 |
+| control: radius 0 in the shade | 1.0011 | 1.0011 | 64 / 64 | 0.146 / 0.146 | 0.162 |
+| control: radius 0 in the shade, hidden from shadow rays | 0.9917 | 0.9917 | 62 / 64 | 0.0224 / 0.0224 | 0.0247 |
+
+The relMSE of the shade scenes sits at its seed floor because the light only leaves through the opening and most tiles are dark. After the fix the sphere light of 0.18 m in the bare room is within 0.01 percent in the mean and every tile is within 0.12 percent. The enclosed and poking lamps are within 1 percent. What is left:
+
+- The shade hidden from shadow rays is 0.8 percent dark in Cook for a radius of 0 as well (tiles 0.776 and 0.833 on the shade's front wall), so it is not a sphere light effect: it comes from `rayVisibility: { shadow: false }` through `--instancing` and is not explained yet. With the lamp poking through the walls the mean is 3.1 percent dark (0.9689, 60 of 64 tiles), 2.1 points more than the same shade not hidden (0.9901), so the hidden shade case stays above the 2 percent line and is open.
+- At 1 bounce the enclosed 0.18 m lamp is 11.5 percent bright in Cook (floor tiles up to 1.165) while radius 0 matches (0.9998) and the bare room is 0.26 percent bright. At the default 8 bounces it matches. The cause was not found (a guess: how the last bounce counts a path that hits the sphere through the opening). It is open and outside the default setting.
+
+Scenes of `bench/reference/scenes.js` whose Cycles reference changes with the new default (a light with a radius), real materials, same settings, Cook over Cycles mean, R channel, before to after `[measured]`: `lit-interior` 1.0034 to 1.0003, `many-lights-500` 1.0011 to 1.0005, `light-linking` 1.0008 to 0.9998, `spot-area` 1.0000 to 0.9999 (all tiles within 5 percent before and after). `metal`, `glass` and `outdoor-hdri` have no light with a radius and their numbers do not change. Cook's own output is byte identical to `origin/main` for `lit-interior`, `glass` and `many-lights-500` on both kernels (64 spp, seed 3, 4 bounces, 480 x 270, built beside each other in one run).
+
+![Cycles with Blender's default Soft Falloff, Cook, Cycles with Soft Falloff off (left to right) for a 0.18 m lamp poking through a shade](cycles-sphere-light-comparison.jpg)
+
+Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
+
+```sh
+node packages/render-native/build.mjs
+uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/sphere-light --repeat-cycles-seed2 --reference-scenes spot-area,light-linking,lit-interior,many-lights-500
+```
+
+`make-sphere-light-scenes.mjs` writes the lamp scenes and `run-sphere-light-parity.py` renders them with Cook and with Cycles (Soft Falloff default and off) and prints one line per scene. The scenes hidden from shadow rays need `--instancing` in `trace-native.mjs` and `rayVisibility` in `render-cycles.py`, which come with the Classroom bridge (#896). `tests/cycles-sphere-light-parity.test.js` pins the default and the closed form (floor radiance `albedo / pi * intensity / d^2` for radius 0, 0.18 and 0.5 m).
