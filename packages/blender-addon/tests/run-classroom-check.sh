@@ -24,3 +24,13 @@ uv run --no-project python -c "
 import json
 s=json.load(open('artifacts/classroom/summary.json'))
 print(json.dumps({k:s.get(k) for k in ('samples','errors','gates','parityGates','depth','blender')}, default=str)[:3000])" 2>&1 | head -20
+echo "== the refactored bridge against the bridge before the refactor (same export?)"
+timeout 120 ~/blender/blender -b --disable-autoexec "$BLEND" --python bench/cycles-parity/classroom_bridge_before.py -- export artifacts/classroom/scene-before --width 960 --height 540 > artifacts/900/bridge-before.log 2>&1
+echo "export with the earlier bridge exit: $?"
+uv run --no-project python -c "
+import json
+new = json.load(open('artifacts/classroom/scene/classroom.json'))
+old = json.load(open('artifacts/classroom/scene-before/classroom.json'))
+for key in sorted(set(new) | set(old)):
+    print(key, 'same' if new.get(key) == old.get(key) else 'DIFFERENT')
+"

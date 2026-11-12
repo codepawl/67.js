@@ -61,9 +61,10 @@ class CookRenderEngine(bpy.types.RenderEngine):
     def render(self, depsgraph):
         try:
             self._render(depsgraph)
-        except (native_runner.CookSetupError, ValueError, RuntimeError) as error:
+        except Exception as error:
+            # Any failure ends the render with a message; an exception left to Blender would end it with a crash report.
             self.report({"ERROR"}, f"Cook: {error}")
-            log(f"error: {error}")
+            log(f"error: {type(error).__name__}: {error}")
             self.error_set(str(error))
 
     def _render(self, depsgraph):

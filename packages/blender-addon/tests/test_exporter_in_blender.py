@@ -5,6 +5,7 @@
 Exits non-zero on the first failed check, and prints one line per passed check.
 """
 import base64
+import json
 import math
 import os
 import sys
@@ -62,6 +63,7 @@ def test_small_scene():
     check(abs(description["camera"]["fov"] - math.degrees(2 * math.atan(18.0 / 35.0 * 270 / 480))) < 1e-3, "the camera field of view is exported")
     check(not report["materialNotes"], "a fully supported scene reports no material notes")
     check(lens == {"enabled": False}, "a camera without depth of field has no lens entry")
+    check(len(json.dumps(description)) > 1000, "the whole description is plain JSON")
 
 
 def test_collection_instances():
@@ -109,6 +111,30 @@ def test_material_slots_and_notes():
     check(all(len(set(notes_for)) == len(notes_for) for notes_for in report["materialNotes"].values()), "no material repeats a note")
 
 
+def test_other_surface_shaders():
+    scene = scene_fixtures.build_small_scene("small")
+    ball_mesh = bpy.data.meshes["BallMesh"]
+    for name, node_type in (("DiffuseOnly", "ShaderNodeBsdfDiffuse"), ("EmissionOnly", "ShaderNodeEmission"), ("GlassOnly", "ShaderNodeBsdfGlass")):
+        material = bpy.data.materials.new(name)
+        material.use_nodes = True
+        tree = material.node_tree
+        shader = tree.nodes.new(node_type)
+        tree.links.new(shader.outputs[0], tree.get_output_node("ALL").inputs["Surface"])
+        ball_mesh.materials.append(material)
+        if name == "DiffuseOnly":
+            texture = tree.nodes.new("ShaderNodeTexImage")
+            texture.image = scene_fixtures.make_checker_image("diffuse-checker")
+            tree.links.new(texture.outputs["Color"], shader.inputs["Color"])
+    for index, polygon in enumerate(ball_mesh.polygons):
+        polygon.material_index = 1 + index % 3
+    bpy.context.view_layer.update()
+    description, _, report, _ = export(scene)
+    json.dumps(description)
+    check(any(material.get("map") for material in description["materials"]), "a Diffuse shader with an image gives a mapped material")
+    check(any(material.get("emission", 0) > 0 and material["color"] == [0.0, 0.0, 0.0] for material in description["materials"]), "an Emission shader gives an emissive material")
+    check(any("BSDF_GLASS" in note for note in report["materialNotes"]["GlassOnly"]), "a Glass shader is reported with its fallback")
+
+
 def test_lights_and_camera():
     scene = scene_fixtures.build_small_scene("small")
     scene_fixtures.add_light(scene, "Spot", "SPOT", (0.0, 0.0, 4.0), 500.0)
@@ -144,7 +170,7 @@ def test_hdri_world():
 
 
 def main():
-    for test in (test_small_scene, test_collection_instances, test_material_slots_and_notes, test_lights_and_camera, test_hdri_world):
+    for test in (test_small_scene, test_collection_instances, test_material_slots_and_notes, test_other_surface_shaders, test_lights_and_camera, test_hdri_world):
         test()
     print(f"{len(CHECKS_PASSED)} checks passed", flush=True)
 

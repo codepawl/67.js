@@ -220,21 +220,21 @@ class MaterialExporter:
         return entry
 
     def apply_base_color(self, name, node, entry):
+        """Sets the colour (and map) of the entry; returns the image node that feeds it, or None."""
         color, color_node = self.read_color(name, node.inputs["Color" if node.type == "BSDF_DIFFUSE" else "Base Color"], "Base Color")
         entry["color"] = color
-        entry["_baseImageNode"] = None
         if color_node is None:
-            return
+            return None
         texture = self.texture_from_image(name, color_node.image, self.color_space_of(color_node))
-        if texture is not None:
-            entry["map"] = texture
-            entry["color"] = [1.0, 1.0, 1.0]
-            entry["_baseImageNode"] = color_node
+        if texture is None:
+            return None
+        entry["map"] = texture
+        entry["color"] = [1.0, 1.0, 1.0]
+        return color_node
 
     def convert_principled(self, name, node):
         entry = {"tag": "surface"}
-        self.apply_base_color(name, node, entry)
-        base_image_node = entry.pop("_baseImageNode")
+        base_image_node = self.apply_base_color(name, node, entry)
         self.apply_metallic_roughness(name, node, entry)
         self.apply_alpha(name, node, entry, base_image_node)
         self.apply_normal(name, node, entry)
