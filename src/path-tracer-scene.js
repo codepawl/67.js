@@ -14,6 +14,11 @@ import { liftRankedTriangles } from './flush-lift.js';
 // and colours, one resolved material per part, the lights in plain arrays, and the environment map as a sampling table.
 
 export const MAX_TRACE_TRIANGLES = 400_000;
+// The bound a scene built for the native "cycles" tracer may ask for with `options.maximumTriangles` (unique triangles of an
+// instanced scene, all triangles of a flattened one). The CPU and WebGL tracers never pass it and keep MAX_TRACE_TRIANGLES.
+export const MAX_NATIVE_TRACE_TRIANGLES = 4_000_000;
+// With that option an instanced scene also counts every copy: at most this many times `maximumTriangles` triangles in total.
+export const NATIVE_INSTANCED_TOTAL_FACTOR = 4;
 export const MAX_TRACE_PARTS = 1024;
 // An instanced trace counts triangles once per shared geometry and bounds the copies on their own.
 export const MAX_TRACE_INSTANCES = 65_536;
@@ -258,7 +263,20 @@ function writeWorldPart(world, part, geometry, partIndex, vertexOffset, triangle
   world.triangleMaterial.fill(partIndex, triangleOffset, triangleOffset + geometry.indices.length / 3);
 }
 
-function flattenParts(parts, geometries = parts.map(traceGeometry)) {
+/**
+ * The triangle bounds of one build: the CPU and WebGL default, or the native bound an exporter for the "cycles" kernel
+ * asks for with `maximumTriangles`. A bad value is refused here so a typo cannot lift the bound.
+ */
+function resolveTriangleLimits(options) {
+  const requested = options?.maximumTriangles;
+  if (requested === undefined) return { native: false, unique: MAX_TRACE_TRIANGLES, total: Infinity };
+  if (!Number.isInteger(requested) || requested < 1 || requested > MAX_NATIVE_TRACE_TRIANGLES) {
+    throw new RangeError(`buildTraceScene option maximumTriangles is an integer from 1 to ${MAX_NATIVE_TRACE_TRIANGLES} for the native path tracer, got ${requested}. Leave it out for the CPU and WebGL path tracers, which take at most ${MAX_TRACE_TRIANGLES} triangles.`);
+  }
+  return { native: true, unique: requested, total: requested * NATIVE_INSTANCED_TOTAL_FACTOR };
+}
+
+function flattenParts(parts, geometries = parts.map(traceGeometry), limits = resolveTriangleLimits()) {
   let vertexTotal = 0;
   let indexTotal = 0;
   parts.forEach((part, index) => validatePart(part, geometries[index]));
@@ -266,7 +284,11 @@ function flattenParts(parts, geometries = parts.map(traceGeometry)) {
     vertexTotal += geometry.positions.length / 3;
     indexTotal += geometry.indices.length;
   }
-  if (indexTotal / 3 > MAX_TRACE_TRIANGLES) throw new RangeError(`A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`);
+  if (indexTotal / 3 > limits.unique) {
+    throw new RangeError(limits.native
+      ? `A native path trace takes at most ${limits.unique} triangles in total, got ${indexTotal / 3}. Share geometry between copies (they stay instances) or simplify the meshes.`
+      : `A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`);
+  }
   const world = allocateWorld(vertexTotal, indexTotal);
   let vertexOffset = 0;
   let triangleOffset = 0;
@@ -385,9 +407,11 @@ function measureInstancedParts(parts, geometries) {
   const seen = new Set();
   let uniqueGeometries = 0;
   let uniqueTriangles = 0;
+  let totalTriangles = 0;
   parts.forEach((part, index) => {
     const geometry = geometries[index];
     validateMatrix(part);
+    totalTriangles += geometry.indices.length / 3;
     if (sharesAuthoredGeometry(part, geometry)) {
       if (seen.has(geometry)) return;
       seen.add(geometry);
@@ -396,18 +420,21 @@ function measureInstancedParts(parts, geometries) {
     uniqueGeometries++;
     uniqueTriangles += geometry.indices.length / 3;
   });
-  return { uniqueGeometries, uniqueTriangles };
+  return { uniqueGeometries, uniqueTriangles, totalTriangles };
 }
 
-function requireInstancedCaps(parts, { uniqueGeometries, uniqueTriangles }) {
+function requireInstancedCaps(parts, { uniqueGeometries, uniqueTriangles, totalTriangles }, limits) {
   if (parts.length > MAX_TRACE_INSTANCES) {
     throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_INSTANCES} instances, got ${parts.length}. Pass fewer parts, or merge small copies into one mesh.`);
   }
   if (uniqueGeometries > MAX_TRACE_PARTS) {
     throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_PARTS} distinct geometries, got ${uniqueGeometries}. Share one geometry object between copies instead of building a new one per part.`);
   }
-  if (uniqueTriangles > MAX_TRACE_TRIANGLES) {
-    throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_TRIANGLES} unique triangles, counted once per shared geometry, got ${uniqueTriangles}. Share geometry between copies or simplify the meshes.`);
+  if (uniqueTriangles > limits.unique) {
+    throw new RangeError(`An instanced path trace takes at most ${limits.unique} unique triangles, counted once per shared geometry, got ${uniqueTriangles}. Share geometry between copies or simplify the meshes.`);
+  }
+  if (totalTriangles > limits.total) {
+    throw new RangeError(`An instanced native path trace takes at most ${limits.total} triangles with every copy counted, got ${totalTriangles}. Pass fewer copies of the large meshes or simplify them.`);
   }
 }
 
@@ -471,8 +498,8 @@ function boundingBoxOf(positions) {
  * list a flattened scene calls `materials`), with no world-space triangle arrays and no CPU BVH. Only
  * `buildNativeInputV2` reads this shape, for the native "cycles" kernel.
  */
-function buildInstancedTraceScene(parts, geometries, environment, localVolumes) {
-  requireInstancedCaps(parts, measureInstancedParts(parts, geometries));
+function buildInstancedTraceScene(parts, geometries, environment, localVolumes, limits) {
+  requireInstancedCaps(parts, measureInstancedParts(parts, geometries), limits);
   const traceMaterials = parts.map(part => resolveMaterial(part.material ?? {}));
   const materials = parts.map((part, index) => ({ ...(part.material ?? {}), ...traceMaterials[index] }));
   const instances = parts.map((part, index) => instanceFor(part, geometries[index], index, materials[index]));
@@ -493,16 +520,18 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes) 
 /**
  * Builds the scene a path trace reads. With `options.instancing` and at least one geometry shared by two parts, the result
  * holds `instances` instead of flattened triangles (see `buildInstancedTraceScene`); with no shared geometry, or without the
- * option, it is the flattened scene, unchanged.
+ * option, it is the flattened scene, unchanged. `options.maximumTriangles` (an integer up to MAX_NATIVE_TRACE_TRIANGLES) is for
+ * a scene exported to the native "cycles" tracer only: it replaces the 400,000 triangle bound of the CPU and WebGL tracers.
  */
 export function buildTraceScene(allParts, environment = {}, options = {}) {
+  const limits = resolveTriangleLimits(options);
   const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts);
   const parts = boundsOnlyParts.length ? allParts.filter(part => !boundsOnlyParts.includes(part)) : allParts;
   const tryInstancing = options.instancing === true && Array.isArray(parts) && parts.length > 0;
   const geometries = tryInstancing ? parts.map(traceGeometry) : undefined;
-  if (tryInstancing && countSharedGeometries(parts, geometries) > 0) return buildInstancedTraceScene(parts, geometries, environment, localVolumes);
+  if (tryInstancing && countSharedGeometries(parts, geometries) > 0) return buildInstancedTraceScene(parts, geometries, environment, localVolumes, limits);
   if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_TRACE_PARTS) throw new RangeError(`A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
-  const geometry = flattenParts(parts, geometries);
+  const geometry = flattenParts(parts, geometries, limits);
   const bvh = buildTriangleBvh(geometry.positions, geometry.indices);
   let extent = 1e-3;
   for (let index = 0; index < geometry.positions.length; index++) extent = Math.max(extent, Math.abs(geometry.positions[index]));
