@@ -19,6 +19,8 @@ type Handle = *mut c_void;
 
 const FORMAT_FLOAT3: c_int = 3;
 const BYTES_PER_PIXEL: usize = 12;
+// Keeps width * height * 12 far below the range of usize, so the length checks cannot wrap.
+const MAXIMUM_IMAGE_SIDE: usize = 65_536;
 const ERROR_NONE: c_int = 0;
 
 const DEVICE_NAMES: [(&str, c_int); 6] = [("default", 0), ("cpu", 1), ("sycl", 2), ("cuda", 3), ("hip", 4), ("metal", 5)];
@@ -265,10 +267,13 @@ impl OidnDenoiser {
         }
         let width = call.width as usize;
         let height = call.height as usize;
-        let floats = width * height * 3;
         if width == 0 || height == 0 {
             return Err(failure("OIDN denoise needs a width and height of at least 1."));
         }
+        if width > MAXIMUM_IMAGE_SIDE || height > MAXIMUM_IMAGE_SIDE {
+            return Err(failure(format!("OIDN denoise takes a width and height of at most {MAXIMUM_IMAGE_SIDE}; got {width} by {height}.")));
+        }
+        let floats = width * height * 3;
         if call.normal.is_some() && call.albedo.is_none() {
             return Err(failure("OIDN takes a normal guide only together with an albedo guide: pass albedo too, or drop normal."));
         }

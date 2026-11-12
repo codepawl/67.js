@@ -834,7 +834,7 @@ The tool call also spends 0.010 / 0.007 s encoding and writing PFM files and 0.0
 
 Output: the in-process image equals the tool's image byte for byte (maximum absolute difference 0) on all four rows, the first call equals a warm call, and so does the call after a size change and back. Resizing recommits the filter; warm calls never do.
 
-Equal total time on `lit-interior` and `many-lights-500` (same container, 3 rounds, seed 3, medians): the in-process CUDA denoise costs 0.008 s against 0.34 to 0.38 s for the tool, so the total of Cook + OIDN falls from 0.56 to 0.23 s at 16 spp on `lit-interior`, with the same relMSE (3.09e-4) as the tool path. The in-process CPU device costs 0.047 s against 0.22 s. The table is in the pull request.
+Equal total time on `lit-interior` and `many-lights-500` (same container, 3 rounds, seed 3, medians): the in-process CUDA denoise costs 0.008 s against 0.34 to 0.38 s for the tool, so the total of Cook + OIDN falls from 0.56 to 0.23 s at 16 spp on `lit-interior`, with the same relMSE (3.09e-4) as the tool path. The in-process CPU device costs 0.047 s against 0.22 s.
 
 ## Depth and grey-diffuse comparison (#896, slice C1a)
 
