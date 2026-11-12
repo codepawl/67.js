@@ -12,6 +12,7 @@ if (argumentsValue.length === 1 && argumentsValue[0] === '--version') {
   console.log(`67js-mcp ${packageMetadata.version}
 Usage: 67js-mcp [--backend gpu|cpu] [--memory 32..384]
                  [--browser <Chrome/Chromium executable>] [--assets <absolute GLB directory>]
+                 [--packs <absolute folder of data-only packs>]
                  [--jobs <absolute private output directory>] [--ffmpeg <absolute executable>]
        67js-mcp --version | --check-update
 

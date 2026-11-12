@@ -19,7 +19,10 @@ import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
 import { createNativeSequence } from './agent-native-sequence.mjs';
 import { chooseNativeInstancing, chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
+import { addonCapabilities, addonFileFor, addonImportMap } from './mcp-addons.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
+import { createPackRegistry } from './agent-packs.mjs';
+import { MAXIMUM_INSTALLED_PACKS, MAXIMUM_PACK_BYTES, MAXIMUM_PACK_FILES, MAXIMUM_PACK_FILE_BYTES, MAXIMUM_PACK_JSON_BYTES, MAXIMUM_PACK_ITEMS_PER_KIND, PACK_CONTENT_KINDS } from '../src/pack-manifest.js';
 import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
@@ -75,7 +78,7 @@ function bakeAfterOperations(operations) {
 const SYNC_TOLERANCE_SECONDS = 0.05;
 // The preview page imports engine chunks that sit beside the package entries, one folder above preview.js.
 const ENGINE_CHUNK_URL = /^\/[\w.-]+\.js$/;
-const html = '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#182126}canvas{display:block;width:100vw;height:100vh}</style></head><body><canvas></canvas><script type="module" src="/preview.js"></script></body></html>';
+const pageHtml = importMapScript => '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#182126}canvas{display:block;width:100vw;height:100vh}</style></head><body><canvas></canvas>' + importMapScript + '<script type="module" src="/preview.js"></script></body></html>';
 
 /** Local, serialized browser preview. No browser is launched until scene creation. */
 // Optional peer dependencies the page loads from the host's node_modules. Rapier ships its WASM inside rapier.mjs.
@@ -85,8 +88,8 @@ const VENDOR_FILES = Object.freeze({
   '/vendor/rapier.js': { resolve: require => join(dirname(require.resolve('@dimforge/rapier3d-compat')), 'rapier.mjs'), type: 'application/javascript; charset=utf-8' },
 });
 
-export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', browser: browserPath, memory = 192, assets: assetRoot,
-  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot, openPage = openInDefaultBrowser,
+export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', browser: browserPath, memory = 192, assets: assetRoot, packs: packsRoot,
+  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot, openPage = openInDefaultBrowser, addons: addonSet = { addons: [], skipped: [] },
   previewUrl = new URL(/* @vite-ignore */ '../build/mcp/preview.js', import.meta.url) } = {}) {
   if (!['gpu', 'cpu'].includes(backend)) {
     throw new RangeError('backend must be gpu or cpu.');
@@ -101,9 +104,17 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   if (assetRoot !== undefined && (typeof assetRoot !== 'string' || !isAbsolute(assetRoot))) {
     throw new TypeError('Asset root must be an explicit absolute directory path.');
   }
+  if (packsRoot !== undefined && (typeof packsRoot !== 'string' || !isAbsolute(packsRoot))) {
+    throw new TypeError('Packs root must be an explicit absolute directory path.');
+  }
   if (jobRoot !== undefined && (typeof jobRoot !== 'string' || !isAbsolute(jobRoot))) {
     throw new TypeError('Job root must be an explicit absolute directory path.');
   }
+  const importMapScript = addonSet.addons.length === 0 ? '' : `<script type="importmap">${JSON.stringify(addonImportMap(packageMetadata.exports))}</script>`;
+  // The one inline script is the import map; its hash is allowed so script-src stays 'self'. No addons, no hash.
+  const importMapHash = addonSet.addons.length === 0 ? '' : ` 'sha256-${createHash('sha256').update(importMapScript.slice(importMapScript.indexOf('>') + 1, -'</script>'.length)).digest('base64')}'`;
+  const registeredByAddon = {};
+  const refusedAddons = [];
   const audioLibrary = audioRoot === undefined ? undefined : createAudioLibrary(audioRoot);
   if (typeof ffmpeg !== 'string' || !ffmpeg || (ffmpeg !== 'ffmpeg' && (!isAbsolute(ffmpeg) || !existsSync(ffmpeg)))) {
     throw new TypeError('FFmpeg must be on PATH or configured with an existing absolute executable path.');
@@ -126,6 +137,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   let queue = Promise.resolve();
   let closing;
   let catalogPromise;
+  let packsPromise;
   let jobsPromise;
   const savedGlbPaths = [];
   const savedWebBuildPaths = [];
@@ -159,9 +171,15 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     phase = 'ready';
   }
   function catalog() {
-    if (!assetRoot) throw new Error('Configure --assets with an absolute directory before importing GLB assets.');
-    catalogPromise ??= createAgentAssetCatalog(assetRoot);
+    if (!assetRoot && !packsRoot) throw new Error('Configure --assets or --packs with an absolute directory before importing GLB assets.');
+    catalogPromise ??= packs().then(registry => createAgentAssetCatalog(assetRoot ?? null, registry?.files));
     return catalogPromise;
+  }
+  // Installed data-only packs (docs/packs.md): checked once per runtime; their GLB, image, look and HDRI files join the catalog.
+  function packs() {
+    if (!packsRoot) return Promise.resolve(null);
+    packsPromise ??= createPackRegistry(packsRoot, { packageVersion: packageMetadata.version });
+    return packsPromise;
   }
 
   /** Bytes of the catalog assets a recipe or edit list places, base64 by asset id, for the page that decodes them. */
@@ -273,6 +291,37 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     });
   }
 
+  // Only files inside an allowlisted addon's own package folder, found by the index it was given at startup.
+  function serveAddonFile(url, response) {
+    const path = addonFileFor(addonSet.addons, url.split('?')[0]);
+    if (path === null) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    readFile(path).then(bytes => {
+      response.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      response.end(bytes);
+    }, () => {
+      response.writeHead(404);
+      response.end();
+    });
+  }
+
+  // Loads each allowlisted addon in the page. One that fails is skipped with its reason; the others stay.
+  async function loadAddons() {
+    for (const [index, addon] of addonSet.addons.entries()) {
+      try {
+        const added = await page.evaluate(input => window.__agentPreview.loadAddon(input), { url: `/addons/${index}/${addon.entry}`, name: addon.name, extensionPoints: addon.extensionPoints });
+        registeredByAddon[addon.name] = added;
+      } catch (error) {
+        const reason = String(error.message).replace(/^page\.evaluate: /, '').split('\n')[0];
+        refusedAddons.push({ name: addon.name, reason });
+        console.error(`67js addon ${addon.name} skipped: ${reason}`);
+      }
+    }
+  }
+
   // Mesh booleans load Manifold and recipe physics loads Rapier, both optional peer dependencies, from the host's
   // node_modules. Without one the page gets a 404 and the edit reports the install command.
   function serveVendorFile({ resolve, type }, response) {
@@ -310,7 +359,11 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return;
         }
         response.setHeader('Cache-Control', 'no-store');
-        response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' blob:");
+        response.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'${importMapHash}; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' blob:`);
+        if (request.method === 'GET' && request.url.startsWith('/addons/')) {
+          serveAddonFile(request.url, response);
+          return;
+        }
         const vendor = request.method === 'GET' ? VENDOR_FILES[request.url] : undefined;
         if (vendor) {
           serveVendorFile(vendor, response);
@@ -326,7 +379,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return;
         }
         response.setHeader('Content-Type', request.url === '/' ? 'text/html; charset=utf-8' : 'application/javascript; charset=utf-8');
-        response.end(request.url === '/' ? html : code);
+        response.end(request.url === '/' ? pageHtml(importMapScript) : code);
       });
       httpServer.on('upgrade', (request, socket, head) => {
         const accepted = isPreviewHost(request.headers.host, httpServer.address().port)
@@ -361,6 +414,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       });
       await page.goto(origin);
       await page.waitForFunction(() => Boolean(window.__agentPreview));
+      await loadAddons();
       phase = 'ready';
     } catch (error) {
       phase = 'failed';
@@ -806,6 +860,12 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           maximumJoints: AGENT_ASSET_LIMITS.maxJoints, maximumClips: AGENT_ASSET_LIMITS.maxClips,
           commands: ['set-root', 'set-asset-node', 'set-motion', 'set-animation', 'set-material', 'set-camera', 'set-environment', 'set-effects', 'set-shadow'],
         },
+        packs: {
+          configured: Boolean(packsRoot), format: '67js.pack', manifest: '67js-pack.json', contentKinds: Object.keys(PACK_CONTENT_KINDS),
+          extensions: PACK_CONTENT_KINDS, maximumPacks: MAXIMUM_INSTALLED_PACKS, maximumFiles: MAXIMUM_PACK_FILES, maximumBytes: MAXIMUM_PACK_BYTES,
+          maximumFileBytes: MAXIMUM_PACK_FILE_BYTES, maximumJsonBytes: MAXIMUM_PACK_JSON_BYTES, maximumItemsPerKind: MAXIMUM_PACK_ITEMS_PER_KIND,
+          use: 'scene_asset_catalog lists packs: name, version, license, author, description and item ids. GLBs, images, looks and environments carry assetId values that work in scene_create_asset, look, hdri and texture fields. Materials and recipes are read with scene_asset_catalog { pack, material } or { pack, recipe }: pass a recipe to scene_create, and a material as a materials entry or a scene_apply set-material. Packs are installed by the user (unzip into the --packs folder); a tool call never downloads one. Invalid packs are skipped and listed under packs.rejected with the reason.',
+        },
         jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1,
           maximumWidth: MAXIMUM_JOB_SIDE, maximumHeight: MAXIMUM_JOB_SIDE, maximumPixels: MAXIMUM_JOB_PIXELS,
           maximumDuration: MAXIMUM_VIDEO_SECONDS, maximumFps: 30, maximumFrames: 900, maximumStills: 8,
@@ -813,6 +873,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           glbExport: { maximumBytes: MAXIMUM_GLB_BYTES, maximumKept: MAXIMUM_KEPT_GLBS, maximumTextureSize: 4096 },
           records: jobRoot ? (await jobs()).list().map(record => ({ jobId: record.jobId, state: record.state,
             sourceRevision: record.sourceRevision, progress: record.progress })) : [] },
+        addons: addonCapabilities({ addons: addonSet.addons.filter(addon => !refusedAddons.some(refused => refused.name === addon.name)), skipped: addonSet.skipped, registered: registeredByAddon, refused: refusedAddons }),
         unsupported: ['remote asset providers', 'arbitrary code execution', 'imported morph track authoring'],
       };
     },
@@ -826,8 +887,20 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         return result;
       });
     },
-    assetCatalog() {
-      return enqueue(async () => assetRoot ? { configured: true, ...(await catalog()).list() } : { configured: false, assets: [] });
+    /** The catalog with the installed packs; `{ pack, recipe }` or `{ pack, material }` reads one pack item's JSON instead. */
+    assetCatalog({ pack, recipe, material } = {}) {
+      return enqueue(async () => {
+        if (pack !== undefined || recipe !== undefined || material !== undefined) {
+          if (!packsRoot) throw new Error('Configure --packs with an absolute directory to read pack items.');
+          if (pack === undefined || (recipe === undefined) === (material === undefined)) {
+            throw new RangeError('Pass pack with exactly one of recipe or material, such as { "pack": "example-starter", "recipe": "workshop" }; scene_asset_catalog without arguments lists them.');
+          }
+          const kind = recipe === undefined ? 'materials' : 'recipes';
+          return { pack, [kind === 'recipes' ? 'recipe' : 'material']: recipe ?? material, json: (await packs()).read(kind, pack, recipe ?? material) };
+        }
+        if (!assetRoot && !packsRoot) return { configured: false, assets: [] };
+        return { configured: true, ...(await catalog()).list(), ...(packsRoot && { packs: (await packs()).list() }) };
+      });
     },
     createAsset({ recipe }) {
       return enqueue(async () => {

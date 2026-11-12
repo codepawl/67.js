@@ -49,7 +49,7 @@ Scenes are plain data with stable IDs, so an agent can edit by ID and check each
 
 - `scene_capabilities`: Index of supported recipe features and runtime budgets; pass topic for the detail of one.
 - `scene_create`: Create a render scene from a JSON recipe; the result has its sessionId.
-- `scene_asset_catalog`: List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory.
+- `scene_asset_catalog`: List content-bound GLB, image, HDRI and look IDs from the asset directory and installed packs.
 - `scene_create_asset`: Create the active scene from a catalog GLB and editable asset recipe.
 - `scene_inspect`: Read revision, counts and selected nodes.
 - `scene_walkmap`: Walkable map on a grid: rows of . walkable, x blocked, # no surface.

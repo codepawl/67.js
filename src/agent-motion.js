@@ -398,9 +398,22 @@ function normalizeIkSolver(input, position, nodes, visibleNodes, duration) {
 }
 
 function solverNodes(solver) {
+  if (solver.type === 'spring') return solver.nodes;
   if (solver.type === 'two-bone') return [solver.root, solver.middle, solver.end];
   if (solver.type === 'aim') return solver.joints;
   return solver.chain ?? [solver.root, solver.end];
+}
+
+/** One stand-in solver per spring chain, so rigs, scale checks and the IK evaluator treat chains like any other solver. */
+function springSolvers(springs, recipe) {
+  const module = agentSceneModule('springs');
+  const hierarchy = ikHierarchy(recipe);
+  return springs.chains.map(chain => ({
+    type: 'spring',
+    nodes: module.springChainNodeIds(chain, springs.colliders, hierarchy),
+    weight: 1,
+    definition: { type: 'custom', create: module.springChainSolver(chain, springs.colliders) },
+  }));
 }
 
 function pointNodes(solver) {
@@ -478,7 +491,7 @@ export function normalizeAgentMotion(input, recipe) {
   if (input === null || input === undefined) {
     return null;
   }
-  knownKeys(input, ['duration', 'loop', 'tracks', 'ik', 'constraints', 'drivers', 'properties', 'layers', 'footLock', 'drive'], 'motion');
+  knownKeys(input, ['duration', 'loop', 'tracks', 'ik', 'constraints', 'drivers', 'properties', 'layers', 'footLock', 'drive', 'springs'], 'motion');
   const drive = input.drive === undefined ? null : normalizedDrive(input.drive, recipe);
   // A drive knows how long its path takes, so the motion may leave the duration out.
   const duration = bounded(input.duration === undefined && drive ? Math.ceil(drive.built.duration * 1000) / 1000 : input.duration, 0.1, 30, 'motion.duration');
@@ -488,7 +501,7 @@ export function normalizeAgentMotion(input, recipe) {
   }
   const inputTracks = input.tracks ?? [];
   denseArray(inputTracks, 128, 'Motion tracks');
-  if (!inputTracks.length && !input.layers?.length && !input.ik?.length && !input.constraints?.length && !input.drivers?.length && !drive) {
+  if (!inputTracks.length && !input.layers?.length && !input.ik?.length && !input.springs && !input.constraints?.length && !input.drivers?.length && !drive) {
     throw invalidField('motion', input, 'at least one track, IK solver, constraint or driver, such as { "duration": 1, "tracks": [...] }; use null to clear it');
   }
   const nodes = new Set((recipe.nodes ?? []).map(node => node.id));
@@ -569,6 +582,10 @@ export function normalizeAgentMotion(input, recipe) {
     }
   }
   const visibleIds = new Set(ikHierarchy(recipe).map(node => node.id));
+  if (input.springs !== undefined) {
+    result.springs = agentSceneModule('springs').normalizeSpringBones(input.springs, { movable: nodes, visible: visibleIds, hierarchy: ikHierarchy(recipe) });
+    checkIkScales(springSolvers(result.springs, recipe), tracks, recipe);
+  }
   if (input.properties !== undefined) {
     result.properties = normalizeProperties(input.properties, duration, visibleIds);
   }
@@ -638,8 +655,9 @@ function ikChannelClip(ik, duration, loop) {
 
 /** Solve a motion's IK on top of its sampled node tracks. Returns staged rotations per node ID. */
 function createIkEvaluator(motion, recipe, stagedNodeTracks) {
-  const rig = ikRig(motion.ik, recipe);
-  const clip = ikChannelClip(motion.ik, motion.duration, motion.loop);
+  const solvers = [...(motion.ik ?? []), ...(motion.springs ? springSolvers(motion.springs, recipe) : [])];
+  const rig = ikRig(solvers, recipe);
+  const clip = ikChannelClip(solvers, motion.duration, motion.loop);
   const channelSampler = clip ? compileAnimationSampler(clip) : null;
   const channelOutput = name => channelSampler.tracks.find(track => track.target === name).output;
   let pose = null;
@@ -649,7 +667,8 @@ function createIkEvaluator(motion, recipe, stagedNodeTracks) {
     const output = channelOutput(name);
     return () => output;
   };
-  const definitions = motion.ik.map((solver, position) => {
+  const definitions = solvers.map((solver, position) => {
+    if (solver.type === 'spring') return solver.definition;
     const weightOutput = solver.weight.keyframes ? channelOutput(`weight ${position}`) : null;
     const weight = weightOutput ? () => Math.min(1, Math.max(0, weightOutput[0])) : solver.weight;
     if (solver.type === 'spline') {
@@ -685,7 +704,7 @@ function createIkEvaluator(motion, recipe, stagedNodeTracks) {
   const indexById = new Map(rig.joints.map((joint, index) => [joint.name, index]));
   const baseBindings = rig.joints.map((joint, index) => ({ index, tracks: stagedNodeTracks.get(joint.name) }));
   const skippedEnds = new Set(
-    motion.ik
+    solvers
       .filter(solver => (solver.type === 'two-bone' || solver.type === 'chain') && solver.keepEndRotation === false)
       .map(solver => solver.end ?? solver.chain[solver.chain.length - 1])
   );
@@ -849,7 +868,7 @@ export function compileAgentMotion(input, recipe) {
     if (!stagedNodeTracks.has(track.id)) stagedNodeTracks.set(track.id, {});
     stagedNodeTracks.get(track.id)[track.property] = staged;
   }
-  const ikEvaluator = motion.ik?.length ? createIkEvaluator(motion, recipe, stagedNodeTracks) : null;
+  const ikEvaluator = motion.ik?.length || motion.springs ? createIkEvaluator(motion, recipe, stagedNodeTracks) : null;
   const constraintEvaluator = createNodeConstraintEvaluator({
     hierarchy: ikHierarchy(recipe), rootMatrix: recipe.ikRootMatrix,
     constraints: motion.constraints, drivers: motion.drivers, materials: recipe.materials ?? [], properties: motion.properties,
@@ -966,7 +985,7 @@ export function compileAgentMotion(input, recipe) {
      */
     sweepIk(stagedPoseAt) {
       if (!ikEvaluator) return [];
-      const worst = motion.ik.map(solver => ({ type: solver.type, reached: true, worstError: 0, atTime: 0, warnings: [], limited: [] }));
+      const worst = (motion.ik ?? []).map(solver => ({ type: solver.type, reached: true, worstError: 0, atTime: 0, warnings: [], limited: [] }));
       for (let sample = 0; sample < IK_SWEEP_SAMPLES; sample++) {
         const time = motion.duration * sample / (IK_SWEEP_SAMPLES - 1);
         sampler.sample(time);

@@ -56,6 +56,7 @@ export default defineConfig({
         docs: 'docs.html',
         changelog: 'changelog.html',
         showcase: 'showcase.html',
+        marketplace: 'marketplace.html',
       },
     },
   },

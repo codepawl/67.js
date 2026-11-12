@@ -356,3 +356,7 @@ Partial files count toward the store budget and remain until explicit release.
 The tests use actual temporary files and controlled callbacks.
 They cover snapshots, persistence, hashes, cancellation, deadlines, restart recovery, quotas, path rejection, and file aliases.
 The tests do not run browsers, ffmpeg, or GPU rendering.
+
+A recipe whose only moving content is `physics`, `cloth` or `particles` takes the same `motion` setting: the job plays the bake on the motion clock, with no authored motion and no `bake-motion` step (so the 32 node cap does not apply). A video without `duration` runs as long as the bake, counted from `motion.start`, and a longer one is rejected. A recipe with nothing that moves fails with an error that lists authored motion, physics, cloth, particles, placed clips and map sequences as the accepted sources.
+
+The camera does not move with the bake. A recipe `camera` (`eye`, `target`, lens) is the same on every frame of a physics, cloth or particle film, so shards flying out of frame do not pull the view. Nothing frames the scene by its bounds: only an authored `camera` motion track or a timeline shot changes the camera. Set `camera.eye` and `camera.target` for a locked shot; left out, the default camera is used, also locked. `tests/physics-film.test.js` checks that a static marker stays on the same pixels from the first frame to the last.
