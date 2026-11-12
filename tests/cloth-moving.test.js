@@ -11,9 +11,9 @@ import { CAPE, CAPE_THICKNESS, WALK_SECONDS, walkingCapeRecipe } from './support
 const FRAMES_PER_SECOND = 60;
 const PENETRATION_TOLERANCE = 0.002;
 
-// World matrices of the walker's nodes at a time, composed here from the motion sampler so the check does not lean on the cloth module's pose code.
-function createPoser(recipe) {
-  const exported = createAgentScene(recipe).exportRecipe();
+// World matrices of the walker's nodes at a time (read from a scene still at its authored pose, so there is no second cloth bake), composed here from the motion sampler so the check does not lean on the cloth module's pose code.
+function createPoser(scene) {
+  const exported = scene.exportRecipe();
   const nodes = [...exported.armatures.flatMap(armatureNodes), ...exported.nodes];
   const byId = new Map(nodes.map(node => [node.id, node]));
   const sampler = compileAgentMotion(exported.motion, { ...exported, nodes });
@@ -81,7 +81,7 @@ function capeWorldVertices(scene, nodeId = 'cape') {
 function walkMeasure(cloth) {
   const recipe = walkingCapeRecipe(cloth);
   const scene = createAgentScene(recipe);
-  const poser = createPoser(recipe);
+  const poser = createPoser(scene);
   const rest = capeWorldVertices(scene);
   let deepest = Infinity;
   let travelled = 0;
@@ -110,7 +110,7 @@ test('a cape pinned to a walking humanoid never enters the limb capsules in a 5 
 
 test('the pinned top edge stays on the chest while the walker moves', () => {
   const scene = createAgentScene(walkingCapeRecipe(CAPE));
-  const poser = createPoser(walkingCapeRecipe(CAPE));
+  const poser = createPoser(scene);
   const offsets = [];
   for (const time of [0, 1.7, 4.2]) {
     scene.sampleMotion(time);

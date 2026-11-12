@@ -556,9 +556,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         if (settings.renderer) {
           const { type, ...tracerOptions } = settings.renderer;
           if (settings.renderer.backend === 'gpu' && backend === 'cpu') throw new Error('renderer.backend "gpu" needs a runtime on the GPU backend, and this one runs on SwiftShader.');
-          const choice = await chooseDenoiser(settings.renderer.denoise);
           nativeTracerLocator ??= createNativeTracerLocator();
           const trace = await chooseTraceBackend({ requested: settings.renderer.backend, runtimeBackend: backend, locator: nativeTracerLocator });
+          // Only a job that really traces on native defaults to OIDN; the cpu, gpu and webgpu defaults do not change.
+          let choice = await chooseDenoiser(settings.renderer.denoise, { preferOidn: trace.backend === 'native' });
           const traceOptions = { width, height, ...tracerOptions, backend: trace.backend === 'native' ? 'gpu' : trace.backend, denoise: choice.denoise, threads: PATH_TRACER_THREADS };
           let traced;
           let backendNote = trace.note;
@@ -574,6 +575,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
               nativeTracerLocator.markUnusable(error.message);
               backendNote = (await nativeTracerLocator.find()).reason;
               traceOptions.backend = backend === 'cpu' ? 'cpu' : 'gpu';
+              choice = await chooseDenoiser(settings.renderer.denoise);
+              traceOptions.denoise = choice.denoise;
               backendNote += ' The ' + traceOptions.backend + ' backend ran instead.';
             }
           }
