@@ -946,7 +946,36 @@ Generated scenes from `bench/cycles-parity/large-scene.mjs` through `large-seque
 | | moving | session | 0.19 | 0 / 0 / 10 / 15 | 1 new, 11 updated |
 | | | one-shot | 0.19 | 1 / 1 / 10 / 15 | |
 
-What this says `[inferred]`: a one-shot frame pays about 120 to 140 ns per triangle for upload and 35 to 60 ns for the acceleration build every frame, so a session saves roughly 60 ms per frame at 400,000 triangles and 200 ms at 1,000,000 (3.32 s against 1.16 s for a 12 frame orbit, about 2.9 times faster; 0.88 against 0.37 s with a moving instance), and the saving grows with the triangle count. On small scenes there is no gain: the 3,000 triangle rooms above and the forest here (10,000 unique triangles, many instances) cost 1 to 3 ms of build and upload per frame, which a session removes, but the sequence totals do not move. The forest case also shows that the cost follows unique triangles, not instances. Not measured: 4,000,000 triangles (the bench's JavaScript heap ran out in the pack step at the default 4 GB; the job path takes at most 400,000 triangles anyway, so a job reaches the first row only), and peak VRAM (the card readings were the same for both modes, so they say nothing about the difference).
+What this says `[inferred]`: a one-shot frame pays about 120 to 140 ns per triangle for upload and 35 to 60 ns for the acceleration build every frame, so a session saves roughly 60 ms per frame at 400,000 triangles and 200 ms at 1,000,000 (3.32 s against 1.16 s for a 12 frame orbit, about 2.9 times faster; 0.88 against 0.37 s with a moving instance), and the saving grows with the triangle count. On small scenes there is no gain: the 3,000 triangle rooms above and the forest here (10,000 unique triangles, many instances) cost 1 to 3 ms of build and upload per frame, which a session removes, but the sequence totals do not move. The forest case also shows that the cost follows unique triangles, not instances. The job path takes at most 400,000 triangles, so a job reaches the first row only; the next section measures larger sizes through the bench.
+
+#### 2,000,000 and 4,000,000 triangles, and GPU memory (#896)
+
+Same terrain scene, frames, resolution and samples as above (12 frames, 480 x 270, 16 samples), one run per cell on the same RTX 4090 (24,564 MiB), through `bench/cycles-parity/large-sequence-memory.mjs`, which starts `large-sequence-timing.mjs` once per size and mode in its own process and polls `nvidia-smi` every 100 ms while it runs. The 4,000,000 triangle scene (3,998,796 triangles) packs in the Node process with `NODE_OPTIONS=--max-old-space-size=16384`. A single run per cell, so read small differences as noise (the camera session at 1M took 1.84 s here against a median of 1.16 s above, because its frame 1 paid a 1.2 s device start in this run). `[measured]`
+
+| Triangles | Variant | Mode | Sequence total (s) | Frames 2-12 mean: upload / acceleration / trace / wall (ms) | Frame 1 upload + acceleration (s) | Peak GPU memory (MiB) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1M | camera | one-shot | 3.62 | 146 / 62 / 7 / 224 | 0.20 | 843 |
+| | | session | 1.84 | 0 / 0 / 5 / 29 | 0.20 | 839 |
+| | moving | one-shot | 3.39 | 150 / 105 / 18 / 282 | 0.25 | (same process) |
+| | | session | 0.76 | 0 / 0 / 5 / 47 | 0.21 | (same process) |
+| 2M | camera | one-shot | 6.54 | 300 / 176 / 10 / 504 | 0.42 | 1,330 |
+| | | session | 1.55 | 0 / 0 / 6 / 52 | 0.41 | 1,330 |
+| | moving | one-shot | 6.07 | 301 / 174 / 9 / 501 | 0.51 | (same process) |
+| | | session | 1.55 | 0 / 0 / 22 / 98 | 0.43 | (same process) |
+| 4M | camera | one-shot | 14.20 | 590 / 338 / 8 / 963 | 0.84 | 2,097 |
+| | | session | 2.87 | 0 / 0 / 17 / 90 | 0.87 | 2,097 |
+| | moving | one-shot | 11.51 | 590 / 339 / 9 / 965 | 0.85 | (same process) |
+| | | session | 3.37 | 0 / 0 / 27 / 183 | 1.29 | (same process) |
+
+Session creation is frame 1 of a session run: upload plus acceleration structure build, 0.20 s at 1M, 0.41 to 0.43 s at 2M and 0.87 to 1.29 s at 4M (the 1.29 s run built in 0.67 s against 0.28 s in the other 4M session run, so treat the 4M figure as 0.9 to 1.3 s). The "camera" frame 1 also pays the device start (0.46 to 2.64 s of `setupSeconds` in these runs), which the "moving" variant, second in the same process, does not. A 12 frame orbit at 4M triangles takes 14.2 s one-shot against 2.9 s with a session (about 5 times), 6.5 against 1.6 s at 2M (about 4 times) and 3.6 against 1.8 s at 1M (about 2 times in this run; the median of three above says 2.9 times), and the saving per frame after the first grows with the triangle count: about 0.93 s per frame at 4M. Every one of the 12 frames of both variants equals the one-shot frame by SHA-256 at all three sizes (12 of 12 in each of the six comparisons).
+
+GPU memory: `nvidia-smi --query-compute-apps=pid,used_memory` returned the child's own row in this container, so the numbers are the process's, with the whole card's `--query-gpu=memory.used` peak 20 to 30 MiB higher and an idle card of 1 MiB. Both variants of a mode run in the same process, so each figure is the peak over both. The peak of a session and of a one-shot run is the same within 4 MiB at every size, because a one-shot trace frees its buffers after each frame and a session holds one scene's buffers for the whole run; what a session keeps resident is the same size as what one frame needs. The memory grows about linearly with the triangle count, 843 MiB at 1M, 1,330 MiB at 2M and 2,097 MiB at 4M, which is about 0.4 KiB per triangle (1,254 MiB for the 3,000,000 triangles between 1M and 4M) on top of roughly 440 MiB that does not grow `[inferred]` from the three points. A second session beside the first would add about the same again; this was not measured.
+
+```sh
+NODE_OPTIONS=--max-old-space-size=16384 node bench/cycles-parity/large-sequence-memory.mjs --sizes 1000000,2000000,4000000 --out artifacts/large-seq/memory.json
+```
+
+Not measured: sizes above 4,000,000 triangles (nothing failed at 4M, so the largest working size is not known), more than one run per cell, two sessions alive at once, and peak host memory.
 
 ## Reproducible Commands
 
