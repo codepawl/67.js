@@ -1,1 +1,0 @@
-- `traceNative` takes `denoise: "atrous"` for the Cook kernel and returns a second, GPU wavelet filtered image in `denoisedRgba` (biased, off by default), and `denoiseAtrous` filters any traced image with its guide buffers (#895)

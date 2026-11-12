@@ -233,6 +233,11 @@ async function runCli() {
   const linearRgb = wavelet ? wavelet.image : (atrousRgb ?? unfilteredRgb);
   const npyPath = `${options.outputPrefix}.npy`;
   await writeFloat32Npy(npyPath, linearRgb, [options.height, options.width, 3]);
+  // The a-trous filter returns the unfiltered image beside the filtered one; keeping it shows that the filter leaves `rgba` alone.
+  const unfilteredNpyPath = atrousRgb ? `${options.outputPrefix}.unfiltered.npy` : null;
+  if (unfilteredNpyPath) {
+    await writeFloat32Npy(unfilteredNpyPath, unfilteredRgb, [options.height, options.width, 3]);
+  }
   const setupSeconds = sceneBuildSeconds + traced.setupSeconds + traced.compileSeconds + traced.uploadSeconds + traced.accelerationBuildSeconds;
   const report = {
     engine: options.kernel === 'cycles' ? 'cook-render-native' : '67js-render-native',
@@ -240,6 +245,7 @@ async function runCli() {
     inputSchemaVersion: nativeInput.schemaVersion ?? 1,
     sceneId: description.id,
     npyPath,
+    unfilteredNpyPath,
     width: options.width,
     height: options.height,
     samples: options.samples,

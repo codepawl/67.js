@@ -1,1 +1,0 @@
-- The Cook `cycles` kernel starts a pixel's next sample as soon as a path ends when you pass `pathRegeneration: true` (`--path-regeneration` in `trace-native.mjs`), which cut sampling time by 9% to 37% on four scenes with the same image (#895)
