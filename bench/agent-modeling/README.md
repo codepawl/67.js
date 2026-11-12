@@ -99,6 +99,12 @@ It prints a table with pass@1 (average success over all runs), pass^k (share of 
 `results/bench-<label>.json` holds that summary and every run's record. `--smoke` runs the two smoke tasks once to prove the
 pipeline, `--tasks a,b` picks tasks, and `--resume` (same label, models and `--runs`) continues a stopped bench.
 
+A run that makes no scene call is classified in its record (`zeroCalls`, see `zero-calls.mjs`). `infra` causes
+(`start-up-failure`, `mcp-server-failed`, `timeout`, `toolsearch-empty`: claude -p or the MCP server never got going, or
+ToolSearch never showed the 67js tools) are retried once, and a run that still ends that way is marked `infra`, counted in the
+`infra` column and left out of pass@1. `model` causes (`toolsearch-then-quit` after ToolSearch showed the tools, `refusal`,
+`no-tool-use`) stay counted as failures and are listed under the table.
+
 To compare a branch with the baseline, run the same command with another label on the branch, then:
 
 ```sh
@@ -106,7 +112,8 @@ node bench/agent-modeling/compare-bench.mjs bench/agent-modeling/results/bench-b
 ```
 
 It prints the totals side by side per model and the tasks whose pass count changed, and exits with 1 when a model's pass@1
-drops by more than `--tolerance` (0.05). Use the same models, `--runs` and backend on both sides. A task that moves by one
+drops by more than `--tolerance` (0.05) or when infra runs pass `--infra-bound` (0.1) of a model's runs, because its pass@1
+then rests on too few runs. The infra count prints next to pass@1. Use the same models, `--runs` and backend on both sides. A task that moves by one
 run out of three is noise; read the totals and the tasks that moved by two runs or more.
 
 ### Several runs and several models

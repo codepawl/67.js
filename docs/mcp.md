@@ -77,7 +77,7 @@ Every recorded agent run used Claude Code. This table says what was tried elsewh
 | Client or check | Result |
 |---|---|
 | Official MCP SDK client over stdio (`npm run smoke:mcp-package`) | Passes. |
-| MCP Inspector CLI 2.13.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Lists all 24 tools through `tools/list` in 7 s. `tools/call` of `scene_create` with the lamp recipe succeeds in 10 s. The CLI starts a new server for every command and the scene lives in the server, so it cannot follow with `scene_look`. That call fails with "No scene is active" and returns no image. The preview image is not testable through this CLI. |
+| MCP Inspector CLI 2.13.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Lists all 25 tools through `tools/list` in 7 s. `tools/call` of `scene_create` with the lamp recipe succeeds in 10 s. The CLI starts a new server for every command and the scene lives in the server, so it cannot follow with `scene_look`. That call fails with "No scene is active" and returns no image. The preview image is not testable through this CLI. |
 | Official MCP Python SDK 2.3.0 (`npm run smoke:mcp-clients`) | Passes, 2026-11-03, Windows, `--backend cpu`. Initialize, `tools/list` (22 tools), `scene_create` and `scene_look` in one session. `scene_look` returns a 20480 byte PNG. 11 s including the first `uv` download. |
 | JSON Schema 2020-12 validator with strict mode (Ajv 8), run in `npm test` | Every tool input schema compiles. |
 | Tool names and descriptions | Names are 9 to 24 characters from `[a-z_]`, within the 64-character limit OpenAI, Gemini and Anthropic share. No description is over 1024 characters. |
@@ -133,6 +133,7 @@ Inspect or export the recipe before retrying. Context loss still permits recipe 
 | `mesh_edit` | `sessionId`, `expectedRevision`, `geometry`, `edits`, optional `replace` | Updated revision, render status and the mesh report with per-edit results |
 | `mesh_stack` | `sessionId`, `expectedRevision`, `geometry`, optional `stack`, `apply` | Updated revision, render status and the mesh report with per-node results |
 | `scene_look` | `sessionId`, optional `width`, `height`, `motionTime`, `labels` | PNG image and metadata |
+| `scene_ask_user` | `sessionId`, optional `prompt`, `maxMarks`, `timeoutSeconds` | Opens the view in the browser, waits for Send, returns numbered marks with `partId`, `point`, `normal`, `note`, the camera and the marked PNG |
 | `scene_review` | `sessionId`, `expectedRevision`, `shots` (each with an optional `branch`), optional `width`, `height`, `labels`, `response_format` | Labeled PNG grid and metadata from an isolated snapshot |
 | `scene_checkpoint` | `sessionId` | Checkpoint ID, session ID, and revision |
 | `scene_restore` | `sessionId`, `expectedRevision`, and a `checkpointId`, a `revision` or a `branch` | Updated revision and render status |
@@ -173,6 +174,8 @@ Set operations use `set-node`, `set-material`, or `set-camera`, with fields dire
 `scene_look` can seek procedural `motionTime` without changing revisions. Omission preserves the last preview pose.
 An explicit `null` restores the authored base pose. Release `0.8.0` also supports imported source-node motion.
 Imported clip sampling remains available through `set-animation`.
+
+`scene_ask_user` is for a change the person cannot put in words. It renders the current view, opens it in their default browser on a loopback address under a random path, and waits up to `timeoutSeconds` (default 300, at most 900) for them to pin up to 16 points with a note of at most 280 characters each and press Send. Each mark comes back with its pixel, the `partId` and world `point` and `normal` the pin lands on (all `null` on empty sky), the `distance` from the camera and the part's `material`, plus the `view` camera and a PNG with the numbered pins. A cancelled or timed-out page returns `outcome` `cancelled` or `timeout` with no marks. Nothing leaves the machine and the tool takes no code or remote URL. Not yet marks: lasso regions, dragged transforms, colours, saved views and film times (issue #922 lists them).
 
 ### Response format
 
