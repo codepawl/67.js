@@ -1,0 +1,1 @@
+- The wavelet denoiser keeps the input pixel where every neighbour weight is zero (background pixels with a zero normal), so the Cook cycles kernel no longer returns NaN there (#969).
