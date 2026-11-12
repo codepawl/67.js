@@ -1,5 +1,6 @@
 import { validateGameRules } from './game-rules.js';
 import { normalizeGameAnimation } from './game-animation.js';
+import { listControllerKinds, listCameraRigKinds } from './player.js';
 
 // The `game` section of a scene recipe: which node the player controls, how, with what camera and input, and the rules
 // that decide when the game is won. It is plain data. The runtime in src/game.js reads it; nothing in it is code.
@@ -17,6 +18,10 @@ export const GAME_SETUP_LIMITS = Object.freeze({
   maxNpcs: 16,
   maxPathPoints: 256,
 });
+
+// The fixed names, then any kind an allowlisted addon registered at runtime (see docs/addons.md).
+export const gameControllerNames = () => [...new Set([...GAME_CONTROLLERS, ...listControllerKinds()])];
+export const gameCameraNames = () => [...new Set([...GAME_CAMERAS, ...listCameraRigKinds()])];
 
 const SETUP_FIELDS = ['player', 'camera', 'input', 'physics', 'ground', 'rules', 'npcs'];
 const PLAYER_FIELDS = ['node', 'controller', 'walkSpeed', 'runSpeed', 'jumpSpeed', 'maximumSpeed', 'footOffset', 'animation'];
@@ -59,7 +64,7 @@ function normalizePlayer(player, nodeIds, nodes) {
   }
   const normalized = {
     node: player.node,
-    controller: chooseName(player.controller, GAME_CONTROLLERS, 'character', 'player.controller'),
+    controller: chooseName(player.controller, gameControllerNames(), 'character', 'player.controller'),
     walkSpeed: boundedNumber(player.walkSpeed, 3, 0, GAME_SETUP_LIMITS.maxSpeed, 'player.walkSpeed'),
     runSpeed: boundedNumber(player.runSpeed, 6, 0, GAME_SETUP_LIMITS.maxSpeed, 'player.runSpeed'),
     jumpSpeed: boundedNumber(player.jumpSpeed, 7, 0, GAME_SETUP_LIMITS.maxJumpSpeed, 'player.jumpSpeed'),
@@ -144,7 +149,7 @@ export function normalizeGameSetup(game, nodeSource) {
   if (game.physics !== undefined && typeof game.physics !== 'boolean') fail('physics', `must be true or false, got ${JSON.stringify(game.physics)}.`);
   const normalized = {
     player,
-    camera: chooseName(game.camera, GAME_CAMERAS, 'follow', 'camera'),
+    camera: chooseName(game.camera, gameCameraNames(), 'follow', 'camera'),
     input: chooseName(game.input, GAME_INPUT_PRESETS, 'keyboard', 'input'),
     physics: game.physics ?? false,
     ground: boundedNumber(game.ground, 0, -GAME_SETUP_LIMITS.maxGround, GAME_SETUP_LIMITS.maxGround, 'ground'),

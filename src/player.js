@@ -798,6 +798,9 @@ const rigFactories = new Map([
   ['sideScroller', createSideScrollerCamera],
 ]);
 
+const BUILT_IN_CONTROLLERS = new Set(controllerFactories.keys());
+const BUILT_IN_RIGS = new Set(rigFactories.keys());
+
 function register(owner, registry, kind, factory) {
   if (typeof kind !== 'string' || kind.length === 0 || kind.length > 64) {
     throw new TypeError(`${owner} kind must be a non-empty string of at most 64 characters, such as "boat", got ${describe(kind)}.`);
@@ -832,6 +835,21 @@ export function listControllerKinds() {
 
 export function listCameraRigKinds() {
   return [...rigFactories.keys()];
+}
+
+function unregister(owner, registry, builtIn, kind) {
+  if (builtIn.has(kind)) throw new RangeError(`${owner} cannot remove the built-in kind "${kind}".`);
+  return registry.delete(kind);
+}
+
+// Take back a kind a host refused (the MCP server does this for an addon that registered a point it did not declare).
+// Built-in kinds stay. Returns whether a kind was removed.
+export function unregisterControllerKind(kind) {
+  return unregister('unregisterControllerKind', controllerFactories, BUILT_IN_CONTROLLERS, kind);
+}
+
+export function unregisterCameraRigKind(kind) {
+  return unregister('unregisterCameraRigKind', rigFactories, BUILT_IN_RIGS, kind);
 }
 
 export function createController(kind, options = {}) {

@@ -10,6 +10,7 @@ import { installMeshBlend, normalizeBlend } from '../src/mesh-blend.js';
 import { installCoplanarDiagnostics } from '../src/coplanar-overlap.js';
 import { applyProjection } from '../src/camera.js';
 import { mat4 } from 'gl-matrix';
+import { listControllerKinds, listCameraRigKinds, unregisterControllerKind, unregisterCameraRigKind } from '../src/player.js';
 import { resolveAgentShadow, agentEnvironmentMap } from '../src/agent-look.js';
 import { agentSceneModule, agentSceneModuleLoaded } from '../src/agent-scene-modules.js';
 import { agentGroundPlacement, createAgentGround, placeAgentGround, FLOOR_COLOR } from '../src/agent-ground.js';
@@ -829,7 +830,42 @@ function paintLabels(context, labels, offsetX, offsetY) {
   }
 }
 
+// Kinds an addon registers are checked against what its package.json declared; one it did not declare is taken back.
+const ADDON_KIND_REGISTRIES = [
+  { point: 'registerController', field: 'controllers', list: listControllerKinds, remove: unregisterControllerKind },
+  { point: 'registerCameraRig', field: 'cameraRigs', list: listCameraRigKinds, remove: unregisterCameraRigKind },
+];
+
+function takeBackKinds(before, registries) {
+  for (const registry of registries) {
+    for (const kind of registry.list()) if (!before[registry.field].includes(kind)) registry.remove(kind);
+  }
+}
+
+async function loadAddonModule({ url, name, extensionPoints }) {
+  const before = Object.fromEntries(ADDON_KIND_REGISTRIES.map(registry => [registry.field, registry.list()]));
+  try {
+    const entry = await import(/* @vite-ignore */ url);
+    if (typeof entry.registerAddon !== 'function') {
+      throw new TypeError(`${name} does not export a registerAddon function. Export registerAddon() that registers its kinds (docs/addons.md).`);
+    }
+    entry.registerAddon();
+  } catch (error) {
+    takeBackKinds(before, ADDON_KIND_REGISTRIES);
+    throw error;
+  }
+  const added = Object.fromEntries(ADDON_KIND_REGISTRIES.map(registry => [registry.field, registry.list().filter(kind => !before[registry.field].includes(kind))]));
+  const undeclared = ADDON_KIND_REGISTRIES.filter(registry => added[registry.field].length > 0 && !extensionPoints.includes(registry.point));
+  if (undeclared.length > 0) {
+    takeBackKinds(before, ADDON_KIND_REGISTRIES);
+    const used = undeclared.map(registry => `${registry.point} (${added[registry.field].join(', ')})`).join(', ');
+    throw new RangeError(`${name} registered ${used} but its package.json "67js".extensionPoints does not declare it. Add the point to extensionPoints, or stop registering it.`);
+  }
+  return added;
+}
+
 window.__agentPreview = {
+  loadAddon: loadAddonModule,
   reviewBegin({ width, height }) {
     reviewGrid = document.createElement('canvas');
     reviewGrid.width = width;
