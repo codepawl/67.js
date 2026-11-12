@@ -357,7 +357,7 @@ The six-scene references use the box filter of width 1, so the box filter stays 
 
 ### Light tree for next event estimation
 
-The `cycles` kernel picks one emitter per surface bounce by walking the Cycles light tree (`light_tree.wgsl`, a translation of `kernel/light/tree.h`: one random number reused down the tree, importance from distance, cone angles, energy and the surface normal, two reservoirs per leaf) and finds the probability of a given emitter from the previous shading point for the MIS weight of a BSDF-sampled hit. `lightSampling` is `auto` (default: tree when the scene has more than one emitter, as Cycles with `use_light_tree` on), `tree` or `uniform` (the flat pick of earlier versions); `trace-native.mjs --light-sampling` sets it. The environment map keeps its own importance sample and is not in the tree. `[measured]`, 960 x 540, 8 bounces, seed 1, against the Cycles 4096-spp seed-1 reference:
+The `cycles` kernel picks one emitter per surface bounce by walking the Cycles light tree (`light_tree.wgsl`, a translation of `kernel/light/tree.h`: one random number reused down the tree, importance from distance, cone angles, energy and the surface normal, two reservoirs per leaf) and finds the probability of a given emitter from the previous shading point for the MIS weight of a BSDF-sampled hit. `lightSampling` is `auto` (default: tree when the scene has more than one emitter, as Cycles with `use_light_tree` on), `tree` or `uniform` (the flat pick of earlier versions); `trace-native.mjs --light-sampling` sets it. `useLightTree: true|false` (`--light-tree on|off`) are other names for `tree` and `uniform`; passing both options with different values is an error. A sun is a distant leaf of the same tree, and light-link masks stay as an OR per node: every emitter is in the tree, and a picked emitter whose mask does not match the receiver contributes nothing (`lgt_links_match`), so linked scenes use the tree too. The environment map keeps its own importance sample and is not in the tree. `[measured]`, 960 x 540, 8 bounces, seed 1, against the Cycles 4096-spp seed-1 reference:
 
 | Check | Result |
 | :--- | :--- |
@@ -522,3 +522,5 @@ uv run --no-project --with numpy python bench/cycles-parity/verify-lobes.py --se
 # Set GIT_BASH_BIN="C:\Program Files\Git\bin\bash.exe" and GPU_LOCK_SCRIPT="<path-to-gpu-lock.sh>" to wrap every GPU step automatically.
 uv run --no-project --with numpy --with psutil python bench/cycles-parity/run-m0-suite.py $OutDir --scene lit-interior --repeats 3 --bounces 8 --mode all
 ```
+
+`bench/cycles-parity/make-many-lights-scene.mjs <scene.json> <out.json> --count 500` writes a copy of an exported scene with that many small point lights, and `bench/cycles-parity/measure-sampler-noise.py <scene.json> <outDir> --compare sampler|light-tree` measures relMSE per sample count for `white` against `sobol-burley`, or for `uniform` against `tree`, against a high-sample reference with its own seed.

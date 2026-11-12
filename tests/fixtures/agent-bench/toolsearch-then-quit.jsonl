@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","model":"claude-haiku-4-5","tools":["ToolSearch"],"mcp_servers":[{"name":"67js","status":"connected"}]}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"ToolSearch","input":{"query":"select:mcp__67js__scene_create"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"mcp__67js__scene_create\nmcp__67js__scene_add_part\nmcp__67js__scene_export_recipe"}]}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I will plan the crate."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"I will plan the crate.","usage":{"output_tokens":900}}

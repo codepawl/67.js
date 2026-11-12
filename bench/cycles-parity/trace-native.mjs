@@ -13,6 +13,9 @@ import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
 const SUPPORTED_FILTERS = new Set(['box', 'gaussian', 'blackman-harris']);
 const SUPPORTED_SAMPLERS = new Set(['white', 'sobol-burley']);
+// Names of the earlier sampler option (#957), kept as aliases.
+const SAMPLER_ALIASES = { pcg: 'white', sobol: 'sobol-burley' };
+const LIGHT_TREE_ALIASES = { auto: 'auto', on: 'tree', off: 'uniform' };
 
 function readFlagValue(argumentList, flagName, fallbackValue) {
   const flagIndex = argumentList.indexOf(flagName);
@@ -42,6 +45,14 @@ function parseNumberOption(argumentList, flagName, fallbackValue, minimumValue) 
   return parsed;
 }
 
+function parseChoiceOption(argumentList, flagName, allowedValues, fallbackValue) {
+  const value = String(readFlagValue(argumentList, flagName, fallbackValue));
+  if (!allowedValues.includes(value)) {
+    throw new RangeError(`Option ${flagName} must be one of ${allowedValues.join(', ')}, got "${value}".`);
+  }
+  return value;
+}
+
 function parseKernelOption(argumentList) {
   const kernel = String(readFlagValue(argumentList, '--kernel', 'legacy'));
   if (!SUPPORTED_KERNELS.has(kernel)) {
@@ -59,9 +70,10 @@ function parseFilterTypeOption(argumentList) {
 }
 
 function parseSamplerOption(argumentList) {
-  const sampler = String(readFlagValue(argumentList, '--sampler', 'sobol-burley'));
+  const requested = String(readFlagValue(argumentList, '--sampler', 'sobol-burley'));
+  const sampler = SAMPLER_ALIASES[requested] ?? requested;
   if (!SUPPORTED_SAMPLERS.has(sampler)) {
-    throw new RangeError(`Option --sampler must be "white" or "sobol-burley", got "${sampler}".`);
+    throw new RangeError(`Option --sampler must be "white" (alias "pcg") or "sobol-burley" (alias "sobol"), got "${requested}".`);
   }
   return sampler;
 }
@@ -71,7 +83,15 @@ function parseLightSamplingOption(argumentList) {
   if (!['auto', 'tree', 'uniform'].includes(lightSampling)) {
     throw new RangeError(`Option --light-sampling must be "auto", "tree" or "uniform", got "${lightSampling}".`);
   }
-  return lightSampling;
+  const aliasedLightTree = String(readFlagValue(argumentList, '--light-tree', 'auto'));
+  if (!Object.hasOwn(LIGHT_TREE_ALIASES, aliasedLightTree)) {
+    throw new RangeError(`Option --light-tree (alias of --light-sampling) must be "auto", "on" or "off", got "${aliasedLightTree}".`);
+  }
+  const aliasedLightSampling = LIGHT_TREE_ALIASES[aliasedLightTree];
+  if (aliasedLightSampling !== 'auto' && lightSampling !== 'auto' && aliasedLightSampling !== lightSampling) {
+    throw new RangeError(`Options --light-tree ${aliasedLightTree} and --light-sampling ${lightSampling} disagree; pass only one.`);
+  }
+  return aliasedLightSampling === 'auto' ? lightSampling : aliasedLightSampling;
 }
 
 function parseTraceArguments(argumentList) {

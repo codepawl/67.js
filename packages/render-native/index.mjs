@@ -11,6 +11,7 @@ import {
   STRUCT_STRIDES_V2,
   KERNEL_FLAG_USE_LIGHT_TREE,
   KERNEL_FLAG_WHITE_NOISE_SAMPLER,
+  resolveSamplingOptions,
   resolveUseLightTree,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
   KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET,
@@ -69,6 +70,7 @@ export function resolveNativeKernel(kernel) {
  */
 export function traceNative(input, options = {}) {
   validatePackOptions(options, 'traceNative', true);
+  const { sampler, lightSampling } = resolveSamplingOptions(options, 'traceNative');
   const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel } = options;
   const selectedKernel = resolveNativeKernel(kernel);
   const addon = loadAddon();
@@ -94,11 +96,11 @@ export function traceNative(input, options = {}) {
   if (input?.schemaVersion === FORMAT_V2_VERSION && hasFilterOptions(options)) {
     v2Input = { ...v2Input, kernelParams: withFilterOptions(v2Input.kernelParams, options) };
   }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && options.sampler !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, options.sampler) };
+  if (input?.schemaVersion === FORMAT_V2_VERSION && sampler !== undefined) {
+    v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, sampler) };
   }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && options.lightSampling !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, options.lightSampling) };
+  if (input?.schemaVersion === FORMAT_V2_VERSION && lightSampling !== undefined) {
+    v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, lightSampling) };
   }
   return addon.traceSceneCycles(v2Input, {
     width,

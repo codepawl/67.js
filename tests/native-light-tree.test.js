@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeInputV2, withLightSamplingFlag } from '../packages/render-native/index.mjs';
+import { STRUCT_STRIDES_V2, buildNativeInputV2, withLightSamplingFlag } from '../packages/render-native/index.mjs';
 import { readFileSync } from 'node:fs';
 import {
   LIGHT_TREE_EMITTER_BYTES,
@@ -12,6 +12,7 @@ import {
   mergeCones,
 } from '../packages/render-native/light-tree-v2.mjs';
 import { createCamera } from '../src/path-tracer.js';
+import { buildTraceScene } from '../src/path-tracer-scene.js';
 
 const LIGHT_BYTES = 128;
 const TRIANGLE_BYTES = 96;
@@ -546,4 +547,114 @@ test('lightSampling on a packed v2 input without emitter tables is rejected for 
   };
   assert.equal(flagsOf(withLightSamplingFlag(completeInput, 'tree')) & 1, 1);
   assert.equal(flagsOf(withLightSamplingFlag(completeInput, 'uniform')) & 1, 0);
+});
+
+// Options and packing of a scene built from the trace scene (the tests adapted from the earlier sampler change, #957).
+const KERNEL_FLAGS_WORD = 8;
+const FLAG_USE_LIGHT_TREE = 1;
+const FLAG_WHITE_NOISE_SAMPLER = 64;
+
+function floorGeometry() {
+  return {
+    positions: new Float32Array([-4, 0, -4, 4, 0, -4, 4, 0, 4, -4, 0, 4]),
+    normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
+    uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+    colors: new Float32Array(12).fill(1),
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+  };
+}
+
+function pointLightList(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    position: [(index % 5) - 2, 1 + (index % 3) * 0.5, Math.floor(index / 5) - 2],
+    color: [1, 0.9, 0.8],
+    intensity: 1 + index,
+    radius: 0.05,
+  }));
+}
+
+function packTraceScene(environment, options = {}, parts = [{ name: 'floor', geometry: floorGeometry(), material: { color: [0.5, 0.5, 0.5] } }]) {
+  const scene = buildTraceScene(parts, environment);
+  const camera = createCamera({ eye: [0, 2, 6], target: [0, 0, 0], fov: 45 }, 32, 16);
+  return buildNativeInputV2(scene, camera, { width: 32, height: 16, samples: 4, ...options });
+}
+
+function packedKernelFlags(input) {
+  return new Uint32Array(input.kernelParams.buffer, input.kernelParams.byteOffset, STRUCT_STRIDES_V2.kernelParams / 4)[KERNEL_FLAGS_WORD];
+}
+
+function treeOf(input) {
+  return { nodes: input.lightTreeNodes, nodeCount: input.lightTreeNodeCount, emitters: input.lightTreeEmitters, lightToTree: input.lightToTree };
+}
+
+test('the Sobol-Burley sampler is the default, "white" sets the opt-out flag and "pcg" and "sobol" are its earlier names', () => {
+  assert.equal(packedKernelFlags(packTraceScene({})) & FLAG_WHITE_NOISE_SAMPLER, 0);
+  assert.equal(packedKernelFlags(packTraceScene({}, { sampler: 'sobol-burley' })) & FLAG_WHITE_NOISE_SAMPLER, 0);
+  assert.equal(packedKernelFlags(packTraceScene({}, { sampler: 'sobol' })) & FLAG_WHITE_NOISE_SAMPLER, 0);
+  assert.equal(packedKernelFlags(packTraceScene({}, { sampler: 'white' })) & FLAG_WHITE_NOISE_SAMPLER, FLAG_WHITE_NOISE_SAMPLER);
+  assert.equal(packedKernelFlags(packTraceScene({}, { sampler: 'pcg' })) & FLAG_WHITE_NOISE_SAMPLER, FLAG_WHITE_NOISE_SAMPLER);
+  assert.throws(() => packTraceScene({}, { sampler: 'halton' }), /sampler.*sobol-burley.*white/);
+});
+
+test('light selection: the tree is the default from two emitters, and lightSampling or its alias useLightTree forces or forbids it', () => {
+  const few = { pointLights: pointLightList(3) };
+  const many = { pointLights: pointLightList(20) };
+  assert.equal(packedKernelFlags(packTraceScene({ pointLights: pointLightList(1) })) & FLAG_USE_LIGHT_TREE, 0, 'one emitter needs no pick');
+  assert.equal(packedKernelFlags(packTraceScene(few)) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
+  assert.equal(packedKernelFlags(packTraceScene(many, { lightSampling: 'uniform' })) & FLAG_USE_LIGHT_TREE, 0);
+  assert.equal(packedKernelFlags(packTraceScene(many, { useLightTree: false })) & FLAG_USE_LIGHT_TREE, 0);
+  assert.equal(packedKernelFlags(packTraceScene({ pointLights: pointLightList(1) }, { useLightTree: true })) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
+  assert.deepEqual(
+    packTraceScene(many, { useLightTree: false }).kernelParams,
+    packTraceScene(many, { lightSampling: 'uniform' }).kernelParams,
+    'the alias packs the same bytes'
+  );
+  assert.doesNotThrow(() => packTraceScene(many, { useLightTree: true, lightSampling: 'tree' }));
+  assert.throws(() => packTraceScene(many, { useLightTree: true, lightSampling: 'uniform' }), /disagrees/);
+  assert.throws(() => packTraceScene(many, { useLightTree: 'yes' }), /useLightTree/);
+  assert.throws(() => packTraceScene(many, { lightSampling: 'sometimes' }), /lightSampling/);
+});
+
+test('the light tree built from a trace scene links every light to the root and sums their energy', () => {
+  const lightCount = 20;
+  const input = packTraceScene({ pointLights: pointLightList(lightCount) });
+  assert.equal(packedKernelFlags(input) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
+  assert.equal(input.lightCount, lightCount);
+  const tree = treeOf(input);
+  checkTreeInvariants(tree, input.lights, input.emissiveTriangles, lightCount, 0);
+  const root = readNode(tree, 0);
+  const leafEnergy = collectLeaves(tree).reduce((sum, leaf) => sum + leaf.node.energy, 0);
+  assert.ok(leafEnergy > 0);
+  assert.ok(Math.abs(root.energy - leafEnergy) <= leafEnergy * 1e-5, 'root energy is the sum of the leaves');
+});
+
+test('a sun stays in the tree as a distant leaf, so the other lights keep the tree pick', () => {
+  const input = packTraceScene({ pointLights: pointLightList(20), keyColor: [3, 3, 3], lightDirection: [0, 1, 0] });
+  assert.equal(packedKernelFlags(input) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
+  const tree = treeOf(input);
+  checkTreeInvariants(tree, input.lights, input.emissiveTriangles, input.lightCount, 0);
+  assert.ok(collectLeaves(tree).some((leaf) => leaf.node.isDistant), 'the sun is a distant leaf');
+});
+
+test('emissive triangles are leaves of the same tree', () => {
+  const emissivePanels = Array.from({ length: 12 }, (_, index) => {
+    const geometry = floorGeometry();
+    geometry.positions = geometry.positions.map((value, position) => (position % 3 === 1 ? 3 : value * 0.1 + (index - 6) * 0.6));
+    return { name: `panel-${index}`, geometry, material: { color: [0.5, 0.5, 0.5], emission: 5 } };
+  });
+  const input = packTraceScene({}, {}, emissivePanels);
+  assert.equal(input.emissiveTriangleCount, 24);
+  assert.equal(packedKernelFlags(input) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
+  checkTreeInvariants(treeOf(input), input.lights, input.emissiveTriangles, input.lightCount, 24);
+});
+
+test('light-link masks do not switch the tree off: every node keeps the OR of the masks below it', () => {
+  const input = packTraceScene({ pointLights: pointLightList(20) });
+  const lightWords = new Uint32Array(input.lights.buffer, input.lights.byteOffset, input.lights.byteLength / 4);
+  let maskOr = 0;
+  for (let index = 0; index < input.lightCount; index++) {
+    maskOr = (maskOr | lightWords[index * (LIGHT_BYTES / 4) + 30]) >>> 0;
+  }
+  assert.equal(packedKernelFlags(input) & FLAG_USE_LIGHT_TREE, FLAG_USE_LIGHT_TREE);
+  assert.equal(readNode(treeOf(input), 0).maskOr, maskOr);
 });

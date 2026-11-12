@@ -1516,6 +1516,39 @@ export function validateLightSamplingOption(lightSampling, callerName) {
   }
 }
 
+/**
+ * Reads the sampler and light-selection options, including the earlier names `sampler: 'pcg'` (same as `'white'`),
+ * `sampler: 'sobol'` (same as `'sobol-burley'`) and `useLightTree: true|false` (same as `lightSampling: 'tree'|'uniform'`).
+ * Returns `{ sampler, lightSampling }` with the canonical names, or `undefined` for an option that was left out.
+ * Throws when a name is unknown or when an alias and its canonical option disagree.
+ */
+export function resolveSamplingOptions(options, callerName) {
+  const samplerAliases = { pcg: 'white', sobol: 'sobol-burley' };
+  let sampler = options.sampler;
+  if (typeof sampler === 'string' && Object.hasOwn(samplerAliases, sampler)) {
+    sampler = samplerAliases[sampler];
+  }
+  validateSamplerOption(sampler, callerName);
+
+  let lightSampling = options.lightSampling;
+  validateLightSamplingOption(lightSampling, callerName);
+  if (options.useLightTree !== undefined) {
+    if (typeof options.useLightTree !== 'boolean') {
+      throw new TypeError(
+        `${callerName}: \`useLightTree\` must be true, false or left out for automatic, got ${JSON.stringify(options.useLightTree)}.`
+      );
+    }
+    const aliasedLightSampling = options.useLightTree ? 'tree' : 'uniform';
+    if (lightSampling !== undefined && lightSampling !== aliasedLightSampling) {
+      throw new RangeError(
+        `${callerName}: \`useLightTree: ${options.useLightTree}\` means \`lightSampling: "${aliasedLightSampling}"\`, which disagrees with \`lightSampling: "${lightSampling}"\`. Pass only one of them.`
+      );
+    }
+    lightSampling = aliasedLightSampling;
+  }
+  return { sampler, lightSampling };
+}
+
 /** True when the kernel should pick lights through the light tree for this scene and mode. */
 export function resolveUseLightTree(lightSampling, emitterCount, lightTreeNodeCount) {
   if (lightTreeNodeCount <= 0 || lightSampling === 'uniform') {
@@ -1544,8 +1577,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   // samplesPerDispatch is optional (undefined means "let the addon choose"); only validate when provided.
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
-  validateSamplerOption(options.sampler, callerName);
-  validateLightSamplingOption(options.lightSampling, callerName);
+  resolveSamplingOptions(options, callerName);
   validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
@@ -1644,7 +1676,7 @@ function packKernelParamsV2({
   const volumeDensity = Math.max(0, Number(volume?.density ?? 0));
 
   let kernelFlags = 0;
-  validateLightSamplingOption(options.lightSampling, 'packKernelParamsV2');
+  const { sampler, lightSampling } = resolveSamplingOptions(options, 'packKernelParamsV2');
   if (options.directLighting !== undefined && !VALID_DIRECT_LIGHTING.includes(options.directLighting)) {
     throw new RangeError(`packKernelParamsV2: \`directLighting\` must be "both", "nee-only" or "bsdf-only", got ${JSON.stringify(options.directLighting)}.`);
   }
@@ -1657,7 +1689,7 @@ function packKernelParamsV2({
     kernelFlags |= KERNEL_FLAG_LIGHT_TREE_PROBE;
   }
   const emitterCount = counts.lightCount + counts.emissiveTriangleCount;
-  if (resolveUseLightTree(options.lightSampling, emitterCount, counts.lightTreeNodeCount)) {
+  if (resolveUseLightTree(lightSampling, emitterCount, counts.lightTreeNodeCount)) {
     kernelFlags |= KERNEL_FLAG_USE_LIGHT_TREE;
   }
   if (volumeDensity > 0) {
@@ -1675,8 +1707,7 @@ function packKernelParamsV2({
   if (options.transparentBackground === true) {
     kernelFlags |= KERNEL_FLAG_TRANSPARENT_BACKGROUND;
   }
-  validateSamplerOption(options.sampler, 'packKernelParamsV2');
-  if (options.sampler === 'white') {
+  if (sampler === 'white') {
     kernelFlags |= KERNEL_FLAG_WHITE_NOISE_SAMPLER;
   }
 

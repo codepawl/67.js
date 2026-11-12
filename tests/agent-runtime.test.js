@@ -30,6 +30,7 @@ import { filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline } from
 import { normalizeReview, REVIEW_LIMITS } from '../scripts/agent-review.mjs';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
+import { ANNOTATE_LIMITS } from '../src/agent-annotate.js';
 
 test('runtime reports real scene capabilities without launching a browser and closes idempotently', async () => {
   const runtime = createAgentRuntime({ backend: 'cpu', memory: 64 });
@@ -123,6 +124,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, GAME_CAPABILITIES, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
     recipeAssetNeeds, gameAssetIds, sequenceFrameIds, catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, TEXTURE_SEQUENCE_CAPABILITIES, AGENT_ASSET_LIMITS, assertCombinedAssetBytes,
     audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName, sessionProblem, SCENE_STORE_LIMITS,
+    runAnnotateSession: async () => ({ outcome: 'timeout' }), openInDefaultBrowser: async () => {}, ANNOTATE_LIMITS,
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
     runtimeOptions, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
     setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },

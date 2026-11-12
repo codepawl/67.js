@@ -2,7 +2,7 @@
 
 > A 3D engine that AI agents drive. Glaze draws real-time scenes on WebGL2, and Cook path traces stills on the CPU or WebGL2, and on Vulkan with the optional render-native package. PNG, MP4 and GLB output comes from the same scene.
 
-67js has an MCP server (`67js-mcp`, 24 tools) that builds, edits, looks at and renders scenes from JSON recipes.
+67js has an MCP server (`67js-mcp`, 25 tools) that builds, edits, looks at and renders scenes from JSON recipes.
 The same engine is a JavaScript library for pages and Node. The library API is in the guide below.
 Scenes are plain data with stable IDs, so an agent can edit by ID and check each change with a rendered image.
 
@@ -58,6 +58,7 @@ Scenes are plain data with stable IDs, so an agent can edit by ID and check each
 - `mesh_stack`: Set the non-destructive modifier stack of a recipe mesh geometry (ops and fields: scene_capabilities meshModifiers), evaluated after its...
 - `scene_apply`: Atomically edit transforms, look, camera or materials.
 - `scene_look`: Render the active scene as a bounded PNG, optionally with part labels.
+- `scene_ask_user`: Open the view in the browser so the person pins points with notes; waits for Send.
 - `scene_review`: Compare one to four independent camera or motion samples in one labeled PNG grid.
 - `scene_checkpoint`: Save a private recipe snapshot.
 - `scene_restore`: Restore a checkpoint atomically using the current revision.
