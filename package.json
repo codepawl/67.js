@@ -178,6 +178,7 @@
     "smoke:agent-vegetation": "node scripts/smoke-agent-vegetation.mjs",
     "smoke:agent-render-jobs": "node scripts/smoke-agent-render-jobs.mjs",
     "smoke:agent-post-pass": "node scripts/smoke-agent-post-pass.mjs",
+    "smoke:agent-compositing": "node scripts/smoke-agent-compositing.mjs",
     "smoke:agent-material-snippet": "node scripts/smoke-agent-material-snippet.mjs",
     "smoke:agent-texture-sequence": "node scripts/smoke-agent-texture-sequence.mjs",
     "smoke:render-passes": "node scripts/smoke-render-passes.mjs",
