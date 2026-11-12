@@ -151,16 +151,18 @@ export function checkBuoyancyWork(ocean, floatingBodies, frameCount) {
 /** Height of the sea surface above the calm level at a world position and physics time, following the horizontal pull of choppy waves. */
 export function seaHeightAt(ocean, worldX, worldZ, time) {
   const seaTime = ocean.time + time;
-  let restX = worldX;
-  let restZ = worldZ;
+  // The ocean mesh edit of a y-up sea reads the waves with its first horizontal axis (z) as the wave x and its second (x) as the
+  // wave z, and pulls them by moveX and moveZ in that order. The same order here puts a body on the wave the mesh draws.
+  let restFirst = worldZ;
+  let restSecond = worldX;
   if (ocean.choppiness > 0) {
     for (let pass = 0; pass < CHOPPY_REST_PASSES; pass++) {
-      const surface = oceanSurfaceAt(ocean.waves, restX, restZ, seaTime, ocean.choppiness);
-      restX = worldX - surface.moveX;
-      restZ = worldZ - surface.moveZ;
+      const surface = oceanSurfaceAt(ocean.waves, restFirst, restSecond, seaTime, ocean.choppiness);
+      restFirst = worldZ - surface.moveX;
+      restSecond = worldX - surface.moveZ;
     }
   }
-  return oceanSurfaceAt(ocean.waves, restX, restZ, seaTime, ocean.choppiness).height;
+  return oceanSurfaceAt(ocean.waves, restFirst, restSecond, seaTime, ocean.choppiness).height;
 }
 
 function rotateByQuaternion(point, rotation) {
