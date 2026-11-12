@@ -683,6 +683,162 @@ async function subsurfaceScene(weight) {
   };
 }
 
+// Issue #895: a 60 m hall cut into ten cells by partition walls with a doorway each, lit by 500 small lights (200 point, 150 spot,
+// 100 emissive quads and 50 emissive triangles) placed from a fixed seed. A surface sees the lights of its own cell and, through
+// the doorways, a few of the next ones, so most of the 500 are far or hidden from any shading point and a flat pick wastes
+// nearly every sample. The count is above MAX_TRACE_LIGHTS, so the parity harness builds it with trace-scene-many-lights.mjs.
+const MANY_LIGHTS_500_SEED = 895;
+const MANY_LIGHTS_500_HALF_LENGTH = 30;
+const MANY_LIGHTS_500_HALF_WIDTH = 4;
+const MANY_LIGHTS_500_HEIGHT = 5;
+const MANY_LIGHTS_500_CELL_LENGTH = 6;
+const MANY_LIGHTS_500_PARTITION_HALF_THICKNESS = 0.1;
+const MANY_LIGHTS_500_DOORWAY_HALF_WIDTH = 1.5;
+const MANY_LIGHTS_500_DOORWAY_HEIGHT = 3.2;
+const MANY_LIGHTS_500_COUNTS = { point: 200, spot: 150, quad: 100, triangle: 50 };
+const MANY_LIGHTS_500_PALETTE = [[1, 0.72, 0.45], [0.8, 0.88, 1], [1, 0.95, 0.85]];
+
+function manyLights500PartitionPlanes() {
+  const planes = [];
+  for (let plane = -MANY_LIGHTS_500_HALF_LENGTH + MANY_LIGHTS_500_CELL_LENGTH; plane < MANY_LIGHTS_500_HALF_LENGTH; plane += MANY_LIGHTS_500_CELL_LENGTH) {
+    planes.push(plane);
+  }
+  return planes;
+}
+
+function manyLights500Shell(cube, wall) {
+  const length = MANY_LIGHTS_500_HALF_LENGTH * 2;
+  const width = MANY_LIGHTS_500_HALF_WIDTH * 2;
+  const middle = MANY_LIGHTS_500_HEIGHT / 2;
+  return [
+    part('hall-floor', cube, [0, -0.05, 0], [width, 0.1, length], { color: [0.5, 0.45, 0.4], roughness: 0.6 }),
+    part('hall-ceiling', cube, [0, MANY_LIGHTS_500_HEIGHT + 0.05, 0], [width, 0.1, length], wall),
+    part('hall-left', cube, [-MANY_LIGHTS_500_HALF_WIDTH - 0.05, middle, 0], [0.1, MANY_LIGHTS_500_HEIGHT + 0.2, length], { ...wall, color: [0.6, 0.35, 0.3] }),
+    part('hall-right', cube, [MANY_LIGHTS_500_HALF_WIDTH + 0.05, middle, 0], [0.1, MANY_LIGHTS_500_HEIGHT + 0.2, length], { ...wall, color: [0.3, 0.42, 0.58] }),
+    part('hall-end', cube, [0, middle, -MANY_LIGHTS_500_HALF_LENGTH - 0.05], [width, MANY_LIGHTS_500_HEIGHT + 0.2, 0.1], wall),
+    part('hall-start', cube, [0, middle, MANY_LIGHTS_500_HALF_LENGTH + 0.05], [width, MANY_LIGHTS_500_HEIGHT + 0.2, 0.1], wall),
+  ];
+}
+
+function manyLights500Partition(cube, wall, planeZ, index) {
+  const thickness = MANY_LIGHTS_500_PARTITION_HALF_THICKNESS * 2;
+  const sideWidth = MANY_LIGHTS_500_HALF_WIDTH - MANY_LIGHTS_500_DOORWAY_HALF_WIDTH;
+  const sideCenter = MANY_LIGHTS_500_DOORWAY_HALF_WIDTH + sideWidth / 2;
+  const lintelHeight = MANY_LIGHTS_500_HEIGHT - MANY_LIGHTS_500_DOORWAY_HEIGHT;
+  return [
+    part(`partition-${index}-left`, cube, [-sideCenter, MANY_LIGHTS_500_HEIGHT / 2, planeZ], [sideWidth, MANY_LIGHTS_500_HEIGHT, thickness], wall),
+    part(`partition-${index}-right`, cube, [sideCenter, MANY_LIGHTS_500_HEIGHT / 2, planeZ], [sideWidth, MANY_LIGHTS_500_HEIGHT, thickness], wall),
+    part(`partition-${index}-lintel`, cube, [0, MANY_LIGHTS_500_DOORWAY_HEIGHT + lintelHeight / 2, planeZ], [MANY_LIGHTS_500_DOORWAY_HALF_WIDTH * 2, lintelHeight, thickness], wall),
+  ];
+}
+
+// A position along the hall that keeps clear of every partition, so no lamp sits inside a wall.
+function manyLights500FreeZ(random, partitionPlanes) {
+  const clearance = MANY_LIGHTS_500_PARTITION_HALF_THICKNESS + 0.3;
+  for (;;) {
+    const candidate = (random() * 2 - 1) * (MANY_LIGHTS_500_HALF_LENGTH - 0.5);
+    if (partitionPlanes.every(plane => Math.abs(candidate - plane) > clearance)) return candidate;
+  }
+}
+
+function manyLights500Color(random) {
+  return MANY_LIGHTS_500_PALETTE[Math.floor(random() * MANY_LIGHTS_500_PALETTE.length)];
+}
+
+// Small emitters: a quad in the YZ plane facing +x or -x, and a triangle in the XZ plane facing down.
+function manyLights500EmitterGeometry(kind, halfSize) {
+  if (kind === 'quad-right') {
+    return {
+      positions: new Float32Array([0, -halfSize, -halfSize, 0, halfSize, -halfSize, 0, halfSize, halfSize, 0, -halfSize, halfSize]),
+      normals: new Float32Array([1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]),
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    };
+  }
+  if (kind === 'quad-left') {
+    return {
+      positions: new Float32Array([0, -halfSize, -halfSize, 0, halfSize, -halfSize, 0, halfSize, halfSize, 0, -halfSize, halfSize]),
+      normals: new Float32Array([-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0]),
+      indices: new Uint32Array([0, 2, 1, 0, 3, 2]),
+    };
+  }
+  return {
+    positions: new Float32Array([-halfSize, 0, -halfSize, halfSize, 0, -halfSize, 0, 0, halfSize]),
+    normals: new Float32Array([0, -1, 0, 0, -1, 0, 0, -1, 0]),
+    indices: new Uint32Array([0, 1, 2]),
+  };
+}
+
+function manyLights500Emitters(random, partitionPlanes) {
+  const quadHalfSize = 0.15;
+  const triangleHalfSize = 0.2;
+  const geometries = {
+    'quad-right': manyLights500EmitterGeometry('quad-right', quadHalfSize),
+    'quad-left': manyLights500EmitterGeometry('quad-left', quadHalfSize),
+    triangle: manyLights500EmitterGeometry('triangle', triangleHalfSize),
+  };
+  const emitters = [];
+  for (let index = 0; index < MANY_LIGHTS_500_COUNTS.quad; index++) {
+    const onLeftWall = index % 2 === 0;
+    const wallX = (onLeftWall ? -1 : 1) * (MANY_LIGHTS_500_HALF_WIDTH - 0.05);
+    const position = [wallX, 0.6 + random() * 2.9, manyLights500FreeZ(random, partitionPlanes)];
+    const material = { color: [0.02, 0.02, 0.02], roughness: 0.6, emission: 12, emissiveColor: manyLights500Color(random) };
+    emitters.push(part(`emitter-quad-${index}`, geometries[onLeftWall ? 'quad-right' : 'quad-left'], position, [1, 1, 1], material));
+  }
+  for (let index = 0; index < MANY_LIGHTS_500_COUNTS.triangle; index++) {
+    const position = [(random() * 2 - 1) * (MANY_LIGHTS_500_HALF_WIDTH - 0.5), MANY_LIGHTS_500_HEIGHT - 0.05, manyLights500FreeZ(random, partitionPlanes)];
+    const material = { color: [0.02, 0.02, 0.02], roughness: 0.6, emission: 20, emissiveColor: manyLights500Color(random) };
+    emitters.push(part(`emitter-triangle-${index}`, geometries.triangle, position, [1, 1, 1], material));
+  }
+  return emitters;
+}
+
+function manyLights500PointLights(random, partitionPlanes) {
+  return Array.from({ length: MANY_LIGHTS_500_COUNTS.point }, () => ({
+    position: [(random() * 2 - 1) * (MANY_LIGHTS_500_HALF_WIDTH - 0.4), 2 + random() * 2.6, manyLights500FreeZ(random, partitionPlanes)],
+    color: manyLights500Color(random),
+    intensity: 0.25 + random() * 0.65,
+    radius: 0.05,
+    castShadow: false,
+  }));
+}
+
+function manyLights500SpotLights(random, partitionPlanes) {
+  return Array.from({ length: MANY_LIGHTS_500_COUNTS.spot }, () => ({
+    position: [(random() * 2 - 1) * (MANY_LIGHTS_500_HALF_WIDTH - 0.4), MANY_LIGHTS_500_HEIGHT - 0.3, manyLights500FreeZ(random, partitionPlanes)],
+    direction: [(random() * 2 - 1) * 0.5, -1, (random() * 2 - 1) * 0.5],
+    angle: 0.35 + random() * 0.35,
+    penumbra: 0.3,
+    color: manyLights500Color(random),
+    intensity: 0.6 + random() * 1.2,
+    radius: 0.05,
+    castShadow: false,
+  }));
+}
+
+async function manyLights500Scene() {
+  const lighting = constantLighting(0.01);
+  const cube = box(0, 1);
+  const wall = { color: [0.72, 0.7, 0.66], roughness: 0.9 };
+  const random = seededRandom(MANY_LIGHTS_500_SEED);
+  const partitionPlanes = manyLights500PartitionPlanes();
+  const emitters = manyLights500Emitters(random, partitionPlanes);
+  const pointLights = manyLights500PointLights(random, partitionPlanes);
+  const spotLights = manyLights500SpotLights(random, partitionPlanes);
+  const parts = [
+    ...manyLights500Shell(cube, wall),
+    ...partitionPlanes.flatMap((planeZ, index) => manyLights500Partition(cube, wall, planeZ, index)),
+    part('pillar', cube, [-1.2, 0.8, 21], [0.5, 1.6, 0.5], { color: [0.6, 0.6, 0.65], roughness: 0.5 }),
+    part('ball', sphere(48, 32), [0.8, 0.5, 15], [0.5, 0.5, 0.5], { color: [0.8, 0.25, 0.2], roughness: 0.3 }),
+    part('block', cube, [0.7, 0.4, 9], [0.8, 0.8, 0.8], { color: [0.2, 0.45, 0.75], roughness: 0.6 }),
+    ...emitters,
+  ];
+  return {
+    parts, blenderWorld: lighting.blenderWorld,
+    environment: environment(lighting, { pointLights, spotLights }),
+    camera: { eye: [0.3, 1.7, 29], target: [0, 1.9, -20], up: [0, 1, 0], fov: 60, near: 0.05, far: 80 },
+  };
+}
+
 export const REFERENCE_SCENES = {
   subsurface: () => subsurfaceScene(1),
   'subsurface-off': () => subsurfaceScene(0),
@@ -867,6 +1023,9 @@ export const REFERENCE_SCENES = {
       camera: { eye: [0, 1.5, 17], target: [0, 1.2, -8], up: [0, 1, 0], fov: 55, near: 0.05, far: 80 },
     };
   },
+
+  // Issue #895: 500 small lights in a hall of ten cells (point, spot, emissive quads and triangles), for the light tree gate.
+  'many-lights-500': manyLights500Scene,
 
   // A street 140 m long under the sun. A single shadow map has to cover the whole street, so its texels are about 8 cm wide;
   // cascades give the cars and lamp posts near the camera 1 to 2 cm texels. harness.js draws it with one map by default and

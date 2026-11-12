@@ -15,6 +15,7 @@ M1_SCENES = [
     "glass",
     "outdoor-hdri",
     "lit-interior",
+    "many-lights-500",
 ]
 
 
