@@ -64,20 +64,20 @@ jobs:
       - run: npm run tool-cost -- --base "$SIZE_BASE_REF"
 
   # `node --test` already runs every file in its own process (Node 24 default, --test-isolation=process), so one pass over
-  # the files is also the isolation check. Twelve shards dealt by measured file time (scripts/shard-test-files.mjs, test-timings.json): the slowest file (about 150 s) is the floor, and 12 shards reach it where 8 stay about 40% above it. Change the matrix and the count in the test command together; tests/shard-test-files.test.js checks they agree.
+  # the files is also the isolation check. Eight shards dealt by measured file time (scripts/shard-test-files.mjs, test-timings.json). The slowest file (about 150 s) is the floor, which 12 shards would reach where 8 stay about 35% above it, but the coverage gate counts unnamed branches once per shard, so more shards lower its branch figure (75.4% at 12 against 77.5% at 8, baseline 78.45%, issue #1004): raise the count after that is fixed. Change the matrix and the count in the test command together; tests/shard-test-files.test.js checks they agree.
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
       # The live MCP tests need build/ and build/mcp.
       - run: npm run build:lib
-      - run: mkdir -p coverage && npm run test:coverage -- --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/shard-${{ matrix.shard }}.info --test-reporter=./scripts/test-timing-reporter.mjs --test-reporter-destination=coverage/timings-${{ matrix.shard }}.json $(node scripts/shard-test-files.mjs ${{ matrix.shard }} 12)
+      - run: mkdir -p coverage && npm run test:coverage -- --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/shard-${{ matrix.shard }}.info --test-reporter=./scripts/test-timing-reporter.mjs --test-reporter-destination=coverage/timings-${{ matrix.shard }}.json $(node scripts/shard-test-files.mjs ${{ matrix.shard }} 8)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
