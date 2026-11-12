@@ -4,6 +4,7 @@ import { restWorldMatrix, boneTails, boneNodeId } from './rig.js';
 import { createRagdoll, ragdollPatches, ragdollReport } from './ragdoll.js';
 import { bakePhysicsScene, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from './physics.js';
 import { normalizeForceFields } from './force-fields.js';
+import { normalizeFloat } from './physics-buoyancy.js';
 import { AGENT_SCENE_CAPABILITIES } from './agent-scene-capabilities.js';
 
 export { loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader };
@@ -24,12 +25,14 @@ const BODY_TYPES = ['dynamic', 'fixed', 'kinematic'];
 const SHAPES = ['box', 'ball', 'capsule', 'cylinder', 'cone', 'convex', 'trimesh', 'compound'];
 const COMPOUND_PART_SHAPES = ['box', 'ball', 'capsule', 'cylinder', 'cone'];
 const JOINT_TYPES = ['spherical', 'revolute', 'prismatic', 'fixed', 'spring'];
-const BODY_FIELDS = ['node', 'type', 'shape', 'shapes', 'mass', 'density', 'friction', 'restitution', 'sensor', 'velocity', 'angularVelocity', 'layer', 'collidesWith'];
+const BODY_FIELDS = ['node', 'type', 'shape', 'shapes', 'mass', 'density', 'friction', 'restitution', 'sensor', 'velocity', 'angularVelocity', 'layer', 'collidesWith', 'float'];
 const COMPOUND_PART_FIELDS = ['shape', 'translation', 'rotation', 'halfExtents', 'radius', 'halfHeight'];
 const JOINT_FIELDS = ['name', 'type', 'bodyA', 'bodyB', 'anchorA', 'anchorB', 'axis', 'limits', 'motor', 'restLength', 'stiffness', 'damping', 'contactsEnabled', 'breakImpulse'];
 const MOTOR_FIELDS = ['mode', 'target', 'stiffness', 'damping', 'maxForce'];
 const EVENT_FIELDS = ['time', 'tick', 'type', 'body', 'joint', 'impulse', 'torqueImpulse', 'point', 'translation', 'rotation', 'motor'];
-const PHYSICS_FIELDS = ['duration', 'gravity', 'bodies', 'joints', 'events', 'fields', 'ragdoll'];
+const PHYSICS_FIELDS = ['duration', 'gravity', 'bodies', 'joints', 'events', 'fields', 'ragdoll', 'ocean'];
+const OCEAN_FIELDS = ['geometry', 'level', 'waterDensity'];
+const OCEAN_WAVE_KEYS = ['windSpeed', 'direction', 'choppiness', 'size', 'seed', 'time', 'resolution'];
 const RAGDOLL_FIELDS = ['armature', 'density', 'friction', 'restitution', 'layer'];
 
 function knownKeys(value, fields, path) {
@@ -125,6 +128,12 @@ function normalizeBody(input, recipeNodes, motionNodeIds, claimedNodes, path) {
   if (input.velocity !== undefined) body.velocity = numberList(input.velocity, 3, `${path}.velocity`);
   if (input.angularVelocity !== undefined) body.angularVelocity = numberList(input.angularVelocity, 3, `${path}.angularVelocity`);
   if (input.layer !== undefined) body.layer = Math.trunc(finiteNumber(input.layer, `${path}.layer`, 0, MAX_LAYER));
+  if (input.float !== undefined) {
+    if (type !== 'dynamic') {
+      throw invalidField(`${path}.float`, input.float, `no float since the body is ${type}; only dynamic bodies float, such as type "dynamic"`, TypeError);
+    }
+    body.float = normalizeFloat(input.float, `${path}.float`);
+  }
   if (shape === 'compound') {
     const parts = boundedArray(input.shapes, MAX_COMPOUND_SHAPES, `${path}.shapes`);
     if (!parts.length) {
@@ -346,7 +355,62 @@ export function normalizeAgentPhysics(input, recipe) {
   if (input.fields !== undefined) {
     result.fields = normalizeForceFields(input.fields, 'physics.fields');
   }
+  if (input.ocean !== undefined) {
+    result.ocean = normalizeOceanReference(input.ocean, recipe);
+  } else if (bodies.some(body => body.float)) {
+    throw invalidField('physics.ocean', undefined, 'a sea for floating bodies, such as { "geometry": "sea" } naming a mesh geometry whose stack has an ocean node');
+  }
   return result;
+}
+
+/** Find the ocean node a physics ocean reads: the first ocean in the stack of the named mesh geometry. */
+function oceanNodeOf(geometryId, recipe) {
+  const geometry = (recipe.geometries ?? []).find(candidate => candidate.id === geometryId);
+  return geometry?.type === 'mesh' ? (geometry.stack ?? []).find(node => node?.op === 'ocean') : undefined;
+}
+
+function normalizeOceanReference(input, recipe) {
+  knownKeys(input, OCEAN_FIELDS, 'physics.ocean');
+  if (!oceanNodeOf(input.geometry, recipe)) {
+    const known = (recipe.geometries ?? []).filter(geometry => oceanNodeOf(geometry.id, recipe)).slice(0, 5).map(geometry => geometry.id).join(', ') || 'none yet; add a mesh geometry with stack [{ "op": "ocean" }]';
+    throw invalidField('physics.ocean.geometry', input.geometry, `the ID of a mesh geometry whose stack has an ocean node, one of ${known}`);
+  }
+  if ((oceanNodeOf(input.geometry, recipe).axis ?? 'y') !== 'y') {
+    throw invalidField('physics.ocean.geometry', input.geometry, 'a sea that lifts the y axis; set axis "y" on its ocean node');
+  }
+  const ocean = { geometry: input.geometry };
+  if (input.level !== undefined) ocean.level = finiteNumber(input.level, 'physics.ocean.level', -10000, 10000);
+  if (input.waterDensity !== undefined) ocean.waterDensity = finiteNumber(input.waterDensity, 'physics.ocean.waterDensity', 1, 20000);
+  return ocean;
+}
+
+const SEA_LEVEL_TOLERANCE = 0.05;
+
+/**
+ * World height of the sea as drawn: the first node showing the ocean geometry, at its translation plus its y scale times the
+ * mean height of the geometry (waves average out to the calm surface). Null when no node shows it. Rotation and parents are ignored.
+ */
+function drawnSeaLevel(oceanReference, recipe, geometries) {
+  const node = recipe.nodes.find(candidate => candidate.geometry === oceanReference.geometry);
+  const positions = geometries.get(oceanReference.geometry)?.positions;
+  if (!node || !positions?.length) return null;
+  let heightTotal = 0;
+  for (let index = 1; index < positions.length; index += 3) heightTotal += positions[index];
+  return node.translation[1] + node.scale[1] * heightTotal / (positions.length / 3);
+}
+
+/** A warning when the level the recipe gives differs from the drawn sea, which makes floating bodies sink out of view; else null. */
+function seaLevelWarning(oceanReference, drawnLevel) {
+  if (oceanReference.level === undefined || drawnLevel === null || Math.abs(oceanReference.level - drawnLevel) <= SEA_LEVEL_TOLERANCE) return null;
+  return `physics.ocean.level is ${oceanReference.level} but the sea geometry "${oceanReference.geometry}" is drawn at height ${Number(drawnLevel.toFixed(3))}; bodies float on the level, so they sit ${Number(Math.abs(oceanReference.level - drawnLevel).toFixed(3))} m ${oceanReference.level < drawnLevel ? 'below' : 'above'} the visible water. Leave level out to follow the drawn sea.`;
+}
+
+/** The sea of the definition: the wave fields of the referenced ocean node, the level (default: the drawn sea) and the water density. */
+function oceanDefinition(oceanReference, recipe, drawnLevel) {
+  const node = oceanNodeOf(oceanReference.geometry, recipe);
+  const waves = Object.fromEntries(OCEAN_WAVE_KEYS.filter(key => node[key] !== undefined).map(key => [key, node[key]]));
+  const { geometry, ...water } = oceanReference;
+  return { ...waves, level: drawnLevel ?? 0, ...water };
 }
 
 function scaledBounds(positions, scale) {
@@ -475,6 +539,10 @@ function physicsDefinition(physics, recipe, geometries, ragdoll) {
   (physics.joints ?? []).forEach((joint, index) => definition.joints.push({ name: joint.name ?? `joint-${index}`, ...joint }));
   if (physics.events) definition.events = physics.events;
   if (physics.fields) definition.fields = physics.fields;
+  if (physics.ocean) definition.ocean = oceanDefinition(physics.ocean, recipe, drawnSeaLevel(physics.ocean, recipe, geometries));
+  for (const body of physics.bodies) {
+    if (body.float) definition.bodies.find(candidate => candidate.name === body.node).float = body.float;
+  }
   return definition;
 }
 
@@ -526,7 +594,8 @@ function bodyReport(scene, physics) {
 export function physicsBakeKey(recipe, geometryRecords) {
   const bodyNodes = recipe.nodes.filter(node => recipe.physics.bodies.some(body => body.node === node.id));
   const rig = recipe.physics.ragdoll ? [recipe.nodes, recipe.armatures] : null;
-  return JSON.stringify([recipe.physics, bodyNodes, bodyNodes.map(node => geometryRecords.get(node.geometry).signature), rig]);
+  const sea = recipe.physics.ocean ? oceanNodeOf(recipe.physics.ocean.geometry, recipe) : null;
+  return JSON.stringify([recipe.physics, bodyNodes, bodyNodes.map(node => geometryRecords.get(node.geometry).signature), rig, sea]);
 }
 
 /**
@@ -546,6 +615,7 @@ export function bakeAgentPhysics(physics, recipe, geometries) {
     const offset = scene.bodyIndex(nodeId) * 7;
     return { translation: pose.subarray(offset, offset + 3), rotation: pose.subarray(offset + 3, offset + 7) };
   };
+  const seaWarning = physics.ocean ? seaLevelWarning(physics.ocean, drawnSeaLevel(physics.ocean, recipe, geometries)) : null;
   let reportCache = null;
   return Object.freeze({
     duration: physics.duration,
@@ -566,6 +636,7 @@ export function bakeAgentPhysics(physics, recipe, geometries) {
         duration: physics.duration, frames: scene.frameCount, gravity: physics.gravity ?? [0, -9.81, 0],
         bodies: bodyReport(scene, physics), ...contactReport(scene, physics),
         eventsTruncated: scene.contactEventsTruncated,
+        ...(seaWarning ? { warnings: [seaWarning] } : {}),
         ...(scene.jointBreaks.length ? { jointBreaks: scene.jointBreaks.slice(0, MAX_REPORTED_CONTACTS).map(({ frame, joint, impulse }) => ({ joint, time: roundedTime(frame, scene.timestep), impulse: Number(impulse.toFixed(3)) })) } : {}),
         ...(ragdoll ? { ragdoll: ragdollReport(ragdoll, scene) } : {}),
       };

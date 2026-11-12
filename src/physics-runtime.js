@@ -4,7 +4,7 @@
 // so the bake path and the live path share one adapter. Another engine plugs in as an object with the same shape as
 // `rapierAdapter`; see docs/physics-runtime.md. Nothing here touches the film path.
 import { mat4, quat } from 'gl-matrix';
-import { applyForceFieldImpulses, createRapierWorld, loadPhysicsEngine, prepareLivePhysics, requireRapier } from './physics.js';
+import { applyBuoyancyImpulses, applyForceFieldImpulses, createRapierWorld, loadPhysicsBuoyancy, loadPhysicsEngine, prepareLivePhysics, requireRapier } from './physics.js';
 
 export const PHYSICS_RUNTIME_LIMITS = Object.freeze({
   maximumListeners: 64,
@@ -101,6 +101,7 @@ export const rapierAdapter = Object.freeze({
       step(stepSeconds, elapsedSeconds) {
         world.timestep = stepSeconds;
         if (prepared.fields.length) applyForceFieldImpulses({ ...prepared, timestep: stepSeconds }, bodies, elapsedSeconds);
+        if (prepared.buoyancy) applyBuoyancyImpulses({ ...prepared, timestep: stepSeconds }, bodies, elapsedSeconds);
         world.step(eventQueue);
       },
       readPose(bodyIndex, output) {
@@ -192,6 +193,7 @@ export async function createPhysicsSystem(definition, options = {}) {
   const { adapter: requestedAdapter, name, bindings: initialBindings, ...engineOptions } = options;
   const adapter = validateAdapter(requestedAdapter ?? rapierAdapter);
   const timestep = engineOptions.timestep ?? 1 / 60;
+  if (definition?.bodies?.some(body => body.float !== undefined)) await loadPhysicsBuoyancy();
   const prepared = prepareLivePhysics(definition, { ...engineOptions, timestep });
   await adapter.load?.();
   const world = adapter.createWorld(prepared);

@@ -3,6 +3,7 @@ dist/
 build/
 .wrangler/
 public/releases/
+public/packs/
 public/release.json
 # Guides copied from docs/ at build time
 public/*.md

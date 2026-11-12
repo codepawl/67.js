@@ -55,6 +55,9 @@ Variants: `scene_apply` with a `branch` name, compare in one `scene_review` (a `
 - Characters and creatures: recipe `armatures` plus `skin` per mesh node, `motion.ik`, imported GLBs through the
   `asset` node field and `scene_asset_catalog`. Physics, cloth, particles and hair are recipe sections.
   `scene_inspect` reports their results; read those instead of guessing from a picture.
+- Third-party controller or camera kinds exist only when the server owner started it with `--addons` and `--allow-addon`:
+  read `scene_capabilities` topic `addons` for the names, then set `game.player.controller` or `game.camera` to one.
+  You cannot load an addon from a tool.
 - A GLB for Blender: `scene_export_glb` (needs `--jobs`), it returns a path.
 
 ## Finish

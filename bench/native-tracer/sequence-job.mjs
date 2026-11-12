@@ -106,7 +106,7 @@ for (const [name, { recipe, expectedLaterRoute, allowedRoutes = [expectedLaterRo
   const laterRoutes = withSessions.routes.slice(1);
   const routesAsExpected = withSessions.routes[0] === 'new-session' && withSessions.routes.length === STILLS_PER_JOB && laterRoutes.every(route => allowedRoutes.includes(route)) && laterRoutes.includes(expectedLaterRoute);
   const sessionsOffRoutes = withoutSessions.routes;
-  report.variants[name] = { identical, routes: withSessions.routes, routesAsExpected, sessionsOffRoutes, backend: withSessions.backend, backendNote: withSessions.backendNote, lastFrameSession: withSessions.lastSession };
+  report.variants[name] = { identical, frameHashes: withSessions.frameHashes, routes: withSessions.routes, routesAsExpected, sessionsOffRoutes, backend: withSessions.backend, backendNote: withSessions.backendNote, lastFrameSession: withSessions.lastSession };
   if (!identical || !routesAsExpected || sessionsOffRoutes.length > 0) failed = true;
 }
 await writeFile(join(outputDirectory, 'sequence-job.json'), JSON.stringify(report, null, 1));

@@ -1,6 +1,6 @@
 import { exportNativeSceneTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
-import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
+import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, needsBuoyancy, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
 import { skyOpenness } from '../src/closed-room.js';
 import { fogSkyVisibility } from '../src/fog-sky-visibility.js';
@@ -10,6 +10,7 @@ import { installMeshBlend, normalizeBlend } from '../src/mesh-blend.js';
 import { installCoplanarDiagnostics } from '../src/coplanar-overlap.js';
 import { applyProjection } from '../src/camera.js';
 import { mat4 } from 'gl-matrix';
+import { listAddedControllerKinds, listAddedCameraRigKinds, listControllerKinds, listCameraRigKinds, unregisterControllerKind, unregisterCameraRigKind } from '../src/player.js';
 import { resolveAgentShadow, agentEnvironmentMap } from '../src/agent-look.js';
 import { agentSceneModule, agentSceneModuleLoaded } from '../src/agent-scene-modules.js';
 import { agentGroundPlacement, createAgentGround, placeAgentGround, FLOOR_COLOR } from '../src/agent-ground.js';
@@ -292,10 +293,31 @@ function rebuildRenderer(record) {
   record.shadowKey = null;
 }
 
+// While a motion time is sampled (a render job, a look at a time), the automatic floor is fixed by the pose at time 0, so
+// shards flying out of a physics bake or a part driving away never resize it, flip it on or off, or move the horizon.
+// A scene with no motion time reads its own pose each draw, as before.
+const motionGrounds = new WeakMap();
+
+function automaticGroundPlacement(scene) {
+  const frozen = motionGrounds.get(scene);
+  if (scene.motionTime != null && frozen?.revision === scene.revision) {
+    return frozen.placement;
+  }
+  return agentGroundPlacement(scene.parts, scene.environment);
+}
+
+function sampleMotionTime(scene, time) {
+  if (motionGrounds.get(scene)?.revision !== scene.revision) {
+    scene.sampleMotion(0);
+    motionGrounds.set(scene, { revision: scene.revision, placement: agentGroundPlacement(scene.parts, scene.environment) });
+  }
+  scene.sampleMotion(time);
+}
+
 // The automatic floor (src/agent-ground.js) follows the scene's lowest geometry. A renderer gains or loses it only
 // through a new renderer, so a floor that appears or disappears (a part now forms one, or environment.ground changed) rebuilds.
 function syncAutomaticGround(record) {
-  const placement = agentGroundPlacement(record.scene.parts, record.scene.environment);
+  const placement = automaticGroundPlacement(record.scene);
   if (Boolean(placement) !== Boolean(record.renderer.groundPart)) {
     rebuildRenderer(record);
     record.renderer.resize();
@@ -499,7 +521,7 @@ function cascadesFor(scene) {
 
 function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = false }) {
   probeSnippets(scene);
-  const placement = agentGroundPlacement(scene.parts, scene.environment);
+  const placement = automaticGroundPlacement(scene);
   const renderer = installCoplanarDiagnostics(installRenderPasses(installCameraEffects(new Renderer67(canvas, scene.parts, {
     ground: placement ? createAgentGround(placement) : false,
     hdr: true,
@@ -620,7 +642,7 @@ function afterMeshBooleans(value, run) {
   if (!allAgentSceneModulesLoaded()) return loadAllAgentSceneModules().then(() => afterMeshBooleans(value, run));
   const loads = [];
   if (!meshBooleansLoaded() && needsMeshBooleans(value)) loads.push(loadMeshBooleans());
-  if (!physicsEngineLoaded() && needsPhysics(value)) loads.push(loadPhysicsEngine());
+  if (needsPhysics(value) && (!physicsEngineLoaded() || needsBuoyancy(value))) loads.push(loadPhysicsEngine({ buoyancy: needsBuoyancy(value) }));
   if (!loads.length) return run();
   return Promise.all(loads).then(run);
 }
@@ -829,7 +851,45 @@ function paintLabels(context, labels, offsetX, offsetY) {
   }
 }
 
+// Kinds an addon registers are checked against what its package.json declared; one it did not declare is taken back.
+const addonKindRegistries = () => [
+  { point: 'registerController', field: 'controllers', list: listControllerKinds, remove: unregisterControllerKind },
+  { point: 'registerCameraRig', field: 'cameraRigs', list: listCameraRigKinds, remove: unregisterCameraRigKind },
+];
+
+function takeBackKinds(before, registries) {
+  for (const registry of registries) {
+    for (const kind of registry.list()) if (!before[registry.field].includes(kind)) registry.remove(kind);
+  }
+}
+
+async function loadAddonModule({ url, name, extensionPoints }) {
+  const { setAddedGameKinds } = await import('../src/game-setup.js');
+  setAddedGameKinds(() => ({ controllers: listAddedControllerKinds(), cameraRigs: listAddedCameraRigKinds() }));
+  const kindRegistries = addonKindRegistries();
+  const before = Object.fromEntries(kindRegistries.map(registry => [registry.field, registry.list()]));
+  try {
+    const entry = await import(/* @vite-ignore */ url);
+    if (typeof entry.registerAddon !== 'function') {
+      throw new TypeError(`${name} does not export a registerAddon function. Export registerAddon() that registers its kinds (docs/addons.md).`);
+    }
+    entry.registerAddon();
+  } catch (error) {
+    takeBackKinds(before, kindRegistries);
+    throw error;
+  }
+  const added = Object.fromEntries(kindRegistries.map(registry => [registry.field, registry.list().filter(kind => !before[registry.field].includes(kind))]));
+  const undeclared = kindRegistries.filter(registry => added[registry.field].length > 0 && !extensionPoints.includes(registry.point));
+  if (undeclared.length > 0) {
+    takeBackKinds(before, kindRegistries);
+    const used = undeclared.map(registry => `${registry.point} (${added[registry.field].join(', ')})`).join(', ');
+    throw new RangeError(`${name} registered ${used} but its package.json "67js".extensionPoints does not declare it. Add the point to extensionPoints, or stop registering it.`);
+  }
+  return added;
+}
+
 window.__agentPreview = {
+  loadAddon: loadAddonModule,
   reviewBegin({ width, height }) {
     reviewGrid = document.createElement('canvas');
     reviewGrid.width = width;
@@ -914,7 +974,7 @@ window.__agentPreview = {
       record.scene.sampleFrame({ ...(animation === undefined ? {} : { animation }),
         ...(motionTime === undefined ? {} : { motionTime }) });
     } else if (motionTime !== undefined) {
-      record.scene.sampleMotion(motionTime);
+      sampleMotionTime(record.scene, motionTime);
     }
     const shotCamera = cameraOverrides ? withCameraOverrides(record.scene.camera, cameraOverrides) : undefined;
     const forVelocity = pass === 'velocity';
@@ -1167,7 +1227,7 @@ window.__agentPreview = {
       if (typeof record.scene.sampleMotion !== 'function') {
         throw new RangeError('Procedural motion time is unavailable for imported assets.');
       }
-      record.scene.sampleMotion(motionTime);
+      sampleMotionTime(record.scene, motionTime);
     }
     draw(record);
     const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure));

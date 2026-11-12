@@ -24,6 +24,7 @@ import { parseArgs } from 'node:util';
 import { createRunGuard } from './run-guard.mjs';
 import { removeLocalPaths, totalsByModel, totalsOf } from './aggregate.mjs';
 import { gradeRecipe, recipeFeatures } from './check.mjs';
+import { countFixRounds, isMcpRender, isMcpWrite } from './fix-rounds.mjs';
 import { scoreLookSafely } from './look.mjs';
 import { classifyZeroCalls } from './zero-calls.mjs';
 import { PROMPT_PREAMBLE, TASKS, taskById, taskPrompt } from './tasks.mjs';
@@ -109,7 +110,8 @@ function textOf(content) {
 
 /** Tool calls, errors, the model, usage and the last exported recipe from a stream-json transcript. */
 function readTranscript(output) {
-  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, branchCalls: 0, relationCalls: 0, pathQueries: 0, recipe: null, result: null };
+  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, branchCalls: 0, relationCalls: 0, pathQueries: 0, fixRounds: 0, recipe: null, result: null };
+  const steps = [];
   const exportCalls = new Set();
   for (const line of output.split('\n')) {
     if (!line.trim().startsWith('{')) continue;
@@ -126,6 +128,7 @@ function readTranscript(output) {
         const name = block.name.replace(`mcp__${MCP_SERVER_NAME}__`, '');
         // ToolSearch only loads the MCP tool schemas; it is harness overhead, not modeling work.
         if (block.name !== 'ToolSearch') summary.toolCalls++;
+        steps.push({ name, input: block.input });
         summary.toolsByName[name] = (summary.toolsByName[name] ?? 0) + 1;
         if (block.input?.branch !== undefined || block.input?.shots?.some(shot => shot.branch !== undefined)) summary.branchCalls++;
         // The recipe a task hands over may carry relations itself; only calls that send a non-empty list count.
@@ -149,6 +152,7 @@ function readTranscript(output) {
     }
     if (event.type === 'result') summary.result = event;
   }
+  summary.fixRounds = countFixRounds(steps, { isRender: isMcpRender, isWrite: isMcpWrite });
   return summary;
 }
 
@@ -194,6 +198,7 @@ async function runTask(task, attempt, systemPromptAddition) {
       model: transcript.model,
       toolCalls: transcript.toolCalls,
       toolErrors: transcript.toolErrors,
+      fixRounds: transcript.fixRounds,
       toolsByName: transcript.toolsByName,
       branchCalls: transcript.branchCalls,
       relationCalls: transcript.relationCalls,

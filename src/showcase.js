@@ -11,7 +11,7 @@ import { applyWaterReflection, attachWaterReflection } from './water-reflection.
 // The mirror redraws every second lit frame while the camera moves: about 1.3 ms off the orbiting port frame
 // (issue #504), and An saw no stutter in a side-by-side. A still camera keeps its picture either way.
 const WATER_REFLECTION_OPTIONS = { updateEvery: 2 };
-import { createDownloadMeter, downloadBlob, readByteLength, readPartRanks } from './showcase-download.js';
+import { createDownloadMeter, downloadBlob, inWholeWorldOrder, readByteLength, readPartRanks } from './showcase-download.js';
 
 // Each scene lives in public/showcase/<id>/scene.json: its GLB, sky, camera, renderer and frame options, and credits.
 // Optional fields: "bounds" ({ min, max } the camera target stays inside), "minDistance" and "maxDistance".
@@ -234,14 +234,6 @@ function showCredits(credits = []) {
 
 function markPressedTab(id) {
   for (const button of tabs.querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.scene === id));
-}
-
-// Puts the parts of every file back in the order a one-piece load gives them, because the order sets how the renderer batches and
-// draws them. Each file lists the rank of its parts in that order (the split script writes it); without ranks the files join as they are.
-function inWholeWorldOrder(files) {
-  if (files.some(file => !file.ranks || file.ranks.length !== file.parts.length)) return files.flatMap(file => file.parts);
-  const ranked = files.flatMap(file => file.parts.map((part, index) => ({ part, rank: file.ranks[index] })));
-  return ranked.sort((first, second) => first.rank - second.rank).map(entry => entry.part);
 }
 
 // Adds the other parts of a staged world once they have downloaded, then swaps the first frame's small sky for the full one.

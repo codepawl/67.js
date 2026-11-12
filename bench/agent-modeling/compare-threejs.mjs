@@ -1,9 +1,13 @@
 // Joins one 67js run (run.mjs) and one three.js run (threejs.mjs) into the comparison file of issue #31 and prints
 // the markdown tables.
-// node bench/agent-modeling/compare-threejs.mjs <67js run json> <three.js run json> <output json>
+// node bench/agent-modeling/compare-threejs.mjs <67js run json> <three.js run json> <output json> [--pairwise <pairwise-judge result json>]
+// With --pairwise it also prints wins per system, the exact binomial p and the position-bias control of pairwise-judge.mjs.
 import { readFile, writeFile } from 'node:fs/promises';
+import { parseArgs } from 'node:util';
+import { pairwiseTable } from './pairwise-judge.mjs';
 
-const [mcpPath, codePath, outputPath] = process.argv.slice(2);
+const { values: options, positionals } = parseArgs({ allowPositionals: true, options: { pairwise: { type: 'string' } } });
+const [mcpPath, codePath, outputPath] = positionals;
 const mcpRun = JSON.parse(await readFile(mcpPath, 'utf8'));
 // The three.js run may be split over several files (comma separated) when a run was stopped and the rest redone.
 const codeRuns = await Promise.all(codePath.split(',').map(async path => JSON.parse(await readFile(path, 'utf8'))));
@@ -20,15 +24,18 @@ const lookOf = record => record.look?.silhouette?.mean ?? null;
 const tokensOf = record => record.inputTokens + record.outputTokens;
 const thousands = value => `${Math.round(value / 1000)}k`;
 
+// Records from before fix rounds were counted have none; a mean needs every record to carry one.
+const fixRoundsOf = own => (own.every(record => typeof record.fixRounds === 'number') ? Number(mean(own.map(record => record.fixRounds)).toFixed(1)) : null);
+
 const taskIds = [...new Set(records.map(record => record.task))];
-const lines = ['| Task | System | Pass | Tool calls | Tool errors | Tokens in / out | Look | Failures |', '| --- | --- | --- | --- | --- | --- | --- | --- |'];
+const lines = ['| Task | System | Pass | Tool calls | Tool errors | Fix rounds | Tokens in / out | Look | Failures |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
 for (const task of taskIds) {
   for (const { name } of SYSTEMS) {
     const record = records.find(candidate => candidate.task === task && candidate.system === name);
-    lines.push(`| ${task} | ${name} | ${record.pass ? 'yes' : 'no'} (${record.passed}/${record.total}) | ${record.toolCalls} | ${record.toolErrors} | ${thousands(record.inputTokens)} / ${thousands(record.outputTokens)} | ${lookOf(record)?.toFixed(3) ?? '-'} | ${record.failed.join('; ') || '-'} |`);
+    lines.push(`| ${task} | ${name} | ${record.pass ? 'yes' : 'no'} (${record.passed}/${record.total}) | ${record.toolCalls} | ${record.toolErrors} | ${record.fixRounds ?? '-'} | ${thousands(record.inputTokens)} / ${thousands(record.outputTokens)} | ${lookOf(record)?.toFixed(3) ?? '-'} | ${record.failed.join('; ') || '-'} |`);
   }
 }
-const totals = ['| System | Pass | Mean tool calls | Mean tokens | Mean look | Mean wall seconds |', '| --- | --- | --- | --- | --- | --- |'];
+const totals = ['| System | Pass | Mean tool calls | Mean fix rounds | Mean tokens | Mean look | Mean wall seconds |', '| --- | --- | --- | --- | --- | --- | --- |'];
 const summary = {};
 for (const { name } of SYSTEMS) {
   const own = records.filter(record => record.system === name);
@@ -37,14 +44,16 @@ for (const { name } of SYSTEMS) {
     runs: own.length,
     passed: own.filter(record => record.pass).length,
     meanToolCalls: Number(mean(own.map(record => record.toolCalls)).toFixed(1)),
+    meanFixRounds: fixRoundsOf(own),
     meanTokens: Math.round(mean(own.map(tokensOf))),
     meanLook: Number(mean(looks).toFixed(3)),
     meanWallSeconds: Math.round(mean(own.map(record => record.wallSeconds))),
   };
   const row = summary[name];
-  totals.push(`| ${name} | ${row.passed}/${row.runs} | ${row.meanToolCalls} | ${thousands(row.meanTokens)} | ${row.meanLook} | ${row.meanWallSeconds} |`);
+  totals.push(`| ${name} | ${row.passed}/${row.runs} | ${row.meanToolCalls} | ${row.meanFixRounds ?? '-'} | ${thousands(row.meanTokens)} | ${row.meanLook} | ${row.meanWallSeconds} |`);
 }
 
+const pairwise = options.pairwise ? JSON.parse(await readFile(options.pairwise, 'utf8')) : null;
 const output = {
   run: '2026-11-07-threejs-vs-67js',
   issue: 31,
@@ -54,7 +63,8 @@ const output = {
   threeVersion: codeRun.threeVersion,
   runsPerTaskPerSystem: 1,
   summary,
+  ...(pairwise ? { pairwise } : {}),
   records,
 };
 await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
-console.log(`${totals.join('\n')}\n\n${lines.join('\n')}`);
+console.log(`${totals.join('\n')}\n\n${lines.join('\n')}${pairwise ? `\n\n${pairwiseTable(pairwise)}` : ''}`);
