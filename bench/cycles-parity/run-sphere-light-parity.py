@@ -176,6 +176,9 @@ def main():
         "bounces": int(read_flag(argument_list, "--bounces", "8")),
     }
     falloff_settings = read_flag(argument_list, "--soft-falloff", "default,off").split(",")
+    for falloff_setting in falloff_settings:
+        if falloff_setting not in ("default", "on", "off"):
+            raise ValueError(f"--soft-falloff takes default, on or off separated by commas, got {falloff_setting!r}.")
     label = read_flag(argument_list, "--label", "cook")
     reference_names = [name for name in read_flag(argument_list, "--reference-scenes", "").split(",") if name]
     blender = find_blender()

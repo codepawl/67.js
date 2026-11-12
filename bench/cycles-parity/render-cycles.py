@@ -58,6 +58,16 @@ GREY_DIFFUSE_ENTRY = {"color": [0.8, 0.8, 0.8], "metallic": 0.0, "roughness": 1.
 DEFAULT_DEPTH_SAMPLES = 64
 
 
+SOFT_FALLOFF_VALUES = {"default": None, "on": True, "off": False}
+
+
+def read_soft_falloff(argument_list):
+    value = read_flag_value(argument_list, "--soft-falloff", "off")
+    if value not in SOFT_FALLOFF_VALUES:
+        raise ValueError(f"--soft-falloff must be default, on or off, got {value!r}.")
+    return SOFT_FALLOFF_VALUES[value]
+
+
 def parse_cli_arguments():
     if "--" not in sys.argv:
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
@@ -90,7 +100,7 @@ def parse_cli_arguments():
         "aperture_blades": int(read_flag_value(argument_list, "--aperture-blades", "0")),
         "aperture_rotation": float(read_flag_value(argument_list, "--aperture-rotation", "0")),
         "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
-        "soft_falloff": {"default": None, "on": True, "off": False}[read_flag_value(argument_list, "--soft-falloff", "off")],
+        "soft_falloff": read_soft_falloff(argument_list),
     }
 
 

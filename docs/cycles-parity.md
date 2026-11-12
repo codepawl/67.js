@@ -1003,7 +1003,7 @@ Not measured: sizes above 4,000,000 triangles (nothing failed at 4M, so the larg
 
 ## Classroom scene against Cycles, every material grey diffuse (#896, slice C1b)
 
-The last Done-when item of #896 asks for the Blender "Classroom" demo scene (Christophe Seux, CC0, from blender.org's demo files) with every material overridden to grey diffuse to pass the image-match checks against Cycles, and a depth pass that matches Cycles on 99.9 percent of pixels. This slice is the bridge, the harness and the first full measurement. The depth gate passes. The image gates do not pass, and the cause is pinned to one thing, point lights with a radius (below). Only `bench/`, `tests/` and this guide change; the `.blend` and everything derived from it stay outside the repository.
+The last Done-when item of #896 asks for the Blender "Classroom" demo scene (Christophe Seux, CC0, from blender.org's demo files) with every material overridden to grey diffuse to pass the image-match checks against Cycles, and a depth pass that matches Cycles on 99.9 percent of pixels. This slice is the bridge, the harness and the first full measurement. The depth gate and the image gates pass. The image gates failed in the first measurement, and the cause was one thing: the Cycles reference drew point lights with a radius as disks (below, and [Sphere lights and Soft Falloff](#sphere-lights-and-soft-falloff-1040)). Only `bench/`, `tests/` and this guide change; the `.blend` and everything derived from it stay outside the repository.
 
 Picture (Cook left, Cycles right, 1024 samples, depth of field on, grey diffuse): `docs/cook-classroom-comparison.jpg`.
 
@@ -1072,7 +1072,7 @@ Same JSON, one light class at a time (pinhole, 256 spp, mean of the green channe
 | the same 7 point lights, radius 0 | 1.0023 (0.05596 / 0.05583) |
 | one point light at a time | 1.09 (radius 0.08), 1.50 to 2.09 (the six lamps of radius 0.18) |
 
-The sun and the area lights agree to 0.2 percent, and the point lights agree to 0.2 percent too once their radius is 0. With a radius, Cook is 1.5 to 2.1 times brighter than Cycles on each of the six 0.18 m lamps, which sit at 2.31 m under a ceiling fixture (inferred: inside or against geometry). Everything above comes from a single pair of renders per row, so the second decimal of the small values is noise. The suspect is how the `cycles` kernel samples and shadows a sphere light whose sphere overlaps or touches geometry (light sampling in `packages/render-native`, point lights with `radius` in `src/cycles/`, against Cycles' sphere light sampling); I did not read or change kernel code, so the function is not named. That is for an issue: "point light with radius overlapping geometry is up to 2x brighter than Cycles", with this scene or a reduced one (a 0.18 m sphere light inside an open shade) as the reproduction. With the radius set to 0 on both sides the full gates would very likely come close to passing, but that full-resolution run was not made, so it is not claimed.
+The sun and the area lights agree to 0.2 percent, and the point lights agree to 0.2 percent too once their radius is 0. With a radius, Cook was 1.5 to 2.1 times brighter than the disk-light Cycles reference on each of the six 0.18 m lamps, which sit at 2.31 m under a ceiling fixture (inferred: inside or against geometry). Everything above comes from a single pair of renders per row, so the second decimal of the small values is noise. The first reading suspected the kernel's sphere light where it overlaps geometry. That was wrong: the kernel draws the sphere Cycles draws with Soft Falloff off, and the gap was the reference's disk light (#1040).
 
 ### The bridge against the original file `[measured]`
 
@@ -1089,7 +1089,7 @@ bash bench/cycles-parity/run-classroom-parity.sh [--samples 1024] [--force expor
 
 Output goes to `artifacts/classroom/` (ignored by Git): `summary.json`, `classroom-comparison.jpg`, the logs, and in `out/` the small files. The scene is read from `~/cook-data/classroom` and downloaded from `https://download.blender.org/demo/test/classroom.zip` on the first run.
 
-Not covered: the 22 unexported instances and the bridge gap above; the point light difference (to be filed); a full-resolution run with point-light radius 0 on both sides; 4096 samples.
+Not covered: the 22 unexported instances and the bridge gap above; a scene that keeps Blender's default disk lights (#1060); 4096 samples.
 
 ## Reproducible Commands
 
@@ -1340,7 +1340,7 @@ Commands: `bash bench/cycles-parity/texture-mips-run-all.sh <dir>` on a machine 
 
 ## Sphere lights and Soft Falloff (#1040)
 
-Cook rendered a point light with a radius up to 41 percent brighter than Cycles on the Classroom scene (six lamps of radius 0.18 m inside shades). The cause is in the comparison, not in the kernel `[measured on small scenes and on Classroom: with the fix its seven lamps read 0.994 to 1.003 one at a time and every Classroom gate passes]`:
+On the Classroom scene Cook rendered the seven point lights with a radius 41 percent brighter than Cycles together, and the six lamps of radius 0.18 m inside shades 1.5 to 2.1 times brighter one at a time. The cause is in the comparison, not in the kernel `[measured on small scenes and on Classroom: with the fix its seven lamps read 0.994 to 1.003 one at a time and every Classroom gate passes]`:
 
 - Blender 4 and later give a point or spot light the property `Light.use_soft_falloff`, on by default. With it on, Cycles builds a light with a radius as an oriented disk that faces the shading point (`intern/cycles/blender/light.cpp`: `set_is_sphere(!(mode & LA_USE_SOFT_FALLOFF))`; `kernel/light/point.h`, `point_light_sample`, the `else` branch). With it off, Cycles builds the sphere: it samples the cone of the sphere from outside, the surface from inside, and a path that hits the sphere uses the same pdf.
 - Cook implements the sphere (`lgt_sample_point_or_spot_light`, `lgt_sphere_solid_angle_pdf` in `lights.wgsl`), with the radiance `intensity / (pi r^2)` that Cycles uses (`eval_fac` in `PointLight::copy_to_kernel`), so the power does not change with the radius.
