@@ -11,7 +11,7 @@ shift
 blender_binary=${BLENDER_BIN:-$HOME/blender/blender}
 uv_binary=${UV_BIN:-$HOME/.local/bin/uv}
 scene="$data/scenes/metal.json"
-seed_count=${SEED_COUNT:-12}
+seed_count=${SEED_COUNT:-24}
 cd "$repository"
 
 render_cycles() { # tag samples seed extra...

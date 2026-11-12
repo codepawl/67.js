@@ -1470,7 +1470,7 @@ Not measured: Chrome's memory for a page that builds 500,000 parts (the numbers 
 
 Question: does Cook match Cycles' mean on `metal` within 0.1 percent per channel, and is the error outside the fireflies at or below Cycles' own? `[measured]` on a rented RTX 4090 (Blender 5.3.0 Cycles on OptiX, Cook on Vulkan), `960 x 540`, `bounces = 8`, box filter, no clamp, no denoise, `filter_glossy = 1`, Sobol-Burley on Cook's side.
 
-A single image's mean is heavy tailed (fireflies), so the standard error comes from the spread across seeds: [`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py) averages each side's per-seed channel means and combines the two standard errors (delta method). [`metal-mean-suite.sh`](../bench/cycles-parity/metal-mean-suite.sh) renders everything below.
+A single image's mean is heavy tailed (fireflies), so the standard error comes from the spread across seeds: [`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py) averages each side's per-seed channel means and combines the two standard errors (delta method). [`metal-mean-suite.sh`](../bench/cycles-parity/metal-mean-suite.sh) renders everything below (24 seeds a side by default, `SEED_COUNT` changes it).
 
 ### Mean ratio, 24 seeds a side at 1024 spp (Cook over Cycles, R / G / B, plus or minus one standard error)
 
@@ -1479,7 +1479,7 @@ A single image's mean is heavy tailed (fireflies), so the standard error comes f
 | `cycles` | 0.99921 / 0.99930 / 0.99946 | 0.00021 / 0.00019 / 0.00015 | yes, off by 0.079 / 0.070 / 0.054 percent |
 | `legacy` | 0.99856 / 0.99753 / 0.99629 | 0.00028 / 0.00025 / 0.00019 | no, off by 0.14 / 0.25 / 0.37 percent |
 
-Control: Cycles seeds 7 to 12 over seeds 1 to 6 gives 1.0005 / 1.0005 / 1.0004, plus or minus 0.0004, so the comparison itself resolves about 0.04 percent with six seeds. With 24 a side the one-standard-error band of the `cycles` kernel is 0.02 percent, and its 95 percent band reaches 0.12 percent on red, so "within 0.1 percent" is met by the estimate and not by a strict 95 percent bound.
+Control: Cycles seeds 1 to 6 over seeds 7 to 12 gives 1.0005 / 1.0005 / 1.0004, plus or minus 0.0004, so the comparison itself resolves about 0.04 percent with six seeds. With 24 a side the one-standard-error band of the `cycles` kernel is 0.02 percent, and its 95 percent band reaches 0.12 percent on red and 0.11 percent on green, so "within 0.1 percent" is met by the estimate and not by a strict 95 percent bound.
 
 Per part (the noisy ones are fireflies on the chrome, gold and steel; the floor and copper have no fireflies, their error is the bias): `cycles` kernel floor 0.9991 / 0.9992 / 0.9994 (52 percent of the pixels), copper 0.9993 / 0.9994 / 0.9996, chrome 0.995 +- 0.003, gold 0.9995 +- 0.0008, steel 1.0007 +- 0.0012. The `legacy` kernel floor is 0.9977 / 0.9947 / 0.9910 and copper 0.9945 / 0.9911 / 0.9904.
 
