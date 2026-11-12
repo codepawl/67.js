@@ -9,11 +9,11 @@
   <img alt="MCP server for agents" src="https://img.shields.io/badge/agents-MCP%20server-F7C948?style=flat-square&labelColor=0A1D1A">
 </p>
 
-67js makes 3D easy to understand and easy to do. An AI agent knows every part of 67js and carries the heavy steps. It builds the scene, lights it, checks the preview and renders the result. You keep the creative choices and stay in the loop, because the agent shows previews and asks when a matter of taste is open.
+67js is a 3D engine for JavaScript that an AI agent drives through an MCP server. It makes 3D easy to understand and easy to do.
+
+The agent knows every part of 67js and carries the heavy steps. It builds the scene, lights it, checks the preview and renders the result. You keep the creative choices and stay in the loop, because the agent shows previews and asks when a matter of taste is open.
 
 ## What you can make
-
-Every clip below is a 67js render.
 
 <table>
   <tr>
@@ -64,7 +64,7 @@ npm install 67js@npm:@codepawlhq/67js
 
 The registry name is `@codepawlhq/67js`, and the alias `67js` keeps imports short. The package is ESM and needs Node.js 20.19 or later. Glaze and the WebGL2 path tracer need a WebGL2 browser, and the WebGPU backends need WebGPU.
 
-A new minor version ships about once a week, and [CHANGELOG.md](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md) lists each change. npx keeps the copy it downloaded first. To update, run `npm install 67js@npm:@codepawlhq/67js@latest` or `npx -y -p @codepawlhq/67js@latest 67js-mcp`.
+A new minor version ships about once a week. Before 1.0, a minor version can change the API, and [CHANGELOG.md](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md) lists each change. npx keeps the copy it downloaded first. To update, run `npm install 67js@npm:@codepawlhq/67js@latest` or `npx -y -p @codepawlhq/67js@latest 67js-mcp`.
 
 ## What it is
 
