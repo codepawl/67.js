@@ -425,7 +425,7 @@ Time to equal error, log-log interpolation of time against relMSE on each render
 What the table says:
 
 - `lit-interior`: at equal samples Cook has 7 to 15 % lower error (0.00274 against 0.00310 at 256 spp, 0.000656 against 0.000771 at 1024) and takes 5 to 14 % less time on the medians from 64 spp up, so it reaches equal error about 1.2 times faster. The 16 and 64 spp Cycles times carry up to 5 s of noise in their ranges, probably start-up and load from other sessions on the shared card `[inferred]`; the cost per sample of both is close to 24 to 25 ms at 1024 spp. The earlier figure of 11.4 s for Cycles at 256 spp differs from the 5.7 to 8.3 s measured here; the card was shared in both cases.
-- `many-lights-500`: Cook is slightly worse. The error is 9 to 10 % higher at equal samples at every rung, while the time per sample is between 1.5 % higher and 8 % lower than Cycles (16 spp +1.5 %, 64 spp -1 %, 256 spp -8 %, 1024 spp -3 %), so Cook needs about 3 to 6 % more time for the same error. This is the one scene where Cook is slower. The gap is small next to the run-to-run range of the Cycles 1024 spp time (93 to 145 s), so read it as a tie to slightly behind, not a clear loss. Where the 9 % comes from (differences between this tree and the Cycles tree, such as the double-sided emissive-triangle cone, or the sampler dimensions) was not isolated.
+- `many-lights-500`: Cook is slightly worse. The error is 9 to 10 % higher at equal samples at every rung, while the time per sample is between 1.5 % higher and 8 % lower than Cycles (16 spp +1.5 %, 64 spp -1 %, 256 spp -8 %, 1024 spp -3 %), so Cook needs about 3 to 6 % more time for the same error. This is the one scene where Cook is slower. The gap is small next to the run-to-run range of the Cycles 1024 spp time (93 to 145 s), so read it as a tie to slightly behind, not a clear loss. Where the 9 % came from was isolated later: see "Noise gap on `many-lights-500` (#966)".
 - `metal`: no equal-error time can be given. The error looks dominated by a few very bright paths rather than by smooth noise `[inferred]`. The reference's own seed-to-seed relMSE is 0.0034, higher than both targets, and neither ladder falls monotonically (Cook 0.0045, 0.281, 0.0181, 0.0083; Cycles 0.628, 0.0042, 0.0750, 0.0059): a single firefly decides a rung. Per sample the two run at the same speed (9.5 s against 9.3 s at 1024 spp). Parity of the converged image is separate and passes (4096 spp relMSE 0.00271 against the 0.0034 noise floor).
 - The error gap on `many-lights-500` survived the review fix to `ltr_importance` (maximum importance now divided by the squared nearest distance and minimum by the squared farthest, as in Cycles): see "Repeat on Modal".
 - Nothing here changes a gate or retunes a kernel default. The comparison is one seed per renderer and one Cycles reference; the error of a single rung moves with the seed, and the interpolation uses four points per curve, so ratios under about 10 % are not resolved.
@@ -455,11 +455,62 @@ Time to equal error, same interpolation as above `[measured and interpolated]`:
 | `many-lights-500` | 0.005 | 15.69 | 16.02 | 1.02x faster |
 | `many-lights-500` | 0.002174 (lowest both reach) | 39.32 | 40.32 | 1.03x faster |
 
-- Against the RTX 3060 figures, the Cook relMSE moved by at most 0.1 percent on `lit-interior` and 0.1 percent on `many-lights-500` (for example 0.127595 against 0.127697 at 16 spp and 0.002174 against 0.002175 at 1024 spp): the importance fix changes which emitter is picked, but not by much on these two scenes, and it does not close the 9 percent error gap to Cycles on `many-lights-500` (0.002174 against 0.002001 at 1024 spp). That gap is still not isolated.
+- Against the RTX 3060 figures, the Cook relMSE moved by at most 0.1 percent on `lit-interior` and 0.1 percent on `many-lights-500` (for example 0.127595 against 0.127697 at 16 spp and 0.002174 against 0.002175 at 1024 spp): the importance fix changes which emitter is picked, but not by much on these two scenes, and it does not close the 9 percent error gap to Cycles on `many-lights-500` (0.002174 against 0.002001 at 1024 spp). That gap was isolated and fixed afterwards: see "Noise gap on `many-lights-500` (#966)".
 - Both renderers are 2.0 to 2.5 times faster on the A10G than on the 3060 in these runs (Cook 2.4 to 2.5 times, Cycles 2.0 to 2.2 times), and the job ran alone in its container, so the Cycles ranges are tight (no 5 s outliers). On this card Cook is 1.45 to 1.52 times faster at equal error on `lit-interior` (1.2 times on the 3060) and level with Cycles on `many-lights-500` (3 to 6 percent slower on the 3060). The ratios depend on the GPU and on load `[inferred]`; no claim is made about other cards.
 - The tree against the flat pick on `many-lights-500` (Cook, seed 3, A10G): error ratio uniform / tree 2.98, 2.86, 2.67 and 2.03 at 16, 64, 256 and 1024 spp, tree time 1.30 to 1.32 times the flat pick per sample (1.16 to 1.18 on the 3060). Time to equal error, tree against flat: 2.03 times faster at relMSE 0.0237, 2.05 at 0.0304, 1.80 at 0.00664 and 1.70 at 0.005 (the flat pick's 1024 spp run reaches only 0.00442, so it was run once there). The "less than half the time" reading of the gate holds at the larger errors and is 1.7 to 1.8 times near 0.005 on this card; the RTX 3060 figures above (2.0 to 2.3 times) were measured before the fix and on a different card.
 - 4096 spp parity of the `cycles` kernel at its defaults, seven scenes, seed 1, on a Modal NVIDIA A10: 7 of 7 pass, with the same mean ratios, tile counts, FLIP LDR and relMSE as the table below to the digits shown (worst per-channel mean ratio 1.0035 on `lit-interior`, against the 2 percent limit). Cook sampling seconds at 4096 spp: `spot-area` 24.3, `light-linking` 27.2, `metal` 17.8, `glass` 30.1, `outdoor-hdri` 9.4, `lit-interior` 49.4, `many-lights-500` 205.7.
 - Checks on the same Modal container: `cargo test` 25 passed, 0 failed (no GPU needed; the napi symbols are left unresolved at link time on Linux, and the one new test covers a tree flag without emitter tables); `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 76 tests, 75 passed, 1 skipped, 0 failed; lobe probes 22 of 22 and sphere furnace scenes 6 of 6 at 512 spp.
+
+### Noise gap on `many-lights-500` (#966)
+
+At equal samples Cook carried 9 percent more error than Cycles on `many-lights-500` (relMSE 0.002174 against 0.002001 at 1024 spp) and less on `lit-interior`. All runs below are Modal containers (NVIDIA A10 or Tesla T4, named per table), seed 3 and 4 for both renderers, error against the Cycles 4096 spp seed 1 reference of the same scene, Cycles 5.3.0 on OptiX in the same container `[measured]`.
+
+**Where it lived.** Variants of the scene keep one emitter kind (the other lights are dropped, the other emissive parts get a zero-emission copy of their material; same positions and seed). Cycles references at 4096 spp seed 1 were rendered per variant. Cook relMSE over Cycles relMSE, before the fix, mean of seeds 3 and 4 (A10):
+
+| kind (count) | 64 spp | 256 spp |
+| --- | ---: | ---: |
+| point lights (200) | 0.914 | 0.919 |
+| spot lights (150) | 0.926 | 0.939 |
+| emissive quads (100, 200 triangles) | 1.476 | 1.474 |
+| emissive triangles (50) | 1.490 | 1.465 |
+| all four, the scene | 1.090 | 1.094 |
+
+The whole gap sat in emissive geometry; point and spot lights were already 7 to 9 percent better than Cycles, which is why the full scene showed only 9 percent. The excess was uniform over the image (6 x 4 block ratios 1.35 to 1.65 on the quads), not a few pixels near the lamps, and it depended on the path depth: on the triangles Cook over Cycles was 1.19 with direct light only (`--bounces 1`), 1.06 with one indirect bounce (`--bounces 2`) and 1.47 with 8 bounces, so roulette (which starts after bounce 3) was the suspect for the large part.
+
+**Cause.** Russian roulette. Cycles continues a path with probability `sqrt(max channel of the throughput)` (`path_state_continuation_probability`, `kernel/integrator/path_state.h`); the `cycles` kernel used the max channel itself. After a few diffuse bounces the survival probability was therefore about the square of Cycles', and the paths that lived carried correspondingly larger weights. Emissive scenes are dim and lit mostly by indirect light, so they paid most `[inferred]`. The fix is `int_russian_roulette_survival` in `src/cycles/integrator.wgsl`, used after a surface bounce and after a volume scatter; the first bounce at which roulette starts (`min_bounce_rr`, 3) is unchanged.
+
+**Ruled out** by measurement: a joint three-dimensional light sample as in Cycles (`PRNG_LIGHT`: z picks the emitter, xy the point; quads 0.011271 against 0.011272 at 256 spp), the tree structure (the 50-triangle scene has the same emitter count in both trees and showed the same gap), flat instead of tree selection (worse: 0.01507 against 0.01125 on the quads) and Cycles' spherical triangle sampling (its switch compares the longest edge with the plane distance divided by twice the area, so it only acts within 4 to 7 cm of a lamp).
+
+**After the fix**, Cook over Cycles `[measured]`:
+
+| scene | spp | Cook relMSE | Cycles relMSE | Cook / Cycles | before |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `many-lights-500` | 64 | 0.02368 | 0.02801 | 0.845 | 1.090 |
+| `many-lights-500` | 256 | 0.005960 | 0.006987 | 0.853 | 1.094 |
+| `many-lights-500` | 1024 | 0.001751 | 0.002001 | 0.875 | 1.087 |
+| `lit-interior` | 64 | 0.010772 | 0.014786 | 0.729 | 0.870 |
+| `lit-interior` | 256 | 0.002206 | 0.003106 | 0.710 | 0.881 |
+| `lit-interior` | 1024 | 0.000521 | 0.000771 | 0.676 | 0.851 |
+| emissive quads only | 64 | 0.030052 | 0.029906 | 1.005 | 1.476 |
+| emissive quads only | 256 | 0.007684 | 0.007648 | 1.005 | 1.474 |
+| emissive triangles only | 64 | 0.086145 | 0.077559 | 1.111 | 1.490 |
+| emissive triangles only | 256 | 0.021867 | 0.019738 | 1.108 | 1.465 |
+
+The mean image ratio against the reference moved by less than 0.05 percent on every row (`many-lights-500` 1.0009 before and after, `lit-interior` 1.0033). The 4096 spp images of six of the seven parity scenes were rendered with the fix and match the table above to the digits shown (mean ratios and relMSE; `lit-interior` relMSE 0.000226 against 0.00026); the seventh, `many-lights-500` at 4096 spp, and the FLIP and tile gates were not run for this change (the Modal workspace was disabled during the run).
+
+**Cost.** Longer paths cost time. Same container, Tesla T4, baseline and trial interleaved, one round, `samplingSeconds` `[measured]`:
+
+| scene | spp | linear rule, relMSE and s | square root, relMSE and s | error | time |
+| --- | ---: | --- | --- | ---: | ---: |
+| `lit-interior` | 64 | 0.012832, 2.68 | 0.010754, 3.01 | -16 % | +12 % |
+| `lit-interior` | 256 | 0.002741, 9.73 | 0.002198, 11.11 | -20 % | +14 % |
+| `lit-interior` | 1024 | 0.000656, 38.52 | 0.000521, 43.47 | -21 % | +13 % |
+| `many-lights-500` | 64 | 0.030592, 8.15 | 0.023719, 8.71 | -22 % | +7 % |
+| `many-lights-500` | 256 | 0.007630, 31.29 | 0.005939, 34.41 | -22 % | +10 % |
+
+Error falls faster than time rises, so time to equal error improves by about 12 to 17 percent on both scenes `[inferred from one round]`.
+
+**Still open.** The 50-triangle variant alone stays 11 percent above Cycles after the fix (uniform over the image, not near the lamps); the full scene, the quads and `lit-interior` are at or below Cycles. Its cause was not isolated; the 1.19 with direct light only cannot come from roulette, which does not act there, and was not re-measured with the fix. Point and spot lights were not measured again after the fix.
 
 ### Final gates for #895
 
