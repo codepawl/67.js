@@ -55,8 +55,8 @@ function crate(id, translation, density) {
 
 function buildRecipe(boatAssetId) {
   const crates = [
-    crate('crate-a', [-3.2, 1.6, 2.2], 350), crate('crate-b', [3.4, 1.1, -1.4], 500), crate('crate-c', [-2.6, 2.0, -3.2], 600),
-    crate('crate-d', [2.8, 1.4, 3.1], 250), crate('crate-e', [0.4, 1.8, -4.4], 450),
+    crate('crate-a', [-3.2, 1.1, 2.2], 350), crate('crate-b', [3.4, 1.0, -1.4], 500), crate('crate-c', [-2.6, 1.2, -3.2], 600),
+    crate('crate-d', [2.8, 1.0, 3.1], 250), crate('crate-e', [0.4, 1.1, -4.4], 450),
   ];
   const seaEdits = [
     { op: 'delete', select: { not: { normal: [0, 1, 0], maxAngle: 10 } } },
@@ -80,14 +80,15 @@ function buildRecipe(boatAssetId) {
     nodes: [
       { id: 'sea', geometry: 'sea', material: 'water' },
       ...crates.map(entry => entry.node),
-      { id: 'hull', geometry: 'hull', material: 'ghost', castShadow: false, translation: [0, 0.9, 0], scale: [BOAT_SIZE.width, BOAT_SIZE.hullHeight, BOAT_SIZE.length] },
+      { id: 'hull', geometry: 'hull', material: 'ghost', castShadow: false, translation: [0, 1.2, 0], scale: [BOAT_SIZE.width, BOAT_SIZE.hullHeight, BOAT_SIZE.length] },
       { id: 'boat', parent: 'hull', asset: { id: boatAssetId }, translation: [0, -boatLift / BOAT_SIZE.hullHeight, 0], scale: [1 / BOAT_SIZE.width, 1 / BOAT_SIZE.hullHeight, 1 / BOAT_SIZE.length] },
     ],
-    camera: { eye: [6.5, 2.4, 8], target: [0, 0.4, 0], fov: 42 },
+    camera: { eye: [6.5, 2.9, 8], target: [0, 0.8, 0], fov: 42 },
     motion: { duration, tracks: [{ kind: 'geometry', id: 'sea', property: 'oceanTime', interpolation: 'LINEAR', keyframes: [{ time: 0, value: 0 }, { time: duration, value: duration }] }] },
     physics: {
       duration,
-      ocean: { geometry: 'sea' },
+      // The sheet is the top of a unit box, so it draws at y = 0.5.
+      ocean: { geometry: 'sea', level: 0.5 },
       bodies: [
         ...crates.map(entry => entry.body),
         { node: 'hull', density: 300, float: { drag: 1.5, angularDrag: 1.5, points: [[-0.6, 0, -1.4], [0.6, 0, -1.4], [-0.6, 0, 1.4], [0.6, 0, 1.4]] } },
