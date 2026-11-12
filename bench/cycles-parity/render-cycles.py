@@ -27,6 +27,10 @@ RAY_VISIBILITY_ATTRIBUTES = {
 # Set by --soft-falloff. Blender 4 and later build a point or spot light with a radius as an oriented disk while Light.use_soft_falloff
 # is on (the default) and as a sphere while it is off. Cook models the sphere, so the default here is off; None keeps the Blender default.
 soft_falloff_setting = None
+# Set by --light-mis off: lights stop being hit by BSDF rays and are sampled by next event estimation only (a diagnostic).
+light_mis_enabled = True
+# Set by --cycles-property name=value (repeatable): diagnostic overrides of scene.cycles properties, such as light_sampling_threshold=0.
+cycles_property_assignments = []
 Y_UP_TO_Z_UP = Matrix((
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 0.0, -1.0, 0.0),
@@ -101,6 +105,7 @@ def parse_cli_arguments():
         "aperture_rotation": float(read_flag_value(argument_list, "--aperture-rotation", "0")),
         "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
         "soft_falloff": read_soft_falloff(argument_list),
+        "light_mis": read_flag_value(argument_list, "--light-mis", "on") != "off",
     }
 
 
@@ -405,6 +410,8 @@ def attach_light_receivers(light_object, receiver_names):
 def apply_soft_falloff_setting(light_data):
     if soft_falloff_setting is not None:
         light_data.use_soft_falloff = soft_falloff_setting
+    if not light_mis_enabled:
+        light_data.cycles.use_multiple_importance_sampling = False
 
 
 def add_spot_light(scene, light_index, spot_entry):
@@ -572,6 +579,10 @@ def configure_cycles_parity(scene, options):
     scene.cycles.caustics_refractive = True
     bounces = options["bounces"]
     scene.cycles.max_bounces = bounces
+    for property_assignment in cycles_property_assignments:
+        property_name, property_value = property_assignment.split("=", 1)
+        current_value = getattr(scene.cycles, property_name)
+        setattr(scene.cycles, property_name, type(current_value)(json.loads(property_value)))
     scene.cycles.diffuse_bounces = bounces
     scene.cycles.glossy_bounces = bounces
     scene.cycles.transmission_bounces = bounces
@@ -734,6 +745,10 @@ def main():
     scene = bpy.context.scene
     global soft_falloff_setting
     soft_falloff_setting = options["soft_falloff"]
+    global light_mis_enabled
+    light_mis_enabled = options["light_mis"]
+    global cycles_property_assignments
+    cycles_property_assignments = [sys.argv[index + 1] for index, token in enumerate(sys.argv) if token == "--cycles-property"]
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
     build_scene_lights(scene, description["environment"])
