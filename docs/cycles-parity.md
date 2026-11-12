@@ -344,13 +344,13 @@ These are per-sample times on one scene. An equal-error comparison between the `
 
 ---
 
-### Path regeneration (`pathRegeneration`, opt-in)
+### Path regeneration (`pathRegeneration`, on by default since #897)
 
-By default a thread of the `cycles` kernel traces one whole path, then starts the next sample of its pixel, so a group of lanes waits for its longest path before any lane starts again. With `pathRegeneration: true` (`--path-regeneration` in `trace-native.mjs`) the kernel runs one bounce per loop iteration, and a lane whose path ended starts the next sample of the same pixel at once. The sample index, the random numbers and the sums are the same, so the image is the same: the relMSE against the Cycles reference matched to the last digit in all 8 cells below, and so did the mean ratio. Only the time per sample changes.
+With `pathRegeneration: false` (`--no-path-regeneration` in `trace-native.mjs`) a thread of the `cycles` kernel traces one whole path, then starts the next sample of its pixel, so a group of lanes waits for its longest path before any lane starts again. Without that option (`pathRegeneration: true`, `--path-regeneration` still accepted) the kernel runs one bounce per loop iteration, and a lane whose path ended starts the next sample of the same pixel at once. The sample index, the random numbers and the sums are the same, so the image is the same: the relMSE against the Cycles reference matched to the last digit in all 8 cells below, and so did the mean ratio. Only the time per sample changes.
 
 Sampling time, `960 x 540`, `8` bounces, seed `3`, NVIDIA A10 on Modal, baseline and trial interleaved in one container, three rounds, median and range `[measured]`:
 
-| Scene | spp | Default | `pathRegeneration` | Ratio |
+| Scene | spp | `pathRegeneration: false` | `pathRegeneration: true` | Ratio |
 | --- | --- | --- | --- | --- |
 | `lit-interior` | 256 | `3.296 s` [3.285-3.358] | `2.112 s` [2.100-2.164] | `0.64` |
 | `lit-interior` | 1024 | `12.620 s` [12.340-12.633] | `7.966 s` [7.918-7.992] | `0.63` |
@@ -362,6 +362,34 @@ Sampling time, `960 x 540`, `8` bounces, seed `3`, NVIDIA A10 on Modal, baseline
 | `metal` | 1024 | `4.658 s` [4.651-4.679] | `4.224 s` [4.179-4.240] | `0.91` |
 
 The image does not change, so equal error is reached in the ratio's share of the time. The gain is largest where path lengths differ most between neighbouring pixels (the interior, glass and the many-lights scene) and smallest on `metal`, where most paths end at the same depth. One GPU and one batch size (`32` samples per dispatch) were measured in full; `64` and `128` gave `0.66` to `0.71` on `lit-interior` at 256 spp. The option is off by default; the seven-scene 4096 spp parity run passed every gate with the option off and with it on, with identical channel means and relMSE in both runs, and the cargo tests (25), node tests, lobe checks and furnace scenes passed.
+
+### Path regeneration on by default (#897)
+
+The `cycles` kernel now regenerates paths unless the caller passes `pathRegeneration: false`. Reason: the table above shows 9 to 37 percent less sampling time for the same image, no scene got slower, and every caller that did not know the option paid the full time. The legacy kernel ignores the option and is untouched.
+
+**Correctness** `[measured]`, one Modal container (NVIDIA A10) for the tests, the parity runs and the identity checks, at the new default: `cargo test` 32 passed, 0 failed; `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 119 tests, 117 passed, 0 failed, 2 skipped; `check-lobes.mjs` and `verify-lobes.py` exit 0. The seven scenes at 4096 spp, seed 1, 8 bounces, box filter, pass every gate (smallest tile ratio 0.9823 on `glass` against a gate of 0.95; FLIP LDR 0.0160 on `lit-interior` against a ceiling of 0.0365; relMSE as in the "Final gates for #895" table, except `many-lights-500` at 0.000728 after the square-root roulette of #966). `area-shapes` and `transparent-shadow` pass (smallest tile ratios 0.9981 and 1.0000), and so does the transparent-bounce limits scene at limits 0, 1, 2 and 8 (mean ratios 1.0011 to 1.0017, tile ratios 0.9999 to 1.0029).
+
+**Byte identity** `[measured]`, `lit-interior` and `glass`, 256 spp, seed 3, `960 x 540`: the image with regeneration on equals the image with it off byte for byte at `--samples-per-dispatch 32` and at `7` (max relative difference 0, 0 differing values). Two time-budgeted runs at the default are identical to each other, to the same run with `--no-path-regeneration` (which chose other dispatch sizes: 57 against 40 samples on `lit-interior`, 100 against 67 on `glass`) and to the fixed 32. The dispatch-determinism change of #1011 therefore did not break the claim above.
+
+**Time and error against Cycles** `[measured]`: one container (NVIDIA A10), `960 x 540`, seed 3, two rounds, medians, error against the Cycles 4096 spp seed 1 reference. Cook is denoised with OIDN on CUDA, Cycles 5.3.0 on OptiX with OpenImageDenoise. Total seconds are sampling plus denoising.
+
+| scene | spp | Cook sampling s, regeneration off / on | Cycles sampling s | Cook + OIDN total s, off / on | Cycles + OIDN total s | relMSE Cook / Cycles, denoised | FLIP Cook / Cycles, denoised |
+| --- | ---: | --- | ---: | --- | ---: | --- | --- |
+| `many-lights-500` | 64 | 3.23 / 2.45 | 2.96 | 3.61 / 2.80 | 3.06 | 0.000544 / 0.000503 | 0.032 / 0.032 |
+| `lit-interior` | 64 | 0.80 / 0.57 | 0.86 | 1.14 / 0.94 | 0.95 | 0.000213 / 0.000207 | 0.027 / 0.028 |
+
+The images are the same with regeneration on and off, so relMSE and FLIP are the same for both. The other cells (`glass`, `outdoor-hdri`, 16, 64 and 256 spp) are in the pull request.
+
+Cook over Cycles, relMSE at equal total seconds for the denoised images (log-log interpolation between the measured rungs, at the middle of the range both cover; below 1 means Cook has the lower error):
+
+| scene | regeneration off | regeneration on |
+| --- | ---: | ---: |
+| `many-lights-500` | 1.09 | 1.07 |
+| `lit-interior` | 1.06 | 1.02 |
+| `glass` | 1.48 | 1.35 |
+| `outdoor-hdri` | 1.22 | 1.20 |
+
+Cook still has a higher denoised error than Cycles at equal time on all four scenes. Most of the remainder is the OIDN call: 0.35 s in Cook against 0.10 s inside Blender at 960 x 540. The raw images keep their lead (`lit-interior` 0.67 off, 0.45 on; `glass` 0.45, 0.33; `outdoor-hdri` 0.10, 0.13 on the 0.3 s budget).
 
 ### Pixel filter: box versus Blackman-Harris
 
@@ -621,7 +649,7 @@ The GPU filter costs about 8 ms in total (upload, seven dispatches, readback of 
 
 ### Path regeneration, environment compensation and the a-trous filter together (#897)
 
-The three options above (`pathRegeneration`, `envCompensation: true` and `denoise: 'atrous'`, each off by default) were measured alone on separate branches and are measured here on one branch built from `main` after the dispatch budget (#964) and the Blackman-Harris references (#977). The legacy kernel `src/kernel.wgsl` is unchanged and still the default, and the `cycles` kernel at its defaults draws the same images as before. Everything ran on Modal; the GPU is named at each result (Modal scheduled an NVIDIA A10 or an NVIDIA L4, and every row records its GPU).
+The three options above (`pathRegeneration`, which was off by default when this was measured, `envCompensation: true` and `denoise: 'atrous'`, off by default) were measured alone on separate branches and are measured here on one branch built from `main` after the dispatch budget (#964) and the Blackman-Harris references (#977). The legacy kernel `src/kernel.wgsl` is unchanged and still the default, and the `cycles` kernel at its defaults draws the same images as before. Everything ran on Modal; the GPU is named at each result (Modal scheduled an NVIDIA A10 or an NVIDIA L4, and every row records its GPU).
 
 **Tests** `[measured]`, NVIDIA A10: `cargo test` 32 passed, 0 failed; `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 93 tests, 92 passed, 0 failed, 1 skipped; the lobe probes and white furnace scenes (`check-lobes.mjs`, `verify-lobes.py`) exit 0.
 
