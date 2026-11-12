@@ -164,6 +164,7 @@ export function buildJobNativeInput(scene, camera, options, pack, resolveTexture
     subsurfaceVec4Offset: tables.subsurfaceVec4Offset,
     materialCount: scene.traceMaterials.length,
     carriedFields: carriedMaterialFieldsOfScene(scene, resolveTexture),
+    textureMips: options.textureMips,
   });
   const instances = scene.instances.map(instance => {
     const lightMask = reducedMaterials.materialLightMasks[instance.materialIndex] ?? ALL_LIGHT_GROUPS;
@@ -181,6 +182,9 @@ export function buildJobNativeInput(scene, camera, options, pack, resolveTexture
 export function buildFlattenedJobNativeInput(scene, camera, options, pack, resolveTexture) {
   const carriedFields = carriedMaterialFieldsOfScene(scene, resolveTexture);
   // The sample count goes into the kernel parameters, as it does when the kernel upgrades the tables itself.
-  const upgradeOptions = options.samples === undefined ? {} : { samples: options.samples };
+  const upgradeOptions = {
+    ...(options.samples === undefined ? {} : { samples: options.samples }),
+    ...(options.textureMips === undefined ? {} : { textureMips: options.textureMips }),
+  };
   return upgradeNativeInputV1ToV2(buildNativeInput(scene, camera, options, pack), upgradeOptions, carriedFields);
 }

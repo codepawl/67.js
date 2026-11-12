@@ -3,6 +3,15 @@
 
 import { buildLightTree } from './light-tree-v2.mjs';
 import { THIN_LENS_FLOAT_INDEXES } from './pack-input.mjs';
+import {
+  TEXTURE_KIND_RG16_FLOAT,
+  TEXTURE_KIND_RGBA32_FLOAT,
+  TEXTURE_KIND_RGBA8,
+  TEXTURE_KIND_RGBA8_SRGB,
+  buildMipChain,
+  mipChainWordCount,
+  mipLevelCount,
+} from './texture-mips.mjs';
 
 export const FORMAT_V2_MAGIC = 0x36375054;
 export const FORMAT_V2_VERSION = 2;
@@ -46,6 +55,8 @@ const KERNEL_FLAG_ADAPTIVE_SAMPLING = 16;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
 export const KERNEL_FLAG_WHITE_NOISE_SAMPLER = 64;
 export const KERNEL_FLAG_PATH_REGENERATION = 1024;
+/** Set when any texture of the pool stores mip levels; the kernel then carries a ray footprint (see FORMAT-v2.md). */
+export const KERNEL_FLAG_TEXTURE_MIPS = 2048;
 
 const INSTANCE_VISIBILITY_CAMERA = 1;
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
@@ -252,7 +263,40 @@ function transformDirection3x4(rows, vector) {
   ];
 }
 
-function createTextureCollector() {
+/** Throws unless `value` is undefined, true or false. `name` and `callerName` say which option it was. */
+export function validateTextureMipsOption(value, name, callerName) {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new TypeError(
+      `${callerName}: \`${name}\` must be true (store mip levels), false or left out (level 0 only, as Blender Cycles reads), got ${JSON.stringify(value)}.`
+    );
+  }
+}
+
+function mipKindOfFormat(format) {
+  if (format === TEXTURE_FORMAT_RGBA32_FLOAT) {
+    return TEXTURE_KIND_RGBA32_FLOAT;
+  }
+  if (format === TEXTURE_FORMAT_RG16_FLOAT) {
+    return TEXTURE_KIND_RG16_FLOAT;
+  }
+  return format === TEXTURE_FORMAT_RGBA8_SRGB ? TEXTURE_KIND_RGBA8_SRGB : TEXTURE_KIND_RGBA8;
+}
+
+// Level 0 without padding, then the levels after it, padded once at the end to a multiple of four words.
+function joinMipLevels(levelZeroWords, mipChain) {
+  const joined = new Uint32Array(Math.max(4, Math.ceil((levelZeroWords.length + mipChain.length) / 4) * 4));
+  joined.set(levelZeroWords, 0);
+  joined.set(mipChain, levelZeroWords.length);
+  return joined;
+}
+
+/**
+ * Collects the textures of a scene into one pool. `textureMips: true` stores a full mip chain after level 0 of every texture
+ * that is filtered linearly and has more than one texel; a texture can say `mips: true` or `mips: false` to differ from that.
+ * The default is level 0 only, which is what Blender Cycles reads.
+ */
+function createTextureCollector({ textureMips } = {}) {
+  validateTextureMipsOption(textureMips, 'textureMips', 'createTextureCollector');
   const indexByKey = new Map();
   const dataIdMap = new WeakMap();
   let nextDataId = 1;
@@ -260,12 +304,24 @@ function createTextureCollector() {
   const wordChunks = [];
   let totalWords = 0;
   let finished = null;
+  let anyTextureHasMips = false;
 
-  function packedWordCount(format, pixelCount) {
-    if (format === TEXTURE_FORMAT_RGBA32_FLOAT) {
-      return pixelCount * 4;
+  function packedWordCount(format, pixelCount, mipWords = 0) {
+    const levelZeroWords = format === TEXTURE_FORMAT_RGBA32_FLOAT ? pixelCount * 4 : pixelCount;
+    if (mipWords === 0 && format === TEXTURE_FORMAT_RGBA32_FLOAT) {
+      return levelZeroWords;
     }
-    return Math.max(4, Math.ceil(pixelCount / 4) * 4);
+    return Math.max(4, Math.ceil((levelZeroWords + mipWords) / 4) * 4);
+  }
+
+  // The number of levels a texture is stored with, level 0 included: 1 unless mips are asked for and can be used.
+  function resolveMipCount(textureOption, nearest, width, height) {
+    validateTextureMipsOption(textureOption, 'mips', 'texture');
+    const wanted = textureOption ?? textureMips ?? false;
+    if (!wanted || nearest) {
+      return 1;
+    }
+    return mipLevelCount(width, height);
   }
 
   // Checked before a texture is converted, so an oversize image fails fast instead of after allocating its words.
@@ -316,8 +372,8 @@ function createTextureCollector() {
 
     const repeatU = rawDescriptor.wrapU ?? (rawDescriptor.repeat === false ? 1 : 0);
     const repeatV = rawDescriptor.wrapV ?? (rawDescriptor.repeat === false ? 1 : 0);
-    const mipCount = Math.max(1, Math.min(255, Number(rawDescriptor.mipCount ?? 1)));
     const nearest = rawDescriptor.nearest ? 1 : 0;
+    const mipCount = resolveMipCount(rawDescriptor.mips, nearest === 1, width, height);
     const useUv1 = rawDescriptor.uvSet === 1 ? 1 : 0;
     const uvScale = rawDescriptor.uvScale ?? [1, 1];
     const uvOffset = rawDescriptor.uvOffset ?? [0, 0];
@@ -336,7 +392,8 @@ function createTextureCollector() {
     }
 
     const pixelCount = width * height;
-    assertRoomInPool(packedWordCount(format, pixelCount), width, height);
+    const mipWords = mipCount > 1 ? mipChainWordCount(mipKindOfFormat(format), width, height) : 0;
+    assertRoomInPool(packedWordCount(format, pixelCount, mipWords), width, height);
     const dataOffset = totalWords;
     let packedWords;
     let sumR = 0;
@@ -391,6 +448,16 @@ function createTextureCollector() {
       }
     }
 
+    if (mipCount > 1) {
+      const levelZeroWordCount = format === TEXTURE_FORMAT_RGBA32_FLOAT ? pixelCount * 4 : pixelCount;
+      const levelZeroWords = packedWords.subarray(0, levelZeroWordCount);
+      const levelZeroTexels = format === TEXTURE_FORMAT_RGBA32_FLOAT
+        ? new Float32Array(packedWords.buffer, packedWords.byteOffset, levelZeroWordCount)
+        : levelZeroWords;
+      packedWords = joinMipLevels(levelZeroWords, buildMipChain(mipKindOfFormat(format), levelZeroTexels, width, height, repeatU & 0x3, repeatV & 0x3));
+      anyTextureHasMips = true;
+    }
+
     const descriptorBytes = new ArrayBuffer(STRUCT_STRIDES_V2.textureDescriptor);
     const descriptorU32 = new Uint32Array(descriptorBytes);
     const descriptorF32 = new Float32Array(descriptorBytes);
@@ -418,10 +485,18 @@ function createTextureCollector() {
 
   function addPackedRgba8Words(words, width, height, isSrgb, repeat) {
     const pixelCount = width * height;
-    const alignedWords = packedWordCount(TEXTURE_FORMAT_RGBA8_UNORM, pixelCount);
+    const mipCount = resolveMipCount(undefined, false, width, height);
+    const atlasKind = isSrgb ? TEXTURE_KIND_RGBA8_SRGB : TEXTURE_KIND_RGBA8;
+    const mipWords = mipCount > 1 ? mipChainWordCount(atlasKind, width, height) : 0;
+    const alignedWords = packedWordCount(TEXTURE_FORMAT_RGBA8_UNORM, pixelCount, mipWords);
     assertRoomInPool(alignedWords, width, height);
-    const padded = new Uint32Array(alignedWords);
+    let padded = new Uint32Array(alignedWords);
     padded.set(words.subarray(0, pixelCount));
+    if (mipCount > 1) {
+      const levelZeroWords = padded.slice(0, pixelCount);
+      padded = joinMipLevels(levelZeroWords, buildMipChain(atlasKind, levelZeroWords, width, height, repeat ? 0 : 1, repeat ? 0 : 1));
+      anyTextureHasMips = true;
+    }
     let sumR = 0;
     let sumG = 0;
     let sumB = 0;
@@ -436,7 +511,7 @@ function createTextureCollector() {
     }
     const format = isSrgb ? TEXTURE_FORMAT_RGBA8_SRGB : TEXTURE_FORMAT_RGBA8_UNORM;
     const wrap = repeat ? 0 : 1;
-    const formatAndSampler = (format | (1 << 8) | (wrap << 16) | (wrap << 18)) >>> 0;
+    const formatAndSampler = (format | (mipCount << 8) | (wrap << 16) | (wrap << 18)) >>> 0;
     const descriptorBytes = new ArrayBuffer(STRUCT_STRIDES_V2.textureDescriptor);
     const descriptorU32 = new Uint32Array(descriptorBytes);
     const descriptorF32 = new Float32Array(descriptorBytes);
@@ -482,6 +557,7 @@ function createTextureCollector() {
       textureDescriptors: descriptorBuffer,
       textureCount,
       textureTexels: texelBuffer,
+      usesTextureMips: anyTextureHasMips,
     };
   }
 
@@ -1705,6 +1781,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   resolveSamplingOptions(options, callerName);
   resolveEnvCompensationFraction(options.envCompensation, callerName);
   validateDenoiseOption(options.denoise, callerName);
+  validateTextureMipsOption(options.textureMips, 'textureMips', callerName);
   validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
@@ -1875,6 +1952,9 @@ function packKernelParamsV2({
   }
   if (sampler === 'white') {
     kernelFlags |= KERNEL_FLAG_WHITE_NOISE_SAMPLER;
+  }
+  if (counts.usesTextureMips === true) {
+    kernelFlags |= KERNEL_FLAG_TEXTURE_MIPS;
   }
 
   const maxBounces = Math.max(0, Math.round(Number(options.bounces ?? options.maxBounces ?? 8)));
@@ -2466,7 +2546,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
       throw new TypeError('buildNativeInputV2 option `reducedMaterials` must be the result of reduceV1MaterialTable (materialRecords and textureCollector).');
     }
   }
-  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector();
+  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector({ textureMips: options.textureMips });
   const packedGeometry = explicitInstances
     ? packInstancedGeometry(explicitInstances, options.materials ?? scene.materials ?? [{}], textureCollector, reducedMaterials)
     : packFlattenedTraceScene(scene, options.parts ?? scene.parts, textureCollector);
@@ -2486,6 +2566,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
     lightCount: packedLights.lightCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
     textureCount: packedTextures.textureCount,
+    usesTextureMips: packedTextures.usesTextureMips,
   };
 
   const kernelParams = packKernelParamsV2({
@@ -2572,8 +2653,8 @@ function withCarriedFields(descriptor, carried, textureCollector) {
  * (blend opacity, sheen, specular, anisotropy, iridescence, attenuation, the layer textures and the rest of the record).
  * `materials` holds the table with the subsurface table after it, `atlas` the atlas words and `atlasWidth` their row width.
  */
-export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields }) {
-  const textureCollector = createTextureCollector();
+export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields, textureMips }) {
+  const textureCollector = createTextureCollector({ textureMips });
   const atlasCache = new Map();
 
   function registerAtlasRect(rectX, rectY, width, height, flagsValue) {
@@ -2711,6 +2792,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     subsurfaceVec4Offset,
     materialCount,
     carriedFields,
+    textureMips: options.textureMips,
   });
 
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
@@ -2961,6 +3043,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     lightCount: packedLights.lightCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
     textureCount: packedTextures.textureCount,
+    usesTextureMips: packedTextures.usesTextureMips,
   };
 
   const kernelParams = packKernelParamsV2({

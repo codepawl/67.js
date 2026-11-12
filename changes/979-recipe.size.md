@@ -1,0 +1,7 @@
+- entry:agent-scene: the fragment geometry type and the fracture-node dispatch, a few hundred bytes gzip; the fracture code itself loads on demand
+- scene:agent-scene+lazy: the new on-demand fracture module (recipe operation, piece cache) and the fracture code it pulls in
+- goal:agent-scene: an agent can only fracture a part without writing code through a recipe operation, which needs these paths
+- tool:scene_capabilities: the physics topic text for fracture-node and the fragment geometry type
+- tool:scene_apply: the fracture-node operation and the fragment geometry type, 782 bytes, so an agent breaks a part without writing code
+- tool-total: the same two schema entries; the field detail stays in scene_capabilities physics
+- scene:agent-scene: the fragment geometry case and the fracture-node dispatch in the scene entry, about 720 bytes gzip; the fracture code itself loads on demand

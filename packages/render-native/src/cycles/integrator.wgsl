@@ -341,7 +341,60 @@ fn int_transform_normal(instance: InstanceRecord, normal_obj: vec3<f32>, fallbac
   return fallback;
 }
 
-fn int_build_shading_point(surface_hit: IntSurfaceHit, wo: vec3<f32>) -> ShadingPoint {
+// Ray cone of a camera ray: x is the width of the cone at the ray origin (a pixel for an orthographic camera, 0 for a pinhole),
+// y its spread, the angle one pixel covers (twice the length of `camera_up`, the half height of the image plane at unit
+// distance, over the image height). The aperture and the pixel filter are left out.
+fn int_camera_ray_cone() -> vec2<f32> {
+  let pixel_size = 2.0 * length(kernel_params.camera_up) / f32(max(kernel_params.image_height, 1u));
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) != 0u) {
+    return vec2<f32>(pixel_size, 0.0);
+  }
+  return vec2<f32>(0.0, pixel_size);
+}
+
+// How much a bounce widens the cone. A diffuse or sheen lobe scatters over a hemisphere, so it widens by one radian; a glossy,
+// coat or glass lobe by twice its roughness alpha (at most one radian); a mirror or a straight-through lobe not at all.
+// The curvature of the surface is not counted.
+fn int_bounce_cone_spread(closure: ptr<function, Closure>, sampled_lobe_type: u32) -> f32 {
+  if (sampled_lobe_type == LOBE_DIFFUSE || sampled_lobe_type == LOBE_SHEEN) {
+    return 1.0;
+  }
+  var widest_alpha = 0.0;
+  for (var lobe_index = 0u; lobe_index < (*closure).lobe_count; lobe_index += 1u) {
+    let lobe = (*closure).lobes[lobe_index];
+    if (lobe.lobe_type == sampled_lobe_type) {
+      widest_alpha = max(widest_alpha, max(lobe.alpha_x, lobe.alpha_y));
+    }
+  }
+  return min(2.0 * widest_alpha, 1.0);
+}
+
+// The width of the ray footprint on the surface in `uv0` units: the cone width at the hit, times the uv units per world unit
+// of the triangle (sqrt of its uv area over its surface area). On the surface the footprint is an ellipse whose long axis is
+// the cone width over cos, the cosine being that of the angle between the ray and the geometric normal. One mip level
+// is chosen for both axes, from the geometric mean of the two: width over sqrt(cos), cos at least 0.1. The long axis would
+// blur across the short one, the short axis would leave the long one aliased. `uv1` is read with the density of `uv0`.
+// The samples of a pixel already average over its footprint, so the width is scaled by max(1/8, 1/sqrt(samples per pixel))
+// as pbrt scales its ray differentials; a level as wide as the whole footprint would blur twice.
+fn int_uv_footprint(
+  ray_cone: vec2<f32>,
+  hit_distance: f32,
+  wo: vec3<f32>,
+  geometric_normal: vec3<f32>,
+  twice_surface_area: f32,
+  twice_uv_area: f32,
+) -> f32 {
+  if (twice_surface_area <= 1.0e-20) {
+    return 0.0;
+  }
+  let cone_width = ray_cone.x + ray_cone.y * hit_distance;
+  let facing = max(abs(dot(wo, geometric_normal)), 0.1);
+  let uv_per_world_unit = sqrt(twice_uv_area / twice_surface_area);
+  let samples_per_pixel_scale = clamp(inverseSqrt(f32(max(kernel_params.total_samples, 1u))), 0.125, 1.0);
+  return cone_width / sqrt(facing) * uv_per_world_unit * samples_per_pixel_scale;
+}
+
+fn int_build_shading_point(surface_hit: IntSurfaceHit, wo: vec3<f32>, ray_cone: vec2<f32>) -> ShadingPoint {
   let instance = instances[surface_hit.instance_index];
   let triangle = triangles[surface_hit.triangle_index];
   let bary_u = surface_hit.barycentrics.x;
@@ -449,6 +502,13 @@ fn int_build_shading_point(surface_hit: IntSurfaceHit, wo: vec3<f32>) -> Shading
   point.light_group_mask_lo = instance.light_group_mask_lo;
   point.vertex_color = vertex_color;
   point.light_group_mask_hi = instance.light_group_mask_hi;
+  point.uv_footprint = 0.0;
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_TEXTURE_MIPS) != 0u) {
+    let uv_edge1 = uv0_1 - uv0_0;
+    let uv_edge2 = uv0_2 - uv0_0;
+    let twice_uv_area = abs(uv_edge1.x * uv_edge2.y - uv_edge2.x * uv_edge1.y);
+    point.uv_footprint = int_uv_footprint(ray_cone, surface_hit.t, wo, geometric_normal, ng_len, twice_uv_area);
+  }
   return point;
 }
 
@@ -679,6 +739,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   var ray_visibility = INSTANCE_VISIBILITY_CAMERA;
   var self_instance = INVALID_INDEX;
   var self_triangle = INVALID_INDEX;
+  var ray_cone = vec2<f32>(0.0);
 
   var throughput = vec3<f32>(1.0);
   var medium_sigma = vec3<f32>(0.0);
@@ -730,6 +791,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       ray_visibility = INSTANCE_VISIBILITY_CAMERA;
       self_instance = INVALID_INDEX;
       self_triangle = INVALID_INDEX;
+      ray_cone = int_camera_ray_cone();
 
       throughput = vec3<f32>(1.0);
       medium_sigma = vec3<f32>(0.0);
@@ -857,6 +919,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             throughput /= survival;
           }
         }
+        ray_cone = vec2<f32>(ray_cone.x + ray_cone.y * volume_scatter_t, ray_cone.y + 1.0);
         ray_origin = scatter_pos;
         ray_dir = next_dir;
         ray_t_min = 0.0;
@@ -901,7 +964,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       let wo = -ray_dir;
-      var point = int_build_shading_point(surface_hit, wo);
+      var point = int_build_shading_point(surface_hit, wo, ray_cone);
       var closure = closure_build(&point, wo);
       let material = materials[point.material_index];
       let is_pure_transparent = closure.lobe_count == 1u && closure.lobes[0].lobe_type == LOBE_TRANSPARENT;
@@ -1080,6 +1143,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
       }
 
+      ray_cone = vec2<f32>(
+        ray_cone.x + ray_cone.y * surface_hit.t,
+        ray_cone.y + int_bounce_cone_spread(&closure, bsdf_sample.sampled_lobe_type),
+      );
       ray_origin = int_ray_offset_origin(&point, bsdf_sample.wi);
       ray_dir = bsdf_sample.wi;
       ray_t_min = 0.0;

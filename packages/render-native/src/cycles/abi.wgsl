@@ -49,6 +49,10 @@ const KERNEL_FLAG_TEST_BSDF_ONLY: u32 = 512u;
 // Set: a path that ends is replaced at once by the pixel's next sample (one bounce per loop iteration). Clear (default): each path
 // runs to its end before the next one starts. The image is the same either way; only the time per sample differs.
 const KERNEL_FLAG_PATH_REGENERATION: u32 = 1024u;
+// Set: the integrator carries a ray cone along each path and a hit hands the texture sampler its footprint, so a texture that
+// stores mip levels is read at the level the footprint asks for. Clear (default): every texture is read at level 0, as Blender
+// Cycles does.
+const KERNEL_FLAG_TEXTURE_MIPS: u32 = 2048u;
 
 // `KernelParamsV2.filter_type` values.
 const FILTER_BOX: u32 = 0u;
@@ -489,6 +493,9 @@ struct ShadingPoint {
 
   vertex_color: vec3<f32>,
   light_group_mask_hi: u32,
+
+  // Width of the ray footprint on the surface in `uv0` units; 0 reads every texture at level 0.
+  uv_footprint: f32,
 }
 
 // Single BSDF lobe parameterized by L4 closure setup.
