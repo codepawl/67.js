@@ -70,3 +70,29 @@ test('the summary groups by model and kind, and the comparison flags a pass@1 dr
   assert.match(result.text, /crate: 2\/2 -> 1\/2 \(-1\)/);
   assert.equal(compareBench(baseline, baseline).regressed, false);
 });
+
+test('the run guard counts each streamed message once and kills a run over its budget', async () => {
+  const { createRunGuard, estimateUsageCostUsd } = await import('../bench/agent-modeling/run-guard.mjs');
+  assert.equal(estimateUsageCostUsd({ input_tokens: 1e6, output_tokens: 1e6 }, 'claude-haiku-4-5'), 6);
+  assert.equal(estimateUsageCostUsd({ cache_read_input_tokens: 1e6 }, 'sonnet'), 0.3);
+  let kills = 0;
+  const child = { kill: () => { kills++; } };
+  const guard = createRunGuard({ child, model: 'haiku', budgetUsd: 0.9, timeoutSeconds: 60 });
+  const event = JSON.stringify({ type: 'assistant', message: { id: 'a', usage: { output_tokens: 100000 } } });
+  guard.feed(`${event}\n${event}\n{"type":"assis`);
+  assert.equal(kills, 0, 'the same message id repeated is one message');
+  assert.equal(guard.estimatedCostUsd, 0.5);
+  guard.feed(`tant","message":{"id":"b","usage":{"output_tokens":100000}}}\n`);
+  assert.equal(kills, 1);
+  assert.equal(guard.reason, 'budget');
+  guard.stop();
+});
+
+test('the run guard kills a run that reaches its time limit', async () => {
+  const { createRunGuard } = await import('../bench/agent-modeling/run-guard.mjs');
+  let kills = 0;
+  const guard = createRunGuard({ child: { kill: () => { kills++; } }, model: 'haiku', budgetUsd: 1, timeoutSeconds: 0.01 });
+  await new Promise(resolveWait => setTimeout(resolveWait, 60));
+  assert.equal(kills, 1);
+  assert.equal(guard.reason, 'timeout');
+});

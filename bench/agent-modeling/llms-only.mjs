@@ -14,6 +14,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { removeLocalPaths, totalsByModel } from './aggregate.mjs';
 import { checkPng } from './png-check.mjs';
+import { createRunGuard } from './run-guard.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const TASK_ID = 'llms-only-png';
@@ -63,7 +64,6 @@ function claudeArguments() {
     '--permission-mode', 'dontAsk',
     '--setting-sources', 'project',
     '--no-session-persistence',
-    '--max-budget-usd', options.budget,
   ];
 }
 
@@ -87,15 +87,16 @@ function runAgent(workingDirectory, settingsPath) {
     const child = spawn(executable, argumentsList, { cwd: workingDirectory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     let errors = '';
+    const guard = createRunGuard({ child, model: options.model, budgetUsd: options.budget, timeoutSeconds: options.timeout });
     child.stdout.on('data', chunk => {
       output += chunk;
+      guard.feed(chunk);
     });
     child.stderr.on('data', chunk => {
       errors += chunk;
     });
-    const timer = setTimeout(() => child.kill(), Number(options.timeout) * 1000);
     child.on('close', code => {
-      clearTimeout(timer);
+      guard.stop();
       resolvePromise({ output, errors, code, wallMs: Math.round(performance.now() - started) });
     });
   });
