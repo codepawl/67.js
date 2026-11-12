@@ -605,6 +605,143 @@ The all-steps time is 8 to 9 ms on an NVIDIA A10 (section above) and 13 to 14 ms
 
 ![lit-interior and many-lights-500 at 64 spp: Cook unfiltered, Cook with the a-trous filter, Cycles 4096 spp](cook-atrous-comparison.jpg)
 
+## Denoised Cook against denoised Cycles (#897)
+
+The raw 64 spp images are noisy; the question here is how the finished image compares. Cook (`--kernel cycles`, defaults: no path regeneration, no environment compensation) is compared with Blender Cycles 5.3.0 OptiX, both raw and denoised, on four scenes at 16, 64 and 256 spp. `[measured]`
+
+**Setup.** One Modal container on an NVIDIA A10 (driver 610.57, card pinned), `960 x 540`, 8 bounces, seed 3 for both renderers (the references are Cycles 4096 spp seed 1), two rounds, medians of the two rounds. Modal preempted the first container once and restarted the function with the same input; the numbers come from the complete restarted run (144 rows, none failed). The variants:
+
+- **Cook raw**, **Cook + a-trous** (`denoise: 'atrous'`, the GPU filter of the section above) and **Cook + OIDN**: one trace gives all three images from the same samples. OIDN 2.5.1 runs through `packages/denoise-oidn` (`oidnDenoise`, HDR mode, quality high) on the kernel's first-hit albedo and normal buffers, on the CUDA device; the CPU device is listed too. The denoise seconds are a warm second call and include what the addon does around the filter (PFM files written and read, process start, weights load).
+- **Cycles raw** and **Cycles + OIDN**: two renders per rung with the same seed. The denoised one sets `denoiser = OPENIMAGEDENOISE`, albedo and normal passes, prefilter accurate and GPU denoising explicitly, so the result does not depend on which denoiser is the default (which one it is on 5.3 was not checked). Cycles denoises inside its render call, so its denoise seconds are the time from first sample to end of call of the denoised render minus the same time of the raw render of that rung and round; its sampling seconds are those of the raw render. Every Cycles + OIDN row ran the GPU denoiser.
+- Error is relMSE (epsilon 0.01) and mean ratio against the Cycles 4096 spp seed 1 reference; FLIP is the LDR mean from round 1 (sRGB, exposure set from the reference). Total seconds are sampling plus denoise, scene build and shader compile excluded.
+
+| scene | spp | variant | sampling s | denoise s | total s | relMSE | FLIP | mean ratio |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| glass | 16 | cook-raw | 0.27 | 0.00 | 0.27 | 0.00424 | 0.030 | 0.999 |
+| glass | 16 | cook-atrous | 0.27 | 0.01 | 0.28 | 0.000754 | 0.023 | 0.995 |
+| glass | 16 | cook-oidn-cuda | 0.27 | 0.65 | 0.92 | 0.000275 | 0.022 | 0.995 |
+| glass | 16 | cook-oidn-cpu | 0.27 | 0.61 | 0.88 | 0.000273 | 0.021 | 0.995 |
+| glass | 16 | cycles-raw | 0.11 | 0.00 | 0.11 | 0.0117 | 0.045 | 1.000 |
+| glass | 16 | cycles-oidn | 0.11 | 0.07 | 0.18 | 0.000216 | 0.019 | 0.998 |
+| glass | 64 | cook-raw | 0.48 | 0.00 | 0.48 | 0.000962 | 0.018 | 0.998 |
+| glass | 64 | cook-atrous | 0.48 | 0.01 | 0.49 | 0.000398 | 0.018 | 0.996 |
+| glass | 64 | cook-oidn-cuda | 0.48 | 0.72 | 1.20 | 0.000168 | 0.019 | 0.996 |
+| glass | 64 | cook-oidn-cpu | 0.48 | 0.53 | 1.01 | 0.000165 | 0.018 | 0.996 |
+| glass | 64 | cycles-raw | 0.39 | 0.00 | 0.39 | 0.0025 | 0.024 | 0.999 |
+| glass | 64 | cycles-oidn | 0.39 | 0.08 | 0.47 | 0.000119 | 0.016 | 1.000 |
+| glass | 256 | cook-raw | 1.89 | 0.00 | 1.89 | 0.000265 | 0.013 | 0.999 |
+| glass | 256 | cook-atrous | 1.89 | 0.01 | 1.89 | 0.000231 | 0.015 | 0.997 |
+| glass | 256 | cook-oidn-cuda | 1.89 | 0.35 | 2.23 | 0.000117 | 0.017 | 0.998 |
+| glass | 256 | cook-oidn-cpu | 1.89 | 0.23 | 2.11 | 0.000114 | 0.016 | 0.998 |
+| glass | 256 | cycles-raw | 1.50 | 0.00 | 1.50 | 0.000532 | 0.014 | 1.000 |
+| glass | 256 | cycles-oidn | 1.50 | 0.12 | 1.62 | 9.71e-05 | 0.014 | 1.000 |
+| lit-interior | 16 | cook-raw | 0.34 | 0.00 | 0.34 | 0.0653 | 0.142 | 1.003 |
+| lit-interior | 16 | cook-atrous | 0.34 | 0.01 | 0.35 | 0.00157 | 0.095 | 0.975 |
+| lit-interior | 16 | cook-oidn-cuda | 0.34 | 0.72 | 1.05 | 0.000319 | 0.040 | 0.997 |
+| lit-interior | 16 | cook-oidn-cpu | 0.34 | 0.23 | 0.57 | 0.000319 | 0.040 | 0.997 |
+| lit-interior | 16 | cycles-raw | 0.24 | 0.00 | 0.24 | 0.0702 | 0.152 | 1.000 |
+| lit-interior | 16 | cycles-oidn | 0.24 | 0.10 | 0.34 | 0.000294 | 0.042 | 0.998 |
+| lit-interior | 64 | cook-raw | 0.77 | 0.00 | 0.77 | 0.0128 | 0.076 | 1.003 |
+| lit-interior | 64 | cook-atrous | 0.77 | 0.01 | 0.78 | 0.000421 | 0.037 | 0.997 |
+| lit-interior | 64 | cook-oidn-cuda | 0.77 | 0.35 | 1.12 | 0.000219 | 0.028 | 1.002 |
+| lit-interior | 64 | cook-oidn-cpu | 0.77 | 0.22 | 0.99 | 0.000218 | 0.028 | 1.002 |
+| lit-interior | 64 | cycles-raw | 0.86 | 0.00 | 0.86 | 0.0148 | 0.082 | 1.000 |
+| lit-interior | 64 | cycles-oidn | 0.86 | 0.11 | 0.97 | 0.000207 | 0.028 | 0.998 |
+| lit-interior | 256 | cook-raw | 3.12 | 0.00 | 3.12 | 0.00274 | 0.040 | 1.003 |
+| lit-interior | 256 | cook-atrous | 3.12 | 0.01 | 3.13 | 0.000232 | 0.023 | 1.002 |
+| lit-interior | 256 | cook-oidn-cuda | 3.12 | 0.46 | 3.58 | 0.000184 | 0.023 | 1.002 |
+| lit-interior | 256 | cook-oidn-cpu | 3.12 | 0.33 | 3.45 | 0.000182 | 0.022 | 1.002 |
+| lit-interior | 256 | cycles-raw | 3.44 | 0.00 | 3.44 | 0.0031 | 0.043 | 1.000 |
+| lit-interior | 256 | cycles-oidn | 3.44 | 0.13 | 3.58 | 0.000171 | 0.021 | 1.000 |
+| many-lights-500 | 16 | cook-raw | 0.91 | 0.00 | 0.91 | 0.128 | 0.176 | 1.001 |
+| many-lights-500 | 16 | cook-atrous | 0.91 | 0.01 | 0.92 | 0.00225 | 0.084 | 0.971 |
+| many-lights-500 | 16 | cook-oidn-cuda | 0.91 | 0.36 | 1.28 | 0.000741 | 0.047 | 0.997 |
+| many-lights-500 | 16 | cook-oidn-cpu | 0.91 | 0.22 | 1.14 | 0.000743 | 0.047 | 0.997 |
+| many-lights-500 | 16 | cycles-raw | 0.78 | 0.00 | 0.78 | 0.117 | 0.177 | 1.000 |
+| many-lights-500 | 16 | cycles-oidn | 0.78 | 0.07 | 0.85 | 0.000622 | 0.044 | 1.000 |
+| many-lights-500 | 64 | cook-raw | 3.14 | 0.00 | 3.14 | 0.0306 | 0.105 | 1.001 |
+| many-lights-500 | 64 | cook-atrous | 3.14 | 0.01 | 3.15 | 0.0009 | 0.044 | 0.991 |
+| many-lights-500 | 64 | cook-oidn-cuda | 3.14 | 0.36 | 3.50 | 0.000559 | 0.034 | 1.000 |
+| many-lights-500 | 64 | cook-oidn-cpu | 3.14 | 0.22 | 3.36 | 0.000559 | 0.034 | 1.000 |
+| many-lights-500 | 64 | cycles-raw | 2.99 | 0.00 | 2.99 | 0.0279 | 0.101 | 1.000 |
+| many-lights-500 | 64 | cycles-oidn | 2.99 | 0.08 | 3.08 | 0.000503 | 0.032 | 1.000 |
+| many-lights-500 | 256 | cook-raw | 12.31 | 0.00 | 12.31 | 0.00763 | 0.058 | 1.001 |
+| many-lights-500 | 256 | cook-atrous | 12.31 | 0.01 | 12.32 | 0.000568 | 0.029 | 0.998 |
+| many-lights-500 | 256 | cook-oidn-cuda | 12.31 | 0.37 | 12.68 | 0.00048 | 0.027 | 1.001 |
+| many-lights-500 | 256 | cook-oidn-cpu | 12.31 | 0.22 | 12.53 | 0.00048 | 0.027 | 1.002 |
+| many-lights-500 | 256 | cycles-raw | 11.86 | 0.00 | 11.86 | 0.00698 | 0.055 | 1.000 |
+| many-lights-500 | 256 | cycles-oidn | 11.86 | 0.13 | 11.98 | 0.000453 | 0.025 | 1.000 |
+| outdoor-hdri | 16 | cook-raw | 0.17 | 0.00 | 0.17 | 0.00117 | 0.016 | 1.000 |
+| outdoor-hdri | 16 | cook-atrous | 0.17 | 0.01 | 0.18 | 5.02e-05 | 0.011 | 1.000 |
+| outdoor-hdri | 16 | cook-oidn-cuda | 0.17 | 0.37 | 0.53 | 4.66e-05 | 0.016 | 0.999 |
+| outdoor-hdri | 16 | cook-oidn-cpu | 0.17 | 0.22 | 0.39 | 4.41e-05 | 0.015 | 0.999 |
+| outdoor-hdri | 16 | cycles-raw | 0.07 | 0.00 | 0.07 | 0.00591 | 0.029 | 1.000 |
+| outdoor-hdri | 16 | cycles-oidn | 0.07 | 0.07 | 0.14 | 3.96e-05 | 0.015 | 1.000 |
+| outdoor-hdri | 64 | cook-raw | 0.15 | 0.00 | 0.15 | 0.000198 | 0.010 | 1.000 |
+| outdoor-hdri | 64 | cook-atrous | 0.15 | 0.01 | 0.16 | 2.11e-05 | 0.009 | 1.000 |
+| outdoor-hdri | 64 | cook-oidn-cuda | 0.15 | 0.36 | 0.51 | 2.35e-05 | 0.013 | 0.999 |
+| outdoor-hdri | 64 | cook-oidn-cpu | 0.15 | 0.22 | 0.38 | 2.13e-05 | 0.012 | 0.999 |
+| outdoor-hdri | 64 | cycles-raw | 0.24 | 0.00 | 0.24 | 0.00118 | 0.015 | 1.000 |
+| outdoor-hdri | 64 | cycles-oidn | 0.24 | 0.09 | 0.32 | 2.19e-05 | 0.014 | 1.000 |
+| outdoor-hdri | 256 | cook-raw | 0.58 | 0.00 | 0.58 | 5.05e-05 | 0.008 | 1.000 |
+| outdoor-hdri | 256 | cook-atrous | 0.58 | 0.01 | 0.58 | 1.02e-05 | 0.008 | 1.000 |
+| outdoor-hdri | 256 | cook-oidn-cuda | 0.58 | 0.40 | 0.97 | 1.37e-05 | 0.012 | 0.999 |
+| outdoor-hdri | 256 | cook-oidn-cpu | 0.58 | 0.22 | 0.80 | 1.19e-05 | 0.011 | 1.000 |
+| outdoor-hdri | 256 | cycles-raw | 0.89 | 0.00 | 0.89 | 0.000169 | 0.009 | 1.000 |
+| outdoor-hdri | 256 | cycles-oidn | 0.89 | 0.10 | 0.99 | 1.29e-05 | 0.013 | 1.000 |
+
+The picture is `many-lights-500` at 64 spp. Top row: Cook raw, Cook + OIDN, Cycles + OIDN, Cycles 4096 spp. Bottom row: the same images cropped at 240 x 135 pixels around a door edge, a box and a sphere, enlarged 2x with nearest-neighbour pixels. Labels give relMSE and total seconds.
+
+![many-lights-500 at 64 spp: Cook raw, Cook + OIDN, Cycles + OIDN, Cycles 4096 spp, with a 2x crop](cook-denoised-comparison.jpg)
+
+**Where Cook's denoised image is better or cheaper.**
+
+- Raw Cook is the cheaper estimate at defaults on `lit-interior` at 256 spp (3.12 s against 3.44 s) and on `outdoor-hdri` (0.58 s against 0.89 s at 256 spp); at equal total seconds its raw relMSE is 0.33 to 0.76 times that of raw Cycles on `glass`, `lit-interior` and `outdoor-hdri`.
+- The a-trous filter costs 0.01 s against 0.07 to 0.13 s for Cycles' OIDN and 0.35 to 0.7 s for the OIDN addon call, and it brings relMSE down by about 30 times at 64 spp on `lit-interior` and `many-lights-500`.
+- Where the image is smooth, Cook + OIDN and Cycles + OIDN are the same: on `many-lights-500` at 64 spp, in the flattest 70 percent of pixels (lowest reference gradient), relMSE is 0.00046 against 0.00043 and the mean ratio 1.0006 against 0.9991. FLIP at 64 spp is 0.034 against 0.032 (`many-lights-500`), 0.028 against 0.028 (`lit-interior`), 0.019 against 0.016 (`glass`), 0.013 against 0.014 (`outdoor-hdri`).
+
+**Where Cook's denoised image is worse.**
+
+- Edges: on `many-lights-500` at 64 spp, in the 5 percent of pixels with the highest reference gradient, Cook + OIDN has relMSE 0.00153 against 0.00114 for Cycles + OIDN (34 percent higher), Cook + a-trous 0.00253 (2.2 times). One image, one seed; the cause (guide buffers, filter settings) was not investigated.
+- Mean shift: the a-trous filter darkens the image, mean ratio 0.971 to 0.975 at 16 spp and 0.991 to 0.997 at 64 spp on `lit-interior` and `many-lights-500` (the flat region of `many-lights-500` at 64 spp reads 0.9896). Cook + OIDN stays within 0.3 percent of the reference mean on `lit-interior` and `many-lights-500` (0.997 to 1.002) and reads 0.5 percent low on `glass` (0.995 to 0.998); Cycles + OIDN within 0.2 percent (0.998 to 1.000).
+- Cost of the OIDN step: 0.35 to 0.72 s through the addon (CUDA device; 0.22 to 0.61 s on the CPU device) against 0.07 to 0.13 s inside Cycles. The addon starts the `oidnDenoise` tool and moves the images through files, which Cycles does not; the difference is the integration, not the filter.
+- Texture detail was not measured: none of the four scenes carries an image texture. The reference noise floor (relMSE between two 4096 spp seeds, table above) is 0.000832 for `many-lights-500`, 0.00026 for `lit-interior` and 0.000058 for `glass`, so denoised relMSE values near or below those numbers cannot rank two denoisers; FLIP separates them better, and it shows them close.
+- Cook raw at defaults samples slower than Cycles on `glass` (1.89 s against 1.50 s at 256 spp) and `many-lights-500` (12.31 s against 11.86 s); `--path-regeneration` cuts that by 0.67 to 0.72 on three scenes (section above) but was not part of this run.
+
+**Equal total seconds** (relMSE interpolated log-log between the measured rungs at the budget named; the ratio is Cook over Cycles, above 1 means Cycles has the lower error):
+
+Cook + OIDN against Cycles + OIDN:
+
+- glass at 1.2 s: cook-oidn-cuda relMSE 0.000166, cycles-oidn relMSE 0.000102 (ratio 1.63)
+- lit-interior at 1.9 s: cook-oidn-cuda relMSE 0.000201, cycles-oidn relMSE 0.000187 (ratio 1.08)
+- many-lights-500 at 3.9 s: cook-oidn-cuda relMSE 0.000552, cycles-oidn relMSE 0.000494 (ratio 1.12)
+- outdoor-hdri at 0.7 s: cook-oidn-cuda relMSE 2.63e-05, cycles-oidn relMSE 1.51e-05 (ratio 1.74)
+
+Cook + a-trous against Cycles + OIDN:
+
+- glass at 0.7 s: cook-atrous relMSE 0.000351, cycles-oidn relMSE 0.000113 (ratio 3.12)
+- lit-interior at 1.0 s: cook-atrous relMSE 0.000372, cycles-oidn relMSE 0.000205 (ratio 1.81)
+- many-lights-500 at 3.3 s: cook-atrous relMSE 0.000884, cycles-oidn relMSE 0.0005 (ratio 1.77)
+- outdoor-hdri at 0.3 s: cook-atrous relMSE 2.4e-05, cycles-oidn relMSE 2.25e-05 (ratio 1.07)
+
+Cook raw against Cycles raw:
+
+- glass at 0.6 s: cook-raw relMSE 0.000738, cycles-raw relMSE 0.00143 (ratio 0.52)
+- lit-interior at 1.0 s: cook-raw relMSE 0.00932, cycles-raw relMSE 0.0122 (ratio 0.76)
+- many-lights-500 at 3.3 s: cook-raw relMSE 0.0292, cycles-raw relMSE 0.0254 (ratio 1.15)
+- outdoor-hdri at 0.3 s: cook-raw relMSE 0.000275, cycles-raw relMSE 0.000838 (ratio 0.33)
+
+For the same total seconds, the finished image of Cycles + OIDN has the lower error than Cook + OIDN on all four scenes (1.08 to 1.74 times), with a larger lead over Cook + a-trous (1.07 to 3.12 times at the budgets above). The OIDN gap is mostly the 0.3 s of the addon call: Cook samples as fast or faster on two of the four scenes at defaults, so a denoise step as cheap as Cycles' would close part of it. Both gaps sit where relMSE is near the reference noise floor, so read them with the FLIP column. Raw, Cook is ahead at equal seconds on three scenes and behind on `many-lights-500` (1.15).
+
+Commands (the Modal pipeline stays outside the repository; each step is a script in `bench/cycles-parity/`):
+
+```sh
+node bench/cycles-parity/trace-native.mjs <scene.json> <prefix> --kernel cycles --samples 64 --seed 3 --bounces 8 --denoise atrous --oidn-devices cuda,cpu
+blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <scene.json> <prefix> --samples 64 --bounces 8 --seed 3 --denoise oidn-gpu
+uv run --no-project python bench/cycles-parity/summarize-denoised-comparison.py <rows.json>
+uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-denoised-comparison-figure.py --rows <rows.json> --images <folder> --reference <reference.npy> --crop-x 300 --crop-y 255 --output docs/cook-denoised-comparison.jpg
+```
+
 ## Depth and grey-diffuse comparison (#896, slice C1a)
 
 The Done-when item of #896 for the Classroom scene asks for two checks against Cycles with every material overridden to grey diffuse: the image-match gates and a depth pass that agrees on 99.9 percent of pixels. This slice adds the harness for both and proves it on two existing scenes; the Classroom scene itself is a later slice. Only `bench/`, `tests/` and this guide change.

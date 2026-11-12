@@ -54,7 +54,7 @@ def parse_cli_arguments():
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
@@ -75,6 +75,7 @@ def parse_cli_arguments():
         "grey_diffuse": "--grey-diffuse" in argument_list,
         "z_depth": "--z-depth" in argument_list,
         "depth_samples": int(read_flag_value(argument_list, "--depth-samples", str(DEFAULT_DEPTH_SAMPLES))),
+        "denoise": read_flag_value(argument_list, "--denoise", "none"),
     }
 
 
@@ -445,6 +446,25 @@ def configure_linear_exr_output(scene, width, height):
     scene.view_settings.look = "None"
 
 
+def configure_cycles_denoising(scene, mode):
+    """Off by default. "oidn-gpu" and "oidn-cpu" run Cycles' own Open Image Denoise with albedo and normal passes.
+
+    Blender's default denoiser for final renders is Open Image Denoise (the other choice is OptiX), with the
+    albedo and normal passes, the accurate prefilter and, when a GPU renders, GPU denoising. This sets those
+    values explicitly so the comparison does not depend on a default.
+    """
+    if mode == "none":
+        scene.cycles.use_denoising = False
+        return
+    if mode not in ("oidn-gpu", "oidn-cpu"):
+        raise ValueError(f"--denoise must be none, oidn-gpu or oidn-cpu, got {mode!r}.")
+    scene.cycles.use_denoising = True
+    scene.cycles.denoiser = "OPENIMAGEDENOISE"
+    scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL"
+    scene.cycles.denoising_prefilter = "ACCURATE"
+    scene.cycles.denoising_use_gpu = mode == "oidn-gpu"
+
+
 def configure_cycles_parity(scene, options):
     scene.render.engine = "CYCLES"
     preferences = bpy.context.preferences.addons["cycles"].preferences
@@ -460,7 +480,7 @@ def configure_cycles_parity(scene, options):
     scene.cycles.device = "GPU"
     scene.cycles.samples = options["samples"]
     scene.cycles.seed = options["seed"]
-    scene.cycles.use_denoising = False
+    configure_cycles_denoising(scene, options["denoise"])
     scene.cycles.use_adaptive_sampling = False
     scene.cycles.pixel_filter_type = PIXEL_FILTER_TYPES[options["filter_type"]]
     scene.cycles.filter_width = options["filter_width"]
@@ -604,6 +624,7 @@ def execute_timed_cycles_render(scene, exr_path):
         "render_call_seconds": render_call_seconds,
         "cycles_sync_seconds": cycles_sync_seconds,
         "sampling_seconds": sampling_seconds,
+        "after_last_sample_seconds": max(0.0, render_call_seconds - (last_sample_seconds or render_call_seconds)),
         "peak_stats_megabytes": peak_stats_megabytes,
         "stats_event_count": len(stats_events),
         "last_stats_text": stats_events[-1][1] if stats_events else "",
@@ -692,6 +713,9 @@ def main():
         "cyclesSyncSeconds": round(timing["cycles_sync_seconds"], 6),
         "setupSeconds": round(setup_seconds, 6),
         "samplingSeconds": round(timing["sampling_seconds"], 6),
+        "secondsAfterLastSample": round(timing["after_last_sample_seconds"], 6),
+        "denoiseMode": options["denoise"],
+        "denoiser": scene.cycles.denoiser if scene.cycles.use_denoising else None,
         "renderCallSeconds": round(timing["render_call_seconds"], 6),
         "totalTraceSeconds": round(total_trace_seconds, 6),
         "cyclesPeakMemoryMegabytes": round(timing["peak_stats_megabytes"], 2),
