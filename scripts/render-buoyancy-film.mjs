@@ -1,5 +1,5 @@
 // Film of crates and a boat bobbing on ocean waves through the MCP render job, for the buoyancy docs and the pull request.
-// Usage: node scripts/render-buoyancy-film.mjs [--backend gpu|cpu] [--width 640] [--height 360] [--duration 4] [--out artifacts/982]
+// Usage: node scripts/render-buoyancy-film.mjs [--scene buoyancy|boat] [--backend gpu|cpu] [--width 640] [--height 360] [--duration 4] [--out artifacts/982]
 // The boat is the CC0 Kenney Watercraft Kit (kenney.nl/assets/watercraft-kit). Put `boat-fishing-small.glb` and
 // `Textures/colormap.png` from its GLB folder in <out>/assets before the first run.
 // CHROME_PATH names another Chrome or Chromium executable. --vulkan wraps the Chrome it finds with the flags a Linux GPU box needs.
@@ -9,10 +9,10 @@ import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/client';
+import { BOAT_SIZE, buildBoatRecipe } from './boat-wake-recipe.mjs';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 const BOAT_FILE = 'boat-fishing-small.glb';
-const BOAT_SIZE = { width: 1.78, length: 3.87, hullHeight: 0.7 };
 
 function option(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -22,7 +22,9 @@ function option(name, fallback) {
 const backend = option('backend', 'gpu');
 const width = Number(option('width', 640));
 const height = Number(option('height', 360));
-const duration = Number(option('duration', 4));
+const sceneName = option('scene', 'buoyancy');
+if (sceneName !== 'buoyancy' && sceneName !== 'boat') throw new Error(`--scene must be buoyancy (crates and a drifting boat) or boat (a steered boat with a wake), got ${sceneName}`);
+const duration = Number(option('duration', sceneName === 'boat' ? 5 : 4));
 const outputFolder = resolve(option('out', 'artifacts/982'));
 const assetFolder = join(outputFolder, 'assets');
 const jobsFolder = join(outputFolder, 'jobs');
@@ -32,7 +34,7 @@ function vulkanChromeWrapper() {
   const names = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
   const found = names.map(name => spawnSync('which', [name], { encoding: 'utf8' }).stdout.trim()).find(Boolean);
   if (!found) throw new Error('No Chrome or Chromium on the PATH; install one or pass CHROME_PATH.');
-  const wrapper = join(jobsFolder, 'chrome-vulkan.sh');
+  const wrapper = join(outputFolder, 'chrome-vulkan.sh');
   writeFileSync(wrapper, `#!/bin/sh
 exec ${found} --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist --no-sandbox "$@"
 `);
@@ -116,11 +118,11 @@ try {
   const catalog = (await call('scene_asset_catalog')).structuredContent;
   const boat = catalog.assets.find(asset => JSON.stringify(asset).includes('boat-fishing-small'));
   if (!boat) throw new Error(`The catalog has no boat: ${JSON.stringify(catalog).slice(0, 400)}`);
-  const created = (await call('scene_create', { recipe: buildRecipe(boat.assetId) }, 300000)).structuredContent;
+  const created = (await call('scene_create', { recipe: (sceneName === 'boat' ? buildBoatRecipe(boat.assetId, duration) : buildRecipe(boat.assetId)) }, 300000)).structuredContent;
   const report = (await call('scene_inspect', { sessionId: created.sessionId })).structuredContent.physics;
   console.log(JSON.stringify(report.bodies.map(body => [body.node, body.finalPosition])));
   const still = (await call('scene_look', { sessionId: created.sessionId, width: 1024, height: 576, motionTime: duration * 0.6 })).content.find(item => item.type === 'image');
-  await writeFile(join(outputFolder, 'buoyancy-still.png'), Buffer.from(still.data, 'base64'));
+  await writeFile(join(outputFolder, `${sceneName}-still.png`), Buffer.from(still.data, 'base64'));
   const job = (await call('scene_render_submit', { sessionId: created.sessionId, expectedRevision: created.revision ?? 0, settings: { kind: 'video', width, height, fps: 24, duration, motion: { start: 0 } } })).structuredContent;
   for (;;) {
     const state = (await call('scene_render_status', { jobId: job.jobId })).structuredContent;
@@ -131,8 +133,8 @@ try {
     await delay(500);
   }
   const result = (await call('scene_render_result', { jobId: job.jobId })).structuredContent;
-  await writeFile(join(outputFolder, 'buoyancy.mp4'), await readFile(result.artifacts[0].path));
-  console.log(`wrote ${join(outputFolder, 'buoyancy.mp4')}`);
+  await writeFile(join(outputFolder, `${sceneName}.mp4`), await readFile(result.artifacts[0].path));
+  console.log(`wrote ${join(outputFolder, `${sceneName}.mp4`)}`);
 } finally {
   await client.close();
 }

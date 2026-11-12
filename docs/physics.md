@@ -408,7 +408,30 @@ A crate or a boat can float on the sea that the `ocean` mesh edit draws. Give th
 
 Each `float` body carries sample points in body space, 16 at most. Without `points` it gets four, in a 2 x 2 grid across the collider bounds at mid height. Every point owns an equal share of the body's volume as a column as tall as the body. Where the surface stands above the point, the column is submerged by a fraction and the water pushes up at that point with `waterDensity x gravity x volume / points x fraction`. A body lighter than water bobs and rolls; a box of density 500 sinks to half its height. Spread the points over the hull, wide for roll and long for pitch, so the body rights itself when a wave tips it. `drag` and `angularDrag` (1/s, 0 to 100, default 2) damp the linear and angular velocity in proportion to the mean submerged fraction. Only dynamic bodies float, and a float body needs a volume, so trimesh does not work.
 
-The definition form of the same thing is `ocean` on the definition and `float` on a body (`src/physics-buoyancy.js`); the live runtime applies it on every step with the same code, and the bake is identical across runs. The cost is waves x points x frames, capped at 100 million wave evaluations, so a long bake with 16 points and `resolution` 16 is rejected with a message that names the limits. A boat controller and a wake behind a moving hull are not part of this yet ([#982](https://github.com/codepawl/67.js/issues/982)).
+The definition form of the same thing is `ocean` on the definition and `float` on a body (`src/physics-buoyancy.js`); the live runtime applies it on every step with the same code, and the bake is identical across runs. The cost is waves x points x frames, capped at 100 million wave evaluations, so a long bake with 16 points and `resolution` 16 is rejected with a message that names the limits.
+
+### Boats and wakes
+
+![A fishing boat turning through waves, with a wake of foam behind it](boat-wake-still.jpg)
+
+A floating hull becomes a boat with `float.boat`: throttle pushes the stern along the bow and the rudder pushes it sideways, so the hull still pitches and rolls on the waves. It turns like a real boat: faster water past the rudder turns it harder, and the keel stops it sliding sideways.
+
+```json
+{ "node": "hull", "density": 300, "float": { "drag": 1.5, "angularDrag": 3, "boat": {
+  "thrust": 4, "rudder": 1, "keelDrag": 4, "forward": "-z",
+  "controls": [{ "time": 0, "throttle": 1 }, { "time": 2, "throttle": 1, "rudder": 0.8 }],
+  "wake": { "width": 1.2, "height": 0.12, "lifetime": 5 }
+} } }
+```
+
+- `thrust` is the push at full throttle in m/s2 (0 to 100, default 4); `rudder` is the sideways push at the stern at full helm and 3 m/s (default 1); `keelDrag` is the sideways slip removed per second (default 4). Both pushes act at `stern` ([x, y, z] in body space; default the end of the hull opposite `forward`, at mid height) and grow with how much of the hull is in the water, full at a quarter submerged, so a hull thrown into the air does not drive.
+- `forward` is the bow in body space: `-z` (default, the way the player controllers face), `+z`, `+x` or `-x`. A positive rudder turns the bow to the right.
+- `controls` are up to 256 keyframes `{ time, throttle, rudder }` with both values from -1 to 1, linear between them and held after the last. A bake reads them, so a film steers the boat with keyframes and the result is identical across runs. A live system ignores them once `setBoatControls` has been called.
+- A live system takes the controls from `physics.setBoatControls(bodyName, { throttle, rudder })`. The `boat` controller of [the player kit](player.md#boat-controller) does that from the input axes every step.
+
+`wake` is off unless you give it. It draws a bounded trail behind the stern into the sea: the last `lifetime` seconds (0.5 to 60, default 5) of the stern path as at most 64 points that fade with age and widen as they spread (`width` 1.2 m at the stern, `strength` 1, `height` 0.12 m). Where a point reaches the sea it raises the `foam` group the water shader already draws and presses a small trough along the track with a ridge on each side. A slow hull leaves no wake. The sea geometry needs an `oceanTime` track so it is rebuilt each frame; the wake is a pure function of the bake, so frames render in any order. The same field is on the `ocean` mesh edit: `wake: { points: [[x, z, strength, width]], height }` draws a trail you place yourself, in the sea geometry's own space.
+
+The boat code is part of the buoyancy chunk, so a scene without floating bodies never loads it.
 
 ## Fracture and breakable glue
 

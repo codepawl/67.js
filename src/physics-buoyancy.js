@@ -1,4 +1,6 @@
 import { oceanSurfaceAt, oceanWaves } from './ocean-waves.js';
+import { applyBoatForces, normalizeBoat, resolveBoat } from './physics-boat.js';
+import { boundedInteger, boundedNumber, rejectUnknownKeys, rotateByQuaternion } from './physics-values.js';
 
 // Buoyancy for rigid bodies on the ocean. A floating body carries up to 16 sample points. Each point owns an equal share of
 // the body's volume as a vertical column the height of the body. Where the sea surface (the same function the ocean
@@ -10,34 +12,10 @@ import { oceanSurfaceAt, oceanWaves } from './ocean-waves.js';
 export const BUOYANCY_LIMITS = Object.freeze({ maxPointsPerBody: 16, maxWaveEvaluations: 100_000_000 });
 
 const OCEAN_KEYS = ['level', 'waterDensity', 'windSpeed', 'direction', 'choppiness', 'size', 'seed', 'time', 'resolution'];
-const FLOAT_KEYS = ['drag', 'angularDrag', 'points'];
+const FLOAT_KEYS = ['drag', 'angularDrag', 'points', 'boat'];
 const MAX_SEED = 0x7fffffff;
 const DEFAULT_DRAG = 2;
 const CHOPPY_REST_PASSES = 2;
-
-function rejectUnknownKeys(value, allowed, label) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object like { ${allowed[0]}: 1 }`);
-  }
-  for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) throw new TypeError(`${label}.${key} is unsupported; use one of ${allowed.join(', ')}`);
-  }
-}
-
-function boundedNumber(value, label, minimum, maximum, example, exclusiveMinimum = false) {
-  const belowMinimum = exclusiveMinimum ? value <= minimum : value < minimum;
-  if (typeof value !== 'number' || !Number.isFinite(value) || belowMinimum || value > maximum) {
-    throw new RangeError(`${label} must be a number ${exclusiveMinimum ? 'above' : 'from'} ${minimum} to ${maximum}, such as ${example}`);
-  }
-  return value;
-}
-
-function boundedInteger(value, label, minimum, maximum, example) {
-  if (!Number.isInteger(value) || value < minimum || value > maximum) {
-    throw new RangeError(`${label} must be an integer from ${minimum} to ${maximum}, such as ${example}`);
-  }
-  return value;
-}
 
 /**
  * Validate the sea bodies float on. The wave fields are those of the ocean mesh edit (same defaults), so a body floats on the
@@ -80,6 +58,7 @@ export function normalizeFloat(input, label) {
       return point.map((component, axis) => boundedNumber(component, `${label}.points[${index}][${axis}]`, -1e6, 1e6, 0));
     });
   }
+  if (input.boat !== undefined) result.boat = normalizeBoat(input.boat, `${label}.boat`);
   return result;
 }
 
@@ -133,6 +112,7 @@ export function floatingBody(floatSpec, bodyColliders, label) {
     drag: floatSpec.drag,
     angularDrag: floatSpec.angularDrag,
     points,
+    boat: floatSpec.boat === undefined ? undefined : resolveBoat(floatSpec.boat, low, high),
     volume: solid.reduce((total, collider) => total + collider.volume, 0),
     columnHeight: Math.max(high[1] - low[1], 1e-6),
   };
@@ -151,29 +131,18 @@ export function checkBuoyancyWork(ocean, floatingBodies, frameCount) {
 /** Height of the sea surface above the calm level at a world position and physics time, following the horizontal pull of choppy waves. */
 export function seaHeightAt(ocean, worldX, worldZ, time) {
   const seaTime = ocean.time + time;
-  let restX = worldX;
-  let restZ = worldZ;
+  // The ocean mesh edit of a y-up sea reads the waves with its first horizontal axis (z) as the wave x and its second (x) as the
+  // wave z, and pulls them by moveX and moveZ in that order. The same order here puts a body on the wave the mesh draws.
+  let restFirst = worldZ;
+  let restSecond = worldX;
   if (ocean.choppiness > 0) {
     for (let pass = 0; pass < CHOPPY_REST_PASSES; pass++) {
-      const surface = oceanSurfaceAt(ocean.waves, restX, restZ, seaTime, ocean.choppiness);
-      restX = worldX - surface.moveX;
-      restZ = worldZ - surface.moveZ;
+      const surface = oceanSurfaceAt(ocean.waves, restFirst, restSecond, seaTime, ocean.choppiness);
+      restFirst = worldZ - surface.moveX;
+      restSecond = worldX - surface.moveZ;
     }
   }
-  return oceanSurfaceAt(ocean.waves, restX, restZ, seaTime, ocean.choppiness).height;
-}
-
-function rotateByQuaternion(point, rotation) {
-  const [pointX, pointY, pointZ] = point;
-  const { x, y, z, w } = rotation;
-  const crossX = 2 * (y * pointZ - z * pointY);
-  const crossY = 2 * (z * pointX - x * pointZ);
-  const crossZ = 2 * (x * pointY - y * pointX);
-  return [
-    pointX + w * crossX + (y * crossZ - z * crossY),
-    pointY + w * crossY + (z * crossX - x * crossZ),
-    pointZ + w * crossZ + (x * crossY - y * crossX),
-  ];
+  return oceanSurfaceAt(ocean.waves, restFirst, restSecond, seaTime, ocean.choppiness).height;
 }
 
 /**
@@ -204,6 +173,7 @@ export function applyBuoyancy(preparedScene, bodies, time) {
     }
     if (submergedTotal === 0) continue;
     const meanSubmerged = submergedTotal / floater.points.length;
+    if (floater.boat) applyBoatForces(body, floater.boat, time, step, meanSubmerged);
     const linearKeep = Math.exp(-floater.drag * meanSubmerged * step);
     const angularKeep = Math.exp(-floater.angularDrag * meanSubmerged * step);
     const linear = body.linvel();
@@ -212,3 +182,4 @@ export function applyBuoyancy(preparedScene, bodies, time) {
     body.setAngvel({ x: angular.x * angularKeep, y: angular.y * angularKeep, z: angular.z * angularKeep }, true);
   }
 }
+export { setBoatControls } from './physics-boat.js';
