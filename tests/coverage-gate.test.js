@@ -29,3 +29,20 @@ test('a function hit in only one shard counts as covered', () => {
   const { totals } = totalsOf(mergeLcov([firstShard, secondShard]));
   assert.deepEqual(totals.functions, [1, 1]);
 });
+
+// Real V8 shards number the blocks of a file in the order they report them, so one branch carries different block ids in
+// different shards and a shard that never runs a function reports it as a single range.
+const branchShardA = ['SF:src/example.js', 'BRDA:10,0,0,4', 'BRDA:10,1,0,0', 'BRDA:20,2,0,1', 'end_of_record'].join('\n');
+const branchShardB = ['SF:src/example.js', 'BRDA:5,0,0,0', 'BRDA:10,1,0,0', 'BRDA:10,2,0,2', 'BRDA:20,3,0,0', 'end_of_record'].join('\n');
+const branchShardC = ['SF:src/example.js', 'BRDA:10,7,0,0', 'end_of_record'].join('\n');
+
+test('a branch counts once however the shards number their blocks', () => {
+  const { totals } = totalsOf(mergeLcov([branchShardA, branchShardB, branchShardC]));
+  assert.deepEqual(totals.branches, [3, 4]);
+});
+
+test('the branch total does not depend on how the same shards are grouped', () => {
+  const allApart = totalsOf(mergeLcov([branchShardA, branchShardB, branchShardC])).totals.branches;
+  const together = totalsOf(mergeLcov([[branchShardA, branchShardB].join('\n'), branchShardC])).totals.branches;
+  assert.deepEqual(allApart, together);
+});

@@ -68,6 +68,7 @@
   },
   "exports": {
     ".": "./build/67.module.js",
+    "./standalone": "./build/67.standalone.js",
     "./addons/model": "./build/model.js",
     "./addons/nature": "./build/nature.js",
     "./addons/motion": "./build/motion.js",
@@ -147,7 +148,7 @@
     "prepare": "node scripts/install-git-hooks.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/prepare-release.mjs && vite build",
-    "build:lib": "vite build --config vite.lib.config.js",
+    "build:lib": "vite build --config vite.lib.config.js && vite build --config vite.browser.config.js",
     "prepare:release": "node scripts/prepare-release.mjs",
     "prepack": "npm run build:lib",
     "deploy": "node scripts/deploy.mjs",
