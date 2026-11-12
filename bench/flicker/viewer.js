@@ -40,7 +40,7 @@ function paintTrianglesApart(parts) {
       triangleNumber++;
       const hue = ((triangleNumber * 0.618034) % 1);
       const colour = options.triangleIds
-        ? [triangleNumber & 255, (triangleNumber >> 8) & 255, (triangleNumber >> 16) & 255].map(byte => (byte / 255) ** DISPLAY_GAMMA)
+        ? [triangleNumber & 255, (triangleNumber >> 8) & 255, (triangleNumber >> 16) & 255].map(byte => options.pass ? byte / 255 : (byte / 255) ** DISPLAY_GAMMA)
         : [0, 1 / 3, 2 / 3].map(offset => 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(2 * Math.PI * (hue + offset))));
       for (let corner = 0; corner < 3; corner++) {
         const source = indices[triangle * 3 + corner] * 3;
@@ -101,6 +101,9 @@ const options = {
   facets: parameters.get('facets') === '1' || parameters.get('facets') === '2',
   // facets=2: the colour of every triangle is its own number, drawn unlit, so the frame tells exactly which face is shown at a pixel.
   triangleIds: parameters.get('facets') === '2',
+  // pass=albedo draws the frame through the albedo render pass (issue #934). The pass writes the colour as it is, with no display curve,
+  // so with facets=2 the triangle numbers are stored linear and the probe reads them back unchanged.
+  pass: parameters.get('pass') === 'albedo' ? 'albedo' : null,
   // hits=N keeps the N nearest faces per ray in the ray cast (default 6, at most 64): a deeper stack than that shows up as offRay.
   // samples=N sets the MSAA sample count. A facets=2 frame defaults to 1: the resolve of 4 samples blends the ids of faces that share a pixel into
   // another valid id, which the ray through the pixel centre cannot match (see colourStepDetails); one sample shows the face under the centre.
@@ -187,6 +190,7 @@ function frameFor(jitterPixels = 0) {
   if (!options.nearFit) frame.near = 0.1;
   if (jitterPixels) frame.shift = [jitterPixels / canvas.width, 0];
   if (effectName) Object.assign(frame, effectSettings());
+  if (options.pass) frame.pass = options.pass;
   return frame;
 }
 
@@ -241,8 +245,9 @@ async function build() {
     resolveCoplanar: options.offset ? resolveAndReport : false,
     ...(effectName ? { depth: true } : {}),
   });
+  if (options.pass) installRenderPasses(renderer);
   if (effectName) {
-    installRenderPasses(renderer);
+    if (!options.pass) installRenderPasses(renderer);
     installCameraEffects(renderer);
     installLineArt(renderer);
   }
@@ -293,7 +298,7 @@ function readFrame(context) {
 // edge blends two owners into a colour that is close to both, which the four-neighbour test reads as no edge, so this count also
 // leaves out pixels with a colour step anywhere within two pixels.
 // The bytes an unlit face of this colour shows: the triangle number that painted it, back from the gamma curve.
-const shownByte = colour => colour.map(channel => Math.round(255 * channel ** (1 / DISPLAY_GAMMA)));
+const shownByte = colour => colour.map(channel => Math.round(255 * (options.pass ? channel : channel ** (1 / DISPLAY_GAMMA))));
 
 // The ground-truth probe (ground-truth.js): one frame, compared with a float64 ray cast that cannot z-fight. Needs flat colours
 // per part (ids=1) or per triangle (facets=1); the trap scenes bring their own. Returns the counts of compareWithGroundTruth
