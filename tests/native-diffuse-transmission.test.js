@@ -210,16 +210,16 @@ test('the lobe probe of a metallic material has no light on the far side', { ski
     material: { color: [0.8, 0.4, 0.2], roughness: 1, metallic: 0.5, specular: 0 },
     bootstrapKernel: true,
   });
-  // Mode 1 evaluates the closure for directions over the whole sphere, from z = 1 in the first row to z = -1 in the last.
+  // Mode 1 writes the direction and pdf in plane 0 and the closure value for it in plane 1, one vec4 per pixel.
+  const pixelCount = width * height;
   let nearSide = 0;
   let farSide = 0;
-  for (let row = 0; row < height; row++) {
-    for (let column = 0; column < width; column++) {
-      const offset = (row * width + column) * 4;
-      const brightness = planes[offset] + planes[offset + 1] + planes[offset + 2];
-      if (row < height / 2) nearSide += brightness;
-      else farSide += brightness;
-    }
+  for (let pixel = 0; pixel < pixelCount; pixel++) {
+    const directionZ = planes[pixel * 4 + 2];
+    const valueOffset = (pixelCount + pixel) * 4;
+    const brightness = planes[valueOffset] + planes[valueOffset + 1] + planes[valueOffset + 2];
+    if (directionZ > 0) nearSide += brightness;
+    else farSide += brightness;
   }
   assert.ok(nearSide > 0, `the near side of a metal and diffuse material is lit: ${nearSide}`);
   assert.equal(farSide, 0, 'no light leaves through the far side');
