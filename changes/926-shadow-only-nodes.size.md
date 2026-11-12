@@ -1,1 +1,5 @@
-- entry:core: +96 bytes gzip so a node can cast a shadow while staying out of the picture, which a gobo outside the shot needs and no existing flag gives (#926). About 0.1 percent of the bundle.
+- scene:agent-scene: +126 bytes gzip (and +44 on lit-box, +29 on entry:core) so a node can cast a shadow while staying out of the picture, which a gobo outside the shot needs and no existing flag gives (#926). Under 0.1 percent of the bundle.
+- scene:agent-scene+lazy: same change as scene:agent-scene.
+- scene:lit-box: same change as scene:agent-scene.
+- scene:gltf-box: same change as scene:agent-scene.
+- scene:gltf-box+lazy: same change as scene:agent-scene.

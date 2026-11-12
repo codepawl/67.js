@@ -96,7 +96,7 @@ test('shadowOnly reaches the part, splits batches and conflicts with the flags t
   assert.ok(batches.some(names => names.join() === 'gobo,gobo2'));
   const node = fields => recipe({ nodes: [{ id: 'one', geometry: 'box', material: 'finish', ...fields }] });
   assert.throws(() => createAgentScene(node({ shadowOnly: 1 })), /nodes\[0\]\.shadowOnly: got 1; expected true or false/);
-  assert.throws(() => createAgentScene(node({ shadowOnly: true, castShadow: false })), /nodes\[0\]\.shadowOnly: got true; expected false when castShadow is false/);
+  assert.throws(() => createAgentScene(node({ shadowOnly: true, castShadow: false })), /nodes\[0\]\.shadowOnly: got true; expected false with castShadow false, holdout or shadowCatcher/);
   assert.throws(() => createAgentScene(node({ shadowOnly: true, holdout: true })), /nodes\[0\]\.shadowOnly: got true/);
   assert.throws(() => createAgentScene(recipe({ nodes: [{ id: 'g', shadowOnly: true }] })), /nodes\[0\]\.shadowOnly: got true; expected a flag on a mesh node/);
 });

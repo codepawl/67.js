@@ -344,7 +344,7 @@ function nodeFrom(value) {
   }
   if (value.holdout === true && value.shadowCatcher === true) throw invalidField('shadowCatcher', value.shadowCatcher, 'false when holdout is true; a node is a holdout or a shadow catcher, not both', TypeError);
   if (value.shadowOnly === true && (value.castShadow === false || value.holdout === true || value.shadowCatcher === true)) {
-    throw invalidField('shadowOnly', value.shadowOnly, 'false when castShadow is false, or holdout or shadowCatcher is true; a shadow-only node casts a shadow and is not drawn', TypeError);
+    throw invalidField('shadowOnly', value.shadowOnly, 'false with castShadow false, holdout or shadowCatcher', TypeError);
   }
   if (value.skin !== undefined) {
     if (value.geometry === undefined) {

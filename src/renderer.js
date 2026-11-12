@@ -291,7 +291,6 @@ function validatePartFlags(part) {
     if (part[flag] !== undefined && typeof part[flag] !== 'boolean') throw new TypeError(`${flag} must be a boolean`);
   }
   if (part.holdout === true && part.shadowCatcher === true) throw new Error(`A part is a holdout or a shadow catcher, not both: ${part.name}`);
-  if (part.shadowOnly === true && (part.castShadow === false || part.holdout === true || part.shadowCatcher === true)) throw new Error(`A shadow-only part casts a shadow and is not drawn, so it cannot also set castShadow false, holdout or shadowCatcher: ${part.name}`);
 }
 
 /** A hidden part keeps its slot in the batch but draws and casts nothing: its instance matrices are packed as zeros. */
@@ -1529,7 +1528,7 @@ export class Renderer67 {
       if (part.skin || part.morph) this.updatePartIdentities.add(part);
       validatePartFlags(part);
       if (castsShadow(part) !== location.batch.castShadow) throw new Error(`Shadow casting changes require a new renderer: ${part.name}`);
-      if (receivesShadow(part) !== location.batch.receivesShadow || (part.shadowOnly === true) !== (batchPass(location.batch) === 'shadowOnly') || compositeModeOf(part) !== location.batch.compositeMode) throw new Error(`receiveShadow, holdout, shadowCatcher and shadowOnly changes require replaceParts: ${part.name}`);
+      if (receivesShadow(part) !== location.batch.receivesShadow || partPass(part) !== batchPass(location.batch) || compositeModeOf(part) !== location.batch.compositeMode) throw new Error(`receiveShadow, holdout, shadowCatcher and shadowOnly changes require replaceParts: ${part.name}`);
       if (depthLayerOf(part) !== (location.batch.depthLayer ?? 0)) throw new Error(`depthLayer changes require replaceParts: ${part.name}`);
       // A material whose fields still equal the ones that passed the full checks below needs none of them again.
       const materialUnchanged = location.materialSnapshot?.matches(part.material) === true;
