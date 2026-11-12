@@ -833,7 +833,8 @@ fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure {
   // weight (in `metallic`) and the colour (in `base_color`); the kernel reads it here.
   var diffuse_transmission_weight = 0.0;
   var diffuse_transmission_color = vec3<f32>(0.0);
-  if (SCENE_HAS_DIFFUSE_TRANSMISSION) {
+  // The length test keeps a table without extension records (a probe, a test) from being read past its end.
+  if (SCENE_HAS_DIFFUSE_TRANSMISSION && arrayLength(&materials) >= 2u * kernel_params.material_count) {
     let extension = materials[kernel_params.material_count + (*point).material_index];
     diffuse_transmission_weight = clamp(extension.metallic, 0.0, 1.0);
     diffuse_transmission_color = max(extension.base_color, vec3<f32>(0.0));

@@ -319,6 +319,19 @@ def configure_diffuse_transmission(material, principled_node, material_entry, ha
     weight = material_entry.get("diffuseTransmission", 0.0)
     if weight <= 0.0:
         return
+    unsupported_layers = []
+    if material_entry.get("metallic", 0.0) > 0.0:
+        unsupported_layers.append("metallic")
+    if material_entry.get("transmission", 0.0) > 0.0 or material_entry.get("tag") == "liquid":
+        unsupported_layers.append("transmission")
+    if (material_entry.get("subsurface") or {}).get("weight", 0.0) > 0.0:
+        unsupported_layers.append("subsurface")
+    if unsupported_layers:
+        raise ValueError(
+            "diffuseTransmission is measured for dielectric, non-glass, non-subsurface materials only: the kernel scales the "
+            "diffuse layer by what metal, glass and subsurface leave of it, and the Translucent node added here does not. "
+            "Remove " + ", ".join(unsupported_layers) + " from the material."
+        )
     if "map" in material_entry or has_vertex_colors:
         raise ValueError("diffuseTransmission is mapped for a plain base colour only: remove the map or the vertex colours.")
     base_color = material_entry["color"]

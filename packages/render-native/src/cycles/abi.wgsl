@@ -124,8 +124,9 @@ const SCENE_HAS_SHEEN: bool = true;
 const SCENE_HAS_ANISOTROPY: bool = true;
 const SCENE_HAS_THIN_FILM: bool = true;
 const SCENE_HAS_F82: bool = true;
-// The material table holds an extension record per material after its `material_count` records (FORMAT-v2.md).
-const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;
+// The material table holds an extension record per material after its `material_count` records (FORMAT-v2.md). Unlike the
+// flags above, `false` is the safe default: only the host's specialization turns it on, for a table that carries them.
+const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;
 const SCENE_HAS_NORMAL_MAP: bool = true;
 const SCENE_HAS_EMISSIVE_TRIANGLES: bool = true;
 const SCENE_HAS_ANALYTIC_LIGHTS: bool = true;

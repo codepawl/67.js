@@ -668,15 +668,34 @@ function resolveSubsurfaceFields(material, baseColor) {
  * reflecting lobe and a cosine lobe on the far side, tinted by `diffuseTransmissionColor` (the base colour when it is left
  * out). Returns null for a material without it, which then packs no extension record.
  */
+export function validateDiffuseTransmission(material) {
+  const { diffuseTransmission, diffuseTransmissionColor } = material;
+  if (diffuseTransmission !== undefined) {
+    const isWeight = typeof diffuseTransmission === 'number' && diffuseTransmission >= 0 && diffuseTransmission <= 1;
+    if (!isWeight) {
+      throw new RangeError(`diffuseTransmission must be a number between 0 and 1, got ${String(diffuseTransmission)}. Use 0 for a sheet that lets no light through.`);
+    }
+  }
+  if (diffuseTransmissionColor !== undefined) {
+    const isColor = (Array.isArray(diffuseTransmissionColor) || ArrayBuffer.isView(diffuseTransmissionColor))
+      && diffuseTransmissionColor.length === 3
+      && Array.from(diffuseTransmissionColor).every(channel => typeof channel === 'number' && channel >= 0 && channel <= 1);
+    if (!isColor) {
+      throw new RangeError(`diffuseTransmissionColor must be three linear RGB numbers between 0 and 1, got ${String(diffuseTransmissionColor)}. Pass [red, green, blue], or leave it out to use the base colour.`);
+    }
+  }
+}
+
 function resolveDiffuseTransmission(material) {
-  const weight = Math.min(1, Math.max(0, Number(material.diffuseTransmission ?? 0)));
+  validateDiffuseTransmission(material);
+  const weight = material.diffuseTransmission ?? 0;
   if (!(weight > 0)) {
     return null;
   }
   const color = material.diffuseTransmissionColor;
   return {
     weight,
-    color: color ? [Number(color[0]), Number(color[1]), Number(color[2])] : [1, 1, 1],
+    color: color ? Array.from(color) : [1, 1, 1],
     tintsBaseColor: !color,
   };
 }

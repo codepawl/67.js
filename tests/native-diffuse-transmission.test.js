@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { STRUCT_STRIDES_V2, findNativeAddon, prepareCyclesInput, traceNative } from '../packages/render-native/index.mjs';
+import { STRUCT_STRIDES_V2, findNativeAddon, prepareCyclesInput, probeCyclesLobe, traceNative } from '../packages/render-native/index.mjs';
 import { buildFlattenedJobNativeInput, buildJobNativeInput, carriedMaterialFields } from '../packages/render-native/job-input.mjs';
 import { packMaterialRecordV2 } from '../packages/render-native/pack-input-v2.mjs';
 import { createCamera } from '../src/path-tracer.js';
@@ -104,7 +104,7 @@ test('a flattened and an instanced job send the same extension records', () => {
 });
 
 test('the packer reads the weight and colour of a bare material descriptor into the record info, not the 256 byte record', () => {
-  const packed = packMaterialRecordV2({ baseColor: [0.5, 0.5, 0.5], diffuseTransmission: 1.5, diffuseTransmissionColor: [0.2, 0.4, 0.6] });
+  const packed = packMaterialRecordV2({ baseColor: [0.5, 0.5, 0.5], diffuseTransmission: 1, diffuseTransmissionColor: [0.2, 0.4, 0.6] });
   assert.deepEqual(packed.diffuseTransmission, { weight: 1, color: [0.2, 0.4, 0.6], tintsBaseColor: false });
   assert.equal(packed.bytes.byteLength, MATERIAL_STRIDE);
   assert.equal(packMaterialRecordV2({ baseColor: [0.5, 0.5, 0.5] }).diffuseTransmission, null);
@@ -192,4 +192,45 @@ test('the sun irradiance behind the sheet matches the front lit reference to the
   for (const value of reference) {
     assert.ok(Math.abs(value / expectedEOverPi - 1) < 0.05, `E / pi is ${value}, expected ${expectedEOverPi}`);
   }
+});
+
+// The lobe probe compiles the kernel without specialization and gives it a table of exactly `materialCount` records. A
+// metallic material there must not be read as a transmitting one: its metallic weight sits where an extension record keeps
+// the diffuse transmission weight, one table length further on.
+test('the lobe probe of a metallic material has no light on the far side', { skip: addonSkip }, () => {
+  const width = 16;
+  const height = 8;
+  const planes = probeCyclesLobe({
+    width,
+    height,
+    mode: 1,
+    seed: 42,
+    wo: [0, 0.6, 0.8],
+    frontFace: true,
+    material: { color: [0.8, 0.4, 0.2], roughness: 1, metallic: 0.5, specular: 0 },
+    bootstrapKernel: true,
+  });
+  // Mode 1 evaluates the closure for directions over the whole sphere, from z = 1 in the first row to z = -1 in the last.
+  let nearSide = 0;
+  let farSide = 0;
+  for (let row = 0; row < height; row++) {
+    for (let column = 0; column < width; column++) {
+      const offset = (row * width + column) * 4;
+      const brightness = planes[offset] + planes[offset + 1] + planes[offset + 2];
+      if (row < height / 2) nearSide += brightness;
+      else farSide += brightness;
+    }
+  }
+  assert.ok(nearSide > 0, `the near side of a metal and diffuse material is lit: ${nearSide}`);
+  assert.equal(farSide, 0, 'no light leaves through the far side');
+});
+
+test('the exported packer refuses a weight or a colour that would render wrong', () => {
+  const pack = fields => () => packMaterialRecordV2({ baseColor: [0.5, 0.5, 0.5], ...fields });
+  assert.throws(pack({ diffuseTransmission: 1.5 }), /diffuseTransmission must be a number between 0 and 1, got 1.5/);
+  assert.throws(pack({ diffuseTransmission: '0.5' }), /diffuseTransmission must be a number between 0 and 1/);
+  assert.throws(pack({ diffuseTransmission: Number.NaN }), /diffuseTransmission must be a number between 0 and 1/);
+  assert.throws(pack({ diffuseTransmission: 0.5, diffuseTransmissionColor: [1, 1] }), /diffuseTransmissionColor must be three linear RGB numbers/);
+  assert.throws(pack({ diffuseTransmission: 0.5, diffuseTransmissionColor: [2, 0, 0] }), /diffuseTransmissionColor must be three linear RGB numbers/);
+  assert.throws(pack({ diffuseTransmission: 0.5, diffuseTransmissionColor: [0, 0, Number.NaN] }), /diffuseTransmissionColor must be three linear RGB numbers/);
 });

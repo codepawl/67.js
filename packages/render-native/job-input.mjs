@@ -5,7 +5,7 @@
 // part looks the same whether or not other geometry in the scene is shared. The maps go from the materials into the FORMAT-v2
 // texture pool without the v1 atlas, so the pool (1 GiB) is the limit on them, not the atlas (4096 x 16384 texels).
 import { buildNativeInput, packNativeMaterialTables, withVirtualAtlas } from './pack-input.mjs';
-import { buildNativeInputV2, reduceV1MaterialTable, upgradeNativeInputV1ToV2 } from './pack-input-v2.mjs';
+import { buildNativeInputV2, reduceV1MaterialTable, upgradeNativeInputV1ToV2, validateDiffuseTransmission } from './pack-input-v2.mjs';
 
 const ALL_LIGHT_GROUPS = 0xffffffff;
 
@@ -54,20 +54,8 @@ function cyclesAnisotropyFields(material, roughness) {
 // through the far side, and the colour of that light (the base colour when it is left out). The ranges follow the other layers
 // of material-layers.js: a weight between 0 and 1, a linear colour with each channel between 0 and 1.
 function diffuseTransmissionFields(material) {
+  validateDiffuseTransmission(material);
   const { diffuseTransmission, diffuseTransmissionColor } = material;
-  if (diffuseTransmission !== undefined) {
-    const isWeight = typeof diffuseTransmission === 'number' && diffuseTransmission >= 0 && diffuseTransmission <= 1;
-    if (!isWeight) {
-      throw new RangeError(`diffuseTransmission must be a number between 0 and 1, got ${String(diffuseTransmission)}. Use 0 for a sheet that lets no light through.`);
-    }
-  }
-  if (diffuseTransmissionColor !== undefined) {
-    const isColor = (Array.isArray(diffuseTransmissionColor) || ArrayBuffer.isView(diffuseTransmissionColor)) && diffuseTransmissionColor.length === 3
-      && Array.from(diffuseTransmissionColor).every(channel => typeof channel === 'number' && channel >= 0 && channel <= 1);
-    if (!isColor) {
-      throw new RangeError(`diffuseTransmissionColor must be three linear RGB numbers between 0 and 1, got ${String(diffuseTransmissionColor)}. Pass [red, green, blue], or leave it out to use the base colour.`);
-    }
-  }
   if (!(diffuseTransmission > 0)) return {};
   const fields = { diffuseTransmission };
   if (diffuseTransmissionColor !== undefined) fields.diffuseTransmissionColor = Array.from(diffuseTransmissionColor);

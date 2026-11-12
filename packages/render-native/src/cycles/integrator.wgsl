@@ -1110,6 +1110,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       if (is_transmission) {
         transmission_bounces += 1u;
         ray_visibility = INSTANCE_VISIBILITY_TRANSMISSION;
+        if (is_diffuse_transmission) {
+          // Cycles labels the translucent sample transmit and diffuse: path_state_next adds the diffuse visibility to the
+          // transmission one, and leaves the diffuse bounce counter alone.
+          ray_visibility |= INSTANCE_VISIBILITY_DIFFUSE;
+        }
         if (transmission_bounces >= limit_transmission) {
           terminate_on_hit = true;
         }

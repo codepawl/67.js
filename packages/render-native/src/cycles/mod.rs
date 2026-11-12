@@ -510,7 +510,10 @@ pub(crate) fn specialize_kernel_source(source: &str, scene: &SceneSpecialization
     specialize!(THIN_FILM, has_thin_film);
     specialize!(F82, has_f82);
     specialize!(NORMAL_MAP, has_normal_map);
-    specialize!(DIFFUSE_TRANSMISSION, has_diffuse_transmission);
+    // Unlike the other sentinels this one defaults to `false`, so a kernel compiled without specialization reads no extension records.
+    if has_diffuse_transmission {
+        result = result.replace("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;", "const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;");
+    }
     specialize!(EMISSIVE_TRIANGLES, has_emissive_triangles);
     specialize!(ANALYTIC_LIGHTS, has_analytic_lights);
     specialize!(FINITE_LIGHTS, has_finite_lights);
@@ -697,11 +700,11 @@ mod specialization_tests {
         let one_material = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
         let inst = make_default_inst();
         let lights = make_default_light();
-        let source = "const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;";
+        let source = "const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;";
 
         let without_extension = dummy_input(&kp, &one_material, &lights, &inst);
         let result = specialize_cycles_kernel(source, &without_extension);
-        assert!(result.contains("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;"), "no extension records, no lobe");
+        assert_eq!(result, source, "no extension records, no lobe: the default stays false");
 
         let mut with_extension_table = one_material.clone();
         with_extension_table.extend_from_slice(&vec![0u8; MATERIAL_RECORD_STRIDE]);
@@ -1202,7 +1205,14 @@ mod tests {
     #[test]
     fn the_diffuse_transmission_lobe_splits_the_diffuse_layer_and_samples_the_far_side() {
         let kernel = assemble_cycles_kernel().expect("the kernel assembles");
-        assert!(kernel.contains("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;"));
+        assert!(
+            kernel.contains("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;"),
+            "an unspecialized kernel (a probe, a test) must not read extension records"
+        );
+        assert!(
+            kernel.contains("SCENE_HAS_DIFFUSE_TRANSMISSION && arrayLength(&materials) >= 2u * kernel_params.material_count"),
+            "the read of an extension record is guarded by the table length"
+        );
         assert!(kernel.contains("const LOBE_DIFFUSE_TRANSMISSION: u32 = 7u;"));
 
         let build_start = kernel.find("fn closure_build(").expect("the closure builder exists");
