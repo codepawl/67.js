@@ -587,7 +587,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             }
           }
           if (backendNote) traced.report.backendNote = backendNote;
-          if (choice.note) traced.report.denoiserNote = choice.note;
+          const denoiserNote = [choice.note, traced.report.denoiserNote].filter(Boolean).join(' ');
+          if (denoiserNote) traced.report.denoiserNote = denoiserNote;
           metrics.renderSeconds += (performance.now() - renderStarted) / 1000;
           metrics.width = width;
           metrics.height = height;
