@@ -620,6 +620,7 @@ const physicsBody = z.strictObject({
   angularVelocity: vector3.optional(),
   layer: z.number().int().min(0).max(15).optional(),
   collidesWith: z.array(z.number().int().min(0).max(15)).max(16).optional().describe('Layers hit; both bodies must list each other. Defaults to all.'),
+  float: z.record(z.string(), z.unknown()).optional().describe('Floats on physics.ocean (dynamic bodies only): drag 2 and angularDrag 2 (1/s, 0-100) damp the body while it is under water; points is 1-16 [x,y,z] in body space (default a 2 x 2 grid at mid height). Each point pushes up by waterDensity x gravity x (volume / points) x its submerged fraction, so density 500 settles at half depth; spread points over a hull so it rolls upright. Needs a volume: not trimesh.'),
 });
 const physicsJoint = z.strictObject({
   type: z.enum(['spherical', 'revolute', 'prismatic', 'fixed']),
@@ -635,6 +636,7 @@ const physics = z.strictObject({
   gravity: vector3.optional().describe('Defaults to [0, -9.81, 0].'),
   bodies: z.array(physicsBody).min(1).max(64),
   joints: z.array(physicsJoint).max(64).optional().describe('Joint bodies are the node IDs of physics bodies.'),
+  ocean: z.record(z.string(), z.unknown()).optional().describe('Sea for floating bodies: geometry is a mesh geometry whose stack has an ocean node (axis y) whose waves they ride; level is the world height of the calm sea (leave it out to follow the drawn sea; a different value adds a warning to the scene_inspect physics report); waterDensity 1000 kg/m3. The sea clock at physics time 0 is the ocean node time, so drive an oceanTime track at 1 s per s to keep the drawn sea in step.'),
 }).describe('Rigid bodies recorded offline with Rapier (optional peer) at 60 fps and seeked by motionTime. scene_inspect reports contacts and resting state. A node cannot have a body and a motion translation or rotation track.');
 const looseRecord = z.record(z.string(), z.unknown()).meta({ id: 'LooseRecord' });
 const clothSheet = z.strictObject({

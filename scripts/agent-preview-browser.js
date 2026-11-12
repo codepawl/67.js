@@ -1,6 +1,6 @@
 import { exportNativeSceneTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
-import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
+import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, needsBuoyancy, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
 import { skyOpenness } from '../src/closed-room.js';
 import { fogSkyVisibility } from '../src/fog-sky-visibility.js';
@@ -31,7 +31,7 @@ import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 import { AGENT_SCENE_DEFAULT_LIMITS } from '../src/agent-scene-capabilities.js';
 import { describeApplication } from '../src/agent-apply-report.js';
-import { framingProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
+import { framingProblems, placementProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
 import { describeMarks, validateMarks } from '../src/agent-annotate.js';
@@ -184,11 +184,16 @@ function sampleFrameShares() {
 /**
  * Warnings about the frame just drawn from `camera`: framing, a stale bake and exposure (when `exposure` is given, the
  * effects.exposure drawn with). Imported assets have no part bounds or bake, so they get the exposure check only.
+ * `placement` adds the floating and intersecting parts, which only scene_look reports: a render job would repeat them
+ * for every frame of a moving scene.
  */
-function viewProblems(record, camera, exposure) {
+function viewProblems(record, camera, exposure, { placement = false } = {}) {
   const problems = [];
   const boxes = record.scene.worldBounds?.();
-  if (boxes) problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes }));
+  if (boxes) {
+    problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes, reportPartsOutside: placement }));
+    if (placement) problems.push(...placementProblems({ boxes }));
+  }
   if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());
   if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure }));
   return problems;
@@ -642,7 +647,7 @@ function afterMeshBooleans(value, run) {
   if (!allAgentSceneModulesLoaded()) return loadAllAgentSceneModules().then(() => afterMeshBooleans(value, run));
   const loads = [];
   if (!meshBooleansLoaded() && needsMeshBooleans(value)) loads.push(loadMeshBooleans());
-  if (!physicsEngineLoaded() && needsPhysics(value)) loads.push(loadPhysicsEngine());
+  if (needsPhysics(value) && (!physicsEngineLoaded() || needsBuoyancy(value))) loads.push(loadPhysicsEngine({ buoyancy: needsBuoyancy(value) }));
   if (!loads.length) return run();
   return Promise.all(loads).then(run);
 }
@@ -1230,7 +1235,7 @@ window.__agentPreview = {
       sampleMotionTime(record.scene, motionTime);
     }
     draw(record);
-    const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure));
+    const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure, { placement: true }));
     record.lastRender = render;
     const labels = withLabels ? collectLabels(record, record.scene.camera, canvas.width, canvas.height) : undefined;
     return {

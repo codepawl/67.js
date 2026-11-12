@@ -22,6 +22,9 @@ export const NATIVE_INSTANCED_TOTAL_FACTOR = 4;
 export const MAX_TRACE_PARTS = 1024;
 // An instanced trace counts triangles once per shared geometry and bounds the copies on their own.
 export const MAX_TRACE_INSTANCES = 65_536;
+// The bound a scene built for the native "cycles" tracer may ask for with `options.maximumInstances`. The CPU and WebGL tracers
+// never pass it and keep MAX_TRACE_INSTANCES.
+export const MAX_NATIVE_TRACE_INSTANCES = 1_000_000;
 export const MAX_TRACE_LIGHTS = 32;
 // A Blender sun of 1 degree, which is what the reference harness gives Cycles.
 export const SUN_ANGULAR_RADIUS = Math.PI / 360;
@@ -276,6 +279,16 @@ function resolveTriangleLimits(options) {
   return { native: true, unique: requested, total: requested * NATIVE_INSTANCED_TOTAL_FACTOR };
 }
 
+/** The instance bound of one build: the CPU and WebGL default, or the native bound asked for with `maximumInstances`. */
+function resolveInstanceLimit(options) {
+  const requested = options?.maximumInstances;
+  if (requested === undefined) return { native: false, count: MAX_TRACE_INSTANCES };
+  if (!Number.isInteger(requested) || requested < 1 || requested > MAX_NATIVE_TRACE_INSTANCES) {
+    throw new RangeError(`buildTraceScene option maximumInstances is an integer from 1 to ${MAX_NATIVE_TRACE_INSTANCES} for the native path tracer, got ${requested}. Leave it out for the CPU and WebGL path tracers, which take at most ${MAX_TRACE_INSTANCES} instances.`);
+  }
+  return { native: true, count: requested };
+}
+
 function flattenParts(parts, geometries = parts.map(traceGeometry), limits = resolveTriangleLimits()) {
   let vertexTotal = 0;
   let indexTotal = 0;
@@ -505,8 +518,8 @@ function measureInstancedParts(parts, geometries) {
 }
 
 function requireInstancedCaps(parts, { uniqueGeometries, uniqueTriangles, totalTriangles }, limits) {
-  if (parts.length > MAX_TRACE_INSTANCES) {
-    throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_INSTANCES} instances, got ${parts.length}. Pass fewer parts, or merge small copies into one mesh.`);
+  if (parts.length > limits.instances.count) {
+    throw new RangeError(`An instanced ${limits.instances.native ? 'native ' : ''}path trace takes at most ${limits.instances.count} instances, got ${parts.length}. Pass fewer parts, or merge small copies into one mesh.`);
   }
   if (uniqueGeometries > MAX_TRACE_PARTS) {
     throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_PARTS} distinct geometries, got ${uniqueGeometries}. Share one geometry object between copies instead of building a new one per part.`);
@@ -604,9 +617,11 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes, 
  * holds `instances` instead of flattened triangles (see `buildInstancedTraceScene`); with no shared geometry, or without the
  * option, it is the flattened scene, unchanged. `options.maximumTriangles` (an integer up to MAX_NATIVE_TRACE_TRIANGLES) is for
  * a scene exported to the native "cycles" tracer only: it replaces the 400,000 triangle bound of the CPU and WebGL tracers.
+ * `options.maximumInstances` (an integer up to MAX_NATIVE_TRACE_INSTANCES) does the same for the 65,536 instances of an
+ * instanced scene; a flattened scene has no instances and keeps its part bound.
  */
 export function buildTraceScene(allParts, environment = {}, options = {}) {
-  const limits = resolveTriangleLimits(options);
+  const limits = { ...resolveTriangleLimits(options), instances: resolveInstanceLimit(options) };
   const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts);
   const parts = boundsOnlyParts.length ? allParts.filter(part => !boundsOnlyParts.includes(part)) : allParts;
   const tryInstancing = options.instancing === true && Array.isArray(parts) && parts.length > 0;

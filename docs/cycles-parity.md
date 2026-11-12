@@ -1478,3 +1478,145 @@ Tracing the packed input on the card (480 by 270, 16 samples, GPU memory of the 
 | 3,998,792 | 7 | 1.31 | 0.13 | 0.55 | 1,961 |
 
 Same picture: the 1,002,528 triangle scene (four meshes, two of them shared by a second instance) exported through the job path as instances, and again as a flattened scene of the same parts (about 1.5 million triangles after expansion), gave the same PNG, SHA-256 `165939ce…01404`, both times. The instanced export took 10.7 s and 2.6 GB of peak RSS; the flattened one 19.5 s and 4.2 GB.
+
+## Instance bound of a native scene (#1055)
+
+`buildTraceScene` bounds an instanced scene at 65,536 instances (one per part) for the CPU and WebGL tracers. A scene built for the native tracer asks for another bound with `maximumInstances`, an integer from 1 to `MAX_NATIVE_TRACE_INSTANCES` (1,000,000). A render job on the Cycles-matching kernel passes 1,000,000 (`NATIVE_JOB_MAXIMUM_INSTANCES` in `scripts/native-bake-page.js`, 500,000 before #1100); the legacy kernel never instances, and the CPU and WebGL tracers keep 65,536 and its error text. The option is separate from `maximumTriangles`: the unique and total triangle bounds apply as before, so copies of a large mesh still hit the total bound (four times `maximumTriangles`) long before the instance bound.
+
+Every place on the way to the kernel that could assume 65,536 instances, read in the code `[measured by reading]`:
+
+| place | limit |
+| --- | --- |
+| `MAX_TRACE_INSTANCES` check in `requireInstancedCaps` (`src/path-tracer-scene.js`) | the only 65,536; a guard for the CPU and WebGL paths, now a caller-set bound |
+| `packInstancedGeometry` and `writeInstanceRecordBytes` (`pack-input-v2.mjs`), `job-input.mjs` | none; counts are 32-bit and the loops are linear |
+| instance table, 160 bytes per instance | 160 MB at 1,000,000 |
+| material table, 256 bytes per distinct material record (#1100: parts whose materials are equal share one record; before, one per part) | 256 MB at 1,000,000 when every part has a material of its own, under 1 KB when the copies share a few |
+| emissive and light tree records that store an instance index | `u32`; the light tree takes 4,194,304 emitters (`LIGHT_TREE_MAX_EMITTERS`), which bounds emissive copies, not plain ones |
+| WGSL `instance_custom_data` and `int_resolve_instance_index` | the hardware custom index has 24 bits: 16,777,216 (`MAX_TLAS_INSTANCES` in `host/accel.rs`) |
+| V8 string of the job export | see below; this is the bound of the job |
+
+Measured before #1100 (one 256-byte material record per part) on an RTX 4090 box, one process per row, a field of two-triangle cards sharing one geometry (`bench/cycles-parity/native-instance-measure.mjs`), packed the way the job page does and traced at 160 by 120 with 16 samples `[measured]`:
+
+| instances | pack s | base64 s | material table MB | all tables, base64 characters | peak RSS MB | traced s | acceleration build s | card MB (process included) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 65,538 | 0.34 | 0.94 | 16.8 | 36.4 M | 520 | 0.37 | 0.011 | 610 |
+| 250,001 | 1.17 | 3.53 | 64.0 | 138.7 M | 1,295 | 0.58 | 0.050 | 704 |
+| 500,001 | 3.24 | 7.13 | 128.0 | 277.3 M | 2,363 | 0.73 | 0.100 | 796 |
+| 1,000,000 | 7.17 | 14.34 | 256.0 | 554.7 M | 4,511 | 1.59 | 0.193 | 1,557 |
+
+Before #1100 each instance cost 416 bytes packed (160 for the instance and 256 for its material record) and 555 base64 characters, because the packer wrote one material record per part even when a thousand copies of one mesh used one material.
+
+Since #1100 the packer gives parts whose 256-byte records are equal one record (`shareEqualMaterialRecords` in `pack-input-v2.mjs`), so a copy that uses a material another part already uses costs the 160 bytes of its instance record and 214 base64 characters. Same card field (two materials and a ground, so three records), one process per row, RTX 4090 box, default Node heap, the first 750,002 and 1,000,000 rows traced at 160 by 120 with 16 samples `[measured]`:
+
+| instances | pack s | instance table bytes | material table bytes | tables, bytes per instance | all tables, base64 characters | peak RSS MB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100,002 before | 0.51 | 16,000,320 | 25,600,512 | 416.0 | 55.5 M | 679 |
+| 100,002 | 0.77 | 16,000,320 | 768 | 160.0 | 21.3 M | 587 |
+| 500,002 before | 2.94 | 80,000,320 | 128,000,512 | 416.0 | 277.3 M | 2,356 |
+| 500,002 | 4.02 | 80,000,320 | 768 | 160.0 | 106.7 M | 1,884 |
+| 750,002 | 4.69 | 120,000,320 | 768 | 160.0 | 160.0 M | 2,730 |
+| 1,000,000 | 6.97 | 160,000,000 | 768 | 160.0 | 213.3 M | 3,568 |
+
+The pack takes 30 to 50% longer in these runs (it hashes and compares every part's record), within the spread of a shared machine; the memory is lower, because the encoded tables are smaller. The 750,002 and 1,000,000 instance rows traced in 0.84 s and 1.21 s; the 1,000,000 row has no counterpart before, since its tables were 554.7 M characters and did not fit. A part whose material equals no other still costs 416 bytes and 555 characters, so the worst case is unchanged: 1,000,000 parts that all differ stay refused by the size check below.
+
+What bounds the instance count `[measured, inferred for the reason]`: the table bytes and V8 strings, not the card or the acceleration build. Every table of one export shares one message, and one V8 string cannot exceed 536,870,888 characters. The export sums the real base64 length of every table (`4 * ceil(bytes / 3)` each) before encoding, and refuses above 95% of that limit (510,027,343 characters, `NATIVE_EXPORT_MAXIMUM_CHARACTERS`) with a `RangeError` that names the total and the largest tables and says to pass fewer parts or fewer unique triangles. The job rethrows that refusal (as it does the texture pool one), so the job report says why the native export failed and no other packing is tried. With shared records 1,000,000 instances are 213 M characters, 42% of the limit. Worked example `[measured]`: 1,500,000 unique triangles are 448 M characters (299 each), which leaves 62 M for instances: with shared records 280,008 instances export (507.7 M characters) and 330,008 are refused (518.4 M); before #1100, at 555 each, about 110,000 fitted and 150,000 were refused (they now export at 480.0 M). The job stops at 1,000,000 instances, which is the library ceiling and the largest size measured on the card and in Node; the earlier 500,000 followed from the table bytes of one material record per part. The card was never the limit: the acceleration build took 0.17 s at 1,000,000 instances. The hardware allows 16,777,216 instances, and nothing above 1,000,000 instances was measured.
+
+What makes two records distinct `[measured by reading]`: a part names its material by index (the triangle's `material_index`, the instance's `material_override`, the emissive entry's `material_index`), and the 256-byte record holds every value of the material, its flags and the index of every texture slot (equal images share one texture index). Two records are equal exactly when their bytes are equal and they derive the same emission, alpha mode and subsurface flag (`meanEmissiveRadiance`, `isEmissive`, `alphaMode`, `usesSubsurface`; each follows from the bytes, and the comparison checks them as well). Light-group masks, ray visibility and the object colour live on the instance, so they never keep two records apart. This branch has no separate record for a diffuse-transmission extension. The flattened packer (`buildFlattenedJobNativeInput` and the v1 upgrade) keeps one record per part: each part there is a mesh of its own, so no copy pays for one, and the legacy kernel reads the v1 tables and is untouched. The index remapping: the triangle record names the record of the mesh's first copy, a later copy gets a `material_override` only when its record differs, an explicit `materialOverride` or `overrideMaterial` is kept and points at the shared record, and an index past the table is left as it is.
+
+Session updates: a session keeps its tables at the size it was created with, and an update replaces the whole `materials` and `instances` tables with the ones packed from the new frame, so a changed material cannot reach a part that was packed with a record of its own. When parts share a record and one of them changes, the next frame packs one record more, `materialCount` changes and the session refuses the update (`planNativeSessionUpdate` throws, and the sequence takes a new session for that frame). That is copy-on-write at pack time. It was chosen over leaving the records of animated parts unshared because the packer cannot know which parts will change, and an extra session per divergence is the whole cost; the pictures are exact either way. A part whose track gives it values that equal no other part, or a material that several parts name by one id (they share a record before and after), keeps the `updated` route. Measured on 8-frame jobs through the job export and `createNativeSequence` (`bench/cycles-parity/native-shared-record-identity.mjs`, 96 by 72, 8 samples) `[measured]`: when the animated card starts equal to seven others the routes are `new-session`, `new-session`, then `updated` six times (before: `new-session`, then `updated` seven times), and when it differs from the start they are `new-session`, then `updated` seven times, as before; each frame equals its one-shot render byte for byte. The demo room of `bench/native-tracer/sequence-job.mjs` animates `plaster`, a material id of its own, so its routes should not change `[inferred by reading the recipe]`, but that job did not start in the box's headless Chrome (`Connection closed`, before and after the change), so it was not run.
+
+Pictures (#1055): scenes under the old bounds are byte for byte the same. The PNG SHA-256 of three scenes (the 20,000 triangle cap scene with copies, a field of 3,000 shared cards and the same cards merged) on the job export of `cycles` instanced, `cycles` flattened and `legacy` are equal on `main` and on this change, and the refusal of the scene the flattened and legacy routes cannot take has the same words (`bench/cycles-parity/native-identity-pngs.mjs`, `[measured]`). Over the old bound, `tests/native-instancing-limit.test.js` traces 85,537 parts (the last 20,000 red, all past index 65,536) and the same cards merged into two meshes: 3,381 red pixels in both, mean ratio within 2% per channel, tiles within 5%, and a relative mean squared error of 1.5e-7, against 1.4e-3 between two seeds of the merged picture.
+
+Pictures (#1100) `[measured]`: `bench/cycles-parity/native-shared-record-identity.mjs` hashes the pictures of four scenes of eight cards (textures, emitters, two materials, metal and glass) on `cycles` instanced, `cycles` flattened, `legacy` and an explicit-override pack, and two 8-frame session sequences, on the build before the change and on the build after it: all 18 hashes are equal (the instanced packs go from 9 records to 3). The PNG of the 250,001-card field is byte for byte the same (SHA-256 372e60c2e317...). `tests/native-shared-material-records.test.js` renders a shared pack and the same pack with one record per instance and compares them byte for byte.
+
+Not measured: Chrome's memory for a page that builds 1,000,000 parts (the numbers above are Node's, whose default heap held the 1,000,000-part case at 2.4 GB used and 3.6 GB resident), and the demo room sequence job.
+
+Not measured: Chrome's memory for a page that builds 500,000 parts (the numbers above are Node's), and a scene whose copies are emissive (each emissive copy adds light tree emitters and emissive records).
+
+## Mean radiance on the `metal` scene (#959)
+
+Question: does Cook match Cycles' mean on `metal` within 0.1 percent per channel, and is the error outside the fireflies at or below Cycles' own? `[measured]` on a rented RTX 4090 (Blender 5.3.0 Cycles on OptiX, Cook on Vulkan), `960 x 540`, `bounces = 8`, box filter, no clamp, no denoise, `filter_glossy = 1`, Sobol-Burley on Cook's side.
+
+A single image's mean is heavy tailed (fireflies), so the standard error comes from the spread across seeds: [`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py) averages each side's per-seed channel means and combines the two standard errors (delta method). [`metal-mean-suite.sh`](../bench/cycles-parity/metal-mean-suite.sh) renders everything below (24 seeds a side by default, `SEED_COUNT` changes it).
+
+### Mean ratio, 24 seeds a side at 1024 spp (Cook over Cycles, R / G / B, plus or minus one standard error)
+
+| Kernel | Mean ratio | Standard error | Within 0.1 percent |
+| --- | --- | --- | --- |
+| `cycles` | 0.99921 / 0.99930 / 0.99946 | 0.00021 / 0.00019 / 0.00015 | yes, off by 0.079 / 0.070 / 0.054 percent |
+| `legacy` | 0.99856 / 0.99753 / 0.99629 | 0.00028 / 0.00025 / 0.00019 | no, off by 0.14 / 0.25 / 0.37 percent |
+
+Control: Cycles seeds 1 to 6 over seeds 7 to 12 gives 1.0005 / 1.0005 / 1.0004, plus or minus 0.0004, so the comparison itself resolves about 0.04 percent with six seeds. With 24 a side the one-standard-error band of the `cycles` kernel is 0.02 percent, and its 95 percent band reaches 0.12 percent on red and 0.11 percent on green, so "within 0.1 percent" is met by the estimate and not by a strict 95 percent bound.
+
+Per part (the noisy ones are fireflies on the chrome, gold and steel; the floor and copper have no fireflies, their error is the bias): `cycles` kernel floor 0.9991 / 0.9992 / 0.9994 (52 percent of the pixels), copper 0.9993 / 0.9994 / 0.9996, chrome 0.995 +- 0.003, gold 0.9995 +- 0.0008, steel 1.0007 +- 0.0012. The `legacy` kernel floor is 0.9977 / 0.9947 / 0.9910 and copper 0.9945 / 0.9911 / 0.9904.
+
+### Error outside the fireflies, 256 spp against Cycles at 4096 spp seed 1 (relMSE without the 100 worst pixels)
+
+| Image | relMSE | relMSE without the 100 worst pixels | Images |
+| --- | --- | --- | --- |
+| Cycles 256 spp (its own noise, seeds 2 to 4) | 0.0486 +- 0.0239 | 0.000382 +- 0.0000013 | 3 |
+| Cook `cycles` kernel 256 spp | 0.0211 +- 0.0095 | 0.000184 +- 0.0000015 | 4 |
+| Cook `legacy` kernel 256 spp | 0.0930 +- 0.0585 | 0.000713 +- 0.0000038 | 4 |
+
+The `cycles` kernel is at 0.48 times Cycles' own error, the `legacy` kernel at 1.87 times. (Both rows share the noise of the 4096 spp reference, which is about 0.00005 in the same measure.)
+
+### Splits
+
+Each pair is Cook `cycles` against Cycles, 6 seeds, 512 spp `[measured]`.
+
+| Split | Mean ratio R / G / B | Floor ratio (no fireflies) |
+| --- | --- | --- |
+| direct light only (`bounces = 0`) | 0.99901 / 0.99913 / 0.99935 | 0.9991 / 0.9992 / 0.9994 |
+| 1 bounce | 0.99892 / 0.99907 / 0.99933 | 0.9991 / 0.9992 / 0.9994 |
+| 2 bounces | 0.99888 / 0.99904 / 0.99932 | 0.9991 / 0.9992 / 0.9994 |
+| 4 bounces | 0.99889 / 0.99904 / 0.99932 | 0.9991 / 0.9992 / 0.9994 |
+| both sides clamp at 10 (direct and indirect) | 1.00117 / 1.00079 / 1.00017 | 0.9991 / 0.9992 / 0.9994 |
+
+The floor's 0.06 to 0.09 percent deficit is already there with direct light only and does not change with the bounce count, so it is not a glossy, multiscatter or bounce-depth effect `[measured]`; it sits in how the sky lights the floor `[measured in the next section, #1104: Blender's world capped the interpolated sky value, Cook caps the texels; the harness now caps the texels]`. The ratios in this table and in the one above were measured with the older script that capped after the lookup. With a clamp of 10 on both sides, the means move apart by up to 1.9 percent on gold: the two clamps are not the same operation, and the default (no clamp) is the one compared above. Two further splits were tried and are not valid: `filter_glossy = 0` on the Cycles side was refused by the render script, and Cook's `nee-only` against Cycles' `--light-mis off` differ by 15 to 20 percent because they do not switch off the same thing.
+
+### What this says about #959
+
+The `cycles` kernel meets both open boxes of #959 on `metal`: the mean is within 0.1 percent per channel, and the error without the 100 worst pixels is below Cycles' own. The `legacy` kernel meets the second and not the first (blue 0.37 percent low). The 0.06 to 0.09 percent floor deficit is isolated in the next section.
+
+## The floor's direct light on the `metal` scene (#1104)
+
+Question: why is the noise-free floor 0.06 to 0.09 percent darker in Cook's `cycles` kernel than in Cycles with direct light only? `[measured]` on the same RTX 4090 box (Blender 5.3.0 on OptiX, Cook on Vulkan). [`floor-direct-light-suite.sh`](../bench/cycles-parity/floor-direct-light-suite.sh) renders it; [`make-floor-scenes.py`](../bench/cycles-parity/make-floor-scenes.py) writes the scenes and [`floor-closed-form.py`](../bench/cycles-parity/floor-closed-form.py) the closed forms.
+
+Setup: the `metal` floor alone, as a Lambert surface of albedo 0.8 (`--grey-diffuse`), zero bounces, 256 x 144 pixels, 256 spp, 4 to 8 seeds a side, the camera straight down (every pixel sees the same light, no horizon, edge or shadow) or the `metal` camera with the floor pixels picked by Cycles' part ids. Standard errors come from the spread across seeds ([`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py)).
+
+### The offset is the sky, not the sun, and it is not shadows or the metal objects
+
+Cook over Cycles, straight-down floor, with the script as it was (the interpolated sky value capped), R / G / B:
+
+| Light | Cook over Cycles | Cook over its closed form | Cycles over its closed form |
+| --- | --- | --- | --- |
+| sun only | 1.00002 (all channels, error below 0.000005) | 1.00000 | 0.99998 |
+| flat sky, texels 128 and 255 (importance table, no structure) | 1.00000 | 1.00000 | 1.00000 |
+| constant world 0.5 | 1.00000 | 1.00000 | 1.00000 |
+| Kloofendal sky | 0.99832 / 0.99874 / 0.99936, +- 0.000004 / 0.000003 / 0.000002 | 1.00000 | 1.00168 / 1.00126 / 1.00064 |
+| sun and Kloofendal sky | 0.99941 / 0.99949 / 0.99967, +- 0.000002 | 1.00000 | 1.00059 / 1.00051 / 1.00033 |
+
+The closed forms are albedo / pi times the sun colour times the cosine of the sun against the floor normal, and albedo / pi times the cosine-weighted hemisphere integral of the sky read from the Radiance file's own bytes (bilinear in the map, 200,000 polar steps). Cook agrees with all of them to 0.001 percent. From the `metal` camera, with no metal objects in the scene, the floor pixels give the same: sun 1.0000, sky 0.9983 / 0.9988 / 0.9994, both 0.9994 / 0.9995 / 0.9997. So the offset is there without the objects (not their shadows or occlusion), is the same from a grazing view as from above (not the pixel filter, the horizon or a ray offset), and sits wholly in the sky. The sun disc size and normalisation are right (sun only, Cook 1.00000 of the closed form), and so is the accumulation: the sun-only picture at 32 and at 4096 spp gives 1.00002 both times.
+
+### Not the sampling
+
+On Cycles' side the sky floor stays at 1.00168 / 1.00126 / 1.00064 of the closed form with the world's sampling set to none (the sky found by BSDF sampling only, so no importance map at all), with the importance map at 4096 instead of 1024, and with the world's sun extraction off (`sun_threshold = 0`). The flat skies show Cycles decodes a Radiance texel without a +0.5 mantissa offset. A pass over the pictures of the sky itself (`sky-lookup-shift.py`, background pixels, no lighting) finds identical pixels looking level, straight up and from the `metal` camera, and a difference only 45 degrees up (Cycles 1.1 / 0.9 / 0.5 percent brighter in the fit, 0.27 percent in the mean).
+
+### Cause
+
+`bench/cycles-parity/render-cycles.py` limited the sky by a `Minimum` node after the Environment Texture node, so it capped the interpolated value. Cook and the 67js runtime cap the texels (`radianceLimit`, 16) before the map is interpolated and sampled. The Kloofendal map has 244 texels above 16 (the largest channel value is 61,184; probably what is left of the sun in the original map `[guessed]`), and bilinear interpolation of the raw texels next to them gives values above 16 that the cap then cuts to 16 where Cook's neighbours stay at their own lower values. Computed from the file with `uv run --no-project --with numpy python bench/cycles-parity/floor-closed-form.py --cap-order` (a 1024 by 2048 polar and azimuth grid, bilinear lookup of the raw texels, then the cap; the texel count and the maximum come from the same command): capping after the lookup raises the floor's sky term by 1.00177 / 1.00132 / 1.00067 against capping before. That is what was measured on Cycles (1.00168 / 1.00126 / 1.00064); the two differ by 0.01 percent, which a 1024 by 2048 grid of the integral can account for `[inferred]`. Cook was right. It is a difference of the comparison, not a defect of the kernel.
+
+### After the change to the script
+
+The script now caps the image's texels before the lookup (`--radiance-cap before-lookup`, the default); `--radiance-cap after-lookup` reproduces the old behaviour. Same scenes, Cycles rendered again:
+
+| Light | Cook over Cycles | Cycles over its closed form |
+| --- | --- | --- |
+| Kloofendal sky, straight down | 0.99999 / 0.99999 / 0.99999, +- 0.000003 / 0.000003 / 0.000002 | 1.00001 |
+| sun and Kloofendal sky, straight down | 1.00001, +- 0.000001 | 0.99999 |
+| `metal` camera, floor pixels: sun, sky, both | 1.0000, 1.0000, 1.0000 | |
+| `metal` scene, 0 bounces, 6 seeds at 512 spp, floor part (270,046 pixels) | 0.9998 / 0.9998 / 0.9998 | |
+
+The same `metal` scene with direct light only, whole picture: 0.99931 / 0.99938 / 0.99951, +- 0.0009 / 0.0008 / 0.0006 (fireflies on the chrome set the error), copper 1.0000 / 0.9999 / 0.9999. The earlier 0.9991 / 0.9992 / 0.9994 floor became 0.9998.
+
+Not isolated: the `metal` floor keeps a 0.02 percent deficit with the metal objects in the scene and its own material (roughness 0.8, not the Lambert override), which the floor-only Lambert scenes do not show. What it comes from (the objects' shadows and occlusion edges, or the floor's specular lobe) was not split. The #959 tables above were measured before the script change and were not repeated.
