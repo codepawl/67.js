@@ -65,6 +65,9 @@ export function resolveNativeKernel(kernel) {
   return selectedKernel;
 }
 
+// The `cycles` kernel starts a pixel's next sample as soon as a path ends unless the caller passes `pathRegeneration: false`.
+const DEFAULT_PATH_REGENERATION = true;
+
 /**
  * Traces the input on the GPU and resolves linear RGBA float data (`rgba`, width * height * 4, rows from the top, the
  * average of `samples` paths) with the adapter name and timings in seconds. `maxSeconds` makes the trace fail once it has
@@ -72,7 +75,7 @@ export function resolveNativeKernel(kernel) {
  */
 export function traceNative(input, options = {}) {
   validatePackOptions(options, 'traceNative', true);
-  const { sampler, lightSampling } = resolveSamplingOptions(options, 'traceNative');
+  resolveSamplingOptions(options, 'traceNative');
   validatePathRegenerationOption(options.pathRegeneration, 'traceNative');
   const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel, denoise } = options;
   const selectedKernel = resolveNativeKernel(kernel);
@@ -88,29 +91,7 @@ export function traceNative(input, options = {}) {
     }
     return addon.traceScene(input, { width, height, samples, maxSeconds, kernel: selectedKernel });
   }
-  let v2Input = input?.schemaVersion === FORMAT_V2_VERSION
-    ? input
-    : upgradeNativeInputV1ToV2(input, options);
-  const explicitFilterGlossy = options.filterGlossy ?? options.blurGlossy;
-  if (input?.schemaVersion === FORMAT_V2_VERSION && explicitFilterGlossy !== undefined) {
-    const rawFilterGlossy = Number(explicitFilterGlossy);
-    const resolvedFilterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
-    const patchedParams = new Uint8Array(v2Input.kernelParams);
-    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
-    v2Input = { ...v2Input, kernelParams: patchedParams };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && hasFilterOptions(options)) {
-    v2Input = { ...v2Input, kernelParams: withFilterOptions(v2Input.kernelParams, options) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && sampler !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, sampler) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && options.pathRegeneration !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withPathRegenerationFlag(v2Input.kernelParams, options.pathRegeneration) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && lightSampling !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, lightSampling) };
-  }
+  const v2Input = prepareCyclesInput(input, options);
   return addon.traceSceneCycles(v2Input, {
     width,
     height,
@@ -198,6 +179,39 @@ function withSamplerFlag(kernelParams, sampler) {
     : (flags & ~KERNEL_FLAG_WHITE_NOISE_SAMPLER) >>> 0;
   view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
   return patchedParams;
+}
+
+/**
+ * Builds the FORMAT-v2 input of the `cycles` kernel from a v1 or v2 input and the trace options, patching the kernel flags
+ * the options set. Exported for tests; not part of the public API.
+ */
+export function prepareCyclesInput(input, options = {}) {
+  const { sampler, lightSampling } = resolveSamplingOptions(options, 'traceNative');
+  let v2Input = input?.schemaVersion === FORMAT_V2_VERSION
+    ? input
+    : upgradeNativeInputV1ToV2(input, options);
+  const explicitFilterGlossy = options.filterGlossy ?? options.blurGlossy;
+  if (input?.schemaVersion === FORMAT_V2_VERSION && explicitFilterGlossy !== undefined) {
+    const rawFilterGlossy = Number(explicitFilterGlossy);
+    const resolvedFilterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
+    const patchedParams = new Uint8Array(v2Input.kernelParams);
+    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
+    v2Input = { ...v2Input, kernelParams: patchedParams };
+  }
+  if (input?.schemaVersion === FORMAT_V2_VERSION && hasFilterOptions(options)) {
+    v2Input = { ...v2Input, kernelParams: withFilterOptions(v2Input.kernelParams, options) };
+  }
+  if (input?.schemaVersion === FORMAT_V2_VERSION && sampler !== undefined) {
+    v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, sampler) };
+  }
+  v2Input = {
+    ...v2Input,
+    kernelParams: withPathRegenerationFlag(v2Input.kernelParams, options.pathRegeneration ?? DEFAULT_PATH_REGENERATION),
+  };
+  if (input?.schemaVersion === FORMAT_V2_VERSION && lightSampling !== undefined) {
+    v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, lightSampling) };
+  }
+  return v2Input;
 }
 
 // Exported for tests; not part of the public API.
