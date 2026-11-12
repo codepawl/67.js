@@ -3,6 +3,14 @@
 Read this before you change code in this repository. [CONTRIBUTING.md](CONTRIBUTING.md) has the full rules; this file is the short path.
 To build scenes with 67js rather than change it, use the MCP server and the skills in `skills/` instead ([README](README.md#for-agents)).
 
+## Stance
+
+67js makes 3D easy to understand and easy to do. The agent carries the heavy steps, and the person keeps the creative choices and stays active ([docs/goal.md](docs/goal.md#stance)). So:
+
+- A change that people can see ships with a still or a clip rendered by 67js. Put it in the pull request and in its change note.
+- Docs and copy show the result first and explain in plain words before code.
+- Agent-facing features return previews and choices, and ask on matters of taste instead of deciding them.
+
 ## Layout
 
 - `src/` is the library, one flat folder. `src/agent-*.js` and `src/mcp*` are the MCP tool surface.
