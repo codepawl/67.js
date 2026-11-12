@@ -124,14 +124,17 @@ def build_blender_mesh(mesh_name, geometry_entry):
 
 
 def unpack_shared_image(image_name, texture_descriptor, image_entries, built_images):
-    image_identifier = texture_descriptor["image"]["imageId"]
+    image_identifier = (texture_descriptor["image"]["imageId"], texture_descriptor.get("colorSpace", "srgb"))
     if image_identifier in built_images:
         return built_images[image_identifier]
-    source_entry = image_entries[image_identifier]
+    source_entry = image_entries[image_identifier[0]]
     raw_pixels = decode_typed_array(source_entry["data"])
     width = source_entry["width"]
     height = source_entry["height"]
     blender_image = bpy.data.images.new(image_name, width, height, alpha=True)
+    if image_identifier[1] == "linear":
+        # Set before the pixels: changing the colour space of an image that holds pixels reloads it and drops them.
+        blender_image.colorspace_settings.name = "Non-Color"
     flipped_pixels = raw_pixels.reshape(height, width, 4)[::-1].astype(numpy.float32) / 255.0
     blender_image.pixels.foreach_set(flipped_pixels.reshape(-1))
     blender_image.pack()
