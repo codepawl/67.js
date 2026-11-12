@@ -852,6 +852,15 @@ export function unregisterCameraRigKind(kind) {
   return unregister('unregisterCameraRigKind', rigFactories, BUILT_IN_RIGS, kind);
 }
 
+// The kinds registered after load (by a game or an allowlisted addon), without the built-in ones.
+export function listAddedControllerKinds() {
+  return listControllerKinds().filter(kind => !BUILT_IN_CONTROLLERS.has(kind));
+}
+
+export function listAddedCameraRigKinds() {
+  return listCameraRigKinds().filter(kind => !BUILT_IN_RIGS.has(kind));
+}
+
 export function createController(kind, options = {}) {
   const controller = build('createController', controllerFactories, kind, options);
   const hasState = controller?.state && Array.isArray(controller.state.position);

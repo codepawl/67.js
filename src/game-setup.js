@@ -1,6 +1,5 @@
 import { validateGameRules } from './game-rules.js';
 import { normalizeGameAnimation } from './game-animation.js';
-import { listControllerKinds, listCameraRigKinds } from './player.js';
 
 // The `game` section of a scene recipe: which node the player controls, how, with what camera and input, and the rules
 // that decide when the game is won. It is plain data. The runtime in src/game.js reads it; nothing in it is code.
@@ -19,9 +18,13 @@ export const GAME_SETUP_LIMITS = Object.freeze({
   maxPathPoints: 256,
 });
 
-// The fixed names, then any kind an allowlisted addon registered at runtime (see docs/addons.md).
-export const gameControllerNames = () => [...new Set([...GAME_CONTROLLERS, ...listControllerKinds()])];
-export const gameCameraNames = () => [...new Set([...GAME_CAMERAS, ...listCameraRigKinds()])];
+// The fixed names, then any kind a host registered at runtime, such as an allowlisted addon (docs/addons.md). The host gives
+// a function returning { controllers, cameraRigs } here, so this module does not pull the player code with it.
+let addedKinds = () => ({});
+export function setAddedGameKinds(source) {
+  addedKinds = source;
+}
+const withAdded = (fixed, added = []) => [...new Set([...fixed, ...added])];
 
 const SETUP_FIELDS = ['player', 'camera', 'input', 'physics', 'ground', 'rules', 'npcs'];
 const PLAYER_FIELDS = ['node', 'controller', 'walkSpeed', 'runSpeed', 'jumpSpeed', 'maximumSpeed', 'footOffset', 'animation'];
@@ -55,7 +58,7 @@ function boundedNumber(value, fallback, minimum, maximum, path) {
   return value;
 }
 
-function normalizePlayer(player, nodeIds, nodes) {
+function normalizePlayer(player, nodeIds, nodes, controllerNames) {
   requireRecord(player, 'player');
   rejectUnknownFields(player, PLAYER_FIELDS, 'player');
   if (typeof player.node !== 'string' || !nodeIds.has(player.node)) {
@@ -64,7 +67,7 @@ function normalizePlayer(player, nodeIds, nodes) {
   }
   const normalized = {
     node: player.node,
-    controller: chooseName(player.controller, gameControllerNames(), 'character', 'player.controller'),
+    controller: chooseName(player.controller, controllerNames, 'character', 'player.controller'),
     walkSpeed: boundedNumber(player.walkSpeed, 3, 0, GAME_SETUP_LIMITS.maxSpeed, 'player.walkSpeed'),
     runSpeed: boundedNumber(player.runSpeed, 6, 0, GAME_SETUP_LIMITS.maxSpeed, 'player.runSpeed'),
     jumpSpeed: boundedNumber(player.jumpSpeed, 7, 0, GAME_SETUP_LIMITS.maxJumpSpeed, 'player.jumpSpeed'),
@@ -141,15 +144,16 @@ function normalizeRules(rules, playerNode) {
  * a normalised copy with every default filled in. The rules document is checked by validateGameRules. Errors name the field and say what to pass.
  */
 export function normalizeGameSetup(game, nodeSource) {
+  const added = addedKinds();
   const nodes = Array.isArray(nodeSource) ? nodeSource : [];
   const nodeIds = Array.isArray(nodeSource) ? new Set(nodeSource.map(node => node.id)) : nodeSource;
   requireRecord(game, 'game');
   rejectUnknownFields(game, SETUP_FIELDS, 'game');
-  const player = normalizePlayer(game.player, nodeIds, nodes);
+  const player = normalizePlayer(game.player, nodeIds, nodes, withAdded(GAME_CONTROLLERS, added.controllers));
   if (game.physics !== undefined && typeof game.physics !== 'boolean') fail('physics', `must be true or false, got ${JSON.stringify(game.physics)}.`);
   const normalized = {
     player,
-    camera: chooseName(game.camera, gameCameraNames(), 'follow', 'camera'),
+    camera: chooseName(game.camera, withAdded(GAME_CAMERAS, added.cameraRigs), 'follow', 'camera'),
     input: chooseName(game.input, GAME_INPUT_PRESETS, 'keyboard', 'input'),
     physics: game.physics ?? false,
     ground: boundedNumber(game.ground, 0, -GAME_SETUP_LIMITS.maxGround, GAME_SETUP_LIMITS.maxGround, 'ground'),

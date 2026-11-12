@@ -16,6 +16,7 @@ import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
 import { responseFormatField, chosenFormat, conciseReview, conciseJobStatus, conciseJobResult, withoutNotes } from './mcp-response-format.mjs';
+import { resolveAddons } from './mcp-addons.mjs';
 import { createCallLogger, CALL_LOG_ENVIRONMENT_VARIABLE } from './mcp-call-log.mjs';
 import { startUpdateCheck, updateNoticeText, describeUpdateCheck } from '../src/mcp-update-check.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
@@ -985,14 +986,19 @@ export async function runCheckUpdateCli({ version = packageMetadata.version } = 
 export async function runMcpCli({ argumentsValue = process.argv.slice(2),
   previewUrl = new URL(/* @vite-ignore */ '../build/mcp/preview.js', import.meta.url), version = packageMetadata.version } = {}) {
   const options = { backend: 'gpu', memory: 192 };
+  const allowedAddonNames = [];
   for (let index = 0; index < argumentsValue.length; index += 2) {
     const name = argumentsValue[index];
     const value = argumentsValue[index + 1];
-    if (!['--backend', '--browser', '--memory', '--assets', '--jobs', '--ffmpeg', '--audio', '--branches', '--relations'].includes(name) || value === undefined) {
-      throw new Error(`Use --backend cpu|gpu, --browser <local executable path>, --memory <32..${MAXIMUM_MEMORY_MIB} MiB>, --assets <absolute GLB directory>, --jobs <absolute private output directory>, --ffmpeg <absolute executable>, --audio <absolute folder of .wav, .mp3, .ogg or .flac files for video jobs>, --branches on|off and --relations on|off (both default on).`);
+    if (!['--backend', '--browser', '--memory', '--assets', '--jobs', '--ffmpeg', '--audio', '--branches', '--relations', '--addons', '--allow-addon'].includes(name) || value === undefined) {
+      throw new Error(`Use --addons <absolute folder with node_modules> with one --allow-addon <package name> for each allowed addon (repeatable, chosen only here), --backend cpu|gpu, --browser <local executable path>, --memory <32..${MAXIMUM_MEMORY_MIB} MiB>, --assets <absolute GLB directory>, --jobs <absolute private output directory>, --ffmpeg <absolute executable>, --audio <absolute folder of .wav, .mp3, .ogg or .flac files for video jobs>, --branches on|off and --relations on|off (both default on).`);
     }
-    options[name.slice(2)] = name === '--memory' ? Number(value) : value;
+    if (name === '--allow-addon') allowedAddonNames.push(value);
+    else options[name.slice(2)] = name === '--memory' ? Number(value) : value;
   }
+  const addonSet = resolveAddons({ folder: options.addons, names: allowedAddonNames, version });
+  for (const { name, reason } of addonSet.skipped) console.error(`67js addon ${name} skipped: ${reason}`);
+  options.addons = addonSet;
   if (!['cpu', 'gpu'].includes(options.backend) || !Number.isInteger(options.memory) || options.memory < 32 || options.memory > MAXIMUM_MEMORY_MIB) {
     throw new Error(`Backend must be cpu or gpu, and memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }

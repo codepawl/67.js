@@ -10,7 +10,7 @@ import { installMeshBlend, normalizeBlend } from '../src/mesh-blend.js';
 import { installCoplanarDiagnostics } from '../src/coplanar-overlap.js';
 import { applyProjection } from '../src/camera.js';
 import { mat4 } from 'gl-matrix';
-import { listControllerKinds, listCameraRigKinds, unregisterControllerKind, unregisterCameraRigKind } from '../src/player.js';
+import { listAddedControllerKinds, listAddedCameraRigKinds, listControllerKinds, listCameraRigKinds, unregisterControllerKind, unregisterCameraRigKind } from '../src/player.js';
 import { resolveAgentShadow, agentEnvironmentMap } from '../src/agent-look.js';
 import { agentSceneModule, agentSceneModuleLoaded } from '../src/agent-scene-modules.js';
 import { agentGroundPlacement, createAgentGround, placeAgentGround, FLOOR_COLOR } from '../src/agent-ground.js';
@@ -843,6 +843,8 @@ function takeBackKinds(before, registries) {
 }
 
 async function loadAddonModule({ url, name, extensionPoints }) {
+  const { setAddedGameKinds } = await import('../src/game-setup.js');
+  setAddedGameKinds(() => ({ controllers: listAddedControllerKinds(), cameraRigs: listAddedCameraRigKinds() }));
   const before = Object.fromEntries(ADDON_KIND_REGISTRIES.map(registry => [registry.field, registry.list()]));
   try {
     const entry = await import(/* @vite-ignore */ url);

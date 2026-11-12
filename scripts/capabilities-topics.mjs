@@ -5,7 +5,7 @@ import * as z from 'zod/v4';
 import { outlineSchema, unionBranches } from './schema-outline.mjs';
 import { AGENT_TOOL_EXAMPLES } from './tool-examples.mjs';
 
-const RUNTIME_SECTIONS = ['sceneLimits', 'preview', 'review', 'assets', 'jobs', 'unsupported'];
+const RUNTIME_SECTIONS = ['sceneLimits', 'preview', 'review', 'assets', 'jobs', 'addons', 'unsupported'];
 const SUMMARY_LENGTH = 110;
 // Scalars (booleans and numbers) of the scene capabilities share one topic instead of one each.
 const FLAGS_TOPIC = 'flags';

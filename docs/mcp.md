@@ -64,6 +64,8 @@ Asset IDs bind file contents through SHA-256. Changed files require a runtime re
 Catalog imports retain supported textures, skins, morphs and animation clips.
 The catalog takes self-contained GLB only. Poly Haven and similar sites ship a glTF folder (`.gltf`, `.bin` and textures): bundle it first with one command, then put the result in the catalog directory: `npx @gltf-transform/cli copy tree_01_1k.gltf tree_01.glb`. A recipe places a catalog asset with an `asset` node field (see [the scene guide](agent-scene.md#placed-catalog-assets)).
 
+`--addons` selects an absolute folder that holds `node_modules`, and each `--allow-addon <package name>` (repeat it, at most 16 times) allows one addon package from it ([third-party addons](addons.md#the-mcp-server-and-addons)). Only these two options choose addons, at startup. A tool call cannot load, name or change one. An addon that is not installed there, fails the addon contract, does not allow the running 67js version, declares an entry file above 2 MiB, resolves to a real path outside the folder, or registers a kind it did not declare is skipped with a one-line reason on stderr, and the server keeps running. `scene_capabilities` topic `addons` lists the loaded and skipped addons and the kinds each registered. A recipe may then use a registered controller or camera kind in `game.player.controller` and `game.camera`; the error for an unknown name lists the available ones.
+
 These launch options remain outside tool arguments.
 The process runs below normal priority to reduce interference with other work.
 
