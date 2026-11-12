@@ -774,3 +774,87 @@ test('pack options reject strings, booleans, arrays and null instead of coercing
     }
   }
 });
+
+function packSunnyEnvironment(options) {
+  const width = 16;
+  const height = 8;
+  const pixels = new Float32Array(width * height * 3).fill(0.2);
+  const sunTexelIndex = 2 * width + 5;
+  pixels[sunTexelIndex * 3] = 12;
+  pixels[sunTexelIndex * 3 + 1] = 12;
+  pixels[sunTexelIndex * 3 + 2] = 12;
+  const environment = createEnvironmentMap({ width, height, data: pixels, intensity: 1 });
+  const parts = [{ name: 'floor', geometry: quadGeometry(-2), material: { color: [0.5, 0.5, 0.5] } }];
+  const scene = buildTraceScene(parts, { map: environment });
+  const camera = createCamera({ eye: [0, 0, 5], target: [0, 0, 0], fov: 50 }, 16, 16);
+  return buildNativeInputV2(scene, camera, { width: 16, height: 16, samples: 1, ...options });
+}
+
+function readEnvironmentConditionalProbabilities(packedInput, width, height) {
+  const cdfStart = width * height;
+  const probabilities = [];
+  for (let pixelIndex = 0; pixelIndex < width * height; pixelIndex++) {
+    probabilities.push(packedInput.environmentTexels[(cdfStart + height + pixelIndex) * 4 + 1]);
+  }
+  return probabilities;
+}
+
+test('envCompensation is off by default and leaves the environment table unchanged', () => {
+  const withoutOption = packSunnyEnvironment({});
+  const withFalse = packSunnyEnvironment({ envCompensation: false });
+  const withZero = packSunnyEnvironment({ envCompensation: 0 });
+  assert.deepEqual(withFalse.environmentTexels, withoutOption.environmentTexels);
+  assert.deepEqual(withZero.environmentTexels, withoutOption.environmentTexels);
+});
+
+test('envCompensation removes the dim texels from the sampling table and keeps the CDFs valid', () => {
+  const plain = packSunnyEnvironment({});
+  const compensated = packSunnyEnvironment({ envCompensation: true });
+  const width = 16;
+  const height = 8;
+  const plainProbabilities = readEnvironmentConditionalProbabilities(plain, width, height);
+  const compensatedProbabilities = readEnvironmentConditionalProbabilities(compensated, width, height);
+
+  const sunRow = 2;
+  const sunColumn = 5;
+  assert.ok(plainProbabilities[sunRow * width + 0] > 0, 'dim texels are sampled without compensation');
+  assert.equal(compensatedProbabilities[sunRow * width + 0], 0, 'dim texels get zero probability');
+  assert.equal(compensatedProbabilities[sunRow * width + sunColumn], 1, 'the sun is the only texel left in its row');
+
+  const cdfStart = width * height;
+  let marginalProbabilitySum = 0;
+  for (let row = 0; row < height; row++) {
+    marginalProbabilitySum += compensated.environmentTexels[(cdfStart + row) * 4 + 1];
+  }
+  assert.ok(Math.abs(marginalProbabilitySum - 1) < 1e-5, 'marginal probabilities sum to 1');
+  assert.equal(compensated.environmentTexels[(cdfStart + height - 1) * 4], 1, 'marginal CDF ends at 1');
+  assert.ok(compensated.environmentTexels[0] === plain.environmentTexels[0], 'radiance texels are untouched');
+});
+
+test('envCompensation keeps the original table for a uniform map and rejects bad values', () => {
+  const width = 8;
+  const height = 4;
+  const uniformMap = createEnvironmentMap({ width, height, data: new Float32Array(width * height * 3).fill(0.5), intensity: 1 });
+  const parts = [{ name: 'floor', geometry: quadGeometry(-2), material: { color: [0.5, 0.5, 0.5] } }];
+  const scene = buildTraceScene(parts, { map: uniformMap });
+  const camera = createCamera({ eye: [0, 0, 5], target: [0, 0, 0], fov: 50 }, 16, 16);
+  const base = { width: 16, height: 16, samples: 1 };
+  const plain = buildNativeInputV2(scene, camera, base);
+  const compensated = buildNativeInputV2(scene, camera, { ...base, envCompensation: true });
+  assert.deepEqual(compensated.environmentTexels, plain.environmentTexels, 'an all-zero table falls back to the plain table');
+  for (const [sweepWidth, sweepHeight] of [[16, 8], [32, 16], [64, 32]]) {
+    for (const radiance of [0.123, 0.2, 0.5, 1, 3.7]) {
+      for (const intensity of [1, 2.5]) {
+        const constantMap = createEnvironmentMap({ width: sweepWidth, height: sweepHeight, data: new Float32Array(sweepWidth * sweepHeight * 3).fill(radiance), intensity });
+        const constantScene = buildTraceScene(parts, { map: constantMap });
+        const plainInput = buildNativeInputV2(constantScene, camera, base);
+        const compensatedInput = buildNativeInputV2(constantScene, camera, { ...base, envCompensation: true });
+        assert.deepEqual(compensatedInput.environmentTexels, plainInput.environmentTexels, `constant map ${sweepWidth}x${sweepHeight}, radiance ${radiance}, intensity ${intensity}`);
+      }
+    }
+  }
+  for (const invalid of [-0.1, 1.5, NaN, '1', null]) {
+    assert.throws(() => validatePackOptions({ ...base, envCompensation: invalid }, 'traceNative', true), /envCompensation/, `envCompensation ${JSON.stringify(invalid)}`);
+  }
+  assert.doesNotThrow(() => validatePackOptions({ ...base, envCompensation: 0.5 }, 'traceNative', true));
+});
