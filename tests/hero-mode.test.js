@@ -33,42 +33,22 @@ test('index.html carries the hero mode script', () => {
   assert.ok(heroModeScript, 'index.html needs <script id="hero-mode">');
 });
 
-test('the poster image reports its load and its error to the script, and keeps its high fetch priority', () => {
+test('the poster keeps its high fetch priority and does not gate the world on its load', () => {
   const poster = indexHtml.match(/<img class="poster"[^>]*>/)[0];
   assert.match(poster, /fetchpriority="high"/);
-  assert.ok(poster.includes('onload="window.__heroPosterSettled&&window.__heroPosterSettled()"'));
-  assert.ok(poster.includes('onerror="window.__heroPosterSettled&&window.__heroPosterSettled()"'));
+  assert.ok(!poster.includes('onload'), 'the first world does not wait for the poster');
+  assert.ok(!poster.includes('onerror'));
 });
 
-test('a desktop on a good connection goes live and starts the first world only once the poster has loaded', async () => {
-  const { mode, attribute, fetched, window } = runHeroMode({ connection: { effectiveType: '4g', saveData: false }, deviceMemory: 8 });
+test('a desktop on a good connection goes live and starts the first view with the page, the full world after it', async () => {
+  const { mode, attribute, fetched, timers, window } = runHeroMode({ connection: { effectiveType: '4g', saveData: false }, deviceMemory: 8 });
   assert.equal(mode, 'live');
   assert.equal(attribute, 'live');
-  assert.deepEqual(fetched, [], 'nothing competes with the poster');
-  window.__heroPosterSettled();
-  assert.ok(fetched.length > 0);
-  assert.equal(fetched.length, 3, 'only the first view starts at once');
+  assert.equal(fetched.length, 3, 'only the 2 MB first view starts at once, beside the poster');
+  assert.equal(timers.length, 0, 'no timer holds the world back');
   await window.__heroPrefetchReady;
   for (const href of Object.keys(window.__heroPrefetch)) assert.deepEqual(await window.__heroPrefetch[href], { href });
   assert.equal(fetched.length, 6, 'the full world follows once the first view has settled');
-});
-
-test('a poster that never settles does not hold the world back for ever', () => {
-  const { fetched, timers, runTimers } = runHeroMode();
-  assert.equal(timers.length, 1);
-  assert.equal(timers[0].delay, 5000);
-  assert.deepEqual(fetched, []);
-  runTimers();
-  assert.ok(fetched.length > 0);
-});
-
-test('the prefetch starts once however many times the poster and the timeout report', () => {
-  const { fetched, window, runTimers } = runHeroMode();
-  window.__heroPosterSettled();
-  const count = fetched.length;
-  window.__heroPosterSettled();
-  runTimers();
-  assert.equal(fetched.length, count);
 });
 
 test('a scout page goes live but prefetches nothing and sets no timer', () => {
@@ -128,7 +108,7 @@ test('the light path shows the poster and fetches nothing', () => {
   }
 });
 
-test('a phone on a good connection waits for the poster and fetches nothing yet', () => {
+test('a phone on a good connection is deferred and fetches nothing from the page head', () => {
   const { mode, fetched } = runHeroMode({ connection: { effectiveType: '4g' }, deviceMemory: 8, phone: true });
   assert.equal(mode, 'deferred');
   assert.equal(fetched.length, 0);

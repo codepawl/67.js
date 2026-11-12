@@ -707,10 +707,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let filter_glossy_enabled = kernel_params.filter_glossy > 0.0;
   let inv_filter_glossy = select(1.0e30, 1.0 / max(kernel_params.filter_glossy, 1.0e-8), filter_glossy_enabled);
 
-  var batch_radiance = vec3<f32>(0.0);
-  var batch_depth = 0.0;
-  var batch_albedo = vec3<f32>(0.0);
-  var batch_normal = vec3<f32>(0.0);
+  // The running sums start from what the film holds and take one sample at a time in sample order. That is the same
+  // sequence of float additions as adding every sample straight to the film, so the image does not depend on where one
+  // dispatch ends and the next begins (summing a batch from zero first would regroup the additions per split).
+  let film_radiance_and_depth = film_accumulation[pixel_index];
+  var batch_radiance = film_radiance_and_depth.xyz;
+  var batch_depth = film_radiance_and_depth.w;
+  let film_albedo_lane = film_accumulation[pixel_count + pixel_index];
+  let film_normal_lane = film_accumulation[2u * pixel_count + pixel_index];
+  var batch_albedo = film_albedo_lane.xyz;
+  var batch_normal = film_normal_lane.xyz;
   var taken_in_batch = 0u;
 
   // Per-path state lives outside the loops so that, with KERNEL_FLAG_PATH_REGENERATION, a path that ends is replaced by the
@@ -1161,9 +1167,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   }
 
   if (taken_in_batch > 0u) {
-    film_accumulation[pixel_index] += vec4<f32>(batch_radiance, batch_depth);
-    film_accumulation[pixel_count + pixel_index] += vec4<f32>(batch_albedo, 0.0);
-    film_accumulation[2u * pixel_count + pixel_index] += vec4<f32>(batch_normal, 0.0);
+    film_accumulation[pixel_index] = vec4<f32>(batch_radiance, batch_depth);
+    film_accumulation[pixel_count + pixel_index] = vec4<f32>(batch_albedo, film_albedo_lane.w);
+    film_accumulation[2u * pixel_count + pixel_index] = vec4<f32>(batch_normal, film_normal_lane.w);
     film_accumulation[3u * pixel_count + pixel_index] = stats;
   }
 }

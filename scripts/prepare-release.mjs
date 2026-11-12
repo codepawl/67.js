@@ -22,6 +22,8 @@ function run(executable, argumentsList, capture = false) {
 const commit = run('git', ['rev-parse', 'HEAD'], true);
 if (process.argv.includes('--require-clean') && run('git', ['status', '--porcelain'], true)) throw new Error('Commit release changes before production preparation.');
 run(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.lib.config.js']);
+// The standalone module goes into build/ before npm pack, so the package carries it.
+run(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.browser.config.js']);
 const releases = resolve(root, 'public/releases');
 await mkdir(releases, { recursive: true });
 const npmCli = process.env.npm_execpath ?? resolve(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
@@ -33,8 +35,12 @@ const tarball = `/releases/${packed.filename}`;
 let archive = await readFile(resolve(releases, packed.filename));
 let integrity = `sha512-${createHash('sha512').update(archive).digest('base64')}`;
 await cp(resolve(root, 'build'), resolve(releases, metadata.version), { recursive: true });
-run(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.browser.config.js']);
-await copyFile(resolve(root, 'build-browser/67.module.js'), resolve(releases, metadata.version, '67.module.js'));
+// The site keeps its old file name. The bytes must equal the npm file, so a CDN and the site serve the same module.
+const standaloneBytes = await readFile(resolve(root, 'build/67.standalone.js'));
+const siteModulePath = resolve(releases, metadata.version, '67.module.js');
+await writeFile(siteModulePath, standaloneBytes);
+const sha512 = (bytes) => createHash('sha512').update(bytes).digest('hex');
+if (sha512(await readFile(siteModulePath)) !== sha512(standaloneBytes)) throw new Error('The site copy of the standalone module differs from build/67.standalone.js.');
 // The site shows pending change notes above the released sections. Nothing here is kept by hand.
 const changelogText = await readFile(resolve(root, 'CHANGELOG.md'), 'utf8');
 await writeFile(resolve(root, 'public/changelog.md'), await changelogWithUnreleased(changelogText));

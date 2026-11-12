@@ -71,6 +71,28 @@ A plain HTML page can import 67js from this site. Use the exact `module` URL fro
 
 Serve the page over HTTP, for example with `npx serve`. A page opened from a `file://` path cannot import modules. This file has the core only. Addons such as `67js/addons/gltf` need the npm package.
 
+## Use 67js from jsdelivr
+
+From version 0.20.0 the npm package holds one self-contained module, `build/67.standalone.js`. It has no relative imports, so jsdelivr (and unpkg) serve it from one URL. Pin the version in the URL. This works in a plain HTML file and in a claude.ai artifact, which loads scripts only from cdnjs, jsdelivr and unpkg.
+
+```html
+<canvas id="view" width="640" height="400"></canvas>
+<script type="module">
+  import { Renderer67, box } from 'https://cdn.jsdelivr.net/npm/@codepawlhq/67js@0.20.0/build/67.standalone.js';
+
+  const parts = [{
+    name: 'Cube',
+    geometry: box(),
+    matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+    material: { color: [0.8, 0.3, 0.2], metallic: 0, roughness: 0.4, emission: 0 },
+  }];
+  const renderer = new Renderer67(document.querySelector('#view'), parts, { samples: 4 });
+  renderer.render({ eye: [2.5, 2, 3.5], target: [0, 0, 0] });
+</script>
+```
+
+The file has the core only. Addons such as `67js/addons/gltf` need the npm package. Versions before 0.20.0 have no standalone file; their `build/67.module.js` also loads from jsdelivr, but it imports 16 chunk files.
+
 ## Good to know
 
 > **Note:** 67js is plain JavaScript and has no TypeScript types. In a strict TypeScript project, add the line `declare module '67js';` to a `.d.ts` file. The imports then have the type `any`.
