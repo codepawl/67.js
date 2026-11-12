@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { createRunGuard } from './run-guard.mjs';
 import { removeLocalPaths, totalsByModel, totalsOf } from './aggregate.mjs';
 import { checkPng } from './png-check.mjs';
 import { gradeGeometries, readTranscript, scoreSilhouetteOfGeometries } from './threejs.mjs';
@@ -89,14 +90,14 @@ function runAgent(options, prompt, workingDirectory, configPath) {
       '--mcp-config', configPath, '--strict-mcp-config',
       '--allowedTools', `mcp__${MCP_SERVER_NAME}`,
       '--disallowedTools', ...BUILT_IN_TOOLS_DENIED,
-      '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--no-session-persistence', '--max-budget-usd', options.budget,
+      '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--no-session-persistence',
     ], { cwd: workingDirectory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
-    child.stdout.on('data', chunk => { output += chunk; });
+    const guard = createRunGuard({ child, model: options.model, budgetUsd: options.budget, timeoutSeconds: options.timeout });
+    child.stdout.on('data', chunk => { output += chunk; guard.feed(chunk); });
     child.stderr.on('data', () => {});
-    const timer = setTimeout(() => child.kill(), Number(options.timeout) * 1000);
     child.on('close', code => {
-      clearTimeout(timer);
+      guard.stop();
       resolvePromise({ output, code, wallMs: Math.round(performance.now() - started) });
     });
   });
