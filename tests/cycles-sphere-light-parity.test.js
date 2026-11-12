@@ -13,7 +13,10 @@ const SIZE = 16;
 const FLOOR_ALBEDO = 0.8;
 const LAMP_HEIGHT = 2;
 const LAMP_INTENSITY = 8;
-const cameraDescription = { eye: [0, 6, 0], target: [0, 0, 0], up: [0, 0, -1], fov: 30 };
+const CAMERA_HEIGHT = 6;
+const CAMERA_FIELD_OF_VIEW_DEGREES = 30;
+const PATCH_SIDE = 4;
+const cameraDescription = { eye: [0, CAMERA_HEIGHT, 0], target: [0, 0, 0], up: [0, 0, -1], fov: CAMERA_FIELD_OF_VIEW_DEGREES };
 
 function floorPart() {
   const matrix = new Float32Array([20, 0, 0, 0, 0, 0.1, 0, 0, 0, 0, 20, 0, 0, -0.05, 0, 1]);
@@ -37,13 +40,34 @@ function renderFloorUnderLamp(radius) {
 
 function centreRadiance(rgba) {
   let sum = 0;
-  const first = SIZE / 2 - 2;
-  for (let row = first; row < first + 4; row++) {
-    for (let column = first; column < first + 4; column++) {
+  const first = (SIZE - PATCH_SIDE) / 2;
+  for (let row = first; row < first + PATCH_SIDE; row++) {
+    for (let column = first; column < first + PATCH_SIDE; column++) {
       sum += rgba[(row * SIZE + column) * 4 + 1];
     }
   }
-  return sum / 16;
+  return sum / (PATCH_SIDE * PATCH_SIDE);
+}
+
+// Where the centre of a pixel column or row lands on the floor, in metres from the point under the lamp.
+function floorOffsetOfPixel(pixelIndex) {
+  const halfExtent = CAMERA_HEIGHT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES * Math.PI) / 360);
+  return (((pixelIndex + 0.5) / SIZE) * 2 - 1) * halfExtent;
+}
+
+// A sphere light of intensity I lights a diffuse floor point at a horizontal distance s, with every part of the sphere above
+// the floor, with I * h / (h^2 + s^2)^(3/2), whatever its radius: the power stays fixed as the radius grows. The pixels the
+// test averages reach about 0.5 m from the point under the lamp, where the floor is a few percent darker than at that point.
+function closedFormCentreRadiance() {
+  let sum = 0;
+  const first = (SIZE - PATCH_SIDE) / 2;
+  for (let row = first; row < first + PATCH_SIDE; row++) {
+    for (let column = first; column < first + PATCH_SIDE; column++) {
+      const distanceSquared = LAMP_HEIGHT * LAMP_HEIGHT + floorOffsetOfPixel(row) ** 2 + floorOffsetOfPixel(column) ** 2;
+      sum += ((FLOOR_ALBEDO / Math.PI) * LAMP_INTENSITY * LAMP_HEIGHT) / distanceSquared ** 1.5;
+    }
+  }
+  return sum / (PATCH_SIDE * PATCH_SIDE);
 }
 
 test('the Cycles reference script renders point and spot lights as spheres unless asked otherwise', () => {
@@ -54,11 +78,9 @@ test('the Cycles reference script renders point and spot lights as spheres unles
   assert.equal(callCount, 3, 'the definition and one call each for point lights and spot lights');
 });
 
-// A sphere light of intensity I seen from a distance d beyond its radius lights a facing diffuse surface with I / d^2, whatever
-// its radius, so the floor under the lamp is albedo / pi * I / d^2 for every radius (power stays fixed as the radius grows).
 for (const radius of [0, 0.18, 0.5]) {
   test(`the native cycles kernel keeps the power of a point light of radius ${radius} m`, { skip: skipWithoutAddon }, () => {
-    const expected = (FLOOR_ALBEDO / Math.PI) * (LAMP_INTENSITY / (LAMP_HEIGHT * LAMP_HEIGHT));
+    const expected = closedFormCentreRadiance();
     const measured = centreRadiance(renderFloorUnderLamp(radius));
     assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);
   });

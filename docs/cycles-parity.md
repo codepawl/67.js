@@ -1047,18 +1047,20 @@ Picture (Cook left, Cycles right, 1024 samples, depth of field on, grey diffuse)
 
 | Gate | Result | Pass |
 | --- | --- | --- |
-| Mean ratio per channel within 2 % | 1.123 / 1.129 / 1.138 | fail |
-| 8 x 8 tiles within 5 % | 2 of 64 (min 1.003, max 2.914) | fail |
-| FLIP LDR against the seed floor + 0.02 | 0.183 (floor 0.115, ceiling 0.135) | fail |
-| relMSE (reported) | 0.334 against a Cycles seed-to-seed floor of 0.066 | n/a |
+| Mean ratio per channel within 2 % | 0.9995 / 0.9995 / 0.9995 | pass |
+| 8 x 8 tiles within 5 % | 64 of 64 (min 0.990, max 1.010) | pass |
+| FLIP LDR against the seed floor + 0.02 | 0.109 (floor 0.111, ceiling 0.131) | pass |
+| relMSE (reported) | 0.062 against a Cycles seed-to-seed floor of 0.064 | n/a |
 | Depth agreement at 1 % on 99.9 % of pixels | 99.939 % (316 of 518,400 pixels disagree) | pass |
 | Depth at 0.1 % / 0.5 % | 98.97 % / 99.86 % | reported |
 
-The pinhole colour comparison gives the same numbers (1.124 / 1.129 / 1.138, 2 of 64 tiles, relMSE 0.336), so depth of field is not what fails the colour gates. The room is dark and noisy (mean radiance 0.17, a small window and a few lamps), so the Cycles noise floor itself is high.
+Every gate passes since the Cycles reference renders a light with a radius as a sphere, as Cook does ([Sphere lights and Soft Falloff](#sphere-lights-and-soft-falloff-1040)). With Blender's default disk light the same run gave 1.123 / 1.129 / 1.138, 2 of 64 tiles (max 2.914), FLIP 0.183 and relMSE 0.334; the section below keeps that diagnosis. The pinhole colour comparison passes with the same margins (0.9997 / 0.9997 / 0.9998, 64 of 64 tiles, relMSE 0.062). The room is dark and noisy (mean radiance 0.17, a small window and a few lamps), so the Cycles noise floor itself is high.
 
 Depth: every one of the 316 disagreeing pixels sits next to a silhouette (none in the interior of a surface; away from silhouettes the agreement is 100 percent and the 99th percentile of the relative error is 0.10 percent). They gather in the right-hand tiles of rows 1 to 4 (107, 119, 45 and 10 pixels in the last column), where the venetian blinds' thin slats are, and a handful are scattered along the floor. 311 are both-hit pixels over 1 percent, 68 over 5 and 17 over 20 percent (a slat edge against what is behind it); 2 are hit only by Cycles and 3 only by Cook. 1,637 pixels are background in both (the window openings), so the miss handling is exercised by a rendered scene for the first time.
 
-### Why the colour gates fail (measured gap, inferred cause)
+### Why the colour gates failed with Blender's default disk lights (measured gap)
+
+The table is the run with Blender's default disk lights in the Cycles reference. With sphere lights on both sides the seven point lights together read 1.0003 (0.07701 / 0.07699) and one at a time 0.994 to 1.003; the sun and area rows do not change `[measured]`.
 
 Same JSON, one light class at a time (pinhole, 256 spp, mean of the green channel; Cook over Cycles):
 
@@ -1338,7 +1340,7 @@ Commands: `bash bench/cycles-parity/texture-mips-run-all.sh <dir>` on a machine 
 
 ## Sphere lights and Soft Falloff (#1040)
 
-Cook rendered a point light with a radius up to 41 percent brighter than Cycles on the Classroom scene (six lamps of radius 0.18 m inside shades). The cause is in the comparison, not in the kernel `[measured on small scenes, inferred for Classroom]`:
+Cook rendered a point light with a radius up to 41 percent brighter than Cycles on the Classroom scene (six lamps of radius 0.18 m inside shades). The cause is in the comparison, not in the kernel `[measured on small scenes and on Classroom: with the fix its seven lamps read 0.994 to 1.003 one at a time and every Classroom gate passes]`:
 
 - Blender 4 and later give a point or spot light the property `Light.use_soft_falloff`, on by default. With it on, Cycles builds a light with a radius as an oriented disk that faces the shading point (`intern/cycles/blender/light.cpp`: `set_is_sphere(!(mode & LA_USE_SOFT_FALLOFF))`; `kernel/light/point.h`, `point_light_sample`, the `else` branch). With it off, Cycles builds the sphere: it samples the cone of the sphere from outside, the surface from inside, and a path that hits the sphere uses the same pdf.
 - Cook implements the sphere (`lgt_sample_point_or_spot_light`, `lgt_sphere_solid_angle_pdf` in `lights.wgsl`), with the radiance `intensity / (pi r^2)` that Cycles uses (`eval_fac` in `PointLight::copy_to_kernel`), so the power does not change with the radius.
