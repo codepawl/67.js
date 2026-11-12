@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chooseTraceBackend, createNativeTracerLocator } from '../scripts/agent-native-trace.mjs';
+import { chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, traceFrameNative } from '../scripts/agent-native-trace.mjs';
 
 const builtTracer = { findNativeAddon: () => '/build/render-native.node' };
 
@@ -49,4 +49,58 @@ test('cpu and gpu requests never touch the native package', async () => {
   const locator = locatorFor(async () => { throw new Error('must not be imported'); });
   assert.deepEqual(await chooseTraceBackend({ requested: 'gpu', runtimeBackend: 'gpu', locator }), { backend: 'gpu' });
   assert.deepEqual(await chooseTraceBackend({ requested: 'cpu', runtimeBackend: 'cpu', locator }), { backend: 'cpu' });
+});
+
+function tracerRecording(calls) {
+  const pixels = 4 * 4;
+  return {
+    traceNative(tables, options) {
+      calls.push(options);
+      return { rgba: new Float32Array(pixels * 4).fill(0.5), albedo: new Float32Array(pixels * 3).fill(0.5),
+        normal: new Float32Array(pixels * 3).fill(0.5), depth: new Float32Array(pixels), variance: new Float32Array(pixels),
+        averageSamples: 11.5, adapter: 'test adapter', backend: 'test' };
+    },
+  };
+}
+
+const emptyExport = {
+  triangleCount: 0, triangles: 0, ignored: [],
+  tables: Object.fromEntries(['triangles', 'materials', 'lights', 'atlas', 'environmentColors', 'environmentTables', 'parameters'].map(name => [name, ''])),
+};
+
+test('a native frame traces with the cycles kernel unless JS67_NATIVE_KERNEL names another', async () => {
+  assert.equal(chooseNativeKernel({}), 'cycles');
+  assert.equal(chooseNativeKernel({ JS67_NATIVE_KERNEL: '' }), 'cycles');
+  assert.equal(chooseNativeKernel({ JS67_NATIVE_KERNEL: 'legacy' }), 'legacy');
+  const calls = [];
+  const saved = process.env.JS67_NATIVE_KERNEL;
+  delete process.env.JS67_NATIVE_KERNEL;
+  try {
+    const defaulted = await traceFrameNative({ tracer: tracerRecording(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'none' });
+    assert.equal(calls[0].kernel, 'cycles');
+    assert.equal(defaulted.report.kernel, 'cycles');
+    await traceFrameNative({ tracer: tracerRecording(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'none', kernel: 'legacy' });
+    assert.equal(calls[1].kernel, 'legacy');
+  } finally {
+    if (saved !== undefined) process.env.JS67_NATIVE_KERNEL = saved;
+  }
+});
+
+test('noiseThreshold reaches the native trace and the report keeps averageSamples', async () => {
+  const calls = [];
+  const traced = await traceFrameNative({ tracer: tracerRecording(calls), exported: emptyExport, width: 4, height: 4, samples: 64, denoise: 'none', noiseThreshold: 0.02 });
+  assert.equal(calls[0].noiseThreshold, 0.02);
+  assert.equal(traced.report.noiseThreshold, 0.02);
+  assert.equal(traced.report.averageSamples, 11.5);
+});
+
+test('the wavelet filter and OIDN both run on the native features', async () => {
+  const calls = [];
+  const guides = [];
+  const denoiser = { OIDN_VERSION: 'test', async denoiseWithOidn(features) { guides.push(Object.keys(features).sort()); return features.color; } };
+  const withOidn = await traceFrameNative({ tracer: tracerRecording(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'oidn', denoiser });
+  assert.equal(withOidn.report.denoiser, 'oidn');
+  assert.deepEqual(guides[0], ['albedo', 'color', 'height', 'normal', 'width']);
+  const withWavelet = await traceFrameNative({ tracer: tracerRecording(calls), exported: emptyExport, width: 4, height: 4, samples: 8, denoise: 'wavelet' });
+  assert.equal(withWavelet.report.denoiser, 'wavelet');
 });

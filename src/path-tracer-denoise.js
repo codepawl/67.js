@@ -90,6 +90,14 @@ function filterPass({ width, height, light, variance, normal, depth }, step, out
           blue += weight * light[neighbor * 3 + 2];
         }
       }
+      // Background pixels carry a zero normal, so every weight is zero: keep the pixel as it is instead of dividing 0 by 0.
+      if (!(weightSum > 0)) {
+        outputLight[center * 3] = light[center * 3];
+        outputLight[center * 3 + 1] = light[center * 3 + 1];
+        outputLight[center * 3 + 2] = light[center * 3 + 2];
+        outputVariance[center] = variance[center];
+        continue;
+      }
       outputLight[center * 3] = red / weightSum;
       outputLight[center * 3 + 1] = green / weightSum;
       outputLight[center * 3 + 2] = blue / weightSum;

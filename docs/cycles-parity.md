@@ -340,7 +340,7 @@ Against Cycles 5.3 OptiX on `lit-interior`, `256` samples took `11.4 s` (measure
 | `cycles` kernel | `0.0065` |
 | Cycles 5.3 OptiX | `0.0031` |
 
-These are per-sample times on one scene. An equal-error comparison between the `cycles` kernel and Cycles has not been measured directly, so nothing here says Cook is faster than Cycles in general. The Cycles `lit-interior` reference was not re-rendered with the current script (its scene file and image are byte-identical to the earlier run).
+These are per-sample times on one scene. An equal-error comparison between the `cycles` kernel and Cycles has not been measured directly, so nothing here says Cook is faster than Cycles in general. The Cycles `lit-interior` reference was re-rendered with the current script and matches the stored one (see "Area light shapes, spread and transparent shadows").
 
 ---
 
@@ -356,6 +356,22 @@ The six-scene references use the box filter of width 1, so the box filter stays 
 | `glass` | Blackman-Harris 1.5 | 0.00061 / 0.0082 | 0.00010 / 0.0073 |
 
 `lit-interior` is smooth, so the filter hides under its noise. `glass` has hard caustic edges: each native filter scores best against the Cycles reference rendered with the same filter, and the mismatched pair is 4 to 7 times worse in relMSE.
+
+#### Seven-scene parity with Cycles' default filter
+
+The same seven scenes pass every M1 gate with Cycles' own default pixel filter. Cycles 5.3.0 OptiX references were rendered with `--filter-type blackman-harris --filter-width 1.5` (4096 spp, seeds 1 and 2, 8 bounces, 960 x 540, no denoiser, no clamps; every other setting as in the box references), and the `cycles` kernel ran with `--filter-type blackman-harris --filter-width 1.5`, 4096 spp, seed 1, 8 bounces. Both ran on an NVIDIA A10 (`wgpu` Vulkan ray queries for Cook, OptiX for Cycles). The gates are the ones of the box table: per-channel mean ratio within 2 percent, every eligible 8 x 8 tile within 5 percent, FLIP LDR below the seed 1 versus seed 2 value plus 0.02, and relMSE reported next to the two-seed noise floor `[measured]`:
+
+| Scene | Mean ratio (R / G / B) | Tiles within 5 percent | Tile ratio range | FLIP LDR (ceiling) | relMSE (noise floor) | Result |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `spot-area` | 1.0000 / 1.0000 / 1.0000 | 47 / 47 | 0.9994 to 1.0010 | 0.0039 (0.0239) | 0.000008 (0.000009) | pass |
+| `light-linking` | 1.0009 / 1.0007 / 1.0008 | 64 / 64 | 0.9996 to 1.0026 | 0.0051 (0.0228) | 0.000015 (0.000004) | pass |
+| `metal` | 0.9996 / 0.9996 / 0.9997 | 64 / 64 | 0.9949 to 1.0043 | 0.0043 (0.0238) | 0.00331 (0.00304) | pass |
+| `glass` | 0.9976 / 0.9978 / 0.9982 | 64 / 64 | 0.9824 to 1.0000 | 0.0070 (0.0234) | 0.000099 (0.000051) | pass |
+| `outdoor-hdri` | 0.9995 / 0.9996 / 0.9998 | 64 / 64 | 0.9987 to 1.0000 | 0.0023 (0.0215) | 0.000005 (0.000007) | pass |
+| `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 / 64 | 1.0004 to 1.0079 | 0.0168 (0.0365) | 0.000261 (0.000286) | pass |
+| `many-lights-500` | 1.0009 / 1.0010 / 1.0010 | 64 / 64 | 0.9998 to 1.0033 | 0.0178 (0.0374) | 0.000835 (0.000793) | pass |
+
+`run-m1-parity.py` takes `--filter-type`, `--filter-width` and `--references-directory` to score either filter against its own references. The Blackman-Harris references are not committed (about 84 MB with their reports).
 
 ### Light tree for next event estimation
 
@@ -577,3 +593,27 @@ uv run --no-project --with numpy --with psutil python bench/cycles-parity/run-m0
 ```
 
 `bench/cycles-parity/make-many-lights-scene.mjs <scene.json> <out.json> --count 500` writes a copy of an exported scene with that many small point lights, and `bench/cycles-parity/measure-sampler-noise.py <scene.json> <outDir> --compare sampler|light-tree` measures relMSE per sample count for `white` against `sobol-burley`, or for `uniform` against `tree`, against a high-sample reference with its own seed.
+
+## Area light shapes, spread and transparent shadows (#894)
+
+The `cycles` kernel already had disk and ellipse area lights (`lgt_sample_area_light` and the emitter-hit branch in `lights.wgsl`, translated from `kernel/light/area.h`), the spread attenuation (`area_light_spread_attenuation`) and transparent shadow rays (`int_trace_shadow` in `integrator.wgsl`, after `kernel/integrator/shade_shadow.h`). They were packed (`tests/native-pack-v2.test.js`) but no scene description could reach them and no Cycles reference exercised them. This change lets the parity harness reach them and adds the scenes `[source]`:
+
+- A reference scene's area light takes `shape` (`rectangle`, the default, `disk` or `ellipse`) and `spread` (radians, `0.0001` to pi, pi is the default). `width` and `height` are the two axes; a disk is an ellipse, so give it a `height` equal to its `width` (the diameter), as Blender does. A material with `alphaMode: 'blend'` and `opacity` below 1 is a blended material: shadow rays through it keep `1 - opacity` of the light, like a Principled alpha below 1 in Cycles; without `alphaMode: 'blend'`, `opacity` is ignored as before. [`bench/cycles-parity/cook-only-fields.mjs`](../bench/cycles-parity/cook-only-fields.mjs) copies these onto the trace scene (and rejects a bad shape or spread with the allowed values in the message), so the core bundle, the rasterizer and the legacy kernel are untouched and ignore them.
+- `render-cycles.py` builds the same shapes, spread and alpha in Blender.
+- Reference scenes `area-shapes` (a disk, an ellipse with spread 1.2 and a square with spread 0.9 over a glossy floor, a ball, a column and a block) and `transparent-shadow` (two blended panes of opacity 0.4 and 0.75 under two sphere lights and a rectangle light) are in `bench/reference/scenes.js`. They are not in `run-m1-parity.py`'s default list: pass `--scenes area-shapes,transparent-shadow` once their Cycles references exist.
+- `tests/cycles-area-shapes-parity.test.js` checks the packed light types, the spread terms, the radiance per area, the blended material records and that opaque materials and rectangle lights resolve as before.
+
+Result, Cook `cycles` kernel at 4096 spp, seed 1, 8 bounces, box filter, against Cycles 5.3 OptiX at 4096 spp seeds 1 and 2, one Modal container (NVIDIA L4, Cook on the `NVIDIA L4` adapter) `[measured]`. Both scenes pass every gate of `run-m1-parity.py` with no kernel change:
+
+| Scene | Mean ratio (R / G / B) | Tiles within 5 % | Tile min / max | FLIP LDR (ceiling) | relMSE (seed noise floor) |
+| --- | --- | ---: | --- | --- | --- |
+| `area-shapes` | 0.9997 / 0.9998 / 0.9997 | 64 of 64 | 0.9981 / 1.0016 | 0.0178 (0.0372) | 0.000686 (0.000638) |
+| `transparent-shadow` | 1.0007 / 1.0006 / 1.0006 | 64 of 64 | 1.0000 / 1.0014 | 0.0057 (0.0255) | 0.000060 (0.000058) |
+
+![Cook and Cycles on area-shapes (top) and transparent-shadow (bottom)](cycles-area-lights-comparison.jpg)
+
+Left Cook, right Cycles 5.3, both 4096 spp, sRGB curve and no tone mapping. The disk, the ellipse with spread 1.2 and the square with spread 0.9 give one soft pool on the floor in both; the two panes of opacity 0.4 and 0.75 cast shadows of the two densities in both.
+
+The `lit-interior` reference was rendered again with the current `render-cycles.py` (4096 spp, seed 1): relMSE against the stored reference 4.9e-10 (the seed 1 versus seed 2 floor is 0.000285) and mean ratio 1.0000 in all channels, so the stored reference is what the current script produces `[measured]`. The seven-scene parity, cargo, lobe and furnace results above are those of the previous kernel: this change touches no WGSL or Rust.
+
+Still open: the `transparent_max = 0` edge (first paragraph of "Bounce-Count Semantics Verification") has not been compared with Cycles on a scene.

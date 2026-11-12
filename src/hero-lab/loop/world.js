@@ -148,7 +148,15 @@ async function fetchFirstViewFiles(description) {
   }
 }
 
+// The build needs two chunks that load on demand (the meshopt decoder and replaceParts). Asking for them while the world's files are
+// still downloading takes their round trips off the time between the last byte of the first view and its first frame.
+function warmBuildChunks() {
+  import('../../gltf-meshopt.js').catch(() => {});
+  import('../../replace-textured-parts.js').catch(() => {});
+}
+
 export async function fetchWorld(descriptionUrl, { firstView = false, measureLink = measureLinkMegabits } = {}) {
+  warmBuildChunks();
   const description = await readDescription(descriptionUrl);
   if (!firstView || !hasFirstView(description)) return fetchDetail(description);
   const firstViewFiles = await fetchFirstViewFiles(description);

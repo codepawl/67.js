@@ -2,6 +2,7 @@
 // The parity harness has no light links, so a scene with more lights is built in chunks of that size and the light lists are joined.
 // Every joined light gets bit -1, which the native packer reads as "all groups", so no two lights share a link bit.
 import { buildTraceScene, MAX_TRACE_LIGHTS } from '../../src/path-tracer-scene.js';
+import { applyCookOnlyFields } from './cook-only-fields.mjs';
 
 const UNLINKED_LIGHT_BIT = -1;
 
@@ -28,7 +29,7 @@ function unlinkedLights(lights) {
 export function buildTraceSceneWithManyLights(parts, environment) {
   const analyticLights = listAnalyticLights(environment);
   if (analyticLights.length <= MAX_TRACE_LIGHTS) {
-    return buildTraceScene(parts, environment);
+    return applyCookOnlyFields(buildTraceScene(parts, environment), parts, environment);
   }
   const points = [];
   const spots = [];
@@ -42,5 +43,5 @@ export function buildTraceSceneWithManyLights(parts, environment) {
   }
   const traceScene = buildTraceScene(parts, { ...environment, pointLights: [], spotLights: [], areaLights: [] });
   traceScene.lights = { sun: traceScene.lights.sun, points, spots, areas };
-  return traceScene;
+  return applyCookOnlyFields(traceScene, parts, environment);
 }
