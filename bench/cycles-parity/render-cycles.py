@@ -54,7 +54,7 @@ def parse_cli_arguments():
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
@@ -76,6 +76,37 @@ def parse_cli_arguments():
         "z_depth": "--z-depth" in argument_list,
         "depth_samples": int(read_flag_value(argument_list, "--depth-samples", str(DEFAULT_DEPTH_SAMPLES))),
         "denoise": read_flag_value(argument_list, "--denoise", "none"),
+        "f_stop": float(read_flag_value(argument_list, "--f-stop", "0")) if "--f-stop" in argument_list else None,
+        "focus_distance": float(read_flag_value(argument_list, "--focus-distance", "0")) if "--focus-distance" in argument_list else None,
+        "aperture_blades": int(read_flag_value(argument_list, "--aperture-blades", "0")),
+        "aperture_rotation": float(read_flag_value(argument_list, "--aperture-rotation", "0")),
+        "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
+    }
+
+
+def resolve_lens_options(options, camera_entry):
+    """Depth-of-field settings from --f-stop and its companions, or None for a pinhole (the default).
+
+    Without --focus-distance the focus is the eye-to-target distance, as in createCamera.
+    """
+    if options["f_stop"] is None:
+        stray_flags = [name for name in ("--focus-distance", "--aperture-blades", "--aperture-rotation", "--sensor-width") if name in sys.argv]
+        if stray_flags:
+            raise ValueError(f"Option {stray_flags[0]} needs --f-stop: pass the f-stop that turns on depth of field, such as --f-stop 2.8.")
+        return None
+    if options["f_stop"] <= 0:
+        raise ValueError(f"--f-stop must be above 0, got {options['f_stop']}.")
+    if options["aperture_blades"] != 0 and not 3 <= options["aperture_blades"] <= 64:
+        raise ValueError(f"--aperture-blades must be 0 (a round aperture) or from 3 to 64, got {options['aperture_blades']}.")
+    focus_distance = options["focus_distance"]
+    if focus_distance is None:
+        focus_distance = math.dist(camera_entry["eye"], camera_entry["target"])
+    return {
+        "f_stop": options["f_stop"],
+        "focus_distance": focus_distance,
+        "aperture_blades": options["aperture_blades"],
+        "aperture_rotation": options["aperture_rotation"],
+        "sensor_width": options["sensor_width"],
     }
 
 
@@ -421,9 +452,26 @@ def build_scene_lights(scene, environment_entry):
         add_area_light(scene, light_index, area_entry)
 
 
-def build_camera_object(scene, camera_entry):
+def configure_depth_of_field(camera_data, lens_options, aspect):
+    """Thin-lens depth of field, matching createCamera in src/path-tracer.js (the same flags go to trace-native.mjs).
+
+    The sensor is sensor-width / aspect tall, so the focal length Cycles derives from the vertical field of view is the one
+    the native side computes; the aperture radius is then focal length / (2 * f-stop) in metres.
+    """
+    camera_data.sensor_height = lens_options["sensor_width"] / aspect
+    camera_data.dof.use_dof = True
+    camera_data.dof.aperture_fstop = lens_options["f_stop"]
+    camera_data.dof.focus_distance = lens_options["focus_distance"]
+    if lens_options["aperture_blades"] > 0:
+        camera_data.dof.aperture_blades = lens_options["aperture_blades"]
+        camera_data.dof.aperture_rotation = math.radians(lens_options["aperture_rotation"])
+
+
+def build_camera_object(scene, camera_entry, lens_options=None, aspect=16.0 / 9.0):
     camera_data = bpy.data.cameras.new("Camera")
     camera_data.sensor_fit = "VERTICAL"
+    if lens_options is not None:
+        configure_depth_of_field(camera_data, lens_options, aspect)
     camera_data.angle_y = math.radians(camera_entry["fov"])
     camera_data.clip_start = camera_entry["near"]
     camera_data.clip_end = camera_entry["far"]
@@ -656,7 +704,8 @@ def main():
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
     build_scene_lights(scene, description["environment"])
-    build_camera_object(scene, description["camera"])
+    lens_options = resolve_lens_options(options, description["camera"])
+    build_camera_object(scene, description["camera"], lens_options, options["width"] / options["height"])
     configure_linear_exr_output(scene, options["width"], options["height"])
     if options["part_ids"]:
         render_part_identifier_map(scene, options["output_prefix"], options["width"], options["height"])
@@ -682,6 +731,11 @@ def main():
             print("DEPTH_PASS_FAILED " + depth_error)
     report = {
         "greyDiffuse": options["grey_diffuse"],
+        "thinLens": None if lens_options is None else {
+            **lens_options,
+            "blenderLensMillimetres": scene.camera.data.lens,
+            "blenderApertureRadius": scene.camera.data.lens / 1000.0 / (2.0 * lens_options["f_stop"]),
+        },
         "depthNpyPath": depth_npy_path,
         "depthError": depth_error,
         "depthSamples": options["depth_samples"] if options["z_depth"] else None,

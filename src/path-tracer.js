@@ -1,4 +1,4 @@
-import { cameraFieldOfView } from './camera.js';
+import { cameraFieldOfView, resolveThinLens } from './camera.js';
 import { fresnelSchlick } from './material-layers.js';
 import { pointLightFalloff } from './ray-query.js';
 import { profileGain } from './light-profile.js';
@@ -155,7 +155,11 @@ export function createCamera(camera, width, height) {
   for (let axis = 0; axis < 3; axis++) right[axis] /= rightLength;
   const above = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
   const halfHeight = Math.tan(fov * Math.PI / 360);
-  return { eye, forward, right, above, halfHeight, halfWidth: halfHeight * width / height };
+  const view = { eye, forward, right, above, halfHeight, halfWidth: halfHeight * width / height };
+  // A camera with an fStop adds its thin lens (apertureRadius, focalDistance, apertureBlades, apertureRotation). Only the
+  // native "cycles" kernel draws it; every other tracer ignores the extra fields, and a pinhole view is unchanged.
+  const thinLens = resolveThinLens(camera, { aspect: width / height, eye, target });
+  return thinLens ? { ...view, ...thinLens } : view;
 }
 
 // ---- Random numbers ----

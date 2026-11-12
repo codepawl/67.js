@@ -36,7 +36,7 @@ A part with a material `subsurface` weight above 0 sends that share of its diffu
 - The procedural sky when there is no environment map (the sky is black).
 - Occlusion maps. Normal and metallic-roughness maps are drawn on UV-mapped and on box-projected materials. Material graphs and patterns are drawn through the colour map they bake.
 - Translucent leaves without a `subsurface` block (foliage looks darker than in the rasterizer), liquids, foam and blended transparency (traced as plain or opaque surfaces).
-- Lights seen in mirrors (area lights and spot lights are lit but not visible), caustics, motion blur, depth of field, bloom and colour grade.
+- Lights seen in mirrors (area lights and spot lights are lit but not visible), caustics, motion blur, bloom and colour grade. Depth of field is drawn only by the native `cycles` kernel, for a camera with an `fStop` (a thin lens with Cycles' aperture, focus distance and blades; see the render-native README); the CPU, GPU and legacy native tracers draw a pinhole.
 - Multiple-scattering GGX: rough metal is a little darker than in Blender.
 
 ## Limits

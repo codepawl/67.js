@@ -887,6 +887,30 @@ All image gates and the depth gate pass on both scenes. Every disagreeing pixel 
 
 Not covered: the Classroom scene (instancing, 854 instances, depth of field, which the depth comparator does not model: a thin lens changes the ray-to-Z conversion), a scene with a background, and 4096 spp references.
 
+## Depth of field (#896, slice D1)
+
+A camera with an `fStop` is a thin lens in the `cycles` kernel, with Cycles' model: aperture radius `focal length / 1000 / (2 * f-stop)` metres, a disk or a regular polygon of `apertureBlades` corners, and a focus distance measured along the view axis. The kernel already held the lens maths (`camera.wgsl`, a port of Cycles' `camera.h`); this slice connects it: `createCamera` turns `fStop`, `focalLength` or `fov` with `sensorWidth`, `focusDistance`, `apertureBlades` and `apertureRotation` (degrees, Blender's sense) into the aperture fields of the params block. Layout and options: [FORMAT-v2.md](../packages/render-native/FORMAT-v2.md) and the [render-native README](../packages/render-native/README.md#depth-of-field-cycles-kernel). The kernel and the legacy kernel are unchanged. Motion blur is not in Cook; it is a known gap and out of scope for #896.
+
+Depth of field off: the packed params bytes and the random numbers drawn do not change. The lens sample (`lens_uv`) is drawn for every sample whether or not the aperture is above 0, and a pinhole camera writes the same lens words as before (`0`, `10`, `0`, `0`). Measured on an RTX 4090: 128-sample images of `lit-interior` and `glass` (480 x 270, fixed 32 samples per dispatch, seed 3), with this tree merged with origin/main and with origin/main's JavaScript on the same addon, have identical SHA-256 for the `cycles` and the `legacy` kernel (4 of 4), and two runs of this tree agree. Earlier runs, before the merge, on an L4 and on the 4090 gave the same hashes. The native node suite on the 4090: 194 tests, 191 pass, 0 fail, 3 skipped, with both GPU depth of field tests running.
+
+Cycles comparison (`dof-depth` scene in `bench/reference/scenes.js`: objects 2 m, 6 m and 15 m from the camera and a grid of small lamps 15 m away; 960 x 540, f/1.0 on a 150 mm wide sensor, a 116 mm lens, focus on the ball 6 m away; the near spheres blur by about 28 pixels, the lamps by about 9; Blender 5.3.0 Cycles OptiX and Cook on one RTX 4090; seed 1, 8 bounces, box filter; `trace-native.mjs` and `render-cycles.py` take the same `--f-stop`, `--focus-distance`, `--aperture-blades`, `--aperture-rotation` (degrees) and `--sensor-width`; Cook goes through `createCamera`) `[measured]`:
+
+| Aperture, Cook 4096 spp against Cycles 4096 spp | mean ratio (R / G / B) | relMSE (eps 0.01) | Cycles seed 2 against seed 1 | tiles within 5 % |
+| --- | --- | ---: | ---: | ---: |
+| disk, focus 6 m | 0.9996 / 0.9996 / 0.9996 | 3.4e-5 | 3.5e-5 | 45 of 45 |
+| triangle, rotation 10 | 0.9996 / 0.9997 / 0.9998 | 2.8e-5 | 2.6e-5 | 44 of 44 |
+| pentagon, rotation 40 | 0.9994 / 0.9995 / 0.9995 | 3.0e-5 | 3.2e-5 | 44 of 44 |
+| hexagon, rotation 15 | 0.9996 / 0.9996 / 0.9996 | 3.6e-5 | 3.0e-5 | 44 of 44 |
+| heptagon, rotation 25 | 0.9995 / 0.9995 / 0.9996 | 3.4e-5 | 3.2e-5 | 44 of 44 |
+
+Of 64 tiles, 19 (disk) and 20 (polygons) are too dark to count. Every row is at Cycles' own noise floor (the polygon rows differ from their floor by at most 6e-6, and the lamp-region relMSE, where bokeh shows, is 0.0039 to 0.0047 against 0.0038 to 0.0043 for Cycles seed 2). Odd and even corner counts and four rotations leave no symmetry to hide a wrong offset or sign. A Cook pinhole against the Cycles disk image scores 7.8e-3 (230 times worse), with 35 of 45 tiles within 5 percent and a tile ratio as low as 0.44, so the scene does tell a lens from a pinhole.
+
+The polygon conventions differ in one place, derived from Cycles' code and not fitted. Cycles' `regular_polygon_sample` (`intern/cycles/kernel/sample/mapping.h`) builds each sector as a triangle whose outer points sit at -pi/n and +pi/n around an axis at `rotation + 2 pi k / n`, so its corners are at `rotation + pi/n + 2 pi k / n`; Blender's `aperture_rotation` reaches `bladesrotation` unchanged in radians (`intern/cycles/blender/camera.cpp`, `camera_sample_aperture` in `kernel/camera/camera.h`). Cook's `cam_sample_regular_polygon` (`camera.wgsl`) puts corners at `rotation + 2 pi k / n`. Same direction and same unit, so `createCamera` adds `180 / blades` degrees (`kernelApertureRotation` in `src/camera.js`). A first fit on the hexagon alone (a sign flip, commit `272003cd`) was wrong, as the pentagon at 40 degrees showed (relMSE 9.2e-4 against a floor of 3.2e-5). Picture: `docs/cook-depth-of-field-comparison.jpg` (rows disk and pentagon; Cook and Cycles at 256 spp, Cook and Cycles at 4096, difference times 4).
+
+Bundle size (`node scripts/measure-size.mjs`, growth against origin/main, gzip bytes): `entry:path-tracer` 29,509 to 29,857 (+348, allowed 590), `entry:path-tracer-progressive` 38,118 to 38,468 (+350), `entry:path-tracer-realtime` 42,565 to 42,906 (+341), `entry:core` 90,098 to 90,103 (+5, allowed 64), `scene:lit-box` unchanged at 58,841. No bundle grew past its allowance, so there is no size note.
+
+Not covered: anamorphic bokeh (slice D2), lens shift and orthographic cameras (`createCamera` refuses both), and the depth pass of a lens camera (not compared).
+
 ## Progressive film and scene updates (#896, slice S2)
 
 A native session builds one image over several `render` calls (`accumulate: true`, `targetSamples`, `reset()`, `resolve()`) and applies new material values, lights, selection weights and instance transforms with `update()`. The kernel adds one sample at a time to the film in sample order and the Sobol-Burley sequence is indexed by the whole image's target count, so call boundaries cannot change a sum. The TLAS is rebuilt over the kept BLAS on a transform change (wgpu 30.0.1 has no refit); a change of counts, triangles or mesh topology is refused with a message that says to create a new session.
