@@ -99,6 +99,10 @@ ${toolLines}
 
 Call \`scene_capabilities\` for field detail. This list is generated from the server's tool registry by \`scripts/generate-llms.mjs\`.
 
+## If you know three.js
+
+Models write three.js from memory. The section "If you know three.js" of the [complete guide](${page('guide.md')}) maps each common three.js idiom to the 67js call. The optional addon \`@codepawlhq/67js-three-compat\` (folder \`packages/three-compat\`) accepts the common three.js shapes (\`Scene\`, \`Mesh\`, \`MeshStandardMaterial\`, \`PerspectiveCamera\`, the light classes, \`GLTFLoader\`, \`setAnimationLoop\`) and builds 67js parts from them. It throws an error that names the 67js call when you use a name it does not support.
+
 ## Docs
 
 - [Complete plain-text guide](${page('guide.md')}): renderer, parts, materials, cameras, animation, export and troubleshooting.

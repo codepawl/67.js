@@ -65,7 +65,7 @@ To move something, change the part and call `renderer.updateParts(parts)`. Then 
 
 ## What 67js is not
 
-67js does not copy the three.js API. Code for three.js does not run in 67js without changes. 67js also has no mouse editor like Blender. You build scenes in code, or an AI agent builds them through the MCP server.
+67js does not copy the three.js API. If you know three.js, [If you know three.js](#if-you-know-three-js) maps its common calls to 67js, and the optional `three-compat` addon builds 67js parts from the common three.js names. It supports a subset, so code that uses other three.js names needs changes. 67js also has no mouse editor like Blender. You build scenes in code, or an AI agent builds them through the MCP server.
 
 ## How these docs are organized
 
