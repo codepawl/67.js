@@ -122,6 +122,8 @@ Install the checkout's dependencies and provide Chrome and FFmpeg. The exporter 
 | `--assembly 1` | 0 to 1 | Renders an exploded object for inspection. |
 | `--audio` | file | Selects original film audio. Other scenes default to silent. |
 
+`--scene file --config scene.json [--root public] [--camera keys.json]` renders a showcase `scene.json`. A staged scene renders headless too: each `glbRest` path is routed like `glb`, its parts load with the first file's shared textures and join in the page's rank order, so a frame matches the page. `hdriPreview` and `glbFirstView` only speed up the page's first frame and are ignored. A `glbRest` that is not a list of paths fails with an error that names it.
+
 The presets come from `RENDER_PRESETS`:
 
 | Preset | Size | Samples | fps | Budget |

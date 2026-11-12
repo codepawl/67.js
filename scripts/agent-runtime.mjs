@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { sampleBrowserHeap, exceedsMemoryGuard } from './agent-memory-guard.mjs';
 import { lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -732,9 +733,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         }
           }
         metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
-        const heap = await session.send('Runtime.getHeapUsage');
-        metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, heap.usedSize);
-        if (metrics.peakNodeBytes > 512 * 1024 ** 2 || metrics.peakBrowserHeap > 256 * 1024 ** 2) {
+        const heapBytes = await sampleBrowserHeap(session);
+        metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, heapBytes);
+        if (exceedsMemoryGuard({ nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap })) {
           throw new Error('Render job exceeded its Node RSS or sampled browser heap guard.');
         }
         await progress({ frames: frame + 1, maximumPendingFrames: 1 });
@@ -1061,8 +1062,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
                 width: settings.width, height: settings.height, columns: settings.columns, labels: settings.labels });
               if (backend === 'cpu' && !/swiftshader/i.test(rendered.graphics)) throw new Error('CPU review did not select SwiftShader.');
               peakNodeBytes = Math.max(peakNodeBytes, process.memoryUsage().rss);
-              peakBrowserHeap = Math.max(peakBrowserHeap, (await session.send('Runtime.getHeapUsage')).usedSize);
-              if (peakNodeBytes > 512 * 1024 ** 2 || peakBrowserHeap > 256 * 1024 ** 2) {
+              peakBrowserHeap = Math.max(peakBrowserHeap, await sampleBrowserHeap(session));
+              if (exceedsMemoryGuard({ nodeBytes: peakNodeBytes, browserHeapBytes: peakBrowserHeap })) {
                 throw new Error('Review exceeded its Node RSS or sampled browser heap guard.');
               }
               shots[index] = { ...rendered, ...(group.branch === undefined ? {} : { branch: group.branch, branchStale: branchRecipe.stale }) };

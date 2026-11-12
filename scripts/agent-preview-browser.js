@@ -1112,7 +1112,11 @@ window.__agentPreview = {
   async applyWithAssets(input) {
     const record = requireSession(input.sessionId);
     if (!record.placedAssets) {
-      throw new Error('This scene was created without placed assets. Recreate it with an asset node in scene_create, then add more.');
+      if (typeof record.scene.provideAssets !== 'function') {
+        throw new Error('This session holds an imported asset, which cannot place other assets. Create a scene with scene_create, then add the asset node with scene_apply.');
+      }
+      record.placedAssets = new Map();
+      record.scene.provideAssets(record.placedAssets);
     }
     await loadAllAgentSceneModules();
     await loadPlacedAssets(record.placedAssets, input.assetNeeds ?? input.operations, input.assetData);
