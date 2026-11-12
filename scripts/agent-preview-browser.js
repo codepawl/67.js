@@ -184,13 +184,15 @@ function sampleFrameShares() {
 /**
  * Warnings about the frame just drawn from `camera`: framing, a stale bake and exposure (when `exposure` is given, the
  * effects.exposure drawn with). Imported assets have no part bounds or bake, so they get the exposure check only.
+ * `placement` adds the floating and intersecting parts, which only scene_look reports: a render job would repeat them
+ * for every frame of a moving scene.
  */
-function viewProblems(record, camera, exposure) {
+function viewProblems(record, camera, exposure, { placement = false } = {}) {
   const problems = [];
   const boxes = record.scene.worldBounds?.();
   if (boxes) {
     problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes }));
-    problems.push(...placementProblems({ boxes }));
+    if (placement) problems.push(...placementProblems({ boxes }));
   }
   if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());
   if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure }));
@@ -1233,7 +1235,7 @@ window.__agentPreview = {
       sampleMotionTime(record.scene, motionTime);
     }
     draw(record);
-    const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure));
+    const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure, { placement: true }));
     record.lastRender = render;
     const labels = withLabels ? collectLabels(record, record.scene.camera, canvas.width, canvas.height) : undefined;
     return {

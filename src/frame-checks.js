@@ -11,6 +11,7 @@ const BLACK_FRAME_SHARE = 0.98;
 const CLIPPED_FRAME_SHARE = 0.35;
 
 const MAXIMUM_FINDING_NODES = 8;
+const MAXIMUM_JOB_DIAGNOSTICS = 16;
 
 /** A finding names the parts it concerns in `nodes` and carries its numbers as extra fields. */
 function warning(kind, target, message, fix, details = {}) {
@@ -229,12 +230,12 @@ export function placementProblems({ boxes }) {
   return problems;
 }
 
-/** Adds a frame's diagnostics to `metrics.diagnostics`, keeping one entry per kind, target and message across a job's frames. */
+/** Adds a frame's diagnostics to `metrics.diagnostics`, keeping one entry per kind, target and message across a job's frames, up to 16 entries. */
 export function mergeFrameDiagnostics(metrics, frameDiagnostics) {
   if (!frameDiagnostics?.length) return;
   metrics.diagnostics ??= [];
   for (const problem of frameDiagnostics) {
     const known = metrics.diagnostics.some(entry => entry.kind === problem.kind && entry.target === problem.target && entry.message === problem.message);
-    if (!known) metrics.diagnostics.push(problem);
+    if (!known && metrics.diagnostics.length < MAXIMUM_JOB_DIAGNOSTICS) metrics.diagnostics.push(problem);
   }
 }
