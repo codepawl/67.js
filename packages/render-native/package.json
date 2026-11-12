@@ -12,6 +12,7 @@
     "pack-input.mjs",
     "pack-input-v2.mjs",
     "light-tree-v2.mjs",
+    "texture-mips.mjs",
     "FORMAT-v2.md",
     "build.mjs",
     "build.rs",
