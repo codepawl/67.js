@@ -8,6 +8,13 @@
 // cannot z-fight. `swapped` is the count that matters (a pixel showing the colour of a face behind the visible one), `tied` the
 // pixels where the scene itself names no winner (exact coplanar faces with the flush pass off, `offset=0`), and `wrong` also holds
 // shading steps within a face. A glTF needs `ids=1` (flat colour per part) or `facets=1` (per triangle) for the truth to read colours.
+// `facets=2` is the exact form: every triangle is drawn unlit in a colour that is its own number, so the frame names the face shown at
+// each pixel and no shading can pass for a swap. Then `flipped` is the count of true visibility flips (a face behind covers one in
+// front that is not ranked below it), `ranked` the swaps the flush pass asked for, `offRay` pixels showing a face the ray through the
+// pixel centre misses (the rasteriser and the ray cast disagree on an edge) and `blended` pixels no face explains.
+// `offRayEdge` / `offRayInterior` split offRay by whether the pixel touches an owner change of the ray cast in its 3x3 neighbourhood;
+// `flipUpperBound` = flipped + offRayInterior bounds the true flips from above. hits=N (viewer config) keeps N hits per ray, default 6.
+// --timeout <ms> sets the wait for a page step (default 240000).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
@@ -32,7 +39,7 @@ const browser = await chromium.launch({
   args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-webgl', '--disable-renderer-backgrounding'],
 });
 const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
-page.setDefaultTimeout(240000);
+page.setDefaultTimeout(Number(argument("timeout", "240000")));
 page.on('pageerror', error => console.error('pageerror', error.message));
 page.on('console', message => { if (message.type() === 'error') console.error('console', message.text()); });
 const results = [];

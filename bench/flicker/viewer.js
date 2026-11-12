@@ -5,8 +5,13 @@ import { Renderer67 } from '../../src/index.js';
 import { parseGltf } from '../../src/gltf.js';
 import { resolveFlushParts } from '../../src/coplanar-overlap.js';
 import { flushOrderOf } from '../../src/depth-layer.js';
-import { TRAPS } from './traps.js';
-import { collectWorldTriangles, castPixelOwners, compareWithGroundTruth } from './ground-truth.js';
+import { installRenderPasses } from '../../src/render-passes.js';
+import { installCameraEffects } from '../../src/camera-effects.js';
+import { installLineArt, resolveLineArt } from '../../src/line-art.js';
+import { resolveEffects } from '../../src/effects.js';
+import { TRAPS, TILED_TRAPS } from './traps.js';
+import { collectWorldTriangles, castPixelOwners, compareWithGroundTruth, COLOUR_KEY_SCALE } from './ground-truth.js';
+import { DEFAULT_HITS_PER_PIXEL } from './pixel-cast.js';
 
 // One flat colour per part, no textures, so a pixel's colour says which part owns it and a changed colour is a changed owner.
 function paintPartsByOwner(parts) {
@@ -18,9 +23,13 @@ function paintPartsByOwner(parts) {
   });
 }
 
+// An unlit surface leaves the renderer as pow(colour, 1 / 2.2) when the frame is not HDR.
+const DISPLAY_GAMMA = 2.2;
+
 // facets=1: one colour per triangle instead of per part. Two faces of one part that meet at a crease then differ in colour, so the
 // probe reads the crease as an edge and stops counting its ordinary anti-aliasing as flicker. Fighting triangles still differ.
 function paintTrianglesApart(parts) {
+  let triangleNumber = 0;
   for (const part of parts) {
     const { positions, normals, indices } = part.geometry;
     const triangleCount = indices.length / 3;
@@ -28,8 +37,11 @@ function paintTrianglesApart(parts) {
     const flatNormals = new Float32Array(triangleCount * 9);
     const colors = new Float32Array(triangleCount * 9);
     for (let triangle = 0; triangle < triangleCount; triangle++) {
-      const hue = (((triangle + 1) * 0.618034) % 1);
-      const colour = [0, 1 / 3, 2 / 3].map(offset => 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(2 * Math.PI * (hue + offset))));
+      triangleNumber++;
+      const hue = ((triangleNumber * 0.618034) % 1);
+      const colour = options.triangleIds
+        ? [triangleNumber & 255, (triangleNumber >> 8) & 255, (triangleNumber >> 16) & 255].map(byte => (byte / 255) ** DISPLAY_GAMMA)
+        : [0, 1 / 3, 2 / 3].map(offset => 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(2 * Math.PI * (hue + offset))));
       for (let corner = 0; corner < 3; corner++) {
         const source = indices[triangle * 3 + corner] * 3;
         const target = (triangle * 3 + corner) * 3;
@@ -40,7 +52,7 @@ function paintTrianglesApart(parts) {
     }
     part.geometry = { positions: flatPositions, normals: flatNormals, colors, indices: Uint32Array.from({ length: triangleCount * 3 }, (_, index) => index) };
     const { map, ...material } = part.material;
-    part.material = { ...material, color: [1, 1, 1], metallic: 0, roughness: 1 };
+    part.material = { ...material, color: [1, 1, 1], metallic: 0, roughness: 1, ...(options.triangleIds ? { tag: 'unlit' } : {}) };
   }
 }
 
@@ -86,12 +98,29 @@ const options = {
   ids: parameters.get('ids') === '1',
   // shadows=0 turns off casting and receiving, to tell shadow-edge aliasing apart from depth fighting.
   shadows: parameters.get('shadows') !== '0',
-  facets: parameters.get('facets') === '1',
+  facets: parameters.get('facets') === '1' || parameters.get('facets') === '2',
+  // facets=2: the colour of every triangle is its own number, drawn unlit, so the frame tells exactly which face is shown at a pixel.
+  triangleIds: parameters.get('facets') === '2',
+  // hits=N keeps the N nearest faces per ray in the ray cast (default 6, at most 64): a deeper stack than that shows up as offRay.
+  // samples=N sets the MSAA sample count. A facets=2 frame defaults to 1: the resolve of 4 samples blends the ids of faces that share a pixel into
+  // another valid id, which the ray through the pixel centre cannot match (see colourStepDetails); one sample shows the face under the centre.
+  samples: Math.max(1, Math.floor(Number(parameters.get('samples')) || (parameters.get('facets') === '2' ? 1 : 4))),
+  hitsPerPixel: Math.min(64, Math.max(1, Number(parameters.get('hits')) || DEFAULT_HITS_PER_PIXEL)),
 };
+// effect=ao|dof|lines|all draws the frame through that screen-space stage (issue #751, effects on cut geometry): the renderer gets a
+// depth texture, the add-ons install, and frameFor carries the stage settings. Without it nothing changes.
+const EFFECTS = new Set(['ao', 'dof', 'lines', 'all']);
+const effectName = parameters.get('effect');
+if (effectName && !EFFECTS.has(effectName)) throw new Error(`Unknown effect ${effectName}. Use one of: ${[...EFFECTS].join(', ')}.`);
+const usesEffect = name => effectName === name || effectName === 'all';
 const trapName = parameters.get('trap');
 
 // The trap name comes from the URL, so only the table's own entries count, never an inherited method such as toString.
 function trapBuilder() {
+  if (parameters.get('tiled') === '1') {
+    if (!Object.hasOwn(TILED_TRAPS, trapName)) throw new Error(`Trap ${trapName} has no flat tiling. Use one of: ${Object.keys(TILED_TRAPS).join(', ')}.`);
+    return TILED_TRAPS[trapName];
+  }
   if (!Object.hasOwn(TRAPS, trapName)) throw new Error(`Unknown trap ${trapName}. Use one of: ${Object.keys(TRAPS).join(', ')}.`);
   return TRAPS[trapName];
 }
@@ -138,10 +167,26 @@ function markDirty() {
   context.clearRect(0, 0, overlay.width, overlay.height);
 }
 
+// The largest ambient occlusion radius the effects accept (metres); a city-sized scene would ask for more.
+const MAXIMUM_AO_RADIUS = 100;
+
+// The stage settings of the effect= parameter: strong enough that a seam shows, and the focus at the pivot so depth of field blurs
+// the surfaces in front and behind it.
+function effectSettings() {
+  const settings = {};
+  const effects = {};
+  if (usesEffect('ao')) Object.assign(effects, { ambientOcclusion: 1, ambientOcclusionRadius: Math.min(Math.max(extent / 40, 0.05), MAXIMUM_AO_RADIUS) });
+  if (usesEffect('dof')) effects.depthOfField = { blur: 0.6, focusDistance: camera.distance };
+  settings.effects = resolveEffects(effects);
+  if (usesEffect('lines')) settings.lines = resolveLineArt({ width: 1.5, boundaries: true, creaseAngle: 30, depthJump: 0.08 });
+  return settings;
+}
+
 function frameFor(jitterPixels = 0) {
   const frame = { eye: eyePosition(), target: camera.pivot, up: [0, 1, 0], fov: FIELD_OF_VIEW, far: Math.max(extent * 2.5, 100, camera.distance * 2 + extent) };
   if (!options.nearFit) frame.near = 0.1;
   if (jitterPixels) frame.shift = [jitterPixels / canvas.width, 0];
+  if (effectName) Object.assign(frame, effectSettings());
   return frame;
 }
 
@@ -156,7 +201,10 @@ async function loadScene() {
   }
   const buildTrap = trapBuilder();
   options.ids = true;
-  return buildTrap();
+  const trap = buildTrap();
+  // facets=1|2 gives a trap the same per-triangle colours as a glTF, so the exact ground truth (facets=2) reads it.
+  if (options.facets) paintTrianglesApart(trap.parts);
+  return trap;
 }
 
 // What the flush pass did to the scene: how long it took, what it could not settle and how much it cut.
@@ -188,10 +236,16 @@ async function build() {
   const size = bounds.maximum.map((value, axis) => value - bounds.minimum[axis]);
   extent = Math.max(...size);
   renderer = new Renderer67(canvas, loaded.parts, {
-    ground: false, hdr: true, samples: 4, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
+    ground: false, hdr: !options.triangleIds, samples: options.samples, pixelRatio: Math.min(devicePixelRatio, 1.5), memoryBudgetMiB: 1024,
     reversedDepth: options.reversed ? 'auto' : false,
     resolveCoplanar: options.offset ? resolveAndReport : false,
+    ...(effectName ? { depth: true } : {}),
   });
+  if (effectName) {
+    installRenderPasses(renderer);
+    installCameraEffects(renderer);
+    installLineArt(renderer);
+  }
   window.flickerRenderer = renderer;
   window.flickerParts = loaded.parts;
   document.querySelector('#drop').hidden = true;
@@ -238,6 +292,9 @@ function readFrame(context) {
 // `totalChanged` counts every pixel whose owner changed, edges included. `clearOfEdges` is stricter than `changed`: an anti-aliased
 // edge blends two owners into a colour that is close to both, which the four-neighbour test reads as no edge, so this count also
 // leaves out pixels with a colour step anywhere within two pixels.
+// The bytes an unlit face of this colour shows: the triangle number that painted it, back from the gamma curve.
+const shownByte = colour => colour.map(channel => Math.round(255 * channel ** (1 / DISPLAY_GAMMA)));
+
 // The ground-truth probe (ground-truth.js): one frame, compared with a float64 ray cast that cannot z-fight. Needs flat colours
 // per part (ids=1) or per triangle (facets=1); the trap scenes bring their own. Returns the counts of compareWithGroundTruth
 // and the milliseconds the ray cast took.
@@ -252,8 +309,8 @@ async function truth() {
   const pixels = new Uint8ClampedArray(readFrame(context));
   const started = performance.now();
   const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
-  const cast = castPixelOwners(world, frameFor(0), width, height);
-  const { mismatchMask, ...counts } = compareWithGroundTruth({ pixels, world, cast, width, height });
+  const cast = castPixelOwners(world, frameFor(0), width, height, options.hitsPerPixel);
+  const { mismatchMask, ...counts } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
   renderer.render(frameFor(0));
   return { ...counts, triangles: world.count, castMilliseconds: Math.round(performance.now() - started), width, height };
 }
@@ -306,12 +363,12 @@ function swapDetails(limit = 12) {
   renderer.render(frameFor(0));
   const pixels = new Uint8ClampedArray(readFrame(context));
   const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
-  const cast = castPixelOwners(world, frameFor(0), width, height);
-  const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height });
+  const cast = castPixelOwners(world, frameFor(0), width, height, options.hitsPerPixel);
+  const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
   const groups = new Map();
   for (let pixel = 0; pixel < mismatchMask.length; pixel++) {
     if (mismatchMask[pixel] !== 2) continue;
-    const group = groups.get(cast.owner[pixel]) ?? { triangle: cast.owner[pixel], pixels: 0, distances: [] };
+    const group = groups.get(cast.owner[pixel]) ?? { triangle: cast.owner[pixel], pixels: 0, distances: [], sample: pixel };
     group.pixels++;
     const neighbours = [-1, 1, -width, width, -width - 1, -width + 1, width - 1, width + 1];
     if (neighbours.some(step => cast.owner[pixel + step] !== cast.owner[pixel])) group.onTriangleEdge = (group.onTriangleEdge ?? 0) + 1;
@@ -324,7 +381,44 @@ function swapDetails(limit = 12) {
     behind: trianglesBehind(world, group.triangle),
     distance: group.distances.sort((first, second) => first - second)[group.distances.length >> 1],
     corners: Array.from(world.corners.subarray(group.triangle * 9, group.triangle * 9 + 9)),
+    sample: {
+      x: group.sample % width, y: Math.floor(group.sample / width),
+      drawnColour: [...pixels.subarray(group.sample * 4, group.sample * 4 + 3)],
+      hits: Array.from({ length: cast.hitsPerPixel }, (_, slot) => cast.hitTriangles[group.sample * cast.hitsPerPixel + slot]).filter(triangle => triangle >= 0)
+        .map((triangle, slot) => ({ triangle, distance: cast.hitDistances[group.sample * cast.hitsPerPixel + slot], rank: world.ranks[triangle], colour: world.keyColours[world.keyOf[triangle]] })),
+    },
   }));
+}
+
+// The wrong pixels of the current frame that show another face's id, with the bytes drawn and the bytes expected (exact frames only).
+// Says how far apart they are per channel and where on the frame they sit, so a rounding step of the frame can be told from a
+// face the ray cast misses: channels counts the pixels by how many of the three channels differ, largest by the largest channel gap.
+function colourStepDetails(limit = 12) {
+  const { width, height } = canvas;
+  const scratch = document.createElement('canvas');
+  scratch.width = width;
+  scratch.height = height;
+  const context = scratch.getContext('2d', { willReadFrequently: true });
+  renderer.render(frameFor(0));
+  const pixels = new Uint8ClampedArray(readFrame(context));
+  const world = collectWorldTriangles(window.flickerParts, flushOrderOf);
+  const cast = castPixelOwners(world, frameFor(0), width, height, options.hitsPerPixel);
+  const { mismatchMask } = compareWithGroundTruth({ pixels, world, cast, width, height, exact: options.triangleIds ? shownByte : null });
+  const channels = [0, 0, 0, 0];
+  const largest = {};
+  const samples = [];
+  for (let pixel = 0; pixel < mismatchMask.length; pixel++) {
+    if (mismatchMask[pixel] !== 1) continue;
+    const expected = shownByte(world.keyColours[world.keyOf[cast.owner[pixel]]].map(channel => channel / COLOUR_KEY_SCALE));
+    const shown = [pixels[pixel * 4], pixels[pixel * 4 + 1], pixels[pixel * 4 + 2]];
+    const gaps = shown.map((byte, channel) => byte - expected[channel]);
+    channels[gaps.filter(gap => gap !== 0).length]++;
+    const gap = Math.max(...gaps.map(Math.abs));
+    largest[gap] = (largest[gap] ?? 0) + 1;
+    if (samples.length < limit && gap <= 16) samples.push({ x: pixel % width, y: Math.floor(pixel / width), expected, shown, alpha: pixels[pixel * 4 + 3] });
+  }
+  renderer.render(frameFor(0));
+  return { channels, largest, samples };
 }
 
 async function probe() {
@@ -540,8 +634,20 @@ async function loadTrap() {
 bindControls();
 requestAnimationFrame(tick);
 document.querySelector('#speedValue').textContent = '';
+// The frame as raw RGBA bytes in base64, for the effects probe to compare two scenes pixel by pixel.
+function frameBase64() {
+  const scratch = document.createElement('canvas');
+  scratch.width = canvas.width;
+  scratch.height = canvas.height;
+  renderer.render(frameFor(0));
+  const bytes = new Uint8Array(readFrame(scratch.getContext('2d', { willReadFrequently: true })).buffer.slice(0));
+  let text = '';
+  for (let start = 0; start < bytes.length; start += 32768) text += String.fromCharCode(...bytes.subarray(start, start + 32768));
+  return { width: canvas.width, height: canvas.height, base64: btoa(text) };
+}
+
 window.flicker = {
-  setCamera, probe, truth, swapDetails, build, options, frameWholeScene,
+  frameBase64, setCamera, probe, truth, swapDetails, colourStepDetails, build, options, frameWholeScene,
   get info() { return { depthMode: depthModeLabel(), ...(renderer ? nearAndFar() : {}), extent, bounds, canvas: [canvas.width, canvas.height], memory: renderer?.memoryReport?.(), flush: flushReport }; },
   render: () => { markDirty(); renderer?.render(frameFor(0)); },
   traps: Object.keys(TRAPS),

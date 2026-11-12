@@ -30,6 +30,10 @@ The options (`--near-pixels`, `--far-pixels` and others) are read by `parseArgum
 
 The first view is cut from the full world, so a flaw in the world shows in both. The quay cranes of the port were decimated when the world was exported, and the machinery house on each crane's rear girder collapsed into a four-triangle wedge. `scripts/fix-port-crane-rear.mjs` removes those wedges from `scene.rest.glb` and adds a real house to each crane (cladding with panel ribs, orange frame bands, a door, a ladder and a roof rail) and a cabinet on each A-frame, using only materials already in the file. It also drops the loose pieces of the old yellow roof rail in the `safety_yellow` mesh (slivers and one tilted slab per crane that floated behind the house), also from a rest file that already has the houses. Run it on `scene.rest.glb`, then rebuild the first view with `build-hero-first-view.mjs`. Every new house is its own mesh: the crop cuts a mesh in place from the pose of the first node that uses it, so a mesh shared by several nodes loses the geometry the others need.
 
+## An animated world
+
+The chip fab is the one world with an animation clip: engineers walk, hoist vehicles and pods ride the rails. `src/hero-lab/loop/world.js` plays the clip from the first frame the world draws, with its time modulo the clip length (`loopedClipTime`), so a world that stays on screen longer than the clip, because the next one is still building, keeps moving instead of stopping on the last pose. That only works for a clip whose last pose is its first. `node scripts/hero-clip-loop.mjs <in.glb> <out.glb> --walk-source <UAL1_Standard.glb> --walk-clip Walk_Loop --engineer-speed 0.83` turns the one-way clip into a 24 s patrol that goes out and back with a rounded turn, faces each engineer along its path and plays the Quaternius Walk_Loop (CC0) at the speed that keeps the planted foot still. `tests/hero-chipfab-animation.test.js` checks the loop seam, the facing, the step and the slide on the committed GLB.
+
 ## Measuring
 
 ```sh

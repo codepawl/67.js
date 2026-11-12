@@ -1,0 +1,14 @@
+# Ordered WGSL module manifest for the Cycles-parity native kernel (`kernel: "cycles"`).
+# Blank lines and `#` comments are ignored; listed files are relative to `src/cycles/` and concatenated in order.
+
+abi.wgsl
+sampler.wgsl
+filter.wgsl
+camera.wgsl
+bsdf_diffuse.wgsl
+bsdf_microfacet.wgsl
+bsdf_glass.wgsl
+bsdf_coat.wgsl
+closure.wgsl
+lights.wgsl
+integrator.wgsl
