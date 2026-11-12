@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene, loadPhysicsEngine, needsPhysics } from '../src/agent-scene.js';
 import { AGENT_SCENE_CAPABILITIES } from '../src/agent-scene-capabilities.js';
+import { SETTLE_CAPABILITY_NOTE } from '../src/settle-notes.js';
 
 await loadPhysicsEngine();
 
@@ -67,5 +68,5 @@ test('settle operation errors name the field and what to pass', () => {
 test('a settle operation asks the host to load the physics engine and is listed in the capabilities', () => {
   assert.equal(needsPhysics([{ type: 'settle', settle: rubble }]), true);
   assert.ok(AGENT_SCENE_CAPABILITIES.operations.includes('settle'));
-  assert.match(AGENT_SCENE_CAPABILITIES.settle, /scene_apply settle/);
+  assert.match(SETTLE_CAPABILITY_NOTE, /scene_apply settle/);
 });

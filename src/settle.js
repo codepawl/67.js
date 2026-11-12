@@ -8,7 +8,7 @@ import { invalidField } from './field-error.js';
 import { bakePhysicsScene, loadPhysicsEngine } from './physics.js';
 import { createRandom } from './vegetation-geometry.js';
 
-export const SETTLE_LIMITS = Object.freeze({ maxProps: 256, maxColliders: 64, maxDuration: 6, maxAttemptsPerProp: 60 });
+export const SETTLE_LIMITS = Object.freeze({ maxProps: 256, maxColliders: 512, maxDuration: 6, maxAttemptsPerProp: 60 });
 const FRAMES_PER_SECOND = 60;
 const PLACEMENT_ATTEMPTS_BEFORE_RAISING = 20;
 const COLUMN_GROWTH = 1.15;
@@ -287,7 +287,8 @@ export function settleInstances(input) {
   const report = { requested: settings.instances?.length ?? settings.count, placed: props.length, skipped, fellOff: 0, unsettled: 0, duration: settings.duration };
   if (!props.length) return { instances: [], report };
   const frameCount = Math.round(settings.duration * FRAMES_PER_SECOND) + 1;
-  const scene = bakePhysicsScene(physicsDefinition(settings, props), { frameCount, timestep: 1 / FRAMES_PER_SECOND });
+  const definition = physicsDefinition(settings, props);
+  const scene = bakePhysicsScene(definition, { frameCount, timestep: 1 / FRAMES_PER_SECOND, maxBodies: definition.bodies.length, maxColliders: definition.colliders.length });
   const finalPose = scene.sample(scene.duration);
   const lowestSurface = Math.min(...settings.colliders.map(collider => (collider.shape === 'ball' ? collider.translation[1] - collider.radius : collider.translation[1] - Math.hypot(...collider.halfExtents))));
   const instances = [];

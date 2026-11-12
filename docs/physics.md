@@ -582,7 +582,7 @@ const { instances, report } = settleInstances({
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `colliders` | required | Up to 64 `box` ({ translation, rotation, halfExtents }) or `ball` ({ translation, radius }) shapes to land on. List earlier settled props here to stack on them. |
+| `colliders` | required | Up to 512 `box` ({ translation, rotation, halfExtents }) or `ball` ({ translation, radius }) shapes to land on. List earlier settled props here to stack on them. |
 | `shape` | `box` | Prop shape, `box` or `ball`. |
 | `area`, `count` or `density` | required | Where to scatter, and how many (256 at most) or how many per square metre. |
 | `instances` | none | Instead of `area`, `count`, `density` and `size`: your own start poses `[{ translation, rotation, size }]` (size is three edge lengths for a box, a diameter for a ball). |
