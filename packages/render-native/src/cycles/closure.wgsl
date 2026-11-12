@@ -94,11 +94,17 @@ fn texture_fetch_texel(desc: TextureDescriptor, ix: i32, iy: i32, format: u32) -
     let rg = unpack2x16float(texture_texels[desc.data_offset + texel_idx]);
     return vec4<f32>(rg.x, rg.y, 0.0, 1.0);
   }
-  let rgba = unpack4x8unorm(texture_texels[desc.data_offset + texel_idx]);
+  return unpack4x8unorm(texture_texels[desc.data_offset + texel_idx]);
+}
+
+// An 8-bit sRGB map is filtered on its stored values and decoded after, the way Blender Cycles reads a byte image. Decoding
+// each texel first and filtering after makes every blended texel brighter (the decode curve is convex): 2 to 5 percent of the
+// mean of a checker map at texel scale (#1030).
+fn texture_decode_filtered(color: vec4<f32>, format: u32) -> vec4<f32> {
   if (format == 1u) {
-    return vec4<f32>(closure_srgb_to_linear(rgba.rgb), rgba.a);
+    return vec4<f32>(closure_srgb_to_linear(color.rgb), color.a);
   }
-  return rgba;
+  return color;
 }
 
 // The one texture sampler of the kernel: shading (closure_sample_texture), bump, and the alpha tests of the integrator all
@@ -133,7 +139,7 @@ fn texture_sample(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>) -> vec
   if (is_nearest) {
     let ix = clamp(i32(floor(u_wrapped * f32(w_i))), 0, w_i - 1);
     let iy = clamp(i32(floor(v_wrapped * f32(h_i))), 0, h_i - 1);
-    return texture_fetch_texel(desc, ix, iy, format);
+    return texture_decode_filtered(texture_fetch_texel(desc, ix, iy, format), format);
   }
 
   let fx = u_wrapped * f32(w_i) - 0.5;
@@ -151,7 +157,7 @@ fn texture_sample(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>) -> vec
   let c10 = texture_fetch_texel(desc, ix1, iy0, format);
   let c01 = texture_fetch_texel(desc, ix0, iy1, format);
   let c11 = texture_fetch_texel(desc, ix1, iy1, format);
-  return mix(mix(c00, c10, tx), mix(c01, c11, tx), ty);
+  return texture_decode_filtered(mix(mix(c00, c10, tx), mix(c01, c11, tx), ty), format);
 }
 
 fn closure_sample_texture(tex_index: i32, point: ptr<function, ShadingPoint>) -> vec4<f32> {

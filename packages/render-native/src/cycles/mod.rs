@@ -1132,6 +1132,18 @@ mod tests {
         assert!(kernel.contains("texture_sample(material.alpha_tex, uv0, uv1).r"));
     }
 
+    /// Blender Cycles filters the stored values of an 8-bit sRGB image and decodes the blend. Decoding each texel before the
+    /// blend reads 2 to 5 percent too bright on a checker map (#1030).
+    #[test]
+    fn an_srgb_map_is_decoded_after_the_filter_and_not_per_texel() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        let fetch_start = kernel.find("fn texture_fetch_texel(").expect("the shared texel fetch exists");
+        let fetch_end = fetch_start + kernel[fetch_start..].find("\n}").expect("the fetch function ends");
+        assert!(!kernel[fetch_start..fetch_end].contains("closure_srgb_to_linear"));
+        assert!(kernel.contains("texture_decode_filtered(mix(mix(c00, c10, tx), mix(c01, c11, tx), ty), format)"));
+        assert!(kernel.contains("texture_decode_filtered(texture_fetch_texel(desc, ix, iy, format), format)"));
+    }
+
     #[test]
     fn the_bootstrap_entry_samples_alpha_through_the_shared_sampler() {
         let bootstrap = include_str!("bootstrap_main.wgsl");
