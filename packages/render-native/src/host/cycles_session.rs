@@ -24,7 +24,7 @@ use crate::host::session::{
     validate_render_extent, with_cycles_cache_on, CyclesDeviceContext, CyclesDispatchTarget, CyclesTrace, DispatchPlan,
     PipelineKey,
 };
-use crate::host::textures::{create_cycles_film, create_cycles_parameters, upload_cycles_scene_tables};
+use crate::host::textures::{check_texture_pool_budget, create_cycles_film, create_cycles_parameters, upload_cycles_scene_tables};
 use crate::NativeTraceInputV2;
 
 const KERNEL_PARAMS_WIDTH_BYTE: usize = 8;
@@ -285,6 +285,8 @@ impl CyclesSession {
         validate_cycles_input(input)?;
         check_counts_match_kernel_params(input)?;
         let context = get_cycles_device_context()?;
+        let pool_limit_bytes = u64::from(context.device.limits().max_storage_buffer_binding_size);
+        check_texture_pool_budget(input.texture_texels.len() as u64 * 4, pool_limit_bytes)?;
         let scene_specialization = scan_scene_specialization(input);
         let setup_seconds = setup_started.elapsed().as_secs_f64();
 

@@ -82,78 +82,6 @@ fn int_resolve_material_index(instance: InstanceRecord, triangle: TriangleRecord
   return select(instance.material_override, triangle.material_index, instance.material_override == INVALID_INDEX);
 }
 
-fn int_wrap_coord(coord: i32, extent: i32, wrap_mode: u32) -> u32 {
-  if (wrap_mode == 1u) {
-    return u32(clamp(coord, 0, extent - 1));
-  }
-  if (wrap_mode == 2u) {
-    let period = 2 * extent;
-    let wrapped = ((coord % period) + period) % period;
-    let mirrored = select(wrapped, period - 1 - wrapped, wrapped >= extent);
-    return u32(clamp(mirrored, 0, extent - 1));
-  }
-  return u32(((coord % extent) + extent) % extent);
-}
-
-fn int_fetch_texel_channel(descriptor: TextureDescriptor, x: u32, y: u32, channel: u32) -> f32 {
-  let format = descriptor.format_and_sampler & 0xFFu;
-  let texel_index = y * descriptor.width + x;
-  if (format == 0u || format == 1u) {
-    let rgba = unpack4x8unorm(texture_texels[descriptor.data_offset + texel_index]);
-    return select(rgba.w, rgba.x, channel == 0u);
-  }
-  if (format == 2u) {
-    let chan_offset = select(3u, 0u, channel == 0u);
-    return bitcast<f32>(texture_texels[descriptor.data_offset + texel_index * 4u + chan_offset]);
-  }
-  if (format == 3u && channel == 0u) {
-    return unpack2x16float(texture_texels[descriptor.data_offset + texel_index]).x;
-  }
-  return 1.0;
-}
-
-fn int_sample_texture_channel(texture_index: i32, uv0: vec2<f32>, uv1: vec2<f32>, channel: u32) -> f32 {
-  if (texture_index < 0 || u32(texture_index) >= kernel_params.texture_count) {
-    return 1.0;
-  }
-  let descriptor = texture_descriptors[u32(texture_index)];
-  if (descriptor.width == 0u || descriptor.height == 0u) {
-    return 1.0;
-  }
-  let use_uv1 = (descriptor.format_and_sampler & (1u << 21u)) != 0u;
-  let base_uv = select(uv0, uv1, use_uv1);
-  let transformed_uv = base_uv * descriptor.uv_scale + descriptor.uv_offset;
-  let wrap_u = (descriptor.format_and_sampler >> 16u) & 3u;
-  let wrap_v = (descriptor.format_and_sampler >> 18u) & 3u;
-  let nearest = (descriptor.format_and_sampler & (1u << 20u)) != 0u;
-  let width_i = i32(descriptor.width);
-  let height_i = i32(descriptor.height);
-
-  if (nearest) {
-    let col = int_wrap_coord(i32(floor(transformed_uv.x * f32(descriptor.width))), width_i, wrap_u);
-    let row = int_wrap_coord(i32(floor(transformed_uv.y * f32(descriptor.height))), height_i, wrap_v);
-    return int_fetch_texel_channel(descriptor, col, row, channel);
-  }
-
-  let px = transformed_uv.x * f32(descriptor.width) - 0.5;
-  let py = transformed_uv.y * f32(descriptor.height) - 0.5;
-  let x0 = floor(px);
-  let y0 = floor(py);
-  let fx = px - x0;
-  let fy = py - y0;
-  var value_sum = 0.0;
-  for (var corner = 0u; corner < 4u; corner += 1u) {
-    let dx = i32(corner & 1u);
-    let dy = i32(corner >> 1u);
-    let col = int_wrap_coord(i32(x0) + dx, width_i, wrap_u);
-    let row = int_wrap_coord(i32(y0) + dy, height_i, wrap_v);
-    let wx = select(1.0 - fx, fx, dx == 1);
-    let wy = select(1.0 - fy, fy, dy == 1);
-    value_sum += int_fetch_texel_channel(descriptor, col, row, channel) * (wx * wy);
-  }
-  return value_sum;
-}
-
 fn int_evaluate_surface_opacity(triangle: TriangleRecord, material: MaterialRecord, barycentrics: vec2<f32>) -> f32 {
   if (material.alpha_mode == ALPHA_MODE_OPAQUE) {
     return 1.0;
@@ -174,10 +102,10 @@ fn int_evaluate_surface_opacity(triangle: TriangleRecord, material: MaterialReco
     (triangle.flags & TRIANGLE_FLAG_HAS_UV1) != 0u,
   );
   if (material.base_color_tex >= 0) {
-    opacity *= int_sample_texture_channel(material.base_color_tex, uv0, uv1, 3u);
+    opacity *= texture_sample(material.base_color_tex, uv0, uv1).a;
   }
   if (material.alpha_tex >= 0) {
-    opacity *= int_sample_texture_channel(material.alpha_tex, uv0, uv1, 0u);
+    opacity *= texture_sample(material.alpha_tex, uv0, uv1).r;
   }
   return clamp(opacity, 0.0, 1.0);
 }

@@ -289,7 +289,7 @@ test('packMaterialRecordV2 and texture packing follow Principled v2 flags and de
   const mat1 = viewRecord(v2.materials, STRUCT_STRIDES_V2.material, 1);
   assert.equal(mat1.u32[49], 1, 'ALPHA_MODE_MASK = 1');
   assert.equal(mat1.i32[52], 0, 'shared base_color_tex');
-  assert.equal(mat1.i32[62], 0, 'alpha_tex points to base_color_tex');
+  assert.equal(mat1.i32[62], -1, 'the base colour map is not also the alpha map: its alpha channel is read as part of base_color_tex');
 
   // Cycles clamp semantics: multiplied by 3.0.
   const kp = viewRecord(v2.kernelParams, STRUCT_STRIDES_V2.kernelParams);
