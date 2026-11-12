@@ -64,5 +64,18 @@ export function prepareFileScene({ configPath, root }) {
     if (typeof description[field] !== 'string') throw new Error(`scene.json needs a "${field}" path.`);
     description[field] = route(description[field]);
   }
+  routeStagedParts(description, route);
   return { description, assets };
+}
+
+// A staged scene lists its other parts in "glbRest", routed like "glb". The first-view fields only speed up the page's first
+// frame, so a headless render drops them.
+function routeStagedParts(description, route) {
+  if (description.glbRest !== undefined) {
+    const isPathList = Array.isArray(description.glbRest) && description.glbRest.every(path => typeof path === 'string');
+    if (!isPathList) throw new Error('scene.json "glbRest" must be a list of glb paths.');
+    description.glbRest = description.glbRest.map(route);
+  }
+  delete description.hdriPreview;
+  delete description.glbFirstView;
 }

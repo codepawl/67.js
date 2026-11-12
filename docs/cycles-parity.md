@@ -1011,9 +1011,9 @@ Picture (Cook left, Cycles right, 1024 samples, depth of field on, grey diffuse)
 
 [`classroom_bridge.py`](../bench/cycles-parity/classroom_bridge.py) runs inside Blender 5.3 on the opened scene, with auto-run scripts disabled (`blender -b --disable-autoexec classroom.blend --python ... -- export <dir>`). `export` writes the evaluated scene in the JSON format the other parity benches read: one geometry per mesh datablock and modifier stack (so linked copies share it), one part per instance with its world matrix, the camera, the lights, the world and one grey material (base 0.8, roughness 1, as the harness defines). `render-cycles.py` builds the Cycles side from that same JSON, so both renderers see exactly the same scene. `reference` renders the original `.blend` in Cycles with the same drops and the same override, to measure the bridge itself.
 
-[`run-classroom-parity.py`](../bench/cycles-parity/run-classroom-parity.py) (started by `run-classroom-parity.sh`) does everything in one call: download once, export, Cook and Cycles renders, comparisons, depth, a figure and the diagnostic experiments. Small changes elsewhere in `bench/`: `trace-native.mjs --instancing` keeps shared geometry as instances (through `instanced-scene-in-batches.mjs`, below), parts may carry `rayVisibility` (read by `render-cycles.py` and by Cook's instance visibility bits), and `render-cycles.py` reads `environment.sunAngularRadius` as Cook does.
+[`run-classroom-parity.py`](../bench/cycles-parity/run-classroom-parity.py) (started by `run-classroom-parity.sh`) does everything in one call: download once, export, Cook and Cycles renders, comparisons, depth, a figure and the diagnostic experiments. Small changes elsewhere in `bench/`: `trace-native.mjs --instancing` keeps shared geometry as instances (through `instanced-scene.mjs`, below), parts may carry `rayVisibility` (read by `render-cycles.py` and by Cook's instance visibility bits), and `render-cycles.py` reads `environment.sunAngularRadius` as Cook does.
 
-`buildTraceScene` refuses an instanced scene with more than 400,000 unique triangles, counted once per shared geometry, and the Classroom holds 427,769. The kernel has no such limit. `instanced-scene-in-batches.mjs` builds the scene in two batches that each fit and joins their instance lists, so `src/` is untouched (tests: `tests/cycles-parity-instanced-batches.test.js`, `tests/cycles-parity-instancing-option.test.js`).
+The Classroom holds 427,769 unique triangles, above the 400,000 of the CPU and WebGL tracers. `instanced-scene.mjs` builds it directly with the native bound (`maximumTriangles`, see "Triangle bound of a native scene" below); `buildTraceScene` reads the parts' `rayVisibility` itself (#1054); the two-batch workaround of the first slice is gone (tests: `tests/cycles-parity-instanced-scene.test.js`, `tests/cycles-parity-instancing-option.test.js`). The instance order is now the part order, as in a flattened scene, where the batches listed one batch after the other. This has not been re-run against Cycles `[not measured]`: the Classroom needs Blender and its download.
 
 ### Counts `[measured]`
 
@@ -1380,3 +1380,34 @@ uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-par
 ```
 
 `make-sphere-light-scenes.mjs` writes the lamp scenes and `run-sphere-light-parity.py` renders them with Cook and with Cycles (Soft Falloff default and off) and prints one line per scene. The scenes hidden from shadow rays need `--instancing` in `trace-native.mjs` and `rayVisibility` in `render-cycles.py`, which come with the Classroom bridge (#896). `tests/cycles-sphere-light-parity.test.js` pins the default and the closed form (floor radiance `albedo / pi * intensity / d^2` for radius 0, 0.18 and 0.5 m).
+
+## Triangle bound of a native scene (#1041)
+
+`buildTraceScene` bounds a scene at 400,000 triangles for the CPU and WebGL tracers, which hold the triangles in JavaScript and in browser memory. A scene built for the native tracer asks for another bound with `maximumTriangles`, an integer from 1 to `MAX_NATIVE_TRACE_TRIANGLES` (4,000,000, the size the large sequence section measured on the card). Two costs are bounded apart: the unique triangles (once per shared geometry, or all triangles of a flattened scene) by `maximumTriangles`, and the triangles with every copy counted by four times that, 16,000,000 at the ceiling. The second bound is a guard and not a measured edge `[inferred: the kernel builds one bottom-level structure per geometry, so a copy costs an instance record]`. A render job on the Cycles-matching kernel passes 1,500,000 (`NATIVE_JOB_MAXIMUM_TRIANGLES` in `scripts/native-bake-page.js`); the legacy kernel keeps 400,000.
+
+A scene under 400,000 triangles packs to the same bytes as before `[measured]`: the SHA-256 of every table of the lit-interior scene (flattened, as v1 tables and as v2 job tables) and of an instanced scene is equal before the change, after it, and with the option set (`bench/cycles-parity/packed-table-hashes.mjs`).
+
+Why the job stops at 1,500,000 and the library at 4,000,000: the job page encodes each packed table as one base64 string, and V8 refuses a string above 536,870,888 characters. The triangle table is about 299 characters per triangle, so it breaks near 1.79 million unique triangles `[inferred from the measurements below]`. A 2,000,000 triangle scene aborted Node in `btoa` and a 4,000,000 one threw `RangeError: Invalid string length`. 1,500,000 leaves 17% under that. Packing in Node for the package API has no such string.
+
+`bench/cycles-parity/native-cap-measure.mjs` builds four rippled grids (two of them used a second time) and packs them the way the job page does, one process per case. It ran on an RTX 4090 box shared with another job, one run per row, so the times are indicative `[measured]`. Memory is Node's `[a Chrome tab has not been measured]`.
+
+| unique triangles | path | scene build s | pack s | base64 s | packed MB | base64 MB (largest table, characters) | JS heap MB | peak RSS MB |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 401,408 | instanced | 0.01 | 1.0 | 3.3 | 85.8 | 114 (119.9 M) | 749 | 1,164 |
+| 401,408 | flattened | 0.59 | 1.3 | 3.1 | 85.8 | 114 (119.9 M) | 748 | 1,284 |
+| 1,002,528 | instanced | 0.02 | 2.0 | 7.8 | 214.2 | 286 (299.4 M) | 1,856 | 2,617 |
+| 1,002,528 | flattened | 1.5 | 3.0 | 8.0 | 214.2 | 286 (299.4 M) | 1,855 | 2,895 |
+| 1,499,912 | instanced | 0.02 | 3.3 | 12.3 | 320.4 | 427 (448.0 M) | 2,773 | 3,817 |
+| 1,499,912 | flattened | 2.2 | 3.5 | 12.1 | 320.4 | 427 (448.0 M) | 2,773 | 4,222 |
+| 2,000,000 | instanced | 0.03 | 4.5 | aborts | 427.3 | over the string limit | 2,738 (no base64) | 3,444 (no base64) |
+| 3,998,792 | instanced | 0.05 | 8.1 | fails | 854.2 | over the string limit | 5,381 (no base64) | 6,677 (no base64) |
+
+Tracing the packed input on the card (480 by 270, 16 samples, GPU memory of the process from nvidia-smi, no base64 step):
+
+| unique triangles | instances | traced s | acceleration build s | upload s | GPU memory MB |
+| --- | --- | --- | --- | --- | --- |
+| 1,002,528 | 7 | 0.54 | 0.03 | 0.04 | 585 |
+| 2,000,000 | 7 | 0.95 | 0.10 | 0.13 | 1,235 |
+| 3,998,792 | 7 | 1.31 | 0.13 | 0.55 | 1,961 |
+
+Same picture: the 1,002,528 triangle scene (four meshes, two of them shared by a second instance) exported through the job path as instances, and again as a flattened scene of the same parts (about 1.5 million triangles after expansion), gave the same PNG, SHA-256 `165939ce…01404`, both times. The instanced export took 10.7 s and 2.6 GB of peak RSS; the flattened one 19.5 s and 4.2 GB.
