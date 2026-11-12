@@ -479,7 +479,7 @@ Time to equal error, same interpolation as above `[measured and interpolated]`:
 
 ### Noise gap on `many-lights-500` (#966)
 
-At equal samples Cook carried 9 percent more error than Cycles on `many-lights-500` (relMSE 0.002174 against 0.002001 at 1024 spp) and less on `lit-interior`. All runs below are Modal containers (NVIDIA A10 or Tesla T4, named per table), seed 3 and 4 for both renderers, error against the Cycles 4096 spp seed 1 reference of the same scene, Cycles 5.3.0 on OptiX in the same container `[measured]`.
+At equal samples Cook carried 9 percent more error than Cycles on `many-lights-500` (relMSE 0.002174 against 0.002001 at 1024 spp) and less on `lit-interior`. All runs below are Modal containers (NVIDIA A10), seed 3 and 4 for both renderers, error against the Cycles 4096 spp seed 1 reference of the same scene, Cycles 5.3.0 on OptiX in the same container `[measured]`.
 
 **Where it lived.** Variants of the scene keep one emitter kind (the other lights are dropped, the other emissive parts get a zero-emission copy of their material; same positions and seed). Cycles references at 4096 spp seed 1 were rendered per variant. Cook relMSE over Cycles relMSE, before the fix, mean of seeds 3 and 4 (A10):
 
@@ -497,36 +497,62 @@ The whole gap sat in emissive geometry; point and spot lights were already 7 to 
 
 **Ruled out** by measurement: a joint three-dimensional light sample as in Cycles (`PRNG_LIGHT`: z picks the emitter, xy the point; quads 0.011271 against 0.011272 at 256 spp), the tree structure (the 50-triangle scene has the same emitter count in both trees and showed the same gap), flat instead of tree selection (worse: 0.01507 against 0.01125 on the quads) and Cycles' spherical triangle sampling (its switch compares the longest edge with the plane distance divided by twice the area, so it only acts within 4 to 7 cm of a lamp).
 
-**After the fix**, Cook over Cycles `[measured]`:
+**After the fix**, Modal NVIDIA A10 (one container for every number below: the linear rule is the same binary with a measurement switch, `--clamp-indirect 12345` in a build that is not committed, so the only difference is the survival rule), seed 3, three rounds interleaved (relMSE does not vary between rounds), Cycles 5.3.0 OptiX in the same container `[measured]`:
 
-| scene | spp | Cook relMSE | Cycles relMSE | Cook / Cycles | before |
+| scene | spp | Cook relMSE before | Cook relMSE after | Cycles relMSE | after / Cycles | before / Cycles |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `many-lights-500` | 64 | 0.030592 | 0.023719 | 0.027925 | 0.849 | 1.096 |
+| `many-lights-500` | 256 | 0.007630 | 0.005939 | 0.006984 | 0.850 | 1.092 |
+| `many-lights-500` | 1024 | 0.002174 | 0.001751 | 0.002001 | 0.875 | 1.086 |
+| `lit-interior` | 64 | 0.012832 | 0.010754 | 0.014834 | 0.725 | 0.865 |
+| `lit-interior` | 256 | 0.002741 | 0.002198 | 0.003103 | 0.709 | 0.883 |
+| `lit-interior` | 1024 | 0.000656 | 0.000521 | 0.000771 | 0.676 | 0.850 |
+| `glass` | 64 | 0.000962 | 0.000864 | 0.002499 | 0.346 | 0.385 |
+| `glass` | 256 | 0.000265 | 0.000243 | 0.000532 | 0.456 | 0.499 |
+| `glass` | 1024 | 0.000095 | 0.000089 | 0.000119 | 0.747 | 0.794 |
+| `outdoor-hdri` | 64 | 0.000198 | 0.000196 | 0.001181 | 0.166 | 0.168 |
+| `outdoor-hdri` | 256 | 0.000051 | 0.000050 | 0.000169 | 0.297 | 0.300 |
+| `outdoor-hdri` | 1024 | 0.000010 | 0.000009 | 0.000026 | 0.364 | 0.368 |
+
+Per emitter kind on `many-lights-500` (the kind variants as above, mean of seeds 3 and 4, one round) `[measured]`:
+
+| kind (count) | spp | before / Cycles | after / Cycles | error after / before | time per sample after / before |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `many-lights-500` | 64 | 0.02368 | 0.02801 | 0.845 | 1.090 |
-| `many-lights-500` | 256 | 0.005960 | 0.006987 | 0.853 | 1.094 |
-| `many-lights-500` | 1024 | 0.001751 | 0.002001 | 0.875 | 1.087 |
-| `lit-interior` | 64 | 0.010772 | 0.014786 | 0.729 | 0.870 |
-| `lit-interior` | 256 | 0.002206 | 0.003106 | 0.710 | 0.881 |
-| `lit-interior` | 1024 | 0.000521 | 0.000771 | 0.676 | 0.851 |
-| emissive quads only | 64 | 0.030052 | 0.029906 | 1.005 | 1.476 |
-| emissive quads only | 256 | 0.007684 | 0.007648 | 1.005 | 1.474 |
-| emissive triangles only | 64 | 0.086145 | 0.077559 | 1.111 | 1.490 |
-| emissive triangles only | 256 | 0.021867 | 0.019738 | 1.108 | 1.465 |
+| point lights (200) | 64 | 0.914 | 0.753 | 0.823 | 1.016 |
+| point lights (200) | 256 | 0.919 | 0.761 | 0.828 | 1.079 |
+| spot lights (150) | 64 | 0.926 | 0.795 | 0.859 | 1.093 |
+| spot lights (150) | 256 | 0.939 | 0.801 | 0.853 | 1.091 |
+| emissive quads (100, 200 triangles) | 64 | 1.476 | 1.005 | 0.681 | 0.996 |
+| emissive quads (100, 200 triangles) | 256 | 1.474 | 1.005 | 0.682 | 1.076 |
+| emissive triangles (50) | 64 | 1.490 | 1.111 | 0.746 | 1.056 |
+| emissive triangles (50) | 256 | 1.465 | 1.108 | 0.756 | 1.059 |
+| all four, the scene | 64 | 1.090 | 0.845 | 0.776 | 1.096 |
+| all four, the scene | 256 | 1.094 | 0.853 | 0.780 | 1.099 |
 
-The mean image ratio against the reference moved by less than 0.05 percent on every row (`many-lights-500` 1.0009 before and after, `lit-interior` 1.0033). The 4096 spp images of six of the seven parity scenes were rendered with the fix and match the table above to the digits shown (mean ratios and relMSE; `lit-interior` relMSE 0.000226 against 0.00026); the seventh, `many-lights-500` at 4096 spp, and the FLIP and tile gates were not run for this change (the Modal workspace was disabled during the run).
+Point and spot lights improve by 14 to 18 percent as well, so with the fix every emitter kind is at or below Cycles except the 50 triangles (see "Still open"). The mean image ratio against the reference did not move (`many-lights-500` 1.0009 before and after). At 4096 spp, seed 1, on the same A10 with the fix: all nine scenes (the seven parity scenes, `area-shapes` and `transparent-shadow`) pass every gate (mean ratio, 8 x 8 tiles, relMSE and FLIP). The tightest values: per-channel mean ratio 1.0034 on `lit-interior` (limit 2 percent), lowest tile ratio 0.9823 on `glass` (a tile counts when within 5 percent; 64 of 64 count on every scene but `spot-area`, where 47 of 47 do), FLIP LDR 0.0169 on `many-lights-500` against its ceiling 0.0373. `many-lights-500` at 4096 spp has relMSE 0.000728 (0.000832 before the fix) and `lit-interior` 0.000226. Checks in the same run: `cargo test` 32 passed, 0 failed; `node --test` of the native, kernel parity and many-lights tests 89 tests, 88 passed, 1 skipped, 0 failed; lobe probes and furnace scenes pass `[measured]`.
 
-**Cost.** Longer paths cost time. Same container, Tesla T4, baseline and trial interleaved, one round, `samplingSeconds` `[measured]`:
+![many-lights-500 at 64 samples before and after the fix, next to Blender Cycles at 4096 samples (centre crop, same exposure)](cook-roulette-comparison.jpg)
 
-| scene | spp | linear rule, relMSE and s | square root, relMSE and s | error | time |
-| --- | ---: | --- | --- | ---: | ---: |
-| `lit-interior` | 64 | 0.012832, 2.68 | 0.010754, 3.01 | -16 % | +12 % |
-| `lit-interior` | 256 | 0.002741, 9.73 | 0.002198, 11.11 | -20 % | +14 % |
-| `lit-interior` | 1024 | 0.000656, 38.52 | 0.000521, 43.47 | -21 % | +13 % |
-| `many-lights-500` | 64 | 0.030592, 8.15 | 0.023719, 8.71 | -22 % | +7 % |
-| `many-lights-500` | 256 | 0.007630, 31.29 | 0.005939, 34.41 | -22 % | +10 % |
+**Cost.** Longer paths cost time per sample, and the error falls more than the time rises. Time to equal error is time per sample times error (error falls as one over the sample count); columns 5 to 7 are that product, so below 1 means faster for the same error `[measured, derived]`:
 
-Error falls faster than time rises, so time to equal error improves by about 12 to 17 percent on both scenes `[inferred from one round]`.
+| scene | spp | time per sample after / before | error after / before | time to equal error after / before | after, time to equal error / Cycles | before, time to equal error / Cycles |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `lit-interior` | 64 | 1.099 | 0.838 | 0.921 | 0.69 | 0.75 |
+| `lit-interior` | 256 | 1.089 | 0.802 | 0.873 | 0.68 | 0.78 |
+| `lit-interior` | 1024 | 1.087 | 0.795 | 0.864 | 0.65 | 0.75 |
+| `many-lights-500` | 64 | 1.093 | 0.775 | 0.847 | 0.99 | 1.17 |
+| `many-lights-500` | 256 | 1.095 | 0.778 | 0.853 | 1.00 | 1.17 |
+| `many-lights-500` | 1024 | 1.098 | 0.805 | 0.885 | 1.04 | 1.17 |
+| `glass` | 64 | 1.039 | 0.899 | 0.934 | 0.44 | 0.47 |
+| `glass` | 256 | 1.044 | 0.914 | 0.955 | 0.60 | 0.63 |
+| `glass` | 1024 | 1.041 | 0.941 | 0.980 | 0.98 | 1.00 |
+| `outdoor-hdri` | 64 | 0.996 | 0.990 | 0.986 | 0.11 | 0.11 |
+| `outdoor-hdri` | 256 | 1.013 | 0.991 | 1.004 | 0.19 | 0.19 |
+| `outdoor-hdri` | 1024 | 1.013 | 0.988 | 1.001 | 0.23 | 0.23 |
 
-**Still open.** The 50-triangle variant alone stays 11 percent above Cycles after the fix (uniform over the image, not near the lamps); the full scene, the quads and `lit-interior` are at or below Cycles. Its cause was not isolated; the 1.19 with direct light only cannot come from roulette, which does not act there, and was not re-measured with the fix. Point and spot lights were not measured again after the fix.
+The fix is a net win on the three scenes lit mostly by indirect light (`many-lights-500` 11 to 15 percent less time for the same error, `lit-interior` 8 to 14 percent, `glass` 2 to 7 percent) and neutral on `outdoor-hdri` (a sun and sky scene whose paths end by escaping, so roulette hardly acts). Against Cycles, `many-lights-500` moves from 17 percent slower at equal error to level (0.99 at 64 and 256 spp, 1.04 at 1024 spp, so 4 percent slower there); `lit-interior` stays 1.5 times faster and `outdoor-hdri` 4 to 9 times faster. `glass` is faster than Cycles at 64 and 256 spp and level at 1024. The relMSE floor from the reference's own noise flattens the ratio at 1024 spp on the low-error scenes `[inferred]`. An earlier one-round T4 run gave +7 to +14 percent time per sample; this A10 run gives +9 to +10 percent on the two emissive scenes, +4 on `glass` and 0 to +1 on `outdoor-hdri`.
+
+**Still open.** The 50-triangle variant alone stays 11 percent above Cycles after the fix (uniform over the image, not near the lamps); the scene as a whole, the quads, the points, the spots and `lit-interior` are at or below Cycles. Its cause was not isolated; the 1.19 with direct light only cannot come from roulette, which does not act there, and was not re-measured with the fix. The issue's second criterion (within 3 percent of Cycles at 64, 256 and 1024 spp) is met on the full scene, which is now 12 to 15 percent below Cycles' error.
 
 ### Final gates for #895
 
