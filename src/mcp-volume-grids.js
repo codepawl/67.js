@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setVolumeGridLoader, VOLUME_GRID_MAX_BYTES } from './volume-grid.js';
 
@@ -13,13 +13,26 @@ export function installVolumeGridFiles(directory = process.env[GRID_DIRECTORY_VA
   setVolumeGridLoader(name => {
     if (!GRID_FILE_NAME.test(name)) return null;
     const path = resolve(root, name);
-    let size;
+    let descriptor;
     try {
-      size = statSync(path).size;
+      descriptor = openSync(path, 'r');
     } catch {
       return null;
     }
-    if (size > VOLUME_GRID_MAX_BYTES + 4096) throw new RangeError(`grid file "${name}" is ${size} bytes, over the ${VOLUME_GRID_MAX_BYTES} byte limit; convert it with a lower --max-resolution`);
-    return new Uint8Array(readFileSync(path));
+    try {
+      // The size comes from the open file, so the file checked is the file read.
+      const size = fstatSync(descriptor).size;
+      if (size > VOLUME_GRID_MAX_BYTES + 4096) throw new RangeError(`grid file "${name}" is ${size} bytes, over the ${VOLUME_GRID_MAX_BYTES} byte limit; convert it with a lower --max-resolution`);
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      while (offset < size) {
+        const read = readSync(descriptor, bytes, offset, size - offset, offset);
+        if (read === 0) break;
+        offset += read;
+      }
+      return offset === size ? bytes : bytes.subarray(0, offset);
+    } finally {
+      closeSync(descriptor);
+    }
   });
 }

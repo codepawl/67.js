@@ -121,7 +121,7 @@ export function decodeVolumeGrid(source, label = 'volume grid') {
   if (header.size !== undefined && (!Array.isArray(header.size) || header.size.length !== 3 || !header.size.every(extent => Number.isFinite(extent) && extent > 0))) {
     throw new TypeError(`${label} header size must be three positive numbers`);
   }
-  const channels = {};
+  const channels = Object.create(null);
   names.forEach((name, index) => {
     const values = new Uint16Array(voxels);
     for (let voxel = 0; voxel < voxels; voxel++) values[voxel] = view.getUint16(dataStart + (index * voxels + voxel) * 2, true);
@@ -162,10 +162,14 @@ const decodedByGrid = new WeakMap();
 export function volumeGridFloats(grid) {
   let floats = decodedByGrid.get(grid);
   if (floats) return floats;
-  floats = {};
+  floats = Object.create(null);
   const table = new Float32Array(65536);
   for (let bits = 0; bits < 65536; bits++) table[bits] = halfToFloat(bits);
-  for (const [name, values] of Object.entries(grid.channels)) floats[name] = Float32Array.from(values, bits => table[bits]);
+  // Only the known channel names become keys, so a name read from a grid file can never write another property.
+  for (const name of VOLUME_GRID_CHANNELS) {
+    const values = grid.channels[name];
+    if (values) floats[name] = Float32Array.from(values, bits => table[bits]);
+  }
   decodedByGrid.set(grid, floats);
   return floats;
 }
