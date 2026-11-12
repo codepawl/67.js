@@ -172,7 +172,7 @@ function markerCentroid(frame, width, height) {
   return { x: sumX / count, y: sumY / count, count };
 }
 
-test('a fixed camera stays locked while a fractured wall flies apart', async () => {
+test('a fixed camera stays locked while a fractured wall flies apart', { skip: !hasFfmpeg && 'ffmpeg is not installed' }, async () => {
   const width = 320;
   const height = 180;
   const recipe = sceneWithGround([
@@ -189,7 +189,7 @@ test('a fixed camera stays locked while a fractured wall flies apart', async () 
     ] } },
     { type: 'fracture-node', node: 'wall', seed: 7, cells: 64, strength: 1, impact: [0, 0, 0.2], impactRadius: 0.8 },
   ] });
-  const result = await submitVideo(sessionId, { width, height, fps: 6, motion: { start: 0 } });
+  const result = await submitJob(sessionId, 'video', { width, height, fps: 6, motion: { start: 0 } });
   const frames = decodedFrames(result.artifacts[0].path, width, height);
   const first = markerCentroid(frames[0], width, height);
   const last = markerCentroid(frames[frames.length - 1], width, height);
