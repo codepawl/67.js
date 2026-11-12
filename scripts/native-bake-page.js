@@ -49,6 +49,35 @@ export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
 // The instance bound of the same export (see buildTraceScene's maximumInstances).
 export const NATIVE_JOB_MAXIMUM_INSTANCES = 500_000;
 
+// Every table of the export travels as base64 inside one evaluate result, one JSON string, and V8 refuses a string above
+// 536,870,888 characters. The bounds above are independent (about 299 characters per unique triangle, 555 per instance), so the
+// export checks the sum of its real tables against this share of the limit; the rest is the JSON around the tables.
+export const V8_MAXIMUM_STRING_LENGTH = 536_870_888;
+export const NATIVE_EXPORT_MAXIMUM_CHARACTERS = Math.floor(V8_MAXIMUM_STRING_LENGTH * 0.95);
+
+/** The base64 length of tables of these byte lengths: `4 * ceil(bytes / 3)` each, summed. */
+export function encodedExportLength(byteLengths) {
+  return byteLengths.reduce((total, bytes) => total + 4 * Math.ceil(bytes / 3), 0);
+}
+
+/**
+ * Refuses tables, given as `[name, byteLength]` pairs, that would not fit one message. The error carries `exportTooLarge`, so the
+ * export rethrows it (like `texturePoolFull`) and the job reports it instead of trying another packing of the same scene.
+ */
+export function requireTableSizesFit(tables) {
+  const total = encodedExportLength(tables.map(([, bytes]) => bytes));
+  if (total <= NATIVE_EXPORT_MAXIMUM_CHARACTERS) return;
+  const largest = [...tables].sort((first, second) => second[1] - first[1]).slice(0, 3).map(([name, bytes]) => `${name} ${encodedExportLength([bytes])}`).join(', ');
+  const error = new RangeError(`The native scene export is ${total} base64 characters in total (largest tables: ${largest}), over the ${NATIVE_EXPORT_MAXIMUM_CHARACTERS} one message can carry. Pass fewer parts (each instance takes about 555 characters), fewer unique triangles (about 299 each), or smaller textures.`);
+  error.exportTooLarge = true;
+  throw error;
+}
+
+/** `requireTableSizesFit` over the typed-array tables of a packed input. */
+export function requireExportFits(input) {
+  requireTableSizesFit(Object.entries(input).filter(([, values]) => ArrayBuffer.isView(values)).map(([name, values]) => [name, values.byteLength]));
+}
+
 /**
  * The scene of a native render job as the tables the job runner traces. With the "cycles" kernel (`kernel`) every scene is
  * exported as FORMAT-v2, so its materials reach the kernel whole; parts that share a geometry stay instances when
@@ -68,10 +97,11 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
   if (traceScene.instances) {
     try {
       const input = buildJobNativeInput(traceScene, camera, options, pack, resolveTexture);
+      requireExportFits(input);
       return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, wholeMaterials };
     } catch (error) {
       // A scene over the texture pool stays over it flattened: the caller gets that refusal, not a v1 atlas one.
-      if (!(error instanceof RangeError) || error.texturePoolFull) throw error;
+      if (!(error instanceof RangeError) || error.texturePoolFull || error.exportTooLarge) throw error;
       flattenedBecause = error.message;
       traceScene = flattenRefusedScene(buildTraceScene, parts, environment, nativeLimits, flattenedBecause);
     }
@@ -81,9 +111,10 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
   if (wholeMaterials) {
     try {
       const input = buildFlattenedJobNativeInput(traceScene, camera, options, pack, resolveTexture);
+      requireExportFits(input);
       return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials, ...instancingNote };
     } catch (error) {
-      if (error.texturePoolFull) throw error;
+      if (error.texturePoolFull || error.exportTooLarge) throw error;
       // The scene stays traceable: the v1 tables carry what the kernel read before, and the report says why they were used.
       materialsReason = error.message;
     }
@@ -94,6 +125,7 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
   // The v1 tables of the "cycles" job fallback cannot carry visibility: the scene is drawn without it, and the report says so.
   const visibilityNote = traceScene.partRayVisibility ? { rayVisibility: 'ignored', rayVisibilityReason: materialsReason } : {};
   const input = buildNativeInputOrExplain(buildNativeInput, { ...traceScene, partRayVisibility: null }, camera, options, pack, materialsReason);
+  requireExportFits(input);
   return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
     ...(materialsReason === undefined ? {} : { materialsReason }), ...visibilityNote, ...instancingNote };
 }

@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
 import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
-import { exportNativeSceneTables, NATIVE_JOB_MAXIMUM_INSTANCES } from '../scripts/native-bake-page.js';
+import {
+  encodedExportLength,
+  exportNativeSceneTables,
+  NATIVE_EXPORT_MAXIMUM_CHARACTERS,
+  NATIVE_JOB_MAXIMUM_INSTANCES,
+  NATIVE_JOB_MAXIMUM_TRIANGLES,
+  requireTableSizesFit,
+  V8_MAXIMUM_STRING_LENGTH,
+} from '../scripts/native-bake-page.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import {
@@ -94,4 +102,53 @@ test('a native render job past its instance bound says so and does not hide the 
 test('a native render job with the legacy kernel keeps its flattened bounds, not the instance bound', () => {
   assert.throws(() => exportNativeSceneTables({ parts: copiesOfTriangle(MAX_TRACE_INSTANCES + 1), environment: ENVIRONMENT, camera, options: packOptions, kernel: 'legacy', instancing: true, modules }),
     { name: 'RangeError', message: /1 to 1024 parts/ });
+});
+
+const TRIANGLE_RECORD_BYTES = 224;
+const INSTANCE_AND_MATERIAL_BYTES = 160 + 256;
+
+test('the base64 length of tables is 4 * ceil(bytes / 3) each, as Buffer measures it', () => {
+  for (const bytes of [0, 1, 2, 3, 4, 5, 299, 1000]) {
+    assert.equal(encodedExportLength([bytes]), Buffer.alloc(bytes).toString('base64').length, `${bytes} bytes`);
+  }
+  assert.equal(encodedExportLength([1, 2, 3]), 4 + 4 + 4);
+  assert.equal(encodedExportLength([]), 0);
+});
+
+test('the export share is under the V8 string limit', () => {
+  assert.equal(V8_MAXIMUM_STRING_LENGTH, 536_870_888);
+  assert.ok(NATIVE_EXPORT_MAXIMUM_CHARACTERS < V8_MAXIMUM_STRING_LENGTH);
+  assert.ok(NATIVE_EXPORT_MAXIMUM_CHARACTERS > 0.9 * V8_MAXIMUM_STRING_LENGTH);
+});
+
+test('the job triangle bound with the 65,536 instances of before still fits one message', () => {
+  const tables = [['triangles', NATIVE_JOB_MAXIMUM_TRIANGLES * TRIANGLE_RECORD_BYTES], ['instances and materials', 65_536 * INSTANCE_AND_MATERIAL_BYTES]];
+  requireTableSizesFit(tables);
+});
+
+test('both job bounds at once are refused before encoding, with the totals and what to pass', () => {
+  const tables = [['triangles', NATIVE_JOB_MAXIMUM_TRIANGLES * TRIANGLE_RECORD_BYTES], ['materials', 150_000 * 256], ['instances', 150_000 * 160]];
+  assert.throws(() => requireTableSizesFit(tables), error => {
+    assert.equal(error.name, 'RangeError');
+    assert.equal(error.exportTooLarge, true);
+    assert.match(error.message, new RegExp(`${encodedExportLength(tables.map(([, bytes]) => bytes))} base64 characters in total`));
+    assert.match(error.message, /largest tables: triangles 448000000, materials 51200000/);
+    assert.match(error.message, /Pass fewer parts.*fewer unique triangles/);
+    return true;
+  });
+});
+
+test('an export over one message is rethrown, not flattened or packed another way', () => {
+  const huge = new Uint8Array(1);
+  Object.defineProperty(huge, 'byteLength', { value: 400_000_000 });
+  let flattenedCalls = 0;
+  const countingFlatten = () => {
+    flattenedCalls++;
+    throw new Error('the flattened packer must not run');
+  };
+  const oversized = () => ({ triangles: huge, triangleCount: 1, instanceCount: 2 });
+  assert.throws(() => exportNativeSceneTables({ parts: copiesOfTriangle(2), environment: ENVIRONMENT, camera, options: packOptions, kernel: 'cycles', instancing: true,
+    modules: { ...modules, buildJobNativeInput: oversized, buildFlattenedJobNativeInput: countingFlatten } }),
+  error => error.exportTooLarge === true && /base64 characters in total/.test(error.message));
+  assert.equal(flattenedCalls, 0);
 });

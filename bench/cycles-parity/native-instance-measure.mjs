@@ -74,6 +74,10 @@ const count = Number(readFlag(argumentList, '--count', 250000));
 const variant = readFlag(argumentList, '--variant', 'instanced');
 const samples = Number(readFlag(argumentList, '--samples', 16));
 const encode = !argumentList.includes('--no-encode');
+if (argumentList.includes('--trace') && !encode) {
+  console.error('--trace needs the encoded tables: drop --no-encode, or drop --trace.');
+  process.exit(2);
+}
 const redFrom = Math.max(0, count - Math.floor(count / 4));
 const camera = cardFieldCamera(count);
 const result = { variant, count };
