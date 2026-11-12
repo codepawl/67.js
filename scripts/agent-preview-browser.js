@@ -1,4 +1,4 @@
-import { encodeNativeTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
+import { encodeNativeInputV2, encodeNativeTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
 import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
@@ -829,6 +829,15 @@ function paintLabels(context, labels, offsetX, offsetY) {
   }
 }
 
+// An instanced scene as FORMAT-v2 tables: the unique triangles once and one record per copy. `types` names each table's typed
+// array and `counts` carries the record counts, so the job runner can rebuild the input for the "cycles" kernel.
+async function exportInstancedNativeScene(traceScene, camera, options, ignored) {
+  const { buildNativeInputV2 } = await import('../packages/render-native/pack-input-v2.mjs');
+  const { fireflyClamp, ...packOptions } = options;
+  const input = buildNativeInputV2(traceScene, camera, packOptions);
+  return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, ignored };
+}
+
 window.__agentPreview = {
   reviewBegin({ width, height }) {
     reviewGrid = document.createElement('canvas');
@@ -989,17 +998,20 @@ window.__agentPreview = {
     } else if (motionTime !== undefined) {
       record.scene.sampleMotion(motionTime);
     }
+    const { instancing, ...packOptions } = options;
     const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes }, pack, { buildNativeInput }] = await Promise.all([
       import('../src/path-tracer.js'), import('../src/path-tracer-scene.js'), import('../src/path-tracer-gpu-pack.js'),
       import('../packages/render-native/pack-input.mjs'),
     ]);
     const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
-    const traceScene = buildTraceScene(record.scene.parts, environment);
+    // Copies of one geometry stay instances only when the job traces with the "cycles" kernel; the legacy kernel reads flattened triangles.
+    const traceScene = buildTraceScene(record.scene.parts, environment, { instancing: instancing === true });
     refuseLocalVolumes(traceScene, 'the native path tracer');
     const camera = createCamera(record.scene.camera, options.width, options.height);
-    const input = buildNativeInput(traceScene, camera, options, pack);
-    const tables = encodeNativeTables(input);
     const ignored = describeIgnoredFeatures(record.scene.parts, environment);
+    if (traceScene.instances) return exportInstancedNativeScene(traceScene, camera, packOptions, ignored);
+    const input = buildNativeInput(traceScene, camera, packOptions, pack);
+    const tables = encodeNativeTables(input);
     return { tables, triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, ignored };
   },
   // The PNG of linear pixels (three floats each, base64) that a denoiser outside the page returned, or of the wavelet

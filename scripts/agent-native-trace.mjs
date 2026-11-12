@@ -67,7 +67,24 @@ export async function chooseTraceBackend({ requested, runtimeBackend, locator })
   return { backend: fallback, note: `${found.reason} The ${fallback} backend ran instead.` };
 }
 
+const V2_TABLE_TYPES = { Uint8Array, Uint32Array, Int32Array, Float32Array };
+
+// The FORMAT-v2 input of an instanced scene: the page names each table's array type and sends the record counts.
+function decodeTablesV2(exported) {
+  const input = { schemaVersion: exported.schemaVersion, ...exported.counts };
+  for (const [name, base64] of Object.entries(exported.tables)) {
+    const View = V2_TABLE_TYPES[exported.types?.[name]];
+    if (!View) throw new TypeError(`The exported native scene table "${name}" has an unknown array type ${JSON.stringify(exported.types?.[name])}.`);
+    const bytes = Buffer.from(base64, 'base64');
+    const copy = new Uint8Array(bytes.length);
+    copy.set(bytes);
+    input[name] = new View(copy.buffer, 0, copy.length / View.BYTES_PER_ELEMENT);
+  }
+  return input;
+}
+
 function decodeTables(exported) {
+  if (exported.schemaVersion !== undefined) return decodeTablesV2(exported);
   const input = { triangleCount: exported.triangleCount };
   for (const name of TABLE_NAMES) {
     const bytes = Buffer.from(exported.tables[name], 'base64');
@@ -173,7 +190,7 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const report = { width, height, samples, bounces, seed, denoised: false, denoiser: 'none', threads: 1, backend: 'native',
     gpu: traced.adapter, nativeBackend: traced.backend, nativeFeatures: traced.features, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
     uploadSeconds: traced.uploadSeconds, accelerationBuildSeconds: traced.accelerationBuildSeconds,
-    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, tracedSeconds, ignored: exported.ignored };
+    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, ...(exported.instances === undefined ? {} : { instances: exported.instances }), tracedSeconds, ignored: exported.ignored };
   let linear = features.color;
   const denoiseStarted = performance.now();
   if (denoise === 'oidn') {

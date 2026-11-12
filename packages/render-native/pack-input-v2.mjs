@@ -2078,6 +2078,25 @@ function appendWorldEmissiveIfActive({
   return emittedIndex;
 }
 
+// Triangle records are shared by every copy of a mesh, so one `local_emissive_offset` per triangle has to fit every instance that
+// emits: the instance's entries are the triangles that kept an area, in order, whichever material the instance resolves to.
+// The first emitting instance sets the offsets; a later one must emit the same triangles.
+function shareEmissiveOffsets(meshSlot, emittedLocalIndices, instanceIndex) {
+  if (emittedLocalIndices.length === 0) return;
+  if (!meshSlot.emissiveLocalIndices) {
+    meshSlot.emissiveLocalIndices = emittedLocalIndices;
+    emittedLocalIndices.forEach((localIdx, offset) => {
+      meshSlot.ordered[localIdx].localEmissiveOffset = offset;
+    });
+    return;
+  }
+  const reference = meshSlot.emissiveLocalIndices;
+  const matches = reference.length === emittedLocalIndices.length && reference.every((localIdx, offset) => localIdx === emittedLocalIndices[offset]);
+  if (!matches) {
+    throw new RangeError(`Instance[${instanceIndex}] scales some emissive triangles of its shared mesh to no area, so its emissive entries differ from the other copies. Give it a scale that keeps every triangle, or remove its emissive material.`);
+  }
+}
+
 function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
   const materialRecords = rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
@@ -2140,14 +2159,10 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
       const opaqueTriangleCount = opaque.length;
       const totalTriangleCount = ordered.length;
 
-      let localEmissiveCounter = 0;
       for (const item of ordered) {
-        if (materialRecords[item.materialIndex]?.isEmissive) {
-          item.localEmissiveOffset = localEmissiveCounter++;
-        }
         allTriangles.push(item);
       }
-      meshSlot = { blasIndex, defaultMaterialIndex, triangleOffset, opaqueTriangleCount, totalTriangleCount, ordered };
+      meshSlot = { blasIndex, defaultMaterialIndex, triangleOffset, opaqueTriangleCount, totalTriangleCount, ordered, emissiveLocalIndices: null };
       meshCache.set(geometry, meshSlot);
     } else if (
       materialOverride === INVALID_INDEX_V2 &&
@@ -2165,7 +2180,7 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
     const visibilityFlags = (baseVisibility | (decomposed.negativeScale ? INSTANCE_FLAG_NEGATIVE_SCALE : 0)) >>> 0;
 
     let emissiveBaseOffset = INVALID_INDEX_V2;
-    let instanceEmissiveCount = 0;
+    const emittedLocalIndices = [];
     for (let localIdx = 0; localIdx < meshSlot.ordered.length; localIdx++) {
       const triItem = meshSlot.ordered[localIdx];
       const globalTriIdx = meshSlot.triangleOffset + localIdx;
@@ -2186,12 +2201,10 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
         if (emissiveBaseOffset === INVALID_INDEX_V2) {
           emissiveBaseOffset = emittedIdx;
         }
-        if (triItem.localEmissiveOffset === INVALID_INDEX_V2) {
-          triItem.localEmissiveOffset = instanceEmissiveCount;
-        }
-        instanceEmissiveCount++;
+        emittedLocalIndices.push(localIdx);
       }
     }
+    shareEmissiveOffsets(meshSlot, emittedLocalIndices, instIdx);
 
     const objectId = (inst.objectId ?? instIdx) >>> 0;
     instanceItems.push({

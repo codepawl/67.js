@@ -29,6 +29,20 @@ export function encodeNativeTables(input) {
   return tables;
 }
 
+/**
+ * A FORMAT-v2 input (an instanced scene) as the job export: the tables as base64, the array type of each table and the record
+ * counts, which is all the job runner needs to rebuild the input for the "cycles" kernel.
+ */
+export function encodeNativeInputV2(input) {
+  const counts = {};
+  const types = {};
+  for (const [name, value] of Object.entries(input)) {
+    if (ArrayBuffer.isView(value)) types[name] = value.constructor.name;
+    else if (typeof value === 'number') counts[name] = value;
+  }
+  return { schemaVersion: input.schemaVersion, tables: encodeNativeTables(input), types, counts };
+}
+
 function floatsFromBase64(data) {
   const bytes = bytesFromBase64(data);
   return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / Float32Array.BYTES_PER_ELEMENT);

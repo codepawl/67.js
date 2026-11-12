@@ -86,7 +86,7 @@ export function traceNative(input, options = {}) {
     }
     if (input?.schemaVersion === FORMAT_V2_VERSION) {
       throw new TypeError(
-        'Cannot pass a FORMAT-v2 scene input to kernel "legacy": pass kernel "cycles" or build a v1 input with buildNativeInput.'
+        'Cannot pass a FORMAT-v2 scene input to kernel "legacy": pass kernel "cycles" or build a v1 input with buildNativeInput (an instanced scene needs kernel "cycles"; build it without { instancing: true } for kernel "legacy").'
       );
     }
     return addon.traceScene(input, { width, height, samples, maxSeconds, kernel: selectedKernel });
