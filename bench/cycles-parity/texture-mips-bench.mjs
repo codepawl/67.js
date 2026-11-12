@@ -10,6 +10,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildNativeInputV2, traceNative } from '../../packages/render-native/index.mjs';
+import { TEXTURE_KIND_RGBA8_SRGB, buildMipChain, mipLevelCount, mipLevelSize } from '../../packages/render-native/texture-mips.mjs';
 import { createCamera } from '../../src/path-tracer.js';
 
 export const CHECKER_SIDE = 64;
@@ -45,12 +46,12 @@ function floorGeometry() {
 }
 
 /** Traces the checker floor and returns linear rgb floats (width * height * 3, rows from the top). */
-export function renderFloor({ cameraName, textureMips, samples, seed, width, height }) {
+export function renderFloor({ cameraName, textureMips, samples, seed, width, height, image = checkerImage() }) {
   const camera = createCamera(CAMERAS[cameraName], width, height);
   const options = { width, height, samples, seed, bounces: 2, textureMips, backgroundColor: SKY_RADIANCE };
   const input = buildNativeInputV2(
     {
-      materials: [{ color: [1, 1, 1], roughness: 1, metallic: 0, map: { image: checkerImage(), colorSpace: 'srgb' } }],
+      materials: [{ color: [1, 1, 1], roughness: 1, metallic: 0, map: { image, colorSpace: 'srgb' } }],
       instances: [{ geometry: floorGeometry(), materialIndex: 0 }],
       lights: {},
     },
@@ -74,6 +75,35 @@ export function relativeMeanSquaredError(image, reference, width, height, firstR
     squaredReference += reference[index] ** 2;
   }
   return squaredDifference / squaredReference;
+}
+
+const FAR_ROW_COUNT = 12;
+
+/** The mean value over the first `FAR_ROW_COUNT` rows from `firstRow` down, the rows nearest the horizon. */
+export function farRowMean(image, width, firstRow) {
+  let total = 0;
+  const start = firstRow * width * 3;
+  const end = (firstRow + FAR_ROW_COUNT) * width * 3;
+  for (let index = start; index < end; index++) {
+    total += image[index];
+  }
+  return total / (end - start);
+}
+
+/** The checker of one mip level as a standalone image: reading it at level 0 forces that level for the whole picture. */
+export function levelImages() {
+  const base = checkerImage();
+  const words = new Uint32Array(base.data.buffer, 0, CHECKER_SIDE * CHECKER_SIDE);
+  const chain = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, words, CHECKER_SIDE, CHECKER_SIDE);
+  const images = [base];
+  let cursor = 0;
+  for (let level = 1; level < mipLevelCount(CHECKER_SIDE, CHECKER_SIDE); level++) {
+    const size = mipLevelSize(CHECKER_SIDE, CHECKER_SIDE, level);
+    const levelWords = chain.slice(cursor, cursor + size.width * size.height);
+    images.push({ width: size.width, height: size.height, data: new Uint8Array(levelWords.buffer, 0, levelWords.length * 4) });
+    cursor += levelWords.length;
+  }
+  return images;
 }
 
 export function maxAbsoluteDifference(first, second) {
@@ -111,16 +141,19 @@ async function runCameraSweep(settings, cameraName, metrics) {
   const firstRow = cameraName === 'receding' ? Math.floor(height / 2) + 2 : 0;
   const reference = renderFloor({ cameraName, textureMips: false, samples: referenceSamples, seed: 4242, width, height });
   await writePicture(outputDirectory, `${cameraName}-reference`, reference);
-  metrics[cameraName] = { referenceSamples, firstRow, runs: [] };
+  metrics[cameraName] = { referenceSamples, firstRow, farRowMeanReference: farRowMean(reference, width, firstRow), runs: [] };
   for (const samples of SAMPLE_COUNTS) {
     const errors = { off: [], on: [] };
     let largestDifference = 0;
+    const farMeans = { off: 0, on: 0 };
     for (let seed = 1; seed <= seedCount; seed++) {
       const off = renderFloor({ cameraName, textureMips: false, samples, seed, width, height });
       const on = renderFloor({ cameraName, textureMips: true, samples, seed, width, height });
       errors.off.push(relativeMeanSquaredError(off, reference, width, height, firstRow));
       errors.on.push(relativeMeanSquaredError(on, reference, width, height, firstRow));
       largestDifference = Math.max(largestDifference, maxAbsoluteDifference(off, on));
+      farMeans.off += farRowMean(off, width, firstRow) / seedCount;
+      farMeans.on += farRowMean(on, width, firstRow) / seedCount;
       if (seed === 1) {
         await writePicture(outputDirectory, `${cameraName}-off-${samples}spp`, off);
         await writePicture(outputDirectory, `${cameraName}-on-${samples}spp`, on);
@@ -135,6 +168,15 @@ async function runCameraSweep(settings, cameraName, metrics) {
       relMseOffPerSeed: errors.off,
       relMseOnPerSeed: errors.on,
       largestPixelDifferenceOnVsOff: largestDifference,
+      farRowMeanOff: farMeans.off,
+      farRowMeanOn: farMeans.on,
+    });
+  }
+  if (cameraName === 'receding') {
+    // Each level alone, read at level 0 of its own texture: which step of the chain moves the far rows.
+    metrics.forcedLevels = levelImages().map((image, level) => {
+      const picture = renderFloor({ cameraName, textureMips: false, samples: 64, seed: 1, width, height, image });
+      return { level, side: image.width, farRowMean: farRowMean(picture, width, firstRow), relMse: relativeMeanSquaredError(picture, reference, width, height, firstRow) };
     });
   }
 }

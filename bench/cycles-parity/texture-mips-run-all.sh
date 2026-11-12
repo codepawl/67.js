@@ -27,7 +27,8 @@ run_step() {
 prepare_baseline_checkout() {
   rm -rf "$baseline_checkout"
   git -C "$candidate_checkout" worktree prune
-  git -C "$candidate_checkout" worktree add --detach "$baseline_checkout" HEAD \
+  local base_commit="${BASELINE_REF:-$(git -C "$candidate_checkout" merge-base HEAD origin/main 2>/dev/null || echo 27ea525b)}"
+  git -C "$candidate_checkout" worktree add --detach "$baseline_checkout" "$base_commit" \
     && ln -s "$candidate_checkout/node_modules" "$baseline_checkout/node_modules"
 }
 

@@ -1,14 +1,15 @@
 // Mip chains for the texture pool of FORMAT-v2 (issue 896). Pure functions on typed arrays, no GPU.
 //
 // Level 0 is the texture as the caller gave it. Each level after it is half as wide and as high, rounded down and never less
-// than one texel, and is the plain average of the 2 x 2 texels of the level before it. A linear 8-bit map and a float map are
-// averaged on their stored values. An sRGB map is averaged in linear light and encoded back to bytes: the kernel still filters
-// its bytes and decodes the blend, as at level 0, but a level that held the mean of the stored bytes would read darker than
-// the mean of the light (a black and white checker: 0.21 against 0.5 once decoded), and a minified surface would turn
-// darker than the same surface supersampled. The alpha channel is averaged on its stored values and not weighted by itself, so a texel with alpha 0 pulls its
-// colour into the next level; a map whose alpha is a cutout should not ask for levels. Where a side has an odd length, the
-// last row or column has no pair: it is averaged with itself in the next level's last texel, and the one beyond the halved
-// size is not read. Normal maps are averaged as stored and are not normalised again; the kernel normalises the result.
+// than one texel. Level 1 is the integral of what the kernel reads at level 0: each level 1 texel is the mean, in linear light,
+// of the level 0 reconstruction (bilinear on the stored values with texel centres at +0.5, then the sRGB decode of an sRGB map)
+// over its footprint, taken at 4 x 4 positions with the wrap mode of the texture. A plain 2 x 2 box of decoded texels is not that
+// mean: the bilinear blend of two stored values decodes darker than the two decoded values, so a box would read too bright
+// against the level 0 picture of a high contrast map. Levels 2 and up are the 2 x 2 box of the level before: in linear light for
+// an sRGB map (decoded, averaged, encoded back to bytes), on the stored values otherwise; an odd last row or column is read
+// twice. The alpha channel is averaged on its stored values, not weighted by itself, so a texel with alpha 0 pulls its colour
+// into the next level; a map whose alpha is a cutout should not ask for levels. Normal maps are averaged as stored and are not
+// normalised again; the kernel normalises the result.
 
 export const TEXTURE_KIND_RGBA8 = 'rgba8';
 export const TEXTURE_KIND_RGBA8_SRGB = 'rgba8-srgb';
@@ -88,6 +89,24 @@ export function mipLevelSize(width, height, level) {
 
 function wordsPerTexel(kind) {
   return kind === TEXTURE_KIND_RGBA32_FLOAT ? 4 : 1;
+}
+
+const SRGB_DECODE_TABLE_SIZE = 4096;
+const SRGB_DECODE_TABLE = (() => {
+  const table = new Float64Array(SRGB_DECODE_TABLE_SIZE + 1);
+  for (let index = 0; index <= SRGB_DECODE_TABLE_SIZE; index++) {
+    const encoded = index / SRGB_DECODE_TABLE_SIZE;
+    table[index] = encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+  }
+  return table;
+})();
+
+// The sRGB decode of a stored value in [0, 1], from a 4096 entry table with linear interpolation.
+function decodeStoredSrgb(stored) {
+  const position = Math.min(1, Math.max(0, stored)) * SRGB_DECODE_TABLE_SIZE;
+  const lower = Math.min(Math.floor(position), SRGB_DECODE_TABLE_SIZE - 1);
+  const blend = position - lower;
+  return SRGB_DECODE_TABLE[lower] * (1 - blend) + SRGB_DECODE_TABLE[lower + 1] * blend;
 }
 
 /** The 32-bit words the levels after level 0 take, with no padding between levels. */
@@ -189,12 +208,103 @@ function averageHalfPairLevel(source, destination, sourceWidth, sourceHeight, de
   });
 }
 
+const FIRST_LEVEL_POSITIONS_PER_AXIS = 4;
+
+// The kernel wrap of a texel index (texture_wrap_texel_index): repeat wraps, clamp and mirror clamp.
+function wrapTexelIndex(index, size, wrapMode) {
+  if (wrapMode === 0) {
+    const remainder = index % size;
+    return remainder < 0 ? remainder + size : remainder;
+  }
+  return Math.min(Math.max(index, 0), size - 1);
+}
+
+// Reads the stored value of one texel as four numbers in [0, 1] (floats as they are; a two-channel texture reads b = 0, a = 1).
+function createStoredTexelReader(kind, source) {
+  if (kind === TEXTURE_KIND_RGBA32_FLOAT) {
+    return (index, target) => {
+      for (let channel = 0; channel < 4; channel++) target[channel] = source[index * 4 + channel];
+    };
+  }
+  if (kind === TEXTURE_KIND_RG16_FLOAT) {
+    return (index, target) => {
+      target[0] = halfToFloat(source[index] & 0xffff);
+      target[1] = halfToFloat(source[index] >>> 16);
+      target[2] = 0;
+      target[3] = 1;
+    };
+  }
+  return (index, target) => {
+    const word = source[index];
+    for (let channel = 0; channel < 4; channel++) target[channel] = ((word >>> (channel * 8)) & 0xff) / 255;
+  };
+}
+
+function encodeFirstLevelTexel(kind, mean, destination, index) {
+  if (kind === TEXTURE_KIND_RGBA32_FLOAT) {
+    for (let channel = 0; channel < 4; channel++) destination[index * 4 + channel] = mean[channel];
+    return;
+  }
+  if (kind === TEXTURE_KIND_RG16_FLOAT) {
+    destination[index] = (floatToHalf(mean[0]) | (floatToHalf(mean[1]) << 16)) >>> 0;
+    return;
+  }
+  let packed = 0;
+  for (let channel = 0; channel < 4; channel++) {
+    const isLinearLightChannel = kind === TEXTURE_KIND_RGBA8_SRGB && channel < 3;
+    const byteValue = isLinearLightChannel ? linearToSrgbByte(mean[channel]) : Math.round(Math.min(1, Math.max(0, mean[channel])) * 255);
+    packed |= byteValue << (channel * 8);
+  }
+  destination[index] = packed >>> 0;
+}
+
+function integrateFirstLevel(kind, source, sourceSize, destination, destinationSize, wrapU, wrapV) {
+  const read = createStoredTexelReader(kind, source);
+  const corners = [new Float64Array(4), new Float64Array(4), new Float64Array(4), new Float64Array(4)];
+  const sampleColor = new Float64Array(4);
+  const sum = new Float64Array(4);
+  const decodesSrgb = kind === TEXTURE_KIND_RGBA8_SRGB;
+  const positions = FIRST_LEVEL_POSITIONS_PER_AXIS;
+  for (let row = 0; row < destinationSize.height; row++) {
+    for (let column = 0; column < destinationSize.width; column++) {
+      sum.fill(0);
+      for (let subRow = 0; subRow < positions; subRow++) {
+        const coordinateY = (row + (subRow + 0.5) / positions) / destinationSize.height * sourceSize.height - 0.5;
+        const baseY = Math.floor(coordinateY);
+        const blendY = coordinateY - baseY;
+        const rowTop = wrapTexelIndex(baseY, sourceSize.height, wrapV) * sourceSize.width;
+        const rowBottom = wrapTexelIndex(baseY + 1, sourceSize.height, wrapV) * sourceSize.width;
+        for (let subColumn = 0; subColumn < positions; subColumn++) {
+          const coordinateX = (column + (subColumn + 0.5) / positions) / destinationSize.width * sourceSize.width - 0.5;
+          const baseX = Math.floor(coordinateX);
+          const blendX = coordinateX - baseX;
+          const left = wrapTexelIndex(baseX, sourceSize.width, wrapU);
+          const right = wrapTexelIndex(baseX + 1, sourceSize.width, wrapU);
+          read(rowTop + left, corners[0]);
+          read(rowTop + right, corners[1]);
+          read(rowBottom + left, corners[2]);
+          read(rowBottom + right, corners[3]);
+          for (let channel = 0; channel < 4; channel++) {
+            const top = corners[0][channel] * (1 - blendX) + corners[1][channel] * blendX;
+            const bottom = corners[2][channel] * (1 - blendX) + corners[3][channel] * blendX;
+            sampleColor[channel] = top * (1 - blendY) + bottom * blendY;
+            sum[channel] += decodesSrgb && channel < 3 ? decodeStoredSrgb(sampleColor[channel]) : sampleColor[channel];
+          }
+        }
+      }
+      for (let channel = 0; channel < 4; channel++) sum[channel] /= positions * positions;
+      encodeFirstLevelTexel(kind, sum, destination, row * destinationSize.width + column);
+    }
+  }
+}
+
 /**
  * The levels after level 0 of one texture, one after the other, as 32-bit words. `texels` holds level 0 without padding:
  * one word per texel for `rgba8` and `rgba8-srgb` (bytes r, g, b, a from the low byte) and `rg16f` (two halves, r in the low half), four
- * floats per texel for `rgba32f`. Returns an empty array for a texture of one texel.
+ * floats per texel for `rgba32f`. `wrapU` and `wrapV` are the wrap modes of the texture (0 repeat, 1 clamp, 2 mirror) and matter
+ * for level 1 only. Returns an empty array for a texture of one texel.
  */
-export function buildMipChain(kind, texels, width, height) {
+export function buildMipChain(kind, texels, width, height, wrapU = 0, wrapV = 0) {
   requireTextureSide(width, height);
   const levelCount = mipLevelCount(width, height);
   const chain = new Uint32Array(mipChainWordCount(kind, width, height));
@@ -219,7 +329,11 @@ export function buildMipChain(kind, texels, width, height) {
     const levelWords = destinationSize.width * destinationSize.height * wordsPerTexel(kind);
     const destinationWords = chain.subarray(cursor, cursor + levelWords);
     const destination = isFloat ? new Float32Array(destinationWords.buffer, destinationWords.byteOffset, levelWords) : destinationWords;
-    average(source, destination, sourceSize.width, sourceSize.height, destinationSize.width, destinationSize.height);
+    if (level === 1) {
+      integrateFirstLevel(kind, source, sourceSize, destination, destinationSize, wrapU, wrapV);
+    } else {
+      average(source, destination, sourceSize.width, sourceSize.height, destinationSize.width, destinationSize.height);
+    }
     source = destination;
     sourceSize = destinationSize;
     cursor += levelWords;

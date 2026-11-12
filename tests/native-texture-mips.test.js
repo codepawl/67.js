@@ -104,41 +104,66 @@ test('half floats round trip the values a mip average produces', () => {
   assert.equal(floatToHalf(1.00048828125), floatToHalf(1), 'a tie rounds to the even neighbour');
 });
 
-test('an 8-bit chain averages the stored bytes of each 2 x 2 block, alpha included, with rounding', () => {
-  const level0 = new Uint32Array([
-    packedWord(0, 0, 0, 255), packedWord(255, 255, 255, 255),
-    packedWord(255, 255, 255, 255), packedWord(0, 0, 0, 255),
-  ]);
-  const chain = buildMipChain(TEXTURE_KIND_RGBA8, level0, 2, 2);
-  assert.equal(chain.length, 1);
-  assert.equal(chain[0], packedWord(128, 128, 128, 255));
-  const transparent = new Uint32Array([packedWord(200, 0, 0, 0), packedWord(0, 0, 0, 255), packedWord(0, 0, 0, 255), packedWord(0, 0, 0, 255)]);
-  assert.equal(buildMipChain(TEXTURE_KIND_RGBA8, transparent, 2, 2)[0], packedWord(50, 0, 0, 191), 'alpha is averaged, not used as a weight');
+const BLACK_WHITE_CHECKER_4X4 = () => Uint32Array.from(
+  { length: 16 },
+  (_, index) => ((index % 4) + Math.floor(index / 4)) % 2 === 0 ? packedWord(0, 0, 0, 255) : packedWord(255, 255, 255, 255),
+);
+
+function byteOf(word, channel) {
+  return (word >>> (channel * 8)) & 0xff;
+}
+
+test('level 1 of an 8-bit chain is the mean of the level 0 reconstruction, levels after it are 2 x 2 boxes', () => {
+  const chain = buildMipChain(TEXTURE_KIND_RGBA8, BLACK_WHITE_CHECKER_4X4(), 4, 4);
+  assert.equal(chain.length, 4 + 1);
+  for (let texel = 0; texel < 5; texel++) {
+    assert.ok(Math.abs(byteOf(chain[texel], 0) - 127.5) <= 2, `texel ${texel} of the chain is ${byteOf(chain[texel], 0)}`);
+    assert.equal(byteOf(chain[texel], 3), 255);
+  }
+  const rampAlpha = new Uint32Array([packedWord(10, 0, 0, 0), packedWord(10, 0, 0, 255), packedWord(10, 0, 0, 255), packedWord(10, 0, 0, 255)]);
+  const alphaChain = buildMipChain(TEXTURE_KIND_RGBA8, rampAlpha, 2, 2);
+  assert.ok(Math.abs(byteOf(alphaChain[0], 3) - 191.25) <= 2, 'alpha is the plain mean, not a weight');
+  assert.equal(byteOf(alphaChain[0], 0), 10, 'a colour that does not change stays');
 });
 
-test('a chain of an uneven or thin texture keeps every level the size the kernel walks to', () => {
-  const level0 = Uint32Array.from({ length: 5 * 3 }, (_, index) => packedWord(index * 10, 0, 0, 255));
-  const chain = buildMipChain(TEXTURE_KIND_RGBA8, level0, 5, 3);
+test('a chain of an uneven or thin texture keeps every level the size the kernel walks to, and a flat colour stays flat', () => {
+  const flat = Uint32Array.from({ length: 5 * 3 }, () => packedWord(77, 90, 200, 255));
+  const chain = buildMipChain(TEXTURE_KIND_RGBA8, flat, 5, 3);
   assert.equal(chain.length, 2 * 1 + 1 * 1);
-  assert.equal(chain[0] & 0xff, Math.round((0 + 10 + 50 + 60) / 4), 'first texel of level 1 averages the top left block');
-  assert.equal(chain[1] & 0xff, Math.round((20 + 30 + 70 + 80) / 4), 'the fifth column has no pair and is not read');
-  assert.equal(chain[2] & 0xff, Math.round(((chain[0] & 0xff) + (chain[1] & 0xff)) / 2), 'level 2 is the 1 x 1 average of the two texels of level 1');
+  for (const word of chain) {
+    assert.equal(word, packedWord(77, 90, 200, 255));
+  }
+  const thin = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, Uint32Array.from({ length: 8 }, () => packedWord(77, 90, 200, 255)), 8, 1);
+  assert.equal(thin.length, 4 + 2 + 1);
+  for (const word of thin) {
+    for (let channel = 0; channel < 3; channel++) {
+      assert.ok(Math.abs(byteOf(word, channel) - [77, 90, 200][channel]) <= 1);
+    }
+  }
   assert.equal(buildMipChain(TEXTURE_KIND_RGBA8, new Uint32Array(1), 1, 1).length, 0);
 });
 
-test('a float chain averages the floats without clamping, so a bright texel keeps its energy', () => {
+test('a float chain keeps the energy of a bright texel and does not clamp', () => {
   const level0 = new Float32Array([8, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
   const chain = buildMipChain(TEXTURE_KIND_RGBA32_FLOAT, level0, 2, 2);
   assert.equal(chain.length, 4);
-  assert.deepEqual(Array.from(new Float32Array(chain.buffer, chain.byteOffset, 4)), [2, 0, 0, 1]);
+  const mean = Array.from(new Float32Array(chain.buffer, chain.byteOffset, 4));
+  assert.ok(Math.abs(mean[0] - 2) < 1e-5 && mean[1] === 0 && Math.abs(mean[3] - 1) < 1e-6, `mean texel ${mean}`);
 });
 
-test('a two-channel half chain averages each channel as a float', () => {
+test('a two-channel half chain takes the mean of each channel as a float', () => {
   const pair = (red, green) => (floatToHalf(red) | (floatToHalf(green) << 16)) >>> 0;
   const level0 = new Uint32Array([pair(1, 0), pair(0, 0), pair(0, 0.5), pair(0, 0)]);
   const chain = buildMipChain(TEXTURE_KIND_RG16_FLOAT, level0, 2, 2);
-  assert.equal(halfToFloat(chain[0] & 0xffff), 0.25);
-  assert.equal(halfToFloat(chain[0] >>> 16), 0.125);
+  assert.ok(Math.abs(halfToFloat(chain[0] & 0xffff) - 0.25) < 1e-3);
+  assert.ok(Math.abs(halfToFloat(chain[0] >>> 16) - 0.125) < 1e-3);
+});
+
+test('the wrap mode reaches level 1: a clamped edge does not read the opposite side', () => {
+  const level0 = Uint32Array.from({ length: 4 * 4 }, (_, index) => (index % 4 === 0 ? packedWord(255, 0, 0, 255) : packedWord(0, 0, 0, 255)));
+  const repeated = buildMipChain(TEXTURE_KIND_RGBA8, level0, 4, 4, 0, 0);
+  const clamped = buildMipChain(TEXTURE_KIND_RGBA8, level0, 4, 4, 1, 1);
+  assert.notEqual(byteOf(repeated[1], 0), byteOf(clamped[1], 0), 'the right half sees the red column on its far side only when it repeats');
 });
 
 test('without textureMips a texture is level 0 only, the flag is clear and the pool is as it was', () => {
@@ -154,7 +179,7 @@ test('without textureMips a texture is level 0 only, the flag is clear and the p
 });
 
 test('textureMips stores the chain after level 0, counts the levels in the descriptor and sets the kernel flag', () => {
-  const image = byteImage(8, 8, (x, y) => [x * 30, y * 30, 7, 255]);
+  const image = byteImage(8, 8, () => [40, 80, 120, 255]);
   const off = packMaps([{ image, colorSpace: 'linear' }]);
   const on = packMaps([{ image, colorSpace: 'linear' }], { textureMips: true });
   assert.equal(KERNEL_FLAG_TEXTURE_MIPS, 2048);
@@ -163,24 +188,27 @@ test('textureMips stores the chain after level 0, counts the levels in the descr
   assert.equal(kernelFlagsOf(on) & ~KERNEL_FLAG_TEXTURE_MIPS, kernelFlagsOf(off));
   assert.equal(on.textureTexels.length, 64 + 16 + 4 + 1 + 3, 'padded once to four words at the end');
   assert.deepEqual(on.textureTexels.subarray(0, 64), off.textureTexels.subarray(0, 64), 'level 0 is untouched');
-  assert.equal(on.textureTexels[64] & 0xff, Math.round((0 + 30 + 0 + 30) / 4), 'level 1 starts right after level 0');
-  assert.ok(Math.abs((on.textureTexels[64 + 16 + 4] & 0xff) - 105) <= 1, 'level 3 is one texel holding the mean of the red ramp');
+  for (const wordIndex of [64, 64 + 15, 64 + 16, 64 + 19, 64 + 20]) {
+    assert.equal(on.textureTexels[wordIndex], packedWord(40, 80, 120, 255), `word ${wordIndex}: every level of a flat map is that colour, stored right after level 0`);
+  }
 });
 
-test('an sRGB chain averages in linear light and stores bytes again, alpha on its stored value', () => {
-  const blackAndWhite = new Uint32Array([packedWord(0, 0, 0, 255), packedWord(255, 255, 255, 255), packedWord(255, 255, 255, 255), packedWord(0, 0, 0, 200)]);
-  const chain = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, blackAndWhite, 2, 2);
-  assert.equal(chain[0], packedWord(188, 188, 188, 241), 'half the light is the byte 188, not the byte 128');
-  assert.equal(buildMipChain(TEXTURE_KIND_RGBA8, blackAndWhite, 2, 2)[0], packedWord(128, 128, 128, 241), 'a linear map keeps the plain average');
-  const grey = new Uint32Array(4).fill(packedWord(77, 77, 77, 255));
-  assert.equal(buildMipChain(TEXTURE_KIND_RGBA8_SRGB, grey, 2, 2)[0], packedWord(77, 77, 77, 255), 'a flat colour survives the round trip');
+test('an sRGB chain stores bytes of the mean light: level 1 integrates the reconstruction, which is darker than a box of decoded texels', () => {
+  const chain = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, BLACK_WHITE_CHECKER_4X4(), 4, 4);
+  const level1 = byteOf(chain[0], 0);
+  assert.ok(level1 >= 130 && level1 <= 145, `level 1 holds byte ${level1}: the mean of the decoded blend of black and white, near 137`);
+  assert.ok(level1 < 188, 'the box of decoded texels would give the byte 188');
+  assert.equal(byteOf(chain[0], 3), 255);
+  const grey = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, new Uint32Array(4).fill(packedWord(77, 77, 77, 255)), 2, 2);
+  assert.ok(Math.abs(byteOf(grey[0], 0) - 77) <= 1, 'a flat colour survives the round trip');
 });
 
-test('an sRGB map keeps its format at every level and its levels hold the mean of the light', () => {
-  const checker = byteImage(2, 2, (x, y) => ((x + y) % 2 === 0 ? [0, 0, 0, 255] : [255, 255, 255, 255]));
+test('an sRGB map keeps its format at every level', () => {
+  const checker = byteImage(4, 4, (x, y) => ((x + y) % 2 === 0 ? [0, 0, 0, 255] : [255, 255, 255, 255]));
   const input = packMaps([{ image: checker, colorSpace: 'srgb' }], { textureMips: true });
   assert.equal(descriptorWord(input, 0, 3) & 0xff, FORMAT_RGBA8_SRGB);
-  assert.equal(input.textureTexels[4], packedWord(188, 188, 188, 255), 'the level holds half the light of black and white, which is the stored byte 188');
+  const level1 = byteOf(input.textureTexels[16], 0);
+  assert.ok(level1 >= 130 && level1 <= 145, `level 1 byte ${level1}`);
 });
 
 test('mips are per texture too: mips true on one map, false on another, and nearest maps never take levels', () => {
@@ -229,9 +257,12 @@ test('float and half textures are packed in their own formats, with levels on re
   assert.equal(mipCountOf(input, 0), 3);
   const floatTexels = new Float32Array(input.textureTexels.buffer, input.textureTexels.byteOffset, 64 + 16 + 4);
   assert.deepEqual(Array.from(floatTexels.subarray(0, 4)), [12, 6, 3, 1], 'an HDR texel is stored unclamped');
-  assert.equal(floatTexels[64], (12 + 0.5 + 0.5 + 0.5) / 4, 'level 1 averages the unclamped floats');
+  const levelOneRed = [0, 1, 2, 3].map((texel) => floatTexels[64 + texel * 4]);
+  assert.ok(Math.max(...levelOneRed) > 1, 'the texel that sees the bright one is above one');
+  const levelOneMean = levelOneRed.reduce((sum, value) => sum + value, 0) / 4;
+  assert.ok(Math.abs(levelOneMean - (12 + 15 * 0.5) / 16) < 1e-4, `level 1 keeps the energy of level 0: ${levelOneMean}`);
   const halfStart = descriptorWord(input, 1, 0);
-  assert.equal(halfToFloat(input.textureTexels[halfStart + 16] & 0xffff), 0.25);
+  assert.ok(Math.abs(halfToFloat(input.textureTexels[halfStart + 16] & 0xffff) - 0.25) < 1e-3);
 });
 
 test('textureMips and mips fail at the boundary with what to pass', () => {
@@ -307,4 +338,43 @@ test('an HDR float emissive map keeps values above one through the kernel, with 
     assert.ok(Math.abs(result.rgba[centrePixel * 4] - texelValue) < 0.05, `centre red ${result.rgba[centrePixel * 4]} (levels ${textureMips})`);
     assert.ok(Math.abs(result.rgba[centrePixel * 4 + 1] - texelValue * 0.5) < 0.05);
   }
+});
+
+test('the level follows the footprint with no half level of bias: one texel per pixel reads level 0, two texels per pixel level 1', gpuSkip, () => {
+  const size = 32;
+  const fieldOfView = 30;
+  const distance = 2 / Math.tan(fieldOfView * Math.PI / 360);
+  const camera = createCamera({ eye: [0, 0, distance], target: [0, 0, 0], fov: fieldOfView }, size, size);
+  const spread = (texelsPerSide) => {
+    const checker = new Float32Array(texelsPerSide * texelsPerSide * 4);
+    for (let texel = 0; texel < texelsPerSide * texelsPerSide; texel++) {
+      const value = ((texel % texelsPerSide) + Math.floor(texel / texelsPerSide)) % 2 === 0 ? 0 : 1;
+      checker.set([value, value, value, 1], texel * 4);
+    }
+    const options = { width: size, height: size, samples: 1, textureMips: true };
+    const input = buildNativeInputV2(
+      {
+        materials: [{ color: [0, 0, 0], emissionStrength: 1, emissionColor: [1, 1, 1], emissiveTexture: { image: { width: texelsPerSide, height: texelsPerSide, data: checker } } }],
+        instances: [{ geometry: quadGeometry(0), materialIndex: 0 }],
+        lights: {},
+      },
+      camera,
+      options,
+    );
+    const result = traceNative(input, { ...options, kernel: 'cycles' });
+    const centre = [];
+    for (let row = 14; row < 18; row++) {
+      for (let column = 14; column < 18; column++) {
+        centre.push(result.rgba[(row * size + column) * 4]);
+      }
+    }
+    return { minimum: Math.min(...centre), maximum: Math.max(...centre) };
+  };
+  // The quad is 16 pixels wide at its centre. 32 texels across it: 2 texels per pixel, level 1, the flat mean of the checker.
+  const twoTexels = spread(32);
+  assert.ok(twoTexels.maximum - twoTexels.minimum < 0.02, 'level 1 is flat: ' + JSON.stringify(twoTexels));
+  assert.ok(Math.abs(twoTexels.minimum - 0.5) < 0.02);
+  // 16 texels across it: 1 texel per pixel, level 0, the checker itself.
+  const oneTexel = spread(16);
+  assert.ok(oneTexel.maximum - oneTexel.minimum > 0.3, 'level 0 keeps the checker: ' + JSON.stringify(oneTexel));
 });

@@ -1172,10 +1172,21 @@ mod tests {
         assert!(walk.contains("level_desc.width * level_desc.height * words_per_texel"));
         assert!(walk.contains("max(level_desc.width >> 1u, 1u)"));
         assert!(walk.contains("max(level_desc.height >> 1u, 1u)"));
-        assert!(kernel.contains("return texture_decode_filtered(mix(lower, upper, blend), format);"));
+        assert!(kernel.contains("return mix(lower, upper, blend);"), "two decoded levels blend in linear light");
         let level_start = kernel.find("fn texture_filter_level(").expect("the level filter exists");
         let level_end = level_start + kernel[level_start..].find("\n}").expect("the level filter ends");
-        assert!(!kernel[level_start..level_end].contains("texture_decode_filtered"), "a mip level is blended on stored values and decoded after, as level 0 is");
+        let level_filter = &kernel[level_start..level_end];
+        let level_zero_branch = level_filter.find("if (level == 0u) {").expect("level 0 has its own branch");
+        let first_decode = level_filter.find("let decoded_c00").expect("later levels decode their taps");
+        let level_zero_return = "return texture_decode_filtered(mix(mix(level_c00, level_c10, level_tx), mix(level_c01, level_c11, level_tx), level_ty), format);";
+        let return_position = level_filter.find(level_zero_return).expect("level 0 stays filter then decode (#1030)");
+        assert!(level_zero_branch < return_position && return_position < first_decode);
+        for tap in ["c00", "c10", "c01", "c11"] {
+            assert!(
+                level_filter.contains(&format!("let decoded_{tap} = texture_decode_filtered(level_{tap}, format);")),
+                "a level after 0 decodes tap {tap} before the blend"
+            );
+        }
     }
 
     #[test]

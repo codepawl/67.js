@@ -454,7 +454,7 @@ function createTextureCollector({ textureMips } = {}) {
       const levelZeroTexels = format === TEXTURE_FORMAT_RGBA32_FLOAT
         ? new Float32Array(packedWords.buffer, packedWords.byteOffset, levelZeroWordCount)
         : levelZeroWords;
-      packedWords = joinMipLevels(levelZeroWords, buildMipChain(mipKindOfFormat(format), levelZeroTexels, width, height));
+      packedWords = joinMipLevels(levelZeroWords, buildMipChain(mipKindOfFormat(format), levelZeroTexels, width, height, repeatU & 0x3, repeatV & 0x3));
       anyTextureHasMips = true;
     }
 
@@ -494,7 +494,7 @@ function createTextureCollector({ textureMips } = {}) {
     padded.set(words.subarray(0, pixelCount));
     if (mipCount > 1) {
       const levelZeroWords = padded.slice(0, pixelCount);
-      padded = joinMipLevels(levelZeroWords, buildMipChain(atlasKind, levelZeroWords, width, height));
+      padded = joinMipLevels(levelZeroWords, buildMipChain(atlasKind, levelZeroWords, width, height, repeat ? 0 : 1, repeat ? 0 : 1));
       anyTextureHasMips = true;
     }
     let sumR = 0;

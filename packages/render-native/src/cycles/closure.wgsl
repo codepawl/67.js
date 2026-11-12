@@ -120,7 +120,10 @@ fn texture_level_descriptor(desc: TextureDescriptor, level: u32, format: u32) ->
   return level_desc;
 }
 
-// Bilinear filter of one mip level on the stored values. The caller decodes the result (see texture_decode_filtered).
+// Bilinear filter of one mip level, returned decoded. Level 0 keeps the order of #1030: blend the stored values, decode the blend.
+// A level after it holds the mean, in linear light, of the level 0 reconstruction over its texel (texture-mips.mjs), so its
+// stored values are blended after the decode of each tap: a blend of two stored sRGB values decodes darker than the light they
+// hold, and nearly every read of a minified map is such a blend.
 fn texture_filter_level(
   desc: TextureDescriptor,
   level: u32,
@@ -147,11 +150,18 @@ fn texture_filter_level(
   let level_c10 = texture_fetch_texel(level_desc, level_ix1, level_iy0, format);
   let level_c01 = texture_fetch_texel(level_desc, level_ix0, level_iy1, format);
   let level_c11 = texture_fetch_texel(level_desc, level_ix1, level_iy1, format);
-  return mix(mix(level_c00, level_c10, level_tx), mix(level_c01, level_c11, level_tx), level_ty);
+  if (level == 0u) {
+    return texture_decode_filtered(mix(mix(level_c00, level_c10, level_tx), mix(level_c01, level_c11, level_tx), level_ty), format);
+  }
+  let decoded_c00 = texture_decode_filtered(level_c00, format);
+  let decoded_c10 = texture_decode_filtered(level_c10, format);
+  let decoded_c01 = texture_decode_filtered(level_c01, format);
+  let decoded_c11 = texture_decode_filtered(level_c11, format);
+  return mix(mix(decoded_c00, decoded_c10, level_tx), mix(decoded_c01, decoded_c11, level_tx), level_ty);
 }
 
-// Trilinear read for a footprint larger than a texel: the two levels around `level_of_detail` are each filtered on their stored
-// values, blended, and only then decoded, so an sRGB map keeps the order of the level 0 path.
+// Trilinear read for a footprint larger than a texel: the two levels around `level_of_detail` are each filtered and decoded
+// (see texture_filter_level) and blended in linear light.
 fn texture_filter_trilinear(
   desc: TextureDescriptor,
   mip_count: u32,
@@ -168,10 +178,10 @@ fn texture_filter_trilinear(
   let blend = clamped_detail - f32(lower_level);
   let lower = texture_filter_level(desc, lower_level, format, wrap_u, wrap_v, u_wrapped, v_wrapped);
   if (upper_level == lower_level) {
-    return texture_decode_filtered(lower, format);
+    return lower;
   }
   let upper = texture_filter_level(desc, upper_level, format, wrap_u, wrap_v, u_wrapped, v_wrapped);
-  return texture_decode_filtered(mix(lower, upper, blend), format);
+  return mix(lower, upper, blend);
 }
 
 // The one texture sampler of the kernel: shading (closure_sample_texture), bump, and the alpha tests of the integrator all
