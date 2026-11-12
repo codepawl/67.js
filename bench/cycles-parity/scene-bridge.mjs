@@ -318,6 +318,7 @@ export async function reconstructTraceSceneSource(description, repositoryRootPat
     geometry: decodedGeometries[partEntry.geometry],
     matrix: new Float32Array(partEntry.matrix),
     material: decodedMaterials[partEntry.material],
+    ...(partEntry.rayVisibility ? { rayVisibility: partEntry.rayVisibility } : {}),
   }));
   const environmentMap = await rebuildEnvironmentMap(description.world, repositoryRootPath);
   const fullEnvironment = {

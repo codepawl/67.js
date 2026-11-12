@@ -26,22 +26,23 @@ function unlinkedLights(lights) {
   return lights.map(light => ({ ...light, bit: UNLINKED_LIGHT_BIT }));
 }
 
-export function buildTraceSceneWithManyLights(parts, environment) {
+// `options.instancing` keeps copies of one geometry as instances (a scene packed with buildNativeInputV2 for the cycles kernel).
+export function buildTraceSceneWithManyLights(parts, environment, options = {}) {
   const analyticLights = listAnalyticLights(environment);
   if (analyticLights.length <= MAX_TRACE_LIGHTS) {
-    return applyCookOnlyFields(buildTraceScene(parts, environment), parts, environment);
+    return applyCookOnlyFields(buildTraceScene(parts, environment, options), parts, environment);
   }
   const points = [];
   const spots = [];
   const areas = [];
   for (let start = 0; start < analyticLights.length; start += MAX_TRACE_LIGHTS) {
     const chunk = analyticLights.slice(start, start + MAX_TRACE_LIGHTS);
-    const chunkLights = buildTraceScene(parts, chunkEnvironment(environment, chunk)).lights;
+    const chunkLights = buildTraceScene(parts, chunkEnvironment(environment, chunk), options).lights;
     points.push(...unlinkedLights(chunkLights.points));
     spots.push(...unlinkedLights(chunkLights.spots));
     areas.push(...unlinkedLights(chunkLights.areas));
   }
-  const traceScene = buildTraceScene(parts, { ...environment, pointLights: [], spotLights: [], areaLights: [] });
+  const traceScene = buildTraceScene(parts, { ...environment, pointLights: [], spotLights: [], areaLights: [] }, options);
   traceScene.lights = { sun: traceScene.lights.sun, points, spots, areas };
   return applyCookOnlyFields(traceScene, parts, environment);
 }
