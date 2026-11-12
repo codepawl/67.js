@@ -1,0 +1,1 @@
+- Balanced the unit test shards from measured timings: untimed test files are dealt by the median timing instead of a hash, the timings are refreshed, `node scripts/shard-test-files.mjs --from-run <run id>` refreshes the timings (#996).
