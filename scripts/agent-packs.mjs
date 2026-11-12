@@ -6,8 +6,8 @@ import { basename, isAbsolute, join } from 'node:path';
 
 import { invalidField } from '../src/field-error.js';
 import {
-  MAXIMUM_INSTALLED_PACKS, MAXIMUM_PACK_BYTES, MAXIMUM_PACK_FILES, MAXIMUM_PACK_FILE_BYTES, MAXIMUM_PACK_JSON_BYTES,
-  PACK_MANIFEST_FILE, findRemoteUrl, isExecutableLookingName, validatePackManifest,
+  MAXIMUM_INSTALLED_PACKS, MAXIMUM_JSON_DEPTH, MAXIMUM_PACK_BYTES, MAXIMUM_PACK_FILES, MAXIMUM_PACK_FILE_BYTES, MAXIMUM_PACK_JSON_BYTES,
+  PACK_MANIFEST_FILE, findRemoteUrl, isExecutableLookingName, isPackDocumentName, validatePackManifest,
 } from '../src/pack-manifest.js';
 import { describeCatalogFile, readCatalogFile } from './agent-asset-catalog.mjs';
 
@@ -46,8 +46,31 @@ async function listPackFiles(directory, label) {
   return files;
 }
 
-async function readJsonFile(directory, file, label, field) {
-  const text = (await readFile(join(directory, file), 'utf8')).replace(/^﻿/, '');
+/** Refuses a file that is not the manifest, not listed in it and not a plain text document (LICENSE, README...). */
+async function assertOnlyAllowedFiles(directory, files, listedFiles, label) {
+  for (const [relativePath, size] of files) {
+    if (listedFiles.has(relativePath)) continue;
+    const field = `pack "${label}" ${relativePath}`;
+    if (!isPackDocumentName(relativePath.split('/').at(-1))) {
+      throw invalidField(field, 'a file that is not listed in the manifest', `a file listed in ${PACK_MANIFEST_FILE} contents, or a LICENSE, README, NOTICE, CHANGELOG or AUTHORS text document; list it in contents or remove it`);
+    }
+    if (size > MAXIMUM_PACK_JSON_BYTES) throw invalidField(field, `${size} bytes`, 'a text document of at most 1 MiB; shorten or remove it');
+    const bytes = await readFile(join(directory, relativePath));
+    let isText = !bytes.includes(0);
+    if (isText) {
+      try {
+        new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        isText = false;
+      }
+    }
+    if (!isText) throw invalidField(field, 'a document that is not UTF-8 text', 'plain UTF-8 text without NUL bytes; remove the file or convert it');
+  }
+}
+
+async function readJsonFile(directory, file, label, field, size) {
+  if (size > MAXIMUM_PACK_JSON_BYTES) throw invalidField(`pack "${label}" ${field}`, `${file} over ${MAXIMUM_PACK_JSON_BYTES} bytes`, 'a JSON file of at most 1 MiB; split it or drop data you do not need');
+  const text =(await readFile(join(directory, file), 'utf8')).replace(/^﻿/, '');
   if (Buffer.byteLength(text) > MAXIMUM_PACK_JSON_BYTES) throw invalidField(`pack "${label}" ${field}`, `${file} over ${MAXIMUM_PACK_JSON_BYTES} bytes`, 'a JSON file of at most 1 MiB; split it or drop data you do not need');
   try {
     return JSON.parse(text);
@@ -62,6 +85,7 @@ async function readJsonFile(directory, file, label, field) {
  */
 async function validateJsonContent(kind, id, json, label, file, validateScene) {
   const remote = findRemoteUrl(json);
+  if (remote?.tooDeep) throw invalidField(`pack "${label}" ${file}`, `JSON nested over ${MAXIMUM_JSON_DEPTH} levels`, `at most ${MAXIMUM_JSON_DEPTH} levels of nested objects and lists; flatten ${remote.path}`);
   if (remote) throw invalidField(`pack "${label}" ${file} ${remote.path}`, remote.value, 'no remote URL: a pack is data only. Reference pack files by their catalog ID, and use data:image/png|jpeg|webp;base64 only for small images');
   if (!json || typeof json !== 'object' || Array.isArray(json)) throw invalidField(`pack "${label}" ${file}`, json, 'one JSON object');
   if (kind === 'recipes' && json.format !== '67js.scene') throw invalidField(`pack "${label}" ${file} format`, json.format, '"67js.scene", the recipe format scene_create takes');
@@ -82,7 +106,18 @@ export async function loadPack(folder, { packageVersion, label = basename(String
   const directory = await realpath(folder);
   const files = await listPackFiles(directory, label);
   if (!files.has(PACK_MANIFEST_FILE)) throw invalidField(`pack "${label}"`, `no ${PACK_MANIFEST_FILE}`, `a ${PACK_MANIFEST_FILE} file at the pack root`);
-  const manifest = validatePackManifest(await readJsonFile(directory, PACK_MANIFEST_FILE, label, PACK_MANIFEST_FILE), { label, packageVersion });
+  const manifest = validatePackManifest(await readJsonFile(directory, PACK_MANIFEST_FILE, label, PACK_MANIFEST_FILE, files.get(PACK_MANIFEST_FILE)), { label, packageVersion });
+  const listedFiles = new Set([PACK_MANIFEST_FILE]);
+  for (const [kind, list] of Object.entries(manifest.contents)) {
+    for (const [index, item] of list.entries()) {
+      for (const key of ['file', 'preview']) {
+        if (item[key] === undefined) continue;
+        if (!files.has(item[key])) throw invalidField(`pack "${label}" ${PACK_MANIFEST_FILE} contents.${kind}[${index}].${key}`, item[key], 'a file that exists in the pack; check the spelling and capitals');
+        listedFiles.add(item[key]);
+      }
+    }
+  }
+  await assertOnlyAllowedFiles(directory, files, listedFiles, label);
   const packFiles = [];
   const json = { materials: new Map(), recipes: new Map() };
   const items = {};
@@ -90,11 +125,8 @@ export async function loadPack(folder, { packageVersion, label = basename(String
     items[kind] = [];
     for (const [index, item] of list.entries()) {
       const field = `contents.${kind}[${index}]`;
-      for (const [key, file] of [['file', item.file], ['preview', item.preview]]) {
-        if (file !== undefined && !files.has(file)) throw invalidField(`pack "${label}" ${PACK_MANIFEST_FILE} ${field}.${key}`, file, 'a file that exists in the pack; check the spelling and capitals');
-      }
       if (kind === 'materials' || kind === 'recipes') {
-        const content = await readJsonFile(directory, item.file, label, `${field}.file`);
+        const content = await readJsonFile(directory, item.file, label, `${field}.file`, files.get(item.file));
         await validateJsonContent(kind, item.id, content, label, item.file, validateScene);
         json[kind].set(item.id, content);
         items[kind].push({ id: item.id, ...(item.preview && { preview: item.preview }) });
@@ -156,6 +188,7 @@ export async function createPackRegistry(root, { packageVersion }) {
     },
     /** A copy of one material or recipe JSON, by pack name and id. */
     read(kind, packName, id) {
+      if (kind !== 'materials' && kind !== 'recipes') throw invalidField('kind', kind, '"materials" or "recipes"');
       const pack = packs.find(candidate => candidate.name === packName);
       if (!pack) throw invalidField('pack', packName, `an installed pack name: ${packs.map(candidate => candidate.name).join(', ') || 'none installed'}`);
       const content = pack.json[kind].get(id);
