@@ -317,7 +317,9 @@ async function runCli() {
   const buildStarted = performance.now();
   const traceSource = await reconstructTraceSceneSource(description);
   const traceScene = buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
-  const camera = createCamera({ ...traceSource.camera, ...options.lens }, options.width, options.height);
+  // render-cycles.py takes the lens from the flags only, so a lens set in the scene file is dropped here to keep the two sides comparable.
+  const { fStop: ignoredSceneFStop, ...sceneCameraWithoutLens } = traceSource.camera;
+  const camera = createCamera({ ...sceneCameraWithoutLens, ...options.lens }, options.width, options.height);
   const samplesPerDispatch = options.samplesPerDispatch !== undefined
     ? options.samplesPerDispatch
     : (options.noiseThreshold > 0 ? 8 : undefined);
