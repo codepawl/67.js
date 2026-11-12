@@ -276,7 +276,7 @@ export async function createAgentAssetCatalog(root) {
     },
     async read(assetId) {
       const entry = entries.get(assetId);
-      if (!entry) throw new Error('Unknown asset ID. Read the configured asset catalog first.');
+      if (!entry) throw new Error(`Unknown asset ID ${String(assetId).slice(0, 12)}. Call scene_asset_catalog and pass an assetId it lists.`);
       const result = await readFile(entry.filename);
       if (result.assetId !== assetId) throw new Error('Asset bytes changed since catalog creation. Restart the runtime to refresh the catalog.');
       const clipCount = result.document?.animations?.length ?? 0;
