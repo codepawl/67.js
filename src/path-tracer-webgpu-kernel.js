@@ -544,6 +544,7 @@ var<private> surfaceViewCosine: f32;
 var<private> surfaceDiffuse: vec3<f32>;
 var<private> surfaceSpecularNormal: vec3<f32>;
 var<private> surfaceSpecularWeight: f32;
+var<private> surfaceMultipleScattering: vec3<f32>;
 var<private> surfaceSpecularAlpha: f32;
 var<private> surfaceCoatWeight: f32;
 var<private> surfaceCoatChance: f32;
@@ -555,12 +556,61 @@ var<private> surfaceSpecularChance: f32;
 var<private> surfaceValue: vec3<f32>;
 var<private> surfacePdf: f32;
 
-fn dielectricSpecularAlbedo(normalReflectance: f32, roughness: f32, viewCosine: f32) -> f32 {
+// The directional albedo of the specular lobe is normalReflectance * x + y.
+fn specularAlbedoTerms(roughness: f32, viewCosine: f32) -> vec2<f32> {
   let smoothness = 1.0 - roughness;
   let slope = min(smoothness * smoothness, exp2(-9.28 * viewCosine)) * smoothness + (0.0425 - 0.0275 * roughness);
   let scale = 1.04 - 0.572 * roughness - 1.04 * slope;
   let offset = 1.04 * slope + 0.022 * roughness - 0.04;
-  return clamp(normalReflectance * scale + offset, 0.0, 1.0);
+  return vec2<f32>(scale, offset);
+}
+
+fn dielectricSpecularAlbedo(normalReflectance: f32, roughness: f32, viewCosine: f32) -> f32 {
+  let terms = specularAlbedoTerms(roughness, viewCosine);
+  return clamp(normalReflectance * terms.x + terms.y, 0.0, 1.0);
+}
+
+// The share of the light a rough conductor lit by a white sky keeps with single scattering GGX and this kernel's Smith masking, by roughness
+// (rows, 0 to 1 in eighths) and square root of the view cosine (columns, 0 to 1 in eighths). Integrated numerically over the hemisphere.
+var<private> specularWhiteAlbedo: array<f32, 81> = array<f32, 81>(
+  1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000,
+  0.7065, 0.6828, 0.9606, 0.9926, 0.9977, 0.9990, 0.9995, 0.9997, 0.9998,
+  0.9306, 0.9098, 0.8781, 0.9169, 0.9613, 0.9820, 0.9904, 0.9940, 0.9957,
+  0.9224, 0.9118, 0.8819, 0.8643, 0.8847, 0.9209, 0.9492, 0.9662, 0.9756,
+  0.8981, 0.8909, 0.8690, 0.8420, 0.8285, 0.8389, 0.8649, 0.8931, 0.9158,
+  0.8543, 0.8478, 0.8281, 0.8004, 0.7733, 0.7574, 0.7581, 0.7730, 0.7956,
+  0.7896, 0.7826, 0.7616, 0.7310, 0.6964, 0.6643, 0.6404, 0.6278, 0.6269,
+  0.7070, 0.6990, 0.6752, 0.6400, 0.5985, 0.5557, 0.5154, 0.4803, 0.4521,
+  0.6131, 0.6043, 0.5776, 0.5380, 0.4910, 0.4413, 0.3928, 0.3476, 0.3069,
+);
+
+fn lookupSpecularWhiteAlbedo(roughness: f32, viewCosine: f32) -> f32 {
+  let rowPosition = clamp(roughness, 0.0, 1.0) * 8.0;
+  let columnPosition = sqrt(clamp(viewCosine, 0.0, 1.0)) * 8.0;
+  let row = min(u32(rowPosition), 7u);
+  let column = min(u32(columnPosition), 7u);
+  let rowBlend = rowPosition - f32(row);
+  let columnBlend = columnPosition - f32(column);
+  let first = mix(specularWhiteAlbedo[row * 9u + column], specularWhiteAlbedo[row * 9u + column + 1u], columnBlend);
+  let second = mix(specularWhiteAlbedo[(row + 1u) * 9u + column], specularWhiteAlbedo[(row + 1u) * 9u + column + 1u], columnBlend);
+  return mix(first, second, rowBlend);
+}
+
+// Single scattering GGX loses the light that bounces between microfacets, a tenth of a rough metal and more at the grazing angles. This is the
+// factor that gives it back, from the albedo of the lobe with a white Fresnel term and the average Fresnel over the hemisphere (Fdez-Aguera 2019).
+fn multipleScatteringFactor(normalReflectance: vec3<f32>, roughness: f32, viewCosine: f32) -> vec3<f32> {
+  let missing = 1.0 - lookupSpecularWhiteAlbedo(roughness, viewCosine);
+  let averageFresnel = normalReflectance + (vec3<f32>(1.0) - normalReflectance) / 21.0;
+  return vec3<f32>(1.0) + averageFresnel * missing / (vec3<f32>(1.0) - missing * averageFresnel);
+}
+
+// Cycles' glossy filter (filter_glossy 1): after a bounce that spread the light, glossy lobes are widened so that a diffuse-glossy-light path
+// does not become a rare, very bright caustic. The smallest sampling density met on the path sets the widest this lobe gets to be.
+var<private> pathMinimumPdf: f32 = 1e30;
+
+fn glossyBlurAlpha() -> f32 {
+  if (pathMinimumPdf >= 1.0) { return 0.0; }
+  return 0.5 * sqrt(1.0 - pathMinimumPdf);
 }
 
 fn prepareSurface(normal: vec3<f32>, view: vec3<f32>) {
@@ -579,8 +629,10 @@ fn prepareSurface(normal: vec3<f32>, view: vec3<f32>) {
   surfaceSpecularNormal = vec3<f32>(dielectricNormalReflectance * (1.0 - hitMetallic)) + hitColor * hitMetallic;
   let specularLuminance = luminance(surfaceSpecularNormal);
   surfaceSpecularWeight = underCoat;
-  surfaceSpecularAlpha = roughnessToAlpha(hitRoughness);
-  surfaceCoatAlpha = roughnessToAlpha(hitClearcoatRoughness);
+  let blurAlpha = glossyBlurAlpha();
+  surfaceSpecularAlpha = max(roughnessToAlpha(hitRoughness), blurAlpha);
+  surfaceCoatAlpha = max(roughnessToAlpha(hitClearcoatRoughness), blurAlpha);
+  surfaceMultipleScattering = multipleScatteringFactor(surfaceSpecularNormal, hitRoughness, viewCosine);
   let diffuseLuminance = luminance(surfaceDiffuse);
   let specularChance = schlick(specularLuminance, viewCosine) * underCoat;
   let coatChance = surfaceCoatWeight;
@@ -611,7 +663,7 @@ fn evaluateSurface(lightDirection: vec3<f32>) {
   if (surfaceSpecularChance > 0.0 && surfaceSpecularAlpha > MIRROR_ALPHA) {
     let alpha = surfaceSpecularAlpha;
     let term = microfacetTerm(alpha, viewCosine, lightCosine, halfCosine) * surfaceSpecularWeight;
-    surfaceValue += schlickColor(surfaceSpecularNormal, viewHalfCosine) * term;
+    surfaceValue += schlickColor(surfaceSpecularNormal, viewHalfCosine) * surfaceMultipleScattering * term;
     surfacePdf += surfaceSpecularChance * smithMasking(alpha, viewCosine) * ggxDistribution(alpha, halfCosine) / (4.0 * viewCosine);
   }
   if (surfaceCoatChance > 0.0 && surfaceCoatAlpha > MIRROR_ALPHA) {
@@ -1071,6 +1123,7 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
   direction = startDirection;
   var position = origin;
   var previousPdf = 0.0;
+  pathMinimumPdf = 1e30;
   var afterMirror = true;
   var normal = vec3<f32>(0.0, 1.0, 0.0);
   let bounces = params.sizeBouncesLights.z;
@@ -1156,6 +1209,7 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
         if (!(surfacePdf > 0.0)) { break; }
         throughput *= surfaceValue * cosine / surfacePdf;
         previousPdf = surfacePdf;
+        pathMinimumPdf = min(pathMinimumPdf, surfacePdf);
         afterMirror = false;
       }
       ${realtime ? realtime.record : ''}
@@ -1266,7 +1320,7 @@ fn generatePaths(@builtin(global_invocation_id) id: vec3<u32>) {
   let base = id.x * PATH_STATE_VECTORS;
   storeVector(base, vec4<f32>(params.eye.xyz, 0.0));
   storeVector(base + 1u, vec4<f32>(rayDirection, 1.0));
-  storeVector(base + 2u, vec4<f32>(1.0, 1.0, 1.0, 0.0));
+  storeVector(base + 2u, vec4<f32>(1.0, 1.0, 1.0, 1e30));
   storeVector(base + 3u, vec4<f32>(0.0));
   storeVector(base + 4u, vec4<f32>(1.0, 1.0, 1.0, 0.0));
   storeVector(base + 5u, vec4<f32>(0.0, 0.0, 1.0, 0.0));
@@ -1376,6 +1430,7 @@ fn shadePaths(@builtin(global_invocation_id) id: vec3<u32>) {
   direction = directionSelection.xyz;
   selectionProbability = directionSelection.w;
   throughput = loadVector(base + 2u).xyz;
+  pathMinimumPdf = loadVector(base + 2u).w;
   radiance = radianceData.xyz;
   nearestSlot = i32(pathMeta.z);
   nearestU = hitInfo.x;
@@ -1447,6 +1502,7 @@ fn shadePaths(@builtin(global_invocation_id) id: vec3<u32>) {
       if (surfacePdf > 0.0) {
         throughput *= surfaceValue * cosine / surfacePdf;
         previousPdf = surfacePdf;
+        pathMinimumPdf = min(pathMinimumPdf, surfacePdf);
         afterMirror = false;
       } else {
         alive = false;
@@ -1460,7 +1516,7 @@ fn shadePaths(@builtin(global_invocation_id) id: vec3<u32>) {
   }
   storeVector(base, vec4<f32>(nextOrigin, previousPdf));
   storeVector(base + 1u, vec4<f32>(direction, selectionProbability));
-  storeVector(base + 2u, vec4<f32>(throughput, 0.0));
+  storeVector(base + 2u, vec4<f32>(throughput, pathMinimumPdf));
   storeVector(base + 3u, vec4<f32>(radiance, radianceData.w));
   pathMeta.x = rngState;
   pathMeta.y = select(0u, FLAG_ALIVE, alive) | select(0u, FLAG_AFTER_MIRROR, afterMirror) | FLAG_SHADED;
