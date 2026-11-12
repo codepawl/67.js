@@ -27,6 +27,7 @@ import {
   validateImagePixelCount,
   validateMaxSeconds,
   validatePackOptions,
+  validateDenoiseOption,
 } from './pack-input-v2.mjs';
 
 export { buildNativeInput, buildNativeTexelInput } from './pack-input.mjs';
@@ -65,6 +66,9 @@ export function resolveNativeKernel(kernel) {
   return selectedKernel;
 }
 
+// The `cycles` kernel starts a pixel's next sample as soon as a path ends unless the caller passes `pathRegeneration: false`.
+const DEFAULT_PATH_REGENERATION = true;
+
 /**
  * Traces the input on the GPU and resolves linear RGBA float data (`rgba`, width * height * 4, rows from the top, the
  * average of `samples` paths) with the adapter name and timings in seconds. `maxSeconds` makes the trace fail once it has
@@ -72,7 +76,7 @@ export function resolveNativeKernel(kernel) {
  */
 export function traceNative(input, options = {}) {
   validatePackOptions(options, 'traceNative', true);
-  const { sampler, lightSampling } = resolveSamplingOptions(options, 'traceNative');
+  resolveSamplingOptions(options, 'traceNative');
   validatePathRegenerationOption(options.pathRegeneration, 'traceNative');
   const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel, denoise } = options;
   const selectedKernel = resolveNativeKernel(kernel);
@@ -83,34 +87,12 @@ export function traceNative(input, options = {}) {
     }
     if (input?.schemaVersion === FORMAT_V2_VERSION) {
       throw new TypeError(
-        'Cannot pass a FORMAT-v2 scene input to kernel "legacy": pass kernel "cycles" or build a v1 input with buildNativeInput.'
+        'Cannot pass a FORMAT-v2 scene input to kernel "legacy": pass kernel "cycles" or build a v1 input with buildNativeInput (an instanced scene needs kernel "cycles"; build it without { instancing: true } for kernel "legacy").'
       );
     }
     return addon.traceScene(input, { width, height, samples, maxSeconds, kernel: selectedKernel });
   }
-  let v2Input = input?.schemaVersion === FORMAT_V2_VERSION
-    ? input
-    : upgradeNativeInputV1ToV2(input, options);
-  const explicitFilterGlossy = options.filterGlossy ?? options.blurGlossy;
-  if (input?.schemaVersion === FORMAT_V2_VERSION && explicitFilterGlossy !== undefined) {
-    const rawFilterGlossy = Number(explicitFilterGlossy);
-    const resolvedFilterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
-    const patchedParams = new Uint8Array(v2Input.kernelParams);
-    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
-    v2Input = { ...v2Input, kernelParams: patchedParams };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && hasFilterOptions(options)) {
-    v2Input = { ...v2Input, kernelParams: withFilterOptions(v2Input.kernelParams, options) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && sampler !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, sampler) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && options.pathRegeneration !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withPathRegenerationFlag(v2Input.kernelParams, options.pathRegeneration) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && lightSampling !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, lightSampling) };
-  }
+  const v2Input = prepareCyclesInput(input, options);
   return addon.traceSceneCycles(v2Input, {
     width,
     height,
@@ -138,6 +120,23 @@ export function denoiseAtrous({ width, height, rgba, albedo, normal, depth, vari
     }
   }
   return loadAddon().denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance });
+}
+
+/**
+ * Opens a persistent OIDN device and filter inside the addon. The OIDN shared library is loaded at run time from
+ * `libraryPath` (`findOidnLibrary()` of the denoise package), so the addon works without it. Returns the native object
+ * with `denoise({ width, height, color, albedo, normal })`, `close()` and `deviceSeconds`. Use
+ * `createOidnDenoiser` of the denoise package for the wrapper that jobs call.
+ */
+export function createNativeOidnDenoiser({ libraryPath, device = 'cpu', quality = 'high', cleanAux = false, threads = 0 }) {
+  if (typeof libraryPath !== 'string' || libraryPath === '') {
+    throw new TypeError('createNativeOidnDenoiser: pass `libraryPath`, the OIDN shared library (findOidnLibrary() in the denoise package).');
+  }
+  const addon = loadAddon();
+  if (typeof addon.OidnDenoiser !== 'function') {
+    throw new Error('The built native tracer has no OIDN support: run `npm run build` in packages/render-native again.');
+  }
+  return new addon.OidnDenoiser({ libraryPath, device, quality, cleanAux, threads });
 }
 
 function hasFilterOptions(options) {
@@ -198,6 +197,20 @@ function withSamplerFlag(kernelParams, sampler) {
     : (flags & ~KERNEL_FLAG_WHITE_NOISE_SAMPLER) >>> 0;
   view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
   return patchedParams;
+}
+
+/**
+ * Builds the FORMAT-v2 input of the `cycles` kernel from a v1 or v2 input and the trace options, patching the kernel flags
+ * the options set. Exported for tests; not part of the public API.
+ */
+export function prepareCyclesInput(input, options = {}) {
+  if (input?.schemaVersion === FORMAT_V2_VERSION) {
+    return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, 'traceNative') };
+  }
+  resolveSamplingOptions(options, 'traceNative');
+  const upgradedInput = upgradeNativeInputV1ToV2(input, options);
+  const pathRegeneration = options.pathRegeneration ?? DEFAULT_PATH_REGENERATION;
+  return { ...upgradedInput, kernelParams: withPathRegenerationFlag(upgradedInput.kernelParams, pathRegeneration) };
 }
 
 // Exported for tests; not part of the public API.
@@ -310,4 +323,262 @@ function loadAddon() {
   const addonPath = findNativeAddon();
   if (!addonPath) throw new Error('The native tracer is not built. Run `npm run build` in packages/render-native.');
   return createRequire(import.meta.url)(addonPath);
+}
+
+// ---- Persistent session (issue 896) ----
+
+function requireSessionKernelParams(kernelParams, callerName) {
+  if (!(kernelParams instanceof Uint8Array) || kernelParams.byteLength !== STRUCT_STRIDES_V2.kernelParams) {
+    throw new TypeError(
+      `${callerName}: \`kernelParams\` must be a Uint8Array of ${STRUCT_STRIDES_V2.kernelParams} bytes (the KernelParamsV2 block of buildNativeInputV2).`
+    );
+  }
+}
+
+function requireCyclesKernelOption(kernel, callerName) {
+  if (kernel !== undefined && resolveNativeKernel(kernel) !== 'cycles') {
+    throw new TypeError(`${callerName}: a native session runs the "cycles" kernel only; got kernel "${kernel}". Use traceNative for the legacy kernel.`);
+  }
+}
+
+function mergeDefinedOptions(sessionOptions, renderOptions) {
+  const merged = { ...sessionOptions };
+  for (const [name, value] of Object.entries(renderOptions)) {
+    if (value !== undefined) merged[name] = value;
+  }
+  return merged;
+}
+
+// The kernel parameters of a FORMAT-v2 input after the sampling, filter and light options of `options`, the one place the patches live (traceNative and sessions share it), in a fixed
+// order.
+function patchedCyclesKernelParams(v2Input, kernelParams, options, callerName) {
+  const { sampler, lightSampling } = resolveSamplingOptions(options, callerName);
+  validatePathRegenerationOption(options.pathRegeneration, callerName);
+  let patchedParams = new Uint8Array(kernelParams);
+  const explicitFilterGlossy = options.filterGlossy ?? options.blurGlossy;
+  if (explicitFilterGlossy !== undefined) {
+    const rawFilterGlossy = Number(explicitFilterGlossy);
+    const resolvedFilterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
+    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
+  }
+  if (hasFilterOptions(options)) patchedParams = withFilterOptions(patchedParams, options);
+  if (sampler !== undefined) patchedParams = withSamplerFlag(patchedParams, sampler);
+  patchedParams = withPathRegenerationFlag(patchedParams, options.pathRegeneration ?? DEFAULT_PATH_REGENERATION);
+  if (lightSampling !== undefined) patchedParams = withLightSamplingFlag({ ...v2Input, kernelParams: patchedParams }, lightSampling);
+  return patchedParams;
+}
+
+// Exported for tests; not part of the public API.
+export function resolveSessionCreation(input, options, callerName = 'createNativeSession') {
+  if (input === null || typeof input !== 'object') {
+    throw new TypeError(`${callerName}: \`input\` must be a FORMAT-v2 input object from buildNativeInputV2.`);
+  }
+  if (input.schemaVersion !== FORMAT_V2_VERSION) {
+    throw new TypeError(
+      `${callerName}: \`input.schemaVersion\` must be ${FORMAT_V2_VERSION} (a FORMAT-v2 input from buildNativeInputV2); got ${JSON.stringify(input.schemaVersion)}. Convert a v1 input with upgradeNativeInputV1ToV2.`
+    );
+  }
+  requireSessionKernelParams(input.kernelParams, callerName);
+  if (options === null || typeof options !== 'object') {
+    throw new TypeError(`${callerName}: \`options\` must be an object.`);
+  }
+  requireCyclesKernelOption(options.kernel, callerName);
+  validatePackOptions(options, callerName);
+  return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, callerName) };
+}
+
+// Exported for tests; not part of the public API.
+export function resolveSessionFrame(sessionInput, sessionOptions, renderOptions) {
+  if (renderOptions === null || typeof renderOptions !== 'object') {
+    throw new TypeError('NativeSession.render: `renderOptions` must be an object.');
+  }
+  const options = mergeDefinedOptions(sessionOptions, renderOptions);
+  requireCyclesKernelOption(options.kernel, 'NativeSession.render');
+  validatePackOptions(options, 'NativeSession.render', true);
+  let baseKernelParams = sessionInput.kernelParams;
+  if (renderOptions.kernelParams !== undefined) {
+    requireSessionKernelParams(renderOptions.kernelParams, 'NativeSession.render');
+    baseKernelParams = renderOptions.kernelParams;
+  }
+  const kernelParams = patchedCyclesKernelParams(sessionInput, baseKernelParams, options, 'NativeSession.render');
+  const { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, accumulate, targetSamples } = options;
+  validateProgressiveOptions({ accumulate, targetSamples, samples });
+  return { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, kernelParams, accumulate, targetSamples };
+}
+
+const MAX_TARGET_SAMPLES = 16777216;
+
+function validateProgressiveOptions({ accumulate, targetSamples, samples }) {
+  if (accumulate !== undefined && typeof accumulate !== 'boolean') {
+    throw new TypeError(`NativeSession.render: \`accumulate\` must be true, false or left out, got ${JSON.stringify(accumulate)}.`);
+  }
+  if (targetSamples === undefined) return;
+  if (accumulate !== true) {
+    throw new TypeError('NativeSession.render: `targetSamples` only applies with `accumulate: true`. Pass accumulate: true to build one image over several render calls.');
+  }
+  if (!Number.isInteger(targetSamples) || targetSamples < 1 || targetSamples > MAX_TARGET_SAMPLES) {
+    throw new RangeError(`NativeSession.render: \`targetSamples\` must be an integer in [1, ${MAX_TARGET_SAMPLES}]; got ${JSON.stringify(targetSamples)}.`);
+  }
+  if (samples > targetSamples) {
+    throw new RangeError(`NativeSession.render: \`samples\` (${samples}) is more than \`targetSamples\` (${targetSamples}). Pass targetSamples as the total for the whole image.`);
+  }
+}
+
+// ---- Scene updates ----
+
+const UPDATE_COUNT_NAMES = [
+  'instanceCount', 'triangleCount', 'materialCount', 'emissiveTriangleCount', 'lightCount', 'lightTreeNodeCount', 'lightTreeEmitterCount', 'textureCount',
+];
+// Tables a session update cannot change, with what each holds, for the error.
+const UPDATE_FIXED_TABLES = [
+  ['triangles', 'the geometry'],
+  ['textureDescriptors', 'the textures'],
+  ['textureTexels', 'the textures'],
+  ['environmentTexels', 'the environment map'],
+];
+// Tables a session update can replace: same size, new values.
+const UPDATE_VALUE_TABLES = ['instances', 'materials', 'emissiveTriangles', 'lights', 'lightTreeNodes', 'lightTreeEmitters', 'lightToTree'];
+const INSTANCE_RECORD_BYTE_LENGTH = 160;
+const INSTANCE_TOPOLOGY_FIELDS = [['blasIndex', 96], ['triangleOffset', 100], ['opaqueTriangleCount', 104], ['totalTriangleCount', 108]];
+
+function bytesOfTable(table) {
+  return table === undefined || table === null ? Buffer.alloc(0) : Buffer.from(table.buffer, table.byteOffset, table.byteLength);
+}
+
+function sameTableBytes(first, second) {
+  return bytesOfTable(first).equals(bytesOfTable(second));
+}
+
+function refuseUpdate(detail) {
+  return new Error(`NativeSession.update: ${detail} Create a new session with createNativeSession(input) for this input.`);
+}
+
+function checkUpdateKeepsRecordCounts(current, next) {
+  for (const name of UPDATE_COUNT_NAMES) {
+    const heldCount = current[name] ?? 0;
+    const newCount = next[name] ?? 0;
+    if (heldCount !== newCount) {
+      throw refuseUpdate(`\`${name}\` changes from ${heldCount} to ${newCount}; a session keeps the tables at the size it was created with.`);
+    }
+  }
+}
+
+function checkUpdateKeepsFixedTables(current, next) {
+  for (const [name, holds] of UPDATE_FIXED_TABLES) {
+    if (!sameTableBytes(current[name], next[name])) {
+      throw refuseUpdate(`\`${name}\` differs, and it holds ${holds}; a session update changes values of materials, lights and instance transforms only.`);
+    }
+  }
+}
+
+function checkUpdateKeepsInstanceMeshes(currentInstances, nextInstances) {
+  const heldBytes = bytesOfTable(currentInstances);
+  const newBytes = bytesOfTable(nextInstances);
+  for (let offset = 0; offset < newBytes.length; offset += INSTANCE_RECORD_BYTE_LENGTH) {
+    for (const [fieldName, fieldOffset] of INSTANCE_TOPOLOGY_FIELDS) {
+      const heldWord = heldBytes.readUInt32LE(offset + fieldOffset);
+      const newWord = newBytes.readUInt32LE(offset + fieldOffset);
+      if (heldWord !== newWord) {
+        throw refuseUpdate(`instance ${offset / INSTANCE_RECORD_BYTE_LENGTH} changes \`${fieldName}\` from ${heldWord} to ${newWord}; an update may move or restyle an instance but not change the mesh it places.`);
+      }
+    }
+  }
+}
+
+/**
+ * Compares a new FORMAT-v2 input with the one a session holds and returns the tables to send: those whose bytes changed.
+ * Refuses, naming what changed, an input with other record counts, other geometry, textures or environment, or instances
+ * that place other meshes. Exported for tests; not part of the public API.
+ */
+export function planNativeSessionUpdate(currentInput, nextInput) {
+  checkUpdateKeepsRecordCounts(currentInput, nextInput);
+  checkUpdateKeepsFixedTables(currentInput, nextInput);
+  const changedTables = {};
+  for (const name of UPDATE_VALUE_TABLES) {
+    if (!sameTableBytes(currentInput[name], nextInput[name])) changedTables[name] = nextInput[name];
+  }
+  if (changedTables.instances !== undefined) {
+    checkUpdateKeepsInstanceMeshes(currentInput.instances, nextInput.instances);
+  }
+  return changedTables;
+}
+
+// Exported for tests, which pass a stand-in for the addon's session class; not part of the public API.
+export function wrapNativeSession(nativeSession, sessionInput, sessionOptions) {
+  let closed = false;
+  let heldInput = sessionInput;
+  function requireOpen(methodName) {
+    if (closed) {
+      throw new Error(`NativeSession.${methodName}: this session is closed. Create a new one with createNativeSession(input).`);
+    }
+  }
+  return {
+    get closed() {
+      return closed;
+    },
+    render(renderOptions = {}) {
+      requireOpen('render');
+      const frame = resolveSessionFrame(heldInput, sessionOptions, renderOptions);
+      const { trace, session } = nativeSession.render(frame);
+      return { ...trace, ...session };
+    },
+    reset() {
+      requireOpen('reset');
+      nativeSession.reset();
+    },
+    resolve(resolveOptions = {}) {
+      requireOpen('resolve');
+      if (resolveOptions === null || typeof resolveOptions !== 'object') {
+        throw new TypeError('NativeSession.resolve: `resolveOptions` must be an object.');
+      }
+      const denoise = resolveOptions.denoise ?? sessionOptions.denoise;
+      validateDenoiseOption(denoise, 'NativeSession.resolve');
+      const { trace, session } = nativeSession.resolve({ denoise });
+      return { ...trace, ...session };
+    },
+    update(newInput) {
+      requireOpen('update');
+      const nextInput = resolveSessionCreation(newInput, sessionOptions, 'NativeSession.update');
+      const changedTables = planNativeSessionUpdate(heldInput, nextInput);
+      const report = nativeSession.update({ kernelParams: nextInput.kernelParams, ...changedTables });
+      heldInput = nextInput;
+      return report;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      nativeSession.close();
+    },
+  };
+}
+
+/**
+ * Keeps a FORMAT-v2 scene on the GPU between frames (the `cycles` kernel only). `render(renderOptions)` takes what
+ * `traceNative` takes (`width`, `height`, `samples`, `samplesPerDispatch`, `maxSeconds`, `denoise`, the sampling and filter
+ * options) and returns what it returns plus `pipelineReused`, `accelerationReused`, `filmReused` and `frameIndex`. A later frame
+ * with the same scene compiles no shader (while the specialized kernel text is unchanged) and builds no acceleration structure; a
+ * frame at the same size also keeps the film. `renderOptions.kernelParams` brings another camera of the same scene: the
+ * `kernelParams` of a second `buildNativeInputV2` call. `options` are defaults for every frame. `close()` frees the card.
+ * A frame equals the `traceNative` render of the same input and options byte for byte.
+ *
+ * Progressive film: `render({ samples, accumulate: true, targetSamples })` adds `samples` to the image instead of starting a new
+ * one, so an image can grow over several calls (the first call of an image sets `targetSamples`, the total it will hold; later
+ * calls leave it out). The calls continue one sample sequence, so the film after all of them equals one render of `targetSamples`
+ * samples byte for byte. The reports carry `firstSample`, `filmSamples` and `targetSamples`. `reset()` starts the image over.
+ * `resolve({ denoise })` returns the film as it stands without tracing. A later call must keep the size and the render settings
+ * (camera, seed, sampler) of the first; a plain frame (no `accumulate`) discards the progressive image.
+ *
+ * `update(newInput)` takes a FORMAT-v2 input packed from the same scene with other material values, lights, emission or instance
+ * transforms and applies it without a new pipeline or BLAS build (the TLAS is rebuilt when a transform changed). It returns
+ * `uploadedTables`, `accelerationRebuilt`, `changedInstances`, `kernelRespecialized` and the seconds. It clears the film, and a
+ * following frame equals the `traceNative` render of `newInput`. A change of record counts, geometry, textures, the environment
+ * map or of the mesh an instance places is refused with an error that says to create a new session.
+ */
+export function createNativeSession(input, options = {}) {
+  const sessionInput = resolveSessionCreation(input, options);
+  const addon = loadAddon();
+  if (typeof addon.NativeCyclesSession !== 'function') {
+    throw new Error('The built native addon has no session support. Run `npm run build` in packages/render-native.');
+  }
+  return wrapNativeSession(new addon.NativeCyclesSession(sessionInput), sessionInput, options);
 }

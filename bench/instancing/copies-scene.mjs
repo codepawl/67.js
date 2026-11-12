@@ -1,7 +1,8 @@
 // The scene of the instancing benches and the equivalence test: N copies of one small mesh placed on a grid.
 // A variant sets how the copies are placed: translate, rotscale (rotated, non-uniform scale), mirror (negative
-// determinant), mirror-rotscale, or emissive (translate, with one emissive material).
-export const COPY_VARIANTS = ['translate', 'rotscale', 'mirror', 'mirror-rotscale', 'emissive'];
+// determinant), mirror-rotscale, emissive (translate, with one emissive material), emissive-rotscale (the same rotated and stretched), or
+// emissive-degenerate (emissive, on a mesh whose first triangle has no area, so emissive entries skip it).
+export const COPY_VARIANTS = ['translate', 'rotscale', 'mirror', 'mirror-rotscale', 'emissive', 'emissive-rotscale', 'emissive-degenerate'];
 
 function midpoint(positions, first, second) {
   return [0, 1, 2].map(axis => (positions[first * 3 + axis] + positions[second * 3 + axis]) / 2);
@@ -80,7 +81,7 @@ function buildParts(geometry, variant, copyCount) {
     const layer = Math.floor(index / (side * side));
     const translation = [(column - side / 2) * 1.1, (row - side / 2) * 1.1, -layer * 1.1];
     const matrix = transformMatrix(scalesFor(variant, index), rotates ? 0.4 + index * 0.37 : 0, translation);
-    const material = variant === 'emissive' && index % 4 === 0 ? EMISSIVE_MATERIAL : MATERIALS[index % MATERIALS.length];
+    const material = variant.startsWith('emissive') && index % 4 === 0 ? EMISSIVE_MATERIAL : MATERIALS[index % MATERIALS.length];
     return { name: `copy-${index}`, geometry, matrix, material };
   });
 }
@@ -88,6 +89,7 @@ function buildParts(geometry, variant, copyCount) {
 
 export function buildCopyScene(variant, copyCount) {
   if (!COPY_VARIANTS.includes(variant)) throw new RangeError(`Pass one of ${COPY_VARIANTS.join(', ')} as the variant.`);
-  const geometry = icosphere(2);
+  const sphere = icosphere(2);
+  const geometry = variant === 'emissive-degenerate' ? { ...sphere, indices: Uint32Array.from([0, 0, 0, ...sphere.indices]) } : sphere;
   return { geometry, parts: buildParts(geometry, variant, copyCount), environment: { keyColor: [3, 3, 3], lightDirection: [0.4, 0.8, 0.5] } };
 }

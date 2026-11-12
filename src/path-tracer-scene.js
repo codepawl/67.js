@@ -466,17 +466,20 @@ function boundingBoxOf(positions) {
 
 /**
  * The scene with copies of one geometry kept as instances: `instances` (geometry, matrix, materialIndex, visibility) over
- * the unique geometries, and `materials` indexed by part, with no world-space triangle arrays and no CPU BVH. Only
+ * the unique geometries, and `materials` indexed by part (`traceMaterials` are the same parts' resolved materials alone, the
+ * list a flattened scene calls `materials`), with no world-space triangle arrays and no CPU BVH. Only
  * `buildNativeInputV2` reads this shape, for the native "cycles" kernel.
  */
 function buildInstancedTraceScene(parts, geometries, environment, localVolumes) {
   requireInstancedCaps(parts, measureInstancedParts(parts, geometries));
-  const materials = parts.map(part => ({ ...(part.material ?? {}), ...resolveMaterial(part.material ?? {}) }));
+  const traceMaterials = parts.map(part => resolveMaterial(part.material ?? {}));
+  const materials = parts.map((part, index) => ({ ...(part.material ?? {}), ...traceMaterials[index] }));
   const instances = parts.map((part, index) => instanceFor(part, geometries[index], index, materials[index]));
   const extent = instancedExtent(instances);
   return {
     instances,
     materials,
+    traceMaterials,
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),
     volume: resolveTraceVolume(environment.volumeFog),
