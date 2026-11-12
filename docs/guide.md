@@ -84,7 +84,7 @@ Core exports are available from `67js`:
 
 `67js/addons/canvas2d`: 2D recipes. `67js/addons/gltf`: optional asset decoding. These are separate imports to keep the core smaller.
 
-The [three.js bridge](three-bridge.md) imports a three.js object tree as parts and exports parts back to three.js objects and GLB.
+The [three.js bridge](https://github.com/codepawl/67.js/blob/main/docs/three-bridge.md) imports a three.js object tree as parts and exports parts back to three.js objects and GLB.
 
 Other people's addons follow the [addon contract](addons.md): a peer dependency on 67js, the `67js-addon` keyword and a `67js` manifest.
 
