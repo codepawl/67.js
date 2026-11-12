@@ -62,6 +62,7 @@ const nodeFields = {
   receiveShadow: z.boolean().optional(),
   holdout: z.boolean().optional(),
   shadowCatcher: z.boolean().optional(),
+  shadowOnly: z.boolean().optional(),
   blend: z.strictObject({ radius: z.number().min(0.005).max(2) }).optional().describe('Soft seam into another mesh, radius in m; docs/mesh-blend.md.'),
   label: z.string().max(256).optional().describe('Human-readable label. Identity remains the node ID.'),
   parent: identifier.nullable().optional().describe('Parent node ID, or null for a root. Local transforms stay unchanged.'),
