@@ -434,7 +434,10 @@ function prepare(definition, options) {
     }
   }
   const joints = rawJoints.map(joint => {
-    fields(joint, ['name', 'type', 'bodyA', 'bodyB', 'anchorA', 'anchorB', 'axis', 'frameA', 'frameB', 'contactsEnabled', 'limits', 'motor', 'restLength', 'stiffness', 'damping'], `joint ${joint.name}`);
+    fields(joint, ['name', 'type', 'bodyA', 'bodyB', 'anchorA', 'anchorB', 'axis', 'frameA', 'frameB', 'contactsEnabled', 'limits', 'motor', 'restLength', 'stiffness', 'damping', 'breakImpulse'], `joint ${joint.name}`);
+    if (joint.breakImpulse !== undefined && joint.type !== 'fixed') {
+      throw new TypeError('breakImpulse requires a fixed joint');
+    }
     if (!['spherical', 'revolute', 'prismatic', 'fixed', 'spring'].includes(joint.type)) {
       throw new TypeError('unsupported joint type');
     }
@@ -468,6 +471,7 @@ function prepare(definition, options) {
       }
     }
     const result = {
+      name: joint.name,
       type: joint.type,
       bodyA,
       bodyB,
@@ -484,11 +488,19 @@ function prepare(definition, options) {
       if (result.stiffness > MAX_MOTOR_GAIN) throw new RangeError('spring stiffness exceeds the supported gain bound');
       result.damping = scalar(joint.damping ?? 0, 'damping', 0, MAX_MOTOR_GAIN);
     }
+    if (joint.breakImpulse !== undefined) result.breakImpulse = positive(joint.breakImpulse, 'breakImpulse');
     if (joint.limits !== undefined) result.limits = jointLimits(joint.limits, joint.type);
     if (joint.motor !== undefined) result.motor = jointMotor(joint.motor, result);
     if (joint.type === 'prismatic' || joint.limits !== undefined || joint.motor !== undefined) initialJointCoordinate(result, bodies);
     return result;
   });
+  for (const joint of joints) {
+    if (joint.breakImpulse === undefined) continue;
+    for (const collider of colliders) {
+      if (collider.body !== joint.bodyA && collider.body !== joint.bodyB) continue;
+      collider.breakForceThreshold = Math.min(collider.breakForceThreshold ?? Infinity, joint.breakImpulse / timestep);
+    }
+  }
   const jointIndices = new Map(rawJoints.map((joint, index) => [joint.name, index]));
   const events = rawEvents.map((event, order) => {
     const tick = integer(event.tick, 'event tick', 0, frameCount - 2);
@@ -747,7 +759,9 @@ function colliderDescriptor(rapier, collider) {
   descriptor.setRestitution(collider.restitution);
   descriptor.setSensor(collider.sensor);
   descriptor.setCollisionGroups(((collider.groups << 16) | collider.mask) >>> 0);
-  descriptor.setActiveEvents(rapier.ActiveEvents.COLLISION_EVENTS);
+  const forceEvents = collider.breakForceThreshold === undefined ? 0 : rapier.ActiveEvents.CONTACT_FORCE_EVENTS;
+  descriptor.setActiveEvents(rapier.ActiveEvents.COLLISION_EVENTS | forceEvents);
+  if (forceEvents) descriptor.setContactForceEventThreshold(collider.breakForceThreshold);
   if (collider.shape !== 'trimesh') {
     if (collider.mass === undefined) {
       descriptor.setDensity(collider.density);
@@ -833,11 +847,44 @@ export function applyForceFieldImpulses(preparedScene, bodies, fieldTime) {
   }
 }
 
+function breakableJointTable(preparedScene, rapierJoints) {
+  const table = [];
+  preparedScene.joints.forEach((joint, index) => {
+    if (joint.breakImpulse !== undefined) table.push({ index, joint, rapierJoint: rapierJoints[index], broken: false });
+  });
+  return table;
+}
+
+/**
+ * Break every glue joint of a body that took a contact impulse over the joint strength in this step.
+ * The impulse is the contact force magnitude times the timestep, so a body resting under its own weight stays glued.
+ */
+function breakJointsHitHard(world, eventQueue, preparedScene, colliderIndices, breakableJoints, frame, jointBreaks) {
+  const impulseByBody = new Map();
+  eventQueue.drainContactForceEvents(event => {
+    const impulse = event.totalForceMagnitude() * preparedScene.timestep;
+    for (const handle of [event.collider1(), event.collider2()]) {
+      const body = preparedScene.colliders[colliderIndices.get(handle)].body;
+      impulseByBody.set(body, Math.max(impulseByBody.get(body) ?? 0, impulse));
+    }
+  });
+  for (const entry of breakableJoints) {
+    if (entry.broken) continue;
+    const impulse = Math.max(impulseByBody.get(entry.joint.bodyA) ?? 0, impulseByBody.get(entry.joint.bodyB) ?? 0);
+    if (impulse < entry.joint.breakImpulse) continue;
+    entry.broken = true;
+    world.removeImpulseJoint(entry.rapierJoint, true);
+    jointBreaks.push(Object.freeze({ frame, joint: entry.joint.name, impulse }));
+  }
+}
+
 function bakePrepared(preparedScene) {
   const rapier = rapierEngine;
   const { world, bodies, joints, colliderIndices } = createRapierWorld(rapier, preparedScene);
   const eventQueue = new rapier.EventQueue(true);
   const contactEvents = [];
+  const jointBreaks = [];
+  const breakableJoints = breakableJointTable(preparedScene, joints);
   const lastMovingFrames = new Int32Array(preparedScene.bodies.length).fill(-1);
   let contactEventsTruncated = false;
   let timeline;
@@ -886,6 +933,9 @@ function bakePrepared(preparedScene) {
           const sensor = preparedScene.colliders[first].sensor || preparedScene.colliders[second].sensor;
           contactEvents.push(Object.freeze({ frame, kind: sensor ? 'sensor' : 'contact', started, colliderA: first, colliderB: second }));
         });
+        if (breakableJoints.length) {
+          breakJointsHitHard(world, eventQueue, preparedScene, colliderIndices, breakableJoints, frame, jointBreaks);
+        }
       }
       for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex++) {
         const linearVelocity = bodies[bodyIndex].linvel();
@@ -920,7 +970,7 @@ function bakePrepared(preparedScene) {
     eventQueue.free();
     world.free();
   }
-  return recordedScene(preparedScene, timeline, { contactEvents, contactEventsTruncated, lastMovingFrames });
+  return recordedScene(preparedScene, timeline, { contactEvents, contactEventsTruncated, lastMovingFrames, jointBreaks });
 }
 
 function recordedScene(preparedScene, timeline, recording) {
@@ -1103,6 +1153,8 @@ function recordedScene(preparedScene, timeline, recording) {
     /** Contact and sensor start or stop events in step order, with collider indices into colliderNames. */
     contactEvents: Object.freeze(recording.contactEvents),
     contactEventsTruncated: recording.contactEventsTruncated,
+    /** Glue joints that broke, in step order: the frame, the joint name and the contact impulse (N s) that broke it. */
+    jointBreaks: Object.freeze(recording.jointBreaks),
     /** Per body: the frame at which it came to rest and stayed there, or -1 while it still moves at the end. */
     restFrames: Object.freeze(Array.from(recording.lastMovingFrames, frame => frame < preparedScene.frameCount - 1 ? frame + 1 : -1)),
     dispose() {

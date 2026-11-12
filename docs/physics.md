@@ -93,7 +93,7 @@ Connected bodies do not collide unless `contactsEnabled` is `true`.
 | `spherical` | None. The joint permits relative rotation. |
 | `revolute` | Required unit `axis` expressed in both bodies' local frames. Optional `limits` and `motor`. |
 | `prismatic` | Required unit `axis` expressed in both bodies' local frames. Optional `limits` and `motor`. |
-| `fixed` | Optional unit `frameA` and `frameB` quaternions. Both default to identity. |
+| `fixed` | Optional unit `frameA` and `frameB` quaternions, both default to identity, and optional `breakImpulse` (see Fracture and breakable glue). |
 | `spring` | `restLength` (default `0`), positive `stiffness` and nonnegative `damping` (default `0`). |
 
 An articulated ragdoll is a graph of dynamic bodies, colliders, and joints.
@@ -388,6 +388,29 @@ Rapier is loaded on demand, an optional peer dependency. The MCP runtime serves 
 
 `scene_inspect` returns a `physics` report: per body the `finalPosition`, `finalSpeed` and `restsAtTime` (null while moving), the `contacts` between bodies with `firstTime`, `count` and `touchingAtEnd`, and the sensor `enter` and `leave` events with times.
 An agent can check that a ball came to rest on a mesh from these numbers, without a picture.
+
+## Fracture and breakable glue
+
+`src/fracture.js` splits a closed convex part (a box, cylinder, sphere or any convex mesh of at most 2048 triangles) into Voronoi fragments and describes the glue that holds them together. A concave part is rejected with a message to split it into convex parts first.
+
+```js
+import { fractureMesh, fragmentPhysics } from './src/fracture.js';
+const fracture = fractureMesh(wallGeometry, { seed: 7, cells: 24, impact: [1.2, 0.5, 0], impactRadius: 0.6 });
+const parts = fragmentPhysics(fracture, { translation: [0, 2, 0], strength: 20, density: 100 });
+// parts.bodies, parts.colliders and parts.joints go into a physics definition next to a ball and a floor.
+```
+
+| Field | Meaning |
+| --- | --- |
+| `seed` | Integer from 0 (default 1). The same seed, cell count and impact give the same fragments byte for byte. |
+| `cells` | 2 to 64 fragments. |
+| `impact`, `impactRadius` | Optional point in the part's local space. Half the cells are placed within `impactRadius` of it (default 0.3 of the part's diagonal), so smaller pieces sit where the hit lands. |
+
+`fractureMesh` returns `fragments`, `glue` and `volume`. Each fragment has `positions`, `normals`, `indices`, `volume` and `center` in the part's local space, and `groups`: the outside faces are material slot 0 and the new inside faces slot 1, each as a `{ slot, start, count }` range of `indices`. Fragment volumes sum to the part volume. `glue` lists each neighbouring pair `{ a, b, anchor, area }`.
+
+`fragmentPhysics` turns that into bodies, convex hull colliders and one fixed joint per neighbouring pair, each with `breakImpulse: strength`. A fixed joint takes `breakImpulse` (N s, above 0): in the bake the joint is removed on the first step in which either of its bodies takes a contact impulse (contact force times the timestep) at or above it. A body resting under its own weight takes about `mass * 9.81 / 60`, so a strength above that holds a structure up and a ball or a falling slab below it breaks the glue. All the joints of a hit fragment that are weaker than the hit break together; the rest of the structure stays glued. `recording.jointBreaks` lists `{ frame, joint, impulse }`. Recipes take `breakImpulse` on a fixed `physics.joints` entry, and `scene_inspect` reports `jointBreaks`.
+
+Not yet: reaching `fractureMesh` from a recipe or the MCP tool without writing the fragments out as nodes, clusters that break as one, and breaking in the live runtime (glue joints there never break).
 
 ## Recipe ragdoll
 

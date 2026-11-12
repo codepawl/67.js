@@ -308,6 +308,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     shapes: Object.freeze(['box', 'ball', 'capsule', 'convex', 'trimesh']),
     jointTypes: Object.freeze(['spherical', 'revolute', 'prismatic', 'fixed']),
     sensors: true, collisionLayers: 16,
+    breakableJoints: 'fixed joint breakImpulse (N s): breaks when a body takes a contact impulse (force x 1/60 s) over it in one step; scene_inspect lists jointBreaks. fractureMesh in src/fracture.js makes glued fragments (docs/physics.md).',
     ragdoll: 'physics.ragdoll {armature}: limp capsule per bone; needs a floor',
     limits: Object.freeze({ maxBodies: 64, maxJoints: 64, maxDuration: 10, framesPerSecond: 60, maxTrimeshTriangles: 20000, maxHullPoints: 2048 }),
   }),
