@@ -31,6 +31,14 @@ fn int_sanitize_radiance(value: vec3<f32>) -> vec3<f32> {
   );
 }
 
+// Probability that a path with this throughput continues after Russian roulette: the square root of the largest channel, as in
+// Cycles `path_state_continuation_probability` (kernel/integrator/path_state.h), which keeps deep paths alive longer than the plain
+// throughput and so adds less variance. The floor only guards against a division by a tiny survival probability.
+fn int_russian_roulette_survival(throughput: vec3<f32>) -> f32 {
+  let largest_channel = max(abs(throughput.x), max(abs(throughput.y), abs(throughput.z)));
+  return clamp(sqrt(largest_channel), 0.05, 1.0);
+}
+
 fn int_clamp_contribution(raw_value: vec3<f32>, clamp_bounce: i32) -> vec3<f32> {
   var value = int_sanitize_radiance(raw_value);
   let ceiling = select(kernel_params.clamp_direct, kernel_params.clamp_indirect, clamp_bounce > 0);
@@ -840,8 +848,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           terminate_on_hit = true;
         }
         if (!terminate_on_hit && bounce > kernel_params.min_bounce_rr) {
-          let max_channel = max(throughput.x, max(throughput.y, throughput.z));
-          let survival = clamp(max_channel, 0.05, 1.0);
+          let survival = int_russian_roulette_survival(throughput);
           if (survival < 1.0) {
             smp_seek(&rng, step, SMP_SLOT_TERMINATE);
             if (smp_next_1d(&rng) >= survival) {
@@ -1057,8 +1064,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       if (!terminate_on_hit && bounce > kernel_params.min_bounce_rr) {
-        let max_channel = max(throughput.x, max(throughput.y, throughput.z));
-        let survival = clamp(max_channel, 0.05, 1.0);
+        let survival = int_russian_roulette_survival(throughput);
         if (survival < 1.0) {
           smp_seek(&rng, step, SMP_SLOT_TERMINATE);
           if (smp_next_1d(&rng) >= survival) {
