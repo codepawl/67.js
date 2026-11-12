@@ -309,6 +309,31 @@ def configure_principled_layers(material, principled_node, material_entry):
         material.node_tree.links.new(absorption_node.outputs["Volume"], output_node.inputs["Volume"])
 
 
+def configure_diffuse_transmission(material, principled_node, material_entry, has_vertex_colors):
+    """Cook's `diffuseTransmission` splits the diffuse layer between the reflecting lobe and a cosine lobe on the far side.
+
+    Blender 5.3's Principled BSDF has no diffuse transmission weight, so the split is built from nodes: the Principled BSDF
+    keeps `(1 - weight) * base colour`, and a Translucent BSDF tinted by `weight * colour` is added to it. The specular layer
+    stays whole, which matches Cook where the material has no specular lobe (`specular: 0`, as the parity scenes use).
+    """
+    weight = material_entry.get("diffuseTransmission", 0.0)
+    if weight <= 0.0:
+        return
+    if "map" in material_entry or has_vertex_colors:
+        raise ValueError("diffuseTransmission is mapped for a plain base colour only: remove the map or the vertex colours.")
+    base_color = material_entry["color"]
+    transmission_color = material_entry.get("diffuseTransmissionColor", base_color)
+    set_linear_rgba_socket(principled_node.inputs["Base Color"], [channel * (1.0 - weight) for channel in base_color])
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    translucent_node = nodes.new("ShaderNodeBsdfTranslucent")
+    set_linear_rgba_socket(translucent_node.inputs["Color"], [channel * weight for channel in transmission_color])
+    add_node = nodes.new("ShaderNodeAddShader")
+    links.new(principled_node.outputs["BSDF"], add_node.inputs[0])
+    links.new(translucent_node.outputs["BSDF"], add_node.inputs[1])
+    links.new(add_node.outputs["Shader"], nodes["Material Output"].inputs["Surface"])
+
+
 def build_blender_material(material_name, material_entry, has_vertex_colors, image_entries, built_images):
     material = bpy.data.materials.new(material_name)
     principled_node = material.node_tree.nodes["Principled BSDF"]
@@ -331,6 +356,7 @@ def build_blender_material(material_name, material_entry, has_vertex_colors, ima
         connect_base_color_texture(material, principled_node, material_entry, has_vertex_colors, image_entries, built_images)
     elif has_vertex_colors:
         connect_vertex_colors(material, principled_node, material_entry)
+    configure_diffuse_transmission(material, principled_node, material_entry, has_vertex_colors)
     return material
 
 

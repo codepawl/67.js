@@ -356,7 +356,7 @@ fn int_camera_ray_cone() -> vec2<f32> {
 // coat or glass lobe by twice its roughness alpha (at most one radian); a mirror or a straight-through lobe not at all.
 // The curvature of the surface is not counted.
 fn int_bounce_cone_spread(closure: ptr<function, Closure>, sampled_lobe_type: u32) -> f32 {
-  if (sampled_lobe_type == LOBE_DIFFUSE || sampled_lobe_type == LOBE_SHEEN) {
+  if (sampled_lobe_type == LOBE_DIFFUSE || sampled_lobe_type == LOBE_SHEEN || sampled_lobe_type == LOBE_DIFFUSE_TRANSMISSION) {
     return 1.0;
   }
   var widest_alpha = 0.0;
@@ -538,7 +538,11 @@ fn int_apply_filter_glossy(closure: ptr<function, Closure>, inv_filter_glossy: f
 }
 
 fn int_is_singular_bsdf_sample(closure: ptr<function, Closure>, point: ptr<function, ShadingPoint>, sample: ClosureSample) -> bool {
-  if (sample.sampled_lobe_type == LOBE_DIFFUSE || sample.sampled_lobe_type == LOBE_SHEEN) {
+  if (
+    sample.sampled_lobe_type == LOBE_DIFFUSE
+    || sample.sampled_lobe_type == LOBE_SHEEN
+    || sample.sampled_lobe_type == LOBE_DIFFUSE_TRANSMISSION
+  ) {
     return false;
   }
   let wi_below = dot((*point).geometric_normal, sample.wi) < 0.0;
@@ -566,7 +570,8 @@ fn int_is_singular_bsdf_sample(closure: ptr<function, Closure>, point: ptr<funct
 
 fn int_closure_has_transmission(closure: ptr<function, Closure>) -> bool {
   for (var lobe_index = 0u; lobe_index < (*closure).lobe_count; lobe_index += 1u) {
-    if ((*closure).lobes[lobe_index].lobe_type == LOBE_GLASS_GGX) {
+    let lobe_type = (*closure).lobes[lobe_index].lobe_type;
+    if (lobe_type == LOBE_GLASS_GGX || lobe_type == LOBE_DIFFUSE_TRANSMISSION) {
       return true;
     }
   }
@@ -1031,7 +1036,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       let picks_through_tree = lgt_use_light_tree() && (kernel_params.light_count + kernel_params.emissive_triangle_count) > 0u;
-      let closure_has_transmission = SCENE_HAS_GLASS && int_closure_has_transmission(&closure);
+      let closure_has_transmission = (SCENE_HAS_GLASS || SCENE_HAS_DIFFUSE_TRANSMISSION) && int_closure_has_transmission(&closure);
       for (var direct_source = 0u; direct_source < 3u; direct_source += 1u) {
         if ((kernel_params.kernel_flags & KERNEL_FLAG_TEST_BSDF_ONLY) != 0u) {
           break;
@@ -1097,7 +1102,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
       bounce += 1u;
       let cos_ng_wi = dot(point.geometric_normal, bsdf_sample.wi);
-      let is_transmission = (bsdf_sample.sampled_lobe_type == LOBE_GLASS_GGX || bsdf_sample.sampled_lobe_type == LOBE_GLOSSY_GGX) && cos_ng_wi < 0.0;
+      // Cycles counts a sample of the translucent lobe as a transmission bounce, and like a thin-walled sheet it leaves the medium alone.
+      let is_diffuse_transmission = bsdf_sample.sampled_lobe_type == LOBE_DIFFUSE_TRANSMISSION;
+      let is_transmission = ((bsdf_sample.sampled_lobe_type == LOBE_GLASS_GGX || bsdf_sample.sampled_lobe_type == LOBE_GLOSSY_GGX) && cos_ng_wi < 0.0)
+        || is_diffuse_transmission;
 
       if (is_transmission) {
         transmission_bounces += 1u;
@@ -1105,7 +1113,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (transmission_bounces >= limit_transmission) {
           terminate_on_hit = true;
         }
-        if ((material.flags & MATERIAL_FLAG_THIN_WALLED) == 0u) {
+        if ((material.flags & MATERIAL_FLAG_THIN_WALLED) == 0u && !is_diffuse_transmission) {
           if (point.front_face != 0u) {
             medium_sigma = max(closure.absorption_sigma, vec3<f32>(0.0));
             in_medium = medium_sigma.x > 0.0 || medium_sigma.y > 0.0 || medium_sigma.z > 0.0;

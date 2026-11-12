@@ -49,8 +49,32 @@ function cyclesAnisotropyFields(material, roughness) {
   };
 }
 
+// A thin sheet that lets diffuse light through (a curtain, a leaf, a lampshade): the share of the diffuse layer that leaves
+// through the far side, and the colour of that light (the base colour when it is left out). The ranges follow the other layers
+// of material-layers.js: a weight between 0 and 1, a linear colour with each channel between 0 and 1.
+function diffuseTransmissionFields(material) {
+  const { diffuseTransmission, diffuseTransmissionColor } = material;
+  if (diffuseTransmission !== undefined) {
+    const isWeight = typeof diffuseTransmission === 'number' && diffuseTransmission >= 0 && diffuseTransmission <= 1;
+    if (!isWeight) {
+      throw new RangeError(`diffuseTransmission must be a number between 0 and 1, got ${String(diffuseTransmission)}. Use 0 for a sheet that lets no light through.`);
+    }
+  }
+  if (diffuseTransmissionColor !== undefined) {
+    const isColor = (Array.isArray(diffuseTransmissionColor) || ArrayBuffer.isView(diffuseTransmissionColor)) && diffuseTransmissionColor.length === 3
+      && Array.from(diffuseTransmissionColor).every(channel => typeof channel === 'number' && channel >= 0 && channel <= 1);
+    if (!isColor) {
+      throw new RangeError(`diffuseTransmissionColor must be three linear RGB numbers between 0 and 1, got ${String(diffuseTransmissionColor)}. Pass [red, green, blue], or leave it out to use the base colour.`);
+    }
+  }
+  if (!(diffuseTransmission > 0)) return {};
+  const fields = { diffuseTransmission };
+  if (diffuseTransmissionColor !== undefined) fields.diffuseTransmissionColor = Array.from(diffuseTransmissionColor);
+  return fields;
+}
+
 function layerFields(material, resolved) {
-  const fields = {};
+  const fields = { ...diffuseTransmissionFields(material) };
   if (material.specular !== undefined) fields.specular = material.specular;
   if (material.specularColor !== undefined && !isWhite(material.specularColor)) fields.specularColor = material.specularColor;
   if (material.anisotropy > 0) Object.assign(fields, cyclesAnisotropyFields(material, resolved.roughness));

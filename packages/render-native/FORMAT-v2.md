@@ -12,7 +12,7 @@ All integers and IEEE-754 `f32` values are **little-endian**. Every structured r
 | `1` | `scene_tlas` | `acceleration_structure` | Hardware TLAS | — | — | Top-level acceleration structure over per-mesh BLASes |
 | `2` | `instances` | `storage, read` | `InstanceRecord` | `160` | `16` | Per-instance transforms, BLAS/triangle offsets, visibility, light mask |
 | `3` | `triangles` | `storage, read` | `TriangleRecord` | `224` | `16` | Object-space mesh triangles (opaque first, then alpha-cutout per BLAS) |
-| `4` | `materials` | `storage, read` | `MaterialRecord` | `256` | `16` | Principled BSDF v2 parameters, flags, absorption, texture indices |
+| `4` | `materials` | `storage, read` | `MaterialRecord` | `256` | `16` | Principled BSDF v2 parameters, flags, absorption, texture indices; then, only for a scene with diffuse transmission, one extension record per material |
 | `5` | `emissive_triangles` | `storage, read` | `EmissiveTriangleRecord` | `96` | `16` | World-space emissive triangle list for NEE and BSDF-hit MIS |
 | `6` | `lights` | `storage, read` | `LightRecord` | `128` | `16` | Analytic lights (`point`, `spot`, `area_rect`, `area_disk`, `sun`) |
 | `7` | `light_tree_nodes` | `storage, read` | `LightTreeNode` | `64` | `16` | Orientation-aware light BVH nodes over analytic + emissive emitters |
@@ -236,6 +236,20 @@ Includes all Principled BSDF v2 fields needed for Cycles parity:
 | `244` | `4` | `4` | `i32` | `anisotropy_tex` | `TextureDescriptor` index, or `-1` |
 | `248` | `4` | `4` | `i32` | `alpha_tex` | `TextureDescriptor` index, or `-1` |
 | `252` | `4` | `4` | `i32` | `bump_tex` | `TextureDescriptor` index, or `-1` |
+
+### Material extension records (diffuse transmission)
+
+The record above has no free word, so a field added later does not change its stride. A scene whose materials use **diffuse transmission** (a thin sheet that lets diffuse light through, such as a curtain, a leaf or a lampshade) appends a second run of `material_count` records of the same 256 bytes to the `materials` buffer: extension record `m` sits at record index `material_count + m`, and `material_count` in the header still counts the first run only. A scene without it sends the buffer it always did (`material_count` records), so its tables are byte-identical to a build without the feature. The host tells the two apart by the buffer length (`>= 2 * material_count * 256`), and the kernel's `SCENE_HAS_DIFFUSE_TRANSMISSION` constant is rewritten to `false` for the rest, so their pipelines contain none of the code.
+
+Only three words of an extension record are read; the others are `0`:
+
+| Byte Offset | WGSL Type | Field (name of the word it reuses) | Description |
+| ---: | :--- | :--- | :--- |
+| `0` | `vec3<f32>` | `base_color` | Linear RGB colour of the light that leaves through the far side |
+| `12` | `f32` | `metallic` | Diffuse transmission weight `[0, 1]`: the share of the diffuse layer that goes to the far side |
+| `192` | `u32` | `flags` | `1=TINTS_BASE_COLOR`: the colour multiplies the base colour of the shading point (a map or a vertex colour included) instead of replacing it; the packer sets it when the material gives no `diffuseTransmissionColor` |
+
+The kernel splits the diffuse layer at the weight `w`: the reflecting diffuse lobe keeps `(1 - w)` of its weight and a `LOBE_DIFFUSE_TRANSMISSION` lobe takes `w * colour` times the same layer weight, so the specular layers above the diffuse keep their strength. The lobe is a cosine lobe on the side of the shading normal away from the viewer, with value and pdf `cos / pi` (Cycles' Translucent BSDF); a sample must also leave through the far side of the geometric normal. A sample of it counts as a transmission bounce and leaves the medium of the path alone, and the light tree and the MIS pdf of the previous bounce treat the shading point as transmissive. The weight is read as `diffuseTransmission` and the colour as `diffuseTransmissionColor` on a part's material (`job-input.mjs` checks the ranges: a number from `0` to `1`, three numbers from `0` to `1`).
 
 ---
 
