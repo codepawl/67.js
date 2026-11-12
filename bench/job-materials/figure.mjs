@@ -18,12 +18,16 @@ function readNpy(path) {
 
 const LABEL_HEIGHT = 28;
 
+const SCALE = 2;
+
 async function panel(path, label) {
-  const { width, height, data } = readNpy(path);
-  const rgba = toneMapToRgba8(data, width, height);
+  const source = readNpy(path);
+  const rgba = toneMapToRgba8(source.data, source.width, source.height);
+  const width = source.width * SCALE;
+  const height = source.height * SCALE;
   const labelSvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${LABEL_HEIGHT}"><rect width="100%" height="100%" fill="#111"/>`
     + `<text x="10" y="19" font-family="sans-serif" font-size="15" fill="#eee">${label}</text></svg>`);
-  const image = await sharp(Buffer.from(rgba.buffer), { raw: { width, height, channels: 4 } }).removeAlpha().png().toBuffer();
+  const image = await sharp(Buffer.from(rgba.buffer), { raw: { width: source.width, height: source.height, channels: 4 } }).removeAlpha().resize(width, height, { kernel: 'lanczos3' }).png().toBuffer();
   return { width, height: height + LABEL_HEIGHT, input: await sharp({ create: { width, height: height + LABEL_HEIGHT, channels: 3, background: '#111' } })
     .composite([{ input: image, top: 0, left: 0 }, { input: labelSvg, top: height, left: 0 }]).png().toBuffer() };
 }

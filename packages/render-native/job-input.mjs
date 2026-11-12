@@ -35,14 +35,25 @@ function blendFields(material, resolved) {
   return { alphaMode: 'blend', opacity };
 }
 
-function layerFields(material) {
+// The kernel reads anisotropy as the Cycles Principled parameters: a strength from 0 to 1 that stretches the roughness, and the
+// rotation in turns. A 67js material (glTF KHR_materials_anisotropy) gives a strength that sets the tangent roughness and a
+// rotation in radians. This is the same conversion bench/cycles-parity/render-cycles.py applies for Blender, so the kernel
+// draws the lobe Cycles draws for the material.
+function cyclesAnisotropyFields(material, roughness) {
+  const alpha = roughness * roughness;
+  const tangentAlpha = alpha + (1 - alpha) * material.anisotropy * material.anisotropy;
+  return {
+    anisotropy: Math.min((1 - alpha / tangentAlpha) / 0.9, 1),
+    anisotropyRotation: (material.anisotropyRotation ?? 0) / (2 * Math.PI),
+    roughness: (alpha * tangentAlpha) ** 0.25,
+  };
+}
+
+function layerFields(material, resolved) {
   const fields = {};
   if (material.specular !== undefined) fields.specular = material.specular;
   if (material.specularColor !== undefined && !isWhite(material.specularColor)) fields.specularColor = material.specularColor;
-  if (material.anisotropy > 0) {
-    fields.anisotropy = material.anisotropy;
-    fields.anisotropyRotation = material.anisotropyRotation ?? 0;
-  }
+  if (material.anisotropy > 0) Object.assign(fields, cyclesAnisotropyFields(material, resolved.roughness));
   if (material.iridescence > 0) {
     fields.iridescence = material.iridescence;
     fields.iridescenceIor = material.iridescenceIor ?? DEFAULT_IRIDESCENCE_IOR;
@@ -87,7 +98,7 @@ function layerTextures(material, resolved, resolveTexture) {
  * that sets none of these gives an empty object, which packs to the record the v1 tables give.
  */
 export function carriedMaterialFields(material, resolved, resolveTexture) {
-  const fields = { ...blendFields(material, resolved), ...layerFields(material) };
+  const fields = { ...blendFields(material, resolved), ...layerFields(material, resolved) };
   const textures = layerTextures(material, resolved, resolveTexture);
   if (Object.keys(textures).length > 0) fields.textures = textures;
   return fields;

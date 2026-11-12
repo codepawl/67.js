@@ -156,8 +156,12 @@ test('a flattened job sends blend opacity, sheen, specular, anisotropy, iridesce
   assert.equal(glass.floats[31], 2);
   assert.deepEqual(Array.from(glass.floats.slice(28, 31)).map(value => Number(value.toFixed(3))), [0.5, 0.8, 0.6]);
   const foil = recordFloats(input, 3);
-  assert.ok(Math.abs(foil.floats[11] - 0.6) < 1e-6, 'anisotropy');
-  assert.ok(Math.abs(foil.floats[12] - 0.5) < 1e-6, 'anisotropy rotation');
+  // Strength 0.6 at roughness 0.3 as the Cycles parameters (the conversion of render-cycles.py), rotation in turns.
+  const alpha = 0.3 * 0.3;
+  const tangentAlpha = alpha + (1 - alpha) * 0.36;
+  assert.ok(Math.abs(foil.floats[11] - (1 - alpha / tangentAlpha) / 0.9) < 1e-6, 'anisotropy');
+  assert.ok(Math.abs(foil.floats[12] - 0.5 / (2 * Math.PI)) < 1e-6, 'anisotropy rotation in turns');
+  assert.ok(Math.abs(foil.floats[4] - (alpha * tangentAlpha) ** 0.25) < 1e-6, 'roughness of an anisotropic material');
   assert.ok(Math.abs(foil.floats[6] - 0.4) < 1e-6, 'specular ior level is half the specular factor');
   assert.deepEqual(Array.from(foil.floats.slice(8, 11)).map(value => Number(value.toFixed(3))), [1, 0.5, 0.2]);
   assert.ok(foil.floats[22] > 0, 'thin film thickness');
