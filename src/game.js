@@ -8,6 +8,7 @@ import { createInput, gamepadSource, keyboardSource } from './input.js';
 import { replaySource, touchSource } from './input-sources.js';
 import { createCharacterController, createChaseCamera, createFirstPersonCamera, createFollowCamera, createTopDownCamera, createVehicleController } from './player.js';
 import { createGameRules } from './game-rules.js';
+import { hasTexturedMaterial } from './game-needs.js';
 
 // Plays the `game` section of a scene recipe in a page: the scene, the input preset, the character controller, the camera rig
 // and the game rules, all run by the live runtime. scene_export_web writes a folder whose index.html calls startGame.
@@ -95,6 +96,11 @@ function createStatusLine(canvas) {
   return element;
 }
 
+function withoutPhysics(recipe) {
+  const { physics, ...rest } = recipe;
+  return rest;
+}
+
 function modelYawOf(animation) {
   return animation?.assetNode ? GLTF_FACING_YAW : 0;
 }
@@ -112,7 +118,7 @@ async function loadAnimationRuntime() {
 
 /**
  * Start the game a recipe describes on a canvas and return its parts: `scene`, `runtime`, `rules`, `input`, `controller`, `renderer`
- * and `dispose()`. Options: `replay` (a recording from recordInput; the keyboard is not attached) `showStatus` (default true) `assets` (decoded catalog assets by assetCopyKey) or `assetUrls` (asset id to GLB URL, which startGame fetches and decodes) and `createRenderer` (tests pass a stand-in for the WebGL renderer).
+ * and `dispose()`. Options: `replay` (a recording from recordInput; the keyboard is not attached) `showStatus` (default true) `assets` (decoded catalog assets by assetCopyKey) or `assetUrls` (asset id to GLB URL, which startGame fetches and decodes), `physicsUrl` (where the page keeps jolt-physics.wasm.js, on its own origin; a recipe with game.physics true needs it unless the jolt-physics package resolves) and `createRenderer` (tests pass a stand-in for the WebGL renderer).
  */
 export async function startGame(canvas, recipe, options = {}) {
   const cleanups = [];
@@ -138,13 +144,16 @@ function runCleanups(cleanups) {
   while (cleanups.length > 0) cleanups.pop()();
 }
 
-async function buildGame(canvas, recipe, { replay, showStatus = true, assets: providedAssets, assetUrls, createRenderer = (...rendererArguments) => new Renderer67(...rendererArguments) }, cleanups) {
+async function buildGame(canvas, recipe, { replay, showStatus = true, assets: providedAssets, assetUrls, physicsUrl, createRenderer = (...rendererArguments) => new Renderer67(...rendererArguments) }, cleanups) {
   const setup = recipe.game;
   if (!setup) throw new Error('startGame needs a recipe with a game section. Add one with the set-game operation.');
-  await loadAgentSceneModules(recipe);
+  // Live physics replaces the recorded bake of the same section, so the scene is built without it.
+  const sceneRecipe = setup.physics ? withoutPhysics(recipe) : recipe;
+  await loadAgentSceneModules(sceneRecipe);
+  if (hasTexturedMaterial(recipe)) await import('./replace-textured-parts.js');
   // The exported page gives URLs; the assets load only for a recipe that places or retargets a catalog asset.
   const assets = providedAssets ?? (assetUrls ? await (await import('./game-assets.js')).loadGameAssets(recipe, assetUrls) : undefined);
-  const scene = createAgentScene(recipe, {}, { assets });
+  const scene = createAgentScene(sceneRecipe, {}, { assets });
   const { game } = scene.exportRecipe();
   const placement = agentGroundPlacement(scene.parts, scene.environment);
   const environment = litEnvironment(scene, Boolean(placement));
@@ -185,8 +194,14 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, assets: pr
     });
   rig = cameraRigFor(game.camera, controller, input);
 
+  const physics = game.physics ? await (await import('./game-physics.js')).createGamePhysics({ recipe, scene, playerNode: game.player.node, physicsUrl }) : null;
+  if (physics) cleanups.push(() => physics.dispose());
+  const physicsSystem = physics && {
+    name: 'game-physics',
+    fixedUpdate: (stepSeconds, context) => physics.fixedUpdate(stepSeconds, context, physics.playerIsBody ? [controller.state.position[0], controller.state.position[1] + footOffset, controller.state.position[2]] : null, body.rotationY),
+  };
   const nodeIds = new Set(recipe.nodes.map(node => node.id));
-  const rules = game.rules ? createGameRules(game.rules, { input, getPartPosition: id => (id === game.player.node ? [...controller.state.position] : undefined) }) : null;
+  const rules = game.rules ? createGameRules(game.rules, { input, getPartPosition: id => (id === game.player.node ? [...controller.state.position] : physics?.positionOf(id)) }) : null;
   const shownNodes = new Map();
   const animatedCharacters = [];
   const animationSystems = [];
@@ -215,6 +230,7 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, assets: pr
       const operations = [characterOperation(game.player.node, position, body.rotationY, footOffset, modelYawOf(playerAnimation))];
       for (const npc of npcs) operations.push(characterOperation(npc.node, npc.follower.state.position, npc.follower.state.yaw, npc.footOffset, npc.modelYaw));
       for (const animation of animatedCharacters) operations.push(...animation.operations());
+      if (physics) operations.push(...physics.poseOperations());
       for (const part of rules?.state.parts ?? []) {
         if (!nodeIds.has(part.id) || part.id === game.player.node || shownNodes.get(part.id) === part.visible) continue;
         shownNodes.set(part.id, part.visible);
@@ -238,7 +254,7 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, assets: pr
   const baseCamera = scene.camera;
   const runtime = createRuntime(renderer, {
     fixedRate: 60,
-    systems: [input, controller, ...animationSystems, rig, ...(rules ? [rules] : []), sceneSystem],
+    systems: [input, controller, ...animationSystems, rig, ...(physicsSystem ? [physicsSystem] : []), ...(rules ? [rules] : []), sceneSystem],
     frame: context => ({ ...baseCamera, ...rig.pose(context), environment, time: context.elapsedSeconds }),
   });
   cleanups.push(() => runtime.dispose());
@@ -248,5 +264,5 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, assets: pr
   resize();
   runtime.start();
 
-  return { scene, runtime, rules, input, controller, renderer, animation: playerAnimation?.graph ?? null, npcs };
+  return { scene, runtime, rules, input, controller, renderer, physics: physics?.system ?? null, animation: playerAnimation?.graph ?? null, npcs };
 }
