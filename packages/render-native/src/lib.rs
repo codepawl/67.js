@@ -8,6 +8,7 @@ use napi::bindgen_prelude::{Float32Array, Uint32Array, Uint8Array};
 use napi::Result;
 use napi_derive::napi;
 
+use crate::host::denoise::{atrous_denoise, DenoiseInput};
 use crate::host::device::failure;
 use crate::host::film::{
     image_accumulation_bytes, image_workgroups, pad_texel_vectors, resolve_image, resolve_texels,
@@ -83,6 +84,30 @@ pub struct NativeCyclesTraceOptions {
     pub samples_per_dispatch: Option<u32>,
     pub max_seconds: Option<f64>,
     pub bootstrap_kernel: Option<bool>,
+    /// `"none"` (default) or `"atrous"`: also filter the image with the edge-avoiding a-trous wavelet filter.
+    pub denoise: Option<String>,
+}
+
+#[napi(object)]
+pub struct DenoiseAtrousOptions {
+    pub width: u32,
+    pub height: u32,
+    /// Linear RGBA, four floats per pixel.
+    pub rgba: Float32Array,
+    pub albedo: Float32Array,
+    /// Three floats per pixel; the filter normalises them.
+    pub normal: Float32Array,
+    pub depth: Float32Array,
+    pub variance: Float32Array,
+}
+
+#[napi(object)]
+pub struct DenoiseAtrousResult {
+    pub rgba: Float32Array,
+    pub compile_seconds: f64,
+    pub upload_seconds: f64,
+    pub gpu_seconds: f64,
+    pub readback_seconds: f64,
 }
 
 #[napi(object)]
@@ -133,6 +158,13 @@ pub struct NativeTexelResult {
 pub struct NativeTraceResult {
     /// Linear RGBA, averaged over the samples, row by row from the top.
     pub rgba: Float32Array,
+    /// The `rgba` image after the a-trous filter (biased: smoothed, not converged); present only when `denoise` was `"atrous"`.
+    pub denoised_rgba: Option<Float32Array>,
+    /// What the filter took in seconds, excluding its one-time pipeline compile: upload, the seven dispatches, readback.
+    pub denoise_seconds: Option<f64>,
+    /// Only the seven dispatches, from submit until the device finished them.
+    pub denoise_gpu_seconds: Option<f64>,
+    pub denoise_compile_seconds: Option<f64>,
     /// First-hit albedo and normal (three floats per pixel, averaged over the samples; normalise the normal), the first-hit
     /// depth and the variance of each pixel's mean luminance: the features the wavelet and OIDN denoisers read.
     pub albedo: Float32Array,
@@ -154,6 +186,16 @@ pub struct NativeTraceResult {
     pub upload_seconds: f64,
     pub acceleration_build_seconds: f64,
     pub traced_seconds: f64,
+}
+
+fn parse_denoise_option(requested: Option<&str>) -> Result<bool> {
+    match requested {
+        None | Some("none") => Ok(false),
+        Some("atrous") => Ok(true),
+        Some(other) => Err(failure(format!(
+            "Invalid denoise option {other:?}: pass \"none\" (default) or \"atrous\"."
+        ))),
+    }
 }
 
 fn select_kernel_source(requested_kernel: Option<&str>) -> Result<(String, bool)> {
@@ -196,6 +238,10 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
     let resolved = resolve_image(&sums, pixel_count);
     Ok(NativeTraceResult {
         rgba: Float32Array::new(resolved.rgba),
+        denoised_rgba: None,
+        denoise_seconds: None,
+        denoise_gpu_seconds: None,
+        denoise_compile_seconds: None,
         albedo: Float32Array::new(resolved.albedo),
         normal: Float32Array::new(resolved.normal),
         depth: Float32Array::new(resolved.depth),
@@ -217,6 +263,7 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
 /// Traces a packed `FORMAT-v2` scene on the GPU using the assembled Cycles-parity WGSL kernel.
 #[napi]
 pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceOptions) -> Result<NativeTraceResult> {
+    let use_atrous_filter = parse_denoise_option(options.denoise.as_deref())?;
     let source = cycles::assemble_cycles_kernel_entry("main", options.bootstrap_kernel.unwrap_or(false))?;
     let pixel_count = options.width as u64 * options.height as u64;
     let accumulation_bytes = image_accumulation_bytes(options.width, options.height);
@@ -248,8 +295,32 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
     )?;
     let (sums, traced_seconds, samples_per_dispatch) = (trace.sums, trace.traced_seconds, trace.largest_batch);
     let resolved = resolve_image(&sums, pixel_count);
+    let filtered = if use_atrous_filter {
+        Some(atrous_denoise(
+            &prepared.device,
+            &prepared.queue,
+            &DenoiseInput {
+                width: options.width,
+                height: options.height,
+                rgba: &resolved.rgba,
+                albedo: &resolved.albedo,
+                normal: &resolved.normal,
+                depth: &resolved.depth,
+                variance: &resolved.variance,
+            },
+        )?)
+    } else {
+        None
+    };
+    let denoise_seconds = filtered.as_ref().map(|output| output.upload_seconds + output.gpu_seconds + output.readback_seconds);
+    let denoise_gpu_seconds = filtered.as_ref().map(|output| output.gpu_seconds);
+    let denoise_compile_seconds = filtered.as_ref().map(|output| output.compile_seconds);
     Ok(NativeTraceResult {
         rgba: Float32Array::new(resolved.rgba),
+        denoised_rgba: filtered.map(|output| Float32Array::new(output.rgba)),
+        denoise_seconds,
+        denoise_gpu_seconds,
+        denoise_compile_seconds,
         albedo: Float32Array::new(resolved.albedo),
         normal: Float32Array::new(resolved.normal),
         depth: Float32Array::new(resolved.depth),
@@ -265,6 +336,32 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
         upload_seconds: prepared.upload_seconds,
         acceleration_build_seconds: prepared.acceleration_build_seconds,
         traced_seconds,
+    })
+}
+
+/// Filters a traced image with the edge-avoiding a-trous wavelet filter on the GPU (spatial only; the result is biased).
+#[napi]
+pub fn denoise_atrous(options: DenoiseAtrousOptions) -> Result<DenoiseAtrousResult> {
+    let (device, queue, _adapter, _backend, _features) = get_cached_device()?;
+    let output = atrous_denoise(
+        &device,
+        &queue,
+        &DenoiseInput {
+            width: options.width,
+            height: options.height,
+            rgba: &options.rgba,
+            albedo: &options.albedo,
+            normal: &options.normal,
+            depth: &options.depth,
+            variance: &options.variance,
+        },
+    )?;
+    Ok(DenoiseAtrousResult {
+        rgba: Float32Array::new(output.rgba),
+        compile_seconds: output.compile_seconds,
+        upload_seconds: output.upload_seconds,
+        gpu_seconds: output.gpu_seconds,
+        readback_seconds: output.readback_seconds,
     })
 }
 

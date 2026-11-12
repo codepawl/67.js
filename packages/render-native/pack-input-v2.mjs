@@ -1572,6 +1572,15 @@ export function validateSamplerOption(sampler, callerName) {
   }
 }
 
+/** Throws unless `denoise` is undefined, "none" or "atrous". */
+export function validateDenoiseOption(denoise, callerName) {
+  if (denoise !== undefined && denoise !== 'none' && denoise !== 'atrous') {
+    throw new RangeError(
+      `${callerName}: \`denoise\` must be "none" (default) or "atrous", got ${JSON.stringify(denoise)}.`
+    );
+  }
+}
+
 /** Throws unless `lightSampling` is undefined, "auto", "tree" or "uniform". */
 export function validateLightSamplingOption(lightSampling, callerName) {
   if (lightSampling !== undefined && !VALID_LIGHT_SAMPLING.includes(lightSampling)) {
@@ -1653,6 +1662,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   validateMaxSeconds(options.maxSeconds, callerName);
   resolveSamplingOptions(options, callerName);
   resolveEnvCompensationFraction(options.envCompensation, callerName);
+  validateDenoiseOption(options.denoise, callerName);
   validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);

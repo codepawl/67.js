@@ -74,10 +74,13 @@ export function traceNative(input, options = {}) {
   validatePackOptions(options, 'traceNative', true);
   const { sampler, lightSampling } = resolveSamplingOptions(options, 'traceNative');
   validatePathRegenerationOption(options.pathRegeneration, 'traceNative');
-  const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel } = options;
+  const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel, denoise } = options;
   const selectedKernel = resolveNativeKernel(kernel);
   const addon = loadAddon();
   if (selectedKernel === 'legacy') {
+    if (denoise === 'atrous') {
+      throw new TypeError('traceNative: `denoise: "atrous"` filters the Cycles kernel result; pass kernel "cycles", or call denoiseAtrous with the traced guide buffers.');
+    }
     if (input?.schemaVersion === FORMAT_V2_VERSION) {
       throw new TypeError(
         'Cannot pass a FORMAT-v2 scene input to kernel "legacy": pass kernel "cycles" or build a v1 input with buildNativeInput.'
@@ -115,7 +118,26 @@ export function traceNative(input, options = {}) {
     samplesPerDispatch,
     maxSeconds,
     bootstrapKernel,
+    denoise,
   });
+}
+
+/**
+ * Filters a traced image with the edge-avoiding a-trous wavelet filter on the GPU (Dammertz 2010 with SVGF's variance
+ * guidance, spatial only). `rgba` holds four floats per pixel; `albedo`, `normal` (any length, zero where nothing was
+ * hit), `depth` and `variance` are the guide buffers `traceNative` returns. The result is smoothed and biased: it is not
+ * a converged image. Returns `{ rgba, compileSeconds, uploadSeconds, gpuSeconds, readbackSeconds }`.
+ */
+export function denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance }) {
+  const pixelCount = width * height;
+  validateImagePixelCount(width, height, 'denoiseAtrous');
+  const planes = { rgba: [rgba, 4], albedo: [albedo, 3], normal: [normal, 3], depth: [depth, 1], variance: [variance, 1] };
+  for (const [name, [plane, floatsPerPixel]] of Object.entries(planes)) {
+    if (!(plane instanceof Float32Array) || plane.length !== pixelCount * floatsPerPixel) {
+      throw new TypeError(`denoiseAtrous: \`${name}\` must be a Float32Array of ${pixelCount * floatsPerPixel} floats for a ${width}x${height} image.`);
+    }
+  }
+  return loadAddon().denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance });
 }
 
 function hasFilterOptions(options) {
