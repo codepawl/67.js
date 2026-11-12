@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mean radiance of Cook against Cycles on the metal scene over many seeds, and the splits that find where a gap comes from (#959).
 #   bash bench/cycles-parity/metal-mean-suite.sh <dataDirectory> <stage>...
-# Stages: build, main, relmse, splits. Needs a GPU box with Blender 5.3 (BLENDER_BIN, default ~/blender/blender) and the built addon.
+# Stages: build, main, relmse, splits, direct (the zero-bounce split alone). Needs a GPU box with Blender 5.3 (BLENDER_BIN, default ~/blender/blender) and the built addon.
 # Every image is <dataDirectory>/<side>-<tag>-s<seed>.npy; existing images are kept, so a stage can be repeated.
 set -uo pipefail
 
@@ -81,6 +81,11 @@ split_pair() { # tag samples seeds cookFlags -- cyclesFlags
     render_cook cycles "$tag" "$samples" "$seed" "${cook_flags[@]}"
   done
   report "split $tag" "$data/cycles-$tag-s*.npy" "$data/cookcycles-$tag-s*.npy" --parts "$data/cycles-parts4096-s1"
+}
+
+stage_direct() {
+  render_cycles parts4096 4096 1 --part-ids
+  split_pair b0 512 6 --bounces 0 -- --bounces 0
 }
 
 stage_splits() {
