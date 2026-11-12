@@ -96,6 +96,25 @@ function textureRepeatScene(maskColorSpace = 'srgb') {
   ]);
 }
 
+// Where does the brightness gap of tex-repeat against Cycles come from? The same room with the textured quads dropped, with
+// each one alone, and with both as flat untextured quads of their average colour.
+function textureSplitScene(include) {
+  const colourMap = { image: gradientChecker(false), colorSpace: 'srgb' };
+  const maskMap = { image: gradientChecker(true), colorSpace: 'srgb' };
+  const parts = [backdrop()];
+  if (include === 'colour' || include === 'both') {
+    parts.push(part('colour', quadGeometry(3), [-2.2, 0, 0], [1.9, 1.9, 1], { color: [1, 1, 1], map: colourMap }));
+  }
+  if (include === 'mask' || include === 'both') {
+    parts.push(part('mask', quadGeometry(3), [2.2, 0, 0], [1.9, 1.9, 1], { color: [0.9, 0.95, 0.9], alphaMode: 'mask', alphaCutoff: 0.5, map: maskMap }));
+  }
+  if (include === 'flat') {
+    parts.push(part('flat-left', quadGeometry(1), [-2.2, 0, 0], [1.9, 1.9, 1], { color: [0.35, 0.3, 0.2] }));
+    parts.push(part('flat-right', quadGeometry(1), [2.2, 0, 0], [1.9, 1.9, 1], { color: [0.35, 0.3, 0.2] }));
+  }
+  return sceneWithParts(parts);
+}
+
 function textureWrapsScene() {
   const wrapped = (extra) => ({ image: gradientChecker(false), colorSpace: 'srgb', uvScale: [2.5, 2.5], uvOffset: [0.15, -0.1], ...extra });
   const alpha = (extra) => ({ image: gradientChecker(true), colorSpace: 'srgb', uvScale: [2.5, 2.5], ...extra });
@@ -123,6 +142,10 @@ export const TEXTURE_SCENES = {
   'tex-repeat': () => textureRepeatScene('srgb'),
   'tex-repeat-linear': () => textureRepeatScene('linear'),
   'tex-wraps': textureWrapsScene,
+  'tex-split-room': () => textureSplitScene('none'),
+  'tex-split-colour': () => textureSplitScene('colour'),
+  'tex-split-mask': () => textureSplitScene('mask'),
+  'tex-split-flat': () => textureSplitScene('flat'),
 };
 
 async function writeScenes(outputDirectory) {
