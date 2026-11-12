@@ -1909,6 +1909,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
           agentSceneModule('motionBake').bakeMotion(candidate, operation, motionBakeSource(state));
           continue;
         }
+        if (operation.type === 'settle') {
+          agentSceneModule('settle').applySettle(candidate, operation);
+          continue;
+        }
         if (operation.type === 'edit-mesh') {
           knownKeys(operation, ['type', 'geometry', 'edits', 'replace'], 'operation');
           const target = meshGeometryTarget(candidate, operation, type => `Add a mesh geometry with base: { type: '${type}', ... } to edit it.`);

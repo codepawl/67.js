@@ -108,6 +108,9 @@ function describeOperation(working, operation, maxText) {
     else working[name] = structuredClone(next);
     return { changed: operation[name] === null ? `cleared ${name}` : `set ${name}` };
   }
+  if (type === 'settle') {
+    return { changed: `settled props under ${operation.settle?.id}; scene_inspect lists them` };
+  }
   if (type === 'bake-motion') {
     return { changed: `baked ${shortList(operation.nodes ?? [], maxText)} to keys` };
   }
