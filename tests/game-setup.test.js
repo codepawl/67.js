@@ -124,7 +124,7 @@ test('the web export refuses what it cannot play and says how to fix it', async 
   const out = () => mkdtemp(join(tmpdir(), '67js-web-refuse-'));
   const game = { player: { node: 'creature' } };
   await assert.rejects(async () => writeWebBuild({ recipe: recipeWith(), buildDirectory: build, outputDirectory: await out() }), /no game.*set-game/);
-  await assert.rejects(async () => writeWebBuild({ recipe: recipeWith({ ...game, physics: true }), buildDirectory: build, outputDirectory: await out() }), /Set game\.physics to false/);
+  await assert.rejects(async () => writeWebBuild({ recipe: recipeWith({ ...game, physics: true }), buildDirectory: build, outputDirectory: await out() }), /no physics section.*set game\.physics to false/s);
   const placed = recipeWith(game);
   placed.nodes.push({ id: 'tree', asset: { id: 'a'.repeat(64) } });
   await assert.rejects(async () => writeWebBuild({ recipe: placed, buildDirectory: build, outputDirectory: await out() }), /needs the bytes of the catalog assets placed by tree/);

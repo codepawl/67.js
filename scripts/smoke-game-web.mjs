@@ -19,7 +19,7 @@ setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const CHROME_PATH = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const directory = await mkdtemp(join(tmpdir(), '67js-game-web-'));
 const cli = resolve(process.argv[2] ?? 'bin/67js-mcp.mjs');
-const MIME_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.glb': 'model/gltf-binary' };
+const MIME_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm' };
 
 const assetsDirectory = join(directory, 'assets');
 await mkdir(assetsDirectory);
@@ -176,10 +176,78 @@ function characterSample() {
   return { recipe, game, replay, title: 'Retargeted walk', expectedScore: undefined, assetFiles, expectedAssets: [sourceId, heroId] };
 }
 
-const SAMPLES = { creature: creatureSample, drive: driveSample, character: characterSample };
+// Key events [sample, source, value] that push the crate on the left, cross over and push the crate on the right.
+const PUZZLE_REPLAY_EVENTS = [
+  [1, 'keyboard/KeyW', 1], [100, 'keyboard/KeyW', 0],
+  [105, 'keyboard/KeyS', 1], [184, 'keyboard/KeyS', 0], [186, 'keyboard/KeyD', 1], [286, 'keyboard/KeyD', 0],
+  [290, 'keyboard/KeyW', 1], [369, 'keyboard/KeyW', 0],
+];
+
+// A physics puzzle: push both crates into their pockets on the marble plates. The player is a kinematic body, the crates are
+// dynamic bodies that the page steps with Jolt, and a rules zone sees a crate by its node id. Both plates pressed opens the gate.
+function puzzleSample() {
+  const POCKET_X = [-2.5, 2.5];
+  const PLATE_Z = -6;
+  const plateZoneIds = ['plate-zone-a', 'plate-zone-b'];
+  const crateIds = ['crate-a', 'crate-b'];
+  const recipe = {
+    format: '67js.scene', schemaVersion: 1,
+    geometries: [{ id: 'block', type: 'box', bevel: 0.03 }, { id: 'cylinder', type: 'cylinder', segments: 24 }, { id: 'dome', type: 'sphere' }],
+    materials: [
+      { id: 'flagstone', color: [1, 1, 1], roughness: 0.9, pattern: { type: 'stone', size: 2 } },
+      { id: 'planks', color: [1, 1, 1], roughness: 0.75, pattern: { type: 'planks', size: 1 } },
+      { id: 'bricks', color: [1, 1, 1], roughness: 0.95, pattern: { type: 'bricks', size: 1 } },
+      { id: 'marble', color: [1, 1, 1], roughness: 0.3, pattern: { type: 'marble', size: 1 } },
+      { id: 'iron', color: [1, 1, 1], metallic: 0.9, roughness: 0.45, pattern: { type: 'metal', size: 0.5 } },
+      { id: 'cloth', color: [1, 1, 1], roughness: 0.8, pattern: { type: 'fabric', size: 0.25 } },
+    ],
+    nodes: [
+      { id: 'floor', geometry: 'block', material: 'flagstone', translation: [0, -0.25, -4], scale: [14, 0.5, 14] },
+      { id: 'hero', geometry: 'cylinder', material: 'cloth', translation: [POCKET_X[0], 0.8, 0], scale: [0.7, 1.6, 0.7] },
+      ...POCKET_X.flatMap((x, index) => [
+        { id: crateIds[index], geometry: 'block', material: 'planks', translation: [x, 0.5, -2.5], scale: [1, 1, 1] },
+        { id: `plate-${'ab'[index]}`, geometry: 'block', material: 'marble', translation: [x, 0.02, PLATE_Z], scale: [1.4, 0.04, 1.4] },
+        { id: `wall-${'ab'[index]}`, geometry: 'block', material: 'bricks', translation: [x, 0.75, -7.1], scale: [2, 1.5, 0.4] },
+      ]),
+      { id: 'gate', geometry: 'block', material: 'iron', translation: [0, 1, -7.1], scale: [2.4, 2, 0.3] },
+      { id: 'beacon', geometry: 'dome', material: 'iron', translation: [0, 2.4, -7.1], scale: [0.5, 0.5, 0.5] },
+    ],
+    physics: {
+      duration: 1,
+      bodies: [
+        { node: 'floor', type: 'fixed', shape: 'box' },
+        { node: 'hero', type: 'kinematic', shape: 'capsule' },
+        ...crateIds.map(node => ({ node, shape: 'box', density: 0.6, friction: 0.6 })),
+        ...['wall-a', 'wall-b'].map(node => ({ node, type: 'fixed', shape: 'box' })),
+      ],
+    },
+    camera: { eye: [0, 7, 7], target: [0, 0, -4], fov: 50 },
+  };
+  const game = {
+    player: { node: 'hero', footOffset: 0.8 },
+    camera: 'top-down',
+    input: 'keyboard',
+    physics: true,
+    rules: {
+      version: 1,
+      variables: { pressed: 0 },
+      zones: POCKET_X.map((x, index) => ({ id: plateZoneIds[index], shape: 'box', center: [x, 0.5, PLATE_Z], size: [1.4, 2, 1.4] })),
+      parts: [{ id: 'hero', tags: ['player'] }, { id: 'gate', tags: ['gate'] }, ...crateIds.map(id => ({ id, tags: ['crate'] }))],
+      rules: [
+        ...plateZoneIds.map(zone => ({ id: `press-${zone}`, once: true, when: { type: 'enter', zone, tag: 'crate' }, do: [{ type: 'add', variable: 'pressed', value: 1 }] })),
+        { id: 'open-gate', when: { type: 'variable', expression: ['>=', 'pressed', 2] }, do: [{ type: 'hide', part: 'gate' }, { type: 'win' }] },
+      ],
+    },
+  };
+  // Walk forward and push the first crate into its pocket; back off, cross to the second crate and push it in too.
+  const replay = { version: 1, samples: 460, truncated: false, events: PUZZLE_REPLAY_EVENTS };
+  return { recipe, game, replay, title: 'Crate pockets', expectedScore: undefined, puzzle: { crateIds, minimumTravel: 2 } };
+}
+
+const SAMPLES = { creature: creatureSample, drive: driveSample, character: characterSample, puzzle: puzzleSample };
 const sampleName = process.argv[3] ?? 'creature';
 assert.ok(SAMPLES[sampleName], `Unknown sample "${sampleName}". Use one of: ${Object.keys(SAMPLES).join(', ')}.`);
-const { recipe, game, replay, title, expectedScore, headRestHeight, assetFiles = {}, expectedAssets = [] } = SAMPLES[sampleName]();
+const { recipe, game, replay, title, expectedScore, headRestHeight, assetFiles = {}, expectedAssets = [], puzzle } = SAMPLES[sampleName]();
 for (const [name, bytes] of Object.entries(assetFiles)) await writeFile(join(assetsDirectory, name), bytes);
 
 function serveFolder(folder) {
@@ -198,6 +266,7 @@ function serveFolder(folder) {
 }
 
 let browser;
+let pageContext;
 let server;
 try {
   await client.connect(transport);
@@ -219,9 +288,17 @@ try {
   await writeFile(join(folder, 'replay.json'), JSON.stringify(replay));
 
   server = await serveFolder(folder);
-  browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
-  const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
+  // GAME_SMOKE_CHROME_ARGS replaces the Chrome flags (a Linux GPU box needs Vulkan ones); GAME_SMOKE_VIDEO_DIR records the page as a 640x360 clip.
+  const chromeArgs = process.env.GAME_SMOKE_CHROME_ARGS ? process.env.GAME_SMOKE_CHROME_ARGS.split(' ') : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'];
+  browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true, args: chromeArgs });
+  const videoDirectory = process.env.GAME_SMOKE_VIDEO_DIR;
+  const viewport = videoDirectory ? { width: 640, height: 360 } : { width: 640, height: 400 };
+  pageContext = await browser.newContext({ viewport, ...(videoDirectory ? { recordVideo: { dir: videoDirectory, size: viewport } } : {}) });
+  const page = await pageContext.newPage();
   const problems = [];
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const requested = [];
+  page.on('request', request => requested.push(request.url()));
   page.on('pageerror', error => problems.push(error.message));
   page.on('console', message => { if (message.type() === 'error') problems.push(message.text()); });
   await page.goto(`http://127.0.0.1:${server.address().port}/?replay=replay.json`);
@@ -258,6 +335,19 @@ try {
     const speed = await page.evaluate(() => window.__game.animation.get('speed'));
     assert.ok(speed >= 0, 'the exported page has a live animation graph with a speed parameter');
   }
+  const hasPhysicsFiles = await readFile(join(folder, 'engine/physics/jolt-physics.wasm.wasm')).then(() => true, () => false);
+  assert.equal(hasPhysicsFiles, Boolean(puzzle), 'only an export with game.physics carries the physics engine');
+  if (puzzle) {
+    // The page stepped the world: both crates were pushed along the floor by the kinematic player, and the gate part opened.
+    const crates = await page.evaluate(ids => ({ steps: window.__game.physics.stepCount, poses: ids.map(id => window.__game.physics.getPose(id).translation) }), puzzle.crateIds);
+    assert.ok(crates.steps > 100, `physics stepped ${crates.steps} times`);
+    for (const translation of crates.poses) assert.ok(translation[2] < -2.5 - puzzle.minimumTravel, `a crate was pushed to z ${translation[2]}`);
+    assert.equal(state.variables.pressed, 2);
+    const stray = requested.filter(url => !url.startsWith(origin) && !url.startsWith('data:'));
+    assert.deepEqual(stray, [], 'the page loads nothing from another origin');
+    assert.ok(requested.some(url => url === `${origin}/engine/physics/jolt-physics.wasm.wasm`), 'the wasm file loads from beside the page');
+    console.log(JSON.stringify({ crates: crates.poses }));
+  }
   for (const id of expectedAssets) assert.ok(await readFile(join(folder, 'assets', `${id}.glb`)), `the export writes assets/${id}.glb`);
   await page.screenshot({ path: join(directory, 'won.png') });
   console.log(JSON.stringify({ ok: true, bytes: exported.bytes, files: exported.files, step: state.step, screenshot: join(directory, 'won.png') }));
@@ -265,6 +355,7 @@ try {
   console.error(diagnostics);
   throw error;
 } finally {
+  await pageContext?.close();
   await browser?.close();
   server?.close();
   await client.close();
