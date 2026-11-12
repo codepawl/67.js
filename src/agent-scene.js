@@ -1206,7 +1206,11 @@ function oceanTimeGeometries(stagedState, sampled, time) {
       frames.set(geometryId, frame);
     }
     for (const node of stagedState.recipe.nodes) {
-      if (node.geometry === geometryId) geometries.set(node.id, frame.geometry);
+      if (node.geometry !== geometryId) continue;
+      // A water part draws the ocean's foam group as foam, as the first build of the part does.
+      const material = stagedState.recipe.materials?.find(candidate => candidate.id === node.material);
+      const drawn = material && frame.geometry.vertexGroups?.foam ? agentSceneModule('mesh').waterFoamGeometry(frame.geometry, material) : frame.geometry;
+      geometries.set(node.id, drawn);
     }
   }
   return geometries;

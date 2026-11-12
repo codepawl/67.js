@@ -18,6 +18,15 @@ const CONTROLS = [
   { time: 1.4, throttle: 1, rudder: 0.8 },
 ];
 
+// Where the baked hull is every half second (x, z); the camera follows it. It is the bake of the recipe below, so change both together.
+const HULL_PATH = [[3, -3], [3, -1.12], [3, 0.62], [3.01, 2.53], [2.87, 4.56], [2.4, 6.36], [1.41, 8.14], [0.06, 9.46], [-1.63, 10.35], [-3.51, 10.7], [-5.36, 10.47]];
+const CAMERA_OFFSET = [7, 3, -5];
+
+/** Keyframes that sit `offset` away from the hull at each step of its path, at the height `offset[1]`. */
+function followKeyframes(offset) {
+  return HULL_PATH.map(([x, z], index) => ({ time: index * 0.5, value: [x + offset[0], offset[1], z + offset[2]] }));
+}
+
 export function buildBoatRecipe(boatAssetId, duration) {
   const boatLift = BOAT_SIZE.hullHeight / 2;
   return {
@@ -32,17 +41,17 @@ export function buildBoatRecipe(boatAssetId, duration) {
     ],
     nodes: [
       { id: 'sea', geometry: 'sea', material: 'water' },
-      { id: 'hull', geometry: 'hull', material: 'ghost', castShadow: false, translation: [2, 0.8, -4], scale: [BOAT_SIZE.width, BOAT_SIZE.hullHeight, BOAT_SIZE.length] },
+      { id: 'hull', geometry: 'hull', material: 'ghost', castShadow: false, translation: [3, 0.8, -3], scale: [BOAT_SIZE.width, BOAT_SIZE.hullHeight, BOAT_SIZE.length] },
       { id: 'boat', parent: 'hull', asset: { id: boatAssetId }, translation: [0, -boatLift / BOAT_SIZE.hullHeight, 0], scale: [1 / BOAT_SIZE.width, 1 / BOAT_SIZE.hullHeight, 1 / BOAT_SIZE.length] },
     ],
-    camera: { eye: [5.5, 3.6, 9], target: [-2, 0.2, 1], fov: 52 },
-    environment: { world: true, skyTop: [0.22, 0.46, 0.85], skyBottom: [0.78, 0.9, 1], keyIntensity: 3 },
-    motion: { duration, tracks: [{ kind: 'geometry', id: 'sea', property: 'oceanTime', interpolation: 'LINEAR', keyframes: [{ time: 0, value: 0 }, { time: duration, value: duration }] }] },
+    camera: { eye: [10, 3, -8], target: [3, 1.5, -3], fov: 50 },
+    environment: { world: true, sky: { type: 'physical', sunElevation: 30, sunRotation: -35, turbidity: 2.5 } },
+    motion: { duration, tracks: [{ kind: 'camera', property: 'eye', interpolation: 'LINEAR', keyframes: followKeyframes(CAMERA_OFFSET) }, { kind: 'camera', property: 'target', interpolation: 'LINEAR', keyframes: followKeyframes([0, 1.5, 0]) }, { kind: 'geometry', id: 'sea', property: 'oceanTime', interpolation: 'LINEAR', keyframes: [{ time: 0, value: 0 }, { time: duration, value: duration }] }] },
     physics: {
       duration,
       ocean: { geometry: 'sea' },
       bodies: [{
-        node: 'hull', density: 550,
+        node: 'hull', density: 550, velocity: [0, 0, 3.5],
         float: {
           drag: 1.5, angularDrag: 3, points: [[-0.6, 0, -1.4], [0.6, 0, -1.4], [-0.6, 0, 1.4], [0.6, 0, 1.4]],
           boat: { thrust: 3.5, rudder: 1, forward: '+z', controls: CONTROLS, wake: { width: 1.6, strength: 1, height: 0.05, lifetime: 3 } },

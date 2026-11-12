@@ -1,5 +1,5 @@
 // Film of crates and a boat bobbing on ocean waves through the MCP render job, for the buoyancy docs and the pull request.
-// Usage: node scripts/render-buoyancy-film.mjs [--scene buoyancy|boat] [--backend gpu|cpu] [--width 640] [--height 360] [--duration 4] [--out artifacts/982]
+// Usage: node scripts/render-buoyancy-film.mjs [--scene buoyancy|boat] [--backend gpu|cpu] [--width 640] [--height 360] [--duration 4] [--still-time 3] [--still-only] [--out artifacts/982]
 // The boat is the CC0 Kenney Watercraft Kit (kenney.nl/assets/watercraft-kit). Put `boat-fishing-small.glb` and
 // `Textures/colormap.png` from its GLB folder in <out>/assets before the first run.
 // CHROME_PATH names another Chrome or Chromium executable. --vulkan wraps the Chrome it finds with the flags a Linux GPU box needs.
@@ -121,8 +121,13 @@ try {
   const created = (await call('scene_create', { recipe: (sceneName === 'boat' ? buildBoatRecipe(boat.assetId, duration) : buildRecipe(boat.assetId)) }, 300000)).structuredContent;
   const report = (await call('scene_inspect', { sessionId: created.sessionId })).structuredContent.physics;
   console.log(JSON.stringify(report.bodies.map(body => [body.node, body.finalPosition])));
-  const still = (await call('scene_look', { sessionId: created.sessionId, width: 1024, height: 576, motionTime: duration * 0.6 })).content.find(item => item.type === 'image');
+  const still = (await call('scene_look', { sessionId: created.sessionId, width: 1024, height: 576, motionTime: Number(option('still-time', duration * 0.6)) })).content.find(item => item.type === 'image');
   await writeFile(join(outputFolder, `${sceneName}-still.png`), Buffer.from(still.data, 'base64'));
+  if (process.argv.includes('--still-only')) {
+    console.log(`wrote ${join(outputFolder, `${sceneName}-still.png`)}`);
+    await client.close();
+    process.exit(0);
+  }
   const job = (await call('scene_render_submit', { sessionId: created.sessionId, expectedRevision: created.revision ?? 0, settings: { kind: 'video', width, height, fps: 24, duration, motion: { start: 0 } } })).structuredContent;
   for (;;) {
     const state = (await call('scene_render_status', { jobId: job.jobId })).structuredContent;

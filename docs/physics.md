@@ -420,7 +420,7 @@ A floating hull becomes a boat with `float.boat`: throttle pushes the stern alon
 { "node": "hull", "density": 300, "float": { "drag": 1.5, "angularDrag": 3, "boat": {
   "thrust": 4, "rudder": 1, "keelDrag": 4, "forward": "-z",
   "controls": [{ "time": 0, "throttle": 1 }, { "time": 2, "throttle": 1, "rudder": 0.8 }],
-  "wake": { "width": 1.2, "height": 0.12, "lifetime": 5 }
+  "wake": { "width": 1.2, "height": 0.06, "lifetime": 3 }
 } } }
 ```
 
@@ -429,7 +429,7 @@ A floating hull becomes a boat with `float.boat`: throttle pushes the stern alon
 - `controls` are up to 256 keyframes `{ time, throttle, rudder }` with both values from -1 to 1, linear between them and held after the last. A bake reads them, so a film steers the boat with keyframes and the result is identical across runs. A live system ignores them once `setBoatControls` has been called.
 - A live system takes the controls from `physics.setBoatControls(bodyName, { throttle, rudder })`. The `boat` controller of [the player kit](player.md#boat-controller) does that from the input axes every step.
 
-`wake` is off unless you give it. It draws a bounded trail behind the stern into the sea: the last `lifetime` seconds (0.5 to 60, default 5) of the stern path as at most 64 points that fade with age and widen as they spread (`width` 1.2 m at the stern, `strength` 1, `height` 0.12 m). Where a point reaches the sea it raises the `foam` group the water shader already draws and presses a small trough along the track with a ridge on each side. A slow hull leaves no wake. The sea geometry needs an `oceanTime` track so it is rebuilt each frame; the wake is a pure function of the bake, so frames render in any order. The same field is on the `ocean` mesh edit: `wake: { points: [[x, z, strength, width]], height }` draws a trail you place yourself, in the sea geometry's own space.
+`wake` is off unless you give it. It draws a bounded trail behind the stern into the sea: the last `lifetime` seconds (0.5 to 60, default 5) of the stern path as at most 62 points (plus two for the hull, so the sea shows white water where the hull meets it) that fade with age and widen as they spread (`width` 1.2 m at the stern, `strength` 1, `height` 0.06 m of choppy displacement). Where a point reaches the sea it raises the `foam` group the water shader already draws and adds a small choppy displacement along the track, so the churned water is rough and white and never flattened. A slow hull leaves no wake. A hull that starts with a `velocity` is taken to have been under way on a straight line before time 0, so its wake is there from the first frame. The sea geometry needs an `oceanTime` track so it is rebuilt each frame; the wake is a pure function of the bake, so frames render in any order. The same field is on the `ocean` mesh edit: `wake: { points: [[x, z, strength, width]], height }` draws a trail you place yourself, in the sea geometry's own space.
 
 The boat code is part of the buoyancy chunk, so a scene without floating bodies never loads it.
 

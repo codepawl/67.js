@@ -6,7 +6,7 @@ import { bakePhysicsScene, loadPhysicsEngine, physicsEngineLoaded, setPhysicsMod
 import { normalizeForceFields } from './force-fields.js';
 import { normalizeFloat } from './physics-buoyancy.js';
 import { rotateByQuaternion } from './physics-values.js';
-import { wakeTrail } from './ocean-wake.js';
+import { MAX_WAKE_POINTS, wakeTrail } from './ocean-wake.js';
 import { AGENT_SCENE_CAPABILITIES } from './agent-scene-capabilities.js';
 
 export { loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader };
@@ -617,13 +617,31 @@ function createBoatWake(physics, scene) {
     return [pose[bodyOffset] + offset[0], pose[bodyOffset + 2] + offset[2]];
   };
   const sample = time => {
-    const [x, z] = sternAt(time);
+    const [x, z] = sternAt(Math.max(0, time));
     const [earlierX, earlierZ] = sternAt(Math.max(0, time - scene.timestep));
     return { x, z, speed: Math.hypot(x - earlierX, z - earlierZ) / scene.timestep };
   };
-  return (geometryId, time) => (geometryId === physics.ocean.geometry
-    ? { wake: { points: wakeTrail({ sample, time: Math.min(time, scene.duration), lifetime, width, strength }), height } }
-    : undefined);
+  // Before time 0 the hull is taken to have been under way on a straight line at its first velocity, so a hull that starts moving has a wake at once.
+  const sampleWithRunIn = time => {
+    if (time >= 0) return sample(time);
+    const [startX, startZ] = sternAt(0);
+    const [nextX, nextZ] = sternAt(scene.timestep);
+    return { x: startX + (startX - nextX) / scene.timestep * -time, z: startZ + (startZ - nextZ) / scene.timestep * -time, speed: Math.hypot(nextX - startX, nextZ - startZ) / scene.timestep };
+  };
+  // White water where the hull meets the sea: one point at the middle of the hull and one at the bow (the stern is the head of the trail).
+  const hullCollar = (time, trailStrength) => {
+    const [sternX, sternZ] = sternAt(time);
+    const centreX = pose[bodyOffset];
+    const centreZ = pose[bodyOffset + 2];
+    return [[centreX, centreZ, trailStrength, width * 0.75], [2 * centreX - sternX, 2 * centreZ - sternZ, trailStrength, width * 0.5]];
+  };
+  return (geometryId, time) => {
+    if (geometryId !== physics.ocean.geometry) return undefined;
+    const at = Math.min(time, scene.duration);
+    const trail = wakeTrail({ sample: sampleWithRunIn, time: at, lifetime, width, strength, count: MAX_WAKE_POINTS - 2 });
+    const underway = trail.length > 0 ? trail[0][2] : 0;
+    return { wake: { points: [...hullCollar(at, underway), ...trail], height } };
+  };
 }
 
 /**

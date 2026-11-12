@@ -43,7 +43,7 @@ function normalizeBoatWake(input, label) {
   return {
     width: boundedNumber(spec.width ?? 1.2, `${label}.width`, 0.05, 100, 1.2),
     strength: boundedNumber(spec.strength ?? 1, `${label}.strength`, 0, 1, 1),
-    height: boundedNumber(spec.height ?? 0.12, `${label}.height`, 0, 2, 0.12),
+    height: boundedNumber(spec.height ?? 0.06, `${label}.height`, 0, 2, 0.06),
     lifetime: boundedNumber(spec.lifetime ?? 5, `${label}.lifetime`, 0.5, 60, 5),
   };
 }
