@@ -1018,7 +1018,7 @@ Against Cycles on `tex-repeat` (2048 spp, 960x540, seed 1; Cycles shows half of 
 | T1 sampler only | 1.077, 0.978, 1.017 | 0.0272 | 31 of 64 |
 | T1 plus packer fix | 1.040, 1.039, 1.051 | 0.0039 | 39 of 64 |
 
-Cycles' own seed-to-seed relMSE is 1.7e-6. Cook with the fix is still 4 to 5 percent bright over the whole image, which no gate passes; the cause of that was not looked at.
+Cycles' own seed-to-seed relMSE is 1.7e-6. Cook with the fix is still 4 to 5 percent bright over the whole image, which no gate passes. Split on the same room (Cook over Cycles, mean ratio R, G, B): the room alone 1.000, 1.000, 1.000; both quads as flat untextured colours 1.000, 1.000, 1.000; the opaque sRGB colour-map quad alone 1.021, 1.028, 1.036; the mask quad alone 1.018, 1.025, 1.023. So the excess sits in the textured surfaces, not in the room or the cutout edge; the cause is not known.
 
 Texture cost on the same A10G, one scene per process `[measured]`:
 
