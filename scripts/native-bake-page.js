@@ -86,9 +86,14 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
       materialsReason = error.message;
     }
   }
-  const input = buildNativeInputOrExplain(buildNativeInput, traceScene, camera, options, pack, materialsReason);
+  if (traceScene.partRayVisibility && !wholeMaterials) {
+    throw new TypeError('A part sets rayVisibility to hide from a ray kind, which only the "cycles" kernel can carry. Use kernel "cycles", or drop the rayVisibility of the part.');
+  }
+  // The v1 tables of the "cycles" job fallback cannot carry visibility: the scene is drawn without it, and the report says so.
+  const visibilityNote = traceScene.partRayVisibility ? { rayVisibility: 'ignored', rayVisibilityReason: materialsReason } : {};
+  const input = buildNativeInputOrExplain(buildNativeInput, { ...traceScene, partRayVisibility: null }, camera, options, pack, materialsReason);
   return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
-    ...(materialsReason === undefined ? {} : { materialsReason }), ...instancingNote };
+    ...(materialsReason === undefined ? {} : { materialsReason }), ...visibilityNote, ...instancingNote };
 }
 
 // The v1 tables are the fallback for a scene whose FORMAT-v2 materials failed; when they fail too, the error keeps the first reason.
