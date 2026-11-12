@@ -31,7 +31,7 @@ import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 import { AGENT_SCENE_DEFAULT_LIMITS } from '../src/agent-scene-capabilities.js';
 import { describeApplication } from '../src/agent-apply-report.js';
-import { framingProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
+import { framingProblems, placementProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
 import { describeMarks, validateMarks } from '../src/agent-annotate.js';
@@ -188,7 +188,10 @@ function sampleFrameShares() {
 function viewProblems(record, camera, exposure) {
   const problems = [];
   const boxes = record.scene.worldBounds?.();
-  if (boxes) problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes }));
+  if (boxes) {
+    problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes }));
+    problems.push(...placementProblems({ boxes }));
+  }
   if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());
   if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure }));
   return problems;

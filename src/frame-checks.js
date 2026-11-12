@@ -10,8 +10,17 @@ const WHITE_LUMA = 250 / 255;
 const BLACK_FRAME_SHARE = 0.98;
 const CLIPPED_FRAME_SHARE = 0.35;
 
-function warning(kind, target, message, fix) {
-  return { kind, severity: 'warning', target, message, fix };
+const MAXIMUM_FINDING_NODES = 8;
+
+/** A finding names the parts it concerns in `nodes` and carries its numbers as extra fields. */
+function warning(kind, target, message, fix, details = {}) {
+  return { kind, severity: 'warning', target, message, fix, ...details };
+}
+
+/** At most 8 part names for a finding, with `nodeCount` when more were left out. */
+export function namedNodes(names) {
+  const nodes = names.slice(0, MAXIMUM_FINDING_NODES);
+  return names.length > nodes.length ? { nodes, nodeCount: names.length } : { nodes };
 }
 
 function subtract(first, second) {
@@ -86,26 +95,40 @@ export function framingProblems({ camera, aspect, boxes }) {
   const upward = cross(right, forward);
   const sideScale = Math.sqrt(1 + tangent * tangent);
   const wideScale = Math.sqrt(1 + tangentWide * tangentWide);
+  const outside = [];
   const visibleBoxes = boxes.filter(box => {
     const { center, radius } = sphereOf(box);
     const offset = subtract(center, camera.eye);
     const depth = dot(offset, forward);
-    if (depth + radius < camera.near || depth - radius > camera.far) return false;
+    if (depth + radius < camera.near || depth - radius > camera.far) {
+      outside.push(box.name);
+      return false;
+    }
     const sideways = (Math.abs(dot(offset, right)) - tangentWide * depth) / wideScale;
     const vertical = (Math.abs(dot(offset, upward)) - tangent * depth) / sideScale;
-    return sideways <= radius && vertical <= radius;
+    const inView = sideways <= radius && vertical <= radius;
+    if (!inView) outside.push(box.name);
+    return inView;
   });
+  const outsideDetails = { ...namedNodes(outside), outsideCount: outside.length, partCount: boxes.length };
   if (visibleBoxes.length * 2 < boxes.length) {
     return [warning('subject-out-of-frame', 'camera',
       `${boxes.length - visibleBoxes.length} of ${boxes.length} parts are outside the camera frustum.`,
-      `${framingSuggestion(camera, boxes, tangent)} to put every part in view.`)];
+      `${framingSuggestion(camera, boxes, tangent)} to put every part in view.`, outsideDetails)];
   }
   const { center, radius } = sphereOf(unionOf(visibleBoxes));
   const depth = dot(subtract(center, camera.eye), forward);
   if (depth > 0 && radius / (depth * tangent) < TINY_SUBJECT_RATIO) {
     return [warning('subject-too-small', 'camera',
       `The visible parts fill under ${Math.round(TINY_SUBJECT_RATIO * 100)} percent of the frame height.`,
-      `${framingSuggestion(camera, visibleBoxes, tangent)} to fill the frame, or lower camera.fov.`)];
+      `${framingSuggestion(camera, visibleBoxes, tangent)} to fill the frame, or lower camera.fov.`,
+      { heightPercent: Math.round(radius / (depth * tangent) * 100) })];
+  }
+  if (outside.length > 0) {
+    return [warning('part-outside-frame', 'camera',
+      `${outside.length} of ${boxes.length} parts are outside the camera frustum, so the picture does not show them.`,
+      `Move them into view with scene_apply set-node, or ${framingSuggestion(camera, boxes, tangent)} to put every part in view.`,
+      outsideDetails)];
   }
   return [];
 }
@@ -123,19 +146,87 @@ export function lumaShares(rgba) {
   return { black: black / pixels, white: white / pixels };
 }
 
+function percents(shares) {
+  return { blackPercent: Math.round(shares.black * 100), whitePercent: Math.round(shares.white * 100) };
+}
+
 /** Warnings for a frame that is nearly all black or has a large clipped area; `exposure` is the current effects.exposure. */
 export function exposureProblems({ shares, exposure }) {
   if (shares.black >= BLACK_FRAME_SHARE) {
     return [warning('exposure-black', 'effects.exposure',
       `${Math.round(shares.black * 100)} percent of the frame is black after tone mapping.`,
-      `Raise effects.exposure from ${exposure} to ${round(Math.max(exposure, 0.25) * 4)}, raise environment.keyIntensity, or aim a light at the subject.`)];
+      `Raise effects.exposure from ${exposure} to ${round(Math.max(exposure, 0.25) * 4)}, raise environment.keyIntensity, or aim a light at the subject.`, percents(shares))];
   }
   if (shares.white >= CLIPPED_FRAME_SHARE) {
     return [warning('exposure-clipped', 'effects.exposure',
       `${Math.round(shares.white * 100)} percent of the frame is clipped to white after tone mapping.`,
-      `Lower effects.exposure from ${exposure} to ${round(exposure / 2)}, or lower environment.keyIntensity.`)];
+      `Lower effects.exposure from ${exposure} to ${round(exposure / 2)}, or lower environment.keyIntensity.`, percents(shares))];
   }
   return [];
+}
+
+const FLOATING_GAP = 0.02;
+const MINIMUM_PENETRATION = 0.02;
+const MAXIMUM_PAIR_PARTS = 256;
+const MAXIMUM_PLACEMENT_FINDINGS = 8;
+
+/** Distance between two boxes along each axis; 0 where they touch or overlap on that axis. */
+function axisGaps(first, second) {
+  return [0, 1, 2].map(axis => Math.max(first.min[axis] - second.max[axis], second.min[axis] - first.max[axis], 0));
+}
+
+/** How far two boxes overlap along each axis, or null when they are apart on any axis. */
+function axisPenetrations(first, second) {
+  const depths = [0, 1, 2].map(axis => Math.min(first.max[axis], second.max[axis]) - Math.max(first.min[axis], second.min[axis]));
+  return depths.every(depth => depth > 0) ? depths : null;
+}
+
+function droppedCount(total) {
+  return total > MAXIMUM_PLACEMENT_FINDINGS ? { droppedCount: total - MAXIMUM_PLACEMENT_FINDINGS } : {};
+}
+
+/**
+ * Findings about where parts sit, from world bounds ({ name, min, max }, y up): a part with nothing within 2 cm of it
+ * that is above the lowest point of the scene (`floating-node`, `gapMeters` to the nearest part or floor), and two
+ * parts whose bounds overlap by 2 cm or more on every axis (`intersecting-nodes`, `penetrationMeters`). Bounds are
+ * axis aligned, so a rotated part may report an overlap its surface does not have. Each kind lists at most 8 and says
+ * how many more there were in `droppedCount`. Scenes of over 256 parts are not checked.
+ */
+export function placementProblems({ boxes }) {
+  if (boxes.length < 1 || boxes.length > MAXIMUM_PAIR_PARTS) return [];
+  const floorHeight = Math.min(...boxes.map(box => box.min[1]));
+  const floating = [];
+  const intersecting = [];
+  boxes.forEach((box, index) => {
+    let nearest = { gap: box.min[1] - floorHeight, name: 'floor' };
+    for (let otherIndex = 0; otherIndex < boxes.length; otherIndex++) {
+      if (otherIndex === index) continue;
+      const other = boxes[otherIndex];
+      const gap = Math.hypot(...axisGaps(box, other));
+      if (gap < nearest.gap) nearest = { gap, name: other.name };
+      const penetrations = otherIndex > index ? axisPenetrations(box, other) : null;
+      if (penetrations && Math.min(...penetrations) >= MINIMUM_PENETRATION) {
+        intersecting.push({ nodes: [box.name, other.name], penetrationMeters: round(Math.min(...penetrations)) });
+      }
+    }
+    if (nearest.gap > FLOATING_GAP) floating.push({ node: box.name, gapMeters: round(nearest.gap), nearest: nearest.name });
+  });
+  const problems = [];
+  const floatingWorstFirst = floating.sort((first, second) => second.gapMeters - first.gapMeters);
+  for (const entry of floatingWorstFirst.slice(0, MAXIMUM_PLACEMENT_FINDINGS)) {
+    problems.push(warning('floating-node', entry.node,
+      `${entry.node} touches nothing: it is ${entry.gapMeters} m from ${entry.nearest === 'floor' ? 'the floor level' : entry.nearest}.`,
+      'Lower it with scene_apply set-node, or give it a relation that rests it on a part, unless it is meant to fly.',
+      { nodes: [entry.node], gapMeters: entry.gapMeters, nearest: entry.nearest, ...droppedCount(floating.length) }));
+  }
+  const intersectingDeepestFirst = intersecting.sort((first, second) => second.penetrationMeters - first.penetrationMeters);
+  for (const entry of intersectingDeepestFirst.slice(0, MAXIMUM_PLACEMENT_FINDINGS)) {
+    problems.push(warning('intersecting-nodes', entry.nodes[0],
+      `${entry.nodes[0]} and ${entry.nodes[1]} overlap by ${entry.penetrationMeters} m inside their bounds.`,
+      'Move one of them apart with scene_apply set-node, or ignore it where the overlap is meant, such as a part sunk into the ground.',
+      { nodes: entry.nodes, penetrationMeters: entry.penetrationMeters, ...droppedCount(intersecting.length) }));
+  }
+  return problems;
 }
 
 /** Adds a frame's diagnostics to `metrics.diagnostics`, keeping one entry per kind, target and message across a job's frames. */

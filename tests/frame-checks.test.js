@@ -2,7 +2,7 @@ import './support/load-agent-scene-modules.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAgentScene } from '../src/agent-scene.js';
-import { exposureProblems, framingProblems, lumaShares, mergeFrameDiagnostics } from '../src/frame-checks.js';
+import { exposureProblems, framingProblems, lumaShares, mergeFrameDiagnostics, placementProblems } from '../src/frame-checks.js';
 import { closedRoom, closedRoomWithoutBake } from './support/agent-bake-rooms.mjs';
 
 function sceneWithCamera(camera) {
@@ -110,4 +110,76 @@ test('job metrics keep one entry per warning across frames', () => {
   mergeFrameDiagnostics(metrics, [{ ...warning }]);
   mergeFrameDiagnostics(metrics, undefined);
   assert.equal(metrics.diagnostics.length, 1);
+});
+
+function boxScene(nodes) {
+  return {
+    format: '67js.scene', schemaVersion: 1,
+    geometries: [{ id: 'box', type: 'box' }],
+    materials: [{ id: 'red', color: [0.8, 0.2, 0.2] }],
+    nodes: nodes.map(node => ({ geometry: 'box', material: 'red', ...node })),
+    camera: { eye: [0, 3, 8], target: [0, 0.5, 0], fov: 45 },
+  };
+}
+
+function placementOf(nodes) {
+  return placementProblems({ boxes: createAgentScene(boxScene(nodes)).worldBounds() });
+}
+
+test('a box in the air is a floating part with its gap in metres and the nearest part', () => {
+  const problems = placementOf([
+    { id: 'floor', scale: [10, 0.2, 10], translation: [0, 0, 0] },
+    { id: 'hover', translation: [0, 1.1, 0] },
+  ]);
+  assert.deepEqual(kinds(problems), ['floating-node']);
+  assert.deepEqual(problems[0].nodes, ['hover']);
+  assert.equal(problems[0].nearest, 'floor');
+  assert.equal(problems[0].gapMeters, 0.5);
+});
+
+test('a box resting on the floor or on another box is not floating', () => {
+  assert.deepEqual(placementOf([
+    { id: 'floor', scale: [10, 0.2, 10], translation: [0, 0, 0] },
+    { id: 'rest', translation: [0, 0.6, 0] },
+    { id: 'stacked', scale: [0.5, 0.5, 0.5], translation: [0, 1.35, 0] },
+  ]), []);
+});
+
+test('two boxes that overlap name both parts and how deep', () => {
+  const problems = placementOf([
+    { id: 'floor', scale: [10, 0.2, 10], translation: [0, 0, 0] },
+    { id: 'first', translation: [-0.4, 0.6, 0] },
+    { id: 'second', translation: [0.4, 0.6, 0] },
+  ]);
+  assert.deepEqual(kinds(problems), ['intersecting-nodes']);
+  assert.deepEqual(problems[0].nodes, ['first', 'second']);
+  assert.equal(problems[0].penetrationMeters, 0.2);
+});
+
+test('a box behind the camera is named as outside the frame while the rest stays in view', () => {
+  const scene = createAgentScene(boxScene([
+    { id: 'seen', translation: [0, 0, 0] },
+    { id: 'also-seen', translation: [1, 0, 0] },
+    { id: 'behind', translation: [0, 0, 20] },
+  ]));
+  const problems = framingProblems({ camera: scene.camera, aspect: 1.5, boxes: scene.worldBounds() });
+  assert.deepEqual(kinds(problems), ['part-outside-frame']);
+  assert.deepEqual(problems[0].nodes, ['behind']);
+  assert.equal(problems[0].outsideCount, 1);
+  assert.equal(problems[0].partCount, 3);
+});
+
+test('placement findings are capped and say how many were left out', () => {
+  const nodes = Array.from({ length: 12 }, (_, index) => ({ id: `hover-${index}`, translation: [index * 3, 1 + index, 0] }));
+  const problems = placementOf([{ id: 'floor', scale: [60, 0.2, 10], translation: [15, 0, 0] }, ...nodes]);
+  assert.equal(problems.length, 8);
+  assert.equal(problems[0].droppedCount, 4);
+});
+
+test('a blown-out frame reports how much is clipped', () => {
+  const [finding] = exposureProblems({ shares: lumaShares(frameOf(255)), exposure: 1 });
+  assert.equal(finding.kind, 'exposure-clipped');
+  assert.equal(finding.whitePercent, 100);
+  const [black] = exposureProblems({ shares: lumaShares(frameOf(0)), exposure: 1 });
+  assert.equal(black.blackPercent, 100);
 });
