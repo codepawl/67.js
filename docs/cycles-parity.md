@@ -340,7 +340,7 @@ Against Cycles 5.3 OptiX on `lit-interior`, `256` samples took `11.4 s` (measure
 | `cycles` kernel | `0.0065` |
 | Cycles 5.3 OptiX | `0.0031` |
 
-These are per-sample times on one scene. An equal-error comparison between the `cycles` kernel and Cycles has not been measured directly, so nothing here says Cook is faster than Cycles in general. The Cycles `lit-interior` reference was not re-rendered with the current script (its scene file and image are byte-identical to the earlier run).
+These are per-sample times on one scene. An equal-error comparison between the `cycles` kernel and Cycles has not been measured directly, so nothing here says Cook is faster than Cycles in general. The Cycles `lit-interior` reference was re-rendered with the current script and matches the stored one (see "Area light shapes, spread and transparent shadows").
 
 ---
 
@@ -536,4 +536,17 @@ The `cycles` kernel already had disk and ellipse area lights (`lgt_sample_area_l
 - Reference scenes `area-shapes` (a disk, an ellipse with spread 1.2 and a square with spread 0.9 over a glossy floor, a ball, a column and a block) and `transparent-shadow` (two blended panes of opacity 0.4 and 0.75 under two sphere lights and a rectangle light) are in `bench/reference/scenes.js`. They are not in `run-m1-parity.py`'s default list: pass `--scenes area-shapes,transparent-shadow` once their Cycles references exist.
 - `tests/cycles-area-shapes-parity.test.js` checks the packed light types, the spread terms, the radiance per area, the blended material records and that opaque materials and rectangle lights resolve as before.
 
-Not measured: no Cycles reference exists for these two scenes yet and Cook has not been compared with Cycles on them. The Modal workspace stopped with "exceeded its spend limit" when the run was started, so the 4096 spp references (seeds 1 and 2), the Cook runs and the lit-interior re-render are still to do. The Modal function that does all of that in one container is `finish_894_parity` in the harness outside the repository; `render-cycles.py --samples 4096 --seed 1|2` and `trace-native.mjs --kernel cycles --samples 4096` are the commands it runs. Until then these features are implemented and unit-tested, not proven against Cycles.
+Result, Cook `cycles` kernel at 4096 spp, seed 1, 8 bounces, box filter, against Cycles 5.3 OptiX at 4096 spp seeds 1 and 2, one Modal container (NVIDIA L4, Cook on the `NVIDIA L4` adapter) `[measured]`. Both scenes pass every gate of `run-m1-parity.py` with no kernel change:
+
+| Scene | Mean ratio (R / G / B) | Tiles within 5 % | Tile min / max | FLIP LDR (ceiling) | relMSE (seed noise floor) |
+| --- | --- | ---: | --- | --- | --- |
+| `area-shapes` | 0.9997 / 0.9998 / 0.9997 | 64 of 64 | 0.9981 / 1.0016 | 0.0178 (0.0372) | 0.000686 (0.000638) |
+| `transparent-shadow` | 1.0007 / 1.0006 / 1.0006 | 64 of 64 | 1.0000 / 1.0014 | 0.0057 (0.0255) | 0.000060 (0.000058) |
+
+![Cook and Cycles on area-shapes (top) and transparent-shadow (bottom)](cycles-area-lights-comparison.jpg)
+
+Left Cook, right Cycles 5.3, both 4096 spp, sRGB curve and no tone mapping. The disk, the ellipse with spread 1.2 and the square with spread 0.9 give one soft pool on the floor in both; the two panes of opacity 0.4 and 0.75 cast shadows of the two densities in both.
+
+The `lit-interior` reference was rendered again with the current `render-cycles.py` (4096 spp, seed 1): relMSE against the stored reference 4.9e-10 (the seed 1 versus seed 2 floor is 0.000285) and mean ratio 1.0000 in all channels, so the stored reference is what the current script produces `[measured]`. The seven-scene parity, cargo, lobe and furnace results above are those of the previous kernel: this change touches no WGSL or Rust.
+
+Still open: the `transparent_max = 0` edge (first paragraph of "Bounce-Count Semantics Verification") has not been compared with Cycles on a scene.
