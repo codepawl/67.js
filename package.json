@@ -238,7 +238,7 @@
     "manifold-3d": "3.5.4"
   },
   "dependencies": {
-    "playwright-core": "1.64.1"
+    "playwright-core": "1.65.0"
   },
   "peerDependenciesMeta": {
     "@dimforge/rapier3d-compat": {
