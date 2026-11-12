@@ -1,6 +1,6 @@
 // One MCP image render job of a recipe with settings.renderer.backend set, timed from submit to completed. Run it through gpu-lock.
 //   node bench/native-tracer/job.mjs <output directory> --backend native|gpu|cpu [--recipe tests/fixtures/demo-room.recipe.json]
-//     [--samples 64] [--width 1920] [--height 1080] [--label run1] [--denoise true]
+//     [--samples 64] [--width 1920] [--height 1080] [--label run1] [--denoise true] [--browser <chrome path>]
 // Writes job-<label>.png and job-<label>.json (seconds, the metrics.pathTracer report and the job state).
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority, tmpdir } from 'node:os';
@@ -29,7 +29,7 @@ setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 await mkdir(outputDirectory, { recursive: true });
 const workDirectory = await mkdtemp(join(tmpdir(), '67js-native-job-'));
 const transport = new StdioClientTransport({ command: process.execPath,
-  args: [resolve('bin/67js-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs')], cwd: workDirectory, stderr: 'pipe' });
+  args: [resolve('bin/67js-mcp.mjs'), '--backend', 'gpu', '--memory', '384', '--jobs', join(workDirectory, 'jobs'), ...(valueAfter('--browser', '') ? ['--browser', valueAfter('--browser', '')] : [])], cwd: workDirectory, stderr: 'pipe', env: { ...process.env } });
 let diagnostics = '';
 transport.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096); });
 const client = new Client({ name: '67js-native-job-bench', version: '1' });
@@ -41,7 +41,9 @@ async function call(name, toolArguments = {}, timeout = 600000) {
 try {
   await client.connect(transport);
   const recipe = JSON.parse(await readFile(recipePath, 'utf8'));
-  const created = (await call('scene_create', { recipe }, 600000)).structuredContent;
+  const createResult = await call('scene_create', { recipe }, 600000);
+  if (!createResult.structuredContent) throw new Error(createResult.content?.[0]?.text ?? 'scene_create returned no structured content');
+  const created = createResult.structuredContent;
   const settings = { kind: 'image', width, height, renderer: { type: 'pathTracer', backend, samples, bounces: 8, denoise, maxSeconds: 600 } };
   const started = performance.now();
   const submitted = await call('scene_render_submit', { sessionId: created.sessionId, expectedRevision: 0, settings });
