@@ -357,6 +357,22 @@ The six-scene references use the box filter of width 1, so the box filter stays 
 
 `lit-interior` is smooth, so the filter hides under its noise. `glass` has hard caustic edges: each native filter scores best against the Cycles reference rendered with the same filter, and the mismatched pair is 4 to 7 times worse in relMSE.
 
+#### Seven-scene parity with Cycles' default filter
+
+The same seven scenes pass every M1 gate with Cycles' own default pixel filter. Cycles 5.3.0 OptiX references were rendered with `--filter-type blackman-harris --filter-width 1.5` (4096 spp, seeds 1 and 2, 8 bounces, 960 x 540, no denoiser, no clamps; every other setting as in the box references), and the `cycles` kernel ran with `--filter-type blackman-harris --filter-width 1.5`, 4096 spp, seed 1, 8 bounces. Both ran on an NVIDIA A10 (`wgpu` Vulkan ray queries for Cook, OptiX for Cycles). The gates are the ones of the box table: per-channel mean ratio within 2 percent, every eligible 8 x 8 tile within 5 percent, FLIP LDR below the seed 1 versus seed 2 value plus 0.02, and relMSE reported next to the two-seed noise floor `[measured]`:
+
+| Scene | Mean ratio (R / G / B) | Tiles within 5 percent | Tile ratio range | FLIP LDR (ceiling) | relMSE (noise floor) | Result |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `spot-area` | 1.0000 / 1.0000 / 1.0000 | 47 / 47 | 0.9994 to 1.0010 | 0.0039 (0.0239) | 0.000008 (0.000009) | pass |
+| `light-linking` | 1.0009 / 1.0007 / 1.0008 | 64 / 64 | 0.9996 to 1.0026 | 0.0051 (0.0228) | 0.000015 (0.000004) | pass |
+| `metal` | 0.9996 / 0.9996 / 0.9997 | 64 / 64 | 0.9949 to 1.0043 | 0.0043 (0.0238) | 0.00331 (0.00304) | pass |
+| `glass` | 0.9976 / 0.9978 / 0.9982 | 64 / 64 | 0.9824 to 1.0000 | 0.0070 (0.0234) | 0.000099 (0.000051) | pass |
+| `outdoor-hdri` | 0.9995 / 0.9996 / 0.9998 | 64 / 64 | 0.9987 to 1.0000 | 0.0023 (0.0215) | 0.000005 (0.000007) | pass |
+| `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 / 64 | 1.0004 to 1.0079 | 0.0168 (0.0365) | 0.000261 (0.000286) | pass |
+| `many-lights-500` | 1.0009 / 1.0010 / 1.0010 | 64 / 64 | 0.9998 to 1.0033 | 0.0178 (0.0374) | 0.000835 (0.000793) | pass |
+
+`run-m1-parity.py` takes `--filter-type`, `--filter-width` and `--references-directory` to score either filter against its own references. The Blackman-Harris references are not committed (about 84 MB with their reports).
+
 ### Light tree for next event estimation
 
 The `cycles` kernel picks one emitter per surface bounce by walking the Cycles light tree (`light_tree.wgsl`, a translation of `kernel/light/tree.h`: one random number reused down the tree, importance from distance, cone angles, energy and the surface normal, two reservoirs per leaf) and finds the probability of a given emitter from the previous shading point for the MIS weight of a BSDF-sampled hit. `lightSampling` is `auto` (default: tree when the scene has more than one emitter, as Cycles with `use_light_tree` on), `tree` or `uniform` (the flat pick of earlier versions); `trace-native.mjs --light-sampling` sets it. `useLightTree: true|false` (`--light-tree on|off`) are other names for `tree` and `uniform`; passing both options with different values is an error. A sun is a distant leaf of the same tree, and light-link masks stay as an OR per node: every emitter is in the tree, and a picked emitter whose mask does not match the receiver contributes nothing (`lgt_links_match`), so linked scenes use the tree too. The environment map keeps its own importance sample and is not in the tree. `[measured]`, 960 x 540, 8 bounces, seed 1, against the Cycles 4096-spp seed-1 reference:
