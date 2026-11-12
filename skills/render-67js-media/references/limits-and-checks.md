@@ -4,7 +4,7 @@
 
 | Option | Meaning |
 |---|---|
-| `--backend gpu` or `cpu` | gpu is the default and fast; cpu is SwiftShader, for machines without hardware WebGL2, much slower. WebGPU is not a server backend: Glaze is WebGL2 only. |
+| `--backend gpu` or `cpu` | gpu is the default and fast; cpu is SwiftShader, for machines without hardware WebGL, much slower. |
 | `--memory <32..384>` | Render-target budget in MiB, default 192. A 1920x1080 frame needs about 175 MiB at 4 samples (measured), so use 256 for it and more for textured scenes. |
 | `--jobs <abs dir>` | Private store for job files. Required for any job. |
 | `--ffmpeg <abs path>` | Needed for MP4 when ffmpeg is not on PATH. |

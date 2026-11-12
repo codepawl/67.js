@@ -11,7 +11,7 @@ node scripts/render-media.mjs --kind video --scene film --backend gpu --preset b
 ```
 
 The available scenes are `object`, `nature`, `film`, `motion`, `view2d` and `assets`.
-GPU rendering selects hardware WebGL2 through Chrome and draws with Glaze, the rasterizer. A path traced still uses Cook, which has its own backend setting (see jobs.md). CPU rendering requests ANGLE SwiftShader.
+GPU rendering selects hardware WebGL through Chrome. CPU rendering requests ANGLE SwiftShader.
 The CPU exporter verifies that the selected backend reports SwiftShader.
 
 | Preset | Dimensions | Samples | FPS | Target budget |
