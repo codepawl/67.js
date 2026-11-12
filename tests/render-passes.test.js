@@ -57,11 +57,13 @@ test('installing camera effects adds two stages once and costs nothing until a f
 
 test('render passes need the addon, reject unknown names and bind per-pass uniforms and manifests', () => {
   const calls = [];
+  const depthFormats = [];
+  const recordedTargets = [];
   const context = {
     VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4,
     TEXTURE_2D: 5, RGBA16F: 6, RGBA8: 7, RGBA: 8, HALF_FLOAT: 9, UNSIGNED_BYTE: 10,
     TEXTURE_MIN_FILTER: 11, TEXTURE_MAG_FILTER: 12, NEAREST: 13, RENDERBUFFER: 14,
-    DEPTH_COMPONENT24: 15, FRAMEBUFFER: 16, COLOR_ATTACHMENT0: 17, DEPTH_ATTACHMENT: 18,
+    DEPTH_COMPONENT24: 15, DEPTH_COMPONENT32F: 24, FRAMEBUFFER: 16, COLOR_ATTACHMENT0: 17, DEPTH_ATTACHMENT: 18,
     FRAMEBUFFER_COMPLETE: 19, DEPTH_TEST: 20, CULL_FACE: 21, TEXTURE0: 22, TRIANGLES: 23,
     getExtension: () => ({}),
     createShader: () => ({}),
@@ -83,7 +85,7 @@ test('render passes need the addon, reject unknown names and bind per-pass unifo
     texParameteri: () => {},
     createRenderbuffer: () => ({ kind: 'rb' }),
     bindRenderbuffer: () => {},
-    renderbufferStorage: () => {},
+    renderbufferStorage: (_target, format) => depthFormats.push(format),
     createFramebuffer: () => ({ kind: 'fb' }),
     bindFramebuffer: () => {},
     framebufferTexture2D: () => {},
@@ -126,7 +128,7 @@ test('render passes need the addon, reject unknown names and bind per-pass unifo
     benchmark: false,
     program: {},
     viewProjection: new Float32Array(16),
-    renderTargets: { record: () => {}, release: () => {} },
+    renderTargets: { record: (name, description) => recordedTargets.push([name, description.format]), release: () => {} },
     requireFeatureNames: () => {},
     drawsInOpaqueLoop: batch => batch === batchOpaque,
     createTexture: desc => desc,
@@ -151,6 +153,23 @@ test('render passes need the addon, reject unknown names and bind per-pass unifo
   assert.equal(renderer.passSupport.prepare({ pass: 'aov', passFloat: true }), RENDER_PASS_MODES.aov);
   assert.ok(renderer.passSupport.framebuffer);
   assert.ok(renderer.passSupport.texture);
+  assert.deepEqual(depthFormats, [context.DEPTH_COMPONENT24], 'without reversed-Z a pass keeps the 24-bit depth');
+
+  // With reversed-Z every auxiliary pass draws into the beauty pass's 32-bit float depth, never into 24 bits (issue #934).
+  renderer.reversedDepth = true;
+  for (const passName of ['albedo', 'objectId', 'normal', 'depth', 'cryptomatte']) {
+    depthFormats.length = 0;
+    recordedTargets.length = 0;
+    renderer.passSupport.releaseTargets(context);
+    renderer.passSupport.prepare({ pass: passName });
+    assert.deepEqual(depthFormats, [context.DEPTH_COMPONENT32F], passName);
+    assert.deepEqual(recordedTargets.find(([name]) => name === 'passDepth'), ['passDepth', 'DEPTH_COMPONENT32F'], passName);
+  }
+  depthFormats.length = 0;
+  renderer.reversedDepth = false;
+  renderer.passSupport.prepare({ pass: 'albedo' });
+  assert.deepEqual(depthFormats, [context.DEPTH_COMPONENT24], 'a pass target follows the depth mode of the renderer');
+  renderer.passSupport.prepare({ pass: 'aov', passFloat: true });
   renderer.passSupport.bindFrame(
     { passFloat: true, previousCamera: { eye: [1, 2, 5], target: [0, 0, 0] } },
     { fogDensity: 0.01, fogColor: [0.3, 0.4, 0.5] },

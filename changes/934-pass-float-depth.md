@@ -1,0 +1,1 @@
+- The albedo, object ID and other render passes now draw with the same reversed-Z 32-bit float depth as the beauty pass, so near-flush faces no longer flip in those buffers where the beauty image shows them steady (#934)
