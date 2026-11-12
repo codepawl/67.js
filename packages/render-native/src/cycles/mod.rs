@@ -1144,6 +1144,51 @@ mod tests {
         assert!(kernel.contains("texture_decode_filtered(texture_fetch_texel(desc, ix, iy, format), format)"));
     }
 
+    /// Mip levels are opt in. The shared sampler without a footprint, which the alpha tests and the bump taps use, must read
+    /// level 0 only, and a hit hands a footprint to the sampler only when the kernel flag is set.
+    #[test]
+    fn mip_levels_are_read_only_for_a_footprint_and_only_with_the_kernel_flag() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        assert!(kernel.contains("const KERNEL_FLAG_TEXTURE_MIPS: u32 = 2048u;"));
+        assert!(kernel.contains("return texture_sample_footprint(tex_index, raw_uv0, raw_uv1, 0.0);"));
+        assert!(kernel.contains("texture_sample_footprint(tex_index, (*point).uv0, (*point).uv1, (*point).uv_footprint)"));
+        assert!(kernel.contains("if (uv_footprint > 0.0 && mip_count > 1u && !is_nearest)"));
+        let build_start = kernel.find("fn int_build_shading_point(").expect("the shading point builder exists");
+        let build_body = &kernel[build_start..];
+        let flag_test = build_body.find("(kernel_params.kernel_flags & KERNEL_FLAG_TEXTURE_MIPS) != 0u").expect("the footprint is gated by the flag");
+        let footprint_call = build_body.find("point.uv_footprint = int_uv_footprint(").expect("the footprint is computed");
+        assert!(flag_test < footprint_call);
+        assert!(build_body.contains("point.uv_footprint = 0.0;"));
+    }
+
+    /// The mip levels sit after level 0 in one run of words (`texture_fetch_texel` stays the only reader of the pool).
+    #[test]
+    fn a_mip_level_is_found_by_walking_the_halving_chain_from_level_0() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        let walk_start = kernel.find("fn texture_level_descriptor(").expect("the level descriptor walk exists");
+        let walk_end = walk_start + kernel[walk_start..].find("\n}").expect("the walk ends");
+        let walk = &kernel[walk_start..walk_end];
+        assert!(walk.contains("select(1u, 4u, format == 2u)"));
+        assert!(walk.contains("level_desc.width * level_desc.height * words_per_texel"));
+        assert!(walk.contains("max(level_desc.width >> 1u, 1u)"));
+        assert!(walk.contains("max(level_desc.height >> 1u, 1u)"));
+        assert!(kernel.contains("return mix(lower, upper, blend);"), "two decoded levels blend in linear light");
+        let level_start = kernel.find("fn texture_filter_level(").expect("the level filter exists");
+        let level_end = level_start + kernel[level_start..].find("\n}").expect("the level filter ends");
+        let level_filter = &kernel[level_start..level_end];
+        let level_zero_branch = level_filter.find("if (level == 0u) {").expect("level 0 has its own branch");
+        let first_decode = level_filter.find("let decoded_c00").expect("later levels decode their taps");
+        let level_zero_return = "return texture_decode_filtered(mix(mix(level_c00, level_c10, level_tx), mix(level_c01, level_c11, level_tx), level_ty), format);";
+        let return_position = level_filter.find(level_zero_return).expect("level 0 stays filter then decode (#1030)");
+        assert!(level_zero_branch < return_position && return_position < first_decode);
+        for tap in ["c00", "c10", "c01", "c11"] {
+            assert!(
+                level_filter.contains(&format!("let decoded_{tap} = texture_decode_filtered(level_{tap}, format);")),
+                "a level after 0 decodes tap {tap} before the blend"
+            );
+        }
+    }
+
     #[test]
     fn the_bootstrap_entry_samples_alpha_through_the_shared_sampler() {
         let bootstrap = include_str!("bootstrap_main.wgsl");
