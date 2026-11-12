@@ -1,0 +1,1 @@
+- three-compat: a new optional addon of 28,962 bytes of source (8,110 bytes gzip) that no core bundle includes; the core bundles are unchanged.
