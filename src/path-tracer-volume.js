@@ -1,6 +1,7 @@
 import { resolveVolumeFog } from './volumetric.js';
-import { localVolumeInterval, localVolumeProfile, localVolumeStepCount, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
+import { localVolumeInterval, localVolumeProfile, localVolumeStepCount, localVolumeGridSample, LOCAL_VOLUME_KEY_GAIN, LOCAL_VOLUME_LIGHT_DEPTH_SATURATION, LOCAL_VOLUME_SHADOW_STRENGTH, LOCAL_VOLUME_SKY_GAIN, LOCAL_VOLUME_SUN_FLATTEN } from './local-volumes.js';
 import { countOpenEdges } from './local-volume-parts.js';
+import { blackbodyRadiance } from './volume-grid.js';
 import { buildTriangleBvh } from './triangle-bvh.js';
 import { createTracer } from './ray-query.js';
 
@@ -227,7 +228,7 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
       flattenedDirection[2] = sun.direction[2] / flattenedLength;
       writeOpticalDepth(volume, x, y, z, flattenedDirection, SUN_DEPTH_TAPS, span, sunDepth);
       const cosine = sun.direction[0] * directionX + sun.direction[1] * directionY + sun.direction[2] * directionZ;
-      const phase = henyeyGreensteinPhase(0, cosine);
+      const phase = henyeyGreensteinPhase(volume.anisotropy ?? 0, cosine);
       for (let channel = 0; channel < 3; channel++) {
         sunLight[channel] = sun.color[channel] * phase * LOCAL_VOLUME_KEY_GAIN * Math.exp(-sunDepth[channel] * LOCAL_VOLUME_SHADOW_STRENGTH);
       }
@@ -235,6 +236,24 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
     for (let channel = 0; channel < 3; channel++) {
       const scattered = volume.scatter * (1 - Math.exp(-volume.absorption[channel] * volume.density * width));
       emitted[channel] += throughput[channel] * scattered * (skyLight[channel] + sunLight[channel]);
+    }
+  }
+
+  const gridCell = new Float64Array(3);
+  const blackbody = new Float64Array(3);
+
+  // One step through a grid volume (shape "grid"): extinction from the density, emission from the flame channel and, with blackbodyIntensity, from the
+  // temperature channel. The rasterizer's march repeats it (fog-shader.js).
+  function crossGridStep(volume, x, y, z, directionX, directionY, directionZ, stepLength, throughput, emitted) {
+    localVolumeGridSample(volume, x, y, z, gridCell);
+    const width = gridCell[0] * stepLength;
+    if (width > 0 && volume.scatter > 0 && lighting) addScatteredLight(volume, x, y, z, directionX, directionY, directionZ, width, throughput, emitted);
+    blackbodyRadiance(gridCell[1] * volume.temperatureScale, blackbody);
+    const flameWidth = gridCell[2] * stepLength;
+    const blackbodyWidth = volume.blackbodyIntensity * volume.emissionStrength * stepLength;
+    for (let channel = 0; channel < 3; channel++) {
+      emitted[channel] += throughput[channel] * (volume.emission[channel] * volume.emissionStrength * flameWidth + blackbody[channel] * blackbodyWidth);
+      throughput[channel] *= Math.exp(-volume.absorption[channel] * volume.density * width);
     }
   }
 
@@ -273,6 +292,10 @@ export function createLocalVolumeCrossing(volumes, lighting = null) {
       const stepLength = (exits[order[rank]] - entry) / stepCount;
       for (let step = 0; step < stepCount; step++) {
         const distance = entry + (step + jitter) * stepLength;
+        if (volume.gridData) {
+          crossGridStep(volume, originX + directionX * distance, originY + directionY * distance, originZ + directionZ * distance, directionX, directionY, directionZ, stepLength, throughput, emitted);
+          continue;
+        }
         const profile = localVolumeProfile(volume, originX + directionX * distance, originY + directionY * distance, originZ + directionZ * distance);
         if (profile <= 0) continue;
         const width = profile * stepLength;
