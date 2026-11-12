@@ -60,7 +60,7 @@ fn closure_srgb_to_linear(rgb: vec3<f32>) -> vec3<f32> {
   );
 }
 
-fn closure_wrap_coord(coord: f32, wrap_mode: u32) -> f32 {
+fn texture_wrap_coord(coord: f32, wrap_mode: u32) -> f32 {
   if (wrap_mode == 1u) {
     return clamp(coord, 0.0, 1.0);
   }
@@ -71,7 +71,7 @@ fn closure_wrap_coord(coord: f32, wrap_mode: u32) -> f32 {
   return coord - floor(coord);
 }
 
-fn closure_wrap_texel_index(idx: i32, dim: i32, wrap_mode: u32) -> i32 {
+fn texture_wrap_texel_index(idx: i32, dim: i32, wrap_mode: u32) -> i32 {
   if (wrap_mode == 0u) {
     let rem = idx % dim;
     return select(rem, rem + dim, rem < 0);
@@ -79,7 +79,7 @@ fn closure_wrap_texel_index(idx: i32, dim: i32, wrap_mode: u32) -> i32 {
   return clamp(idx, 0, dim - 1);
 }
 
-fn closure_fetch_texel(desc: TextureDescriptor, ix: i32, iy: i32, format: u32) -> vec4<f32> {
+fn texture_fetch_texel(desc: TextureDescriptor, ix: i32, iy: i32, format: u32) -> vec4<f32> {
   let texel_idx = u32(iy) * desc.width + u32(ix);
   if (format == 2u) {
     let base = desc.data_offset + texel_idx * 4u;
@@ -101,7 +101,10 @@ fn closure_fetch_texel(desc: TextureDescriptor, ix: i32, iy: i32, format: u32) -
   return rgba;
 }
 
-fn closure_sample_texture_uv(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>) -> vec4<f32> {
+// The one texture sampler of the kernel: shading (closure_sample_texture), bump, and the alpha tests of the integrator all
+// read texels here, so the visibility of a cutout and its shading agree on wrap, filter and format. `tex_index` outside the
+// table or an empty descriptor reads as white.
+fn texture_sample(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>) -> vec4<f32> {
   if (tex_index < 0) {
     return vec4<f32>(1.0);
   }
@@ -122,15 +125,15 @@ fn closure_sample_texture_uv(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f
 
   let base_uv = select(raw_uv0, raw_uv1, use_uv1);
   let uv = base_uv * desc.uv_scale + desc.uv_offset;
-  let u_wrapped = closure_wrap_coord(uv.x, wrap_u);
-  let v_wrapped = closure_wrap_coord(uv.y, wrap_v);
+  let u_wrapped = texture_wrap_coord(uv.x, wrap_u);
+  let v_wrapped = texture_wrap_coord(uv.y, wrap_v);
   let w_i = i32(desc.width);
   let h_i = i32(desc.height);
 
   if (is_nearest) {
     let ix = clamp(i32(floor(u_wrapped * f32(w_i))), 0, w_i - 1);
     let iy = clamp(i32(floor(v_wrapped * f32(h_i))), 0, h_i - 1);
-    return closure_fetch_texel(desc, ix, iy, format);
+    return texture_fetch_texel(desc, ix, iy, format);
   }
 
   let fx = u_wrapped * f32(w_i) - 0.5;
@@ -139,20 +142,20 @@ fn closure_sample_texture_uv(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f
   let by0 = i32(floor(fy));
   let tx = fx - f32(bx0);
   let ty = fy - f32(by0);
-  let ix0 = closure_wrap_texel_index(bx0, w_i, wrap_u);
-  let ix1 = closure_wrap_texel_index(bx0 + 1, w_i, wrap_u);
-  let iy0 = closure_wrap_texel_index(by0, h_i, wrap_v);
-  let iy1 = closure_wrap_texel_index(by0 + 1, h_i, wrap_v);
+  let ix0 = texture_wrap_texel_index(bx0, w_i, wrap_u);
+  let ix1 = texture_wrap_texel_index(bx0 + 1, w_i, wrap_u);
+  let iy0 = texture_wrap_texel_index(by0, h_i, wrap_v);
+  let iy1 = texture_wrap_texel_index(by0 + 1, h_i, wrap_v);
 
-  let c00 = closure_fetch_texel(desc, ix0, iy0, format);
-  let c10 = closure_fetch_texel(desc, ix1, iy0, format);
-  let c01 = closure_fetch_texel(desc, ix0, iy1, format);
-  let c11 = closure_fetch_texel(desc, ix1, iy1, format);
+  let c00 = texture_fetch_texel(desc, ix0, iy0, format);
+  let c10 = texture_fetch_texel(desc, ix1, iy0, format);
+  let c01 = texture_fetch_texel(desc, ix0, iy1, format);
+  let c11 = texture_fetch_texel(desc, ix1, iy1, format);
   return mix(mix(c00, c10, tx), mix(c01, c11, tx), ty);
 }
 
 fn closure_sample_texture(tex_index: i32, point: ptr<function, ShadingPoint>) -> vec4<f32> {
-  return closure_sample_texture_uv(tex_index, (*point).uv0, (*point).uv1);
+  return texture_sample(tex_index, (*point).uv0, (*point).uv1);
 }
 
 fn closure_apply_normal_map(
@@ -196,9 +199,9 @@ fn closure_apply_bump_map(
   }
   let du = vec2<f32>(1.0 / f32(desc.width), 0.0);
   let dv = vec2<f32>(0.0, 1.0 / f32(desc.height));
-  let h_c = bsdf_mf_average(closure_sample_texture_uv(tex_index, (*point).uv0, (*point).uv1).rgb);
-  let h_u = bsdf_mf_average(closure_sample_texture_uv(tex_index, (*point).uv0 + du, (*point).uv1 + du).rgb);
-  let h_v = bsdf_mf_average(closure_sample_texture_uv(tex_index, (*point).uv0 + dv, (*point).uv1 + dv).rgb);
+  let h_c = bsdf_mf_average(texture_sample(tex_index, (*point).uv0, (*point).uv1).rgb);
+  let h_u = bsdf_mf_average(texture_sample(tex_index, (*point).uv0 + du, (*point).uv1 + du).rgb);
+  let h_v = bsdf_mf_average(texture_sample(tex_index, (*point).uv0 + dv, (*point).uv1 + dv).rgb);
   let dh_du = (h_u - h_c) * f32(desc.width) * bump_distance;
   let dh_dv = (h_v - h_c) * f32(desc.height) * bump_distance;
   let perturbed = base_normal - dh_du * tangent - dh_dv * bitangent;

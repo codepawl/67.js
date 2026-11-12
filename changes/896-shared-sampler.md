@@ -1,0 +1,1 @@
+- The Cycles kernel reads the alpha of cutouts through the same texture sampler as shading, and a texture set past the 1 GiB pool fails at packing with its size and the limit (#896)

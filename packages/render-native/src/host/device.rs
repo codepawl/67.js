@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use napi::{Error, Result};
 use wgpu::util::DeviceExt;
 
@@ -5,13 +7,22 @@ pub(crate) fn failure(message: impl Into<String>) -> Error {
     Error::from_reason(message.into())
 }
 
-pub(crate) fn storage_buffer(device: &wgpu::Device, label: &str, bytes: &[u8]) -> wgpu::Buffer {
+/// The bytes of a storage buffer: a multiple of four long and at least 16. Bytes that already fit are borrowed, so a texel
+/// pool of hundreds of megabytes is not copied once more on the host before it reaches the GPU.
+pub(crate) fn padded_storage_bytes(bytes: &[u8]) -> Cow<'_, [u8]> {
+    let padded_length = bytes.len().next_multiple_of(4).max(16);
+    if padded_length == bytes.len() {
+        return Cow::Borrowed(bytes);
+    }
     let mut padded = bytes.to_vec();
-    let padded_length = padded.len().next_multiple_of(4).max(16);
     padded.resize(padded_length, 0);
+    Cow::Owned(padded)
+}
+
+pub(crate) fn storage_buffer(device: &wgpu::Device, label: &str, bytes: &[u8]) -> wgpu::Buffer {
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),
-        contents: &padded,
+        contents: &padded_storage_bytes(bytes),
         usage: wgpu::BufferUsages::STORAGE,
     })
 }
@@ -67,4 +78,27 @@ pub(crate) fn open_device() -> Result<(wgpu::Device, wgpu::Queue, wgpu::AdapterI
     }))
     .map_err(|error| failure(format!("Could not open the device: {error}")))?;
     Ok((device, queue, adapter.get_info()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::padded_storage_bytes;
+    use std::borrow::Cow;
+
+    #[test]
+    fn padded_storage_bytes_borrows_bytes_that_already_fit() {
+        let bytes = [7u8; 32];
+        let padded = padded_storage_bytes(&bytes);
+        assert!(matches!(padded, Cow::Borrowed(_)));
+        assert_eq!(padded.as_ptr(), bytes.as_ptr());
+    }
+
+    #[test]
+    fn padded_storage_bytes_pads_short_and_unaligned_input_with_zeros() {
+        assert_eq!(padded_storage_bytes(&[]).len(), 16);
+        let unaligned = padded_storage_bytes(&[1u8; 18]);
+        assert_eq!(unaligned.len(), 20);
+        assert_eq!(&unaligned[18..], &[0u8, 0u8]);
+        assert_eq!(&unaligned[..18], &[1u8; 18]);
+    }
 }

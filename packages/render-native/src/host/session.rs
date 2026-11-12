@@ -17,7 +17,7 @@ use crate::host::accel::{
 use crate::host::dispatch::{DispatchPlanner, DISPATCH_BUDGET_SECONDS};
 use crate::host::device::{failure, layout_entry, open_device, storage_buffer, storage_entry};
 use crate::host::film::{image_accumulation_bytes, read_accumulation};
-use crate::host::textures::{upload_cycles_scene_buffers, upload_scene_buffers};
+use crate::host::textures::{check_texture_pool_budget, upload_cycles_scene_buffers, upload_scene_buffers};
 use crate::{NativeTraceInput, NativeTraceInputV2, ProbeCyclesLobeOptions};
 
 // ---- In-process device and pipeline cache ----
@@ -689,6 +689,8 @@ pub(crate) fn prepare_cycles_scene(
 
     // Use cached device; open once per process.
     let (device, queue, adapter_name, backend_name, features) = get_cached_device()?;
+    let pool_limit_bytes = u64::from(device.limits().max_storage_buffer_binding_size);
+    check_texture_pool_budget(input.texture_texels.len() as u64 * 4, pool_limit_bytes)?;
     let (device_lost, device_error) = cached_device_loss_state()?;
     let setup_seconds = setup_started.elapsed().as_secs_f64();
 

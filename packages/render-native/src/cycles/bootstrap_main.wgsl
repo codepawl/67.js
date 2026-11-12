@@ -31,15 +31,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       let cand_mat_idx = select(cand_inst.material_override, cand_tri.material_index, cand_inst.material_override == INVALID_INDEX);
       let cand_mat = materials[cand_mat_idx];
       var alpha = cand_mat.alpha;
-      if (cand_mat.base_color_tex >= 0 && u32(cand_mat.base_color_tex) < kernel_params.texture_count) {
-        let desc = texture_descriptors[u32(cand_mat.base_color_tex)];
+      if (cand_mat.base_color_tex >= 0) {
         let bary_w = 1.0 - candidate.barycentrics.x - candidate.barycentrics.y;
-        let hit_u = fract(bary_w * cand_tri.uv0_u + candidate.barycentrics.x * cand_tri.uv1_u + candidate.barycentrics.y * cand_tri.uv2_u);
-        let hit_v = fract(bary_w * cand_tri.uv0_v + candidate.barycentrics.x * cand_tri.uv1_v + candidate.barycentrics.y * cand_tri.uv2_v);
-        let tex_x = min(u32(max(hit_u, 0.0) * f32(desc.width)), max(desc.width, 1u) - 1u);
-        let tex_y = min(u32(max(hit_v, 0.0) * f32(desc.height)), max(desc.height, 1u) - 1u);
-        let packed_texel = unpack4x8unorm(texture_texels[desc.data_offset + tex_y * desc.width + tex_x]);
-        alpha = alpha * packed_texel.a;
+        let hit_uv = bary_w * vec2<f32>(cand_tri.uv0_u, cand_tri.uv0_v)
+          + candidate.barycentrics.x * vec2<f32>(cand_tri.uv1_u, cand_tri.uv1_v)
+          + candidate.barycentrics.y * vec2<f32>(cand_tri.uv2_u, cand_tri.uv2_v);
+        alpha = alpha * texture_sample(cand_mat.base_color_tex, hit_uv, hit_uv).a;
       }
       if (cand_mat.alpha_mode != ALPHA_MODE_MASK || alpha >= cand_mat.alpha_cutoff) {
         rayQueryConfirmIntersection(&rq);

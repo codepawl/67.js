@@ -349,6 +349,8 @@ Total stride: **32 bytes** (`2 × 16 B`), alignment: **16 bytes**.
 | `16` | `8` | `8` | `vec2<f32>` | `uv_scale` | UV scale `(su, sv)` |
 | `24` | `8` | `8` | `vec2<f32>` | `uv_offset` | UV offset `(ou, ov)` |
 
+One sampler reads every descriptor: `texture_sample` in `src/cycles/closure.wgsl`. Shading, bump, normal maps and the alpha tests of the integrator (the opacity of a cutout or blended surface, for camera, bounce and shadow rays) all go through it, so a surface is seen and shaded with the same wrap, filter and format. Wrap `0` repeats, `1` clamps and `2` mirrors in float UV space before the texel lookup; `nearest` picks the texel the wrapped UV falls in, otherwise the four neighbours are blended. `texture_texels` is one storage binding, so the pool of all textures (each texture padded to 16 bytes) must fit the device's storage binding size, at most 1 GiB. `buildNativeInputV2` refuses a pool past 1 GiB and the host refuses one past the device's binding size, each with an error that names the size and the limit. The struct sizes above do not change.
+
 ---
 
 ## 9. Film Accumulation Buffer (`@binding(11)`)

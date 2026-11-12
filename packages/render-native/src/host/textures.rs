@@ -1,6 +1,6 @@
 use wgpu::util::DeviceExt;
 
-use crate::host::device::storage_buffer;
+use crate::host::device::{failure, storage_buffer};
 use crate::{NativeTraceInput, NativeTraceInputV2};
 
 const MATERIAL_TEXELS: usize = 10;
@@ -23,6 +23,20 @@ pub(crate) fn material_is_cutout(materials: &[f32], material: usize) -> bool {
     }
     let is_shadow_only = materials[base + 5 * 4 + 1] > 0.0;
     is_shadow_only || (materials[base + 3 * 4 + 2] > 0.0 && materials[base + 6 * 4 + 2] > 0.0)
+}
+
+/// The texel pool is one storage binding, so it cannot outgrow `limit_bytes` (the device's storage binding size, at most 1 GiB).
+/// Failing here names the size and the way out; the device would only report a validation error with no hint about textures.
+pub(crate) fn check_texture_pool_budget(pool_bytes: u64, limit_bytes: u64) -> napi::Result<()> {
+    if pool_bytes <= limit_bytes {
+        return Ok(());
+    }
+    const MEBIBYTE: u64 = 1 << 20;
+    Err(failure(format!(
+        "The textures take {} MiB but one texture pool holds at most {} MiB on this device. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.",
+        pool_bytes.div_ceil(MEBIBYTE),
+        limit_bytes / MEBIBYTE,
+    )))
 }
 
 pub(crate) fn upload_scene_buffers(
@@ -132,5 +146,24 @@ pub(crate) fn upload_cycles_scene_buffers(
         buffers,
         accumulation,
         parameters,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_texture_pool_budget;
+
+    #[test]
+    fn texture_pool_budget_accepts_a_pool_at_the_limit() {
+        assert!(check_texture_pool_budget(1 << 30, 1 << 30).is_ok());
+        assert!(check_texture_pool_budget(0, 1 << 20).is_ok());
+    }
+
+    #[test]
+    fn texture_pool_budget_error_names_the_size_the_limit_and_the_fix() {
+        let message = check_texture_pool_budget((1 << 30) + 1, 1 << 30).unwrap_err().reason;
+        assert!(message.contains("1025 MiB"), "{message}");
+        assert!(message.contains("1024 MiB"), "{message}");
+        assert!(message.contains("Pass smaller textures"), "{message}");
     }
 }
