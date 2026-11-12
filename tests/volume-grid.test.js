@@ -10,6 +10,7 @@ import { bindLocalVolumeParts } from '../src/local-volume-parts.js';
 import { createLocalVolumeCrossing } from '../src/path-tracer-volume.js';
 import { renderPathTracedImage } from '../src/path-tracer.js';
 import { normalizeAgentLook } from '../src/agent-look.js';
+import { loadAgentSceneModules, agentSceneModulesNeeded } from '../src/agent-scene-modules.js';
 
 function uniformGrid(resolution, channels) {
   const voxels = resolution[0] * resolution[1] * resolution[2];
@@ -93,8 +94,10 @@ test('a volume whose grid is not loaded names the field and the call to make; a 
   }
 });
 
-test('the agent look accepts a grid volume and keeps its fields', () => {
-  const look = normalizeAgentLook({ environment: { localVolumes: [{ shape: 'grid', grid: 'blast', center: [0, 1, 0], size: [2, 2, 2], blackbodyIntensity: 1 }] } });
+test('the agent look accepts a grid volume and keeps its fields', async () => {
+  const recipe = { environment: { localVolumes: [{ shape: 'grid', grid: 'blast', center: [0, 1, 0], size: [2, 2, 2], blackbodyIntensity: 1 }] } };
+  await loadAgentSceneModules(recipe);
+  const look = normalizeAgentLook(recipe);
   assert.equal(look.environment.localVolumes[0].grid, 'blast');
   assert.equal(look.environment.localVolumes[0].blackbodyIntensity, 1);
 });
@@ -200,4 +203,9 @@ test('the MCP grid folder loads name.67vg files and nothing that looks like a pa
     setVolumeGridLoader(null);
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('a grid volume in a recipe says which call loads the grid code when it is missing', () => {
+  assert.match(agentSceneModulesNeeded({ environment: { localVolumes: [{ shape: 'grid' }] } }).join(), /volumeGrid/);
+  assert.deepEqual(agentSceneModulesNeeded({ environment: { localVolumes: [{ shape: 'box' }] } }).filter(name => name === 'volumeGrid'), []);
 });

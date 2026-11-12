@@ -3,7 +3,7 @@ import { mat4 } from 'gl-matrix';
 import { createLightingState, updateLightingState, MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS, MAXIMUM_SPECULAR_ANTI_ALIASING } from './lighting.js';
 import { resolveEffects } from './effects.js';
 import { resolveVolumeFog } from './volumetric.js';
-import { resolveLocalVolumesWith } from './local-volumes.js';
+import { resolveLocalVolumesWith } from './local-volume-resolve.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
 import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
