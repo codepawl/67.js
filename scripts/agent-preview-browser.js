@@ -1,6 +1,6 @@
 import { exportNativeSceneTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
-import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
+import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, needsBuoyancy, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
 import { skyOpenness } from '../src/closed-room.js';
 import { fogSkyVisibility } from '../src/fog-sky-visibility.js';
@@ -620,7 +620,7 @@ function afterMeshBooleans(value, run) {
   if (!allAgentSceneModulesLoaded()) return loadAllAgentSceneModules().then(() => afterMeshBooleans(value, run));
   const loads = [];
   if (!meshBooleansLoaded() && needsMeshBooleans(value)) loads.push(loadMeshBooleans());
-  if (!physicsEngineLoaded() && needsPhysics(value)) loads.push(loadPhysicsEngine());
+  if (needsPhysics(value) && (!physicsEngineLoaded() || needsBuoyancy(value))) loads.push(loadPhysicsEngine({ buoyancy: needsBuoyancy(value) }));
   if (!loads.length) return run();
   return Promise.all(loads).then(run);
 }

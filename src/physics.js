@@ -1,9 +1,9 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { evaluateForceFields, normalizeForceFields } from './force-fields.js';
-import { applyBuoyancy, checkBuoyancyWork, floatingBody, normalizeFloat, normalizeOcean } from './physics-buoyancy.js';
 
 let rapierPromise;
 let rapierEngine;
+let buoyancyModule;
 let loadRapierModule = () => import('@dimforge/rapier3d-compat');
 const ZERO = [0, 0, 0];
 const IDENTITY = [0, 0, 0, 1];
@@ -35,8 +35,28 @@ export function setPhysicsModuleLoader(loader) {
   rapierEngine = undefined;
 }
 
-/** Load the Rapier WASM engine once. After it resolves, bakePhysicsScene runs synchronously. */
-export function loadPhysicsEngine() {
+/** Load the code for floating bodies once. It is a separate chunk so a scene without floating bodies never fetches it. */
+export async function loadPhysicsBuoyancy() {
+  buoyancyModule ??= await import('./physics-buoyancy.js');
+}
+
+function requireBuoyancy(label) {
+  if (!buoyancyModule) {
+    throw new Error(`${label} floats, which needs the buoyancy code. Await loadPhysicsEngine({ buoyancy: true }) before baking or creating the system.`);
+  }
+  return buoyancyModule;
+}
+
+/**
+ * Load the Rapier WASM engine once. After it resolves, bakePhysicsScene runs synchronously.
+ * Pass `{ buoyancy: true }` when any body has a `float` field.
+ */
+export function loadPhysicsEngine(options = {}) {
+  const engine = loadRapierEngine();
+  return options.buoyancy ? Promise.all([engine, loadPhysicsBuoyancy()]).then(([rapier]) => rapier) : engine;
+}
+
+function loadRapierEngine() {
   rapierPromise ??= loadRapierModule().then(async module => {
     const rapier = module.default ?? module;
     await rapier.init();
@@ -311,7 +331,7 @@ function prepare(definition, options) {
     return {
       name: body.name,
       type,
-      float: body.float === undefined ? undefined : normalizeFloat(body.float, `body ${body.name}.float`),
+      float: body.float === undefined ? undefined : requireBuoyancy(`body ${body.name}`).normalizeFloat(body.float, `body ${body.name}.float`),
       translation: vector(body.translation, 3, 'translation', ZERO),
       rotation: rotation(body.rotation, 'rotation'),
       linearVelocity: vector(body.linearVelocity, 3, 'linearVelocity', ZERO),
@@ -589,14 +609,15 @@ function prepare(definition, options) {
 
 /** The sea and the floating bodies of a definition, or null when no body has a float field. */
 function buoyancyPlan(oceanInput, bodies, colliders, frameCount) {
+  if (!bodies.some(body => body.float !== undefined)) return null;
+  const { checkBuoyancyWork, floatingBody, normalizeOcean } = buoyancyModule;
   const floating = [];
   bodies.forEach((body, bodyIndex) => {
     if (body.float === undefined) return;
     const bodyColliders = colliders.filter(collider => collider.body === bodyIndex);
     floating.push({ bodyIndex, ...floatingBody(body.float, bodyColliders, `body ${body.name}`) });
   });
-  const ocean = oceanInput === undefined ? null : normalizeOcean(oceanInput);
-  if (!floating.length) return null;
+  const ocean = normalizeOcean(oceanInput);
   checkBuoyancyWork(ocean, floating, frameCount);
   return { ocean, floating };
 }
@@ -856,6 +877,11 @@ export function createRapierWorld(rapier, preparedScene) {
   }
 }
 
+/** Push every floating body by the sea at `time`, as one impulse over a step. The buoyancy code is loaded whenever a body floats. */
+export function applyBuoyancyImpulses(preparedScene, bodies, time) {
+  buoyancyModule.applyBuoyancy(preparedScene, bodies, time);
+}
+
 /** Push every dynamic body by the force fields at `fieldTime`, as one impulse over a step. */
 export function applyForceFieldImpulses(preparedScene, bodies, fieldTime) {
   const fieldAccel = [0, 0, 0];
@@ -947,7 +973,7 @@ function bakePrepared(preparedScene) {
           }
         }
         if (preparedScene.fields.length) applyForceFieldImpulses(preparedScene, bodies, (frame - 1) * preparedScene.timestep);
-        if (preparedScene.buoyancy) applyBuoyancy(preparedScene, bodies, (frame - 1) * preparedScene.timestep);
+        if (preparedScene.buoyancy) applyBuoyancyImpulses(preparedScene, bodies, (frame - 1) * preparedScene.timestep);
         world.step(eventQueue);
         eventQueue.drainCollisionEvents((firstHandle, secondHandle, started) => {
           if (contactEvents.length >= preparedScene.maxContactEvents) {

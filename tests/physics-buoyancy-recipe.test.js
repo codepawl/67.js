@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene, loadPhysicsEngine } from '../src/agent-scene.js';
 
-await loadPhysicsEngine();
+await loadPhysicsEngine({ buoyancy: true });
 
 function seaRecipe(physics, oceanNode = { op: 'ocean', windSpeed: 0.5, size: 50, seed: 4 }) {
   return {

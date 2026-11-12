@@ -70,7 +70,7 @@ function buildRecipe(boatAssetId) {
     geometries: [
       { id: 'crate', type: 'box' },
       { id: 'hull', type: 'box' },
-      { id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: seaEdits, stack: [{ op: 'ocean', windSpeed: 6, choppiness: 0.4, size: 30, seed: 5, resolution: 5 }] },
+      { id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: seaEdits, stack: [{ op: 'ocean', windSpeed: 4.5, choppiness: 0.4, size: 30, seed: 5, resolution: 5 }] },
     ],
     materials: [
       { id: 'wood', color: [0.55, 0.34, 0.16], roughness: 0.8 },
@@ -90,7 +90,7 @@ function buildRecipe(boatAssetId) {
       ocean: { geometry: 'sea' },
       bodies: [
         ...crates.map(entry => entry.body),
-        { node: 'hull', density: 350, float: { drag: 1.5, angularDrag: 1.5, points: [[-0.6, 0, -1.4], [0.6, 0, -1.4], [-0.6, 0, 1.4], [0.6, 0, 1.4]] } },
+        { node: 'hull', density: 300, float: { drag: 1.5, angularDrag: 1.5, points: [[-0.6, 0, -1.4], [0.6, 0, -1.4], [-0.6, 0, 1.4], [0.6, 0, 1.4]] } },
       ],
     },
   };

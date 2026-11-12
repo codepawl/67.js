@@ -31,7 +31,7 @@ function digest(scene, seconds) {
   return hash.digest('hex');
 }
 
-test.before(() => loadPhysicsEngine());
+test.before(() => loadPhysicsEngine({ buoyancy: true }));
 
 test('a box of density 500 on a calm sea settles at half its height under water', () => {
   const scene = bake(crateDefinition(), 20);
