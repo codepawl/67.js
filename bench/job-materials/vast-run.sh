@@ -43,8 +43,10 @@ for stage in "$@"; do
       folder="$out/parity"
       mkdir -p "$folder"
       node bench/job-materials/parity.mjs describe "$folder" 2>&1 | tail -3
+      blender_binary="$(command -v blender || ls -d /opt/blender*/blender /usr/local/blender*/blender /root/blender*/blender /usr/local/bin/blender* 2>/dev/null | head -1 || find / -maxdepth 4 -name blender -type f 2>/dev/null | head -1 || true)"
+      echo "blender: ${blender_binary:-none}"
       for scene in blend sheen specular-tint anisotropy iridescence absorption composite; do
-        blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- "$folder/$scene.json" "$folder/$scene-cycles" --samples 4096 --bounces 8 --seed 1 --width 192 --height 128 2>&1 | grep -E "CYCLES_TRACE|Error|Traceback" | cut -c1-200
+        "$blender_binary" -b --factory-startup --python bench/cycles-parity/render-cycles.py -- "$folder/$scene.json" "$folder/$scene-cycles" --samples 4096 --bounces 8 --seed 1 --width 192 --height 128 > "$folder/$scene-cycles.log" 2>&1 || tail -5 "$folder/$scene-cycles.log" | cut -c1-200
       done
       ls "$folder" | head -40
       node bench/job-materials/parity.mjs cook "$folder" 4096 2>&1 | tail -10
@@ -57,7 +59,8 @@ for stage in "$@"; do
       node bench/job-materials/figure.mjs "$folder" composite "$out/composite.jpg" 2>&1 | tail -2
       ;;
     size)
-      npm run size 2>&1 | tail -30
+      npm run size > "$out/size.txt" 2>&1
+      grep -n -E "scene:|entry:(core|render|path|agent)|Base|base|vs" "$out/size.txt" | head -40
       ;;
   esac
 done

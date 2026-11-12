@@ -301,7 +301,9 @@ test('a job frame of a scene without carried fields has the pixels of the v1 tab
 });
 
 test('a job frame with a blend pane differs from the same scene traced from the v1 tables with the same kernel', { skip: addonSkip }, async t => {
-  const parts = [carriedParts[0], part('wall', -0.5, { color: [0.9, 0.2, 0.2] }, 1.5)];
+  // The pane hangs in front of the wall (two quads in one plane would hide it).
+  const inFront = { ...carriedParts[0], matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 2, 1], geometry: quad(1.5) };
+  const parts = [inFront, part('wall', 0, { color: [0.9, 0.2, 0.2] }, 1.5)];
   const viaV2 = await traceJobFrame(parts, 'cycles', t);
   if (!viaV2) return;
   const direct = traceNative(buildNativeInput(buildTraceScene(parts, environment), camera, packOptions, pack), { width: WIDTH, height: HEIGHT, samples: 8, kernel: 'cycles' });
