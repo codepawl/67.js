@@ -1,6 +1,8 @@
 // Packs a 67js trace scene (or upgrades a legacy v1 input) into the FORMAT-v2 binary tables read by the Cycles-parity
 // native kernel (`FORMAT-v2.md` and `src/cycles/abi.wgsl`). Pure typed arrays with zero Node-only imports.
 
+import { buildLightTreeNodes } from './light-tree-v2.mjs';
+
 export const FORMAT_V2_MAGIC = 0x36375054;
 export const FORMAT_V2_VERSION = 2;
 export const INVALID_INDEX_V2 = 0xffffffff;
@@ -26,6 +28,8 @@ const KERNEL_FLAG_HAS_SUBSURFACE = 4;
 const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA = 8;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING = 16;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
+const KERNEL_FLAG_PCG_SAMPLER = 64;
+const KERNEL_FLAG_USE_EMISSIVE_LIGHT_TREE = 128;
 
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
@@ -1288,57 +1292,6 @@ function packAnalyticLightsBuffer(entries) {
   };
 }
 
-function packRootLightTreeNode(packedLights, packedEmissives) {
-  const totalEmitters = packedLights.lightCount + packedEmissives.emissiveTriangleCount;
-  const buffer = new Uint8Array(STRUCT_STRIDES_V2.lightTreeNode);
-  if (totalEmitters === 0) {
-    return { lightTreeNodes: buffer, lightTreeNodeCount: 0 };
-  }
-  const f32 = new Float32Array(buffer.buffer, 0, 16);
-  const u32 = new Uint32Array(buffer.buffer, 0, 16);
-  const i32 = new Int32Array(buffer.buffer, 0, 16);
-
-  const boundsMin = [Infinity, Infinity, Infinity];
-  const boundsMax = [-Infinity, -Infinity, -Infinity];
-  for (const candidate of [packedLights, packedEmissives]) {
-    if (!candidate.boundsMin) continue;
-    for (let axis = 0; axis < 3; axis++) {
-      boundsMin[axis] = Math.min(boundsMin[axis], candidate.boundsMin[axis]);
-      boundsMax[axis] = Math.max(boundsMax[axis], candidate.boundsMax[axis]);
-    }
-  }
-  if (!(boundsMin[0] <= boundsMax[0])) {
-    boundsMin.fill(-1);
-    boundsMax.fill(1);
-  }
-
-  const leafCount = Math.min(0xffff, totalEmitters);
-  const kindBit = packedLights.lightCount === 0 && packedEmissives.emissiveTriangleCount > 0 ? (1 << 16) : 0;
-  const distantBit = packedLights.hasDistant ? (1 << 17) : 0;
-
-  f32[0] = boundsMin[0];
-  f32[1] = boundsMin[1];
-  f32[2] = boundsMin[2];
-  f32[3] = packedLights.analyticLightTotalWeight + packedEmissives.emissiveTotalWeight;
-
-  f32[4] = boundsMax[0];
-  f32[5] = boundsMax[1];
-  f32[6] = boundsMax[2];
-  f32[7] = Math.PI;
-
-  f32[8] = 0;
-  f32[9] = 1;
-  f32[10] = 0;
-  f32[11] = Math.PI;
-
-  i32[12] = -1;
-  u32[13] = 0;
-  u32[14] = (leafCount | kindBit | distantBit) >>> 0;
-  u32[15] = (packedLights.maskOr | packedEmissives.maskOr) >>> 0;
-
-  return { lightTreeNodes: buffer, lightTreeNodeCount: 1 };
-}
-
 function packEnvironmentTexelsV2(environment, options = {}) {
   if (!environment || !(environment.width > 0 && environment.height > 0)) {
     const bg = options.backgroundColor ?? [0, 0, 0];
@@ -1525,6 +1478,12 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   // samplesPerDispatch is optional (undefined means "let the addon choose"); only validate when provided.
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
+  if (options.sampler !== undefined && options.sampler !== 'sobol' && options.sampler !== 'pcg') {
+    throw new RangeError(`${callerName}: \`sampler\` must be "sobol" or "pcg", got ${JSON.stringify(options.sampler)}.`);
+  }
+  if (options.useLightTree !== undefined && typeof options.useLightTree !== 'boolean') {
+    throw new TypeError(`${callerName}: \`useLightTree\` must be true, false or left out for automatic, got ${JSON.stringify(options.useLightTree)}.`);
+  }
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
     if (samplesPerDispatch !== undefined) {
@@ -1598,8 +1557,11 @@ function packKernelParamsV2({
   const volumeDensity = Math.max(0, Number(volume?.density ?? 0));
 
   let kernelFlags = 0;
-  if (options.useLightTree === true && counts.lightTreeNodeCount > 0) {
+  if (counts.analyticLightTree === true) {
     kernelFlags |= KERNEL_FLAG_USE_LIGHT_TREE;
+  }
+  if (counts.emissiveLightTree === true) {
+    kernelFlags |= KERNEL_FLAG_USE_EMISSIVE_LIGHT_TREE;
   }
   if (volumeDensity > 0) {
     kernelFlags |= KERNEL_FLAG_HAS_VOLUME;
@@ -1615,6 +1577,9 @@ function packKernelParamsV2({
   }
   if (options.transparentBackground === true) {
     kernelFlags |= KERNEL_FLAG_TRANSPARENT_BACKGROUND;
+  }
+  if (options.sampler === 'pcg') {
+    kernelFlags |= KERNEL_FLAG_PCG_SAMPLER;
   }
 
   const maxBounces = Math.max(0, Math.round(Number(options.bounces ?? options.maxBounces ?? 8)));
@@ -2190,7 +2155,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   const packedEmissives = packEmissiveTriangleBuffer(packedGeometry.emissiveList);
   const analyticEntries = buildAnalyticLightEntries(scene.lights);
   const packedLights = packAnalyticLightsBuffer(analyticEntries);
-  const packedLightTree = packRootLightTreeNode(packedLights, packedEmissives);
+  const packedLightTree = buildLightTreeNodes(packedLights, packedEmissives, { instances: packedGeometry.instances, instanceCount: packedGeometry.instanceCount }, options);
   const packedEnvironment = packEnvironmentTexelsV2(scene.environment, options);
 
   const counts = {
@@ -2200,6 +2165,8 @@ export function buildNativeInputV2(scene, camera, options = {}) {
     emissiveTriangleCount: packedEmissives.emissiveTriangleCount,
     lightCount: packedLights.lightCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
+    analyticLightTree: packedLightTree.analyticTree,
+    emissiveLightTree: packedLightTree.emissiveTree,
     textureCount: packedTextures.textureCount,
   };
 
@@ -2601,7 +2568,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
   const packedEmissives = packEmissiveTriangleBuffer(emissiveList);
   const analyticEntries = buildAnalyticLightEntries(reconstructedLights);
   const packedLights = packAnalyticLightsBuffer(analyticEntries);
-  const packedLightTree = packRootLightTreeNode(packedLights, packedEmissives);
+  const packedLightTree = buildLightTreeNodes(packedLights, packedEmissives, { instances: instancesBuffer, instanceCount: instanceItems.length }, options);
   const packedEnvironment = packEnvironmentTexelsV2(reconstructedEnv, options);
 
   const mergedOptions = {
@@ -2620,6 +2587,8 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     emissiveTriangleCount: packedEmissives.emissiveTriangleCount,
     lightCount: packedLights.lightCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
+    analyticLightTree: packedLightTree.analyticTree,
+    emissiveLightTree: packedLightTree.emissiveTree,
     textureCount: packedTextures.textureCount,
   };
 

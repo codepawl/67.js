@@ -41,7 +41,7 @@ const PENDING_CUTTER_SCOPE = Object.freeze({ definitions: null, chain: Object.fr
 const TERRAIN_SKY_VISIBILITY_BYTES = 4;
 const CAMERA_DEFAULTS = Object.freeze({ eye: [4, 3, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 45, near: 0.1, far: 1000 });
 // Per-node render flags: `visible` hides a node and its children; the rest become renderer part flags of a mesh node.
-const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher'];
+const RENDER_FLAG_FIELDS = ['visible', 'castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'shadowOnly'];
 const PART_FLAG_FIELDS = RENDER_FLAG_FIELDS.slice(1);
 const NODE_FIELDS = ['translation', 'rotation', 'scale', 'parent', 'label', 'geometry', 'material', 'skin', 'relations', 'asset', 'vegetation', 'decal', 'depthLayer', 'blend', ...RENDER_FLAG_FIELDS];
 const MATERIAL_FIELDS = ['color', 'metallic', 'roughness', 'emission', 'emissiveColor', 'opacity', 'alphaMode', 'doubleSided', 'pattern', 'map', 'subsurface', 'snippet', 'waterPreset', 'absorption', 'turbidity', 'aov', 'wear', ...MATERIAL_LAYER_FIELDS];
@@ -343,6 +343,9 @@ function nodeFrom(value) {
     if (flag !== 'visible' && value[flag] !== undefined && value.geometry === undefined) throw invalidField(flag, value[flag], 'a flag on a mesh node with geometry and material; remove it from group nodes', TypeError);
   }
   if (value.holdout === true && value.shadowCatcher === true) throw invalidField('shadowCatcher', value.shadowCatcher, 'false when holdout is true; a node is a holdout or a shadow catcher, not both', TypeError);
+  if (value.shadowOnly === true && (value.castShadow === false || value.holdout === true || value.shadowCatcher === true)) {
+    throw invalidField('shadowOnly', value.shadowOnly, 'false with castShadow false, holdout or shadowCatcher', TypeError);
+  }
   if (value.skin !== undefined) {
     if (value.geometry === undefined) {
       throw invalidField('skin', value.skin, 'a skin on a mesh node with geometry and material; remove skin from group nodes', TypeError);

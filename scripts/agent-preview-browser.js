@@ -1107,7 +1107,7 @@ window.__agentPreview = {
         return afterMeshBooleans(input.operations, () => this.applyLoaded(input));
       });
     }
-    if (recipeAssetNeeds(input.operations).length) return this.applyWithAssets(input);
+    if (input.assetNeeds || recipeAssetNeeds(input.operations).length) return this.applyWithAssets(input);
     return afterMeshBooleans(input.operations, () => this.applyLoaded(input));
   },
   async applyWithAssets(input) {
@@ -1116,7 +1116,7 @@ window.__agentPreview = {
       throw new Error('This scene was created without placed assets. Recreate it with an asset node in scene_create, then add more.');
     }
     await loadAllAgentSceneModules();
-    await loadPlacedAssets(record.placedAssets, input.operations, input.assetData);
+    await loadPlacedAssets(record.placedAssets, input.assetNeeds ?? input.operations, input.assetData);
     return afterMeshBooleans(input.operations, () => this.applyLoaded(input));
   },
   applyLoaded({ sessionId, operations, expectedRevision }) {

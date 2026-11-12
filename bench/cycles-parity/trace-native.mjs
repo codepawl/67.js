@@ -41,6 +41,14 @@ function parseNumberOption(argumentList, flagName, fallbackValue, minimumValue) 
   return parsed;
 }
 
+function parseChoiceOption(argumentList, flagName, allowedValues, fallbackValue) {
+  const value = String(readFlagValue(argumentList, flagName, fallbackValue));
+  if (!allowedValues.includes(value)) {
+    throw new RangeError(`Option ${flagName} must be one of ${allowedValues.join(', ')}, got "${value}".`);
+  }
+  return value;
+}
+
 function parseKernelOption(argumentList) {
   const kernel = String(readFlagValue(argumentList, '--kernel', 'legacy'));
   if (!SUPPORTED_KERNELS.has(kernel)) {
@@ -59,7 +67,7 @@ function parseFilterTypeOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler sobol|pcg] [--light-tree auto|on|off] [--filter-type box|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -71,6 +79,8 @@ function parseTraceArguments(argumentList) {
     bounces: parseIntegerOption(argumentList, '--bounces', 8, 0),
     seed: parseIntegerOption(argumentList, '--seed', 1, 0),
     filterType: parseFilterTypeOption(argumentList),
+    sampler: parseChoiceOption(argumentList, '--sampler', ['sobol', 'pcg'], 'sobol'),
+    lightTree: parseChoiceOption(argumentList, '--light-tree', ['auto', 'on', 'off'], 'auto'),
     filterWidth: parseNumberOption(argumentList, '--filter-width', 1.0, 0.01),
     clampDirect: parseNumberOption(argumentList, '--clamp-direct', 0, 0),
     clampIndirect: parseNumberOption(argumentList, '--clamp-indirect', 0, 0),
@@ -115,11 +125,15 @@ async function runCli() {
   const buildStarted = performance.now();
   const traceSource = await reconstructTraceSceneSource(description);
   const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
+  for (const light of description.environment?.manyPointLights ?? []) {
+    traceScene.lights.points.push({ bit: -1, range: 0, ...light });
+  }
   const camera = createCamera(traceSource.camera, options.width, options.height);
   const samplesPerDispatch = options.samplesPerDispatch !== undefined
     ? options.samplesPerDispatch
     : (options.noiseThreshold > 0 ? 8 : undefined);
-  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, samplesPerDispatch, parts: traceSource.parts });
+  const useLightTree = { auto: undefined, on: true, off: false }[options.lightTree];
+  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, useLightTree, samplesPerDispatch, parts: traceSource.parts });
   const sceneBuildSeconds = (performance.now() - buildStarted) / 1000;
   const traced = renderNative.traceNative(nativeInput, {
     width: options.width,
@@ -156,6 +170,8 @@ async function runCli() {
     samplesPerDispatch: traced.samplesPerDispatch ?? null,
     bounces: options.bounces,
     seed: options.seed,
+    sampler: options.sampler,
+    lightTree: options.lightTree,
     filterType: options.filterType,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
