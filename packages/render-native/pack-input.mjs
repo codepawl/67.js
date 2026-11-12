@@ -46,7 +46,7 @@ export function buildNativeInput(scene, camera, options, pack) {
   }
   // The subsurface table (two vectors per material) follows the material table in the same buffer; its offset is 0 when no
   // material scatters light under its surface, which keeps the walk out of the kernel.
-  const materialData = pack.packMaterials(scene.materials, atlas).data;
+  const materialData = pack.packMaterials(scene.materials, atlas, scene.shadowOnlyParts).data;
   const usesSubsurface = pack.sceneUsesSubsurface(scene.materials);
   const subsurfaceData = usesSubsurface ? pack.packSubsurface(scene.materials).data : new Float32Array(0);
   const materials = new Float32Array(materialData.length + subsurfaceData.length);

@@ -37,7 +37,7 @@ const CAMERA_MAIN = `void main() {
   float screenX = ((float(pixelCoordinate.x) + jitterX) / float(uSize.x) * 2.0 - 1.0) * uHalfSize.x;
   float screenY = (1.0 - (float(row) + jitterY) / float(uSize.y) * 2.0) * uHalfSize.y;
   vec3 rayDirection = normalize(uForward + uRight * screenX + uAbove * screenY);
-  tracePath(uEye, rayDirection, pixel, sampleIndex);`;
+  tracePath(uEye, rayDirection, pixel, sampleIndex, true);`;
 
 // Texel mode: one pixel is one lightmap texel. The path starts on the texel's surface with a cosine weighted direction,
 // so the radiance it returns is the light arriving at the texel (the caller multiplies by the albedo). The first
@@ -61,7 +61,7 @@ const TEXEL_MAIN = `void main() {
   float angle = TWO_PI * secondUnit;
   vec3 rayDirection = buildFrame(normal) * vec3(coneRadius * cos(angle), coneRadius * sin(angle), sqrt(max(0.0, 1.0 - firstUnit)));
   if (texelIndex >= uTexelCount) rayDirection = normal;
-  tracePath(origin, rayDirection, pixel, sampleIndex);`;
+  tracePath(origin, rayDirection, pixel, sampleIndex, false);`;
 
 // The light tree walk of path-tracer-light-tree.js (nodeImportance, leftChildProbability, chooseLightFromTree), four texels a node.
 const LIGHT_TREE_FUNCTIONS = `
@@ -500,18 +500,25 @@ float fillHit(vec3 origin, vec3 direction, float distance) {
   return alpha;
 }
 
-/** The nearest solid hit, stepping through the transparent texels of cutout materials. */
-bool intersectScene(vec3 origin, vec3 direction) {
+/** True when the nearest hit belongs to a shadow-only part (the flag sits in texel 5 of the material); camera rays step through it. */
+bool nearestHitIsShadowOnly() {
+  return fetchData(uMaterials, int(fetchData(uTriangles, nearestSlot * TRIANGLE_TEXELS).w) * MATERIAL_TEXELS + 5).y > 0.0;
+}
+
+/** The nearest solid hit, stepping through the transparent texels of cutout materials and, for a camera ray, shadow-only parts. */
+bool intersectScene(vec3 origin, vec3 direction, bool cameraRay) {
   vec3 start = origin;
   float travelled = 0.0;
   for (int attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
     traceRay(start, direction, uFarDistance, false);
     if (nearestSlot < 0) return false;
     float foundDistance = nearestDistance;
-    float alpha = fillHit(start, direction, foundDistance);
-    if (hitCutoff == 0.0 || alpha >= hitCutoff) {
-      hitDistance += travelled;
-      return true;
+    if (!(cameraRay && nearestHitIsShadowOnly())) {
+      float alpha = fillHit(start, direction, foundDistance);
+      if (hitCutoff == 0.0 || alpha >= hitCutoff) {
+        hitDistance += travelled;
+        return true;
+      }
     }
     float advance = foundDistance + uSurfaceOffset;
     travelled += advance;
@@ -1174,7 +1181,8 @@ bool scatterInFog(vec3 origin, float segmentLength) {
 }
 
 ${hasSubsurface ? SUBSURFACE_FUNCTIONS : ''}
-void tracePath(vec3 origin, vec3 startDirection, uint pixel, uint sampleIndex) {
+// cameraRays is true when the path starts at the camera, so its first leg steps through shadow-only parts.
+void tracePath(vec3 origin, vec3 startDirection, uint pixel, uint sampleIndex, bool cameraRays) {
   resetRandom(pixel, sampleIndex, uSeed);
   radiance = vec3(0.0);
   throughput = vec3(1.0);
@@ -1188,7 +1196,7 @@ void tracePath(vec3 origin, vec3 startDirection, uint pixel, uint sampleIndex) {
   bool afterMirror = true;
   vec3 normal = vec3(0.0, 1.0, 0.0);
   for (int depth = 0; depth <= uBounces; depth++) {
-    bool found = intersectScene(position, direction);
+    bool found = intersectScene(position, direction, cameraRays && depth == 0);
     bool inFog = uHasVolume && scatterInFog(position, found ? hitDistance : uFarDistance);
     if (!inFog && !found) {
       if (depth == 0) firstLegEscaped = 1.0;
