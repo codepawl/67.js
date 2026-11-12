@@ -491,6 +491,29 @@ Release addon built; on the RTX 3060 `cargo test --target x86_64-pc-windows-msvc
 | `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 of 64 | 0.0168 (0.0365) | 0.00026 (0.000285) |
 | `many-lights-500` | 1.0009 / 1.0010 / 1.0009 | 64 of 64 | 0.0178 (0.0373) | 0.000832 (0.000791) |
 
+## Depth and grey-diffuse comparison (#896, slice C1a)
+
+The Done-when item of #896 for the Classroom scene asks for two checks against Cycles with every material overridden to grey diffuse: the image-match gates and a depth pass that agrees on 99.9 percent of pixels. This slice adds the harness for both and proves it on two existing scenes; the Classroom scene itself is a later slice. Only `bench/`, `tests/` and this guide change.
+
+Options, all off by default so existing references and runs are unchanged:
+
+- `render-cycles.py --grey-diffuse` sets the view layer's material override to one Principled material (base colour 0.8, roughness 1, metallic 0, specular 0). `--z-depth` renders the camera Z depth to `<prefix>-depth.npy` (rows from the top, 0 where nothing is hit) with `--depth-samples` samples (default 64). The depth comes from the Camera Data node's View Z Depth through an emission-only override with the world switched off, not from a multilayer EXR: it is the same quantity as Cycles' Z pass, goes through the single-layer path the colour image uses, and averages silhouette pixels with misses counted as 0, as Cook does. It is not the literal Z pass.
+- `trace-native.mjs --grey-diffuse` gives every part the same material ([`grey-diffuse-override.mjs`](../bench/cycles-parity/grey-diffuse-override.mjs): the colour, roughness, metallic and specular above, no emission, no texture, no vertex colours; lights are untouched). `--write-depth` writes `<prefix>-depth.npy` and records `depthConvention` and `cameraVerticalFovDegrees` in the JSON.
+- [`compare_depth.py`](../bench/cycles-parity/compare_depth.py) scores a depth pair: the share of pixels where both hit and differ by at most 1 percent (relative to Cycles), or where both missed. A pixel hit by only one side counts as a disagreement. Gate: 99.9 percent. It also reports the share at 0.1, 0.5 and 5 percent, the median ratio (a constant scale shows there), the 99th percentile and maximum relative error, and how many disagreeing pixels sit next to a silhouette (an 8-neighbourhood with a hit/miss change or a depth jump over 5 percent, in either image).
+
+Depth convention, from the code: Cycles' depth is the Z distance (along the view axis, `camera_z_depth`). Cook's `depth` is the first-hit distance along the unit ray (`first_depth = surface_hit.t` in `integrator.wgsl`, direction normalised in `camera.wgsl`), averaged over the samples with misses as 0. The comparator converts Cook to Z, `z = t * cos(angle between the pixel's ray and the view axis)`, from the vertical field of view and the image size; it assumes a symmetric perspective camera with no lens shift, which holds for every reference scene. The conversion is not optional: without it the agreement is 4.1 percent on `lit-interior`.
+
+Result (one Modal container on an NVIDIA A10, Cook on the `NVIDIA A10` adapter, Blender 5.3.0 Cycles OptiX; 960 x 540, 1024 spp, seed 1 for both, Cycles seed 2 for the FLIP noise floor, 8 bounces, box filter, depth at 64 samples; `app.py::depth_parity` in the Cook Modal app) `[measured]`:
+
+| Scene | Mean ratio (R / G / B) | Tiles within 5 % | FLIP LDR (ceiling) | Depth agreement at 1 % | at 0.1 % | median Cook / Cycles | max relative error |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
+| `lit-interior` | 1.0027 / 1.0027 / 1.0026 | 64 of 64 | 0.0222 (0.0420) | 99.985 % (78 pixels) | 99.83 % | 1.0000002 | 2.2 % |
+| `many-lights-500` | 1.0008 / 1.0008 / 1.0008 | 64 of 64 | 0.0176 (0.0375) | 99.971 % (151 pixels) | 99.66 % | 1.00000005 | 3.0 % |
+
+All image gates and the depth gate pass on both scenes. Every disagreeing pixel sits on a silhouette (78 and 151 pixels, none in the interior of a surface); away from silhouettes the agreement is 100 percent and the 99th percentile of the relative error is below 0.01 percent, so there is no constant scale or slope. Both scenes are closed rooms, so no pixel misses: the miss handling (background in both, one side only, infinity, NaN) is covered by `bench/cycles-parity/test_compare_depth.py` on synthetic arrays and not yet by a rendered scene. `tests/cycles-grey-diffuse.test.js` covers the override. Run the comparator tests with `uv run --no-project --with numpy python -m unittest bench/cycles-parity/test_compare_depth.py`.
+
+Not covered: the Classroom scene (instancing, 854 instances, depth of field, which the depth comparator does not model: a thin lens changes the ray-to-Z conversion), a scene with a background, and 4096 spp references.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
