@@ -354,3 +354,5 @@ Partial files count toward the store budget and remain until explicit release.
 The tests use actual temporary files and controlled callbacks.
 They cover snapshots, persistence, hashes, cancellation, deadlines, restart recovery, quotas, path rejection, and file aliases.
 The tests do not run browsers, ffmpeg, or GPU rendering.
+
+A recipe whose only moving content is `physics`, `cloth` or `particles` takes the same `motion` setting: the job plays the bake on the motion clock, with no authored motion and no `bake-motion` step (so the 32 node cap does not apply). A video without `duration` runs as long as the bake, counted from `motion.start`, and a longer one is rejected. A recipe with nothing that moves fails with an error that lists authored motion, physics, cloth, particles, placed clips and map sequences as the accepted sources.
