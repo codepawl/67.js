@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/banner.jpg" alt="67js: 3D engine that AI agents drive, over a Bistro street rendered by it" width="100%"></a>
+  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/hero-bistro.webp" alt="A camera glides down a cobbled European street at dusk, rendered by 67js" width="100%"></a>
 </p>
 
 <p align="center">
@@ -9,16 +9,69 @@
   <img alt="MCP server for agents" src="https://img.shields.io/badge/agents-MCP%20server-F7C948?style=flat-square&labelColor=0A1D1A">
 </p>
 
-67js is a 3D engine for AI agents and for pages. It has a real-time rasterizer, a path tracer, addons for terrain, vegetation, characters, liquid, vehicles and media export, and an MCP server.
-A scene is plain data: each part has a geometry, a matrix and a material.
+67js makes 3D easy to understand and easy to do. An AI agent knows every part of 67js and carries the heavy steps. It builds the scene, lights it, checks the preview and renders the result. You keep the creative choices and stay in the loop, because the agent shows previews and asks when a matter of taste is open.
 
-An agent builds and changes a scene through the MCP server, looks at PNG previews and renders stills or MP4 video.
-The rasterizer runs on WebGL2.
-The path tracer runs on the CPU, on WebGL2 and, with the optional `packages/render-native`, on Vulkan.
-A WebGPU backend is opt-in from the library, and the MCP server does not expose it.
+## What you can make
 
-The goal is to be as capable as Blender and as light as three.js. [docs/goal.md](https://github.com/codepawl/67.js/blob/main/docs/goal.md) defines each part.
-See the [showcase](https://67js.codepawl.com/showcase.html), the [documentation](https://67js.codepawl.com/docs.html), the [guide for agents](https://67js.codepawl.com/llms.txt) and the [changelog](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md). The [FAQ](https://67js.codepawl.com/docs.html#faq) answers common questions.
+Every clip below is a 67js render.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://67js.codepawl.com/showcase.html"><img src="https://67js.codepawl.com/previews/feature-buildup.webp" alt="A harbour town with a pier and a boat changes from dusk to golden hour" width="100%"></a><br>
+      <b>A harbour town built up from nothing</b>
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://67js.codepawl.com/showcase.html"><img src="https://67js.codepawl.com/previews/feature-clockwork.webp" alt="A gold gyroscope of rings around a stack of gears with a cyan glow" width="100%"></a><br>
+      <b>Gold rings around a clockwork core</b>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md"><img src="https://67js.codepawl.com/previews/feature-cook-dof.webp" alt="Coloured spheres on wooden planks while the focus moves from a red sphere to a gold one" width="100%"></a><br>
+      <b>Path-traced depth of field</b>
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://67js.codepawl.com/showcase.html"><img src="https://67js.codepawl.com/previews/feature-flicker-fixed.webp" alt="A low pan over a warehouse floor with yellow lines and racks of boxes" width="100%"></a><br>
+      <b>A warehouse floor without flicker</b>
+    </td>
+  </tr>
+</table>
+
+More scenes are on the [showcase](https://67js.codepawl.com/showcase.html) and in [Stills](#stills).
+
+## Install
+
+**Let your agent do it.** Paste this prompt into Claude Code, Codex, Cursor, Gemini CLI or OpenCode. The agent installs the package, reads the guide and connects the MCP server.
+
+```text
+Install 67js from npm as `67js@npm:@codepawlhq/67js` and connect its MCP server with `npx 67js-mcp`. Read
+https://67js.codepawl.com/llms.txt first and follow it.
+```
+
+**Claude Code plugin.** One command adds the MCP server and both skills.
+
+```text
+/plugin marketplace add codepawl/67.js
+/plugin install 67js@67js
+```
+
+**By hand**
+
+```sh
+npm install 67js@npm:@codepawlhq/67js
+```
+
+The registry name is `@codepawlhq/67js`, and the alias `67js` keeps imports short. The package is ESM and needs Node.js 20.19 or later. Glaze and the WebGL2 path tracer need a WebGL2 browser, and the WebGPU backends need WebGPU.
+
+A new minor version ships about once a week, and [CHANGELOG.md](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md) lists each change. npx keeps the copy it downloaded first. To update, run `npm install 67js@npm:@codepawlhq/67js@latest` or `npx -y -p @codepawlhq/67js@latest 67js-mcp`.
+
+## What it is
+
+67js is a 3D engine for AI agents and for pages. It has a real-time rasterizer, a path tracer, addons for terrain, vegetation, characters, liquid, vehicles and media export, and an MCP server. A scene is plain data: each part has a geometry, a matrix and a material.
+
+An agent builds and changes a scene through the MCP server, looks at PNG previews and renders stills or MP4 video. The goal is to be as capable as Blender and as light as three.js. [docs/goal.md](https://github.com/codepawl/67.js/blob/main/docs/goal.md) defines each part.
+See the [documentation](https://67js.codepawl.com/docs.html), the [guide for agents](https://67js.codepawl.com/llms.txt) and the [FAQ](https://67js.codepawl.com/docs.html#faq).
 
 ## Renderers
 
@@ -85,7 +138,7 @@ It runs at 2 bounces against an 8-bounce reference.
 Machine: RTX 3060 12 GB (driver 621.14), Intel i7-14700KF, Chrome 157 headless on D3D11, Node 24, Blender 5.3, measured 2026-11-11.
 The card was idle: each run waited for at most 15 percent utilisation, and 0 of 162 runs were contended.
 
-## Showcase
+## Stills
 
 Each picture below is a 67js render. The linked ones open live in the browser.
 
@@ -112,43 +165,6 @@ Each picture below is a 67js render. The linked ones open live in the browser.
     <td><img src="https://67js.codepawl.com/previews/bistro-plaza.webp" alt="A large plane tree in a hedged circle on a Bistro plaza"></td>
   </tr>
 </table>
-
-## Install
-
-**Let your agent do it.** Paste this prompt into Claude Code, Codex, Cursor, Gemini CLI or OpenCode. The agent installs
-the package, reads the guide and connects the MCP server.
-
-```text
-Install 67js from npm as `67js@npm:@codepawlhq/67js` and connect its MCP server with `npx 67js-mcp`. Read
-https://67js.codepawl.com/llms.txt first and follow it.
-```
-
-**Claude Code plugin.** One command adds the MCP server and both skills. The server starts from the published npm
-package with `npx`, so nothing is built locally.
-
-```text
-/plugin marketplace add codepawl/67.js
-/plugin install 67js@67js
-```
-
-**By hand**
-
-```sh
-npm install 67js@npm:@codepawlhq/67js
-```
-
-The registry name is `@codepawlhq/67js`. The command installs it under the alias `67js`, so imports stay short.
-The package is ESM. The tools need Node.js 20.19 or later. Glaze and the WebGL2 path tracer need a WebGL2 browser. The WebGPU backends need a browser with WebGPU.
-
-### Releases
-
-A new minor version ships about once a week. The day is not fixed and can move by one to three days, so a release
-can wait for an important fix or go out early when its work is done. A serious bug gets a patch release at once.
-Before 1.0, a minor version can change the API. [CHANGELOG.md](https://github.com/codepawl/67.js/blob/main/CHANGELOG.md) lists each change and what to update.
-
-npx keeps the copy it downloaded first, so the MCP server does not update by itself. To get the latest version, run
-`npm install 67js@npm:@codepawlhq/67js@latest` in a project, or start the server once with
-`npx -y -p @codepawlhq/67js@latest 67js-mcp`.
 
 ## Quick start
 
