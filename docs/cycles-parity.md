@@ -203,6 +203,8 @@ Least-squares fit of $\text{relMSE}(N) = B_{\text{bias}} + \frac{V}{N}$ across t
 
 ![Three scenes rendered by the legacy kernel at 256 samples, the cycles kernel at 4096 samples and Blender Cycles 5.3 at 4096 samples](cycles-parity-comparison.jpg)
 
+![The many-lights-500 scene at 64 samples with the flat light pick, the light tree and Blender Cycles 5.3, then the light tree and Blender Cycles at 4096 samples and lit-interior at 256 samples](cycles-light-tree-comparison.jpg)
+
 Left to right: Cook's legacy kernel (256 samples), Cook's `cycles` kernel (4096 samples), Blender Cycles 5.3 (4096 samples). Linear output shown with the sRGB curve and no tone mapping.
 
 Milestone M1 expands parity verification for **Cook** (`packages/render-native` `--kernel cycles`) from `lit-interior` to six reference scenes from [`bench/reference/scenes.js`](../bench/reference/scenes.js): `spot-area`, `light-linking`, `metal`, `glass`, `outdoor-hdri`, and `lit-interior`. Every scene exports losslessly (`roundTripVerified = true`) via [`bench/cycles-parity/export-scene.mjs`](../bench/cycles-parity/export-scene.mjs) with Node asset loading handled in [`bench/cycles-parity/scene-bridge.mjs`](../bench/cycles-parity/scene-bridge.mjs) `[measured]`.
