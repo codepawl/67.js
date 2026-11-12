@@ -4,6 +4,7 @@
 // so the bake path and the live path share one adapter. Another engine plugs in as an object with the same shape as
 // `rapierAdapter`; see docs/physics-runtime.md. Nothing here touches the film path.
 import { mat4, quat } from 'gl-matrix';
+import { applyBuoyancy } from './physics-buoyancy.js';
 import { applyForceFieldImpulses, createRapierWorld, loadPhysicsEngine, prepareLivePhysics, requireRapier } from './physics.js';
 
 export const PHYSICS_RUNTIME_LIMITS = Object.freeze({
@@ -101,6 +102,7 @@ export const rapierAdapter = Object.freeze({
       step(stepSeconds, elapsedSeconds) {
         world.timestep = stepSeconds;
         if (prepared.fields.length) applyForceFieldImpulses({ ...prepared, timestep: stepSeconds }, bodies, elapsedSeconds);
+        if (prepared.buoyancy) applyBuoyancy({ ...prepared, timestep: stepSeconds }, bodies, elapsedSeconds);
         world.step(eventQueue);
       },
       readPose(bodyIndex, output) {

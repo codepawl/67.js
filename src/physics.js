@@ -1,5 +1,6 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { evaluateForceFields, normalizeForceFields } from './force-fields.js';
+import { applyBuoyancy, checkBuoyancyWork, floatingBody, normalizeFloat, normalizeOcean } from './physics-buoyancy.js';
 
 let rapierPromise;
 let rapierEngine;
@@ -258,7 +259,7 @@ function meshCollider(collider, body, limits, budget) {
 }
 
 function prepare(definition, options) {
-  fields(definition, ['bodies', 'colliders', 'joints', 'events', 'fields', 'gravity'], 'definition');
+  fields(definition, ['bodies', 'colliders', 'joints', 'events', 'fields', 'gravity', 'ocean'], 'definition');
   fields(options, ['frameCount', 'timestep', 'solverIterations', 'maxMemoryBytes', ...Object.keys(LIMITS)], 'options');
   const limits = {};
   for (const [key, [fallback, cap]] of Object.entries(LIMITS)) {
@@ -290,7 +291,7 @@ function prepare(definition, options) {
     throw new RangeError(`physics memory plan ${estimatedPeakBytes} exceeds maxMemoryBytes ${maxMemoryBytes}`);
   }
   const bodies = rawBodies.map(body => {
-    fields(body, ['name', 'type', 'translation', 'rotation', 'linearVelocity', 'angularVelocity', 'linearDamping', 'angularDamping', 'ccd'], `body ${body.name}`);
+    fields(body, ['name', 'type', 'translation', 'rotation', 'linearVelocity', 'angularVelocity', 'linearDamping', 'angularDamping', 'ccd', 'float'], `body ${body.name}`);
     const type = body.type ?? 'dynamic';
     if (!['dynamic', 'fixed', 'kinematic'].includes(type)) {
       throw new TypeError(`body ${body.name} has unsupported type`);
@@ -301,9 +302,16 @@ function prepare(definition, options) {
     if (body.ccd !== undefined && typeof body.ccd !== 'boolean') {
       throw new TypeError('ccd must be boolean');
     }
+    if (body.float !== undefined && type !== 'dynamic') {
+      throw new TypeError(`body ${body.name} only floats when dynamic; set type "dynamic" or drop float`);
+    }
+    if (body.float !== undefined && definition.ocean === undefined) {
+      throw new TypeError(`body ${body.name} floats but the definition has no ocean; add ocean, such as { windSpeed: 5 }`);
+    }
     return {
       name: body.name,
       type,
+      float: body.float === undefined ? undefined : normalizeFloat(body.float, `body ${body.name}.float`),
       translation: vector(body.translation, 3, 'translation', ZERO),
       rotation: rotation(body.rotation, 'rotation'),
       linearVelocity: vector(body.linearVelocity, 3, 'linearVelocity', ZERO),
@@ -402,6 +410,7 @@ function prepare(definition, options) {
     return {
       ...common,
       shape: collider.shape,
+      volume,
       radius,
       halfHeight,
       halfExtents,
@@ -550,6 +559,7 @@ function prepare(definition, options) {
   const forceFields = normalizeForceFields(definition.fields ?? [], 'fields');
   const gravity = vector(definition.gravity, 3, 'gravity', [0, -9.81, 0]);
   validateMotionBounds(bodies, events, gravity, forceFields, timestep, frameCount, massTotals, minimumInertiaTotals, maximumColliderOffsets, joints, inertiaTotals);
+  const buoyancy = buoyancyPlan(definition.ocean, bodies, colliders, frameCount);
   const memoryPlan = Object.freeze({
     timelineBytes,
     solverReserveBytes,
@@ -568,12 +578,27 @@ function prepare(definition, options) {
     events,
     fields: forceFields,
     gravity,
+    buoyancy,
     frameCount,
     timestep,
     solverIterations,
     maxContactEvents: limits.maxContactEvents,
     memoryPlan,
   };
+}
+
+/** The sea and the floating bodies of a definition, or null when no body has a float field. */
+function buoyancyPlan(oceanInput, bodies, colliders, frameCount) {
+  const floating = [];
+  bodies.forEach((body, bodyIndex) => {
+    if (body.float === undefined) return;
+    const bodyColliders = colliders.filter(collider => collider.body === bodyIndex);
+    floating.push({ bodyIndex, ...floatingBody(body.float, bodyColliders, `body ${body.name}`) });
+  });
+  const ocean = oceanInput === undefined ? null : normalizeOcean(oceanInput);
+  if (!floating.length) return null;
+  checkBuoyancyWork(ocean, floating, frameCount);
+  return { ocean, floating };
 }
 
 function validateMotorBounds(bodies, joints, events, timestep, duration, massTotals, minimumInertiaTotals, maximumInertiaTotals, maximumColliderOffsets, linearSpeedBounds, angularSpeedBounds) {
@@ -922,6 +947,7 @@ function bakePrepared(preparedScene) {
           }
         }
         if (preparedScene.fields.length) applyForceFieldImpulses(preparedScene, bodies, (frame - 1) * preparedScene.timestep);
+        if (preparedScene.buoyancy) applyBuoyancy(preparedScene, bodies, (frame - 1) * preparedScene.timestep);
         world.step(eventQueue);
         eventQueue.drainCollisionEvents((firstHandle, secondHandle, started) => {
           if (contactEvents.length >= preparedScene.maxContactEvents) {
