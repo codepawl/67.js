@@ -44,6 +44,9 @@ def read_flag_value(argument_list, flag_name, fallback_value):
 
 
 PIXEL_FILTER_TYPES = {"box": "BOX", "gaussian": "GAUSSIAN", "blackman-harris": "BLACKMAN_HARRIS"}
+# Keep in step with GREY_DIFFUSE_MATERIAL in grey-diffuse-override.mjs: both renderers must shade the same thing.
+GREY_DIFFUSE_ENTRY = {"color": [0.8, 0.8, 0.8], "metallic": 0.0, "roughness": 1.0, "specular": 0.0}
+DEFAULT_DEPTH_SAMPLES = 64
 
 
 def parse_cli_arguments():
@@ -51,7 +54,7 @@ def parse_cli_arguments():
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
@@ -69,6 +72,9 @@ def parse_cli_arguments():
         "filter_width": float(read_flag_value(argument_list, "--filter-width", "1.0")),
         "keep_exr": "--keep-exr" in argument_list,
         "part_ids": "--part-ids" in argument_list,
+        "grey_diffuse": "--grey-diffuse" in argument_list,
+        "z_depth": "--z-depth" in argument_list,
+        "depth_samples": int(read_flag_value(argument_list, "--depth-samples", str(DEFAULT_DEPTH_SAMPLES))),
     }
 
 
@@ -520,6 +526,46 @@ def render_part_identifier_map(scene, output_prefix, width, height):
     print("PART_IDS " + json.dumps({"parts": part_names, "outputPrefix": output_prefix}))
 
 
+def apply_grey_diffuse_override(scene):
+    """Shades every object with one grey diffuse material, as the view layer's material override does."""
+    grey_material = build_blender_material("grey-diffuse-override", GREY_DIFFUSE_ENTRY, False, [], {})
+    scene.view_layers[0].material_override = grey_material
+
+
+def build_camera_z_depth_material():
+    """An emission material whose colour is the camera Z depth: the distance along the view axis, not along the ray."""
+    material = bpy.data.materials.new("camera-z-depth")
+    node_tree = material.node_tree
+    node_tree.nodes.clear()
+    camera_data_node = node_tree.nodes.new("ShaderNodeCameraData")
+    emission_node = node_tree.nodes.new("ShaderNodeEmission")
+    emission_node.inputs["Strength"].default_value = 1.0
+    output_node = node_tree.nodes.new("ShaderNodeOutputMaterial")
+    node_tree.links.new(camera_data_node.outputs["View Z Depth"], emission_node.inputs["Color"])
+    node_tree.links.new(emission_node.outputs["Emission"], output_node.inputs["Surface"])
+    return material
+
+
+def render_camera_z_depth(scene, output_prefix, width, height, depth_samples):
+    """Renders the camera Z depth through Cycles into <prefix>-depth.npy (rows from the top, 0 where nothing is hit).
+
+    A real Z pass needs a multilayer EXR or compositor nodes; the Camera Data node's View Z Depth is the same
+    quantity (Cycles' pass is camera_z_depth too) and goes through the single-layer path used for the colour image.
+    The world is switched off so a miss reads 0, which is also what Cook writes.
+    """
+    scene.view_layers[0].material_override = build_camera_z_depth_material()
+    scene.world.node_tree.nodes["Background"].inputs[1].default_value = 0.0
+    scene.cycles.samples = depth_samples
+    depth_exr_path = f"{output_prefix}-depth.exr"
+    depth_npy_path = f"{output_prefix}-depth.npy"
+    scene.render.filepath = depth_exr_path
+    bpy.ops.render.render(write_still=True)
+    load_exr_into_npy(depth_exr_path, depth_npy_path, width, height, False)
+    z_depth = numpy.load(depth_npy_path)[:, :, 0].copy()
+    numpy.save(depth_npy_path, z_depth)
+    return depth_npy_path
+
+
 def execute_timed_cycles_render(scene, exr_path):
     scene.render.filepath = exr_path
     stats_events = []
@@ -592,6 +638,8 @@ def main():
         render_part_identifier_map(scene, options["output_prefix"], options["width"], options["height"])
         return
     used_devices = configure_cycles_parity(scene, options)
+    if options["grey_diffuse"]:
+        apply_grey_diffuse_override(scene)
     scene_build_seconds = time.perf_counter() - build_started
     exr_path = f"{options['output_prefix']}.exr"
     npy_path = f"{options['output_prefix']}.npy"
@@ -599,7 +647,20 @@ def main():
     load_exr_into_npy(exr_path, npy_path, options["width"], options["height"], options["keep_exr"])
     setup_seconds = scene_build_seconds + timing["cycles_sync_seconds"]
     total_trace_seconds = scene_build_seconds + timing["render_call_seconds"]
+    report_samples = scene.cycles.samples
+    depth_npy_path = None
+    depth_error = None
+    if options["z_depth"]:
+        try:
+            depth_npy_path = render_camera_z_depth(scene, options["output_prefix"], options["width"], options["height"], options["depth_samples"])
+        except Exception as error:  # the colour image is already on disk; keep its report even when the depth pass fails
+            depth_error = repr(error)
+            print("DEPTH_PASS_FAILED " + depth_error)
     report = {
+        "greyDiffuse": options["grey_diffuse"],
+        "depthNpyPath": depth_npy_path,
+        "depthError": depth_error,
+        "depthSamples": options["depth_samples"] if options["z_depth"] else None,
         "engine": "cycles-optix",
         "blenderVersion": bpy.app.version_string,
         "devices": used_devices,
@@ -608,7 +669,7 @@ def main():
         "exrPath": exr_path if options["keep_exr"] else None,
         "width": options["width"],
         "height": options["height"],
-        "samples": scene.cycles.samples,
+        "samples": report_samples,
         "seed": scene.cycles.seed,
         "bounces": scene.cycles.max_bounces,
         "diffuseBounces": scene.cycles.diffuse_bounces,

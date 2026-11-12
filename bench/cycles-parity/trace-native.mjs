@@ -10,6 +10,7 @@ import * as renderNative from '../../packages/render-native/index.mjs';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 import { denoiseRadiance } from '../../src/path-tracer-denoise.js';
+import { applyGreyDiffuseOverride } from './grey-diffuse-override.mjs';
 
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
 const SUPPORTED_FILTERS = new Set(['box', 'gaussian', 'blackman-harris']);
@@ -101,7 +102,7 @@ function parseLightSamplingOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--grey-diffuse] [--write-depth]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -134,6 +135,8 @@ function parseTraceArguments(argumentList) {
       ? parseIntegerOption(argumentList, '--samples-per-dispatch', 16, 1)
       : undefined,
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
+    greyDiffuse: argumentList.includes('--grey-diffuse'),
+    writeDepth: argumentList.includes('--write-depth'),
   };
 }
 
@@ -196,7 +199,8 @@ async function runCli() {
   if (!renderNative.findNativeAddon()) {
     throw new Error('The render-native addon is missing. Build packages/render-native before running trace-native.mjs.');
   }
-  const description = JSON.parse(await readFile(options.sceneJsonPath, 'utf8'));
+  const loadedDescription = JSON.parse(await readFile(options.sceneJsonPath, 'utf8'));
+  const description = options.greyDiffuse ? applyGreyDiffuseOverride(loadedDescription) : loadedDescription;
   await mkdir(dirname(options.outputPrefix), { recursive: true });
   const totalStarted = performance.now();
   const buildStarted = performance.now();
@@ -243,7 +247,20 @@ async function runCli() {
     await writeFloat32Npy(unfilteredNpyPath, unfilteredRgb, [options.height, options.width, 3]);
   }
   const setupSeconds = sceneBuildSeconds + traced.setupSeconds + traced.compileSeconds + traced.uploadSeconds + traced.accelerationBuildSeconds;
+  // The depth buffer is the mean first-hit distance ALONG THE RAY (unit direction), 0 where the ray missed; Cycles' Z is
+  // the distance along the view axis. compare-depth.py converts. Cook's film averages over all samples, misses included.
+  const depthNpyPath = options.writeDepth ? `${options.outputPrefix}-depth.npy` : null;
+  if (depthNpyPath) {
+    if (!traced.depth || traced.depth.length !== options.width * options.height) {
+      throw new Error(`--write-depth needs the native tracer to return a depth buffer of ${options.width * options.height} floats (kernel "${options.kernel}" returned ${traced.depth?.length ?? 'none'}).`);
+    }
+    await writeFloat32Npy(depthNpyPath, Float32Array.from(traced.depth), [options.height, options.width]);
+  }
   const report = {
+    greyDiffuse: options.greyDiffuse,
+    depthNpyPath,
+    depthConvention: depthNpyPath ? 'ray-distance' : null,
+    cameraVerticalFovDegrees: traceSource.camera.fov,
     engine: options.kernel === 'cycles' ? 'cook-render-native' : '67js-render-native',
     kernel: traced.kernel ?? options.kernel,
     inputSchemaVersion: nativeInput.schemaVersion ?? 1,
