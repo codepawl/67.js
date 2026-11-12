@@ -55,6 +55,8 @@
     "docs/game.md",
     "docs/scene-query.md",
     "docs/user-passes.md",
+    "docs/addons.md",
+    "scripts/addon-check.mjs",
     "docs/skeleton-pose.md",
     "docs/verification.md"
   ],
