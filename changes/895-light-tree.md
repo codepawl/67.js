@@ -1,1 +1,2 @@
 - The Cook `cycles` kernel picks next event lights through the Cycles light tree (`lightSampling`: `auto`, `tree` or `uniform`; `--light-sampling` in `trace-native.mjs`), built by the host over analytic lights and emissive triangles (#895)
+- A packed FORMAT-v2 input without light tree emitter tables is rejected when it asks for the tree (`traceNative` throws for `lightSampling: 'tree'` and uses the flat pick for `auto`), `filterType` and `filterWidth` now apply to an already packed input, and `buildLightTree` throws above 32 distant lights (#895)
