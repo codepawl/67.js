@@ -292,10 +292,31 @@ function rebuildRenderer(record) {
   record.shadowKey = null;
 }
 
+// While a motion time is sampled (a render job, a look at a time), the automatic floor is fixed by the pose at time 0, so
+// shards flying out of a physics bake or a part driving away never resize it, flip it on or off, or move the horizon.
+// A scene with no motion time reads its own pose each draw, as before.
+const motionGrounds = new WeakMap();
+
+function automaticGroundPlacement(scene) {
+  const frozen = motionGrounds.get(scene);
+  if (scene.motionTime != null && frozen?.revision === scene.revision) {
+    return frozen.placement;
+  }
+  return agentGroundPlacement(scene.parts, scene.environment);
+}
+
+function sampleMotionTime(scene, time) {
+  if (motionGrounds.get(scene)?.revision !== scene.revision) {
+    scene.sampleMotion(0);
+    motionGrounds.set(scene, { revision: scene.revision, placement: agentGroundPlacement(scene.parts, scene.environment) });
+  }
+  scene.sampleMotion(time);
+}
+
 // The automatic floor (src/agent-ground.js) follows the scene's lowest geometry. A renderer gains or loses it only
 // through a new renderer, so a floor that appears or disappears (a part now forms one, or environment.ground changed) rebuilds.
 function syncAutomaticGround(record) {
-  const placement = agentGroundPlacement(record.scene.parts, record.scene.environment);
+  const placement = automaticGroundPlacement(record.scene);
   if (Boolean(placement) !== Boolean(record.renderer.groundPart)) {
     rebuildRenderer(record);
     record.renderer.resize();
@@ -499,7 +520,7 @@ function cascadesFor(scene) {
 
 function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = false }) {
   probeSnippets(scene);
-  const placement = agentGroundPlacement(scene.parts, scene.environment);
+  const placement = automaticGroundPlacement(scene);
   const renderer = installCoplanarDiagnostics(installRenderPasses(installCameraEffects(new Renderer67(canvas, scene.parts, {
     ground: placement ? createAgentGround(placement) : false,
     hdr: true,
@@ -914,7 +935,7 @@ window.__agentPreview = {
       record.scene.sampleFrame({ ...(animation === undefined ? {} : { animation }),
         ...(motionTime === undefined ? {} : { motionTime }) });
     } else if (motionTime !== undefined) {
-      record.scene.sampleMotion(motionTime);
+      sampleMotionTime(record.scene, motionTime);
     }
     const shotCamera = cameraOverrides ? withCameraOverrides(record.scene.camera, cameraOverrides) : undefined;
     const forVelocity = pass === 'velocity';
@@ -1167,7 +1188,7 @@ window.__agentPreview = {
       if (typeof record.scene.sampleMotion !== 'function') {
         throw new RangeError('Procedural motion time is unavailable for imported assets.');
       }
-      record.scene.sampleMotion(motionTime);
+      sampleMotionTime(record.scene, motionTime);
     }
     draw(record);
     const render = renderInfo(record.renderer, viewProblems(record, record.scene.camera, record.scene.effects.exposure));
