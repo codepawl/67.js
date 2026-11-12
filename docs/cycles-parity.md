@@ -819,6 +819,23 @@ uv run --no-project python bench/cycles-parity/summarize-denoised-comparison.py 
 uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-denoised-comparison-figure.py --rows <rows.json> --images <folder> --reference <reference.npy> --crop-x 300 --crop-y 255 --output docs/cook-denoised-comparison.jpg
 ```
 
+## Persistent in-process OIDN (#1025)
+
+The `oidnDenoise` tool pays for a process start, CUDA initialisation, the weights and three PFM files on every call. `createNativeOidnDenoiser` (render-native) and `createOidnDenoiser` (denoise package) keep one OIDN device, four buffers and the committed filter alive, and recommit only when the size or the set of guides changes. `trace-native.mjs --oidn-devices cuda,cuda-cli,cpu,cpu-cli` runs the in-process device (`cuda`) beside the tool (`cuda-cli`) on one trace; `node bench/oidn-cost/measure-oidn-cost.mjs --out <file>` writes the split below. Every number is measured on one Modal container with an NVIDIA A10 (driver 610.57) and a 24 thread Xeon, OIDN 2.5.1, quality high, colour plus albedo plus normal, seeded synthetic input, median of seven calls.
+
+| size | device | tool call s | of which process start to exit | in-process first call s (plus device creation) | in-process warm call s | warm: write / execute / read ms |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 960 x 540 | cuda | 0.345 | 0.320 | 0.015 (0.103) | 0.0072 | 1.3 / 3.5 / 2.2 |
+| 960 x 540 | cpu | 0.218 | 0.194 | 0.075 (0.010) | 0.048 | 1.8 / 43.5 / 2.8 |
+| 1920 x 1080 | cuda | 0.787 | 0.671 | 0.033 (0.090) | 0.029 | 7.2 / 13.6 / 7.7 |
+| 1920 x 1080 | cpu | 0.732 | 0.624 | 0.223 (0.002) | 0.178 | 6.5 / 162.5 / 8.3 |
+
+The tool call also spends 0.010 / 0.007 s encoding and writing PFM files and 0.007 s reading one back at 960 x 540 (0.034 / 0.054 / 0.023 s at 1920 x 1080). A bare `oidnDenoise --version` takes 0.007 s, and `--verbose 2` shows 0.110 s for the CUDA device, 0.005 s for the filter commit and 0.007 s for the filter at 960 x 540, so about 0.2 s of the 0.32 s process is CUDA runtime start and teardown that the verbose lines do not count. The three images cost 0.007 s (960 x 540) and 0.024 s (1920 x 1080) to copy in JS, which is the floor left by not sharing memory between the Vulkan tracer and CUDA.
+
+Output: the in-process image equals the tool's image byte for byte (maximum absolute difference 0) on all four rows, the first call equals a warm call, and so does the call after a size change and back. Resizing recommits the filter; warm calls never do.
+
+Equal total time on `lit-interior` and `many-lights-500` (same container, 3 rounds, seed 3, medians): the in-process CUDA denoise costs 0.008 s against 0.34 to 0.38 s for the tool, so the total of Cook + OIDN falls from 0.56 to 0.23 s at 16 spp on `lit-interior`, with the same relMSE (3.09e-4) as the tool path. The in-process CPU device costs 0.047 s against 0.22 s. The table is in the pull request.
+
 ## Depth and grey-diffuse comparison (#896, slice C1a)
 
 The Done-when item of #896 for the Classroom scene asks for two checks against Cycles with every material overridden to grey diffuse: the image-match gates and a depth pass that agrees on 99.9 percent of pixels. This slice adds the harness for both and proves it on two existing scenes; the Classroom scene itself is a later slice. Only `bench/`, `tests/` and this guide change.
