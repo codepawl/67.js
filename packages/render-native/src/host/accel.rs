@@ -22,7 +22,9 @@ pub(crate) struct UnpackedTriangles {
 
 pub(crate) struct CyclesAcceleration {
     pub(crate) tlas: wgpu::Tlas,
-    pub(crate) _blases: Vec<wgpu::Blas>,
+    pub(crate) blases: Vec<wgpu::Blas>,
+    /// For each instance, the index into `blases` of the mesh it places; a transform update rebuilds the TLAS from it.
+    pub(crate) instance_blas_indices: Vec<usize>,
     pub(crate) _vertex_buffer: wgpu::Buffer,
 }
 
@@ -243,6 +245,60 @@ fn create_blas_plan_for_slice(device: &wgpu::Device, spec: BlasSliceSpec) -> Bla
     }
 }
 
+/// The object-to-world rows of the instance record that starts at byte `base`, as a hardware TLAS transform.
+fn read_instance_transform(instance_bytes: &[u8], base: usize) -> [f32; 12] {
+    let mut transform_row_major_3x4 = [0.0f32; 12];
+    for float_index in 0..12 {
+        transform_row_major_3x4[float_index] = read_f32_le(instance_bytes, base + float_index * 4);
+    }
+    transform_row_major_3x4
+}
+
+/// The ray-kind bits of `visibility_flags` the hardware culls on (the negative-scale bit is not one of them).
+pub(crate) fn instance_cull_mask(visibility_flags: u32) -> u8 {
+    (visibility_flags & INSTANCE_RAY_VISIBILITY_MASK) as u8
+}
+
+/// Rebuilds the TLAS of a session from a new instance table with the same instances in the same order: new transforms
+/// and ray visibility, the same meshes. The BLAS are not touched. The pinned wgpu has no TLAS refit (`PreferUpdate` is
+/// accepted and rebuilds), so a rebuild is the whole cost of moving an instance.
+pub(crate) fn rebuild_cycles_tlas(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    acceleration: &mut CyclesAcceleration,
+    instance_bytes: &[u8],
+) -> Result<()> {
+    let instance_count = acceleration.instance_blas_indices.len();
+    if instance_count == 0 || instance_bytes.len() != instance_count * INSTANCE_RECORD_BYTES {
+        return Err(failure(format!(
+            "The instance table must hold the session's {instance_count} instances of {INSTANCE_RECORD_BYTES} bytes to rebuild the TLAS; got {} bytes.",
+            instance_bytes.len()
+        )));
+    }
+    for instance_index in 0..instance_count {
+        let base = instance_index * INSTANCE_RECORD_BYTES;
+        let visibility_flags = read_u32_le(instance_bytes, base + 116);
+        let blas = &acceleration.blases[acceleration.instance_blas_indices[instance_index]];
+        let placed = wgpu::TlasInstance::new(
+            blas,
+            read_instance_transform(instance_bytes, base),
+            instance_index as u32,
+            instance_cull_mask(visibility_flags),
+        );
+        acceleration.tlas[instance_index] = Some(placed);
+    }
+    let mut build_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("cycles tlas rebuild"),
+    });
+    build_encoder.build_acceleration_structures(
+        std::iter::empty::<&wgpu::BlasBuildEntry>(),
+        std::iter::once(&acceleration.tlas),
+    );
+    queue.submit(Some(build_encoder.finish()));
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    Ok(())
+}
+
 /// Builds an empty masked-out 1-triangle BLAS + TLAS when a scene has zero instances or runs a lobe-only probe.
 pub(crate) fn build_empty_cycles_acceleration(device: &wgpu::Device, queue: &wgpu::Queue) -> CyclesAcceleration {
     let vertex_buffer = create_vertex_buffer(device, &[0.0f32; 9]);
@@ -290,7 +346,8 @@ pub(crate) fn build_empty_cycles_acceleration(device: &wgpu::Device, queue: &wgp
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
     CyclesAcceleration {
         tlas,
-        _blases: vec![dummy_plan.blas],
+        blases: vec![dummy_plan.blas],
+        instance_blas_indices: Vec::new(),
         _vertex_buffer: vertex_buffer,
     }
 }
@@ -361,17 +418,13 @@ pub(crate) fn build_cycles_acceleration_structure(
             next_index
         };
 
-        let mut transform_row_major_3x4 = [0.0f32; 12];
-        for float_index in 0..12 {
-            transform_row_major_3x4[float_index] = read_f32_le(instance_bytes, base + float_index * 4);
-        }
-        let cull_mask = (visibility_flags & INSTANCE_RAY_VISIBILITY_MASK) as u8;
         placements.push(ParsedInstancePlacement {
-            transform_row_major_3x4,
+            transform_row_major_3x4: read_instance_transform(instance_bytes, base),
             blas_plan_index,
-            cull_mask,
+            cull_mask: instance_cull_mask(visibility_flags),
         });
     }
+    let instance_blas_indices: Vec<usize> = placements.iter().map(|placement| placement.blas_plan_index).collect();
 
     let vertices = unpack_v2_triangle_vertices(triangle_bytes, triangle_count);
     let vertex_buffer = create_vertex_buffer(device, &vertices);
@@ -431,7 +484,8 @@ pub(crate) fn build_cycles_acceleration_structure(
     let blases = plans.into_iter().map(|plan| plan.blas).collect();
     Ok(CyclesAcceleration {
         tlas,
-        _blases: blases,
+        blases,
+        instance_blas_indices,
         _vertex_buffer: vertex_buffer,
     })
 }

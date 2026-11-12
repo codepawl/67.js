@@ -887,6 +887,23 @@ All image gates and the depth gate pass on both scenes. Every disagreeing pixel 
 
 Not covered: the Classroom scene (instancing, 854 instances, depth of field, which the depth comparator does not model: a thin lens changes the ray-to-Z conversion), a scene with a background, and 4096 spp references.
 
+## Progressive film and scene updates (#896, slice S2)
+
+A native session builds one image over several `render` calls (`accumulate: true`, `targetSamples`, `reset()`, `resolve()`) and applies new material values, lights, selection weights and instance transforms with `update()`. The kernel adds one sample at a time to the film in sample order and the Sobol-Burley sequence is indexed by the whole image's target count, so call boundaries cannot change a sum. The TLAS is rebuilt over the kept BLAS on a transform change (wgpu 30.0.1 has no refit); a change of counts, triangles or mesh topology is refused with a message that says to create a new session.
+
+Measured on one NVIDIA A10 (480 x 270, 32 samples, `bench/cycles-parity/session-progressive.mjs`):
+
+| Check | `lit-interior` | `many-lights-500` |
+| --- | --- | --- |
+| Split calls (16+16, 8+15+9; both samplers; path regeneration on and off) equal one call, byte for byte | 8 of 8 | 8 of 8 |
+| `update()` then `render` equals a fresh one-shot of the final input, byte for byte (materials; materials and transforms; back to start) | 3 of 3 | 3 of 3 |
+| New session, cold pipeline | 6721 ms | 6899 ms |
+| New session, pipeline already compiled in the process | 65 ms | 44 ms |
+| Update plus render (4 samples), materials only | 17.5 ms | 43.1 ms |
+| Update plus render, transforms (TLAS rebuilt) | 17.7 ms | 44.9 ms |
+
+One-shot `traceNative` images (both kernels) and S1 session frames hash the same as origin/main built in the same container.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
@@ -1032,6 +1049,22 @@ Texture cost on the same A10G, one scene per process `[measured]`:
 The number of textures is not limited by either build (2000 descriptors of 16x16 packed and rendered the same); the limit is the 1 GiB pool. Bindings, bind groups and struct sizes are unchanged.
 
 Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` writes `tex-repeat` (Cycles can render it), `tex-repeat-linear` and `tex-wraps` (clamp, mirror, nearest, blend and normal map; Cook only), `node bench/cycles-parity/texture-pool-bench.mjs --textures 256 --size 512` prints pack, setup, compile and upload seconds and peak memory.
+
+## Instancing equivalence (#896, slice I2)
+
+Instanced against flattened on the `cycles` kernel, `bench/instancing/instancing-checks.mjs equivalence`: 200 copies of a 320-triangle icosphere on a grid, 128 x 96, 1024 samples, seed 1, NVIDIA GeForce RTX 4090. The flattened scene holds 64,000 triangles (64,200 with the degenerate one) and the instanced one 320 (321). The measures are in `bench/instancing/image-compare.mjs`: mean ratio of RGB, relative MSE with epsilon 0.01, and 8 x 8 tiles whose mean is within 5 percent (tiles too dark to compare are left out).
+
+| Variant | Mean ratio RGB | relMSE | Tiles within 5 percent |
+|---|---|---|---|
+| translate | 1.0000, 1.0000, 1.0000 | 8.1e-8 | 20 of 20 |
+| rotscale (rotated, stretched) | 1.0032, 1.0038, 1.0045 | 4.9e-5 | 20 of 20 |
+| emissive (every fourth copy emissive by its own material) | 0.9997, 0.9998, 1.0000 | 2.0e-5 | 20 of 20 |
+| emissive-rotscale | 1.0010, 1.0006, 1.0017 | 7.2e-5 | 20 of 20 |
+| emissive-degenerate (first triangle has no area) | 0.9997, 0.9998, 1.0000 | 2.0e-5 | 20 of 20 |
+
+The test (`tests/native-instancing-equivalence.test.js`) asks for a mean ratio and every tile ratio inside 0.98 to 1.02 and a relMSE under 5e-4, which is about the seed-to-seed noise of the flattened scene. The images are not bitwise equal, because the instanced kernel transforms rays into object space and the flattened scene stores world-space triangles. Mirrored copies are not in the table: the flattened path winds mirrored parts the wrong way until #1026, so that comparison waits for it.
+
+Scenes without shared geometry did not change. The packed tables (v1 for both kernels, v2 flattened, v2 with `instancing: true` but no sharing, and an instanced scene) and the traced pixels of the `legacy` and `cycles` kernels at 48 x 32 and 16 samples have the same SHA-256 on `origin/main` and on this branch, with both addons built in the same run.
 
 ## Why textured surfaces rendered bright (#1030)
 
