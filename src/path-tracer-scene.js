@@ -311,15 +311,24 @@ function traceProfile(light) {
   return light.ies === undefined ? null : lightShapeSupport.profile(light.ies);
 }
 
+// A point or spot light with a radius is a sphere unless it asks for the oriented disk of Blender's Soft Falloff. Only the `cycles` native kernel draws the disk.
+function softFalloffOf(light, label) {
+  if (light.softFalloff === undefined) return {};
+  if (typeof light.softFalloff !== 'boolean') {
+    throw new TypeError(`${label}.softFalloff must be true (a disk, as Blender's Soft Falloff) or false (a sphere), got ${JSON.stringify(light.softFalloff)}. Leave it out for the sphere.`);
+  }
+  return light.softFalloff ? { softFalloff: true } : {};
+}
+
 function resolveLights(environment) {
   const sunPower = Math.max(...(environment.keyColor ?? [0, 0, 0]));
   const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.length ?? 0);
   if (lightCount > MAX_TRACE_LIGHTS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_LIGHTS} point, spot and area lights.`);
   return {
     sun: sunPower > 0 ? { bit: SUN_BIT, direction: normalized(environment.lightDirection ?? [0, 1, 0]), color: environment.keyColor, angularRadius: environment.sunAngularRadius ?? SUN_ANGULAR_RADIUS } : null,
-    points: (environment.pointLights ?? []).map((light, index) => ({ bit: POINT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0 })),
+    points: (environment.pointLights ?? []).map((light, index) => ({ bit: POINT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0, ...softFalloffOf(light, `environment.pointLights[${index}]`) })),
     spots: (environment.spotLights ?? []).map((light, index) => ({
-      bit: SPOT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0,
+      bit: SPOT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0, ...softFalloffOf(light, `environment.spotLights[${index}]`),
       direction: normalized(light.direction),
       cosineHalfAngle: Math.cos(light.angle),
       profile: traceProfile(light),

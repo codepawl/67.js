@@ -240,7 +240,13 @@ fn ltr_sphere_light_profile(light: LightRecord, emitter: LightTreeEmitter, posit
   profile.energy = emitter.energy;
   profile.visible = true;
   profile.cone_axis = ltr_safe_normalize(position - light.position);
-  if (min_distance > light.radius) {
+  if ((light.flags & LIGHT_FLAG_SOFT_FALLOFF) != 0u) {
+    // An oriented disk: Cycles takes the angle of its edge as seen from the receiver, and the hypotenuse as the far distance.
+    let hypotenuse = sqrt(light.radius * light.radius + min_distance * min_distance);
+    profile.cos_theta_u = min_distance / hypotenuse;
+    profile.max_distance = hypotenuse;
+    profile.min_distance = min_distance;
+  } else if (min_distance > light.radius) {
     profile.cos_theta_u = ltr_cos_from_sin(light.radius / min_distance);
     profile.max_distance = min_distance / profile.cos_theta_u;
     profile.min_distance = min_distance;

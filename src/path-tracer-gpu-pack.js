@@ -163,7 +163,10 @@ export function packSubsurface(materials) {
 
 const LIGHT_TYPES = { point: 0, spot: 1, area: 2 };
 
-/** Six texels per point, spot or area light, in the order the tracer samples them. */
+/**
+ * Six texels per point, spot or area light, in the order the tracer samples them. The third float of the last texel is 1 for a point or
+ * spot light with `softFalloff` (an oriented disk, read by the `cycles` kernel only) and 0 for every other light.
+ */
 export function packLights(lights) {
   const entries = [
     ...lights.points.map(light => ({ light, type: LIGHT_TYPES.point })),
@@ -186,7 +189,7 @@ export function packLights(lights) {
     data.set([...(light.direction ?? [0, 0, 0]), light.radius], base + 8);
     data.set([0, 0, 0, light.cosineHalfAngle ?? 0], base + 12);
     data.set([0, 0, 0, light.blend ?? 0], base + 16);
-    data.set([light.intensity, light.range, 0, 0], base + 20);
+    data.set([light.intensity, light.range, light.softFalloff === true ? 1 : 0, 0], base + 20);
   });
   return { table, count: entries.length };
 }

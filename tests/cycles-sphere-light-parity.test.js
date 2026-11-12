@@ -24,14 +24,21 @@ function floorPart() {
   return { name: 'floor', geometry: box(0, 1), matrix, material };
 }
 
-function renderFloorUnderLamp(radius) {
+function renderFloorUnderLamp(radius, lampKind = 'point', lampFields = {}) {
   const environment = {
     keyColor: [0, 0, 0],
     lightDirection: [0, 1, 0],
     ambientIntensity: 0,
     fillIntensity: 0,
-    pointLights: [{ position: [0, LAMP_HEIGHT, 0], color: [1, 1, 1], intensity: LAMP_INTENSITY, radius, castShadow: true }],
+    pointLights: [],
+    spotLights: [],
   };
+  const lamp = { position: [0, LAMP_HEIGHT, 0], color: [1, 1, 1], intensity: LAMP_INTENSITY, radius, castShadow: true, ...lampFields };
+  if (lampKind === 'spot') {
+    environment.spotLights.push({ direction: [0, -1, 0], angle: 1.2, penumbra: 0, ...lamp });
+  } else {
+    environment.pointLights.push(lamp);
+  }
   const scene = buildTraceScene([floorPart()], environment);
   const camera = createCamera(cameraDescription, SIZE, SIZE);
   const input = buildNativeInput(scene, camera, { width: SIZE, height: SIZE, samples: 256, bounces: 2, seed: 1 }, pack);
@@ -55,16 +62,28 @@ function floorOffsetOfPixel(pixelIndex) {
   return (((pixelIndex + 0.5) / SIZE) * 2 - 1) * halfExtent;
 }
 
+function sphereIrradianceAt(distanceSquared) {
+  return (LAMP_INTENSITY * LAMP_HEIGHT) / distanceSquared ** 1.5;
+}
+
+// A soft falloff light (Cycles' oriented disk of radius r, radiance I / (pi r^2)) faces the floor point at distance d, so every point
+// of the disk is at t^2 = d^2 + rho^2 with the cosine d / t at the lamp. Integrating the cosine at a floor point whose normal makes
+// the angle beta with the line to the lamp over the disk (the azimuth term of the floor cosine integrates to zero) gives
+// E = I cos(beta) / (d^2 + r^2), with cos(beta) = h / d. It is the point light value with d^2 raised by r^2 under the cube.
+function softFalloffIrradianceAt(radius) {
+  return distanceSquared => (LAMP_INTENSITY * LAMP_HEIGHT) / (Math.sqrt(distanceSquared) * (distanceSquared + radius * radius));
+}
+
 // A sphere light of intensity I lights a diffuse floor point at a horizontal distance s, with every part of the sphere above
 // the floor, with I * h / (h^2 + s^2)^(3/2), whatever its radius: the power stays fixed as the radius grows. The pixels the
 // test averages reach about 0.5 m from the point under the lamp, where the floor is a few percent darker than at that point.
-function closedFormCentreRadiance() {
+function closedFormCentreRadiance(irradianceAt = sphereIrradianceAt) {
   let sum = 0;
   const first = (SIZE - PATCH_SIDE) / 2;
   for (let row = first; row < first + PATCH_SIDE; row++) {
     for (let column = first; column < first + PATCH_SIDE; column++) {
       const distanceSquared = LAMP_HEIGHT * LAMP_HEIGHT + floorOffsetOfPixel(row) ** 2 + floorOffsetOfPixel(column) ** 2;
-      sum += ((FLOOR_ALBEDO / Math.PI) * LAMP_INTENSITY * LAMP_HEIGHT) / distanceSquared ** 1.5;
+      sum += (FLOOR_ALBEDO / Math.PI) * irradianceAt(distanceSquared);
     }
   }
   return sum / (PATCH_SIDE * PATCH_SIDE);
@@ -85,3 +104,19 @@ for (const radius of [0, 0.18, 0.5]) {
     assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);
   });
 }
+
+for (const lampKind of ['point', 'spot']) {
+  for (const radius of [0.18, 0.5, 1]) {
+    test(`the native cycles kernel lights a floor under a soft falloff ${lampKind} light of radius ${radius} m as an oriented disk`, { skip: skipWithoutAddon }, () => {
+      const expected = closedFormCentreRadiance(softFalloffIrradianceAt(radius));
+      const measured = centreRadiance(renderFloorUnderLamp(radius, lampKind, { softFalloff: true }));
+      assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);
+    });
+  }
+}
+
+test('a light without softFalloff stays a sphere: the floor under a 1 m lamp keeps the sphere value', { skip: skipWithoutAddon }, () => {
+  const expected = closedFormCentreRadiance();
+  const measured = centreRadiance(renderFloorUnderLamp(1, 'point', { softFalloff: false }));
+  assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);
+});
