@@ -45,7 +45,7 @@ test('a sun above 14 degrees keeps the sky and key it had before the low-sun fit
 test('sky presets set the sun, are deterministic, and fields beside them win', () => {
   const first = skyEnvironment({ preset: 'golden-hour' });
   assert.deepEqual(first, skyEnvironment({ preset: 'golden-hour' }));
-  assert.equal(first.sky.sunElevation, 6);
+  assert.equal(first.sky.sunElevation, 4);
   assert.equal(first.sky.preset, undefined);
   assert.equal(skyEnvironment({ preset: 'sunset' }).sky.sunElevation, 1);
   assert.ok(skyEnvironment({ preset: 'blue-hour' }).sky.sunElevation < 0);
@@ -57,7 +57,7 @@ test('a preset in set-environment replaces the earlier sky, and a bad preset nam
   const session = createAgentScene({ format: '67js.scene', schemaVersion: 1, geometries: [], materials: [], nodes: [],
     environment: { sky: { type: 'physical', sunElevation: 60, turbidity: 8 } } });
   session.apply([{ type: 'set-environment', environment: { sky: { preset: 'golden-hour' } } }], { expectedRevision: 0 });
-  assert.equal(session.environment.sky.sunElevation, 6);
+  assert.equal(session.environment.sky.sunElevation, 4);
   assert.equal(session.environment.sky.turbidity, 3);
   assert.throws(() => skyEnvironment({ preset: 'noon' }), /environment\.sky\.preset.*golden-hour, sunset, blue-hour/);
 });

@@ -10,7 +10,7 @@ export const PHYSICAL_SKY_FIELDS = Object.freeze(['type', 'sunElevation', 'sunRo
 // Named looks an agent can ask for with environment.sky { preset }: they set the sun and nothing else, so the sky, the key colour and
 // the haze all come from the same atmosphere. Fields named beside a preset win over it.
 export const PHYSICAL_SKY_PRESETS = Object.freeze({
-  'golden-hour': Object.freeze({ sunElevation: 6, sunRotation: 250 }),
+  'golden-hour': Object.freeze({ sunElevation: 4, sunRotation: 250 }),
   sunset: Object.freeze({ sunElevation: 1, sunRotation: 250 }),
   'blue-hour': Object.freeze({ sunElevation: -4, sunRotation: 250 }),
 });
@@ -41,7 +41,8 @@ const MAXIMUM_AIR_MASS = 20;
 const AEROSOL_ANISOTROPY = 0.76;
 const SHARED_SUN_MASS = 4;
 const LOW_SUN_FADE_END = 14;
-const LOW_SUN_HORIZON_BOOST = [1, 0.1, 0];
+const LOW_SUN_HORIZON_BOOST = [2.4, 0.1, -0.4];
+const HORIZON_BAND_SINE = 0.15;
 const LOW_SUN_ZENITH_DIMMING = 0.4;
 const LOW_SUN_KEY_BOOST = 1.2;
 
@@ -122,7 +123,7 @@ function skyRadiance(sky, direction, sun) {
   // Fitted to Blender's sky at 2 to 15 degrees: a low sun lifts the red of the horizon band (multiple scattering the single
   // scattering sum above lacks) and dims the zenith, fading to nothing at a sun 14 degrees up.
   const lowSun = lowSunShare(sky);
-  const lowView = lowShare;
+  const horizonBand = Math.max(0, 1 - direction[1] / HORIZON_BAND_SINE) ** 2;
   return depth.map((channelDepth, channel) => {
     const rayleigh = RAYLEIGH_DEPTH[channel];
     const aerosol = AEROSOL_DEPTH_PER_TURBIDITY[channel] * sky.turbidity;
@@ -132,7 +133,7 @@ function skyRadiance(sky, direction, sun) {
     const nearSun = Math.max(0, sunCosine) ** 2 * (1 - Math.max(0, direction[1]));
     const sunMass = Math.min(sunMassCap, fullSunMass) * (1 - nearSun) + fullSunMass * nearSun;
     const lightReaching = Math.exp(-channelDepth * sunMass * 0.45 - OZONE_DEPTH[channel] * ozone * viewMass * 0.35);
-    const lowSunTint = 1 + lowSun * (lowView * LOW_SUN_HORIZON_BOOST[channel] - (1 - lowView) * LOW_SUN_ZENITH_DIMMING);
+    const lowSunTint = 1 + lowSun * (horizonBand * LOW_SUN_HORIZON_BOOST[channel] - (1 - lowShare) * LOW_SUN_ZENITH_DIMMING);
     return SKY_STRENGTH * scattered * inScatter * lightReaching * setting * lowSunTint;
   });
 }
