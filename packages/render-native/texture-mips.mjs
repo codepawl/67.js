@@ -120,24 +120,23 @@ export function mipChainWordCount(kind, width, height) {
   return totalWords;
 }
 
-// Calls `visit(destinationIndex, topLeft, topRight, bottomLeft, bottomRight)` with the texel indexes of the 2 x 2 block of the
-// source level that the destination texel covers. A side of one texel, or the last column of an odd side, reads itself twice.
-function visitBlocks(sourceWidth, sourceHeight, destinationWidth, destinationHeight, visit) {
-  for (let row = 0; row < destinationHeight; row++) {
-    const topRow = Math.min(row * 2, sourceHeight - 1);
-    const bottomRow = Math.min(row * 2 + 1, sourceHeight - 1);
-    for (let column = 0; column < destinationWidth; column++) {
-      const leftColumn = Math.min(column * 2, sourceWidth - 1);
-      const rightColumn = Math.min(column * 2 + 1, sourceWidth - 1);
-      visit(
-        row * destinationWidth + column,
-        topRow * sourceWidth + leftColumn,
-        topRow * sourceWidth + rightColumn,
-        bottomRow * sourceWidth + leftColumn,
-        bottomRow * sourceWidth + rightColumn,
-      );
+// The source texels one destination texel covers along one axis, with the share of the destination texel each one fills.
+// A destination side is floor(source / 2), so an odd source side gives spans of two and a fraction texels: every source
+// texel is read, and the weights of a span sum to one.
+function axisSpans(sourceSide, destinationSide) {
+  const ratio = sourceSide / destinationSide;
+  const spans = [];
+  for (let destinationIndex = 0; destinationIndex < destinationSide; destinationIndex++) {
+    const spanStart = destinationIndex * ratio;
+    const spanEnd = Math.min(sourceSide, (destinationIndex + 1) * ratio);
+    const span = [];
+    for (let sourceIndex = Math.floor(spanStart); sourceIndex < Math.ceil(spanEnd); sourceIndex++) {
+      const covered = Math.min(spanEnd, sourceIndex + 1) - Math.max(spanStart, sourceIndex);
+      if (covered > 0) span.push({ sourceIndex, weight: covered / ratio });
     }
+    spans.push(span);
   }
+  return spans;
 }
 
 function linearToSrgbByte(linear) {
@@ -151,13 +150,22 @@ function linearToSrgbByte(linear) {
 // rounded to its storage format once, so the rounding of a level never feeds the next one.
 function boxAverageLevel(source, sourceSize, destinationSize) {
   const destination = new Float64Array(destinationSize.width * destinationSize.height * 4);
-  visitBlocks(sourceSize.width, sourceSize.height, destinationSize.width, destinationSize.height, (target, topLeft, topRight, bottomLeft, bottomRight) => {
-    for (let channel = 0; channel < 4; channel++) {
-      destination[target * 4 + channel] = (
-        source[topLeft * 4 + channel] + source[topRight * 4 + channel] + source[bottomLeft * 4 + channel] + source[bottomRight * 4 + channel]
-      ) * 0.25;
+  const columnSpans = axisSpans(sourceSize.width, destinationSize.width);
+  const rowSpans = axisSpans(sourceSize.height, destinationSize.height);
+  for (let row = 0; row < destinationSize.height; row++) {
+    for (let column = 0; column < destinationSize.width; column++) {
+      const target = (row * destinationSize.width + column) * 4;
+      for (const rowEntry of rowSpans[row]) {
+        for (const columnEntry of columnSpans[column]) {
+          const sourceTexel = (rowEntry.sourceIndex * sourceSize.width + columnEntry.sourceIndex) * 4;
+          const weight = rowEntry.weight * columnEntry.weight;
+          for (let channel = 0; channel < 4; channel++) {
+            destination[target + channel] += source[sourceTexel + channel] * weight;
+          }
+        }
+      }
     }
-  });
+  }
   return destination;
 }
 

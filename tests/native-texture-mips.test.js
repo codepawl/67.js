@@ -488,3 +488,49 @@ test('a contrasty sRGB map read at level 1 gives the linear mean of the stored l
   const pictureMean = total / 144;
   assert.ok(Math.abs(pictureMean - expectedMean) / expectedMean < 0.01, `picture mean ${pictureMean} against the linear mean ${expectedMean} of the level 1 texels`);
 });
+
+// The tables a scene packs to with mip levels off, as SHA-256 taken on main before the levels existed (#896): the default
+// must not move a byte of the texture descriptors, the texel pool, the kernel parameters or the material records.
+test('with mip levels off the packed tables are the bytes main packed before the levels existed', async () => {
+  const { createHash } = await import('node:crypto');
+  const materials = [
+    { color: [1, 1, 1], map: { image: byteImage(6, 5, (x, y) => [x * 40, y * 50, 7, 255]) } },
+    { color: [1, 1, 1], map: { image: byteImage(8, 8, (x, y) => [x * 30, y * 30, 90, 200]), colorSpace: 'linear' }, alphaMode: 'mask', alphaCutoff: 0.5 },
+    { color: [0, 0, 0], emission: 1, emissiveColor: [1, 1, 1], emissiveMap: { image: byteImage(3, 3, (x, y) => [x * 100, y * 100, 255, 255]), colorSpace: 'srgb' } },
+  ];
+  const sharedGeometry = quadGeometry(0);
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 40 }, 16, 16);
+  const input = buildNativeInputV2(
+    { materials, instances: materials.map((material, index) => ({ geometry: sharedGeometry, materialIndex: index })), lights: {} },
+    camera,
+    { width: 16, height: 16, samples: 4 },
+  );
+  const expected = {
+    textureDescriptors: '402bc427be8bb0c8813f31b93db3db427aecd03310a86eaedd571d26d2a80db3',
+    textureTexels: '020b6aa192172d87214eae6b2fc9604ef6174b5583ad6fbf1c6991d483f424ab',
+    kernelParams: '582db4072d736a1dfb749a2eeeac2ab47fa64093cb4a26f6f99a4ef41dec9a12',
+    materials: '65bd6ad01f6045e2cb0af51bf496358bb318101e21c72627fb34e13b4374ac94',
+  };
+  for (const [tableName, expectedHash] of Object.entries(expected)) {
+    const table = input[tableName];
+    const hash = createHash('sha256').update(Buffer.from(table.buffer, table.byteOffset, table.byteLength)).digest('hex');
+    assert.equal(hash, expectedHash, tableName);
+  }
+});
+
+// A level of odd side halves to floor(side / 2) texels, so each destination texel covers two and a fraction source texels.
+// Every source texel must reach the next level: a 6 x 6 map has a 3 x 3 level 1 and a 1 x 1 level 2 that is the mean of all nine.
+test('a level with an odd side reaches the next level whole, not without its last row and column', () => {
+  const rightThirdWhite = new Uint32Array(36);
+  for (let texel = 0; texel < 36; texel++) {
+    const value = texel % 6 >= 4 ? 255 : 0;
+    rightThirdWhite[texel] = packedWord(value, value, value, 255);
+  }
+  const chain = buildMipChain(TEXTURE_KIND_RGBA8, rightThirdWhite, 6, 6);
+  assert.equal(chain.length, 9 + 1);
+  let levelOneSum = 0;
+  for (let texel = 0; texel < 9; texel++) levelOneSum += chain[texel] & 0xff;
+  const levelTwoRed = chain[9] & 0xff;
+  assert.ok(levelOneSum > 0, 'level 1 holds the white third');
+  assert.ok(Math.abs(levelTwoRed - levelOneSum / 9) <= 1, `level 2 is ${levelTwoRed}, the mean of level 1 is ${(levelOneSum / 9).toFixed(1)}`);
+});
