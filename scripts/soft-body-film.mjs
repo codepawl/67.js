@@ -150,7 +150,8 @@ export function clothVertices(scene, node, time) {
 
 /**
  * Bakes a recipe and samples every frame. Returns the world vertex buffer of each frame, a hash of each frame, and
- * the milliseconds of the whole bake (scene creation plus the first sample) and of every later sample.
+ * the milliseconds of the whole bake (scene creation plus the first sample) and of every later sample, and the triangle indices of the
+ * cloth node so a caller does not bake the recipe again just to read them.
  */
 export function recordFilm(recipe, nodeId, frameCount) {
   const node = recipe.nodes.find(candidate => candidate.id === nodeId);
@@ -165,7 +166,8 @@ export function recordFilm(recipe, nodeId, frameCount) {
     sampleMilliseconds.push(performance.now() - sampleStarted);
   }
   const hashes = frames.map(frame => createHash('sha256').update(Buffer.from(frame.buffer)).digest('hex'));
-  return { frames, hashes, bakeMilliseconds, sampleMilliseconds };
+  const indices = scene.parts.find(part => part.name === node.id).geometry.indices;
+  return { frames, hashes, bakeMilliseconds, sampleMilliseconds, indices };
 }
 
 /** Lowest, highest and extent of a vertex buffer along one axis (0 x, 1 y, 2 z). */

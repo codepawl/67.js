@@ -6,6 +6,13 @@ import { normalizeAgentBake } from '../src/agent-bake.js';
 import { BAKE_PRESETS } from '../src/agent-scene-capabilities.js';
 import { closedRoom, closedRoomWithoutBake, lightmapBytes } from './support/agent-bake-rooms.mjs';
 
+// One baked room for the tests that only read a scene (inspect, parts, bytes) or call an apply that throws. A test that edits a scene makes its own.
+let sharedRoom = null;
+function sharedBakedRoom() {
+  sharedRoom ??= createAgentScene(closedRoom());
+  return sharedRoom;
+}
+
 test('bake presets and fields resolve to plain numbers within their ranges', () => {
   assert.deepEqual(normalizeAgentBake({ preset: 'fine' }), { ...BAKE_PRESETS.fine, probes: 'room' });
   assert.deepEqual(normalizeAgentBake({}), { ...BAKE_PRESETS.standard, probes: 'room' });
@@ -25,7 +32,7 @@ test('bake rejects hostile and out of range fields', () => {
 });
 
 test('a recipe bake lights the room with lightmaps and reports its time and skipped parts', () => {
-  const scene = createAgentScene(closedRoom());
+  const scene = sharedBakedRoom();
   const bake = scene.inspect().bake;
   assert.equal(bake.reused, false);
   assert.ok(Number.isFinite(bake.seconds) && bake.seconds >= 0);
@@ -42,7 +49,7 @@ test('a recipe bake lights the room with lightmaps and reports its time and skip
 });
 
 test('the same recipe gives the same lightmap bytes', () => {
-  const first = createAgentScene(closedRoom());
+  const first = sharedBakedRoom();
   const second = createAgentScene(closedRoom());
   for (const name of ['floor', 'back', 'block']) {
     const firstBytes = lightmapBytes(first.parts.find(part => part.name === name));
@@ -81,14 +88,14 @@ test('moving a part, changing a light or changing the bake runs it again, and cl
 });
 
 test('a failed bake leaves the scene as it was', () => {
-  const scene = createAgentScene(closedRoom());
+  const scene = sharedBakedRoom();
   assert.throws(() => scene.apply([{ type: 'set-bake', bake: { samples: 5000 } }], { expectedRevision: 0 }));
   assert.equal(scene.revision, 0);
   assert.equal(scene.inspect().bake.samples, BAKE_PRESETS.draft.samples);
 });
 
 test('a bake names the local volumes it leaves out and a scene without volumes reports as before', () => {
-  const plain = createAgentScene(closedRoom()).inspect().bake;
+  const plain = sharedBakedRoom().inspect().bake;
   assert.equal(plain.skippedLocalVolumes, undefined);
   assert.equal(plain.warnings, undefined);
 
