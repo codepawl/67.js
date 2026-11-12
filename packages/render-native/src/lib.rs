@@ -14,7 +14,7 @@ use crate::host::film::{
     texel_accumulation_bytes, texel_workgroups,
 };
 use crate::host::session::{
-    DispatchPlan, prepare_cycles_scene, prepare_scene, run_cycles_lobe_probe, trace_cycles_samples, trace_samples, JobShape,
+    get_cached_device, DispatchPlan, prepare_cycles_scene, prepare_scene, run_cycles_lobe_probe, trace_cycles_samples, trace_samples, JobShape,
 };
 
 const KERNEL_SOURCE: &str = include_str!("kernel.wgsl");
