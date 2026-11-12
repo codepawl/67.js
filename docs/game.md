@@ -45,7 +45,7 @@ A scene recipe can carry a `game` section. It names the node the player controls
 | `input` | `keyboard` | `keyboard` (WASD move, arrows look, Space jump, Shift run), `gamepad` (adds the first pad) or `touch` (adds a left-half stick and tap to jump) |
 | `player.animation` | none | An [animation graph](animation-graph.md) for the player, see [Animation and NPCs](#animation-and-npcs) |
 | `npcs` | none | Up to 16 characters that walk a path through their own graph, see [Animation and NPCs](#animation-and-npcs) |
-| `physics` | `false` | Accepted. The web export refuses `true` until the physics engine can be bundled |
+| `physics` | `false` | `true` plays the recipe's `physics` section live, see [Physics](#physics) |
 | `ground` | 0 | Height of the walkable ground in metres |
 | `rules` | none | A [game rules](game-rules.md) document, checked when it is set |
 
@@ -55,7 +55,7 @@ A rules part named like a scene node is hidden and shown with it, which is how a
 
 `scene_export_web` writes one folder: `index.html`, `game.json` (the recipe) and `engine/` (the built 67js modules, found by following the imports from `build/game.js`). It runs from any static host with no server code, and the folder is bounded: the engine stays under 12 MiB, the recipe under 1 MiB, and the newest four builds are kept. Placed catalog assets (and the assets whose clips a character retargets) are copied to `assets/<id>.glb`, up to 64 MiB together; grown vegetation is refused with the fix. The page shows the variables and the verdict in a corner label and exposes the running game as `window.__game` (`rules.state`, `controller.state`, `scene`, `runtime`).
 
-`index.html?replay=name.json` plays a recording (`recordInput`, see [input](input.md#custom-and-scripted-input)) from the same folder instead of the keyboard. `scripts/smoke-game-web.mjs` builds a creature that collects 3 coins and reaches a goal through the MCP tools, exports it, and wins it from a replay in headless Chrome, with a head-bob animation graph that the page must play. `node scripts/smoke-game-web.mjs bin/67js-mcp.mjs drive` does the same for a car that passes 3 gates and reaches a finish line under a `chase` camera.  The `character` sample walks a placed, retargeted humanoid (idle and walk clips of another file) to a goal, and checks that the page loads `assets/<id>.glb` and the character's limbs move.
+`index.html?replay=name.json` plays a recording (`recordInput`, see [input](input.md#custom-and-scripted-input)) from the same folder instead of the keyboard. `scripts/smoke-game-web.mjs` builds a creature that collects 3 coins and reaches a goal through the MCP tools, exports it, and wins it from a replay in headless Chrome, with a head-bob animation graph that the page must play. `node scripts/smoke-game-web.mjs bin/67js-mcp.mjs puzzle` plays the [physics puzzle](#physics). `node scripts/smoke-game-web.mjs bin/67js-mcp.mjs drive` does the same for a car that passes 3 gates and reaches a finish line under a `chase` camera.  The `character` sample walks a placed, retargeted humanoid (idle and walk clips of another file) to a goal, and checks that the page loads `assets/<id>.glb` and the character's limbs move.
 
 ## From code
 
@@ -65,7 +65,18 @@ const game = await startGame(canvas, recipe, { replay, showStatus: true });
 game.dispose();
 ```
 
-`startGame` loads the scene modules the recipe needs, builds the scene and renderer, and runs input, controller, camera rig and rules as [runtime](runtime.md) systems. Each frame it moves the player node with `set-node`, so a large scene pays a scene update per frame. Not yet in the web build: live physics, sound and post effects.
+`startGame` loads the scene modules the recipe needs, builds the scene and renderer, and runs input, controller, camera rig and rules as [runtime](runtime.md) systems. Each frame it moves the player node with `set-node`, so a large scene pays a scene update per frame. Not yet in the web build: sound and post effects.
+
+## Physics
+
+`game.physics: true` plays the recipe's `physics` section (the `set-physics` bodies, with the limits of [physics](physics.md)) live. `startGame` loads `game-physics.js` and the Jolt engine only for such a recipe, so other games and exports do not grow. The engine steps in the fixed update of the runtime at 60 Hz, after the controller and before the rules, and each dynamic body's node follows it through `set-node`. The same recipe gives the same poses on every run in the same engine build; `window.__game.physics` is the [physics system](physics-runtime.md) (`getPose`, `stepCount`, `applyImpulse`, queries).
+
+- The player node can be a `kinematic` body (shape `capsule`, `box` or `ball`): the controller drives it, so the player pushes dynamic bodies and is never pushed back.
+- A rules part named like a dynamic body reports that body's position, so a zone, a tag and `enter` work on crates and balls.
+- Give every fixed body `shape: "box"` (or `ball`, `capsule`, `convex`): the default `trimesh` is not built. Joints, ragdolls, trimesh and compound shapes are refused with the field to change, and `physics.duration` is only the length of the recorded film.
+- The web export copies `jolt-physics.wasm.js` and its `.wasm` file to `engine/physics/` (about 3 MiB) and gives the page their URL, so Jolt fetches the wasm from beside the page. Nothing loads from another origin: a `physicsUrl` on another origin is refused. The `jolt-physics` package must be installed to export.
+
+The `puzzle` sample of `scripts/smoke-game-web.mjs` is two plank crates, two marble plates in brick pockets and an iron gate on a stone floor (pattern materials). The player walks into the first crate and pushes it onto its plate, crosses over and pushes the second; when both plates are pressed the gate part is hidden and the game is won. The smoke checks that the page loads only its own files, that the wasm comes from `engine/physics/`, that both crates moved, and that an export without physics carries no `engine/physics/` folder.
 
 ## Animation and NPCs
 

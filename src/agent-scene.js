@@ -1897,6 +1897,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       publishPose(state, stagePose(state, state.motionTime));
       return exported;
     },
+    /** Gives a scene created without placed assets the pool of decoded catalog assets, so a later edit can place the first one. */
+    provideAssets(pool) {
+      options = { ...options, assets: pool };
+    },
     apply(inputOperations, options = {}) {
       expected(options);
       if (!Array.isArray(inputOperations) || inputOperations.length === 0 || inputOperations.length > limits.maxOperations) {

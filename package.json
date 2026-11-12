@@ -56,13 +56,15 @@
     "docs/game.md",
     "docs/scene-query.md",
     "docs/user-passes.md",
+    "docs/addons.md",
     "docs/skeleton-pose.md",
     "docs/verification.md"
   ],
   "main": "./build/67.module.js",
   "module": "./build/67.module.js",
   "bin": {
-    "67js-mcp": "./bin/67js-mcp.mjs"
+    "67js-mcp": "./bin/67js-mcp.mjs",
+    "67js-addon-check": "./bin/67js-addon-check.mjs"
   },
   "engines": {
     "node": ">=20.19.0"
