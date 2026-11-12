@@ -847,6 +847,23 @@ uv run --no-project python bench/cycles-parity/summarize-denoised-comparison.py 
 uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-denoised-comparison-figure.py --rows <rows.json> --images <folder> --reference <reference.npy> --crop-x 300 --crop-y 255 --output docs/cook-denoised-comparison.jpg
 ```
 
+## Persistent in-process OIDN (#1025)
+
+The `oidnDenoise` tool pays for a process start, CUDA initialisation, the weights and three PFM files on every call. `createNativeOidnDenoiser` (render-native) and `createOidnDenoiser` (denoise package) keep one OIDN device, four buffers and the committed filter alive, and recommit only when the size or the set of guides changes. `trace-native.mjs --oidn-devices cuda,cuda-cli,cpu,cpu-cli` runs the in-process device (`cuda`) beside the tool (`cuda-cli`) on one trace; `node bench/oidn-cost/measure-oidn-cost.mjs --out <file>` writes the split below. Every number is measured on one Modal container with an NVIDIA A10 (driver 610.57) and a 24 thread Xeon, OIDN 2.5.1, quality high, colour plus albedo plus normal, seeded synthetic input, median of seven calls.
+
+| size | device | tool call s | of which process start to exit | in-process first call s (plus device creation) | in-process warm call s | warm: write / execute / read ms |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 960 x 540 | cuda | 0.345 | 0.320 | 0.015 (0.103) | 0.0072 | 1.3 / 3.5 / 2.2 |
+| 960 x 540 | cpu | 0.218 | 0.194 | 0.075 (0.010) | 0.048 | 1.8 / 43.5 / 2.8 |
+| 1920 x 1080 | cuda | 0.787 | 0.671 | 0.033 (0.090) | 0.029 | 7.2 / 13.6 / 7.7 |
+| 1920 x 1080 | cpu | 0.732 | 0.624 | 0.223 (0.002) | 0.178 | 6.5 / 162.5 / 8.3 |
+
+The tool call also spends 0.010 / 0.007 s encoding and writing PFM files and 0.007 s reading one back at 960 x 540 (0.034 / 0.054 / 0.023 s at 1920 x 1080). A bare `oidnDenoise --version` takes 0.007 s, and `--verbose 2` shows 0.110 s for the CUDA device, 0.005 s for the filter commit and 0.007 s for the filter at 960 x 540, so about 0.2 s of the 0.32 s process is CUDA runtime start and teardown that the verbose lines do not count. The three images cost 0.007 s (960 x 540) and 0.024 s (1920 x 1080) to copy in JS, which is the floor left by not sharing memory between the Vulkan tracer and CUDA.
+
+Output: the in-process image equals the tool's image byte for byte (maximum absolute difference 0) on all four rows, the first call equals a warm call, and so does the call after a size change and back. Resizing recommits the filter; warm calls never do.
+
+Equal total time on `lit-interior` and `many-lights-500` (same container, 3 rounds, seed 3, medians): the in-process CUDA denoise costs 0.008 s against 0.34 to 0.38 s for the tool, so the total of Cook + OIDN falls from 0.56 to 0.23 s at 16 spp on `lit-interior`, with the same relMSE (3.09e-4) as the tool path. The in-process CPU device costs 0.047 s against 0.22 s.
+
 ## Depth and grey-diffuse comparison (#896, slice C1a)
 
 The Done-when item of #896 for the Classroom scene asks for two checks against Cycles with every material overridden to grey diffuse: the image-match gates and a depth pass that agrees on 99.9 percent of pixels. This slice adds the harness for both and proves it on two existing scenes; the Classroom scene itself is a later slice. Only `bench/`, `tests/` and this guide change.
@@ -886,6 +903,23 @@ Cycles comparison (`dof-depth` scene in `bench/reference/scenes.js`: objects 2 m
 Of 64 tiles, 19 (disk) and 20 (hexagon) are too dark to count. For the disk the relMSE equals Cycles' own seed 1 against seed 2 (3.4e-5): Cook sits at Cycles' noise floor. At 256 spp Cook scores 3.0e-4 and Cycles 2.6e-4 against the 4096 reference. The blur is large enough to tell the lens from a pinhole: Cook without a lens against the Cycles disk image scores 7.8e-3 (230 times worse), with 35 of 45 tiles within 5 percent and a tile ratio as low as 0.44. The hexagon score of 3.8e-4 came from a sign difference in the aperture rotation: the kernel turns the polygon the other way from Blender, so Cook at `-15` matched Cycles at `15` (whole-image relMSE 3.3e-5, lamp regions 0.004 against 0.055 for Cook at 15 and 0.03 for Cook at 0 or 30). `createCamera` now flips the sign, so `apertureRotation: 15` means the same as Blender's 15 degrees; the render with the flipped sign was not repeated after that change. Pictures: `artifacts/cook-parity/dof-896-comparison-rtx4090.png` (rows disk and hexagon; Cook and Cycles at 256 spp, Cook and Cycles at 4096, difference times 4) and `dof-896-hexagon-bokeh-crops.png`.
 
 Not covered: anamorphic bokeh (slice D2), lens shift and orthographic cameras (`createCamera` refuses both), the depth pass of a lens camera (not compared), and a re-render of the hexagon after the rotation sign flip.
+
+## Progressive film and scene updates (#896, slice S2)
+
+A native session builds one image over several `render` calls (`accumulate: true`, `targetSamples`, `reset()`, `resolve()`) and applies new material values, lights, selection weights and instance transforms with `update()`. The kernel adds one sample at a time to the film in sample order and the Sobol-Burley sequence is indexed by the whole image's target count, so call boundaries cannot change a sum. The TLAS is rebuilt over the kept BLAS on a transform change (wgpu 30.0.1 has no refit); a change of counts, triangles or mesh topology is refused with a message that says to create a new session.
+
+Measured on one NVIDIA A10 (480 x 270, 32 samples, `bench/cycles-parity/session-progressive.mjs`):
+
+| Check | `lit-interior` | `many-lights-500` |
+| --- | --- | --- |
+| Split calls (16+16, 8+15+9; both samplers; path regeneration on and off) equal one call, byte for byte | 8 of 8 | 8 of 8 |
+| `update()` then `render` equals a fresh one-shot of the final input, byte for byte (materials; materials and transforms; back to start) | 3 of 3 | 3 of 3 |
+| New session, cold pipeline | 6721 ms | 6899 ms |
+| New session, pipeline already compiled in the process | 65 ms | 44 ms |
+| Update plus render (4 samples), materials only | 17.5 ms | 43.1 ms |
+| Update plus render, transforms (TLAS rebuilt) | 17.7 ms | 44.9 ms |
+
+One-shot `traceNative` images (both kernels) and S1 session frames hash the same as origin/main built in the same container.
 
 ## Reproducible Commands
 

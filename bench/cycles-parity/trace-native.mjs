@@ -11,7 +11,7 @@ import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 import { denoiseRadiance } from '../../src/path-tracer-denoise.js';
 import { applyGreyDiffuseOverride } from './grey-diffuse-override.mjs';
-import { denoiseWithOidn } from '../../packages/denoise-oidn/index.mjs';
+import { createOidnDenoiser, denoiseWithOidn } from '../../packages/denoise-oidn/index.mjs';
 
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
 const SUPPORTED_FILTERS = new Set(['box', 'gaussian', 'blackman-harris']);
@@ -89,8 +89,8 @@ function parseOidnDevicesOption(argumentList) {
   const requested = String(readFlagValue(argumentList, '--oidn-devices', ''));
   const devices = requested === '' ? [] : requested.split(',');
   for (const device of devices) {
-    if (!['cpu', 'cuda', 'default'].includes(device)) {
-      throw new RangeError(`Option --oidn-devices takes a comma list of cpu, cuda or default, got "${device}".`);
+    if (!['cpu', 'cuda', 'default', 'cpu-cli', 'cuda-cli', 'default-cli'].includes(device)) {
+      throw new RangeError(`Option --oidn-devices takes a comma list of cpu, cuda or default, each optionally with a -cli suffix to force the oidnDenoise tool, got "${device}".`);
     }
   }
   return devices;
@@ -114,7 +114,7 @@ function parseLightSamplingOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda] [--grey-diffuse] [--write-depth] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda,cpu-cli,cuda-cli] [--grey-diffuse] [--write-depth] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -237,33 +237,65 @@ function applyWavelet(traced, linearRgb, width, height) {
   return { image: result, seconds, replacedPixels };
 }
 
+function median(values) {
+  const sorted = [...values].sort((first, second) => first - second);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+const WARM_OIDN_CALLS = 3;
+
 /**
- * Comparison runs only: runs the OIDN addon (packages/denoise-oidn, the official oidnDenoise tool through PFM files) on the
- * traced colour with the kernel's first-hit albedo and normal guides, once per device, and writes each result to
- * <prefix>.oidn-<device>.npy. The seconds are a second, warm call as the addon is built (PFM write, tool start, weights
- * load, filter, PFM read); the first call is reported apart.
+ * Comparison runs only: runs OIDN on the traced colour with the kernel's first-hit albedo and normal guides, once per
+ * entry of --oidn-devices, and writes each result to <prefix>.oidn-<entry>.npy. A plain device name ("cuda") uses the
+ * persistent in-process device of the render-native addon when the OIDN library is installed, and the oidnDenoise tool
+ * otherwise; "cuda-cli" forces the tool (PFM files and a process per call). `seconds` is the median of three warm calls;
+ * `firstCallSeconds` is everything the first image costs, including device creation for the in-process device.
  */
 async function runOidnComparison(traced, linearRgb, options, outputPrefix) {
   const albedo = traced.albedo;
   const normal = new Float32Array(traced.normal);
   normalizeNormals(normal);
   const results = {};
-  for (const device of options.oidnDevices) {
-    const callOidn = () => denoiseWithOidn({ width: options.width, height: options.height, color: linearRgb, albedo, normal, device });
+  for (const entry of options.oidnDevices) {
+    const forceCli = entry.endsWith('-cli');
+    const device = forceCli ? entry.slice(0, -'-cli'.length) : entry;
+    const frame = { width: options.width, height: options.height, color: linearRgb, albedo, normal };
+    let persistent = null;
     try {
       const firstStarted = performance.now();
+      let mode = 'cli';
+      if (!forceCli) {
+        try {
+          persistent = createOidnDenoiser({ createNative: renderNative.createNativeOidnDenoiser, device });
+          mode = 'in-process';
+        } catch (error) {
+          results[entry] = { fallbackReason: String(error.message).slice(0, 300) };
+        }
+      }
+      const callOidn = persistent ? () => persistent.denoise(frame) : () => denoiseWithOidn({ ...frame, device });
       await callOidn();
       const firstSeconds = (performance.now() - firstStarted) / 1000;
-      const started = performance.now();
-      const denoised = await callOidn();
-      results[device] = {
-        seconds: Number(((performance.now() - started) / 1000).toFixed(6)),
+      const warmSeconds = [];
+      let denoised;
+      for (let call = 0; call < WARM_OIDN_CALLS; call++) {
+        const started = performance.now();
+        denoised = await callOidn();
+        warmSeconds.push((performance.now() - started) / 1000);
+      }
+      results[entry] = {
+        ...results[entry],
+        mode,
+        seconds: Number(median(warmSeconds).toFixed(6)),
         firstCallSeconds: Number(firstSeconds.toFixed(6)),
+        warmCallSeconds: warmSeconds.map(seconds => Number(seconds.toFixed(6))),
+        ...(persistent ? { deviceSeconds: Number(persistent.deviceSeconds.toFixed(6)), warmPhases: persistent.lastTimings } : {}),
       };
-      await writeFloat32Npy(`${outputPrefix}.oidn-${device}.npy`, denoised, [options.height, options.width, 3]);
+      await writeFloat32Npy(`${outputPrefix}.oidn-${entry}.npy`, denoised, [options.height, options.width, 3]);
     } catch (error) {
       // One failing device (for example CUDA missing in a container) must not lose the other variants of this trace.
-      results[device] = { error: String(error.message).slice(0, 600) };
+      results[entry] = { error: String(error.message).slice(0, 600) };
+    } finally {
+      persistent?.close();
     }
   }
   return results;
