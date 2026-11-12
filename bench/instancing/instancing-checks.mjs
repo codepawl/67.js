@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { buildNativeInputV2, findNativeAddon, traceNative } from '../../packages/render-native/index.mjs';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
+import { buildNativeInput, buildNativeTexelInput } from '../../packages/render-native/pack-input.mjs';
 import { buildCopyScene } from './copies-scene.mjs';
 import { meanRatioRgb, relativeMeanSquaredError, tileMeanRatios } from './image-compare.mjs';
 import { createCamera } from '../../src/path-tracer.js';
@@ -67,6 +67,8 @@ function identityScenes() {
     };
     const entry = { sceneWithoutSharing: unshared.instances === undefined };
     for (const [name, input] of Object.entries(inputs)) entry[name] = hashTables(input);
+    // The light bake shares the v1 material tables.
+    entry.texelV1 = hashTables(buildNativeTexelInput(flattened, { texelCount: 64, samples: 4, bounces: 3, seed: 1, fireflyClamp: 20 }, pack));
     if (!packOnly && findNativeAddon()) {
       entry.trace = {
         legacyFlattenedV1: traceHash(inputs.flattenedV1, 'legacy', width, height),

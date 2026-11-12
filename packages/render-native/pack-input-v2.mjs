@@ -2097,8 +2097,10 @@ function shareEmissiveOffsets(meshSlot, emittedLocalIndices, instanceIndex) {
   }
 }
 
-function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
-  const materialRecords = rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
+function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, reducedMaterials) {
+  const materialRecords = reducedMaterials
+    ? reducedMaterials.materialRecords
+    : rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
   materialRecords.forEach((rec, index) => materialsBuffer.set(rec.bytes, index * STRUCT_STRIDES_V2.material));
 
@@ -2377,10 +2379,19 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   }
   validatePackOptions(options, 'buildNativeInputV2');
 
-  const textureCollector = createTextureCollector();
   const explicitInstances = options.instances ?? scene.instances;
+  const reducedMaterials = options.reducedMaterials;
+  if (reducedMaterials !== undefined) {
+    if (!explicitInstances) {
+      throw new TypeError('buildNativeInputV2 option `reducedMaterials` belongs to an instanced scene: pass a scene with `instances` (buildTraceScene with { instancing: true }), or leave the option out.');
+    }
+    if (!Array.isArray(reducedMaterials.materialRecords) || !reducedMaterials.textureCollector) {
+      throw new TypeError('buildNativeInputV2 option `reducedMaterials` must be the result of reduceV1MaterialTable (materialRecords and textureCollector).');
+    }
+  }
+  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector();
   const packedGeometry = explicitInstances
-    ? packInstancedGeometry(explicitInstances, options.materials ?? scene.materials ?? [{}], textureCollector)
+    ? packInstancedGeometry(explicitInstances, options.materials ?? scene.materials ?? [{}], textureCollector, reducedMaterials)
     : packFlattenedTraceScene(scene, options.parts ?? scene.parts, textureCollector);
 
   const packedTextures = textureCollector.finish();
@@ -2448,46 +2459,14 @@ function extractAtlasSubtexture(atlasWords, atlasWidth, rectX, rectY, width, hei
 }
 
 /**
- * Upgrades a legacy v1 `buildNativeInput` payload to `FORMAT-v2` (`schemaVersion: 2`) so existing callers passing v1
- * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites.
+ * The material records of a v1 material table, the reduction every v1 native job goes through: only the fields the v1 tables
+ * carry survive (base colour, metallic, roughness, emission, clearcoat, transmission, ior, normal scale, mask cutoff,
+ * subsurface and the four atlas textures). `materials` holds the table with the subsurface table after it, `atlas` the atlas
+ * words and `atlasWidth` their row width.
  */
-export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
-  if (v1Input?.schemaVersion === FORMAT_V2_VERSION) {
-    return v1Input;
-  }
-  if (!v1Input || !(v1Input.parameters instanceof Uint8Array) || v1Input.parameters.byteLength !== 256) {
-    throw new TypeError('upgradeNativeInputV1ToV2 requires a v1 NativeTraceInput with a 256-byte parameters block, or a FORMAT-v2 input.');
-  }
-  validatePackOptions(options, 'upgradeNativeInputV1ToV2');
-
-  const paramBuffer = v1Input.parameters.buffer;
-  const paramByteOffset = v1Input.parameters.byteOffset;
-  const paramF32 = new Float32Array(paramBuffer, paramByteOffset, 64);
-  const paramI32 = new Int32Array(paramBuffer, paramByteOffset, 64);
-  const paramU32 = new Uint32Array(paramBuffer, paramByteOffset, 64);
-
-  const triangleCount = Number(v1Input.triangleCount ?? 0);
-  const triData = v1Input.triangles;
-  if (!(triangleCount >= 0) || !triData || triData.length < triangleCount * 36) {
-    throw new RangeError('v1 NativeTraceInput.triangles must hold at least triangleCount * 36 floats.');
-  }
-
-  const subsurfaceVec4Offset = paramU32[60];
-  const materialVec4Limit = subsurfaceVec4Offset > 0 ? subsurfaceVec4Offset : Math.floor((v1Input.materials?.length ?? 0) / 4);
-  const maxPossibleMaterials = Math.max(1, Math.floor(materialVec4Limit / 10));
-  let highestMaterialIndex = 0;
-  for (let slot = 0; slot < triangleCount; slot++) {
-    const matIdx = Math.max(0, Math.round(triData[slot * 36 + 3]));
-    if (matIdx > highestMaterialIndex) {
-      highestMaterialIndex = matIdx;
-    }
-  }
-  const materialCount = Math.min(maxPossibleMaterials, highestMaterialIndex + 1);
-
+export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount }) {
   const textureCollector = createTextureCollector();
   const atlasCache = new Map();
-  const atlasWidth = paramU32[45] || 1;
-  const atlasWords = v1Input.atlas;
 
   function registerAtlasRect(rectX, rectY, width, height, flagsValue) {
     if (!(width > 0 && height > 0) || !atlasWords) {
@@ -2510,7 +2489,6 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     return added;
   }
 
-  const matSource = v1Input.materials;
   const materialRecords = [];
   const materialLightMasks = [];
   const materialShadowOnly = [];
@@ -2576,6 +2554,53 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     packedMat.isEmissive = luminance(packedMat.meanEmissiveRadiance) > 0;
     materialRecords.push(packedMat);
   }
+  return { materialRecords, materialLightMasks, materialShadowOnly, textureCollector };
+}
+
+/**
+ * Upgrades a legacy v1 `buildNativeInput` payload to `FORMAT-v2` (`schemaVersion: 2`) so existing callers passing v1
+ * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites.
+ */
+export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
+  if (v1Input?.schemaVersion === FORMAT_V2_VERSION) {
+    return v1Input;
+  }
+  if (!v1Input || !(v1Input.parameters instanceof Uint8Array) || v1Input.parameters.byteLength !== 256) {
+    throw new TypeError('upgradeNativeInputV1ToV2 requires a v1 NativeTraceInput with a 256-byte parameters block, or a FORMAT-v2 input.');
+  }
+  validatePackOptions(options, 'upgradeNativeInputV1ToV2');
+
+  const paramBuffer = v1Input.parameters.buffer;
+  const paramByteOffset = v1Input.parameters.byteOffset;
+  const paramF32 = new Float32Array(paramBuffer, paramByteOffset, 64);
+  const paramI32 = new Int32Array(paramBuffer, paramByteOffset, 64);
+  const paramU32 = new Uint32Array(paramBuffer, paramByteOffset, 64);
+
+  const triangleCount = Number(v1Input.triangleCount ?? 0);
+  const triData = v1Input.triangles;
+  if (!(triangleCount >= 0) || !triData || triData.length < triangleCount * 36) {
+    throw new RangeError('v1 NativeTraceInput.triangles must hold at least triangleCount * 36 floats.');
+  }
+
+  const subsurfaceVec4Offset = paramU32[60];
+  const materialVec4Limit = subsurfaceVec4Offset > 0 ? subsurfaceVec4Offset : Math.floor((v1Input.materials?.length ?? 0) / 4);
+  const maxPossibleMaterials = Math.max(1, Math.floor(materialVec4Limit / 10));
+  let highestMaterialIndex = 0;
+  for (let slot = 0; slot < triangleCount; slot++) {
+    const matIdx = Math.max(0, Math.round(triData[slot * 36 + 3]));
+    if (matIdx > highestMaterialIndex) {
+      highestMaterialIndex = matIdx;
+    }
+  }
+  const materialCount = Math.min(maxPossibleMaterials, highestMaterialIndex + 1);
+
+  const { materialRecords, materialLightMasks, materialShadowOnly, textureCollector } = reduceV1MaterialTable({
+    materials: v1Input.materials,
+    atlas: v1Input.atlas,
+    atlasWidth: paramU32[45] || 1,
+    subsurfaceVec4Offset,
+    materialCount,
+  });
 
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
   materialRecords.forEach((rec, idx) => materialsBuffer.set(rec.bytes, idx * STRUCT_STRIDES_V2.material));

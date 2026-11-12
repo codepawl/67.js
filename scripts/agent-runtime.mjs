@@ -564,16 +564,19 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           let traced;
           let backendNote = trace.note;
           if (trace.backend === 'native') {
+            let exportedScene = false;
             try {
               const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold, instancing: chooseNativeInstancing() } });
+              exportedScene = true;
               traced = await traceFrameNative({ tracer: trace.tracer, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
                 seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
                 maxSeconds: tracerOptions.maxSeconds, noiseThreshold: tracerOptions.noiseThreshold });
             } catch (error) {
               // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
               if (isNativeTimeLimitError(error)) throw error;
-              nativeTracerLocator.markUnusable(error.message);
-              backendNote = (await nativeTracerLocator.find()).reason;
+              // Only a tracer or adapter failure makes the tracer unusable; a scene that failed to export says so for this job alone.
+              if (exportedScene) nativeTracerLocator.markUnusable(error.message);
+              backendNote = exportedScene ? (await nativeTracerLocator.find()).reason : `renderer.backend "native" could not export the scene (${error.message}).`;
               traceOptions.backend = backend === 'cpu' ? 'cpu' : 'gpu';
               choice = await chooseDenoiser(settings.renderer.denoise);
               traceOptions.denoise = choice.denoise;
