@@ -29,6 +29,47 @@ export function encodeNativeTables(input) {
   return tables;
 }
 
+/**
+ * A FORMAT-v2 input (an instanced scene) as the job export: the tables as base64, the array type of each table and the record
+ * counts, which is all the job runner needs to rebuild the input for the "cycles" kernel.
+ */
+export function encodeNativeInputV2(input) {
+  const counts = {};
+  const types = {};
+  for (const [name, value] of Object.entries(input)) {
+    if (ArrayBuffer.isView(value)) types[name] = value.constructor.name;
+    else if (typeof value === 'number') counts[name] = value;
+  }
+  return { schemaVersion: input.schemaVersion, tables: encodeNativeTables(input), types, counts };
+}
+
+/**
+ * The scene of a native render job as the tables the job runner traces. With `instancing`, parts that share a geometry are
+ * exported as FORMAT-v2 instances; a scene the instanced packer refuses (copies of an emissive mesh that emit different
+ * triangles, say) is exported flattened, as a job without shared geometry is, and says why in `instancing` and
+ * `instancingReason`. `modules` holds buildTraceScene, refuseLocalVolumes, buildNativeInput, buildJobNativeInput and `pack`
+ * (src/path-tracer-gpu-pack.js), which the page loads on demand.
+ */
+export function exportNativeSceneTables({ parts, environment, camera, options, instancing, modules }) {
+  const { buildTraceScene, refuseLocalVolumes, buildNativeInput, buildJobNativeInput, pack } = modules;
+  let traceScene = buildTraceScene(parts, environment, { instancing: instancing === true });
+  refuseLocalVolumes(traceScene, 'the native path tracer');
+  let flattenedBecause;
+  if (traceScene.instances) {
+    try {
+      const input = buildJobNativeInput(traceScene, camera, options, pack);
+      return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount };
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+      flattenedBecause = error.message;
+      traceScene = buildTraceScene(parts, environment);
+    }
+  }
+  const input = buildNativeInput(traceScene, camera, options, pack);
+  return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3,
+    ...(flattenedBecause === undefined ? {} : { instancing: 'flattened', instancingReason: flattenedBecause }) };
+}
+
 function floatsFromBase64(data) {
   const bytes = bytesFromBase64(data);
   return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / Float32Array.BYTES_PER_ELEMENT);

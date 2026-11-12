@@ -1053,3 +1053,19 @@ Both pairs are identical in Cook and in Cycles: left Cook, right Cycles, 4096 sp
 With the fix, on one Modal container (NVIDIA A10) `[measured]`: the seven scenes at 4096 spp (box filter) pass 7 of 7 (mean ratios 1.0000 `spot-area`, 1.0008 `light-linking`, 0.9993 `metal`, 0.9979 `glass`, 0.9996 `outdoor-hdri`, 1.0034 `lit-interior`, 1.0009 `many-lights-500`); `area-shapes` (0.9997) and `transparent-shadow` (1.0006) still pass 64 of 64 tiles with the numbers of the table above; `cargo test` 32 passed, 0 failed; the native node tests 84 passed, 0 failed, 1 skipped (it skipped before); `check-lobes.mjs` and `verify-lobes.py` (lobe probes and furnace scenes) exit 0. Against the kernel before the fix, the new test fails all three cases (the limit 0 mean was 3.3 percent off in red, the backdrop at limit 2 0.99 percent).
 
 `tests/native-transparent-bounces.test.js` pins the behaviour on a GPU (it skips without the addon): the image mean and the sky behind one layer at limits 0 and 1, and the image mean and the backdrop behind one layer at limit 2, against the Cycles means above with a tolerance of 0.5 percent.
+
+## Instancing equivalence (#896, slice I2)
+
+Instanced against flattened on the `cycles` kernel, `bench/instancing/instancing-checks.mjs equivalence`: 200 copies of a 320-triangle icosphere on a grid, 128 x 96, 1024 samples, seed 1, NVIDIA GeForce RTX 4090. The flattened scene holds 64,000 triangles (64,200 with the degenerate one) and the instanced one 320 (321). The measures are in `bench/instancing/image-compare.mjs`: mean ratio of RGB, relative MSE with epsilon 0.01, and 8 x 8 tiles whose mean is within 5 percent (tiles too dark to compare are left out).
+
+| Variant | Mean ratio RGB | relMSE | Tiles within 5 percent |
+|---|---|---|---|
+| translate | 1.0000, 1.0000, 1.0000 | 8.1e-8 | 20 of 20 |
+| rotscale (rotated, stretched) | 1.0032, 1.0038, 1.0045 | 4.9e-5 | 20 of 20 |
+| emissive (every fourth copy emissive by its own material) | 0.9997, 0.9998, 1.0000 | 2.0e-5 | 20 of 20 |
+| emissive-rotscale | 1.0010, 1.0006, 1.0017 | 7.2e-5 | 20 of 20 |
+| emissive-degenerate (first triangle has no area) | 0.9997, 0.9998, 1.0000 | 2.0e-5 | 20 of 20 |
+
+The test (`tests/native-instancing-equivalence.test.js`) asks for a mean ratio and every tile ratio inside 0.98 to 1.02 and a relMSE under 5e-4, which is about the seed-to-seed noise of the flattened scene. The images are not bitwise equal, because the instanced kernel transforms rays into object space and the flattened scene stores world-space triangles. Mirrored copies are not in the table: the flattened path winds mirrored parts the wrong way until #1026, so that comparison waits for it.
+
+Scenes without shared geometry did not change. The packed tables (v1 for both kernels, v2 flattened, v2 with `instancing: true` but no sharing, and an instanced scene) and the traced pixels of the `legacy` and `cycles` kernels at 48 x 32 and 16 samples have the same SHA-256 on `origin/main` and on this branch, with both addons built in the same run.

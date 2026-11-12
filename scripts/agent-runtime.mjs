@@ -16,7 +16,7 @@ import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
 import { createNativeSequence } from './agent-native-sequence.mjs';
-import { chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
+import { chooseNativeInstancing, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
 import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
@@ -567,8 +567,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           let traced;
           let backendNote = trace.note;
           if (trace.backend === 'native') {
+            let exportedScene = false;
             try {
-              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold } });
+              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold, instancing: chooseNativeInstancing() } });
+              exportedScene = true;
               if (settings.frameCount > 1 && process.env.JS67_NATIVE_SESSIONS !== 'off') nativeSequence ??= createNativeSequence({ tracer: trace.tracer });
               traced = await traceFrameNative({ tracer: trace.tracer, sequence: nativeSequence, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
                 seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
@@ -577,8 +579,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
               // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
               if (isNativeTimeLimitError(error)) throw error;
               nativeSequence?.close();
-              nativeTracerLocator.markUnusable(error.message);
-              backendNote = (await nativeTracerLocator.find()).reason;
+              nativeSequence = undefined;
+              // Only a tracer or adapter failure makes the tracer unusable; a scene that failed to export says so for this job alone.
+              if (exportedScene) nativeTracerLocator.markUnusable(error.message);
+              backendNote = exportedScene ? (await nativeTracerLocator.find()).reason : `renderer.backend "native" could not export the scene (${error.message}).`;
               traceOptions.backend = backend === 'cpu' ? 'cpu' : 'gpu';
               choice = await chooseDenoiser(settings.renderer.denoise);
               traceOptions.denoise = choice.denoise;

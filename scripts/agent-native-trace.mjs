@@ -67,7 +67,29 @@ export async function chooseTraceBackend({ requested, runtimeBackend, locator })
   return { backend: fallback, note: `${found.reason} The ${fallback} backend ran instead.` };
 }
 
+const V2_TABLE_TYPES = { Uint8Array, Uint32Array, Int32Array, Float32Array };
+
+// The FORMAT-v2 input of an instanced scene: the page names each table's array type and sends the record counts.
+function decodeTablesV2(exported) {
+  const input = { schemaVersion: exported.schemaVersion, ...exported.counts };
+  for (const [name, base64] of Object.entries(exported.tables)) {
+    const View = V2_TABLE_TYPES[exported.types?.[name]];
+    if (!View) throw new TypeError(`The exported native scene table "${name}" has an unknown array type ${JSON.stringify(exported.types?.[name])}.`);
+    const bytes = Buffer.from(base64, 'base64');
+    const copy = new Uint8Array(bytes.length);
+    copy.set(bytes);
+    input[name] = new View(copy.buffer, 0, copy.length / View.BYTES_PER_ELEMENT);
+  }
+  return input;
+}
+
+// The bytes of every table the tracer is handed, which is what it uploads to the card (before alignment).
+function tableBytes(tables) {
+  return Object.values(tables).reduce((total, value) => total + (ArrayBuffer.isView(value) ? value.byteLength : 0), 0);
+}
+
 function decodeTables(exported) {
+  if (exported.schemaVersion !== undefined) return decodeTablesV2(exported);
   const input = { triangleCount: exported.triangleCount };
   for (const name of TABLE_NAMES) {
     const bytes = Buffer.from(exported.tables[name], 'base64');
@@ -105,6 +127,14 @@ function withoutAlpha(rgba, pixelCount) {
 export function chooseNativeKernel(environment = process.env) {
   const requested = environment.JS67_NATIVE_KERNEL;
   return requested === undefined || requested === '' ? 'cycles' : requested;
+}
+
+/**
+ * Whether a job keeps repeated geometry as instances: on with the "cycles" kernel, off with the legacy kernel and when
+ * JS67_NATIVE_INSTANCING=off asks for flattened triangles (to compare the two, or to rule instancing out of a bug).
+ */
+export function chooseNativeInstancing(environment = process.env) {
+  return chooseNativeKernel(environment) === 'cycles' && environment.JS67_NATIVE_INSTANCING !== 'off';
 }
 
 /**
@@ -166,10 +196,11 @@ export async function denoiseFrameWithOidn({ tracer, denoiser, width, height, co
 export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel(), sequence }) {
   const started = performance.now();
   const filtersInTrace = denoise === 'atrous' && kernel === 'cycles';
+  const tables = decodeTables(exported);
   const traceOptions = { width, height, samples, maxSeconds, kernel, noiseThreshold, ...(filtersInTrace ? { denoise: 'atrous' } : {}) };
   const { traced, route } = sequence && kernel === 'cycles'
-    ? sequence.trace(decodeTables(exported), traceOptions)
-    : { traced: tracer.traceNative(decodeTables(exported), traceOptions) };
+    ? sequence.trace(tables, traceOptions)
+    : { traced: tracer.traceNative(tables, traceOptions) };
   const tracedSeconds = (performance.now() - started) / 1000;
   const pixelCount = width * height;
   const features = { color: withoutAlpha(traced.rgba, pixelCount), albedo: traced.albedo, normal: traced.normal,
@@ -178,7 +209,8 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const report = { width, height, samples, bounces, seed, denoised: false, denoiser: 'none', threads: 1, backend: 'native',
     gpu: traced.adapter, nativeBackend: traced.backend, nativeFeatures: traced.features, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
     uploadSeconds: traced.uploadSeconds, accelerationBuildSeconds: traced.accelerationBuildSeconds,
-    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, tracedSeconds, ignored: exported.ignored,
+    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, inputBytes: tableBytes(tables), ...(exported.instances === undefined ? {} : { instances: exported.instances }),
+    ...(exported.instancing === undefined ? {} : { instancing: exported.instancing, instancingReason: exported.instancingReason }), tracedSeconds, ignored: exported.ignored,
     ...(route ? { nativeSession: route } : {}) };
   let linear = features.color;
   const denoiseStarted = performance.now();
