@@ -297,3 +297,10 @@ test('graph errors name the valid options, and scene_capabilities lists the node
     assert.ok(documented.includes(operator), `${operator} is documented in scene_capabilities`);
   }
 });
+
+test('scene_capabilities says fresnel exists only as an emission factor and lists what is missing', () => {
+  const coordinates = AGENT_SCENE_CAPABILITIES.materialGraph.nodes.coordinates;
+  assert.match(coordinates, /In graphs: fresnel, only as an emission factor/);
+  assert.match(coordinates, /Not in graphs: vertexGroup, AO, bevel, curvature/);
+  assert.doesNotMatch(coordinates, /Not in graphs yet: AO, bevel, curvature, fresnel/);
+});
