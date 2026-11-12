@@ -579,17 +579,36 @@ def configure_cycles_parity(scene, options):
     scene.cycles.caustics_refractive = True
     bounces = options["bounces"]
     scene.cycles.max_bounces = bounces
-    for property_assignment in cycles_property_assignments:
-        property_name, property_value = property_assignment.split("=", 1)
-        current_value = getattr(scene.cycles, property_name)
-        setattr(scene.cycles, property_name, type(current_value)(json.loads(property_value)))
     scene.cycles.diffuse_bounces = bounces
     scene.cycles.glossy_bounces = bounces
     scene.cycles.transmission_bounces = bounces
     scene.cycles.volume_bounces = bounces
     transparent_bounces = options["transparent_bounces"]
     scene.cycles.transparent_max_bounces = bounces if transparent_bounces is None else transparent_bounces
+    for property_assignment in cycles_property_assignments:
+        apply_cycles_property(scene, property_assignment)
     return used_devices
+
+
+# One --cycles-property name=value, applied after every setting above so that the override is what renders.
+def apply_cycles_property(scene, property_assignment):
+    if "=" not in property_assignment:
+        raise ValueError(f"--cycles-property takes name=value, got {property_assignment!r}.")
+    property_name, property_text = property_assignment.split("=", 1)
+    if not hasattr(scene.cycles, property_name):
+        raise ValueError(f"--cycles-property names a scene.cycles property, and {property_name!r} is not one.")
+    current_value = getattr(scene.cycles, property_name)
+    try:
+        property_value = json.loads(property_text)
+    except json.JSONDecodeError:
+        raise ValueError(f"--cycles-property {property_name} takes a JSON value such as 0, 0.5, true or \"NAME\", got {property_text!r}.")
+    if isinstance(current_value, bool) != isinstance(property_value, bool):
+        raise ValueError(f"--cycles-property {property_name} is {'a boolean' if isinstance(current_value, bool) else 'not a boolean'}, got {property_text!r}.")
+    if isinstance(current_value, int) and not isinstance(property_value, int):
+        raise ValueError(f"--cycles-property {property_name} is a whole number, got {property_text!r}.")
+    if isinstance(current_value, str) != isinstance(property_value, str):
+        raise ValueError(f"--cycles-property {property_name} is {'a name in quotes' if isinstance(current_value, str) else 'a number'}, got {property_text!r}.")
+    setattr(scene.cycles, property_name, type(current_value)(property_value))
 
 
 def parse_megabytes_from_stats(stats_text):
@@ -748,7 +767,13 @@ def main():
     global light_mis_enabled
     light_mis_enabled = options["light_mis"]
     global cycles_property_assignments
-    cycles_property_assignments = [sys.argv[index + 1] for index, token in enumerate(sys.argv) if token == "--cycles-property"]
+    cycles_property_assignments = []
+    for index, token in enumerate(sys.argv):
+        if token != "--cycles-property":
+            continue
+        if index + 1 >= len(sys.argv):
+            raise ValueError("--cycles-property takes name=value after it.")
+        cycles_property_assignments.append(sys.argv[index + 1])
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
     build_scene_lights(scene, description["environment"])
