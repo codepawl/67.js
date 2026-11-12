@@ -2,7 +2,7 @@
 # Are the pictures of the existing scenes unchanged by the mip level support? (#896)
 #   bash bench/cycles-parity/texture-mips-identity.sh <baselineCheckout> <outputDirectory>
 #
-# Traces five scenes on both kernels with this checkout and with a checkout of the commit this branch was cut from, each with its
+# Traces six scenes on both kernels with this checkout and with a checkout of the commit this branch was cut from, each with its
 # own built addon, and compares the SHA-256 of the float pictures. Mip levels are off in all of them (the default). Prints one
 # line per picture, then "identical" or "DIFFERENT" and exits 1 for a difference. Run it on a machine with a GPU.
 set -uo pipefail
@@ -17,13 +17,14 @@ mkdir -p "$scenes_directory"
 for reference_scene in lit-interior glass brick-graph; do
   (cd "$candidate_checkout" && node bench/cycles-parity/export-scene.mjs "$output_directory" --scene "$reference_scene" > /dev/null) || exit 2
 done
+(cd "$candidate_checkout" && node bench/cycles-parity/make-many-lights-scene.mjs "$scenes_directory/lit-interior.json" "$scenes_directory/many-lights-500.json" --count 500 --seed 7 > /dev/null) || exit 2
 
 picture_hashes() {
   local checkout="$1"
   local label="$2"
   local scene
   local kernel
-  for scene in lit-interior glass brick-graph tex-repeat tex-wraps; do
+  for scene in lit-interior glass many-lights-500 brick-graph tex-repeat tex-wraps; do
     for kernel in legacy cycles; do
       local prefix="$output_directory/$label-$scene-$kernel"
       if (cd "$checkout" && node bench/cycles-parity/trace-native.mjs "$scenes_directory/$scene.json" "$prefix" \
