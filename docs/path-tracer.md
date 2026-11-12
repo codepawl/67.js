@@ -36,7 +36,7 @@ A part with a material `subsurface` weight above 0 sends that share of its diffu
 - The procedural sky when there is no environment map (the sky is black).
 - Occlusion maps. Normal and metallic-roughness maps are drawn on UV-mapped and on box-projected materials. Material graphs and patterns are drawn through the colour map they bake.
 - Translucent leaves without a `subsurface` block (foliage looks darker than in the rasterizer), liquids, foam and blended transparency (traced as plain or opaque surfaces).
-- Lights seen in mirrors (area lights and spot lights are lit but not visible), caustics, motion blur, depth of field, bloom and colour grade.
+- Lights seen in mirrors (area lights and spot lights are lit but not visible), caustics, motion blur, bloom and colour grade. Depth of field is drawn only by the native `cycles` kernel, for a camera with an `fStop` (a thin lens with Cycles' aperture, focus distance and blades; see the render-native README); the CPU, GPU and legacy native tracers draw a pinhole.
 - Multiple-scattering GGX: rough metal is a little darker than in Blender.
 
 ## Limits
@@ -68,6 +68,8 @@ Also checked before any ray is traced: samples times pixels times bounces at mos
 - A job sends the materials of an instanced scene and of a flattened one the same way (`buildJobNativeInput` and `buildFlattenedJobNativeInput` in `packages/render-native/job-input.mjs`): what the v1 material tables carry is read from them, and `carriedMaterialFields` lays blend opacity, sheen, specular, anisotropy, iridescence, attenuation and the layer textures over it. A part looks the same whether or not other geometry in the scene is shared, and a material that sets none of those fields packs to the record the v1 tables gave. Every job on the `cycles` kernel is exported as FORMAT-v2; the legacy kernel and light bakes keep the v1 tables.
 - When the instanced packer refuses a scene (copies of an emissive mesh that emit different triangles, a singular matrix), the job exports it flattened as before and the report says `instancing: "flattened"` and `instancingReason`. A scene that fails to export no longer marks the native tracer unusable for the process; only a tracer or adapter failure does.
 - A part with `shadowOnly: true` becomes an instance that camera rays skip (visibility bits for every other ray kind stay set). An instance whose material differs from the first copy's emits light by its own material: a copy made emissive by its material is sampled as a light, and a copy made non-emissive is not. Triangles of a shared mesh that are emissive keep one `local_emissive_offset` for all copies, so a copy scaled to a size that drops an emissive triangle the other copies keep is refused with its index.
+
+A part whose matrix mirrors (negative determinant) is flattened with its vertex normals kept outward and the last two corners of each triangle swapped, so the cross-product normal of every triangle points outward too. The native `cycles` kernel derives its geometric normal from that winding, and an instanced mirrored part reaches the same result through its negative-scale flag; a scene without a mirrored part is unchanged byte for byte.
 
 The same scene and options give the same bytes. Random numbers come from a hash of the pixel, the sample and the seed, never from `Math.random` or the clock, and a pixel does not depend on which thread drew it.
 

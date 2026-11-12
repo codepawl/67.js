@@ -25,7 +25,7 @@ function render(variant, instancing, seed) {
 
 const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
 
-for (const variant of ['translate', 'rotscale', 'emissive', 'emissive-rotscale', 'emissive-degenerate']) {
+for (const variant of ['translate', 'rotscale', 'mirror', 'mirror-rotscale', 'emissive', 'emissive-rotscale', 'emissive-degenerate']) {
   test(`instanced ${variant} copies render the flattened image within tolerance`, { skip: addonSkip }, t => {
     let flattened;
     try {

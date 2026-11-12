@@ -2,6 +2,7 @@
 // native kernel (`FORMAT-v2.md` and `src/cycles/abi.wgsl`). Pure typed arrays with zero Node-only imports.
 
 import { buildLightTree } from './light-tree-v2.mjs';
+import { THIN_LENS_FLOAT_INDEXES } from './pack-input.mjs';
 
 export const FORMAT_V2_MAGIC = 0x36375054;
 export const FORMAT_V2_VERSION = 2;
@@ -1729,6 +1730,45 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   }
 }
 
+export const MAX_APERTURE_BLADES = 64;
+
+/** The thin lens a v1 params block carries (see THIN_LENS_FLOAT_INDEXES in pack-input.mjs); nothing for a pinhole, so its bytes stay as they were. */
+function readV1ThinLens(paramF32) {
+  if (!(paramF32[THIN_LENS_FLOAT_INDEXES.apertureRadius] > 0)) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(THIN_LENS_FLOAT_INDEXES).map(([fieldName, floatIndex]) => [fieldName, paramF32[floatIndex]]));
+}
+const DEFAULT_FOCAL_DISTANCE = 10;
+
+function requireThinLensNumber(value, name, callerName, isValid, expectation) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || !isValid(value)) {
+    throw new RangeError(`${callerName}: camera \`${name}\` must be ${expectation}, got ${JSON.stringify(value)}.`);
+  }
+}
+
+/**
+ * The thin lens of a camera, from the camera object (as `createCamera` returns it for a camera with an `fStop`) or from the
+ * same names in `options`: `apertureRadius` (scene units, 0 is a pinhole), `focalDistance` (along the view axis),
+ * `apertureBlades` (0 for a round aperture, else 3 to 64) and `apertureRotation` (radians). A pinhole keeps the defaults
+ * the params block always held, so its bytes do not change. Throws a RangeError that says what to pass.
+ */
+export function resolveThinLensParameters(camera, options, callerName) {
+  const apertureRadius = camera?.apertureRadius ?? options.apertureRadius ?? 0;
+  requireThinLensNumber(apertureRadius, 'apertureRadius', callerName, value => value >= 0,
+    'a number of scene units, 0 or more (0 is a pinhole; fStop 2.8 on a 50 mm lens is 0.00893)');
+  const focalDistance = camera?.focalDistance ?? options.focalDistance ?? DEFAULT_FOCAL_DISTANCE;
+  requireThinLensNumber(focalDistance, 'focalDistance', callerName, value => value > 0,
+    'a distance along the view axis above 0, such as the eye-to-target distance');
+  const apertureBlades = camera?.apertureBlades ?? options.apertureBlades ?? 0;
+  requireThinLensNumber(apertureBlades, 'apertureBlades', callerName,
+    value => Number.isInteger(value) && (value === 0 || (value >= 3 && value <= MAX_APERTURE_BLADES)),
+    `0 for a round aperture or a whole number from 3 to ${MAX_APERTURE_BLADES}`);
+  const apertureRotation = camera?.apertureRotation ?? options.apertureRotation ?? 0;
+  requireThinLensNumber(apertureRotation, 'apertureRotation', callerName, () => true, 'a finite number of radians');
+  return { apertureRadius, focalDistance, apertureBlades, apertureRotation };
+}
+
 function effectiveCyclesClamp(value) {
   if (value === undefined || value === null) {
     return 0.0;
@@ -1862,6 +1902,7 @@ function packKernelParamsV2({
   const cameraNear = Math.max(0, Number(options.near ?? camera?.near ?? 0));
   const cameraFar = Math.max(cameraNear + 1e-3, Number(options.far ?? camera?.far ?? farDistance ?? 1e30));
   const lensShift = camera?.lensShift ?? options.lensShift ?? [0, 0];
+  const thinLens = resolveThinLensParameters(camera, options, 'buildNativeInputV2');
 
   u32[0] = FORMAT_V2_MAGIC;
   u32[1] = FORMAT_V2_VERSION;
@@ -1911,17 +1952,17 @@ function packKernelParamsV2({
   f32[36] = scaledRight[0];
   f32[37] = scaledRight[1];
   f32[38] = scaledRight[2];
-  f32[39] = Math.max(0, Number(camera?.apertureRadius ?? options.apertureRadius ?? 0));
+  f32[39] = thinLens.apertureRadius;
 
   f32[40] = scaledUp[0];
   f32[41] = scaledUp[1];
   f32[42] = scaledUp[2];
-  f32[43] = Math.max(1e-4, Number(camera?.focalDistance ?? options.focalDistance ?? 10));
+  f32[43] = thinLens.focalDistance;
 
   f32[44] = Number(lensShift[0] ?? 0);
   f32[45] = Number(lensShift[1] ?? 0);
-  u32[46] = Math.max(0, Math.round(Number(camera?.apertureBlades ?? options.apertureBlades ?? 0))) >>> 0;
-  f32[47] = Number(camera?.apertureRotation ?? options.apertureRotation ?? 0);
+  u32[46] = thinLens.apertureBlades >>> 0;
+  f32[47] = thinLens.apertureRotation;
 
   u32[48] = packedEnvironment.envWidth >>> 0;
   u32[49] = packedEnvironment.envHeight >>> 0;
@@ -2893,6 +2934,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     above: [paramF32[12], paramF32[13], paramF32[14]],
     halfWidth: paramF32[32],
     halfHeight: paramF32[33],
+    ...readV1ThinLens(paramF32),
   };
 
   const packedTextures = textureCollector.finish();
