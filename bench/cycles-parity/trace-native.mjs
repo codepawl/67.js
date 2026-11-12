@@ -96,7 +96,7 @@ function parseLightSamplingOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -110,6 +110,7 @@ function parseTraceArguments(argumentList) {
     filterType: parseFilterTypeOption(argumentList),
     sampler: parseSamplerOption(argumentList),
     lightSampling: parseLightSamplingOption(argumentList),
+    envCompensation: parseNumberOption(argumentList, '--env-compensation', 0, 0),
     directLighting: String(readFlagValue(argumentList, '--direct-lighting', 'both')),
     lightTreeProbe: argumentList.includes('--light-tree-probe'),
     pathRegeneration: argumentList.includes('--path-regeneration'),

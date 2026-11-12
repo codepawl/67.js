@@ -1330,6 +1330,65 @@ function packLightTree(packedLights, packedEmissives) {
   };
 }
 
+/**
+ * Reads the `envCompensation` option: `undefined`, `false` or `0` (off, the default), `true` (the full mean) or a
+ * fraction in (0, 1] of the mean radiance to subtract from the sampling table. Returns the fraction, 0 when off.
+ */
+export function resolveEnvCompensationFraction(envCompensation, callerName) {
+  if (envCompensation === undefined || envCompensation === false) {
+    return 0;
+  }
+  if (envCompensation === true) {
+    return 1;
+  }
+  if (typeof envCompensation !== 'number' || !Number.isFinite(envCompensation) || envCompensation < 0 || envCompensation > 1) {
+    throw new RangeError(
+      `${callerName}: \`envCompensation\` must be true, false or a number from 0 to 1 (the fraction of the mean radiance to subtract), got ${JSON.stringify(envCompensation)}.`
+    );
+  }
+  return envCompensation;
+}
+
+/**
+ * MIS compensation of the environment sampling table (Karlik et al. 2019; pbrt-v4 ImageInfiniteLight, Apache-2.0).
+ * Subtracts `fraction` times the sphere-mean radiance from every texel's weight and clamps at zero, so light sampling
+ * spends its samples where BSDF sampling does badly. The kernel reads the pdf from the same table, so the pdf used in
+ * MIS stays the pdf that was sampled. A map that would end up all zero keeps its original table.
+ * Rewrites `pixelWeights` and `rowTotals` in place and returns the new total.
+ */
+function compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, fraction, originalTotal) {
+  const deltaPhi = (2 * Math.PI) / width;
+  const deltaTheta = Math.PI / height;
+  let solidAngleSum = 0;
+  for (let y = 0; y < height; y++) {
+    solidAngleSum += Math.sin(Math.PI * (y + 0.5) / height) * deltaPhi * deltaTheta * width;
+  }
+  const meanRadiance = originalTotal / solidAngleSum;
+
+  const compensatedWeights = new Float64Array(pixelWeights.length);
+  const compensatedRowTotals = new Float64Array(height);
+  let compensatedTotal = 0;
+  for (let y = 0; y < height; y++) {
+    const texelSolidAngle = Math.sin(Math.PI * (y + 0.5) / height) * deltaPhi * deltaTheta;
+    const subtractedWeight = fraction * meanRadiance * texelSolidAngle;
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      const pixelIndex = y * width + x;
+      const weight = Math.max(0, pixelWeights[pixelIndex] - subtractedWeight);
+      compensatedWeights[pixelIndex] = weight;
+      rowSum += weight;
+    }
+    compensatedRowTotals[y] = rowSum;
+    compensatedTotal += rowSum;
+  }
+  if (!(compensatedTotal > 0)) {
+    return originalTotal;
+  }
+  pixelWeights.set(compensatedWeights);
+  rowTotals.set(compensatedRowTotals);
+  return compensatedTotal;
+}
+
 function packEnvironmentTexelsV2(environment, options = {}) {
   if (!environment || !(environment.width > 0 && environment.height > 0)) {
     const bg = options.backgroundColor ?? [0, 0, 0];
@@ -1356,6 +1415,7 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     ? Number(environment.rotation)
     : Math.atan2(Number(environment.sine ?? 0), Number(environment.cosine ?? 1));
 
+  const compensationFraction = resolveEnvCompensationFraction(options.envCompensation, 'buildNativeInputV2');
   const pixelCount = width * height;
   const totalVec4 = 2 * pixelCount + height;
   const texels = new Float32Array(totalVec4 * 4);
@@ -1386,6 +1446,10 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     }
     rowTotals[y] = rowSum;
     totalWeight += rowSum;
+  }
+
+  if (compensationFraction > 0) {
+    totalWeight = compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, compensationFraction, totalWeight);
   }
 
   const envCdfOffset = pixelCount;
@@ -1588,6 +1652,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
   resolveSamplingOptions(options, callerName);
+  resolveEnvCompensationFraction(options.envCompensation, callerName);
   validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
