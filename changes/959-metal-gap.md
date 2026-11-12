@@ -1,0 +1,1 @@
+- Cook keeps the light that bounces between microfacets on rough metal and widens glossy lobes after a diffuse bounce as Cycles does, so the metal reference scene lands 3.4 times closer to Cycles at 256 samples (#959)
