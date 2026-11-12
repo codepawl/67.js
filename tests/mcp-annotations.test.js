@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { createAgentMcpServer } from '../scripts/mcp-server.mjs';
 
-const READ_ONLY_TOOLS = ['scene_capabilities', 'scene_inspect', 'scene_look', 'scene_review', 'mesh_inspect', 'scene_walkmap',
+const READ_ONLY_TOOLS = ['scene_capabilities', 'scene_inspect', 'scene_look', 'scene_ask_user', 'scene_review', 'mesh_inspect', 'scene_walkmap',
   'scene_asset_catalog', 'scene_render_status', 'scene_render_result', 'scene_export_recipe'];
 const DESTRUCTIVE_TOOLS = ['scene_dispose', 'scene_render_release', 'scene_release_checkpoint'];
 const TOOLS_WITH_OUTPUT_SCHEMA = ['scene_capabilities', 'scene_inspect', 'scene_checkpoint', 'scene_release_checkpoint', 'scene_render_status', 'scene_render_result'];
@@ -32,7 +32,7 @@ async function connect(context, runtime) {
 test('every tool has a title and complete annotations, with the read-only and destructive sets fixed', async context => {
   const client = await connect(context, { activeSessionId: () => null, async close() {} });
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 24);
+  assert.equal(tools.length, 25);
   for (const tool of tools) {
     assert.ok(tool.title && tool.annotations.title === tool.title, `${tool.name} has a title`);
     for (const hint of ['readOnlyHint', 'destructiveHint', 'idempotentHint']) {

@@ -789,6 +789,8 @@ const renderSettings = z.strictObject({
   region: z.strictObject({ x: z.number().int().min(0), y: z.number().int().min(0), width: z.number().int().min(16), height: z.number().int().min(16) }).optional().describe('Pixels to keep from the top left. Not with renderer.'),
 }).describe('Snapshot render: one PNG, eight evenly spaced PNGs, or H.264 MP4 (even dimensions). Defaults: 24 fps, one second. motion.start plays recipe tracks, animation an imported clip, both layer. Omitted motion holds time zero.');
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+// Changes nothing in the scene, but opens a page for the person and waits, so a repeat call asks again.
+const askUser = { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const edit = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 // Only these three remove something that cannot be restored: the scene, a checkpoint slot, a job's files.
 const destroy = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
@@ -796,7 +798,7 @@ const destroy = { readOnlyHint: false, destructiveHint: true, idempotentHint: fa
 const TOOL_TITLES = {
   scene_capabilities: 'Scene capabilities', scene_create: 'Create scene', scene_asset_catalog: 'Asset catalog', scene_create_asset: 'Create scene from asset',
   scene_inspect: 'Inspect scene', scene_walkmap: 'Walkable map', mesh_inspect: 'Inspect meshes', mesh_edit: 'Edit mesh', mesh_stack: 'Set mesh modifiers',
-  scene_apply: 'Apply scene edits', scene_look: 'Look at scene', scene_review: 'Review camera samples', scene_checkpoint: 'Save checkpoint',
+  scene_apply: 'Apply scene edits', scene_look: 'Look at scene', scene_ask_user: 'Ask the user to mark the scene', scene_review: 'Review camera samples', scene_checkpoint: 'Save checkpoint',
   scene_restore: 'Restore checkpoint', scene_release_checkpoint: 'Release checkpoint', scene_export_recipe: 'Export recipe', scene_export_glb: 'Export GLB', scene_export_web: 'Export web game',
   scene_dispose: 'Dispose scene', scene_render_submit: 'Submit render job', scene_render_status: 'Render job status', scene_render_cancel: 'Cancel render job',
   scene_render_result: 'Render job result', scene_render_release: 'Release render job',
@@ -924,6 +926,10 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   register('scene_look', 'Render the active scene as a bounded PNG, optionally with part labels. Optional authored motionTime seeks without changing revision; null restores the authored base pose. Omit to retain the last preview pose.', z.strictObject({ ...sessionFields, motionTime: z.number().min(0).max(3600).nullable().optional(), width: z.number().int().min(64).max(1024).default(768).describe('PNG width in pixels.'), height: z.number().int().min(64).max(1024).default(512).describe('PNG height in pixels.'), labels: labelsFlag }), readOnly, async argumentsValue => {
     const { data, mimeType, metadata } = await runtime.look(argumentsValue);
     return { content: [{ type: 'image', data, mimeType }, { type: 'text', text: JSON.stringify(metadata) }], structuredContent: metadata };
+  });
+  register('scene_ask_user', 'Open the view in the browser so the person pins points with notes; waits for Send. Use for a change hard to say in words. Returns marks with partId, point, normal, note, and the marked PNG.', z.strictObject({ ...sessionFields, prompt: z.string().max(200).optional().describe('Line shown above the picture.'), maxMarks: z.number().int().min(1).max(16).default(16), timeoutSeconds: z.number().int().min(10).max(900).default(300) }), askUser, async argumentsValue => {
+    const { content, image } = await runtime.askUser(argumentsValue);
+    return { content: [...(image ? [{ type: 'image', data: image, mimeType: 'image/png' }] : []), { type: 'text', text: JSON.stringify(content) }] };
   });
   register('scene_review', 'Compare one to four independent camera or motion samples in one labeled PNG grid. Preserves source revision, transient pose, viewport and checkpoints. Omitted motionTime restores authored base pose; omitted animation uses the authored asset clip pose; rendererTime defaults to zero. No render job store is required.', z.strictObject({
     ...sessionFields, expectedRevision,

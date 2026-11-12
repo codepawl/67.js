@@ -1,0 +1,1 @@
+- `scene_ask_user` opens the current view in the browser so a person can pin points with notes, and returns each pin as a part ID, world point and normal (#922)

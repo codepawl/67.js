@@ -18,6 +18,7 @@ import { describeApplication } from '../../src/agent-apply-report.js';
 import { framingProblems, exposureProblems, lumaShares } from '../../src/frame-checks.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../../src/agent-asset-limits.js';
 import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from '../../scripts/agent-walkmap.js';
+import { describeMarks, validateMarks } from '../../src/agent-annotate.js';
 
 // Runs the preview page's adapter code in a VM with a fault-injected renderer, the way the MCP preview runs it in a browser.
 const source = (await readFile(new URL('../../scripts/agent-preview-browser.js', import.meta.url), 'utf8')).replace(/^import .+;\r?$/gm, '');
@@ -83,7 +84,7 @@ export function previewHarness() {
     // The harness loads Manifold from node_modules directly, so the preview's served-file loader is ignored.
     setManifoldModuleLoader: () => {},
     needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader: () => {},
-    sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, SCENE_STORE_LIMITS, AGENT_SCENE_DEFAULT_LIMITS, describeApplication, framingProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
+    describeMarks, validateMarks, sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, SCENE_STORE_LIMITS, AGENT_SCENE_DEFAULT_LIMITS, describeApplication, framingProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
     applyProjection, applyCameraFields, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
     // Line art needs a real renderer with render passes, so the fault-injected one gets a no-op install.
     agentSceneModule: name => (name === 'lineArt' ? { installLineArt: renderer => renderer } : name === 'userPass' ? { ...agentSceneModule(name), installUserPasses: renderer => renderer } : agentSceneModule(name)), agentSceneModuleLoaded, createBranchStore, printableLabel,
