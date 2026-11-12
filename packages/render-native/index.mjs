@@ -65,6 +65,9 @@ export function resolveNativeKernel(kernel) {
   return selectedKernel;
 }
 
+// The `cycles` kernel starts a pixel's next sample as soon as a path ends unless the caller passes `pathRegeneration: false`.
+const DEFAULT_PATH_REGENERATION = true;
+
 /**
  * Traces the input on the GPU and resolves linear RGBA float data (`rgba`, width * height * 4, rows from the top, the
  * average of `samples` paths) with the adapter name and timings in seconds. `maxSeconds` makes the trace fail once it has
@@ -72,7 +75,7 @@ export function resolveNativeKernel(kernel) {
  */
 export function traceNative(input, options = {}) {
   validatePackOptions(options, 'traceNative', true);
-  const { sampler, lightSampling } = resolveSamplingOptions(options, 'traceNative');
+  resolveSamplingOptions(options, 'traceNative');
   validatePathRegenerationOption(options.pathRegeneration, 'traceNative');
   const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel, denoise } = options;
   const selectedKernel = resolveNativeKernel(kernel);
@@ -88,12 +91,7 @@ export function traceNative(input, options = {}) {
     }
     return addon.traceScene(input, { width, height, samples, maxSeconds, kernel: selectedKernel });
   }
-  let v2Input = input?.schemaVersion === FORMAT_V2_VERSION
-    ? input
-    : upgradeNativeInputV1ToV2(input, options);
-  if (input?.schemaVersion === FORMAT_V2_VERSION) {
-    v2Input = { ...v2Input, kernelParams: patchedCyclesKernelParams(v2Input, v2Input.kernelParams, options, 'traceNative') };
-  }
+  const v2Input = prepareCyclesInput(input, options);
   return addon.traceSceneCycles(v2Input, {
     width,
     height,
@@ -181,6 +179,20 @@ function withSamplerFlag(kernelParams, sampler) {
     : (flags & ~KERNEL_FLAG_WHITE_NOISE_SAMPLER) >>> 0;
   view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
   return patchedParams;
+}
+
+/**
+ * Builds the FORMAT-v2 input of the `cycles` kernel from a v1 or v2 input and the trace options, patching the kernel flags
+ * the options set. Exported for tests; not part of the public API.
+ */
+export function prepareCyclesInput(input, options = {}) {
+  if (input?.schemaVersion === FORMAT_V2_VERSION) {
+    return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, 'traceNative') };
+  }
+  resolveSamplingOptions(options, 'traceNative');
+  const upgradedInput = upgradeNativeInputV1ToV2(input, options);
+  const pathRegeneration = options.pathRegeneration ?? DEFAULT_PATH_REGENERATION;
+  return { ...upgradedInput, kernelParams: withPathRegenerationFlag(upgradedInput.kernelParams, pathRegeneration) };
 }
 
 // Exported for tests; not part of the public API.
@@ -333,7 +345,7 @@ function patchedCyclesKernelParams(v2Input, kernelParams, options, callerName) {
   }
   if (hasFilterOptions(options)) patchedParams = withFilterOptions(patchedParams, options);
   if (sampler !== undefined) patchedParams = withSamplerFlag(patchedParams, sampler);
-  if (options.pathRegeneration !== undefined) patchedParams = withPathRegenerationFlag(patchedParams, options.pathRegeneration);
+  patchedParams = withPathRegenerationFlag(patchedParams, options.pathRegeneration ?? DEFAULT_PATH_REGENERATION);
   if (lightSampling !== undefined) patchedParams = withLightSamplingFlag({ ...v2Input, kernelParams: patchedParams }, lightSampling);
   return patchedParams;
 }

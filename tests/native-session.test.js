@@ -7,6 +7,7 @@ import {
   resolveSessionCreation,
   resolveSessionFrame,
   traceNative,
+  withPathRegenerationFlag,
   wrapNativeSession,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
 } from '../packages/render-native/index.mjs';
@@ -158,7 +159,9 @@ test('a frame takes the camera of another packing through kernelParams', () => {
   const sessionInput = resolveSessionCreation(first, {});
   const defaults = { width: 24, height: 16, samples: 4 };
   const frame = resolveSessionFrame(sessionInput, defaults, { kernelParams: second.kernelParams });
-  assert.deepEqual(frame.kernelParams, second.kernelParams);
+  assert.deepEqual(frame.kernelParams, withPathRegenerationFlag(second.kernelParams, true));
+  const withoutRegeneration = resolveSessionFrame(sessionInput, defaults, { kernelParams: second.kernelParams, pathRegeneration: false });
+  assert.deepEqual(withoutRegeneration.kernelParams, withPathRegenerationFlag(second.kernelParams, false));
   assert.throws(
     () => resolveSessionFrame(sessionInput, defaults, { kernelParams: new Uint8Array(8) }),
     { name: 'TypeError', message: /320 bytes/ }
