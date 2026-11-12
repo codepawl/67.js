@@ -1434,3 +1434,34 @@ Tracing the packed input on the card (480 by 270, 16 samples, GPU memory of the 
 | 3,998,792 | 7 | 1.31 | 0.13 | 0.55 | 1,961 |
 
 Same picture: the 1,002,528 triangle scene (four meshes, two of them shared by a second instance) exported through the job path as instances, and again as a flattened scene of the same parts (about 1.5 million triangles after expansion), gave the same PNG, SHA-256 `165939ce…01404`, both times. The instanced export took 10.7 s and 2.6 GB of peak RSS; the flattened one 19.5 s and 4.2 GB.
+
+## Instance bound of a native scene (#1055)
+
+`buildTraceScene` bounds an instanced scene at 65,536 instances (one per part) for the CPU and WebGL tracers. A scene built for the native tracer asks for another bound with `maximumInstances`, an integer from 1 to `MAX_NATIVE_TRACE_INSTANCES` (1,000,000). A render job on the Cycles-matching kernel passes 500,000 (`NATIVE_JOB_MAXIMUM_INSTANCES` in `scripts/native-bake-page.js`); the legacy kernel never instances, and the CPU and WebGL tracers keep 65,536 and its error text. The option is separate from `maximumTriangles`: the unique and total triangle bounds apply as before, so copies of a large mesh still hit the total bound (four times `maximumTriangles`) long before the instance bound.
+
+Every place on the way to the kernel that could assume 65,536 instances, read in the code `[measured by reading]`:
+
+| place | limit |
+| --- | --- |
+| `MAX_TRACE_INSTANCES` check in `requireInstancedCaps` (`src/path-tracer-scene.js`) | the only 65,536; a guard for the CPU and WebGL paths, now a caller-set bound |
+| `packInstancedGeometry` and `writeInstanceRecordBytes` (`pack-input-v2.mjs`), `job-input.mjs` | none; counts are 32-bit and the loops are linear |
+| instance table, 160 bytes per instance | 160 MB at 1,000,000 |
+| material table, 256 bytes per part (a material record per part, not per distinct material) | the largest table: 256 MB at 1,000,000 |
+| emissive and light tree records that store an instance index | `u32`; the light tree takes 4,194,304 emitters (`LIGHT_TREE_MAX_EMITTERS`), which bounds emissive copies, not plain ones |
+| WGSL `instance_custom_data` and `int_resolve_instance_index` | the hardware custom index has 24 bits: 16,777,216 (`MAX_TLAS_INSTANCES` in `host/accel.rs`) |
+| V8 string of the job export | see below; this is the bound of the job |
+
+Measured on an RTX 4090 box, one process per row, a field of two-triangle cards sharing one geometry (`bench/cycles-parity/native-instance-measure.mjs`), packed the way the job page does and traced at 160 by 120 with 16 samples `[measured]`:
+
+| instances | pack s | base64 s | material table MB | all tables, base64 characters | peak RSS MB | traced s | acceleration build s | card MB (process included) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 65,538 | 0.34 | 0.94 | 16.8 | 36.4 M | 520 | 0.37 | 0.011 | 610 |
+| 250,001 | 1.17 | 3.53 | 64.0 | 138.7 M | 1,295 | 0.58 | 0.050 | 704 |
+| 500,001 | 3.24 | 7.13 | 128.0 | 277.3 M | 2,363 | 0.73 | 0.100 | 796 |
+| 1,000,000 | 7.17 | 14.34 | 256.0 | 554.7 M | 4,511 | 1.59 | 0.193 | 1,557 |
+
+Each instance costs 416 bytes packed (160 for the instance and 256 for its material) and 555 base64 characters. What bounds it `[measured, inferred for the reason]`: the table bytes and V8 strings, not the card or the acceleration build. At 1,000,000 instances the largest table is 341 M characters, which encodes, but the tables together are 554.7 M characters, above the 536,870,888 of one V8 string, so a page that returns the export as one string (a JSON message) would fail; 500,000 instances alone are 277 M characters, 52% of that limit, but the tables of one export share the message, so the bounds are not independent. The export sums the real base64 length of every table (`4 * ceil(bytes / 3)` each) before encoding, and refuses above 95% of the V8 limit (510,027,343 characters, `NATIVE_EXPORT_MAXIMUM_CHARACTERS`) with a `RangeError` that names the total and the largest tables and says to pass fewer parts or fewer unique triangles. The job rethrows that refusal (as it does the texture pool one), so the job report says why the native export failed and no other packing is tried. Worked example `[measured sizes]`: 1,500,000 unique triangles are 448 M characters (299 each), which leaves 62 M for instances at 555 each: about 110,000 instances (the 65,536 of before, 36 M, still fit; 150,000 instances, 83 M, give 531 M and are refused). Without triangles, 500,000 instances (277 M) fit alone. The job stops at 500,000 instances, and the library ceiling is 1,000,000, the size measured on the card. The card was never the limit: the acceleration build took 0.19 s at 1,000,000 instances and the traces ran in 1.6 s. The hardware allows 16,777,216 instances, and nothing above 1,000,000 instances was measured.
+
+Pictures: scenes under the old bounds are byte for byte the same. The PNG SHA-256 of three scenes (the 20,000 triangle cap scene with copies, a field of 3,000 shared cards and the same cards merged) on the job export of `cycles` instanced, `cycles` flattened and `legacy` are equal on `main` and on this change, and the refusal of the scene the flattened and legacy routes cannot take has the same words (`bench/cycles-parity/native-identity-pngs.mjs`, `[measured]`). Over the old bound, `tests/native-instancing-limit.test.js` traces 85,537 parts (the last 20,000 red, all past index 65,536) and the same cards merged into two meshes: 3,381 red pixels in both, mean ratio within 2% per channel, tiles within 5%, and a relative mean squared error of 1.5e-7, against 1.4e-3 between two seeds of the merged picture.
+
+Not measured: Chrome's memory for a page that builds 500,000 parts (the numbers above are Node's), and a scene whose copies are emissive (each emissive copy adds light tree emitters and emissive records).
