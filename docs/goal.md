@@ -2,6 +2,16 @@
 
 67js aims to be as capable as Blender, as light as three.js, and as AI friendly as possible. No public claim of parity or speed is allowed until the evidence below exists.
 
+## Stance
+
+67js makes 3D easy to understand and easy to do. An agent knows how to use every part of 67js and carries the heavy steps of the work: setup, assets, lighting, checks and renders. The person keeps the creative choices and stays active. The agent proposes, shows pictures and asks when a choice is a matter of taste. It does not decide the look on its own and it does not leave the person waiting passively.
+
+Every surface follows from this:
+
+- **Show, then tell.** The README, docs, changelog and release notes lead with renders and clips made by 67js. A reader sees what a feature makes before reading how it works. A change that people can see ships with a picture or a short clip.
+- **Plain words.** Copy says what the person can make and what the agent does for them. Code comes after that.
+- **The person stays in the loop.** Agent tools return previews and choices to react to. Examples are `scene_ask_user`, review grids and quick previews before a final render.
+
 ## Definitions
 
 **As capable as Blender.** Every in-scope row of the parity ledger (`docs/parity.md`) has evidence, and the reference scenes reach an agreed score against Cycles and EEVEE. Evidence is a golden fixture or a reference render. A demo does not count.
@@ -12,7 +22,7 @@
 
 ## Not in scope
 
-- A mouse editor, and the Blender interface and editors. Agents are the user, and people review through images and artifacts.
+- A mouse editor, and the Blender interface and editors. Agents operate the engine, and people direct the work and review it through images and artifacts.
 - The Video Editing sequencer, and Motion Tracking and Masking.
 - Grease Pencil.
 - Reading `.blend` files, and compatibility with the Blender Python API. GLB is the exchange format.
