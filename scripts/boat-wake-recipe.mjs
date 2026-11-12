@@ -24,7 +24,7 @@ export function buildBoatRecipe(boatAssetId, duration) {
     format: '67js.scene', schemaVersion: 1,
     geometries: [
       { id: 'hull', type: 'box' },
-      { id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: SEA_EDITS, stack: [{ op: 'ocean', windSpeed: 3.5, choppiness: 0.2, size: 30, seed: 5, resolution: 5 }] },
+      { id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: SEA_EDITS, stack: [{ op: 'ocean', windSpeed: 2.5, choppiness: 0, size: 30, seed: 5, resolution: 5 }] },
     ],
     materials: [
       { id: 'water', color: [0.02, 0.12, 0.2], tag: 'water' },
@@ -32,19 +32,20 @@ export function buildBoatRecipe(boatAssetId, duration) {
     ],
     nodes: [
       { id: 'sea', geometry: 'sea', material: 'water' },
-      { id: 'hull', geometry: 'hull', material: 'ghost', castShadow: false, translation: [3, 0.8, -7], scale: [BOAT_SIZE.width, BOAT_SIZE.hullHeight, BOAT_SIZE.length] },
+      { id: 'hull', geometry: 'hull', material: 'ghost', castShadow: false, translation: [2, 0.8, -4], scale: [BOAT_SIZE.width, BOAT_SIZE.hullHeight, BOAT_SIZE.length] },
       { id: 'boat', parent: 'hull', asset: { id: boatAssetId }, translation: [0, -boatLift / BOAT_SIZE.hullHeight, 0], scale: [1 / BOAT_SIZE.width, 1 / BOAT_SIZE.hullHeight, 1 / BOAT_SIZE.length] },
     ],
-    camera: { eye: [3, 4.2, 9.5], target: [-2.2, 0.2, -1.5], fov: 54 },
+    camera: { eye: [5.5, 3.6, 9], target: [-2, 0.2, 1], fov: 52 },
+    environment: { world: true, skyTop: [0.22, 0.46, 0.85], skyBottom: [0.78, 0.9, 1], keyIntensity: 3 },
     motion: { duration, tracks: [{ kind: 'geometry', id: 'sea', property: 'oceanTime', interpolation: 'LINEAR', keyframes: [{ time: 0, value: 0 }, { time: duration, value: duration }] }] },
     physics: {
       duration,
       ocean: { geometry: 'sea' },
       bodies: [{
-        node: 'hull', density: 300,
+        node: 'hull', density: 550,
         float: {
           drag: 1.5, angularDrag: 3, points: [[-0.6, 0, -1.4], [0.6, 0, -1.4], [-0.6, 0, 1.4], [0.6, 0, 1.4]],
-          boat: { thrust: 3.5, rudder: 1, forward: '+z', controls: CONTROLS, wake: { width: 1.5, strength: 1, height: 0.16, lifetime: 6 } },
+          boat: { thrust: 3.5, rudder: 1, forward: '+z', controls: CONTROLS, wake: { width: 1.6, strength: 1, height: 0.05, lifetime: 3 } },
         },
       }],
     },

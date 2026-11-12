@@ -9,7 +9,10 @@ export const WAKE_FOAM_REACH = 3;
 const DEFAULT_WAKE_HEIGHT = 0.12;
 const MAXIMUM_WAKE_HEIGHT = 2;
 const REFERENCE_SPEED = 3;
-const SPREAD_PER_LIFETIME = 2;
+// The trail starts this fraction of `width` wide at the stern and spreads by this multiple of `width` over its life: a V that opens.
+const STERN_WIDTH_FRACTION = 0.25;
+const SPREAD_PER_LIFETIME = 1.75;
+const FOAM_GAIN = 1.6;
 const MINIMUM_STRENGTH = 0.01;
 
 function describe(value) {
@@ -53,7 +56,7 @@ export function wakeAt(wake, positionX, positionZ) {
     const distance = Math.hypot(positionX - pointX, positionZ - pointZ) / width;
     if (distance > WAKE_FOAM_REACH) continue;
     const falloff = Math.exp(-distance * distance / 2);
-    foam = Math.max(foam, strength * falloff);
+    foam = Math.max(foam, Math.min(1, FOAM_GAIN * strength * falloff));
     // A negative Ricker profile: a trough on the track and a ridge on both sides.
     offset -= wake.height * strength * (1 - distance * distance) * falloff;
   }
@@ -62,7 +65,7 @@ export function wakeAt(wake, positionX, positionZ) {
 
 /**
  * The wake points of a hull at `time`: the last `lifetime` seconds of its path, `count` samples (at most 64) evenly spaced.
- * `sample(time)` returns the stern as { x, z, speed }. Older points are weaker and wider, and a slow hull leaves little.
+ * `sample(time)` returns the stern as { x, z, speed }. The newest point is narrow and strong and older ones are wider and weaker, so the trail opens like a V and fades out. Keep `lifetime` short enough that a turning hull does not cross its own trail.
  */
 export function wakeTrail({ sample, time, lifetime, width, strength, count = MAX_WAKE_POINTS }) {
   const points = [];
@@ -74,7 +77,7 @@ export function wakeTrail({ sample, time, lifetime, width, strength, count = MAX
     const fade = (1 - age / lifetime) ** 2;
     const pointStrength = strength * Math.min(1, stern.speed / REFERENCE_SPEED) * fade;
     if (pointStrength < MINIMUM_STRENGTH) continue;
-    points.push([stern.x, stern.z, pointStrength, width * (1 + SPREAD_PER_LIFETIME * age / lifetime)]);
+    points.push([stern.x, stern.z, pointStrength, width * (STERN_WIDTH_FRACTION + SPREAD_PER_LIFETIME * age / lifetime)]);
   }
   return points;
 }
