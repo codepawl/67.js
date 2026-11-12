@@ -904,6 +904,50 @@ Measured on one NVIDIA A10 (480 x 270, 32 samples, `bench/cycles-parity/session-
 
 One-shot `traceNative` images (both kernels) and S1 session frames hash the same as origin/main built in the same container.
 
+## Sequence jobs through a persistent session (#896, slice S3)
+
+A stills or video job with `renderer.backend: "native"` and more than one frame holds one native session for the whole job. Frame 1 creates it; each later frame is decided by comparing its FORMAT-v2 tables with the ones the session holds: the same tables (a camera move) render with the frame's own `kernelParams`; changed `materials`, lights or instance transforms go through `session.update`; changed counts, geometry, textures or environment close the session and create a new one for that frame. A failed update (which closes the session by design), a failed render or a package without sessions falls to a new session or a one-shot trace for that frame and the job carries on. `metrics.pathTracer.nativeSession` names the route of each frame (`path`: `new-session`, `reused`, `updated` or `one-shot`, with `reason`, `changedTables`, `pipelineReused`, `accelerationReused`, `frameIndex`). Every frame equals the one-shot render of the same input byte for byte (`tests/native-sequence.test.js`, and the SHA-256 of all 24 frames in each run below).
+
+Measured on one NVIDIA RTX 4090 (Vast instance, 24 frames, 480 x 270, 16 samples, `bench/cycles-parity/sequence-timing.mjs`, one process per mode so the cold compile of one mode never warms the other; medians of three runs; milliseconds) `[measured]`:
+
+| Sequence | Mode | Frame 1 setup / compile / upload / accel / trace | Frame 2-24 mean setup / compile / upload / accel / trace | Sequence total (s) | Routes |
+| --- | --- | --- | --- | --- | --- |
+| `lit-interior`, camera orbit | session | 300 / 33 / 0.5 / 1.0 / 24 | 0 / 1.8 / 0.1 / 0 / 19 | 1.03 | 1 new, 23 reused |
+| | one-shot | 324 / 32 / 0.5 / 1.7 / 25 | 0 / 1.9 / 0.3 / 0.9 / 18 | 0.98 | |
+| `lit-interior`, block moves and key light swings (flattened) | session | 296 / 33 / 0.5 / 1.2 / 26 | 0 / 1.9 / 0.2 / 0.8 / 21 | 1.02 | 24 new (triangles differ) |
+| | one-shot | 304 / 33 / 0.5 / 1.4 / 27 | 0 / 1.9 / 0.3 / 1.0 / 21 | 1.02 | |
+| same, instanced (`buildTraceScene` `instancing: true`) | session | 295 / 33 / 0.5 / 0.9 / 21 | 0 / 1.8 / 0.0 / 0 / 13 | 0.88 | 1 new, 23 updated |
+| | one-shot | 233 / 34 / 0.5 / 0.8 / 20 | 0 / 1.8 / 0.2 / 0.5 / 13 | 0.75 | |
+| `many-lights-500` (3,646 triangles, 350 lights), camera orbit | session | 302 / 33 / 0.7 / 2.7 / 70 | 0 / 1.9 / 0.1 / 0 / 19 | 1.00 | 1 new, 23 reused |
+| | one-shot | 286 / 33 / 0.7 / 2.6 / 66 | 0 / 1.8 / 0.3 / 2.0 / 18 | 1.32 (one run 7.5 s, two near 1.0) | |
+
+What the numbers say `[inferred]`: a session removes the acceleration build and most of the upload from frame 2 on (camera-only: 0 ms against 0.9 to 2.0 ms of build, 0.1 against 0.3 ms of upload), and `pipelineReused` and `accelerationReused` are true on every later frame. Compile does not read zero: the 1.8 ms is the lookup of the process-wide compiled-kernel cache, which a one-shot trace also hits from its second frame, so a one-shot sequence in a warm process already skips the 33 ms compile and the 240 to 320 ms device start. These scenes hold about 3,000 triangles, so the saving is 1 to 3 ms of a 18 to 25 ms frame and the sequence totals sit within run-to-run noise (the instanced rows show the spread: 0.73 to 1.04 s for the same work). A moving object in the flattened scene changes the `triangles` table, so every frame there is a new session (as costly as a one-shot trace); only a scene packed with shared geometry turns a moved object into an instance-transform update.
+
+### Real jobs (8 stills through the MCP server, RTX 4090, page on SwiftShader, native tracer on the GPU)
+
+`bench/native-tracer/sequence-job.mjs` on the demo room, each variant run with sessions and with `JS67_NATIVE_SESSIONS=off`: every frame of every variant is byte-identical between the two runs. Routes of frames 2 to 8 `[measured]`: camera tracks only, `reused` on all 7; plus a roughness track, `updated` on all 7 (table `materials`); plus a point light intensity track, `updated` on all 7 (tables `lights`, `lightTreeNodes`, `lightTreeEmitters`); the recipe's own motion (a pendant swings), `updated` on 6 with the top-level acceleration structure rebuilt (tables `instances`, `emissiveTriangles`, `lights` and the light tree) and `reused` on 1 (the swing returned to an earlier pose), since jobs export shared geometry as instances (before that export every such frame took `new-session`, because the flattened tables hold the pendant's triangles); with the sparks and fur particle systems left in, `new-session` on all 7 (`emissiveTriangleCount` changes from frame to frame). Cause, found by diffing the page export between times in Node (`[measured]`): the demo room's `particles` (sparks emit glowing triangles over time, hair sways) rebuild the triangle and emissive tables at every time, so a camera-only edit of the recipe with its particles left in still changes `triangles`; with them removed only the camera block differs. The export itself is deterministic and does not cull by camera. A session cannot keep the acceleration structure across a change of the emissive or triangle count: `update` refuses a count change by design, because the BLAS holds the triangles and the session's buffers and bind group are sized at creation; allowing it needs a Rust change to re-create the emissive, light and light tree buffers and the bind group (and re-specialize the kernel) while keeping the BLAS, which is not worth it while the triangles change in the same frames.
+
+### Large scenes (12 frames, same card)
+
+Generated scenes from `bench/cycles-parity/large-scene.mjs` through `large-sequence-timing.mjs` (480 x 270, 16 samples, medians of three runs, session against one-shot on identical inputs; every frame of every run is byte-identical between the two modes). "Camera" orbits the camera and runs first in the process, so its frame 1 includes the 300 to 400 ms start of the device; "moving" orbits the camera and alternates one instance between two placements every frame (an instance-table update, the TLAS rebuilt over the kept BLAS), and runs second in a warm process. `[measured]`
+
+| Scene | Variant | Mode | Sequence total (s) | Frames 2-12 mean: upload / acceleration / trace / wall (ms) | Routes |
+| --- | --- | --- | --- | --- | --- |
+| terrain, 400k triangles | camera | session | 0.66 | 0 / 0 / 5 / 18 | 1 new, 11 reused |
+| | | one-shot | 1.26 | 47 / 14 / 5 / 73 | |
+| | moving | session | 0.37 | 0 / 0 / 5 / 25 | 1 new, 11 updated |
+| | | one-shot | 0.88 | 46 / 14 / 5 / 72 | |
+| terrain, 1M triangles | camera | session | 1.16 | 0 / 0 / 5 / 29 | 1 new, 11 reused |
+| | | one-shot | 3.32 | 141 / 58 / 6 / 213 | |
+| | moving | session | 0.73 | 0 / 0 / 5 / 46 | 1 new, 11 updated |
+| | | one-shot | 3.67 | 143 / 130 / 24 / 308 | |
+| forest, 1,002 instances of one 10k mesh | camera | session | 0.53 | 0 / 0 / 10 / 14 | 1 new, 11 reused |
+| | | one-shot | 0.51 | 1 / 1 / 10 / 16 | |
+| | moving | session | 0.19 | 0 / 0 / 10 / 15 | 1 new, 11 updated |
+| | | one-shot | 0.19 | 1 / 1 / 10 / 15 | |
+
+What this says `[inferred]`: a one-shot frame pays about 120 to 140 ns per triangle for upload and 35 to 60 ns for the acceleration build every frame, so a session saves roughly 60 ms per frame at 400,000 triangles and 200 ms at 1,000,000 (3.32 s against 1.16 s for a 12 frame orbit, about 2.9 times faster; 0.88 against 0.37 s with a moving instance), and the saving grows with the triangle count. On small scenes there is no gain: the 3,000 triangle rooms above and the forest here (10,000 unique triangles, many instances) cost 1 to 3 ms of build and upload per frame, which a session removes, but the sequence totals do not move. The forest case also shows that the cost follows unique triangles, not instances. Not measured: 4,000,000 triangles (the bench's JavaScript heap ran out in the pack step at the default 4 GB; the job path takes at most 400,000 triangles anyway, so a job reaches the first row only), and peak VRAM (the card readings were the same for both modes, so they say nothing about the difference).
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:

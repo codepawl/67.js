@@ -15,6 +15,7 @@ import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
 import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS } from '../src/agent-scene-capabilities.js';
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
+import { createNativeSequence } from './agent-native-sequence.mjs';
 import { chooseNativeInstancing, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
 import { geometryOnlyGlb } from './agent-query-asset.mjs';
@@ -463,6 +464,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     let jobPage;
     let encoder;
     let frameReceiver;
+    // A stills or video job of native frames renders them all through one session; it is closed when the job ends.
+    let nativeSequence;
     let pageEncodes = false;
     let suspended = false;
     const started = performance.now();
@@ -568,12 +571,15 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             try {
               const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold, instancing: chooseNativeInstancing() } });
               exportedScene = true;
-              traced = await traceFrameNative({ tracer: trace.tracer, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
+              if (settings.frameCount > 1 && process.env.JS67_NATIVE_SESSIONS !== 'off') nativeSequence ??= createNativeSequence({ tracer: trace.tracer });
+              traced = await traceFrameNative({ tracer: trace.tracer, sequence: nativeSequence, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
                 seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
                 maxSeconds: tracerOptions.maxSeconds, noiseThreshold: tracerOptions.noiseThreshold });
             } catch (error) {
               // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
               if (isNativeTimeLimitError(error)) throw error;
+              nativeSequence?.close();
+              nativeSequence = undefined;
               // Only a tracer or adapter failure makes the tracer unusable; a scene that failed to export says so for this job alone.
               if (exportedScene) nativeTracerLocator.markUnusable(error.message);
               backendNote = exportedScene ? (await nativeTracerLocator.find()).reason : `renderer.backend "native" could not export the scene (${error.message}).`;
@@ -596,6 +602,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           metrics.width = width;
           metrics.height = height;
           metrics.pathTracer = traced.report;
+          if (traced.report.nativeSession) (metrics.nativeSessionRoutes ??= []).push(traced.report.nativeSession.path);
           const tracedBytes = Buffer.from(traced.data, 'base64');
           if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced frame exceeded 12 MiB.');
           if (encoder) {
@@ -729,6 +736,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       return { artifacts, metrics };
     } finally {
       signal.removeEventListener('abort', abort);
+      nativeSequence?.close();
       activeFrameReceiver = undefined;
       frameReceiver?.close();
       try { await encoder?.close(); }
