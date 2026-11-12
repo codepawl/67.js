@@ -3,7 +3,7 @@
 // The boat is the CC0 Kenney Watercraft Kit `boat-fishing-small.glb`; it is downloaded next to the output on first use.
 // CHROME_PATH names another Chrome or Chromium executable. --vulkan wraps the Chrome it finds with the flags a Linux GPU box needs.
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { existsSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -41,12 +41,20 @@ exec ${found} --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist
   return wrapper;
 }
 
+// Only these kit files are fetched, so a download can never write outside the asset folder.
+const KIT_FILES = new Map([[BOAT_FILE, BOAT_FILE], ['Textures/colormap.png', 'Textures/colormap.png']]);
+
 async function fetchKitFile(relativePath) {
-  const target = join(assetFolder, relativePath);
-  if (existsSync(target)) return;
-  const response = await fetch(`${KIT_URL}/${relativePath}`);
-  if (!response.ok) throw new Error(`Could not download ${relativePath}: HTTP ${response.status}`);
-  await writeFile(target, Buffer.from(await response.arrayBuffer()));
+  const knownPath = KIT_FILES.get(relativePath);
+  if (!knownPath) throw new Error(`Unknown kit file ${relativePath}; add it to KIT_FILES first.`);
+  const target = join(assetFolder, knownPath);
+  const response = await fetch(`${KIT_URL}/${knownPath}`);
+  if (!response.ok) throw new Error(`Could not download ${knownPath}: HTTP ${response.status}`);
+  try {
+    await writeFile(target, Buffer.from(await response.arrayBuffer()), { flag: 'wx' });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+  }
 }
 
 function crate(id, translation, density) {
