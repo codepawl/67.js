@@ -115,6 +115,28 @@ function textureSplitScene(include) {
   return sceneWithParts(parts);
 }
 
+// An emissive quad seen head on with no light in the room, so a pixel is the texture itself and the mean of the picture is
+// known in closed form from the texels (`texture-mean-expectation.py`). Cook and Cycles differ here only in how they read a
+// texture. One frame covers 10 degrees of a 3 x 3 repeat of the quad.
+function emissiveProbeScene(colorSpace) {
+  const emissiveMap = { image: gradientChecker(false), colorSpace };
+  return {
+    parts: [part('emitter', quadGeometry(3), [0, 0, 0], [1, 1, 1], { color: [0, 0, 0], emission: 1, emissiveColor: [1, 1, 1], emissiveMap })],
+    blenderWorld: { type: 'constant', value: 0 },
+    environment: { ...environment(), pointLights: [] },
+    camera: { eye: [0, 0, 8], target: [0, 0, 0], up: [0, 1, 0], fov: 10, near: 0.1, far: 50 },
+  };
+}
+
+// The mask quad of tex-repeat without the backdrop that receives its shadow, and with an opaque map under the same mask material.
+// Cook over Cycles on these two says whether a gap on the mask quad sits on the quad, in its shadow or in the cutout itself.
+function maskDiagnosticScene(variant) {
+  const mapImage = variant === 'opaque' ? gradientChecker(false) : gradientChecker(true);
+  const maskMap = { image: mapImage, colorSpace: 'srgb' };
+  const maskQuad = part('mask', quadGeometry(3), [2.2, 0, 0], [1.9, 1.9, 1], { color: [0.9, 0.95, 0.9], alphaMode: 'mask', alphaCutoff: 0.5, map: maskMap });
+  return sceneWithParts(variant === 'alone' ? [maskQuad] : [backdrop(), maskQuad]);
+}
+
 function textureWrapsScene() {
   const wrapped = (extra) => ({ image: gradientChecker(false), colorSpace: 'srgb', uvScale: [2.5, 2.5], uvOffset: [0.15, -0.1], ...extra });
   const alpha = (extra) => ({ image: gradientChecker(true), colorSpace: 'srgb', uvScale: [2.5, 2.5], ...extra });
@@ -142,6 +164,10 @@ export const TEXTURE_SCENES = {
   'tex-repeat': () => textureRepeatScene('srgb'),
   'tex-repeat-linear': () => textureRepeatScene('linear'),
   'tex-wraps': textureWrapsScene,
+  'tex-emit-srgb': () => emissiveProbeScene('srgb'),
+  'tex-emit-linear': () => emissiveProbeScene('linear'),
+  'tex-mask-alone': () => maskDiagnosticScene('alone'),
+  'tex-mask-opaque-map': () => maskDiagnosticScene('opaque'),
   'tex-split-room': () => textureSplitScene('none'),
   'tex-split-colour': () => textureSplitScene('colour'),
   'tex-split-mask': () => textureSplitScene('mask'),

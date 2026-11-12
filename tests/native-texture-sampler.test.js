@@ -161,3 +161,24 @@ test('a masked material reads its base map alpha through base_color_tex, not thr
   assert.equal(readMaterialWord(input, 0, ALPHA_TEX_WORD), -1);
   assert.equal(readMaterialWord(input, 1, ALPHA_TEX_WORD), 1, 'an explicit alpha map is still bound');
 });
+
+// Two texels, black and white, on a quad seen head on and lit by nothing: the pixel on the seam between them is the blend of the
+// two. Blender Cycles blends the stored 8-bit values (0.5) and decodes the blend (0.214); decoding each texel first gives 0.5 (#1030).
+test('an sRGB colour map is blended on its stored values and decoded after, as Cycles does', { skip: !findNativeAddon() }, () => {
+  const size = 9;
+  const camera = createCamera({ eye: [0, 0, 2.2], target: [0, 0, 0], fov: 30 }, size, size);
+  const blackThenWhite = { width: 2, height: 1, data: new Uint8Array([0, 0, 0, 255, 255, 255, 255, 255]) };
+  const input = buildNativeInputV2(
+    {
+      materials: [{ color: [0, 0, 0], emission: 1, emissiveColor: [1, 1, 1], emissiveMap: { image: blackThenWhite, colorSpace: 'srgb' } }],
+      instances: [{ geometry: quadGeometry(0), materialIndex: 0 }],
+      lights: {},
+    },
+    camera,
+    { width: size, height: size, samples: 16 },
+  );
+  const result = traceNative(input, { width: size, height: size, samples: 16, kernel: 'cycles' });
+  const centrePixel = Math.floor(size / 2) * size + Math.floor(size / 2);
+  const decodedBlend = ((0.5 + 0.055) / 1.055) ** 2.4;
+  assert.ok(Math.abs(result.rgba[centrePixel * 4] - decodedBlend) < 0.02, `centre red ${result.rgba[centrePixel * 4]}, expected ${decodedBlend}`);
+});

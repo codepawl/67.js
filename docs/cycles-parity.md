@@ -1032,3 +1032,33 @@ Texture cost on the same A10G, one scene per process `[measured]`:
 The number of textures is not limited by either build (2000 descriptors of 16x16 packed and rendered the same); the limit is the 1 GiB pool. Bindings, bind groups and struct sizes are unchanged.
 
 Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` writes `tex-repeat` (Cycles can render it), `tex-repeat-linear` and `tex-wraps` (clamp, mirror, nearest, blend and normal map; Cook only), `node bench/cycles-parity/texture-pool-bench.mjs --textures 256 --size 512` prints pack, setup, compile and upload seconds and peak memory.
+
+## Why textured surfaces rendered bright (#1030)
+
+The `cycles` kernel decoded every texel of an 8-bit sRGB map to linear and then filtered the decoded values. Blender Cycles filters the stored 8-bit values and decodes the blend. The decode curve is convex, so a blended texel decoded first is always brighter than one decoded last, and the gap is largest where neighbouring texels differ, at the edges of a checker. The kernel now fetches stored values and decodes the filtered result (`texture_decode_filtered` in `closure.wgsl`). Opaque and nearest-filtered reads, linear maps and every untextured scene take the same arithmetic as before. Textured scenes change: this is a look change toward Cycles.
+
+Proof on the smallest scene, `tex-emit-srgb` (an emissive quad seen head on with nothing else in the room, 128 x 128, 256 spp, RTX 4090, Blender 5.3). The mean of the picture in closed form from the texels, for each order of decode and filter, against what each renderer drew (R, G, B):
+
+| | Mean linear value |
+| --- | --- |
+| closed form, decode then filter | 0.47000, 0.36315, 0.19351 |
+| closed form, filter then decode | 0.44136, 0.34604, 0.17975 |
+| Cook before | 0.47000, 0.36314, 0.19350 |
+| Cycles | 0.44144, 0.34608, 0.17978 |
+| Cook after | 0.44144, 0.34608, 0.17979 |
+
+`tex-emit-linear` (the same map as a linear map) is 0.64706, 0.58824, 0.42157 in closed form, in Cook and in Cycles, so the sampler's geometry (texel centres, wrap, flip) was right and the colour curve order was the whole gap on opaque maps. `render-cycles.py` now builds a `colorSpace: 'linear'` map as a Non-Color image; before, it always used sRGB, so a linear map could not be compared.
+
+Cook over Cycles, 2048 spp, 960 x 540, seed 1, mean ratio R, G, B and relMSE (eps 0.01); Cycles seed against seed is 7.9e-7 to 1.7e-6:
+
+| Scene | Before | After |
+| --- | --- | --- |
+| `tex-split-colour` (opaque colour map) | 1.0207, 1.0275, 1.0357; 2.2e-3 | 1.0001, 1.0002, 1.0002; 7.6e-7 |
+| `tex-split-mask` (colour map with an alpha ramp, cutout) | 1.0182, 1.0246, 1.0234; 1.6e-3 | 1.0131, 1.0110, 1.0145; 1.3e-3 |
+| `tex-repeat` (both quads) | 1.0396, 1.0388, 1.0512; 3.9e-3 | 1.0131, 1.0065, 1.0099; 1.3e-3 |
+| `tex-split-room`, `tex-split-flat` (no texture) | 1.000 | 1.000 |
+| `brick-graph` (graph material with a map) | 0.9817, 0.9880, 0.9925; 1.61e-2 | 0.9817, 0.9879, 0.9923; 1.61e-2 |
+
+Still open: the mask quad is 1.1 to 1.5 percent bright. Two renders of the diagnostic scenes (`tex-mask-alone`: the mask quad without the backdrop; `tex-mask-opaque-map`: the backdrop plus the same mask material over an opaque map) put it off the texture read: with the backdrop removed the quad is 1.0021, 1.0022, 1.0012 (measured in a build that also blended colour weighted by alpha, which did not move the full scene beyond 0.2 percent, so it was dropped), and with an opaque map under the mask material the whole scene is 1.0001. The ratio map of `tex-split-mask` puts the excess in the columns of the cutout holes and in the strip of backdrop below the quad, where Cook is up to 40 percent brighter: the light that reaches the backdrop past a cutout, not the colour of the quad. The cause there is not known.
+
+Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` also writes `tex-emit-srgb`, `tex-emit-linear`, `tex-split-*`, `tex-mask-alone` and `tex-mask-opaque-map`; `native-texture-sampler.test.js` holds a GPU-gated test of the seam between a black and a white texel (0.214 linear when blended before decoding, 0.5 when decoded first).
