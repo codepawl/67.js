@@ -45,7 +45,7 @@ export function encodeNativeInputV2(input) {
 
 // The triangle bound of a scene exported to the "cycles" kernel (see buildTraceScene's maximumTriangles); the legacy kernel and every
 // other tracer keep the 400,000 of the CPU and WebGL paths.
-export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_000_000;
+export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
 
 /**
  * The scene of a native render job as the tables the job runner traces. With the "cycles" kernel (`kernel`) every scene is

@@ -1,7 +1,8 @@
 // Measures the page-side pack of a scene above the CPU and WebGL triangle bound (#1041), and optionally traces it on the native tracer.
 // One child process per case, so the peak memory of a case is its own. Each child prints one NATIVE_CAP_CASE line of JSON.
 //   node bench/cycles-parity/native-cap-measure.mjs --sizes 400000,1000000 [--variants instanced,flattened] [--trace] [--out <json file>]
-//     [--png-directory <dir>] [--samples 16]
+//     [--png-directory <dir>] [--samples 16] [--no-encode]
+// --no-encode stops after the pack (a table above 536,870,888 base64 characters cannot be encoded in V8) and traces the packed input as it is.
 // Run with NODE_OPTIONS=--max-old-space-size=16384 for sizes above 2,000,000 triangles.
 // instanced: buildTraceScene({ instancing: true, maximumTriangles }) + buildJobNativeInput + encodeNativeInputV2, the job export path.
 // flattened: the four meshes alone, buildTraceScene({ maximumTriangles }) (world-space triangles and a CPU BVH) + buildFlattenedJobNativeInput + encodeNativeInputV2.
@@ -44,7 +45,7 @@ function packedBytesOf(input) {
   return Object.values(input).reduce((total, value) => total + (ArrayBuffer.isView(value) ? value.byteLength : 0), 0);
 }
 
-function packScene(variant, uniqueTriangles, maximumTriangles) {
+function packScene(variant, uniqueTriangles, maximumTriangles, encode) {
   const instanced = variant === 'instanced';
   const { parts, uniqueTriangles: actualUnique } = buildNativeCapParts(uniqueTriangles, variant !== 'flattened');
   const camera = nativeCapCamera();
@@ -57,11 +58,22 @@ function packScene(variant, uniqueTriangles, maximumTriangles) {
     ? buildJobNativeInput(traceScene, camera, NATIVE_CAP_PACK_OPTIONS, pack, resolveTexture)
     : buildFlattenedJobNativeInput(traceScene, camera, NATIVE_CAP_PACK_OPTIONS, pack, resolveTexture);
   phases.packSeconds = secondsSince(startedAt);
+  if (!encode) return { input, phases, actualUnique, packedBytes: packedBytesOf(input), instances: input.instanceCount ?? 0 };
   startedAt = performance.now();
   const encoded = encodeNativeInputV2(input);
   phases.encodeSeconds = secondsSince(startedAt);
   const exported = { ...encoded, triangleCount: input.triangleCount, triangles: instanced ? input.triangleCount : traceScene.indices.length / 3, instances: input.instanceCount, wholeMaterials: true };
   return { exported, phases, actualUnique, packedBytes: packedBytesOf(input), instances: input.instanceCount ?? 0 };
+}
+
+// Without the base64 step (a table above the 536,870,888 characters of a V8 string cannot be encoded): the packed input goes to the tracer as it is.
+async function traceInput(input, samples) {
+  const tracer = await import('../../packages/render-native/index.mjs');
+  const { width, height } = NATIVE_CAP_PACK_OPTIONS;
+  const startedAt = performance.now();
+  const traced = tracer.traceNative(input, { width, height, samples, kernel: 'cycles', noiseThreshold: 0 });
+  return { tracedSeconds: secondsSince(startedAt), accelerationBuildSeconds: traced.accelerationBuildSeconds, uploadSeconds: traced.uploadSeconds, adapter: traced.adapter,
+    rgbaSha256: createHash('sha256').update(Buffer.from(traced.rgba.buffer, traced.rgba.byteOffset, traced.rgba.byteLength)).digest('hex') };
 }
 
 async function traceExported(exported, samples, pngPath) {
@@ -86,15 +98,16 @@ async function runChild(argumentList) {
   const maximumTriangles = Number(readFlag(argumentList, '--maximum', 4_000_000));
   const result = { variant, requestedUniqueTriangles: size };
   const startedAt = performance.now();
-  const packed = packScene(variant, size, maximumTriangles);
+  const encode = !argumentList.includes('--no-encode');
+  const packed = packScene(variant, size, maximumTriangles, encode);
   Object.assign(result, { uniqueTriangles: packed.actualUnique, instances: packed.instances, ...packed.phases, packTotalSeconds: secondsSince(startedAt),
-    packedMegabytes: megabytes(packed.packedBytes), ...describeTables(packed.exported) });
+    packedMegabytes: megabytes(packed.packedBytes), ...(encode ? describeTables(packed.exported) : {}) });
   result.overStringLimit = result.largestTableCharacters > V8_STRING_LIMIT || result.jsonCharacters > V8_STRING_LIMIT;
   result.heapUsedMegabytes = megabytes(process.memoryUsage().heapUsed);
   result.peakResidentMegabytes = megabytes(process.resourceUsage().maxRSS * 1024);
   if (argumentList.includes('--trace')) {
     const pngPath = pngDirectory ? join(pngDirectory, `${variant}-${size}.png`) : null;
-    Object.assign(result, { trace: await traceExported(packed.exported, samples, pngPath) });
+    Object.assign(result, { trace: encode ? await traceExported(packed.exported, samples, pngPath) : await traceInput(packed.input, samples) });
   }
   console.log(`NATIVE_CAP_CASE ${JSON.stringify(result)}`);
 }
@@ -108,6 +121,16 @@ async function readCardMegabytes() {
   }
 }
 
+async function readProcessMegabytes(processId) {
+  try {
+    const { stdout } = await runCommand('nvidia-smi', ['--query-compute-apps=pid,used_memory', '--format=csv,noheader,nounits']);
+    const row = stdout.trim().split('\n').map(line => line.split(',').map(part => part.trim())).find(parts => Number(parts[0]) === processId);
+    return row ? Number(row[1]) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 async function runCaseInChild(variant, size, extraArguments) {
   const childArguments = [THIS_FILE, '--child', '--variant', variant, '--size', String(size), ...extraArguments];
   const idleCardMegabytes = await readCardMegabytes();
@@ -117,8 +140,10 @@ async function runCaseInChild(variant, size, extraArguments) {
   let finished = false;
   const exited = new Promise(resolve => child.once('exit', code => { finished = true; resolve(code); }));
   let peakCardMegabytes = idleCardMegabytes;
+  let peakProcessMegabytes = null;
   while (!finished) {
-    const card = await readCardMegabytes();
+    const [card, processMegabytes] = await Promise.all([readCardMegabytes(), readProcessMegabytes(child.pid)]);
+    if (processMegabytes !== null) peakProcessMegabytes = Math.max(peakProcessMegabytes ?? 0, processMegabytes);
     if (Number.isFinite(card)) peakCardMegabytes = Math.max(peakCardMegabytes, card);
     await new Promise(resolve => setTimeout(resolve, 150));
   }
@@ -130,6 +155,7 @@ async function runCaseInChild(variant, size, extraArguments) {
     result.trace.cardIdleMegabytes = idleCardMegabytes;
     result.trace.cardPeakMegabytes = peakCardMegabytes;
     result.trace.cardDeltaMegabytes = peakCardMegabytes - idleCardMegabytes;
+    result.trace.processMegabytes = peakProcessMegabytes;
   }
   return result;
 }
@@ -138,7 +164,7 @@ async function runParent(argumentList) {
   const sizes = readFlag(argumentList, '--sizes', '400000').split(',').map(Number);
   const variants = readFlag(argumentList, '--variants', 'instanced,flattened').split(',');
   const passThrough = ['--samples', '--png-directory', '--maximum'].flatMap(flag => (argumentList.includes(flag) ? [flag, readFlag(argumentList, flag, '')] : []));
-  if (argumentList.includes('--trace')) passThrough.push('--trace');
+  for (const flag of ['--trace', '--no-encode']) if (argumentList.includes(flag)) passThrough.push(flag);
   const results = [];
   for (const size of sizes) {
     for (const variant of variants) {
