@@ -104,12 +104,18 @@ export function packAtlas(materials) {
   return { placements, width: ATLAS_WIDTH, height, data };
 }
 
+// The float of a material record that holds the shadow-only flag: texel 5, second channel (its first channel is the emission map flag).
+export const SHADOW_ONLY_SLOT = 21;
+
 function textureFlags(texture) {
   return (texture.repeat ? 1 : 0) + (texture.colorLookup ? 2 : 0);
 }
 
-/** Ten texels per material: surface values, texture flags, then one atlas rectangle per map. */
-export function packMaterials(materials, atlas) {
+/**
+ * Ten texels per material: surface values, texture flags, then one atlas rectangle per map. A material of a shadow-only part
+ * (`shadowOnlyParts[index] === 1`) also gets 1 in SHADOW_ONLY_SLOT, which camera rays read to step through it.
+ */
+export function packMaterials(materials, atlas, shadowOnlyParts = null) {
   const table = createTable(materials.length * MATERIAL_TEXELS);
   const { data } = table;
   const fields = ['texture', 'normalTexture', 'surfaceTexture', 'emissiveTexture'];
@@ -128,6 +134,7 @@ export function packMaterials(materials, atlas) {
       data[base + 17 + fieldIndex] = textureFlags(texture);
       data.set([place.x, place.y, texture.width, texture.height], base + (6 + fieldIndex) * 4);
     });
+    if (shadowOnlyParts?.[index] === 1) data[base + SHADOW_ONLY_SLOT] = 1;
   });
   return table;
 }

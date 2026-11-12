@@ -54,12 +54,17 @@ def parse_cli_arguments():
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
         "samples": int(read_flag_value(argument_list, "--samples", "256")),
         "bounces": int(read_flag_value(argument_list, "--bounces", "8")),
+        # Transparent Max Bounces on its own; absent means the same value as --bounces.
+        "transparent_bounces": (
+            int(read_flag_value(argument_list, "--transparent-bounces", "-1"))
+            if "--transparent-bounces" in argument_list else None
+        ),
         "seed": int(read_flag_value(argument_list, "--seed", "1")),
         "width": int(read_flag_value(argument_list, "--width", "960")),
         "height": int(read_flag_value(argument_list, "--height", "540")),
@@ -469,7 +474,8 @@ def configure_cycles_parity(scene, options):
     scene.cycles.glossy_bounces = bounces
     scene.cycles.transmission_bounces = bounces
     scene.cycles.volume_bounces = bounces
-    scene.cycles.transparent_max_bounces = bounces
+    transparent_bounces = options["transparent_bounces"]
+    scene.cycles.transparent_max_bounces = bounces if transparent_bounces is None else transparent_bounces
     return used_devices
 
 

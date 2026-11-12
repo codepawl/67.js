@@ -286,6 +286,7 @@ fn int_trace_shadow(
   self_triangle: u32,
   target_instance: u32,
   target_triangle: u32,
+  path_transparent_bounces: u32,
 ) -> vec3<f32> {
   let step_eps = max(kernel_params.ray_epsilon, 1.0e-6);
   let shadow_t_max = select(1.0e30, max(max_distance - step_eps, 0.0), max_distance < 1.0e29);
@@ -293,7 +294,10 @@ fn int_trace_shadow(
 
   if (shadow_t_max > 0.0 && kernel_params.instance_count > 0u && kernel_params.triangle_count > 0u) {
     var current_t_min = 0.0;
-    var transparent_hits = 0u;
+    // `integrate_shadow_max_transparent_hits` (kernel/integrator/intersect_shadow.h) allows
+    // max(transparent_max_bounce - transparent_bounce, 0) transparent hits: the transparent
+    // surfaces the camera path already passed count against the same limit as the shadow ray's.
+    var transparent_hits = path_transparent_bounces;
     for (var step = 0u; step <= INT_MAX_PATH_STEPS; step += 1u) {
       if (current_t_min >= shadow_t_max) {
         break;
@@ -582,6 +586,7 @@ fn int_accumulate_direct_sample(
   medium_sigma: vec3<f32>,
   in_medium: bool,
   bounce: u32,
+  transparent_bounces: u32,
   radiance: ptr<function, vec3<f32>>,
 ) {
   if (sample.valid == 0u || sample.pdf <= 0.0) {
@@ -615,6 +620,7 @@ fn int_accumulate_direct_sample(
       (*point).triangle_index,
       sample.target_instance,
       sample.target_triangle,
+      transparent_bounces,
     );
   }
   if (visibility.x <= 0.0 && visibility.y <= 0.0 && visibility.z <= 0.0) {
@@ -653,6 +659,7 @@ fn int_accumulate_volume_direct_sample(
   incident_dir: vec3<f32>,
   throughput: vec3<f32>,
   bounce: u32,
+  transparent_bounces: u32,
   radiance: ptr<function, vec3<f32>>,
 ) {
   if (sample.valid == 0u || sample.pdf <= 0.0) {
@@ -674,6 +681,7 @@ fn int_accumulate_volume_direct_sample(
       INVALID_INDEX,
       sample.target_instance,
       sample.target_triangle,
+      transparent_bounces,
     );
   }
   *radiance += int_clamp_contribution(unshadowed * visibility, i32(bounce));
@@ -829,12 +837,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (SCENE_HAS_ANALYTIC_LIGHTS && kernel_params.light_count > 0u) {
           smp_seek(&rng, step, SMP_SLOT_VOLUME_ANALYTIC_PICK);
           let light_samp = lgt_sample_analytic_light(scatter_pos, 0xFFFFFFFFu, 0xFFFFFFFFu, smp_next_1d(&rng), smp_next_2d(&rng));
-          int_accumulate_volume_direct_sample(light_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
+          int_accumulate_volume_direct_sample(light_samp, scatter_pos, ray_dir, throughput, bounce, transparent_bounces, &sample_radiance);
         }
         if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
           smp_seek(&rng, step, SMP_SLOT_VOLUME_ENVIRONMENT);
           let env_samp = lgt_sample_environment(smp_next_4d(&rng));
-          int_accumulate_volume_direct_sample(env_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
+          int_accumulate_volume_direct_sample(env_samp, scatter_pos, ray_dir, throughput, bounce, transparent_bounces, &sample_radiance);
         }
 
         var phase_pdf = 0.0;
@@ -937,7 +945,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
       if (terminate_on_hit) {
         if (closure.lobe_count > 0u && closure.lobes[0].lobe_type == LOBE_TRANSPARENT && closure.total_sample_weight > 0.0) {
-          if (kernel_params.max_transparent_bounces > 0u && transparent_bounces < kernel_params.max_transparent_bounces) {
+          // `path_state_next` (kernel/integrator/path_state.h) counts the transparent surface it passes and sets
+          // PATH_RAY_TERMINATE_ON_NEXT_SURFACE once the count reaches transparent_max_bounce, so the first
+          // surface is always passed, also with a limit of 0. The break on terminate_on_next_surface above ends
+          // the path at the next surface and the count never exceeds the limit here.
+          {
             let trans_prob = clamp(closure.lobes[0].sample_weight / closure.total_sample_weight, 0.0, 1.0);
             smp_seek(&rng, step, SMP_SLOT_TRANSPARENT);
             if (trans_prob > 0.0 && smp_next_1d(&rng) < trans_prob) {
@@ -998,7 +1010,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             direct_sample = lgt_sample_environment(smp_next_4d(&rng));
           }
         }
-        int_accumulate_direct_sample(direct_sample, &closure, &point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
+        int_accumulate_direct_sample(direct_sample, &closure, &point, wo, throughput, medium_sigma, in_medium, bounce, transparent_bounces, &sample_radiance);
       }
 
       smp_seek(&rng, step, SMP_SLOT_SURFACE_BSDF);
@@ -1008,9 +1020,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       if (bsdf_sample.sampled_lobe_type == LOBE_TRANSPARENT) {
-        if (kernel_params.max_transparent_bounces == 0u || transparent_bounces >= kernel_params.max_transparent_bounces) {
-          break;
-        }
+        // As above: `path_state_next` passes the transparent surface and then terminates on the next surface
+        // when the count reaches transparent_max_bounce, with a limit of 0 as well (its FIXME note).
         transparent_bounces += 1u;
         if (transparent_bounces >= kernel_params.max_transparent_bounces) {
           terminate_on_next_surface = true;

@@ -1,0 +1,109 @@
+<!doctype html>
+<meta charset="utf-8">
+<script type="importmap">{"imports":{"gl-matrix":"/node_modules/gl-matrix/esm/index.js"}}</script>
+<script type="module">
+import { box } from '/src/geometry.js';
+import { buildTraceScene } from '/src/path-tracer-scene.js';
+import { createCamera, normalizePathTracerOptions, renderPathTracedImage } from '/src/path-tracer.js';
+import { traceOnWebGpu } from '/src/path-tracer-webgpu.js';
+import { createRealtimeTracer } from '/src/path-tracer-realtime.js';
+
+function placed(translation, scale) {
+  return new Float32Array([scale[0], 0, 0, 0, 0, scale[1], 0, 0, 0, 0, scale[2], 0, translation[0], translation[1], translation[2], 1]);
+}
+const surface = color => ({ tag: 'surface', metallic: 0, roughness: 1, emission: 0, color });
+const environment = { keyColor: [3, 3, 3], lightDirection: [0, 1, 0] };
+const camera = { eye: [0, 6, 0], target: [0, 0, 0], up: [0, 0, -1], fov: 40 };
+const floor = () => ({ name: 'floor', geometry: box(0, 1), matrix: placed([0, -0.05, 0], [20, 0.1, 20]), material: surface([0.5, 0.5, 0.5]) });
+const caster = extra => ({ name: 'caster', geometry: box(0, 1), matrix: placed([0, 1.5, 0], [2, 0.2, 2]), material: surface([0.9, 0.2, 0.1]), ...extra });
+const CASES = [['no caster', () => [floor()]], ['visible caster', () => [floor(), caster()]], ['shadowOnly caster', () => [floor(), caster({ shadowOnly: true })]]];
+
+const luminance = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+/** Mean luminance of the centre square (under the caster) and of the outer ring (floor the shadow never reaches). */
+function regions(pixelAt, size) {
+  const quarter = Math.floor(size / 4);
+  let centreSum = 0, centreCount = 0, ringSum = 0, ringCount = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const value = pixelAt(x, y);
+      if (x >= quarter && x < size - quarter && y >= quarter && y < size - quarter) { centreSum += value; centreCount++; }
+      else if (x < 3 || y < 3 || x >= size - 3 || y >= size - 3) { ringSum += value; ringCount++; }
+    }
+  }
+  return { centre: centreSum / centreCount, ring: ringSum / ringCount };
+}
+
+function draw(canvasContext, rgba, size, column) {
+  const image = new ImageData(new Uint8ClampedArray(rgba), size, size);
+  canvasContext.putImageData(image, column * size, 0);
+}
+
+function toRgba(linear, size) {
+  const bytes = new Uint8ClampedArray(size * size * 4);
+  for (let index = 0; index < size * size; index++) {
+    for (let channel = 0; channel < 3; channel++) bytes[index * 4 + channel] = 255 * Math.min(1, Math.max(0, linear[index * 3 + channel])) ** (1 / 2.2);
+    bytes[index * 4 + 3] = 255;
+  }
+  return bytes;
+}
+
+async function traceLinear(backend, parts, size) {
+  const options = { width: size, height: size, samples: 64, bounces: 2, denoise: false, threads: 1 };
+  if (backend === 'gpu') return (await renderPathTracedImage({ parts, environment, camera }, { ...options, backend: 'gpu' })).linear;
+  const kernel = backend === 'webgpu-wavefront' ? 'wavefront' : 'megakernel';
+  const resolved = normalizePathTracerOptions({ ...options, backend: 'webgpu' });
+  const traced = await traceOnWebGpu(buildTraceScene(parts, environment), createCamera(camera, size, size), { ...resolved, kernel }, () => {});
+  return traced.color;
+}
+
+async function realtimeRgba(parts, size) {
+  const canvas = document.createElement('canvas');
+  const tracer = await createRealtimeTracer({ parts, environment, camera }, { backend: 'webgpu', width: size, height: size, resolutionDivisor: 1, canvas });
+  if (tracer.backend !== 'webgpu') throw Object.assign(new Error(`real-time tracer fell back: ${tracer.fallbackReason}`), { unavailable: true });
+  for (let frame = 0; frame < 48; frame++) await tracer.frame(camera, { wait: true }).done;
+  const { rgba } = await tracer.readFrame();
+  tracer.dispose?.();
+  return rgba;
+}
+
+window.shadowOnlyProof = async (backend, size) => {
+  if (backend.startsWith('webgpu') && !navigator.gpu) return { backend, unavailable: true, error: 'navigator.gpu is missing on this page' };
+  const montage = document.createElement('canvas');
+  montage.width = size * CASES.length;
+  montage.height = size;
+  const context = montage.getContext('2d');
+  const frames = [];
+  const started = performance.now();
+  try {
+    for (const [index, [label, build]] of CASES.entries()) {
+      let rgba;
+      let pixelAt;
+      if (backend === 'webgpu-realtime') {
+        rgba = await realtimeRgba(build(), size);
+        pixelAt = (x, y) => luminance(rgba[(y * size + x) * 4], rgba[(y * size + x) * 4 + 1], rgba[(y * size + x) * 4 + 2]) / 255;
+      } else {
+        const linear = await traceLinear(backend, build(), size);
+        rgba = toRgba(linear, size);
+        pixelAt = (x, y) => luminance(linear[(y * size + x) * 3], linear[(y * size + x) * 3 + 1], linear[(y * size + x) * 3 + 2]);
+      }
+      draw(context, rgba, size, index);
+      frames.push({ label, ...regions(pixelAt, size) });
+    }
+  } catch (error) {
+    return { backend, unavailable: Boolean(error.unavailable) || /navigator\.gpu|adapter|WebGPU/i.test(error.message), error: error.message };
+  }
+  const [lit, visible, shadow] = frames;
+  // The real-time tracer returns ACES tone mapped bytes, which lift shadows, so its ratios are looser than the linear ones.
+  const toneMapped = backend === 'webgpu-realtime';
+  const darkening = toneMapped ? 0.5 : 0.25;
+  const separation = toneMapped ? 2 : 3;
+  const checks = {
+    castingShadowDarkensFloor: shadow.centre < lit.centre * darkening,
+    casterHiddenFromCamera: visible.centre > shadow.centre * separation,
+    shadowOnlyDifferentFromVisible: Math.abs(visible.centre - shadow.centre) > 0.2 * lit.centre,
+    ringUnchanged: Math.abs(shadow.ring - lit.ring) < 0.15 * lit.ring,
+  };
+  return { backend, status: Object.values(checks).every(Boolean) ? 'pass' : 'fail', frames, checks, seconds: (performance.now() - started) / 1000, montage: montage.toDataURL('image/png') };
+};
+</script>
