@@ -93,6 +93,8 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 | `300` | `4` | `4` | `f32` | `filter_glossy` | Cycles Filter Glossy (`blur_glossy`) factor (`0.0` = off, default `1.0`) |
 | `304` | `16` | `16` | `vec4<u32>` | `reserved_tail` | Reserved (`[0, 0, 0, 0]`) |
 
+The four thin-lens words (`aperture_radius`, `focal_distance`, `aperture_blades`, `aperture_rotation`, bytes 156, 172, 184 and 188) are set by `resolveThinLensParameters` in `pack-input-v2.mjs`, from the camera object that `createCamera` returns for a camera with an `fStop` (or from `options.apertureRadius`, `focalDistance`, `apertureBlades`, `apertureRotation`). A pinhole writes `0`, `10`, `0` and `0`, as before, so its params bytes do not change. Cycles' model: the aperture radius is `focal length (mm) / 1000 / (2 * f-stop)`, a point on the lens (a disk, or a regular polygon of `aperture_blades` corners turned by `aperture_rotation`) is the ray origin, and the ray goes through the point that lies `focal_distance` along `camera_forward` from the pinhole ray (the focus distance is measured on the view axis, not along the ray). The lens sample is the kernel's existing `lens_uv` draw, taken for every sample whether or not the aperture is 0, so depth of field does not move any other random number. A FORMAT-v1 input carries the same four values in the unused fourth float of the eye, forward, right and above vectors (floats 3, 7, 11 and 15 of the 64-float block); the legacy kernel ignores them and `upgradeNativeInputV1ToV2` reads them back.
+
 ---
 
 ## 2. Instance Table — `InstanceRecord` (`@binding(2)`)
