@@ -91,7 +91,7 @@ test('visible, castShadow, receiveShadow, holdout and shadowCatcher draw as docu
     }
     const page = await browser.newPage({ viewport: { width: 96, height: 96 } });
     await page.goto(`http://127.0.0.1:${port}/`);
-    const names = ['plain', 'noCaster', 'hiddenCaster', 'holdoutCaster', 'holdoutNoCast', 'holdoutBlindFloor', 'catcherLit', 'catcherNoCaster', 'hiddenAll'];
+    const names = ['plain', 'noCaster', 'hiddenCaster', 'holdoutCaster', 'holdoutNoCast', 'holdoutBlindFloor', 'catcherLit', 'catcherNoCaster', 'hiddenAll', 'shadowOnlyCaster'];
     const images = await drawScenarios(page, [
       { floor: {}, caster: {} },
       { floor: {}, caster: { holdout: true } },
@@ -102,6 +102,7 @@ test('visible, castShadow, receiveShadow, holdout and shadowCatcher draw as docu
       { floor: { shadowCatcher: true }, caster: { holdout: true } },
       { floor: { shadowCatcher: true }, caster: { visible: false } },
       { floor: { visible: false }, caster: { visible: false } },
+      { floor: {}, caster: { shadowOnly: true } },
     ]);
     const image = Object.fromEntries(names.map((name, index) => [name, images[index]]));
     assert.ok(opaquePixels(image.plain) > 3000, 'the plain scene draws the floor and the caster');
@@ -116,6 +117,9 @@ test('visible, castShadow, receiveShadow, holdout and shadowCatcher draw as docu
     // A hidden caster casts no shadow either: its scene equals the one whose caster is a holdout that does not cast.
     const hiddenNoShadow = differingPixels(image.hiddenCaster, image.holdoutNoCast);
     assert.ok(hiddenNoShadow > 150, 'holdout still occludes while a hidden caster leaves the floor whole');
+    // Shadow only (issue 926): the caster leaves the picture but its shadow stays on the floor.
+    assert.ok(differingPixels(image.shadowOnlyCaster, image.plain) > 150, 'a shadow-only caster is not drawn');
+    assert.ok(differingPixels(image.shadowOnlyCaster, image.hiddenCaster) > 30, 'a shadow-only caster still shades the floor, which a hidden one does not');
     // Shadow catcher: black pixels whose alpha is the shadow, and nothing without a caster.
     assert.equal(opaquePixels(image.catcherNoCaster), 0, 'a lit shadow catcher is fully transparent');
     assert.ok(opaquePixels(image.catcherLit) > 30, 'the received shadow is written as alpha');

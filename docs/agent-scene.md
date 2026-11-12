@@ -345,7 +345,9 @@ Five node fields change how a node renders; `add-node` and `set-node` take them,
 - `castShadow: false` and `receiveShadow: false` (mesh nodes) stop a mesh casting or receiving shadows. Both default to true; glass casts none unless `castShadow` is set.
 - `holdout: true` writes zero colour and zero alpha where the mesh covers, and still hides what is behind it and still casts its shadow. `shadowCatcher: true` draws only the shadow it receives, black with the shadow as premultiplied alpha, and casts none. Both are for compositing over footage and need a transparent canvas: `new Renderer67(canvas, parts, { transparent: true })`. A node is never both. The shadow catcher shows the sun shadow only.
 
-Parts with different `castShadow`, `receiveShadow`, `holdout` or `shadowCatcher` values batch apart; `visible` never splits a batch. `receiveShadow`, `holdout` and `shadowCatcher` changes need `replaceParts`, not `updateParts`.
+- `shadowOnly: true` (mesh nodes) keeps the node in the shadow passes and leaves it out of the picture, the same as Blender's Ray Visibility > Camera off. Use it for a gobo, such as a window frame outside the shot that throws bars of sun onto a wall. It is also left out of depth, object ID and wireframe passes. It defaults to false, so no scene changes. A node cannot set `shadowOnly` together with `castShadow: false`, `holdout` or `shadowCatcher`. The raster renderer honours it; the Cook path tracer does not yet, and traces the node as visible geometry.
+
+Parts with different `castShadow`, `receiveShadow`, `holdout`, `shadowCatcher` or `shadowOnly` values batch apart; `visible` never splits a batch. `receiveShadow`, `holdout`, `shadowCatcher` and `shadowOnly` changes need `replaceParts`, not `updateParts`.
 
 ### Relations between parts
 

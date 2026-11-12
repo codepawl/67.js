@@ -82,6 +82,25 @@ test('shadow and composite flags reach the part and split batches', () => {
   assert.ok(batches.some(names => names.join() === 'other,plain'));
 });
 
+test('shadowOnly reaches the part, splits batches and conflicts with the flags that remove the shadow or the picture', () => {
+  const scene = createAgentScene(recipe({ nodes: [
+    { id: 'plain', geometry: 'box', material: 'finish' },
+    { id: 'gobo', geometry: 'box', material: 'finish', shadowOnly: true, translation: [2, 0, 0] },
+    { id: 'gobo2', geometry: 'box', material: 'finish', shadowOnly: true, translation: [4, 0, 0] },
+  ] }));
+  const byName = new Map(scene.parts.map(part => [part.name, part]));
+  assert.equal(byName.get('gobo').shadowOnly, true);
+  assert.equal(byName.get('plain').shadowOnly, undefined);
+  const batches = groupParts(scene.parts).map(batch => batch.map(part => part.name).sort());
+  assert.equal(batches.length, 2);
+  assert.ok(batches.some(names => names.join() === 'gobo,gobo2'));
+  const node = fields => recipe({ nodes: [{ id: 'one', geometry: 'box', material: 'finish', ...fields }] });
+  assert.throws(() => createAgentScene(node({ shadowOnly: 1 })), /nodes\[0\]\.shadowOnly: got 1; expected true or false/);
+  assert.throws(() => createAgentScene(node({ shadowOnly: true, castShadow: false })), /nodes\[0\]\.shadowOnly: got true; expected false when castShadow is false/);
+  assert.throws(() => createAgentScene(node({ shadowOnly: true, holdout: true })), /nodes\[0\]\.shadowOnly: got true/);
+  assert.throws(() => createAgentScene(recipe({ nodes: [{ id: 'g', shadowOnly: true }] })), /nodes\[0\]\.shadowOnly: got true; expected a flag on a mesh node/);
+});
+
 test('flags must be booleans on mesh nodes and a node is not both holdout and catcher', () => {
   const node = fields => recipe({ nodes: [{ id: 'one', geometry: 'box', material: 'finish', ...fields }] });
   assert.throws(() => createAgentScene(node({ castShadow: 'no' })), /nodes\[0\]\.castShadow: got "no"; expected true or false/);
