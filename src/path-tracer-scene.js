@@ -336,6 +336,7 @@ export function buildTraceScene(allParts, environment = {}) {
     ...geometry,
     bvh,
     materials: parts.map(part => resolveMaterial(part.material ?? {})),
+    shadowOnlyParts: parts.some(part => part.shadowOnly === true) ? Uint8Array.from(parts, part => (part.shadowOnly === true ? 1 : 0)) : null,
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),
     volume: resolveTraceVolume(environment.volumeFog),
