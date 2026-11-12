@@ -1,4 +1,4 @@
-import { encodeNativeTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
+import { exportNativeSceneTables, nativeTexelTracerIfAvailable } from './native-bake-page.js';
 import { buildWithKernels, kernelWorkersAvailable, kernelStats, resetKernelStats } from '../src/kernel-offload.js';
 import { createAgentScene, applyCameraFields, loadAllAgentSceneModules, allAgentSceneModulesLoaded, needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader, needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from '../src/agent-scene.js';
 import { Renderer67 } from '../src/renderer.js';
@@ -989,18 +989,17 @@ window.__agentPreview = {
     } else if (motionTime !== undefined) {
       record.scene.sampleMotion(motionTime);
     }
-    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes }, pack, { buildNativeInput }] = await Promise.all([
+    const { instancing, ...packOptions } = options;
+    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes }, pack, { buildNativeInput }, { buildJobNativeInput }] = await Promise.all([
       import('../src/path-tracer.js'), import('../src/path-tracer-scene.js'), import('../src/path-tracer-gpu-pack.js'),
-      import('../packages/render-native/pack-input.mjs'),
+      import('../packages/render-native/pack-input.mjs'), import('../packages/render-native/job-input.mjs'),
     ]);
     const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
-    const traceScene = buildTraceScene(record.scene.parts, environment);
-    refuseLocalVolumes(traceScene, 'the native path tracer');
+    // Copies of one geometry stay instances only when the job traces with the "cycles" kernel; the legacy kernel reads flattened triangles.
     const camera = createCamera(record.scene.camera, options.width, options.height);
-    const input = buildNativeInput(traceScene, camera, options, pack);
-    const tables = encodeNativeTables(input);
-    const ignored = describeIgnoredFeatures(record.scene.parts, environment);
-    return { tables, triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, ignored };
+    const exported = exportNativeSceneTables({ parts: record.scene.parts, environment, camera, options: packOptions, instancing: instancing === true,
+      modules: { buildTraceScene, refuseLocalVolumes, buildNativeInput, buildJobNativeInput, pack } });
+    return { ...exported, ignored: describeIgnoredFeatures(record.scene.parts, environment) };
   },
   // The PNG of linear pixels (three floats each, base64) that a denoiser outside the page returned, or of the wavelet
   // filter over the kept features when none came back.
