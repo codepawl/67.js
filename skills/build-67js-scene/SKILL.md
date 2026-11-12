@@ -35,6 +35,7 @@ Variants: `scene_apply` with a `branch` name, compare in one `scene_review` (a `
 | Lens, focal length, depth of field, shift, orthographic | `${CLAUDE_SKILL_DIR}/references/camera.md` |
 | Motion tracks (camera, nodes, lights, sun, sky, effects), shots, timeline | `${CLAUDE_SKILL_DIR}/references/film-and-animation.md` |
 | A call failed, a diagnostic appeared, the picture is wrong | `${CLAUDE_SKILL_DIR}/references/errors-and-recovery.md` |
+| A playable game: animate a placed, retargeted character (idle, walk, run), web export | `${CLAUDE_SKILL_DIR}/references/game.md` |
 | Polygon modeling: extrude, inset, bevel, booleans, mirror, array | `${CLAUDE_SKILL_DIR}/references/mesh-modeling.md` |
 | Scene code against the npm library, not MCP | `${CLAUDE_SKILL_DIR}/references/scene-contract.md` |
 

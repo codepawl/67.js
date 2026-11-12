@@ -127,7 +127,8 @@ test('the web export refuses what it cannot play and says how to fix it', async 
   await assert.rejects(async () => writeWebBuild({ recipe: recipeWith({ ...game, physics: true }), buildDirectory: build, outputDirectory: await out() }), /Set game\.physics to false/);
   const placed = recipeWith(game);
   placed.nodes.push({ id: 'tree', asset: { id: 'a'.repeat(64) } });
-  await assert.rejects(async () => writeWebBuild({ recipe: placed, buildDirectory: build, outputDirectory: await out() }), /procedural scenes only/);
+  await assert.rejects(async () => writeWebBuild({ recipe: placed, buildDirectory: build, outputDirectory: await out() }), /needs the bytes of the catalog assets placed by tree/);
+  await assert.rejects(async () => writeWebBuild({ recipe: { ...placed, nodes: [{ id: 'grove', vegetation: {} }] }, buildDirectory: build, outputDirectory: await out() }), /does not carry grown vegetation/);
   await assert.rejects(async () => writeWebBuild({ recipe: recipeWith(game), buildDirectory: await mkdtemp(join(tmpdir(), '67js-empty-build-')), outputDirectory: await out() }), /game\.js is missing.*build:lib/);
   const big = await fakeBuild();
   await writeFile(join(big, 'chunk-a.js'), `${'/'.repeat(WEB_EXPORT_LIMITS.maxEngineBytes)}\nexport {};`);

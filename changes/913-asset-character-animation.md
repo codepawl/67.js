@@ -1,0 +1,1 @@
+- A game recipe animates a placed, retargeted character: `player.animation` and `npcs[].animation` take clips of asset files (`from: { asset, clip }`), the graph blends idle, walk and run by speed with planted feet holding to under 1e-4 m, and the web export writes the placed assets to `assets/<id>.glb` for the page to load (Part of #913)

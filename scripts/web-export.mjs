@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path';
 // section) and engine/ (the built 67js modules that index.html imports, found by following the import statements from
 // build/game.js). There is no server code. The folder is bounded, so an export never fills the disk.
 
-export const WEB_EXPORT_LIMITS = Object.freeze({ maxEngineBytes: 12 * 1024 * 1024, maxEngineFiles: 400, maxTitleLength: 64, maxRecipeBytes: 1024 * 1024 });
+export const WEB_EXPORT_LIMITS = Object.freeze({ maxEngineBytes: 12 * 1024 * 1024, maxEngineFiles: 400, maxTitleLength: 64, maxRecipeBytes: 1024 * 1024, maxAssetBytes: 64 * 1024 * 1024 });
+const ASSET_ID = /^[a-f0-9]{64}$/;
 
 const ENTRY_MODULE = 'game.js';
 const IMPORT_PATTERN = /(?:from\s*|import\s*\(\s*|import\s*)["'](\.\/[A-Za-z0-9_.-]+\.js)["']/g;
@@ -42,7 +43,7 @@ function pageTitle(title) {
 }
 
 /** The page. `?replay=name.json` plays a recording from the same folder instead of the keyboard, for tests and demos. */
-export function indexHtml(title) {
+export function indexHtml(title, assetUrls = {}) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -60,7 +61,8 @@ const canvas = document.getElementById('game');
 const recipe = await (await fetch('./game.json')).json();
 const replayName = new URLSearchParams(location.search).get('replay');
 const replay = /^[\\w.-]+\\.json$/.test(replayName ?? '') ? await (await fetch('./' + replayName)).json() : undefined;
-window.__game = await startGame(canvas, recipe, { replay });
+const assetUrls = ${JSON.stringify(assetUrls)};
+window.__game = await startGame(canvas, recipe, { replay, assetUrls });
 </script>
 </body>
 </html>
@@ -71,10 +73,12 @@ window.__game = await startGame(canvas, recipe, { replay });
  * Write the web build of a recipe into `outputDirectory` (created, must not hold a build already) and return its summary.
  * `buildDirectory` is the package's build/ folder.
  */
-export async function writeWebBuild({ recipe, buildDirectory, outputDirectory, title }) {
+export async function writeWebBuild({ recipe, buildDirectory, outputDirectory, title, assets = new Map() }) {
   if (!recipe?.game) throw new Error('This scene has no game. Add one with scene_apply set-game (fields: scene_capabilities topic game), then export again.');
   if (recipe.game.physics) throw new Error('game.physics is true, and the web export does not bundle the physics engine yet. Set game.physics to false with set-game.');
-  if (recipe.nodes?.some(node => node.asset || node.vegetation)) throw new Error('The web export holds procedural scenes only. Remove the placed catalog assets and vegetation, or build them from geometry.');
+  if (recipe.nodes?.some(node => node.vegetation)) throw new Error('The web export does not carry grown vegetation yet. Remove it, or build the plants from geometry.');
+  const missing = (recipe.nodes ?? []).filter(node => node.asset && !assets.has(node.asset.id)).map(node => node.id);
+  if (missing.length) throw new Error(`The web export needs the bytes of the catalog assets placed by ${missing.join(', ')}. Pass them as assets (asset id to Buffer).`);
   if (recipe.format !== '67js.scene') throw new Error('The web export needs a 67js.scene recipe. Create the scene with scene_create.');
   const recipeText = JSON.stringify(recipe);
   if (Buffer.byteLength(recipeText) > WEB_EXPORT_LIMITS.maxRecipeBytes) throw new RangeError(`The recipe is larger than ${WEB_EXPORT_LIMITS.maxRecipeBytes} bytes. Simplify the scene.`);
@@ -87,8 +91,18 @@ export async function writeWebBuild({ recipe, buildDirectory, outputDirectory, t
   await mkdir(join(outputDirectory, 'engine'), { recursive: true });
   for (const name of names) await copyFile(join(buildDirectory, name), join(outputDirectory, 'engine', name));
   await writeFile(join(outputDirectory, 'game.json'), recipeText);
-  const html = indexHtml(title);
+  const assetUrls = {};
+  let assetBytes = 0;
+  if (assets.size) await mkdir(join(outputDirectory, 'assets'), { recursive: true });
+  for (const [id, bytes] of assets) {
+    if (!ASSET_ID.test(id)) throw new RangeError(`Asset id ${JSON.stringify(id)} is not a catalog id of 64 hexadecimal characters.`);
+    assetBytes += bytes.byteLength;
+    if (assetBytes > WEB_EXPORT_LIMITS.maxAssetBytes) throw new RangeError(`The placed assets are over ${WEB_EXPORT_LIMITS.maxAssetBytes} bytes together. Use fewer or smaller assets.`);
+    await writeFile(join(outputDirectory, 'assets', `${id}.glb`), bytes);
+    assetUrls[id] = `./assets/${id}.glb`;
+  }
+  const html = indexHtml(title, assetUrls);
   await writeFile(join(outputDirectory, 'index.html'), html);
-  const totalBytes = engineBytes + Buffer.byteLength(recipeText) + Buffer.byteLength(html);
-  return { directory: dirname(join(outputDirectory, 'index.html')), files: names.length + 2, engineModules: names.length, bytes: totalBytes };
+  const totalBytes = engineBytes + assetBytes + Buffer.byteLength(recipeText) + Buffer.byteLength(html);
+  return { directory: dirname(join(outputDirectory, 'index.html')), files: names.length + 2 + assets.size, engineModules: names.length, bytes: totalBytes };
 }

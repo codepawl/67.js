@@ -1,6 +1,6 @@
 import { depthLayerOf, flushOrderOf, setFlushOrder } from './depth-layer.js';
 import { resolveFlush } from './flush-resolve.js';
-import { boundsDiagonal as diagonal, determinantSign, worldBounds } from './flush-search.js';
+import { boundsDiagonal as diagonal, determinantSign, nearTolerance, worldBounds } from './flush-search.js';
 
 // Two jobs. resolveFlushParts ranks near-coplanar triangles so they stop z-fighting (flush-search.js, flush-resolve.js); the
 // renderer runs it once on the parts it is built with, and the agent scene whenever its parts change. findCoplanarOverlaps is
@@ -333,8 +333,10 @@ function forEachCandidatePair(entries, tolerance, scanBudget, test) {
  * material?, decal?, depthLayer?, skin?, morph? }`; skinned and morphed parts are skipped. Returns
  * `{ overlaps, truncated, work }` with each overlap as `{ smaller, larger, area, distance, normal }` (areas in square
  * metres, the larger part by bounds diagonal). `work` counts bounds and triangle tests, capped by `workBudget`.
+ * Unless `tolerance` is given, the reach is the flush search's (nearTolerance of the scene bounds, never below
+ * COPLANAR_TOLERANCE), so a scene that opted out hears about every pair the ranking would have settled.
  */
-export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, workBudget = DEFAULT_WORK_BUDGET, triangleBudget = DEFAULT_TRIANGLE_BUDGET } = {}) {
+export function findCoplanarOverlaps(parts, { tolerance: requestedTolerance = null, workBudget = DEFAULT_WORK_BUDGET, triangleBudget = DEFAULT_TRIANGLE_BUDGET } = {}) {
   const entries = [];
   const stacks = new Map();
   for (const part of parts) {
@@ -353,6 +355,7 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
     stack.set(pose, copies + 1);
     entries.push({ part, bounds });
   }
+  const tolerance = requestedTolerance ?? Math.max(COPLANAR_TOLERANCE, nearTolerance(diagonal(sceneBoundsOf(entries))));
   const budget = { work: 0, limit: workBudget };
   const scanBudget = { triangles: triangleBudget, exhausted: false };
   const overlaps = [];
@@ -387,6 +390,17 @@ export function findCoplanarOverlaps(parts, { tolerance = COPLANAR_TOLERANCE, wo
   const truncated = budget.work > workBudget || scanBudget.exhausted;
   overlaps.sort((first, second) => second.area - first.area || String(first.smaller.name).localeCompare(String(second.smaller.name)));
   return { overlaps, truncated, work: budget.work };
+}
+
+function sceneBoundsOf(entries) {
+  const scene = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+  for (const { bounds } of entries) {
+    for (let axis = 0; axis < 3; axis++) {
+      scene[axis] = Math.min(scene[axis], bounds[axis]);
+      scene[3 + axis] = Math.max(scene[3 + axis], bounds[3 + axis]);
+    }
+  }
+  return scene;
 }
 
 function metres(value) {

@@ -34,6 +34,8 @@ const reportOnly = flagPresent('--report-only');
 const resultsPath = resolve(valueAfter('--results', join(workDirectory, `matrix-${width}.json`)));
 const blenderBinary = process.env.BLENDER_BIN ?? 'C:/Program Files/Blender Foundation/Blender 5.3/blender.exe';
 const skipScoring = flagPresent('--no-score');
+// Cook native, webgpu, gpu and cpu all get this firefly clamp. 1000 is the cap of the JS API, so it is the only value every backend accepts (#936).
+const fireflyClamp = Number(valueAfter('--firefly-clamp', 1000));
 
 const BASE_ORDER = ['glaze-draft', 'glaze-realtime', 'eevee-lowest', 'eevee-default', 'cook-native', 'cycles', 'cook-webgpu'];
 const OPTIONAL_ORDER = [flagPresent('--with-cook-gpu') ? 'cook-gpu' : null, flagPresent('--with-cook-cpu') ? 'cook-cpu' : null].filter(Boolean);
@@ -135,7 +137,7 @@ function planCell(scene, sceneJson, engine, samples, repetition, directory) {
   }
   if (engine === 'cook-native' || engine === 'cycles') {
     const traceCommand = engine === 'cook-native'
-      ? ['node', 'bench/cycles-parity/trace-native.mjs', sceneJson, prefix, '--samples', String(samples), '--bounces', '8', '--seed', '1', '--firefly-clamp', '1000000000', '--noise-threshold', '0']
+      ? ['node', 'bench/cycles-parity/trace-native.mjs', sceneJson, prefix, '--samples', String(samples), '--bounces', '8', '--seed', '1', '--firefly-clamp', String(fireflyClamp), '--noise-threshold', '0']
       : [blenderBinary, '-b', '--factory-startup', '--python', 'bench/cycles-parity/render-cycles.py', '--', sceneJson, prefix, '--samples', String(samples), '--bounces', '8', '--seed', '1', '--width', String(width), '--height', String(height)];
     return {
       command: measuredCommand(prefix, traceCommand),
@@ -144,7 +146,7 @@ function planCell(scene, sceneJson, engine, samples, repetition, directory) {
         const processMetrics = await readJson(`${prefix}.metrics.json`);
         return {
           metrics: {
-            samples, samplingSeconds: report.samplingSeconds, totalTraceSeconds: report.totalTraceSeconds, perSampleMilliseconds: (report.samplingSeconds / samples) * 1000,
+            samples, fireflyClamp: engine === 'cook-native' ? fireflyClamp : null, samplingSeconds: report.samplingSeconds, totalTraceSeconds: report.totalTraceSeconds, perSampleMilliseconds: (report.samplingSeconds / samples) * 1000,
             primaryMilliseconds: report.samplingSeconds * 1000, primaryName: 'sampling, all samples',
             processWallSeconds: processMetrics.wallSeconds, cardDeltaMebibytes: processMetrics.peakVramDeltaMegabytes, peakRamMegabytes: processMetrics.peakRamMegabytes,
           },
@@ -165,7 +167,7 @@ function planCell(scene, sceneJson, engine, samples, repetition, directory) {
         return {
           metrics: {
             samples, samplingSeconds, totalTraceSeconds: report.report.tracedSeconds, compileSeconds, perSampleMilliseconds: (samplingSeconds / samples) * 1000,
-            primaryMilliseconds: samplingSeconds * 1000, primaryName: 'sampling, all samples', cardDeltaMebibytes: report.card.deltaMebibytes,
+            primaryMilliseconds: samplingSeconds * 1000, primaryName: 'sampling, all samples', cardDeltaMebibytes: report.card.deltaMebibytes, fireflyClamp: 1000,
           },
           image: { path: `${cookPrefix}.npy`, kind: 'linear-npy' },
         };

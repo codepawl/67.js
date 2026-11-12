@@ -24,6 +24,7 @@ import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
 import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { writeWebBuild } from './web-export.mjs';
+import { gameAssetIds } from '../src/game-assets.js';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
 import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
@@ -162,6 +163,18 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     const needs = recipeAssetNeeds(value);
     const entries = await Promise.all(needs.map(async ({ id }) => [id, (await (await catalog()).read(id)).toString('base64')]));
     return { ...(needs.length ? { assetData: Object.fromEntries(entries) } : {}), ...(await sequenceFrameData(value)), ...(await lookFileData(value)) };
+  }
+
+  /**
+   * A set-game that animates a node the scene already places needs one more decoded copy of that asset, which the operations alone do not
+   * name. Returns the scene's nodes with the new game, which the page and the byte loader read the asset needs from, or undefined.
+   */
+  async function gameAssetNeeds({ sessionId, operations }) {
+    const setGame = (operations ?? []).findLast(operation => operation.type === 'set-game');
+    if (!setGame?.game) return undefined;
+    const { recipe } = await invoke('exportRecipe', { sessionId });
+    const candidate = { nodes: recipe.nodes, game: setGame.game };
+    return recipeAssetNeeds(candidate).some(need => need.copies > 1) ? { recipe: candidate } : undefined;
   }
 
   /** The HDRI and .cube files a recipe names: shipped ones by name from assets/looks, the others by catalog ID. The page decodes them. */
@@ -850,7 +863,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         const hadBake = bakedSessionIds.has(input.sessionId);
         const rebakes = hadBake || bakeAfter === true;
         const motions = (input.operations ?? []).filter(operation => operation.type === 'set-motion').map(operation => operation.motion);
-        const applied = await invoke('apply', { ...input, ...(await motionSources(motions)), ...(await placedAssetData(input.operations)) }, rebakes ? BAKE_EVALUATION_TIMEOUT_MS : EVALUATION_TIMEOUT_MS);
+        const gameAssets = await gameAssetNeeds(input);
+        const applied = await invoke('apply', { ...input, ...(await motionSources(motions)), ...(await placedAssetData(gameAssets?.recipe ?? input.operations)), ...(gameAssets ? { assetNeeds: gameAssets.recipe } : {}) }, rebakes ? BAKE_EVALUATION_TIMEOUT_MS : EVALUATION_TIMEOUT_MS);
         if (bakeAfter ?? hadBake) bakedSessionIds.add(input.sessionId);
         else bakedSessionIds.delete(input.sessionId);
         return applied;
@@ -1064,7 +1078,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         const outputDirectory = join(directory, `web-${randomUUID()}`);
         let summary;
         try {
-          summary = await writeWebBuild({ recipe, buildDirectory: fileURLToPath(new URL('../', previewUrl)), outputDirectory, title });
+          const assets = new Map();
+          for (const id of gameAssetIds(recipe)) assets.set(id, await (await catalog()).read(id));
+          summary = await writeWebBuild({ recipe, buildDirectory: fileURLToPath(new URL('../', previewUrl)), outputDirectory, title, assets });
         } catch (error) {
           // A refused or half-written build never uses up a retention slot or evicts a good one.
           await rm(outputDirectory, { recursive: true, force: true });
