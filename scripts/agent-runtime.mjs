@@ -569,7 +569,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           if (trace.backend === 'native') {
             try {
               const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold } });
-              if (settings.frameCount > 1) nativeSequence ??= createNativeSequence({ tracer: trace.tracer });
+              if (settings.frameCount > 1 && process.env.JS67_NATIVE_SESSIONS !== 'off') nativeSequence ??= createNativeSequence({ tracer: trace.tracer });
               traced = await traceFrameNative({ tracer: trace.tracer, sequence: nativeSequence, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
                 seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
                 maxSeconds: tracerOptions.maxSeconds, noiseThreshold: tracerOptions.noiseThreshold });
@@ -598,6 +598,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           metrics.width = width;
           metrics.height = height;
           metrics.pathTracer = traced.report;
+          if (traced.report.nativeSession) (metrics.nativeSessionRoutes ??= []).push(traced.report.nativeSession.path);
           const tracedBytes = Buffer.from(traced.data, 'base64');
           if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced frame exceeded 12 MiB.');
           if (encoder) {

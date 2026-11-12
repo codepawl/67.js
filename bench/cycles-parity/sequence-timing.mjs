@@ -6,30 +6,19 @@
 //     [--samples 16] [--width 480] [--height 270] [--seed 1] [--instancing]
 // Variants: "camera" orbits the camera; "object-light" also moves the part named "block" and swings the first point light's intensity.
 // --instancing builds the scene with shared geometry, so a moved part is an instance transform (an update) instead of new triangles.
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../../src/path-tracer-scene.js';
 import * as renderNative from '../../packages/render-native/index.mjs';
-import { createNativeSequence } from '../../scripts/agent-native-sequence.mjs';
+import { PHASE_NAMES, averageOfWarmFrames, readFlag, runSequence } from './sequence-bench-core.mjs';
 import { applyCookOnlyFields } from './cook-only-fields.mjs';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 
-const PHASE_NAMES = ['setupSeconds', 'compileSeconds', 'uploadSeconds', 'accelerationBuildSeconds', 'tracedSeconds'];
 const MOVING_PART_NAME = 'block';
 const ORBIT_RADIANS = Math.PI / 6;
-
-function readFlag(argumentList, flagName, fallbackValue) {
-  const flagIndex = argumentList.indexOf(flagName);
-  return flagIndex === -1 ? fallbackValue : argumentList[flagIndex + 1];
-}
-
-function sha256Of(values) {
-  return createHash('sha256').update(Buffer.from(values.buffer, values.byteOffset, values.byteLength)).digest('hex');
-}
 
 function orbitedCamera(camera, frameIndex, frameCount) {
   const angle = ORBIT_RADIANS * frameIndex / Math.max(1, frameCount - 1);
@@ -67,36 +56,6 @@ function buildInputs(source, settings) {
   return inputs;
 }
 
-function summarizeFrame(traced, route, wallSeconds) {
-  const frame = { rgbaSha256: sha256Of(traced.rgba), wallSeconds: Number(wallSeconds.toFixed(6)), path: route?.path ?? 'one-shot' };
-  for (const phaseName of PHASE_NAMES) frame[phaseName] = Number((traced[phaseName] ?? 0).toFixed(6));
-  if (route?.reason) frame.reason = route.reason;
-  if (route?.changedTables) frame.changedTables = route.changedTables;
-  return frame;
-}
-
-function averageOfWarmFrames(frames, fieldName) {
-  const warmFrames = frames.slice(1);
-  const total = warmFrames.reduce((sum, frame) => sum + frame[fieldName], 0);
-  return Number((total / Math.max(1, warmFrames.length)).toFixed(6));
-}
-
-function runSequence(inputs, mode, traceOptions) {
-  const sequence = mode === 'session' ? createNativeSequence({ tracer: renderNative }) : null;
-  const frames = [];
-  const sequenceStarted = performance.now();
-  try {
-    for (const input of inputs) {
-      const frameStarted = performance.now();
-      const { traced, route } = sequence ? sequence.trace(input, traceOptions) : { traced: renderNative.traceNative(input, traceOptions) };
-      frames.push(summarizeFrame(traced, route, (performance.now() - frameStarted) / 1000));
-    }
-  } finally {
-    sequence?.close();
-  }
-  return { frames, totalSeconds: Number(((performance.now() - sequenceStarted) / 1000).toFixed(6)) };
-}
-
 async function run() {
   const argumentList = process.argv.slice(2);
   const mode = readFlag(argumentList, '--mode', null);
@@ -115,7 +74,7 @@ async function run() {
   const source = await reconstructTraceSceneSource(description);
   const renderOptions = { width, height, samples, bounces: 8, seed };
   const inputs = buildInputs(source, { variant, frameCount, width, height, instancing, renderOptions });
-  const { frames, totalSeconds } = runSequence(inputs, mode, { ...renderOptions, kernel: 'cycles' });
+  const { frames, totalSeconds } = runSequence(inputs.length, frameIndex => inputs[frameIndex], mode, { ...renderOptions, kernel: 'cycles' });
   const paths = {};
   for (const frame of frames) paths[frame.path] = (paths[frame.path] ?? 0) + 1;
   const summary = { scene: description.id, mode, variant, instancing, frameCount, width, height, samples, seed, totalSeconds, paths,

@@ -921,7 +921,28 @@ Measured on one NVIDIA RTX 4090 (Vast instance, 24 frames, 480 x 270, 16 samples
 | `many-lights-500` (3,646 triangles, 350 lights), camera orbit | session | 302 / 33 / 0.7 / 2.7 / 70 | 0 / 1.9 / 0.1 / 0 / 19 | 1.00 | 1 new, 23 reused |
 | | one-shot | 286 / 33 / 0.7 / 2.6 / 66 | 0 / 1.8 / 0.3 / 2.0 / 18 | 1.32 (one run 7.5 s, two near 1.0) | |
 
-What the numbers say `[inferred]`: a session removes the acceleration build and most of the upload from frame 2 on (camera-only: 0 ms against 0.9 to 2.0 ms of build, 0.1 against 0.3 ms of upload), and `pipelineReused` and `accelerationReused` are true on every later frame. Compile does not read zero: the 1.8 ms is the lookup of the process-wide compiled-kernel cache, which a one-shot trace also hits from its second frame, so a one-shot sequence in a warm process already skips the 33 ms compile and the 240 to 320 ms device start. These scenes hold about 3,000 triangles, so the saving is 1 to 3 ms of a 18 to 25 ms frame and the sequence totals sit within run-to-run noise (the instanced rows show the spread: 0.73 to 1.04 s for the same work). A session pays when the scene is large enough for the build and upload to matter; a bench at that size is not recorded here. A moving object in the flattened scene changes the `triangles` table, so every frame there is a new session (as costly as a one-shot trace); only a scene packed with shared geometry turns a moved object into an instance-transform update.
+What the numbers say `[inferred]`: a session removes the acceleration build and most of the upload from frame 2 on (camera-only: 0 ms against 0.9 to 2.0 ms of build, 0.1 against 0.3 ms of upload), and `pipelineReused` and `accelerationReused` are true on every later frame. Compile does not read zero: the 1.8 ms is the lookup of the process-wide compiled-kernel cache, which a one-shot trace also hits from its second frame, so a one-shot sequence in a warm process already skips the 33 ms compile and the 240 to 320 ms device start. These scenes hold about 3,000 triangles, so the saving is 1 to 3 ms of a 18 to 25 ms frame and the sequence totals sit within run-to-run noise (the instanced rows show the spread: 0.73 to 1.04 s for the same work). A moving object in the flattened scene changes the `triangles` table, so every frame there is a new session (as costly as a one-shot trace); only a scene packed with shared geometry turns a moved object into an instance-transform update.
+
+### Large scenes (12 frames, same card)
+
+Generated scenes from `bench/cycles-parity/large-scene.mjs` through `large-sequence-timing.mjs` (480 x 270, 16 samples, medians of three runs, session against one-shot on identical inputs; every frame of every run is byte-identical between the two modes). "Camera" orbits the camera and runs first in the process, so its frame 1 includes the 300 to 400 ms start of the device; "moving" orbits the camera and alternates one instance between two placements every frame (an instance-table update, the TLAS rebuilt over the kept BLAS), and runs second in a warm process. `[measured]`
+
+| Scene | Variant | Mode | Sequence total (s) | Frames 2-12 mean: upload / acceleration / trace / wall (ms) | Routes |
+| --- | --- | --- | --- | --- | --- |
+| terrain, 400k triangles | camera | session | 0.66 | 0 / 0 / 5 / 18 | 1 new, 11 reused |
+| | | one-shot | 1.26 | 47 / 14 / 5 / 73 | |
+| | moving | session | 0.37 | 0 / 0 / 5 / 25 | 1 new, 11 updated |
+| | | one-shot | 0.88 | 46 / 14 / 5 / 72 | |
+| terrain, 1M triangles | camera | session | 1.16 | 0 / 0 / 5 / 29 | 1 new, 11 reused |
+| | | one-shot | 3.32 | 141 / 58 / 6 / 213 | |
+| | moving | session | 0.73 | 0 / 0 / 5 / 46 | 1 new, 11 updated |
+| | | one-shot | 3.67 | 143 / 130 / 24 / 308 | |
+| forest, 1,002 instances of one 10k mesh | camera | session | 0.53 | 0 / 0 / 10 / 14 | 1 new, 11 reused |
+| | | one-shot | 0.51 | 1 / 1 / 10 / 16 | |
+| | moving | session | 0.19 | 0 / 0 / 10 / 15 | 1 new, 11 updated |
+| | | one-shot | 0.19 | 1 / 1 / 10 / 15 | |
+
+What this says `[inferred]`: a one-shot frame pays about 120 to 140 ns per triangle for upload and 35 to 60 ns for the acceleration build every frame, so a session saves roughly 60 ms per frame at 400,000 triangles and 200 ms at 1,000,000 (3.32 s against 1.16 s for a 12 frame orbit, about 2.9 times faster; 0.88 against 0.37 s with a moving instance), and the saving grows with the triangle count. On small scenes there is no gain: the 3,000 triangle rooms above and the forest here (10,000 unique triangles, many instances) cost 1 to 3 ms of build and upload per frame, which a session removes, but the sequence totals do not move. The forest case also shows that the cost follows unique triangles, not instances. Not measured: 4,000,000 triangles (the bench's JavaScript heap ran out in the pack step at the default 4 GB; the job path takes at most 400,000 triangles anyway, so a job reaches the first row only), and peak VRAM (the card readings were the same for both modes, so they say nothing about the difference).
 
 ## Reproducible Commands
 
