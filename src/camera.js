@@ -82,11 +82,14 @@ export function cameraFocalLength(frame, aspect) {
 }
 
 /**
- * The kernel's aperture rotation in radians for a Blender-style rotation in degrees. The kernel turns the polygon the other way
- * round, which a hexagon at 15 degrees showed against Cycles (Cook at -15 matched Cycles at 15, Cook at 0 and 30 did not).
+ * The kernel's aperture rotation in radians for a Blender-style rotation in degrees. Against Cycles the kernel's polygon sits half
+ * a corner step away: a hexagon at 15 degrees matched Cook at 45 (and Cook at 0 and 30 were equally far off), and a pentagon at 40
+ * degrees matched Cook at about 76 and not at 40 or -40, so the half step is added, not the sign flipped. A round aperture has no
+ * corners and no offset.
  */
-function kernelApertureRotation(rotationDegrees) {
-  return rotationDegrees === 0 ? 0 : -rotationDegrees * Math.PI / 180;
+function kernelApertureRotation(rotationDegrees, blades) {
+  const rotation = rotationDegrees * Math.PI / 180;
+  return blades >= 3 ? rotation + Math.PI / blades : rotation;
 }
 
 /**
@@ -112,7 +115,7 @@ export function resolveThinLens(frame, { aspect, eye, target }) {
     apertureRadius: cameraFocalLength(frame, aspect) / 1000 / (2 * frame.fStop),
     focalDistance: focusDistance,
     apertureBlades: blades,
-    apertureRotation: kernelApertureRotation(rotationDegrees),
+    apertureRotation: kernelApertureRotation(rotationDegrees, blades),
   };
 }
 

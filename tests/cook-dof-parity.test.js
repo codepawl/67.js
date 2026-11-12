@@ -84,8 +84,8 @@ test('focus distance, blades and rotation come through; rotation turns from degr
   );
   assert.equal(lens.focalDistance, 2.5);
   assert.equal(lens.apertureBlades, 6);
-  assert.ok(Math.abs(lens.apertureRotation + Math.PI / 6) < 1e-12, 'the kernel turns the other way round from Blender, so the sign flips');
-  assert.equal(resolveThinLens({ ...LENS_OF_50_MM, apertureRotation: 0 }, { aspect: 1, eye: [0, 0, 4], target: [0, 0, 0] }).apertureRotation, 0, 'no negative zero for no rotation');
+  assert.ok(Math.abs(lens.apertureRotation - Math.PI / 3) < 1e-12, 'a hexagon at 30 degrees is the kernel at 30 degrees plus half a corner step (30)');
+  assert.equal(resolveThinLens({ ...LENS_OF_50_MM, apertureRotation: 0 }, { aspect: 1, eye: [0, 0, 4], target: [0, 0, 0] }).apertureRotation, 0, 'a round aperture has no offset');
 });
 
 test('a camera without an fStop is a pinhole: no lens fields, no change to the view', () => {
@@ -124,7 +124,7 @@ test('depth of field changes only its own words of the params block', () => {
   const hexagon = kernelWords(packWithCamera({ ...LENS_ON_PINHOLE, apertureBlades: 6, apertureRotation: 90 }));
   assert.deepEqual(differingWords(pinhole, hexagon), LENS_WORDS);
   assert.equal(hexagon[APERTURE_BLADES_WORD], 6);
-  assert.equal(floatOfWord(hexagon[APERTURE_ROTATION_WORD]), Math.fround(-Math.PI / 2));
+  assert.equal(floatOfWord(hexagon[APERTURE_ROTATION_WORD]), Math.fround(Math.PI / 2 + Math.PI / 6));
 });
 
 test('a v1 input carries the lens in the free fourth floats and upgrades to the same v2 words', () => {
