@@ -97,6 +97,7 @@ test('the run guard kills a run that reaches its time limit', async () => {
   await new Promise(resolveWait => setTimeout(resolveWait, 60));
   assert.equal(kills, 1);
   assert.equal(guard.reason, 'timeout');
+});
 
 const readFixture = name => readFileSync(new URL(`./fixtures/agent-bench/${name}.jsonl`, import.meta.url), 'utf8');
 
