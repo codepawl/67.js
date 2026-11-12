@@ -1488,3 +1488,93 @@ Pictures (#1055): scenes under the old bounds are byte for byte the same. The PN
 Pictures (#1100) `[measured]`: `bench/cycles-parity/native-shared-record-identity.mjs` hashes the pictures of four scenes of eight cards (textures, emitters, two materials, metal and glass) on `cycles` instanced, `cycles` flattened, `legacy` and an explicit-override pack, and two 8-frame session sequences, on the build before the change and on the build after it: all 18 hashes are equal (the instanced packs go from 9 records to 3). The PNG of the 250,001-card field is byte for byte the same (SHA-256 372e60c2e317...). `tests/native-shared-material-records.test.js` renders a shared pack and the same pack with one record per instance and compares them byte for byte.
 
 Not measured: Chrome's memory for a page that builds 1,000,000 parts (the numbers above are Node's, whose default heap held the 1,000,000-part case at 2.4 GB used and 3.6 GB resident), and the demo room sequence job.
+
+Not measured: Chrome's memory for a page that builds 500,000 parts (the numbers above are Node's), and a scene whose copies are emissive (each emissive copy adds light tree emitters and emissive records).
+
+## Mean radiance on the `metal` scene (#959)
+
+Question: does Cook match Cycles' mean on `metal` within 0.1 percent per channel, and is the error outside the fireflies at or below Cycles' own? `[measured]` on a rented RTX 4090 (Blender 5.3.0 Cycles on OptiX, Cook on Vulkan), `960 x 540`, `bounces = 8`, box filter, no clamp, no denoise, `filter_glossy = 1`, Sobol-Burley on Cook's side.
+
+A single image's mean is heavy tailed (fireflies), so the standard error comes from the spread across seeds: [`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py) averages each side's per-seed channel means and combines the two standard errors (delta method). [`metal-mean-suite.sh`](../bench/cycles-parity/metal-mean-suite.sh) renders everything below (24 seeds a side by default, `SEED_COUNT` changes it).
+
+### Mean ratio, 24 seeds a side at 1024 spp (Cook over Cycles, R / G / B, plus or minus one standard error)
+
+| Kernel | Mean ratio | Standard error | Within 0.1 percent |
+| --- | --- | --- | --- |
+| `cycles` | 0.99921 / 0.99930 / 0.99946 | 0.00021 / 0.00019 / 0.00015 | yes, off by 0.079 / 0.070 / 0.054 percent |
+| `legacy` | 0.99856 / 0.99753 / 0.99629 | 0.00028 / 0.00025 / 0.00019 | no, off by 0.14 / 0.25 / 0.37 percent |
+
+Control: Cycles seeds 1 to 6 over seeds 7 to 12 gives 1.0005 / 1.0005 / 1.0004, plus or minus 0.0004, so the comparison itself resolves about 0.04 percent with six seeds. With 24 a side the one-standard-error band of the `cycles` kernel is 0.02 percent, and its 95 percent band reaches 0.12 percent on red and 0.11 percent on green, so "within 0.1 percent" is met by the estimate and not by a strict 95 percent bound.
+
+Per part (the noisy ones are fireflies on the chrome, gold and steel; the floor and copper have no fireflies, their error is the bias): `cycles` kernel floor 0.9991 / 0.9992 / 0.9994 (52 percent of the pixels), copper 0.9993 / 0.9994 / 0.9996, chrome 0.995 +- 0.003, gold 0.9995 +- 0.0008, steel 1.0007 +- 0.0012. The `legacy` kernel floor is 0.9977 / 0.9947 / 0.9910 and copper 0.9945 / 0.9911 / 0.9904.
+
+### Error outside the fireflies, 256 spp against Cycles at 4096 spp seed 1 (relMSE without the 100 worst pixels)
+
+| Image | relMSE | relMSE without the 100 worst pixels | Images |
+| --- | --- | --- | --- |
+| Cycles 256 spp (its own noise, seeds 2 to 4) | 0.0486 +- 0.0239 | 0.000382 +- 0.0000013 | 3 |
+| Cook `cycles` kernel 256 spp | 0.0211 +- 0.0095 | 0.000184 +- 0.0000015 | 4 |
+| Cook `legacy` kernel 256 spp | 0.0930 +- 0.0585 | 0.000713 +- 0.0000038 | 4 |
+
+The `cycles` kernel is at 0.48 times Cycles' own error, the `legacy` kernel at 1.87 times. (Both rows share the noise of the 4096 spp reference, which is about 0.00005 in the same measure.)
+
+### Splits
+
+Each pair is Cook `cycles` against Cycles, 6 seeds, 512 spp `[measured]`.
+
+| Split | Mean ratio R / G / B | Floor ratio (no fireflies) |
+| --- | --- | --- |
+| direct light only (`bounces = 0`) | 0.99901 / 0.99913 / 0.99935 | 0.9991 / 0.9992 / 0.9994 |
+| 1 bounce | 0.99892 / 0.99907 / 0.99933 | 0.9991 / 0.9992 / 0.9994 |
+| 2 bounces | 0.99888 / 0.99904 / 0.99932 | 0.9991 / 0.9992 / 0.9994 |
+| 4 bounces | 0.99889 / 0.99904 / 0.99932 | 0.9991 / 0.9992 / 0.9994 |
+| both sides clamp at 10 (direct and indirect) | 1.00117 / 1.00079 / 1.00017 | 0.9991 / 0.9992 / 0.9994 |
+
+The floor's 0.06 to 0.09 percent deficit is already there with direct light only and does not change with the bounce count, so it is not a glossy, multiscatter or bounce-depth effect `[measured]`; it sits in how the sky lights the floor `[measured in the next section, #1104: Blender's world capped the interpolated sky value, Cook caps the texels; the harness now caps the texels]`. The ratios in this table and in the one above were measured with the older script that capped after the lookup. With a clamp of 10 on both sides, the means move apart by up to 1.9 percent on gold: the two clamps are not the same operation, and the default (no clamp) is the one compared above. Two further splits were tried and are not valid: `filter_glossy = 0` on the Cycles side was refused by the render script, and Cook's `nee-only` against Cycles' `--light-mis off` differ by 15 to 20 percent because they do not switch off the same thing.
+
+### What this says about #959
+
+The `cycles` kernel meets both open boxes of #959 on `metal`: the mean is within 0.1 percent per channel, and the error without the 100 worst pixels is below Cycles' own. The `legacy` kernel meets the second and not the first (blue 0.37 percent low). The 0.06 to 0.09 percent floor deficit is isolated in the next section.
+
+## The floor's direct light on the `metal` scene (#1104)
+
+Question: why is the noise-free floor 0.06 to 0.09 percent darker in Cook's `cycles` kernel than in Cycles with direct light only? `[measured]` on the same RTX 4090 box (Blender 5.3.0 on OptiX, Cook on Vulkan). [`floor-direct-light-suite.sh`](../bench/cycles-parity/floor-direct-light-suite.sh) renders it; [`make-floor-scenes.py`](../bench/cycles-parity/make-floor-scenes.py) writes the scenes and [`floor-closed-form.py`](../bench/cycles-parity/floor-closed-form.py) the closed forms.
+
+Setup: the `metal` floor alone, as a Lambert surface of albedo 0.8 (`--grey-diffuse`), zero bounces, 256 x 144 pixels, 256 spp, 4 to 8 seeds a side, the camera straight down (every pixel sees the same light, no horizon, edge or shadow) or the `metal` camera with the floor pixels picked by Cycles' part ids. Standard errors come from the spread across seeds ([`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py)).
+
+### The offset is the sky, not the sun, and it is not shadows or the metal objects
+
+Cook over Cycles, straight-down floor, with the script as it was (the interpolated sky value capped), R / G / B:
+
+| Light | Cook over Cycles | Cook over its closed form | Cycles over its closed form |
+| --- | --- | --- | --- |
+| sun only | 1.00002 (all channels, error below 0.000005) | 1.00000 | 0.99998 |
+| flat sky, texels 128 and 255 (importance table, no structure) | 1.00000 | 1.00000 | 1.00000 |
+| constant world 0.5 | 1.00000 | 1.00000 | 1.00000 |
+| Kloofendal sky | 0.99832 / 0.99874 / 0.99936, +- 0.000004 / 0.000003 / 0.000002 | 1.00000 | 1.00168 / 1.00126 / 1.00064 |
+| sun and Kloofendal sky | 0.99941 / 0.99949 / 0.99967, +- 0.000002 | 1.00000 | 1.00059 / 1.00051 / 1.00033 |
+
+The closed forms are albedo / pi times the sun colour times the cosine of the sun against the floor normal, and albedo / pi times the cosine-weighted hemisphere integral of the sky read from the Radiance file's own bytes (bilinear in the map, 200,000 polar steps). Cook agrees with all of them to 0.001 percent. From the `metal` camera, with no metal objects in the scene, the floor pixels give the same: sun 1.0000, sky 0.9983 / 0.9988 / 0.9994, both 0.9994 / 0.9995 / 0.9997. So the offset is there without the objects (not their shadows or occlusion), is the same from a grazing view as from above (not the pixel filter, the horizon or a ray offset), and sits wholly in the sky. The sun disc size and normalisation are right (sun only, Cook 1.00000 of the closed form), and so is the accumulation: the sun-only picture at 32 and at 4096 spp gives 1.00002 both times.
+
+### Not the sampling
+
+On Cycles' side the sky floor stays at 1.00168 / 1.00126 / 1.00064 of the closed form with the world's sampling set to none (the sky found by BSDF sampling only, so no importance map at all), with the importance map at 4096 instead of 1024, and with the world's sun extraction off (`sun_threshold = 0`). The flat skies show Cycles decodes a Radiance texel without a +0.5 mantissa offset. A pass over the pictures of the sky itself (`sky-lookup-shift.py`, background pixels, no lighting) finds identical pixels looking level, straight up and from the `metal` camera, and a difference only 45 degrees up (Cycles 1.1 / 0.9 / 0.5 percent brighter in the fit, 0.27 percent in the mean).
+
+### Cause
+
+`bench/cycles-parity/render-cycles.py` limited the sky by a `Minimum` node after the Environment Texture node, so it capped the interpolated value. Cook and the 67js runtime cap the texels (`radianceLimit`, 16) before the map is interpolated and sampled. The Kloofendal map has 244 texels above 16 (the largest channel value is 61,184; probably what is left of the sun in the original map `[guessed]`), and bilinear interpolation of the raw texels next to them gives values above 16 that the cap then cuts to 16 where Cook's neighbours stay at their own lower values. Computed from the file with `uv run --no-project --with numpy python bench/cycles-parity/floor-closed-form.py --cap-order` (a 1024 by 2048 polar and azimuth grid, bilinear lookup of the raw texels, then the cap; the texel count and the maximum come from the same command): capping after the lookup raises the floor's sky term by 1.00177 / 1.00132 / 1.00067 against capping before. That is what was measured on Cycles (1.00168 / 1.00126 / 1.00064); the two differ by 0.01 percent, which a 1024 by 2048 grid of the integral can account for `[inferred]`. Cook was right. It is a difference of the comparison, not a defect of the kernel.
+
+### After the change to the script
+
+The script now caps the image's texels before the lookup (`--radiance-cap before-lookup`, the default); `--radiance-cap after-lookup` reproduces the old behaviour. Same scenes, Cycles rendered again:
+
+| Light | Cook over Cycles | Cycles over its closed form |
+| --- | --- | --- |
+| Kloofendal sky, straight down | 0.99999 / 0.99999 / 0.99999, +- 0.000003 / 0.000003 / 0.000002 | 1.00001 |
+| sun and Kloofendal sky, straight down | 1.00001, +- 0.000001 | 0.99999 |
+| `metal` camera, floor pixels: sun, sky, both | 1.0000, 1.0000, 1.0000 | |
+| `metal` scene, 0 bounces, 6 seeds at 512 spp, floor part (270,046 pixels) | 0.9998 / 0.9998 / 0.9998 | |
+
+The same `metal` scene with direct light only, whole picture: 0.99931 / 0.99938 / 0.99951, +- 0.0009 / 0.0008 / 0.0006 (fireflies on the chrome set the error), copper 1.0000 / 0.9999 / 0.9999. The earlier 0.9991 / 0.9992 / 0.9994 floor became 0.9998.
+
+Not isolated: the `metal` floor keeps a 0.02 percent deficit with the metal objects in the scene and its own material (roughness 0.8, not the Lambert override), which the floor-only Lambert scenes do not show. What it comes from (the objects' shadows and occlusion edges, or the floor's specular lobe) was not split. The #959 tables above were measured before the script change and were not repeated.

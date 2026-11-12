@@ -29,6 +29,9 @@ RAY_VISIBILITY_ATTRIBUTES = {
 soft_falloff_setting = None
 # Set by --light-mis off: lights stop being hit by BSDF rays and are sampled by next event estimation only (a diagnostic).
 light_mis_enabled = True
+# Set by --radiance-cap. Cook and the 67js runtime limit the texels of a sky map before they are interpolated (before-lookup, the default);
+# the Blender world used to limit the interpolated value instead (after-lookup), which lets the texels beside a very bright spot add energy.
+radiance_cap_before_lookup = True
 # Set by --cycles-property name=value (repeatable): diagnostic overrides of scene.cycles properties, such as light_sampling_threshold=0.
 cycles_property_assignments = []
 Y_UP_TO_Z_UP = Matrix((
@@ -72,12 +75,19 @@ def read_soft_falloff(argument_list):
     return SOFT_FALLOFF_VALUES[value]
 
 
+def read_radiance_cap_order(argument_list):
+    value = read_flag_value(argument_list, "--radiance-cap", "before-lookup")
+    if value not in ("before-lookup", "after-lookup"):
+        raise ValueError(f"--radiance-cap must be before-lookup or after-lookup, got {value!r}.")
+    return value == "before-lookup"
+
+
 def parse_cli_arguments():
     if "--" not in sys.argv:
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--soft-falloff default|on|off] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--radiance-cap before-lookup|after-lookup] [--world-property name=value] [--soft-falloff default|on|off] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
@@ -106,6 +116,7 @@ def parse_cli_arguments():
         "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
         "soft_falloff": read_soft_falloff(argument_list),
         "light_mis": read_flag_value(argument_list, "--light-mis", "on") != "off",
+        "radiance_cap_before_lookup": read_radiance_cap_order(argument_list),
     }
 
 
@@ -368,6 +379,16 @@ def build_scene_objects(scene, description):
         scene.collection.objects.link(mesh_object)
 
 
+def limit_image_radiance(image, radiance_limit):
+    channel_count = image.channels
+    pixels = numpy.empty(image.size[0] * image.size[1] * channel_count, dtype=numpy.float32)
+    image.pixels.foreach_get(pixels)
+    colors = pixels.reshape(-1, channel_count)
+    colors[:, :3] = numpy.minimum(colors[:, :3], radiance_limit)
+    image.pixels.foreach_set(colors.reshape(-1))
+    image.update()
+
+
 def build_world_shader(scene, world_description, repository_root):
     world = bpy.data.worlds.new("World")
     scene.world = world
@@ -385,6 +406,8 @@ def build_world_shader(scene, world_description, repository_root):
         mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, ENVIRONMENT_ROTATION_Z)
         environment_node = nodes.new("ShaderNodeTexEnvironment")
         environment_node.image = bpy.data.images.load(os.path.join(repository_root, world_description["file"]))
+        if radiance_cap_before_lookup:
+            limit_image_radiance(environment_node.image, world_description["radianceLimit"])
         links.new(coordinate_node.outputs["Generated"], mapping_node.inputs["Vector"])
         links.new(mapping_node.outputs["Vector"], environment_node.inputs["Vector"])
         cap_node = nodes.new("ShaderNodeVectorMath")
@@ -611,6 +634,25 @@ def apply_cycles_property(scene, property_assignment):
     setattr(scene.cycles, property_name, type(current_value)(property_value))
 
 
+# One --world-property name=value (a diagnostic): sets a property of the world's Cycles settings, such as sampling_method="NONE"
+# (the sky is then found by BSDF sampling only) or sample_map_resolution=4096. Blender versions keep these on world.cycles or on world.
+def apply_world_property(world, property_assignment):
+    if "=" not in property_assignment:
+        raise ValueError(f"--world-property takes name=value, got {property_assignment!r}.")
+    property_name, property_text = property_assignment.split("=", 1)
+    try:
+        property_value = json.loads(property_text)
+    except json.JSONDecodeError:
+        raise ValueError(f"--world-property {property_name} takes a JSON value such as 0, 0.5, true or \"NAME\", got {property_text!r}.")
+    for owner in (world.cycles, world):
+        if hasattr(owner, property_name):
+            setattr(owner, property_name, property_value)
+            print("WORLD_PROPERTY " + json.dumps({"name": property_name, "value": property_value, "readBack": str(getattr(owner, property_name))}))
+            return
+    sampling_names = [name for name in dir(world.cycles) + dir(world) if "sampl" in name or "resolution" in name]
+    raise ValueError(f"--world-property {property_name!r} is on neither world.cycles nor world; names that mention sampling: {sampling_names}")
+
+
 def parse_megabytes_from_stats(stats_text):
     matches = PEAK_MEMORY_PATTERN.findall(stats_text)
     if not matches:
@@ -766,6 +808,8 @@ def main():
     soft_falloff_setting = options["soft_falloff"]
     global light_mis_enabled
     light_mis_enabled = options["light_mis"]
+    global radiance_cap_before_lookup
+    radiance_cap_before_lookup = options["radiance_cap_before_lookup"]
     global cycles_property_assignments
     cycles_property_assignments = []
     for index, token in enumerate(sys.argv):
@@ -776,6 +820,12 @@ def main():
         cycles_property_assignments.append(sys.argv[index + 1])
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
+    for index, token in enumerate(sys.argv):
+        if token != "--world-property":
+            continue
+        if index + 1 >= len(sys.argv):
+            raise ValueError("--world-property takes name=value after it.")
+        apply_world_property(scene.world, sys.argv[index + 1])
     build_scene_lights(scene, description["environment"])
     lens_options = resolve_lens_options(options, description["camera"])
     build_camera_object(scene, description["camera"], lens_options, options["width"] / options["height"])
