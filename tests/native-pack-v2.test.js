@@ -842,6 +842,17 @@ test('envCompensation keeps the original table for a uniform map and rejects bad
   const plain = buildNativeInputV2(scene, camera, base);
   const compensated = buildNativeInputV2(scene, camera, { ...base, envCompensation: true });
   assert.deepEqual(compensated.environmentTexels, plain.environmentTexels, 'an all-zero table falls back to the plain table');
+  for (const [sweepWidth, sweepHeight] of [[16, 8], [32, 16], [64, 32]]) {
+    for (const radiance of [0.123, 0.2, 0.5, 1, 3.7]) {
+      for (const intensity of [1, 2.5]) {
+        const constantMap = createEnvironmentMap({ width: sweepWidth, height: sweepHeight, data: new Float32Array(sweepWidth * sweepHeight * 3).fill(radiance), intensity });
+        const constantScene = buildTraceScene(parts, { map: constantMap });
+        const plainInput = buildNativeInputV2(constantScene, camera, base);
+        const compensatedInput = buildNativeInputV2(constantScene, camera, { ...base, envCompensation: true });
+        assert.deepEqual(compensatedInput.environmentTexels, plainInput.environmentTexels, `constant map ${sweepWidth}x${sweepHeight}, radiance ${radiance}, intensity ${intensity}`);
+      }
+    }
+  }
   for (const invalid of [-0.1, 1.5, NaN, '1', null]) {
     assert.throws(() => validatePackOptions({ ...base, envCompensation: invalid }, 'traceNative', true), /envCompensation/, `envCompensation ${JSON.stringify(invalid)}`);
   }

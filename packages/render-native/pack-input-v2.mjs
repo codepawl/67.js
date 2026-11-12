@@ -1349,11 +1349,13 @@ export function resolveEnvCompensationFraction(envCompensation, callerName) {
   return envCompensation;
 }
 
+const MINIMUM_COMPENSATED_TABLE_FRACTION = 1e-6;
+
 /**
  * MIS compensation of the environment sampling table (Karlik et al. 2019; pbrt-v4 ImageInfiniteLight, Apache-2.0).
  * Subtracts `fraction` times the sphere-mean radiance from every texel's weight and clamps at zero, so light sampling
  * spends its samples where BSDF sampling does badly. The kernel reads the pdf from the same table, so the pdf used in
- * MIS stays the pdf that was sampled. A map that would end up all zero keeps its original table.
+ * MIS stays the pdf that was sampled. A map that would end up all zero, or nearly so, keeps its original table.
  * Rewrites `pixelWeights` and `rowTotals` in place and returns the new total.
  */
 function compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, fraction, originalTotal) {
@@ -1381,7 +1383,9 @@ function compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, fr
     compensatedRowTotals[y] = rowSum;
     compensatedTotal += rowSum;
   }
-  if (!(compensatedTotal > 0)) {
+  // A constant map leaves only rounding residue (about 1e-16 of the total) after the subtraction, and a table built
+  // from that residue would sample an arbitrary patch of the sky, so anything this small counts as all zero.
+  if (!(compensatedTotal > originalTotal * MINIMUM_COMPENSATED_TABLE_FRACTION)) {
     return originalTotal;
   }
   pixelWeights.set(compensatedWeights);
