@@ -391,6 +391,56 @@ Time to equal error, from the two ladders on a log-log interpolation of time aga
 
 **Gate 2, parity with Cycles** (Cook `cycles` kernel, tree, 4096 spp, seed 1, against the Cycles seed 1 reference, `run-m1-parity.py`) `[measured]`: per-channel mean ratio 1.0009 / 1.0010 / 1.0009 (limit 2 %); 64 of 64 tiles within 5 %, tile ratios 0.9999 to 1.0034; FLIP LDR 0.0178 against a ceiling of 0.0373; relMSE 0.000832 against the 0.000791 noise floor. All gates pass, and nothing in the kernel or the scene export was changed to get there: light types, spot cone and units already matched (spot `angle`, `penumbra` and the 4 pi and pi watt factors are the ones the other scenes use; emissive quads and triangles go through Principled emission strength on both sides, as the kernel emits). Cook took 386.6 s of sampling for 4096 spp with other jobs on the card.
 
+### Equal-error time against Cycles
+
+The question is how long each renderer needs for the same error, not how long it takes for the same sample count. Cycles 5.3.0 (OptiX, RTX 3060) and the Cook `cycles` kernel (defaults: Sobol-Burley blue-noise sampler, light tree `auto`, box filter 1) render `lit-interior`, `metal` and `many-lights-500` at 16, 64, 256 and 1024 spp, 960x540, 8 bounces, seed 3 for both, so neither shares a random stream with the seed 1 reference. One rung is a Cook run followed by a Cycles run, one job at a time, three rounds, each through the GPU lock. Time is the sampling time each tool reports (`samplingSeconds`: Cook's sampling loop; for Cycles the span from its first sample statistics event to the end of the render call), without scene setup and without a denoiser. Error is relMSE against the Cycles 4096 spp seed 1 reference. The images do not change between rounds, so relMSE has no range; times are medians with the range of three runs `[measured]`.
+
+| scene | spp | Cook relMSE | Cycles relMSE | Cook s | Cycles s |
+| --- | ---: | ---: | ---: | --- | --- |
+| `lit-interior` | 16 | 0.06530 | 0.07024 | 0.415 [0.405-0.446] | 1.454 [0.467-5.732] |
+| `lit-interior` | 64 | 0.01283 | 0.01483 | 1.547 [1.452-4.544] | 1.794 [1.670-5.488] |
+| `lit-interior` | 256 | 0.00274 | 0.00310 | 5.922 [5.774-6.144] | 6.375 [5.669-8.254] |
+| `lit-interior` | 1024 | 0.000656 | 0.000771 | 24.75 [24.00-24.78] | 26.11 [25.93-28.35] |
+| `many-lights-500` | 16 | 0.1277 | 0.1172 | 1.516 [1.511-1.550] | 1.493 [1.482-1.861] |
+| `many-lights-500` | 64 | 0.03061 | 0.02793 | 5.913 [5.837-7.692] | 5.974 [5.854-7.034] |
+| `many-lights-500` | 256 | 0.00764 | 0.00699 | 23.57 [23.50-23.71] | 25.59 [24.83-25.76] |
+| `many-lights-500` | 1024 | 0.00218 | 0.00200 | 94.84 [93.79-96.43] | 97.73 [93.23-144.8] |
+| `metal` | 16 | 0.00450 | 0.6283 | 0.177 [0.153-0.215] | 0.171 [0.163-0.175] |
+| `metal` | 64 | 0.2806 | 0.00422 | 0.628 [0.622-0.629] | 0.619 [0.601-0.718] |
+| `metal` | 256 | 0.01812 | 0.07499 | 2.279 [2.264-2.914] | 2.752 [2.302-4.047] |
+| `metal` | 1024 | 0.00831 | 0.00590 | 9.517 [8.986-13.27] | 9.298 [9.091-11.07] |
+
+Time to equal error, log-log interpolation of time against relMSE on each renderer's ladder, only inside the errors both ladders cover. "Floor corrected" subtracts half of the reference's seed 1 versus seed 2 relMSE (the reference's own noise, which both renderers carry) from every error before interpolating `[measured and interpolated]`:
+
+| scene | relMSE target | Cook s | Cycles s | Cook speed relative to Cycles | floor corrected |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `lit-interior` | 0.005 | 3.51 | 4.33 | 1.23x faster | 1.24x |
+| `lit-interior` | 0.001 | 16.2 | 20.1 | 1.24x faster | 1.25x |
+| `many-lights-500` | 0.005 | 37.7 | 36.6 | 0.97x (Cook slower) | 0.98x |
+| `many-lights-500` | 0.00218 (lowest both reach) | 94.8 | 89.4 | 0.94x (Cook slower) | 0.93x (at 0.00178) |
+| `metal` | none | | | not defined | |
+
+What the table says:
+
+- `lit-interior`: at equal samples Cook has 7 to 15 % lower error (0.00274 against 0.00310 at 256 spp, 0.000656 against 0.000771 at 1024) and takes 5 to 14 % less time on the medians from 64 spp up, so it reaches equal error about 1.2 times faster. The 16 and 64 spp Cycles times carry up to 5 s of noise in their ranges, probably start-up and load from other sessions on the shared card `[inferred]`; the cost per sample of both is close to 24 to 25 ms at 1024 spp. The earlier figure of 11.4 s for Cycles at 256 spp differs from the 5.7 to 8.3 s measured here; the card was shared in both cases.
+- `many-lights-500`: Cook is slightly worse. The error is 9 to 10 % higher at equal samples at every rung, while the time per sample is between 1.5 % higher and 8 % lower than Cycles (16 spp +1.5 %, 64 spp -1 %, 256 spp -8 %, 1024 spp -3 %), so Cook needs about 3 to 6 % more time for the same error. This is the one scene where Cook is slower. The gap is small next to the run-to-run range of the Cycles 1024 spp time (93 to 145 s), so read it as a tie to slightly behind, not a clear loss. Where the 9 % comes from (differences between this tree and the Cycles tree, such as the double-sided emissive-triangle cone, or the sampler dimensions) was not isolated.
+- `metal`: no equal-error time can be given. The error looks dominated by a few very bright paths rather than by smooth noise `[inferred]`. The reference's own seed-to-seed relMSE is 0.0034, higher than both targets, and neither ladder falls monotonically (Cook 0.0045, 0.281, 0.0181, 0.0083; Cycles 0.628, 0.0042, 0.0750, 0.0059): a single firefly decides a rung. Per sample the two run at the same speed (9.5 s against 9.3 s at 1024 spp). Parity of the converged image is separate and passes (4096 spp relMSE 0.00271 against the 0.0034 noise floor).
+- Nothing here changes a gate or retunes a kernel default. The comparison is one seed per renderer and one Cycles reference; the error of a single rung moves with the seed, and the interpolation uses four points per curve, so ratios under about 10 % are not resolved.
+
+### Final gates for #895
+
+Release addon built; `cargo test --target x86_64-pc-windows-msvc`: 24 pass; `node --test tests/native-*.test.js`: 53 pass; lobe probes 22 of 22 and sphere furnace scenes 6 of 6 pass (512 spp); 4096 spp parity of the `cycles` kernel at its defaults on all seven scenes, 7 of 7 pass `[measured]`:
+
+| scene | mean ratio (R / G / B) | tiles within 5 % | FLIP LDR (ceiling) | relMSE (noise floor) |
+| --- | --- | ---: | --- | --- |
+| `spot-area` | 1.0000 / 1.0000 / 1.0000 | 47 of 47 | 0.0039 (0.0239) | 0.000008 (0.000009) |
+| `light-linking` | 1.0009 / 1.0007 / 1.0008 | 64 of 64 | 0.0051 (0.0228) | 0.000015 (0.000004) |
+| `metal` | 0.9991 / 0.9992 / 0.9995 | 64 of 64 | 0.0042 (0.0237) | 0.00271 (0.003399) |
+| `glass` | 0.9976 / 0.9978 / 0.9982 | 64 of 64 | 0.0070 (0.0234) | 0.000058 (0.000044) |
+| `outdoor-hdri` | 0.9995 / 0.9996 / 0.9998 | 64 of 64 | 0.0023 (0.0215) | 0.000005 (0.000007) |
+| `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 of 64 | 0.0168 (0.0365) | 0.00026 (0.000285) |
+| `many-lights-500` | 1.0009 / 1.0010 / 1.0009 | 64 of 64 | 0.0178 (0.0373) | 0.000832 (0.000791) |
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
