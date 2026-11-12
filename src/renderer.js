@@ -1040,6 +1040,32 @@ export class Renderer67 {
     context.texParameterf(target, extension.TEXTURE_MAX_ANISOTROPY_EXT, this.supportedAnisotropy);
   }
 
+  // Sampler state and mipmaps of the texture bound to TEXTURE_2D, once its level 0 is uploaded.
+  configureTexture(info) {
+    const context = this.context;
+    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, info.wrapS);
+    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, info.wrapT);
+    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, info.minFilter);
+    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, info.magFilter);
+    if (info.mipmaps) {
+      context.generateMipmap(context.TEXTURE_2D);
+      this.applyAnisotropy(context.TEXTURE_2D);
+    }
+  }
+
+  /**
+   * Uploads the large textures of `source` (parts, or texture descriptors) in bands of at most `maximumBytes`, yielding to
+   * the page after each band, so a later replaceParts or createTexture finds them ready instead of handing the driver every
+   * image in one call. Pixels equal a single upload. Compressed and small textures are left to createTexture.
+   * `checkpoint` is an async function that yields (createSlicer from cooperative.js).
+   */
+  async preloadTextures(source, options = {}) {
+    const descriptors = source.flatMap(item => (item?.material ? materialMapState(item.material).slice(0, 5) : [item]));
+    // The slicing code loads on demand, so a renderer that never preloads does not carry it.
+    const { preloadRendererTextures } = await import('./texture-upload.js');
+    await preloadRendererTextures(this, descriptors, options);
+  }
+
   createTexture(map) {
     if (this.textures.has(map)) return this.textures.get(map);
     const context = this.context;
@@ -1054,14 +1080,7 @@ export class Renderer67 {
         const info = textureDescriptorInfo(map, context.getParameter(context.MAX_TEXTURE_SIZE));
         if (map.image.compressed) map.image.compressed.upload(context);
         else context.texImage2D(context.TEXTURE_2D, 0, map.colorSpace === 'linear' ? context.RGBA8 : context.SRGB8_ALPHA8, context.RGBA, context.UNSIGNED_BYTE, map.image);
-        context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, info.wrapS);
-        context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, info.wrapT);
-        context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, info.minFilter);
-        context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, info.magFilter);
-        if (info.mipmaps) {
-          context.generateMipmap(context.TEXTURE_2D);
-          this.applyAnisotropy(context.TEXTURE_2D);
-        }
+        this.configureTexture(info);
       } else {
         context.texImage2D(context.TEXTURE_2D, 0, context.RGBA8, 1, 1, 0, context.RGBA, context.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
         context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR);
