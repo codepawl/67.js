@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { createAgentMcpServer } from '../scripts/mcp-server.mjs';
@@ -163,7 +163,7 @@ async function runCases(context, cases, { chunkSize = 20 } = {}) {
     const registry = await createPackRegistry(chunkRoot, { packageVersion });
     const refusedFolders = new Set(expectedRejected.map(name => join(chunkRoot, name)));
     for (const file of registry.files) {
-      if ([...refusedFolders].some(folder => file.directory.startsWith(folder))) problems.push(`chunk ${chunk}: refused pack leaked ${file.filename} into the registry`);
+      if ([...refusedFolders].some(folder => file.directory.startsWith(`${folder}${sep}`) || file.directory === folder)) problems.push(`chunk ${chunk}: refused pack leaked ${file.filename} into the registry`);
     }
     const catalog = await createAgentAssetCatalog(null, registry.files);
     for (const file of registry.files) {
@@ -374,7 +374,7 @@ test('JSON at and over its depth and size limits', async context => {
     makeCase('depth: keys with dots under the limit', 'accept', { change: (_, files) => setMaterialJson(files, { [`${'k.'.repeat(100)}k`]: { inner: { value: 1 } } }) }),
     makeCase('size: JSON of exactly 1 MiB', 'accept', { change: (_, files) => setMaterialJson(files, padTo('{"roughness":0.5}', MAXIMUM_PACK_JSON_BYTES)) }),
     makeCase('size: JSON of 1 MiB + 1', 'refuse', { change: (_, files) => setMaterialJson(files, padTo('{"roughness":0.5}', MAXIMUM_PACK_JSON_BYTES + 1)) }),
-    makeCase('size: JSON of 1 MiB with a BOM', 'accept', { change: (_, files) => setMaterialJson(files, `\uFEFF${padTo('{"roughness":0.5}', MAXIMUM_PACK_JSON_BYTES)}`) }),
+    makeCase('size: JSON of 1 MiB plus a BOM (the file is over 1 MiB)', 'refuse', { change: (_, files) => setMaterialJson(files, `\uFEFF${padTo('{"roughness":0.5}', MAXIMUM_PACK_JSON_BYTES)}`) }),
     makeCase('size: manifest over 1 MiB', 'refuse', { manifestText: padTo('{}', MAXIMUM_PACK_JSON_BYTES + 1) }),
     makeCase('shape: 100000 numbers', 'accept', { change: (_, files) => setMaterialJson(files, { values: Array.from({ length: 100000 }, (_, index) => index % 7) }) }),
     makeCase('shape: 100000 short strings', 'accept', { change: (_, files) => setMaterialJson(files, { values: Array.from({ length: 100000 }, () => 'ab') }) }),
@@ -428,7 +428,7 @@ function manifestCases() {
   refuse('ids differing only by case', manifest => { manifest.contents.materials[1].id = 'Rusty-Metal'; });
   accept('same id in two kinds', manifest => { manifest.contents.recipes[0].id = 'rusty-metal'; });
   refuse('duplicate id among 64', manifest => { manifest.contents.materials = Array.from({ length: 64 }, (_, index) => ({ id: index === 63 ? 'm-0' : `m-${index}`, file: 'materials/rusty-metal.json' })); });
-  accept('64 materials', manifest => { manifest.contents.materials = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND }, (_, index) => ({ id: `m-${index}`, file: 'materials/rusty-metal.json' })); });
+  accept('64 materials', manifest => { manifest.contents.materials = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND }, (_, index) => ({ id: `m-${index}`, file: index === 63 ? 'materials/warm-plaster.json' : 'materials/rusty-metal.json' })); });
   refuse('65 materials', manifest => { manifest.contents.materials = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND + 1 }, (_, index) => ({ id: `m-${index}`, file: 'materials/rusty-metal.json' })); });
   accept('64 recipes with previews', manifest => { manifest.contents.recipes = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND }, (_, index) => ({ id: `r-${index}`, file: 'recipes/crates.json', preview: 'previews/crates.png' })); });
   refuse('65 recipes', manifest => { manifest.contents.recipes = Array.from({ length: MAXIMUM_PACK_ITEMS_PER_KIND + 1 }, (_, index) => ({ id: `r-${index}`, file: 'recipes/crates.json' })); });
@@ -464,7 +464,7 @@ function manifestCases() {
   accept('version 99999.99999.99999', manifest => { manifest.version = '99999.99999.99999'; });
   refuse('contents missing', manifest => { delete manifest.contents; });
   for (const value of [null, [], 'x', 5, true]) refuse(`contents ${JSON.stringify(value)}`, manifest => { manifest.contents = value; });
-  accept('contents empty', manifest => { manifest.contents = {}; });
+  refuse('contents empty leaves every file unlisted', manifest => { manifest.contents = {}; });
   for (const value of [null, 'x', 5, {}, true]) refuse(`materials list ${JSON.stringify(value)}`, manifest => { manifest.contents.materials = value; });
   for (const value of [null, 'x', 5, [], [[]], true]) refuse(`first material ${JSON.stringify(value)}`, manifest => { manifest.contents.materials = [value]; });
   refuse('extra top-level key', manifest => { manifest.scripts = { postinstall: 'x' }; });
@@ -473,9 +473,9 @@ function manifestCases() {
   refuse('preview that is not an image', manifest => { manifest.contents.recipes[0].preview = 'recipes/crates.json'; });
   refuse('manifest listed as a recipe', manifest => { manifest.contents.recipes[0].file = '67js-pack.json'; });
   refuse('png listed as a look', manifest => { manifest.contents.looks[0].file = 'previews/crates.png'; });
-  refuse('cube listed as an image', manifest => { manifest.contents = { images: [{ id: 'x', file: 'looks/warm.cube' }] }; });
-  refuse('json listed as a glb', manifest => { manifest.contents = { assets: [{ id: 'x', file: 'materials/rusty-metal.json' }] }; });
-  refuse('json renamed to a glb', manifest => { manifest.contents = { assets: [{ id: 'x', file: 'models/x.glb' }] }; });
+  refuse('cube listed as an image', manifest => { manifest.contents.images = [{ id: 'x', file: 'looks/warm.cube' }]; });
+  refuse('json listed as a glb', manifest => { manifest.contents.assets = [{ id: 'x', file: 'materials/rusty-metal.json' }]; });
+  refuse('json renamed to a glb', manifest => { manifest.contents.assets = [{ id: 'x', file: 'models/x.glb' }]; });
   return cases;
 }
 
@@ -509,7 +509,7 @@ test('engines ranges stay bounded in time and give a null for anything unreadabl
 // ---- 5. exact limits -------------------------------------------------------------------------------------------------------
 
 function fillerFiles(files, count, prefix = 'filler') {
-  for (let index = 0; index < count; index++) files.set(`${prefix}/f${index}.txt`, 'x');
+  for (let index = 0; index < count; index++) files.set(`${prefix}/f${index}/LICENSE`, 'x');
 }
 
 test('file count, folder depth, path length and per-file size at and over their limits', async context => {
@@ -519,30 +519,29 @@ test('file count, folder depth, path length and per-file size at and over their 
     makeCase('256 files', 'accept', { change: (_, files) => fillerFiles(files, MAXIMUM_PACK_FILES - baseCount) }),
     makeCase('257 files', 'refuse', { change: (_, files) => fillerFiles(files, MAXIMUM_PACK_FILES - baseCount + 1) }),
     makeCase('1000 files', 'refuse', { change: (_, files) => fillerFiles(files, 1000) }),
-    makeCase('folders nested 8 deep', 'accept', { change: (_, files) => files.set('a/b/c/d/e/f/g/h/data.txt', 'x') }),
-    makeCase('folders nested 9 deep', 'refuse', { change: (_, files) => files.set('a/b/c/d/e/f/g/h/i/data.txt', 'x') }),
-    makeCase('folders nested 40 deep', 'refuse', { change: (_, files) => files.set(`${'d/'.repeat(40)}data.txt`, 'x') }),
+    makeCase('folders nested 8 deep', 'accept', { change: (_, files) => files.set('a/b/c/d/e/f/g/h/LICENSE', 'x') }),
+    makeCase('folders nested 9 deep', 'refuse', { change: (_, files) => files.set('a/b/c/d/e/f/g/h/i/LICENSE', 'x') }),
+    makeCase('folders nested 40 deep', 'refuse', { change: (_, files) => files.set(`${'d/'.repeat(40)}LICENSE`, 'x') }),
     makeCase('empty folders nested 9 deep', 'refuse', { after: folder => mkdirSync(join(folder, 'a/b/c/d/e/f/g/h/i'), { recursive: true }) }),
     makeCase('listed path of 200 characters', 'accept', {
-      change: (manifest, files) => { manifest.contents.materials[0].file = longFile(200); files.set(longFile(200), files.get('materials/rusty-metal.json')); },
+      change: (manifest, files) => { manifest.contents.materials[0].file = longFile(200); files.set(longFile(200), files.get('materials/rusty-metal.json')); files.delete('materials/rusty-metal.json'); },
     }),
     makeCase('listed path of 201 characters', 'refuse', {
       change: (manifest, files) => { manifest.contents.materials[0].file = longFile(201); files.set(longFile(201), files.get('materials/rusty-metal.json')); },
     }),
-    makeCase('file of exactly 64 MiB, unlisted', 'accept', { after: folder => { writeFileSync(join(folder, 'data.bin'), ''); truncateSync(join(folder, 'data.bin'), MAXIMUM_PACK_FILE_BYTES); } }),
     makeCase('file of 64 MiB + 1, unlisted', 'refuse', { after: folder => { writeFileSync(join(folder, 'data.bin'), ''); truncateSync(join(folder, 'data.bin'), MAXIMUM_PACK_FILE_BYTES + 1); } }),
     makeCase('a listed GLB of 64 MiB + 1', 'refuse', {
-      change: manifest => { manifest.contents = { assets: [{ id: 'big', file: 'big.glb' }] }; },
+      change: manifest => { manifest.contents.assets = [{ id: 'big', file: 'big.glb' }]; },
       after: folder => { writeFileSync(join(folder, 'big.glb'), ''); truncateSync(join(folder, 'big.glb'), MAXIMUM_PACK_FILE_BYTES + 1); },
     }),
-    makeCase('a listed GLB that is empty', 'refuse', { change: manifest => { manifest.contents = { assets: [{ id: 'big', file: 'big.glb' }] }; }, after: folder => writeFileSync(join(folder, 'big.glb'), '') }),
-    makeCase('a listed GLB that is JSON text', 'refuse', { change: manifest => { manifest.contents = { assets: [{ id: 'big', file: 'big.glb' }] }; }, after: folder => writeFileSync(join(folder, 'big.glb'), '{"asset":{"version":"2.0"},"padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}') }),
-    makeCase('a listed PNG that is a script', 'refuse', { change: manifest => { manifest.contents.recipes[0].preview = 'previews/fake.png'; }, change2: null, after: folder => writeFileSync(join(folder, 'previews/fake.png'), 'alert(1);alert(1);alert(1);alert(1);') }),
+    makeCase('a listed GLB that is empty', 'refuse', { change: manifest => { manifest.contents.assets = [{ id: 'big', file: 'big.glb' }]; }, after: folder => writeFileSync(join(folder, 'big.glb'), '') }),
+    makeCase('a listed GLB that is JSON text', 'refuse', { change: manifest => { manifest.contents.assets = [{ id: 'big', file: 'big.glb' }]; }, after: folder => writeFileSync(join(folder, 'big.glb'), '{"asset":{"version":"2.0"},"padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}') }),
+    makeCase('a listed PNG that is a script', 'refuse', { after: folder => writeFileSync(join(folder, 'previews/crates.png'), 'alert(1);alert(1);alert(1);alert(1);') }),
   ];
   await runCases(context, cases);
 });
 
-test('the pack total is accepted at exactly 256 MiB and refused one byte over', async context => {
+test('the pack total is refused one byte over 256 MiB', async context => {
   const totalOf = (folder) => {
     let total = 0;
     const visit = (directory) => {
@@ -563,7 +562,7 @@ test('the pack total is accepted at exactly 256 MiB and refused one byte over', 
       remaining -= size;
     }
   };
-  await runCases(context, [makeCase('total of exactly 256 MiB', 'accept', { after: padTo(0) }), makeCase('total of 256 MiB + 1', 'refuse', { after: padTo(1) })], { chunkSize: 1 });
+  await runCases(context, [makeCase('total of 256 MiB + 1', 'refuse', { after: padTo(1) })], { chunkSize: 1 });
 });
 
 test('at most 32 packs load at once and the rest are reported, not half loaded', async context => {
@@ -594,7 +593,7 @@ test('a GLB whose image points outside the pack is refused and never embeds the 
   const png = example.files.get('previews/crates.png');
   const uris = ['../secret.png', '../../secret.png', '/secret.png', 'C:/secret.png', 'C:\\secret.png', '%2e%2e/secret.png', '..%2fsecret.png', 'sub/../../secret.png', 'file:///secret.png', 'https://example.test/secret.png', '..\\secret.png', 'a/\u0000/b.png', '', '.', './', 'data:text/html;base64,AAAA'];
   const cases = uris.map(uri => makeCase(`GLB image ${JSON.stringify(uri)}`, 'refuse', {
-    change: manifest => { manifest.contents = { assets: [{ id: 'model', file: 'models/model.glb' }] }; },
+    change: manifest => { manifest.contents.assets = [{ id: 'model', file: 'models/model.glb' }]; },
     after: folder => {
       writeFileAt(folder, 'models/model.glb', glbWithImageUri(uri));
       writeFileSync(join(dirname(folder), 'secret.png'), png);
@@ -651,10 +650,10 @@ test('300 seeded random manifest mutations are refused cleanly or keep every inv
   assert.ok(accepted >= 5 && accepted <= 295, `a mix of outcomes is expected, got ${accepted} accepted of ${outcomes.length}`);
 });
 
-test('random file trees: extras next to a valid pack are accepted only when they hold no code name', async context => {
+test('random file trees: extras next to a valid pack are accepted only when they are plain text documents', async context => {
   const random = createRandom(SEED + 1);
-  const safeNames = ['LICENSE', 'README.md', 'notes.txt', 'data.bin', 'Thumbs.db', 'x.png', 'x.json', 'x.js.txt', 'js', 'a.b.c'];
-  const riskyNames = ['x.js', 'x.PNG.js', 'x.Sh', 'x.HTML', 'x.svg', 'x.wasm', 'x.exe', 'x.py'];
+  const safeNames = ['LICENSE', 'license.txt', 'README.md', 'Notice', 'CHANGELOG.MD', 'AUTHORS', 'Licence.txt'];
+  const riskyNames = ['x.js', 'x.PNG.js', 'x.Sh', 'x.HTML', 'x.svg', 'x.wasm', 'x.exe', 'x.py', 'notes.txt', 'data.bin', 'Thumbs.db', 'x.png', 'x.json', 'x.js.txt', 'js', 'a.b.c', 'run', '.env', 'LICENSE.json'];
   const cases = Array.from({ length: 60 }, (_, index) => {
     const risky = random() < 0.5;
     const names = risky ? riskyNames : safeNames;
@@ -739,4 +738,52 @@ test('an input that is never an object does not break the pack registry', async 
   copy.metallic = 99;
   assert.notEqual(registry.read('materials', 'fz-1', 'rusty-metal').metallic, 99, 'reads return copies');
   assert.equal(existsSync(join(parent, 'one', '67js-pack.json')), true);
+});
+
+// ---- 9. the allow list ---------------------------------------------------------------------------------------------------------------
+
+test('only the manifest, listed files and plain text documents may be in a pack', async context => {
+  const script = '#!/bin/sh\necho owned\nexit 0\n# padding padding padding padding\n';
+  const withGlb = (content) => ({
+    change: manifest => { manifest.contents.assets = [{ id: 'model', file: 'models/model.glb' }]; },
+    after: folder => writeFileAt(folder, 'models/model.glb', content),
+  });
+  const withHdr = (content) => ({
+    change: manifest => { manifest.contents.environments = [{ id: 'sky', file: 'sky.hdr' }]; },
+    after: folder => writeFileSync(join(folder, 'sky.hdr'), content),
+  });
+  const cases = [
+    ...['run', 'Makefile', '.env', '.bashrc', '.hidden', 'a/b/.profile', 'LICENSES', 'LICENSE.json', 'LICENSE.exe', 'README.html', 'notes.txt', 'MIT', 'COPYING'].map(name => makeCase(`unlisted ${name}`, 'refuse', { change: (_, files) => files.set(name, script) })),
+    ...['LICENSE', 'LICENCE', 'README', 'NOTICE', 'CHANGELOG', 'AUTHORS', 'license.md', 'Readme.TXT', 'a/b/NOTICE.md'].map(name => makeCase(`document ${name}`, 'accept', { change: (_, files) => files.set(name, 'Plain text, with unicode: café ☃\n') })),
+    makeCase('document with a NUL byte', 'refuse', { change: (_, files) => files.set('LICENSE', Buffer.from('MIT\u0000License')) }),
+    makeCase('document that is not UTF-8', 'refuse', { change: (_, files) => files.set('README.md', Buffer.from([0x68, 0x69, 0xff, 0xfe, 0x20])) }),
+    makeCase('document of exactly 1 MiB', 'accept', { change: (_, files) => files.set('LICENSE', 'a'.repeat(MAXIMUM_PACK_JSON_BYTES)) }),
+    makeCase('document of 1 MiB + 1', 'refuse', { change: (_, files) => files.set('LICENSE', 'a'.repeat(MAXIMUM_PACK_JSON_BYTES + 1)) }),
+    makeCase('preview that is a script named .png', 'refuse', { change: (_, files) => files.set('previews/crates.png', script) }),
+    makeCase('GLB that is a script', 'refuse', withGlb(script.padEnd(64, ' '))),
+    makeCase('GLB that is a PNG', 'refuse', withGlb(example.files.get('previews/crates.png'))),
+    makeCase('HDR that is a script', 'refuse', withHdr(script)),
+    makeCase('HDR starting with #? but not Radiance', 'refuse', withHdr('#?x\nrm -rf\n')),
+    makeCase('HDR #?RGBE', 'accept', withHdr('#?RGBE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n\u0080\u0080\u0080\u0081')),
+    makeCase('look that is a script', 'refuse', { change: (_, files) => files.set('looks/warm.cube', script) }),
+  ];
+  for (const listed of ['67js-pack.json', '67JS-PACK.JSON', '67js-Pack.json', 'sub/67js-pack.json', 'a/b/67JS-PACK.JSON']) {
+    cases.push(
+      makeCase(`manifest listed as a material: ${listed}`, 'refuse', { change: manifest => { manifest.contents.materials[0].file = listed; } }),
+      makeCase(`manifest listed as a recipe: ${listed}`, 'refuse', { change: manifest => { manifest.contents.recipes[0].file = listed; } }),
+      makeCase(`manifest listed as a preview: ${listed}`, 'refuse', { change: manifest => { manifest.contents.recipes[0].preview = listed; } }),
+    );
+  }
+  await runCases(context, cases);
+});
+
+test('a JSON file over 1 MiB is refused from its size, without being read', async context => {
+  const started = performance.now();
+  const outcomes = await runCases(context, [
+    makeCase('60 MiB material', 'refuse', { after: folder => { writeFileSync(join(folder, 'materials/rusty-metal.json'), ''); truncateSync(join(folder, 'materials/rusty-metal.json'), 60 * 1024 * 1024); } }),
+    makeCase('60 MiB manifest', 'refuse', { after: folder => { writeFileSync(join(folder, '67js-pack.json'), ''); truncateSync(join(folder, '67js-pack.json'), 60 * 1024 * 1024); } }),
+  ], { chunkSize: 1 });
+  assert.match(outcomes[0].error.message, /materials\[0\]\.file: got .*JSON file of at most 1 MiB/);
+  assert.match(outcomes[1].error.message, /67js-pack\.json: got .*JSON file of at most 1 MiB/);
+  assert.ok(performance.now() - started < 3000, 'a size check must not read 60 MiB');
 });

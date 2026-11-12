@@ -12,7 +12,7 @@ const IMAGE_EXTENSIONS = { png: /\.png$/i, jpeg: /\.jpe?g$/i, webp: /\.webp$/i }
 /** 'environment' for a Radiance .hdr and 'look' for a .cube file, by extension and a first-bytes check; the preview decodes them. */
 function lookFileKind(filename, bytes) {
   if (/\.hdr$/i.test(filename)) {
-    if (bytes.toString('latin1', 0, 2) !== '#?') throw new Error('An .hdr catalog file must be a Radiance file starting with #?.');
+    if (!/^#\?(?:RADIANCE|RGBE)/.test(bytes.toString('latin1', 0, 10))) throw new Error('An .hdr catalog file must be a Radiance file starting with #?RADIANCE or #?RGBE.');
     return 'environment';
   }
   if (/\.cube$/i.test(filename)) {

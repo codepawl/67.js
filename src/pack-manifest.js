@@ -54,6 +54,13 @@ export function isExecutableLookingName(filename) {
   return dot >= 0 && EXECUTABLE_EXTENSIONS.has(lower.slice(dot));
 }
 
+const DOCUMENT_NAME_PATTERN = /^(?:license|licence|readme|notice|changelog|authors)(?:\.(?:md|txt))?$/i;
+
+/** True for the text documents a pack may carry without listing them: LICENSE, LICENCE, README, NOTICE, CHANGELOG, AUTHORS, with .md or .txt. */
+export function isPackDocumentName(filename) {
+  return DOCUMENT_NAME_PATTERN.test(String(filename));
+}
+
 export function fileExtension(filename) {
   const lower = String(filename).toLowerCase();
   const dot = lower.lastIndexOf('.');
@@ -139,6 +146,7 @@ export function findRemoteUrl(value, path = '$', depth = 1) {
 /** Throws unless `value` is a forward-slash relative path of safe segments inside the pack: no "..", no absolute or drive paths, no backslashes. */
 export function assertPackFilePath(value, fieldPath) {
   const expected = 'a relative path inside the pack with forward slashes and only letters, digits, . _ - in each part, such as "models/crate.glb"';
+  if (typeof value === 'string' && value.split('/').at(-1).toLowerCase() === PACK_MANIFEST_FILE) throw invalidField(fieldPath, value, 'a content file; the manifest itself cannot be listed');
   if (typeof value !== 'string' || value.length === 0 || value.length > MAXIMUM_PATH_CHARACTERS) throw invalidField(fieldPath, value, expected);
   if (value.startsWith('/') || value.includes('\\') || /^[A-Za-z]:/.test(value)) throw invalidField(fieldPath, value, expected);
   for (const segment of value.split('/')) {
