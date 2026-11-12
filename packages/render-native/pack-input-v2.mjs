@@ -101,6 +101,23 @@ const TEXTURE_FORMAT_RG16_FLOAT = 3;
 export const TEXTURE_POOL_MAX_BYTES = 1 << 30;
 const BYTES_PER_MEBIBYTE = 1 << 20;
 
+/** Thrown when the textures of a scene do not fit the pool. `texturePoolFull` lets a caller tell it from other packer refusals. */
+export class TexturePoolFullError extends RangeError {
+  constructor(message) {
+    super(message);
+    this.name = 'TexturePoolFullError';
+    this.texturePoolFull = true;
+  }
+}
+
+function validateTexturePoolMaxBytes(value, callerName) {
+  if (value === undefined) return TEXTURE_POOL_MAX_BYTES;
+  if (!Number.isInteger(value) || value < 16 || value > TEXTURE_POOL_MAX_BYTES) {
+    throw new RangeError(`${callerName}: \`texturePoolMaxBytes\` must be an integer from 16 to ${TEXTURE_POOL_MAX_BYTES} (the pool limit); got ${value}. It can only lower the limit.`);
+  }
+  return value;
+}
+
 const DEFAULT_HDRI_RADIANCE_LIMIT = 16;
 const SUN_DEFAULT_HALF_ANGLE = Math.PI / 360;
 const IDENTITY_MATRIX_4X4 = Object.freeze([
@@ -295,8 +312,9 @@ function joinMipLevels(levelZeroWords, mipChain) {
  * that is filtered linearly and has more than one texel; a texture can say `mips: true` or `mips: false` to differ from that.
  * The default is level 0 only, which is what Blender Cycles reads.
  */
-function createTextureCollector({ textureMips } = {}) {
+function createTextureCollector({ textureMips, texturePoolMaxBytes } = {}) {
   validateTextureMipsOption(textureMips, 'textureMips', 'createTextureCollector');
+  const poolMaxBytes = validateTexturePoolMaxBytes(texturePoolMaxBytes, 'createTextureCollector');
   const indexByKey = new Map();
   const dataIdMap = new WeakMap();
   let nextDataId = 1;
@@ -326,14 +344,14 @@ function createTextureCollector({ textureMips } = {}) {
 
   // Checked before a texture is converted, so an oversize image fails fast instead of after allocating its words.
   function assertRoomInPool(wordCount, width, height) {
-    if ((totalWords + wordCount) * 4 <= TEXTURE_POOL_MAX_BYTES) {
+    if ((totalWords + wordCount) * 4 <= poolMaxBytes) {
       return;
     }
     const neededMebibytes = Math.ceil(wordCount * 4 / BYTES_PER_MEBIBYTE);
     const usedMebibytes = Math.ceil(totalWords * 4 / BYTES_PER_MEBIBYTE);
-    throw new RangeError(
+    throw new TexturePoolFullError(
       `The texture pool is full: the ${width}x${height} texture needs ${neededMebibytes} MiB and the ${descriptors.length} before it take ${usedMebibytes} MiB, ` +
-      `but one pool holds at most ${TEXTURE_POOL_MAX_BYTES / BYTES_PER_MEBIBYTE} MiB. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.`,
+      `but one pool holds at most ${poolMaxBytes / BYTES_PER_MEBIBYTE} MiB. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.`,
     );
   }
 
@@ -483,13 +501,15 @@ function createTextureCollector({ textureMips } = {}) {
     return record;
   }
 
-  function addPackedRgba8Words(words, width, height, isSrgb, repeat) {
+  // `wordsOrReader` is the level 0 words, or a function that makes them: it runs after the pool check, so a texture that does not fit is never read.
+  function addPackedRgba8Words(wordsOrReader, width, height, isSrgb, repeat) {
     const pixelCount = width * height;
     const mipCount = resolveMipCount(undefined, false, width, height);
     const atlasKind = isSrgb ? TEXTURE_KIND_RGBA8_SRGB : TEXTURE_KIND_RGBA8;
     const mipWords = mipCount > 1 ? mipChainWordCount(atlasKind, width, height) : 0;
     const alignedWords = packedWordCount(TEXTURE_FORMAT_RGBA8_UNORM, pixelCount, mipWords);
     assertRoomInPool(alignedWords, width, height);
+    const words = typeof wordsOrReader === 'function' ? wordsOrReader() : wordsOrReader;
     let padded = new Uint32Array(alignedWords);
     padded.set(words.subarray(0, pixelCount));
     if (mipCount > 1) {
@@ -2546,7 +2566,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
       throw new TypeError('buildNativeInputV2 option `reducedMaterials` must be the result of reduceV1MaterialTable (materialRecords and textureCollector).');
     }
   }
-  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector({ textureMips: options.textureMips });
+  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector({ textureMips: options.textureMips, texturePoolMaxBytes: options.texturePoolMaxBytes });
   const packedGeometry = explicitInstances
     ? packInstancedGeometry(explicitInstances, options.materials ?? scene.materials ?? [{}], textureCollector, reducedMaterials)
     : packFlattenedTraceScene(scene, options.parts ?? scene.parts, textureCollector);
@@ -2610,8 +2630,12 @@ export function buildNativeInputV2(scene, camera, options = {}) {
 // The words of a texture that was never copied into an atlas (`packVirtualAtlas` in pack-input.mjs): its RGBA8 bytes as
 // little-endian words, the layout the atlas rows hold.
 function virtualTextureWords(texture, width, height) {
+  const byteCount = width * height * 4;
+  if (texture.data.length < byteCount) {
+    throw new RangeError(`A ${width}x${height} material texture needs ${byteCount} bytes of RGBA8 pixels but its data holds ${texture.data.length}. Pass data of width * height * 4 bytes.`);
+  }
   const words = new Uint32Array(width * height);
-  new Uint8Array(words.buffer).set(texture.data.subarray(0, width * height * 4));
+  new Uint8Array(words.buffer).set(texture.data.subarray(0, byteCount));
   return words;
 }
 
@@ -2663,8 +2687,8 @@ function withCarriedFields(descriptor, carried, textureCollector) {
  * `virtualTextures`, when given, replaces the atlas: the rectangle of a map is `{ x: its index in that list, y: 0 }` and the
  * map is read from the list, so the texture pool is the only limit on the maps.
  */
-export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields, textureMips, virtualTextures }) {
-  const textureCollector = createTextureCollector({ textureMips });
+export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields, textureMips, virtualTextures, texturePoolMaxBytes }) {
+  const textureCollector = createTextureCollector({ textureMips, texturePoolMaxBytes });
   const atlasCache = new Map();
 
   function registerAtlasRect(rectX, rectY, width, height, flagsValue) {
@@ -2682,10 +2706,9 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
     }
     const repeat = (flags & 1) !== 0;
     const isSrgb = (flags & 2) !== 0;
-    const subWords = virtualTextures
-      ? virtualTextureWords(virtualTextures[x], w, h)
-      : extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h);
-    const added = textureCollector.addPackedRgba8Words(subWords, w, h, isSrgb, repeat);
+    const added = virtualTextures
+      ? textureCollector.addPackedRgba8Words(() => virtualTextureWords(virtualTextures[x], w, h), w, h, isSrgb, repeat)
+      : textureCollector.addPackedRgba8Words(extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h), w, h, isSrgb, repeat);
     atlasCache.set(key, added);
     return added;
   }
@@ -2806,6 +2829,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     carriedFields,
     textureMips: options.textureMips,
     virtualTextures: v1Input.virtualTextures,
+    texturePoolMaxBytes: options.texturePoolMaxBytes,
   });
 
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);

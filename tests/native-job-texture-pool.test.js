@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { STRUCT_STRIDES_V2 } from '../packages/render-native/index.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
-import { TEXTURE_POOL_MAX_BYTES } from '../packages/render-native/pack-input-v2.mjs';
+import { buildFlattenedJobNativeInput, buildJobNativeInput, carriedMaterialFieldsOfScene } from '../packages/render-native/job-input.mjs';
+import { buildNativeInput, packNativeMaterialTables } from '../packages/render-native/pack-input.mjs';
+import { TEXTURE_POOL_MAX_BYTES, TexturePoolFullError, buildNativeInputV2, reduceV1MaterialTable } from '../packages/render-native/pack-input-v2.mjs';
+import { exportNativeSceneTables } from '../scripts/native-bake-page.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
@@ -53,7 +55,8 @@ function hashesOfPackedTables(input) {
   return Object.fromEntries(tableNames.map(name => [name, hashOfTable(input[name])]));
 }
 
-// SHA-256 of every packed table of the two scenes, taken with the v1 atlas step in place (before issue 1053).
+// SHA-256 of every packed table of the two scenes, taken on the unmodified code of origin/main at the branch base (55efd532),
+// where every map still went through the v1 atlas: stash the change, run this file with PRINT_POOL_HASHES=1, copy the printed hashes.
 const GOLDEN_INSTANCED_HASHES = {
   emissiveTriangles: '2e38284e3690d5a05476c1c3068ea5e3b87e9667c3417183f287d60b1c5834b9',
   environmentTexels: '374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb',
@@ -136,18 +139,116 @@ test('a flattened job with maps beyond the v1 atlas packs them into the texture 
   assert.ok(input.textureTexels.byteLength >= OVER_ATLAS_MAP_COUNT * OVER_ATLAS_MAP_SIZE * OVER_ATLAS_MAP_SIZE * 4);
 });
 
-test('a job whose map exceeds the texture pool says what to pass instead', () => {
-  // One map a row taller than the 1 GiB pool: the pool check runs before any pixel is read, so a short array stands in for the pixels.
+const POOL_MESSAGE = /texture pool is full[\s\S]*Pass smaller textures/;
+
+// One map a row taller than the 1 GiB pool. Its data is 4 bytes: the pool check runs before the data is read or a word is allocated.
+function oversizeMapParts(shared) {
   const side = 16384;
   const oversize = { image: { width: side, height: side + 1, data: new Uint8ClampedArray(4) }, colorSpace: 'srgb' };
-  const shared = quad(1);
-  const parts = [
+  return [
     { name: 'copy-a', geometry: shared, matrix: translate(0), material: { color: [1, 1, 1], map: oversize } },
     { name: 'copy-b', geometry: shared, matrix: translate(2), material: { color: [1, 1, 1] } },
   ];
+}
+
+function assertPoolRefusal(callback) {
+  assert.throws(callback, error => error instanceof TexturePoolFullError && error instanceof RangeError && error.texturePoolFull === true && POOL_MESSAGE.test(error.message));
+}
+
+test('an instanced job whose map exceeds the texture pool says what to pass instead', () => {
+  const scene = buildTraceScene(oversizeMapParts(quad(1)), environment, { instancing: true });
+  assertPoolRefusal(() => buildJobNativeInput(scene, camera, packOptions, pack, resolveTexture));
+});
+
+test('a flattened job whose map exceeds the texture pool says what to pass instead', () => {
+  const scene = buildTraceScene(oversizeMapParts(quad(1)), environment);
+  assertPoolRefusal(() => buildFlattenedJobNativeInput(scene, camera, packOptions, pack, resolveTexture));
+});
+
+// The maps share one small buffer through distinct views, and `texturePoolMaxBytes` lowers the pool to 6 MiB: each 1024 x 1024
+// map (4 MiB) fits alone and the second one passes the pool. That option is the seam that keeps these tests from allocating a gigabyte.
+const SMALL_POOL_OPTIONS = { ...packOptions, texturePoolMaxBytes: 6 * 1024 * 1024 };
+
+test('maps that each fit the pool but not together are refused by both job builders', () => {
+  const parts = manyMapParts(3, 1024);
+  assertPoolRefusal(() => buildJobNativeInput(buildTraceScene(parts, environment, { instancing: true }), camera, SMALL_POOL_OPTIONS, pack, resolveTexture));
+  assertPoolRefusal(() => buildFlattenedJobNativeInput(buildTraceScene(parts, environment), camera, SMALL_POOL_OPTIONS, pack, resolveTexture));
+  const single = buildFlattenedJobNativeInput(buildTraceScene(manyMapParts(1, 1024), environment), camera, SMALL_POOL_OPTIONS, pack, resolveTexture);
+  assert.equal(single.textureCount, 1);
+});
+
+test('the pool limit can be lowered and never raised', () => {
+  const scene = buildTraceScene(manyMapParts(1, 8), environment);
+  for (const bad of [0, 1.5, TEXTURE_POOL_MAX_BYTES + 1, '4096']) {
+    assert.throws(() => buildFlattenedJobNativeInput(scene, camera, { ...packOptions, texturePoolMaxBytes: bad }, pack, resolveTexture), /texturePoolMaxBytes/);
+  }
+});
+
+test('a map whose data is shorter than its size is refused with both sizes', () => {
+  const short = { image: { width: 8, height: 8, data: new Uint8ClampedArray(100) }, colorSpace: 'srgb' };
+  const shared = quad(1);
+  const parts = [
+    { name: 'a', geometry: shared, matrix: translate(0), material: { color: [1, 1, 1], map: short } },
+    { name: 'b', geometry: shared, matrix: translate(2), material: { color: [1, 1, 1] } },
+  ];
   const scene = buildTraceScene(parts, environment, { instancing: true });
-  assert.throws(
-    () => buildJobNativeInput(scene, camera, packOptions, pack, resolveTexture),
-    error => error instanceof RangeError && /texture pool is full/.test(error.message) && /Pass smaller textures/.test(error.message),
-  );
+  assert.throws(() => buildJobNativeInput(scene, camera, packOptions, pack, resolveTexture), /8x8 material texture needs 256 bytes[\s\S]*holds 100/);
+});
+
+test('with mip levels the virtual pack equals the pack through the real v1 atlas, byte for byte', () => {
+  const scene = buildTraceScene(texturedParts(), environment, { instancing: true });
+  const options = { ...packOptions, textureMips: true };
+  const tables = packNativeMaterialTables(scene.traceMaterials, null, pack);
+  const reducedMaterials = reduceV1MaterialTable({
+    materials: tables.materials,
+    atlas: tables.atlas,
+    atlasWidth: tables.atlasWidth,
+    subsurfaceVec4Offset: tables.subsurfaceVec4Offset,
+    materialCount: scene.traceMaterials.length,
+    carriedFields: carriedMaterialFieldsOfScene(scene, resolveTexture),
+    textureMips: true,
+  });
+  const instances = scene.instances.map(instance => {
+    const lightMask = reducedMaterials.materialLightMasks[instance.materialIndex] ?? 0xffffffff;
+    return { ...instance, lightMask, lightMaskHi: lightMask === 0xffffffff ? 0xffffffff : 0 };
+  });
+  const { fireflyClamp, ...withoutClamp } = options;
+  const throughAtlas = buildNativeInputV2(scene, camera, { ...withoutClamp, instances, reducedMaterials });
+  const virtual = buildJobNativeInput(scene, camera, options, pack, resolveTexture);
+  assert.deepEqual(hashesOfPackedTables(virtual), hashesOfPackedTables(throughAtlas));
+  const firstDescriptor = new Uint32Array(virtual.textureDescriptors.buffer, virtual.textureDescriptors.byteOffset, 8);
+  assert.ok(((firstDescriptor[3] >>> 8) & 0xff) > 1, 'the scene stores mip levels');
+});
+
+function exportModules(overrides = {}) {
+  return {
+    buildTraceScene,
+    refuseLocalVolumes: () => {},
+    resolveTexture,
+    buildNativeInput: (scene, view, options, tables) => buildNativeInput(scene, view, options, tables),
+    buildJobNativeInput,
+    buildFlattenedJobNativeInput,
+    pack,
+    ...overrides,
+  };
+}
+
+function exportParts(parts, options, modules = exportModules(), instancing = true) {
+  return exportNativeSceneTables({ parts, environment, camera, options, kernel: 'cycles', instancing, modules });
+}
+
+test('the page export of an instanced scene over the pool shows the pool message, not the atlas one', () => {
+  const parts = manyMapParts(3, 1024);
+  assert.throws(() => exportParts(parts, SMALL_POOL_OPTIONS), error => POOL_MESSAGE.test(error.message) && !/GPU atlas/.test(error.message));
+});
+
+test('the page export of a flattened scene over the pool shows the pool message, not the atlas one', () => {
+  const parts = manyMapParts(3, 1024).map((part, index) => ({ ...part, geometry: quad(1 + index / 10) }));
+  assert.throws(() => exportParts(parts, SMALL_POOL_OPTIONS), error => POOL_MESSAGE.test(error.message) && !/GPU atlas/.test(error.message));
+});
+
+test('the page export keeps the first reason when the v1 fallback fails on the atlas too', () => {
+  const parts = manyMapParts(OVER_ATLAS_MAP_COUNT, OVER_ATLAS_MAP_SIZE);
+  const modules = exportModules({ buildFlattenedJobNativeInput: () => { throw new RangeError('the records do not fit'); } });
+  assert.throws(() => exportParts(parts, packOptions, modules, false), /GPU atlas[\s\S]*already failed: the records do not fit/);
 });

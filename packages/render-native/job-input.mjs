@@ -167,6 +167,7 @@ export function buildJobNativeInput(scene, camera, options, pack, resolveTexture
     materialCount: scene.traceMaterials.length,
     carriedFields: carriedMaterialFieldsOfScene(scene, resolveTexture),
     textureMips: options.textureMips,
+    texturePoolMaxBytes: options.texturePoolMaxBytes,
   });
   const instances = scene.instances.map(instance => {
     const lightMask = reducedMaterials.materialLightMasks[instance.materialIndex] ?? ALL_LIGHT_GROUPS;
@@ -187,6 +188,7 @@ export function buildFlattenedJobNativeInput(scene, camera, options, pack, resol
   const upgradeOptions = {
     ...(options.samples === undefined ? {} : { samples: options.samples }),
     ...(options.textureMips === undefined ? {} : { textureMips: options.textureMips }),
+    ...(options.texturePoolMaxBytes === undefined ? {} : { texturePoolMaxBytes: options.texturePoolMaxBytes }),
   };
   return upgradeNativeInputV1ToV2(buildNativeInput(scene, camera, options, withVirtualAtlas(pack)), upgradeOptions, carriedFields);
 }
