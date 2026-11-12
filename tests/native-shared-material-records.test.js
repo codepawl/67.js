@@ -23,6 +23,7 @@ const environment = { keyColor: [3, 3, 3], lightDirection: [0.4, 0.8, 0.5] };
 const MATERIAL_OFFSET_IN_INSTANCE = 112;
 const MATERIAL_INDEX_OFFSET_IN_TRIANGLE = 12;
 const MATERIAL_INDEX_OFFSET_IN_EMISSIVE = 60;
+const MATERIAL_COUNT_OFFSET_IN_PARAMETERS = 92;
 
 const quad = {
   positions: Float32Array.from([-0.6, 0, -0.6, 0.6, 0, -0.6, 0.6, 0, 0.6, -0.6, 0, 0.6]),
@@ -217,7 +218,10 @@ function withUnsharedRecords(input) {
     materials.set(input.materials.subarray(resolved * recordBytes, (resolved + 1) * recordBytes), copyIndex * recordBytes);
     view.setUint32(index * instanceBytes + MATERIAL_OFFSET_IN_INSTANCE, copyIndex, true);
   }
-  return { ...input, instances, materials, materialCount: input.materialCount + input.instanceCount };
+  const materialCount = input.materialCount + input.instanceCount;
+  const kernelParams = Uint8Array.from(input.kernelParams);
+  new DataView(kernelParams.buffer).setUint32(MATERIAL_COUNT_OFFSET_IN_PARAMETERS, materialCount, true);
+  return { ...input, instances, materials, materialCount, kernelParams };
 }
 
 test('shared records trace the picture of one record per part', { skip: addonSkip }, t => {

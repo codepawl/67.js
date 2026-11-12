@@ -2304,10 +2304,19 @@ export function shareEqualMaterialRecords(materialRecords) {
   };
 }
 
+// The words of a record, read in place when its bytes are aligned (the records `packMaterialRecordV2` returns are).
+function materialRecordWords(bytes) {
+  const wordCount = bytes.byteLength / 4;
+  return bytes.byteOffset % 4 === 0
+    ? new Uint32Array(bytes.buffer, bytes.byteOffset, wordCount)
+    : new Uint32Array(Uint8Array.from(bytes).buffer);
+}
+
 function hashMaterialRecordBytes(bytes) {
+  const words = materialRecordWords(bytes);
   let hash = 0x811c9dc5;
-  for (let index = 0; index < bytes.length; index++) {
-    hash = Math.imul(hash ^ bytes[index], 0x01000193);
+  for (let index = 0; index < words.length; index++) {
+    hash = Math.imul(hash ^ words[index], 0x01000193);
   }
   return hash >>> 0;
 }
@@ -2315,7 +2324,12 @@ function hashMaterialRecordBytes(bytes) {
 function materialRecordsAreEqual(first, second) {
   if (first.isEmissive !== second.isEmissive || first.usesSubsurface !== second.usesSubsurface || first.alphaMode !== second.alphaMode) return false;
   if (first.meanEmissiveRadiance.some((value, channel) => !Object.is(value, second.meanEmissiveRadiance[channel]))) return false;
-  return first.bytes.every((byte, index) => byte === second.bytes[index]);
+  const firstWords = materialRecordWords(first.bytes);
+  const secondWords = materialRecordWords(second.bytes);
+  for (let index = 0; index < firstWords.length; index++) {
+    if (firstWords[index] !== secondWords[index]) return false;
+  }
+  return true;
 }
 
 function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, reducedMaterials) {

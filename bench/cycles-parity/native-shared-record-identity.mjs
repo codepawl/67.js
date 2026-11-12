@@ -103,4 +103,48 @@ for (const [sceneName, buildParts] of Object.entries(sceneBuilders)) {
     results[`${sceneName} explicit-override`] = { hash: `refused: ${error.message}` };
   }
 }
+// An eight-frame sequence through one native session, as a stills job traces it: the camera moves every frame and the roughness of
+// card 2 follows a track. In "equal-start" card 2 starts equal to the other grey cards (so it shares their record at frame 0 and stops
+// sharing at frame 1: that frame takes a new session), in "own-record" it differs from every other card from the start (every later
+// frame is an update). Each frame is traced with a session and one-shot; the hashes of the two must be equal.
+const { createNativeSequence } = await import('../../scripts/agent-native-sequence.mjs');
+const SEQUENCE_FRAMES = 8;
+
+function sequenceParts(frame, startsEqual) {
+  const parts = [GROUND];
+  for (let index = 0; index < 8; index++) {
+    const animated = index === 2;
+    const roughness = animated ? (startsEqual ? 0.7 - frame * 0.08 : 0.65 - frame * 0.05) : 0.7;
+    parts.push(placed(`card-${index}`, index, { color: [0.6, 0.6, 0.6], roughness }));
+  }
+  return parts;
+}
+
+async function traceSequence(startsEqual, useSession) {
+  const sequence = useSession ? createNativeSequence({ tracer }) : undefined;
+  const hashes = [];
+  const routes = [];
+  const materialRecords = [];
+  for (let frame = 0; frame < SEQUENCE_FRAMES; frame++) {
+    const frameCamera = createCamera({ eye: [frame * 0.3 - 1, 3, 9], target: [0, 0.5, 0], fov: 50 }, WIDTH, HEIGHT);
+    const exported = exportNativeSceneTables({ parts: sequenceParts(frame, startsEqual), environment: ENVIRONMENT, camera: frameCamera, options: PACK_OPTIONS, kernel: 'cycles', instancing: true, modules });
+    const traced = await traceFrameNative({ tracer, exported: { ...exported, ignored: [] }, width: WIDTH, height: HEIGHT, samples: SAMPLES, bounces: PACK_OPTIONS.bounces, seed: 1, denoise: 'none', kernel: 'cycles', sequence });
+    hashes.push(sha256(Buffer.from(traced.data, 'base64')));
+    routes.push(traced.report?.nativeSession?.path ?? 'one-shot');
+    materialRecords.push(exported.counts?.materialCount ?? null);
+  }
+  sequence?.close();
+  return { hashes, routes, materialRecords };
+}
+
+for (const [name, startsEqual] of [['equal-start', true], ['own-record', false]]) {
+  try {
+    const withSession = await traceSequence(startsEqual, true);
+    const oneShot = await traceSequence(startsEqual, false);
+    results[`sequence ${name}`] = { hash: sha256(withSession.hashes.join(',')), sessionEqualsOneShot: withSession.hashes.every((hash, index) => hash === oneShot.hashes[index]),
+      routes: withSession.routes, materialRecords: withSession.materialRecords };
+  } catch (error) {
+    results[`sequence ${name}`] = { hash: `refused: ${error.message}` };
+  }
+}
 console.log(`SHARED_RECORD_IDENTITY ${JSON.stringify(results, null, 1)}`);
