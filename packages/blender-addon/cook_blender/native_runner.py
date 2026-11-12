@@ -53,6 +53,13 @@ def lens_arguments(lens_entry):
     ]
 
 
+def environment_cap_argument(environment_cap):
+    """0 means no cap on the environment image; a positive number caps each texel at that radiance."""
+    if environment_cap < 0:
+        raise ValueError(f"The environment cap must be 0 (no cap) or a positive radiance, got {environment_cap}.")
+    return "none" if environment_cap == 0 else str(environment_cap)
+
+
 def build_trace_command(node_executable, native_directory, scene_path, output_prefix, options):
     """`options` holds width, height, samples, bounces, seed, filter_type, filter_width and lens (the lens entry of the export)."""
     for name in ("width", "height", "samples", "bounces", "seed", "filter_type", "filter_width"):
@@ -73,6 +80,7 @@ def build_trace_command(node_executable, native_directory, scene_path, output_pr
         "--seed", str(options["seed"]),
         "--filter-type", options["filter_type"],
         "--filter-width", str(options["filter_width"]),
+        "--hdri-radiance-limit", environment_cap_argument(options.get("environment_cap", 0.0)),
         *lens_arguments(options.get("lens", {})),
     ]
 

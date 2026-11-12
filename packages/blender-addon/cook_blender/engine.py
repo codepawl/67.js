@@ -29,6 +29,11 @@ class CookSceneSettings(bpy.types.PropertyGroup):
     max_bounces: bpy.props.IntProperty(name="Max Bounces", description="Light bounces per path", default=8, min=0, max=64)
     seed: bpy.props.IntProperty(name="Seed", description="Noise pattern seed", default=1, min=0)
     pixel_filter: bpy.props.EnumProperty(name="Pixel Filter", items=PIXEL_FILTERS, default="blackman-harris")
+    environment_cap: bpy.props.FloatProperty(
+        name="Environment Cap",
+        description="Limit each texel of the world image to this radiance before it is used. 0 leaves the image unclamped, as Cycles does; a cap lowers noise from small very bright spots and loses their energy",
+        default=0.0, min=0.0, soft_max=1000.0,
+    )
     filter_width: bpy.props.FloatProperty(name="Filter Width", description="Pixel filter width in pixels", default=1.5, min=0.01, max=10.0, subtype="PIXEL")
 
 
@@ -88,6 +93,7 @@ class CookRenderEngine(bpy.types.RenderEngine):
             options = {
                 "width": width, "height": height, "samples": settings.samples, "bounces": settings.max_bounces, "seed": settings.seed,
                 "filter_type": settings.pixel_filter, "filter_width": settings.filter_width, "lens": lens_entry,
+                "environment_cap": float(os.environ.get("COOK_TEST_ENVIRONMENT_CAP", settings.environment_cap)),
             }
             output_prefix = os.path.join(work_directory, "trace")
             command = native_runner.build_trace_command(node_executable, native_directory, scene_path, output_prefix, options)
@@ -153,6 +159,7 @@ class COOK_PT_sampling(bpy.types.Panel):
         layout.prop(settings, "seed")
         layout.prop(settings, "pixel_filter")
         layout.prop(settings, "filter_width")
+        layout.prop(settings, "environment_cap")
 
 
 EDITABLE_ENGINE_IDS = ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES")

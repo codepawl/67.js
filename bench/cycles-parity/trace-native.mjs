@@ -113,9 +113,18 @@ function parseLightSamplingOption(argumentList) {
   return aliasedLightSampling === 'auto' ? lightSampling : aliasedLightSampling;
 }
 
+/** `--hdri-radiance-limit <number|none>`: the cap the packer puts on environment texels; absent keeps the packer's default (16). */
+function parseHdriRadianceLimit(argumentList) {
+  if (!argumentList.includes('--hdri-radiance-limit')) {
+    return undefined;
+  }
+  const requested = readFlagValue(argumentList, '--hdri-radiance-limit', 'none');
+  return requested === 'none' ? Infinity : parseNumberOption(argumentList, '--hdri-radiance-limit', 16, 0);
+}
+
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda,cpu-cli,cuda-cli] [--grey-diffuse] [--write-depth] [--instancing] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda,cpu-cli,cuda-cli] [--hdri-radiance-limit N|none] [--grey-diffuse] [--write-depth] [--instancing] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -150,6 +159,7 @@ function parseTraceArguments(argumentList) {
       ? parseIntegerOption(argumentList, '--samples-per-dispatch', 16, 1)
       : undefined,
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
+    hdriRadianceLimit: parseHdriRadianceLimit(argumentList),
     greyDiffuse: argumentList.includes('--grey-diffuse'),
     writeDepth: argumentList.includes('--write-depth'),
     instancing: argumentList.includes('--instancing'),

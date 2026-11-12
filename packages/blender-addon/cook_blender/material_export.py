@@ -5,6 +5,7 @@ or an Image Texture node linked directly to it; anything else is replaced by the
 `notes` under the material name, so the render log can say what was approximated.
 """
 import base64
+import os
 
 import numpy
 
@@ -324,10 +325,18 @@ class MaterialExporter:
         if texture is None:
             return
         strength = float(source_node.inputs["Strength"].default_value)
+        if os.environ.get("COOK_EXPERIMENT_FLIP_GREEN") == "1":
+            self.invert_green_of_last_image()
         entry["normalMap"] = texture
         entry["normalScale"] = [strength, strength]
         if source_node.inputs["Strength"].is_linked:
             self.note(name, f"Normal Map strength is linked; the constant {strength:g} is used")
+
+    def invert_green_of_last_image(self):
+        raw = base64.b64decode(self.images[-1]["data"]["base64"])
+        pixels = numpy.frombuffer(raw, dtype=numpy.uint8).copy().reshape(-1, 4)
+        pixels[:, 1] = 255 - pixels[:, 1]
+        self.images[-1]["data"]["base64"] = base64.b64encode(pixels.tobytes()).decode("ascii")
 
     def apply_emission(self, name, node, entry):
         strength = self.read_constant(name, node, "Emission Strength", "Emission Strength")

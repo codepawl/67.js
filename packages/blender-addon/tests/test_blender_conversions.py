@@ -134,6 +134,15 @@ class NativeRunnerTests(unittest.TestCase):
         with_lens = native_runner.build_trace_command("node", "/repo", "scene.json", "out", options)
         self.assertEqual(with_lens[with_lens.index("--f-stop") + 1], "2.8")
 
+    def test_environment_cap_is_off_by_default_and_a_number_when_set(self):
+        options = {"width": 4, "height": 4, "samples": 1, "bounces": 1, "seed": 0, "filter_type": "box", "filter_width": 1.0}
+        command = native_runner.build_trace_command("node", "/repo", "scene.json", "out", options)
+        self.assertEqual(command[command.index("--hdri-radiance-limit") + 1], "none")
+        command = native_runner.build_trace_command("node", "/repo", "scene.json", "out", {**options, "environment_cap": 16.0})
+        self.assertEqual(command[command.index("--hdri-radiance-limit") + 1], "16.0")
+        with self.assertRaises(ValueError):
+            native_runner.build_trace_command("node", "/repo", "scene.json", "out", {**options, "environment_cap": -1.0})
+
     def test_missing_option_is_named(self):
         with self.assertRaises(KeyError):
             native_runner.build_trace_command("node", "/repo", "scene.json", "out", {"width": 1})

@@ -187,16 +187,20 @@ def bump_normal_pixels(size=64, tiles=6, slope=1.5):
     return pixels
 
 
-def add_map_materials(scene):
+def add_map_materials(scene, which=("roughness", "normal", "alpha")):
     """Images on Roughness (floor), Normal (the balls) and Alpha (a screen with square holes)."""
-    columns = numpy.linspace(0.08, 0.9, 128)[None, :, None] * numpy.ones((128, 1, 4))
-    link_image(bpy.data.materials["Floor"], make_data_image("roughness-ramp", columns), "Color", "Roughness")
-    clay = bpy.data.materials["Clay"]
-    normal_node = clay.node_tree.nodes.new("ShaderNodeNormalMap")
-    texture = clay.node_tree.nodes.new("ShaderNodeTexImage")
-    texture.image = make_data_image("bumps", bump_normal_pixels())
-    clay.node_tree.links.new(texture.outputs["Color"], normal_node.inputs["Color"])
-    clay.node_tree.links.new(normal_node.outputs["Normal"], clay.node_tree.nodes["Principled BSDF"].inputs["Normal"])
+    if "roughness" in which:
+        columns = numpy.linspace(0.08, 0.9, 128)[None, :, None] * numpy.ones((128, 1, 4))
+        link_image(bpy.data.materials["Floor"], make_data_image("roughness-ramp", columns), "Color", "Roughness")
+    if "normal" in which:
+        clay = bpy.data.materials["Clay"]
+        normal_node = clay.node_tree.nodes.new("ShaderNodeNormalMap")
+        texture = clay.node_tree.nodes.new("ShaderNodeTexImage")
+        texture.image = make_data_image("bumps", bump_normal_pixels())
+        clay.node_tree.links.new(texture.outputs["Color"], normal_node.inputs["Color"])
+        clay.node_tree.links.new(normal_node.outputs["Normal"], clay.node_tree.nodes["Principled BSDF"].inputs["Normal"])
+    if "alpha" not in which:
+        return
     cell = 16
     rows, columns_grid = numpy.mgrid[0:128, 0:128]
     solid = ((rows // cell) + (columns_grid // cell)) % 2 == 0
@@ -242,6 +246,8 @@ def build_small_scene(variant="small", width=480, height=270):
         return scene
     if variant == "maps":
         add_map_materials(scene)
+    elif variant.startswith("maps-"):
+        add_map_materials(scene, (variant[len("maps-"):],))
     sun = add_light(scene, "Sun", "SUN", (0.0, 0.0, 5.0), 3.0, (math.radians(50.0), 0.0, math.radians(30.0)))
     sun.data.angle = 0.05
     add_light(scene, "Lamp", "POINT", (2.0, -2.0, 3.0), 400.0).data.shadow_soft_size = 0.1
