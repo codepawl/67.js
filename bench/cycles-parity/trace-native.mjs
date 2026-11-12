@@ -5,13 +5,17 @@ import { constants, setPriority } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
-import { buildTraceScene } from '../../src/path-tracer-scene.js';
+import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import * as renderNative from '../../packages/render-native/index.mjs';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
-const SUPPORTED_FILTERS = new Set(['box', 'blackman-harris']);
+const SUPPORTED_FILTERS = new Set(['box', 'gaussian', 'blackman-harris']);
+const SUPPORTED_SAMPLERS = new Set(['white', 'sobol-burley']);
+// Names of the earlier sampler option (#957), kept as aliases.
+const SAMPLER_ALIASES = { pcg: 'white', sobol: 'sobol-burley' };
+const LIGHT_TREE_ALIASES = { auto: 'auto', on: 'tree', off: 'uniform' };
 
 function readFlagValue(argumentList, flagName, fallbackValue) {
   const flagIndex = argumentList.indexOf(flagName);
@@ -60,14 +64,39 @@ function parseKernelOption(argumentList) {
 function parseFilterTypeOption(argumentList) {
   const filterType = String(readFlagValue(argumentList, '--filter-type', 'box'));
   if (!SUPPORTED_FILTERS.has(filterType)) {
-    throw new RangeError(`Option --filter-type must be "box" or "blackman-harris", got "${filterType}".`);
+    throw new RangeError(`Option --filter-type must be "box", "gaussian" or "blackman-harris", got "${filterType}".`);
   }
   return filterType;
 }
 
+function parseSamplerOption(argumentList) {
+  const requested = String(readFlagValue(argumentList, '--sampler', 'sobol-burley'));
+  const sampler = SAMPLER_ALIASES[requested] ?? requested;
+  if (!SUPPORTED_SAMPLERS.has(sampler)) {
+    throw new RangeError(`Option --sampler must be "white" (alias "pcg") or "sobol-burley" (alias "sobol"), got "${requested}".`);
+  }
+  return sampler;
+}
+
+function parseLightSamplingOption(argumentList) {
+  const lightSampling = String(readFlagValue(argumentList, '--light-sampling', 'auto'));
+  if (!['auto', 'tree', 'uniform'].includes(lightSampling)) {
+    throw new RangeError(`Option --light-sampling must be "auto", "tree" or "uniform", got "${lightSampling}".`);
+  }
+  const aliasedLightTree = String(readFlagValue(argumentList, '--light-tree', 'auto'));
+  if (!Object.hasOwn(LIGHT_TREE_ALIASES, aliasedLightTree)) {
+    throw new RangeError(`Option --light-tree (alias of --light-sampling) must be "auto", "on" or "off", got "${aliasedLightTree}".`);
+  }
+  const aliasedLightSampling = LIGHT_TREE_ALIASES[aliasedLightTree];
+  if (aliasedLightSampling !== 'auto' && lightSampling !== 'auto' && aliasedLightSampling !== lightSampling) {
+    throw new RangeError(`Options --light-tree ${aliasedLightTree} and --light-sampling ${lightSampling} disagree; pass only one.`);
+  }
+  return aliasedLightSampling === 'auto' ? lightSampling : aliasedLightSampling;
+}
+
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler sobol|pcg] [--light-tree auto|on|off] [--filter-type box|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -79,8 +108,10 @@ function parseTraceArguments(argumentList) {
     bounces: parseIntegerOption(argumentList, '--bounces', 8, 0),
     seed: parseIntegerOption(argumentList, '--seed', 1, 0),
     filterType: parseFilterTypeOption(argumentList),
-    sampler: parseChoiceOption(argumentList, '--sampler', ['sobol', 'pcg'], 'sobol'),
-    lightTree: parseChoiceOption(argumentList, '--light-tree', ['auto', 'on', 'off'], 'auto'),
+    sampler: parseSamplerOption(argumentList),
+    lightSampling: parseLightSamplingOption(argumentList),
+    directLighting: String(readFlagValue(argumentList, '--direct-lighting', 'both')),
+    lightTreeProbe: argumentList.includes('--light-tree-probe'),
     filterWidth: parseNumberOption(argumentList, '--filter-width', 1.0, 0.01),
     clampDirect: parseNumberOption(argumentList, '--clamp-direct', 0, 0),
     clampIndirect: parseNumberOption(argumentList, '--clamp-indirect', 0, 0),
@@ -124,16 +155,12 @@ async function runCli() {
   const totalStarted = performance.now();
   const buildStarted = performance.now();
   const traceSource = await reconstructTraceSceneSource(description);
-  const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
-  for (const light of description.environment?.manyPointLights ?? []) {
-    traceScene.lights.points.push({ bit: -1, range: 0, ...light });
-  }
+  const traceScene = buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, options.width, options.height);
   const samplesPerDispatch = options.samplesPerDispatch !== undefined
     ? options.samplesPerDispatch
     : (options.noiseThreshold > 0 ? 8 : undefined);
-  const useLightTree = { auto: undefined, on: true, off: false }[options.lightTree];
-  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, useLightTree, samplesPerDispatch, parts: traceSource.parts });
+  const nativeInput = packSceneForKernel(traceScene, camera, { ...options, samplesPerDispatch, parts: traceSource.parts });
   const sceneBuildSeconds = (performance.now() - buildStarted) / 1000;
   const traced = renderNative.traceNative(nativeInput, {
     width: options.width,
@@ -145,6 +172,8 @@ async function runCli() {
     maxSeconds: options.maxSeconds,
     kernel: options.kernel,
     filterType: options.filterType,
+    sampler: options.sampler,
+    lightSampling: options.lightSampling,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,
@@ -171,9 +200,9 @@ async function runCli() {
     longestDispatchSeconds: traced.longestDispatchSeconds ?? null,
     bounces: options.bounces,
     seed: options.seed,
-    sampler: options.sampler,
-    lightTree: options.lightTree,
     filterType: options.filterType,
+    sampler: options.sampler,
+    lightSampling: options.lightSampling,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,

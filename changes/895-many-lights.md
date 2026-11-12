@@ -1,0 +1,1 @@
+- Add the parity scene `many-lights-500` (a 60 m hall with 500 small point, spot and emissive lights) and let the parity harness build scenes with more than 32 analytic lights, to measure the Cook light tree against the flat pick and against Cycles 5.3 (#895)

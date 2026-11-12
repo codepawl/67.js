@@ -38,8 +38,14 @@ const KERNEL_FLAG_HAS_SUBSURFACE: u32 = 4u;
 const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA: u32 = 8u;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING: u32 = 16u;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND: u32 = 32u;
-const KERNEL_FLAG_PCG_SAMPLER: u32 = 64u;
-const KERNEL_FLAG_USE_EMISSIVE_LIGHT_TREE: u32 = 128u;
+// Set: unstratified PCG hash sampler. Clear (default): Cycles' Sobol-Burley blue-noise pattern.
+const KERNEL_FLAG_WHITE_NOISE_SAMPLER: u32 = 64u;
+// Tests only: every pixel writes the light tree pick probabilities of one random shading point instead of tracing paths.
+const KERNEL_FLAG_LIGHT_TREE_PROBE: u32 = 128u;
+// Tests only: direct light samples carry no MIS weight and emissive hits found by the BSDF count nothing (NEE only), or the
+// reverse: no direct light samples and emissive hits count fully (BSDF only). Both clear is the normal MIS combination.
+const KERNEL_FLAG_TEST_NEE_ONLY: u32 = 256u;
+const KERNEL_FLAG_TEST_BSDF_ONLY: u32 = 512u;
 
 // `KernelParamsV2.filter_type` values.
 const FILTER_BOX: u32 = 0u;
@@ -113,6 +119,7 @@ const SCENE_HAS_ANALYTIC_LIGHTS: bool = true;
 const SCENE_HAS_FINITE_LIGHTS: bool = true;
 const SCENE_HAS_ENV_IMPORTANCE: bool = true;
 const SCENE_HAS_LIGHT_LINKING: bool = true;
+const SCENE_HAS_LIGHT_TREE: bool = true;
 const LOBE_NONE: u32 = 0u;
 const LOBE_DIFFUSE: u32 = 1u;
 const LOBE_GLOSSY_GGX: u32 = 2u;
@@ -357,6 +364,21 @@ struct LightTreeNode {
   light_group_mask_or: u32,
 }
 
+// 32 bytes (2 x 16 B), alignment 16 B. One emitter of the light tree, in tree order (FORMAT-v2 section 7b).
+// `kind_and_depth`: bit 0 emissive triangle, bit 1 distant, bits 8..15 depth. `record_index` indexes `lights` or
+// `emissive_triangles`. `bit_trail_low` / `bit_trail_high` hold one bit per tree level, set where the path to the
+// emitter goes right.
+struct LightTreeEmitter {
+  energy: f32,
+  theta_o: f32,
+  theta_e: f32,
+  kind_and_depth: u32,
+  record_index: u32,
+  leaf_node_index: u32,
+  bit_trail_low: u32,
+  bit_trail_high: u32,
+}
+
 // 32 bytes (2 x 16 B), alignment 16 B.
 struct TextureDescriptor {
   @align(16) data_offset: u32,
@@ -530,6 +552,8 @@ struct ClosureSample {
 @group(0) @binding(10) var<storage, read> environment_texels: array<vec4<f32>>;
 @group(0) @binding(11) var<storage, read_write> film_accumulation: array<vec4<f32>>;
 @group(0) @binding(12) var<storage, read> cycles_lut: array<u32>;
+@group(0) @binding(13) var<storage, read> light_tree_emitters: array<LightTreeEmitter>;
+@group(0) @binding(14) var<storage, read> light_to_tree: array<u32>;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Cross-lane closure interface contract (defined in Lane L4 `src/cycles/closure.wgsl`, called by Lane L3 integrator)
