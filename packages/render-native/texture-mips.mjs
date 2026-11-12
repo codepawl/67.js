@@ -3,12 +3,12 @@
 // Level 0 is the texture as the caller gave it. Each level after it is half as wide and as high, rounded down and never less
 // than one texel. Level 1 is the integral of what the kernel reads at level 0: each level 1 texel is the mean, in linear light,
 // of the level 0 reconstruction (bilinear on the stored values with texel centres at +0.5, then the sRGB decode of an sRGB map)
-// over its footprint, taken at 4 x 4 positions with the wrap mode of the texture. A plain 2 x 2 box of decoded texels is not that
+// over its footprint, taken at up to 8 x 8 positions with the wrap mode of the texture. A plain 2 x 2 box of decoded texels is not that
 // mean: the bilinear blend of two stored values decodes darker than the two decoded values, so a box would read too bright
-// against the level 0 picture of a high contrast map. Levels 2 and up are the 2 x 2 box of the level before: in linear light for
-// an sRGB map (decoded, averaged, encoded back to bytes), on the stored values otherwise; an odd last row or column is read
-// twice. The alpha channel is averaged on its stored values, not weighted by itself, so a texel with alpha 0 pulls its colour
-// into the next level; a map whose alpha is a cutout should not ask for levels. Normal maps are averaged as stored and are not
+// against the level 0 picture of a high contrast map. Levels 2 and up are the 2 x 2 box of the level before, in linear light for
+// an sRGB map; an odd last row or column is read twice. The whole chain is built in doubles and each level is rounded to its
+// storage format once (to the nearest code of the stored value), so no rounding feeds the next level. The alpha channel is
+// averaged on its stored values, not weighted by itself, so a texel with alpha 0 pulls its colour into the next level; a map whose alpha is a cutout should not ask for levels. Normal maps are averaged as stored and are not
 // normalised again; the kernel normalises the result.
 
 export const TEXTURE_KIND_RGBA8 = 'rgba8';
@@ -140,75 +140,36 @@ function visitBlocks(sourceWidth, sourceHeight, destinationWidth, destinationHei
   }
 }
 
-function averageBytes(first, second, third, fourth) {
-  return (first + second + third + fourth + 2) >> 2;
-}
-
-function srgbByteToLinearTable() {
-  const table = new Float64Array(256);
-  for (let byteValue = 0; byteValue < 256; byteValue++) {
-    const encoded = byteValue / 255;
-    table[byteValue] = encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
-  }
-  return table;
-}
-
-const SRGB_BYTE_TO_LINEAR = srgbByteToLinearTable();
-
 function linearToSrgbByte(linear) {
   const clamped = Math.min(1, Math.max(0, linear));
   const encoded = clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055;
   return Math.round(encoded * 255);
 }
 
-function averageSrgbBytesInLinearLight(first, second, third, fourth) {
-  return linearToSrgbByte((SRGB_BYTE_TO_LINEAR[first] + SRGB_BYTE_TO_LINEAR[second] + SRGB_BYTE_TO_LINEAR[third] + SRGB_BYTE_TO_LINEAR[fourth]) * 0.25);
-}
-
-function averageRgba8Level(source, destination, sourceWidth, sourceHeight, destinationWidth, destinationHeight, isSrgb = false) {
-  visitBlocks(sourceWidth, sourceHeight, destinationWidth, destinationHeight, (target, topLeft, topRight, bottomLeft, bottomRight) => {
-    let packed = 0;
-    for (let channel = 0; channel < 4; channel++) {
-      const shift = channel * 8;
-      const averageOfChannel = isSrgb && channel < 3 ? averageSrgbBytesInLinearLight : averageBytes;
-      const average = averageOfChannel(
-        (source[topLeft] >>> shift) & 0xff,
-        (source[topRight] >>> shift) & 0xff,
-        (source[bottomLeft] >>> shift) & 0xff,
-        (source[bottomRight] >>> shift) & 0xff,
-      );
-      packed |= average << shift;
-    }
-    destination[target] = packed >>> 0;
-  });
-}
-
-function averageFloatLevel(source, destination, sourceWidth, sourceHeight, destinationWidth, destinationHeight) {
-  visitBlocks(sourceWidth, sourceHeight, destinationWidth, destinationHeight, (target, topLeft, topRight, bottomLeft, bottomRight) => {
+// A working level holds four doubles per texel: the linear light of the colour channels of an sRGB map, the stored value
+// (bytes as value / 255, floats as they are) for everything else. The chain is built in these doubles and each level is
+// rounded to its storage format once, so the rounding of a level never feeds the next one.
+function boxAverageLevel(source, sourceSize, destinationSize) {
+  const destination = new Float64Array(destinationSize.width * destinationSize.height * 4);
+  visitBlocks(sourceSize.width, sourceSize.height, destinationSize.width, destinationSize.height, (target, topLeft, topRight, bottomLeft, bottomRight) => {
     for (let channel = 0; channel < 4; channel++) {
       destination[target * 4 + channel] = (
         source[topLeft * 4 + channel] + source[topRight * 4 + channel] + source[bottomLeft * 4 + channel] + source[bottomRight * 4 + channel]
       ) * 0.25;
     }
   });
+  return destination;
 }
 
-function averageHalfPairLevel(source, destination, sourceWidth, sourceHeight, destinationWidth, destinationHeight) {
-  visitBlocks(sourceWidth, sourceHeight, destinationWidth, destinationHeight, (target, topLeft, topRight, bottomLeft, bottomRight) => {
-    let packed = 0;
-    for (let channel = 0; channel < 2; channel++) {
-      const shift = channel * 16;
-      const total = halfToFloat((source[topLeft] >>> shift) & 0xffff)
-        + halfToFloat((source[topRight] >>> shift) & 0xffff)
-        + halfToFloat((source[bottomLeft] >>> shift) & 0xffff)
-        + halfToFloat((source[bottomRight] >>> shift) & 0xffff);
-      packed |= floatToHalf(total * 0.25) << shift;
-    }
-    destination[target] = packed >>> 0;
-  });
-}
+const FIRST_LEVEL_SAMPLE_BUDGET = 64 * 1024 * 1024;
+const FIRST_LEVEL_MAX_POSITIONS_PER_AXIS = 8;
 
-const FIRST_LEVEL_POSITIONS_PER_AXIS = 4;
+// 8 x 8 positions per level 1 texel leave the mean of a 30 / 220 sRGB checker 0.3 percent short, 4 x 4 leave it 1.6 percent short
+// (16 x 16 is exact). A large texture takes fewer positions so that packing stays within about 64 million reconstructions.
+function firstLevelPositionsPerAxis(texelCount) {
+  const affordable = Math.floor(Math.sqrt(FIRST_LEVEL_SAMPLE_BUDGET / texelCount));
+  return Math.max(2, Math.min(FIRST_LEVEL_MAX_POSITIONS_PER_AXIS, affordable));
+}
 
 // The kernel wrap of a texel index (texture_wrap_texel_index): repeat wraps, clamp and mirror clamp.
 function wrapTexelIndex(index, size, wrapMode) {
@@ -219,7 +180,7 @@ function wrapTexelIndex(index, size, wrapMode) {
   return Math.min(Math.max(index, 0), size - 1);
 }
 
-// Reads the stored value of one texel as four numbers in [0, 1] (floats as they are; a two-channel texture reads b = 0, a = 1).
+// Reads the stored value of one texel as four numbers (floats as they are; a two-channel texture reads b = 0, a = 1).
 function createStoredTexelReader(kind, source) {
   if (kind === TEXTURE_KIND_RGBA32_FLOAT) {
     return (index, target) => {
@@ -240,31 +201,13 @@ function createStoredTexelReader(kind, source) {
   };
 }
 
-function encodeFirstLevelTexel(kind, mean, destination, index) {
-  if (kind === TEXTURE_KIND_RGBA32_FLOAT) {
-    for (let channel = 0; channel < 4; channel++) destination[index * 4 + channel] = mean[channel];
-    return;
-  }
-  if (kind === TEXTURE_KIND_RG16_FLOAT) {
-    destination[index] = (floatToHalf(mean[0]) | (floatToHalf(mean[1]) << 16)) >>> 0;
-    return;
-  }
-  let packed = 0;
-  for (let channel = 0; channel < 4; channel++) {
-    const isLinearLightChannel = kind === TEXTURE_KIND_RGBA8_SRGB && channel < 3;
-    const byteValue = isLinearLightChannel ? linearToSrgbByte(mean[channel]) : Math.round(Math.min(1, Math.max(0, mean[channel])) * 255);
-    packed |= byteValue << (channel * 8);
-  }
-  destination[index] = packed >>> 0;
-}
-
-function integrateFirstLevel(kind, source, sourceSize, destination, destinationSize, wrapU, wrapV) {
+function integrateFirstLevel(kind, source, sourceSize, destinationSize, wrapU, wrapV) {
   const read = createStoredTexelReader(kind, source);
+  const destination = new Float64Array(destinationSize.width * destinationSize.height * 4);
   const corners = [new Float64Array(4), new Float64Array(4), new Float64Array(4), new Float64Array(4)];
-  const sampleColor = new Float64Array(4);
   const sum = new Float64Array(4);
   const decodesSrgb = kind === TEXTURE_KIND_RGBA8_SRGB;
-  const positions = FIRST_LEVEL_POSITIONS_PER_AXIS;
+  const positions = firstLevelPositionsPerAxis(destinationSize.width * destinationSize.height);
   for (let row = 0; row < destinationSize.height; row++) {
     for (let column = 0; column < destinationSize.width; column++) {
       sum.fill(0);
@@ -287,14 +230,38 @@ function integrateFirstLevel(kind, source, sourceSize, destination, destinationS
           for (let channel = 0; channel < 4; channel++) {
             const top = corners[0][channel] * (1 - blendX) + corners[1][channel] * blendX;
             const bottom = corners[2][channel] * (1 - blendX) + corners[3][channel] * blendX;
-            sampleColor[channel] = top * (1 - blendY) + bottom * blendY;
-            sum[channel] += decodesSrgb && channel < 3 ? decodeStoredSrgb(sampleColor[channel]) : sampleColor[channel];
+            const reconstructed = top * (1 - blendY) + bottom * blendY;
+            sum[channel] += decodesSrgb && channel < 3 ? decodeStoredSrgb(reconstructed) : reconstructed;
           }
         }
       }
-      for (let channel = 0; channel < 4; channel++) sum[channel] /= positions * positions;
-      encodeFirstLevelTexel(kind, sum, destination, row * destinationSize.width + column);
+      for (let channel = 0; channel < 4; channel++) {
+        destination[(row * destinationSize.width + column) * 4 + channel] = sum[channel] / (positions * positions);
+      }
     }
+  }
+  return destination;
+}
+
+// Rounds a working level to the storage format of the texture, once: bytes to the nearest code of the stored (sRGB encoded) value.
+function encodeLevel(kind, working, texelCount, destination) {
+  if (kind === TEXTURE_KIND_RGBA32_FLOAT) {
+    for (let index = 0; index < texelCount * 4; index++) destination[index] = working[index];
+    return;
+  }
+  for (let texel = 0; texel < texelCount; texel++) {
+    const base = texel * 4;
+    if (kind === TEXTURE_KIND_RG16_FLOAT) {
+      destination[texel] = (floatToHalf(working[base]) | (floatToHalf(working[base + 1]) << 16)) >>> 0;
+      continue;
+    }
+    let packed = 0;
+    for (let channel = 0; channel < 4; channel++) {
+      const isLinearLight = kind === TEXTURE_KIND_RGBA8_SRGB && channel < 3;
+      const byteValue = isLinearLight ? linearToSrgbByte(working[base + channel]) : Math.round(Math.min(1, Math.max(0, working[base + channel])) * 255);
+      packed |= byteValue << (channel * 8);
+    }
+    destination[texel] = packed >>> 0;
   }
 }
 
@@ -306,35 +273,29 @@ function integrateFirstLevel(kind, source, sourceSize, destination, destinationS
  */
 export function buildMipChain(kind, texels, width, height, wrapU = 0, wrapV = 0) {
   requireTextureSide(width, height);
+  if (![TEXTURE_KIND_RGBA8, TEXTURE_KIND_RGBA8_SRGB, TEXTURE_KIND_RGBA32_FLOAT, TEXTURE_KIND_RG16_FLOAT].includes(kind)) {
+    throw new RangeError(`buildMipChain: kind must be "${TEXTURE_KIND_RGBA8}", "${TEXTURE_KIND_RGBA8_SRGB}", "${TEXTURE_KIND_RGBA32_FLOAT}" or "${TEXTURE_KIND_RG16_FLOAT}", got ${JSON.stringify(kind)}.`);
+  }
   const levelCount = mipLevelCount(width, height);
   const chain = new Uint32Array(mipChainWordCount(kind, width, height));
   if (levelCount === 1) {
     return chain;
   }
   const isFloat = kind === TEXTURE_KIND_RGBA32_FLOAT;
-  const average = {
-    [TEXTURE_KIND_RGBA8]: averageRgba8Level,
-    [TEXTURE_KIND_RGBA8_SRGB]: (...levelArguments) => averageRgba8Level(...levelArguments, true),
-    [TEXTURE_KIND_RGBA32_FLOAT]: averageFloatLevel,
-    [TEXTURE_KIND_RG16_FLOAT]: averageHalfPairLevel,
-  }[kind];
-  if (!average) {
-    throw new RangeError(`buildMipChain: kind must be "${TEXTURE_KIND_RGBA8}", "${TEXTURE_KIND_RGBA8_SRGB}", "${TEXTURE_KIND_RGBA32_FLOAT}" or "${TEXTURE_KIND_RG16_FLOAT}", got ${JSON.stringify(kind)}.`);
-  }
-  let source = isFloat ? new Float32Array(texels.buffer, texels.byteOffset, width * height * 4) : texels;
+  const source = isFloat ? new Float32Array(texels.buffer, texels.byteOffset, width * height * 4) : texels;
+  let working = null;
   let sourceSize = { width, height };
   let cursor = 0;
   for (let level = 1; level < levelCount; level++) {
     const destinationSize = mipLevelSize(width, height, level);
-    const levelWords = destinationSize.width * destinationSize.height * wordsPerTexel(kind);
+    const texelCount = destinationSize.width * destinationSize.height;
+    const levelWords = texelCount * wordsPerTexel(kind);
     const destinationWords = chain.subarray(cursor, cursor + levelWords);
     const destination = isFloat ? new Float32Array(destinationWords.buffer, destinationWords.byteOffset, levelWords) : destinationWords;
-    if (level === 1) {
-      integrateFirstLevel(kind, source, sourceSize, destination, destinationSize, wrapU, wrapV);
-    } else {
-      average(source, destination, sourceSize.width, sourceSize.height, destinationSize.width, destinationSize.height);
-    }
-    source = destination;
+    working = level === 1
+      ? integrateFirstLevel(kind, source, sourceSize, destinationSize, wrapU, wrapV)
+      : boxAverageLevel(working, sourceSize, destinationSize);
+    encodeLevel(kind, working, texelCount, destination);
     sourceSize = destinationSize;
     cursor += levelWords;
   }

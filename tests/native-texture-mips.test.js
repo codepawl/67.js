@@ -166,6 +166,79 @@ test('the wrap mode reaches level 1: a clamped edge does not read the opposite s
   assert.notEqual(byteOf(repeated[1], 0), byteOf(clamped[1], 0), 'the right half sees the red column on its far side only when it repeats');
 });
 
+function decodeSrgbByte(byteValue) {
+  const encoded = byteValue / 255;
+  return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+}
+
+function linearMeanOfLevels(chain, side) {
+  const means = [];
+  let cursor = 0;
+  for (let level = 1; level < mipLevelCount(side, side); level++) {
+    const texelCount = mipLevelSize(side, side, level).width ** 2;
+    let total = 0;
+    for (let index = 0; index < texelCount; index++) {
+      total += decodeSrgbByte(chain[cursor + index] & 0xff);
+    }
+    means.push(total / texelCount);
+    cursor += texelCount;
+  }
+  return means;
+}
+
+// The kernel reads level 0 by blending the stored values and decoding the blend; this is its mean over a fine grid, repeat wrap.
+function reconstructionLinearMean(words, side) {
+  const stored = (column, row) => (words[(((row % side) + side) % side) * side + (((column % side) + side) % side)] & 0xff) / 255;
+  const steps = 8;
+  let total = 0;
+  for (let sampleRow = 0; sampleRow < side * steps; sampleRow++) {
+    for (let sampleColumn = 0; sampleColumn < side * steps; sampleColumn++) {
+      const x = (sampleColumn + 0.5) / steps - 0.5;
+      const y = (sampleRow + 0.5) / steps - 0.5;
+      const left = Math.floor(x);
+      const top = Math.floor(y);
+      const blendX = x - left;
+      const blendY = y - top;
+      const upper = stored(left, top) * (1 - blendX) + stored(left + 1, top) * blendX;
+      const lower = stored(left, top + 1) * (1 - blendX) + stored(left + 1, top + 1) * blendX;
+      const value = upper * (1 - blendY) + lower * blendY;
+      total += value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    }
+  }
+  return total / (side * side * steps * steps);
+}
+
+test('a uniform mid grey keeps its linear value within half a code at every level of an sRGB chain', () => {
+  for (const grey of [30, 77, 128, 200]) {
+    const side = 32;
+    const chain = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, new Uint32Array(side * side).fill(packedWord(grey, grey, grey, 255)), side, side);
+    for (const word of chain) {
+      assert.equal(word & 0xff, grey, 'a flat colour is the same byte at every level, no drift down');
+    }
+  }
+});
+
+test('the levels of a random sRGB texture keep the mean light of the level 0 reconstruction, with no downward trend', () => {
+  let seed = 12345;
+  const nextByte = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return 60 + (seed >>> 24) % 181;
+  };
+  const side = 32;
+  const words = Uint32Array.from({ length: side * side }, () => {
+    const value = nextByte();
+    return packedWord(value, value, value, 255);
+  });
+  const expected = reconstructionLinearMean(words, side);
+  const means = linearMeanOfLevels(buildMipChain(TEXTURE_KIND_RGBA8_SRGB, words, side, side), side);
+  const relativeErrors = means.map((mean) => (mean - expected) / expected);
+  for (const [index, error] of relativeErrors.entries()) {
+    assert.ok(Math.abs(error) < 0.005, `level ${index + 1} mean is ${(error * 100).toFixed(2)} percent off the reconstruction mean`);
+  }
+  const averageError = relativeErrors.reduce((sum, error) => sum + error, 0) / relativeErrors.length;
+  assert.ok(averageError > -0.003, `the levels do not drift down together: average ${(averageError * 100).toFixed(2)} percent`);
+});
+
 test('without textureMips a texture is level 0 only, the flag is clear and the pool is as it was', () => {
   const image = byteImage(8, 8, (x, y) => [x * 30, y * 30, 7, 255]);
   const byDefault = packMaps([{ image }]);
@@ -377,4 +450,41 @@ test('the level follows the footprint with no half level of bias: one texel per 
   // 16 texels across it: 1 texel per pixel, level 0, the checker itself.
   const oneTexel = spread(16);
   assert.ok(oneTexel.maximum - oneTexel.minimum > 0.3, 'level 0 keeps the checker: ' + JSON.stringify(oneTexel));
+});
+
+test('a contrasty sRGB map read at level 1 gives the linear mean of the stored level 1 texels, not a blend of stored values', gpuSkip, () => {
+  const size = 32;
+  const fieldOfView = 30;
+  const distance = 2 / Math.tan(fieldOfView * Math.PI / 360);
+  const camera = createCamera({ eye: [0, 0, distance], target: [0, 0, 0], fov: fieldOfView }, size, size);
+  const levelZeroSide = 4;
+  const image = byteImage(levelZeroSide, levelZeroSide, (column, row) => {
+    const isLight = (column * 7 + row * 13 + column * row) % 3 === 0;
+    return isLight ? [235, 235, 235, 255] : [20, 20, 20, 255];
+  });
+  const words = new Uint32Array(image.data.buffer, 0, levelZeroSide * levelZeroSide);
+  const levelOne = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, words, levelZeroSide, levelZeroSide).subarray(0, 4);
+  const expectedMean = Array.from(levelOne).reduce((sum, word) => sum + decodeSrgbByte(word & 0xff), 0) / 4;
+  // 8 repeats of the 4 x 4 map across the 16 pixels of the quad: 2 texels per pixel, so level 1, one level 1 texel per pixel.
+  const options = { width: size, height: size, samples: 1, textureMips: true };
+  const input = buildNativeInputV2(
+    {
+      materials: [{ color: [0, 0, 0], emissionStrength: 1, emissionColor: [1, 1, 1], emissiveTexture: { image, colorSpace: 'srgb', uvScale: [8, 8] } }],
+      instances: [{ geometry: quadGeometry(0), materialIndex: 0 }],
+      lights: {},
+    },
+    camera,
+    options,
+  );
+  assert.equal(descriptorWord(input, 0, 3) & 0xff, FORMAT_RGBA8_SRGB);
+  assert.equal(mipCountOf(input, 0), 3);
+  const result = traceNative(input, { ...options, kernel: 'cycles' });
+  let total = 0;
+  for (let row = 10; row < 22; row++) {
+    for (let column = 10; column < 22; column++) {
+      total += result.rgba[(row * size + column) * 4];
+    }
+  }
+  const pictureMean = total / 144;
+  assert.ok(Math.abs(pictureMean - expectedMean) / expectedMean < 0.01, `picture mean ${pictureMean} against the linear mean ${expectedMean} of the level 1 texels`);
 });

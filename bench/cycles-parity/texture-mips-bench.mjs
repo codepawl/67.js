@@ -90,20 +90,26 @@ export function farRowMean(image, width, firstRow) {
   return total / (end - start);
 }
 
-/** The checker of one mip level as a standalone image: reading it at level 0 forces that level for the whole picture. */
-export function levelImages() {
+function decodeSrgbByte(byteValue) {
+  const encoded = byteValue / 255;
+  return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+}
+
+/** The mean linear light of each stored level of the checker chain (level 0: its texels), from the packer, no GPU. */
+export function linearLevelMeans() {
   const base = checkerImage();
   const words = new Uint32Array(base.data.buffer, 0, CHECKER_SIDE * CHECKER_SIDE);
   const chain = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, words, CHECKER_SIDE, CHECKER_SIDE);
-  const images = [base];
+  const meanOf = (levelWords) => levelWords.reduce((sum, word) => sum + decodeSrgbByte(word & 0xff), 0) / levelWords.length;
+  const means = [{ level: 0, side: CHECKER_SIDE, linearMean: meanOf(words) }];
   let cursor = 0;
   for (let level = 1; level < mipLevelCount(CHECKER_SIDE, CHECKER_SIDE); level++) {
     const size = mipLevelSize(CHECKER_SIDE, CHECKER_SIDE, level);
-    const levelWords = chain.slice(cursor, cursor + size.width * size.height);
-    images.push({ width: size.width, height: size.height, data: new Uint8Array(levelWords.buffer, 0, levelWords.length * 4) });
-    cursor += levelWords.length;
+    const texelCount = size.width * size.height;
+    means.push({ level, side: size.width, linearMean: meanOf(chain.subarray(cursor, cursor + texelCount)) });
+    cursor += texelCount;
   }
-  return images;
+  return means;
 }
 
 export function maxAbsoluteDifference(first, second) {
@@ -173,11 +179,19 @@ async function runCameraSweep(settings, cameraName, metrics) {
     });
   }
   if (cameraName === 'receding') {
-    // Each level alone, read at level 0 of its own texture: which step of the chain moves the far rows.
-    metrics.forcedLevels = levelImages().map((image, level) => {
-      const picture = renderFloor({ cameraName, textureMips: false, samples: 64, seed: 1, width, height, image });
-      return { level, side: image.width, farRowMean: farRowMean(picture, width, firstRow), relMse: relativeMeanSquaredError(picture, reference, width, height, firstRow) };
-    });
+    // Mean of each band of rows below the horizon, nearest the horizon first: the middle bands read levels 1 and 2.
+    const off = renderFloor({ cameraName, textureMips: false, samples: 64, seed: 1, width, height });
+    const on = renderFloor({ cameraName, textureMips: true, samples: 64, seed: 1, width, height });
+    metrics.rowBands = [];
+    for (let bandStart = firstRow; bandStart + FAR_ROW_COUNT <= height; bandStart += FAR_ROW_COUNT) {
+      metrics.rowBands.push({
+        firstRow: bandStart,
+        reference: farRowMean(reference, width, bandStart),
+        off: farRowMean(off, width, bandStart),
+        on: farRowMean(on, width, bandStart),
+      });
+    }
+    metrics.levelLinearMeans = linearLevelMeans();
   }
 }
 
