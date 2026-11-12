@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, symlink, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, symlink, readdir, readFile, cp } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { mat4 } from 'gl-matrix';
@@ -148,4 +149,79 @@ test('an .hdr that is not Radiance data and a .cube that is not a 3D look are re
   await rm(join(directory, 'fake.hdr'));
   await writeFile(join(directory, 'fake.cube'), 'LUT_1D_SIZE 2\n0 0 0\n1 1 1\n'.padEnd(64, ' '));
   await assert.rejects(createAgentAssetCatalog(directory), /LUT_3D_SIZE/);
+});
+
+const KENNEY_BOAT_FOLDER = new URL('./fixtures/kenney-boat/', import.meta.url);
+
+async function boatFixture(context) {
+  const directory = await mkdtemp(join(tmpdir(), '67js-catalog-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await cp(KENNEY_BOAT_FOLDER, directory, { recursive: true });
+  return directory;
+}
+
+test('a Kenney GLB loads with the colormap that sits next to it, embedded into the stored asset', async context => {
+  const directory = await boatFixture(context);
+  const catalog = await createAgentAssetCatalog(directory);
+  const listing = catalog.list();
+  assert.equal(listing.assets.length, 1);
+  assert.equal(listing.assets[0].images, 1);
+  const stored = await catalog.read(listing.assets[0].assetId);
+  const jsonLength = stored.readUInt32LE(12);
+  const document = JSON.parse(stored.subarray(20, 20 + jsonLength).toString('utf8'));
+  assert.equal(document.images[0].uri, undefined);
+  assert.equal(document.images[0].mimeType, 'image/png');
+  const view = document.bufferViews[document.images[0].bufferView];
+  const binaryStart = 20 + jsonLength + 8;
+  const pngStart = binaryStart + view.byteOffset;
+  assert.deepEqual(stored.subarray(pngStart, pngStart + 4), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  assert.equal(view.byteOffset % 4, 0);
+  assert.equal(document.buffers[0].byteLength, stored.length - binaryStart);
+  assert.equal(listing.assets[0].assetId, createHash('sha256').update(stored).digest('hex'));
+});
+
+test('a GLB texture that is missing, remote, outside the folder or not an image is refused with the file and the fix', async context => {
+  const directory = await boatFixture(context);
+  const boat = await readFile(join(directory, 'boat-fishing-small.glb'));
+  const attempts = [
+    ['Textures/absent.png', /boat-fishing-small\.glb: image "Textures\/absent\.png" was not found next to the GLB/],
+    ['https://example.invalid/colormap.png', /remote or embedded address.*relative path/],
+    ['data:image/png;base64,AAAA', /remote or embedded address/],
+    ['../colormap.png', /leaves the GLB's folder.*relative path/],
+    ['Textures/../../colormap.png', /leaves the GLB's folder/],
+    ['%2e%2e/colormap.png', /leaves the GLB's folder/],
+    ['/etc/colormap.png', /leaves the GLB's folder/],
+    ['C:\\colormap.png', /remote or embedded address/],
+  ];
+  for (const [uri, message] of attempts) {
+    await writeFile(join(directory, 'boat-fishing-small.glb'), withDocument(boat, document => { document.images[0].uri = uri; }));
+    await assert.rejects(createAgentAssetCatalog(directory), message, uri);
+  }
+  await writeFile(join(directory, 'Textures', 'notes.png'), 'not an image');
+  await writeFile(join(directory, 'boat-fishing-small.glb'), withDocument(boat, document => { document.images[0].uri = 'Textures/notes.png'; }));
+  await assert.rejects(createAgentAssetCatalog(directory), /not a PNG, JPEG or WebP/);
+});
+
+test('a texture folder that links out of the catalog folder is refused', async context => {
+  const directory = await boatFixture(context);
+  const outside = await mkdtemp(join(tmpdir(), '67js-outside-'));
+  context.after(() => rm(outside, { recursive: true, force: true }));
+  await cp(join(directory, 'Textures', 'colormap.png'), join(outside, 'colormap.png'));
+  await rm(join(directory, 'Textures'), { recursive: true });
+  try {
+    await symlink(outside, join(directory, 'Textures'), 'junction');
+  } catch (error) {
+    context.skip(`links are not allowed here: ${error.code}`);
+    return;
+  }
+  await assert.rejects(createAgentAssetCatalog(directory), /leaves the GLB's folder|without links/);
+});
+
+test('sibling textures stay inside the asset byte bound', async context => {
+  const directory = await boatFixture(context);
+  const boat = await readFile(join(directory, 'boat-fishing-small.glb'));
+  const huge = Buffer.alloc(AGENT_ASSET_LIMITS.maxBytes - boat.length + 8);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(huge);
+  await writeFile(join(directory, 'Textures', 'colormap.png'), huge);
+  await assert.rejects(createAgentAssetCatalog(directory), error => error instanceof RangeError && /boat-fishing-small\.glb: with its images next to it the asset reaches/.test(error.message));
 });

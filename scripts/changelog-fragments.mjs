@@ -1,6 +1,7 @@
 import { readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isAllowedMediaUrl, isVideoUrl } from '../src/changelog-media.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const fragmentsFolder = resolve(root, 'changes');
@@ -41,6 +42,40 @@ function issueNumberOf(text, fallbackName) {
 // "Breaking changes" is breaking.
 const groupHeading = /^###\s+(.+?)\s*$/;
 
+// A note adds a picture or clip with a line "media: <url> <alt text>" under its bullet. CHANGELOG.md holds the same
+// thing as markdown ("![alt](url)", or "[alt](url)" for a video), so both forms are read back.
+const mediaLine = /^\s*media:\s+(\S+)(?:\s+(.*\S))?\s*$/;
+const markdownImageLine = /^\s*!\[([^\]]*)\]\((\S+)\)\s*$/;
+const markdownVideoLine = /^\s*\[([^\]]*)\]\((\S+)\)\s*$/;
+
+function mediaOfLine(line) {
+  const note = line.match(mediaLine);
+  if (note) return { url: note[1], alt: note[2] ?? '' };
+  const image = line.match(markdownImageLine);
+  if (image) return { url: image[2], alt: image[1] };
+  const video = line.match(markdownVideoLine);
+  if (video && isVideoUrl(video[2])) return { url: video[2], alt: video[1] };
+  return null;
+}
+
+function checkedMedia(media, line) {
+  if (!isAllowedMediaUrl(media.url)) {
+    throw new Error(`Media line "${line.trim()}" needs an https URL or a path that starts with "/". Write "media: https://example.com/clip.mp4 What the clip shows".`);
+  }
+  if (!media.alt) throw new Error(`Media line "${line.trim()}" needs alt text after the URL. Write "media: <url> What the picture shows".`);
+  return media;
+}
+
+// Turns "media:" lines into the markdown GitHub renders: an image, or a link for a video.
+export function mediaLinesToMarkdown(text) {
+  return text.split('\n').map((line) => {
+    const note = line.match(mediaLine);
+    if (!note) return line;
+    const media = checkedMedia({ url: note[1], alt: note[2] ?? '' }, line);
+    return isVideoUrl(media.url) ? `  [${media.alt}](${media.url})` : `  ![${media.alt}](${media.url})`;
+  }).join('\n');
+}
+
 export function parseEntries(markdown, fallbackName) {
   const entries = [];
   let group = null;
@@ -50,14 +85,17 @@ export function parseEntries(markdown, fallbackName) {
       group = heading[1];
     } else if (line.startsWith('- ')) {
       entries.push({ text: line.slice(2).trim(), group });
+    } else if (line.trim() && entries.length > 0 && mediaOfLine(line)) {
+      entries[entries.length - 1].media = checkedMedia(mediaOfLine(line), line);
     } else if (line.trim() && entries.length > 0) {
       entries[entries.length - 1].text += ` ${line.trim()}`;
     }
   }
-  return entries.map(({ text, group: entryGroup }) => {
+  return entries.map(({ text, group: entryGroup, media }) => {
     const breaking = breakingPattern.test(text) || breakingPattern.test(entryGroup ?? '');
     const entry = { issue: issueNumberOf(text, fallbackName), text, breaking };
     if (entryGroup) entry.group = entryGroup;
+    if (media) entry.media = media;
     return entry;
   });
 }
@@ -95,12 +133,12 @@ export async function changelogWithUnreleased(changelogText, folder = fragmentsF
   const fragments = await readFragments(folder);
   if (fragments.length === 0) return changelogText;
   const text = changelogText.replace(/\r\n/g, '\n');
-  const section = `## Unreleased\n\n${fragments.map((fragment) => fragment.text).join('\n')}\n\n`;
+  const section = `## Unreleased\n\n${fragments.map((fragment) => mediaLinesToMarkdown(fragment.text)).join('\n')}\n\n`;
   const firstSection = text.search(/^## /m);
   return firstSection === -1 ? `${text.replace(/\s+$/, '')}\n\n${section.trimEnd()}\n` : `${text.slice(0, firstSection)}${section}${text.slice(firstSection)}`;
 }
 
-// Puts a version section above the newest one. Fragment text is copied as it is.
+// Puts a version section above the newest one. Fragment text is copied as it is, except that media lines become markdown.
 export function foldIntoChangelog(changelogText, version, fragments) {
   const changelog = changelogText.replace(/\r\n/g, '\n');
   if (!semver.test(version)) throw new Error(`Not a valid version: ${version}`);
@@ -108,7 +146,7 @@ export function foldIntoChangelog(changelogText, version, fragments) {
   if (new RegExp(`^## ${version.replaceAll('.', '\\.')}$`, 'm').test(changelog)) {
     throw new Error(`CHANGELOG.md already has a section for ${version}.`);
   }
-  const section = `## ${version}\n\n${fragments.map((fragment) => fragment.text).join('\n')}\n\n`;
+  const section = `## ${version}\n\n${fragments.map((fragment) => mediaLinesToMarkdown(fragment.text)).join('\n')}\n\n`;
   const firstSection = changelog.search(/^## /m);
   if (firstSection === -1) return `${changelog.replace(/\s+$/, '')}\n\n${section.trimEnd()}\n`;
   return `${changelog.slice(0, firstSection)}${section}${changelog.slice(firstSection)}`;

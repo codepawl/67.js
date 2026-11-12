@@ -417,6 +417,11 @@ function layerBits(layers) {
   return layers.reduce((bits, layer) => bits | (1 << layer), 0);
 }
 
+/** The recorded-physics definition of a recipe section without a ragdoll, for a live physics system. `geometries` maps geometry ids to geometry data. */
+export function liveAgentPhysicsDefinition(physics, recipe, geometries) {
+  return physicsDefinition(physics, recipe, geometries, null);
+}
+
 function physicsDefinition(physics, recipe, geometries, ragdoll) {
   const nodes = new Map(recipe.nodes.map(node => [node.id, node]));
   const definition = { bodies: [], colliders: [], joints: [] };

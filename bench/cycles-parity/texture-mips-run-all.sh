@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Everything the texture mip levels of #896 are checked with, in one run on a machine with a GPU, Rust and Node:
+#   bash bench/cycles-parity/texture-mips-run-all.sh <outputDirectory>
+# 1. builds the addon of this checkout, and of the commit it was cut from (a second checkout beside it, its own cargo target);
+# 2. cargo test of the addon, then the node tests of the textures (the ones that need a GPU run, not skip);
+# 3. the byte identity of five existing scenes on both kernels against the base build;
+# 4. the error of a minified and a magnified checker with and without levels (texture-mips-bench.mjs).
+# Each step keeps going after a failure and the last lines say which steps failed.
+set -uo pipefail
+
+output_directory=$(mkdir -p "$1" && cd "$1" && pwd)
+candidate_checkout=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+baseline_checkout="${candidate_checkout}-base"
+failed_steps=()
+
+run_step() {
+  local step_name="$1"
+  shift
+  echo "=== $step_name"
+  if ! "$@" > "$output_directory/$step_name.log" 2>&1; then
+    failed_steps+=("$step_name")
+    echo "FAILED $step_name (tail of $output_directory/$step_name.log follows)"
+    tail -n 40 "$output_directory/$step_name.log"
+  fi
+}
+
+prepare_baseline_checkout() {
+  rm -rf "$baseline_checkout"
+  git -C "$candidate_checkout" worktree prune
+  local base_commit="${BASELINE_REF:-$(git -C "$candidate_checkout" merge-base HEAD origin/main 2>/dev/null || echo 27ea525b)}"
+  git -C "$candidate_checkout" worktree add --detach "$baseline_checkout" "$base_commit" \
+    && ln -s "$candidate_checkout/node_modules" "$baseline_checkout/node_modules"
+}
+
+build_addon() {
+  (cd "$1/packages/render-native" && CARGO_TARGET_DIR="$2" node build.mjs)
+}
+
+run_step build-candidate build_addon "$candidate_checkout" "${CARGO_TARGET_DIR:-/root/cargo-target/candidate}"
+run_step prepare-baseline prepare_baseline_checkout
+run_step build-baseline build_addon "$baseline_checkout" /root/cargo-target/baseline
+run_step cargo-test bash -c "set -o pipefail; cd '$candidate_checkout/packages/render-native' && cargo test 2>&1 | tail -n 80"
+run_step node-tests bash -c "cd '$candidate_checkout' && node --test tests/native-texture-mips.test.js tests/native-texture-sampler.test.js tests/native-pack-v2.test.js tests/native-job-materials.test.js"
+run_step identity bash "$candidate_checkout/bench/cycles-parity/texture-mips-identity.sh" "$baseline_checkout" "$output_directory/identity"
+run_step mips-bench node "$candidate_checkout/bench/cycles-parity/texture-mips-bench.mjs" "$output_directory/bench"
+
+echo "=== summary"
+grep -hE "^# (tests|pass|fail|skipped)|^ℹ (tests|pass|fail|skipped)|test result" "$output_directory"/cargo-test.log "$output_directory"/node-tests.log || true
+tail -n 1 "$output_directory/identity.log" || true
+if [ "${#failed_steps[@]}" -gt 0 ]; then
+  echo "failed steps: ${failed_steps[*]}"
+  exit 1
+fi
+echo "all steps passed"

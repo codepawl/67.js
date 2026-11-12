@@ -1003,7 +1003,7 @@ Not measured: sizes above 4,000,000 triangles (nothing failed at 4M, so the larg
 
 ## Classroom scene against Cycles, every material grey diffuse (#896, slice C1b)
 
-The last Done-when item of #896 asks for the Blender "Classroom" demo scene (Christophe Seux, CC0, from blender.org's demo files) with every material overridden to grey diffuse to pass the image-match checks against Cycles, and a depth pass that matches Cycles on 99.9 percent of pixels. This slice is the bridge, the harness and the first full measurement. The depth gate passes. The image gates do not pass, and the cause is pinned to one thing, point lights with a radius (below). Only `bench/`, `tests/` and this guide change; the `.blend` and everything derived from it stay outside the repository.
+The last Done-when item of #896 asks for the Blender "Classroom" demo scene (Christophe Seux, CC0, from blender.org's demo files) with every material overridden to grey diffuse to pass the image-match checks against Cycles, and a depth pass that matches Cycles on 99.9 percent of pixels. This slice is the bridge, the harness and the first full measurement. The depth gate and the image gates pass. The image gates failed in the first measurement, and the cause was one thing: the Cycles reference drew point lights with a radius as disks (below, and [Sphere lights and Soft Falloff](#sphere-lights-and-soft-falloff-1040)). Only `bench/`, `tests/` and this guide change; the `.blend` and everything derived from it stay outside the repository.
 
 Picture (Cook left, Cycles right, 1024 samples, depth of field on, grey diffuse): `docs/cook-classroom-comparison.jpg`.
 
@@ -1047,18 +1047,20 @@ Picture (Cook left, Cycles right, 1024 samples, depth of field on, grey diffuse)
 
 | Gate | Result | Pass |
 | --- | --- | --- |
-| Mean ratio per channel within 2 % | 1.123 / 1.129 / 1.138 | fail |
-| 8 x 8 tiles within 5 % | 2 of 64 (min 1.003, max 2.914) | fail |
-| FLIP LDR against the seed floor + 0.02 | 0.183 (floor 0.115, ceiling 0.135) | fail |
-| relMSE (reported) | 0.334 against a Cycles seed-to-seed floor of 0.066 | n/a |
+| Mean ratio per channel within 2 % | 0.9995 / 0.9995 / 0.9995 | pass |
+| 8 x 8 tiles within 5 % | 64 of 64 (min 0.990, max 1.010) | pass |
+| FLIP LDR against the seed floor + 0.02 | 0.109 (floor 0.111, ceiling 0.131) | pass |
+| relMSE (reported) | 0.062 against a Cycles seed-to-seed floor of 0.064 | n/a |
 | Depth agreement at 1 % on 99.9 % of pixels | 99.939 % (316 of 518,400 pixels disagree) | pass |
 | Depth at 0.1 % / 0.5 % | 98.97 % / 99.86 % | reported |
 
-The pinhole colour comparison gives the same numbers (1.124 / 1.129 / 1.138, 2 of 64 tiles, relMSE 0.336), so depth of field is not what fails the colour gates. The room is dark and noisy (mean radiance 0.17, a small window and a few lamps), so the Cycles noise floor itself is high.
+Every gate passes since the Cycles reference renders a light with a radius as a sphere, as Cook does ([Sphere lights and Soft Falloff](#sphere-lights-and-soft-falloff-1040)). With Blender's default disk light the same run gave 1.123 / 1.129 / 1.138, 2 of 64 tiles (max 2.914), FLIP 0.183 and relMSE 0.334; the section below keeps that diagnosis. The pinhole colour comparison passes with the same margins (0.9997 / 0.9997 / 0.9998, 64 of 64 tiles, relMSE 0.062). The room is dark and noisy (mean radiance 0.17, a small window and a few lamps), so the Cycles noise floor itself is high.
 
 Depth: every one of the 316 disagreeing pixels sits next to a silhouette (none in the interior of a surface; away from silhouettes the agreement is 100 percent and the 99th percentile of the relative error is 0.10 percent). They gather in the right-hand tiles of rows 1 to 4 (107, 119, 45 and 10 pixels in the last column), where the venetian blinds' thin slats are, and a handful are scattered along the floor. 311 are both-hit pixels over 1 percent, 68 over 5 and 17 over 20 percent (a slat edge against what is behind it); 2 are hit only by Cycles and 3 only by Cook. 1,637 pixels are background in both (the window openings), so the miss handling is exercised by a rendered scene for the first time.
 
-### Why the colour gates fail (measured gap, inferred cause)
+### Why the colour gates failed with Blender's default disk lights (measured gap)
+
+The table is the run with Blender's default disk lights in the Cycles reference. With sphere lights on both sides the seven point lights together read 1.0003 (0.07701 / 0.07699) and one at a time 0.994 to 1.003; the sun and area rows do not change `[measured]`.
 
 Same JSON, one light class at a time (pinhole, 256 spp, mean of the green channel; Cook over Cycles):
 
@@ -1070,7 +1072,7 @@ Same JSON, one light class at a time (pinhole, 256 spp, mean of the green channe
 | the same 7 point lights, radius 0 | 1.0023 (0.05596 / 0.05583) |
 | one point light at a time | 1.09 (radius 0.08), 1.50 to 2.09 (the six lamps of radius 0.18) |
 
-The sun and the area lights agree to 0.2 percent, and the point lights agree to 0.2 percent too once their radius is 0. With a radius, Cook is 1.5 to 2.1 times brighter than Cycles on each of the six 0.18 m lamps, which sit at 2.31 m under a ceiling fixture (inferred: inside or against geometry). Everything above comes from a single pair of renders per row, so the second decimal of the small values is noise. The suspect is how the `cycles` kernel samples and shadows a sphere light whose sphere overlaps or touches geometry (light sampling in `packages/render-native`, point lights with `radius` in `src/cycles/`, against Cycles' sphere light sampling); I did not read or change kernel code, so the function is not named. That is for an issue: "point light with radius overlapping geometry is up to 2x brighter than Cycles", with this scene or a reduced one (a 0.18 m sphere light inside an open shade) as the reproduction. With the radius set to 0 on both sides the full gates would very likely come close to passing, but that full-resolution run was not made, so it is not claimed.
+The sun and the area lights agree to 0.2 percent, and the point lights agree to 0.2 percent too once their radius is 0. With a radius, Cook was 1.5 to 2.1 times brighter than the disk-light Cycles reference on each of the six 0.18 m lamps, which sit at 2.31 m under a ceiling fixture (inferred: inside or against geometry). Everything above comes from a single pair of renders per row, so the second decimal of the small values is noise. The first reading suspected the kernel's sphere light where it overlaps geometry. That was wrong: the kernel draws the sphere Cycles draws with Soft Falloff off, and the gap was the reference's disk light (#1040).
 
 ### The bridge against the original file `[measured]`
 
@@ -1087,7 +1089,7 @@ bash bench/cycles-parity/run-classroom-parity.sh [--samples 1024] [--force expor
 
 Output goes to `artifacts/classroom/` (ignored by Git): `summary.json`, `classroom-comparison.jpg`, the logs, and in `out/` the small files. The scene is read from `~/cook-data/classroom` and downloaded from `https://download.blender.org/demo/test/classroom.zip` on the first run.
 
-Not covered: the 22 unexported instances and the bridge gap above; the point light difference (to be filed); a full-resolution run with point-light radius 0 on both sides; 4096 samples.
+Not covered: the 22 unexported instances and the bridge gap above; a scene that keeps Blender's default disk lights (#1060); 4096 samples.
 
 ## Reproducible Commands
 
@@ -1308,3 +1310,73 @@ Same scene, same 4096 samples, 192 x 128, box filter, 8 bounces, seed 1, against
 ![Opaque pane before, blend pane after, Cycles 5.3 (left to right) for a blend pane over a sheen sphere](native-job-materials.jpg)
 
 Jobs that use none of these fields are unchanged: the tables of a flattened job (all of them, including the kernel parameters), the instanced input of a shared-geometry job, and the PNG of a real job on the demo room, a textured scene, a scene with 40 copies of one mesh and a scene with glass and clearcoat have the same bytes as on the base branch (`tests/native-job-materials.test.js`, `bench/job-materials`).
+
+## Texture mip levels (#896, slice T2)
+
+Blender Cycles reads level 0 of an image with bilinear filtering and has no mip mapping in its default path, so level 0 stays the default of Cook. `textureMips: true` (a packing option; `mips: true|false` on one texture) opts in. What existed before this slice: RGBA8 (unorm and sRGB), RGBA32F and RG16F textures packed and sampled by the one `texture_sample`, a 1 GiB pool check, a mip count bit field in the descriptor that nothing wrote or read (the packer took a `mipCount` it never filled, which is gone), and the uv transform, wrap, filter and colour space already in the dedupe key (`tests/native-texture-sampler.test.js`).
+
+**What it does.** The packer (`texture-mips.mjs`) stores a full chain after level 0, sides halved and rounded down. Level 1 is the integral of the level 0 reconstruction: each of its texels supersamples its footprint at up to 8 x 8 positions (wrap mode respected) and at each one does what the kernel does at level 0 (bilinear on stored values, centres at +0.5, then the sRGB decode), averaging in linear light; an sRGB map is encoded back to bytes, a float map keeps its floats. Levels 2 and up are a 2 x 2 box of the level before (sRGB in linear light, other formats on stored values, an odd last row or column read twice), all in doubles and rounded to the storage format once per level. Averaging sRGB bytes made a minified 30 / 220 checker read 0.205 where the light averages 0.365. Alpha is averaged like a channel, not weighted, so a cutout map should not ask for levels. A nearest map or a one texel map never stores levels. The pool check counts the levels (a third more texels).
+
+**Level choice.** With any levels stored the packer sets kernel flag `2048`. The integrator then keeps a ray cone per path: the camera pixel angle (twice the length of `camera_up` over the image height; an orthographic camera starts with a pixel wide cone), the cone width at each hit, widened at a bounce by one radian for a diffuse or sheen lobe and by twice the roughness alpha (at most one) for a glossy, coat or glass lobe; the aperture, the pixel filter and the curvature of the surface are not counted. At a hit the footprint in `uv0` units is the cone width, over the square root of the cosine between ray and geometric normal (at least 0.1, the geometric mean of the footprint ellipse), times the uv units per world unit of the triangle, times `max(1/8, 1/sqrt(total samples))` because the samples of a pixel already average over its footprint. The sampler turns that into `log2` of texels (the larger axis after `uv_scale`); at 0 or below it takes the level 0 path unchanged, above it blends the two levels around it. Level 0 stays filter-then-decode (#1030, what Cycles does). A stored level holds the mean light of a footprint, so the kernel decodes each of its four taps before the bilinear blend and the two levels blend in linear light; blending two stored sRGB values and decoding the result would be darker than the light they hold. Alpha tests and bump taps read level 0. The level has no half-level bias: a quad filling half of a 32 x 32 picture reads level 0 at one texel per pixel (the checker survives) and level 1 at two (flat mean 0.5, GPU test in `tests/native-texture-mips.test.js`).
+
+**Proof 1, byte identity with mips off** (RTX 4090, `texture-mips-identity.sh`, 160 x 90, 16 spp, seed 1): `lit-interior`, `glass`, `brick-graph`, `tex-repeat` and `tex-wraps` on the `legacy` and `cycles` kernels, SHA-256 of the pictures of this branch against a build of the commit it was cut from in the same run: 10 of 10 identical.
+
+**Proof 2, a minified checker** (`texture-mips-bench.mjs`; a 64 x 64 sRGB checker of 4 texel cells on a floor to the horizon, uniform sky, 320 x 180, 3 seeds; relMSE over the rows below the horizon against a 2048 spp picture of the same scene with levels off):
+
+| Camera | spp | relMSE levels off | relMSE levels on | Mean of the far rows: reference / off / on | Largest pixel difference on against off |
+| :--- | ---: | ---: | ---: | :--- | ---: |
+| receding to the horizon | 16 | 0.00741 | 0.00293 | 0.2997 / 0.3002 / 0.2991 | 0.23 |
+| receding to the horizon | 64 | 0.00109 | 0.00052 | 0.2997 / 0.2996 / 0.2994 | 0.08 |
+| magnified (30 cm above the floor) | 16 | 0.00060 | 0.00060 | 0.2773 / 0.2773 / 0.2773 | 0 |
+| magnified (30 cm above the floor) | 64 | 0.00009 | 0.00009 | 0.2773 / 0.2773 / 0.2773 | 0 |
+
+The magnified picture is bit for bit the one with levels off. On the receding floor levels on has 2.5 times lower error at 16 spp and 2.1 times lower at 64. The far rows (the 12 rows nearest the horizon, rows 92 to 103 of 180) are 0.2 percent under the reference at 16 spp and 0.1 percent at 64, inside the 0.5 percent target. The picture `docs/texture-mips-minified-checker.jpg` shows levels off, levels on and the reference at 16 spp. In the six bands of 12 rows below the farthest one the picture with levels on equals the one with levels off to the last digit: with this camera and a 0.5 UV per metre checker only the farthest band reads a level above 0 at 64 spp.
+
+**Two defects found by checking the chain, and a measurement that misled.** An earlier run reported far-row means of 0.260 and 0.238 for "level 1" and "level 2" forced over the whole picture, 13 and 21 percent under the reference. That number came from the bench, not the kernel: it rendered the level as a stand-alone texture, which the kernel reads as level 0 (stored values blended, then decoded), the very order that is darker for a contrasty map. The bench option is gone. What the packer stores is checked without a GPU (`linearLevelMeans` in the bench): mean linear light of the stored texels, level 0 texels 0.3643, level 0 reconstruction (what the kernel reads at level 0) 0.3154, level 1 and 2 0.3154, levels 3 to 6 0.3140. The kernel read of level 1 is checked on the GPU (`tests/native-texture-mips.test.js`): a contrasty 4 x 4 sRGB map with levels, repeated 8 times over a head-on quad so that a level 1 texel covers a pixel, gives a picture mean within 1 percent of the linear mean of the level 1 texels. The two real defects were in the packer: (1) level 1 sampled each texel at 4 x 4 positions, which is too coarse for a 30 / 220 edge and left its mean 1.6 percent short; it now takes up to 8 x 8 (0.02 percent short; a texture with more than about 1M level 1 texels takes fewer, to bound packing time at about 64M reconstructions); (2) every level was rounded to bytes and the next level built from the rounded one. The chain is now built in doubles and each level is rounded once to the nearest code of the stored value (Math.round, not a truncation). What is left is that rounding: a uniform level 3 or deeper is 0.44 percent under the reconstruction mean, within half a code at this brightness, and a flat grey keeps its byte at every level. The history that led here: averaging sRGB bytes (error 0.043), then linear-light levels with a blend of stored values (0.0081 at 16 spp, worse than off), then decoding each tap before the blend and level 1 from the level 0 reconstruction (0.0030 at 16 spp, far rows 1.3 percent dark), then this table. The cone width is a documented estimate; the aperture, pixel filter and curvature are not counted.
+
+**Float textures.** RGBA32F and RG16F were already packed and sampled. `tests/native-texture-mips.test.js` shows an HDR float emissive map (value 4 and 2 on a quad that fills the picture) coming out of the kernel unclamped with and without levels, and the packer tests show the formats, the chain of floats and halves and the 1 GiB check with levels.
+
+Commands: `bash bench/cycles-parity/texture-mips-run-all.sh <dir>` on a machine with a GPU builds this branch and its base, runs `cargo test`, the node tests, the identity check and the bench; `uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-texture-mips-figure.py <dir>/bench docs/texture-mips-minified-checker.jpg --samples 16` draws the picture.
+
+## Sphere lights and Soft Falloff (#1040)
+
+On the Classroom scene Cook rendered the seven point lights with a radius 41 percent brighter than Cycles together, and the six lamps of radius 0.18 m inside shades 1.5 to 2.1 times brighter one at a time. The cause is in the comparison, not in the kernel `[measured on small scenes and on Classroom: with the fix its seven lamps read 0.994 to 1.003 one at a time and every Classroom gate passes]`:
+
+- Blender 4 and later give a point or spot light the property `Light.use_soft_falloff`, on by default. With it on, Cycles builds a light with a radius as an oriented disk that faces the shading point (`intern/cycles/blender/light.cpp`: `set_is_sphere(!(mode & LA_USE_SOFT_FALLOFF))`; `kernel/light/point.h`, `point_light_sample`, the `else` branch). With it off, Cycles builds the sphere: it samples the cone of the sphere from outside, the surface from inside, and a path that hits the sphere uses the same pdf.
+- Cook implements the sphere (`lgt_sample_point_or_spot_light`, `lgt_sphere_solid_angle_pdf` in `lights.wgsl`), with the radiance `intensity / (pi r^2)` that Cycles uses (`eval_fac` in `PointLight::copy_to_kernel`), so the power does not change with the radius.
+- `render-cycles.py` never set the property, so every Cycles reference with a light radius used the disk and Cook the sphere. The two agree far from geometry (radius 0.05 m: 0.05 percent apart) and drift as the lamp grows or touches geometry.
+
+Fix: `render-cycles.py` sets `use_soft_falloff` explicitly, to off by default, so both renderers draw a sphere. `--soft-falloff default|on|off` keeps the Blender default (`default`) or the disk (`on`) available. The kernel and the packer are unchanged (SHA-256 of the Cook output is identical to `origin/main`, below). Cook has no disk light, so a scene authored in Blender with the default Soft Falloff still differs by the amounts in the left column.
+
+Cook over Cycles mean radiance (the three channels agree to 4 digits on grey diffuse scenes), 1024 spp, 480 x 270, 8 bounces, box filter, seed 1, one RTX 4090, Blender 5.3.0 OptiX, all materials grey diffuse, one lamp of intensity 8 at 1.6 m in the `lit-interior` room (`make-sphere-light-scenes.mjs`). "Before" is Cycles with the Blender default (disk), "after" is Cycles with Soft Falloff off `[measured]`:
+
+| Scene | Mean ratio before | Mean ratio after | Tiles within 5 % before / after | relMSE before / after | Cycles seed 2 over seed 1 relMSE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| bare room, radius 0 | 1.0001 | 1.0001 | 64 / 64 | 0.000471 / 0.000471 | 0.000543 |
+| bare room, radius 0.05 m | 1.0005 | 1.0001 | 64 / 64 | 0.000472 / 0.000471 | 0.000543 |
+| bare room, radius 0.18 m | 1.0059 | 1.0001 | 64 / 64 | 0.000506 / 0.000472 | 0.000543 |
+| bare room, radius 0.5 m | 1.0441 | 1.0001 | 54 / 64 to 64 / 64 | 0.002205 / 0.000480 | 0.000551 |
+| 0.18 m lamp inside an open-bottomed shade | 1.1584 | 1.0011 | 0 / 64 to 64 / 64 | 0.183 / 0.146 | 0.161 |
+| same shade, hidden from shadow rays | 1.0656 | 0.9918 | 18 / 64 to 62 / 64 | 0.0265 / 0.0228 | 0.0250 |
+| 0.18 m lamp poking through the shade walls | 5.1383 | 0.9901 | 0 / 64 to 64 / 64 | 412 / 0.120 | 0.120 |
+| same, hidden from shadow rays | 1.4710 | 0.9689 | 0 / 64 to 60 / 64 | 53.4 / 0.0529 | 0.0559 |
+| control: radius 0 in the shade | 1.0011 | 1.0011 | 64 / 64 | 0.146 / 0.146 | 0.162 |
+| control: radius 0 in the shade, hidden from shadow rays | 0.9917 | 0.9917 | 62 / 64 | 0.0224 / 0.0224 | 0.0247 |
+
+The relMSE of the shade scenes sits at its seed floor because the light only leaves through the opening and most tiles are dark. After the fix the sphere light of 0.18 m in the bare room is within 0.01 percent in the mean and every tile is within 0.12 percent. The enclosed and poking lamps are within 1 percent. What is left:
+
+- The shade hidden from shadow rays is 0.8 percent dark in Cook for a radius of 0 as well (tiles 0.776 and 0.833 on the shade's front wall), so it is not a sphere light effect: it comes from `rayVisibility: { shadow: false }` through `--instancing` and is not explained yet. With the lamp poking through the walls the mean is 3.1 percent dark (0.9689, 60 of 64 tiles), 2.1 points more than the same shade not hidden (0.9901), so the hidden shade case stays above the 2 percent line and is open.
+- At 1 bounce the enclosed 0.18 m lamp is 11.5 percent bright in Cook (floor tiles up to 1.165) while radius 0 matches (0.9998) and the bare room is 0.26 percent bright. At the default 8 bounces it matches. The cause was not found (a guess: how the last bounce counts a path that hits the sphere through the opening). It is open and outside the default setting.
+
+Scenes of `bench/reference/scenes.js` whose Cycles reference changes with the new default (a light with a radius), real materials, same settings, Cook over Cycles mean, R channel, before to after `[measured]`: `lit-interior` 1.0034 to 1.0003, `many-lights-500` 1.0011 to 1.0005, `light-linking` 1.0008 to 0.9998, `spot-area` 1.0000 to 0.9999 (all tiles within 5 percent before and after). `metal`, `glass` and `outdoor-hdri` have no light with a radius and their numbers do not change. Cook's own output is byte identical to `origin/main` for `lit-interior`, `glass` and `many-lights-500` on both kernels (64 spp, seed 3, 4 bounces, 480 x 270, built beside each other in one run).
+
+![Cycles with Blender's default Soft Falloff (left, mean radiance 0.109) and with Soft Falloff off (right, 0.566) for a 0.18 m lamp poking through a shade, 1024 spp. Cook is within 1 percent of the right panel, 5.1 times the left (table above); its own picture was not kept because the GPU box was replaced during the run.](cycles-sphere-light-comparison.jpg)
+
+Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
+
+```sh
+node packages/render-native/build.mjs
+uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/sphere-light --repeat-cycles-seed2 --reference-scenes spot-area,light-linking,lit-interior,many-lights-500
+```
+
+`make-sphere-light-scenes.mjs` writes the lamp scenes and `run-sphere-light-parity.py` renders them with Cook and with Cycles (Soft Falloff default and off) and prints one line per scene. The scenes hidden from shadow rays need `--instancing` in `trace-native.mjs` and `rayVisibility` in `render-cycles.py`, which come with the Classroom bridge (#896). `tests/cycles-sphere-light-parity.test.js` pins the default and the closed form (floor radiance `albedo / pi * intensity / d^2` for radius 0, 0.18 and 0.5 m).

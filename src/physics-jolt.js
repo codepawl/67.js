@@ -16,9 +16,12 @@ const INSTALL_HINT = 'Install it with `npm install jolt-physics`, or build the s
 let joltPromise;
 let joltModule;
 
-/** Load the Jolt wasm module once. */
-export function loadJoltEngine() {
-  joltPromise ??= import('jolt-physics').then(async module => {
+/**
+ * Load the Jolt wasm module once. A page that ships its own copy passes `moduleUrl`, the absolute URL of
+ * jolt-physics.wasm.js; that file fetches the .wasm file next to it, so nothing loads from another origin.
+ */
+export function loadJoltEngine({ moduleUrl } = {}) {
+  joltPromise ??= (moduleUrl === undefined ? import('jolt-physics') : import(/* @vite-ignore */ moduleUrl)).then(async module => {
     joltModule = await (module.default ?? module)();
     return joltModule;
   }, error => {

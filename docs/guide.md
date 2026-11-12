@@ -84,6 +84,8 @@ Core exports are available from `67js`:
 
 `67js/addons/canvas2d`: 2D recipes. `67js/addons/gltf`: optional asset decoding. These are separate imports to keep the core smaller.
 
+Other people's addons follow the [addon contract](addons.md): a peer dependency on 67js, the `67js-addon` keyword and a `67js` manifest.
+
 67js targets WebGL2. Version `0.4.0` includes the APIs below. Check the installed package version and release metadata before using them.
 
 ## Release and source availability
