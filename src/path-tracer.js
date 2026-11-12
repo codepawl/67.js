@@ -45,13 +45,15 @@ const CONVERGENCE_LUMINANCE_FLOOR = 0.05;
 const IGNORED_MAP_FIELDS = ['occlusionMap'];
 // Shading layers of the rasterizer that the tracer's surface model has no term for.
 const IGNORED_LAYERS = [
-  ['anisotropy', material => material.anisotropy > 0],
-  ['iridescence', material => material.iridescence > 0],
-  ['sheen', material => (material.sheenColor ?? []).some(channel => channel !== 0)],
+  ['anisotropy', material => material.anisotropy > 0, true],
+  ['iridescence', material => material.iridescence > 0, true],
+  ['sheen', material => (material.sheenColor ?? []).some(channel => channel !== 0), true],
   ['moss', material => material.moss > 0],
-  ['splat layers', material => Boolean(material.layers || Object.keys(material.layerMaps ?? {}).some(name => name !== 'clearcoatTexture'))],
+  ['splat layers', (material, kernelMaterials) => Boolean(material.layers || Object.keys(material.layerMaps ?? {}).some(name => !(kernelMaterials ? KERNEL_LAYER_MAPS : ['clearcoatTexture']).includes(name)))],
   ['lightMap', material => Boolean(material.lightMap)],
 ];
+// The layer maps the native "cycles" kernel reads with its whole materials (the roughness maps of the coat and the sheen have no slot).
+const KERNEL_LAYER_MAPS = ['clearcoatTexture', 'clearcoatNormalTexture', 'anisotropyTexture', 'sheenColorTexture'];
 
 function hasGraphOpacity(material) {
   return material.pattern?.type === 'graph' && Object.hasOwn(material.pattern.graph ?? {}, 'opacity');
@@ -974,7 +976,7 @@ export function toneMapToRgba8(linear, width, height, { viewTransform = 'aces', 
 }
 
 /** Names what this scene asks for that the path tracer does not draw, so a result never claims more than it traced. */
-export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
+export function describeIgnoredFeatures(parts, environment, backend = 'cpu', { kernelMaterials = false } = {}) {
   const notes = new Set();
   const fog = environment?.volumeFog;
   if (fog?.density > 0 && (fog.noiseAmount ?? 0.5) > 0) notes.add('volumeFog is traced as a uniform medium: noiseAmount, noiseScale and drift are ignored.');
@@ -984,10 +986,11 @@ export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
     const material = part.material ?? {};
     for (const field of IGNORED_MAP_FIELDS) if (material[field]) notes.add(`${field} is ignored.`);
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
-    if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');
-    if (material.layerMaps?.clearcoatTexture || material.transmissionMap) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
+    if (material.alphaMode === 'blend' && hasGraphOpacity(material)) notes.add('A graph opacity output is traced as a cutout at 0.5.');
+    else if (material.alphaMode === 'blend' && !kernelMaterials) notes.add('Blended transparency is traced as opaque.');
+    if (!kernelMaterials && (material.layerMaps?.clearcoatTexture || material.transmissionMap)) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
     if (material.emissionFresnel > 0 && backend !== 'cpu') notes.add('emission fresnel is ignored by the GPU path tracers; the cpu backend applies it.');
-    for (const [name, isUsed] of IGNORED_LAYERS) if (isUsed(material)) notes.add(`${name} is ignored.`);
+    for (const [name, isUsed, kernelShades] of IGNORED_LAYERS) if (!(kernelMaterials && kernelShades) && isUsed(material, kernelMaterials)) notes.add(`${name} is ignored.`);
   }
   return [...notes];
 }

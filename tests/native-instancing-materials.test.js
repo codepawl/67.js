@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
-import { STRUCT_STRIDES_V2, upgradeNativeInputV1ToV2 } from '../packages/render-native/index.mjs';
-import { buildJobNativeInput } from '../packages/render-native/job-input.mjs';
+import { STRUCT_STRIDES_V2 } from '../packages/render-native/index.mjs';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
-import { buildTraceScene } from '../src/path-tracer-scene.js';
+import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
 
 const camera = createCamera({ eye: [0, 0, 8], target: [0, 0, 0], fov: 50 }, 16, 16);
 const options = { width: 16, height: 16, samples: 1, bounces: 4, seed: 1, fireflyClamp: 20, noiseThreshold: 0 };
@@ -43,10 +42,9 @@ function materialRecords(input) {
   return records;
 }
 
-// What a native job without shared geometry sends: v1 tables, which the cycles kernel upgrades to FORMAT-v2.
+// What a native job without shared geometry sends.
 function flattenedJobInput(parts) {
-  const scene = buildTraceScene(parts, environment);
-  return upgradeNativeInputV1ToV2(buildNativeInput(scene, camera, options, pack), options);
+  return buildFlattenedJobNativeInput(buildTraceScene(parts, environment), camera, options, pack, resolveTexture);
 }
 
 test('a part keeps the same material record whether or not other geometry in the job is shared', () => {
@@ -54,7 +52,7 @@ test('a part keeps the same material record whether or not other geometry in the
   const flattened = materialRecords(flattenedJobInput(parts));
   const instancedScene = buildTraceScene(parts, environment, { instancing: true });
   assert.ok(instancedScene.instances, 'the two copies of one mesh make the job instanced');
-  const instanced = materialRecords(buildJobNativeInput(instancedScene, camera, options, pack));
+  const instanced = materialRecords(buildJobNativeInput(instancedScene, camera, options, pack, resolveTexture));
   assert.equal(instanced.length, parts.length);
   parts.forEach((part, index) => assert.equal(instanced[index], flattened[index], `material record of ${part.name}`));
 });

@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
-import { buildJobNativeInput } from '../packages/render-native/job-input.mjs';
-import { findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
+import { findNativeAddon, traceNative, upgradeNativeInputV1ToV2 } from '../packages/render-native/index.mjs';
 import { traceFrameNative } from '../scripts/agent-native-trace.mjs';
 import { exportNativeSceneTables } from '../scripts/native-bake-page.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
-import { buildTraceScene, refuseLocalVolumes } from '../src/path-tracer-scene.js';
+import { buildTraceScene, refuseLocalVolumes, resolveTexture } from '../src/path-tracer-scene.js';
 
 const WIDTH = 16;
 const HEIGHT = 16;
 const camera = createCamera({ eye: [0, 0, 8], target: [0, 0, 0], fov: 50 }, WIDTH, HEIGHT);
 const options = { width: WIDTH, height: HEIGHT, bounces: 3, seed: 1, fireflyClamp: 20, noiseThreshold: 0 };
 const environment = { keyColor: [3, 3, 3], lightDirection: [0.4, 0.8, 0.5] };
-const modules = { buildTraceScene, refuseLocalVolumes, buildNativeInput, buildJobNativeInput, pack };
+const modules = { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack };
 
 // A large triangle and a small one, so a copy shrunk far enough keeps one and loses the other.
 const mixedSizeMesh = {
@@ -39,13 +39,13 @@ function parts(matrices) {
 }
 
 function jobExport(matrices) {
-  const exported = exportNativeSceneTables({ parts: parts(matrices), environment, camera, options, instancing: true, modules });
+  const exported = exportNativeSceneTables({ parts: parts(matrices), environment, camera, options, kernel: 'cycles', instancing: true, modules });
   return JSON.parse(JSON.stringify({ ...exported, ignored: [] }));
 }
 
+// What the kernel builds from the v1 tables of the flattened scene.
 function mainsExport(matrices) {
-  const input = buildNativeInput(buildTraceScene(parts(matrices), environment), camera, options, pack);
-  return input;
+  return upgradeNativeInputV1ToV2(buildNativeInput(buildTraceScene(parts(matrices), environment), camera, options, pack));
 }
 
 for (const [name, scene] of Object.entries(scenes)) {
@@ -54,10 +54,12 @@ for (const [name, scene] of Object.entries(scenes)) {
     const exported = jobExport(matrices);
     assert.equal(exported.instancing, 'flattened');
     assert.match(exported.instancingReason, reason);
-    assert.equal(exported.schemaVersion, undefined, 'v1 tables');
+    assert.equal(exported.schemaVersion, 2, 'FORMAT-v2 tables without shared meshes');
+    assert.equal(exported.instances, undefined);
+    assert.equal(exported.wholeMaterials, true);
     const main = mainsExport(matrices);
     for (const [tableName, table] of Object.entries(main)) {
-      if (!ArrayBuffer.isView(table)) continue;
+      if (!ArrayBuffer.isView(table) || tableName === 'kernelParams') continue;
       assert.equal(exported.tables[tableName], Buffer.from(table.buffer, table.byteOffset, table.byteLength).toString('base64'), tableName);
     }
   });

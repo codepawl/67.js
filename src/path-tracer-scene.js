@@ -106,7 +106,8 @@ function defaultCanvas(width, height) {
   return canvas;
 }
 
-function resolveTexture(descriptor) {
+/** Pixels and sampling of a texture descriptor for the trace, or null when its image cannot be read. */
+export function resolveTexture(descriptor) {
   const image = descriptor?.image;
   const data = texturePixels(image);
   if (!data) return null;
@@ -496,6 +497,8 @@ export function buildTraceScene(allParts, environment = {}, options = {}) {
     ...geometry,
     bvh,
     materials: parts.map(part => resolveMaterial(part.material ?? {})),
+    // The parts' own materials: the fields resolveMaterial leaves out, which the native "cycles" kernel shades.
+    partMaterials: parts.map(part => part.material ?? {}),
     shadowOnlyParts: parts.some(part => part.shadowOnly === true) ? Uint8Array.from(parts, part => (part.shadowOnly === true ? 1 : 0)) : null,
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),

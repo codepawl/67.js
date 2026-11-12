@@ -989,17 +989,17 @@ window.__agentPreview = {
     } else if (motionTime !== undefined) {
       record.scene.sampleMotion(motionTime);
     }
-    const { instancing, ...packOptions } = options;
-    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes }, pack, { buildNativeInput }, { buildJobNativeInput }] = await Promise.all([
+    const { instancing, kernel, ...packOptions } = options;
+    const [{ createCamera, describeIgnoredFeatures }, { buildTraceScene, refuseLocalVolumes, resolveTexture }, pack, { buildNativeInput }, { buildJobNativeInput, buildFlattenedJobNativeInput }] = await Promise.all([
       import('../src/path-tracer.js'), import('../src/path-tracer-scene.js'), import('../src/path-tracer-gpu-pack.js'),
       import('../packages/render-native/pack-input.mjs'), import('../packages/render-native/job-input.mjs'),
     ]);
     const environment = { ...record.scene.environment, map: agentEnvironmentMap(record.scene.environment) };
-    // Copies of one geometry stay instances only when the job traces with the "cycles" kernel; the legacy kernel reads flattened triangles.
+    // The "cycles" kernel gets FORMAT-v2 tables with whole materials, and copies of one geometry stay instances; the legacy kernel reads flattened v1 triangles.
     const camera = createCamera(record.scene.camera, options.width, options.height);
-    const exported = exportNativeSceneTables({ parts: record.scene.parts, environment, camera, options: packOptions, instancing: instancing === true,
-      modules: { buildTraceScene, refuseLocalVolumes, buildNativeInput, buildJobNativeInput, pack } });
-    return { ...exported, ignored: describeIgnoredFeatures(record.scene.parts, environment) };
+    const exported = exportNativeSceneTables({ parts: record.scene.parts, environment, camera, options: packOptions, kernel, instancing: instancing === true,
+      modules: { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } });
+    return { ...exported, ignored: describeIgnoredFeatures(record.scene.parts, environment, 'cpu', { kernelMaterials: exported.wholeMaterials }) };
   },
   // The PNG of linear pixels (three floats each, base64) that a denoiser outside the page returned, or of the wavelet
   // filter over the kept features when none came back.
