@@ -76,6 +76,7 @@ export function buildNativeV1Tables(scene, camera, options, pack) {
     materials: materialTables.materials,
     lights: lights.table.data,
     atlas: materialTables.atlas,
+    ...(materialTables.virtualTextures ? { virtualTextures: materialTables.virtualTextures } : {}),
     environmentColors: environment?.colors ?? new Float32Array(4),
     environmentTables,
     parameters: writeParameters(scene, camera, options, lights.count, materialTables.atlasWidth, materialTables.subsurfaceVec4Offset),
@@ -88,6 +89,7 @@ export function buildNativeV1Tables(scene, camera, options, pack) {
  */
 export function packNativeMaterialTables(materials, shadowOnlyParts, pack) {
   const atlas = pack.packAtlas(materials);
+  const virtualTextures = atlas.virtualTextures ? { virtualTextures: atlas.virtualTextures } : {};
   const materialData = pack.packMaterials(materials, atlas, shadowOnlyParts).data;
   const usesSubsurface = pack.sceneUsesSubsurface(materials);
   const subsurfaceData = usesSubsurface ? pack.packSubsurface(materials).data : new Float32Array(0);
@@ -99,7 +101,35 @@ export function packNativeMaterialTables(materials, shadowOnlyParts, pack) {
     atlas: new Uint32Array(atlas.data.buffer, atlas.data.byteOffset, Math.floor(atlas.data.byteLength / 4)),
     atlasWidth: atlas.width,
     subsurfaceVec4Offset: usesSubsurface ? materialData.length / 4 : 0,
+    ...virtualTextures,
   };
+}
+
+const MATERIAL_TEXTURE_FIELDS = Object.freeze(['texture', 'normalTexture', 'surfaceTexture', 'emissiveTexture']);
+
+/**
+ * A stand-in for `packAtlas` that copies no pixel. Each distinct texture gets the rectangle `{ x: its number, y: 0 }` in the
+ * material table, and `virtualTextures[number]` holds the texture itself. The FORMAT-v2 job packs read the maps from there
+ * straight into the texture pool, so the maps are limited by the pool (`TEXTURE_POOL_MAX_BYTES`) and not by the 4096 x 16384
+ * texels of the v1 atlas.
+ */
+export function packVirtualAtlas(materials) {
+  const placements = new Map();
+  const virtualTextures = [];
+  for (const material of materials) {
+    for (const field of MATERIAL_TEXTURE_FIELDS) {
+      const texture = material[field];
+      if (!texture || placements.has(texture.data)) continue;
+      placements.set(texture.data, { x: virtualTextures.length, y: 0 });
+      virtualTextures.push(texture);
+    }
+  }
+  return { placements, width: 1, height: 1, data: new Uint8Array(4), virtualTextures };
+}
+
+/** `pack` with the atlas step replaced by `packVirtualAtlas`; the tables it packs carry `virtualTextures`. */
+export function withVirtualAtlas(pack) {
+  return { ...pack, packAtlas: packVirtualAtlas };
 }
 
 // The words of the parameter block the texel entry reads: the texel count where an image holds its width, and the sample
