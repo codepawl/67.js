@@ -116,7 +116,7 @@ function textureSplitScene(include) {
 }
 
 // An emissive quad seen head on with no light in the room, so a pixel is the texture itself and the mean of the picture is
-// known in closed form from the texels (`texture-mean-expectation.py`). Cook and Cycles differ here only in how they read a
+// known in closed form from the texels. Cook and Cycles differ here only in how they read a
 // texture. One frame covers 10 degrees of a 3 x 3 repeat of the quad.
 function emissiveProbeScene(colorSpace) {
   const emissiveMap = { image: gradientChecker(false), colorSpace };

@@ -1133,7 +1133,7 @@ mod tests {
     }
 
     /// Blender Cycles filters the stored values of an 8-bit sRGB image and decodes the blend. Decoding each texel before the
-    /// blend reads 2 to 7 percent too bright on a checker map (#1030).
+    /// blend reads 2 to 5 percent too bright on a checker map (#1030).
     #[test]
     fn an_srgb_map_is_decoded_after_the_filter_and_not_per_texel() {
         let kernel = assemble_cycles_kernel().expect("the kernel assembles");

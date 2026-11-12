@@ -98,7 +98,7 @@ fn texture_fetch_texel(desc: TextureDescriptor, ix: i32, iy: i32, format: u32) -
 }
 
 // An 8-bit sRGB map is filtered on its stored values and decoded after, the way Blender Cycles reads a byte image. Decoding
-// each texel first and filtering after makes every blended texel brighter (the decode curve is convex): 2 to 7 percent of the
+// each texel first and filtering after makes every blended texel brighter (the decode curve is convex): 2 to 5 percent of the
 // mean of a checker map at texel scale (#1030).
 fn texture_decode_filtered(color: vec4<f32>, format: u32) -> vec4<f32> {
   if (format == 1u) {
