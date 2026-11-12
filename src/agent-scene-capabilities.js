@@ -308,7 +308,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     shapes: Object.freeze(['box', 'ball', 'capsule', 'convex', 'trimesh']),
     jointTypes: Object.freeze(['spherical', 'revolute', 'prismatic', 'fixed']),
     sensors: true, collisionLayers: 16,
-    breakableJoints: 'joints[].breakImpulse (fixed joints, N s): the joint breaks in the bake when either body takes a contact impulse (force x 1/60 s) at or above it in one step, so resting weight does not. The report lists jointBreaks { joint, time, impulse }. Fracture a convex part into glued fragments with fractureMesh and fragmentPhysics from src/fracture.js (docs/physics.md).',
+    breakableJoints: 'fixed joint breakImpulse (N s): breaks when a body takes a contact impulse (force x 1/60 s) over it in one step; scene_inspect lists jointBreaks. fractureMesh in src/fracture.js makes glued fragments (docs/physics.md).',
     ragdoll: 'physics.ragdoll {armature}: limp capsule per bone; needs a floor',
     limits: Object.freeze({ maxBodies: 64, maxJoints: 64, maxDuration: 10, framesPerSecond: 60, maxTrimeshTriangles: 20000, maxHullPoints: 2048 }),
   }),
