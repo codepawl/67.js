@@ -6,7 +6,7 @@
 --compare sampler (default) pits the PCG hash against Sobol-Burley. --compare light-tree pits the cumulative-weight light pick
 against the light tree, both on Sobol-Burley, and also reports sampling seconds and the time each needs to reach the error
 the other reaches (interpolated on a log-log line through the sample ladder).
-Every render goes through gpu-lock. The reference uses the first variant with its own seed, so no candidate shares random
+Renders go through the script named by GPU_LOCK_COMMAND when it is set. The reference uses the first variant with its own seed, so no candidate shares random
 numbers with it. Prints one JSON object.
 """
 import json
@@ -20,7 +20,8 @@ import numpy
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 REPOSITORY_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-GPU_LOCK = os.path.expanduser("~/.agents/tools/gpu-lock.sh")
+# A shared machine can queue GPU jobs: set GPU_LOCK_COMMAND to a wrapper script and every render runs through it.
+GPU_LOCK_COMMAND = os.environ.get("GPU_LOCK_COMMAND")
 REL_MSE_EPSILON = 1e-2
 REFERENCE_SEED = 9001
 VARIANT_FLAGS = {
@@ -41,7 +42,7 @@ def read_flag(argument_list, flag_name, fallback):
 def render(scene_json, output_prefix, variant_flags, samples, seed, width, height, weight):
     environment = dict(os.environ, GPU_LOCK_WEIGHT=weight)
     command = [
-        "bash", GPU_LOCK, "node", os.path.join(REPOSITORY_ROOT, "bench", "cycles-parity", "trace-native.mjs"),
+        *(["bash", GPU_LOCK_COMMAND] if GPU_LOCK_COMMAND else []), "node", os.path.join(REPOSITORY_ROOT, "bench", "cycles-parity", "trace-native.mjs"),
         scene_json, output_prefix, "--kernel", "cycles", "--samples", str(samples),
         "--seed", str(seed), "--width", str(width), "--height", str(height), *variant_flags,
     ]
