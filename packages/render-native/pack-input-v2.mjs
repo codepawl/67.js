@@ -1,7 +1,7 @@
 // Packs a 67js trace scene (or upgrades a legacy v1 input) into the FORMAT-v2 binary tables read by the Cycles-parity
 // native kernel (`FORMAT-v2.md` and `src/cycles/abi.wgsl`). Pure typed arrays with zero Node-only imports.
 
-import { buildLightTreeNodes } from './light-tree-v2.mjs';
+import { buildLightTree } from './light-tree-v2.mjs';
 
 export const FORMAT_V2_MAGIC = 0x36375054;
 export const FORMAT_V2_VERSION = 2;
@@ -10,6 +10,16 @@ export const INVALID_INDEX_V2 = 0xffffffff;
 // Byte offset of `filter_glossy` inside a `KernelParamsV2` buffer (u32[75] * 4 = 300).
 // Used in `packKernelParamsV2` and in `index.mjs` when patching a pre-built buffer.
 export const KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET = 300;
+export const KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET = 32;
+// Byte offsets of `filter_type` (u32[19]) and `filter_width` (f32[20]); the packer and `traceNative` share them.
+export const KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET = 76;
+export const KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET = 80;
+
+export const VALID_SAMPLERS = Object.freeze(['sobol-burley', 'white']);
+/** `auto` picks the light tree when the scene has more than `LIGHT_TREE_AUTO_MIN_EMITTERS` emitters. */
+export const VALID_LIGHT_SAMPLING = Object.freeze(['auto', 'tree', 'uniform']);
+/** A single emitter is picked with probability 1 either way, so the tree only pays off from two emitters on. */
+export const LIGHT_TREE_AUTO_MIN_EMITTERS = 1;
 
 export const STRUCT_STRIDES_V2 = Object.freeze({
   kernelParams: 320,
@@ -22,14 +32,18 @@ export const STRUCT_STRIDES_V2 = Object.freeze({
   textureDescriptor: 32,
 });
 
-const KERNEL_FLAG_USE_LIGHT_TREE = 1;
+export const KERNEL_FLAG_USE_LIGHT_TREE = 1;
+/** Tests only: see `KERNEL_FLAG_TEST_NEE_ONLY` and `KERNEL_FLAG_TEST_BSDF_ONLY` in abi.wgsl. */
+export const KERNEL_FLAG_LIGHT_TREE_PROBE = 128;
+const KERNEL_FLAG_TEST_NEE_ONLY = 256;
+const KERNEL_FLAG_TEST_BSDF_ONLY = 512;
+export const VALID_DIRECT_LIGHTING = Object.freeze(['both', 'nee-only', 'bsdf-only']);
 const KERNEL_FLAG_HAS_VOLUME = 2;
 const KERNEL_FLAG_HAS_SUBSURFACE = 4;
 const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA = 8;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING = 16;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
-const KERNEL_FLAG_PCG_SAMPLER = 64;
-const KERNEL_FLAG_USE_EMISSIVE_LIGHT_TREE = 128;
+export const KERNEL_FLAG_WHITE_NOISE_SAMPLER = 64;
 
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
@@ -1292,6 +1306,29 @@ function packAnalyticLightsBuffer(entries) {
   };
 }
 
+// Builds the Cycles light tree over the packed lights and emissive triangles (light-tree-v2.mjs) and records the
+// owning leaf of every analytic light in its `tree_leaf_index` field.
+function packLightTree(packedLights, packedEmissives) {
+  const tree = buildLightTree(
+    packedLights.lights,
+    packedLights.lightCount,
+    packedEmissives.emissiveTriangles,
+    packedEmissives.emissiveTriangleCount
+  );
+  const lightWords = new Uint32Array(packedLights.lights.buffer, packedLights.lights.byteOffset, packedLights.lights.byteLength / 4);
+  const wordsPerLight = STRUCT_STRIDES_V2.light / 4;
+  for (let index = 0; index < packedLights.lightCount; index++) {
+    lightWords[index * wordsPerLight + 27] = tree.lightLeafIndices[index];
+  }
+  return {
+    lightTreeNodes: tree.nodes,
+    lightTreeNodeCount: tree.nodeCount,
+    lightTreeEmitters: tree.emitters,
+    lightTreeEmitterCount: tree.emitterCount,
+    lightToTree: tree.lightToTree,
+  };
+}
+
 function packEnvironmentTexelsV2(environment, options = {}) {
   if (!environment || !(environment.width > 0 && environment.height > 0)) {
     const bg = options.backgroundColor ?? [0, 0, 0];
@@ -1461,6 +1498,68 @@ function requireFiniteIntegerInRangeIfPresent(value, name, min, max, callerName)
  * Validates public boundary options for `buildNativeInputV2`, `upgradeNativeInputV1ToV2`, and
  * `traceNative`. Throws `RangeError` or `TypeError` with a descriptive message on failure.
  */
+/** Throws unless `sampler` is undefined, "sobol-burley" (the Cycles default pattern) or "white" (the PCG hash). */
+export function validateSamplerOption(sampler, callerName) {
+  if (sampler !== undefined && !VALID_SAMPLERS.includes(sampler)) {
+    throw new RangeError(
+      `${callerName}: \`sampler\` must be "sobol-burley" (default) or "white", got ${JSON.stringify(sampler)}.`
+    );
+  }
+}
+
+/** Throws unless `lightSampling` is undefined, "auto", "tree" or "uniform". */
+export function validateLightSamplingOption(lightSampling, callerName) {
+  if (lightSampling !== undefined && !VALID_LIGHT_SAMPLING.includes(lightSampling)) {
+    throw new RangeError(
+      `${callerName}: \`lightSampling\` must be "auto" (default), "tree" or "uniform", got ${JSON.stringify(lightSampling)}.`
+    );
+  }
+}
+
+/**
+ * Reads the sampler and light-selection options, including the earlier names `sampler: 'pcg'` (same as `'white'`),
+ * `sampler: 'sobol'` (same as `'sobol-burley'`) and `useLightTree: true|false` (same as `lightSampling: 'tree'|'uniform'`).
+ * Returns `{ sampler, lightSampling }` with the canonical names, or `undefined` for an option that was left out.
+ * Throws when a name is unknown or when an alias and its canonical option disagree.
+ */
+export function resolveSamplingOptions(options, callerName) {
+  const samplerAliases = { pcg: 'white', sobol: 'sobol-burley' };
+  let sampler = options.sampler;
+  if (typeof sampler === 'string' && Object.hasOwn(samplerAliases, sampler)) {
+    sampler = samplerAliases[sampler];
+  }
+  validateSamplerOption(sampler, callerName);
+
+  let lightSampling = options.lightSampling;
+  validateLightSamplingOption(lightSampling, callerName);
+  if (options.useLightTree !== undefined) {
+    if (typeof options.useLightTree !== 'boolean') {
+      throw new TypeError(
+        `${callerName}: \`useLightTree\` must be true, false or left out for automatic, got ${JSON.stringify(options.useLightTree)}.`
+      );
+    }
+    const aliasedLightSampling = options.useLightTree ? 'tree' : 'uniform';
+    if (lightSampling !== undefined && lightSampling !== aliasedLightSampling) {
+      throw new RangeError(
+        `${callerName}: \`useLightTree: ${options.useLightTree}\` means \`lightSampling: "${aliasedLightSampling}"\`, which disagrees with \`lightSampling: "${lightSampling}"\`. Pass only one of them.`
+      );
+    }
+    lightSampling = aliasedLightSampling;
+  }
+  return { sampler, lightSampling };
+}
+
+/** True when the kernel should pick lights through the light tree for this scene and mode. */
+export function resolveUseLightTree(lightSampling, emitterCount, lightTreeNodeCount) {
+  if (lightTreeNodeCount <= 0 || lightSampling === 'uniform') {
+    return false;
+  }
+  if (lightSampling === 'tree') {
+    return emitterCount > 0;
+  }
+  return emitterCount > LIGHT_TREE_AUTO_MIN_EMITTERS;
+}
+
 export function validatePackOptions(options, callerName, requireDimensionsAndSamples = false) {
   if (!options || typeof options !== 'object') {
     throw new TypeError(`${callerName}: \`options\` must be an object.`);
@@ -1478,12 +1577,8 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   // samplesPerDispatch is optional (undefined means "let the addon choose"); only validate when provided.
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
-  if (options.sampler !== undefined && options.sampler !== 'sobol' && options.sampler !== 'pcg') {
-    throw new RangeError(`${callerName}: \`sampler\` must be "sobol" or "pcg", got ${JSON.stringify(options.sampler)}.`);
-  }
-  if (options.useLightTree !== undefined && typeof options.useLightTree !== 'boolean') {
-    throw new TypeError(`${callerName}: \`useLightTree\` must be true, false or left out for automatic, got ${JSON.stringify(options.useLightTree)}.`);
-  }
+  resolveSamplingOptions(options, callerName);
+  validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
     if (samplesPerDispatch !== undefined) {
@@ -1519,16 +1614,40 @@ function effectiveCyclesClamp(value) {
   return numeric * 3.0;
 }
 
-function resolveFilterParameters(options = {}) {
-  const filter = options.filterType ?? options.pixelFilter ?? 0;
-  let filterType = 0;
-  if (filter === 1 || filter === 'gaussian') {
-    filterType = 1;
-  } else if (filter === 2 || filter === 'blackman-harris' || filter === 'blackman_harris') {
-    filterType = 2;
+const FILTER_TYPE_CODES = Object.freeze({
+  box: 0,
+  gaussian: 1,
+  'blackman-harris': 2,
+  blackman_harris: 2,
+});
+
+export function filterTypeCode(filter) {
+  if (filter === 0 || filter === 1 || filter === 2) {
+    return filter;
   }
+  return typeof filter === 'string' ? FILTER_TYPE_CODES[filter] : undefined;
+}
+
+/** Throws unless `filterType` (or `pixelFilter`) and `filterWidth` are absent or valid. Width is in pixels, 0.01 to 16. */
+export function validateFilterOptions(options, callerName) {
+  const filter = options.filterType !== undefined ? options.filterType : options.pixelFilter;
+  if (filter !== undefined && filterTypeCode(filter) === undefined) {
+    throw new RangeError(
+      `${callerName}: \`filterType\` must be "box" (default), "gaussian" or "blackman-harris", got ${JSON.stringify(filter)}.`
+    );
+  }
+  const width = options.filterWidth;
+  if (width !== undefined && !(typeof width === 'number' && Number.isFinite(width) && width >= 0.01 && width <= 16)) {
+    throw new RangeError(
+      `${callerName}: \`filterWidth\` must be a number of pixels from 0.01 to 16 (1.5 is the Cycles Blackman-Harris default), got ${JSON.stringify(width)}.`
+    );
+  }
+}
+
+export function resolveFilterParameters(options = {}) {
+  const filterType = filterTypeCode(options.filterType ?? options.pixelFilter ?? 0) ?? 0;
   const defaultWidth = filterType === 0 ? 1.0 : 1.5;
-  const filterWidth = options.filterWidth !== undefined ? Math.max(0.01, Number(options.filterWidth)) : defaultWidth;
+  const filterWidth = options.filterWidth ?? defaultWidth;
   return { filterType, filterWidth };
 }
 
@@ -1557,11 +1676,21 @@ function packKernelParamsV2({
   const volumeDensity = Math.max(0, Number(volume?.density ?? 0));
 
   let kernelFlags = 0;
-  if (counts.analyticLightTree === true) {
-    kernelFlags |= KERNEL_FLAG_USE_LIGHT_TREE;
+  const { sampler, lightSampling } = resolveSamplingOptions(options, 'packKernelParamsV2');
+  if (options.directLighting !== undefined && !VALID_DIRECT_LIGHTING.includes(options.directLighting)) {
+    throw new RangeError(`packKernelParamsV2: \`directLighting\` must be "both", "nee-only" or "bsdf-only", got ${JSON.stringify(options.directLighting)}.`);
   }
-  if (counts.emissiveLightTree === true) {
-    kernelFlags |= KERNEL_FLAG_USE_EMISSIVE_LIGHT_TREE;
+  if (options.directLighting === 'nee-only') {
+    kernelFlags |= KERNEL_FLAG_TEST_NEE_ONLY;
+  } else if (options.directLighting === 'bsdf-only') {
+    kernelFlags |= KERNEL_FLAG_TEST_BSDF_ONLY;
+  }
+  if (options.lightTreeProbe === true) {
+    kernelFlags |= KERNEL_FLAG_LIGHT_TREE_PROBE;
+  }
+  const emitterCount = counts.lightCount + counts.emissiveTriangleCount;
+  if (resolveUseLightTree(lightSampling, emitterCount, counts.lightTreeNodeCount)) {
+    kernelFlags |= KERNEL_FLAG_USE_LIGHT_TREE;
   }
   if (volumeDensity > 0) {
     kernelFlags |= KERNEL_FLAG_HAS_VOLUME;
@@ -1578,8 +1707,8 @@ function packKernelParamsV2({
   if (options.transparentBackground === true) {
     kernelFlags |= KERNEL_FLAG_TRANSPARENT_BACKGROUND;
   }
-  if (options.sampler === 'pcg') {
-    kernelFlags |= KERNEL_FLAG_PCG_SAMPLER;
+  if (sampler === 'white') {
+    kernelFlags |= KERNEL_FLAG_WHITE_NOISE_SAMPLER;
   }
 
   const maxBounces = Math.max(0, Math.round(Number(options.bounces ?? options.maxBounces ?? 8)));
@@ -1631,9 +1760,9 @@ function packKernelParamsV2({
   u32[16] = maxVolumeBounces >>> 0;
   u32[17] = maxTransparentBounces >>> 0;
   u32[18] = minBounceRr >>> 0;
-  u32[19] = filterType >>> 0;
+  u32[KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET / 4] = filterType >>> 0;
 
-  f32[20] = filterWidth;
+  f32[KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET / 4] = filterWidth;
   u32[21] = counts.instanceCount >>> 0;
   u32[22] = counts.triangleCount >>> 0;
   u32[23] = counts.materialCount >>> 0;
@@ -2155,7 +2284,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   const packedEmissives = packEmissiveTriangleBuffer(packedGeometry.emissiveList);
   const analyticEntries = buildAnalyticLightEntries(scene.lights);
   const packedLights = packAnalyticLightsBuffer(analyticEntries);
-  const packedLightTree = buildLightTreeNodes(packedLights, packedEmissives, { instances: packedGeometry.instances, instanceCount: packedGeometry.instanceCount }, options);
+  const packedLightTree = packLightTree(packedLights, packedEmissives);
   const packedEnvironment = packEnvironmentTexelsV2(scene.environment, options);
 
   const counts = {
@@ -2165,8 +2294,6 @@ export function buildNativeInputV2(scene, camera, options = {}) {
     emissiveTriangleCount: packedEmissives.emissiveTriangleCount,
     lightCount: packedLights.lightCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
-    analyticLightTree: packedLightTree.analyticTree,
-    emissiveLightTree: packedLightTree.emissiveTree,
     textureCount: packedTextures.textureCount,
   };
 
@@ -2198,6 +2325,9 @@ export function buildNativeInputV2(scene, camera, options = {}) {
     lightCount: counts.lightCount,
     lightTreeNodes: packedLightTree.lightTreeNodes,
     lightTreeNodeCount: counts.lightTreeNodeCount,
+    lightTreeEmitters: packedLightTree.lightTreeEmitters,
+    lightTreeEmitterCount: packedLightTree.lightTreeEmitterCount,
+    lightToTree: packedLightTree.lightToTree,
     textureDescriptors: packedTextures.textureDescriptors,
     textureCount: counts.textureCount,
     textureTexels: packedTextures.textureTexels,
@@ -2568,7 +2698,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
   const packedEmissives = packEmissiveTriangleBuffer(emissiveList);
   const analyticEntries = buildAnalyticLightEntries(reconstructedLights);
   const packedLights = packAnalyticLightsBuffer(analyticEntries);
-  const packedLightTree = buildLightTreeNodes(packedLights, packedEmissives, { instances: instancesBuffer, instanceCount: instanceItems.length }, options);
+  const packedLightTree = packLightTree(packedLights, packedEmissives);
   const packedEnvironment = packEnvironmentTexelsV2(reconstructedEnv, options);
 
   const mergedOptions = {
@@ -2587,8 +2717,6 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     emissiveTriangleCount: packedEmissives.emissiveTriangleCount,
     lightCount: packedLights.lightCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
-    analyticLightTree: packedLightTree.analyticTree,
-    emissiveLightTree: packedLightTree.emissiveTree,
     textureCount: packedTextures.textureCount,
   };
 
@@ -2620,6 +2748,9 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     lightCount: counts.lightCount,
     lightTreeNodes: packedLightTree.lightTreeNodes,
     lightTreeNodeCount: counts.lightTreeNodeCount,
+    lightTreeEmitters: packedLightTree.lightTreeEmitters,
+    lightTreeEmitterCount: packedLightTree.lightTreeEmitterCount,
+    lightToTree: packedLightTree.lightToTree,
     textureDescriptors: packedTextures.textureDescriptors,
     textureCount: counts.textureCount,
     textureTexels: packedTextures.textureTexels,

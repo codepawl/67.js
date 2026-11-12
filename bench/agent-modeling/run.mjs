@@ -21,6 +21,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { createRunGuard } from './run-guard.mjs';
 import { removeLocalPaths, totalsByModel, totalsOf } from './aggregate.mjs';
 import { gradeRecipe, recipeFeatures } from './check.mjs';
 import { scoreLookSafely } from './look.mjs';
@@ -79,7 +80,6 @@ function runClaude(prompt, workingDirectory, configPath, systemPromptAddition) {
     '--permission-mode', 'dontAsk',
     '--setting-sources', 'project',
     '--no-session-persistence',
-    '--max-budget-usd', options.budget,
     ...(systemPromptAddition ? ['--append-system-prompt', systemPromptAddition] : []),
   ];
   return new Promise(resolvePromise => {
@@ -87,16 +87,17 @@ function runClaude(prompt, workingDirectory, configPath, systemPromptAddition) {
     const child = spawn(options.claude, argumentsList, { cwd: workingDirectory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     let errors = '';
+    const guard = createRunGuard({ child, model: options.model, budgetUsd: options.budget, timeoutSeconds: options.timeout });
     child.stdout.on('data', chunk => {
       output += chunk;
+      guard.feed(chunk);
     });
     child.stderr.on('data', chunk => {
       errors += chunk;
     });
-    const timer = setTimeout(() => child.kill(), Number(options.timeout) * 1000);
     child.on('close', code => {
-      clearTimeout(timer);
-      resolvePromise({ output, errors, code, wallMs: Math.round(performance.now() - started) });
+      guard.stop();
+      resolvePromise({ output, errors, code, guardReason: guard.reason, wallMs: Math.round(performance.now() - started) });
     });
   });
 }
@@ -205,7 +206,7 @@ async function runTask(task, attempt, systemPromptAddition) {
       outputTokens: usage.output_tokens ?? 0,
       wallSeconds: Math.round(run.wallMs / 1000),
       exitCode: run.code,
-      stopped: transcript.result?.subtype ?? 'no result',
+      stopped: transcript.result?.subtype ?? (run.guardReason ? `guard-${run.guardReason}` : 'no result'),
     };
   } finally {
     await removeWorkingDirectory(workingDirectory);

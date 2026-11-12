@@ -392,8 +392,11 @@ function fillHit(scene, triangleId, originX, originY, originZ, directionX, direc
   return alpha;
 }
 
-/** The nearest solid hit along a ray, stepping through the transparent texels of cutout materials. */
-function intersect(scene, originX, originY, originZ, directionX, directionY, directionZ, hit) {
+/**
+ * The nearest solid hit along a ray, stepping through the transparent texels of cutout materials. A camera ray also
+ * steps through a shadow-only part, which stays in the scene for shadow and bounce rays (Blender's camera visibility off).
+ */
+function intersect(scene, originX, originY, originZ, directionX, directionY, directionZ, hit, isCameraRay = false) {
   let startX = originX;
   let startY = originY;
   let startZ = originZ;
@@ -401,8 +404,9 @@ function intersect(scene, originX, originY, originZ, directionX, directionY, dir
   for (let attempt = 0; attempt < ALPHA_STEP_LIMIT; attempt++) {
     const found = scene.tracer.trace(startX, startY, startZ, directionX, directionY, directionZ, scene.farDistance, false);
     if (found.nearestTriangle < 0) return false;
-    const alpha = fillHit(scene, found.nearestTriangle, startX, startY, startZ, directionX, directionY, directionZ, found.nearestDistance, hit);
-    if (hit.material.alphaCutoff === 0 || alpha >= hit.material.alphaCutoff) {
+    const seenByCamera = !(isCameraRay && scene.shadowOnlyParts?.[scene.triangleMaterial[found.nearestTriangle]] === 1);
+    const alpha = seenByCamera ? fillHit(scene, found.nearestTriangle, startX, startY, startZ, directionX, directionY, directionZ, found.nearestDistance, hit) : 0;
+    if (seenByCamera && (hit.material.alphaCutoff === 0 || alpha >= hit.material.alphaCutoff)) {
       hit.distance += travelled;
       return true;
     }
@@ -866,7 +870,7 @@ function createPathTracer(scene, options) {
     let previousPdf = 0;
     let afterMirror = true;
     for (let depth = 0; depth <= options.bounces; depth++) {
-      const found = intersect(scene, positionX, positionY, positionZ, direction[0], direction[1], direction[2], hit);
+      const found = intersect(scene, positionX, positionY, positionZ, direction[0], direction[1], direction[2], hit, depth === 0);
       const scattersInFog = scene.volume && scatterInFog(positionX, positionY, positionZ, found ? hit.distance : scene.farDistance);
       if (crossLocalVolumes) {
         const segmentLength = scattersInFog ? Math.hypot(hit.point[0] - positionX, hit.point[1] - positionY, hit.point[2] - positionZ) : (found ? hit.distance : scene.farDistance);
@@ -978,6 +982,7 @@ export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
   if (!environment?.map) notes.add('There is no environment map, so the sky is black and only the lights shine.');
   for (const part of parts) {
     const material = part.material ?? {};
+    if (part.shadowOnly === true && backend !== 'cpu') notes.add('shadowOnly is left out of camera rays by the cpu backend only; the GPU path tracers draw the part.');
     for (const field of IGNORED_MAP_FIELDS) if (material[field]) notes.add(`${field} is ignored.`);
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
     if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');

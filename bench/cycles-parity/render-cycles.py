@@ -43,12 +43,15 @@ def read_flag_value(argument_list, flag_name, fallback_value):
     return argument_list[flag_index + 1]
 
 
+PIXEL_FILTER_TYPES = {"box": "BOX", "gaussian": "GAUSSIAN", "blackman-harris": "BLACKMAN_HARRIS"}
+
+
 def parse_cli_arguments():
     if "--" not in sys.argv:
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--keep-exr] [--part-ids]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
@@ -57,6 +60,8 @@ def parse_cli_arguments():
         "seed": int(read_flag_value(argument_list, "--seed", "1")),
         "width": int(read_flag_value(argument_list, "--width", "960")),
         "height": int(read_flag_value(argument_list, "--height", "540")),
+        "filter_type": read_flag_value(argument_list, "--filter-type", "box"),
+        "filter_width": float(read_flag_value(argument_list, "--filter-width", "1.0")),
         "keep_exr": "--keep-exr" in argument_list,
         "part_ids": "--part-ids" in argument_list,
     }
@@ -440,8 +445,8 @@ def configure_cycles_parity(scene, options):
     scene.cycles.seed = options["seed"]
     scene.cycles.use_denoising = False
     scene.cycles.use_adaptive_sampling = False
-    scene.cycles.pixel_filter_type = "BOX"
-    scene.cycles.filter_width = 1.0
+    scene.cycles.pixel_filter_type = PIXEL_FILTER_TYPES[options["filter_type"]]
+    scene.cycles.filter_width = options["filter_width"]
     scene.cycles.sample_clamp_direct = 0.0
     scene.cycles.sample_clamp_indirect = 0.0
     scene.cycles.caustics_reflective = True

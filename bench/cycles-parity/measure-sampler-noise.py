@@ -25,10 +25,10 @@ GPU_LOCK_COMMAND = os.environ.get("GPU_LOCK_COMMAND")
 REL_MSE_EPSILON = 1e-2
 REFERENCE_SEED = 9001
 VARIANT_FLAGS = {
-    "sampler": {"pcg": ["--sampler", "pcg"], "sobol": ["--sampler", "sobol"]},
+    "sampler": {"pcg": ["--sampler", "white"], "sobol": ["--sampler", "sobol-burley"]},
     "light-tree": {
-        "off": ["--sampler", "sobol", "--light-tree", "off"],
-        "on": ["--sampler", "sobol", "--light-tree", "on"],
+        "off": ["--sampler", "sobol-burley", "--light-sampling", "uniform"],
+        "on": ["--sampler", "sobol-burley", "--light-sampling", "tree"],
     },
 }
 

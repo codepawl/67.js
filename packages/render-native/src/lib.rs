@@ -53,6 +53,11 @@ pub struct NativeTraceInputV2 {
     pub light_count: u32,
     pub light_tree_nodes: Uint8Array,
     pub light_tree_node_count: u32,
+    /// Emitters in tree order (FORMAT-v2 section 7b); absent in inputs packed before the light tree landed.
+    pub light_tree_emitters: Option<Uint8Array>,
+    pub light_tree_emitter_count: Option<u32>,
+    /// Emitter slot of every unified emitter (analytic lights first, then emissive triangles).
+    pub light_to_tree: Option<Uint32Array>,
     pub texture_descriptors: Uint8Array,
     pub texture_count: u32,
     pub texture_texels: Uint32Array,

@@ -67,7 +67,7 @@ node bench/agent-modeling/run.mjs --claude <path to claude> --model sonnet --lab
 
 Each task gets a fresh non-interactive Claude Code session in an empty temporary folder. The session has only the
 67js MCP server, its built-in file and shell tools are disabled, and it runs under a per-task budget (`--budget`, in
-USD, default 3) and timeout (`--timeout`, in seconds, default 1200). Pick tasks with `--tasks crate,bolt`. Raw
+USD, default 3) and timeout (`--timeout`, in seconds, default 1200). The budget is an estimate the bench adds up from streamed token usage and enforces itself in `run-guard.mjs`; it is never passed to claude as `--max-budget-usd`, because Claude Code shows that cap to the model and Haiku quit when it read the remainder as spent (#962). Pick tasks with `--tasks crate,bolt`. Raw
 transcripts and exported recipes go to `artifacts/agent-modeling/<run>/`. The summary, with the model ID reported by
 the session, goes to `results/<run>.json`. Grade one recipe by hand with
 `node bench/agent-modeling/check.mjs <task> <recipe.json>`.
