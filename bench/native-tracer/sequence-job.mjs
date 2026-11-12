@@ -1,8 +1,12 @@
 // Runs real multi-frame native stills jobs through the MCP server, once with sessions and once with JS67_NATIVE_SESSIONS=off, and checks
 // that every frame of the two runs has the same bytes and that the frames after the first took the route the sequence calls for.
 //   node bench/native-tracer/sequence-job.mjs <output directory> [--browser <chrome path>] [--runtime-backend gpu|cpu] [--samples 8] [--width 480] [--height 270]
-// Variants (the demo room with its motion edited): camera (camera tracks only), material (plus a roughness track), light (plus a point light
-// intensity track), transform (the recipe's own tracks, where a pendant swings: the exported triangles change, so each frame gets a session).
+// Variants (the demo room with its motion edited and, except "particles", its particle systems removed, since sparks and swaying hair rebuild the
+// triangles and the emissive list at every time and a session is only reused when the exported tables are equal): camera (camera tracks only,
+// every later frame `reused`), material (plus a roughness track: `updated`), light (plus a point light intensity track: `updated`), transform
+// (the recipe's own tracks, where a pendant swings: the exported triangles change, so a frame gets a new session unless the swing has returned to an earlier pose) and particles (camera tracks
+// with the sparks left in: a new session per frame, as costly as a one-shot trace).
+// A run with sessions off carries no `nativeSession` in its reports, so its route list is empty by design.
 // Prints one SEQUENCE_JOB line of JSON and exits 1 when a frame differs or a route is not the expected one.
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -32,12 +36,14 @@ function keyframes(first, last) {
 function buildVariants(recipe) {
   const cameraTracks = recipe.motion.tracks.filter(track => track.kind === 'camera');
   const materialId = recipe.nodes.find(node => node.id === 'left-wall').material;
-  const withMotion = tracks => ({ ...recipe, motion: { ...recipe.motion, tracks } });
+  const withoutParticles = Object.fromEntries(Object.entries(recipe).filter(([key]) => key !== 'particles'));
+  const withMotion = tracks => ({ ...withoutParticles, motion: { ...recipe.motion, tracks } });
   return {
-    camera: { recipe: withMotion(cameraTracks), expectedLaterRoutes: ['reused'] },
-    material: { recipe: withMotion([...cameraTracks, { kind: 'material', id: materialId, property: 'roughness', interpolation: 'LINEAR', keyframes: keyframes(0.9, 0.2) }]), expectedLaterRoutes: ['reused', 'updated'] },
-    light: { recipe: withMotion([...cameraTracks, { kind: 'light', id: 'point:0', property: 'intensity', interpolation: 'LINEAR', keyframes: keyframes(14, 4) }]), expectedLaterRoutes: ['reused', 'updated'] },
-    transform: { recipe: withMotion(recipe.motion.tracks), expectedLaterRoutes: ['reused', 'updated', 'new-session'] },
+    camera: { recipe: withMotion(cameraTracks), expectedLaterRoute: 'reused' },
+    material: { recipe: withMotion([...cameraTracks, { kind: 'material', id: materialId, property: 'roughness', interpolation: 'LINEAR', keyframes: keyframes(0.9, 0.2) }]), expectedLaterRoute: 'updated' },
+    light: { recipe: withMotion([...cameraTracks, { kind: 'light', id: 'point:0', property: 'intensity', interpolation: 'LINEAR', keyframes: keyframes(14, 4) }]), expectedLaterRoute: 'updated' },
+    transform: { recipe: withMotion(recipe.motion.tracks), expectedLaterRoute: 'new-session', allowedRoutes: ['new-session', 'reused'] },
+    particles: { recipe: { ...recipe, motion: { ...recipe.motion, tracks: cameraTracks } }, expectedLaterRoute: 'new-session' },
   };
 }
 
@@ -85,7 +91,7 @@ await mkdir(outputDirectory, { recursive: true });
 const variants = buildVariants(JSON.parse(await readFile('tests/fixtures/demo-room.recipe.json', 'utf8')));
 const report = { width, height, samples, frames: STILLS_PER_JOB, variants: {} };
 let failed = false;
-for (const [name, { recipe, expectedLaterRoutes }] of Object.entries(variants)) {
+for (const [name, { recipe, expectedLaterRoute, allowedRoutes = [expectedLaterRoute] }] of Object.entries(variants)) {
   let withSessions;
   let withoutSessions;
   try {
@@ -98,8 +104,7 @@ for (const [name, { recipe, expectedLaterRoutes }] of Object.entries(variants)) 
   }
   const identical = withSessions.frameHashes.length === STILLS_PER_JOB && withSessions.frameHashes.every((hash, index) => hash === withoutSessions.frameHashes[index]);
   const laterRoutes = withSessions.routes.slice(1);
-  const routesAsExpected = withSessions.routes[0] === 'new-session' && withSessions.routes.length === STILLS_PER_JOB && laterRoutes.every(route => expectedLaterRoutes.includes(route))
-    && (name === 'camera' ? laterRoutes.every(route => route === 'reused') : laterRoutes.some(route => route !== 'new-session'));
+  const routesAsExpected = withSessions.routes[0] === 'new-session' && withSessions.routes.length === STILLS_PER_JOB && laterRoutes.every(route => allowedRoutes.includes(route)) && laterRoutes.includes(expectedLaterRoute);
   const sessionsOffRoutes = withoutSessions.routes;
   report.variants[name] = { identical, routes: withSessions.routes, routesAsExpected, sessionsOffRoutes, backend: withSessions.backend, backendNote: withSessions.backendNote, lastFrameSession: withSessions.lastSession };
   if (!identical || !routesAsExpected || sessionsOffRoutes.length > 0) failed = true;
