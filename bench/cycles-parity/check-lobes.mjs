@@ -1,5 +1,5 @@
 // Runs Cycles lobe white-furnace and PDF grid probes plus end-to-end uniform-sky sphere furnace renders.
-//   node bench/cycles-parity/test-lobes.mjs <outputDirectory> [--samples-width 512] [--samples-height 512] [--grid-width 1024] [--grid-height 512]
+//   node bench/cycles-parity/check-lobes.mjs <outputDirectory> [--samples-width 512] [--samples-height 512] [--grid-width 1024] [--grid-height 512]
 import { mkdir, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -493,7 +493,7 @@ function parseIntegerOption(argumentList, flagName, fallbackValue, minimumValue)
 
 function parseCliArguments(argumentList) {
   if (argumentList.length < 1 || argumentList[0].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/test-lobes.mjs <outputDirectory> [--samples-width 512] [--samples-height 512] [--grid-width 1024] [--grid-height 512] [--scene-samples 512] [--seed 1] [--filter <substring>] [--skip-scenes] [--skip-probes]');
+    throw new RangeError('Usage: node bench/cycles-parity/check-lobes.mjs <outputDirectory> [--samples-width 512] [--samples-height 512] [--grid-width 1024] [--grid-height 512] [--scene-samples 512] [--seed 1] [--filter <substring>] [--skip-scenes] [--skip-probes]');
   }
   return {
     outputDirectory: resolve(argumentList[0]),
@@ -662,7 +662,7 @@ async function runCli() {
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   const options = parseCliArguments(process.argv.slice(2));
   if (!renderNative.findNativeAddon()) {
-    throw new Error('The render-native addon is missing. Build packages/render-native before running test-lobes.mjs.');
+    throw new Error('The render-native addon is missing. Build packages/render-native before running check-lobes.mjs.');
   }
   await mkdir(options.outputDirectory, { recursive: true });
   const probeManifestEntries = [];
