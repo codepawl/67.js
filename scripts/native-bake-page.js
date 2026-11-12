@@ -70,7 +70,7 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
     } catch (error) {
       if (!(error instanceof RangeError)) throw error;
       flattenedBecause = error.message;
-      traceScene = buildTraceScene(parts, environment, triangleLimit);
+      traceScene = flattenRefusedScene(buildTraceScene, parts, environment, triangleLimit, flattenedBecause);
     }
   }
   const instancingNote = flattenedBecause === undefined ? {} : { instancing: 'flattened', instancingReason: flattenedBecause };
@@ -87,6 +87,17 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
   const input = buildNativeInput(traceScene, camera, options, pack);
   return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
     ...(materialsReason === undefined ? {} : { materialsReason }), ...instancingNote };
+}
+
+// The flattened scene of parts the packer refused as instances. Every copy counts against the bound once flattened, so a scene
+// that fitted as instances can be over it; the error then names the packer's refusal, since the geometry was already shared.
+function flattenRefusedScene(buildTraceScene, parts, environment, triangleLimit, refusal) {
+  try {
+    return buildTraceScene(parts, environment, triangleLimit);
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    throw new RangeError(`The scene could not stay instanced (${refusal}) and is too large once every copy is flattened: ${error.message}`);
+  }
 }
 
 function floatsFromBase64(data) {

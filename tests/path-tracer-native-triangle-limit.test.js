@@ -103,6 +103,18 @@ test('a native render job with the cycles kernel exports an instanced scene abov
   assert.equal(exported.triangleCount, MAX_TRACE_TRIANGLES + 1);
 });
 
+test('a refused instanced job that is over the bound once flattened says why it was flattened', () => {
+  const parts = copiesOf(triangleStack(8), 2);
+  const smallBound = (sceneParts, environment, options) => buildTraceScene(sceneParts, environment, { ...options, maximumTriangles: 10 });
+  const refuseInstances = () => {
+    throw new RangeError('copies of this mesh emit different triangles');
+  };
+  assert.throws(
+    () => exportNativeSceneTables({ parts, environment: ENVIRONMENT, camera, options: packOptions, kernel: 'cycles', instancing: true,
+      modules: { ...modules, buildTraceScene: smallBound, buildJobNativeInput: refuseInstances } }),
+    { name: 'RangeError', message: /could not stay instanced \(copies of this mesh emit different triangles\).*at most 10 triangles/ });
+});
+
 test('a native render job with the legacy kernel keeps the 400,000 bound', () => {
   const parts = copiesOf(triangleStack(MAX_TRACE_TRIANGLES + 1), 1);
   assert.throws(() => exportNativeSceneTables({ parts, environment: ENVIRONMENT, camera, options: packOptions, kernel: 'legacy', instancing: false, modules }),
