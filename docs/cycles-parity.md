@@ -355,6 +355,21 @@ The six-scene references use the box filter of width 1, so the box filter stays 
 
 `lit-interior` is smooth, so the filter hides under its noise. `glass` has hard caustic edges: each native filter scores best against the Cycles reference rendered with the same filter, and the mismatched pair is 4 to 7 times worse in relMSE.
 
+### Light tree for next event estimation
+
+The `cycles` kernel picks one emitter per surface bounce by walking the Cycles light tree (`light_tree.wgsl`, a translation of `kernel/light/tree.h`: one random number reused down the tree, importance from distance, cone angles, energy and the surface normal, two reservoirs per leaf) and finds the probability of a given emitter from the previous shading point for the MIS weight of a BSDF-sampled hit. `lightSampling` is `auto` (default: tree when the scene has more than one emitter, as Cycles with `use_light_tree` on), `tree` or `uniform` (the flat pick of earlier versions); `trace-native.mjs --light-sampling` sets it. The environment map keeps its own importance sample and is not in the tree. `[measured]`, 960 x 540, 8 bounces, seed 1, against the Cycles 4096-spp seed-1 reference:
+
+| Check | Result |
+| :--- | :--- |
+| Six scenes, 1024 spp, tree on: largest per-channel mean-ratio gap | glass 0.28 %, light-linking 0.09 %, lit-interior 0.34 % (0.34 % with the flat pick too), metal 0.05 %, outdoor-hdri 0.06 %, spot-area 0.00 % |
+| `lit-interior` relMSE at 1024 spp, tree against flat | 0.00065 against 0.00105 |
+| Pick probabilities, 1600 random shading points per scene (`--light-tree-probe`, the kernel's own `ltr_pdf` and `ltr_sample`) | sum never above 1.0000002; all 800 points that see through the surface sum to 1; of the opaque ones, 664 of 800 (`lit-interior`) and 649 of 800 (12 emissive triangles) sum to 1, the rest are 0 (no emitter above the surface) or lose a share to a node whose emitters are all invisible, as in Cycles; fraction of 64 stratified picks that found an emitter equals the sum to 0.8 %; returned pick probability equals `ltr_pdf` of the picked emitter to 1.3e-6 |
+| One large emissive slab over a floor and a glossy ball, 512 spp | mean against both: NEE only 1.0014 / 1.0017 / 1.0018, BSDF only 1.0000 / 0.9999 / 0.9999 |
+| 256 spp sampling time, median of 3 interleaved runs (the GPU was shared with another job, so all times are 1.6 times the idle figure) | `lit-interior`: tree 5.94 s [5.91 to 8.52], flat 4.58 s [4.58 to 4.60]; `metal` (one emitter, `auto` picks flat): tree 2.53 s [2.51 to 2.53], flat 2.32 s [2.27 to 2.33] |
+| 256 spp relMSE | `lit-interior`: tree 0.00274, flat 0.00433 (Cycles 0.0031); `metal`: 0.00506 both |
+
+On `lit-interior` the tree costs 30 % more per sample and removes 37 % of the noise, so it wins by about 17 % at equal time (inferred from relMSE falling as 1/samples). The probe is a GPU test entry, not a Rust port; `tests/native-light-tree-kernel.test.js` repeats the three checks on a small scene.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
