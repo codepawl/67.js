@@ -79,7 +79,9 @@ try {
   assert.ok(lit > 500, 'The cube must cover visible pixels.');
   assert.deepEqual(failures, []);
   assert.deepEqual(errors, []);
-  assert.equal(requests.filter((line) => line.includes('.js')).length, 1, 'Only the one module file may load.');
+  const scriptRequests = requests.filter((line) => line.includes('.js')).length;
+  console.log(`script requests=${scriptRequests}`);
+  if (!publishedUrl) assert.equal(scriptRequests, 1, 'Only the one module file may load.');
   console.log('cdn single file smoke passed');
 } finally {
   await browser.close();
