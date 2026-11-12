@@ -27,6 +27,7 @@ import {
   validateImagePixelCount,
   validateMaxSeconds,
   validatePackOptions,
+  validateDenoiseOption,
 } from './pack-input-v2.mjs';
 
 export { buildNativeInput, buildNativeTexelInput } from './pack-input.mjs';
@@ -368,22 +369,22 @@ function patchedCyclesKernelParams(v2Input, kernelParams, options, callerName) {
 }
 
 // Exported for tests; not part of the public API.
-export function resolveSessionCreation(input, options) {
+export function resolveSessionCreation(input, options, callerName = 'createNativeSession') {
   if (input === null || typeof input !== 'object') {
-    throw new TypeError('createNativeSession: `input` must be a FORMAT-v2 input object from buildNativeInputV2.');
+    throw new TypeError(`${callerName}: \`input\` must be a FORMAT-v2 input object from buildNativeInputV2.`);
   }
   if (input.schemaVersion !== FORMAT_V2_VERSION) {
     throw new TypeError(
-      `createNativeSession: \`input.schemaVersion\` must be ${FORMAT_V2_VERSION} (a FORMAT-v2 input from buildNativeInputV2); got ${JSON.stringify(input.schemaVersion)}. Convert a v1 input with upgradeNativeInputV1ToV2.`
+      `${callerName}: \`input.schemaVersion\` must be ${FORMAT_V2_VERSION} (a FORMAT-v2 input from buildNativeInputV2); got ${JSON.stringify(input.schemaVersion)}. Convert a v1 input with upgradeNativeInputV1ToV2.`
     );
   }
-  requireSessionKernelParams(input.kernelParams, 'createNativeSession');
+  requireSessionKernelParams(input.kernelParams, callerName);
   if (options === null || typeof options !== 'object') {
-    throw new TypeError('createNativeSession: `options` must be an object.');
+    throw new TypeError(`${callerName}: \`options\` must be an object.`);
   }
-  requireCyclesKernelOption(options.kernel, 'createNativeSession');
-  validatePackOptions(options, 'createNativeSession');
-  return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, 'createNativeSession') };
+  requireCyclesKernelOption(options.kernel, callerName);
+  validatePackOptions(options, callerName);
+  return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, callerName) };
 }
 
 // Exported for tests; not part of the public API.
@@ -400,24 +401,148 @@ export function resolveSessionFrame(sessionInput, sessionOptions, renderOptions)
     baseKernelParams = renderOptions.kernelParams;
   }
   const kernelParams = patchedCyclesKernelParams(sessionInput, baseKernelParams, options, 'NativeSession.render');
-  const { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise } = options;
-  return { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, kernelParams };
+  const { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, accumulate, targetSamples } = options;
+  validateProgressiveOptions({ accumulate, targetSamples, samples });
+  return { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, kernelParams, accumulate, targetSamples };
+}
+
+const MAX_TARGET_SAMPLES = 16777216;
+
+function validateProgressiveOptions({ accumulate, targetSamples, samples }) {
+  if (accumulate !== undefined && typeof accumulate !== 'boolean') {
+    throw new TypeError(`NativeSession.render: \`accumulate\` must be true, false or left out, got ${JSON.stringify(accumulate)}.`);
+  }
+  if (targetSamples === undefined) return;
+  if (accumulate !== true) {
+    throw new TypeError('NativeSession.render: `targetSamples` only applies with `accumulate: true`. Pass accumulate: true to build one image over several render calls.');
+  }
+  if (!Number.isInteger(targetSamples) || targetSamples < 1 || targetSamples > MAX_TARGET_SAMPLES) {
+    throw new RangeError(`NativeSession.render: \`targetSamples\` must be an integer in [1, ${MAX_TARGET_SAMPLES}]; got ${JSON.stringify(targetSamples)}.`);
+  }
+  if (samples > targetSamples) {
+    throw new RangeError(`NativeSession.render: \`samples\` (${samples}) is more than \`targetSamples\` (${targetSamples}). Pass targetSamples as the total for the whole image.`);
+  }
+}
+
+// ---- Scene updates ----
+
+const UPDATE_COUNT_NAMES = [
+  'instanceCount', 'triangleCount', 'materialCount', 'emissiveTriangleCount', 'lightCount', 'lightTreeNodeCount', 'lightTreeEmitterCount', 'textureCount',
+];
+// Tables a session update cannot change, with what each holds, for the error.
+const UPDATE_FIXED_TABLES = [
+  ['triangles', 'the geometry'],
+  ['textureDescriptors', 'the textures'],
+  ['textureTexels', 'the textures'],
+  ['environmentTexels', 'the environment map'],
+];
+// Tables a session update can replace: same size, new values.
+const UPDATE_VALUE_TABLES = ['instances', 'materials', 'emissiveTriangles', 'lights', 'lightTreeNodes', 'lightTreeEmitters', 'lightToTree'];
+const INSTANCE_RECORD_BYTE_LENGTH = 160;
+const INSTANCE_TOPOLOGY_FIELDS = [['blasIndex', 96], ['triangleOffset', 100], ['opaqueTriangleCount', 104], ['totalTriangleCount', 108]];
+
+function bytesOfTable(table) {
+  return table === undefined || table === null ? Buffer.alloc(0) : Buffer.from(table.buffer, table.byteOffset, table.byteLength);
+}
+
+function sameTableBytes(first, second) {
+  return bytesOfTable(first).equals(bytesOfTable(second));
+}
+
+function refuseUpdate(detail) {
+  return new Error(`NativeSession.update: ${detail} Create a new session with createNativeSession(input) for this input.`);
+}
+
+function checkUpdateKeepsRecordCounts(current, next) {
+  for (const name of UPDATE_COUNT_NAMES) {
+    const heldCount = current[name] ?? 0;
+    const newCount = next[name] ?? 0;
+    if (heldCount !== newCount) {
+      throw refuseUpdate(`\`${name}\` changes from ${heldCount} to ${newCount}; a session keeps the tables at the size it was created with.`);
+    }
+  }
+}
+
+function checkUpdateKeepsFixedTables(current, next) {
+  for (const [name, holds] of UPDATE_FIXED_TABLES) {
+    if (!sameTableBytes(current[name], next[name])) {
+      throw refuseUpdate(`\`${name}\` differs, and it holds ${holds}; a session update changes values of materials, lights and instance transforms only.`);
+    }
+  }
+}
+
+function checkUpdateKeepsInstanceMeshes(currentInstances, nextInstances) {
+  const heldBytes = bytesOfTable(currentInstances);
+  const newBytes = bytesOfTable(nextInstances);
+  for (let offset = 0; offset < newBytes.length; offset += INSTANCE_RECORD_BYTE_LENGTH) {
+    for (const [fieldName, fieldOffset] of INSTANCE_TOPOLOGY_FIELDS) {
+      const heldWord = heldBytes.readUInt32LE(offset + fieldOffset);
+      const newWord = newBytes.readUInt32LE(offset + fieldOffset);
+      if (heldWord !== newWord) {
+        throw refuseUpdate(`instance ${offset / INSTANCE_RECORD_BYTE_LENGTH} changes \`${fieldName}\` from ${heldWord} to ${newWord}; an update may move or restyle an instance but not change the mesh it places.`);
+      }
+    }
+  }
+}
+
+/**
+ * Compares a new FORMAT-v2 input with the one a session holds and returns the tables to send: those whose bytes changed.
+ * Refuses, naming what changed, an input with other record counts, other geometry, textures or environment, or instances
+ * that place other meshes. Exported for tests; not part of the public API.
+ */
+export function planNativeSessionUpdate(currentInput, nextInput) {
+  checkUpdateKeepsRecordCounts(currentInput, nextInput);
+  checkUpdateKeepsFixedTables(currentInput, nextInput);
+  const changedTables = {};
+  for (const name of UPDATE_VALUE_TABLES) {
+    if (!sameTableBytes(currentInput[name], nextInput[name])) changedTables[name] = nextInput[name];
+  }
+  if (changedTables.instances !== undefined) {
+    checkUpdateKeepsInstanceMeshes(currentInput.instances, nextInput.instances);
+  }
+  return changedTables;
 }
 
 // Exported for tests, which pass a stand-in for the addon's session class; not part of the public API.
 export function wrapNativeSession(nativeSession, sessionInput, sessionOptions) {
   let closed = false;
+  let heldInput = sessionInput;
+  function requireOpen(methodName) {
+    if (closed) {
+      throw new Error(`NativeSession.${methodName}: this session is closed. Create a new one with createNativeSession(input).`);
+    }
+  }
   return {
     get closed() {
       return closed;
     },
     render(renderOptions = {}) {
-      if (closed) {
-        throw new Error('NativeSession.render: this session is closed. Create a new one with createNativeSession(input).');
-      }
-      const frame = resolveSessionFrame(sessionInput, sessionOptions, renderOptions);
+      requireOpen('render');
+      const frame = resolveSessionFrame(heldInput, sessionOptions, renderOptions);
       const { trace, session } = nativeSession.render(frame);
       return { ...trace, ...session };
+    },
+    reset() {
+      requireOpen('reset');
+      nativeSession.reset();
+    },
+    resolve(resolveOptions = {}) {
+      requireOpen('resolve');
+      if (resolveOptions === null || typeof resolveOptions !== 'object') {
+        throw new TypeError('NativeSession.resolve: `resolveOptions` must be an object.');
+      }
+      const denoise = resolveOptions.denoise ?? sessionOptions.denoise;
+      validateDenoiseOption(denoise, 'NativeSession.resolve');
+      const { trace, session } = nativeSession.resolve({ denoise });
+      return { ...trace, ...session };
+    },
+    update(newInput) {
+      requireOpen('update');
+      const nextInput = resolveSessionCreation(newInput, sessionOptions, 'NativeSession.update');
+      const changedTables = planNativeSessionUpdate(heldInput, nextInput);
+      const report = nativeSession.update({ kernelParams: nextInput.kernelParams, ...changedTables });
+      heldInput = nextInput;
+      return report;
     },
     close() {
       if (closed) return;
@@ -435,6 +560,19 @@ export function wrapNativeSession(nativeSession, sessionInput, sessionOptions) {
  * frame at the same size also keeps the film. `renderOptions.kernelParams` brings another camera of the same scene: the
  * `kernelParams` of a second `buildNativeInputV2` call. `options` are defaults for every frame. `close()` frees the card.
  * A frame equals the `traceNative` render of the same input and options byte for byte.
+ *
+ * Progressive film: `render({ samples, accumulate: true, targetSamples })` adds `samples` to the image instead of starting a new
+ * one, so an image can grow over several calls (the first call of an image sets `targetSamples`, the total it will hold; later
+ * calls leave it out). The calls continue one sample sequence, so the film after all of them equals one render of `targetSamples`
+ * samples byte for byte. The reports carry `firstSample`, `filmSamples` and `targetSamples`. `reset()` starts the image over.
+ * `resolve({ denoise })` returns the film as it stands without tracing. A later call must keep the size and the render settings
+ * (camera, seed, sampler) of the first; a plain frame (no `accumulate`) discards the progressive image.
+ *
+ * `update(newInput)` takes a FORMAT-v2 input packed from the same scene with other material values, lights, emission or instance
+ * transforms and applies it without a new pipeline or BLAS build (the TLAS is rebuilt when a transform changed). It returns
+ * `uploadedTables`, `accelerationRebuilt`, `changedInstances`, `kernelRespecialized` and the seconds. It clears the film, and a
+ * following frame equals the `traceNative` render of `newInput`. A change of record counts, geometry, textures, the environment
+ * map or of the mesh an instance places is refused with an error that says to create a new session.
  */
 export function createNativeSession(input, options = {}) {
   const sessionInput = resolveSessionCreation(input, options);
