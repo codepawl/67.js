@@ -49,7 +49,7 @@ Rules, all checked at load:
 - Paths are relative, with forward slashes, inside the pack: no `..`, no absolute or drive paths, no backslashes, only letters, digits, `.`, `_` and `-` in each part. Every listed file must exist and have the extension of its kind.
 - No symbolic links, and no script or program file anywhere in the pack, listed or not (`.js`, `.mjs`, `.html`, `.svg`, `.wasm`, `.exe`, `.sh`, `.bat`, `.ps1`, `.py` and similar). One such file refuses the whole pack.
 - Limits (`src/pack-manifest.js`): 256 files, 256 MiB in total, 64 MiB per file, 1 MiB per JSON file, 64 items per kind; at most 32 packs load at once.
-- Recipes and materials contain no remote URL (`http:`, `https:`, `ftp:`, `//host`, a `data:` URL that is not a PNG, JPEG or WebP image). A recipe has `"format": "67js.scene"`. `npm run pack:check` also runs the validator `scene_create` uses (a material is checked as the only material of an empty scene); the server leaves that to `scene_create` and `scene_apply`, which run it when the agent uses the item.
+- Recipe and material JSON nests at most 64 levels of objects and lists. They contain no remote URL, in a value or a key (`http:`, `https:`, `ftp:`, `//host`, a `data:` URL that is not a PNG, JPEG or WebP image). A recipe has `"format": "67js.scene"`. `npm run pack:check` also runs the validator `scene_create` uses (a material is checked as the only material of an empty scene); the server leaves that to `scene_create` and `scene_apply`, which run it when the agent uses the item.
 
 An error names the pack, the file and the field, and says what to pass instead.
 

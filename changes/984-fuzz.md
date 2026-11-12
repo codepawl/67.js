@@ -1,0 +1,1 @@
+- Packs refuse remote URLs hidden in JSON keys and JSON nested more than 64 levels deep, and `run.js.` style names count as code files (#984)

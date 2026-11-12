@@ -17,7 +17,7 @@ const MAXIMUM_PATH_CHARACTERS = 200;
 const MAXIMUM_NAME_CHARACTERS = 64;
 const MAXIMUM_RANGE_CHARACTERS = 64;
 const MAXIMUM_RANGE_COMPARATORS = 8;
-const MAXIMUM_JSON_DEPTH = 64;
+export const MAXIMUM_JSON_DEPTH = 64;
 
 /** The kinds of content a pack lists, with the file extensions each accepts. */
 export const PACK_CONTENT_KINDS = Object.freeze({
@@ -48,7 +48,8 @@ const IMAGE_DATA_URL_PATTERN = /^data:image\/(?:png|jpeg|webp);base64,/i;
 
 /** True for a file name a pack must never hold, whatever the manifest lists. */
 export function isExecutableLookingName(filename) {
-  const lower = String(filename).toLowerCase();
+  // Windows drops trailing dots and spaces, so "run.js." and "run.js " are run.js there.
+  const lower = String(filename).toLowerCase().replace(/[. ]+$/, '');
   const dot = lower.lastIndexOf('.');
   return dot >= 0 && EXECUTABLE_EXTENSIONS.has(lower.slice(dot));
 }
@@ -112,18 +113,24 @@ export function semverSatisfies(version, range) {
     && (!bounds.upperInclusive || compareVersions(current, bounds.upperInclusive) <= 0));
 }
 
-/** The first string in parsed JSON that is a remote URL (http, https, ftp, ws, //host, file, blob, javascript, or a data URL that is not an image), as `{ path, value }`; else null. */
-export function findRemoteUrl(value, path = '$') {
-  if (typeof value === 'string') {
-    const dataUrl = /^\s*data:/i.test(value);
-    const remote = dataUrl ? !IMAGE_DATA_URL_PATTERN.test(value.trim()) : REMOTE_URL_PATTERN.test(value) || PROTOCOL_RELATIVE_PATTERN.test(value) || REMOTE_HOST_PATTERN.test(value);
-    return remote ? { path, value } : null;
-  }
+function isRemoteString(text) {
+  if (/^\s*data:/i.test(text)) return !IMAGE_DATA_URL_PATTERN.test(text.trim());
+  return REMOTE_URL_PATTERN.test(text) || PROTOCOL_RELATIVE_PATTERN.test(text) || REMOTE_HOST_PATTERN.test(text);
+}
+
+/**
+ * The first string or key in parsed JSON that is a remote URL (http, https, ftp, ws, //host, file, blob, javascript, or a data URL that is not an
+ * image), as `{ path, value }`; else null. JSON nested more than MAXIMUM_JSON_DEPTH containers deep, arrays included, returns `{ path, value, tooDeep: true }`.
+ */
+export function findRemoteUrl(value, path = '$', depth = 1) {
+  if (typeof value === 'string') return isRemoteString(value) ? { path, value } : null;
   if (!value || typeof value !== 'object') return null;
-  if (path.split('.').length > MAXIMUM_JSON_DEPTH) return { path, value: '(nested too deeply)' };
-  const entries = Array.isArray(value) ? value.map((item, index) => [`${path}[${index}]`, item]) : Object.entries(value).map(([key, item]) => [`${path}.${key}`, item]);
-  for (const [childPath, child] of entries) {
-    const found = findRemoteUrl(child, childPath);
+  if (depth > MAXIMUM_JSON_DEPTH) return { path, value: '(nested too deeply)', tooDeep: true };
+  const isList = Array.isArray(value);
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = isList ? `${path}[${key}]` : `${path}.${key}`;
+    if (!isList && isRemoteString(key)) return { path: childPath, value: key };
+    const found = findRemoteUrl(child, childPath, depth + 1);
     if (found) return found;
   }
   return null;
