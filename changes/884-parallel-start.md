@@ -1,0 +1,2 @@
+- The home hero starts its first view with the page, in parallel with the poster, instead of after the poster loads (#884)
+- The home hero asks for the build's two on-demand chunks while the first view downloads (#884)

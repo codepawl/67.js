@@ -58,8 +58,8 @@ test('a native job without the native tracer runs the cpu backend with the same 
   { skip: (!hasBuild && 'run npm run build:lib first') || (!hasBrowser && 'no Chrome'), timeout: 600000 }, async context => {
     const workDirectory = await mkdtemp(join(tmpdir(), '67js-native-fallback-'));
     context.after(() => rm(workDirectory, { recursive: true, force: true }));
-    const cpu = await renderDemoRoom('cpu', workDirectory);
-    const native = await renderDemoRoom('native', workDirectory);
+    // The two renders share nothing (own server, own job folder, own image file), so they run side by side.
+    const [cpu, native] = await Promise.all([renderDemoRoom('cpu', workDirectory), renderDemoRoom('native', workDirectory)]);
     assert.equal(native.report.backend, 'cpu');
     assert.match(native.report.backendNote, /switched off by JS67_NATIVE_TRACER=off.*cpu backend ran instead/);
     assert.equal(cpu.report.backendNote, undefined);
