@@ -96,8 +96,8 @@ stage_probe() {
   render_variants cycles td-sky@nosample:8 td-sky@res4096:8 td-sky@nosun:8 td-both@nosun:8 td-sky@capafter:8 td-both@capafter:8
 
   # The sky itself: 512 x 288 pictures of the background from level, 45 degrees up and straight up.
-  width=512
-  height=288
+  local width=512
+  local height=288
   both_sides sk-h:2 sk-45:2 sk-up:2
   render_variants cycles sk-45@capafter:2
 }

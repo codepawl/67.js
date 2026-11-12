@@ -7,6 +7,9 @@ The floor is Lambert with albedo 0.8, the camera looks straight down and nothing
   sky:  albedo / pi * the integral of sky radiance times cosine over the upper hemisphere (a flat sky of radiance L gives albedo * L).
 For the Kloofendal map the integral is taken twice from the Radiance file's own bytes: with the texel decoded as mantissa times
 2^(exponent-136) (what Cook's parser and the Radiance format give) and as (mantissa + 0.5) times 2^(exponent-136).
+  uv run --no-project --with numpy python bench/cycles-parity/floor-closed-form.py --cap-order
+needs only the sky file: it prints how many texels exceed the radiance limit and the sky term with the limit applied to the texels before
+the bilinear lookup (Cook) and to the interpolated value after it (what render-cycles.py did before #1104), on a 2-D grid.
 Prints, per tag, the closed forms, each renderer's mean over the seeds with its standard error, and each mean over the closed form.
 """
 import glob
@@ -108,7 +111,47 @@ def format_channels(values, digits=5):
     return "[" + ", ".join(f"{value:.{digits}f}" for value in values) + "]"
 
 
+def decode_uncapped_texels(rgbe):
+    scale = numpy.where(rgbe[..., 3] == 0, 0.0, 2.0 ** (rgbe[..., 3].astype(numpy.float64) - 136.0))
+    return rgbe[..., :3].astype(numpy.float64) * scale[..., None]
+
+
+def hemisphere_term(texels, cap_after_lookup, polar_steps=1024, azimuth_steps=2048):
+    """albedo-free E / pi of the upper hemisphere, bilinear in both axes on a polar x azimuth grid, capping the value if asked."""
+    height, width, _ = texels.shape
+    polar = (numpy.arange(polar_steps) + 0.5) / polar_steps * (math.pi / 2.0)
+    texel_x = (numpy.arange(azimuth_steps) + 0.5) / azimuth_steps * width - 0.5
+    left = numpy.floor(texel_x).astype(int)
+    fraction_x = (texel_x - left)[:, None]
+    total = numpy.zeros(3)
+    for index in range(polar_steps):
+        texel_y = polar[index] / math.pi * height - 0.5
+        top = int(math.floor(texel_y))
+        fraction_y = texel_y - top
+        row = texels[min(max(top, 0), height - 1)] * (1.0 - fraction_y) + texels[min(max(top + 1, 0), height - 1)] * fraction_y
+        line = row[left % width] * (1.0 - fraction_x) + row[(left + 1) % width] * fraction_x
+        if cap_after_lookup:
+            line = numpy.minimum(line, RADIANCE_LIMIT)
+        weight = math.cos(polar[index]) * math.sin(polar[index]) * (math.pi / 2.0 / polar_steps)
+        total += line.mean(axis=0) * weight
+    return 2.0 * total
+
+
+def print_cap_order():
+    """Sky term with the radiance limit applied to the texels (Cook) and to the interpolated value (the old render-cycles.py)."""
+    raw = decode_uncapped_texels(decode_radiance_bytes(SKY_FILE))
+    brightest = raw.max(axis=2)
+    print(f"{SKY_FILE}: {int((brightest > RADIANCE_LIMIT).sum())} texels above {RADIANCE_LIMIT:g}, largest channel value {raw.max():.0f}")
+    cap_before = hemisphere_term(numpy.minimum(raw, RADIANCE_LIMIT), False)
+    cap_after = hemisphere_term(raw, True)
+    print(f"cap before the lookup {format_channels(cap_before, 6)}  cap after the lookup {format_channels(cap_after, 6)}")
+    print(f"cap after over cap before {format_channels(cap_after / cap_before)}")
+
+
 def main():
+    if "--cap-order" in sys.argv:
+        print_cap_order()
+        return
     data_directory = sys.argv[1]
     tags = sys.argv[sys.argv.index("--tags") + 1].split(",") if "--tags" in sys.argv else list(closed_forms())
     forms = closed_forms()

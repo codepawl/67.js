@@ -637,8 +637,13 @@ def apply_cycles_property(scene, property_assignment):
 # One --world-property name=value (a diagnostic): sets a property of the world's Cycles settings, such as sampling_method="NONE"
 # (the sky is then found by BSDF sampling only) or sample_map_resolution=4096. Blender versions keep these on world.cycles or on world.
 def apply_world_property(world, property_assignment):
+    if "=" not in property_assignment:
+        raise ValueError(f"--world-property takes name=value, got {property_assignment!r}.")
     property_name, property_text = property_assignment.split("=", 1)
-    property_value = json.loads(property_text)
+    try:
+        property_value = json.loads(property_text)
+    except json.JSONDecodeError:
+        raise ValueError(f"--world-property {property_name} takes a JSON value such as 0, 0.5, true or \"NAME\", got {property_text!r}.")
     for owner in (world.cycles, world):
         if hasattr(owner, property_name):
             setattr(owner, property_name, property_value)
@@ -816,8 +821,11 @@ def main():
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
     for index, token in enumerate(sys.argv):
-        if token == "--world-property":
-            apply_world_property(scene.world, sys.argv[index + 1])
+        if token != "--world-property":
+            continue
+        if index + 1 >= len(sys.argv):
+            raise ValueError("--world-property takes name=value after it.")
+        apply_world_property(scene.world, sys.argv[index + 1])
     build_scene_lights(scene, description["environment"])
     lens_options = resolve_lens_options(options, description["camera"])
     build_camera_object(scene, description["camera"], lens_options, options["width"] / options["height"])
