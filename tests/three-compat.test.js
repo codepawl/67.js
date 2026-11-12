@@ -192,6 +192,21 @@ test('every 67js call named by an error exists', () => {
 const chromePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const renderEnabled = process.env.RENDER_TESTS === '1' && existsSync(chromePath);
 
+const snippetTimeoutMilliseconds = 20000;
+
+// A snippet that never reports a frame fails by name instead of holding the whole test until its own timeout.
+async function drawWithin(page, name, milliseconds) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`snippet "${name}" reported no frame within ${milliseconds} ms`)), milliseconds);
+  });
+  try {
+    return await Promise.race([page.evaluate(snippetName => window.drawSnippet(snippetName), name), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 test('each three.js-style snippet draws a frame through the addon', { skip: !renderEnabled, timeout: 300000 }, async () => {
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   const { chromium } = await import('playwright');
@@ -210,7 +225,7 @@ test('each three.js-style snippet draws a frame through the addon', { skip: !ren
     await page.waitForFunction(() => window.drawSnippet, null, { timeout: 60000 });
     const hashes = new Set();
     for (const snippet of snippets) {
-      const result = await page.evaluate(name => window.drawSnippet(name), snippet.name);
+      const result = await drawWithin(page, snippet.name, snippetTimeoutMilliseconds);
       assert.ok(result.frames >= 1, `${snippet.name} drew a frame`);
       assert.ok(result.distinctColors >= 12, `${snippet.name} is not a blank frame (${result.distinctColors} colours)`);
       assert.ok(!hashes.has(result.hash), `${snippet.name} differs from every other snippet`);

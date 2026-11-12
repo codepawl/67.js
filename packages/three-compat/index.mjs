@@ -638,8 +638,14 @@ export function createThreeCompat(core) {
           ground: false, samples: this.antialias ? 4 : 1, pixelRatio: this.pixelRatio, environment,
         });
         this.structure = key;
+        this.heldParts = parts;
       } else {
-        this.renderer67.updateParts(parts);
+        // The renderer knows its parts by object identity, and collectScene makes new objects each call: carry the new pose onto the held ones.
+        parts.forEach((part, index) => {
+          this.heldParts[index].matrix = part.matrix;
+          this.heldParts[index].material = part.material;
+        });
+        this.renderer67.updateParts(this.heldParts);
       }
       this.renderer67.resize();
       this.renderer67.render({ ...frame, environment });
