@@ -131,6 +131,12 @@ Total stride: **224 bytes** (`14 × 16 B`), alignment: **16 bytes**. Within each
 
 When `InstanceRecord.emissive_base_offset != 0xFFFFFFFF` and `TriangleRecord.local_emissive_offset != 0xFFFFFFFF`, the world-space `EmissiveTriangleRecord` for MIS is at `emissive_base_offset + local_emissive_offset`.
 
+**Sharing rules.** Instances that share a mesh share one slice of `triangles` (one BLAS, one `triangle_offset`), so everything in a `TriangleRecord` is the same for every copy. What can differ per copy lives in the `InstanceRecord`: the transform, `material_override`, `visibility_flags`, the light masks, the object id, random and colour, and `emissive_base_offset`. The packer applies these rules:
+
+- A mesh with per-triangle materials is not shared; its triangles are baked into world space and traced with an identity transform.
+- `local_emissive_offset` counts the triangles that keep an area after an instance's transform, in triangle order, and is the same for every copy. A copy that would emit a different set of triangles is refused. A copy whose resolved material is not emissive gets `emissive_base_offset = 0xFFFFFFFF`, so its triangles never index the emissive list.
+- A shadow-only copy clears the camera bit of `visibility_flags` and keeps the others. A mirrored copy (negative determinant) sets the negative-scale bit.
+
 | Byte Offset | Size (B) | Alignment (B) | WGSL Type | Field | Description |
 | ---: | ---: | ---: | :--- | :--- | :--- |
 | `0` | `12` | `16` | `vec3<f32>` | `p0` | Object-space vertex 0 position |
