@@ -68,7 +68,8 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
       const input = buildJobNativeInput(traceScene, camera, options, pack, resolveTexture);
       return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, wholeMaterials };
     } catch (error) {
-      if (!(error instanceof RangeError)) throw error;
+      // A scene over the texture pool stays over it flattened: the caller gets that refusal, not a v1 atlas one.
+      if (!(error instanceof RangeError) || error.texturePoolFull) throw error;
       flattenedBecause = error.message;
       traceScene = flattenRefusedScene(buildTraceScene, parts, environment, triangleLimit, flattenedBecause);
     }
@@ -80,13 +81,29 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
       const input = buildFlattenedJobNativeInput(traceScene, camera, options, pack, resolveTexture);
       return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials, ...instancingNote };
     } catch (error) {
+      if (error.texturePoolFull) throw error;
       // The scene stays traceable: the v1 tables carry what the kernel read before, and the report says why they were used.
       materialsReason = error.message;
     }
   }
-  const input = buildNativeInput(traceScene, camera, options, pack);
+  if (traceScene.partRayVisibility && !wholeMaterials) {
+    throw new TypeError('A part sets rayVisibility to hide from a ray kind, which only the "cycles" kernel can carry. Use kernel "cycles", or drop the rayVisibility of the part.');
+  }
+  // The v1 tables of the "cycles" job fallback cannot carry visibility: the scene is drawn without it, and the report says so.
+  const visibilityNote = traceScene.partRayVisibility ? { rayVisibility: 'ignored', rayVisibilityReason: materialsReason } : {};
+  const input = buildNativeInputOrExplain(buildNativeInput, { ...traceScene, partRayVisibility: null }, camera, options, pack, materialsReason);
   return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
-    ...(materialsReason === undefined ? {} : { materialsReason }), ...instancingNote };
+    ...(materialsReason === undefined ? {} : { materialsReason }), ...visibilityNote, ...instancingNote };
+}
+
+// The v1 tables are the fallback for a scene whose FORMAT-v2 materials failed; when they fail too, the error keeps the first reason.
+function buildNativeInputOrExplain(buildNativeInput, traceScene, camera, options, pack, materialsReason) {
+  try {
+    return buildNativeInput(traceScene, camera, options, pack);
+  } catch (error) {
+    if (materialsReason === undefined || !(error instanceof RangeError)) throw error;
+    throw new RangeError(`${error.message} The FORMAT-v2 export had already failed: ${materialsReason}`);
+  }
 }
 
 // The flattened scene of parts the packer refused as instances. Every copy counts against the bound once flattened, so a scene
