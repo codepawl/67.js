@@ -43,6 +43,10 @@ export function encodeNativeInputV2(input) {
   return { schemaVersion: input.schemaVersion, tables: encodeNativeTables(input), types, counts };
 }
 
+// The triangle bound of a scene exported to the "cycles" kernel (see buildTraceScene's maximumTriangles); the legacy kernel and every
+// other tracer keep the 400,000 of the CPU and WebGL paths.
+export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
+
 /**
  * The scene of a native render job as the tables the job runner traces. With the "cycles" kernel (`kernel`) every scene is
  * exported as FORMAT-v2, so its materials reach the kernel whole; parts that share a geometry stay instances when
@@ -55,7 +59,8 @@ export function encodeNativeInputV2(input) {
 export function exportNativeSceneTables({ parts, environment, camera, options, kernel, instancing, modules }) {
   const { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } = modules;
   const wholeMaterials = kernel === 'cycles';
-  let traceScene = buildTraceScene(parts, environment, { instancing: wholeMaterials && instancing === true });
+  const triangleLimit = wholeMaterials ? { maximumTriangles: NATIVE_JOB_MAXIMUM_TRIANGLES } : {};
+  let traceScene = buildTraceScene(parts, environment, { instancing: wholeMaterials && instancing === true, ...triangleLimit });
   refuseLocalVolumes(traceScene, 'the native path tracer');
   let flattenedBecause;
   if (traceScene.instances) {
@@ -63,9 +68,10 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
       const input = buildJobNativeInput(traceScene, camera, options, pack, resolveTexture);
       return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, wholeMaterials };
     } catch (error) {
-      if (!(error instanceof RangeError)) throw error;
+      // A scene over the texture pool stays over it flattened: the caller gets that refusal, not a v1 atlas one.
+      if (!(error instanceof RangeError) || error.texturePoolFull) throw error;
       flattenedBecause = error.message;
-      traceScene = buildTraceScene(parts, environment);
+      traceScene = flattenRefusedScene(buildTraceScene, parts, environment, triangleLimit, flattenedBecause);
     }
   }
   const instancingNote = flattenedBecause === undefined ? {} : { instancing: 'flattened', instancingReason: flattenedBecause };
@@ -75,13 +81,35 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
       const input = buildFlattenedJobNativeInput(traceScene, camera, options, pack, resolveTexture);
       return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials, ...instancingNote };
     } catch (error) {
+      if (error.texturePoolFull) throw error;
       // The scene stays traceable: the v1 tables carry what the kernel read before, and the report says why they were used.
       materialsReason = error.message;
     }
   }
-  const input = buildNativeInput(traceScene, camera, options, pack);
+  const input = buildNativeInputOrExplain(buildNativeInput, traceScene, camera, options, pack, materialsReason);
   return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
     ...(materialsReason === undefined ? {} : { materialsReason }), ...instancingNote };
+}
+
+// The v1 tables are the fallback for a scene whose FORMAT-v2 materials failed; when they fail too, the error keeps the first reason.
+function buildNativeInputOrExplain(buildNativeInput, traceScene, camera, options, pack, materialsReason) {
+  try {
+    return buildNativeInput(traceScene, camera, options, pack);
+  } catch (error) {
+    if (materialsReason === undefined || !(error instanceof RangeError)) throw error;
+    throw new RangeError(`${error.message} The FORMAT-v2 export had already failed: ${materialsReason}`);
+  }
+}
+
+// The flattened scene of parts the packer refused as instances. Every copy counts against the bound once flattened, so a scene
+// that fitted as instances can be over it; the error then names the packer's refusal, since the geometry was already shared.
+function flattenRefusedScene(buildTraceScene, parts, environment, triangleLimit, refusal) {
+  try {
+    return buildTraceScene(parts, environment, triangleLimit);
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    throw new RangeError(`The scene could not stay instanced (${refusal}) and is too large once every copy is flattened: ${error.message}`);
+  }
 }
 
 function floatsFromBase64(data) {
