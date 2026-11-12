@@ -1,5 +1,6 @@
 import './home.js';
 import './documentation.css';
+import { isVideoUrl } from './changelog-media.js';
 
 const article = document.querySelector('#doc-article');
 const versionList = document.querySelector('#doc-toc');
@@ -38,6 +39,28 @@ function appendText(parent, text) {
   });
 }
 
+// A clip plays like a GIF: muted, looping and inline. A picture loads when it scrolls near.
+function mediaElement(media) {
+  if (isVideoUrl(media.url)) {
+    const video = document.createElement('video');
+    video.className = 'change-media';
+    video.src = media.url;
+    video.muted = true;
+    video.loop = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute('aria-label', media.alt);
+    return video;
+  }
+  const image = document.createElement('img');
+  image.className = 'change-media';
+  image.src = media.url;
+  image.alt = media.alt;
+  image.loading = 'lazy';
+  image.decoding = 'async';
+  return image;
+}
+
 function entryRow(entry) {
   const row = document.createElement('li');
   row.className = 'change-entry';
@@ -59,6 +82,7 @@ function entryRow(entry) {
   // The issue column already links the number, so a trailing "(#N)" for the same issue is dropped.
   const trailingIssue = entry.issue === null ? null : new RegExp(`\\s*\\(#${entry.issue}\\)$`);
   appendText(text, trailingIssue ? entry.text.replace(trailingIssue, '') : entry.text);
+  if (entry.media) text.append(mediaElement(entry.media));
   row.append(issue, text);
   return row;
 }
