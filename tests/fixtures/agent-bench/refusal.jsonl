@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","model":"claude-haiku-4-5","tools":["ToolSearch"],"mcp_servers":[{"name":"67js","status":"connected"}]}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I can't help with that request."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"I can't help with that request.","usage":{"output_tokens":900},"stop_reason":"refusal"}
