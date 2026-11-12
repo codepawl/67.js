@@ -831,7 +831,7 @@ function paintLabels(context, labels, offsetX, offsetY) {
 }
 
 // Kinds an addon registers are checked against what its package.json declared; one it did not declare is taken back.
-const ADDON_KIND_REGISTRIES = [
+const addonKindRegistries = () => [
   { point: 'registerController', field: 'controllers', list: listControllerKinds, remove: unregisterControllerKind },
   { point: 'registerCameraRig', field: 'cameraRigs', list: listCameraRigKinds, remove: unregisterCameraRigKind },
 ];
@@ -845,7 +845,8 @@ function takeBackKinds(before, registries) {
 async function loadAddonModule({ url, name, extensionPoints }) {
   const { setAddedGameKinds } = await import('../src/game-setup.js');
   setAddedGameKinds(() => ({ controllers: listAddedControllerKinds(), cameraRigs: listAddedCameraRigKinds() }));
-  const before = Object.fromEntries(ADDON_KIND_REGISTRIES.map(registry => [registry.field, registry.list()]));
+  const kindRegistries = addonKindRegistries();
+  const before = Object.fromEntries(kindRegistries.map(registry => [registry.field, registry.list()]));
   try {
     const entry = await import(/* @vite-ignore */ url);
     if (typeof entry.registerAddon !== 'function') {
@@ -853,13 +854,13 @@ async function loadAddonModule({ url, name, extensionPoints }) {
     }
     entry.registerAddon();
   } catch (error) {
-    takeBackKinds(before, ADDON_KIND_REGISTRIES);
+    takeBackKinds(before, kindRegistries);
     throw error;
   }
-  const added = Object.fromEntries(ADDON_KIND_REGISTRIES.map(registry => [registry.field, registry.list().filter(kind => !before[registry.field].includes(kind))]));
-  const undeclared = ADDON_KIND_REGISTRIES.filter(registry => added[registry.field].length > 0 && !extensionPoints.includes(registry.point));
+  const added = Object.fromEntries(kindRegistries.map(registry => [registry.field, registry.list().filter(kind => !before[registry.field].includes(kind))]));
+  const undeclared = kindRegistries.filter(registry => added[registry.field].length > 0 && !extensionPoints.includes(registry.point));
   if (undeclared.length > 0) {
-    takeBackKinds(before, ADDON_KIND_REGISTRIES);
+    takeBackKinds(before, kindRegistries);
     const used = undeclared.map(registry => `${registry.point} (${added[registry.field].join(', ')})`).join(', ');
     throw new RangeError(`${name} registered ${used} but its package.json "67js".extensionPoints does not declare it. Add the point to extensionPoints, or stop registering it.`);
   }
