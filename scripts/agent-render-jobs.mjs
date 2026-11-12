@@ -84,6 +84,16 @@ function jsonCopy(value, maximum = MAXIMUM_JSON_BYTES) {
   return JSON.parse(text);
 }
 
+/** Seconds the recipe's physics or cloth bake covers, or undefined when it has neither. Both play on the motion clock. */
+function bakedPhysicsDuration(recipe) {
+  const durations = [recipe?.physics?.duration, recipe?.cloth?.duration].filter(Number.isFinite);
+  return durations.length ? Math.max(...durations) : undefined;
+}
+
+function playsPhysics(recipe) {
+  return Boolean(recipe?.physics || recipe?.cloth || recipe?.particles);
+}
+
 function settingsFrom(input, clips, recipe) {
   objectKeys(input, ['kind', 'width', 'height', 'fps', 'duration', 'animation', 'motion', 'rendererTime', 'passes', 'renderer', 'timeline', 'audio', 'encoder', 'transparent', 'format', 'multilayer', 'region'], 'settings');
   if (!['image', 'stills', 'video'].includes(input.kind)) throw new TypeError('kind must be image, stills or video.');
@@ -93,7 +103,10 @@ function settingsFrom(input, clips, recipe) {
   if (input.kind === 'video' && (width % 2 || height % 2)) throw new RangeError('Video dimensions must be even.');
   const fps = boundedNumber(input.fps ?? 24, 1, MAXIMUM_JOB_FPS, 'fps', true);
   const timelineStart = timelineStartFrom(input, recipe);
-  const defaultDuration = timelineStart === undefined || input.kind === 'image' ? 1 : filmTimelineDuration(recipe.timeline) - timelineStart;
+  // A physics-only film runs as long as its bake, counted from the motion start.
+  const bakeSeconds = recipe?.format === '67js.scene' && !recipe.motion ? bakedPhysicsDuration(recipe) : undefined;
+  const bakeDefault = bakeSeconds && input.kind !== 'image' && input.motion ? Math.max(0.1, bakeSeconds - (Number(input.motion.start) || 0)) : undefined;
+  const defaultDuration = timelineStart === undefined || input.kind === 'image' ? bakeDefault ?? 1 : filmTimelineDuration(recipe.timeline) - timelineStart;
   const duration = boundedNumber(input.duration ?? defaultDuration, 0.1, MAXIMUM_VIDEO_SECONDS, 'duration');
   const frameCount = input.kind === 'image' ? 1 : input.kind === 'stills' ? 8 : Math.ceil(fps * duration);
   if (frameCount > 900) throw new RangeError('Job exceeds 900 frames.');
@@ -119,8 +132,8 @@ function settingsFrom(input, clips, recipe) {
     const placesClips = recipe?.format === '67js.scene' && recipeAssetNeeds(recipe).some(need => need.copies > 1);
     // A map sequence reads the same clock.
     const sequenced = JSON.stringify(recipe?.materials ?? []).includes('"sequence":{');
-    if (!['67js.scene', '67js.asset'].includes(recipe?.format) || (!recipe.motion && !placesClips && !sequenced)) {
-      throw new RangeError('Motion settings require a recipe with authored motion or a placed clip (or a map sequence).');
+    if (!['67js.scene', '67js.asset'].includes(recipe?.format) || (!recipe.motion && !placesClips && !sequenced && !(recipe.format === '67js.scene' && playsPhysics(recipe)))) {
+      throw new RangeError('Motion settings require a recipe with authored motion, physics (or cloth, particles), a placed clip or a map sequence.');
     }
     const motionDuration = recipe.motion ? boundedNumber(recipe.motion.duration, 0.1, 30, 'motion duration') : undefined;
     if (recipe.motion?.loop !== undefined && typeof recipe.motion.loop !== 'boolean') {
@@ -130,6 +143,9 @@ function settingsFrom(input, clips, recipe) {
     boundedNumber(start + lastSampleTime, 0, 3600, 'motion end');
     if (recipe.motion && !recipe.motion.loop && start + lastSampleTime > motionDuration) {
       throw new RangeError('Motion range exceeds the authored duration.');
+    }
+    if (!recipe.motion && bakeSeconds && start + lastSampleTime > bakeSeconds) {
+      throw new RangeError(`Motion range exceeds the physics bake duration of ${bakeSeconds} s; shorten the job or lengthen physics.duration.`);
     }
     result.motion = { start };
   }

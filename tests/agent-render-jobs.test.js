@@ -87,7 +87,29 @@ test('a scene that places a clip takes motion settings without authored motion, 
   assert.equal((await terminal(controller, submitted.jobId)).state, 'completed');
   assert.equal(controller.status(submitted.jobId).settings.motion.start, 2);
   input.snapshot.recipe = { format: '67js.scene', nodes: [{ id: 'prop', asset: { id } }] };
-  await assert.rejects(controller.submit(input), /authored motion or a placed clip/);
+  await assert.rejects(controller.submit(input), /authored motion, physics .* a placed clip/);
+  await controller.release(submitted.jobId);
+  await controller.close();
+});
+
+test('a scene with physics takes motion settings, defaults the video to the bake length and stops at its end', async context => {
+  const root = await temporary(context);
+  const controller = await createAgentRenderJobs({ root, limits, run: writeImage });
+  const input = request();
+  input.snapshot.recipe = { format: '67js.scene', physics: { duration: 2, bodies: [] } };
+  input.settings = { kind: 'video', width: 64, height: 64, fps: 10, motion: { start: 0 } };
+  const submitted = await controller.submit(input);
+  assert.equal(controller.status(submitted.jobId).settings.duration, 2);
+  assert.equal(controller.status(submitted.jobId).settings.frameCount, 20);
+  await terminal(controller, submitted.jobId);
+  input.settings.duration = 3;
+  await assert.rejects(controller.submit(input), /physics bake duration of 2 s/);
+  input.snapshot.recipe = { format: '67js.scene', cloth: { duration: 1, sheets: [] } };
+  input.settings = { kind: 'image', width: 64, height: 64, motion: { start: 0.5 } };
+  const clothJob = await controller.submit(input);
+  assert.equal(controller.status(clothJob.jobId).settings.motion.start, 0.5);
+  await terminal(controller, clothJob.jobId);
+  await controller.release(clothJob.jobId);
   await controller.release(submitted.jobId);
   await controller.close();
 });
