@@ -542,6 +542,69 @@ Measured on an NVIDIA A10 (Modal), 960 x 540, seed 3, medians of three rounds, e
 
 The GPU filter costs about 8 ms in total (upload, seven dispatches, readback of the traced image that already sits on the host) and 1.4 to 1.6 ms for the dispatches, against 3.7 to 4.2 s for the CPU filter at the same error: roughly 500 times faster as built. Against the sampling time in the table the GPU filter is 0.2 to 2.7 percent, while the CPU filter takes 4 to 12 times as long as the 16 spp render. At equal time the filtered image has 10 to 100 times lower relMSE than the unfiltered one at 64 and 256 spp on lit-interior and many-lights-500. Where the reference is nearly converged (glass and metal at 1024 spp) the filter's bias shows: relMSE and FLIP get worse than the unfiltered render (glass 0.00009 to 0.00014). The unfiltered metal render at 64 spp is dominated by a few fireflies (relMSE 0.28); the CPU filter leaves that number almost unchanged, the GPU filter lowers it (the cause was not investigated), and FLIP, which sees little difference, is the fairer score for that scene.
 
+### Path regeneration, environment compensation and the a-trous filter together (#897)
+
+The three options above (`pathRegeneration`, `envCompensation: true` and `denoise: 'atrous'`, each off by default) were measured alone on separate branches and are measured here on one branch built from `main` after the dispatch budget (#964) and the Blackman-Harris references (#977). The legacy kernel `src/kernel.wgsl` is unchanged and still the default, and the `cycles` kernel at its defaults draws the same images as before. Everything ran on Modal; the GPU is named at each result (Modal scheduled an NVIDIA A10 or an NVIDIA L4, and every row records its GPU).
+
+**Tests** `[measured]`, NVIDIA A10: `cargo test` 32 passed, 0 failed; `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 93 tests, 92 passed, 0 failed, 1 skipped; the lobe probes and white furnace scenes (`check-lobes.mjs`, `verify-lobes.py`) exit 0.
+
+**Seven-scene parity, 4096 spp, seed 1, 8 bounces, box filter** `[measured]`. With every option off (NVIDIA L4) the table equals the "Final gates for #895" table above in every column. With `--path-regeneration --env-compensation 1` (NVIDIA A10) every scene passes every gate again with the same mean ratios and tile ranges; relMSE is the same to the printed digits except `glass` (0.000058 off, 0.000056 on, the compensation), and FLIP LDR differs by at most 0.00003:
+
+| scene | mean ratio (R / G / B) | tiles within 5 % | FLIP LDR (ceiling) | relMSE (noise floor), off / on |
+| --- | --- | ---: | --- | --- |
+| `spot-area` | 1.0000 / 1.0000 / 1.0000 | 47 of 47 | 0.0039 (0.0239) | 0.000008 / 0.000008 |
+| `light-linking` | 1.0009 / 1.0007 / 1.0008 | 64 of 64 | 0.0051 (0.0228) | 0.000015 / 0.000015 |
+| `metal` | 0.9991 / 0.9992 / 0.9995 | 64 of 64 | 0.0042 (0.0237) | 0.00271 / 0.00271 |
+| `glass` | 0.9976 / 0.9978 / 0.9982 | 64 of 64 | 0.0070 (0.0234) | 0.000058 / 0.000056 |
+| `outdoor-hdri` | 0.9995 / 0.9996 / 0.9998 | 64 of 64 | 0.0023 (0.0215) | 0.000005 / 0.000005 |
+| `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 of 64 | 0.0168 (0.0365) | 0.00026 / 0.00026 |
+| `many-lights-500` | 1.0009 / 1.0010 / 1.0009 | 64 of 64 | 0.0178 (0.0373) | 0.000832 / 0.000832 |
+
+Path regeneration and the compensated environment table are unbiased, so they must pass the parity gates. The a-trous filter is biased and is not gated on parity; its `rgba` is checked instead: on four scenes and three rounds (12 of 12) the unfiltered image of a `denoise: 'atrous'` run equals the image of a run without the filter, bit for bit, at 64 spp and 32 samples per dispatch.
+
+**Combined gain** `[measured]`: baseline (defaults) against trial (`--path-regeneration --env-compensation 1`) and Blender Cycles 5.3.0 OptiX, interleaved in one container (NVIDIA A10), `960 x 540`, 8 bounces, seed 3, three rounds, median [range] of sampling seconds, relMSE (epsilon 0.01) against the Cycles 4096 spp seed 1 reference. Time ratio is trial over baseline. The two Cook variants differ in the image only through the environment table, so the error ratio is 1.00 where there is no sunny HDRI.
+
+| scene | spp | baseline s | trial s | time ratio | relMSE baseline / trial | Cycles s, relMSE |
+| --- | --- | --- | --- | --- | --- | --- |
+| `lit-interior` | 64 | 0.787 [0.778-1.005] | 0.556 [0.541-0.763] | 0.71 | 0.012832 / 0.012832 | 0.874, 0.014834 |
+| `lit-interior` | 256 | 3.198 [3.177-3.273] | 2.167 [2.076-2.210] | 0.68 | 0.002741 / 0.002740 | 3.481, 0.003103 |
+| `lit-interior` | 1024 | 12.848 [12.293-12.881] | 8.630 [8.225-8.639] | 0.67 | 0.000656 / 0.000656 | 14.010, 0.000771 |
+| `glass` | 64 | 0.493 [0.491-0.696] | 0.357 [0.344-0.358] | 0.72 | 0.000962 / 0.000733 | 0.397, 0.002499 |
+| `glass` | 256 | 1.937 [1.873-1.948] | 1.326 [1.282-1.336] | 0.68 | 0.000265 / 0.000208 | 1.520, 0.000532 |
+| `glass` | 1024 | 7.753 [7.525-7.758] | 5.169 [5.028-5.173] | 0.67 | 0.000095 / 0.000086 | 6.076, 0.000119 |
+| `many-lights-500` | 64 | 3.200 [3.191-3.299] | 2.293 [2.234-2.297] | 0.72 | 0.030592 / 0.030592 | 3.036, 0.027925 |
+| `many-lights-500` | 256 | 12.848 [12.504-12.875] | 9.048 [8.831-9.084] | 0.70 | 0.007630 / 0.007630 | 12.020, 0.006984 |
+| `many-lights-500` | 1024 | 51.698 [50.916-51.862] | 36.319 [36.069-36.348] | 0.70 | 0.002174 / 0.002174 | 48.360, 0.002001 |
+| `outdoor-hdri` | 64 | 0.165 [0.160-0.301] | 0.155 [0.154-0.157] | 0.94 | 0.000198 / 0.000109 | 0.237, 0.001181 |
+| `outdoor-hdri` | 256 | 0.596 [0.589-0.597] | 0.608 [0.605-0.611] | 1.02 | 0.000051 / 0.000023 | 0.896, 0.000169 |
+| `outdoor-hdri` | 1024 | 2.361 [2.359-2.380] | 2.428 [2.416-2.456] | 1.03 | 0.000010 / 0.000007 | 3.599, 0.000026 |
+
+The two gains stack where they apply: regeneration cuts the time on the three scenes with uneven path lengths (0.67 to 0.72 here, 0.63 to 0.73 measured alone), and compensation cuts the error under the HDRI (1.36 to 2.18 times; 1.11 to 1.31 on `glass`, which sees the sky). Equal-error ratio against Cycles is the time Cycles needs for the relMSE a Cook rung reaches (log-log interpolation inside the Cycles ladder) over the time of that Cook rung, so above 1 means Cook is faster; a Cook rung whose error lies outside the Cycles ladder has no entry:
+
+| scene | Cook defaults vs Cycles | Cook with both options vs Cycles |
+| --- | --- | --- |
+| `lit-interior` | 1.26x (64 spp), 1.23x (256 spp) | 1.78x (64 spp), 1.82x (256 spp) |
+| `many-lights-500` | 0.86x (256 spp), 0.85x (1024 spp) | 1.22x (256 spp), 1.21x (1024 spp) |
+| `glass` | 1.84x (64 spp), 1.50x (256 spp) | 3.22x (64 spp), 2.74x (256 spp) |
+| `outdoor-hdri` | 4.86x (64 spp), 3.68x (256 spp) | 7.97x (64 spp) |
+
+On `many-lights-500` Cook with defaults was slower than Cycles at equal error and is faster with the options on. The reference carries noise of its own (relMSE 0.000007 to 0.0008 between two 4096 spp seeds), which compresses the ratios at the highest rungs.
+
+**Dispatch budget** `[measured]` (NVIDIA L4, `lit-interior`, 256 spp, seed 3). With no `samplesPerDispatch` the render splits itself into dispatches of about 0.5 s, sized from the time of the previous one, so a faster kernel gets larger batches: 45 samples per dispatch without regeneration and 85 with it (longest dispatch 0.49 s and 0.51 s). The kernel reads the sample count of a dispatch from the same parameter the planner writes, so `pathRegeneration` works with any batch size. With the same fixed batch size the images with and without regeneration are bit-identical (32 and 7 samples per dispatch: 0 different values). The budgeted renders with and without regeneration are not bit-identical to each other, nor to the fixed 32 run, because the planner picks different batch sizes and the sums of the batches are added to the accumulation buffer in float32, so another split of the same samples rounds differently. The same difference appears without regeneration (budgeted against fixed 32, and fixed 32 against fixed 7: 0.9 to 1.1 million of 1.55 million values differ) and is one float32 rounding step: at most 2.9e-6 to 3.8e-6 absolute, 4e-7 to 6e-7 relative. Sampling time at 256 spp: 3.02 s budgeted without regeneration and 1.80 s with it (0.60); fixed 32: 3.09 s and 1.84 s.
+
+**A-trous filter at 64 spp** `[measured]` (NVIDIA L4, `960 x 540`, seed 3, 32 samples per dispatch, medians of three rounds, FLIP LDR mean from round 1). The filter is biased: the mean ratio drops by 0.2 to 1.1 percent.
+
+| scene | relMSE unfiltered / filtered | FLIP unfiltered / filtered | mean ratio unfiltered / filtered | filter ms (all steps, dispatches only, compile once) |
+| --- | --- | --- | --- | --- |
+| `lit-interior` | 0.01283 / 0.00042 | 0.076 / 0.037 | 1.0033 / 0.9966 | 14.1, 1.45, 78 |
+| `many-lights-500` | 0.03059 / 0.00090 | 0.105 / 0.044 | 1.0011 / 0.9905 | 14.1, 1.46, 79 |
+| `glass` | 0.00096 / 0.00040 | 0.018 / 0.018 | 0.9976 / 0.9955 | 12.6, 1.45, 80 |
+| `metal` | 0.28063 / 0.00227 | 0.015 / 0.014 | 0.9965 / 0.9856 | 12.8, 1.47, 79 |
+
+The all-steps time is 8 to 9 ms on an NVIDIA A10 (section above) and 13 to 14 ms on this L4 (upload, seven dispatches, readback). The picture puts the unfiltered and the filtered 64 spp image next to the Cycles 4096 spp reference. The filtered image is smoother and has lower error, and it is softer than the reference at texture and shadow edges: an estimate with bias, not a converged one.
+
+![lit-interior and many-lights-500 at 64 spp: Cook unfiltered, Cook with the a-trous filter, Cycles 4096 spp](cook-atrous-comparison.jpg)
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
