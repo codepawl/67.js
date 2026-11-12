@@ -2607,6 +2607,14 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   };
 }
 
+// The words of a texture that was never copied into an atlas (`packVirtualAtlas` in pack-input.mjs): its RGBA8 bytes as
+// little-endian words, the layout the atlas rows hold.
+function virtualTextureWords(texture, width, height) {
+  const words = new Uint32Array(width * height);
+  new Uint8Array(words.buffer).set(texture.data.subarray(0, width * height * 4));
+  return words;
+}
+
 function extractAtlasSubtexture(atlasWords, atlasWidth, rectX, rectY, width, height) {
   const words = new Uint32Array(width * height);
   for (let row = 0; row < height; row++) {
@@ -2652,8 +2660,10 @@ function withCarriedFields(descriptor, carried, textureCollector) {
  * `carriedFields`, when given, holds one `carriedMaterialFields` result per material for everything the tables cannot hold
  * (blend opacity, sheen, specular, anisotropy, iridescence, attenuation, the layer textures and the rest of the record).
  * `materials` holds the table with the subsurface table after it, `atlas` the atlas words and `atlasWidth` their row width.
+ * `virtualTextures`, when given, replaces the atlas: the rectangle of a map is `{ x: its index in that list, y: 0 }` and the
+ * map is read from the list, so the texture pool is the only limit on the maps.
  */
-export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields, textureMips }) {
+export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields, textureMips, virtualTextures }) {
   const textureCollector = createTextureCollector({ textureMips });
   const atlasCache = new Map();
 
@@ -2672,7 +2682,9 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
     }
     const repeat = (flags & 1) !== 0;
     const isSrgb = (flags & 2) !== 0;
-    const subWords = extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h);
+    const subWords = virtualTextures
+      ? virtualTextureWords(virtualTextures[x], w, h)
+      : extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h);
     const added = textureCollector.addPackedRgba8Words(subWords, w, h, isSrgb, repeat);
     atlasCache.set(key, added);
     return added;
@@ -2793,6 +2805,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     materialCount,
     carriedFields,
     textureMips: options.textureMips,
+    virtualTextures: v1Input.virtualTextures,
   });
 
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
