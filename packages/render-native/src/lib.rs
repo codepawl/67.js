@@ -14,9 +14,8 @@ use crate::host::film::{
     image_accumulation_bytes, image_workgroups, pad_texel_vectors, resolve_image, resolve_texels,
     texel_accumulation_bytes, texel_workgroups,
 };
-use crate::host::session::{
-    get_cached_device, DispatchPlan, prepare_cycles_scene, prepare_scene, run_cycles_lobe_probe, trace_cycles_samples, trace_samples, JobShape,
-};
+use crate::host::cycles_session::{CyclesRenderRequest, CyclesSession};
+use crate::host::session::{get_cached_device, prepare_scene, run_cycles_lobe_probe, trace_samples, JobShape};
 
 const KERNEL_SOURCE: &str = include_str!("kernel.wgsl");
 /// The texel entry point of the light bake, appended to the kernel for a bake only.
@@ -86,6 +85,9 @@ pub struct NativeCyclesTraceOptions {
     pub bootstrap_kernel: Option<bool>,
     /// `"none"` (default) or `"atrous"`: also filter the image with the edge-avoiding a-trous wavelet filter.
     pub denoise: Option<String>,
+    /// A KernelParamsV2 block for this render (a session frame with another camera or render settings of the same scene);
+    /// absent means the block of the input.
+    pub kernel_params: Option<Uint8Array>,
 }
 
 #[napi(object)]
@@ -260,45 +262,48 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
     })
 }
 
-/// Traces a packed `FORMAT-v2` scene on the GPU using the assembled Cycles-parity WGSL kernel.
-#[napi]
-pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceOptions) -> Result<NativeTraceResult> {
+/// The frame bookkeeping of a session render: what was reused instead of rebuilt.
+#[napi(object)]
+pub struct NativeSessionReport {
+    /// The session already held the compiled pipeline this frame needed (no shader compile).
+    pub pipeline_reused: bool,
+    /// The acceleration structures were built by an earlier call (no build for this frame).
+    pub acceleration_reused: bool,
+    /// The film and its bind group were kept from the previous frame (same image size).
+    pub film_reused: bool,
+    /// How many frames the session finished before this one.
+    pub frame_index: u32,
+}
+
+#[napi(object)]
+pub struct NativeSessionRenderResult {
+    pub trace: NativeTraceResult,
+    pub session: NativeSessionReport,
+}
+
+/// Renders one frame on a session and resolves the film into the result object.
+fn render_session_frame(
+    session: &mut CyclesSession,
+    options: &NativeCyclesTraceOptions,
+) -> Result<NativeSessionRenderResult> {
     let use_atrous_filter = parse_denoise_option(options.denoise.as_deref())?;
-    let source = cycles::assemble_cycles_kernel_entry("main", options.bootstrap_kernel.unwrap_or(false))?;
-    let pixel_count = options.width as u64 * options.height as u64;
-    let accumulation_bytes = image_accumulation_bytes(options.width, options.height);
-    let prepared = prepare_cycles_scene(
-        &input,
-        source,
-        options.width,
-        options.height,
-        options.samples,
-        accumulation_bytes,
-    )?;
-    let groups = image_workgroups(options.width, options.height);
-    // Unless the caller fixes the batch, each dispatch is sized from the time of the last so none runs long enough for the
-    // driver to reset the device. A wall-clock limit under 2 s keeps one sample per dispatch for tight responsiveness.
-    let plan = match options.samples_per_dispatch {
-        Some(samples_per_dispatch) => DispatchPlan::Fixed(samples_per_dispatch.max(1)),
-        None => match options.max_seconds {
-            Some(limit) if limit < 2.0 => DispatchPlan::Fixed(1),
-            _ => DispatchPlan::TimeBudget { largest_batch: options.samples.max(1) },
-        },
+    let request = CyclesRenderRequest {
+        width: options.width,
+        height: options.height,
+        samples: options.samples,
+        samples_per_dispatch: options.samples_per_dispatch,
+        max_seconds: options.max_seconds,
+        bootstrap_kernel: options.bootstrap_kernel.unwrap_or(false),
+        kernel_params: options.kernel_params.as_deref(),
     };
-    let trace = trace_cycles_samples(
-        &prepared,
-        options.samples,
-        plan,
-        groups,
-        accumulation_bytes,
-        options.max_seconds,
-    )?;
-    let (sums, traced_seconds, samples_per_dispatch) = (trace.sums, trace.traced_seconds, trace.largest_batch);
-    let resolved = resolve_image(&sums, pixel_count);
+    let render = session.render(&request)?;
+    let pixel_count = options.width as u64 * options.height as u64;
+    let resolved = resolve_image(&render.trace.sums, pixel_count);
+    let context = session.device_context();
     let filtered = if use_atrous_filter {
         Some(atrous_denoise(
-            &prepared.device,
-            &prepared.queue,
+            &context.device,
+            &context.queue,
             &DenoiseInput {
                 width: options.width,
                 height: options.height,
@@ -315,7 +320,7 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
     let denoise_seconds = filtered.as_ref().map(|output| output.upload_seconds + output.gpu_seconds + output.readback_seconds);
     let denoise_gpu_seconds = filtered.as_ref().map(|output| output.gpu_seconds);
     let denoise_compile_seconds = filtered.as_ref().map(|output| output.compile_seconds);
-    Ok(NativeTraceResult {
+    let trace = NativeTraceResult {
         rgba: Float32Array::new(resolved.rgba),
         denoised_rgba: filtered.map(|output| Float32Array::new(output.rgba)),
         denoise_seconds,
@@ -326,17 +331,60 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
         depth: Float32Array::new(resolved.depth),
         variance: Float32Array::new(resolved.variance),
         average_samples: resolved.average_samples,
-        samples_per_dispatch: Some(samples_per_dispatch),
-        longest_dispatch_seconds: trace.longest_dispatch_seconds,
-        adapter: prepared.adapter_name,
-        backend: prepared.backend_name,
-        features: prepared.features,
-        setup_seconds: prepared.setup_seconds,
-        compile_seconds: prepared.compile_seconds,
-        upload_seconds: prepared.upload_seconds,
-        acceleration_build_seconds: prepared.acceleration_build_seconds,
-        traced_seconds,
-    })
+        samples_per_dispatch: Some(render.trace.largest_batch),
+        longest_dispatch_seconds: render.trace.longest_dispatch_seconds,
+        adapter: context.adapter_name.clone(),
+        backend: context.backend_name.clone(),
+        features: context.features.clone(),
+        setup_seconds: render.report.setup_seconds,
+        compile_seconds: render.report.compile_seconds,
+        upload_seconds: render.report.upload_seconds,
+        acceleration_build_seconds: render.report.acceleration_build_seconds,
+        traced_seconds: render.trace.traced_seconds,
+    };
+    let session_report = NativeSessionReport {
+        pipeline_reused: render.report.pipeline_reused,
+        acceleration_reused: render.report.acceleration_reused,
+        film_reused: render.report.film_reused,
+        frame_index: render.report.frame_index,
+    };
+    Ok(NativeSessionRenderResult { trace, session: session_report })
+}
+
+/// Traces a packed `FORMAT-v2` scene on the GPU using the assembled Cycles-parity WGSL kernel: a session that renders once.
+#[napi]
+pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceOptions) -> Result<NativeTraceResult> {
+    parse_denoise_option(options.denoise.as_deref())?;
+    let mut session = CyclesSession::create(&input)?;
+    let rendered = render_session_frame(&mut session, &options)?;
+    Ok(rendered.trace)
+}
+
+/// A scene kept on the GPU between frames (issue 896): the device handle, the scene tables, the acceleration structures,
+/// the compiled pipeline and the film. `createNativeSession` in index.mjs is the way to make one.
+#[napi]
+pub struct NativeCyclesSession {
+    session: CyclesSession,
+}
+
+#[napi]
+impl NativeCyclesSession {
+    #[napi(constructor)]
+    pub fn new(input: NativeTraceInputV2) -> Result<Self> {
+        Ok(NativeCyclesSession { session: CyclesSession::create(&input)? })
+    }
+
+    /// Renders one frame of the session's scene. `options.kernelParams` may bring another camera or render settings of the same scene.
+    #[napi]
+    pub fn render(&mut self, options: NativeCyclesTraceOptions) -> Result<NativeSessionRenderResult> {
+        render_session_frame(&mut self.session, &options)
+    }
+
+    /// Frees the card; every later `render` fails.
+    #[napi]
+    pub fn close(&mut self) {
+        self.session.close();
+    }
 }
 
 /// Filters a traced image with the edge-avoiding a-trous wavelet filter on the GPU (spatial only; the result is biased).

@@ -89,21 +89,10 @@ fn light_to_tree_words(input: &NativeTraceInputV2) -> &[u32] {
     }
 }
 
-pub(crate) fn upload_cycles_scene_buffers(
-    device: &wgpu::Device,
-    input: &NativeTraceInputV2,
-    width: u32,
-    height: u32,
-    total_samples: u32,
-    accumulation_bytes: u64,
-) -> UploadedSceneBuffers {
-    let mut parameter_bytes = input.kernel_params.to_vec();
-    parameter_bytes[8..12].copy_from_slice(&width.to_le_bytes());
-    parameter_bytes[12..16].copy_from_slice(&height.to_le_bytes());
-    parameter_bytes[24..28].copy_from_slice(&total_samples.to_le_bytes());
-
-    // Bindings 2..=10 in FORMAT-v2 order, then the light tree tables for bindings 13 and 14.
-    let buffers = vec![
+/// The scene tables in FORMAT-v2 order: bindings 2..=10, then the light tree tables bound at 13 and 14 by
+/// `create_cycles_bind_group`. These stay on the card for as long as a session lives.
+pub(crate) fn upload_cycles_scene_tables(device: &wgpu::Device, input: &NativeTraceInputV2) -> Vec<wgpu::Buffer> {
+    vec![
         storage_buffer(device, "cycles instances", &input.instances),
         storage_buffer(device, "cycles triangles", &input.triangles),
         storage_buffer(device, "cycles materials", &input.materials),
@@ -116,21 +105,23 @@ pub(crate) fn upload_cycles_scene_buffers(
         // Bound at 13 and 14 by `create_cycles_bind_group`: the light tree emitters and the emitter-to-slot table.
         storage_buffer(device, "cycles light tree emitters", light_tree_emitter_bytes(input)),
         storage_buffer(device, "cycles light to tree", bytemuck::cast_slice(light_to_tree_words(input))),
-    ];
-    let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
+    ]
+}
+
+/// A zeroed film. `COPY_DST` lets a session clear it between renders.
+pub(crate) fn create_cycles_film(device: &wgpu::Device, accumulation_bytes: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("cycles film accumulation"),
         size: accumulation_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
-    });
-    let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    })
+}
+
+pub(crate) fn create_cycles_parameters(device: &wgpu::Device, kernel_params: &[u8]) -> wgpu::Buffer {
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("cycles kernel params"),
-        contents: &parameter_bytes,
+        contents: kernel_params,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    UploadedSceneBuffers {
-        buffers,
-        accumulation,
-        parameters,
-    }
+    })
 }
