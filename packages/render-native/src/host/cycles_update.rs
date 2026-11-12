@@ -128,6 +128,8 @@ pub(crate) struct ProgressiveFilm {
     pub(crate) target_samples: u32,
     pub(crate) samples_drawn: u32,
     pub(crate) signature: Vec<u8>,
+    /// The diagnostic kernel adds a different quantity, so a film cannot mix calls of the two kernels.
+    pub(crate) bootstrap_kernel: bool,
 }
 
 /// What one render call asks of the film.
@@ -138,6 +140,7 @@ pub(crate) struct FilmRequest<'a> {
     pub(crate) accumulate: bool,
     pub(crate) target_samples: Option<u32>,
     pub(crate) frame_kernel_params: &'a [u8],
+    pub(crate) bootstrap_kernel: bool,
 }
 
 /// Which samples a render call draws and into which film.
@@ -182,6 +185,7 @@ pub(crate) fn choose_film_use(film: Option<&ProgressiveFilm>, request: &FilmRequ
             target_samples,
             samples_drawn: request.samples,
             signature,
+            bootstrap_kernel: request.bootstrap_kernel,
         };
         return Ok(FilmUse { first_sample: 0, total_samples: target_samples, starts_new_image: true, film_after: Some(film_after) });
     };
@@ -202,6 +206,12 @@ pub(crate) fn choose_film_use(film: Option<&ProgressiveFilm>, request: &FilmRequ
     if signature != film.signature {
         return Err(failure(format!(
             "The kernel parameters (camera, seed, sampler or other render settings) differ from the ones this film started with, so the new samples would not belong to the same image. {REQUIRES_RESET}"
+        )));
+    }
+    if request.bootstrap_kernel != film.bootstrap_kernel {
+        return Err(failure(format!(
+            "bootstrapKernel is {} but the film started with {}, and the two kernels do not add the same samples. {REQUIRES_RESET}",
+            request.bootstrap_kernel, film.bootstrap_kernel
         )));
     }
     let remaining_samples = film.target_samples - film.samples_drawn;
@@ -316,7 +326,7 @@ mod tests {
     }
 
     fn request<'a>(kernel_params: &'a [u8], samples: u32, accumulate: bool, target_samples: Option<u32>) -> FilmRequest<'a> {
-        FilmRequest { width: 24, height: 16, samples, accumulate, target_samples, frame_kernel_params: kernel_params }
+        FilmRequest { width: 24, height: 16, samples, accumulate, target_samples, frame_kernel_params: kernel_params, bootstrap_kernel: false }
     }
 
     #[test]
@@ -369,6 +379,11 @@ mod tests {
         moved_camera[200] ^= 1;
         let camera_message = choose_film_use(Some(&started), &request(&moved_camera, 2, true, None)).unwrap_err().to_string();
         assert!(camera_message.contains("kernel parameters"), "{camera_message}");
+
+        let mut bootstrap_call = request(&params, 2, true, None);
+        bootstrap_call.bootstrap_kernel = true;
+        let bootstrap_message = choose_film_use(Some(&started), &bootstrap_call).unwrap_err().to_string();
+        assert!(bootstrap_message.contains("bootstrapKernel") && bootstrap_message.contains("reset()"), "{bootstrap_message}");
     }
 
     #[test]

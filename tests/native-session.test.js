@@ -369,7 +369,7 @@ test('a refused update changes nothing and a closed session refuses reset, resol
     scene.instances.push({ geometry: UNIT_QUAD, matrix: horizontalQuadMatrix(1, 1, true), materialIndex: 0 });
   });
   assert.throws(() => session.update(withExtraQuad), { message: /instanceCount/ });
-  assert.throws(() => session.update(undefined), { name: 'TypeError', message: /FORMAT-v2/ });
+  assert.throws(() => session.update(undefined), { name: 'TypeError', message: /^NativeSession.update: `input` must be a FORMAT-v2/ });
   assert.deepEqual(calls, [], 'the addon is not called for a refused update');
   session.close();
   for (const method of ['reset', 'resolve']) {
@@ -377,6 +377,29 @@ test('a refused update changes nothing and a closed session refuses reset, resol
   }
   assert.throws(() => session.update(current), { message: /NativeSession.update: this session is closed/ });
   assert.deepEqual(calls, []);
+});
+
+test('an update the addon refuses leaves the wrapper diffing against the scene the addon still holds', () => {
+  const current = roomInputWith(() => {});
+  const changed = roomInputWith((scene) => {
+    scene.materials[0].color = [0.2, 0.5, 0.8];
+  });
+  const updates = [];
+  let refuse = true;
+  const nativeSession = {
+    update(options) {
+      updates.push(options);
+      if (refuse) throw new Error('The update failed part way');
+      return {};
+    },
+    close() {},
+  };
+  const session = wrapNativeSession(nativeSession, resolveSessionCreation(current, {}), {});
+  assert.throws(() => session.update(changed), { message: /failed part way/ });
+  refuse = false;
+  session.update(changed);
+  assert.equal(updates.length, 2);
+  assert.deepEqual(Object.keys(updates[1]).sort(), Object.keys(updates[0]).sort(), 'the retry diffs against the old scene, so it sends the same tables');
 });
 
 // ---- Renders on the GPU ----

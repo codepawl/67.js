@@ -369,22 +369,22 @@ function patchedCyclesKernelParams(v2Input, kernelParams, options, callerName) {
 }
 
 // Exported for tests; not part of the public API.
-export function resolveSessionCreation(input, options) {
+export function resolveSessionCreation(input, options, callerName = 'createNativeSession') {
   if (input === null || typeof input !== 'object') {
-    throw new TypeError('createNativeSession: `input` must be a FORMAT-v2 input object from buildNativeInputV2.');
+    throw new TypeError(`${callerName}: \`input\` must be a FORMAT-v2 input object from buildNativeInputV2.`);
   }
   if (input.schemaVersion !== FORMAT_V2_VERSION) {
     throw new TypeError(
-      `createNativeSession: \`input.schemaVersion\` must be ${FORMAT_V2_VERSION} (a FORMAT-v2 input from buildNativeInputV2); got ${JSON.stringify(input.schemaVersion)}. Convert a v1 input with upgradeNativeInputV1ToV2.`
+      `${callerName}: \`input.schemaVersion\` must be ${FORMAT_V2_VERSION} (a FORMAT-v2 input from buildNativeInputV2); got ${JSON.stringify(input.schemaVersion)}. Convert a v1 input with upgradeNativeInputV1ToV2.`
     );
   }
-  requireSessionKernelParams(input.kernelParams, 'createNativeSession');
+  requireSessionKernelParams(input.kernelParams, callerName);
   if (options === null || typeof options !== 'object') {
-    throw new TypeError('createNativeSession: `options` must be an object.');
+    throw new TypeError(`${callerName}: \`options\` must be an object.`);
   }
-  requireCyclesKernelOption(options.kernel, 'createNativeSession');
-  validatePackOptions(options, 'createNativeSession');
-  return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, 'createNativeSession') };
+  requireCyclesKernelOption(options.kernel, callerName);
+  validatePackOptions(options, callerName);
+  return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, callerName) };
 }
 
 // Exported for tests; not part of the public API.
@@ -538,7 +538,7 @@ export function wrapNativeSession(nativeSession, sessionInput, sessionOptions) {
     },
     update(newInput) {
       requireOpen('update');
-      const nextInput = resolveSessionCreation(newInput, sessionOptions);
+      const nextInput = resolveSessionCreation(newInput, sessionOptions, 'NativeSession.update');
       const changedTables = planNativeSessionUpdate(heldInput, nextInput);
       const report = nativeSession.update({ kernelParams: nextInput.kernelParams, ...changedTables });
       heldInput = nextInput;

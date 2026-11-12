@@ -14,7 +14,7 @@ use crate::cycles::{
     check_update_params_keep_scene_shape, scan_scene_specialization, specialize_kernel_source,
     trace_entry_point_for_params, SceneSpecialization,
 };
-use crate::host::accel::{build_cycles_acceleration_structure, rebuild_cycles_tlas, CyclesAcceleration};
+use crate::host::accel::{build_cycles_acceleration_structure, rebuild_cycles_tlas, CyclesAcceleration, INSTANCE_RECORD_BYTES};
 use crate::host::cycles_update::{choose_film_use, plan_instance_update, FilmRequest, ProgressiveFilm, UpdatableTable};
 use crate::host::device::{failure, storage_buffer};
 use crate::host::film::{image_accumulation_bytes, image_workgroups, read_accumulation};
@@ -373,6 +373,7 @@ impl CyclesSession {
                 accumulate: request.accumulate,
                 target_samples: request.target_samples,
                 frame_kernel_params: &frame_kernel_params,
+                bootstrap_kernel: request.bootstrap_kernel,
             },
         )?;
 
@@ -521,26 +522,32 @@ impl CyclesSession {
             None => None,
         };
 
-        let upload_started = Instant::now();
-        let context = &self.context;
-        let gpu = self.gpu.as_mut().ok_or_else(session_closed_failure)?;
-        for (table, bytes) in &update.tables {
-            let label = format!("cycles {} (updated)", table.input_name());
-            gpu.scene_tables[table.buffer_index()] = storage_buffer(&context.device, &label, bytes);
-            self.retained.keep_table(*table, bytes);
-        }
-        let upload_seconds = upload_started.elapsed().as_secs_f64();
-
-        let rebuild_started = Instant::now();
-        let acceleration_rebuilt = instance_plan.as_ref().is_some_and(|plan| plan.tlas_dirty);
+        // An empty acceleration (no triangles) holds a dummy TLAS that no ray reaches, so there is nothing to rebuild.
+        let held_instance_count = self.gpu.as_ref().ok_or_else(session_closed_failure)?.acceleration.instance_blas_indices.len();
+        let acceleration_rebuilt = held_instance_count > 0 && instance_plan.as_ref().is_some_and(|plan| plan.tlas_dirty);
         if let (true, Some(bytes)) = (acceleration_rebuilt, new_instances) {
-            rebuild_cycles_tlas(&context.device, &context.queue, &mut gpu.acceleration, bytes)?;
+            if bytes.len() != held_instance_count * INSTANCE_RECORD_BYTES {
+                return Err(failure(format!(
+                    "The new instances table holds {} bytes but the acceleration structure holds {held_instance_count} instances ({} bytes). Create a new session for this input.",
+                    bytes.len(),
+                    held_instance_count * INSTANCE_RECORD_BYTES
+                )));
+            }
         }
-        let acceleration_rebuild_seconds = rebuild_started.elapsed().as_secs_f64();
 
-        if !update.tables.is_empty() {
-            rebind_film(context, gpu)?;
-        }
+        // Past this point the session changes. A step that still fails (a driver or device error) cannot be undone, so the
+        // film is cleared and the session closed rather than left half updated.
+        let applied = self.apply_tables(update, new_instances, acceleration_rebuilt);
+        let (upload_seconds, acceleration_rebuild_seconds) = match applied {
+            Ok(seconds) => seconds,
+            Err(error) => {
+                self.clear_progressive_film();
+                self.gpu = None;
+                return Err(failure(format!(
+                    "The update failed part way ({error}) and the session was closed so it cannot render a half updated scene. Create a new session with createNativeSession(input)."
+                )));
+            }
+        };
         self.session_kernel_params = update.kernel_params.to_vec();
         let respecialized = self.retained.specialization();
         let kernel_respecialized = respecialized != self.scene_specialization;
@@ -556,6 +563,37 @@ impl CyclesSession {
             acceleration_rebuild_seconds,
             update_seconds: update_started.elapsed().as_secs_f64(),
         })
+    }
+}
+
+impl CyclesSession {
+    /// Uploads the new tables, rebuilds the TLAS when asked and rebinds the film; returns the seconds spent uploading and rebuilding.
+    fn apply_tables(
+        &mut self,
+        update: &CyclesSceneUpdate<'_>,
+        new_instances: Option<&[u8]>,
+        acceleration_rebuilt: bool,
+    ) -> Result<(f64, f64)> {
+        let upload_started = Instant::now();
+        let context = &self.context;
+        let gpu = self.gpu.as_mut().ok_or_else(session_closed_failure)?;
+        for (table, bytes) in &update.tables {
+            let label = format!("cycles {} (updated)", table.input_name());
+            gpu.scene_tables[table.buffer_index()] = storage_buffer(&context.device, &label, bytes);
+            self.retained.keep_table(*table, bytes);
+        }
+        let upload_seconds = upload_started.elapsed().as_secs_f64();
+
+        let rebuild_started = Instant::now();
+        if let (true, Some(bytes)) = (acceleration_rebuilt, new_instances) {
+            rebuild_cycles_tlas(&context.device, &context.queue, &mut gpu.acceleration, bytes)?;
+        }
+        let acceleration_rebuild_seconds = rebuild_started.elapsed().as_secs_f64();
+
+        if !update.tables.is_empty() {
+            rebind_film(context, gpu)?;
+        }
+        Ok((upload_seconds, acceleration_rebuild_seconds))
     }
 }
 
