@@ -122,6 +122,40 @@ function atrousColor({ tracer, traced, width, height }) {
   return withoutAlpha(filtered, width * height);
 }
 
+// One in-process OIDN device per loaded denoiser package, kept for the life of the process so the second and later frames
+// skip device creation and the filter commit. `instance` is null when the package, the OIDN library or the addon cannot do it.
+const persistentOidnByPackage = new WeakMap();
+
+function persistentOidnFor({ tracer, denoiser }) {
+  if (typeof denoiser.createOidnDenoiser !== 'function' || typeof tracer.createNativeOidnDenoiser !== 'function') return { instance: null };
+  if (!persistentOidnByPackage.has(denoiser)) {
+    try {
+      persistentOidnByPackage.set(denoiser, { instance: denoiser.createOidnDenoiser({ createNative: tracer.createNativeOidnDenoiser }) });
+    } catch (error) {
+      persistentOidnByPackage.set(denoiser, { instance: null, note: error.message });
+    }
+  }
+  return persistentOidnByPackage.get(denoiser);
+}
+
+/**
+ * Runs OIDN on one frame: in the persistent in-process device when it is available, otherwise (or when that call fails)
+ * through the `oidnDenoise` tool. Resolves with the filtered colour and `{ mode, note }`; `mode` is "in-process" or "cli".
+ */
+export async function denoiseFrameWithOidn({ tracer, denoiser, width, height, color, albedo, normal }) {
+  const persistent = persistentOidnFor({ tracer, denoiser });
+  let note = persistent.note;
+  if (persistent.instance) {
+    try {
+      return { linear: await persistent.instance.denoise({ width, height, color, albedo, normal }), mode: 'in-process' };
+    } catch (error) {
+      note = error.message;
+    }
+  }
+  const linear = await denoiser.denoiseWithOidn({ width, height, color, albedo, normal });
+  return { linear, mode: 'cli', ...(note ? { note: `The in-process OIDN device was not used (${note}): the oidnDenoise tool ran instead.` } : {}) };
+}
+
 /**
  * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet",
  * "atrous" (the tracer's GPU filter, which is also where a missing or failing OIDN lands) or "oidn"; `denoiser` is the
@@ -144,8 +178,9 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const denoiseStarted = performance.now();
   if (denoise === 'oidn') {
     try {
-      linear = await denoiser.denoiseWithOidn({ width, height, color: features.color, albedo: features.albedo, normal: features.normal });
-      Object.assign(report, { denoised: true, denoiser: 'oidn', oidnVersion: denoiser.OIDN_VERSION });
+      const filtered = await denoiseFrameWithOidn({ tracer, denoiser, width, height, color: features.color, albedo: features.albedo, normal: features.normal });
+      linear = filtered.linear;
+      Object.assign(report, { denoised: true, denoiser: 'oidn', oidnVersion: denoiser.OIDN_VERSION, oidnMode: filtered.mode, ...(filtered.note ? { denoiserNote: filtered.note } : {}) });
     } catch (error) {
       report.denoiserNote = `OIDN failed (${error.message}): the GPU a-trous filter ran instead.`;
       denoise = 'atrous';

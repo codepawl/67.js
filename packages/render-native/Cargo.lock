@@ -654,6 +654,7 @@ name = "render-native"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "libloading 0.8.9",
  "napi",
  "napi-build",
  "napi-derive",

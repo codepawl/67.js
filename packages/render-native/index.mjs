@@ -140,6 +140,23 @@ export function denoiseAtrous({ width, height, rgba, albedo, normal, depth, vari
   return loadAddon().denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance });
 }
 
+/**
+ * Opens a persistent OIDN device and filter inside the addon. The OIDN shared library is loaded at run time from
+ * `libraryPath` (`findOidnLibrary()` of the denoise package), so the addon works without it. Returns the native object
+ * with `denoise({ width, height, color, albedo, normal })`, `close()` and `deviceSeconds`. Use
+ * `createOidnDenoiser` of the denoise package for the wrapper that jobs call.
+ */
+export function createNativeOidnDenoiser({ libraryPath, device = 'cpu', quality = 'high', cleanAux = false, threads = 0 }) {
+  if (typeof libraryPath !== 'string' || libraryPath === '') {
+    throw new TypeError('createNativeOidnDenoiser: pass `libraryPath`, the OIDN shared library (findOidnLibrary() in the denoise package).');
+  }
+  const addon = loadAddon();
+  if (typeof addon.OidnDenoiser !== 'function') {
+    throw new Error('The built native tracer has no OIDN support: run `npm run build` in packages/render-native again.');
+  }
+  return new addon.OidnDenoiser({ libraryPath, device, quality, cleanAux, threads });
+}
+
 function hasFilterOptions(options) {
   return options.filterType !== undefined || options.pixelFilter !== undefined || options.filterWidth !== undefined;
 }
