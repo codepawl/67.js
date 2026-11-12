@@ -11,6 +11,7 @@ import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 import { denoiseRadiance } from '../../src/path-tracer-denoise.js';
 import { applyGreyDiffuseOverride } from './grey-diffuse-override.mjs';
+import { denoiseWithOidn } from '../../packages/denoise-oidn/index.mjs';
 
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
 const SUPPORTED_FILTERS = new Set(['box', 'gaussian', 'blackman-harris']);
@@ -84,6 +85,17 @@ function parseDenoiseOption(argumentList) {
   return parseChoiceOption(argumentList, '--denoise', ['none', 'wavelet', 'atrous'], 'none');
 }
 
+function parseOidnDevicesOption(argumentList) {
+  const requested = String(readFlagValue(argumentList, '--oidn-devices', ''));
+  const devices = requested === '' ? [] : requested.split(',');
+  for (const device of devices) {
+    if (!['cpu', 'cuda', 'default'].includes(device)) {
+      throw new RangeError(`Option --oidn-devices takes a comma list of cpu, cuda or default, got "${device}".`);
+    }
+  }
+  return devices;
+}
+
 function parseLightSamplingOption(argumentList) {
   const lightSampling = String(readFlagValue(argumentList, '--light-sampling', 'auto'));
   if (!['auto', 'tree', 'uniform'].includes(lightSampling)) {
@@ -102,7 +114,7 @@ function parseLightSamplingOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--grey-diffuse] [--write-depth]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda] [--grey-diffuse] [--write-depth]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -132,6 +144,7 @@ function parseTraceArguments(argumentList) {
     fireflyClamp: parseNumberOption(argumentList, '--firefly-clamp', 1e9, 0),
     noiseThreshold: parseNumberOption(argumentList, '--noise-threshold', 0, 0),
     denoise: parseDenoiseOption(argumentList),
+    oidnDevices: parseOidnDevicesOption(argumentList),
     samplesPerDispatch: argumentList.includes('--samples-per-dispatch')
       ? parseIntegerOption(argumentList, '--samples-per-dispatch', 16, 1)
       : undefined,
@@ -194,6 +207,38 @@ function applyWavelet(traced, linearRgb, width, height) {
   return { image: result, seconds, replacedPixels };
 }
 
+/**
+ * Comparison runs only: runs the OIDN addon (packages/denoise-oidn, the official oidnDenoise tool through PFM files) on the
+ * traced colour with the kernel's first-hit albedo and normal guides, once per device, and writes each result to
+ * <prefix>.oidn-<device>.npy. The seconds are a second, warm call as the addon is built (PFM write, tool start, weights
+ * load, filter, PFM read); the first call is reported apart.
+ */
+async function runOidnComparison(traced, linearRgb, options, outputPrefix) {
+  const albedo = traced.albedo;
+  const normal = new Float32Array(traced.normal);
+  normalizeNormals(normal);
+  const results = {};
+  for (const device of options.oidnDevices) {
+    const callOidn = () => denoiseWithOidn({ width: options.width, height: options.height, color: linearRgb, albedo, normal, device });
+    try {
+      const firstStarted = performance.now();
+      await callOidn();
+      const firstSeconds = (performance.now() - firstStarted) / 1000;
+      const started = performance.now();
+      const denoised = await callOidn();
+      results[device] = {
+        seconds: Number(((performance.now() - started) / 1000).toFixed(6)),
+        firstCallSeconds: Number(firstSeconds.toFixed(6)),
+      };
+      await writeFloat32Npy(`${outputPrefix}.oidn-${device}.npy`, denoised, [options.height, options.width, 3]);
+    } catch (error) {
+      // One failing device (for example CUDA missing in a container) must not lose the other variants of this trace.
+      results[device] = { error: String(error.message).slice(0, 600) };
+    }
+  }
+  return results;
+}
+
 async function runCli() {
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   const options = parseTraceArguments(process.argv.slice(2));
@@ -247,6 +292,7 @@ async function runCli() {
   if (unfilteredNpyPath) {
     await writeFloat32Npy(unfilteredNpyPath, unfilteredRgb, [options.height, options.width, 3]);
   }
+  const oidnTrial = options.oidnDevices.length > 0 ? await runOidnComparison(traced, unfilteredRgb, options, options.outputPrefix) : null;
   const setupSeconds = sceneBuildSeconds + traced.setupSeconds + traced.compileSeconds + traced.uploadSeconds + traced.accelerationBuildSeconds;
   // The depth buffer is the mean first-hit distance ALONG THE RAY (unit direction), 0 where the ray missed; Cycles' Z is
   // the distance along the view axis. compare-depth.py converts. Cook's film averages over all samples, misses included.
@@ -290,6 +336,7 @@ async function runCli() {
     denoiseGpuSeconds: Number((traced.denoiseGpuSeconds ?? 0).toFixed(6)),
     denoiseCompileSeconds: Number((traced.denoiseCompileSeconds ?? 0).toFixed(6)),
     denoiseNonFinitePixelsReplaced: wavelet ? wavelet.replacedPixels : 0,
+    oidnTrial,
     triangleCount: nativeInput.triangleCount,
     adapter: traced.adapter,
     backend: traced.backend,
