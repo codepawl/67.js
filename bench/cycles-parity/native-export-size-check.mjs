@@ -1,6 +1,6 @@
 // Job-level check of the export size rule (#1055): about 1,500,000 unique triangles with 150,000 instances stay inside both job bounds but
 // not inside one message, so the export must refuse with the new RangeError; the same triangles with 20,000 instances must export.
-//   NODE_OPTIONS=--max-old-space-size=16384 node bench/cycles-parity/native-export-size-check.mjs
+//   NODE_OPTIONS=--max-old-space-size=16384 node bench/cycles-parity/native-export-size-check.mjs [card counts]
 import * as pack from '../../src/path-tracer-gpu-pack.js';
 import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
 import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../../packages/render-native/job-input.mjs';
@@ -22,4 +22,5 @@ function exportWithCards(cardCount) {
   }
 }
 
-for (const cardCount of [20_000, 150_000]) console.log(`NATIVE_EXPORT_SIZE ${JSON.stringify(exportWithCards(cardCount))}`);
+const requestedCounts = process.argv.slice(2).map(Number);
+for (const cardCount of requestedCounts.length > 0 ? requestedCounts : [20_000, 150_000]) console.log(`NATIVE_EXPORT_SIZE ${JSON.stringify(exportWithCards(cardCount))}`);

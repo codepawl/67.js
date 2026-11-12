@@ -47,11 +47,11 @@ export function encodeNativeInputV2(input) {
 // other tracer keep the 400,000 of the CPU and WebGL paths.
 export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
 // The instance bound of the same export (see buildTraceScene's maximumInstances).
-export const NATIVE_JOB_MAXIMUM_INSTANCES = 500_000;
+export const NATIVE_JOB_MAXIMUM_INSTANCES = 1_000_000;
 
 // Every table of the export travels as base64 inside one evaluate result, one JSON string, and V8 refuses a string above
-// 536,870,888 characters. The bounds above are independent (about 299 characters per unique triangle, 555 per instance), so the
-// export checks the sum of its real tables against this share of the limit; the rest is the JSON around the tables.
+// 536,870,888 characters. The bounds above are independent (about 299 characters per unique triangle, 214 per instance whose material record is shared
+// and up to 555 per instance with a record of its own), so the export checks the sum of its real tables against this share of the limit; the rest is the JSON around the tables.
 export const V8_MAXIMUM_STRING_LENGTH = 536_870_888;
 export const NATIVE_EXPORT_MAXIMUM_CHARACTERS = Math.floor(V8_MAXIMUM_STRING_LENGTH * 0.95);
 
@@ -68,7 +68,7 @@ export function requireTableSizesFit(tables) {
   const total = encodedExportLength(tables.map(([, bytes]) => bytes));
   if (total <= NATIVE_EXPORT_MAXIMUM_CHARACTERS) return;
   const largest = [...tables].sort((first, second) => second[1] - first[1]).slice(0, 3).map(([name, bytes]) => `${name} ${encodedExportLength([bytes])}`).join(', ');
-  const error = new RangeError(`The native scene export is ${total} base64 characters in total (largest tables: ${largest}), over the ${NATIVE_EXPORT_MAXIMUM_CHARACTERS} one message can carry. Pass fewer parts (each instance takes about 555 characters), fewer unique triangles (about 299 each), or smaller textures.`);
+  const error = new RangeError(`The native scene export is ${total} base64 characters in total (largest tables: ${largest}), over the ${NATIVE_EXPORT_MAXIMUM_CHARACTERS} one message can carry. Pass fewer parts (each instance takes about 214 characters, 555 when its material is not shared with another part), fewer unique triangles (about 299 each), or smaller textures.`);
   error.exportTooLarge = true;
   throw error;
 }
