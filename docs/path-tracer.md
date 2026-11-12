@@ -56,6 +56,15 @@ A part with a material `subsurface` weight above 0 sends that share of its diffu
 
 Also checked before any ray is traced: samples times pixels times bounces at most 4 billion, 400,000 triangles, 1,024 parts, 32 lights, and finite numbers and in-range indices in every part. A render job limits `maxSeconds` to 600: the job runs on workers without blocking the page, and its deadline is `maxSeconds` plus 60 seconds for the page and the PNG, so a trace that reaches its limit still ends before the job does.
 
+### Instanced scenes for the native tracer
+
+`buildTraceScene(parts, environment, { instancing: true })` keeps parts that share one geometry object as instances of it, and `buildNativeInputV2` packs them as one bottom-level structure per geometry plus one instance record per part, for `traceNative` with `kernel: "cycles"`. Without the option the scene is flattened as before, and a scene where no two parts share a geometry is flattened too, with output identical to the default.
+
+- Sharing is decided after the trace geometry is resolved. A skinned, flush-lifted or box-mapped part gets a geometry of its own, and a geometry with per-triangle materials is not shared either: those parts are moved into world space once and traced as instances with an identity matrix.
+- Limits: 400,000 triangles counted once per shared geometry, 1,024 distinct geometries (the part limit, counted on geometries) and 65,536 instances. An instanced scene has no world-space triangle arrays or CPU BVH, so only `buildNativeInputV2` reads it.
+- A part's material is its own entry in `materials`, so copies may differ in material; a multi-material mesh stays one geometry with the materials the part names.
+- `buildNativeInput` (the `legacy` kernel) refuses an instanced scene with an error; build the scene without `instancing` for that kernel. Render jobs still export flattened tables.
+
 The same scene and options give the same bytes. Random numbers come from a hash of the pixel, the sample and the seed, never from `Math.random` or the clock, and a pixel does not depend on which thread drew it.
 
 ## Choosing a backend
