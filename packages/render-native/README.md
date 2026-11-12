@@ -31,3 +31,5 @@ const { radiance, escaped } = traceNativeTexels(input, { count: texelCount, poin
 ```
 
 `radiance` is the mean light that reaches each texel (three floats per texel) and `escaped` the share of first rays that left the scene. The agent runtime uses it for recipe bakes (`bake.backend: "native"`).
+
+Cook's sampler is an Owen-scrambled Sobol sequence (Burley 2020); `sampler: 'pcg'` selects the earlier white-noise hash. Lights are picked through a light tree (Conty and Kulla 2018) when a kind, analytic lights or emissive triangles, holds more than 8 emitters, no sun is among the lights and no instance restricts its light group; `useLightTree: true` forces it and `false` turns it off. Both change only the noise pattern of the image, not its mean. The pixel filter stays `box` unless `filterType: 'blackman-harris'` is passed ([FORMAT-v2.md](./FORMAT-v2.md)).

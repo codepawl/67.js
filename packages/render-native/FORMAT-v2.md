@@ -37,7 +37,7 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 | `20` | `4` | `4` | `u32` | `samples_per_dispatch` | Samples traced per pixel in one dispatch (`>= 1`) |
 | `24` | `4` | `4` | `u32` | `total_samples` | Target total samples per pixel |
 | `28` | `4` | `4` | `u32` | `seed` | Deterministic scramble seed |
-| `32` | `4` | `4` | `u32` | `kernel_flags` | Bitmask: `1=USE_LIGHT_TREE`, `2=HAS_VOLUME`, `4=HAS_SUBSURFACE`, `8=ORTHOGRAPHIC_CAMERA`, `16=ADAPTIVE_SAMPLING`, `32=TRANSPARENT_BACKGROUND` |
+| `32` | `4` | `4` | `u32` | `kernel_flags` | Bitmask: `1=USE_LIGHT_TREE`, `2=HAS_VOLUME`, `4=HAS_SUBSURFACE`, `8=ORTHOGRAPHIC_CAMERA`, `16=ADAPTIVE_SAMPLING`, `32=TRANSPARENT_BACKGROUND`, `64=PCG_SAMPLER` (unset: Owen-scrambled Sobol-Burley), `128=USE_EMISSIVE_LIGHT_TREE` |
 | `36` | `4` | `4` | `f32` | `adaptive_threshold` | Adaptive stop threshold (`0.0` = disabled) |
 | `40` | `4` | `4` | `f32` | `clamp_direct` | Effective direct radiance ceiling at bounce `0` (`0.0` or `>= 1e30` = unclamped; Cycles `sample_clamp_direct * 3.0`) |
 | `44` | `4` | `4` | `f32` | `clamp_indirect` | Effective indirect radiance ceiling at bounce `> 0` (`0.0` or `>= 1e30` = unclamped; Cycles `sample_clamp_indirect * 3.0`) |
@@ -289,6 +289,13 @@ Convention: `direction` is always the **unit emission direction pointing from th
 ## 7. Light Tree Nodes — `LightTreeNode` (`@binding(7)`)
 
 Total stride: **64 bytes** (`4 × 16 B`), alignment: **16 bytes**.
+
+`light-tree-v2.mjs` builds the buffer. It holds one tree over the analytic lights and one over the emissive triangles (a kind keeps the cumulative-weight pick when the lights hold a sun, any instance restricts its light group, or the kind has more than 16383 emitters; `useLightTree: false` builds neither, `true` builds every tree that can exist, and the default builds one for a kind with more than 8 emitters). Layout:
+
+- Node `0` is a directory: `left_child` is the analytic root (flag `1=USE_LIGHT_TREE`), `right_or_first_emitter` the emissive root (flag `128=USE_EMISSIVE_LIGHT_TREE`, `0xFFFFFFFF` when absent) and `light_group_mask_or` the node index of the first emissive leaf.
+- Leaves come first: the leaf of light `i` is node `1 + i`, the leaf of emissive triangle `i` is node `emissive_leaf_base + i`. Inner nodes follow each block.
+- A leaf keeps `-1 - parent` in `left_child`; an inner node keeps its parent in the low 16 bits of `emitter_count_and_kind`. The kernel walks up from a leaf to learn the chance of having picked that emitter from the previous shading point, for MIS.
+- `theta_o` and `theta_e` are angles in radians. The importance ignores the surface normal, so the chance is the same from the next-event sample and from the BSDF ray that later hits the emitter.
 
 | Byte Offset | Size (B) | Alignment (B) | WGSL Type | Field | Description |
 | ---: | ---: | ---: | :--- | :--- | :--- |

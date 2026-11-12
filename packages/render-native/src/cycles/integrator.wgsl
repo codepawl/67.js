@@ -896,6 +896,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       if (closure.emission.x > 0.0 || closure.emission.y > 0.0 || closure.emission.z > 0.0) {
         let emission_weight = lgt_emissive_surface_weight(
           point.emissive_index,
+          ray_origin,
           surface_hit.t,
           ray_dir,
           is_camera_ray,
