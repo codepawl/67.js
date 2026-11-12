@@ -3,7 +3,7 @@
 // to the bytes it always did) and lays the rest of the material over it: blend opacity, sheen, specular, anisotropy,
 // iridescence, attenuation and the layer textures. A flattened scene and an instanced one go through the same records, so a
 // part looks the same whether or not other geometry in the scene is shared.
-import { buildNativeInput, packNativeMaterialTables } from './pack-input.mjs';
+import { buildNativeV1Tables, packNativeMaterialTables } from './pack-input.mjs';
 import { buildNativeInputV2, reduceV1MaterialTable, upgradeNativeInputV1ToV2 } from './pack-input-v2.mjs';
 
 const ALL_LIGHT_GROUPS = 0xffffffff;
@@ -186,5 +186,5 @@ export function buildFlattenedJobNativeInput(scene, camera, options, pack, resol
     ...(options.samples === undefined ? {} : { samples: options.samples }),
     ...(options.textureMips === undefined ? {} : { textureMips: options.textureMips }),
   };
-  return upgradeNativeInputV1ToV2(buildNativeInput(scene, camera, options, pack), upgradeOptions, carriedFields);
+  return upgradeNativeInputV1ToV2(buildNativeV1Tables(scene, camera, options, pack), upgradeOptions, carriedFields, scene.partRayVisibility ?? null);
 }

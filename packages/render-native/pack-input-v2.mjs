@@ -2750,9 +2750,10 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
  * Upgrades a legacy v1 `buildNativeInput` payload to `FORMAT-v2` (`schemaVersion: 2`) so existing callers passing v1
  * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites. `carriedFields` (one
  * `carriedMaterialFields` result per material) adds what the v1 material table cannot hold; without it the records hold the
- * v1 fields alone.
+ * v1 fields alone. `partRayVisibility` (a flattened scene's `partRayVisibility`, one FORMAT-v2 visibility byte per material)
+ * sets the ray kinds each material's instance is visible to; without it a shadow-only material is hidden from camera rays alone.
  */
-export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = undefined) {
+export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = undefined, partRayVisibility = null) {
   if (v1Input?.schemaVersion === FORMAT_V2_VERSION) {
     return v1Input;
   }
@@ -2910,7 +2911,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
       opaqueTriangleCount: opaque.length,
       totalTriangleCount: ordered.length,
       materialOverride: INVALID_INDEX_V2,
-      visibilityFlags: materialShadowOnly[matIdx] ? INSTANCE_DEFAULT_VISIBILITY & ~INSTANCE_VISIBILITY_CAMERA : INSTANCE_DEFAULT_VISIBILITY,
+      visibilityFlags: partRayVisibility?.[matIdx] ?? (materialShadowOnly[matIdx] ? INSTANCE_DEFAULT_VISIBILITY & ~INSTANCE_VISIBILITY_CAMERA : INSTANCE_DEFAULT_VISIBILITY),
       lightGroupMaskLo: maskLo,
       lightGroupMaskHi: maskHi,
       emissiveBaseOffset,

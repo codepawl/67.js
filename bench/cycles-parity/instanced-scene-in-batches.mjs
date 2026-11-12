@@ -55,29 +55,6 @@ export function splitGeometriesIntoBatches(groups) {
   return [[...firstBatch], [...secondBatch]];
 }
 
-// FORMAT-v2 instance visibility bits: 1 camera, 2 diffuse, 4 glossy, 8 transmission, 16 shadow, 32 volume scatter.
-const RAY_VISIBILITY_BITS = { camera: 1, diffuse: 2, glossy: 4, transmission: 8, shadow: 16, volumeScatter: 32 };
-const ALL_RAY_KINDS = 63;
-
-function visibilityFlagsFor(part) {
-  let flags = ALL_RAY_KINDS;
-  for (const [kind, isVisible] of Object.entries(part.rayVisibility ?? {})) {
-    if (isVisible === false) {
-      flags &= ~RAY_VISIBILITY_BITS[kind];
-    }
-  }
-  return flags;
-}
-
-// Each instance of a batch scene is its part, in order; a part that hides from some ray kinds gets those bits cleared.
-function applyRayVisibility(scene, batchParts) {
-  scene.instances.forEach((instance, index) => {
-    if (batchParts[index].rayVisibility) {
-      instance.visibilityFlags = visibilityFlagsFor(batchParts[index]);
-    }
-  });
-}
-
 export function buildInstancedTraceSceneInBatches(parts, environment) {
   const groups = groupPartsByGeometry(parts);
   const batches = splitGeometriesIntoBatches(groups);
@@ -87,7 +64,6 @@ export function buildInstancedTraceSceneInBatches(parts, environment) {
     if (!scene.instances) {
       throw new RangeError('A batch of the instanced scene has no shared geometry and was flattened.');
     }
-    applyRayVisibility(scene, batchParts);
     return scene;
   });
   const [firstScene, ...otherScenes] = scenes;

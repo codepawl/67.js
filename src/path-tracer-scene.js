@@ -360,8 +360,70 @@ function resolveTraceLocalVolumes(input, parts) {
   return { volumes, boundsOnlyParts: parts.filter(part => meshPartNames.has(part.name) && part.visible === false) };
 }
 
-// Camera rays skip a shadow-only part; every other ray kind still sees it (visibility bits 2, 4, 8, 16 and 32 of FORMAT-v2).
-const INSTANCE_VISIBILITY_WITHOUT_CAMERA = 2 | 4 | 8 | 16 | 32;
+// FORMAT-v2 instance visibility bits, the same names a part's `rayVisibility` takes.
+export const RAY_VISIBILITY_BITS = Object.freeze({ camera: 1, diffuse: 2, glossy: 4, transmission: 8, shadow: 16, volumeScatter: 32 });
+const ALL_RAY_KINDS = 63;
+
+function describePart(part, index) {
+  return typeof part?.name === 'string' && part.name ? `part "${part.name}"` : `part ${index}`;
+}
+
+function requireRayVisibilityObject(rayVisibility, label) {
+  if (rayVisibility === null || typeof rayVisibility !== 'object' || Array.isArray(rayVisibility)) {
+    throw new TypeError(`${label} rayVisibility must be an object such as { shadow: false } with keys from ${Object.keys(RAY_VISIBILITY_BITS).join(', ')}, got ${JSON.stringify(rayVisibility)}.`);
+  }
+}
+
+function rayKindBit(kind, value, label) {
+  const bit = RAY_VISIBILITY_BITS[kind];
+  if (bit === undefined) {
+    throw new TypeError(`${label} rayVisibility has the unknown ray kind "${kind}": use ${Object.keys(RAY_VISIBILITY_BITS).join(', ')}.`);
+  }
+  if (typeof value !== 'boolean') {
+    throw new TypeError(`${label} rayVisibility.${kind} must be true or false, got ${JSON.stringify(value)}.`);
+  }
+  return bit;
+}
+
+/**
+ * The FORMAT-v2 visibility bits of one part: `rayVisibility: { camera, diffuse, glossy, transmission, shadow, volumeScatter }`
+ * (a kind set to false hides the part from those rays), `castShadow: false` as shadow off, and `shadowOnly` as camera off.
+ * A part that sets none of them gets 63, every ray kind.
+ */
+export function partRayVisibilityFlags(part, index = 0) {
+  const label = describePart(part, index);
+  let flags = ALL_RAY_KINDS;
+  if (part.rayVisibility !== undefined) {
+    requireRayVisibilityObject(part.rayVisibility, label);
+    for (const [kind, value] of Object.entries(part.rayVisibility)) {
+      const bit = rayKindBit(kind, value, label);
+      if (value === false) flags &= ~bit;
+    }
+  }
+  if (part.castShadow === false) {
+    if (part.rayVisibility?.shadow === true) {
+      throw new TypeError(`${label} sets castShadow: false and rayVisibility.shadow: true, which disagree: drop one of them.`);
+    }
+    flags &= ~RAY_VISIBILITY_BITS.shadow;
+  }
+  if (part.shadowOnly === true) {
+    if ((flags & RAY_VISIBILITY_BITS.shadow) === 0) {
+      throw new TypeError(`${label} sets shadowOnly with shadow rays off (castShadow: false or rayVisibility.shadow: false), which would hide it from every ray: keep shadow rays on, or drop shadowOnly.`);
+    }
+    flags &= ~RAY_VISIBILITY_BITS.camera;
+  }
+  return flags;
+}
+
+function requestsRayVisibility(part) {
+  return part.rayVisibility !== undefined || part.castShadow === false;
+}
+
+// One byte per part for a flattened scene, or null when no part asks for a ray visibility (shadowOnly alone keeps its own path).
+function flattenedRayVisibility(parts) {
+  if (!parts.some(requestsRayVisibility)) return null;
+  return Uint8Array.from(parts, (part, index) => partRayVisibilityFlags(part, index));
+}
 
 /**
  * True when the part keeps the geometry object it was authored with, so its copies can share one bottom-level structure.
@@ -429,7 +491,8 @@ function instanceFor(part, geometry, partIndex, material) {
     lightMask: material.lightMask,
   };
   if (part.material?.lightMaskHi !== undefined) instance.lightMaskHi = part.material.lightMaskHi;
-  if (part.shadowOnly === true) instance.visibilityFlags = INSTANCE_VISIBILITY_WITHOUT_CAMERA;
+  const visibilityFlags = partRayVisibilityFlags(part, partIndex);
+  if (visibilityFlags !== ALL_RAY_KINDS) instance.visibilityFlags = visibilityFlags;
   return instance;
 }
 
@@ -513,6 +576,8 @@ export function buildTraceScene(allParts, environment = {}, options = {}) {
     // The parts' own materials: the fields resolveMaterial leaves out, which the native "cycles" kernel shades.
     partMaterials: parts.map(part => part.material ?? {}),
     shadowOnlyParts: parts.some(part => part.shadowOnly === true) ? Uint8Array.from(parts, part => (part.shadowOnly === true ? 1 : 0)) : null,
+    // Per part FORMAT-v2 visibility bits for the native "cycles" kernel; the "legacy" kernel and the other tracers do not read them.
+    partRayVisibility: flattenedRayVisibility(parts),
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),
     volume: resolveTraceVolume(environment.volumeFog),

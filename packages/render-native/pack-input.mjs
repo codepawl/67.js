@@ -51,6 +51,14 @@ function writeParameters(scene, camera, options, lightCount, atlasWidth, subsurf
  * `pack` is the module `src/path-tracer-gpu-pack.js`, passed in so this package never imports the engine's source.
  */
 export function buildNativeInput(scene, camera, options, pack) {
+  if (scene.partRayVisibility) {
+    throw new TypeError('A part sets rayVisibility or castShadow: false, which the v1 tables cannot carry. Pack the scene for kernel "cycles" with buildFlattenedJobNativeInput (or build it with { instancing: true } and use buildJobNativeInput), or drop the part setting.');
+  }
+  return buildNativeV1Tables(scene, camera, options, pack);
+}
+
+/** The v1 tables of a flattened scene without the refusal above: for a caller that reads `scene.partRayVisibility` itself. */
+export function buildNativeV1Tables(scene, camera, options, pack) {
   if (scene.instances) {
     throw new TypeError('buildNativeInput packs flattened scenes for kernel "legacy" and cannot read instances: build the scene without { instancing: true }, or pack it with buildNativeInputV2 and trace with kernel "cycles".');
   }
