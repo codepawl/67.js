@@ -182,3 +182,53 @@ test('an sRGB colour map is blended on its stored values and decoded after, as C
   const decodedBlend = ((0.5 + 0.055) / 1.055) ** 2.4;
   assert.ok(Math.abs(result.rgba[centrePixel * 4] - decodedBlend) < 0.02, `centre red ${result.rgba[centrePixel * 4]}, expected ${decodedBlend}`);
 });
+
+function meanChannels(rgba) {
+  const sums = [0, 0, 0];
+  const pixelCount = rgba.length / 4;
+  for (let pixel = 0; pixel < pixelCount; pixel++) {
+    for (let channel = 0; channel < 3; channel++) {
+      sums[channel] += rgba[pixel * 4 + channel];
+    }
+  }
+  return sums.map((sum) => sum / pixelCount);
+}
+
+// A floor lit only by an emitter whose map is a high-contrast sRGB checker, seen from above so the emitter is out of the picture.
+// Light sampling and bounce rays estimate the same floor, so their means agree when a light sample carries the map read at the
+// sampled point. A light sample that carried the mean of the decoded texels instead is 10 percent or more too bright (#1030).
+test('a light sample on an emissive map reads the map at the sampled point, like a ray that hits it', { skip: !findNativeAddon() }, () => {
+  const width = 48;
+  const height = 32;
+  const samples = 512;
+  const checker = new Uint8Array(4 * 4 * 4);
+  for (let texel = 0; texel < 16; texel++) {
+    const bright = ((texel % 4) + Math.floor(texel / 4)) & 1;
+    checker.set(bright ? [235, 180, 60, 255] : [25, 40, 120, 255], texel * 4);
+  }
+  const emitterGeometry = { ...quadGeometry(0), uvs: new Float32Array([0, 4, 4, 4, 4, 0, 0, 0]) };
+  const scene = {
+    materials: [
+      { color: [0.6, 0.6, 0.6], roughness: 0.9 },
+      { color: [0, 0, 0], emission: 4, emissiveColor: [1, 1, 1], emissiveMap: { image: { width: 4, height: 4, data: checker }, colorSpace: 'srgb' } },
+    ],
+    instances: [
+      { geometry: quadGeometry(0), matrix: [1.5, 0, 0, 0, 0, 0, -1.4, 0, 0, 1, 0, 0, 0, -1, 1.6, 1], materialIndex: 0 },
+      { geometry: emitterGeometry, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0.2, 0, 1], materialIndex: 1 },
+    ],
+    lights: {},
+  };
+  const camera = createCamera({ eye: [0, 3, 1.6], target: [0, -1, 1.6], up: [0, 0, -1], fov: 40 }, width, height);
+  const meanOf = (directLighting) => {
+    const options = { width, height, samples, samplesPerDispatch: 32, seed: 7, directLighting };
+    const input = buildNativeInputV2(scene, camera, options);
+    return meanChannels(traceNative(input, { ...options, kernel: 'cycles' }).rgba);
+  };
+  const neeOnly = meanOf('nee-only');
+  const bsdfOnly = meanOf('bsdf-only');
+  for (let channel = 0; channel < 3; channel++) {
+    assert.ok(bsdfOnly[channel] > 0.01, `channel ${channel} of the floor is lit`);
+    const ratio = neeOnly[channel] / bsdfOnly[channel];
+    assert.ok(Math.abs(ratio - 1) < 0.04, `channel ${channel}: light sampling ${neeOnly[channel]} against bounce rays ${bsdfOnly[channel]}`);
+  }
+});
