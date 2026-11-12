@@ -983,6 +983,7 @@ function normalizeRecipe(input, limits) {
     throw invalidField('camera.fStop', recipe.camera.fStop, 'a camera without effects.depthOfField.blur above 0; set blur to 0 or remove fStop');
   }
   checkLightLinkNames(recipe);
+  if (recipe.effects?.distortion || recipe.effects?.flash) agentSceneModule('postSteps').checkAirStepNodes(recipe);
   if (Object.hasOwn(recipe, 'motion')) {
     recipe.motion = recipe.motion === null || recipe.motion === undefined ? null : agentSceneModule('motion').normalizeAgentMotion(recipe.motion, recipe);
   }
@@ -1880,7 +1881,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     },
     get effects() {
       const effects = structuredClone(state.recipe.effects);
-      return state.movedLook?.effects ?agentSceneModule('motion').motionEffects(effects, state.movedLook) : effects;
+      const moved = state.movedLook?.effects ? agentSceneModule('motion').motionEffects(effects, state.movedLook) : effects;
+      return moved.distortion || moved.flash ? agentSceneModule('postSteps').placeAirSteps(moved, state.motionTime, state.parts) : moved;
     },
     get shadow() {
       return structuredClone(state.recipe.shadow);

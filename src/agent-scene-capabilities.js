@@ -335,6 +335,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     notes: 'Bounced light from point, spot, area and key lights. Skips alpha, skin, morph, hair, cloth (bake.skipped). A preset shrinks to fit (bake.used, bake.reduction); explicit settings fail over maxPathWork or past maxSeconds. No environment map or specular; probes are specular, not in glTF.',
     limits: Object.freeze({ maxSeconds: BAKE_MAXIMUM_SECONDS, workerMaxSeconds: BAKE_WORKER_MAXIMUM_SECONDS, maxPathWork: BAKE_EXPLICIT_PATH_WORK_LIMIT, maxPointLights: MAX_POINT_LIGHTS }),
   }),
+  airSteps: 'effects.distortion (ring, haze) and effects.flash: up to 4 sources each at a centre or node, on the scene clock; effects tracks distortionStrength and flashIntensity fade them. See docs/agent-look.md.',
   motionLook: Object.freeze({
     light: 'id point:N, spot:N or area:N (index in its list): position, color, intensity; direction on spot and area',
     sun: 'direction, color, intensity (lightDirection, keyColor, keyIntensity)',

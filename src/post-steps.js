@@ -1,8 +1,11 @@
 import { postStepSupport } from './shader-registry.js';
 import { createStage, sharedFragmentHeader } from './camera-effects.js';
+import { numberInRange, groupOf, onlyKeys, triple } from './post-fields.js';
+import { resolveDistortion, resolveFlash, createDistortionStage, createFlashStage } from './post-air.js';
 import { resolveMask, usesObjectMask, maskShader, bindMask, unbindMask, MASK_UNIFORM_NAMES } from './post-mask.js';
 
 export { usesObjectMask };
+export { placeAirSteps, checkAirStepNodes } from './post-air.js';
 
 // Named post steps for a graded film: color balance (lift, gamma, gain), glare (streaks and fog glow), lens distortion with
 // dispersion, stylize filters (sharpen, kuwahara, posterize, pixelate) and composite (a chroma or luma key over a background).
@@ -19,30 +22,7 @@ const MAXIMUM_KUWAHARA_RADIUS = 8;
 // Longest lateral color offset at the image corner at full dispersion, as a fraction of the distance from the center.
 const MAXIMUM_DISPERSION = 0.03;
 
-function numberInRange(value, fallback, minimum, maximum, name) {
-  const result = value ?? fallback;
-  if (!Number.isFinite(result) || result < minimum || result > maximum) throw new RangeError(`${name} must be between ${minimum} and ${maximum}.`);
-  return result;
-}
-
 const NEUTRAL = Object.freeze({ lift: [0, 0, 0], gamma: [1, 1, 1], gain: [1, 1, 1] });
-
-function groupOf(value, name) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${name} must be an object.`);
-  return value;
-}
-
-function onlyKeys(group, allowed, name) {
-  for (const key of Object.keys(group)) {
-    if (!allowed.includes(key)) throw new TypeError(`Unknown ${name} field "${key}".`);
-  }
-}
-
-function triple(value, fallback, minimum, maximum, name) {
-  const source = value ?? fallback;
-  if (!Array.isArray(source) || source.length !== 3) throw new TypeError(`${name} must be three numbers.`);
-  return source.map((component, index) => numberInRange(component, fallback[index], minimum, maximum, `${name}[${index}]`));
-}
 
 function resolveColorBalance(input) {
   const group = groupOf(input, 'colorBalance');
@@ -161,6 +141,8 @@ function resolveLensDistortion(input) {
 /** The named steps an effects input sets, resolved with their defaults. A step the input leaves out stays out of the result. */
 export function resolvePostSteps(effects) {
   const resolved = {};
+  if (effects.distortion !== undefined) resolved.distortion = resolveDistortion(effects.distortion);
+  if (effects.flash !== undefined) resolved.flash = resolveFlash(effects.flash);
   if (effects.colorBalance !== undefined) resolved.colorBalance = resolveColorBalance(effects.colorBalance);
   if (effects.glare !== undefined) resolved.glare = resolveGlare(effects.glare);
   if (effects.lensDistortion !== undefined) resolved.lensDistortion = resolveLensDistortion(effects.lensDistortion);
@@ -175,14 +157,18 @@ export function resolvePostSteps(effects) {
 function refuseMaskWithLensDistortion(resolved) {
   const lens = resolved.lensDistortion;
   const lensIsOn = Boolean(lens) && (lens.distortion !== 0 || lens.dispersion > 0);
+  const airIsOn = resolved.distortion?.length > 0;
   const maskedStep = ['colorBalance', 'stylize', 'composite'].find(name => resolved[name]?.mask);
+  if (airIsOn && maskedStep) {
+    throw new TypeError(`${maskedStep}.mask cannot be combined with distortion: the mask is in undistorted screen space and would not line up with the bent picture. Fix: remove the mask, or remove the distortion step.`);
+  }
   if (lensIsOn && maskedStep) {
     throw new TypeError(`${maskedStep}.mask cannot be combined with lensDistortion: the mask is in undistorted screen space and would not line up with the warped image. Fix: remove the mask, or set lensDistortion.distortion and dispersion to 0.`);
   }
 }
 
 // Registers what the look needs: the field names it accepts and how to resolve them (src/shader-registry.js).
-postStepSupport.fields = ['colorBalance', 'glare', 'lensDistortion', 'stylize', 'composite'];
+postStepSupport.fields = ['distortion', 'flash', 'colorBalance', 'glare', 'lensDistortion', 'stylize', 'composite'];
 postStepSupport.resolve = resolvePostSteps;
 
 export const colorBalanceFragment = `${sharedFragmentHeader}
@@ -505,13 +491,13 @@ function createLensDistortionStage() {
 }
 
 /**
- * Adds glare, lens distortion, color balance, the stylize filters and the composite key to a renderer, after any depth of field and motion blur it has, in that
+ * Adds the air distortion and flash steps (post-air.js), glare, lens distortion, color balance, the stylize filters and the composite key to a renderer, after any depth of field and motion blur it has, in that
  * order. Like them it needs `depth: true`. Each stage runs only for a frame whose effects set it. A step with a `mask` by
  * objects reads the object ID pass: install the render passes and draw that pass before the lit frame (`usesObjectMask` says when).
  */
 export function installPostSteps(renderer) {
   if (!renderer.postStages.some(stage => stage.name === 'Glare')) {
-    renderer.postStages.push(createGlareStage(), createLensDistortionStage(), createColorBalanceStage(), createStylizeStage(), createCompositeStage());
+    renderer.postStages.push(createDistortionStage(stepsOf), createFlashStage(stepsOf), createGlareStage(), createLensDistortionStage(), createColorBalanceStage(), createStylizeStage(), createCompositeStage());
   }
   return renderer;
 }
