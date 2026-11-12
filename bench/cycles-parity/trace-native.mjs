@@ -66,9 +66,17 @@ function parseSamplerOption(argumentList) {
   return sampler;
 }
 
+function parseLightSamplingOption(argumentList) {
+  const lightSampling = String(readFlagValue(argumentList, '--light-sampling', 'auto'));
+  if (!['auto', 'tree', 'uniform'].includes(lightSampling)) {
+    throw new RangeError(`Option --light-sampling must be "auto", "tree" or "uniform", got "${lightSampling}".`);
+  }
+  return lightSampling;
+}
+
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -81,6 +89,9 @@ function parseTraceArguments(argumentList) {
     seed: parseIntegerOption(argumentList, '--seed', 1, 0),
     filterType: parseFilterTypeOption(argumentList),
     sampler: parseSamplerOption(argumentList),
+    lightSampling: parseLightSamplingOption(argumentList),
+    directLighting: String(readFlagValue(argumentList, '--direct-lighting', 'both')),
+    lightTreeProbe: argumentList.includes('--light-tree-probe'),
     filterWidth: parseNumberOption(argumentList, '--filter-width', 1.0, 0.01),
     clampDirect: parseNumberOption(argumentList, '--clamp-direct', 0, 0),
     clampIndirect: parseNumberOption(argumentList, '--clamp-indirect', 0, 0),
@@ -142,6 +153,7 @@ async function runCli() {
     kernel: options.kernel,
     filterType: options.filterType,
     sampler: options.sampler,
+    lightSampling: options.lightSampling,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,
@@ -169,6 +181,7 @@ async function runCli() {
     seed: options.seed,
     filterType: options.filterType,
     sampler: options.sampler,
+    lightSampling: options.lightSampling,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,

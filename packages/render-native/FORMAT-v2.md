@@ -40,7 +40,7 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 | `20` | `4` | `4` | `u32` | `samples_per_dispatch` | Samples traced per pixel in one dispatch (`>= 1`) |
 | `24` | `4` | `4` | `u32` | `total_samples` | Target total samples per pixel |
 | `28` | `4` | `4` | `u32` | `seed` | Deterministic scramble seed |
-| `32` | `4` | `4` | `u32` | `kernel_flags` | Bitmask: `1=USE_LIGHT_TREE`, `2=HAS_VOLUME`, `4=HAS_SUBSURFACE`, `8=ORTHOGRAPHIC_CAMERA`, `16=ADAPTIVE_SAMPLING`, `32=TRANSPARENT_BACKGROUND`, `64=WHITE_NOISE_SAMPLER` (bit clear: Cycles' Sobol-Burley blue-noise pattern, the default; bit set: the PCG hash sampler) |
+| `32` | `4` | `4` | `u32` | `kernel_flags` | Bitmask: `1=USE_LIGHT_TREE`, `2=HAS_VOLUME`, `4=HAS_SUBSURFACE`, `8=ORTHOGRAPHIC_CAMERA`, `16=ADAPTIVE_SAMPLING`, `32=TRANSPARENT_BACKGROUND`, `64=WHITE_NOISE_SAMPLER` (bit clear: Cycles' Sobol-Burley blue-noise pattern, the default; bit set: the PCG hash sampler), `128=LIGHT_TREE_PROBE`, `256=TEST_NEE_ONLY`, `512=TEST_BSDF_ONLY` (the last three are for tests). Bit `1` is set by the packer from `lightSampling` (`auto` default: tree from more than one emitter; `tree`; `uniform`) and compiles the traversal in or out (`SCENE_HAS_LIGHT_TREE`) |
 | `36` | `4` | `4` | `f32` | `adaptive_threshold` | Adaptive stop threshold (`0.0` = disabled) |
 | `40` | `4` | `4` | `f32` | `clamp_direct` | Effective direct radiance ceiling at bounce `0` (`0.0` or `>= 1e30` = unclamped; Cycles `sample_clamp_direct * 3.0`) |
 | `44` | `4` | `4` | `f32` | `clamp_indirect` | Effective indirect radiance ceiling at bounce `> 0` (`0.0` or `>= 1e30` = unclamped; Cycles `sample_clamp_indirect * 3.0`) |
@@ -319,7 +319,7 @@ Light tree revision 1 (`LIGHT_TREE_REVISION` in `light-tree-v2.mjs`; `schemaVers
 
 ## 7b. Light Tree Emitters — `LightTreeEmitter` (`@binding(13)`) and `light_to_tree` (`@binding(14)`)
 
-`LightTreeEmitter` stride: **32 bytes**, alignment 16 bytes. Slots are in tree order, so the emitters of a leaf are contiguous. Unified emitter index `i` is an analytic light for `i < light_count` and emissive triangle `i - light_count` otherwise; `light_to_tree[i]` is its slot. Both tables are optional in the napi input (`lightTreeEmitters`, `lightTreeEmitterCount`, `lightToTree` come together or not at all); without them the host binds a zeroed record. The kernel does not read them yet.
+`LightTreeEmitter` stride: **32 bytes**, alignment 16 bytes. Slots are in tree order, so the emitters of a leaf are contiguous. Unified emitter index `i` is an analytic light for `i < light_count` and emissive triangle `i - light_count` otherwise; `light_to_tree[i]` is its slot. Both tables are optional in the napi input (`lightTreeEmitters`, `lightTreeEmitterCount`, `lightToTree` come together or not at all); without them the host binds a zeroed record. With `USE_LIGHT_TREE` set the kernel (`light_tree.wgsl`, a translation of Cycles `kernel/light/tree.h`) picks one emitter per surface bounce by walking the nodes from the root with one random number, and finds the probability of a given emitter with `bit_trail_low/high` and `kind_and_depth` for the MIS weight of a BSDF-sampled hit. The environment map keeps its own importance sample and is not part of the tree.
 
 | Byte Offset | Size (B) | WGSL Type | Field | Description |
 | ---: | ---: | :--- | :--- | :--- |

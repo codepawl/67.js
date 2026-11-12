@@ -15,6 +15,7 @@ const BOOTSTRAP_MAIN_SOURCE: &str = include_str!("bootstrap_main.wgsl");
 include!(concat!(env!("OUT_DIR"), "/cycles_manifest_files.rs"));
 
 // ---- KernelParamsV2 byte offsets (verified against pack-input-v2.mjs and abi.wgsl) ----
+const KERNEL_FLAG_LIGHT_TREE_PROBE: u32 = 128;
 const KP_KERNEL_FLAGS_BYTE: usize = 32;    // u32[8]
 const KP_ENV_WIDTH_BYTE: usize = 192;      // u32[48]
 const KP_ENV_HEIGHT_BYTE: usize = 196;     // u32[49]
@@ -163,6 +164,16 @@ pub(crate) fn check_counts_match_kernel_params(input: &NativeTraceInputV2) -> Re
     Ok(())
 }
 
+/// The compute entry point to run: `main`, or `light_tree_probe` when the input carries `KERNEL_FLAG_LIGHT_TREE_PROBE` (tests).
+pub(crate) fn trace_entry_point(input: &NativeTraceInputV2) -> &'static str {
+    let kernel_flags = read_u32_le(&input.kernel_params, KP_KERNEL_FLAGS_BYTE);
+    if (kernel_flags & KERNEL_FLAG_LIGHT_TREE_PROBE) != 0 {
+        "light_tree_probe"
+    } else {
+        "main"
+    }
+}
+
 /// Specializes the assembled Cycles kernel source for the given scene input, replacing
 /// `const SCENE_HAS_*: bool = true;` sentinel declarations with the actual scene-derived values.
 /// The sentinel pattern is `true` (conservative default) so the kernel compiles and renders
@@ -185,6 +196,7 @@ pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2)
 
     let has_volume = (kernel_flags & 2) != 0 && volume_density > 0.0;
     let has_env_importance = env_width > 0 && env_height > 0 && env_total_weight > 0.0;
+    let has_light_tree = (kernel_flags & 1) != 0 && input.light_tree_node_count > 0;
     let has_emissive_triangles = input.emissive_triangle_count > 0;
     let has_analytic_lights = input.light_count > 0;
 
@@ -357,6 +369,7 @@ pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2)
     specialize!(FINITE_LIGHTS, has_finite_lights);
     specialize!(ENV_IMPORTANCE, has_env_importance);
     specialize!(LIGHT_LINKING, has_light_linking);
+    specialize!(LIGHT_TREE, has_light_tree);
     if max_closure_lobes < 4 {
         result = result.replace(
             "const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES",
@@ -478,6 +491,7 @@ mod specialization_tests {
                       const SCENE_HAS_FINITE_LIGHTS: bool = true;\n\
                       const SCENE_HAS_ENV_IMPORTANCE: bool = true;\n\
                       const SCENE_HAS_LIGHT_LINKING: bool = true;\n\
+                      const SCENE_HAS_LIGHT_TREE: bool = true;\n\
                       const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES
                       const MAX_CLOSURE_CANDIDATES: u32 = 7u; // SPECIALIZE_CANDIDATES";
         let result = specialize_cycles_kernel(source, &input);
@@ -496,6 +510,7 @@ mod specialization_tests {
         assert!(result.contains("const SCENE_HAS_FINITE_LIGHTS: bool = false;"), "FINITE_LIGHTS should be false");
         assert!(result.contains("const SCENE_HAS_ENV_IMPORTANCE: bool = false;"), "ENV_IMPORTANCE should be false");
         assert!(result.contains("const SCENE_HAS_LIGHT_LINKING: bool = false;"), "LIGHT_LINKING should be false");
+        assert!(result.contains("const SCENE_HAS_LIGHT_TREE: bool = false;"), "LIGHT_TREE should be false");
         assert!(result.contains("const MAX_CLOSURE_LOBES: u32 = 2u; // SPECIALIZE_LOBES"), "MAX_CLOSURE_LOBES should be 2u");
         assert!(
             result.contains("const MAX_CLOSURE_CANDIDATES: u32 = 2u; // SPECIALIZE_CANDIDATES"),

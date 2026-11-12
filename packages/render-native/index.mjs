@@ -9,7 +9,9 @@ import {
   FORMAT_V2_MAGIC,
   FORMAT_V2_VERSION,
   STRUCT_STRIDES_V2,
+  KERNEL_FLAG_USE_LIGHT_TREE,
   KERNEL_FLAG_WHITE_NOISE_SAMPLER,
+  resolveUseLightTree,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
   KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET,
   buildNativeInputV2,
@@ -88,6 +90,9 @@ export function traceNative(input, options = {}) {
   if (input?.schemaVersion === FORMAT_V2_VERSION && options.sampler !== undefined) {
     v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, options.sampler) };
   }
+  if (input?.schemaVersion === FORMAT_V2_VERSION && options.lightSampling !== undefined) {
+    v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, options.lightSampling) };
+  }
   return addon.traceSceneCycles(v2Input, {
     width,
     height,
@@ -96,6 +101,19 @@ export function traceNative(input, options = {}) {
     maxSeconds,
     bootstrapKernel,
   });
+}
+
+function withLightSamplingFlag(v2Input, lightSampling) {
+  const patchedParams = new Uint8Array(v2Input.kernelParams);
+  const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
+  const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
+  const emitterCount = (v2Input.lightCount ?? 0) + (v2Input.emissiveTriangleCount ?? 0);
+  const useTree = resolveUseLightTree(lightSampling, emitterCount, v2Input.lightTreeNodeCount ?? 0);
+  const patchedFlags = useTree
+    ? (flags | KERNEL_FLAG_USE_LIGHT_TREE) >>> 0
+    : (flags & ~KERNEL_FLAG_USE_LIGHT_TREE) >>> 0;
+  view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
+  return patchedParams;
 }
 
 function withSamplerFlag(kernelParams, sampler) {

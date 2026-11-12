@@ -13,6 +13,10 @@ export const KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET = 300;
 export const KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET = 32;
 
 export const VALID_SAMPLERS = Object.freeze(['sobol-burley', 'white']);
+/** `auto` picks the light tree when the scene has more than `LIGHT_TREE_AUTO_MIN_EMITTERS` emitters. */
+export const VALID_LIGHT_SAMPLING = Object.freeze(['auto', 'tree', 'uniform']);
+/** A single emitter is picked with probability 1 either way, so the tree only pays off from two emitters on. */
+export const LIGHT_TREE_AUTO_MIN_EMITTERS = 1;
 
 export const STRUCT_STRIDES_V2 = Object.freeze({
   kernelParams: 320,
@@ -25,7 +29,12 @@ export const STRUCT_STRIDES_V2 = Object.freeze({
   textureDescriptor: 32,
 });
 
-const KERNEL_FLAG_USE_LIGHT_TREE = 1;
+export const KERNEL_FLAG_USE_LIGHT_TREE = 1;
+/** Tests only: see `KERNEL_FLAG_TEST_NEE_ONLY` and `KERNEL_FLAG_TEST_BSDF_ONLY` in abi.wgsl. */
+export const KERNEL_FLAG_LIGHT_TREE_PROBE = 128;
+const KERNEL_FLAG_TEST_NEE_ONLY = 256;
+const KERNEL_FLAG_TEST_BSDF_ONLY = 512;
+export const VALID_DIRECT_LIGHTING = Object.freeze(['both', 'nee-only', 'bsdf-only']);
 const KERNEL_FLAG_HAS_VOLUME = 2;
 const KERNEL_FLAG_HAS_SUBSURFACE = 4;
 const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA = 8;
@@ -1495,6 +1504,26 @@ export function validateSamplerOption(sampler, callerName) {
   }
 }
 
+/** Throws unless `lightSampling` is undefined, "auto", "tree" or "uniform". */
+export function validateLightSamplingOption(lightSampling, callerName) {
+  if (lightSampling !== undefined && !VALID_LIGHT_SAMPLING.includes(lightSampling)) {
+    throw new RangeError(
+      `${callerName}: \`lightSampling\` must be "auto" (default), "tree" or "uniform", got ${JSON.stringify(lightSampling)}.`
+    );
+  }
+}
+
+/** True when the kernel should pick lights through the light tree for this scene and mode. */
+export function resolveUseLightTree(lightSampling, emitterCount, lightTreeNodeCount) {
+  if (lightTreeNodeCount <= 0 || lightSampling === 'uniform') {
+    return false;
+  }
+  if (lightSampling === 'tree') {
+    return emitterCount > 0;
+  }
+  return emitterCount > LIGHT_TREE_AUTO_MIN_EMITTERS;
+}
+
 export function validatePackOptions(options, callerName, requireDimensionsAndSamples = false) {
   if (!options || typeof options !== 'object') {
     throw new TypeError(`${callerName}: \`options\` must be an object.`);
@@ -1513,6 +1542,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
   validateSamplerOption(options.sampler, callerName);
+  validateLightSamplingOption(options.lightSampling, callerName);
   validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
@@ -1611,7 +1641,20 @@ function packKernelParamsV2({
   const volumeDensity = Math.max(0, Number(volume?.density ?? 0));
 
   let kernelFlags = 0;
-  if (options.useLightTree === true && counts.lightTreeNodeCount > 0) {
+  validateLightSamplingOption(options.lightSampling, 'packKernelParamsV2');
+  if (options.directLighting !== undefined && !VALID_DIRECT_LIGHTING.includes(options.directLighting)) {
+    throw new RangeError(`packKernelParamsV2: \`directLighting\` must be "both", "nee-only" or "bsdf-only", got ${JSON.stringify(options.directLighting)}.`);
+  }
+  if (options.directLighting === 'nee-only') {
+    kernelFlags |= KERNEL_FLAG_TEST_NEE_ONLY;
+  } else if (options.directLighting === 'bsdf-only') {
+    kernelFlags |= KERNEL_FLAG_TEST_BSDF_ONLY;
+  }
+  if (options.lightTreeProbe === true) {
+    kernelFlags |= KERNEL_FLAG_LIGHT_TREE_PROBE;
+  }
+  const emitterCount = counts.lightCount + counts.emissiveTriangleCount;
+  if (resolveUseLightTree(options.lightSampling, emitterCount, counts.lightTreeNodeCount)) {
     kernelFlags |= KERNEL_FLAG_USE_LIGHT_TREE;
   }
   if (volumeDensity > 0) {

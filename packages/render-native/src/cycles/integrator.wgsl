@@ -564,6 +564,15 @@ fn int_is_singular_bsdf_sample(closure: ptr<function, Closure>, point: ptr<funct
   return false;
 }
 
+fn int_closure_has_transmission(closure: ptr<function, Closure>) -> bool {
+  for (var lobe_index = 0u; lobe_index < (*closure).lobe_count; lobe_index += 1u) {
+    if ((*closure).lobes[lobe_index].lobe_type == LOBE_GLASS_GGX) {
+      return true;
+    }
+  }
+  return false;
+}
+
 fn int_accumulate_direct_sample(
   sample: LgtDirectSample,
   closure: ptr<function, Closure>,
@@ -582,7 +591,8 @@ fn int_accumulate_direct_sample(
   if (bsdf.value.x <= 0.0 && bsdf.value.y <= 0.0 && bsdf.value.z <= 0.0) {
     return;
   }
-  let mis_weight = select(lgt_power_heuristic(sample.pdf, bsdf.pdf), 1.0, sample.is_delta != 0u);
+  let nee_only = (kernel_params.kernel_flags & KERNEL_FLAG_TEST_NEE_ONLY) != 0u;
+  let mis_weight = select(lgt_power_heuristic(sample.pdf, bsdf.pdf), 1.0, sample.is_delta != 0u || nee_only);
   if (mis_weight <= 0.0) {
     return;
   }
@@ -854,6 +864,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         min_ray_pdf = min(phase_pdf, min_ray_pdf);
         prev_recv_lo = 0xFFFFFFFFu;
         prev_recv_hi = 0xFFFFFFFFu;
+        lgt_remember_mis_origin(scatter_pos, ray_dir, false, false);
         continue;
       }
 
@@ -943,11 +954,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         break;
       }
 
+      let picks_through_tree = lgt_use_light_tree() && (kernel_params.light_count + kernel_params.emissive_triangle_count) > 0u;
+      let closure_has_transmission = SCENE_HAS_GLASS && int_closure_has_transmission(&closure);
       for (var direct_source = 0u; direct_source < 3u; direct_source += 1u) {
+        if ((kernel_params.kernel_flags & KERNEL_FLAG_TEST_BSDF_ONLY) != 0u) {
+          break;
+        }
         var direct_sample: LgtDirectSample;
         direct_sample.valid = 0u;
         direct_sample.pdf = 0.0;
-        if (direct_source == 0u) {
+        if (direct_source == 0u && picks_through_tree) {
+          smp_seek(&rng, step, SMP_SLOT_ANALYTIC_PICK);
+          let tree_pick_u = smp_next_1d(&rng);
+          let tree_sample_uv = smp_next_2d(&rng);
+          direct_sample = lgt_sample_tree_emitter(&point, point.shading_normal, closure_has_transmission, tree_pick_u, tree_sample_uv);
+        } else if (direct_source == 1u && picks_through_tree) {
+          continue;
+        } else if (direct_source == 0u) {
           if (SCENE_HAS_ANALYTIC_LIGHTS && kernel_params.light_count > 0u) {
             smp_seek(&rng, step, SMP_SLOT_ANALYTIC_PICK);
             direct_sample = lgt_sample_analytic_light(
@@ -1058,6 +1081,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       min_ray_pdf = min(bsdf_sample.pdf, min_ray_pdf);
       prev_recv_lo = point.light_group_mask_lo;
       prev_recv_hi = point.light_group_mask_hi;
+      lgt_remember_mis_origin(point.position, point.shading_normal, closure_has_transmission, picks_through_tree);
     }
 
     let exposed = int_sanitize_radiance(sample_radiance * exposure);

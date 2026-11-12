@@ -30,6 +30,33 @@ fn lgt_empty_sample() -> LgtDirectSample {
   return sample;
 }
 
+// Shading point of the last surface bounce, kept for the MIS weight of the next hit. `lgt_mis_picked_by_tree` is false after a
+// volume scatter, whose direct light is picked from the flat analytic table.
+var<private> lgt_mis_picked_by_tree: bool = false;
+var<private> lgt_mis_position: vec3<f32> = vec3<f32>(0.0);
+var<private> lgt_mis_normal: vec3<f32> = vec3<f32>(0.0, 0.0, 1.0);
+var<private> lgt_mis_has_transmission: bool = false;
+
+fn lgt_use_light_tree() -> bool {
+  return SCENE_HAS_LIGHT_TREE && (kernel_params.kernel_flags & KERNEL_FLAG_USE_LIGHT_TREE) != 0u;
+}
+
+fn lgt_remember_mis_origin(position: vec3<f32>, normal: vec3<f32>, has_transmission: bool, picked_by_tree: bool) {
+  lgt_mis_position = position;
+  lgt_mis_normal = normal;
+  lgt_mis_has_transmission = has_transmission;
+  lgt_mis_picked_by_tree = picked_by_tree;
+}
+
+// Probability that the direct light pick chose this emitter from the last shading point. `flat_probability` is the
+// per-table probability used when the pick did not go through the tree.
+fn lgt_selection_probability(unified_index: u32, flat_probability: f32) -> f32 {
+  if (lgt_use_light_tree() && lgt_mis_picked_by_tree) {
+    return ltr_pdf(lgt_mis_position, lgt_mis_normal, lgt_mis_has_transmission, unified_index);
+  }
+  return flat_probability;
+}
+
 fn lgt_power_heuristic(pdf_a: f32, pdf_b: f32) -> f32 {
   if (pdf_a <= 0.0) {
     return 0.0;
@@ -525,7 +552,19 @@ fn lgt_sample_analytic_light(
     return lgt_empty_sample();
   }
   let light_index = lgt_binary_search_light_cdf(pick_u, count);
-  let light = lights[light_index];
+  return lgt_sample_analytic_light_at(light_index, lights[light_index].selection_pdf, shading_pos, receiver_lo, receiver_hi, sample_uv);
+}
+
+fn lgt_sample_analytic_light_at(
+  light_index: u32,
+  selection_pdf: f32,
+  shading_pos: vec3<f32>,
+  receiver_lo: u32,
+  receiver_hi: u32,
+  sample_uv: vec2<f32>,
+) -> LgtDirectSample {
+  var light = lights[light_index];
+  light.selection_pdf = selection_pdf;
   if (light.selection_pdf <= 0.0) {
     return lgt_empty_sample();
   }
@@ -551,8 +590,13 @@ fn lgt_sample_emissive_triangle(point: ptr<function, ShadingPoint>, pick_u: f32,
     return out;
   }
   let index = lgt_binary_search_emissive_cdf(pick_u, count);
+  return lgt_sample_emissive_triangle_at(point, index, emissive_triangles[index].selection_pdf, sample_uv);
+}
+
+fn lgt_sample_emissive_triangle_at(point: ptr<function, ShadingPoint>, index: u32, selection_pdf: f32, sample_uv: vec2<f32>) -> LgtDirectSample {
+  var out = lgt_empty_sample();
   let emitter = emissive_triangles[index];
-  if (emitter.selection_pdf <= 0.0 || emitter.area <= 0.0) {
+  if (selection_pdf <= 0.0 || emitter.area <= 0.0) {
     return out;
   }
   if (!lgt_links_match((*point).light_group_mask_lo, (*point).light_group_mask_hi, emitter.light_group_mask_lo, emitter.light_group_mask_hi)) {
@@ -587,11 +631,38 @@ fn lgt_sample_emissive_triangle(point: ptr<function, ShadingPoint>, pick_u: f32,
   out.wi = wi;
   out.distance = dist;
   out.radiance = emitter.radiance;
-  out.pdf = emitter.selection_pdf * pdf_solid_angle;
+  out.pdf = selection_pdf * pdf_solid_angle;
   out.target_instance = emitter.instance_index;
   out.target_triangle = emitter.triangle_index;
   out.cast_shadow = 1u;
   return out;
+}
+
+// Picks one emitter (analytic light or emissive triangle) through the light tree and samples a point on it.
+fn lgt_sample_tree_emitter(
+  point: ptr<function, ShadingPoint>,
+  normal: vec3<f32>,
+  has_transmission: bool,
+  pick_u: f32,
+  sample_uv: vec2<f32>,
+) -> LgtDirectSample {
+  var pick_probability = 0.0;
+  let slot = ltr_sample((*point).position, normal, has_transmission, pick_u, &pick_probability);
+  if (slot < 0 || pick_probability <= 0.0) {
+    return lgt_empty_sample();
+  }
+  let emitter = light_tree_emitters[u32(slot)];
+  if ((emitter.kind_and_depth & LTR_EMITTER_KIND_TRIANGLE) != 0u) {
+    return lgt_sample_emissive_triangle_at(point, emitter.record_index, pick_probability, sample_uv);
+  }
+  return lgt_sample_analytic_light_at(
+    emitter.record_index,
+    pick_probability,
+    (*point).position,
+    (*point).light_group_mask_lo,
+    (*point).light_group_mask_hi,
+    sample_uv,
+  );
 }
 
 fn lgt_direction_to_env_uv(direction: vec3<f32>, polar_out: ptr<function, f32>) -> vec2<f32> {
@@ -789,8 +860,11 @@ fn lgt_eval_analytic_lights_along_segment(
         let one_minus_cos = min(one_minus_cos_sphere, one_minus_cos_spot);
         pdf_solid_angle = 1.0 / max(TWO_PI * one_minus_cos, 1.0e-30);
       }
-      let pdf_nee = light.selection_pdf * pdf_solid_angle;
-      let mis_weight = select(lgt_power_heuristic(prev_bsdf_pdf, pdf_nee), 1.0, is_camera_ray || mis_skip);
+      var mis_weight = 1.0;
+      if (!(is_camera_ray || mis_skip)) {
+        let pdf_nee = lgt_selection_probability(index, light.selection_pdf) * pdf_solid_angle;
+        mis_weight = lgt_power_heuristic(prev_bsdf_pdf, pdf_nee);
+      }
       let medium_atten = select(vec3<f32>(1.0), exp(-medium_sigma * max(hit_t - t_min, 0.0)), in_medium);
       total += light.radiance * medium_atten * (spot_weight * falloff * mis_weight);
       continue;
@@ -850,8 +924,11 @@ fn lgt_eval_analytic_lights_along_segment(
           continue;
         }
       }
-      let pdf_nee = light.selection_pdf * pdf_solid_angle;
-      let mis_weight = select(lgt_power_heuristic(prev_bsdf_pdf, pdf_nee), 1.0, is_camera_ray || mis_skip);
+      var mis_weight = 1.0;
+      if (!(is_camera_ray || mis_skip)) {
+        let pdf_nee = lgt_selection_probability(index, light.selection_pdf) * pdf_solid_angle;
+        mis_weight = lgt_power_heuristic(prev_bsdf_pdf, pdf_nee);
+      }
       let medium_atten = select(vec3<f32>(1.0), exp(-medium_sigma * max(hit_t - t_min, 0.0)), in_medium);
       total += light.radiance * medium_atten * (spread_weight * falloff * mis_weight);
     }
@@ -907,8 +984,11 @@ fn lgt_eval_escaped_ray(
     if (dot(ray_dir, to_sun) < 1.0 - one_minus_cos) {
       continue;
     }
-    let pdf_nee = light.selection_pdf / max(TWO_PI * one_minus_cos, 1.0e-30);
-    let sun_mis = select(lgt_power_heuristic(prev_bsdf_pdf, pdf_nee), 1.0, is_camera_ray || mis_skip);
+    var sun_mis = 1.0;
+    if (!(is_camera_ray || mis_skip)) {
+      let pdf_nee = lgt_selection_probability(index, light.selection_pdf) / max(TWO_PI * one_minus_cos, 1.0e-30);
+      sun_mis = lgt_power_heuristic(prev_bsdf_pdf, pdf_nee);
+    }
     total += light.radiance * sun_mis;
   }
 
@@ -934,7 +1014,17 @@ fn lgt_emissive_surface_weight(
       return 0.0;
     }
   }
-  if (is_camera_ray || mis_skip || emitter.selection_pdf <= 0.0 || emitter.area <= 0.0) {
+  if (is_camera_ray || mis_skip || emitter.area <= 0.0) {
+    return 1.0;
+  }
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_TEST_NEE_ONLY) != 0u) {
+    return 0.0;
+  }
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_TEST_BSDF_ONLY) != 0u) {
+    return 1.0;
+  }
+  let selection_probability = lgt_selection_probability(kernel_params.light_count + emissive_index, emitter.selection_pdf);
+  if (selection_probability <= 0.0) {
     return 1.0;
   }
   let mat = materials[emitter.material_index];
@@ -945,6 +1035,6 @@ fn lgt_emissive_surface_weight(
   if (cos_light <= 1.0e-8) {
     return 0.0;
   }
-  let pdf_nee = emitter.selection_pdf * (hit_distance * hit_distance) / max(emitter.area * cos_light, 1.0e-20);
+  let pdf_nee = selection_probability * (hit_distance * hit_distance) / max(emitter.area * cos_light, 1.0e-20);
   return lgt_power_heuristic(prev_bsdf_pdf, pdf_nee);
 }
