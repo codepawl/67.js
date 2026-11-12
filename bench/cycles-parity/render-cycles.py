@@ -18,6 +18,11 @@ WATTS_PER_AREA_INTENSITY = math.pi
 SUN_ANGULAR_DIAMETER = math.radians(1.0)
 ENVIRONMENT_ROTATION_Z = -math.pi / 2.0
 PART_ID_STEPS = 64
+# A part may carry rayVisibility: { shadow: false, ... } for the ray kinds it is hidden from (Cook reads the same field).
+RAY_VISIBILITY_ATTRIBUTES = {
+    "camera": "visible_camera", "diffuse": "visible_diffuse", "glossy": "visible_glossy",
+    "transmission": "visible_transmission", "volumeScatter": "visible_volume_scatter", "shadow": "visible_shadow",
+}
 Y_UP_TO_Z_UP = Matrix((
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 0.0, -1.0, 0.0),
@@ -338,6 +343,8 @@ def build_scene_objects(scene, description):
         column_major = part_entry["matrix"]
         local_matrix = Matrix([[column_major[column * 4 + row] for column in range(4)] for row in range(4)])
         mesh_object.matrix_world = Y_UP_TO_Z_UP @ local_matrix
+        for ray_kind, is_visible in part_entry.get("rayVisibility", {}).items():
+            setattr(mesh_object, RAY_VISIBILITY_ATTRIBUTES[ray_kind], is_visible)
         scene.collection.objects.link(mesh_object)
 
 
@@ -430,7 +437,9 @@ def build_scene_lights(scene, environment_entry):
         sun_data = bpy.data.lights.new("Sun", "SUN")
         sun_data.energy = sun_strength
         sun_data.color = [channel / sun_strength for channel in key_color]
-        sun_data.angle = SUN_ANGULAR_DIAMETER
+        # A scene that sets sunAngularRadius (radians, as Cook reads it) gets that disc; the others keep the 1 degree default.
+        sun_radius = environment_entry.get("sunAngularRadius")
+        sun_data.angle = SUN_ANGULAR_DIAMETER if sun_radius is None else 2.0 * sun_radius
         sun_object = bpy.data.objects.new("Sun", sun_data)
         toward_light = Vector(convert_position_to_blender(environment_entry["lightDirection"])).normalized()
         sun_object.rotation_mode = "QUATERNION"
