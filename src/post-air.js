@@ -18,7 +18,7 @@ const MAXIMUM_NODE_ID_LENGTH = 128;
 const PLACEMENT_FIELDS = ['centre', 'node', 'time'];
 const RING_FIELDS = ['startTime', 'speed', 'thickness', 'strength', 'falloff', 'maxRadius', 'edge'];
 const HAZE_FIELDS = ['region', 'size', 'noiseScale', 'scroll', 'strength'];
-const FLASH_FIELDS = ['startTime', 'attack', 'decay', 'intensity', 'color', 'radius'];
+const FLASH_FIELDS = ['startTime', 'attack', 'decay', 'intensity', 'color', 'radius', 'ambient'];
 const HAZE_REGIONS = ['box', 'sphere'];
 
 function sourceList(value, step) {
@@ -100,6 +100,7 @@ function resolveFlashSource(input, index) {
     intensity: numberInRange(group.intensity, 4, 0, 1000, `${name}.intensity`),
     color: triple(group.color, [1, 0.85, 0.6], 0, 1, `${name}.color`),
     radius: numberInRange(group.radius, 50, 0.01, MAXIMUM_COORDINATE, `${name}.radius`),
+    ambient: numberInRange(group.ambient, 0, 0, 0.5, `${name}.ambient`),
   };
 }
 
@@ -199,13 +200,18 @@ void main() {
       vec3 radial = origin + direction * along - centre;
       float axisDistance = length(radial);
       float band = (axisDistance - shape[index].x) / shape[index].y;
+      vec3 toCentre = centre - origin;
+      float axisRight = length(cross(normalize(direction + rightDelta), toCentre));
+      float axisUp = length(cross(normalize(direction + upDelta), toCentre));
+      float pixelWidth = max(max(abs(axisRight - axisDistance), abs(axisUp - axisDistance)) * 3.0, 0.0001);
+      float edgeBand = (axisDistance - shape[index].x) / min(shape[index].y, pixelWidth);
       float shellDistance = along - sqrt(max(shape[index].x * shape[index].x - axisDistance * axisDistance, 0.0));
       float weight = exp(-band * band) * (1.0 - smoothstep(surface - shape[index].y, surface, shellDistance));
       if (weight < 0.002 || axisDistance < 0.0001) continue;
       vec2 onScreen = vec2(dot(radial, rightDelta), dot(radial, upDelta));
       if (length(onScreen) < 1e-9) continue;
       shift += normalize(onScreen) * weight * shape[index].z * ${RING_MAXIMUM_SHIFT.toFixed(3)} * resolution.y;
-      edgeLift += weight * shape[index].w;
+      edgeLift += exp(-edgeBand * edgeBand) * (1.0 - smoothstep(surface - shape[index].y, surface, shellDistance)) * shape[index].w;
       guardDistance = min(guardDistance, shellDistance);
     } else {
       // Haze: walk the ray through the box or ellipsoid and shift by noise taken at the middle of the stretch inside it.
@@ -249,13 +255,14 @@ void main() {
 export const flashFragment = `${airHeader}
 uniform int sourceCount;
 uniform vec4 flashPlacement[${MAXIMUM_AIR_SOURCES}];
-uniform vec3 flashLift[${MAXIMUM_AIR_SOURCES}];
+uniform vec4 flashLift[${MAXIMUM_AIR_SOURCES}];
 void main() {
   vec4 source = texture(sourceTexture, textureCoordinate);
   bool isSky = texture(sceneDepth, textureCoordinate).r >= 1.0;
   vec3 origin = rayPointAt(textureCoordinate, -1.0);
   vec3 direction = rayDirectionAt(textureCoordinate);
   vec3 lift = vec3(0.0);
+  float ambient = 0.0;
   for (int index = 0; index < ${MAXIMUM_AIR_SOURCES}; index++) {
     if (index >= sourceCount) break;
     vec3 centre = flashPlacement[index].xyz;
@@ -263,9 +270,11 @@ void main() {
     // Sky has no surface, so the light is measured from the pixel's ray; surfaces are measured from the point they sit at.
     float reach = isSky ? length(toCentre - direction * max(dot(toCentre, direction), 0.0)) : distance(worldPointAt(textureCoordinate), centre);
     float ratio = reach / flashPlacement[index].w;
-    lift += flashLift[index] / (1.0 + ratio * ratio);
+    lift += flashLift[index].rgb / (1.0 + ratio * ratio);
+    ambient += flashLift[index].w;
   }
-  outputColor = vec4(source.rgb + lift, source.a);
+  // Near the source the light falls off with distance; a small screen-wide gain keeps the rest of the frame from going dark by contrast.
+  outputColor = vec4(source.rgb * (1.0 + ambient) + lift, source.a);
 }`;
 
 /** Packs the active sources of a distortion step into the uniform arrays of its shader. */
@@ -293,13 +302,13 @@ export function packDistortion(sources) {
 /** Packs the lit sources of a flash step into the uniform arrays of its shader. */
 export function packFlash(sources) {
   const placement = new Float32Array(MAXIMUM_AIR_SOURCES * 4);
-  const lift = new Float32Array(MAXIMUM_AIR_SOURCES * 3);
+  const lift = new Float32Array(MAXIMUM_AIR_SOURCES * 4);
   let count = 0;
   for (const source of sources) {
     const level = flashLevel(source);
     if (level <= 0) continue;
     placement.set([...source.centre, source.radius], count * 4);
-    lift.set(source.color.map(component => component * level), count * 3);
+    lift.set([...source.color.map(component => component * level), source.ambient * level / source.intensity], count * 4);
     count++;
   }
   return { count, placement, lift };
@@ -331,7 +340,7 @@ export function createFlashStage(stepsOf) {
       const packed = packFlash(stepsOf(frame).flash);
       context.uniform1i(uniforms.sourceCount, packed.count);
       context.uniform4fv(uniforms.flashPlacement, packed.placement);
-      context.uniform3fv(uniforms.flashLift, packed.lift);
+      context.uniform4fv(uniforms.flashLift, packed.lift);
     },
   });
 }

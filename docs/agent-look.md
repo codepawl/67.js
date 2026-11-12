@@ -299,7 +299,7 @@ A blast sells itself in its first frames: a flash, a ring that bends the air, an
 
 ```json
 { "effects": {
-  "flash": { "node": "bomb", "startTime": 0, "attack": 0, "decay": 0.15, "intensity": 2.5, "radius": 30 },
+  "flash": { "node": "bomb", "startTime": 0, "attack": 0, "decay": 0.15, "intensity": 3.5, "radius": 6, "ambient": 0.15 },
   "distortion": [
     { "shape": "ring", "node": "bomb", "startTime": 0, "speed": 45, "thickness": 2.2, "strength": 1, "falloff": 0.6, "edge": 0.5 },
     { "shape": "haze", "centre": [0, 3, -16], "region": "sphere", "size": [5, 4, 5], "noiseScale": 1.1, "scroll": 3, "strength": 0.9 }
@@ -328,7 +328,8 @@ Each step takes one source or a list of up to four. Every source places itself w
 | `flash.decay` | `0.4` | Seconds to fall from full brightness to zero, `0.01` to `60` |
 | `flash.intensity` | `4` | `0` to `1000`, linear scene light added at the point |
 | `flash.color` | `[1, 0.85, 0.6]` | Three numbers, `0` to `1` |
-| `flash.radius` | `50` | Metres, `0.01` to `100000`. The light halves at this distance from the point |
+| `flash.radius` | `50` | Metres, `0.01` to `100000`. The light is `intensity / (1 + (distance / radius)^2)`, so it halves at this distance from the point |
+| `flash.ambient` | `0` | `0` to `0.5`. A screen-wide gain at the flash's peak (`0.15` is 15 percent), so the frame far from the point does not read dark beside it |
 | `*.time` | `0` | Seconds. The scene sets it from the playhead; set it yourself to hold a still of a scene with no motion |
 
 The ring bends the picture where the line of sight passes the centre at the ring radius, and the haze shifts it by noise taken inside its box or sphere. Both read the depth buffer: a surface in front of the bending air is not dragged along, and air behind a wall does nothing. The flash adds light before bloom and tone mapping, so a bright flash feeds bloom where bloom is on. Surfaces are lit by their distance from the point; sky is lit by the distance of its line of sight.

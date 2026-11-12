@@ -50,7 +50,7 @@ test('a distortion source resolves with defaults and refuses bad input by naming
 
 test('a flash source resolves with defaults and refuses bad input by naming the field', () => {
   const [flash] = resolveFlash({ centre: [1, 2, 3], intensity: 6 });
-  assert.deepEqual(flash, { centre: [1, 2, 3], time: 0, startTime: 0, attack: 0.05, decay: 0.4, intensity: 6, color: [1, 0.85, 0.6], radius: 50 });
+  assert.deepEqual(flash, { centre: [1, 2, 3], time: 0, startTime: 0, attack: 0.05, decay: 0.4, intensity: 6, color: [1, 0.85, 0.6], radius: 50, ambient: 0 });
   assert.throws(() => resolveFlash({ decay: 0 }), /flash\[0\]\.decay must be between 0.01 and 60/);
   assert.throws(() => resolveFlash({ color: [2, 0, 0] }), /flash\[0\]\.color\[0\] must be between 0 and 1/);
   assert.throws(() => resolveFlash({ radius: 0 }), /flash\[0\]\.radius must be between/);
