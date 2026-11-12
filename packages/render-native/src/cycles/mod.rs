@@ -164,9 +164,39 @@ pub(crate) fn check_counts_match_kernel_params(input: &NativeTraceInputV2) -> Re
     Ok(())
 }
 
-/// The compute entry point to run: `main`, or `light_tree_probe` when the input carries `KERNEL_FLAG_LIGHT_TREE_PROBE` (tests).
-pub(crate) fn trace_entry_point(input: &NativeTraceInputV2) -> &'static str {
-    let kernel_flags = read_u32_le(&input.kernel_params, KP_KERNEL_FLAGS_BYTE);
+/// Checks that a frame's kernel parameters describe the scene the session holds: the seven record counts must equal the
+/// counts of the parameters the session was created with. Everything else (camera, bounces, seed, filter, flags) may change.
+pub(crate) fn check_frame_params_keep_scene_counts(session_kernel_params: &[u8], frame_kernel_params: &[u8]) -> Result<()> {
+    let counts = [
+        ("instanceCount", KP_INSTANCE_COUNT_BYTE),
+        ("triangleCount", KP_TRIANGLE_COUNT_BYTE),
+        ("materialCount", KP_MATERIAL_COUNT_BYTE),
+        ("emissiveTriangleCount", KP_EMISSIVE_TRIANGLE_COUNT_BYTE),
+        ("lightCount", KP_LIGHT_COUNT_BYTE),
+        ("lightTreeNodeCount", KP_LIGHT_TREE_NODE_COUNT_BYTE),
+        ("textureCount", KP_TEXTURE_COUNT_BYTE),
+    ];
+    for (name, byte_offset) in counts {
+        if session_kernel_params.len() < byte_offset + 4 || frame_kernel_params.len() < byte_offset + 4 {
+            return Err(failure(format!(
+                "kernelParams must hold the 320 byte KernelParamsV2 block to read {name} at byte {byte_offset}."
+            )));
+        }
+        let session_count = read_u32_le(session_kernel_params, byte_offset);
+        let frame_count = read_u32_le(frame_kernel_params, byte_offset);
+        if session_count != frame_count {
+            return Err(failure(format!(
+                "The kernelParams of this frame say {name} is {frame_count}, but the session scene has {session_count}. A session renders one scene; pack the frame from the same scene (only the camera and the render settings may differ) or create a new session."
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The compute entry point to run for a kernel parameter block: `main`, or `light_tree_probe` when it carries
+/// `KERNEL_FLAG_LIGHT_TREE_PROBE` (tests).
+pub(crate) fn trace_entry_point_for_params(kernel_params: &[u8]) -> &'static str {
+    let kernel_flags = read_u32_le(kernel_params, KP_KERNEL_FLAGS_BYTE);
     if (kernel_flags & KERNEL_FLAG_LIGHT_TREE_PROBE) != 0 {
         "light_tree_probe"
     } else {
@@ -179,24 +209,40 @@ pub(crate) fn trace_entry_point(input: &NativeTraceInputV2) -> &'static str {
 /// The sentinel pattern is `true` (conservative default) so the kernel compiles and renders
 /// correctly even without specialization; specialization disables dead branches for performance.
 ///
-/// NOTE: Only replaces in `trace_scene_cycles` / `prepare_cycles_scene`. In `probe_cycles_lobe`
+/// NOTE: Only replaces in `trace_scene_cycles` / `CyclesSession`. In `probe_cycles_lobe`
 /// all flags stay `true` (which is the unspecialized default).
+#[cfg(test)]
 pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2) -> String {
-    let kp = &input.kernel_params;
+    specialize_kernel_source(source, &scan_scene_specialization(input), &input.kernel_params)
+}
+
+/// What the scene tables decide about the kernel's `SCENE_HAS_*` constants and lobe bounds. A session scans its scene once
+/// and combines the result with each frame's kernel parameters, so a frame does not walk the tables again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SceneSpecialization {
+    has_alpha_mask: bool,
+    has_transparent: bool,
+    has_glass: bool,
+    has_coat: bool,
+    has_sheen: bool,
+    has_anisotropy: bool,
+    has_thin_film: bool,
+    has_f82: bool,
+    has_normal_map: bool,
+    max_closure_lobes: u32,
+    max_closure_candidates: u32,
+    has_finite_lights: bool,
+    has_light_linking: bool,
+    has_emissive_triangles: bool,
+    has_analytic_lights: bool,
+    light_tree_node_count: u32,
+}
+
+/// Walks the materials, lights and instances of an input once.
+pub(crate) fn scan_scene_specialization(input: &NativeTraceInputV2) -> SceneSpecialization {
     let mats = &input.materials;
     let lights = &input.lights;
     let instances = &input.instances;
-
-    // --- KernelParamsV2 fields ---
-    let kernel_flags = read_u32_le(kp, KP_KERNEL_FLAGS_BYTE);
-    let volume_density = read_f32_le(kp, KP_VOLUME_DENSITY_BYTE);
-    let env_width = read_u32_le(kp, KP_ENV_WIDTH_BYTE);
-    let env_height = read_u32_le(kp, KP_ENV_HEIGHT_BYTE);
-    let env_total_weight = read_f32_le(kp, KP_ENV_TOTAL_WEIGHT_BYTE);
-
-    let has_volume = (kernel_flags & 2) != 0 && volume_density > 0.0;
-    let has_env_importance = env_width > 0 && env_height > 0 && env_total_weight > 0.0;
-    let has_light_tree = (kernel_flags & 1) != 0 && input.light_tree_node_count > 0;
     let has_emissive_triangles = input.emissive_triangle_count > 0;
     let has_analytic_lights = input.light_count > 0;
 
@@ -339,6 +385,57 @@ pub(crate) fn specialize_cycles_kernel(source: &str, input: &NativeTraceInputV2)
             }
         }
     }
+
+    SceneSpecialization {
+        has_alpha_mask,
+        has_transparent,
+        has_glass,
+        has_coat,
+        has_sheen,
+        has_anisotropy,
+        has_thin_film,
+        has_f82,
+        has_normal_map,
+        max_closure_lobes,
+        max_closure_candidates,
+        has_finite_lights,
+        has_light_linking,
+        has_emissive_triangles,
+        has_analytic_lights,
+        light_tree_node_count: input.light_tree_node_count,
+    }
+}
+
+/// Replaces the `SCENE_HAS_*` sentinels of `source` with the scene scan and the frame's kernel parameters
+/// (kernel flags, fog density and environment table size).
+pub(crate) fn specialize_kernel_source(source: &str, scene: &SceneSpecialization, kp: &[u8]) -> String {
+    let kernel_flags = read_u32_le(kp, KP_KERNEL_FLAGS_BYTE);
+    let volume_density = read_f32_le(kp, KP_VOLUME_DENSITY_BYTE);
+    let env_width = read_u32_le(kp, KP_ENV_WIDTH_BYTE);
+    let env_height = read_u32_le(kp, KP_ENV_HEIGHT_BYTE);
+    let env_total_weight = read_f32_le(kp, KP_ENV_TOTAL_WEIGHT_BYTE);
+
+    let has_volume = (kernel_flags & 2) != 0 && volume_density > 0.0;
+    let has_env_importance = env_width > 0 && env_height > 0 && env_total_weight > 0.0;
+    let has_light_tree = (kernel_flags & 1) != 0 && scene.light_tree_node_count > 0;
+    let SceneSpecialization {
+        has_alpha_mask,
+        has_transparent,
+        has_glass,
+        has_coat,
+        has_sheen,
+        has_anisotropy,
+        has_thin_film,
+        has_f82,
+        has_normal_map,
+        max_closure_lobes,
+        max_closure_candidates,
+        has_finite_lights,
+        has_light_linking,
+        has_emissive_triangles,
+        has_analytic_lights,
+        ..
+    } = *scene;
 
     // --- Apply replacements ---
     // The sentinel pattern `const SCENE_HAS_*: bool = true;` is replaced with the computed value.
@@ -554,6 +651,66 @@ mod specialization_tests {
         let source = "fn main() { let x = 1; }";
         let result = specialize_cycles_kernel(source, &input);
         assert_eq!(result, source, "Source without markers should be unchanged");
+    }
+
+    const SESSION_TEST_SOURCE: &str = "const SCENE_HAS_VOLUME: bool = true;\nconst SCENE_HAS_GLASS: bool = true;\nconst SCENE_HAS_ENV_IMPORTANCE: bool = true;";
+
+    #[test]
+    fn a_scene_scan_combined_with_the_parameters_equals_the_one_step_specialization() {
+        let kp = make_kp(2, 1.0, 0, 0, 0.0);
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let input = dummy_input(&kp, &mat, &make_default_light(), &make_default_inst());
+        let scene = scan_scene_specialization(&input);
+        assert_eq!(
+            specialize_kernel_source(SESSION_TEST_SOURCE, &scene, &kp),
+            specialize_cycles_kernel(SESSION_TEST_SOURCE, &input)
+        );
+    }
+
+    #[test]
+    fn a_frame_that_changes_only_the_camera_keeps_the_specialized_source() {
+        let kp = make_kp(2, 1.0, 0, 0, 0.0);
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let input = dummy_input(&kp, &mat, &make_default_light(), &make_default_inst());
+        let scene = scan_scene_specialization(&input);
+        let mut moved_camera = kp.clone();
+        moved_camera[120..124].copy_from_slice(&3.5f32.to_bits().to_le_bytes());
+        assert_eq!(
+            specialize_kernel_source(SESSION_TEST_SOURCE, &scene, &kp),
+            specialize_kernel_source(SESSION_TEST_SOURCE, &scene, &moved_camera)
+        );
+    }
+
+    #[test]
+    fn a_frame_that_removes_the_fog_changes_the_specialized_source() {
+        let kp = make_kp(2, 1.0, 0, 0, 0.0);
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let input = dummy_input(&kp, &mat, &make_default_light(), &make_default_inst());
+        let scene = scan_scene_specialization(&input);
+        let without_fog = make_kp(0, 0.0, 0, 0, 0.0);
+        let fogged = specialize_kernel_source(SESSION_TEST_SOURCE, &scene, &kp);
+        let clear = specialize_kernel_source(SESSION_TEST_SOURCE, &scene, &without_fog);
+        assert!(fogged.contains("const SCENE_HAS_VOLUME: bool = true;"));
+        assert!(clear.contains("const SCENE_HAS_VOLUME: bool = false;"));
+    }
+
+    #[test]
+    fn a_frame_must_keep_the_scene_record_counts_of_the_session() {
+        let session_params = make_kp(0, 0.0, 0, 0, 0.0);
+        let mut moved_camera = session_params.clone();
+        moved_camera[120..124].copy_from_slice(&1.0f32.to_bits().to_le_bytes());
+        assert!(check_frame_params_keep_scene_counts(&session_params, &moved_camera).is_ok());
+
+        let mut other_scene = session_params.clone();
+        other_scene[KP_MATERIAL_COUNT_BYTE..KP_MATERIAL_COUNT_BYTE + 4].copy_from_slice(&9u32.to_le_bytes());
+        let message = check_frame_params_keep_scene_counts(&session_params, &other_scene)
+            .expect_err("a different material count must be refused")
+            .to_string();
+        assert!(message.contains("materialCount"), "{message}");
+        assert!(message.contains("create a new session"), "{message}");
+
+        let truncated = &session_params[..64];
+        assert!(check_frame_params_keep_scene_counts(&session_params, truncated).is_err());
     }
 
     fn opaque_inputs(metallic: f32, transmission_weight: f32) -> BaseLayerInputs {
