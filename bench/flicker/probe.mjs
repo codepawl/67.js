@@ -1,4 +1,5 @@
 // Drives the flicker viewer in headless Chrome on the GPU and prints how many pixels flicker at each camera spot.
+//   Add pass=albedo to a config (with facets=2) to draw the frame through the albedo render pass instead of the beauty pass (issue #934).
 //   node bench/flicker/probe.mjs --url http://127.0.0.1:5210 --asset /@fs/D:/path/file.glb --out artifacts/flicker \
 //        --spots spots.json --configs "reversed=1,nearFit=1;reversed=0,nearFit=0"
 // spots.json: [{ "name": "roofs", "eye": [x, y, z], "target": [x, y, z] }]. Without --spots it prints the scene bounds and exits.

@@ -49,7 +49,8 @@ out vec4 outputColor;
 void main() { outputColor = vec4(texelFetch(sourceTexture, ivec2(gl_FragCoord.xy), 0).rgb, 1.0); }`;
 
 // A float target keeps the pass values as half floats (frame.passFloat) for 16-bit PNG and EXR output; the shader writes the same values.
-function createPassTarget(context, width, height, float = false) {
+// With reversed-Z (reversed-depth.js) the beauty pass keeps depth in a 32-bit float buffer, so a pass draws into the same format.
+function createPassTarget(context, width, height, float = false, floatDepth = false) {
   if (float && !context.getExtension('EXT_color_buffer_float')) throw new Error('16-bit PNG and EXR output need EXT_color_buffer_float. Use format png.');
   const texture = context.createTexture();
   context.bindTexture(context.TEXTURE_2D, texture);
@@ -59,7 +60,7 @@ function createPassTarget(context, width, height, float = false) {
   context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, context.NEAREST);
   const depth = context.createRenderbuffer();
   context.bindRenderbuffer(context.RENDERBUFFER, depth);
-  context.renderbufferStorage(context.RENDERBUFFER, context.DEPTH_COMPONENT24, width, height);
+  context.renderbufferStorage(context.RENDERBUFFER, floatDepth ? context.DEPTH_COMPONENT32F : context.DEPTH_COMPONENT24, width, height);
   const framebuffer = context.createFramebuffer();
   context.bindFramebuffer(context.FRAMEBUFFER, framebuffer);
   context.framebufferTexture2D(context.FRAMEBUFFER, context.COLOR_ATTACHMENT0, context.TEXTURE_2D, texture, 0);
@@ -67,7 +68,7 @@ function createPassTarget(context, width, height, float = false) {
   if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) {
     throw new Error('Render pass framebuffer allocation failed. Choose a lower quality preset.');
   }
-  return { texture, depth, framebuffer, float };
+  return { texture, depth, framebuffer, float, floatDepth };
 }
 
 /**
@@ -135,12 +136,13 @@ export function installRenderPasses(renderer) {
       copyTextureUniform = context.getUniformLocation(copyProgram, 'sourceTexture');
     }
     const float = frame.passFloat === true;
-    if (target && target.float !== float) releaseTargets(context);
+    const floatDepth = renderer.reversedDepth === true;
+    if (target && (target.float !== float || target.floatDepth !== floatDepth)) releaseTargets(context);
     if (!target) {
       const { width, height } = renderer.canvas;
-      target = createPassTarget(context, width, height, float);
+      target = createPassTarget(context, width, height, float, floatDepth);
       renderer.renderTargets.record('passColor', { width, height, format: float ? 'RGBA16F' : 'RGBA8' });
-      renderer.renderTargets.record('passDepth', { width, height, format: 'DEPTH_COMPONENT24' });
+      renderer.renderTargets.record('passDepth', { width, height, format: floatDepth ? 'DEPTH_COMPONENT32F' : 'DEPTH_COMPONENT24' });
     }
     return mode;
   }

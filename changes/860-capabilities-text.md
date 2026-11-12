@@ -1,0 +1,1 @@
+- Make the `scene_capabilities` graph text say fresnel works as an emission factor and name what is still missing, and drop the `pass` argument `scene_look` does not take from the post mask docs.

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentScene } from '../src/agent-scene.js';
-import { clearFlushParts, findCoplanarOverlaps, coplanarOverlapDiagnostics, flushLeftoverDiagnostics, installCoplanarDiagnostics, resolveFlushParts } from '../src/coplanar-overlap.js';
+import { COPLANAR_TOLERANCE, clearFlushParts, findCoplanarOverlaps, coplanarOverlapDiagnostics, flushLeftoverDiagnostics, installCoplanarDiagnostics, resolveFlushParts } from '../src/coplanar-overlap.js';
 import { depthLayerOf, flushOrderOf } from '../src/depth-layer.js';
 import { loadAgentSceneModules } from '../src/agent-scene-modules.js';
 import { frameDiagnostics } from '../src/frame-diagnostics.js';
@@ -259,7 +259,7 @@ test('ranks settle in chains, and a stack deeper than the ranks is reported inst
   const big = gridPart('chainBig', 1, 1, 0);
   const middle = gridPart('chainMiddle', 0.5, 1, step);
   const small = gridPart('chainSmall', 0.2, 1, step * 2);
-  assert.equal(findCoplanarOverlaps([small, middle, big]).overlaps.length, 0, 'wider apart than the overlap check looks');
+  assert.equal(findCoplanarOverlaps([small, middle, big], { tolerance: COPLANAR_TOLERANCE }).overlaps.length, 0, 'wider apart than the 1 mm check');
   const rankOf = part => flushOrderOf(part)?.ranges.at(-1).rank ?? 0;
   assert.deepEqual(resolveFlushParts([small, middle, big]), { ranked: 2, leftovers: [] });
   assert.deepEqual([big, middle, small].map(rankOf), [0, 1, 2]);
@@ -312,4 +312,21 @@ function overflowingStrip(name, firstZ) {
 test('a touching pair whose shared box overflows is searched without throwing', () => {
   const strips = [overflowingStrip('stripOne', 0), overflowingStrip('stripTwo', 1)];
   assert.doesNotThrow(() => findCoplanarOverlaps(strips));
+});
+
+test('the pair report reaches as far as the flush search, so a 1.5 mm pair is reported when the ranking is off', () => {
+  const base = gridPart('base', 4, 4, 0);
+  const nearFlush = gridPart('nearFlush', 2, 2, 0.0015);
+  const { overlaps } = findCoplanarOverlaps([base, nearFlush]);
+  assert.equal(overlaps.length, 1);
+  assert.ok(Math.abs(overlaps[0].distance - 0.0015) < 1e-6);
+  assert.equal(resolveFlushParts([base, nearFlush]).ranked, 1);
+  const farApart = gridPart('farApart', 2, 2, 0.01);
+  assert.deepEqual(findCoplanarOverlaps([base, farApart]).overlaps, []);
+});
+
+test('with resolveCoplanar false, a 1.5 mm near-flush pair of nodes is reported by scene_inspect', () => {
+  const warnings = coplanarWarnings([wall, node('plate', [0, 0, 0.0015], [1, 0.5, 0.2])]);
+  assert.equal(warnings.length, 1);
+  assert.deepEqual([...warnings[0].parts].sort(), ['plate', 'wall']);
 });
