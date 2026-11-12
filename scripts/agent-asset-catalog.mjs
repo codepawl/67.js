@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { open, readdir, realpath, lstat } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, sep } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 
 import { AGENT_ASSET_LIMITS, assetBytesLimitMessage } from '../src/agent-asset-limits.js';
 import { MAXIMUM_CATALOG_LOOK_BYTES } from '../src/look-catalog.js';
@@ -57,88 +57,93 @@ function selfContainedGlb(bytes) {
   return document;
 }
 
-/** Explicit local directory catalog. IDs bind bytes, rather than agent-supplied file paths. */
-export async function createAgentAssetCatalog(root) {
-  if (typeof root !== 'string' || !isAbsolute(root)) {
-    throw new TypeError('Asset root must be an explicit absolute directory path.');
+/** Reads one catalog file (GLB, image, .hdr or .cube) inside a real directory: its bytes, kind and content ID. `filename` may be a relative path with forward slashes. */
+export async function readCatalogFile(directory, filename) {
+  const path = join(directory, filename);
+  const original = await lstat(path);
+  if (!original.isFile() || original.isSymbolicLink()) {
+    throw new Error('Catalog assets must be regular files, without links.');
   }
-  const directory = await realpath(root);
-  if (!(await lstat(directory)).isDirectory()) {
-    throw new TypeError('Asset root must be a directory.');
+  const resolved = await realpath(path);
+  const offset = relative(directory, resolved);
+  if (offset.startsWith(`..${sep}`) || offset === '..' || isAbsolute(offset) || offset.split(sep).join('/') !== filename) {
+    throw new Error('Asset must remain inside its configured directory.');
   }
+  const handle = await open(resolved, 'r');
+  try {
+    const current = await handle.stat();
+    if (current.isFile() && current.size > MAXIMUM_BYTES) {
+      throw new RangeError(`${filename}: ${assetBytesLimitMessage(current.size)}`);
+    }
+    if (!current.isFile() || current.dev !== original.dev || current.ino !== original.ino || current.size < 20) {
+      throw new Error('Asset changed during opening or is too small to be a GLB.');
+    }
+    const bytes = Buffer.alloc(current.size);
+    let position = 0;
+    while (position < bytes.length) {
+      const result = await handle.read(bytes, position, bytes.length - position, position);
+      if (result.bytesRead === 0) throw new Error('Asset was truncated during reading.');
+      position += result.bytesRead;
+    }
+    const after = await handle.stat();
+    if (after.size !== current.size || after.mtimeMs !== current.mtimeMs || after.ctimeMs !== current.ctimeMs) {
+      throw new Error('Asset changed during reading.');
+    }
+    const lookKind = lookFileKind(filename, bytes);
+    const imageFormat = lookKind ? null : imageKind(bytes);
+    if (imageFormat && !IMAGE_EXTENSIONS[imageFormat].test(filename)) throw new Error('Image extension must match its PNG, JPEG or WebP content.');
+    if (!imageFormat && !lookKind && !/\.glb$/i.test(filename)) throw new Error('Catalog files must be GLB, PNG, JPEG, WebP, HDR or CUBE, with a matching extension.');
+    const document = imageFormat || lookKind ? null : selfContainedGlb(bytes);
+    const assetId = createHash('sha256').update(bytes).digest('hex');
+    return { bytes, document, assetId, imageFormat, lookKind, kind: lookKind ?? (imageFormat ? 'image' : 'glb') };
+  } finally {
+    await handle.close();
+  }
+}
+
+/** The catalog record of a file read by readCatalogFile; `name` is what the agent sees. */
+export function describeCatalogFile(name, { bytes, document, assetId, imageFormat, lookKind }) {
+  if (lookKind) return Object.freeze({ assetId, name, bytes: bytes.length, kind: lookKind });
+  if (imageFormat) return Object.freeze({ assetId, name, bytes: bytes.length, kind: 'image', mimeType: IMAGE_MIME[imageFormat] });
+  const animations = document.animations ?? [];
+  if (!Array.isArray(animations)) throw new Error('GLB animations must be an array.');
+  return Object.freeze({
+    assetId, name, bytes: bytes.length, kind: 'glb',
+    meshes: document.meshes?.length ?? 0,
+    skins: document.skins?.length ?? 0,
+    images: document.images?.length ?? 0,
+    animationCount: animations.length,
+    animationsTruncated: animations.length > 16,
+    animations: animations.slice(0, 16).map((animation, index) => ({ index, name: String(animation?.name ?? `Clip ${index}`).slice(0, 80) })),
+  });
+}
+
+/**
+ * Explicit local directory catalog. IDs bind bytes, rather than agent-supplied file paths.
+ * `packFiles` adds the validated GLB, image, .hdr and .cube files of installed packs (scripts/agent-packs.mjs),
+ * each `{ directory, filename, assetId, metadata }`. With a null root only pack files are listed.
+ */
+export async function createAgentAssetCatalog(root, packFiles = []) {
   const entries = new Map();
-
-  async function readFile(filename) {
-    const path = join(directory, filename);
-    const original = await lstat(path);
-    if (!original.isFile() || original.isSymbolicLink()) {
-      throw new Error('Catalog assets must be regular files, without links.');
+  if (root !== null) {
+    if (typeof root !== 'string' || !isAbsolute(root)) {
+      throw new TypeError('Asset root must be an explicit absolute directory path.');
     }
-    const resolved = await realpath(path);
-    const offset = relative(directory, resolved);
-    if (offset.startsWith(`..${sep}`) || offset === '..' || isAbsolute(offset) || basename(resolved) !== filename) {
-      throw new Error('Asset must remain inside its configured directory.');
+    const directory = await realpath(root);
+    if (!(await lstat(directory)).isDirectory()) {
+      throw new TypeError('Asset root must be a directory.');
     }
-    const handle = await open(resolved, 'r');
-    try {
-      const current = await handle.stat();
-      if (current.isFile() && current.size > MAXIMUM_BYTES) {
-        throw new RangeError(`${filename}: ${assetBytesLimitMessage(current.size)}`);
-      }
-      if (!current.isFile() || current.dev !== original.dev || current.ino !== original.ino || current.size < 20) {
-        throw new Error('Asset changed during opening or is too small to be a GLB.');
-      }
-      const bytes = Buffer.alloc(current.size);
-      let position = 0;
-      while (position < bytes.length) {
-        const result = await handle.read(bytes, position, bytes.length - position, position);
-        if (result.bytesRead === 0) throw new Error('Asset was truncated during reading.');
-        position += result.bytesRead;
-      }
-      const after = await handle.stat();
-      if (after.size !== current.size || after.mtimeMs !== current.mtimeMs || after.ctimeMs !== current.ctimeMs) {
-        throw new Error('Asset changed during reading.');
-      }
-      const lookKind = lookFileKind(filename, bytes);
-      const imageFormat = lookKind ? null : imageKind(bytes);
-      if (imageFormat && !IMAGE_EXTENSIONS[imageFormat].test(filename)) throw new Error('Image extension must match its PNG, JPEG or WebP content.');
-      if (!imageFormat && !lookKind && !/\.glb$/i.test(filename)) throw new Error('Catalog files must be GLB, PNG, JPEG, WebP, HDR or CUBE, with a matching extension.');
-      const document = imageFormat || lookKind ? null : selfContainedGlb(bytes);
-      const assetId = createHash('sha256').update(bytes).digest('hex');
-      return { bytes, document, assetId, imageFormat, lookKind };
-    } finally {
-      await handle.close();
+    const files = (await readdir(directory, { withFileTypes: true }))
+      .filter(entry => /\.(glb|png|jpe?g|webp|hdr|cube)$/i.test(entry.name)).sort((left, right) => left.name.localeCompare(right.name));
+    if (files.length > MAXIMUM_ASSETS) throw new RangeError(`Asset catalog has ${files.length} files, over its maxAssets ${MAXIMUM_ASSETS}. Remove files from the --assets directory.`);
+    for (const file of files) {
+      const result = await readCatalogFile(directory, file.name);
+      if (entries.has(result.assetId)) continue;
+      entries.set(result.assetId, { directory, filename: file.name, metadata: describeCatalogFile(file.name, result) });
     }
   }
-
-  const files = (await readdir(directory, { withFileTypes: true }))
-    .filter(entry => /\.(glb|png|jpe?g|webp|hdr|cube)$/i.test(entry.name)).sort((left, right) => left.name.localeCompare(right.name));
-  if (files.length > MAXIMUM_ASSETS) throw new RangeError(`Asset catalog has ${files.length} files, over its maxAssets ${MAXIMUM_ASSETS}. Remove files from the --assets directory.`);
-  for (const file of files) {
-    const { bytes, document, assetId, imageFormat, lookKind } = await readFile(file.name);
-    if (entries.has(assetId)) continue;
-    if (lookKind) {
-      entries.set(assetId, { filename: file.name, metadata: Object.freeze({ assetId, name: file.name, bytes: bytes.length, kind: lookKind }) });
-      continue;
-    }
-    if (imageFormat) {
-      entries.set(assetId, { filename: file.name, metadata: Object.freeze({ assetId, name: file.name, bytes: bytes.length, kind: 'image', mimeType: IMAGE_MIME[imageFormat] }) });
-      continue;
-    }
-    const animations = document.animations ?? [];
-    if (!Array.isArray(animations)) throw new Error('GLB animations must be an array.');
-    entries.set(assetId, {
-      filename: file.name,
-      metadata: Object.freeze({
-        assetId, name: file.name, bytes: bytes.length, kind: 'glb',
-        meshes: document.meshes?.length ?? 0,
-        skins: document.skins?.length ?? 0,
-        images: document.images?.length ?? 0,
-        animationCount: animations.length,
-        animationsTruncated: animations.length > 16,
-        animations: animations.slice(0, 16).map((animation, index) => ({ index, name: String(animation?.name ?? `Clip ${index}`).slice(0, 80) })),
-      }),
-    });
+  for (const file of packFiles) {
+    if (!entries.has(file.assetId)) entries.set(file.assetId, { directory: file.directory, filename: file.filename, metadata: file.metadata });
   }
   return Object.freeze({
     list() {
@@ -147,7 +152,7 @@ export async function createAgentAssetCatalog(root) {
     async read(assetId) {
       const entry = entries.get(assetId);
       if (!entry) throw new Error('Unknown asset ID. Read the configured asset catalog first.');
-      const result = await readFile(entry.filename);
+      const result = await readCatalogFile(entry.directory, entry.filename);
       if (result.assetId !== assetId) throw new Error('Asset bytes changed since catalog creation. Restart the runtime to refresh the catalog.');
       const clipCount = result.document?.animations?.length ?? 0;
       if (clipCount > AGENT_ASSET_LIMITS.maxClips) throw new RangeError(`Asset has ${clipCount} animation clips, over the catalog maxClips ${AGENT_ASSET_LIMITS.maxClips}. Remove clips from the file.`);
