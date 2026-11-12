@@ -522,6 +522,26 @@ Release addon built; on the RTX 3060 `cargo test --target x86_64-pc-windows-msvc
 | `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 of 64 | 0.0168 (0.0365) | 0.00026 (0.000285) |
 | `many-lights-500` | 1.0009 / 1.0010 / 1.0009 | 64 of 64 | 0.0178 (0.0373) | 0.000832 (0.000791) |
 
+### Optional GPU a-trous wavelet filter (`denoise: "atrous"`, #895)
+
+`traceNative(..., { kernel: 'cycles', denoise: 'atrous' })` also runs an edge-avoiding a-trous wavelet filter (Dammertz 2010 with the variance guidance of SVGF, spatial only) in WGSL on the traced image, its first-hit albedo, normal and depth, and the per-pixel variance the kernel already returns. The filtered image comes back as `denoisedRgba`; `rgba` stays the unfiltered estimate. It is off by default and the filter is biased: it smooths, it does not converge. Never compare a filtered image with a converged one as if it were unbiased.
+It is the WGSL form of the CPU filter in `src/path-tracer-denoise.js`, with one difference: pixels whose first ray escaped (zero normal and depth) agree with each other, so the sky is filtered instead of turning to NaN (#969). A node test checks the GPU result against the CPU filter on a synthetic image (relative difference under 2e-3).
+
+Measured on an NVIDIA A10 (Modal), 960 x 540, seed 3, medians of three rounds, error is relMSE (epsilon 0.01) against the Cycles 4096 spp seed 1 reference, FLIP (LDR) mean from one round. The CPU column runs `denoiseRadiance` in Node on the container CPU with the same guides, replacing non-finite pixels by the unfiltered pixel.
+
+| scene, spp | sampling s | relMSE unfiltered / CPU / GPU filter | FLIP unfiltered / CPU / GPU filter | filter ms CPU / GPU (all steps, dispatches only) |
+| --- | --- | --- | --- | --- |
+| lit-interior, 16 | 0.44 | 0.0653 / 0.00157 / 0.00157 | 0.142 / 0.095 / 0.095 | 4088 / 7.4, 1.5 |
+| lit-interior, 64 | 0.95 | 0.0128 / 0.00042 / 0.00042 | 0.076 / 0.037 / 0.037 | 4085 / 8.4, 1.5 |
+| many-lights-500, 16 | 1.00 | 0.128 / 0.00225 / 0.00225 | 0.176 / 0.084 / 0.084 | 4115 / 7.6, 1.5 |
+| many-lights-500, 64 | 3.27 | 0.0306 / 0.00090 / 0.00090 | 0.105 / 0.044 / 0.044 | 4158 / 7.5, 1.4 |
+| glass, 16 | 0.38 | 0.00424 / 0.00155 / 0.00075 | 0.030 / 0.023 / 0.023 | 3673 / 8.2, 1.6 |
+| glass, 64 | 0.72 | 0.00096 / 0.00050 / 0.00040 | 0.018 / 0.017 / 0.018 | 3680 / 8.3, 1.4 |
+| metal, 16 | 0.31 | 0.00450 / 0.00156 / 0.00070 | 0.025 / 0.019 / 0.019 | 3819 / 8.3, 1.3 |
+| metal, 64 | 0.51 | 0.281 / 0.280 / 0.00227 | 0.015 / 0.014 / 0.014 | 3778 / 8.7, 1.5 |
+
+The GPU filter costs about 8 ms in total (upload, seven dispatches, readback of the traced image that already sits on the host) and 1.4 to 1.6 ms for the dispatches, against 3.7 to 4.2 s for the CPU filter at the same error: roughly 500 times faster as built. Against the sampling time in the table the GPU filter is 0.2 to 2.7 percent, while the CPU filter takes 4 to 12 times as long as the 16 spp render. At equal time the filtered image has 10 to 100 times lower relMSE than the unfiltered one at 64 and 256 spp on lit-interior and many-lights-500. Where the reference is nearly converged (glass and metal at 1024 spp) the filter's bias shows: relMSE and FLIP get worse than the unfiltered render (glass 0.00009 to 0.00014). The unfiltered metal render at 64 spp is dominated by a few fireflies (relMSE 0.28); the CPU filter leaves that number almost unchanged, the GPU filter lowers it (the cause was not investigated), and FLIP, which sees little difference, is the fairer score for that scene.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
