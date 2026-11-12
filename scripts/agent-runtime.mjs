@@ -24,6 +24,7 @@ import { sequenceFrameIds } from '../src/agent-texture-sequence.js';
 import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES } from '../src/look-catalog.js';
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { writeWebBuild } from './web-export.mjs';
+import { gameAssetIds } from '../src/game-assets.js';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
 import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
@@ -1064,7 +1065,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         const outputDirectory = join(directory, `web-${randomUUID()}`);
         let summary;
         try {
-          summary = await writeWebBuild({ recipe, buildDirectory: fileURLToPath(new URL('../', previewUrl)), outputDirectory, title });
+          const assets = new Map();
+          for (const id of gameAssetIds(recipe)) assets.set(id, await (await catalog()).read(id));
+          summary = await writeWebBuild({ recipe, buildDirectory: fileURLToPath(new URL('../', previewUrl)), outputDirectory, title, assets });
         } catch (error) {
           // A refused or half-written build never uses up a retention slot or evicts a good one.
           await rm(outputDirectory, { recursive: true, force: true });

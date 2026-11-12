@@ -123,6 +123,14 @@ export function normalizeAssetPlacement(value) {
   return result;
 }
 
+/** The nodes a game recipe animates itself: a placed asset there is posed by the game's animation graph, frame by frame. */
+export function gamePosedNodeIds(game) {
+  const ids = new Set();
+  if (game?.player?.animation && game.player.node) ids.add(game.player.node);
+  for (const npc of game?.npcs ?? []) if (npc?.animation && npc.node) ids.add(npc.node);
+  return ids;
+}
+
 function collectPlacements(value, found, depth = 0) {
   if (!value || typeof value !== 'object' || depth > 8) return;
   if (Array.isArray(value)) {
@@ -146,10 +154,12 @@ export function recipeAssetNeeds(value) {
   const placements = [];
   collectPlacements(value, placements);
   const needs = new Map();
+  const posedNodes = gamePosedNodeIds(value?.game);
+  const posedPlacements = (value?.nodes ?? []).filter(node => node.asset && posedNodes.has(node.id)).map(node => node.asset);
   for (const placement of placements) {
     const id = placement.id.toLowerCase();
     const need = needs.get(id) ?? { id, copies: 1 };
-    if (placement.clip || placement.drive || placement.crowd) need.copies++;
+    if (placement.clip || placement.drive || placement.crowd || posedPlacements.includes(placement)) need.copies++;
     needs.set(id, need);
   }
   return [...needs.values()];
@@ -203,7 +213,9 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
     throw new Error('This recipe places catalog assets, which a host loads and decodes first. Pass them as the assets option of createAgentScene; MCP does this for scene_create.');
   }
   const distinct = new Set(placed.map(node => node.asset.id));
-  const animated = placed.filter(node => node.asset.clip || node.asset.drive || node.asset.crowd);
+  const posedNodes = gamePosedNodeIds(recipe.game);
+  const isAnimated = node => Boolean(node.asset.clip || node.asset.drive || node.asset.crowd || posedNodes.has(node.id));
+  const animated = placed.filter(isAnimated);
   if (placed.length > ASSET_PLACEMENT_LIMITS.maxPlacements || distinct.size > ASSET_PLACEMENT_LIMITS.maxAssets ||
       animated.length > ASSET_PLACEMENT_LIMITS.maxAnimatedPlacements) {
     throw new RangeError(`A scene places at most ${ASSET_PLACEMENT_LIMITS.maxPlacements} assets, ${ASSET_PLACEMENT_LIMITS.maxAssets} different ones, ${ASSET_PLACEMENT_LIMITS.maxAnimatedPlacements} of them playing a clip; this recipe places ${placed.length}, ${distinct.size} and ${animated.length}.`);
@@ -214,8 +226,9 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
   const generatedNodes = [];
   for (const node of placed) {
     const { id: assetId, materials: overrides = [], clip, drive, crowd } = node.asset;
+    const posed = posedNodes.has(node.id);
     let copy = 0;
-    if (clip || drive || crowd) {
+    if (clip || drive || crowd || posed) {
       copy = (copyCounter.get(assetId) ?? 0) + 1;
       copyCounter.set(assetId, copy);
     }
@@ -273,9 +286,9 @@ export function expandAssetPlacements(recipe, assets, limits, outputCache = new 
         ...(part.castShadow !== undefined ? { castShadow: part.castShadow } : {}),
       });
     });
-    const record = { node: node.id, assetId, copy, asset, partNodeIds, clip: clip ?? null, drive: drive ? createDrive(node.id, `nodes[${recipe.nodes.indexOf(node)}].asset.drive`, createAssetDrive, asset, drive) : null, drivePose: null };
+    const record = { node: node.id, assetId, copy, asset, partNodeIds, clip: clip ?? null, pose: posed ? { nodeOverrides: [], morphWeights: undefined } : null, drive: drive ? createDrive(node.id, `nodes[${recipe.nodes.indexOf(node)}].asset.drive`, createAssetDrive, asset, drive) : null, drivePose: null };
     runtime.placements.push(record);
-    if (clip || drive) runtime.animators.push(record);
+    if (clip || drive || posed) runtime.animators.push(record);
   }
   if (recipe.nodes.length + generatedNodes.length > limits.maxNodes) {
     throw new RangeError(`Placed assets expand to ${generatedNodes.length} part nodes, which with the ${recipe.nodes.length} authored nodes exceeds maxNodes ${limits.maxNodes}. Place fewer copies or simpler assets.`);
@@ -315,7 +328,9 @@ export function stageAssetClips(runtime, graph, time) {
         transactions.push(record.crowd.stage(time ?? 0));
         continue;
       }
-      if (record.drive) {
+      if (record.pose) {
+        transaction = record.asset.stagePose({ animation: null, nodeOverrides: record.pose.nodeOverrides, morphWeights: record.pose.morphWeights });
+      } else if (record.drive) {
         const driven = record.drive.sample(time ?? 0);
         record.drivePose = driven.pose;
         transaction = record.asset.stagePose({ nodeOverrides: driven.nodeOverrides });

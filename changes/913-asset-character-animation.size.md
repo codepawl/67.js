@@ -1,0 +1,4 @@
+- entry:game+lazy: the asset loader (src/game-assets.js, gltf decode of the exported files) sits in its own on-demand chunk, loaded only when the page has assetUrls; the game entry itself gains only the option plumbing and the half-turn for glTF facing
+- scene:agent-scene+lazy: `setAssetPose` and the posed-placement branch in the placed-asset module are a few hundred bytes; the recipe validator for asset clips is plain checks
+- scene:agent-scene: +112 bytes gzip for `setAssetPose`, the one core hook that lets a game pose a placed asset (an agent-facing capability: a placed, retargeted character plays idle, walk and run); the posing code itself lives in the on-demand assets module
+- goal:agent-scene: the same 112 bytes; the scene is already over its goal and the hook cannot move out, since the scene object owns the staged asset runtime
