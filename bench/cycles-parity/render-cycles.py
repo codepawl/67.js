@@ -23,6 +23,10 @@ RAY_VISIBILITY_ATTRIBUTES = {
     "camera": "visible_camera", "diffuse": "visible_diffuse", "glossy": "visible_glossy",
     "transmission": "visible_transmission", "volumeScatter": "visible_volume_scatter", "shadow": "visible_shadow",
 }
+
+# Set by --soft-falloff. Blender 4 and later build a point or spot light with a radius as an oriented disk while Light.use_soft_falloff
+# is on (the default) and as a sphere while it is off. Cook models the sphere, so the default here is off; None keeps the Blender default.
+soft_falloff_setting = None
 Y_UP_TO_Z_UP = Matrix((
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 0.0, -1.0, 0.0),
@@ -54,12 +58,22 @@ GREY_DIFFUSE_ENTRY = {"color": [0.8, 0.8, 0.8], "metallic": 0.0, "roughness": 1.
 DEFAULT_DEPTH_SAMPLES = 64
 
 
+SOFT_FALLOFF_VALUES = {"default": None, "on": True, "off": False}
+
+
+def read_soft_falloff(argument_list):
+    value = read_flag_value(argument_list, "--soft-falloff", "off")
+    if value not in SOFT_FALLOFF_VALUES:
+        raise ValueError(f"--soft-falloff must be default, on or off, got {value!r}.")
+    return SOFT_FALLOFF_VALUES[value]
+
+
 def parse_cli_arguments():
     if "--" not in sys.argv:
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--soft-falloff default|on|off] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
@@ -86,6 +100,7 @@ def parse_cli_arguments():
         "aperture_blades": int(read_flag_value(argument_list, "--aperture-blades", "0")),
         "aperture_rotation": float(read_flag_value(argument_list, "--aperture-rotation", "0")),
         "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
+        "soft_falloff": read_soft_falloff(argument_list),
     }
 
 
@@ -387,11 +402,17 @@ def attach_light_receivers(light_object, receiver_names):
     light_object.light_linking.receiver_collection = receiver_collection
 
 
+def apply_soft_falloff_setting(light_data):
+    if soft_falloff_setting is not None:
+        light_data.use_soft_falloff = soft_falloff_setting
+
+
 def add_spot_light(scene, light_index, spot_entry):
     light_data = bpy.data.lights.new(f"Spot-{light_index}", "SPOT")
     light_data.energy = spot_entry["intensity"] * WATTS_PER_POINT_INTENSITY
     light_data.color = spot_entry["color"]
     light_data.shadow_soft_size = spot_entry["radius"]
+    apply_soft_falloff_setting(light_data)
     light_data.spot_size = 2.0 * spot_entry["angle"]
     light_data.spot_blend = spot_entry["penumbra"]
     spot_object = bpy.data.objects.new(f"Spot-{light_index}", light_data)
@@ -451,6 +472,7 @@ def build_scene_lights(scene, environment_entry):
         point_data.energy = point_entry["intensity"] * WATTS_PER_POINT_INTENSITY
         point_data.color = point_entry["color"]
         point_data.shadow_soft_size = point_entry["radius"]
+        apply_soft_falloff_setting(point_data)
         point_object = bpy.data.objects.new(f"Point-{light_index}", point_data)
         point_object.location = convert_position_to_blender(point_entry["position"])
         scene.collection.objects.link(point_object)
@@ -710,6 +732,8 @@ def main():
     build_started = time.perf_counter()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
+    global soft_falloff_setting
+    soft_falloff_setting = options["soft_falloff"]
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
     build_scene_lights(scene, description["environment"])
