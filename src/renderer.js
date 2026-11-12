@@ -152,6 +152,11 @@ function partNeedsFullUpload(part, texturesReplaceable = Boolean(texturedReplace
   return Boolean(part.skin || part.morph || part.geometry.morphTargets || part.geometry.skinIndices || hasMaterialMap(part.material) && !texturesReplaceable);
 }
 
+// A shadow-only part joins the shadow passes and none of the colour, depth or ID passes, so the camera never sees it.
+function partPass(part) {
+  return part.shadowOnly === true ? 'shadowOnly' : renderPass(part.material);
+}
+
 function batchPass(batch) {
   return batch.pass ?? 'opaque';
 }
@@ -279,7 +284,7 @@ const receivesShadow = part => part.receiveShadow !== false;
 // Uniform value of a batch: 0 draws normally, 1 is a holdout (zero colour, zero alpha), 2 is a shadow catcher (black, alpha = shadow).
 const compositeModeOf = part => (part.holdout === true ? 1 : part.shadowCatcher === true ? 2 : 0);
 
-const BOOLEAN_PART_FLAGS = ['castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'visible'];
+const BOOLEAN_PART_FLAGS = ['castShadow', 'receiveShadow', 'holdout', 'shadowCatcher', 'shadowOnly', 'visible'];
 
 function validatePartFlags(part) {
   for (const flag of BOOLEAN_PART_FLAGS) {
@@ -501,7 +506,7 @@ function createPartGrouper(batching) {
       materialTail = [renderPass(part.material), ...materialAlphaState(part.material), part.material.aovMap ?? null, part.material.transmissionMap ?? null, ...(part.material.aov ?? ZERO_VECTOR)];
       materialKeyTails.set(part.material, materialTail);
     }
-    const values = [batching ? part.geometry : part, ...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail];
+    const values = [batching ? part.geometry : part, ...materialValues, part.skin ?? null, part.material.snippet, part.crowd ?? null, part.morph ?? null, castsShadow(part), receivesShadow(part), compositeModeOf(part), part.shadowOnly === true, depthLayerOf(part), flushOrderOf(part), part.lods ?? null, part.shadowLods ?? null, isMirroredMatrix(part.matrix), ...materialTail];
     const key = values.map(numberOf).join(',');
     let batch = batchesByKey.get(key);
     if (!batch) {
@@ -1327,7 +1332,7 @@ export class Renderer67 {
     const [alphaMode, alphaCutoff, opacity, doubleSided] = materialAlphaState(parts[0].material);
     const layerState = materialLayerState(parts[0].material);
     const culling = this.createCullingState(parts);
-    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, wear: parts[0].material.wear ?? null, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: flushOrder?.indices.length ?? geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), tintedShadow: castsTintedShadow(parts[0]), tintBlind: Boolean(splat) || Object.keys(parts[0].material.layerMaps ?? {}).length >= 3, receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: renderPass(parts[0].material) };
+    const batch = { ...culling, alphaMode, alphaCutoff, opacity, doubleSided, mirrored: isMirroredMatrix(parts[0].matrix), layerState, wear: parts[0].material.wear ?? null, parts: [...parts], vertexArray, instanceBuffer, instanceData, textures, mapState, splat, lightMapTexture, texture: textures[0], map, skin, skinTexture, influenceTexture, crowd, crowdTexture, morph, morphTexture, morphWeights, indexCount: flushOrder?.indices.length ?? geometry.indices.length, instanceCount: parts.length, floor: parts[0].material.tag === 'floor', castShadow: castsShadow(parts[0]), tintedShadow: castsTintedShadow(parts[0]), tintBlind: Boolean(splat) || Object.keys(parts[0].material.layerMaps ?? {}).length >= 3, receivesShadow: receivesShadow(parts[0]), compositeMode: compositeModeOf(parts[0]), depthLayer: depthLayerOf(parts[0]), flushOrder, flushIndexBuffer, pass: partPass(parts[0]) };
     if (parts[0].lods) culling.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level));
     culling.shadowLevels?.levelGeometries.forEach((geometryOfLevel, level) => this.levelDraw(batch, level, batch.shadowLevels));
     parts.forEach((part, index) => this.partLocations.set(part, { batch, index, geometry: part.geometry, map, mapState, layerState, skin, jointMatrices: skin?.jointMatrices, skinIndices: geometry.skinIndices, skinWeights: geometry.skinWeights, morph, morphWeights: morph?.weights, morphTargets: geometry.morphTargets, normalMatrix: mat3.create(), committedMatrix: batch.instanceData.subarray(index * INSTANCE_STRIDE, index * INSTANCE_STRIDE + 16) }));
@@ -1359,7 +1364,7 @@ export class Renderer67 {
       const sameParts = batch?.parts.length === group.length && batch.parts.every((part, index) => part === group[index]);
       const alphaState = materialAlphaState(first.material);
       const sameState = location?.geometry === first.geometry && batch?.castShadow === castsShadow(first) && batch.receivesShadow === receivesShadow(first) && batch.compositeMode === compositeModeOf(first) && (batch.depthLayer ?? 0) === depthLayerOf(first) && (batch.flushOrder ?? null) === flushOrderOf(first) &&
-        batch.floor === (first.material.tag === 'floor') && batchPass(batch) === renderPass(first.material) &&
+        batch.floor === (first.material.tag === 'floor') && batchPass(batch) === partPass(first) &&
         [batch.alphaMode, batch.alphaCutoff, batch.opacity, batch.doubleSided].every((value, index) => value === alphaState[index]) &&
         batch.mapState.every((value, index) => value === mapState[index]) &&
         batch.layerState.every((value, index) => value === materialLayerState(first.material)[index]);
@@ -1523,7 +1528,7 @@ export class Renderer67 {
       if (part.skin || part.morph) this.updatePartIdentities.add(part);
       validatePartFlags(part);
       if (castsShadow(part) !== location.batch.castShadow) throw new Error(`Shadow casting changes require a new renderer: ${part.name}`);
-      if (receivesShadow(part) !== location.batch.receivesShadow || compositeModeOf(part) !== location.batch.compositeMode) throw new Error(`receiveShadow, holdout and shadowCatcher changes require replaceParts: ${part.name}`);
+      if (receivesShadow(part) !== location.batch.receivesShadow || (part.shadowOnly === true) !== (batchPass(location.batch) === 'shadowOnly') || compositeModeOf(part) !== location.batch.compositeMode) throw new Error(`receiveShadow, holdout, shadowCatcher and shadowOnly changes require replaceParts: ${part.name}`);
       if (depthLayerOf(part) !== (location.batch.depthLayer ?? 0)) throw new Error(`depthLayer changes require replaceParts: ${part.name}`);
       // A material whose fields still equal the ones that passed the full checks below needs none of them again.
       const materialUnchanged = location.materialSnapshot?.matches(part.material) === true;
@@ -1534,7 +1539,7 @@ export class Renderer67 {
       }
       if (part.geometry !== location.geometry) throw new Error(`Geometry changes require a new renderer: ${part.name}`);
       if (isMirroredMatrix(part.matrix) !== Boolean(location.batch.mirrored)) mirrorChanged = true;
-      if (!materialUnchanged && renderPass(part.material) !== batchPass(location.batch)) throw new Error(`Moving a part into or out of the liquid or foam pass requires replaceParts: ${part.name}`);
+      if (!materialUnchanged && partPass(part) !== batchPass(location.batch)) throw new Error(`Moving a part into or out of the liquid or foam pass requires replaceParts: ${part.name}`);
       if ((part.skin ?? null) !== location.skin || part.skin?.jointMatrices !== location.jointMatrices || part.geometry.skinIndices !== location.skinIndices || part.geometry.skinWeights !== location.skinWeights) throw new Error(`Skin identity changes require a new renderer: ${part.name}`);
       if (part.skin) {
         if (PROCEDURAL_MATERIAL_TAGS.has(part.material.tag)) throw new Error('Skinned parts require a standard material tag.');
