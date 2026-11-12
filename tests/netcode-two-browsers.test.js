@@ -17,8 +17,21 @@ const INJECTED_LATENCY_MILLISECONDS = 50;
 // About a pixel on the 30 px per unit sample canvas, so the clock stops at the first visible movement, not 50 ms into it.
 const MOVE_DISTANCE = 0.05;
 const CONVERGENCE_TOLERANCE = 0.05;
-// Measured on a loaded 28-thread machine: about 95 ms each way on both transports. The bound leaves room for load.
-const MAXIMUM_LAG_MILLISECONDS = 250;
+// What the netcode itself adds to a move, read from scripts/netcode-sample.js: the injected latency, up to one 20 ms fixed
+// tick before the input is applied, one snapshot interval (every tick), the 40 ms interpolation delay and one drawn frame.
+// Measured unloaded: 75 to 115 ms. The bound stays tight so an extra delay in the netcode path still fails.
+const TICK_MILLISECONDS = 20;
+const SNAPSHOT_INTERVAL_MILLISECONDS = 20;
+const INTERPOLATION_DELAY_MILLISECONDS = 40;
+const FRAME_MILLISECONDS = 17;
+const MEASUREMENT_SLACK_MILLISECONDS = 15;
+const MAXIMUM_NETCODE_LAG_MILLISECONDS = INJECTED_LATENCY_MILLISECONDS + TICK_MILLISECONDS + SNAPSHOT_INTERVAL_MILLISECONDS +
+  INTERPOLATION_DELAY_MILLISECONDS + FRAME_MILLISECONDS + MEASUREMENT_SLACK_MILLISECONDS;
+// A loaded runner delays page scheduling, not the netcode. Each lag is measured against a baseline taken in the same run
+// between the same two pages, and only the part above that baseline is held to the bound. Lag noise only adds time, so the
+// smallest excess of a few attempts is the netcode's own.
+const BASELINE_PINGS = 5;
+const LAG_ATTEMPTS = 3;
 
 function startStaticServer() {
   const server = createServer(async (request, response) => {
@@ -40,6 +53,14 @@ function startStaticServer() {
 
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
+async function waitUntil(condition, description, timeoutMilliseconds = 5000) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${description}.`);
+    await pause(10);
+  }
+}
+
 async function measureLag(sender, receiver, movingId, input) {
   const watching = receiver.evaluateHandle(([id, distance]) => window.sample.whenEntityMoves(id, distance), [movingId, MOVE_DISTANCE]);
   await pause(50);
@@ -48,6 +69,44 @@ async function measureLag(sender, receiver, movingId, input) {
   await sender.evaluate(() => window.sample.setInput({ moveX: 0, moveZ: 0 }));
   await pause(700);
   return seenAt - sentAt;
+}
+
+// One-way time for a plain BroadcastChannel message between two pages to reach the receiver's next drawn frame, with no
+// netcode and no injected latency: what the runner's load adds to any message between these pages. Returns the median.
+async function measureBaseline(sender, receiver) {
+  const samples = [];
+  for (let ping = 0; ping < BASELINE_PINGS; ping += 1) {
+    const arriving = receiver.evaluateHandle(() => new Promise(resolve => {
+      const channel = new BroadcastChannel('67js-netcode-baseline');
+      channel.onmessage = event => requestAnimationFrame(() => {
+        channel.close();
+        resolve(Date.now() - event.data);
+      });
+    }));
+    await pause(30);
+    await sender.evaluate(() => {
+      const channel = new BroadcastChannel('67js-netcode-baseline');
+      channel.postMessage(Date.now());
+      setTimeout(() => channel.close(), 100);
+    });
+    samples.push(await (await arriving).jsonValue());
+  }
+  samples.sort((first, second) => first - second);
+  return samples[Math.floor(samples.length / 2)];
+}
+
+// The lag above the runner's own scheduling baseline, smallest of several attempts.
+async function measureNetcodeLag(sender, receiver, movingId, input) {
+  let smallest = null;
+  for (let attempt = 0; attempt < LAG_ATTEMPTS; attempt += 1) {
+    const baseline = await measureBaseline(sender, receiver);
+    // Alternate the direction so repeated attempts do not walk the player into the edge of the world.
+    const direction = attempt % 2 === 0 ? 1 : -1;
+    const lag = await measureLag(sender, receiver, movingId, { moveX: input.moveX * direction, moveZ: input.moveZ * direction });
+    const excess = lag - baseline;
+    if (smallest === null || excess < smallest.excess) smallest = { lag, baseline, excess };
+  }
+  return smallest;
 }
 
 async function playTogether(context, transport, relayUrl) {
@@ -62,8 +121,8 @@ async function playTogether(context, transport, relayUrl) {
   await clientPage.waitForFunction(() => window.sample.netcode.stats.snapshotsReceived > 5, null, { timeout: 10000 });
   await pause(500);
 
-  const hostToClientLag = await measureLag(hostPage, clientPage, 'alice', { moveX: 1, moveZ: 0 });
-  const clientToHostLag = await measureLag(clientPage, hostPage, 'bob', { moveX: 0, moveZ: 1 });
+  const hostToClientLag = await measureNetcodeLag(hostPage, clientPage, 'alice', { moveX: 1, moveZ: 0 });
+  const clientToHostLag = await measureNetcodeLag(clientPage, hostPage, 'bob', { moveX: 0, moveZ: 1 });
 
   // Both players steer at once, then stop and let the last packets land.
   const turns = [{ moveX: 1, moveZ: 0.5 }, { moveX: -1, moveZ: 1 }, { moveX: 0, moveZ: -1 }];
@@ -122,7 +181,7 @@ for (const transport of ['broadcast', 'websocket']) {
       context.baseUrl = `http://127.0.0.1:${server.address().port}`;
       const result = await playTogether(context, transport, relay ? `ws://127.0.0.1:${relay.port}/` : null);
       const { positions } = result;
-      console.log(`netcode ${transport}: host to client ${result.hostToClientLag} ms, client to host ${result.clientToHostLag} ms, ` +
+      console.log(`netcode ${transport}: host to client ${result.hostToClientLag.lag} ms (baseline ${result.hostToClientLag.baseline}), client to host ${result.clientToHostLag.lag} ms (baseline ${result.clientToHostLag.baseline}), ` +
         `largest correction ${positions.client.stats.maximumCorrection.toFixed(4)}`);
 
       for (const id of ['alice', 'bob']) {
@@ -132,8 +191,11 @@ for (const transport of ['broadcast', 'websocket']) {
         }
       }
       assert.ok(Math.hypot(positions.host.alice[0] + 3, positions.host.alice[2]) > 0.3, 'the host player moved');
-      assert.ok(result.hostToClientLag > INJECTED_LATENCY_MILLISECONDS && result.hostToClientLag < MAXIMUM_LAG_MILLISECONDS, `host to client lag ${result.hostToClientLag} ms`);
-      assert.ok(result.clientToHostLag > INJECTED_LATENCY_MILLISECONDS && result.clientToHostLag < MAXIMUM_LAG_MILLISECONDS, `client to host lag ${result.clientToHostLag} ms`);
+      for (const [label, measured] of [['host to client', result.hostToClientLag], ['client to host', result.clientToHostLag]]) {
+        const description = `${label} lag ${measured.lag} ms with a ${measured.baseline} ms baseline`;
+        assert.ok(measured.lag > INJECTED_LATENCY_MILLISECONDS, `${description} is below the injected latency`);
+        assert.ok(measured.excess < MAXIMUM_NETCODE_LAG_MILLISECONDS, `${description}: ${measured.excess} ms of netcode lag, over the ${MAXIMUM_NETCODE_LAG_MILLISECONDS} ms bound`);
+      }
       assert.equal(positions.host.stats.rejectedMessages, 0);
       assert.equal(positions.client.stats.rejectedMessages, 0);
     } finally {
@@ -181,7 +243,15 @@ test('the relay survives an oversize frame and keeps forwarding for other player
     socket.once('open', () => resolve(socket));
     socket.once('error', reject);
   });
-  const nextMessage = socket => new Promise(resolve => socket.once('message', data => resolve(JSON.parse(data.toString()))));
+  const nextMessageFrom = (socket, peerId) => new Promise(resolve => {
+    const listener = data => {
+      const message = JSON.parse(data.toString());
+      if (message.from !== peerId) return;
+      socket.off('message', listener);
+      resolve(message);
+    };
+    socket.on('message', listener);
+  });
   try {
     const sender = await open('sender');
     const receiver = await open('receiver');
@@ -191,9 +261,12 @@ test('the relay survives an oversize frame and keeps forwarding for other player
     offender.send('x'.repeat(70000));
     await offenderClosed;
 
-    const arrival = nextMessage(receiver);
+    // The relay also tells the receiver that the offender left, and that notice can land before the forwarded message.
+    const arrival = nextMessageFrom(receiver, 'sender');
     sender.send(JSON.stringify({ to: 'receiver', data: { still: 'alive' } }));
     assert.deepEqual(await arrival, { from: 'sender', data: { still: 'alive' } });
+    // The relay drops the offender when its own socket closes, which can land after the offender's side saw the close.
+    await waitUntil(() => relay.peerIds.length === 2, 'the relay to drop the offender');
     assert.deepEqual(relay.peerIds.sort(), ['receiver', 'sender']);
     sender.close();
     receiver.close();
