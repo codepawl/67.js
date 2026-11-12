@@ -164,29 +164,44 @@ pub(crate) fn check_counts_match_kernel_params(input: &NativeTraceInputV2) -> Re
     Ok(())
 }
 
-/// Checks that a frame's kernel parameters describe the scene the session holds: the seven record counts must equal the
-/// counts of the parameters the session was created with. Everything else (camera, bounces, seed, filter, flags) may change.
+/// The words of `KernelParamsV2` that describe scene data a session uploaded or compiled for once: the record counts that
+/// size the buffers, the environment table (size, offset and total weight), the offsets into the texel pool and the light
+/// selection weights. A frame may not change them; every other word (camera, lens, seed, bounces, clamps, filter, adaptive
+/// sampling, exposure, fog, kernel flags) is a per-frame setting. Fog and the kernel flags select pipeline variants, which a
+/// session recompiles on its own when they change.
+const SCENE_BOUND_FIELDS: [(&str, usize); 16] = [
+    ("instanceCount", KP_INSTANCE_COUNT_BYTE),
+    ("triangleCount", KP_TRIANGLE_COUNT_BYTE),
+    ("materialCount", KP_MATERIAL_COUNT_BYTE),
+    ("emissiveTriangleCount", KP_EMISSIVE_TRIANGLE_COUNT_BYTE),
+    ("lightCount", KP_LIGHT_COUNT_BYTE),
+    ("lightTreeNodeCount", KP_LIGHT_TREE_NODE_COUNT_BYTE),
+    ("textureCount", KP_TEXTURE_COUNT_BYTE),
+    ("envWidth", KP_ENV_WIDTH_BYTE),
+    ("envHeight", KP_ENV_HEIGHT_BYTE),
+    ("envCdfOffset", 200),
+    ("envTotalWeight", KP_ENV_TOTAL_WEIGHT_BYTE),
+    ("emissiveTotalWeight", 268),
+    ("analyticLightTotalWeight", 272),
+    ("iesTableOffset", 284),
+    ("backgroundMisWeight", 292),
+    ("sobolTableOffset", 296),
+];
+
+/// Checks that a frame's kernel parameters describe the scene the session holds: every scene-bound word (see
+/// `SCENE_BOUND_FIELDS`) must equal the one the session was created with.
 pub(crate) fn check_frame_params_keep_scene_counts(session_kernel_params: &[u8], frame_kernel_params: &[u8]) -> Result<()> {
-    let counts = [
-        ("instanceCount", KP_INSTANCE_COUNT_BYTE),
-        ("triangleCount", KP_TRIANGLE_COUNT_BYTE),
-        ("materialCount", KP_MATERIAL_COUNT_BYTE),
-        ("emissiveTriangleCount", KP_EMISSIVE_TRIANGLE_COUNT_BYTE),
-        ("lightCount", KP_LIGHT_COUNT_BYTE),
-        ("lightTreeNodeCount", KP_LIGHT_TREE_NODE_COUNT_BYTE),
-        ("textureCount", KP_TEXTURE_COUNT_BYTE),
-    ];
-    for (name, byte_offset) in counts {
+    for (name, byte_offset) in SCENE_BOUND_FIELDS {
         if session_kernel_params.len() < byte_offset + 4 || frame_kernel_params.len() < byte_offset + 4 {
             return Err(failure(format!(
                 "kernelParams must hold the 320 byte KernelParamsV2 block to read {name} at byte {byte_offset}."
             )));
         }
-        let session_count = read_u32_le(session_kernel_params, byte_offset);
-        let frame_count = read_u32_le(frame_kernel_params, byte_offset);
-        if session_count != frame_count {
+        let session_word = read_u32_le(session_kernel_params, byte_offset);
+        let frame_word = read_u32_le(frame_kernel_params, byte_offset);
+        if session_word != frame_word {
             return Err(failure(format!(
-                "The kernelParams of this frame say {name} is {frame_count}, but the session scene has {session_count}. A session renders one scene; pack the frame from the same scene (only the camera and the render settings may differ) or create a new session."
+                "The kernelParams of this frame change {name} (byte {byte_offset}) from {session_word} to {frame_word} (raw 32 bit words), but the session scene was uploaded with the first value. A session renders one scene; pack the frame from the same scene (only the camera and the render settings may differ) or create a new session."
             )));
         }
     }
@@ -711,6 +726,47 @@ mod specialization_tests {
 
         let truncated = &session_params[..64];
         assert!(check_frame_params_keep_scene_counts(&session_params, truncated).is_err());
+    }
+
+    #[test]
+    fn a_frame_may_not_change_any_scene_bound_word_and_the_error_names_it() {
+        let session_params = make_kp(0, 0.0, 512, 256, 3.0);
+        for (name, byte_offset) in SCENE_BOUND_FIELDS {
+            let mut changed = session_params.clone();
+            changed[byte_offset..byte_offset + 4].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+            let message = check_frame_params_keep_scene_counts(&session_params, &changed)
+                .expect_err("a changed scene-bound word must be refused")
+                .to_string();
+            assert!(message.contains(name), "{name}: {message}");
+            assert!(message.contains("create a new session"), "{name}: {message}");
+        }
+    }
+
+    #[test]
+    fn a_frame_with_another_hdri_or_an_environment_the_session_lacks_is_refused() {
+        let with_environment = make_kp(0, 0.0, 512, 256, 3.0);
+        let other_size = make_kp(0, 0.0, 1024, 512, 3.0);
+        let no_environment = make_kp(0, 0.0, 0, 0, 0.0);
+        let message = check_frame_params_keep_scene_counts(&with_environment, &other_size).unwrap_err().to_string();
+        assert!(message.contains("envWidth"), "{message}");
+        assert!(check_frame_params_keep_scene_counts(&no_environment, &with_environment).is_err());
+        assert!(check_frame_params_keep_scene_counts(&with_environment, &no_environment).is_err());
+    }
+
+    #[test]
+    fn per_frame_settings_may_change_freely() {
+        let session_params = make_kp(0, 0.0, 512, 256, 3.0);
+        let scene_bound: Vec<usize> = SCENE_BOUND_FIELDS.iter().map(|(_, offset)| *offset).collect();
+        // Every 4 byte word after the header except the scene-bound ones (camera, lens, seed, bounces, clamps, filter,
+        // fog, exposure, flags, adaptive sampling) is a setting of the frame.
+        for byte_offset in (8..304).step_by(4).filter(|offset| !scene_bound.contains(offset)) {
+            let mut changed = session_params.clone();
+            changed[byte_offset..byte_offset + 4].copy_from_slice(&0x3f80_0000u32.to_le_bytes());
+            assert!(
+                check_frame_params_keep_scene_counts(&session_params, &changed).is_ok(),
+                "byte {byte_offset} is a per-frame setting"
+            );
+        }
     }
 
     fn opaque_inputs(metallic: f32, transmission_weight: f32) -> BaseLayerInputs {

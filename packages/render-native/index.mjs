@@ -91,25 +91,8 @@ export function traceNative(input, options = {}) {
   let v2Input = input?.schemaVersion === FORMAT_V2_VERSION
     ? input
     : upgradeNativeInputV1ToV2(input, options);
-  const explicitFilterGlossy = options.filterGlossy ?? options.blurGlossy;
-  if (input?.schemaVersion === FORMAT_V2_VERSION && explicitFilterGlossy !== undefined) {
-    const rawFilterGlossy = Number(explicitFilterGlossy);
-    const resolvedFilterGlossy = Number.isFinite(rawFilterGlossy) && rawFilterGlossy > 0 ? rawFilterGlossy : 0.0;
-    const patchedParams = new Uint8Array(v2Input.kernelParams);
-    new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
-    v2Input = { ...v2Input, kernelParams: patchedParams };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && hasFilterOptions(options)) {
-    v2Input = { ...v2Input, kernelParams: withFilterOptions(v2Input.kernelParams, options) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && sampler !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, sampler) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && options.pathRegeneration !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withPathRegenerationFlag(v2Input.kernelParams, options.pathRegeneration) };
-  }
-  if (input?.schemaVersion === FORMAT_V2_VERSION && lightSampling !== undefined) {
-    v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, lightSampling) };
+  if (input?.schemaVersion === FORMAT_V2_VERSION) {
+    v2Input = { ...v2Input, kernelParams: patchedCyclesKernelParams(v2Input, v2Input.kernelParams, options, 'traceNative') };
   }
   return addon.traceSceneCycles(v2Input, {
     width,
@@ -336,9 +319,9 @@ function mergeDefinedOptions(sessionOptions, renderOptions) {
   return merged;
 }
 
-// The kernel parameters of a FORMAT-v2 input after the sampling, filter and light options of `options`: the same patches, in the
-// same order, that `traceNative` applies to a v2 input.
-function patchedSessionKernelParams(v2Input, kernelParams, options, callerName) {
+// The kernel parameters of a FORMAT-v2 input after the sampling, filter and light options of `options`, the one place the patches live (traceNative and sessions share it), in a fixed
+// order.
+function patchedCyclesKernelParams(v2Input, kernelParams, options, callerName) {
   const { sampler, lightSampling } = resolveSamplingOptions(options, callerName);
   validatePathRegenerationOption(options.pathRegeneration, callerName);
   let patchedParams = new Uint8Array(kernelParams);
@@ -371,7 +354,7 @@ export function resolveSessionCreation(input, options) {
   }
   requireCyclesKernelOption(options.kernel, 'createNativeSession');
   validatePackOptions(options, 'createNativeSession');
-  return { ...input, kernelParams: patchedSessionKernelParams(input, input.kernelParams, options, 'createNativeSession') };
+  return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, 'createNativeSession') };
 }
 
 // Exported for tests; not part of the public API.
@@ -387,7 +370,7 @@ export function resolveSessionFrame(sessionInput, sessionOptions, renderOptions)
     requireSessionKernelParams(renderOptions.kernelParams, 'NativeSession.render');
     baseKernelParams = renderOptions.kernelParams;
   }
-  const kernelParams = patchedSessionKernelParams(sessionInput, baseKernelParams, options, 'NativeSession.render');
+  const kernelParams = patchedCyclesKernelParams(sessionInput, baseKernelParams, options, 'NativeSession.render');
   const { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise } = options;
   return { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, kernelParams };
 }

@@ -66,6 +66,7 @@ pub(crate) struct CyclesRender {
 }
 
 /// What creating the session cost; the first frame reports it.
+#[derive(Clone, Copy)]
 struct CreationCosts {
     setup_seconds: f64,
     upload_seconds: f64,
@@ -232,7 +233,7 @@ impl CyclesSession {
         let frame_kernel_params = self.frame_kernel_params(request.kernel_params)?;
 
         let frame_index = self.renders_completed;
-        let creation_costs = self.creation_costs.take();
+        let creation_costs = self.creation_costs;
         let acceleration_reused = creation_costs.is_none();
         let context = &self.context;
         let gpu = self.gpu.as_mut().ok_or_else(session_closed_failure)?;
@@ -278,6 +279,7 @@ impl CyclesSession {
             request.max_seconds,
         )?;
         self.renders_completed = frame_index + 1;
+        self.creation_costs = None;
 
         let report = CyclesRenderReport {
             setup_seconds: creation_costs.as_ref().map_or(0.0, |costs| costs.setup_seconds),

@@ -326,3 +326,38 @@ test('rendering after close throws and the card is free for a new session', { sk
     fresh.close();
   }
 });
+
+const ENV_WIDTH_BYTE_OFFSET = 192;
+const SOBOL_TABLE_OFFSET_BYTE_OFFSET = 296;
+
+test('a frame that changes the environment table shape or a texel pool offset is refused', { skip: skipWithoutAddon }, () => {
+  const input = roomInput([0, 2.2, 6]);
+  const session = createNativeSession(input);
+  try {
+    for (const [byteOffset, fieldName] of [[ENV_WIDTH_BYTE_OFFSET, /envWidth/], [SOBOL_TABLE_OFFSET_BYTE_OFFSET, /sobolTableOffset/]]) {
+      const changed = new Uint8Array(input.kernelParams);
+      const view = new DataView(changed.buffer);
+      view.setUint32(byteOffset, view.getUint32(byteOffset, true) + 64, true);
+      assert.throws(() => session.render({ ...IMAGE_OPTIONS, kernelParams: changed }), { message: fieldName });
+    }
+  } finally {
+    session.close();
+  }
+});
+
+test('a first frame that fails leaves the creation costs for the retry', { skip: skipWithoutAddon }, () => {
+  const input = roomInput([0, 2.2, 6]);
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
+  const session = createNativeSession(input);
+  try {
+    assert.throws(() => session.render({ ...options, samples: 4096, maxSeconds: 1e-6 }), { message: /time limit/ });
+    const retry = session.render(options);
+    assert.equal(retry.frameIndex, 0);
+    assert.equal(retry.accelerationReused, false);
+    assert.ok(retry.setupSeconds > 0, 'the creation setup seconds are reported by the first frame that succeeds');
+    assertSameBytes(traceNative(input, options), retry, 'the retry against the one-shot render');
+    assert.equal(session.render(options).accelerationReused, true);
+  } finally {
+    session.close();
+  }
+});
