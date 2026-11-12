@@ -159,12 +159,17 @@ export async function denoiseFrameWithOidn({ tracer, denoiser, width, height, co
 /**
  * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet",
  * "atrous" (the tracer's GPU filter, which is also where a missing or failing OIDN lands) or "oidn"; `denoiser` is the
- * loaded OIDN package for "oidn". Throws when the tracer cannot run, so the caller can fall back.
+ * loaded OIDN package for "oidn". `sequence` (from createNativeSequence) renders a cycles kernel frame through the job's
+ * persistent session and adds `report.nativeSession`, the route the frame took. Throws when the tracer cannot run, so the
+ * caller can fall back.
  */
-export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel() }) {
+export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel(), sequence }) {
   const started = performance.now();
   const filtersInTrace = denoise === 'atrous' && kernel === 'cycles';
-  const traced = tracer.traceNative(decodeTables(exported), { width, height, samples, maxSeconds, kernel, noiseThreshold, ...(filtersInTrace ? { denoise: 'atrous' } : {}) });
+  const traceOptions = { width, height, samples, maxSeconds, kernel, noiseThreshold, ...(filtersInTrace ? { denoise: 'atrous' } : {}) };
+  const { traced, route } = sequence && kernel === 'cycles'
+    ? sequence.trace(decodeTables(exported), traceOptions)
+    : { traced: tracer.traceNative(decodeTables(exported), traceOptions) };
   const tracedSeconds = (performance.now() - started) / 1000;
   const pixelCount = width * height;
   const features = { color: withoutAlpha(traced.rgba, pixelCount), albedo: traced.albedo, normal: traced.normal,
@@ -173,7 +178,8 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const report = { width, height, samples, bounces, seed, denoised: false, denoiser: 'none', threads: 1, backend: 'native',
     gpu: traced.adapter, nativeBackend: traced.backend, nativeFeatures: traced.features, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
     uploadSeconds: traced.uploadSeconds, accelerationBuildSeconds: traced.accelerationBuildSeconds,
-    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, tracedSeconds, ignored: exported.ignored };
+    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, tracedSeconds, ignored: exported.ignored,
+    ...(route ? { nativeSession: route } : {}) };
   let linear = features.color;
   const denoiseStarted = performance.now();
   if (denoise === 'oidn') {

@@ -904,6 +904,25 @@ Measured on one NVIDIA A10 (480 x 270, 32 samples, `bench/cycles-parity/session-
 
 One-shot `traceNative` images (both kernels) and S1 session frames hash the same as origin/main built in the same container.
 
+## Sequence jobs through a persistent session (#896, slice S3)
+
+A stills or video job with `renderer.backend: "native"` and more than one frame holds one native session for the whole job. Frame 1 creates it; each later frame is decided by comparing its FORMAT-v2 tables with the ones the session holds: the same tables (a camera move) render with the frame's own `kernelParams`; changed `materials`, lights or instance transforms go through `session.update`; changed counts, geometry, textures or environment close the session and create a new one for that frame. A failed update (which closes the session by design), a failed render or a package without sessions falls to a new session or a one-shot trace for that frame and the job carries on. `metrics.pathTracer.nativeSession` names the route of each frame (`path`: `new-session`, `reused`, `updated` or `one-shot`, with `reason`, `changedTables`, `pipelineReused`, `accelerationReused`, `frameIndex`). Every frame equals the one-shot render of the same input byte for byte (`tests/native-sequence.test.js`, and the SHA-256 of all 24 frames in each run below).
+
+Measured on one NVIDIA RTX 4090 (Vast instance, 24 frames, 480 x 270, 16 samples, `bench/cycles-parity/sequence-timing.mjs`, one process per mode so the cold compile of one mode never warms the other; medians of three runs; milliseconds) `[measured]`:
+
+| Sequence | Mode | Frame 1 setup / compile / upload / accel / trace | Frame 2-24 mean setup / compile / upload / accel / trace | Sequence total (s) | Routes |
+| --- | --- | --- | --- | --- | --- |
+| `lit-interior`, camera orbit | session | 300 / 33 / 0.5 / 1.0 / 24 | 0 / 1.8 / 0.1 / 0 / 19 | 1.03 | 1 new, 23 reused |
+| | one-shot | 324 / 32 / 0.5 / 1.7 / 25 | 0 / 1.9 / 0.3 / 0.9 / 18 | 0.98 | |
+| `lit-interior`, block moves and key light swings (flattened) | session | 296 / 33 / 0.5 / 1.2 / 26 | 0 / 1.9 / 0.2 / 0.8 / 21 | 1.02 | 24 new (triangles differ) |
+| | one-shot | 304 / 33 / 0.5 / 1.4 / 27 | 0 / 1.9 / 0.3 / 1.0 / 21 | 1.02 | |
+| same, instanced (`buildTraceScene` `instancing: true`) | session | 295 / 33 / 0.5 / 0.9 / 21 | 0 / 1.8 / 0.0 / 0 / 13 | 0.88 | 1 new, 23 updated |
+| | one-shot | 233 / 34 / 0.5 / 0.8 / 20 | 0 / 1.8 / 0.2 / 0.5 / 13 | 0.75 | |
+| `many-lights-500` (3,646 triangles, 350 lights), camera orbit | session | 302 / 33 / 0.7 / 2.7 / 70 | 0 / 1.9 / 0.1 / 0 / 19 | 1.00 | 1 new, 23 reused |
+| | one-shot | 286 / 33 / 0.7 / 2.6 / 66 | 0 / 1.8 / 0.3 / 2.0 / 18 | 1.32 (one run 7.5 s, two near 1.0) | |
+
+What the numbers say `[inferred]`: a session removes the acceleration build and most of the upload from frame 2 on (camera-only: 0 ms against 0.9 to 2.0 ms of build, 0.1 against 0.3 ms of upload), and `pipelineReused` and `accelerationReused` are true on every later frame. Compile does not read zero: the 1.8 ms is the lookup of the process-wide compiled-kernel cache, which a one-shot trace also hits from its second frame, so a one-shot sequence in a warm process already skips the 33 ms compile and the 240 to 320 ms device start. These scenes hold about 3,000 triangles, so the saving is 1 to 3 ms of a 18 to 25 ms frame and the sequence totals sit within run-to-run noise (the instanced rows show the spread: 0.73 to 1.04 s for the same work). A session pays when the scene is large enough for the build and upload to matter; a bench at that size is not recorded here. A moving object in the flattened scene changes the `triangles` table, so every frame there is a new session (as costly as a one-shot trace); only a scene packed with shared geometry turns a moved object into an instance-transform update.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:

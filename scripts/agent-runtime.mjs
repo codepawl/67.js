@@ -15,6 +15,7 @@ import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
 import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS } from '../src/agent-scene-capabilities.js';
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
+import { createNativeSequence } from './agent-native-sequence.mjs';
 import { chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
 import { geometryOnlyGlb } from './agent-query-asset.mjs';
@@ -463,6 +464,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     let jobPage;
     let encoder;
     let frameReceiver;
+    // A stills or video job of native frames renders them all through one session; it is closed when the job ends.
+    let nativeSequence;
     let pageEncodes = false;
     let suspended = false;
     const started = performance.now();
@@ -566,12 +569,14 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           if (trace.backend === 'native') {
             try {
               const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold } });
-              traced = await traceFrameNative({ tracer: trace.tracer, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
+              if (settings.frameCount > 1) nativeSequence ??= createNativeSequence({ tracer: trace.tracer });
+              traced = await traceFrameNative({ tracer: trace.tracer, sequence: nativeSequence, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
                 seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
                 maxSeconds: tracerOptions.maxSeconds, noiseThreshold: tracerOptions.noiseThreshold });
             } catch (error) {
               // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
               if (isNativeTimeLimitError(error)) throw error;
+              nativeSequence?.close();
               nativeTracerLocator.markUnusable(error.message);
               backendNote = (await nativeTracerLocator.find()).reason;
               traceOptions.backend = backend === 'cpu' ? 'cpu' : 'gpu';
@@ -726,6 +731,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       return { artifacts, metrics };
     } finally {
       signal.removeEventListener('abort', abort);
+      nativeSequence?.close();
       activeFrameReceiver = undefined;
       frameReceiver?.close();
       try { await encoder?.close(); }

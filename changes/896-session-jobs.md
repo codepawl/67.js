@@ -1,0 +1,1 @@
+- Native render jobs with several frames keep one persistent session, so a camera move builds nothing after frame 1 and each frame's report names the route it took (#896)

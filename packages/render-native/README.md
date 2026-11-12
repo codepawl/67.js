@@ -72,6 +72,8 @@ A frame may change these words of the 320 byte block: the camera, lens, aperture
 
 A frame is byte-identical to the `traceNative` render of the same input and options: `traceNative` runs a session that renders once. `render` after `close()` throws, and so does a frame on a session whose device was lost; the error says to create a new session. A plain frame clears the film and starts at sample 0.
 
+A render job of many frames (`scripts/agent-native-sequence.mjs`) keeps one session for its frames: the same tables render with the frame's `kernelParams`, changed values go through `update`, and a refused or failed update, or a render the session cannot do, falls back to a new session or a one-shot trace for that frame. The job report names the route of each frame.
+
 ### Progressive film
 
 `render({ samples: 16, accumulate: true, targetSamples: 64 })` adds its samples to the film instead of starting an image, so one image can grow over several calls and be read at any point:
