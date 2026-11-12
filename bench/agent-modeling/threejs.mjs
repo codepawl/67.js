@@ -20,6 +20,7 @@ import { parseArgs } from 'node:util';
 import { createRunGuard } from './run-guard.mjs';
 import { removeLocalPaths, totalsByModel, totalsOf } from './aggregate.mjs';
 import { checkOne } from './check.mjs';
+import { countFixRounds, isCodeRender, isCodeWrite } from './fix-rounds.mjs';
 import { camerasForTask, worldGeometriesOf } from './look.mjs';
 import { countTips, lineHits, sectionLoops, signedVolume } from './measure.mjs';
 import { checkPng } from './png-check.mjs';
@@ -136,7 +137,8 @@ export async function scoreSilhouetteOfGeometries(taskId, rawGeometries) {
 }
 
 export function readTranscript(output) {
-  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, result: null };
+  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, fixRounds: 0, result: null };
+  const steps = [];
   for (const line of output.split('\n')) {
     if (!line.trim().startsWith('{')) continue;
     let event;
@@ -151,6 +153,7 @@ export function readTranscript(output) {
         if (block.type !== 'tool_use' || block.name === 'ToolSearch') continue;
         summary.toolCalls++;
         summary.toolsByName[block.name] = (summary.toolsByName[block.name] ?? 0) + 1;
+        steps.push({ name: block.name, input: block.input });
       }
     }
     if (event.type === 'user') {
@@ -160,6 +163,7 @@ export function readTranscript(output) {
     }
     if (event.type === 'result') summary.result = event;
   }
+  summary.fixRounds = countFixRounds(steps, { isRender: isCodeRender, isWrite: isCodeWrite });
   return summary;
 }
 
@@ -267,6 +271,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             model: transcript.model,
             toolCalls: transcript.toolCalls,
             toolErrors: transcript.toolErrors,
+            fixRounds: transcript.fixRounds,
             toolsByName: transcript.toolsByName,
             look: silhouette ? { silhouette } : null,
             turns: transcript.result?.num_turns ?? null,
