@@ -83,6 +83,7 @@
     "./addons/shrinkwrap": "./build/shrinkwrap.js",
     "./addons/surface-attachment": "./build/surface-attachment.js",
     "./addons/physics": "./build/physics.js",
+    "./addons/settle": "./build/settle.js",
     "./addons/spume": "./build/spume.js",
     "./addons/retarget": "./build/retarget.js",
     "./addons/crowd-skinning": "./build/crowd-skinning.js",

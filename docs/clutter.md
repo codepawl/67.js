@@ -75,6 +75,10 @@ On an 80 × 100 m area, eye 1.3 m above the ground, built in Node:
 
 `riverbed` and `scree` are dense by design. Lower `pebbles` or `cullDistance` for phones.
 
+## Settling stones into a pile
+
+Clutter tiles are meshes, so they stay where they were scattered. To drop stones and let them lie against a wall or each other, use the settle step ([Settling props](physics.md#settling-props)): list the stone poses as `instances`, or let it scatter boxes and balls over an area. It returns resting transforms to draw as static parts.
+
 ## Limits
 
 - Stones are untextured. Up close they read as smooth, mottled stones, not as scanned rock.
