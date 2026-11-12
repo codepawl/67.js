@@ -1,10 +1,13 @@
 // Renders N copies of one small mesh through the native "cycles" kernel, either as shared instances or flattened into one
 // triangle soup, and writes the linear RGBA floats beside a JSON report. Usage:
 //   node bench/instancing/render-copies.mjs <instanced|flattened> <output folder> [copies] [width] [height] [samples] [variant] [seed] [kernel]
+// kernel is "cycles" (default) or "legacy"; legacy reads the flattened scene only.
 // A variant sets how the copies are placed: translate (default), rotscale (rotated, non-uniform scale), mirror (negative
 // determinant), mirror-rotscale, or emissive (translate, with one emissive material).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { buildNativeInputV2, traceNative } from '../../packages/render-native/index.mjs';
+import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
+import * as pack from '../../src/path-tracer-gpu-pack.js';
 import { buildCopyScene } from './copies-scene.mjs';
 import { createCamera } from '../../src/path-tracer.js';
 import { buildTraceScene } from '../../src/path-tracer-scene.js';
@@ -22,7 +25,8 @@ const camera = createCamera({ eye: [0, 0, 14], target: [0, 0, -3], fov: 50 }, wi
 
 const packStarted = performance.now();
 const scene = buildTraceScene(parts, environment, { instancing: mode === 'instanced' });
-const input = buildNativeInputV2(scene, camera, { width, height, samples, seed });
+const packOptions = { width, height, samples, seed };
+const input = kernel === 'legacy' ? buildNativeInput(scene, camera, packOptions, pack) : buildNativeInputV2(scene, camera, packOptions);
 const packSeconds = (performance.now() - packStarted) / 1000;
 const traced = traceNative(input, { width, height, samples, kernel });
 const kernelSuffix = kernel === 'cycles' ? '' : `-${kernel}`;
