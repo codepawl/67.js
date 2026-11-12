@@ -12,6 +12,7 @@ import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
 const SUPPORTED_FILTERS = new Set(['box', 'blackman-harris']);
+const SUPPORTED_SAMPLERS = new Set(['white', 'sobol-burley']);
 
 function readFlagValue(argumentList, flagName, fallbackValue) {
   const flagIndex = argumentList.indexOf(flagName);
@@ -57,9 +58,17 @@ function parseFilterTypeOption(argumentList) {
   return filterType;
 }
 
+function parseSamplerOption(argumentList) {
+  const sampler = String(readFlagValue(argumentList, '--sampler', 'sobol-burley'));
+  if (!SUPPORTED_SAMPLERS.has(sampler)) {
+    throw new RangeError(`Option --sampler must be "white" or "sobol-burley", got "${sampler}".`);
+  }
+  return sampler;
+}
+
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--filter-type box|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -71,6 +80,7 @@ function parseTraceArguments(argumentList) {
     bounces: parseIntegerOption(argumentList, '--bounces', 8, 0),
     seed: parseIntegerOption(argumentList, '--seed', 1, 0),
     filterType: parseFilterTypeOption(argumentList),
+    sampler: parseSamplerOption(argumentList),
     filterWidth: parseNumberOption(argumentList, '--filter-width', 1.0, 0.01),
     clampDirect: parseNumberOption(argumentList, '--clamp-direct', 0, 0),
     clampIndirect: parseNumberOption(argumentList, '--clamp-indirect', 0, 0),
@@ -131,6 +141,7 @@ async function runCli() {
     maxSeconds: options.maxSeconds,
     kernel: options.kernel,
     filterType: options.filterType,
+    sampler: options.sampler,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,
@@ -157,6 +168,7 @@ async function runCli() {
     bounces: options.bounces,
     seed: options.seed,
     filterType: options.filterType,
+    sampler: options.sampler,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,

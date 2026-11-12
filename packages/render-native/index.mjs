@@ -9,7 +9,9 @@ import {
   FORMAT_V2_MAGIC,
   FORMAT_V2_VERSION,
   STRUCT_STRIDES_V2,
+  KERNEL_FLAG_WHITE_NOISE_SAMPLER,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
+  KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET,
   buildNativeInputV2,
   packMaterialRecordV2,
   upgradeNativeInputV1ToV2,
@@ -83,6 +85,9 @@ export function traceNative(input, options = {}) {
     new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength).setFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, resolvedFilterGlossy, true);
     v2Input = { ...v2Input, kernelParams: patchedParams };
   }
+  if (input?.schemaVersion === FORMAT_V2_VERSION && options.sampler !== undefined) {
+    v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, options.sampler) };
+  }
   return addon.traceSceneCycles(v2Input, {
     width,
     height,
@@ -93,7 +98,18 @@ export function traceNative(input, options = {}) {
   });
 }
 
-function buildProbeKernelParams({ width, height, mode, seed, wo, frontFace, materialCount, textureCount }) {
+function withSamplerFlag(kernelParams, sampler) {
+  const patchedParams = new Uint8Array(kernelParams);
+  const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
+  const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
+  const patchedFlags = sampler === 'white'
+    ? (flags | KERNEL_FLAG_WHITE_NOISE_SAMPLER) >>> 0
+    : (flags & ~KERNEL_FLAG_WHITE_NOISE_SAMPLER) >>> 0;
+  view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
+  return patchedParams;
+}
+
+function buildProbeKernelParams({ width, height, mode, seed, sampleOffset, wo, frontFace, materialCount, textureCount }) {
   const buffer = new ArrayBuffer(STRUCT_STRIDES_V2.kernelParams);
   const f32 = new Float32Array(buffer);
   const u32 = new Uint32Array(buffer);
@@ -105,7 +121,7 @@ function buildProbeKernelParams({ width, height, mode, seed, wo, frontFace, mate
   u32[1] = FORMAT_V2_VERSION;
   u32[2] = width >>> 0;
   u32[3] = height >>> 0;
-  u32[4] = 0;
+  u32[4] = (sampleOffset ?? 0) >>> 0;
   u32[5] = 1;
   u32[6] = 1;
   u32[7] = (seed ?? 1) >>> 0;
@@ -158,6 +174,7 @@ export function probeCyclesLobe(options = {}) {
       height,
       mode: options.mode ?? 0,
       seed: options.seed ?? 1,
+      sampleOffset: options.sampleOffset,
       wo,
       frontFace: options.frontFace ?? true,
       materialCount,

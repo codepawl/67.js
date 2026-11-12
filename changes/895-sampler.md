@@ -1,0 +1,1 @@
+- The Cook `cycles` kernel samples with Cycles' Sobol-Burley blue-noise pattern by default; `sampler: "white"` (`--sampler white` in `trace-native.mjs`) keeps the old hash sampler (#895)

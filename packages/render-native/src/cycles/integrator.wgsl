@@ -765,6 +765,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       if (has_world_volume) {
         let overlap = int_volume_segment_overlap(ray_origin, ray_dir, ray_t_min, surface_hit.t);
         if (overlap.y > overlap.x) {
+          smp_seek(&rng, step, SMP_SLOT_VOLUME_DISTANCE);
           let vol_u = smp_next_1d(&rng);
           let free_flight = -log(max(1.0 - vol_u, 1.0e-12)) / kernel_params.volume_density;
           let vol_len = overlap.y - overlap.x;
@@ -810,15 +811,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
 
         if (SCENE_HAS_ANALYTIC_LIGHTS && kernel_params.light_count > 0u) {
+          smp_seek(&rng, step, SMP_SLOT_VOLUME_ANALYTIC_PICK);
           let light_samp = lgt_sample_analytic_light(scatter_pos, 0xFFFFFFFFu, 0xFFFFFFFFu, smp_next_1d(&rng), smp_next_2d(&rng));
           int_accumulate_volume_direct_sample(light_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
         }
         if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
+          smp_seek(&rng, step, SMP_SLOT_VOLUME_ENVIRONMENT);
           let env_samp = lgt_sample_environment(smp_next_4d(&rng));
           int_accumulate_volume_direct_sample(env_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
         }
 
         var phase_pdf = 0.0;
+        smp_seek(&rng, step, SMP_SLOT_VOLUME_PHASE);
         let next_dir = int_sample_henyey_greenstein(ray_dir, kernel_params.volume_anisotropy, smp_next_2d(&rng), &phase_pdf);
         bounce += 1u;
         volume_bounces += 1u;
@@ -829,6 +833,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           let max_channel = max(throughput.x, max(throughput.y, throughput.z));
           let survival = clamp(max_channel, 0.05, 1.0);
           if (survival < 1.0) {
+            smp_seek(&rng, step, SMP_SLOT_TERMINATE);
             if (smp_next_1d(&rng) >= survival) {
               break;
             }
@@ -917,6 +922,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (closure.lobe_count > 0u && closure.lobes[0].lobe_type == LOBE_TRANSPARENT && closure.total_sample_weight > 0.0) {
           if (kernel_params.max_transparent_bounces > 0u && transparent_bounces < kernel_params.max_transparent_bounces) {
             let trans_prob = clamp(closure.lobes[0].sample_weight / closure.total_sample_weight, 0.0, 1.0);
+            smp_seek(&rng, step, SMP_SLOT_TRANSPARENT);
             if (trans_prob > 0.0 && smp_next_1d(&rng) < trans_prob) {
               transparent_bounces += 1u;
               if (transparent_bounces >= kernel_params.max_transparent_bounces) {
@@ -943,6 +949,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         direct_sample.pdf = 0.0;
         if (direct_source == 0u) {
           if (SCENE_HAS_ANALYTIC_LIGHTS && kernel_params.light_count > 0u) {
+            smp_seek(&rng, step, SMP_SLOT_ANALYTIC_PICK);
             direct_sample = lgt_sample_analytic_light(
               point.position,
               point.light_group_mask_lo,
@@ -953,16 +960,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           }
         } else if (direct_source == 1u) {
           if (SCENE_HAS_EMISSIVE_TRIANGLES && kernel_params.emissive_triangle_count > 0u) {
+            smp_seek(&rng, step, SMP_SLOT_EMISSIVE_PICK);
             direct_sample = lgt_sample_emissive_triangle(&point, smp_next_1d(&rng), smp_next_2d(&rng));
           }
         } else {
           if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
+            smp_seek(&rng, step, SMP_SLOT_ENVIRONMENT);
             direct_sample = lgt_sample_environment(smp_next_4d(&rng));
           }
         }
         int_accumulate_direct_sample(direct_sample, &closure, &point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
       }
 
+      smp_seek(&rng, step, SMP_SLOT_SURFACE_BSDF);
       let bsdf_sample = closure_sample(&closure, wo, smp_next_3d(&rng));
       if (bsdf_sample.pdf <= 0.0 || (bsdf_sample.eval.x <= 0.0 && bsdf_sample.eval.y <= 0.0 && bsdf_sample.eval.z <= 0.0)) {
         break;
@@ -1027,6 +1037,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let max_channel = max(throughput.x, max(throughput.y, throughput.z));
         let survival = clamp(max_channel, 0.05, 1.0);
         if (survival < 1.0) {
+          smp_seek(&rng, step, SMP_SLOT_TERMINATE);
           if (smp_next_1d(&rng) >= survival) {
             break;
           }

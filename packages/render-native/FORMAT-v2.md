@@ -37,7 +37,7 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 | `20` | `4` | `4` | `u32` | `samples_per_dispatch` | Samples traced per pixel in one dispatch (`>= 1`) |
 | `24` | `4` | `4` | `u32` | `total_samples` | Target total samples per pixel |
 | `28` | `4` | `4` | `u32` | `seed` | Deterministic scramble seed |
-| `32` | `4` | `4` | `u32` | `kernel_flags` | Bitmask: `1=USE_LIGHT_TREE`, `2=HAS_VOLUME`, `4=HAS_SUBSURFACE`, `8=ORTHOGRAPHIC_CAMERA`, `16=ADAPTIVE_SAMPLING`, `32=TRANSPARENT_BACKGROUND` |
+| `32` | `4` | `4` | `u32` | `kernel_flags` | Bitmask: `1=USE_LIGHT_TREE`, `2=HAS_VOLUME`, `4=HAS_SUBSURFACE`, `8=ORTHOGRAPHIC_CAMERA`, `16=ADAPTIVE_SAMPLING`, `32=TRANSPARENT_BACKGROUND`, `64=WHITE_NOISE_SAMPLER` (bit clear: Cycles' Sobol-Burley blue-noise pattern, the default; bit set: the PCG hash sampler) |
 | `36` | `4` | `4` | `f32` | `adaptive_threshold` | Adaptive stop threshold (`0.0` = disabled) |
 | `40` | `4` | `4` | `f32` | `clamp_direct` | Effective direct radiance ceiling at bounce `0` (`0.0` or `>= 1e30` = unclamped; Cycles `sample_clamp_direct * 3.0`) |
 | `44` | `4` | `4` | `f32` | `clamp_indirect` | Effective indirect radiance ceiling at bounce `> 0` (`0.0` or `>= 1e30` = unclamped; Cycles `sample_clamp_indirect * 3.0`) |

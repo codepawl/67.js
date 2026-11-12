@@ -8,6 +8,9 @@ export const INVALID_INDEX_V2 = 0xffffffff;
 // Byte offset of `filter_glossy` inside a `KernelParamsV2` buffer (u32[75] * 4 = 300).
 // Used in `packKernelParamsV2` and in `index.mjs` when patching a pre-built buffer.
 export const KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET = 300;
+export const KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET = 32;
+
+export const VALID_SAMPLERS = Object.freeze(['sobol-burley', 'white']);
 
 export const STRUCT_STRIDES_V2 = Object.freeze({
   kernelParams: 320,
@@ -26,6 +29,7 @@ const KERNEL_FLAG_HAS_SUBSURFACE = 4;
 const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA = 8;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING = 16;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
+export const KERNEL_FLAG_WHITE_NOISE_SAMPLER = 64;
 
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
@@ -1508,6 +1512,15 @@ function requireFiniteIntegerInRangeIfPresent(value, name, min, max, callerName)
  * Validates public boundary options for `buildNativeInputV2`, `upgradeNativeInputV1ToV2`, and
  * `traceNative`. Throws `RangeError` or `TypeError` with a descriptive message on failure.
  */
+/** Throws unless `sampler` is undefined, "sobol-burley" (the Cycles default pattern) or "white" (the PCG hash). */
+export function validateSamplerOption(sampler, callerName) {
+  if (sampler !== undefined && !VALID_SAMPLERS.includes(sampler)) {
+    throw new RangeError(
+      `${callerName}: \`sampler\` must be "sobol-burley" (default) or "white", got ${JSON.stringify(sampler)}.`
+    );
+  }
+}
+
 export function validatePackOptions(options, callerName, requireDimensionsAndSamples = false) {
   if (!options || typeof options !== 'object') {
     throw new TypeError(`${callerName}: \`options\` must be an object.`);
@@ -1525,6 +1538,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   // samplesPerDispatch is optional (undefined means "let the addon choose"); only validate when provided.
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
+  validateSamplerOption(options.sampler, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
     if (samplesPerDispatch !== undefined) {
@@ -1615,6 +1629,10 @@ function packKernelParamsV2({
   }
   if (options.transparentBackground === true) {
     kernelFlags |= KERNEL_FLAG_TRANSPARENT_BACKGROUND;
+  }
+  validateSamplerOption(options.sampler, 'packKernelParamsV2');
+  if (options.sampler === 'white') {
+    kernelFlags |= KERNEL_FLAG_WHITE_NOISE_SAMPLER;
   }
 
   const maxBounces = Math.max(0, Math.round(Number(options.bounces ?? options.maxBounces ?? 8)));

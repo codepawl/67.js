@@ -38,6 +38,8 @@ const KERNEL_FLAG_HAS_SUBSURFACE: u32 = 4u;
 const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA: u32 = 8u;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING: u32 = 16u;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND: u32 = 32u;
+// Set: unstratified PCG hash sampler. Clear (default): Cycles' Sobol-Burley blue-noise pattern.
+const KERNEL_FLAG_WHITE_NOISE_SAMPLER: u32 = 64u;
 
 // `KernelParamsV2.filter_type` values.
 const FILTER_BOX: u32 = 0u;
