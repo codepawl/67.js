@@ -65,7 +65,11 @@ function nodeTranslation(nodes, id) {
 }
 
 // The node a controller or follower moves: its feet position and the heading about the vertical axis.
-function characterOperation(id, position, yaw, footOffset) {
+// A placed glTF character faces +Z, while yaw 0 faces -Z, so its node is turned half a circle.
+const GLTF_FACING_YAW = Math.PI;
+
+function characterOperation(id, position, yaw, footOffset, modelYaw = 0) {
+  yaw += modelYaw;
   return { type: 'set-node', id, translation: [position[0], position[1] + footOffset, position[2]], rotation: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)] };
 }
 
@@ -91,6 +95,10 @@ function createStatusLine(canvas) {
   return element;
 }
 
+function modelYawOf(animation) {
+  return animation?.assetNode ? GLTF_FACING_YAW : 0;
+}
+
 function describeState(state) {
   const variables = Object.entries(state.variables).map(([name, value]) => `${name} ${value}`).join('   ');
   const verdict = state.status === 'won' ? '   YOU WIN' : state.status === 'lost' ? '   GAME OVER' : '';
@@ -104,7 +112,7 @@ async function loadAnimationRuntime() {
 
 /**
  * Start the game a recipe describes on a canvas and return its parts: `scene`, `runtime`, `rules`, `input`, `controller`, `renderer`
- * and `dispose()`. Options: `replay` (a recording from recordInput; the keyboard is not attached) `showStatus` (default true) and `createRenderer` (tests pass a stand-in for the WebGL renderer).
+ * and `dispose()`. Options: `replay` (a recording from recordInput; the keyboard is not attached) `showStatus` (default true) `assets` (decoded catalog assets by assetCopyKey) or `assetUrls` (asset id to GLB URL, which startGame fetches and decodes) and `createRenderer` (tests pass a stand-in for the WebGL renderer).
  */
 export async function startGame(canvas, recipe, options = {}) {
   const cleanups = [];
@@ -130,11 +138,13 @@ function runCleanups(cleanups) {
   while (cleanups.length > 0) cleanups.pop()();
 }
 
-async function buildGame(canvas, recipe, { replay, showStatus = true, createRenderer = (...rendererArguments) => new Renderer67(...rendererArguments) }, cleanups) {
+async function buildGame(canvas, recipe, { replay, showStatus = true, assets: providedAssets, assetUrls, createRenderer = (...rendererArguments) => new Renderer67(...rendererArguments) }, cleanups) {
   const setup = recipe.game;
   if (!setup) throw new Error('startGame needs a recipe with a game section. Add one with the set-game operation.');
   await loadAgentSceneModules(recipe);
-  const scene = createAgentScene(recipe);
+  // The exported page gives URLs; the assets load only for a recipe that places or retargets a catalog asset.
+  const assets = providedAssets ?? (assetUrls ? await (await import('./game-assets.js')).loadGameAssets(recipe, assetUrls) : undefined);
+  const scene = createAgentScene(recipe, {}, { assets });
   const { game } = scene.exportRecipe();
   const placement = agentGroundPlacement(scene.parts, scene.environment);
   const environment = litEnvironment(scene, Boolean(placement));
@@ -157,7 +167,7 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
   // The animation graph runtime loads only for a recipe that declares an animation or an NPC, so other games do not carry it.
   const hasAnimation = Boolean(game.player.animation) || (game.npcs?.length ?? 0) > 0;
   const { createGameAnimation, createPathFollower } = hasAnimation ? await loadAnimationRuntime() : {};
-  const playerAnimation = game.player.animation ? createGameAnimation(game.player.animation, recipe.nodes, game.player.node) : null;
+  const playerAnimation = game.player.animation ? createGameAnimation(game.player.animation, recipe.nodes, game.player.node, { assets }) : null;
   const startPosition = [start[0], start[1] - footOffset, start[2]];
   const controller = game.player.controller === 'vehicle'
     ? createVehicleController({ input, position: startPosition, ground: game.ground, maximumSpeed: game.player.maximumSpeed, node: body })
@@ -185,14 +195,15 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
     animationSystems.push(parameterSystem(playerAnimation, controller.state), playerAnimation.graph.system());
   }
   const npcs = (game.npcs ?? []).map(npc => {
-    const animation = createGameAnimation(npc.animation, recipe.nodes, npc.node);
+    const animation = createGameAnimation(npc.animation, recipe.nodes, npc.node, { assets });
     const start = nodeTranslation(recipe.nodes, npc.node);
     const follower = createPathFollower({ graph: animation.graph, position: [start[0], start[1] - npc.footOffset, start[2]], yaw: npc.yaw, cruiseSpeed: npc.cruiseSpeed });
     follower.follow(npc.path);
     animatedCharacters.push(animation);
     animationSystems.push(follower.system(), animation.graph.system());
-    return { node: npc.node, footOffset: npc.footOffset, follower, graph: animation.graph };
+    return { node: npc.node, footOffset: npc.footOffset, follower, graph: animation.graph, modelYaw: modelYawOf(animation) };
   });
+  const hasPosedAssets = animatedCharacters.some(animation => animation.assetNode);
   let drawnTopology = scene.topologyRevision;
   const status = showStatus && rules ? createStatusLine(canvas) : null;
   if (status) cleanups.push(() => status.remove());
@@ -201,8 +212,8 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
     name: 'scene',
     update(deltaSeconds, context) {
       const position = controller.positionAt(context.alpha);
-      const operations = [characterOperation(game.player.node, position, body.rotationY, footOffset)];
-      for (const npc of npcs) operations.push(characterOperation(npc.node, npc.follower.state.position, npc.follower.state.yaw, npc.footOffset));
+      const operations = [characterOperation(game.player.node, position, body.rotationY, footOffset, modelYawOf(playerAnimation))];
+      for (const npc of npcs) operations.push(characterOperation(npc.node, npc.follower.state.position, npc.follower.state.yaw, npc.footOffset, npc.modelYaw));
       for (const animation of animatedCharacters) operations.push(...animation.operations());
       for (const part of rules?.state.parts ?? []) {
         if (!nodeIds.has(part.id) || part.id === game.player.node || shownNodes.get(part.id) === part.visible) continue;
@@ -210,6 +221,10 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, createRend
         operations.push({ type: 'set-node', id: part.id, visible: part.visible });
       }
       scene.apply(operations, { expectedRevision: scene.revision });
+      if (hasPosedAssets) {
+        for (const animation of animatedCharacters) if (animation.assetNode) scene.setAssetPose(animation.assetNode, animation.assetPose());
+        scene.sampleMotion(context.elapsedSeconds % 3600);
+      }
       if (scene.topologyRevision === drawnTopology) {
         renderer.updateParts(scene.parts);
       } else {

@@ -1,0 +1,2 @@
+- entry:game+lazy: the asset loader (src/game-assets.js, gltf decode of the exported files) sits in its own on-demand chunk, loaded only when the page has assetUrls; the game entry itself gains only the option plumbing and the half-turn for glTF facing
+- scene:agent-scene+lazy: `setAssetPose` and the posed-placement branch in the placed-asset module are a few hundred bytes; the recipe validator for asset clips is plain checks

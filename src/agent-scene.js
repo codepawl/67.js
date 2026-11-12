@@ -1788,6 +1788,17 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       }
       return state.motionTime;
     },
+    /**
+     * Set the pose a game's animation graph computed for a placed asset: `nodeOverrides` (and optional `morphWeights`) as
+     * `asset.stagePose` takes them. The next `sampleMotion` draws it. Only the player and NPC nodes of the game section are posable.
+     */
+    setAssetPose(nodeId, { nodeOverrides = [], morphWeights } = {}) {
+      const record = state.assetRuntime.animators.find(candidate => candidate.node === nodeId && candidate.pose);
+      if (!record) {
+        throw invalidField('nodeId', nodeId, 'a placed asset node that game.player.animation or game.npcs[].animation animates; other placed assets play their asset.clip or asset.drive');
+      }
+      record.pose = { nodeOverrides, morphWeights };
+    },
     // After sampleMotion, the lights, sun and sky the motion tracks set at that time; the recipe keeps its authored values.
     get environment() {
       const environment = structuredClone(state.recipe.environment);
