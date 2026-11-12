@@ -59,3 +59,13 @@ test('the tier bench gives every Cook backend the same firefly clamp and records
   assert.match(driver, /fireflyClamp: 1000/);
   assert.doesNotMatch(driver, /1000000000/);
 });
+
+test('both kernels step camera rays through a part flagged in texel 5 of its material, and no other ray', () => {
+  const nativeTrace = extractFunction(NATIVE_KERNEL_SOURCE, 'traceRay');
+  assert.match(nativeTrace, /if \(cameraRay && materials\[material \+ 5\]\.y > 0\.0\) \{ continue; \}/);
+  assert.match(extractFunction(NATIVE_KERNEL_SOURCE, 'occluded'), /traceRay\(origin, direction, limit, true, false\)/);
+  assert.match(extractFunction(MEGAKERNEL_SOURCE, 'nearestHitIsShadowOnly'), /MATERIAL_TEXELS \+ 5\]\.y > 0\.0/);
+  assert.match(extractFunction(MEGAKERNEL_SOURCE, 'intersectScene'), /cameraRay && nearestHitIsShadowOnly\(\)/);
+  assert.match(extractFunction(NATIVE_KERNEL_SOURCE, 'tracePath'), /intersectScene\(position, direction, cameraRays && depth == 0\)/);
+  assert.match(extractFunction(MEGAKERNEL_SOURCE, 'tracePath'), /intersectScene\(position, direction, cameraRays && depth == 0\)/);
+});

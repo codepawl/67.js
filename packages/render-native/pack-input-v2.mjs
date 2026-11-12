@@ -46,6 +46,7 @@ const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
 export const KERNEL_FLAG_WHITE_NOISE_SAMPLER = 64;
 export const KERNEL_FLAG_PATH_REGENERATION = 1024;
 
+const INSTANCE_VISIBILITY_CAMERA = 1;
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
 
@@ -2499,6 +2500,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
   const matSource = v1Input.materials;
   const materialRecords = [];
   const materialLightMasks = [];
+  const materialShadowOnly = [];
   for (let m = 0; m < materialCount; m++) {
     const base = m * 40;
     const baseColor = [matSource[base], matSource[base + 1], matSource[base + 2]];
@@ -2513,6 +2515,8 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     const alphaCutoff = matSource[base + 14];
     const maskLo = ((Math.round(matSource[base + 15]) & 0xffff) | ((Math.round(matSource[base + 16]) & 0xffff) << 16)) >>> 0;
     materialLightMasks.push(maskLo);
+    // The v1 tables flag a shadow-only part in the second channel of material texel 5 (SHADOW_ONLY_SLOT in src/path-tracer-gpu-pack.js).
+    materialShadowOnly.push(matSource[base + 21] > 0);
 
     const baseTex = registerAtlasRect(matSource[base + 24], matSource[base + 25], matSource[base + 26], matSource[base + 27], matSource[base + 17]);
     const normalTex = registerAtlasRect(matSource[base + 28], matSource[base + 29], matSource[base + 30], matSource[base + 31], matSource[base + 18]);
@@ -2675,7 +2679,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
       opaqueTriangleCount: opaque.length,
       totalTriangleCount: ordered.length,
       materialOverride: INVALID_INDEX_V2,
-      visibilityFlags: INSTANCE_DEFAULT_VISIBILITY,
+      visibilityFlags: materialShadowOnly[matIdx] ? INSTANCE_DEFAULT_VISIBILITY & ~INSTANCE_VISIBILITY_CAMERA : INSTANCE_DEFAULT_VISIBILITY,
       lightGroupMaskLo: maskLo,
       lightGroupMaskHi: maskHi,
       emissiveBaseOffset,

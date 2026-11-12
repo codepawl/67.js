@@ -44,8 +44,9 @@ test('a part without the flag leaves the trace scene and the notes unchanged', (
   assert.deepEqual(describeIgnoredFeatures([floor(), caster()], {}, 'cpu').filter(note => note.startsWith('shadowOnly')), []);
 });
 
-test('the GPU path tracers say they still draw a shadow-only part', () => {
-  const notes = describeIgnoredFeatures([floor(), caster({ shadowOnly: true })], {}, 'gpu');
-  assert.ok(notes.some(note => note.startsWith('shadowOnly')));
-  assert.deepEqual(describeIgnoredFeatures([floor(), caster({ shadowOnly: true })], {}, 'cpu').filter(note => note.startsWith('shadowOnly')), []);
+test('no Cook backend lists shadowOnly as an ignored feature', () => {
+  for (const backend of ['cpu', 'gpu', 'webgpu', 'native']) {
+    const notes = describeIgnoredFeatures([floor(), caster({ shadowOnly: true })], {}, backend);
+    assert.deepEqual(notes.filter(note => note.startsWith('shadowOnly')), [], backend);
+  }
 });

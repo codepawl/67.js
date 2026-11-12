@@ -23,7 +23,7 @@ fn bakeTexels(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgro
   let coneRadius = sqrt(firstUnit);
   let angle = TWO_PI * secondUnit;
   let rayDirection = buildFrame(normal) * vec3<f32>(coneRadius * cos(angle), coneRadius * sin(angle), sqrt(max(0.0, 1.0 - firstUnit)));
-  tracePath(origin, rayDirection, texelIndex, sampleIndex);
+  tracePath(origin, rayDirection, texelIndex, sampleIndex, false);
   if (!(all(radiance >= vec3<f32>(0.0)) && all(radiance < vec3<f32>(1e30)))) { radiance = vec3<f32>(0.0); }
   accumulation[texelIndex] += vec4<f32>(radiance, 0.0);
   accumulation[texelCount + texelIndex] += vec4<f32>(firstLegEscaped, 0.0, 0.0, 0.0);

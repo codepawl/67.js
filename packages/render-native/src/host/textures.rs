@@ -14,12 +14,15 @@ pub(crate) struct UploadedSceneBuffers {
 
 /// Whether a material takes its alpha from a colour map and cuts at a threshold. A material is `MATERIAL_TEXELS` vec4s: the cutoff
 /// is the third float of texel 3 and the width of the colour map's atlas rectangle the third float of texel 6.
+/// A shadow-only material (the second float of texel 5) also goes in the non-opaque geometry: hardware commits opaque
+/// triangles without asking the shader, and a camera ray must be able to step through this one.
 pub(crate) fn material_is_cutout(materials: &[f32], material: usize) -> bool {
     let base = material * MATERIAL_TEXELS * 4;
     if base + 7 * 4 > materials.len() {
         return false;
     }
-    materials[base + 3 * 4 + 2] > 0.0 && materials[base + 6 * 4 + 2] > 0.0
+    let is_shadow_only = materials[base + 5 * 4 + 1] > 0.0;
+    is_shadow_only || (materials[base + 3 * 4 + 2] > 0.0 && materials[base + 6 * 4 + 2] > 0.0)
 }
 
 pub(crate) fn upload_scene_buffers(

@@ -15,6 +15,8 @@ import { liftRankedTriangles } from './flush-lift.js';
 
 export const MAX_TRACE_TRIANGLES = 400_000;
 export const MAX_TRACE_PARTS = 1024;
+// An instanced trace counts triangles once per shared geometry and bounds the copies on their own.
+export const MAX_TRACE_INSTANCES = 65_536;
 export const MAX_TRACE_LIGHTS = 32;
 // A Blender sun of 1 degree, which is what the reference harness gives Cycles.
 export const SUN_ANGULAR_RADIUS = Math.PI / 360;
@@ -160,9 +162,16 @@ function requireFiniteNumbers(values, expectedLength, label) {
   }
 }
 
-function validatePart(part, geometry) {
-  const label = `Part ${part.name ?? ''}`.trim();
-  requireFiniteNumbers(part.matrix ?? IDENTITY_MATRIX, 16, `${label} matrix`);
+function partLabel(part) {
+  return `Part ${part.name ?? ''}`.trim();
+}
+
+function validateMatrix(part) {
+  requireFiniteNumbers(part.matrix ?? IDENTITY_MATRIX, 16, `${partLabel(part)} matrix`);
+}
+
+function validateGeometry(part, geometry) {
+  const label = partLabel(part);
   requireFiniteNumbers(geometry.positions, undefined, `${label} positions`);
   if (geometry.positions.length % 3 !== 0 || geometry.indices.length % 3 !== 0) throw new RangeError(`${label} positions and indices must come in threes.`);
   const vertexCount = geometry.positions.length / 3;
@@ -173,6 +182,11 @@ function validatePart(part, geometry) {
   }
   if (geometry.uvs && geometry.uvs.length !== vertexCount * 2) throw new RangeError(`${label} needs one UV pair for every position.`);
   if (geometry.colors && geometry.colors.length !== vertexCount * 3) throw new RangeError(`${label} needs one colour for every position.`);
+}
+
+function validatePart(part, geometry) {
+  validateMatrix(part);
+  validateGeometry(part, geometry);
 }
 
 /**
@@ -189,17 +203,8 @@ function traceGeometry(part) {
   return boxProjectedGeometry(geometry, columnLengths(part.matrix ?? IDENTITY_MATRIX), boxMapScale, boxMapAxis);
 }
 
-function flattenParts(parts) {
-  let vertexTotal = 0;
-  let indexTotal = 0;
-  const geometries = parts.map(traceGeometry);
-  parts.forEach((part, index) => validatePart(part, geometries[index]));
-  for (const geometry of geometries) {
-    vertexTotal += geometry.positions.length / 3;
-    indexTotal += geometry.indices.length;
-  }
-  if (indexTotal / 3 > MAX_TRACE_TRIANGLES) throw new RangeError(`A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`);
-  const world = {
+function allocateWorld(vertexTotal, indexTotal) {
+  return {
     positions: new Float32Array(vertexTotal * 3),
     normals: new Float32Array(vertexTotal * 3),
     uvs: new Float32Array(vertexTotal * 2),
@@ -207,37 +212,54 @@ function flattenParts(parts) {
     indices: new Uint32Array(indexTotal),
     triangleMaterial: new Uint32Array(indexTotal / 3),
   };
+}
+
+// Writes one part, moved by its matrix, into the world arrays at the given vertex and triangle offsets.
+function writeWorldPart(world, part, geometry, partIndex, vertexOffset, triangleOffset) {
+  const matrix = part.matrix ?? IDENTITY_MATRIX;
+  const normals = normalMatrix(matrix);
+  const vertexCount = geometry.positions.length / 3;
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    const x = geometry.positions[vertex * 3];
+    const y = geometry.positions[vertex * 3 + 1];
+    const z = geometry.positions[vertex * 3 + 2];
+    const target = (vertexOffset + vertex) * 3;
+    world.positions[target] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+    world.positions[target + 1] = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+    world.positions[target + 2] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+    const normalX = geometry.normals[vertex * 3];
+    const normalY = geometry.normals[vertex * 3 + 1];
+    const normalZ = geometry.normals[vertex * 3 + 2];
+    const worldX = normals[0] * normalX + normals[3] * normalY + normals[6] * normalZ;
+    const worldY = normals[1] * normalX + normals[4] * normalY + normals[7] * normalZ;
+    const worldZ = normals[2] * normalX + normals[5] * normalY + normals[8] * normalZ;
+    const length = Math.hypot(worldX, worldY, worldZ) || 1;
+    world.normals[target] = worldX / length;
+    world.normals[target + 1] = worldY / length;
+    world.normals[target + 2] = worldZ / length;
+  }
+  if (geometry.uvs) world.uvs.set(geometry.uvs, (vertexOffset) * 2);
+  if (geometry.colors) world.colors.set(geometry.colors, vertexOffset * 3);
+  for (let slot = 0; slot < geometry.indices.length; slot++) world.indices[triangleOffset * 3 + slot] = geometry.indices[slot] + vertexOffset;
+  world.triangleMaterial.fill(partIndex, triangleOffset, triangleOffset + geometry.indices.length / 3);
+}
+
+function flattenParts(parts, geometries = parts.map(traceGeometry)) {
+  let vertexTotal = 0;
+  let indexTotal = 0;
+  parts.forEach((part, index) => validatePart(part, geometries[index]));
+  for (const geometry of geometries) {
+    vertexTotal += geometry.positions.length / 3;
+    indexTotal += geometry.indices.length;
+  }
+  if (indexTotal / 3 > MAX_TRACE_TRIANGLES) throw new RangeError(`A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`);
+  const world = allocateWorld(vertexTotal, indexTotal);
   let vertexOffset = 0;
   let triangleOffset = 0;
   parts.forEach((part, partIndex) => {
     const geometry = geometries[partIndex];
-    const matrix = part.matrix ?? IDENTITY_MATRIX;
-    const normals = normalMatrix(matrix);
-    const vertexCount = geometry.positions.length / 3;
-    for (let vertex = 0; vertex < vertexCount; vertex++) {
-      const x = geometry.positions[vertex * 3];
-      const y = geometry.positions[vertex * 3 + 1];
-      const z = geometry.positions[vertex * 3 + 2];
-      const target = (vertexOffset + vertex) * 3;
-      world.positions[target] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
-      world.positions[target + 1] = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
-      world.positions[target + 2] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
-      const normalX = geometry.normals[vertex * 3];
-      const normalY = geometry.normals[vertex * 3 + 1];
-      const normalZ = geometry.normals[vertex * 3 + 2];
-      const worldX = normals[0] * normalX + normals[3] * normalY + normals[6] * normalZ;
-      const worldY = normals[1] * normalX + normals[4] * normalY + normals[7] * normalZ;
-      const worldZ = normals[2] * normalX + normals[5] * normalY + normals[8] * normalZ;
-      const length = Math.hypot(worldX, worldY, worldZ) || 1;
-      world.normals[target] = worldX / length;
-      world.normals[target + 1] = worldY / length;
-      world.normals[target + 2] = worldZ / length;
-    }
-    if (geometry.uvs) world.uvs.set(geometry.uvs, (vertexOffset) * 2);
-    if (geometry.colors) world.colors.set(geometry.colors, vertexOffset * 3);
-    for (let slot = 0; slot < geometry.indices.length; slot++) world.indices[triangleOffset * 3 + slot] = geometry.indices[slot] + vertexOffset;
-    world.triangleMaterial.fill(partIndex, triangleOffset, triangleOffset + geometry.indices.length / 3);
-    vertexOffset += vertexCount;
+    writeWorldPart(world, part, geometry, partIndex, vertexOffset, triangleOffset);
+    vertexOffset += geometry.positions.length / 3;
     triangleOffset += geometry.indices.length / 3;
   });
   return world;
@@ -324,11 +346,146 @@ function resolveTraceLocalVolumes(input, parts) {
   return { volumes, boundsOnlyParts: parts.filter(part => meshPartNames.has(part.name) && part.visible === false) };
 }
 
-export function buildTraceScene(allParts, environment = {}) {
+// Camera rays skip a shadow-only part; every other ray kind still sees it (visibility bits 2, 4, 8, 16 and 32 of FORMAT-v2).
+const INSTANCE_VISIBILITY_WITHOUT_CAMERA = 2 | 4 | 8 | 16 | 32;
+
+/**
+ * True when the part keeps the geometry object it was authored with, so its copies can share one bottom-level structure.
+ * A skinned, flush-lifted or box-mapped part gets a geometry of its own from `traceGeometry`, and a geometry with
+ * per-triangle materials would be read differently by the instanced packer, so those stay baked into world space.
+ */
+function sharesAuthoredGeometry(part, traced) {
+  return traced === part.geometry && !traced.triangleMaterial;
+}
+
+function countSharedGeometries(parts, geometries) {
+  const useCounts = new Map();
+  parts.forEach((part, index) => {
+    if (sharesAuthoredGeometry(part, geometries[index])) useCounts.set(geometries[index], (useCounts.get(geometries[index]) ?? 0) + 1);
+  });
+  return [...useCounts.values()].filter(count => count > 1).length;
+}
+
+/** Validates each part's matrix, and each distinct geometry once, then returns the unique geometry and triangle totals. */
+function measureInstancedParts(parts, geometries) {
+  const seen = new Set();
+  let uniqueGeometries = 0;
+  let uniqueTriangles = 0;
+  parts.forEach((part, index) => {
+    const geometry = geometries[index];
+    validateMatrix(part);
+    if (sharesAuthoredGeometry(part, geometry)) {
+      if (seen.has(geometry)) return;
+      seen.add(geometry);
+    }
+    validateGeometry(part, geometry);
+    uniqueGeometries++;
+    uniqueTriangles += geometry.indices.length / 3;
+  });
+  return { uniqueGeometries, uniqueTriangles };
+}
+
+function requireInstancedCaps(parts, { uniqueGeometries, uniqueTriangles }) {
+  if (parts.length > MAX_TRACE_INSTANCES) {
+    throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_INSTANCES} instances, got ${parts.length}. Pass fewer parts, or merge small copies into one mesh.`);
+  }
+  if (uniqueGeometries > MAX_TRACE_PARTS) {
+    throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_PARTS} distinct geometries, got ${uniqueGeometries}. Share one geometry object between copies instead of building a new one per part.`);
+  }
+  if (uniqueTriangles > MAX_TRACE_TRIANGLES) {
+    throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_TRIANGLES} unique triangles, counted once per shared geometry, got ${uniqueTriangles}. Share geometry between copies or simplify the meshes.`);
+  }
+}
+
+// A part that cannot share its geometry is moved into world space once and traced with an identity matrix.
+function bakeWorldGeometry(part, geometry) {
+  const world = allocateWorld(geometry.positions.length / 3, geometry.indices.length);
+  writeWorldPart(world, part, geometry, 0, 0, 0);
+  delete world.triangleMaterial;
+  return world;
+}
+
+function instanceFor(part, geometry, partIndex, material) {
+  const shared = sharesAuthoredGeometry(part, geometry);
+  const instance = {
+    geometry: shared ? geometry : bakeWorldGeometry(part, geometry),
+    matrix: shared ? part.matrix ?? IDENTITY_MATRIX : IDENTITY_MATRIX,
+    materialIndex: partIndex,
+    objectId: partIndex,
+    lightMask: material.lightMask,
+  };
+  if (part.material?.lightMaskHi !== undefined) instance.lightMaskHi = part.material.lightMaskHi;
+  if (part.shadowOnly === true) instance.visibilityFlags = INSTANCE_VISIBILITY_WITHOUT_CAMERA;
+  return instance;
+}
+
+// The largest coordinate any instance reaches, from the corners of each geometry's box, so it never reads a whole copy.
+function instancedExtent(instances) {
+  const boxes = new Map();
+  let extent = 1e-3;
+  for (const { geometry, matrix } of instances) {
+    if (!boxes.has(geometry)) boxes.set(geometry, boundingBoxOf(geometry.positions));
+    const { low, high } = boxes.get(geometry);
+    for (let corner = 0; corner < 8; corner++) {
+      const x = corner & 1 ? high[0] : low[0];
+      const y = corner & 2 ? high[1] : low[1];
+      const z = corner & 4 ? high[2] : low[2];
+      extent = Math.max(extent,
+        Math.abs(matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]),
+        Math.abs(matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]),
+        Math.abs(matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14]));
+    }
+  }
+  return extent;
+}
+
+function boundingBoxOf(positions) {
+  const low = [Infinity, Infinity, Infinity];
+  const high = [-Infinity, -Infinity, -Infinity];
+  for (let offset = 0; offset < positions.length; offset += 3) {
+    for (let axis = 0; axis < 3; axis++) {
+      low[axis] = Math.min(low[axis], positions[offset + axis]);
+      high[axis] = Math.max(high[axis], positions[offset + axis]);
+    }
+  }
+  return { low, high };
+}
+
+/**
+ * The scene with copies of one geometry kept as instances: `instances` (geometry, matrix, materialIndex, visibility) over
+ * the unique geometries, and `materials` indexed by part, with no world-space triangle arrays and no CPU BVH. Only
+ * `buildNativeInputV2` reads this shape, for the native "cycles" kernel.
+ */
+function buildInstancedTraceScene(parts, geometries, environment, localVolumes) {
+  requireInstancedCaps(parts, measureInstancedParts(parts, geometries));
+  const materials = parts.map(part => ({ ...(part.material ?? {}), ...resolveMaterial(part.material ?? {}) }));
+  const instances = parts.map((part, index) => instanceFor(part, geometries[index], index, materials[index]));
+  const extent = instancedExtent(instances);
+  return {
+    instances,
+    materials,
+    lights: resolveLights(environment),
+    environment: resolveEnvironment(environment.map),
+    volume: resolveTraceVolume(environment.volumeFog),
+    localVolumes,
+    surfaceOffset: extent * 1e-5,
+    farDistance: extent * 1e4,
+  };
+}
+
+/**
+ * Builds the scene a path trace reads. With `options.instancing` and at least one geometry shared by two parts, the result
+ * holds `instances` instead of flattened triangles (see `buildInstancedTraceScene`); with no shared geometry, or without the
+ * option, it is the flattened scene, unchanged.
+ */
+export function buildTraceScene(allParts, environment = {}, options = {}) {
   const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts);
   const parts = boundsOnlyParts.length ? allParts.filter(part => !boundsOnlyParts.includes(part)) : allParts;
+  const tryInstancing = options.instancing === true && Array.isArray(parts) && parts.length > 0;
+  const geometries = tryInstancing ? parts.map(traceGeometry) : undefined;
+  if (tryInstancing && countSharedGeometries(parts, geometries) > 0) return buildInstancedTraceScene(parts, geometries, environment, localVolumes);
   if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_TRACE_PARTS) throw new RangeError(`A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
-  const geometry = flattenParts(parts);
+  const geometry = flattenParts(parts, geometries);
   const bvh = buildTriangleBvh(geometry.positions, geometry.indices);
   let extent = 1e-3;
   for (let index = 0; index < geometry.positions.length; index++) extent = Math.max(extent, Math.abs(geometry.positions[index]));
