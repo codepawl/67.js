@@ -870,6 +870,23 @@ All image gates and the depth gate pass on both scenes. Every disagreeing pixel 
 
 Not covered: the Classroom scene (instancing, 854 instances, depth of field, which the depth comparator does not model: a thin lens changes the ray-to-Z conversion), a scene with a background, and 4096 spp references.
 
+## Depth of field (#896, slice D1)
+
+A camera with an `fStop` is a thin lens in the `cycles` kernel, with Cycles' model: aperture radius `focal length / 1000 / (2 * f-stop)` metres, a disk or a regular polygon of `apertureBlades` corners, and a focus distance measured along the view axis. The kernel already held the lens maths (`camera.wgsl`, a port of Cycles' `camera.h`); this slice connects it: `createCamera` turns `fStop`, `focalLength` or `fov` with `sensorWidth`, `focusDistance`, `apertureBlades` and `apertureRotation` (degrees, Blender's sense) into the aperture fields of the params block. Layout and options: [FORMAT-v2.md](../packages/render-native/FORMAT-v2.md) and the [render-native README](../packages/render-native/README.md#depth-of-field-cycles-kernel). The kernel and the legacy kernel are unchanged. Motion blur is not in Cook; it is a known gap and out of scope for #896.
+
+Depth of field off: the packed params bytes and the random numbers drawn do not change. The lens sample (`lens_uv`) is drawn for every sample whether or not the aperture is above 0, and a pinhole camera writes the same lens words as before (`0`, `10`, `0`, `0`). Measured on an RTX 4090: 128-sample images of `lit-interior` and `glass` (480 x 270, fixed 32 samples per dispatch, seed 3), with this tree and with the base commit's JavaScript on the same addon, have identical SHA-256 for the `cycles` and the `legacy` kernel (4 of 4), and two runs of this tree agree. An earlier run on an L4 gave the same hashes.
+
+Cycles comparison (`dof-depth` scene in `bench/reference/scenes.js`: objects 2 m, 6 m and 15 m from the camera and a grid of small lamps 15 m away; 960 x 540, f/1.0 on a 150 mm wide sensor, a 116 mm lens, focus on the ball 6 m away; the near spheres blur by about 28 pixels, the lamps by about 9; Blender 5.3.0 Cycles OptiX and Cook on one RTX 4090; seed 1, 8 bounces, box filter; `trace-native.mjs` and `render-cycles.py` take the same `--f-stop`, `--focus-distance`, `--aperture-blades`, `--aperture-rotation` (degrees) and `--sensor-width`) `[measured]`:
+
+| Aperture | Cook 4096 spp against Cycles 4096 spp | mean ratio (R / G / B) | relMSE (eps 0.01) | tiles within 5 % |
+| --- | --- | --- | ---: | ---: |
+| disk | `--f-stop 1 --focus-distance 6` | 0.9996 / 0.9996 / 0.9996 | 3.4e-5 | 45 of 45 |
+| hexagon, rotation 15, default focus | same | 0.9995 / 0.9996 / 0.9996 | 3.8e-4 (see below) | 44 of 44 |
+
+Of 64 tiles, 19 (disk) and 20 (hexagon) are too dark to count. For the disk the relMSE equals Cycles' own seed 1 against seed 2 (3.4e-5): Cook sits at Cycles' noise floor. At 256 spp Cook scores 3.0e-4 and Cycles 2.6e-4 against the 4096 reference. The blur is large enough to tell the lens from a pinhole: Cook without a lens against the Cycles disk image scores 7.8e-3 (230 times worse), with 35 of 45 tiles within 5 percent and a tile ratio as low as 0.44. The hexagon score of 3.8e-4 came from a sign difference in the aperture rotation: the kernel turns the polygon the other way from Blender, so Cook at `-15` matched Cycles at `15` (whole-image relMSE 3.3e-5, lamp regions 0.004 against 0.055 for Cook at 15 and 0.03 for Cook at 0 or 30). `createCamera` now flips the sign, so `apertureRotation: 15` means the same as Blender's 15 degrees; the render with the flipped sign was not repeated after that change. Pictures: `artifacts/cook-parity/dof-896-comparison-rtx4090.png` (rows disk and hexagon; Cook and Cycles at 256 spp, Cook and Cycles at 4096, difference times 4) and `dof-896-hexagon-bokeh-crops.png`.
+
+Not covered: anamorphic bokeh (slice D2), lens shift and orthographic cameras (`createCamera` refuses both), the depth pass of a lens camera (not compared), and a re-render of the hexagon after the rotation sign flip.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:

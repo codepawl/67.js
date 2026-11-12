@@ -82,6 +82,14 @@ export function cameraFocalLength(frame, aspect) {
 }
 
 /**
+ * The kernel's aperture rotation in radians for a Blender-style rotation in degrees. The kernel turns the polygon the other way
+ * round, which a hexagon at 15 degrees showed against Cycles (Cook at -15 matched Cycles at 15, Cook at 0 and 30 did not).
+ */
+function kernelApertureRotation(rotationDegrees) {
+  return rotationDegrees === 0 ? 0 : -rotationDegrees * Math.PI / 180;
+}
+
+/**
  * The thin lens a camera with an `fStop` describes, for the native path tracer (Cycles' camera model): the aperture radius in
  * scene units (focalLength / (2 * fStop), millimetres to metres), the focus distance along the view axis (`focusDistance`, by
  * default the distance from eye to target), and the optional polygonal blades (`apertureBlades`, 0 or 3 to 64) turned by
@@ -104,7 +112,7 @@ export function resolveThinLens(frame, { aspect, eye, target }) {
     apertureRadius: cameraFocalLength(frame, aspect) / 1000 / (2 * frame.fStop),
     focalDistance: focusDistance,
     apertureBlades: blades,
-    apertureRotation: rotationDegrees * Math.PI / 180,
+    apertureRotation: kernelApertureRotation(rotationDegrees),
   };
 }
 
