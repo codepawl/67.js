@@ -39,7 +39,7 @@ export function buildNativeInput(scene, camera, options, pack) {
   if (scene.instances) {
     throw new TypeError('buildNativeInput packs flattened scenes for kernel "legacy" and cannot read instances: build the scene without { instancing: true }, or pack it with buildNativeInputV2 and trace with kernel "cycles".');
   }
-  const atlas = pack.packAtlas(scene.materials);
+  const materialTables = packNativeMaterialTables(scene.materials, scene.shadowOnlyParts, pack);
   const lights = pack.packLights(scene.lights);
   const environment = pack.packEnvironment(scene.environment);
   const environmentTables = new Float32Array(environment ? environment.height + environment.width * environment.height : 4);
@@ -47,23 +47,35 @@ export function buildNativeInput(scene, camera, options, pack) {
     environmentTables.set(environment.rows.data.subarray(0, environment.height), 0);
     environmentTables.set(environment.pixels.data.subarray(0, environment.width * environment.height), environment.height);
   }
-  // The subsurface table (two vectors per material) follows the material table in the same buffer; its offset is 0 when no
-  // material scatters light under its surface, which keeps the walk out of the kernel.
-  const materialData = pack.packMaterials(scene.materials, atlas, scene.shadowOnlyParts).data;
-  const usesSubsurface = pack.sceneUsesSubsurface(scene.materials);
-  const subsurfaceData = usesSubsurface ? pack.packSubsurface(scene.materials).data : new Float32Array(0);
-  const materials = new Float32Array(materialData.length + subsurfaceData.length);
-  materials.set(materialData);
-  materials.set(subsurfaceData, materialData.length);
   return {
     triangles: pack.packTriangles(scene).data,
     triangleCount: scene.bvh.triangleOrder.length,
-    materials,
+    materials: materialTables.materials,
     lights: lights.table.data,
-    atlas: new Uint32Array(atlas.data.buffer, atlas.data.byteOffset, Math.floor(atlas.data.byteLength / 4)),
+    atlas: materialTables.atlas,
     environmentColors: environment?.colors ?? new Float32Array(4),
     environmentTables,
-    parameters: writeParameters(scene, camera, options, lights.count, atlas.width, usesSubsurface ? materialData.length / 4 : 0),
+    parameters: writeParameters(scene, camera, options, lights.count, materialTables.atlasWidth, materialTables.subsurfaceVec4Offset),
+  };
+}
+
+/**
+ * The v1 material tables of resolved trace materials: the material table with the subsurface table after it (its offset is 0
+ * when no material scatters light under its surface, which keeps the walk out of the kernel), the texture atlas and its width.
+ */
+export function packNativeMaterialTables(materials, shadowOnlyParts, pack) {
+  const atlas = pack.packAtlas(materials);
+  const materialData = pack.packMaterials(materials, atlas, shadowOnlyParts).data;
+  const usesSubsurface = pack.sceneUsesSubsurface(materials);
+  const subsurfaceData = usesSubsurface ? pack.packSubsurface(materials).data : new Float32Array(0);
+  const combined = new Float32Array(materialData.length + subsurfaceData.length);
+  combined.set(materialData);
+  combined.set(subsurfaceData, materialData.length);
+  return {
+    materials: combined,
+    atlas: new Uint32Array(atlas.data.buffer, atlas.data.byteOffset, Math.floor(atlas.data.byteLength / 4)),
+    atlasWidth: atlas.width,
+    subsurfaceVec4Offset: usesSubsurface ? materialData.length / 4 : 0,
   };
 }
 

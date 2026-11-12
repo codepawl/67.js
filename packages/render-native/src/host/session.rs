@@ -621,7 +621,7 @@ pub(crate) fn validate_kernel_params_v2(parameter_bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) -> Result<()> {
+pub(crate) fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) -> Result<()> {
     let minimum_bytes = (count.max(1) as usize) * stride;
     if bytes.len() < minimum_bytes || bytes.len() % stride != 0 {
         return Err(failure(format!(
@@ -773,8 +773,11 @@ fn fail_if_device_lost(
     )))
 }
 
+/// Draws `samples` samples numbered `first_sample` onwards, adding them to what the film already holds. A one-shot render
+/// and the first call of a progressive film start at sample 0.
 pub(crate) fn trace_cycles_samples(
     target: &CyclesDispatchTarget<'_>,
+    first_sample: u32,
     samples: u32,
     plan: DispatchPlan,
     groups: (u32, u32),
@@ -788,13 +791,14 @@ pub(crate) fn trace_cycles_samples(
         DispatchPlan::TimeBudget { largest_batch } => Some(DispatchPlanner::new(DISPATCH_BUDGET_SECONDS, largest_batch)),
         DispatchPlan::Fixed(_) => None,
     };
-    let mut sample_offset = 0u32;
+    let end_sample = first_sample + samples;
+    let mut sample_offset = first_sample;
     let mut dispatch_count = 0u32;
     let mut largest_batch = 0u32;
     let mut longest_dispatch_seconds: Option<f64> = None;
 
-    while sample_offset < samples {
-        let remaining_samples = samples - sample_offset;
+    while sample_offset < end_sample {
+        let remaining_samples = end_sample - sample_offset;
         let batch_samples = match (&planner, plan) {
             (Some(planner), _) => planner.next_batch(remaining_samples),
             (None, DispatchPlan::Fixed(step)) => remaining_samples.min(step.max(1)),
@@ -830,13 +834,13 @@ pub(crate) fn trace_cycles_samples(
         let should_poll = if planner.is_some() {
             true
         } else if max_seconds.is_some() {
-            dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= samples
+            dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= end_sample
         } else {
-            sample_offset < samples && dispatch_count % SAMPLES_PER_WAIT == 0
+            sample_offset < end_sample && dispatch_count % SAMPLES_PER_WAIT == 0
         };
         if should_poll {
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
-            fail_if_device_lost(target, dispatch_offset, batch_samples, samples)?;
+            fail_if_device_lost(target, dispatch_offset, batch_samples, end_sample)?;
             if let Some(planner) = planner.as_mut() {
                 let dispatch_seconds = dispatch_started.elapsed().as_secs_f64();
                 planner.record(batch_samples, dispatch_seconds);
@@ -845,7 +849,7 @@ pub(crate) fn trace_cycles_samples(
             if let Some(limit) = max_seconds {
                 if trace_started.elapsed().as_secs_f64() > limit {
                     return Err(failure(format!(
-                        "The native trace passed its time limit of {limit} s after {sample_offset} of {samples} samples."
+                        "The native trace passed its time limit of {limit} s after {sample_offset} of {end_sample} samples."
                     )));
                 }
             }
@@ -853,7 +857,7 @@ pub(crate) fn trace_cycles_samples(
     }
 
     let sums = read_accumulation(device, queue, target.accumulation, accumulation_bytes);
-    fail_if_device_lost(target, samples.saturating_sub(largest_batch), largest_batch, samples)?;
+    fail_if_device_lost(target, end_sample.saturating_sub(largest_batch), largest_batch, end_sample)?;
     Ok(CyclesTrace {
         sums: sums?,
         traced_seconds: trace_started.elapsed().as_secs_f64(),
