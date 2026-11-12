@@ -980,20 +980,38 @@ With the fix, on one Modal container (NVIDIA A10) `[measured]`: the seven scenes
 
 The `cycles` kernel had three texture readers: `closure_sample_texture_uv` (shading), `int_sample_texture_channel` (the alpha of cutouts and blended surfaces for every ray) and an inline nearest read in `bootstrap_main.wgsl`. They now call one function, `texture_sample` in `closure.wgsl`, so a cutout is seen and shaded through the same wrap, filter and format. The `legacy` kernel is untouched. The texture pool also fails early now: a pool past the 1 GiB storage binding raises an error that names the size and the limit at `buildNativeInputV2` (and at the host, against the device's binding size), where the base build aborted the process in the device. The host no longer copies the pool once more before upload (`storage_buffer` borrows bytes that already fit), and the packer drops its per-texture arrays once they are joined.
 
-Measured on an NVIDIA A10G (Modal), one run each unless noted `[measured]`:
+**Why pixels moved, and a packer bug the move exposed.** The packer pointed `alpha_tex` at the base colour map of every non-opaque material, and the kernel reads `alpha_tex` as a separate map through its red channel. A cutout's alpha was therefore the base alpha times the colour's red: texels that were not red enough turned transparent. In the old kernel the shading sampler decoded an sRGB map's red to linear and the integrator's alpha test read it raw, so visibility and shading disagreed; the shared sampler decodes it in both. The second commit stops setting `alpha_tex` from the base map (an explicit `alphaMap` still binds). Measured on an NVIDIA A10G (Modal), 64 spp, fixed seed, image bytes `[measured]`:
 
-| Check | Base | T1 |
+| Scene | base against T1 sampler only | base against T1 plus packer fix |
 | --- | --- | --- |
-| `cycles` kernel, `lit-interior` (no texture), 64 spp, same seed | image bytes | identical |
-| `legacy` kernel, `lit-interior` and the textured `tex-repeat` | image bytes | identical |
-| `cycles` kernel, `tex-repeat` and `tex-wraps` (alpha-masked and blended textures) | image bytes | **different**: 47 percent of pixels, mean ratio 1.012 and 1.009 |
-| Pool of 256 MiB (256 textures of 512x512), peak process memory | 2240 and 2161 MiB | 1753 and 1646 MiB |
-| Same, upload seconds | 0.28 and 0.14 | 0.20 and 0.06 |
-| Pool of 1100 MiB | process aborted in the device | `RangeError` at packing with size and limit |
-| Cycles kernel WGSL | 6607 lines, 242,913 bytes | 6538 lines, 240,235 bytes |
+| `lit-interior`, `glass` (cycles, no mask) | identical | identical |
+| `brick-graph` (colour and normal map, no mask) | identical | identical |
+| `legacy` kernel, `lit-interior` and `tex-repeat` | identical | identical |
+| `tex-repeat`, sRGB mask map | 81,634 of 172,800 values differ | 104,138 differ |
+| `tex-repeat-linear`, same mask in a linear map | 3,253 differ (the sRGB decode of red accounts for the rest) | 96,810 differ |
+| `tex-wraps` (mask, blend, clamp, mirror, nearest, normal map) | 82,387 differ | 113,768 differ |
+
+The 3,253 left on `tex-repeat-linear` are not explained; an emulation of both samplers over a 3000 x 3000 UV grid differs at 108 of 9,000,000 cutoff decisions (exact ties at alpha 0.5 of the test texture), which fits a residual of a few pixels in this size, not proven. No site draws a random number. Every build is deterministic run to run.
+
+Against Cycles on `tex-repeat` (2048 spp, 960x540, seed 1; Cycles shows half of each strip opaque):
+
+| Build | Mean ratio (R, G, B) | relMSE (eps 0.01) | Tiles within 5 percent |
+| --- | --- | --- | --- |
+| base | 1.061, 0.971, 1.008 | 0.0215 | 31 of 64 |
+| T1 sampler only | 1.077, 0.978, 1.017 | 0.0272 | 31 of 64 |
+| T1 plus packer fix | 1.040, 1.039, 1.051 | 0.0039 | 39 of 64 |
+
+Cycles' own seed-to-seed relMSE is 1.7e-6. Cook with the fix is still 4 to 5 percent bright over the whole image, which no gate passes; the cause of that was not looked at.
+
+Texture cost on the same A10G, one scene per process `[measured]`:
+
+| | Base | T1 |
+| --- | --- | --- |
+| 256 textures of 512x512 (256 MiB), peak process memory, two runs | 2240 and 2161 MiB | 1753 and 1646 MiB |
+| same, upload seconds | 0.28 and 0.14 | 0.20 and 0.06 |
+| pool of 1100 MiB | process aborted in the device | `RangeError` at packing with size and limit |
+| cycles kernel WGSL | 6607 lines, 242,913 bytes | 6538 lines, 240,235 bytes |
 
 The number of textures is not limited by either build (2000 descriptors of 16x16 packed and rendered the same); the limit is the 1 GiB pool. Bindings, bind groups and struct sizes are unchanged.
 
-The two images that differ are scenes with alpha-masked or blended textures. A numeric emulation of both old samplers over a 3000 x 3000 UV grid of a repeating 16x16 alpha texture agrees to 1.4e-7 (108 of 9,000,000 cutoff decisions differ at exact ties), so the samplers' arithmetic does not explain a difference of this size, and the cause is not found. Against Cycles on `tex-repeat` (2048 spp, 960x540, Cycles seed 1): before, mean ratio (1.06, 0.97, 1.01) for red, green, blue, relMSE 0.0215, 31 of 64 tiles within 5 percent; after, relMSE 0.0272, 31 of 64 tiles. Both are far from Cycles on the cutout (Cycles shows half of each strip opaque, Cook a fraction of it, before and after), so the scene does not pass the gates either way. Seed-to-seed noise floor of the reference is 1.7e-6. `brick-graph` (the only textured reference scene) and `glass` were not compared against the base: the base copy had no HDRI file, so only the T1 side ran.
-
-Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` writes `tex-repeat` (Cycles can render it) and `tex-wraps` (clamp, mirror, nearest, blend and normal map; Cook only), `node bench/cycles-parity/texture-pool-bench.mjs --textures 256 --size 512` prints pack, setup, compile and upload seconds and peak memory.
+Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` writes `tex-repeat` (Cycles can render it), `tex-repeat-linear` and `tex-wraps` (clamp, mirror, nearest, blend and normal map; Cook only), `node bench/cycles-parity/texture-pool-bench.mjs --textures 256 --size 512` prints pack, setup, compile and upload seconds and peak memory.
