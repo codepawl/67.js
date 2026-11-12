@@ -299,9 +299,9 @@ A blast sells itself in its first frames: a flash, a ring that bends the air, an
 
 ```json
 { "effects": {
-  "flash": { "node": "bomb", "startTime": 0, "attack": 0, "decay": 0.4, "intensity": 1.8, "radius": 20 },
+  "flash": { "node": "bomb", "startTime": 0, "attack": 0, "decay": 0.15, "intensity": 2.5, "radius": 30 },
   "distortion": [
-    { "shape": "ring", "node": "bomb", "startTime": 0, "speed": 20, "thickness": 1.4, "strength": 1, "falloff": 0.45 },
+    { "shape": "ring", "node": "bomb", "startTime": 0, "speed": 45, "thickness": 2.2, "strength": 1, "falloff": 0.6, "edge": 0.5 },
     { "shape": "haze", "centre": [0, 3, -16], "region": "sphere", "size": [5, 4, 5], "noiseScale": 1.1, "scroll": 3, "strength": 0.9 }
   ]
 } }
@@ -315,8 +315,9 @@ Each step takes one source or a list of up to four. Every source places itself w
 | `distortion.startTime` | `0` | Ring only. Seconds on the scene clock, `0` to `3600` |
 | `distortion.speed` | `40` | Ring only. Metres per second, `0` to `10000`; the radius at time `t` is `speed * (t - startTime)` |
 | `distortion.thickness` | `1.5` | Ring only. Metres, `0.01` to `1000` |
-| `distortion.strength` | `0.5` ring, `0.3` haze | `0` to `1`. At `1` the picture shifts by up to 10 percent of the image height for a ring and 4 percent for haze |
+| `distortion.strength` | `0.5` ring, `0.3` haze | `0` to `1`. At `1` the picture shifts by up to 15 percent of the image height for a ring and 4 percent for haze |
 | `distortion.falloff` | `0.4` | Ring only. `0` to `20`; the strength decays as `exp(-falloff * seconds)` while the ring grows |
+| `distortion.edge` | `0` | Ring only. `0` to `2`. A warm light lift on the thin band at the ring radius, scaled by the ring's strength, so the front reads as a visible edge on flat walls. Off by default |
 | `distortion.maxRadius` | `200` | Ring only. Metres, `0.01` to `100000`; the ring vanishes past it |
 | `distortion.region` | `box` | Haze only. `box` or `sphere` |
 | `distortion.size` | `[2, 2, 2]` | Haze only. Half-extents in metres, each `0.01` to `1000` |

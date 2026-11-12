@@ -30,7 +30,7 @@ function fakeRenderer(context) {
 
 test('a distortion source resolves with defaults and refuses bad input by naming the field', () => {
   const [ring] = resolveDistortion({ shape: 'ring', centre: [0, 2, -10] });
-  assert.deepEqual(ring, { shape: 'ring', centre: [0, 2, -10], time: 0, startTime: 0, speed: 40, thickness: 1.5, strength: 0.5, falloff: 0.4, maxRadius: 200 });
+  assert.deepEqual(ring, { shape: 'ring', centre: [0, 2, -10], time: 0, startTime: 0, speed: 40, thickness: 1.5, strength: 0.5, falloff: 0.4, maxRadius: 200, edge: 0 });
   const [haze] = resolveDistortion({ shape: 'haze', node: 'fire', region: 'sphere' });
   assert.equal(haze.node, 'fire');
   assert.deepEqual(haze.size, [2, 2, 2]);

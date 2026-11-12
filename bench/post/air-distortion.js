@@ -57,9 +57,9 @@ function ramp(time, start, end) {
 // The steps at one instant: the flash and ring start at once, the heat haze builds up after them.
 function airAt(time) {
   return {
-    flash: { centre: BLAST_CENTRE, time, startTime: 0, attack: 0, decay: 0.4, intensity: 1.8, color: [1, 0.8, 0.5], radius: 20 },
+    flash: { centre: BLAST_CENTRE, time, startTime: 0, attack: 0, decay: 0.15, intensity: 2.5, color: [1, 0.8, 0.5], radius: 30 },
     distortion: [
-      { shape: 'ring', centre: BLAST_CENTRE, time, startTime: 0, speed: 20, thickness: 1.4, strength: 1, falloff: 0.45, maxRadius: 70 },
+      { shape: 'ring', centre: BLAST_CENTRE, time, startTime: 0, speed: 45, thickness: 2.2, strength: 1, falloff: 0.6, maxRadius: 70, edge: 0.5 },
       { shape: 'haze', centre: [0, 3, -16], region: 'sphere', size: [5, 4, 5], noiseScale: 1.1, scroll: 3, time, strength: 0.9 * ramp(time, 0.3, 0.9) },
     ],
   };

@@ -11,12 +11,12 @@ export const MAXIMUM_AIR_SOURCES = 4;
 const MAXIMUM_SCENE_TIME = 3600;
 const MAXIMUM_COORDINATE = 100000;
 // The largest picture shift at full strength, as a fraction of the image height.
-const RING_MAXIMUM_SHIFT = 0.1;
+const RING_MAXIMUM_SHIFT = 0.15;
 const HAZE_MAXIMUM_SHIFT = 0.04;
 const MAXIMUM_NODE_ID_LENGTH = 128;
 
 const PLACEMENT_FIELDS = ['centre', 'node', 'time'];
-const RING_FIELDS = ['startTime', 'speed', 'thickness', 'strength', 'falloff', 'maxRadius'];
+const RING_FIELDS = ['startTime', 'speed', 'thickness', 'strength', 'falloff', 'maxRadius', 'edge'];
 const HAZE_FIELDS = ['region', 'size', 'noiseScale', 'scroll', 'strength'];
 const FLASH_FIELDS = ['startTime', 'attack', 'decay', 'intensity', 'color', 'radius'];
 const HAZE_REGIONS = ['box', 'sphere'];
@@ -51,6 +51,7 @@ function resolveRing(group, name) {
     strength: numberInRange(group.strength, 0.5, 0, 1, `${name}.strength`),
     falloff: numberInRange(group.falloff, 0.4, 0, 20, `${name}.falloff`),
     maxRadius: numberInRange(group.maxRadius, 200, 0.01, MAXIMUM_COORDINATE, `${name}.maxRadius`),
+    edge: numberInRange(group.edge, 0, 0, 2, `${name}.edge`),
   };
 }
 
@@ -186,6 +187,7 @@ void main() {
   vec3 rightDelta = rayDirectionAt(textureCoordinate + vec2(1.0 / resolution.x, 0.0)) - direction;
   vec3 upDelta = rayDirectionAt(textureCoordinate + vec2(0.0, 1.0 / resolution.y)) - direction;
   vec2 shift = vec2(0.0);
+  float edgeLift = 0.0;
   float guardDistance = 1e9;
   for (int index = 0; index < ${MAXIMUM_AIR_SOURCES}; index++) {
     if (index >= sourceCount) break;
@@ -203,6 +205,7 @@ void main() {
       vec2 onScreen = vec2(dot(radial, rightDelta), dot(radial, upDelta));
       if (length(onScreen) < 1e-9) continue;
       shift += normalize(onScreen) * weight * shape[index].z * ${RING_MAXIMUM_SHIFT.toFixed(3)} * resolution.y;
+      edgeLift += weight * shape[index].w;
       guardDistance = min(guardDistance, shellDistance);
     } else {
       // Haze: walk the ray through the box or ellipsoid and shift by noise taken at the middle of the stretch inside it.
@@ -239,7 +242,8 @@ void main() {
   vec2 warped = textureCoordinate - shift / resolution;
   // A surface in front of the bending air must not be dragged along with it: keep the pixel where it is.
   if (guardDistance < 1e8 && surfaceDistanceAt(warped) < guardDistance - 0.05) warped = textureCoordinate;
-  outputColor = texture(sourceTexture, warped);
+  // The shock front itself: a warm lift on the thin band at the ring radius, so the ring reads as an edge on flat walls too.
+  outputColor = texture(sourceTexture, warped) + vec4(edgeLift * vec3(1.0, 0.9, 0.75), 0.0);
 }`;
 
 export const flashFragment = `${airHeader}
@@ -273,7 +277,7 @@ export function packDistortion(sources) {
   for (const source of sources) {
     if (source.shape === 'ring') {
       const state = ringState(source);
-      if (state && state.amplitude > 0) active.push({ source, row: [state.radius, source.thickness, state.amplitude, 0], kind: 0 });
+      if (state && state.amplitude > 0) active.push({ source, row: [state.radius, source.thickness, state.amplitude, source.edge * state.amplitude], kind: 0 });
     } else if (source.strength > 0) {
       active.push({ source, row: [source.noiseScale, source.scroll * source.time, source.strength, 0], kind: source.region === 'box' ? 1 : 2 });
     }
