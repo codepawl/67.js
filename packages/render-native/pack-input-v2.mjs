@@ -2114,7 +2114,7 @@ function packKernelParamsV2({
   return new Uint8Array(buffer);
 }
 
-function buildGeometryTriangleItem(geometry, triIndex, defaultMaterialIndex, meshId, materialRecords) {
+function buildGeometryTriangleItem(geometry, triIndex, defaultMaterialIndex, meshId, materialRecords, recordIndexOf = index => index) {
   const { positions, normals, uvs, uv1s, colors, tangents, indices, triangleMaterial } = geometry;
   const i0 = indices[triIndex * 3];
   const i1 = indices[triIndex * 3 + 1];
@@ -2168,7 +2168,7 @@ function buildGeometryTriangleItem(geometry, triIndex, defaultMaterialIndex, mes
     flags |= TRIANGLE_FLAG_HAS_UV1;
   }
 
-  const materialIndex = triangleMaterial ? triangleMaterial[triIndex] : defaultMaterialIndex;
+  const materialIndex = triangleMaterial ? recordIndexOf(triangleMaterial[triIndex]) : defaultMaterialIndex;
   const matInfo = materialRecords[materialIndex];
   const isOpaque = (matInfo?.alphaMode ?? ALPHA_MODE_OPAQUE) === ALPHA_MODE_OPAQUE;
 
@@ -2274,10 +2274,69 @@ function shareEmissiveOffsets(meshSlot, emittedLocalIndices, instanceIndex) {
   }
 }
 
+/**
+ * Gives parts whose material records are equal one record. Two records are equal when their 256 bytes are, which holds the base
+ * values, the flags, every texture index (equal textures share an index in the collector) and the extension fields, and when
+ * the derived emission they were packed with is. The unique records keep the order of their first part, so a scene without
+ * equal records keeps its table, and `recordIndexOf` maps a part's material index to its record's index; an index past the
+ * table (no record) stays as it is.
+ */
+export function shareEqualMaterialRecords(materialRecords) {
+  const uniqueRecords = [];
+  const recordIndexByPart = new Array(materialRecords.length);
+  const uniqueIndicesByHash = new Map();
+  materialRecords.forEach((record, partIndex) => {
+    const hash = hashMaterialRecordBytes(record.bytes);
+    const candidates = uniqueIndicesByHash.get(hash);
+    const sameIndex = candidates?.find(uniqueIndex => materialRecordsAreEqual(uniqueRecords[uniqueIndex], record));
+    if (sameIndex !== undefined) {
+      recordIndexByPart[partIndex] = sameIndex;
+      return;
+    }
+    recordIndexByPart[partIndex] = uniqueRecords.length;
+    if (candidates) candidates.push(uniqueRecords.length);
+    else uniqueIndicesByHash.set(hash, [uniqueRecords.length]);
+    uniqueRecords.push(record);
+  });
+  return {
+    records: uniqueRecords,
+    recordIndexOf: partIndex => recordIndexByPart[partIndex] ?? partIndex,
+  };
+}
+
+// The words of a record, read in place when its bytes are aligned (the records `packMaterialRecordV2` returns are).
+function materialRecordWords(bytes) {
+  const wordCount = bytes.byteLength / 4;
+  return bytes.byteOffset % 4 === 0
+    ? new Uint32Array(bytes.buffer, bytes.byteOffset, wordCount)
+    : new Uint32Array(Uint8Array.from(bytes).buffer);
+}
+
+function hashMaterialRecordBytes(bytes) {
+  const words = materialRecordWords(bytes);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < words.length; index++) {
+    hash = Math.imul(hash ^ words[index], 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function materialRecordsAreEqual(first, second) {
+  if (first.isEmissive !== second.isEmissive || first.usesSubsurface !== second.usesSubsurface || first.alphaMode !== second.alphaMode) return false;
+  if (first.meanEmissiveRadiance.some((value, channel) => !Object.is(value, second.meanEmissiveRadiance[channel]))) return false;
+  const firstWords = materialRecordWords(first.bytes);
+  const secondWords = materialRecordWords(second.bytes);
+  for (let index = 0; index < firstWords.length; index++) {
+    if (firstWords[index] !== secondWords[index]) return false;
+  }
+  return true;
+}
+
 function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, reducedMaterials) {
-  const materialRecords = reducedMaterials
+  const partRecords = reducedMaterials
     ? reducedMaterials.materialRecords
     : rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
+  const { records: materialRecords, recordIndexOf } = shareEqualMaterialRecords(partRecords);
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
   materialRecords.forEach((rec, index) => materialsBuffer.set(rec.bytes, index * STRUCT_STRIDES_V2.material));
 
@@ -2287,12 +2346,12 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, r
     const inst = instancesInput[instIdx];
     const geometry = inst?.geometry;
     if (!geometry) continue;
-    const defaultMat = Number(inst.materialIndex ?? 0);
+    const defaultMat = recordIndexOf(Number(inst.materialIndex ?? 0));
     if (!firstDefaultMatByGeo.has(geometry)) {
       firstDefaultMatByGeo.set(geometry, defaultMat);
     }
     const overrideMat = inst.materialOverride !== undefined
-      ? (inst.materialOverride >>> 0)
+      ? recordIndexOf(inst.materialOverride >>> 0)
       : (!geometry.triangleMaterial && defaultMat !== firstDefaultMatByGeo.get(geometry) ? (defaultMat >>> 0) : INVALID_INDEX_V2);
     if (overrideMat !== INVALID_INDEX_V2) {
       const matAlphaMode = materialRecords[overrideMat]?.alphaMode ?? ALPHA_MODE_OPAQUE;
@@ -2313,9 +2372,9 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, r
     if (!geometry?.positions || !geometry?.indices) {
       throw new TypeError(`Instance[${instIdx}] requires a geometry with positions and indices.`);
     }
-    const defaultMaterialIndex = Number(inst.materialIndex ?? 0);
+    const defaultMaterialIndex = recordIndexOf(Number(inst.materialIndex ?? 0));
     let materialOverride = inst.materialOverride !== undefined
-      ? (inst.materialOverride >>> 0)
+      ? recordIndexOf(inst.materialOverride >>> 0)
       : (inst.overrideMaterial === true ? (defaultMaterialIndex >>> 0) : INVALID_INDEX_V2);
 
     let meshSlot = meshCache.get(geometry);
@@ -2326,7 +2385,7 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, r
       const opaque = [];
       const cutout = [];
       for (let t = 0; t < triCount; t++) {
-        const item = buildGeometryTriangleItem(geometry, t, defaultMaterialIndex, blasIndex, materialRecords);
+        const item = buildGeometryTriangleItem(geometry, t, defaultMaterialIndex, blasIndex, materialRecords, recordIndexOf);
         if (item.isOpaque && !forceNonOpaque) {
           opaque.push(item);
         } else {
