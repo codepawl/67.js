@@ -313,3 +313,31 @@ test('a job frame with a blend pane differs from the same scene traced from the 
   const direct = traceNative(buildNativeInput(buildTraceScene(parts, environment), camera, packOptions, pack), { width: WIDTH, height: HEIGHT, samples: 8, kernel: 'cycles' });
   assert.notDeepEqual(viaV2, Buffer.from(direct.rgba.buffer, direct.rgba.byteOffset, direct.rgba.byteLength));
 });
+
+// The kernel reads the green channel of the coat map as a roughness scale and the alpha of the sheen map as one; a 67js
+// material keeps those in other maps, so a weight or tint map is carried only when it cannot change the roughness (#1036).
+test('a coat or sheen map is carried only when its other channel cannot change the roughness', () => {
+  const coatMask = checker(2, 9);
+  const sheenTint = checker(2, 11);
+  const resolvedCoat = roughness => ({ clearcoat: 1, clearcoatRoughness: roughness, clearcoatTexture: resolveTexture(coatMask), transmission: 0 });
+  const smoothCoat = carriedMaterialFields({ layerMaps: { clearcoatTexture: coatMask } }, resolvedCoat(0), resolveTexture);
+  assert.ok(smoothCoat.textures.coatWeightRoughness, 'a coat without roughness keeps its mask');
+  const roughCoat = carriedMaterialFields({ layerMaps: { clearcoatTexture: coatMask } }, resolvedCoat(0.3), resolveTexture);
+  assert.equal(roughCoat.textures, undefined, 'the green channel of a mask would scale the roughness');
+  const packedCoat = carriedMaterialFields({ layerMaps: { clearcoatTexture: coatMask, clearcoatRoughnessTexture: { ...coatMask } } }, resolvedCoat(0.3), resolveTexture);
+  assert.ok(packedCoat.textures.coatWeightRoughness, 'one image for weight and roughness is what the slot holds');
+
+  const sheen = roughness => ({ sheenColor: [1, 1, 1], sheenRoughness: roughness, layerMaps: { sheenColorTexture: sheenTint } });
+  assert.ok(carriedMaterialFields(sheen(0), { transmission: 0, clearcoat: 0 }, resolveTexture).textures.sheenColorRoughness);
+  assert.equal(carriedMaterialFields(sheen(0.5), { transmission: 0, clearcoat: 0 }, resolveTexture).textures, undefined);
+
+  const notes = describeIgnoredFeatures([{ material: { clearcoat: 1, clearcoatRoughness: 0.3, layerMaps: { clearcoatTexture: coatMask } } }], { map: {} }, 'cpu', { kernelMaterials: true });
+  assert.deepEqual(notes, ['A clearcoat or sheen colour map is ignored when the layer has a roughness above 0 kept in another map.']);
+});
+
+test('a record field that is not a finite number, a boolean or an array of finite numbers is refused', () => {
+  const resolved = { transmission: 0, clearcoat: 0 };
+  assert.throws(() => carriedMaterialFields({ coatIor: 'glass' }, resolved, resolveTexture), /Material field coatIor must be a finite number/);
+  assert.throws(() => carriedMaterialFields({ coatTint: [1, Number.NaN, 1] }, resolved, resolveTexture), /Material field coatTint/);
+  assert.deepEqual(carriedMaterialFields({ coatIor: 1.6, thinWalled: true, coatTint: [0.5, 0.9, 0.5] }, resolved, resolveTexture), { coatIor: 1.6, thinWalled: true, coatTint: [0.5, 0.9, 0.5] });
+});

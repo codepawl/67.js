@@ -55,6 +55,15 @@ const IGNORED_LAYERS = [
 // The layer maps the native "cycles" kernel reads with its whole materials (the roughness maps of the coat and the sheen have no slot).
 const KERNEL_LAYER_MAPS = ['clearcoatTexture', 'clearcoatNormalTexture', 'anisotropyTexture', 'sheenColorTexture'];
 
+// The native kernel reads a coat's weight and roughness, and a sheen's tint and roughness, from one map each
+// (packages/render-native/job-input.mjs carries the map only when it cannot change the roughness).
+function hasSplitLayerMap(material) {
+  const maps = material.layerMaps ?? {};
+  const coatIsSplit = Boolean(maps.clearcoatTexture) && material.clearcoatRoughness > 0 && maps.clearcoatTexture.image !== maps.clearcoatRoughnessTexture?.image;
+  const sheenIsSplit = Boolean(maps.sheenColorTexture) && material.sheenRoughness > 0 && maps.sheenColorTexture.image !== maps.sheenRoughnessTexture?.image;
+  return coatIsSplit || sheenIsSplit;
+}
+
 function hasGraphOpacity(material) {
   return material.pattern?.type === 'graph' && Object.hasOwn(material.pattern.graph ?? {}, 'opacity');
 }
@@ -989,6 +998,7 @@ export function describeIgnoredFeatures(parts, environment, backend = 'cpu', { k
     if (material.alphaMode === 'blend' && hasGraphOpacity(material)) notes.add('A graph opacity output is traced as a cutout at 0.5.');
     else if (material.alphaMode === 'blend' && !kernelMaterials) notes.add('Blended transparency is traced as opaque.');
     if (!kernelMaterials && (material.layerMaps?.clearcoatTexture || material.transmissionMap)) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
+    if (kernelMaterials && hasSplitLayerMap(material)) notes.add('A clearcoat or sheen colour map is ignored when the layer has a roughness above 0 kept in another map.');
     if (material.emissionFresnel > 0 && backend !== 'cpu') notes.add('emission fresnel is ignored by the GPU path tracers; the cpu backend applies it.');
     for (const [name, isUsed, kernelShades] of IGNORED_LAYERS) if (!(kernelMaterials && kernelShades) && isUsed(material, kernelMaterials)) notes.add(`${name} is ignored.`);
   }

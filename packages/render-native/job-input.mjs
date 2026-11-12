@@ -68,9 +68,36 @@ function layerFields(material, resolved) {
     fields.attenuationColor = material.attenuationColor ?? [1, 1, 1];
   }
   for (const name of RECORD_FIELDS) {
-    if (material[name] !== undefined) fields[name] = material[name];
+    if (material[name] === undefined) continue;
+    if (!isRecordValue(material[name])) {
+      throw new TypeError(`Material field ${name} must be a finite number, a boolean or an array of finite numbers; got ${String(material[name])}.`);
+    }
+    fields[name] = material[name];
   }
   return fields;
+}
+
+function isRecordValue(value) {
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (!Array.isArray(value) && !ArrayBuffer.isView(value)) return false;
+  return Array.from(value).every(channel => typeof channel === 'number' && Number.isFinite(channel));
+}
+
+function sharesImage(firstDescriptor, secondDescriptor) {
+  return Boolean(firstDescriptor?.image) && firstDescriptor.image === secondDescriptor?.image;
+}
+
+// The kernel reads a coat's weight and roughness from the red and green channels of one map, and a sheen's tint and
+// roughness from the colour and alpha of one map. A 67js material (glTF) keeps each roughness in a map of its own. So the
+// weight or tint map is carried only when its other channel cannot change the roughness: the roughness factor is 0, or the
+// material's roughness map is the same image.
+function coatMapFitsTheSlot(material, resolved) {
+  return !(resolved.clearcoatRoughness > 0) || sharesImage(material.layerMaps?.clearcoatTexture, material.layerMaps?.clearcoatRoughnessTexture);
+}
+
+function sheenMapFitsTheSlot(material) {
+  return !(material.sheenRoughness > 0) || sharesImage(material.layerMaps?.sheenColorTexture, material.layerMaps?.sheenRoughnessTexture);
 }
 
 // A layer texture only matters while its layer is on, so a texture on a layer that is off stays out of the record.
@@ -81,11 +108,11 @@ function layerTextures(material, resolved, resolveTexture) {
   };
   if (resolved.transmission > 0) keep('transmission', resolved.transmissionTexture);
   if (resolved.clearcoat > 0) {
-    keep('coatWeightRoughness', resolved.clearcoatTexture);
+    if (coatMapFitsTheSlot(material, resolved)) keep('coatWeightRoughness', resolved.clearcoatTexture);
     keep('coatNormal', resolveTexture(material.layerMaps?.clearcoatNormalTexture));
   }
   if (material.anisotropy > 0) keep('anisotropy', resolveTexture(material.layerMaps?.anisotropyTexture));
-  if (hasColor(material.sheenColor)) keep('sheenColorRoughness', resolveTexture(material.layerMaps?.sheenColorTexture));
+  if (hasColor(material.sheenColor) && sheenMapFitsTheSlot(material)) keep('sheenColorRoughness', resolveTexture(material.layerMaps?.sheenColorTexture));
   if (material.bumpDistance > 0) keep('bump', resolveTexture(material.bumpMap));
   return textures;
 }

@@ -59,7 +59,7 @@ for (const [name, scene] of Object.entries(scenes)) {
     assert.equal(exported.wholeMaterials, true);
     const main = mainsExport(matrices);
     for (const [tableName, table] of Object.entries(main)) {
-      if (!ArrayBuffer.isView(table) || tableName === 'kernelParams') continue;
+      if (!ArrayBuffer.isView(table)) continue;
       assert.equal(exported.tables[tableName], Buffer.from(table.buffer, table.byteOffset, table.byteLength).toString('base64'), tableName);
     }
   });
