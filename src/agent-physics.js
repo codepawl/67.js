@@ -4,14 +4,14 @@ import { restWorldMatrix, boneTails, boneNodeId } from './rig.js';
 import { createRagdoll, ragdollPatches, ragdollReport } from './ragdoll.js';
 import { bakePhysicsScene, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from './physics.js';
 import { normalizeForceFields } from './force-fields.js';
+import { AGENT_SCENE_CAPABILITIES } from './agent-scene-capabilities.js';
 
 export { loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader };
 export { needsPhysics } from './agent-scene-modules.js';
 
 const FRAMES_PER_SECOND = 60;
 const MAX_DURATION_SECONDS = 10;
-const MAX_BODIES = 64;
-const MAX_JOINTS = 64;
+const { maxBodies: MAX_BODIES, maxJoints: MAX_JOINTS } = AGENT_SCENE_CAPABILITIES.physics.limits;
 const MAX_LAYER = 15;
 const MAX_TRIMESH_TRIANGLES = 20000;
 const MAX_HULL_POINTS = 2048;
