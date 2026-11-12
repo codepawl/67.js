@@ -82,10 +82,13 @@ export function cameraFocalLength(frame, aspect) {
 }
 
 /**
- * The kernel's aperture rotation in radians for a Blender-style rotation in degrees. Against Cycles the kernel's polygon sits half
- * a corner step away: a hexagon at 15 degrees matched Cook at 45 (and Cook at 0 and 30 were equally far off), and a pentagon at 40
- * degrees matched Cook at about 76 and not at 40 or -40, so the half step is added, not the sign flipped. A round aperture has no
- * corners and no offset.
+ * The kernel's aperture rotation in radians for a Blender-style rotation in degrees (Blender's aperture_rotation reaches Cycles'
+ * bladesrotation as radians, unchanged, in intern/cycles/blender/camera.cpp).
+ * Derivation from Cycles' regular_polygon_sample (intern/cycles/kernel/sample/mapping.h): each sector is the triangle with
+ * apex at the centre and its other two points at angles -pi/n and +pi/n around the sector axis, and the axes sit at
+ * rotation + 2 pi k / n, so the corners are at rotation + pi/n + 2 pi k / n (an edge midpoint, not a corner, sits at angle
+ * `rotation`). The kernel's cam_sample_regular_polygon puts corners at rotation + 2 pi k / n, so the kernel value is Cycles'
+ * rotation plus pi/n, same direction and same unit. A round aperture has no corners and no offset.
  */
 function kernelApertureRotation(rotationDegrees, blades) {
   const rotation = rotationDegrees * Math.PI / 180;
