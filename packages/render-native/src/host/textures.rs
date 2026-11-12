@@ -68,6 +68,24 @@ pub(crate) fn upload_scene_buffers(
     }
 }
 
+const EMPTY_LIGHT_TREE_EMITTER: [u8; 32] = [0u8; 32];
+const EMPTY_LIGHT_TO_TREE: [u32; 1] = [0u32; 1];
+
+/// The emitter table of an input, or one zeroed record for an input packed without a light tree.
+fn light_tree_emitter_bytes(input: &NativeTraceInputV2) -> &[u8] {
+    match &input.light_tree_emitters {
+        Some(bytes) if !bytes.is_empty() => bytes,
+        _ => &EMPTY_LIGHT_TREE_EMITTER,
+    }
+}
+
+fn light_to_tree_words(input: &NativeTraceInputV2) -> &[u32] {
+    match &input.light_to_tree {
+        Some(words) if !words.is_empty() => words,
+        _ => &EMPTY_LIGHT_TO_TREE,
+    }
+}
+
 pub(crate) fn upload_cycles_scene_buffers(
     device: &wgpu::Device,
     input: &NativeTraceInputV2,
@@ -81,7 +99,7 @@ pub(crate) fn upload_cycles_scene_buffers(
     parameter_bytes[12..16].copy_from_slice(&height.to_le_bytes());
     parameter_bytes[24..28].copy_from_slice(&total_samples.to_le_bytes());
 
-    // Bindings 2..=10 in FORMAT-v2 order.
+    // Bindings 2..=10 in FORMAT-v2 order, then the light tree tables for bindings 13 and 14.
     let buffers = vec![
         storage_buffer(device, "cycles instances", &input.instances),
         storage_buffer(device, "cycles triangles", &input.triangles),
@@ -92,6 +110,9 @@ pub(crate) fn upload_cycles_scene_buffers(
         storage_buffer(device, "cycles texture descriptors", &input.texture_descriptors),
         storage_buffer(device, "cycles texture texels", bytemuck::cast_slice(&input.texture_texels)),
         storage_buffer(device, "cycles environment texels", bytemuck::cast_slice(&input.environment_texels)),
+        // Bound at 13 and 14 by `create_cycles_bind_group`: the light tree emitters and the emitter-to-slot table.
+        storage_buffer(device, "cycles light tree emitters", light_tree_emitter_bytes(input)),
+        storage_buffer(device, "cycles light to tree", bytemuck::cast_slice(light_to_tree_words(input))),
     ];
     let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("cycles film accumulation"),

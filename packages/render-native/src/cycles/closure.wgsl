@@ -943,6 +943,10 @@ fn test_lobe_samples(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (idx >= total) {
     return;
   }
+  if (kernel_params.kernel_flags == SMP_PROBE_MODE) {
+    smp_write_probe(idx, total);
+    return;
+  }
 
   var point: ShadingPoint;
   point.position = vec3<f32>(0.0, 0.0, 0.0);

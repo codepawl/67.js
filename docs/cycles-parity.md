@@ -38,7 +38,7 @@ Exported losslessly from [`bench/reference/scenes.js`](../bench/reference/scenes
 | Filter glossy | `filter_glossy = 1.0` (`bsdf_blur` on secondary glossy bounces) | `filterGlossy: 1.0` in `--kernel cycles` (none in `legacy`) | Matches Cycles secondary-bounce roughness blur (`alpha >= filter_glossy * min_ray_pdf`) on reflective/refractive caustics |
 | Denoising | `use_denoising = False` | Raw `traced.rgba` (no wavelet/OIDN) | Measure raw Monte Carlo estimator |
 | Adaptive sampling | `use_adaptive_sampling = False` | `noiseThreshold: 0` | Draw exact `N` samples at every pixel |
-| Pixel filter | `pixel_filter_type = 'BOX'`, `filter_width = 1.0` | Uniform jitter in `[0, 1)^2` | Cycles default Blackman-Harris `1.5 px` blurs/rings across pixel boundaries |
+| Pixel filter | `pixel_filter_type = 'BOX'`, `filter_width = 1.0` (the references; Cycles' own default is Blackman-Harris `1.5 px`) | `filterType: 'box'`, `filterWidth: 1.0` by default; `'blackman-harris'` (default width `1.5`) and `'gaussian'` sample the Cycles 1024-entry inverse-CDF table (`filter_table.rs`, translated from `film.cpp`) | With each filter the native image matches a Cycles reference rendered with the same filter; the measured relMSE and FLIP are in the table below |
 | Color space | `OPEN_EXR` `32`-bit float RGB, `view_transform = 'Raw'`, `look = 'None'` | Linear `Float32Array` RGB `.npy` | Scene-referred linear float32 with no tone map |
 
 ### Bounce-Count Semantics Verification
@@ -203,6 +203,8 @@ Least-squares fit of $\text{relMSE}(N) = B_{\text{bias}} + \frac{V}{N}$ across t
 
 ![Three scenes rendered by the legacy kernel at 256 samples, the cycles kernel at 4096 samples and Blender Cycles 5.3 at 4096 samples](cycles-parity-comparison.jpg)
 
+![The many-lights-500 scene at 64 samples with the flat light pick, the light tree and Blender Cycles 5.3, then the light tree and Blender Cycles at 4096 samples and lit-interior at 256 samples](cycles-light-tree-comparison.jpg)
+
 Left to right: Cook's legacy kernel (256 samples), Cook's `cycles` kernel (4096 samples), Blender Cycles 5.3 (4096 samples). Linear output shown with the sRGB curve and no tone mapping.
 
 Milestone M1 expands parity verification for **Cook** (`packages/render-native` `--kernel cycles`) from `lit-interior` to six reference scenes from [`bench/reference/scenes.js`](../bench/reference/scenes.js): `spot-area`, `light-linking`, `metal`, `glass`, `outdoor-hdri`, and `lit-interior`. Every scene exports losslessly (`roundTripVerified = true`) via [`bench/cycles-parity/export-scene.mjs`](../bench/cycles-parity/export-scene.mjs) with Node asset loading handled in [`bench/cycles-parity/scene-bridge.mjs`](../bench/cycles-parity/scene-bridge.mjs) `[measured]`.
@@ -342,6 +344,137 @@ These are per-sample times on one scene. An equal-error comparison between the `
 
 ---
 
+### Pixel filter: box versus Blackman-Harris
+
+The six-scene references use the box filter of width 1, so the box filter stays the default of the `cycles` kernel. Cycles' own default is Blackman-Harris with width 1.5. To show which choice matches Cycles, `render-cycles.py --filter-type blackman-harris --filter-width 1.5` rendered a second Cycles 5.3 reference (4096 spp, seed 1, OptiX) and the `cycles` kernel ran at 1024 spp, seed 1, 8 bounces, 960 x 540 with each filter `[measured]`:
+
+| Scene | Native filter | vs Cycles box 1 (relMSE / FLIP LDR) | vs Cycles Blackman-Harris 1.5 (relMSE / FLIP LDR) |
+| :--- | :--- | :--- | :--- |
+| `lit-interior` | box 1 | 0.00105 / 0.0272 | 0.00106 / 0.0273 |
+| `lit-interior` | Blackman-Harris 1.5 | 0.00106 / 0.0273 | 0.00105 / 0.0272 |
+| `glass` | box 1 | 0.00009 / 0.0073 | 0.00016 / 0.0084 |
+| `glass` | Blackman-Harris 1.5 | 0.00061 / 0.0082 | 0.00010 / 0.0073 |
+
+`lit-interior` is smooth, so the filter hides under its noise. `glass` has hard caustic edges: each native filter scores best against the Cycles reference rendered with the same filter, and the mismatched pair is 4 to 7 times worse in relMSE.
+
+### Light tree for next event estimation
+
+The `cycles` kernel picks one emitter per surface bounce by walking the Cycles light tree (`light_tree.wgsl`, a translation of `kernel/light/tree.h`: one random number reused down the tree, importance from distance, cone angles, energy and the surface normal, two reservoirs per leaf) and finds the probability of a given emitter from the previous shading point for the MIS weight of a BSDF-sampled hit. `lightSampling` is `auto` (default: tree when the scene has more than one emitter, as Cycles with `use_light_tree` on), `tree` or `uniform` (the flat pick of earlier versions); `trace-native.mjs --light-sampling` sets it. `useLightTree: true|false` (`--light-tree on|off`) are other names for `tree` and `uniform`; passing both options with different values is an error. A sun is a distant leaf of the same tree, and light-link masks stay as an OR per node: every emitter is in the tree, and a picked emitter whose mask does not match the receiver contributes nothing (`lgt_links_match`), so linked scenes use the tree too. The environment map keeps its own importance sample and is not in the tree. `[measured]`, 960 x 540, 8 bounces, seed 1, against the Cycles 4096-spp seed-1 reference:
+
+| Check | Result |
+| :--- | :--- |
+| Six scenes, 1024 spp, tree on: largest per-channel mean-ratio gap | glass 0.28 %, light-linking 0.09 %, lit-interior 0.34 % (0.34 % with the flat pick too), metal 0.05 %, outdoor-hdri 0.06 %, spot-area 0.00 % |
+| `lit-interior` relMSE at 1024 spp, tree against flat | 0.00065 against 0.00105 |
+| Pick probabilities, 1600 random shading points per scene (`--light-tree-probe`, the kernel's own `ltr_pdf` and `ltr_sample`) | sum never above 1.0000002; all 800 points that see through the surface sum to 1; of the opaque ones, 664 of 800 (`lit-interior`) and 649 of 800 (12 emissive triangles) sum to 1, the rest are 0 (no emitter above the surface) or lose a share to a node whose emitters are all invisible, as in Cycles; fraction of 64 stratified picks that found an emitter equals the sum to 0.8 %; returned pick probability equals `ltr_pdf` of the picked emitter to 1.3e-6 |
+| One large emissive slab over a floor and a glossy ball, 512 spp | mean against both: NEE only 1.0014 / 1.0017 / 1.0018, BSDF only 1.0000 / 0.9999 / 0.9999 |
+| 256 spp sampling time, median of 3 interleaved runs (the GPU was shared with another job, so all times are 1.6 times the idle figure) | `lit-interior`: tree 5.94 s [5.91 to 8.52], flat 4.58 s [4.58 to 4.60]; `metal` (one emitter, `auto` picks flat): tree 2.53 s [2.51 to 2.53], flat 2.32 s [2.27 to 2.33] |
+| 256 spp relMSE | `lit-interior`: tree 0.00274, flat 0.00433 (Cycles 0.0031); `metal`: 0.00506 both |
+
+On `lit-interior` the tree costs 30 % more per sample and removes 37 % of the noise, so it wins by about 17 % at equal time (inferred from relMSE falling as 1/samples). The probe is a GPU test entry, not a Rust port; `tests/native-light-tree-kernel.test.js` repeats the three checks on a small scene.
+
+### Seventh scene: `many-lights-500` (light tree gate, #895)
+
+A 60 m hall cut into ten cells by partition walls with one doorway each, lit by 500 small lights placed from a fixed seed: 200 point lights, 150 spot lights, 100 emissive quads on the side walls and 50 emissive triangles on the ceiling (350 analytic lights and 200 emissive triangles). A surface sees the lights of its own cell and, through the doorways, a few of the next ones, so most of the 500 are far or hidden from any shading point and a flat pick wastes almost every sample. It is defined in [`bench/reference/scenes.js`](../bench/reference/scenes.js) as `many-lights-500` (the id `many-lights` is the 24-lamp corridor of issue #623), exported by the same `export-scene.mjs` path as the other six, and built by `render-cycles.py` from the same JSON, so both renderers read one scene. Export, a Cycles reference and a Cook run are the same commands as for the six, with `--scene many-lights-500`; `run-m1-parity.py` lists it as the seventh scene.
+
+`buildTraceScene` takes at most 32 analytic lights (`MAX_TRACE_LIGHTS`, one light-link mask bit each). The parity harness has no light links, so [`trace-scene-many-lights.mjs`](../bench/cycles-parity/trace-scene-many-lights.mjs) builds the lights in chunks of 32 and joins the lists, giving every light the "all groups" bit; the core limit and the legacy kernel are unchanged. `tests/cycles-parity-many-lights.test.js` checks the counts, the fixed seed and the join.
+
+Cycles 5.3 reference: Blender 5.3.0 OptiX, 960x540, 4096 spp, seeds 1 and 2, 8 bounces, light tree on (the Cycles default, `use_light_tree = true` in the render report), box filter 1, no denoiser, no clamps. The seed 1 versus seed 2 noise floor is relMSE 0.000791, per-channel mean ratio 1.0000 / 1.0000 / 1.0000, tiles 0.9995 to 1.0009, FLIP LDR 0.0173 `[measured]`. Sampling took 732 s (seed 1) and 1391 s (seed 2) with other jobs on the card, so they are not a speed figure.
+
+**Gate 1, the tree against the flat pick** (Cook `cycles` kernel, seed 1, 8 bounces, sampling seconds from the report, three interleaved rounds, relMSE against the seed 1 reference; the three runs of a rung give the same image, so relMSE has no range) `[measured]`:
+
+| spp | uniform relMSE | tree relMSE | uniform / tree error | uniform sampling s | tree sampling s | tree / uniform time |
+| ---: | ---: | ---: | ---: | --- | --- | ---: |
+| 16 | 0.37364 | 0.12644 | 2.95 | 1.344 [1.331-1.348] | 1.558 [1.555-1.559] | 1.16 |
+| 64 | 0.08809 | 0.03041 | 2.90 | 5.114 [5.095-5.160] | 5.991 [5.968-6.074] | 1.17 |
+| 256 | 0.02032 | 0.00766 | 2.65 | 20.474 [20.447-21.442] | 24.159 [24.015-24.450] | 1.18 |
+| 1024 | 0.00442 | 0.00218 | 2.03 | 81.958 [81.881-82.966] | 96.484 [95.916-96.609] | 1.18 |
+
+Time to equal error, from the two ladders on a log-log interpolation of time against relMSE (both curves cover 0.00442 to 0.126, so no extrapolation): at relMSE 0.0237 (geometric middle of that range) the flat pick needs 17.7 s and the tree 7.7 s, 2.30 times faster; at 0.00664 (1.5 times the lowest error both reach) 56.7 s and 28.3 s, 2.00 times faster; at 0.0304 (the tree at 64 spp) 14.0 s and 6.0 s, 2.33 times faster `[measured and interpolated]`. **The gate is met**: the tree reaches equal error in less than half the time. The tree costs 16 to 18 % more per sample here and removes 51 to 66 % of the noise per sample. At 1024 spp both curves approach the floor set by the 4096 spp reference's own noise (about half of the 0.000791 seed-to-seed figure), which is why the ratio falls toward 2.
+
+**Gate 2, parity with Cycles** (Cook `cycles` kernel, tree, 4096 spp, seed 1, against the Cycles seed 1 reference, `run-m1-parity.py`) `[measured]`: per-channel mean ratio 1.0009 / 1.0010 / 1.0009 (limit 2 %); 64 of 64 tiles within 5 %, tile ratios 0.9999 to 1.0034; FLIP LDR 0.0178 against a ceiling of 0.0373; relMSE 0.000832 against the 0.000791 noise floor. All gates pass, and nothing in the kernel or the scene export was changed to get there: light types, spot cone and units already matched (spot `angle`, `penumbra` and the 4 pi and pi watt factors are the ones the other scenes use; emissive quads and triangles go through Principled emission strength on both sides, as the kernel emits). Cook took 386.6 s of sampling for 4096 spp with other jobs on the card. These RTX 3060 figures come from before the light tree importance fix described under "Repeat on Modal" below; the Modal run reproduces the same gate values.
+
+### Equal-error time against Cycles
+
+The question is how long each renderer needs for the same error, not how long it takes for the same sample count. Cycles 5.3.0 (OptiX, RTX 3060) and the Cook `cycles` kernel (defaults: Sobol-Burley blue-noise sampler, light tree `auto`, box filter 1) render `lit-interior`, `metal` and `many-lights-500` at 16, 64, 256 and 1024 spp, 960x540, 8 bounces, seed 3 for both, so neither shares a random stream with the seed 1 reference. One rung is a Cook run followed by a Cycles run, one job at a time, three rounds, each through the GPU lock. Time is the sampling time each tool reports (`samplingSeconds`: Cook's sampling loop; for Cycles the span from its first sample statistics event to the end of the render call), without scene setup and without a denoiser. Error is relMSE against the Cycles 4096 spp seed 1 reference. The images do not change between rounds, so relMSE has no range; times are medians with the range of three runs `[measured]`.
+
+| scene | spp | Cook relMSE | Cycles relMSE | Cook s | Cycles s |
+| --- | ---: | ---: | ---: | --- | --- |
+| `lit-interior` | 16 | 0.06530 | 0.07024 | 0.415 [0.405-0.446] | 1.454 [0.467-5.732] |
+| `lit-interior` | 64 | 0.01283 | 0.01483 | 1.547 [1.452-4.544] | 1.794 [1.670-5.488] |
+| `lit-interior` | 256 | 0.00274 | 0.00310 | 5.922 [5.774-6.144] | 6.375 [5.669-8.254] |
+| `lit-interior` | 1024 | 0.000656 | 0.000771 | 24.75 [24.00-24.78] | 26.11 [25.93-28.35] |
+| `many-lights-500` | 16 | 0.1277 | 0.1172 | 1.516 [1.511-1.550] | 1.493 [1.482-1.861] |
+| `many-lights-500` | 64 | 0.03061 | 0.02793 | 5.913 [5.837-7.692] | 5.974 [5.854-7.034] |
+| `many-lights-500` | 256 | 0.00764 | 0.00699 | 23.57 [23.50-23.71] | 25.59 [24.83-25.76] |
+| `many-lights-500` | 1024 | 0.00218 | 0.00200 | 94.84 [93.79-96.43] | 97.73 [93.23-144.8] |
+| `metal` | 16 | 0.00450 | 0.6283 | 0.177 [0.153-0.215] | 0.171 [0.163-0.175] |
+| `metal` | 64 | 0.2806 | 0.00422 | 0.628 [0.622-0.629] | 0.619 [0.601-0.718] |
+| `metal` | 256 | 0.01812 | 0.07499 | 2.279 [2.264-2.914] | 2.752 [2.302-4.047] |
+| `metal` | 1024 | 0.00831 | 0.00590 | 9.517 [8.986-13.27] | 9.298 [9.091-11.07] |
+
+Time to equal error, log-log interpolation of time against relMSE on each renderer's ladder, only inside the errors both ladders cover. "Floor corrected" subtracts half of the reference's seed 1 versus seed 2 relMSE (the reference's own noise, which both renderers carry) from every error before interpolating `[measured and interpolated]`:
+
+| scene | relMSE target | Cook s | Cycles s | Cook speed relative to Cycles | floor corrected |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `lit-interior` | 0.005 | 3.51 | 4.33 | 1.23x faster | 1.24x |
+| `lit-interior` | 0.001 | 16.2 | 20.1 | 1.24x faster | 1.25x |
+| `many-lights-500` | 0.005 | 37.7 | 36.6 | 0.97x (Cook slower) | 0.98x |
+| `many-lights-500` | 0.00218 (lowest both reach) | 94.8 | 89.4 | 0.94x (Cook slower) | 0.93x (at 0.00178) |
+| `metal` | none | | | not defined | |
+
+What the table says:
+
+- `lit-interior`: at equal samples Cook has 7 to 15 % lower error (0.00274 against 0.00310 at 256 spp, 0.000656 against 0.000771 at 1024) and takes 5 to 14 % less time on the medians from 64 spp up, so it reaches equal error about 1.2 times faster. The 16 and 64 spp Cycles times carry up to 5 s of noise in their ranges, probably start-up and load from other sessions on the shared card `[inferred]`; the cost per sample of both is close to 24 to 25 ms at 1024 spp. The earlier figure of 11.4 s for Cycles at 256 spp differs from the 5.7 to 8.3 s measured here; the card was shared in both cases.
+- `many-lights-500`: Cook is slightly worse. The error is 9 to 10 % higher at equal samples at every rung, while the time per sample is between 1.5 % higher and 8 % lower than Cycles (16 spp +1.5 %, 64 spp -1 %, 256 spp -8 %, 1024 spp -3 %), so Cook needs about 3 to 6 % more time for the same error. This is the one scene where Cook is slower. The gap is small next to the run-to-run range of the Cycles 1024 spp time (93 to 145 s), so read it as a tie to slightly behind, not a clear loss. Where the 9 % comes from (differences between this tree and the Cycles tree, such as the double-sided emissive-triangle cone, or the sampler dimensions) was not isolated.
+- `metal`: no equal-error time can be given. The error looks dominated by a few very bright paths rather than by smooth noise `[inferred]`. The reference's own seed-to-seed relMSE is 0.0034, higher than both targets, and neither ladder falls monotonically (Cook 0.0045, 0.281, 0.0181, 0.0083; Cycles 0.628, 0.0042, 0.0750, 0.0059): a single firefly decides a rung. Per sample the two run at the same speed (9.5 s against 9.3 s at 1024 spp). Parity of the converged image is separate and passes (4096 spp relMSE 0.00271 against the 0.0034 noise floor).
+- The error gap on `many-lights-500` survived the review fix to `ltr_importance` (maximum importance now divided by the squared nearest distance and minimum by the squared farthest, as in Cycles): see "Repeat on Modal".
+- Nothing here changes a gate or retunes a kernel default. The comparison is one seed per renderer and one Cycles reference; the error of a single rung moves with the seed, and the interpolation uses four points per curve, so ratios under about 10 % are not resolved.
+
+### Repeat on Modal after the review fixes (NVIDIA A10G, 2026-11-12)
+
+The review of #895 found that `ltr_importance` had the distances swapped against `kernel/light/tree.h` (the maximum importance is divided by the squared minimum distance, the minimum importance by the squared maximum distance). That is fixed, and the ladders were measured again on a Modal container instead of the RTX 3060: one NVIDIA A10G (driver 610.57, Vulkan 1.4 with ray queries; Cook picked the `NVIDIA A10G` adapter, not llvmpipe), Blender 5.3.0 Cycles on OptiX on the same card, one container for the whole run so the timings are comparable, seed 3 for both, three rounds in which each rung runs Cook then Cycles. Error is relMSE against the same 4096 spp seed 1 Cycles reference `[measured]`; seconds are `samplingSeconds` with the range of three runs. The harness is `modal/app.py` outside the repository (Modal functions `build_and_test`, `measure`, `parity`).
+
+| scene | spp | Cook relMSE | Cycles relMSE | Cook s | Cycles s |
+| --- | ---: | ---: | ---: | --- | --- |
+| `lit-interior` | 16 | 0.06529 | 0.07024 | 0.196 [0.177-0.345] | 0.229 [0.227-0.230] |
+| `lit-interior` | 64 | 0.01283 | 0.01483 | 0.651 [0.629-0.884] | 0.828 [0.826-0.830] |
+| `lit-interior` | 256 | 0.002741 | 0.003103 | 2.500 [2.498-2.518] | 3.250 [3.249-3.257] |
+| `lit-interior` | 1024 | 0.000656 | 0.000771 | 10.04 [10.04-10.05] | 13.07 [13.03-13.07] |
+| `many-lights-500` | 16 | 0.1276 | 0.1173 | 0.663 [0.662-0.919] | 0.734 [0.734-0.737] |
+| `many-lights-500` | 64 | 0.03059 | 0.02793 | 2.487 [2.483-2.499] | 2.795 [2.795-2.804] |
+| `many-lights-500` | 256 | 0.007630 | 0.006984 | 9.843 [9.839-9.856] | 11.07 [11.04-11.12] |
+| `many-lights-500` | 1024 | 0.002174 | 0.002001 | 39.32 [39.32-39.36] | 44.20 [44.06-44.21] |
+
+Time to equal error, same interpolation as above `[measured and interpolated]`:
+
+| scene | relMSE target | Cook s | Cycles s | Cook relative to Cycles |
+| --- | ---: | ---: | ---: | ---: |
+| `lit-interior` | 0.005 | 1.48 | 2.14 | 1.45x faster |
+| `lit-interior` | 0.001 | 6.66 | 10.08 | 1.51x faster |
+| `lit-interior` | 0.000771 (lowest both reach) | 8.58 | 13.07 | 1.52x faster |
+| `many-lights-500` | 0.005 | 15.69 | 16.02 | 1.02x faster |
+| `many-lights-500` | 0.002174 (lowest both reach) | 39.32 | 40.32 | 1.03x faster |
+
+- Against the RTX 3060 figures, the Cook relMSE moved by at most 0.1 percent on `lit-interior` and 0.1 percent on `many-lights-500` (for example 0.127595 against 0.127697 at 16 spp and 0.002174 against 0.002175 at 1024 spp): the importance fix changes which emitter is picked, but not by much on these two scenes, and it does not close the 9 percent error gap to Cycles on `many-lights-500` (0.002174 against 0.002001 at 1024 spp). That gap is still not isolated.
+- Both renderers are 2.0 to 2.5 times faster on the A10G than on the 3060 in these runs (Cook 2.4 to 2.5 times, Cycles 2.0 to 2.2 times), and the job ran alone in its container, so the Cycles ranges are tight (no 5 s outliers). On this card Cook is 1.45 to 1.52 times faster at equal error on `lit-interior` (1.2 times on the 3060) and level with Cycles on `many-lights-500` (3 to 6 percent slower on the 3060). The ratios depend on the GPU and on load `[inferred]`; no claim is made about other cards.
+- The tree against the flat pick on `many-lights-500` (Cook, seed 3, A10G): error ratio uniform / tree 2.98, 2.86, 2.67 and 2.03 at 16, 64, 256 and 1024 spp, tree time 1.30 to 1.32 times the flat pick per sample (1.16 to 1.18 on the 3060). Time to equal error, tree against flat: 2.03 times faster at relMSE 0.0237, 2.05 at 0.0304, 1.80 at 0.00664 and 1.70 at 0.005 (the flat pick's 1024 spp run reaches only 0.00442, so it was run once there). The "less than half the time" reading of the gate holds at the larger errors and is 1.7 to 1.8 times near 0.005 on this card; the RTX 3060 figures above (2.0 to 2.3 times) were measured before the fix and on a different card.
+- 4096 spp parity of the `cycles` kernel at its defaults, seven scenes, seed 1, on a Modal NVIDIA A10: 7 of 7 pass, with the same mean ratios, tile counts, FLIP LDR and relMSE as the table below to the digits shown (worst per-channel mean ratio 1.0035 on `lit-interior`, against the 2 percent limit). Cook sampling seconds at 4096 spp: `spot-area` 24.3, `light-linking` 27.2, `metal` 17.8, `glass` 30.1, `outdoor-hdri` 9.4, `lit-interior` 49.4, `many-lights-500` 205.7.
+- Checks on the same Modal container: `cargo test` 25 passed, 0 failed (no GPU needed; the napi symbols are left unresolved at link time on Linux, and the one new test covers a tree flag without emitter tables); `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 76 tests, 75 passed, 1 skipped, 0 failed; lobe probes 22 of 22 and sphere furnace scenes 6 of 6 at 512 spp.
+
+### Final gates for #895
+
+Release addon built; on the RTX 3060 `cargo test --target x86_64-pc-windows-msvc`: 24 pass; `node --test tests/native-*.test.js`: 53 pass; lobe probes 22 of 22 and sphere furnace scenes 6 of 6 pass (512 spp); 4096 spp parity of the `cycles` kernel at its defaults on all seven scenes, 7 of 7 pass `[measured]`. The Modal run after the review fixes gives the same table (see above) with 25 cargo tests and 75 node tests passing:
+
+| scene | mean ratio (R / G / B) | tiles within 5 % | FLIP LDR (ceiling) | relMSE (noise floor) |
+| --- | --- | ---: | --- | --- |
+| `spot-area` | 1.0000 / 1.0000 / 1.0000 | 47 of 47 | 0.0039 (0.0239) | 0.000008 (0.000009) |
+| `light-linking` | 1.0009 / 1.0007 / 1.0008 | 64 of 64 | 0.0051 (0.0228) | 0.000015 (0.000004) |
+| `metal` | 0.9991 / 0.9992 / 0.9995 | 64 of 64 | 0.0042 (0.0237) | 0.00271 (0.003399) |
+| `glass` | 0.9976 / 0.9978 / 0.9982 | 64 of 64 | 0.0070 (0.0234) | 0.000058 (0.000044) |
+| `outdoor-hdri` | 0.9995 / 0.9996 / 0.9998 | 64 of 64 | 0.0023 (0.0215) | 0.000005 (0.000007) |
+| `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 of 64 | 0.0168 (0.0365) | 0.00026 (0.000285) |
+| `many-lights-500` | 1.0009 / 1.0010 / 1.0009 | 64 of 64 | 0.0178 (0.0373) | 0.000832 (0.000791) |
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
@@ -357,8 +490,8 @@ $OutDir = "artifacts/cycles-parity"
 # 2. Build packages/render-native if build/render-native.node is not present yet
 node packages/render-native/build.mjs
 
-# 3. Export all 6 M1 reference scenes and verify byte-identical round-trip packing
-foreach ($Scene in @("spot-area", "light-linking", "metal", "glass", "outdoor-hdri", "lit-interior")) {
+# 3. Export all 7 reference scenes (the six M1 scenes and many-lights-500) and verify byte-identical round-trip packing
+foreach ($Scene in @("spot-area", "light-linking", "metal", "glass", "outdoor-hdri", "lit-interior", "many-lights-500")) {
   node bench/cycles-parity/export-scene.mjs $OutDir --scene $Scene
 }
 
@@ -392,21 +525,4 @@ uv run --no-project --with numpy python bench/cycles-parity/verify-lobes.py --se
 uv run --no-project --with numpy --with psutil python bench/cycles-parity/run-m0-suite.py $OutDir --scene lit-interior --repeats 3 --bounces 8 --mode all
 ```
 
-## Sampling and light selection (#895)
-
-Cook's `cycles` kernel draws its random numbers from an Owen-scrambled Sobol sequence (Burley 2020, hash-based scrambling, one scramble per pixel and per group of four dimensions) and picks lights through a light tree (Conty and Kulla 2018) once the analytic lights or the emissive triangles number more than 8. `sampler: 'pcg'` and `useLightTree: false` restore the earlier behaviour. The pixel filter is unchanged: `box` unless `filterType: 'blackman-harris'` is passed, which is what a Cycles reference at its default filter needs.
-
-Measured on the RTX 3060 at `480 × 270`, 8 bounces, `box` filter, two seeds per point, against a high-sample reference of the other variant with its own seed (`bench/cycles-parity/measure-sampler-noise.py`):
-
-| Scene | Comparison | Samples | `relMSE` before | `relMSE` after | Drop |
-| :--- | :--- | ---: | ---: | ---: | ---: |
-| `lit-interior` | PCG hash, then Sobol-Burley | 16 | 0.1024 | 0.0886 | 13.5% |
-| `lit-interior` | PCG hash, then Sobol-Burley | 64 | 0.02629 | 0.02022 | 23.1% |
-| `lit-interior` | PCG hash, then Sobol-Burley | 256 | 0.007130 | 0.004966 | 30.4% |
-| `lit-interior` with 500 point lights | uniform pick, then light tree | 16 | 0.09166 | 0.02193 | 76.1% |
-| `lit-interior` with 500 point lights | uniform pick, then light tree | 256 | 0.004423 | 0.001235 | 72.1% |
-| `lit-interior` with 500 point lights | uniform pick, then light tree | 1024 | 0.000993 | 0.000431 | 56.6% |
-
-On the 500-light scene (`make-many-lights-scene.mjs`) the tree costs about 4% more time per sample and reaches the 1024-sample error of the uniform pick in `9.6 s` of sampling instead of `25.3 s` (log-log interpolation over the 16 to 1024 ladder). The mean image of the tree over the uniform pick is `0.99996`, and the per-channel mean of Sobol-Burley at 256 samples is within `0.04%` of the reference, so neither change moves the image mean.
-
-Not done: the blue-noise arrangement of the per-pixel scrambles across the image (each pixel hashes its own scramble, so the error is white across pixels, not blue), and a light tree that stays on in scenes with a sun or with instances that restrict their light group. The image-match runs against Blender Cycles (`run-m1-parity.py`) need Blender, which this machine did not have on the path.
+`bench/cycles-parity/make-many-lights-scene.mjs <scene.json> <out.json> --count 500` writes a copy of an exported scene with that many small point lights, and `bench/cycles-parity/measure-sampler-noise.py <scene.json> <outDir> --compare sampler|light-tree` measures relMSE per sample count for `white` against `sobol-burley`, or for `uniform` against `tree`, against a high-sample reference with its own seed.

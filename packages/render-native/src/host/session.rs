@@ -8,12 +8,13 @@ use std::time::Instant;
 use napi::Result;
 use wgpu::util::DeviceExt;
 
-use crate::cycles::{check_counts_match_kernel_params, specialize_cycles_kernel, CYCLES_LUT_WORDS};
+use crate::cycles::{check_counts_match_kernel_params, specialize_cycles_kernel, trace_entry_point, unit_filter_table_words, CYCLES_LUT_WORDS};
 use crate::host::accel::{
     build_acceleration_structure, build_cycles_acceleration_structure, build_empty_cycles_acceleration,
     create_vertex_buffer, unpack_triangles, CyclesAcceleration, INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS,
     TRIANGLE_RECORD_BYTES,
 };
+use crate::host::dispatch::{DispatchPlanner, DISPATCH_BUDGET_SECONDS};
 use crate::host::device::{failure, layout_entry, open_device, storage_buffer, storage_entry};
 use crate::host::film::{image_accumulation_bytes, read_accumulation};
 use crate::host::textures::{upload_cycles_scene_buffers, upload_scene_buffers};
@@ -71,6 +72,8 @@ struct CachedDevice {
     features: String,
     /// Set by the device lost callback; the next call then opens a fresh device and drops everything below.
     device_lost: Arc<AtomicBool>,
+    /// What wgpu reported when it lost the device or rejected work, for the error a failed render raises.
+    device_error: Arc<Mutex<String>>,
     /// Static 118,848-byte LUT storage buffer for Cycles binding 12.
     lut_buffer: wgpu::Buffer,
     /// Bind group layout for the Cycles kernel (bindings 0..=12).
@@ -115,10 +118,26 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
         let (device, queue, adapter_info) = open_device()?;
         let device_lost = Arc::new(AtomicBool::new(false));
         let lost_flag = Arc::clone(&device_lost);
-        device.set_device_lost_callback(move |_reason, _message| {
+        let device_error = Arc::new(Mutex::new(String::new()));
+        let lost_message = Arc::clone(&device_error);
+        device.set_device_lost_callback(move |reason, message| {
+            if let Ok(mut stored) = lost_message.lock() {
+                *stored = format!("{reason:?}: {message}");
+            }
             lost_flag.store(true, Ordering::SeqCst);
         });
-        let lut_bytes: &[u8] = bytemuck::cast_slice(&CYCLES_LUT_WORDS[..]);
+        // The default handler panics on a lost device; record the report so the render can raise a readable error.
+        let error_flag = Arc::clone(&device_lost);
+        let error_message = Arc::clone(&device_error);
+        device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| {
+            if let Ok(mut stored) = error_message.lock() {
+                stored.push_str(&error.to_string());
+            }
+            error_flag.store(true, Ordering::SeqCst);
+        }));
+        let mut lut_words: Vec<u32> = CYCLES_LUT_WORDS.to_vec();
+        lut_words.extend(unit_filter_table_words());
+        let lut_bytes: &[u8] = bytemuck::cast_slice(&lut_words);
         let lut_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cycles LUT binding 12"),
             contents: lut_bytes,
@@ -133,6 +152,7 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
             backend_name: format!("{:?}", adapter_info.backend),
             features: if has_ray_query { "EXPERIMENTAL_RAY_QUERY".to_string() } else { String::new() },
             device_lost,
+            device_error,
             lut_buffer,
             cycles_bind_group_layout,
             cycles_pipelines: BoundedCache::new(MAX_CACHED_PIPELINES),
@@ -146,6 +166,15 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
         cached.backend_name.clone(),
         cached.features.clone(),
     ))
+}
+
+/// The flag and message the device callbacks fill in when the cached device is lost.
+fn cached_device_loss_state() -> Result<(Arc<AtomicBool>, Arc<Mutex<String>>)> {
+    let guard = lock_device_cache();
+    match guard.as_ref() {
+        Some(cached) => Ok((Arc::clone(&cached.device_lost), Arc::clone(&cached.device_error))),
+        None => Err(cache_was_reset_failure()),
+    }
 }
 
 fn cache_was_reset_failure() -> napi::Error {
@@ -196,6 +225,9 @@ const MATERIAL_RECORD_BYTES: usize = 256;
 const EMISSIVE_TRIANGLE_RECORD_BYTES: usize = 96;
 const LIGHT_RECORD_BYTES: usize = 128;
 const LIGHT_TREE_NODE_BYTES: usize = 64;
+const LIGHT_TREE_EMITTER_BYTES: usize = 32;
+/// Buffers bound at 2..=10; the light tree emitter and light-to-tree buffers follow them for bindings 13 and 14.
+const CYCLES_SCENE_BUFFER_COUNT: usize = 9;
 const TEXTURE_DESCRIPTOR_BYTES: usize = 32;
 const CYCLES_SAMPLE_OFFSET_BYTE_OFFSET: u64 = 16;
 const LOBE_PROBE_WORKGROUP_SIZE: u32 = 64;
@@ -231,6 +263,8 @@ pub(crate) struct PreparedCyclesScene {
     pub(crate) adapter_name: String,
     pub(crate) backend_name: String,
     pub(crate) features: String,
+    pub(crate) device_lost: Arc<AtomicBool>,
+    pub(crate) device_error: Arc<Mutex<String>>,
     pub(crate) setup_seconds: f64,
     pub(crate) compile_seconds: f64,
     pub(crate) upload_seconds: f64,
@@ -299,7 +333,9 @@ fn create_cycles_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     ];
     layout_entries.extend((2..=10).map(|binding| storage_entry(binding, true)));
     layout_entries.push(storage_entry(11, false)); // film_accumulation (read_write)
-    layout_entries.push(storage_entry(12, true));  // cycles_lut (read-only, 118 848 bytes)
+    layout_entries.push(storage_entry(12, true));  // cycles_lut (read-only: static LUTs, then the two pixel filter tables)
+    layout_entries.push(storage_entry(13, true));  // light_tree_emitters
+    layout_entries.push(storage_entry(14, true));  // light_to_tree
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("cycles path tracer"),
         entries: &layout_entries,
@@ -384,7 +420,7 @@ fn create_cycles_bind_group(
         wgpu::BindGroupEntry { binding: 0, resource: parameters.as_entire_binding() },
         wgpu::BindGroupEntry { binding: 1, resource: tlas.as_binding() },
     ];
-    for (offset, buffer) in buffers.iter().enumerate() {
+    for (offset, buffer) in buffers[..CYCLES_SCENE_BUFFER_COUNT].iter().enumerate() {
         entries.push(wgpu::BindGroupEntry {
             binding: 2 + offset as u32,
             resource: buffer.as_entire_binding(),
@@ -398,6 +434,12 @@ fn create_cycles_bind_group(
         binding: 12,
         resource: lut_buffer.as_entire_binding(),
     });
+    for (offset, buffer) in buffers[CYCLES_SCENE_BUFFER_COUNT..].iter().enumerate() {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 13 + offset as u32,
+            resource: buffer.as_entire_binding(),
+        });
+    }
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("cycles path tracer"),
         layout: bind_group_layout,
@@ -551,6 +593,54 @@ fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) 
     Ok(())
 }
 
+/// Byte offset of `kernel_flags` in `KernelParamsV2` and its light-tree bit (`KERNEL_FLAG_USE_LIGHT_TREE` in pack-input-v2.mjs).
+const KERNEL_PARAMS_KERNEL_FLAGS_BYTE: usize = 32;
+const KERNEL_FLAG_USE_LIGHT_TREE: u32 = 1;
+
+/// The emitter table and the emitter-to-slot table come together or not at all, and the slot table must cover
+/// every analytic light and emissive triangle of the input.
+pub(crate) fn validate_light_tree_tables(input: &NativeTraceInputV2) -> Result<()> {
+    let (emitters, emitter_count, light_to_tree) = match (
+        &input.light_tree_emitters,
+        input.light_tree_emitter_count,
+        &input.light_to_tree,
+    ) {
+        (None, None, None) => {
+            let tree_flag_set = input
+                .kernel_params
+                .get(KERNEL_PARAMS_KERNEL_FLAGS_BYTE..KERNEL_PARAMS_KERNEL_FLAGS_BYTE + 4)
+                .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) & KERNEL_FLAG_USE_LIGHT_TREE != 0)
+                .unwrap_or(false);
+            if tree_flag_set && input.light_tree_node_count > 0 {
+                return Err(failure(
+                    "The light-tree kernel flag is set and the input has light tree nodes, but lightTreeEmitters, lightTreeEmitterCount and lightToTree are missing. Repack the scene with buildNativeInputV2.",
+                ));
+            }
+            return Ok(());
+        }
+        (Some(emitters), Some(emitter_count), Some(light_to_tree)) => (emitters, emitter_count, light_to_tree),
+        _ => {
+            return Err(failure(
+                "lightTreeEmitters, lightTreeEmitterCount and lightToTree must all be present or all absent. Pack them together with buildNativeInputV2.",
+            ))
+        }
+    };
+    validate_record_buffer("lightTreeEmitters", emitters, emitter_count, LIGHT_TREE_EMITTER_BYTES)?;
+    let unified_count = input.light_count as u64 + input.emissive_triangle_count as u64;
+    if emitter_count as u64 != unified_count {
+        return Err(failure(format!(
+            "lightTreeEmitterCount is {emitter_count} but the input has {unified_count} lights and emissive triangles. The tree must hold every emitter once."
+        )));
+    }
+    if (light_to_tree.len() as u64) < unified_count.max(1) {
+        return Err(failure(format!(
+            "lightToTree holds {} entries, fewer than the {unified_count} emitters of the input.",
+            light_to_tree.len()
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn prepare_cycles_scene(
     input: &NativeTraceInputV2,
     shader_source: String,
@@ -595,16 +685,18 @@ pub(crate) fn prepare_cycles_scene(
         input.texture_count,
         TEXTURE_DESCRIPTOR_BYTES,
     )?;
+    validate_light_tree_tables(input)?;
 
     // Use cached device; open once per process.
     let (device, queue, adapter_name, backend_name, features) = get_cached_device()?;
+    let (device_lost, device_error) = cached_device_loss_state()?;
     let setup_seconds = setup_started.elapsed().as_secs_f64();
 
     let compile_started = Instant::now();
     // Specialise the kernel source for this scene (replaces SCENE_HAS_* sentinels).
     check_counts_match_kernel_params(input)?;
     let specialized_source = specialize_cycles_kernel(&shader_source, input);
-    let pipeline = get_or_compile_cycles_pipeline("main", specialized_source)?;
+    let pipeline = get_or_compile_cycles_pipeline(trace_entry_point(input), specialized_source)?;
     let compile_seconds = compile_started.elapsed().as_secs_f64();
 
     let upload_started = Instant::now();
@@ -644,6 +736,8 @@ pub(crate) fn prepare_cycles_scene(
         adapter_name,
         backend_name,
         features,
+        device_lost,
+        device_error,
         setup_seconds,
         compile_seconds,
         upload_seconds,
@@ -653,23 +747,75 @@ pub(crate) fn prepare_cycles_scene(
     })
 }
 
+/// How `trace_cycles_samples` splits the samples into dispatches.
+#[derive(Clone, Copy)]
+pub(crate) enum DispatchPlan {
+    /// Every dispatch draws this many samples, as the caller asked.
+    Fixed(u32),
+    /// Each dispatch is sized from the time of the last so none runs past the time budget; no batch is larger than `largest_batch`.
+    TimeBudget { largest_batch: u32 },
+}
+
+pub(crate) struct CyclesTrace {
+    pub(crate) sums: Vec<f32>,
+    pub(crate) traced_seconds: f64,
+    /// The most samples one dispatch drew.
+    pub(crate) largest_batch: u32,
+    /// The longest single dispatch; only measured when the dispatches are sized by time.
+    pub(crate) longest_dispatch_seconds: Option<f64>,
+}
+
+/// Raises the error for a lost device, naming the dispatch that was running and how to lower the work per dispatch.
+fn fail_if_device_lost(
+    prepared: &PreparedCyclesScene,
+    sample_offset: u32,
+    batch_samples: u32,
+    samples: u32,
+) -> Result<()> {
+    if !prepared.device_lost.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let detail = prepared.device_error.lock().map(|stored| stored.clone()).unwrap_or_default();
+    let smaller_batch = (batch_samples / 2).max(1);
+    Err(failure(format!(
+        "The GPU device was lost during the render, while drawing samples {sample_offset} to {} of {samples} in one dispatch of \
+         {batch_samples} samples ({}). The driver resets a GPU when a single dispatch runs too long. Lower the work per dispatch: \
+         pass samplesPerDispatch {smaller_batch} or less, or leave it unset so the render splits itself into dispatches of \
+         about {DISPATCH_BUDGET_SECONDS} s, or lower the samples or the resolution. Then run the render again.",
+        sample_offset + batch_samples,
+        if detail.is_empty() { "no detail from the driver".to_string() } else { detail },
+    )))
+}
+
 pub(crate) fn trace_cycles_samples(
     prepared: &PreparedCyclesScene,
     samples: u32,
-    samples_per_dispatch: u32,
+    plan: DispatchPlan,
     groups: (u32, u32),
     accumulation_bytes: u64,
     max_seconds: Option<f64>,
-) -> Result<(Vec<f32>, f64)> {
+) -> Result<CyclesTrace> {
     let trace_started = Instant::now();
     let device = &prepared.device;
     let queue = &prepared.queue;
-    let step = samples_per_dispatch.max(1);
+    let mut planner = match plan {
+        DispatchPlan::TimeBudget { largest_batch } => Some(DispatchPlanner::new(DISPATCH_BUDGET_SECONDS, largest_batch)),
+        DispatchPlan::Fixed(_) => None,
+    };
     let mut sample_offset = 0u32;
     let mut dispatch_count = 0u32;
+    let mut largest_batch = 0u32;
+    let mut longest_dispatch_seconds: Option<f64> = None;
 
     while sample_offset < samples {
-        let batch_samples = (samples - sample_offset).min(step);
+        let remaining_samples = samples - sample_offset;
+        let batch_samples = match (&planner, plan) {
+            (Some(planner), _) => planner.next_batch(remaining_samples),
+            (None, DispatchPlan::Fixed(step)) => remaining_samples.min(step.max(1)),
+            (None, DispatchPlan::TimeBudget { .. }) => unreachable!("a time budget always has a planner"),
+        };
+        largest_batch = largest_batch.max(batch_samples);
+        let dispatch_started = Instant::now();
         let mut dispatch_words = [0u8; 8];
         dispatch_words[0..4].copy_from_slice(&sample_offset.to_le_bytes());
         dispatch_words[4..8].copy_from_slice(&batch_samples.to_le_bytes());
@@ -689,17 +835,27 @@ pub(crate) fn trace_cycles_samples(
         }
         queue.submit(Some(encoder.finish()));
 
+        let dispatch_offset = sample_offset;
         sample_offset += batch_samples;
         dispatch_count += 1;
-        // When no time limit is set poll every 4 dispatches (excluding the final batch, which
-        // `read_accumulation` waits on directly) to drain staging belts without stalling each batch.
-        let should_poll = if max_seconds.is_some() {
+        // A planned render waits for every dispatch to time it. A fixed one, when no time limit is set, polls every 4
+        // dispatches (excluding the final batch, which `read_accumulation` waits on directly) to drain staging belts
+        // without stalling each batch.
+        let should_poll = if planner.is_some() {
+            true
+        } else if max_seconds.is_some() {
             dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= samples
         } else {
             sample_offset < samples && dispatch_count % SAMPLES_PER_WAIT == 0
         };
         if should_poll {
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            fail_if_device_lost(prepared, dispatch_offset, batch_samples, samples)?;
+            if let Some(planner) = planner.as_mut() {
+                let dispatch_seconds = dispatch_started.elapsed().as_secs_f64();
+                planner.record(batch_samples, dispatch_seconds);
+                longest_dispatch_seconds = Some(longest_dispatch_seconds.map_or(dispatch_seconds, |longest| longest.max(dispatch_seconds)));
+            }
             if let Some(limit) = max_seconds {
                 if trace_started.elapsed().as_secs_f64() > limit {
                     return Err(failure(format!(
@@ -710,8 +866,14 @@ pub(crate) fn trace_cycles_samples(
         }
     }
 
-    let sums = read_accumulation(device, queue, &prepared.accumulation, accumulation_bytes)?;
-    Ok((sums, trace_started.elapsed().as_secs_f64()))
+    let sums = read_accumulation(device, queue, &prepared.accumulation, accumulation_bytes);
+    fail_if_device_lost(prepared, samples.saturating_sub(largest_batch), largest_batch, samples)?;
+    Ok(CyclesTrace {
+        sums: sums?,
+        traced_seconds: trace_started.elapsed().as_secs_f64(),
+        largest_batch,
+        longest_dispatch_seconds,
+    })
 }
 
 pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_source: String) -> Result<Vec<f32>> {
@@ -775,6 +937,8 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
         storage_buffer(&device, "probe texture descriptors", descriptor_slice),
         storage_buffer(&device, "probe texture texels", bytemuck::cast_slice(texel_slice)),
         storage_buffer(&device, "dummy environment texels", &[0u8; 16]),
+        storage_buffer(&device, "dummy light tree emitters", &[0u8; LIGHT_TREE_EMITTER_BYTES]),
+        storage_buffer(&device, "dummy light to tree", &[0u8; 4]),
     ];
     let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lobe probe accumulation"),

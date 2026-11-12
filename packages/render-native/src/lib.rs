@@ -14,7 +14,7 @@ use crate::host::film::{
     texel_accumulation_bytes, texel_workgroups,
 };
 use crate::host::session::{
-    prepare_cycles_scene, prepare_scene, run_cycles_lobe_probe, trace_cycles_samples, trace_samples, JobShape,
+    DispatchPlan, prepare_cycles_scene, prepare_scene, run_cycles_lobe_probe, trace_cycles_samples, trace_samples, JobShape,
 };
 
 const KERNEL_SOURCE: &str = include_str!("kernel.wgsl");
@@ -53,6 +53,11 @@ pub struct NativeTraceInputV2 {
     pub light_count: u32,
     pub light_tree_nodes: Uint8Array,
     pub light_tree_node_count: u32,
+    /// Emitters in tree order (FORMAT-v2 section 7b); absent in inputs packed before the light tree landed.
+    pub light_tree_emitters: Option<Uint8Array>,
+    pub light_tree_emitter_count: Option<u32>,
+    /// Emitter slot of every unified emitter (analytic lights first, then emissive triangles).
+    pub light_to_tree: Option<Uint32Array>,
     pub texture_descriptors: Uint8Array,
     pub texture_count: u32,
     pub texture_texels: Uint32Array,
@@ -138,6 +143,8 @@ pub struct NativeTraceResult {
     pub average_samples: f64,
     /// The samples each dispatch drew, as given or as chosen automatically (Cycles kernel only; absent for the legacy kernel).
     pub samples_per_dispatch: Option<u32>,
+    /// The longest single dispatch in seconds, measured when dispatches are sized by time (absent for a fixed batch).
+    pub longest_dispatch_seconds: Option<f64>,
     pub adapter: String,
     pub backend: String,
     /// "EXPERIMENTAL_RAY_QUERY" when the device the trace ran on was opened with ray queries (the tracer needs them).
@@ -195,6 +202,7 @@ pub fn trace_scene(input: NativeTraceInput, options: NativeTraceOptions) -> Resu
         variance: Float32Array::new(resolved.variance),
         average_samples: resolved.average_samples,
         samples_per_dispatch: None,
+        longest_dispatch_seconds: None,
         adapter: prepared.adapter_name,
         backend: prepared.backend_name,
         features: prepared.features,
@@ -221,34 +229,24 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
         accumulation_bytes,
     )?;
     let groups = image_workgroups(options.width, options.height);
-    let samples_per_dispatch = match options.samples_per_dispatch {
-        Some(n) => n.max(1),
-        None => {
-            // Auto-select a batch that keeps GPU utilisation high without coarse progress steps.
-            // With a wall-clock limit use step=1 for tight responsiveness below 2 s; otherwise
-            // batch by pixel count so each dispatch is a worthwhile chunk.
-            let pixel_count = options.width as u64 * options.height as u64;
-            let batch = match options.max_seconds {
-                Some(limit) if limit < 2.0 => 1,
-                _ => {
-                    if pixel_count <= 1_000_000 {
-                        options.samples.min(32)
-                    } else {
-                        options.samples.min(16)
-                    }
-                }
-            };
-            batch.max(1)
-        }
+    // Unless the caller fixes the batch, each dispatch is sized from the time of the last so none runs long enough for the
+    // driver to reset the device. A wall-clock limit under 2 s keeps one sample per dispatch for tight responsiveness.
+    let plan = match options.samples_per_dispatch {
+        Some(samples_per_dispatch) => DispatchPlan::Fixed(samples_per_dispatch.max(1)),
+        None => match options.max_seconds {
+            Some(limit) if limit < 2.0 => DispatchPlan::Fixed(1),
+            _ => DispatchPlan::TimeBudget { largest_batch: options.samples.max(1) },
+        },
     };
-    let (sums, traced_seconds) = trace_cycles_samples(
+    let trace = trace_cycles_samples(
         &prepared,
         options.samples,
-        samples_per_dispatch,
+        plan,
         groups,
         accumulation_bytes,
         options.max_seconds,
     )?;
+    let (sums, traced_seconds, samples_per_dispatch) = (trace.sums, trace.traced_seconds, trace.largest_batch);
     let resolved = resolve_image(&sums, pixel_count);
     Ok(NativeTraceResult {
         rgba: Float32Array::new(resolved.rgba),
@@ -258,6 +256,7 @@ pub fn trace_scene_cycles(input: NativeTraceInputV2, options: NativeCyclesTraceO
         variance: Float32Array::new(resolved.variance),
         average_samples: resolved.average_samples,
         samples_per_dispatch: Some(samples_per_dispatch),
+        longest_dispatch_seconds: trace.longest_dispatch_seconds,
         adapter: prepared.adapter_name,
         backend: prepared.backend_name,
         features: prepared.features,

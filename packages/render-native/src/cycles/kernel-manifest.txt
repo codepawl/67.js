@@ -11,4 +11,5 @@ bsdf_glass.wgsl
 bsdf_coat.wgsl
 closure.wgsl
 lights.wgsl
+light_tree.wgsl
 integrator.wgsl

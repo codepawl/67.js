@@ -1,11 +1,35 @@
 // SPDX-FileCopyrightText: 2011-2022 Blender Foundation
 // SPDX-License-Identifier: Apache-2.0
 //
-// Stateless 4D sampler (`smp_*`) for the Cycles-parity native kernel. The default is an Owen-scrambled Sobol
-// sequence with Burley's hash-based scrambling ("Practical Hash-based Owen Scrambling", JCGT 2020), the sampler
-// Cycles uses. `KERNEL_FLAG_PCG_SAMPLER` selects the earlier uncorrelated 4D PCG hash instead.
+// Random numbers for the Cycles-parity native kernel (`smp_*`). Two patterns, chosen by
+// `KERNEL_FLAG_WHITE_NOISE_SAMPLER`:
+//   - default: Cycles 5.3 BLUE_NOISE_PURE, a translation of kernel/sample/{pattern,sobol_burley,util}.h and
+//     util/hash.h: one Owen-scrambled Sobol sequence (seed 0) where each pixel owns a section of
+//     `total_samples` consecutive indices (modulo 2^32, as in Cycles, so sections can overlap when pixel rank times
+//     `total_samples` exceeds 2^32), found by a base-4 Owen scrambled Morton code of the pixel.
+//   - white: a stateless PCG4D hash per draw, unstratified across samples.
+// Sobol-Burley decisions are addressed by a dimension set. The path loop calls `smp_seek` before each decision so
+// that a bounce that skips a light kind does not shift the sets of the others (Cycles reserves PRNG_BOUNCE_NUM = 16
+// sets per path step the same way).
 
 const SMP_UINT_TO_UNIT_FLOAT: f32 = 1.0 / 16777216.0;
+const SMP_UINT_TO_UNIT_FLOAT_EXCLUSIVE: f32 = 1.0 / 4294967808.0;
+const SMP_SETS_PER_STEP: u32 = 16u;
+
+// Dimension-set slots inside one path step. Each draw call takes the next set, so a 1D plus 2D pair uses two slots.
+const SMP_SLOT_TERMINATE: u32 = 0u;
+const SMP_SLOT_ANALYTIC_PICK: u32 = 1u;
+const SMP_SLOT_ANALYTIC_POINT: u32 = 2u;
+const SMP_SLOT_EMISSIVE_PICK: u32 = 3u;
+const SMP_SLOT_EMISSIVE_POINT: u32 = 4u;
+const SMP_SLOT_ENVIRONMENT: u32 = 5u;
+const SMP_SLOT_SURFACE_BSDF: u32 = 6u;
+const SMP_SLOT_TRANSPARENT: u32 = 7u;
+const SMP_SLOT_VOLUME_DISTANCE: u32 = 8u;
+const SMP_SLOT_VOLUME_ANALYTIC_PICK: u32 = 9u;
+const SMP_SLOT_VOLUME_ANALYTIC_POINT: u32 = 10u;
+const SMP_SLOT_VOLUME_ENVIRONMENT: u32 = 11u;
+const SMP_SLOT_VOLUME_PHASE: u32 = 12u;
 
 struct SmpState {
   pixel_x: u32,
@@ -13,96 +37,177 @@ struct SmpState {
   sample_index: u32,
   dimension: u32,
   seed: u32,
-  pixel_seed: u32,
-  use_pcg: u32,
+  pixel_sequence_start: u32,
+  use_sobol_burley: u32,
 }
 
-// First four dimensions of the Joe-Kuo Sobol sequence, one row per bit of the sample index.
-const SMP_SOBOL_MATRIX = array<vec4<u32>, 32>(
-  vec4<u32>(0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u),
-  vec4<u32>(0x40000000u, 0xC0000000u, 0xC0000000u, 0xC0000000u),
-  vec4<u32>(0x20000000u, 0xA0000000u, 0x60000000u, 0x20000000u),
-  vec4<u32>(0x10000000u, 0xF0000000u, 0x90000000u, 0x50000000u),
-  vec4<u32>(0x08000000u, 0x88000000u, 0xE8000000u, 0xF8000000u),
-  vec4<u32>(0x04000000u, 0xCC000000u, 0x5C000000u, 0x74000000u),
-  vec4<u32>(0x02000000u, 0xAA000000u, 0x8E000000u, 0xA2000000u),
-  vec4<u32>(0x01000000u, 0xFF000000u, 0xC5000000u, 0x93000000u),
-  vec4<u32>(0x00800000u, 0x80800000u, 0x68800000u, 0xD8800000u),
-  vec4<u32>(0x00400000u, 0xC0C00000u, 0x9CC00000u, 0x25400000u),
-  vec4<u32>(0x00200000u, 0xA0A00000u, 0xEE600000u, 0x59E00000u),
-  vec4<u32>(0x00100000u, 0xF0F00000u, 0x55900000u, 0xE6D00000u),
-  vec4<u32>(0x00080000u, 0x88880000u, 0x80680000u, 0x78080000u),
-  vec4<u32>(0x00040000u, 0xCCCC0000u, 0xC09C0000u, 0xB40C0000u),
-  vec4<u32>(0x00020000u, 0xAAAA0000u, 0x60EE0000u, 0x82020000u),
-  vec4<u32>(0x00010000u, 0xFFFF0000u, 0x90550000u, 0xC3050000u),
-  vec4<u32>(0x00008000u, 0x80008000u, 0xE8808000u, 0x208F8000u),
-  vec4<u32>(0x00004000u, 0xC000C000u, 0x5CC0C000u, 0x51474000u),
-  vec4<u32>(0x00002000u, 0xA000A000u, 0x8E606000u, 0xFBEA2000u),
-  vec4<u32>(0x00001000u, 0xF000F000u, 0xC5909000u, 0x75D93000u),
-  vec4<u32>(0x00000800u, 0x88008800u, 0x6868E800u, 0xA0858800u),
-  vec4<u32>(0x00000400u, 0xCC00CC00u, 0x9C9C5C00u, 0x914E5400u),
-  vec4<u32>(0x00000200u, 0xAA00AA00u, 0xEEEE8E00u, 0xDBE79E00u),
-  vec4<u32>(0x00000100u, 0xFF00FF00u, 0x5555C500u, 0x25DB6D00u),
-  vec4<u32>(0x00000080u, 0x80808080u, 0x8000E880u, 0x58800080u),
-  vec4<u32>(0x00000040u, 0xC0C0C0C0u, 0xC0005CC0u, 0xE54000C0u),
-  vec4<u32>(0x00000020u, 0xA0A0A0A0u, 0x60008E60u, 0x79E00020u),
-  vec4<u32>(0x00000010u, 0xF0F0F0F0u, 0x9000C590u, 0xB6D00050u),
-  vec4<u32>(0x00000008u, 0x88888888u, 0xE8006868u, 0x800800F8u),
-  vec4<u32>(0x00000004u, 0xCCCCCCCCu, 0x5C009C9Cu, 0xC00C0074u),
-  vec4<u32>(0x00000002u, 0xAAAAAAAAu, 0x8E00EEEEu, 0x200200A2u),
-  vec4<u32>(0x00000001u, 0xFFFFFFFFu, 0xC5005555u, 0x50050093u),
+// Rows 1 to 3 of Cycles' `sobol_burley_table` (kernel/tables.h); row 0 is the identity and handled by bit reversal.
+var<private> SMP_SOBOL_TABLE: array<u32, 96> = array<u32, 96>(
+    0x00000001u, 0x00000003u, 0x00000005u, 0x0000000fu,
+    0x00000011u, 0x00000033u, 0x00000055u, 0x000000ffu,
+    0x00000101u, 0x00000303u, 0x00000505u, 0x00000f0fu,
+    0x00001111u, 0x00003333u, 0x00005555u, 0x0000ffffu,
+    0x00010001u, 0x00030003u, 0x00050005u, 0x000f000fu,
+    0x00110011u, 0x00330033u, 0x00550055u, 0x00ff00ffu,
+    0x01010101u, 0x03030303u, 0x05050505u, 0x0f0f0f0fu,
+    0x11111111u, 0x33333333u, 0x55555555u, 0xffffffffu,
+    0x00000001u, 0x00000003u, 0x00000006u, 0x00000009u,
+    0x00000017u, 0x0000003au, 0x00000071u, 0x000000a3u,
+    0x00000116u, 0x00000339u, 0x00000677u, 0x000009aau,
+    0x00001601u, 0x00003903u, 0x00007706u, 0x0000aa09u,
+    0x00010117u, 0x0003033au, 0x00060671u, 0x000909a3u,
+    0x00171616u, 0x003a3939u, 0x00717777u, 0x00a3aaaau,
+    0x01170001u, 0x033a0003u, 0x06710006u, 0x09a30009u,
+    0x16160017u, 0x3939003au, 0x77770071u, 0xaaaa00a3u,
+    0x00000001u, 0x00000003u, 0x00000004u, 0x0000000au,
+    0x0000001fu, 0x0000002eu, 0x00000045u, 0x000000c9u,
+    0x0000011bu, 0x000002a4u, 0x0000079au, 0x00000b67u,
+    0x0000101eu, 0x0000302du, 0x00004041u, 0x0000a0c3u,
+    0x0001f104u, 0x0002e28au, 0x000457dfu, 0x000c9baeu,
+    0x0011a105u, 0x002a7289u, 0x0079e7dbu, 0x00b6dba4u,
+    0x0100011au, 0x030002a7u, 0x0400079eu, 0x0a000b6du,
+    0x1f001001u, 0x2e003003u, 0x45004004u, 0xc900a00au,
 );
 
-
-fn smp_hash_u32(input_word: u32) -> u32 {
-  var v = input_word;
-  v ^= v >> 16u;
-  v *= 0x7feb352du;
-  v ^= v >> 15u;
-  v *= 0x846ca68bu;
-  v ^= v >> 16u;
-  return v;
+fn smp_rotate_left(value: u32, count: u32) -> u32 {
+  return (value << count) | (value >> (32u - count));
 }
 
-fn smp_laine_karras_permutation(index_word: u32, scramble_seed: u32) -> u32 {
-  var x = index_word + scramble_seed;
-  x ^= x * 0x6c50b47cu;
-  x ^= x * 0xb82f1e52u;
-  x ^= x * 0xc7afe638u;
-  x ^= x * 0x8d22f6e6u;
-  return x;
+// util/hash.h hash_uint: Bob Jenkins' lookup3 final mix.
+fn smp_hash_uint(key: u32) -> u32 {
+  var a = 0xdeadbeefu + 17u + key;
+  var b = 0xdeadbeefu + 17u;
+  var c = 0xdeadbeefu + 17u;
+  c ^= b;
+  c -= smp_rotate_left(b, 14u);
+  a ^= c;
+  a -= smp_rotate_left(c, 11u);
+  b ^= a;
+  b -= smp_rotate_left(a, 25u);
+  c ^= b;
+  c -= smp_rotate_left(b, 16u);
+  a ^= c;
+  a -= smp_rotate_left(c, 4u);
+  b ^= a;
+  b -= smp_rotate_left(a, 14u);
+  c ^= b;
+  c -= smp_rotate_left(b, 24u);
+  return c;
 }
 
-fn smp_nested_uniform_scramble(index_word: u32, scramble_seed: u32) -> u32 {
-  return reverseBits(smp_laine_karras_permutation(reverseBits(index_word), scramble_seed));
+// util/hash.h hash_hp_uint: the Hash Prospector mixing function.
+fn smp_hash_hp_uint(value: u32) -> u32 {
+  var mixed = value;
+  mixed ^= mixed >> 16u;
+  mixed *= 0x21f0aaadu;
+  mixed ^= mixed >> 15u;
+  mixed *= 0xd35a2d97u;
+  mixed ^= mixed >> 15u;
+  return mixed ^ 0xe6fe3bebu;
 }
 
-fn smp_sobol_4d(index_word: u32) -> vec4<u32> {
-  var result = vec4<u32>(0u);
-  var remaining = index_word;
-  for (var bit = 0u; bit < 32u; bit += 1u) {
-    if (remaining == 0u) {
-      break;
+// kernel/sample/util.h reversed_bit_owen.
+fn smp_reversed_bit_owen(value: u32, seed: u32) -> u32 {
+  var scrambled = value;
+  scrambled ^= scrambled * 0x3d20adeau;
+  scrambled += seed;
+  scrambled *= (seed >> 16u) | 1u;
+  scrambled ^= scrambled * 0x05526c56u;
+  scrambled ^= scrambled * 0x53a22864u;
+  return scrambled;
+}
+
+fn smp_reversed_bit_owen_base4(value: u32, seed: u32) -> u32 {
+  var scrambled = value;
+  scrambled ^= scrambled * 0x3d20adeau;
+  scrambled ^= (scrambled >> 1u) & (scrambled << 1u) & 0x55555555u;
+  scrambled += seed;
+  scrambled *= (seed >> 16u) | 1u;
+  scrambled ^= (scrambled >> 1u) & (scrambled << 1u) & 0x55555555u;
+  scrambled ^= scrambled * 0x05526c56u;
+  scrambled ^= scrambled * 0x53a22864u;
+  return scrambled;
+}
+
+fn smp_nested_uniform_scramble_base4(value: u32, seed: u32) -> u32 {
+  return reverseBits(smp_reversed_bit_owen_base4(reverseBits(value), seed));
+}
+
+fn smp_expand_bits(value: u32) -> u32 {
+  var expanded = value & 0x0000ffffu;
+  expanded = (expanded ^ (expanded << 8u)) & 0x00ff00ffu;
+  expanded = (expanded ^ (expanded << 4u)) & 0x0f0f0f0fu;
+  expanded = (expanded ^ (expanded << 2u)) & 0x33333333u;
+  expanded = (expanded ^ (expanded << 1u)) & 0x55555555u;
+  return expanded;
+}
+
+fn smp_morton_2d(x: u32, y: u32) -> u32 {
+  return (smp_expand_bits(x) << 1u) | smp_expand_bits(y);
+}
+
+fn smp_uint_to_float_exclusive(value: u32) -> f32 {
+  return f32(value) * SMP_UINT_TO_UNIT_FLOAT_EXCLUSIVE;
+}
+
+// kernel/sample/sobol_burley.h sobol_burley: one Owen-scrambled Sobol dimension (0 to 3) for a bit-reversed index.
+fn smp_sobol_burley(reversed_index: u32, sobol_dimension: u32, scramble_seed: u32) -> f32 {
+  var result = 0u;
+  if (sobol_dimension == 0u) {
+    result = reverseBits(reversed_index);
+  } else {
+    var remaining = reversed_index;
+    var row_offset = (sobol_dimension - 1u) * 32u;
+    while (remaining != 0u) {
+      let leading_zeros = countLeadingZeros(remaining);
+      result ^= SMP_SOBOL_TABLE[row_offset + leading_zeros];
+      row_offset += leading_zeros + 1u;
+      // Two shifts: a single shift by 32 would wrap instead of clearing the value.
+      remaining <<= leading_zeros;
+      remaining <<= 1u;
     }
-    if ((remaining & 1u) != 0u) {
-      result = result ^ SMP_SOBOL_MATRIX[bit];
-    }
-    remaining = remaining >> 1u;
   }
-  return result;
+  result = reverseBits(smp_reversed_bit_owen(result, scramble_seed));
+  return smp_uint_to_float_exclusive(result);
 }
 
-fn smp_sobol_burley_words(state: ptr<function, SmpState>) -> vec4<u32> {
-  let group = (*state).dimension >> 2u;
-  (*state).dimension = (*state).dimension + 4u;
-  let group_seed = smp_hash_u32((*state).pixel_seed ^ (group * 0x9E3779B9u + 0x7F4A7C15u));
-  let shuffled_index = smp_nested_uniform_scramble((*state).sample_index, group_seed);
-  let sobol_words = smp_sobol_4d(shuffled_index);
-  return vec4<u32>(
-    smp_nested_uniform_scramble(sobol_words.x, smp_hash_u32(group_seed ^ 0x68E31DA4u)),
-    smp_nested_uniform_scramble(sobol_words.y, smp_hash_u32(group_seed ^ 0xB5297A4Du)),
-    smp_nested_uniform_scramble(sobol_words.z, smp_hash_u32(group_seed ^ 0x1B56C4E9u)),
-    smp_nested_uniform_scramble(sobol_words.w, smp_hash_u32(group_seed ^ 0x2545F491u)),
+fn smp_shuffled_index(index: u32, seed: u32, shuffle_constant: u32) -> u32 {
+  return smp_reversed_bit_owen(reverseBits(index), seed ^ shuffle_constant);
+}
+
+fn smp_sobol_burley_1d(index: u32, dimension: u32) -> f32 {
+  let seed = smp_hash_hp_uint(dimension);
+  let shuffled = smp_shuffled_index(index, seed, 0xbff95bfeu);
+  return smp_sobol_burley(shuffled, 0u, seed ^ 0x635c77bdu);
+}
+
+fn smp_sobol_burley_2d(index: u32, dimension_set: u32) -> vec2<f32> {
+  let seed = smp_hash_hp_uint(dimension_set);
+  let shuffled = smp_shuffled_index(index, seed, 0xf8ade99au);
+  return vec2<f32>(
+    smp_sobol_burley(shuffled, 0u, seed ^ 0xe0aaaf76u),
+    smp_sobol_burley(shuffled, 1u, seed ^ 0x94964d4eu),
+  );
+}
+
+fn smp_sobol_burley_3d(index: u32, dimension_set: u32) -> vec3<f32> {
+  let seed = smp_hash_hp_uint(dimension_set);
+  let shuffled = smp_shuffled_index(index, seed, 0xcaa726acu);
+  return vec3<f32>(
+    smp_sobol_burley(shuffled, 0u, seed ^ 0x9e78e391u),
+    smp_sobol_burley(shuffled, 1u, seed ^ 0x67c33241u),
+    smp_sobol_burley(shuffled, 2u, seed ^ 0x78c395c5u),
+  );
+}
+
+fn smp_sobol_burley_4d(index: u32, dimension_set: u32) -> vec4<f32> {
+  let seed = smp_hash_hp_uint(dimension_set);
+  let shuffled = smp_shuffled_index(index, seed, 0xc2c1a055u);
+  return vec4<f32>(
+    smp_sobol_burley(shuffled, 0u, seed ^ 0x39468210u),
+    smp_sobol_burley(shuffled, 1u, seed ^ 0xe9d8a845u),
+    smp_sobol_burley(shuffled, 2u, seed ^ 0x5f32b482u),
+    smp_sobol_burley(shuffled, 3u, seed ^ 0x1524cc56u),
   );
 }
 
@@ -125,9 +230,6 @@ fn smp_word_to_unit_float(word: u32) -> f32 {
 }
 
 fn smp_draw_words(state: ptr<function, SmpState>) -> vec4<u32> {
-  if ((*state).use_pcg == 0u) {
-    return smp_sobol_burley_words(state);
-  }
   let dim = (*state).dimension;
   (*state).dimension = dim + 1u;
   let seed = (*state).seed;
@@ -147,17 +249,45 @@ fn smp_init(pixel_x: u32, pixel_y: u32, sample_index: u32, seed: u32) -> SmpStat
   state.sample_index = sample_index;
   state.dimension = 0u;
   state.seed = seed;
-  state.use_pcg = select(0u, 1u, (kernel_params.kernel_flags & KERNEL_FLAG_PCG_SAMPLER) != 0u);
-  state.pixel_seed = smp_hash_u32(pixel_x ^ smp_hash_u32(pixel_y ^ smp_hash_u32(seed + 0x3C6EF372u)));
+  state.pixel_sequence_start = 0u;
+  state.use_sobol_burley = 0u;
+  if ((kernel_params.kernel_flags & KERNEL_FLAG_WHITE_NOISE_SAMPLER) == 0u) {
+    state.use_sobol_burley = 1u;
+    let pixel_rank = smp_nested_uniform_scramble_base4(smp_morton_2d(pixel_x, pixel_y), smp_hash_uint(seed));
+    state.pixel_sequence_start = pixel_rank * kernel_params.total_samples;
+  }
   return state;
 }
 
+// Jumps to the dimension sets reserved for `slot` in path step `step`. The white sampler keeps its running counter.
+fn smp_seek(state: ptr<function, SmpState>, step: u32, slot: u32) {
+  if ((*state).use_sobol_burley != 0u) {
+    (*state).dimension = (step + 1u) * SMP_SETS_PER_STEP + slot;
+  }
+}
+
+fn smp_take_sobol_dimension(state: ptr<function, SmpState>) -> u32 {
+  let dimension = (*state).dimension;
+  (*state).dimension = dimension + 1u;
+  return dimension;
+}
+
+fn smp_sequence_index(state: ptr<function, SmpState>) -> u32 {
+  return (*state).sample_index + (*state).pixel_sequence_start;
+}
+
 fn smp_next_1d(state: ptr<function, SmpState>) -> f32 {
+  if ((*state).use_sobol_burley != 0u) {
+    return smp_sobol_burley_1d(smp_sequence_index(state), smp_take_sobol_dimension(state));
+  }
   let words = smp_draw_words(state);
   return smp_word_to_unit_float(words.x);
 }
 
 fn smp_next_2d(state: ptr<function, SmpState>) -> vec2<f32> {
+  if ((*state).use_sobol_burley != 0u) {
+    return smp_sobol_burley_2d(smp_sequence_index(state), smp_take_sobol_dimension(state));
+  }
   let words = smp_draw_words(state);
   return vec2<f32>(
     smp_word_to_unit_float(words.x),
@@ -166,6 +296,9 @@ fn smp_next_2d(state: ptr<function, SmpState>) -> vec2<f32> {
 }
 
 fn smp_next_3d(state: ptr<function, SmpState>) -> vec3<f32> {
+  if ((*state).use_sobol_burley != 0u) {
+    return smp_sobol_burley_3d(smp_sequence_index(state), smp_take_sobol_dimension(state));
+  }
   let words = smp_draw_words(state);
   return vec3<f32>(
     smp_word_to_unit_float(words.x),
@@ -175,6 +308,9 @@ fn smp_next_3d(state: ptr<function, SmpState>) -> vec3<f32> {
 }
 
 fn smp_next_4d(state: ptr<function, SmpState>) -> vec4<f32> {
+  if ((*state).use_sobol_burley != 0u) {
+    return smp_sobol_burley_4d(smp_sequence_index(state), smp_take_sobol_dimension(state));
+  }
   let words = smp_draw_words(state);
   return vec4<f32>(
     smp_word_to_unit_float(words.x),
@@ -182,4 +318,28 @@ fn smp_next_4d(state: ptr<function, SmpState>) -> vec4<f32> {
     smp_word_to_unit_float(words.z),
     smp_word_to_unit_float(words.w),
   );
+}
+
+// `kernel_flags` value that makes `test_lobe_samples` write sampler values instead of lobe samples (tests only).
+const SMP_PROBE_MODE: u32 = 100u;
+
+// Probe: the pattern functions at sequence index `kernel_params.sample_offset + idx` and dimension set `kernel_params.seed`. Planes 0 and 1 hold the 4D
+// sample and the 1D, 2D and first 3D components; plane 2 holds integer hashes as raw bits; plane 3 the rest of the 3D sample.
+fn smp_write_probe(slot: u32, total: u32) {
+  let idx = kernel_params.sample_offset + slot;
+  let dimension_set = kernel_params.seed;
+  let one_dimensional = smp_sobol_burley_1d(idx, dimension_set);
+  let two_dimensional = smp_sobol_burley_2d(idx, dimension_set);
+  let three_dimensional = smp_sobol_burley_3d(idx, dimension_set);
+  let pixel_x = idx % 64u;
+  let pixel_y = idx / 64u;
+  film_accumulation[slot] = smp_sobol_burley_4d(idx, dimension_set);
+  film_accumulation[total + slot] = vec4<f32>(one_dimensional, two_dimensional.x, two_dimensional.y, three_dimensional.x);
+  film_accumulation[2u * total + slot] = bitcast<vec4<f32>>(vec4<u32>(
+    smp_hash_uint(idx),
+    smp_morton_2d(pixel_x, pixel_y),
+    smp_nested_uniform_scramble_base4(idx, dimension_set),
+    smp_hash_hp_uint(idx),
+  ));
+  film_accumulation[3u * total + slot] = vec4<f32>(three_dimensional.y, three_dimensional.z, 0.0, 0.0);
 }

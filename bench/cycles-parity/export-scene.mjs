@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
-import { buildTraceScene } from '../../src/path-tracer-scene.js';
+import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
 import { loadReferenceScene, reconstructTraceSceneSource, serializeSceneDescription } from './scene-bridge.mjs';
 
@@ -35,7 +35,7 @@ function buildPackedTables(traceSource) {
     fireflyClamp: 1e9,
     noiseThreshold: 0,
   };
-  const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
+  const traceScene = buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, options.width, options.height);
   return buildNativeInput(traceScene, camera, options, packModule);
 }
