@@ -24,6 +24,7 @@ import { parseArgs } from 'node:util';
 import { removeLocalPaths, totalsByModel, totalsOf } from './aggregate.mjs';
 import { gradeRecipe, recipeFeatures } from './check.mjs';
 import { scoreLookSafely } from './look.mjs';
+import { classifyZeroCalls } from './zero-calls.mjs';
 import { PROMPT_PREAMBLE, TASKS, taskById, taskPrompt } from './tasks.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
@@ -211,6 +212,17 @@ async function runTask(task, attempt, systemPromptAddition) {
   }
 }
 
+// An infra failure (claude -p or the MCP server never got going) says nothing about the schemas, so the run is tried
+// once more. The retry's record replaces the first; it keeps the first cause in retriedAfter. A second infra failure
+// stays marked infra and is left out of pass@1.
+async function runTaskWithInfraRetry(task, attempt, systemPromptAddition) {
+  const first = await runTask(task, attempt, systemPromptAddition);
+  if (!first.infra) return first;
+  console.log(`${task.id.padEnd(16)} #${attempt} infra ${first.zeroCalls.cause}: retrying once`);
+  const second = await runTask(task, attempt, systemPromptAddition, '-retry');
+  return { ...second, retriedAfter: first.zeroCalls.cause };
+}
+
 if (!['on', 'off'].includes(options.branches)) throw new RangeError('--branches must be on or off');
 if (!['on', 'off'].includes(options.relations)) throw new RangeError('--relations must be on or off');
 const tasks = options.tasks ? options.tasks.split(',').map(taskById) : TASKS;
@@ -250,9 +262,10 @@ for (let attempt = 1; attempt <= attempts; attempt++) {
 }
 
 for (const { task, attempt } of pending) {
-  const record = await runTask(task, attempt, systemPromptAddition);
+  const record = await runTaskWithInfraRetry(task, attempt, systemPromptAddition);
   records.push(record);
-  console.log(`${record.task.padEnd(16)} #${attempt} ${record.pass ? 'PASS' : 'FAIL'} ${record.passed}/${record.total}  calls ${record.toolCalls} (errors ${record.toolErrors})  $${record.costUsd ?? '?'}  ${record.wallSeconds}s${record.failed.length ? `  ${record.failed.join(' | ')}` : ''}`);
+  const label = record.infra ? `INFRA ${record.zeroCalls.cause}` : record.pass ? 'PASS' : `FAIL${record.zeroCalls ? ` ${record.zeroCalls.cause}` : ''}`;
+  console.log(`${record.task.padEnd(16)} #${attempt} ${label} ${record.passed}/${record.total}  calls ${record.toolCalls} (errors ${record.toolErrors})  $${record.costUsd ?? '?'}  ${record.wallSeconds}s${record.failed.length ? `  ${record.failed.join(' | ')}` : ''}`);
   // Saved after every task, so a run that gets killed keeps what it already paid for.
   await writeFile(summaryPath, `${JSON.stringify(summarize(), null, 2)}\n`);
 }

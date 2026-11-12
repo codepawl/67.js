@@ -93,7 +93,7 @@ async function waitForJob(jobId) {
 
 try {
   await client.connect(transport);
-  assert.equal((await client.listTools()).tools.length, 24);
+  assert.equal((await client.listTools()).tools.length, 25);
   const capabilities = (await call('scene_capabilities', { topic: 'postPasses' })).structuredContent;
   assert.equal(capabilities.value.limits.maxPasses, 4);
   assert.ok((await call('scene_capabilities', { topic: 'operations' })).structuredContent.value.includes('set-post-passes'));

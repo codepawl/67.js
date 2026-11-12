@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { benchSummary, benchTotals } from '../bench/agent-modeling/bench-summary.mjs';
+import { classifyZeroCalls } from '../bench/agent-modeling/zero-calls.mjs';
 import { compareBench } from '../bench/agent-modeling/compare-bench.mjs';
 import { gradeRecipe } from '../bench/agent-modeling/check.mjs';
 import { REFERENCES } from '../bench/agent-modeling/references.mjs';
@@ -69,4 +71,51 @@ test('the summary groups by model and kind, and the comparison flags a pass@1 dr
   assert.match(result.text, /REGRESSION/);
   assert.match(result.text, /crate: 2\/2 -> 1\/2 \(-1\)/);
   assert.equal(compareBench(baseline, baseline).regressed, false);
+});
+
+const readFixture = name => readFileSync(new URL(`./fixtures/agent-bench/${name}.jsonl`, import.meta.url), 'utf8');
+
+test('a run with 0 scene calls is classified by cause: infra for start-up, server and empty ToolSearch, model for the rest', () => {
+  const classify = (name, options = {}) => classifyZeroCalls(readFixture(name), { exitCode: 0, toolCalls: 0, ...options });
+  assert.equal(classify('with-scene-calls', { toolCalls: 1 }), null);
+  assert.deepEqual(classify('no-init', { exitCode: 1, errors: 'spawn failed\nmore' }), { kind: 'infra', cause: 'start-up-failure', detail: 'spawn failed' });
+  assert.equal(classify('mcp-server-failed').cause, 'mcp-server-failed');
+  assert.equal(classify('mcp-server-failed').kind, 'infra');
+  assert.equal(classify('no-result', { exitCode: 1 }).cause, 'start-up-failure');
+  assert.equal(classify('no-result', { exitCode: null }).cause, 'timeout');
+  assert.equal(classify('toolsearch-empty').cause, 'toolsearch-empty');
+  assert.equal(classify('toolsearch-empty').kind, 'infra');
+});
+
+test('a ToolSearch that showed the 67js tools and then quit, a refusal and a no-tool answer are model failures', () => {
+  const classify = name => classifyZeroCalls(readFixture(name), { exitCode: 0, toolCalls: 0 });
+  assert.deepEqual([classify('toolsearch-then-quit').kind, classify('toolsearch-then-quit').cause], ['model', 'toolsearch-then-quit']);
+  assert.deepEqual([classify('refusal').kind, classify('refusal').cause], ['model', 'refusal']);
+  assert.deepEqual([classify('no-tool-use').kind, classify('no-tool-use').cause], ['model', 'no-tool-use']);
+});
+
+test('infra runs stay out of pass@1 and are reported by cause; model zero-call runs stay counted and are labelled', () => {
+  const infraRecord = cause => record('crate', false, { toolCalls: 0, infra: true, zeroCalls: { kind: 'infra', cause } });
+  const quitRecord = record('bolt', false, { toolCalls: 0, infra: false, zeroCalls: { kind: 'model', cause: 'toolsearch-then-quit' } });
+  const totals = benchTotals([record('crate', true), infraRecord('mcp-server-failed'), infraRecord('timeout'), record('bolt', true), quitRecord], 2);
+  assert.equal(totals.runs, 3);
+  assert.equal(totals.passAt1, 0.667);
+  assert.equal(totals.infraRuns, 2);
+  assert.deepEqual(totals.infraByCause, { 'mcp-server-failed': 1, timeout: 1 });
+  assert.deepEqual(totals.modelZeroCalls, { 'toolsearch-then-quit': 1 });
+  assert.equal(totals.infraShare, 0.4);
+  assert.equal(totals.passPowK, 0.5);
+  assert.equal(benchSummary({ haiku: [record('crate', true), infraRecord('timeout')] }, 2).haiku.taskResults.crate.infra, 1);
+});
+
+test('the comparison prints infra counts next to pass@1 and flags infra above the bound', () => {
+  const infraRecord = record('crate', false, { toolCalls: 0, infra: true, zeroCalls: { kind: 'infra', cause: 'timeout' } });
+  const clean = { summary: benchSummary({ haiku: [record('crate', true), record('crate', true), record('bolt', true), record('bolt', true)] }, 2) };
+  const noisy = { summary: benchSummary({ haiku: [record('crate', true), infraRecord, record('bolt', true), record('bolt', true)] }, 2) };
+  const result = compareBench(clean, noisy);
+  assert.equal(result.regressed, false);
+  assert.equal(result.tooMuchInfra, true);
+  assert.match(result.text, /haiku: infra 0 -> 1 runs {2}INFRA over 10% of runs; pass@1 100% -> 100%/);
+  assert.match(result.text, /candidate infra runs \(not in pass@1\): 1 \(timeout 1\)/);
+  assert.equal(compareBench(clean, noisy, 0.05, 0.5).tooMuchInfra, false);
 });
