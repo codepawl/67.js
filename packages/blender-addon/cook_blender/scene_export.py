@@ -4,6 +4,7 @@ The functions up to `encode_array` are shared with bench/cycles-parity/classroom
 render add-on read a Blender scene the same way. `export_scene` is the add-on entry: it reads an evaluated depsgraph.
 """
 import base64
+import hashlib
 import math
 import os
 
@@ -262,6 +263,13 @@ def modifier_signature(original_object, use_render_flags=False):
     return repr(entries)
 
 
+def evaluated_mesh_digest(mesh):
+    """A short fingerprint of an evaluated mesh's vertices and face count, so equal instanced meshes are shared and different ones are not."""
+    coordinates = numpy.empty(len(mesh.vertices) * 3, dtype=numpy.float32)
+    mesh.vertices.foreach_get("co", coordinates)
+    return (len(mesh.polygons), hashlib.blake2b(coordinates.tobytes(), digest_size=8).hexdigest())
+
+
 def geometry_key(original_object, use_render_flags=False):
     if original_object.type == "MESH":
         signature = modifier_signature(original_object, use_render_flags)
@@ -388,8 +396,7 @@ def collect_parts(depsgraph, materials, report):
         key = geometry_key(original_object, use_render_flags=True)
         if instance.is_instance and evaluated_object.type == "MESH":
             # Geometry Nodes instances share one original (their host); the instanced mesh itself tells them apart.
-            evaluated_data = evaluated_object.data
-            key = key + ("instance", evaluated_data.name, len(evaluated_data.vertices), len(evaluated_data.polygons))
+            key = key + ("instance", evaluated_mesh_digest(evaluated_object.data))
         if key not in geometry_indices:
             groups = mesh_to_triangle_groups(evaluated_object, include_uvs=True, split_by_material=True)
             geometry_indices[key] = {}
