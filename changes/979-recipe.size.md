@@ -4,3 +4,4 @@
 - tool:scene_capabilities: the physics topic text for fracture-node and the fragment geometry type
 - tool:scene_apply: the fracture-node operation and the fragment geometry type, 782 bytes, so an agent breaks a part without writing code
 - tool-total: the same two schema entries; the field detail stays in scene_capabilities physics
+- scene:agent-scene: the fragment geometry case and the fracture-node dispatch in the scene entry, about 720 bytes gzip; the fracture code itself loads on demand
