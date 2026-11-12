@@ -19,6 +19,7 @@ import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
 import { createNativeSequence } from './agent-native-sequence.mjs';
 import { chooseNativeInstancing, chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
+import { addonCapabilities, addonFileFor, addonImportMap } from './mcp-addons.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
 import { createPackRegistry } from './agent-packs.mjs';
 import { MAXIMUM_INSTALLED_PACKS, MAXIMUM_PACK_BYTES, MAXIMUM_PACK_FILES, MAXIMUM_PACK_FILE_BYTES, MAXIMUM_PACK_JSON_BYTES, MAXIMUM_PACK_ITEMS_PER_KIND, PACK_CONTENT_KINDS } from '../src/pack-manifest.js';
@@ -77,7 +78,7 @@ function bakeAfterOperations(operations) {
 const SYNC_TOLERANCE_SECONDS = 0.05;
 // The preview page imports engine chunks that sit beside the package entries, one folder above preview.js.
 const ENGINE_CHUNK_URL = /^\/[\w.-]+\.js$/;
-const html = '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#182126}canvas{display:block;width:100vw;height:100vh}</style></head><body><canvas></canvas><script type="module" src="/preview.js"></script></body></html>';
+const pageHtml = importMapScript => '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#182126}canvas{display:block;width:100vw;height:100vh}</style></head><body><canvas></canvas>' + importMapScript + '<script type="module" src="/preview.js"></script></body></html>';
 
 /** Local, serialized browser preview. No browser is launched until scene creation. */
 // Optional peer dependencies the page loads from the host's node_modules. Rapier ships its WASM inside rapier.mjs.
@@ -88,7 +89,7 @@ const VENDOR_FILES = Object.freeze({
 });
 
 export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', browser: browserPath, memory = 192, assets: assetRoot, packs: packsRoot,
-  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot, openPage = openInDefaultBrowser,
+  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot, openPage = openInDefaultBrowser, addons: addonSet = { addons: [], skipped: [] },
   previewUrl = new URL(/* @vite-ignore */ '../build/mcp/preview.js', import.meta.url) } = {}) {
   if (!['gpu', 'cpu'].includes(backend)) {
     throw new RangeError('backend must be gpu or cpu.');
@@ -109,6 +110,11 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   if (jobRoot !== undefined && (typeof jobRoot !== 'string' || !isAbsolute(jobRoot))) {
     throw new TypeError('Job root must be an explicit absolute directory path.');
   }
+  const importMapScript = addonSet.addons.length === 0 ? '' : `<script type="importmap">${JSON.stringify(addonImportMap(packageMetadata.exports))}</script>`;
+  // The one inline script is the import map; its hash is allowed so script-src stays 'self'. No addons, no hash.
+  const importMapHash = addonSet.addons.length === 0 ? '' : ` 'sha256-${createHash('sha256').update(importMapScript.slice(importMapScript.indexOf('>') + 1, -'</script>'.length)).digest('base64')}'`;
+  const registeredByAddon = {};
+  const refusedAddons = [];
   const audioLibrary = audioRoot === undefined ? undefined : createAudioLibrary(audioRoot);
   if (typeof ffmpeg !== 'string' || !ffmpeg || (ffmpeg !== 'ffmpeg' && (!isAbsolute(ffmpeg) || !existsSync(ffmpeg)))) {
     throw new TypeError('FFmpeg must be on PATH or configured with an existing absolute executable path.');
@@ -285,6 +291,37 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     });
   }
 
+  // Only files inside an allowlisted addon's own package folder, found by the index it was given at startup.
+  function serveAddonFile(url, response) {
+    const path = addonFileFor(addonSet.addons, url.split('?')[0]);
+    if (path === null) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    readFile(path).then(bytes => {
+      response.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      response.end(bytes);
+    }, () => {
+      response.writeHead(404);
+      response.end();
+    });
+  }
+
+  // Loads each allowlisted addon in the page. One that fails is skipped with its reason; the others stay.
+  async function loadAddons() {
+    for (const [index, addon] of addonSet.addons.entries()) {
+      try {
+        const added = await page.evaluate(input => window.__agentPreview.loadAddon(input), { url: `/addons/${index}/${addon.entry}`, name: addon.name, extensionPoints: addon.extensionPoints });
+        registeredByAddon[addon.name] = added;
+      } catch (error) {
+        const reason = String(error.message).replace(/^page\.evaluate: /, '').split('\n')[0];
+        refusedAddons.push({ name: addon.name, reason });
+        console.error(`67js addon ${addon.name} skipped: ${reason}`);
+      }
+    }
+  }
+
   // Mesh booleans load Manifold and recipe physics loads Rapier, both optional peer dependencies, from the host's
   // node_modules. Without one the page gets a 404 and the edit reports the install command.
   function serveVendorFile({ resolve, type }, response) {
@@ -322,7 +359,11 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return;
         }
         response.setHeader('Cache-Control', 'no-store');
-        response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' blob:");
+        response.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'${importMapHash}; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' blob:`);
+        if (request.method === 'GET' && request.url.startsWith('/addons/')) {
+          serveAddonFile(request.url, response);
+          return;
+        }
         const vendor = request.method === 'GET' ? VENDOR_FILES[request.url] : undefined;
         if (vendor) {
           serveVendorFile(vendor, response);
@@ -338,7 +379,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return;
         }
         response.setHeader('Content-Type', request.url === '/' ? 'text/html; charset=utf-8' : 'application/javascript; charset=utf-8');
-        response.end(request.url === '/' ? html : code);
+        response.end(request.url === '/' ? pageHtml(importMapScript) : code);
       });
       httpServer.on('upgrade', (request, socket, head) => {
         const accepted = isPreviewHost(request.headers.host, httpServer.address().port)
@@ -373,6 +414,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       });
       await page.goto(origin);
       await page.waitForFunction(() => Boolean(window.__agentPreview));
+      await loadAddons();
       phase = 'ready';
     } catch (error) {
       phase = 'failed';
@@ -831,6 +873,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           glbExport: { maximumBytes: MAXIMUM_GLB_BYTES, maximumKept: MAXIMUM_KEPT_GLBS, maximumTextureSize: 4096 },
           records: jobRoot ? (await jobs()).list().map(record => ({ jobId: record.jobId, state: record.state,
             sourceRevision: record.sourceRevision, progress: record.progress })) : [] },
+        addons: addonCapabilities({ addons: addonSet.addons.filter(addon => !refusedAddons.some(refused => refused.name === addon.name)), skipped: addonSet.skipped, registered: registeredByAddon, refused: refusedAddons }),
         unsupported: ['remote asset providers', 'arbitrary code execution', 'imported morph track authoring'],
       };
     },

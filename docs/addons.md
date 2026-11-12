@@ -4,7 +4,7 @@ A code addon is an npm package that extends 67js through the extension points it
 
 ## Security
 
-A code addon runs with the full rights of your page or Node process: it can read files, use the network and change anything in the scene. The MCP server never loads one from a tool call. Install only addons you trust, and read what an addon does before you add it.
+A code addon runs with the full rights of your page or Node process: it can read files, use the network and change anything in the scene. The MCP server loads one only when its owner allowlists it at startup ([below](#the-mcp-server-and-addons)), never from a tool call. Install only addons you trust, and read what an addon does before you add it.
 
 ## The contract
 
@@ -44,6 +44,20 @@ Kinds and formats cannot be replaced once registered, so pick a name that is unl
 ## Write one
 
 Copy [templates/addon-starter](https://github.com/codepawl/67.js/tree/main/templates/addon-starter). It registers a `hover` controller kind, has a test written with `node:test`, and passes the check below. Export a function that registers, rather than registering on import, so the host decides when.
+
+The entry module also exports `registerAddon()`, which a host calls once to register the addon's kinds (the starter shows it).
+
+## The MCP server and addons
+
+The person who starts the MCP server may allow addons:
+
+```sh
+67js-mcp --addons /abs/path/to/folder --allow-addon 67js-addon-starter --allow-addon @scope/other
+```
+
+The folder holds `node_modules` with the packages installed (`npm install` there). The server looks for each name only in `<folder>/node_modules/<name>` and refuses a real path (links included) outside the folder. Each addon must pass `67js-addon-check` against the running 67js version, declare a `bundleBytes` of at most 2 MiB, and be one self-contained ES module (the page serves only that package's own `.js` and `.mjs` files, and maps `@codepawlhq/67js` and `@codepawlhq/67js/addons/*` to the page's own engine modules). The server calls its `registerAddon()` in the preview page. Only the `registerController` and `registerCameraRig` points are checked there: a kind registered under a point the addon did not declare is taken back and the addon is skipped.
+
+An addon that fails is skipped with the reason on stderr and in `scene_capabilities` topic `addons`; the server keeps running. Tools only use the kinds a loaded addon registered: set `game.player.controller` or `game.camera` to the kind name. The page still runs under `script-src 'self'` plus the hash of one import map, and no tool can add, name or change an addon.
 
 ## Test one
 
