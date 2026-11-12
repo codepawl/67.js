@@ -197,6 +197,7 @@ async function runCli() {
     samples: options.samples,
     averageSamples: traced.averageSamples,
     samplesPerDispatch: traced.samplesPerDispatch ?? null,
+    longestDispatchSeconds: traced.longestDispatchSeconds ?? null,
     bounces: options.bounces,
     seed: options.seed,
     filterType: options.filterType,
