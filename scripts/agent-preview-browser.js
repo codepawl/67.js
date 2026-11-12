@@ -191,7 +191,7 @@ function viewProblems(record, camera, exposure, { placement = false } = {}) {
   const problems = [];
   const boxes = record.scene.worldBounds?.();
   if (boxes) {
-    problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes }));
+    problems.push(...framingProblems({ camera, aspect: canvas.width / canvas.height, boxes, reportPartsOutside: placement }));
     if (placement) problems.push(...placementProblems({ boxes }));
   }
   if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());

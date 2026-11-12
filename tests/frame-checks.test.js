@@ -176,6 +176,43 @@ test('placement findings are capped and say how many were left out', () => {
   assert.equal(problems[0].droppedCount, 4);
 });
 
+test('parts resting inside a large terrain box do not intersect it, but a real clash beside them does', () => {
+  const trees = Array.from({ length: 10 }, (_, index) => ({ id: `tree-${index}`, scale: [0.5, 2, 0.5], translation: [index * 4 - 18, 3.9, 0] }));
+  const terrain = { id: 'terrain', scale: [100, 4, 100], translation: [0, 2, 0] };
+  assert.deepEqual(placementOf([terrain, ...trees]), []);
+  const clash = placementOf([
+    terrain, ...trees,
+    { id: 'crate-a', translation: [30, 4.5, 0] },
+    { id: 'crate-b', translation: [30.4, 4.5, 0] },
+  ]);
+  assert.deepEqual(kinds(clash), ['intersecting-nodes']);
+  assert.deepEqual(clash[0].nodes, ['crate-a', 'crate-b']);
+});
+
+test('a cup half inside a table still intersects it', () => {
+  const problems = placementOf([
+    { id: 'table', scale: [2, 0.1, 2], translation: [0, 1, 0] },
+    { id: 'cup', scale: [0.2, 0.3, 0.2], translation: [0, 1.1, 0] },
+  ]);
+  assert.deepEqual(kinds(problems), ['intersecting-nodes']);
+});
+
+test('parts outside the frame are left out of per-frame job checks and repeats collapse in job metrics', () => {
+  const scene = createAgentScene(boxScene([{ id: 'a', translation: [0, 0, 0] }, { id: 'b', translation: [1, 0, 0] }, { id: 'c', translation: [-1, 0, 0] }, { id: 'd', translation: [0, 0, 0.5] }]));
+  const boxes = scene.worldBounds();
+  const metrics = {};
+  for (let frame = 0; frame < 6; frame++) {
+    const camera = { ...scene.camera, eye: [frame * 0.8, 3, 8], target: [frame * 0.8, 0.5, 0] };
+    const jobFrame = framingProblems({ camera, aspect: 1.5, boxes, reportPartsOutside: false });
+    assert.equal(jobFrame.filter(problem => problem.kind === 'part-outside-frame').length, 0);
+    mergeFrameDiagnostics(metrics, framingProblems({ camera, aspect: 1.5, boxes }));
+  }
+  assert.ok((metrics.diagnostics ?? []).filter(problem => problem.kind === 'part-outside-frame').length <= 1);
+  mergeFrameDiagnostics(metrics, [{ kind: 'subject-out-of-frame', target: 'camera', message: 'x', outsideCount: 3 }]);
+  mergeFrameDiagnostics(metrics, [{ kind: 'subject-out-of-frame', target: 'camera', message: 'y', outsideCount: 4 }]);
+  assert.equal(metrics.diagnostics.filter(problem => problem.kind === 'subject-out-of-frame').length, 1);
+});
+
 test('a blown-out frame reports how much is clipped', () => {
   const [finding] = exposureProblems({ shares: lumaShares(frameOf(255)), exposure: 1 });
   assert.equal(finding.kind, 'exposure-clipped');

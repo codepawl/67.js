@@ -80,10 +80,10 @@ function framingSuggestion(camera, boxes, tangent) {
 }
 
 /**
- * Warnings for where the camera points. `boxes` are world bounds ({ min, max }) of the visible parts; a camera that is
+ * Warnings for where the camera points. `reportPartsOutside` adds `part-outside-frame`, which only scene_look reports. `boxes` are world bounds ({ min, max }) of the visible parts; a camera that is
  * orthographic or shifted gets none, because the frustum test below assumes a centered perspective view.
  */
-export function framingProblems({ camera, aspect, boxes }) {
+export function framingProblems({ camera, aspect, boxes, reportPartsOutside = true }) {
   const tangent = halfHeightTangent(camera, aspect);
   if (!tangent) return [];
   if (boxes.length === 0) {
@@ -125,7 +125,7 @@ export function framingProblems({ camera, aspect, boxes }) {
       `${framingSuggestion(camera, visibleBoxes, tangent)} to fill the frame, or lower camera.fov.`,
       { heightPercent: Math.round(radius / (depth * tangent) * 100) })];
   }
-  if (outside.length > 0) {
+  if (reportPartsOutside && outside.length > 0) {
     return [warning('part-outside-frame', 'camera',
       `${outside.length} of ${boxes.length} parts are outside the camera frustum, so the picture does not show them.`,
       `Move them into view with scene_apply set-node, or ${framingSuggestion(camera, boxes, tangent)} to put every part in view.`,
@@ -169,6 +169,8 @@ export function exposureProblems({ shares, exposure }) {
 const FLOATING_GAP = 0.02;
 const MINIMUM_PENETRATION = 0.02;
 const MAXIMUM_PAIR_PARTS = 256;
+const ENCLOSURE_VOLUME_RATIO = 20;
+const ENCLOSURE_SIDE_RATIO = 10;
 const MAXIMUM_PLACEMENT_FINDINGS = 8;
 
 /** Distance between two boxes along each axis; 0 where they touch or overlap on that axis. */
@@ -180,6 +182,29 @@ function axisGaps(first, second) {
 function axisPenetrations(first, second) {
   const depths = [0, 1, 2].map(axis => Math.min(first.max[axis], second.max[axis]) - Math.max(first.min[axis], second.min[axis]));
   return depths.every(depth => depth > 0) ? depths : null;
+}
+
+function volumeOf(box) {
+  return [0, 1, 2].reduce((volume, axis) => volume * (box.max[axis] - box.min[axis]), 1);
+}
+
+function coversFootprint(outer, inner) {
+  return [0, 2].every(axis => outer.min[axis] <= inner.min[axis] && outer.max[axis] >= inner.max[axis]);
+}
+
+function longestSide(box) {
+  return Math.max(...[0, 1, 2].map(axis => box.max[axis] - box.min[axis]));
+}
+
+/**
+ * One box covers the other's footprint and is 20 times its volume and 10 times its longest side or more: a terrain, a
+ * hollow room or a bowl whose bounds enclose what rests in it, even where a tree pokes through the top. Two crates sunk into each other, or a cup half inside a table, are not enclosures.
+ */
+function isEnclosure(first, second) {
+  const [larger, smaller] = volumeOf(first) >= volumeOf(second) ? [first, second] : [second, first];
+  return coversFootprint(larger, smaller)
+    && volumeOf(larger) >= ENCLOSURE_VOLUME_RATIO * volumeOf(smaller)
+    && longestSide(larger) >= ENCLOSURE_SIDE_RATIO * longestSide(smaller);
 }
 
 function droppedCount(total) {
@@ -206,7 +231,7 @@ export function placementProblems({ boxes }) {
       const gap = Math.hypot(...axisGaps(box, other));
       if (gap < nearest.gap) nearest = { gap, name: other.name };
       const penetrations = otherIndex > index ? axisPenetrations(box, other) : null;
-      if (penetrations && Math.min(...penetrations) >= MINIMUM_PENETRATION) {
+      if (penetrations && Math.min(...penetrations) >= MINIMUM_PENETRATION && !isEnclosure(box, other)) {
         intersecting.push({ nodes: [box.name, other.name], penetrationMeters: round(Math.min(...penetrations)) });
       }
     }
@@ -235,7 +260,7 @@ export function mergeFrameDiagnostics(metrics, frameDiagnostics) {
   if (!frameDiagnostics?.length) return;
   metrics.diagnostics ??= [];
   for (const problem of frameDiagnostics) {
-    const known = metrics.diagnostics.some(entry => entry.kind === problem.kind && entry.target === problem.target && entry.message === problem.message);
+    const known = metrics.diagnostics.some(entry => entry.kind === problem.kind && entry.target === problem.target && (problem.outsideCount !== undefined || entry.message === problem.message));
     if (!known && metrics.diagnostics.length < MAXIMUM_JOB_DIAGNOSTICS) metrics.diagnostics.push(problem);
   }
 }

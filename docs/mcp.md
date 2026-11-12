@@ -171,8 +171,8 @@ Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs`
 | kind | fields | meaning |
 | --- | --- | --- |
 | `floating-node` | `nodes`, `gapMeters`, `nearest` | The part is more than 2 cm from every other part and from the floor level (the lowest point of the scene). `nearest` is the closest part or `floor`. |
-| `intersecting-nodes` | `nodes`, `penetrationMeters` | The bounds of two parts overlap by 2 cm or more on every axis. Bounds are axis aligned, so a rotated part can report an overlap its surface does not have; a part sunk into the ground is reported too. |
-| `part-outside-frame` | `nodes`, `outsideCount`, `partCount` | Parts whose bounding sphere is outside the camera frustum or behind the camera. When more than half are outside, `subject-out-of-frame` is returned with the same fields instead. |
+| `intersecting-nodes` | `nodes`, `penetrationMeters` | The bounds of two parts overlap by 2 cm or more on every axis. Bounds are axis aligned, so a rotated part can report an overlap its surface does not have; a part sunk into a small ground is reported too. A pair is skipped when one box covers the other's footprint and is 20 times its volume and 10 times its longest side (a terrain, room or bowl whose bounds enclose what rests in it). |
+| `part-outside-frame` | `nodes`, `outsideCount`, `partCount` | Parts whose bounding sphere is outside the camera frustum or behind the camera. When more than half are outside, `subject-out-of-frame` is returned with the same fields instead. Only `scene_look` reports `part-outside-frame` and the two placement kinds; render jobs keep one `subject-out-of-frame` entry however the count changes. |
 | `exposure-clipped`, `exposure-black` | `whitePercent`, `blackPercent` | Share of a 64 by 64 copy of the frame that is clipped to white (35 percent or more) or black (98 percent or more) after tone mapping. |
 
 The checks run on part bounds and on that small copy of the frame, so they cost almost nothing. Scenes of over 256 parts get no floating or intersection findings. `src/frame-checks.js` holds them.
