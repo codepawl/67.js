@@ -1,5 +1,5 @@
 // A wake on the ocean: a bounded trail of points behind a moving hull. Each point is [x, z, strength, width] in the sea's
-// horizontal plane. Where a point reaches a vertex it raises the `foam` group to full white water and adds a small, choppy
+// horizontal plane. Where a point reaches a vertex it raises the `foam` group to lace and adds a small, choppy
 // displacement, so the churned water behind the boat is rough and white and never an ironed-flat patch. The trail is a pure
 // function of the points, so the same hull path gives the same vertices on every run.
 
@@ -12,8 +12,11 @@ const REFERENCE_SPEED = 3;
 // The trail starts this fraction of `width` wide at the stern and spreads by this multiple of `width` over its life: a V that opens.
 const STERN_WIDTH_FRACTION = 0.5;
 const SPREAD_PER_LIFETIME = 1.5;
-// Foam is full white where the strength times this gain reaches 1, with a flat top and a short edge, so the wake has a clear body.
-const FOAM_GAIN = 1.4;
+// The water shader draws foam where the group is above 0.5, as lace whose holes close as the group rises, so a wake writes
+// 0.5 + 0.5 * mask. The mask is capped at 0.6 (a group value of 0.8): lace with the sea showing through, never opaque white.
+// The mask follows strength, so the trail breaks up and thins out along its length.
+const FOAM_MASK_CAP = 0.6;
+const FOAM_GAIN = 1.1;
 const MINIMUM_STRENGTH = 0.01;
 
 function describe(value) {
@@ -63,10 +66,10 @@ export function wakeAt(wake, positionX, positionZ) {
     const distance = Math.hypot(positionX - pointX, positionZ - pointZ) / width;
     if (distance > WAKE_FOAM_REACH) continue;
     const reach = strength * Math.exp(-(distance ** 4));
-    foam = Math.max(foam, Math.min(1, FOAM_GAIN * reach));
+    foam = Math.max(foam, FOAM_MASK_CAP * Math.min(1, FOAM_GAIN * reach));
     weight = Math.max(weight, reach);
   }
-  return { foam, offset: weight > 0 ? wake.height * weight * churn(positionX, positionZ) : 0 };
+  return { foam: foam > 0.001 ? 0.5 + 0.5 * foam : 0, offset: weight > 0 ? wake.height * weight * churn(positionX, positionZ) : 0 };
 }
 
 /**
@@ -81,7 +84,7 @@ export function wakeTrail({ sample, time, lifetime, width, strength, count = MAX
   for (let index = 0; index < total; index++) {
     const age = lifetime * index / total;
     const stern = sample(time - age);
-    const fade = 1 - age / lifetime;
+    const fade = (1 - age / lifetime) ** 2;
     const pointStrength = strength * Math.min(1, stern.speed / REFERENCE_SPEED) * fade;
     if (pointStrength < MINIMUM_STRENGTH) continue;
     points.push([stern.x, stern.z, pointStrength, width * (STERN_WIDTH_FRACTION + SPREAD_PER_LIFETIME * age / lifetime)]);

@@ -48,11 +48,13 @@ test('a hull at rest leaves no wake and the trail starts no earlier than time 0'
   assert.ok(underway.length > 20, `${underway.length} points at time 0 for a hull already moving`);
 });
 
-test('a wake is white water with a flat top and an edge, adds no trough, and nothing far away', () => {
+test('a wake is capped lace with a flat top and an edge, adds no trough, and nothing far away', () => {
   const wake = normalizeWake({ points: [[0, 0, 1, 1]], height: 0.2 });
-  assert.equal(wakeAt(wake, 0, 0).foam, 1);
-  assert.equal(wakeAt(wake, 0.5, 0).foam, 1, 'full foam across the body of the wake');
-  assert.ok(wakeAt(wake, 1.4, 0).foam < 0.5, 'a short edge');
+  assert.ok(Math.abs(wakeAt(wake, 0, 0).foam - 0.8) < 1e-9, 'capped at 0.8, below full white');
+  assert.ok(wakeAt(wake, 0.5, 0).foam > 0.75, 'dense across the body of the wake');
+  assert.ok(wakeAt(wake, 1.4, 0).foam < 0.55, 'a short edge');
+  const faint = normalizeWake({ points: [[0, 0, 0.3, 1]] });
+  assert.ok(wakeAt(faint, 0, 0).foam < 0.7 && wakeAt(faint, 0, 0).foam > 0.5, 'a weak point is a thin lace');
   assert.deepEqual(wakeAt(wake, 20, 0), { foam: 0, offset: 0 });
 });
 

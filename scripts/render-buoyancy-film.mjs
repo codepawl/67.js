@@ -1,5 +1,5 @@
 // Film of crates and a boat bobbing on ocean waves through the MCP render job, for the buoyancy docs and the pull request.
-// Usage: node scripts/render-buoyancy-film.mjs [--scene buoyancy|boat] [--backend gpu|cpu] [--width 640] [--height 360] [--duration 4] [--still-time 3] [--still-only] [--out artifacts/982]
+// Usage: node scripts/render-buoyancy-film.mjs [--scene buoyancy|boat] [--backend gpu|cpu] [--width 640] [--height 360] [--duration 4] [--still-time 3] [--still-only] [--wind 4.5] [--out artifacts/982]
 // The boat is the CC0 Kenney Watercraft Kit (kenney.nl/assets/watercraft-kit). Put `boat-fishing-small.glb` and
 // `Textures/colormap.png` from its GLB folder in <out>/assets before the first run.
 // CHROME_PATH names another Chrome or Chromium executable. --vulkan wraps the Chrome it finds with the flags a Linux GPU box needs.
@@ -72,7 +72,7 @@ function buildRecipe(boatAssetId) {
     geometries: [
       { id: 'crate', type: 'box' },
       { id: 'hull', type: 'box' },
-      { id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: seaEdits, stack: [{ op: 'ocean', windSpeed: 4.5, choppiness: 0.4, size: 30, seed: 5, resolution: 5 }] },
+      { id: 'sea', type: 'mesh', base: { type: 'box', bevel: 0 }, edits: seaEdits, stack: [{ op: 'ocean', windSpeed: Number(option('wind', 4.5)), choppiness: 0.4, size: 30, seed: 5, resolution: 5 }] },
     ],
     materials: [
       { id: 'wood', color: [0.55, 0.34, 0.16], roughness: 0.8 },
