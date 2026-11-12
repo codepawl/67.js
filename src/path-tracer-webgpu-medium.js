@@ -105,7 +105,7 @@ fn randomWalk(point: vec3<f32>, normal: vec3<f32>, meanFreePath: vec3<f32>, colo
   let height = sqrt(max(0.0, 1.0 - radius * radius));
   walkDirection = frame[0] * (radius * cos(angle)) + frame[1] * (radius * sin(angle)) - normal * height;
   for (var scatters = 0; scatters <= WALK_STEPS; scatters++) {
-    let found = intersectScene(position, walkDirection);
+    let found = intersectScene(position, walkDirection, false);
     if (!found || hitMaterialIndex != material) { return select(WALK_LOST, WALK_THIN, scatters == 0); }
     // One channel draws the distance; weighting by the mean density over the three channels keeps every channel unbiased.
     let hero = min(2, i32(floor(nextRandom() * 3.0)));

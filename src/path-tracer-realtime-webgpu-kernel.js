@@ -142,7 +142,7 @@ fn traceRealtime(@builtin(global_invocation_id) id: vec3<u32>) {
   let screenX = ((f32(id.x) + jitterX) / f32(width) * 2.0 - 1.0) * params.cameraAndClamp.x;
   let screenY = (1.0 - (f32(id.y) + jitterY) / f32(height) * 2.0) * params.cameraAndClamp.y;
   let rayDirection = normalize(params.forward.xyz + params.right.xyz * screenX + params.above.xyz * screenY);
-  tracePath(params.eye.xyz, rayDirection, pixel, sampleIndex);
+  tracePath(params.eye.xyz, rayDirection, pixel, sampleIndex, true);
   if (!(all(radiance >= vec3<f32>(0.0)) && all(radiance < vec3<f32>(1e30)))) { radiance = vec3<f32>(0.0); }
   if (!(featureDepth >= 0.0 && featureDepth < 1e30)) { featureDepth = 0.0; }
   if (!(all(featureNormal >= vec3<f32>(-1.5)) && all(featureNormal < vec3<f32>(1.5)))) { featureNormal = vec3<f32>(0.0, 0.0, 1.0); }

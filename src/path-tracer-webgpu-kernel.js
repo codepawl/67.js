@@ -322,8 +322,13 @@ fn fillHit(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> f32 {
   return alpha;
 }
 
-// The nearest solid hit, stepping through the transparent texels of cutout materials.
-fn intersectScene(origin: vec3<f32>, direction: vec3<f32>) -> bool {
+// True when the nearest hit belongs to a shadow-only part (the flag sits in texel 5 of the material); camera rays step through it.
+fn nearestHitIsShadowOnly() -> bool {
+  return materials[i32(triangles[nearestSlot * TRIANGLE_TEXELS].w) * MATERIAL_TEXELS + 5].y > 0.0;
+}
+
+// The nearest solid hit, stepping through the transparent texels of cutout materials and, for a camera ray, shadow-only parts.
+fn intersectScene(origin: vec3<f32>, direction: vec3<f32>, cameraRay: bool) -> bool {
   var start = origin;
   var travelled = 0.0;
   let farDistance = params.environmentRotationAndRays.w;
@@ -332,10 +337,12 @@ fn intersectScene(origin: vec3<f32>, direction: vec3<f32>) -> bool {
     traceRay(start, direction, farDistance, false);
     if (nearestSlot < 0) { return false; }
     let foundDistance = nearestDistance;
-    let alpha = fillHit(start, direction, foundDistance);
-    if (hitCutoff == 0.0 || alpha >= hitCutoff) {
-      hitDistance += travelled;
-      return true;
+    if (!(cameraRay && nearestHitIsShadowOnly())) {
+      let alpha = fillHit(start, direction, foundDistance);
+      if (hitCutoff == 0.0 || alpha >= hitCutoff) {
+        hitDistance += travelled;
+        return true;
+      }
     }
     let advance = foundDistance + surfaceOffset;
     travelled += advance;
@@ -986,7 +993,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let screenX = ((f32(id.x) + jitterX) / f32(width) * 2.0 - 1.0) * params.cameraAndClamp.x;
   let screenY = (1.0 - (f32(id.y) + jitterY) / f32(height) * 2.0) * params.cameraAndClamp.y;
   let rayDirection = normalize(params.forward.xyz + params.right.xyz * screenX + params.above.xyz * screenY);
-  tracePath(params.eye.xyz, rayDirection, pixel, sampleIndex);
+  tracePath(params.eye.xyz, rayDirection, pixel, sampleIndex, true);
   if (!(all(radiance >= vec3<f32>(0.0)) && all(radiance < vec3<f32>(1e30)))) { radiance = vec3<f32>(0.0); }
   if (!(featureDepth >= 0.0 && featureDepth < 1e30)) { featureDepth = 0.0; }
   if (!(all(featureNormal >= vec3<f32>(-1.5)) && all(featureNormal < vec3<f32>(1.5)))) { featureNormal = vec3<f32>(0.0, 0.0, 1.0); }
@@ -1023,7 +1030,7 @@ fn bakeTexels(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgro
   let coneRadius = sqrt(firstUnit);
   let angle = TWO_PI * secondUnit;
   let rayDirection = buildFrame(normal) * vec3<f32>(coneRadius * cos(angle), coneRadius * sin(angle), sqrt(max(0.0, 1.0 - firstUnit)));
-  tracePath(origin, rayDirection, texelIndex, sampleIndex);
+  tracePath(origin, rayDirection, texelIndex, sampleIndex, false);
   if (!(all(radiance >= vec3<f32>(0.0)) && all(radiance < vec3<f32>(1e30)))) { radiance = vec3<f32>(0.0); }
   accumulation[texelIndex] += vec4<f32>(radiance, 0.0);
   accumulation[texelCount + texelIndex] += vec4<f32>(firstLegEscaped, 0.0, 0.0, 0.0);
@@ -1052,7 +1059,8 @@ fn addLights(depth: i32, normal: vec3<f32>) {
   selectionProbability = 1.0 / f32(emitterCount);
 }`}
 ${hasSubsurface ? SUBSURFACE_FUNCTIONS : ''}
-fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
+// cameraRays is true when the path starts at the camera, so its first leg steps through shadow-only parts.
+fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32, cameraRays: bool) {
   resetRandom(pixel, sampleIndex, params.seedAndAtlas.x);
   radiance = vec3<f32>(0.0);
   throughput = vec3<f32>(1.0);
@@ -1068,7 +1076,7 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
   let bounces = params.sizeBouncesLights.z;
   let surfaceOffset = params.environmentRotationAndRays.z;
   for (var depth = 0; depth <= bounces; depth++) {
-    let found = intersectScene(position, direction);
+    let found = intersectScene(position, direction, cameraRays && depth == 0);
     ${hasVolume ? 'let inFog = scatterInFog(position, select(params.environmentRotationAndRays.w, hitDistance, found));' : 'let inFog = false;'}
     if (!inFog && !found) {
       if (depth == 0) { firstLegEscaped = 1.0; }
@@ -1293,7 +1301,8 @@ fn extendPaths(@builtin(global_invocation_id) id: vec3<u32>) {
     if (nearestSlot < 0) { break; }
     let material = i32(triangles[nearestSlot * TRIANGLE_TEXELS].w) * MATERIAL_TEXELS;
     let cutoff = materials[material + 3].z;
-    if (cutoff == 0.0 || alphaAtNearestHit() >= cutoff) {
+    let steppedThrough = currentDepth() == 0 && nearestHitIsShadowOnly();
+    if (!steppedThrough && (cutoff == 0.0 || alphaAtNearestHit() >= cutoff)) {
       found = true;
       break;
     }

@@ -68,7 +68,7 @@ int randomWalk(vec3 point, vec3 normal, vec3 meanFreePath, vec3 color, int mater
   float height = sqrt(max(0.0, 1.0 - radius * radius));
   walkDirection = frame[0] * (radius * cos(angle)) + frame[1] * (radius * sin(angle)) - normal * height;
   for (int scatters = 0; scatters <= WALK_STEPS; scatters++) {
-    bool found = intersectScene(position, walkDirection);
+    bool found = intersectScene(position, walkDirection, false);
     if (!found || hitMaterialIndex != material) return scatters == 0 ? WALK_THIN : WALK_LOST;
     // One channel draws the distance; weighting by the mean density over the three channels keeps every channel unbiased.
     int hero = min(2, int(floor(nextRandom() * 3.0)));

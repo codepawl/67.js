@@ -982,7 +982,6 @@ export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
   if (!environment?.map) notes.add('There is no environment map, so the sky is black and only the lights shine.');
   for (const part of parts) {
     const material = part.material ?? {};
-    if (part.shadowOnly === true && backend !== 'cpu') notes.add('shadowOnly is left out of camera rays by the cpu backend only; the GPU path tracers draw the part.');
     for (const field of IGNORED_MAP_FIELDS) if (material[field]) notes.add(`${field} is ignored.`);
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
     if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');

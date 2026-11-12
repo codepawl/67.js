@@ -113,7 +113,8 @@ fn alphaAtSlot(slot: i32, secondWeight: f32, thirdWeight: f32) -> f32 {
   return sampleAtlas(mapRectangle, materials[material + 4].y, uv).a;
 }
 
-fn traceRay(origin: vec3<f32>, direction: vec3<f32>, limit: f32, anyHit: bool) {
+// A camera ray ignores the parts flagged shadow-only (the flag sits in texel 5 of the material); every other ray still hits them.
+fn traceRay(origin: vec3<f32>, direction: vec3<f32>, limit: f32, anyHit: bool, cameraRay: bool) {
   nearestDistance = limit;
   nearestSlot = -1;
   var query: ray_query;
@@ -123,6 +124,7 @@ fn traceRay(origin: vec3<f32>, direction: vec3<f32>, limit: f32, anyHit: bool) {
     let candidate = rayQueryGetCandidateIntersection(&query);
     let slot = primitiveSlot(candidate.geometry_index, candidate.primitive_index);
     let material = i32(triangles[slot * TRIANGLE_TEXELS].w) * MATERIAL_TEXELS;
+    if (cameraRay && materials[material + 5].y > 0.0) { continue; }
     let cutoff = materials[material + 3].z;
     if (alphaAtSlot(slot, candidate.barycentrics.x, candidate.barycentrics.y) >= cutoff) {
       rayQueryConfirmIntersection(&query);
@@ -282,15 +284,15 @@ fn fillHit(origin: vec3<f32>, direction: vec3<f32>, distance: f32) -> f32 {
 }
 
 // The nearest solid hit; transparent texels of cutout materials never reach here (see `traceRay`).
-fn intersectScene(origin: vec3<f32>, direction: vec3<f32>) -> bool {
-  traceRay(origin, direction, params.environmentRotationAndRays.w, false);
+fn intersectScene(origin: vec3<f32>, direction: vec3<f32>, cameraRay: bool) -> bool {
+  traceRay(origin, direction, params.environmentRotationAndRays.w, false, cameraRay);
   if (nearestSlot < 0) { return false; }
   fillHit(origin, direction, nearestDistance);
   return true;
 }
 
 fn occluded(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> bool {
-  traceRay(origin, direction, limit, true);
+  traceRay(origin, direction, limit, true, false);
   return nearestSlot >= 0;
 }
 
@@ -883,7 +885,7 @@ fn randomWalk(point: vec3<f32>, normal: vec3<f32>, meanFreePath: vec3<f32>, colo
   let height = sqrt(max(0.0, 1.0 - radius * radius));
   walkDirection = frame[0] * (radius * cos(angle)) + frame[1] * (radius * sin(angle)) - normal * height;
   for (var scatters = 0; scatters <= WALK_STEPS; scatters++) {
-    let found = intersectScene(position, walkDirection);
+    let found = intersectScene(position, walkDirection, false);
     if (!found || hitMaterialIndex != material) { return select(WALK_LOST, WALK_THIN, scatters == 0); }
     // One channel draws the distance; weighting by the mean density over the three channels keeps every channel unbiased.
     let hero = min(2, i32(floor(nextRandom() * 3.0)));
@@ -945,7 +947,8 @@ fn enterSubsurface(depth: i32, entryNormal: vec3<f32>) -> bool {
   addLights(depth, subsurfaceNormal);
   return true;
 }
-fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32) {
+// `cameraRays` is true when the path starts at the camera, so its first leg steps through shadow-only parts.
+fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleIndex: u32, cameraRays: bool) {
   resetRandom(pixel, sampleIndex, params.seedAndAtlas.x);
   radiance = vec3<f32>(0.0);
   throughput = vec3<f32>(1.0);
@@ -961,7 +964,7 @@ fn tracePath(origin: vec3<f32>, startDirection: vec3<f32>, pixel: u32, sampleInd
   let bounces = params.sizeBouncesLights.z;
   let surfaceOffset = params.environmentRotationAndRays.z;
   for (var depth = 0; depth <= bounces; depth++) {
-    let found = intersectScene(position, direction);
+    let found = intersectScene(position, direction, cameraRays && depth == 0);
     var inFog = false;
     if (HAS_VOLUME) { inFog = scatterInFog(position, select(params.environmentRotationAndRays.w, hitDistance, found)); }
     if (!inFog && !found) {
@@ -1076,7 +1079,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let screenX = ((f32(id.x) + jitterX) / f32(width) * 2.0 - 1.0) * params.cameraAndClamp.x;
   let screenY = (1.0 - (f32(id.y) + jitterY) / f32(height) * 2.0) * params.cameraAndClamp.y;
   let rayDirection = normalize(params.forward.xyz + params.right.xyz * screenX + params.above.xyz * screenY);
-  tracePath(params.eye.xyz, rayDirection, pixel, sampleIndex);
+  tracePath(params.eye.xyz, rayDirection, pixel, sampleIndex, true);
   if (!(all(radiance >= vec3<f32>(0.0)) && all(radiance < vec3<f32>(1e30)))) { radiance = vec3<f32>(0.0); }
   if (!(featureDepth >= 0.0 && featureDepth < 1e30)) { featureDepth = 0.0; }
   if (!(all(featureNormal >= vec3<f32>(-1.5)) && all(featureNormal < vec3<f32>(1.5)))) { featureNormal = vec3<f32>(0.0, 0.0, 1.0); }
