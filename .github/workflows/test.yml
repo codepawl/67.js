@@ -64,7 +64,7 @@ jobs:
       - run: npm run tool-cost -- --base "$SIZE_BASE_REF"
 
   # `node --test` already runs every file in its own process (Node 24 default, --test-isolation=process), so one pass over
-  # the files is also the isolation check. Eight shards of hashed file names (scripts/shard-test-files.mjs). The light bake tests are heavy, so one shard of three took twice as long as the others.
+  # the files is also the isolation check. Eight shards dealt by measured file time (scripts/shard-test-files.mjs, test-timings.json). The slowest file (about 150 s) is the floor, which 12 shards would reach where 8 stay about 35% above it, but the coverage gate counts unnamed branches once per shard, so more shards lower its branch figure (75.4% at 12 against 77.5% at 8, baseline 78.45%, issue #1004): raise the count after that is fixed. Change the matrix and the count in the test command together; tests/shard-test-files.test.js checks they agree.
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
