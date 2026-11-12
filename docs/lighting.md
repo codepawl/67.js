@@ -67,7 +67,7 @@ Limits: the diffuse term uses L2 spherical harmonics, so a very small intense su
 
 ## Point lights
 
-At most 16 lights are supported per frame. Each light supplies `position`. Optional fields default to white `color`, `intensity: 1`, `radius: 0.05` and unlimited `range: 0`.
+At most 16 lights are supported per frame. Each light supplies `position`. Optional fields default to white `color`, `intensity: 1`, `radius: 0.05` and unlimited `range: 0`. `softFalloff: true` (point and spot lights, default false) makes a light with a radius an oriented disk facing the shaded point, as Blender's Soft Falloff; only the native `cycles` path tracer draws it, every other renderer keeps the sphere ([Cycles parity](cycles-parity.md#soft-falloff-lights-1060)).
 
 The light uses inverse-square falloff outside its radius. Doubling distance reduces incoming illumination to one quarter before material response. Intensity follows the candela convention for a point source, but the renderer's existing exposure and environment are not a calibrated photographic pipeline.
 
@@ -81,7 +81,7 @@ A point light casts a shadow only with `castShadow: true` (see [Local shadows](#
 
 ## Spot lights
 
-`environment.spotLights` holds at most eight lights. Each has `position` and `direction` (any nonzero length). Optional fields: `angle` (outer half angle in radians, 0.01 to just under pi/2, default pi/4), `penumbra` (0 to 1, default 0.15), `color`, `intensity`, `radius`, `range` and `castShadow`, with the point light defaults and limits.
+`environment.spotLights` holds at most eight lights. Each has `position` and `direction` (any nonzero length). Optional fields: `angle` (outer half angle in radians, 0.01 to just under pi/2, default pi/4), `penumbra` (0 to 1, default 0.15), `color`, `intensity`, `radius`, `range`, `castShadow` and `softFalloff`, with the point light defaults and limits.
 
 `intensity` is candela, so a spot light and a point light of the same intensity give the same light inside the cone. The cone mask is a smoothstep from the outer cosine to `outer + (1 - outer) * penumbra`, which is Blender's spot blend, so a `bench/reference` Blender spot with `spot_size = 2 * angle` and `spot_blend = penumbra` matches. Falloff, `radius` and `range` work as for point lights.
 

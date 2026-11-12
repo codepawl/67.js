@@ -89,10 +89,12 @@ function closedFormCentreRadiance(irradianceAt = sphereIrradianceAt) {
   return sum / (PATCH_SIDE * PATCH_SIDE);
 }
 
-test('the Cycles reference script renders point and spot lights as spheres unless asked otherwise', () => {
+test('the Cycles reference script follows each light softFalloff, off when absent, unless --soft-falloff overrides it', () => {
   const source = readFileSync(new URL('../bench/cycles-parity/render-cycles.py', import.meta.url), 'utf8');
-  assert.match(source, /read_flag_value\(argument_list, "--soft-falloff", "off"\)/, 'the default turns Light.use_soft_falloff off');
-  assert.match(source, /light_data\.use_soft_falloff = soft_falloff_setting/, 'the setting reaches the light');
+  assert.match(source, /if "--soft-falloff" not in argument_list:\s+return SOFT_FALLOFF_FROM_SCENE/, 'without the flag each light follows its scene entry');
+  assert.match(source, /light_data\.use_soft_falloff = light_entry\.get\("softFalloff"\) is True/, 'a light without the field is a sphere');
+  assert.match(source, /read_flag_value\(argument_list, "--soft-falloff", "off"\)/, 'an explicit flag value is read');
+  assert.match(source, /light_data\.use_soft_falloff = soft_falloff_setting/, 'the explicit setting reaches the light');
   const callCount = source.split('apply_soft_falloff_setting(').length - 1;
   assert.equal(callCount, 3, 'the definition and one call each for point lights and spot lights');
 });

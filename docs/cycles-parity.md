@@ -1415,8 +1415,12 @@ Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
 
 ```sh
 node packages/render-native/build.mjs
-uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/soft-falloff --soft-falloff off --repeat-cycles-seed2 --scenes bare-r0.18,bare-r0.18-soft,poking-r0.18,poking-r0.18-soft
+# the whole table above: every lamp scene and its -soft twin, with the seed floor
+uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/soft-falloff --soft-falloff off --repeat-cycles-seed2 --scenes bare-r0.05,bare-r0.18,bare-r0.5,enclosed-r0.18,poking-r0.18,bare-r0.05-soft,bare-r0.18-soft,bare-r0.5-soft,enclosed-r0.18-soft,poking-r0.18-soft
+# the picture (the narrow run of the poking lamp is enough for it)
 uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-soft-falloff-figure.py --cook-sphere artifacts/soft-falloff/renders/poking-r0.18-cook.npy --cook-soft artifacts/soft-falloff/renders/poking-r0.18-soft-cook.npy --cycles-soft artifacts/soft-falloff/renders/poking-r0.18-soft-cycles-scene.npy --output docs/cook-soft-falloff-comparison.jpg
+# the identity evidence: run it on origin/main and on this branch and compare the output
+node bench/cycles-parity/packed-table-hashes.mjs --scenes lit-interior,many-lights-500,spot-area
 ```
 
 `make-sphere-light-scenes.mjs` writes every lamp with a radius twice, as `<id>` (sphere) and `<id>-soft` (`softFalloff: true`); `run-sphere-light-parity.py` compares the `-soft` scenes with Cycles following the scene and the others with the `--soft-falloff` settings.
