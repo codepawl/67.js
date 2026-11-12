@@ -210,7 +210,8 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
     gpu: traced.adapter, nativeBackend: traced.backend, nativeFeatures: traced.features, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
     uploadSeconds: traced.uploadSeconds, accelerationBuildSeconds: traced.accelerationBuildSeconds,
     kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, inputBytes: tableBytes(tables), ...(exported.instances === undefined ? {} : { instances: exported.instances }),
-    ...(exported.instancing === undefined ? {} : { instancing: exported.instancing, instancingReason: exported.instancingReason }), tracedSeconds, ignored: exported.ignored,
+    ...(exported.instancing === undefined ? {} : { instancing: exported.instancing, instancingReason: exported.instancingReason }),
+    ...(exported.materialsReason === undefined ? {} : { materialsReason: exported.materialsReason }), tracedSeconds, ignored: exported.ignored,
     ...(route ? { nativeSession: route } : {}) };
   let linear = features.color;
   const denoiseStarted = performance.now();

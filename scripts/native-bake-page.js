@@ -44,30 +44,44 @@ export function encodeNativeInputV2(input) {
 }
 
 /**
- * The scene of a native render job as the tables the job runner traces. With `instancing`, parts that share a geometry are
- * exported as FORMAT-v2 instances; a scene the instanced packer refuses (copies of an emissive mesh that emit different
- * triangles, say) is exported flattened, as a job without shared geometry is, and says why in `instancing` and
- * `instancingReason`. `modules` holds buildTraceScene, refuseLocalVolumes, buildNativeInput, buildJobNativeInput and `pack`
- * (src/path-tracer-gpu-pack.js), which the page loads on demand.
+ * The scene of a native render job as the tables the job runner traces. With the "cycles" kernel (`kernel`) every scene is
+ * exported as FORMAT-v2, so its materials reach the kernel whole; parts that share a geometry stay instances when
+ * `instancing` is on. A scene the packer refuses (copies of an emissive mesh that emit different triangles, say) is
+ * exported flattened, and a scene whose FORMAT-v2 materials cannot be built is exported as the v1 tables the legacy kernel
+ * reads; each says why in `instancing` and `instancingReason`, or `materialsReason`. `wholeMaterials` tells whether the
+ * kernel gets whole materials. `modules` holds buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput,
+ * buildJobNativeInput, buildFlattenedJobNativeInput and `pack` (src/path-tracer-gpu-pack.js), which the page loads on demand.
  */
-export function exportNativeSceneTables({ parts, environment, camera, options, instancing, modules }) {
-  const { buildTraceScene, refuseLocalVolumes, buildNativeInput, buildJobNativeInput, pack } = modules;
-  let traceScene = buildTraceScene(parts, environment, { instancing: instancing === true });
+export function exportNativeSceneTables({ parts, environment, camera, options, kernel, instancing, modules }) {
+  const { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } = modules;
+  const wholeMaterials = kernel === 'cycles';
+  let traceScene = buildTraceScene(parts, environment, { instancing: wholeMaterials && instancing === true });
   refuseLocalVolumes(traceScene, 'the native path tracer');
   let flattenedBecause;
   if (traceScene.instances) {
     try {
-      const input = buildJobNativeInput(traceScene, camera, options, pack);
-      return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount };
+      const input = buildJobNativeInput(traceScene, camera, options, pack, resolveTexture);
+      return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, wholeMaterials };
     } catch (error) {
       if (!(error instanceof RangeError)) throw error;
       flattenedBecause = error.message;
       traceScene = buildTraceScene(parts, environment);
     }
   }
+  const instancingNote = flattenedBecause === undefined ? {} : { instancing: 'flattened', instancingReason: flattenedBecause };
+  let materialsReason;
+  if (wholeMaterials) {
+    try {
+      const input = buildFlattenedJobNativeInput(traceScene, camera, options, pack, resolveTexture);
+      return { ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials, ...instancingNote };
+    } catch (error) {
+      // The scene stays traceable: the v1 tables carry what the kernel read before, and the report says why they were used.
+      materialsReason = error.message;
+    }
+  }
   const input = buildNativeInput(traceScene, camera, options, pack);
-  return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3,
-    ...(flattenedBecause === undefined ? {} : { instancing: 'flattened', instancingReason: flattenedBecause }) };
+  return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
+    ...(materialsReason === undefined ? {} : { materialsReason }), ...instancingNote };
 }
 
 function floatsFromBase64(data) {

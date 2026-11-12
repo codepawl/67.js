@@ -2535,13 +2535,44 @@ function extractAtlasSubtexture(atlasWords, atlasWidth, rectX, rectY, width, hei
   return words;
 }
 
+// The texture slots of a material record that the v1 tables have no atlas rectangle for, with the colour space of each.
+// `carried.textures` names them; the record field is the index the collector hands back.
+const CARRIED_TEXTURE_SLOTS = Object.freeze([
+  ['transmission', 'transmissionTex', false],
+  ['coatWeightRoughness', 'coatWeightRoughnessTex', false],
+  ['coatTint', 'coatTintTex', true],
+  ['coatNormal', 'coatNormalTex', false],
+  ['sheenColorRoughness', 'sheenColorRoughnessTex', true],
+  ['anisotropy', 'anisotropyTex', false],
+  ['bump', 'bumpTex', false],
+]);
+
 /**
- * The material records of a v1 material table, the reduction every v1 native job goes through: only the fields the v1 tables
- * carry survive (base colour, metallic, roughness, emission, clearcoat, transmission, ior, normal scale, mask cutoff,
- * subsurface and the four atlas textures). `materials` holds the table with the subsurface table after it, `atlas` the atlas
- * words and `atlasWidth` their row width.
+ * The record descriptor of a material with the fields beyond the v1 tables laid over it. `carried` is the result of
+ * `carriedMaterialFields` (src names of the record fields, plus `textures`, resolved images by slot). The descriptor keeps
+ * every field the v1 tables carry as they are: carried fields never replace them, so a material that carries nothing packs
+ * to the bytes it always did. Blending applies only to a material the tables made opaque.
  */
-export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount }) {
+function withCarriedFields(descriptor, carried, textureCollector) {
+  if (!carried) return descriptor;
+  const { textures, alphaMode, ...fields } = carried;
+  const carriedDescriptor = { ...descriptor, ...fields };
+  if (alphaMode === 'blend' && descriptor.alphaMode === 'opaque') carriedDescriptor.alphaMode = 'blend';
+  for (const [slot, field, isSrgb] of CARRIED_TEXTURE_SLOTS) {
+    const image = textures?.[slot];
+    if (image) carriedDescriptor[field] = textureCollector.addTexture(image, isSrgb).index;
+  }
+  return carriedDescriptor;
+}
+
+/**
+ * The material records of a v1 material table. The fields the v1 tables carry (base colour, metallic, roughness, emission,
+ * clearcoat, transmission, ior, normal scale, mask cutoff, subsurface and the four atlas textures) are read from the tables.
+ * `carriedFields`, when given, holds one `carriedMaterialFields` result per material for everything the tables cannot hold
+ * (blend opacity, sheen, specular, anisotropy, iridescence, attenuation, the layer textures and the rest of the record).
+ * `materials` holds the table with the subsurface table after it, `atlas` the atlas words and `atlasWidth` their row width.
+ */
+export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields }) {
   const textureCollector = createTextureCollector();
   const atlasCache = new Map();
 
@@ -2604,7 +2635,7 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
       }
     }
 
-    const packedMat = packMaterialRecordV2({
+    const packedMat = packMaterialRecordV2(withCarriedFields({
       baseColor,
       metallic,
       roughness,
@@ -2622,7 +2653,7 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
       metallicRoughnessTex: mrTex.index,
       emissionTex: emissionTex.index,
       alphaTex: -1,
-    }, null);
+    }, carriedFields?.[m], textureCollector), null);
     packedMat.meanEmissiveRadiance = [
       packedMat.meanEmissiveRadiance[0] * emissionTex.meanLinearRgb[0],
       packedMat.meanEmissiveRadiance[1] * emissionTex.meanLinearRgb[1],
@@ -2636,9 +2667,11 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
 
 /**
  * Upgrades a legacy v1 `buildNativeInput` payload to `FORMAT-v2` (`schemaVersion: 2`) so existing callers passing v1
- * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites.
+ * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites. `carriedFields` (one
+ * `carriedMaterialFields` result per material) adds what the v1 material table cannot hold; without it the records hold the
+ * v1 fields alone.
  */
-export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
+export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = undefined) {
   if (v1Input?.schemaVersion === FORMAT_V2_VERSION) {
     return v1Input;
   }
@@ -2677,6 +2710,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     atlasWidth: paramU32[45] || 1,
     subsurfaceVec4Offset,
     materialCount,
+    carriedFields,
   });
 
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
