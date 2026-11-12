@@ -1539,6 +1539,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
   validateSamplerOption(options.sampler, callerName);
+  validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
     if (samplesPerDispatch !== undefined) {
@@ -1574,16 +1575,40 @@ function effectiveCyclesClamp(value) {
   return numeric * 3.0;
 }
 
-function resolveFilterParameters(options = {}) {
-  const filter = options.filterType ?? options.pixelFilter ?? 0;
-  let filterType = 0;
-  if (filter === 1 || filter === 'gaussian') {
-    filterType = 1;
-  } else if (filter === 2 || filter === 'blackman-harris' || filter === 'blackman_harris') {
-    filterType = 2;
+const FILTER_TYPE_CODES = Object.freeze({
+  box: 0,
+  gaussian: 1,
+  'blackman-harris': 2,
+  blackman_harris: 2,
+});
+
+function filterTypeCode(filter) {
+  if (filter === 0 || filter === 1 || filter === 2) {
+    return filter;
   }
+  return typeof filter === 'string' ? FILTER_TYPE_CODES[filter] : undefined;
+}
+
+/** Throws unless `filterType` (or `pixelFilter`) and `filterWidth` are absent or valid. Width is in pixels, 0.01 to 16. */
+export function validateFilterOptions(options, callerName) {
+  const filter = options.filterType !== undefined ? options.filterType : options.pixelFilter;
+  if (filter !== undefined && filterTypeCode(filter) === undefined) {
+    throw new RangeError(
+      `${callerName}: \`filterType\` must be "box" (default), "gaussian" or "blackman-harris", got ${JSON.stringify(filter)}.`
+    );
+  }
+  const width = options.filterWidth;
+  if (width !== undefined && !(typeof width === 'number' && Number.isFinite(width) && width >= 0.01 && width <= 16)) {
+    throw new RangeError(
+      `${callerName}: \`filterWidth\` must be a number of pixels from 0.01 to 16 (1.5 is the Cycles Blackman-Harris default), got ${JSON.stringify(width)}.`
+    );
+  }
+}
+
+function resolveFilterParameters(options = {}) {
+  const filterType = filterTypeCode(options.filterType ?? options.pixelFilter ?? 0) ?? 0;
   const defaultWidth = filterType === 0 ? 1.0 : 1.5;
-  const filterWidth = options.filterWidth !== undefined ? Math.max(0.01, Number(options.filterWidth)) : defaultWidth;
+  const filterWidth = options.filterWidth ?? defaultWidth;
   return { filterType, filterWidth };
 }
 

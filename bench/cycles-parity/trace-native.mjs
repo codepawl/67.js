@@ -11,7 +11,7 @@ import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
-const SUPPORTED_FILTERS = new Set(['box', 'blackman-harris']);
+const SUPPORTED_FILTERS = new Set(['box', 'gaussian', 'blackman-harris']);
 const SUPPORTED_SAMPLERS = new Set(['white', 'sobol-burley']);
 
 function readFlagValue(argumentList, flagName, fallbackValue) {
@@ -53,7 +53,7 @@ function parseKernelOption(argumentList) {
 function parseFilterTypeOption(argumentList) {
   const filterType = String(readFlagValue(argumentList, '--filter-type', 'box'));
   if (!SUPPORTED_FILTERS.has(filterType)) {
-    throw new RangeError(`Option --filter-type must be "box" or "blackman-harris", got "${filterType}".`);
+    throw new RangeError(`Option --filter-type must be "box", "gaussian" or "blackman-harris", got "${filterType}".`);
   }
   return filterType;
 }
@@ -68,7 +68,7 @@ function parseSamplerOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--filter-type box|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),

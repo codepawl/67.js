@@ -38,7 +38,7 @@ Exported losslessly from [`bench/reference/scenes.js`](../bench/reference/scenes
 | Filter glossy | `filter_glossy = 1.0` (`bsdf_blur` on secondary glossy bounces) | `filterGlossy: 1.0` in `--kernel cycles` (none in `legacy`) | Matches Cycles secondary-bounce roughness blur (`alpha >= filter_glossy * min_ray_pdf`) on reflective/refractive caustics |
 | Denoising | `use_denoising = False` | Raw `traced.rgba` (no wavelet/OIDN) | Measure raw Monte Carlo estimator |
 | Adaptive sampling | `use_adaptive_sampling = False` | `noiseThreshold: 0` | Draw exact `N` samples at every pixel |
-| Pixel filter | `pixel_filter_type = 'BOX'`, `filter_width = 1.0` | Uniform jitter in `[0, 1)^2` | Cycles default Blackman-Harris `1.5 px` blurs/rings across pixel boundaries |
+| Pixel filter | `pixel_filter_type = 'BOX'`, `filter_width = 1.0` (the references; Cycles' own default is Blackman-Harris `1.5 px`) | `filterType: 'box'`, `filterWidth: 1.0` by default; `'blackman-harris'` (default width `1.5`) and `'gaussian'` sample the Cycles 1024-entry inverse-CDF table (`filter_table.rs`, translated from `film.cpp`) | With each filter the native image matches a Cycles reference rendered with the same filter; the measured relMSE and FLIP are in the table below |
 | Color space | `OPEN_EXR` `32`-bit float RGB, `view_transform = 'Raw'`, `look = 'None'` | Linear `Float32Array` RGB `.npy` | Scene-referred linear float32 with no tone map |
 
 ### Bounce-Count Semantics Verification
@@ -341,6 +341,19 @@ Against Cycles 5.3 OptiX on `lit-interior`, `256` samples took `11.4 s` (measure
 These are per-sample times on one scene. An equal-error comparison between the `cycles` kernel and Cycles has not been measured directly, so nothing here says Cook is faster than Cycles in general. The Cycles `lit-interior` reference was not re-rendered with the current script (its scene file and image are byte-identical to the earlier run).
 
 ---
+
+### Pixel filter: box versus Blackman-Harris
+
+The six-scene references use the box filter of width 1, so the box filter stays the default of the `cycles` kernel. Cycles' own default is Blackman-Harris with width 1.5. To show which choice matches Cycles, `render-cycles.py --filter-type blackman-harris --filter-width 1.5` rendered a second Cycles 5.3 reference (4096 spp, seed 1, OptiX) and the `cycles` kernel ran at 1024 spp, seed 1, 8 bounces, 960 x 540 with each filter `[measured]`:
+
+| Scene | Native filter | vs Cycles box 1 (relMSE / FLIP LDR) | vs Cycles Blackman-Harris 1.5 (relMSE / FLIP LDR) |
+| :--- | :--- | :--- | :--- |
+| `lit-interior` | box 1 | 0.00105 / 0.0272 | 0.00106 / 0.0273 |
+| `lit-interior` | Blackman-Harris 1.5 | 0.00106 / 0.0273 | 0.00105 / 0.0272 |
+| `glass` | box 1 | 0.00009 / 0.0073 | 0.00016 / 0.0084 |
+| `glass` | Blackman-Harris 1.5 | 0.00061 / 0.0082 | 0.00010 / 0.0073 |
+
+`lit-interior` is smooth, so the filter hides under its noise. `glass` has hard caustic edges: each native filter scores best against the Cycles reference rendered with the same filter, and the mismatched pair is 4 to 7 times worse in relMSE.
 
 ## Reproducible Commands
 

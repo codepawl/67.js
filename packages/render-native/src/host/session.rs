@@ -8,7 +8,7 @@ use std::time::Instant;
 use napi::Result;
 use wgpu::util::DeviceExt;
 
-use crate::cycles::{check_counts_match_kernel_params, specialize_cycles_kernel, CYCLES_LUT_WORDS};
+use crate::cycles::{check_counts_match_kernel_params, specialize_cycles_kernel, unit_filter_table_words, CYCLES_LUT_WORDS};
 use crate::host::accel::{
     build_acceleration_structure, build_cycles_acceleration_structure, build_empty_cycles_acceleration,
     create_vertex_buffer, unpack_triangles, CyclesAcceleration, INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS,
@@ -118,7 +118,9 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
         device.set_device_lost_callback(move |_reason, _message| {
             lost_flag.store(true, Ordering::SeqCst);
         });
-        let lut_bytes: &[u8] = bytemuck::cast_slice(&CYCLES_LUT_WORDS[..]);
+        let mut lut_words: Vec<u32> = CYCLES_LUT_WORDS.to_vec();
+        lut_words.extend(unit_filter_table_words());
+        let lut_bytes: &[u8] = bytemuck::cast_slice(&lut_words);
         let lut_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cycles LUT binding 12"),
             contents: lut_bytes,
@@ -299,7 +301,7 @@ fn create_cycles_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     ];
     layout_entries.extend((2..=10).map(|binding| storage_entry(binding, true)));
     layout_entries.push(storage_entry(11, false)); // film_accumulation (read_write)
-    layout_entries.push(storage_entry(12, true));  // cycles_lut (read-only, 118 848 bytes)
+    layout_entries.push(storage_entry(12, true));  // cycles_lut (read-only: static LUTs, then the two pixel filter tables)
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("cycles path tracer"),
         entries: &layout_entries,

@@ -1,5 +1,7 @@
+mod filter_table;
 mod luts;
 
+pub(crate) use filter_table::unit_filter_table_words;
 pub(crate) use luts::CYCLES_LUT_WORDS;
 
 use napi::Result;
