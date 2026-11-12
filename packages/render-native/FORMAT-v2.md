@@ -87,7 +87,7 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 | `288` | `4` | `4` | `f32` | `film_exposure` | Linear exposure multiplier applied on film accumulation (default `1.0`) |
 | `292` | `4` | `4` | `f32` | `background_mis_weight` | `1.0` when environment MIS is active, `0.0` otherwise |
 | `296` | `4` | `4` | `u32` | `sobol_table_offset` | Word offset into `texture_texels` for Sobol / blue-noise tables |
-| `300` | `4` | `4` | `u32` | `reserved_u0` | Reserved (`0`) |
+| `300` | `4` | `4` | `f32` | `filter_glossy` | Cycles Filter Glossy (`blur_glossy`) factor (`0.0` = off, default `1.0`) |
 | `304` | `16` | `16` | `vec4<u32>` | `reserved_tail` | Reserved (`[0, 0, 0, 0]`) |
 
 ---
