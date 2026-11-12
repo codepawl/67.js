@@ -63,7 +63,7 @@ It runs the same checks as the server and prints `ok` or `FAIL` with the error. 
 
 ## Install
 
-Unzip each pack into its own subfolder of one packs folder and start the server with that folder:
+The [Marketplace page](https://67js.codepawl.com/marketplace.html) lists the published packs with a checksum. Unzip each pack into its own subfolder of one packs folder and start the server with that folder:
 
 ```sh
 67js-mcp --packs /absolute/path/to/packs
