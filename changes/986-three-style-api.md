@@ -1,0 +1,1 @@
+- The optional `@codepawlhq/67js-three-compat` addon accepts the common three.js names and builds 67js parts from them, and "If you know three.js" maps each three.js idiom to the 67js call (#986)

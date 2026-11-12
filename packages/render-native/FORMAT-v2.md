@@ -93,6 +93,8 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 | `300` | `4` | `4` | `f32` | `filter_glossy` | Cycles Filter Glossy (`blur_glossy`) factor (`0.0` = off, default `1.0`) |
 | `304` | `16` | `16` | `vec4<u32>` | `reserved_tail` | Reserved (`[0, 0, 0, 0]`) |
 
+The four thin-lens words (`aperture_radius`, `focal_distance`, `aperture_blades`, `aperture_rotation`, bytes 156, 172, 184 and 188) are set by `resolveThinLensParameters` in `pack-input-v2.mjs`, from the camera object that `createCamera` returns for a camera with an `fStop` (or from `options.apertureRadius`, `focalDistance`, `apertureBlades`, `apertureRotation`). A pinhole writes `0`, `10`, `0` and `0`, as before, so its params bytes do not change. Cycles' model: the aperture radius is `focal length (mm) / 1000 / (2 * f-stop)`, a point on the lens (a disk, or a regular polygon of `aperture_blades` corners turned by `aperture_rotation`) is the ray origin, and the ray goes through the point that lies `focal_distance` along `camera_forward` from the pinhole ray (the focus distance is measured on the view axis, not along the ray). The lens sample is the kernel's existing `lens_uv` draw, taken for every sample whether or not the aperture is 0, so depth of field does not move any other random number. A FORMAT-v1 input carries the same four values in the unused fourth float of the eye, forward, right and above vectors (floats 3, 7, 11 and 15 of the 64-float block); the legacy kernel ignores them and `upgradeNativeInputV1ToV2` reads them back.
+
 ---
 
 ## 2. Instance Table — `InstanceRecord` (`@binding(2)`)
@@ -130,6 +132,12 @@ Both 3×4 affine transforms are stored as three row vectors `row0..row2`: transf
 Total stride: **224 bytes** (`14 × 16 B`), alignment: **16 bytes**. Within each mesh BLAS slice (`triangle_offset .. triangle_offset + total_triangle_count`), opaque triangles occupy `[0 .. opaque_triangle_count)` (BLAS geometry `0`) and alpha-cutout triangles occupy `[opaque_triangle_count .. total_triangle_count)` (BLAS geometry `1`, when `opaque_triangle_count > 0`; otherwise geometry `0`).
 
 When `InstanceRecord.emissive_base_offset != 0xFFFFFFFF` and `TriangleRecord.local_emissive_offset != 0xFFFFFFFF`, the world-space `EmissiveTriangleRecord` for MIS is at `emissive_base_offset + local_emissive_offset`.
+
+**Sharing rules.** Instances that share a mesh share one slice of `triangles` (one BLAS, one `triangle_offset`), so everything in a `TriangleRecord` is the same for every copy. What can differ per copy lives in the `InstanceRecord`: the transform, `material_override`, `visibility_flags`, the light masks, the object id, random and colour, and `emissive_base_offset`. The packer applies these rules:
+
+- A mesh with per-triangle materials is not shared; its triangles are baked into world space and traced with an identity transform.
+- `local_emissive_offset` counts the triangles that keep an area after an instance's transform, in triangle order, and is the same for every copy. A copy that would emit a different set of triangles is refused. A copy whose resolved material is not emissive gets `emissive_base_offset = 0xFFFFFFFF`, so its triangles never index the emissive list.
+- A shadow-only copy clears the camera bit of `visibility_flags` and keeps the others. A mirrored copy (negative determinant) sets the negative-scale bit.
 
 | Byte Offset | Size (B) | Alignment (B) | WGSL Type | Field | Description |
 | ---: | ---: | ---: | :--- | :--- | :--- |
@@ -348,6 +356,8 @@ Total stride: **32 bytes** (`2 × 16 B`), alignment: **16 bytes**.
 | `12` | `4` | `4` | `u32` | `format_and_sampler` | Bits `0..7`: `0=RGBA8_UNORM`, `1=RGBA8_SRGB`, `2=RGBA32_FLOAT`, `3=RG16_FLOAT`; bits `8..15`: mip count; bits `16..17`: wrap U; bits `18..19`: wrap V; bit `20`: nearest; bit `21`: use `UV1` |
 | `16` | `8` | `8` | `vec2<f32>` | `uv_scale` | UV scale `(su, sv)` |
 | `24` | `8` | `8` | `vec2<f32>` | `uv_offset` | UV offset `(ou, ov)` |
+
+One sampler reads every descriptor: `texture_sample` in `src/cycles/closure.wgsl`. Shading, bump, normal maps and the alpha tests of the integrator (the opacity of a cutout or blended surface, for camera, bounce and shadow rays) all go through it, so a surface is seen and shaded with the same wrap, filter and format. Wrap `0` repeats, `1` clamps and `2` mirrors in float UV space before the texel lookup; `nearest` picks the texel the wrapped UV falls in, otherwise the four neighbours are blended. `texture_texels` is one storage binding, so the pool of all textures (each texture padded to 16 bytes) must fit the device's storage binding size, at most 1 GiB. `buildNativeInputV2` refuses a pool past 1 GiB and the host refuses one past the device's binding size, each with an error that names the size and the limit. The struct sizes above do not change.
 
 ---
 

@@ -905,6 +905,40 @@ export const REFERENCE_SCENES = {
     };
   },
 
+  // Issue #896 (depth of field): objects 2 m, 6 m and 15 m from the camera, with a grid of small bright lamps far behind them. With a
+  // wide aperture focused on the middle object the lamps become bokeh shapes and the near spheres a soft veil.
+  async 'dof-depth'() {
+    const lighting = constantLighting(0.05);
+    const cube = box(0, 1);
+    const lampGeometry = sphere(24, 16);
+    const parts = [
+      part('floor', cube, [0, -0.05, -4], [30, 0.1, 30], { color: [0.35, 0.3, 0.28], roughness: 0.7 }),
+      part('back-wall', cube, [0, 3, -11], [30, 8, 0.1], { color: [0.08, 0.08, 0.1], roughness: 0.9 }),
+      part('focus-ball', sphere(48, 32), [0, 0.5, 0], [0.5, 0.5, 0.5], { color: [0.85, 0.3, 0.15], roughness: 0.3 }),
+      part('focus-block', cube, [1.3, 0.4, 0.2], [0.8, 0.8, 0.8], { color: [0.2, 0.35, 0.8], roughness: 0.5 }),
+      part('near-green', sphere(32, 24), [-0.7, 0.25, 3.8], [0.25, 0.25, 0.25], { color: [0.2, 0.7, 0.3], roughness: 0.4 }),
+      part('near-yellow', sphere(32, 24), [0.9, 0.3, 3.6], [0.3, 0.3, 0.3], { color: [0.9, 0.8, 0.2], roughness: 0.4 }),
+      part('near-block', cube, [0.1, 0.2, 4.2], [0.3, 0.4, 0.3], { color: [0.75, 0.75, 0.8], roughness: 0.5 }),
+      part('far-block', cube, [-2.5, 0.8, -5], [1.2, 1.6, 1.2], { color: [0.6, 0.55, 0.5], roughness: 0.6 }),
+    ];
+    for (let row = 0; row < 3; row++) {
+      for (let column = 0; column < 6; column++) {
+        const warm = (row + column) % 2 === 0;
+        parts.push(part(`lamp-${row}-${column}`, lampGeometry, [(column - 2.5) * 1.9, 0.6 + row * 1.5, -9],
+          [0.04, 0.04, 0.04], { color: warm ? [1, 0.85, 0.6] : [0.7, 0.85, 1], emission: 25, roughness: 1 }));
+      }
+    }
+    const pointLights = [
+      { position: [2, 3.5, 2], color: [1, 0.95, 0.85], intensity: 12, radius: 0.05, castShadow: true },
+      { position: [-3, 2.5, -2], color: [0.8, 0.9, 1], intensity: 6, radius: 0.05, castShadow: true },
+    ];
+    return {
+      parts, blenderWorld: lighting.blenderWorld,
+      environment: environment(lighting, { pointLights }),
+      camera: { eye: [0, 1.2, 6], target: [0, 1, 0], up: [0, 1, 0], fov: 40, near: 0.05, far: 60 },
+    };
+  },
+
   // The lit-interior room with a mirror sphere, a gold sphere and a glossy floor: what a reflection probe is for.
   async 'metal-room'() {
     const lighting = constantLighting(0.02);
@@ -1044,6 +1078,36 @@ export const REFERENCE_SCENES = {
       parts, blenderWorld: lighting.blenderWorld,
       environment: environment(lighting, { pointLights, areaLights }),
       camera: { eye: [0, 1.8, 4.5], target: [0, 0.7, -0.5], up: [0, 1, 0], fov: 50, near: 0.05, far: 50 },
+    };
+  },
+
+  // Issue #894: three blended layers of opacity 0.5 (red, green, blue, nearest first) in front of a lit grey backdrop, seen head on.
+  // The layers cover different parts of the frame, so the left third of the picture sees one layer, the middle third two and the
+  // right third three. The backdrop stops short of the top of the frame, where a uniform sky shows through the layers. The picture
+  // tells how many transparent surfaces a camera path passes at each transparent bounce limit and whether it still reaches the sky.
+  async 'transparent-bounces'() {
+    const lighting = constantLighting(0.3);
+    const cube = box(0, 1);
+    const layer = (name, color, depth, left, width) => part(
+      name,
+      wallQuad(1, 5),
+      [left + width / 2, -2, depth],
+      [width, 1, 1],
+      { color, roughness: 0.6, alphaMode: 'blend', opacity: 0.5 },
+    );
+    const parts = [
+      part('backdrop', cube, [0, 0.2, -2.05], [12, 3.2, 0.1], { color: [0.7, 0.7, 0.7], roughness: 0.9 }),
+      layer('layer-near-red', [0.9, 0.3, 0.25], 2, -3, 6),
+      layer('layer-middle-green', [0.3, 0.85, 0.35], 1, -0.863, 4.863),
+      layer('layer-far-blue', [0.3, 0.4, 0.9], 0, 1.078, 2.922),
+    ];
+    const pointLights = [
+      { position: [1, 2.5, 4.5], color: [1, 0.95, 0.9], intensity: 40, radius: 0.15, castShadow: true },
+    ];
+    return {
+      parts, blenderWorld: lighting.blenderWorld,
+      environment: environment(lighting, { pointLights }),
+      camera: { eye: [0, 0.7, 5], target: [0, 0.7, -2], up: [0, 1, 0], fov: 40, near: 0.05, far: 50 },
     };
   },
 

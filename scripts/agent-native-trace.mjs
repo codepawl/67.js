@@ -67,7 +67,29 @@ export async function chooseTraceBackend({ requested, runtimeBackend, locator })
   return { backend: fallback, note: `${found.reason} The ${fallback} backend ran instead.` };
 }
 
+const V2_TABLE_TYPES = { Uint8Array, Uint32Array, Int32Array, Float32Array };
+
+// The FORMAT-v2 input of an instanced scene: the page names each table's array type and sends the record counts.
+function decodeTablesV2(exported) {
+  const input = { schemaVersion: exported.schemaVersion, ...exported.counts };
+  for (const [name, base64] of Object.entries(exported.tables)) {
+    const View = V2_TABLE_TYPES[exported.types?.[name]];
+    if (!View) throw new TypeError(`The exported native scene table "${name}" has an unknown array type ${JSON.stringify(exported.types?.[name])}.`);
+    const bytes = Buffer.from(base64, 'base64');
+    const copy = new Uint8Array(bytes.length);
+    copy.set(bytes);
+    input[name] = new View(copy.buffer, 0, copy.length / View.BYTES_PER_ELEMENT);
+  }
+  return input;
+}
+
+// The bytes of every table the tracer is handed, which is what it uploads to the card (before alignment).
+function tableBytes(tables) {
+  return Object.values(tables).reduce((total, value) => total + (ArrayBuffer.isView(value) ? value.byteLength : 0), 0);
+}
+
 function decodeTables(exported) {
+  if (exported.schemaVersion !== undefined) return decodeTablesV2(exported);
   const input = { triangleCount: exported.triangleCount };
   for (const name of TABLE_NAMES) {
     const bytes = Buffer.from(exported.tables[name], 'base64');
@@ -108,12 +130,77 @@ export function chooseNativeKernel(environment = process.env) {
 }
 
 /**
- * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet" or
- * "oidn"; `denoiser` is the loaded OIDN package for "oidn". Throws when the tracer cannot run, so the caller can fall back.
+ * Whether a job keeps repeated geometry as instances: on with the "cycles" kernel, off with the legacy kernel and when
+ * JS67_NATIVE_INSTANCING=off asks for flattened triangles (to compare the two, or to rule instancing out of a bug).
  */
-export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel() }) {
+export function chooseNativeInstancing(environment = process.env) {
+  return chooseNativeKernel(environment) === 'cycles' && environment.JS67_NATIVE_INSTANCING !== 'off';
+}
+
+/**
+ * The traced colour after the GPU a-trous filter, three floats per pixel. The cycles kernel already returned it when the
+ * trace asked for `denoise: "atrous"`; otherwise (the legacy kernel, or the filter after OIDN failed) the tracer filters
+ * the traced image with its guide buffers. Throws when the installed package cannot filter.
+ */
+function atrousColor({ tracer, traced, width, height }) {
+  let filtered = traced.denoisedRgba;
+  if (!filtered) {
+    if (typeof tracer.denoiseAtrous !== 'function') throw new Error('the installed render-native package has no a-trous filter');
+    const { rgba, albedo, normal, depth, variance } = traced;
+    filtered = tracer.denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance }).rgba;
+  }
+  return withoutAlpha(filtered, width * height);
+}
+
+// One in-process OIDN device per loaded denoiser package, kept for the life of the process so the second and later frames
+// skip device creation and the filter commit. `instance` is null when the package, the OIDN library or the addon cannot do it.
+const persistentOidnByPackage = new WeakMap();
+
+function persistentOidnFor({ tracer, denoiser }) {
+  if (typeof denoiser.createOidnDenoiser !== 'function' || typeof tracer.createNativeOidnDenoiser !== 'function') return { instance: null };
+  if (!persistentOidnByPackage.has(denoiser)) {
+    try {
+      persistentOidnByPackage.set(denoiser, { instance: denoiser.createOidnDenoiser({ createNative: tracer.createNativeOidnDenoiser }) });
+    } catch (error) {
+      persistentOidnByPackage.set(denoiser, { instance: null, note: error.message });
+    }
+  }
+  return persistentOidnByPackage.get(denoiser);
+}
+
+/**
+ * Runs OIDN on one frame: in the persistent in-process device when it is available, otherwise (or when that call fails)
+ * through the `oidnDenoise` tool. Resolves with the filtered colour and `{ mode, note }`; `mode` is "in-process" or "cli".
+ */
+export async function denoiseFrameWithOidn({ tracer, denoiser, width, height, color, albedo, normal }) {
+  const persistent = persistentOidnFor({ tracer, denoiser });
+  let note = persistent.note;
+  if (persistent.instance) {
+    try {
+      return { linear: await persistent.instance.denoise({ width, height, color, albedo, normal }), mode: 'in-process' };
+    } catch (error) {
+      note = error.message;
+    }
+  }
+  const linear = await denoiser.denoiseWithOidn({ width, height, color, albedo, normal });
+  return { linear, mode: 'cli', ...(note ? { note: `The in-process OIDN device was not used (${note}): the oidnDenoise tool ran instead.` } : {}) };
+}
+
+/**
+ * Traces one frame the page exported and returns the PNG (base64) with the job report. `denoise` is "none", "wavelet",
+ * "atrous" (the tracer's GPU filter, which is also where a missing or failing OIDN lands) or "oidn"; `denoiser` is the
+ * loaded OIDN package for "oidn". `sequence` (from createNativeSequence) renders a cycles kernel frame through the job's
+ * persistent session and adds `report.nativeSession`, the route the frame took. Throws when the tracer cannot run, so the
+ * caller can fall back.
+ */
+export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel(), sequence }) {
   const started = performance.now();
-  const traced = tracer.traceNative(decodeTables(exported), { width, height, samples, maxSeconds, kernel, noiseThreshold });
+  const filtersInTrace = denoise === 'atrous' && kernel === 'cycles';
+  const tables = decodeTables(exported);
+  const traceOptions = { width, height, samples, maxSeconds, kernel, noiseThreshold, ...(filtersInTrace ? { denoise: 'atrous' } : {}) };
+  const { traced, route } = sequence && kernel === 'cycles'
+    ? sequence.trace(tables, traceOptions)
+    : { traced: tracer.traceNative(tables, traceOptions) };
   const tracedSeconds = (performance.now() - started) / 1000;
   const pixelCount = width * height;
   const features = { color: withoutAlpha(traced.rgba, pixelCount), albedo: traced.albedo, normal: traced.normal,
@@ -122,15 +209,29 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const report = { width, height, samples, bounces, seed, denoised: false, denoiser: 'none', threads: 1, backend: 'native',
     gpu: traced.adapter, nativeBackend: traced.backend, nativeFeatures: traced.features, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
     uploadSeconds: traced.uploadSeconds, accelerationBuildSeconds: traced.accelerationBuildSeconds,
-    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, tracedSeconds, ignored: exported.ignored };
+    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, inputBytes: tableBytes(tables), ...(exported.instances === undefined ? {} : { instances: exported.instances }),
+    ...(exported.instancing === undefined ? {} : { instancing: exported.instancing, instancingReason: exported.instancingReason }),
+    ...(exported.materialsReason === undefined ? {} : { materialsReason: exported.materialsReason }), tracedSeconds, ignored: exported.ignored,
+    ...(route ? { nativeSession: route } : {}) };
   let linear = features.color;
   const denoiseStarted = performance.now();
   if (denoise === 'oidn') {
     try {
-      linear = await denoiser.denoiseWithOidn({ width, height, color: features.color, albedo: features.albedo, normal: features.normal });
-      Object.assign(report, { denoised: true, denoiser: 'oidn', oidnVersion: denoiser.OIDN_VERSION });
+      const filtered = await denoiseFrameWithOidn({ tracer, denoiser, width, height, color: features.color, albedo: features.albedo, normal: features.normal });
+      linear = filtered.linear;
+      Object.assign(report, { denoised: true, denoiser: 'oidn', oidnVersion: denoiser.OIDN_VERSION, oidnMode: filtered.mode, ...(filtered.note ? { denoiserNote: filtered.note } : {}) });
     } catch (error) {
-      report.denoiserNote = `OIDN failed (${error.message}): the wavelet filter ran instead.`;
+      report.denoiserNote = `OIDN failed (${error.message}): the GPU a-trous filter ran instead.`;
+      denoise = 'atrous';
+    }
+  }
+  if (denoise === 'atrous') {
+    try {
+      linear = atrousColor({ tracer, traced, width, height });
+      Object.assign(report, { denoised: true, denoiser: 'atrous' });
+    } catch (error) {
+      const failure = `The GPU a-trous filter failed (${error.message}): the wavelet filter ran instead.`;
+      report.denoiserNote = [report.denoiserNote, failure].filter(Boolean).join(' ');
       denoise = 'wavelet';
     }
   }

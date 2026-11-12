@@ -2,6 +2,7 @@
 // native kernel (`FORMAT-v2.md` and `src/cycles/abi.wgsl`). Pure typed arrays with zero Node-only imports.
 
 import { buildLightTree } from './light-tree-v2.mjs';
+import { THIN_LENS_FLOAT_INDEXES } from './pack-input.mjs';
 
 export const FORMAT_V2_MAGIC = 0x36375054;
 export const FORMAT_V2_VERSION = 2;
@@ -44,7 +45,9 @@ const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA = 8;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING = 16;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
 export const KERNEL_FLAG_WHITE_NOISE_SAMPLER = 64;
+export const KERNEL_FLAG_PATH_REGENERATION = 1024;
 
+const INSTANCE_VISIBILITY_CAMERA = 1;
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
 
@@ -81,6 +84,11 @@ const TEXTURE_FORMAT_RGBA8_UNORM = 0;
 const TEXTURE_FORMAT_RGBA8_SRGB = 1;
 const TEXTURE_FORMAT_RGBA32_FLOAT = 2;
 const TEXTURE_FORMAT_RG16_FLOAT = 3;
+
+// All textures share one storage binding of 32-bit words. The native host opens its device with a binding of at most 1 GiB
+// (`open_device` in src/host/device.rs), so a pool past this size cannot be bound.
+export const TEXTURE_POOL_MAX_BYTES = 1 << 30;
+const BYTES_PER_MEBIBYTE = 1 << 20;
 
 const DEFAULT_HDRI_RADIANCE_LIMIT = 16;
 const SUN_DEFAULT_HALF_ANGLE = Math.PI / 360;
@@ -251,6 +259,27 @@ function createTextureCollector() {
   const descriptors = [];
   const wordChunks = [];
   let totalWords = 0;
+  let finished = null;
+
+  function packedWordCount(format, pixelCount) {
+    if (format === TEXTURE_FORMAT_RGBA32_FLOAT) {
+      return pixelCount * 4;
+    }
+    return Math.max(4, Math.ceil(pixelCount / 4) * 4);
+  }
+
+  // Checked before a texture is converted, so an oversize image fails fast instead of after allocating its words.
+  function assertRoomInPool(wordCount, width, height) {
+    if ((totalWords + wordCount) * 4 <= TEXTURE_POOL_MAX_BYTES) {
+      return;
+    }
+    const neededMebibytes = Math.ceil(wordCount * 4 / BYTES_PER_MEBIBYTE);
+    const usedMebibytes = Math.ceil(totalWords * 4 / BYTES_PER_MEBIBYTE);
+    throw new RangeError(
+      `The texture pool is full: the ${width}x${height} texture needs ${neededMebibytes} MiB and the ${descriptors.length} before it take ${usedMebibytes} MiB, ` +
+      `but one pool holds at most ${TEXTURE_POOL_MAX_BYTES / BYTES_PER_MEBIBYTE} MiB. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.`,
+    );
+  }
 
   function objectIdentity(dataBuffer) {
     if (!dataIdMap.has(dataBuffer)) {
@@ -307,6 +336,7 @@ function createTextureCollector() {
     }
 
     const pixelCount = width * height;
+    assertRoomInPool(packedWordCount(format, pixelCount), width, height);
     const dataOffset = totalWords;
     let packedWords;
     let sumR = 0;
@@ -388,7 +418,8 @@ function createTextureCollector() {
 
   function addPackedRgba8Words(words, width, height, isSrgb, repeat) {
     const pixelCount = width * height;
-    const alignedWords = Math.max(4, Math.ceil(pixelCount / 4) * 4);
+    const alignedWords = packedWordCount(TEXTURE_FORMAT_RGBA8_UNORM, pixelCount);
+    assertRoomInPool(alignedWords, width, height);
     const padded = new Uint32Array(alignedWords);
     padded.set(words.subarray(0, pixelCount));
     let sumR = 0;
@@ -429,6 +460,12 @@ function createTextureCollector() {
   }
 
   function finish() {
+    finished ??= buildFinishedTextures();
+    return finished;
+  }
+
+  // The per-texture word arrays are dropped once they are joined, so the host holds one copy of the pool, not two.
+  function buildFinishedTextures() {
     const textureCount = descriptors.length;
     const descriptorBuffer = new Uint8Array(Math.max(1, textureCount) * STRUCT_STRIDES_V2.textureDescriptor);
     for (let index = 0; index < textureCount; index++) {
@@ -440,6 +477,7 @@ function createTextureCollector() {
       texelBuffer.set(chunk, cursor);
       cursor += chunk.length;
     }
+    wordChunks.length = 0;
     return {
       textureDescriptors: descriptorBuffer,
       textureCount,
@@ -633,9 +671,10 @@ export function packMaterialRecordV2(material = {}, textureCollector = null) {
     ? collector.addTexture(material.bumpTexture ?? material.bumpMap, false)
     : { index: Number(material.bumpTex ?? -1), meanLinearRgb: [1, 1, 1] };
 
-  const alphaTexIndex = explicitAlphaTex.index >= 0
-    ? explicitAlphaTex.index
-    : (alphaMode !== ALPHA_MODE_OPAQUE ? baseTex.index : -1);
+  // The kernel reads the alpha of the base colour map itself (its alpha channel). `alpha_tex` is a separate map read through its
+  // red channel, so pointing it at the base colour map would multiply the alpha by the colour's red (and, for an sRGB map, by its
+  // linearised red): a cutout then loses every texel that is not red enough. Only an explicit alpha map sets it.
+  const alphaTexIndex = explicitAlphaTex.index;
 
   let flags = 0;
   if (material.multiscatterGgx !== false) {
@@ -1329,6 +1368,69 @@ function packLightTree(packedLights, packedEmissives) {
   };
 }
 
+/**
+ * Reads the `envCompensation` option: `undefined`, `false` or `0` (off, the default), `true` (the full mean) or a
+ * fraction in (0, 1] of the mean radiance to subtract from the sampling table. Returns the fraction, 0 when off.
+ */
+export function resolveEnvCompensationFraction(envCompensation, callerName) {
+  if (envCompensation === undefined || envCompensation === false) {
+    return 0;
+  }
+  if (envCompensation === true) {
+    return 1;
+  }
+  if (typeof envCompensation !== 'number' || !Number.isFinite(envCompensation) || envCompensation < 0 || envCompensation > 1) {
+    throw new RangeError(
+      `${callerName}: \`envCompensation\` must be true, false or a number from 0 to 1 (the fraction of the mean radiance to subtract), got ${JSON.stringify(envCompensation)}.`
+    );
+  }
+  return envCompensation;
+}
+
+const MINIMUM_COMPENSATED_TABLE_FRACTION = 1e-6;
+
+/**
+ * MIS compensation of the environment sampling table (Karlik et al. 2019; pbrt-v4 ImageInfiniteLight, Apache-2.0).
+ * Subtracts `fraction` times the sphere-mean radiance from every texel's weight and clamps at zero, so light sampling
+ * spends its samples where BSDF sampling does badly. The kernel reads the pdf from the same table, so the pdf used in
+ * MIS stays the pdf that was sampled. A map that would end up all zero, or nearly so, keeps its original table.
+ * Rewrites `pixelWeights` and `rowTotals` in place and returns the new total.
+ */
+function compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, fraction, originalTotal) {
+  const deltaPhi = (2 * Math.PI) / width;
+  const deltaTheta = Math.PI / height;
+  let solidAngleSum = 0;
+  for (let y = 0; y < height; y++) {
+    solidAngleSum += Math.sin(Math.PI * (y + 0.5) / height) * deltaPhi * deltaTheta * width;
+  }
+  const meanRadiance = originalTotal / solidAngleSum;
+
+  const compensatedWeights = new Float64Array(pixelWeights.length);
+  const compensatedRowTotals = new Float64Array(height);
+  let compensatedTotal = 0;
+  for (let y = 0; y < height; y++) {
+    const texelSolidAngle = Math.sin(Math.PI * (y + 0.5) / height) * deltaPhi * deltaTheta;
+    const subtractedWeight = fraction * meanRadiance * texelSolidAngle;
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      const pixelIndex = y * width + x;
+      const weight = Math.max(0, pixelWeights[pixelIndex] - subtractedWeight);
+      compensatedWeights[pixelIndex] = weight;
+      rowSum += weight;
+    }
+    compensatedRowTotals[y] = rowSum;
+    compensatedTotal += rowSum;
+  }
+  // A constant map leaves only rounding residue (about 1e-16 of the total) after the subtraction, and a table built
+  // from that residue would sample an arbitrary patch of the sky, so anything this small counts as all zero.
+  if (!(compensatedTotal > originalTotal * MINIMUM_COMPENSATED_TABLE_FRACTION)) {
+    return originalTotal;
+  }
+  pixelWeights.set(compensatedWeights);
+  rowTotals.set(compensatedRowTotals);
+  return compensatedTotal;
+}
+
 function packEnvironmentTexelsV2(environment, options = {}) {
   if (!environment || !(environment.width > 0 && environment.height > 0)) {
     const bg = options.backgroundColor ?? [0, 0, 0];
@@ -1355,6 +1457,7 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     ? Number(environment.rotation)
     : Math.atan2(Number(environment.sine ?? 0), Number(environment.cosine ?? 1));
 
+  const compensationFraction = resolveEnvCompensationFraction(options.envCompensation, 'buildNativeInputV2');
   const pixelCount = width * height;
   const totalVec4 = 2 * pixelCount + height;
   const texels = new Float32Array(totalVec4 * 4);
@@ -1385,6 +1488,10 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     }
     rowTotals[y] = rowSum;
     totalWeight += rowSum;
+  }
+
+  if (compensationFraction > 0) {
+    totalWeight = compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, compensationFraction, totalWeight);
   }
 
   const envCdfOffset = pixelCount;
@@ -1507,6 +1614,15 @@ export function validateSamplerOption(sampler, callerName) {
   }
 }
 
+/** Throws unless `denoise` is undefined, "none" or "atrous". */
+export function validateDenoiseOption(denoise, callerName) {
+  if (denoise !== undefined && denoise !== 'none' && denoise !== 'atrous') {
+    throw new RangeError(
+      `${callerName}: \`denoise\` must be "none" (default) or "atrous", got ${JSON.stringify(denoise)}.`
+    );
+  }
+}
+
 /** Throws unless `lightSampling` is undefined, "auto", "tree" or "uniform". */
 export function validateLightSamplingOption(lightSampling, callerName) {
   if (lightSampling !== undefined && !VALID_LIGHT_SAMPLING.includes(lightSampling)) {
@@ -1549,6 +1665,15 @@ export function resolveSamplingOptions(options, callerName) {
   return { sampler, lightSampling };
 }
 
+/** Throws unless `pathRegeneration` is undefined, true or false. */
+export function validatePathRegenerationOption(pathRegeneration, callerName) {
+  if (pathRegeneration !== undefined && typeof pathRegeneration !== 'boolean') {
+    throw new TypeError(
+      `${callerName}: \`pathRegeneration\` must be true, false or left out (the "cycles" kernel defaults to true), got ${JSON.stringify(pathRegeneration)}.`
+    );
+  }
+}
+
 /** True when the kernel should pick lights through the light tree for this scene and mode. */
 export function resolveUseLightTree(lightSampling, emitterCount, lightTreeNodeCount) {
   if (lightTreeNodeCount <= 0 || lightSampling === 'uniform') {
@@ -1578,6 +1703,8 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
   resolveSamplingOptions(options, callerName);
+  resolveEnvCompensationFraction(options.envCompensation, callerName);
+  validateDenoiseOption(options.denoise, callerName);
   validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
@@ -1601,6 +1728,45 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
       requireFiniteIntegerInRange(options[field], field, 0, 1024, callerName);
     }
   }
+}
+
+export const MAX_APERTURE_BLADES = 64;
+
+/** The thin lens a v1 params block carries (see THIN_LENS_FLOAT_INDEXES in pack-input.mjs); nothing for a pinhole, so its bytes stay as they were. */
+function readV1ThinLens(paramF32) {
+  if (!(paramF32[THIN_LENS_FLOAT_INDEXES.apertureRadius] > 0)) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(THIN_LENS_FLOAT_INDEXES).map(([fieldName, floatIndex]) => [fieldName, paramF32[floatIndex]]));
+}
+const DEFAULT_FOCAL_DISTANCE = 10;
+
+function requireThinLensNumber(value, name, callerName, isValid, expectation) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || !isValid(value)) {
+    throw new RangeError(`${callerName}: camera \`${name}\` must be ${expectation}, got ${JSON.stringify(value)}.`);
+  }
+}
+
+/**
+ * The thin lens of a camera, from the camera object (as `createCamera` returns it for a camera with an `fStop`) or from the
+ * same names in `options`: `apertureRadius` (scene units, 0 is a pinhole), `focalDistance` (along the view axis),
+ * `apertureBlades` (0 for a round aperture, else 3 to 64) and `apertureRotation` (radians). A pinhole keeps the defaults
+ * the params block always held, so its bytes do not change. Throws a RangeError that says what to pass.
+ */
+export function resolveThinLensParameters(camera, options, callerName) {
+  const apertureRadius = camera?.apertureRadius ?? options.apertureRadius ?? 0;
+  requireThinLensNumber(apertureRadius, 'apertureRadius', callerName, value => value >= 0,
+    'a number of scene units, 0 or more (0 is a pinhole; fStop 2.8 on a 50 mm lens is 0.00893)');
+  const focalDistance = camera?.focalDistance ?? options.focalDistance ?? DEFAULT_FOCAL_DISTANCE;
+  requireThinLensNumber(focalDistance, 'focalDistance', callerName, value => value > 0,
+    'a distance along the view axis above 0, such as the eye-to-target distance');
+  const apertureBlades = camera?.apertureBlades ?? options.apertureBlades ?? 0;
+  requireThinLensNumber(apertureBlades, 'apertureBlades', callerName,
+    value => Number.isInteger(value) && (value === 0 || (value >= 3 && value <= MAX_APERTURE_BLADES)),
+    `0 for a round aperture or a whole number from 3 to ${MAX_APERTURE_BLADES}`);
+  const apertureRotation = camera?.apertureRotation ?? options.apertureRotation ?? 0;
+  requireThinLensNumber(apertureRotation, 'apertureRotation', callerName, () => true, 'a finite number of radians');
+  return { apertureRadius, focalDistance, apertureBlades, apertureRotation };
 }
 
 function effectiveCyclesClamp(value) {
@@ -1736,6 +1902,7 @@ function packKernelParamsV2({
   const cameraNear = Math.max(0, Number(options.near ?? camera?.near ?? 0));
   const cameraFar = Math.max(cameraNear + 1e-3, Number(options.far ?? camera?.far ?? farDistance ?? 1e30));
   const lensShift = camera?.lensShift ?? options.lensShift ?? [0, 0];
+  const thinLens = resolveThinLensParameters(camera, options, 'buildNativeInputV2');
 
   u32[0] = FORMAT_V2_MAGIC;
   u32[1] = FORMAT_V2_VERSION;
@@ -1785,17 +1952,17 @@ function packKernelParamsV2({
   f32[36] = scaledRight[0];
   f32[37] = scaledRight[1];
   f32[38] = scaledRight[2];
-  f32[39] = Math.max(0, Number(camera?.apertureRadius ?? options.apertureRadius ?? 0));
+  f32[39] = thinLens.apertureRadius;
 
   f32[40] = scaledUp[0];
   f32[41] = scaledUp[1];
   f32[42] = scaledUp[2];
-  f32[43] = Math.max(1e-4, Number(camera?.focalDistance ?? options.focalDistance ?? 10));
+  f32[43] = thinLens.focalDistance;
 
   f32[44] = Number(lensShift[0] ?? 0);
   f32[45] = Number(lensShift[1] ?? 0);
-  u32[46] = Math.max(0, Math.round(Number(camera?.apertureBlades ?? options.apertureBlades ?? 0))) >>> 0;
-  f32[47] = Number(camera?.apertureRotation ?? options.apertureRotation ?? 0);
+  u32[46] = thinLens.apertureBlades >>> 0;
+  f32[47] = thinLens.apertureRotation;
 
   u32[48] = packedEnvironment.envWidth >>> 0;
   u32[49] = packedEnvironment.envHeight >>> 0;
@@ -1988,8 +2155,29 @@ function appendWorldEmissiveIfActive({
   return emittedIndex;
 }
 
-function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
-  const materialRecords = rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
+// Triangle records are shared by every copy of a mesh, so one `local_emissive_offset` per triangle has to fit every instance that
+// emits: the instance's entries are the triangles that kept an area, in order, whichever material the instance resolves to.
+// The first emitting instance sets the offsets; a later one must emit the same triangles.
+function shareEmissiveOffsets(meshSlot, emittedLocalIndices, instanceIndex) {
+  if (emittedLocalIndices.length === 0) return;
+  if (!meshSlot.emissiveLocalIndices) {
+    meshSlot.emissiveLocalIndices = emittedLocalIndices;
+    emittedLocalIndices.forEach((localIdx, offset) => {
+      meshSlot.ordered[localIdx].localEmissiveOffset = offset;
+    });
+    return;
+  }
+  const reference = meshSlot.emissiveLocalIndices;
+  const matches = reference.length === emittedLocalIndices.length && reference.every((localIdx, offset) => localIdx === emittedLocalIndices[offset]);
+  if (!matches) {
+    throw new RangeError(`Instance[${instanceIndex}] scales some emissive triangles of its shared mesh to no area, so its emissive entries differ from the other copies. Give it a scale that keeps every triangle, or remove its emissive material.`);
+  }
+}
+
+function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, reducedMaterials) {
+  const materialRecords = reducedMaterials
+    ? reducedMaterials.materialRecords
+    : rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
   materialRecords.forEach((rec, index) => materialsBuffer.set(rec.bytes, index * STRUCT_STRIDES_V2.material));
 
@@ -2050,14 +2238,10 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
       const opaqueTriangleCount = opaque.length;
       const totalTriangleCount = ordered.length;
 
-      let localEmissiveCounter = 0;
       for (const item of ordered) {
-        if (materialRecords[item.materialIndex]?.isEmissive) {
-          item.localEmissiveOffset = localEmissiveCounter++;
-        }
         allTriangles.push(item);
       }
-      meshSlot = { blasIndex, defaultMaterialIndex, triangleOffset, opaqueTriangleCount, totalTriangleCount, ordered };
+      meshSlot = { blasIndex, defaultMaterialIndex, triangleOffset, opaqueTriangleCount, totalTriangleCount, ordered, emissiveLocalIndices: null };
       meshCache.set(geometry, meshSlot);
     } else if (
       materialOverride === INVALID_INDEX_V2 &&
@@ -2075,7 +2259,7 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
     const visibilityFlags = (baseVisibility | (decomposed.negativeScale ? INSTANCE_FLAG_NEGATIVE_SCALE : 0)) >>> 0;
 
     let emissiveBaseOffset = INVALID_INDEX_V2;
-    let instanceEmissiveCount = 0;
+    const emittedLocalIndices = [];
     for (let localIdx = 0; localIdx < meshSlot.ordered.length; localIdx++) {
       const triItem = meshSlot.ordered[localIdx];
       const globalTriIdx = meshSlot.triangleOffset + localIdx;
@@ -2096,12 +2280,10 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector) {
         if (emissiveBaseOffset === INVALID_INDEX_V2) {
           emissiveBaseOffset = emittedIdx;
         }
-        if (triItem.localEmissiveOffset === INVALID_INDEX_V2) {
-          triItem.localEmissiveOffset = instanceEmissiveCount;
-        }
-        instanceEmissiveCount++;
+        emittedLocalIndices.push(localIdx);
       }
     }
+    shareEmissiveOffsets(meshSlot, emittedLocalIndices, instIdx);
 
     const objectId = (inst.objectId ?? instIdx) >>> 0;
     instanceItems.push({
@@ -2274,10 +2456,19 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   }
   validatePackOptions(options, 'buildNativeInputV2');
 
-  const textureCollector = createTextureCollector();
   const explicitInstances = options.instances ?? scene.instances;
+  const reducedMaterials = options.reducedMaterials;
+  if (reducedMaterials !== undefined) {
+    if (!explicitInstances) {
+      throw new TypeError('buildNativeInputV2 option `reducedMaterials` belongs to an instanced scene: pass a scene with `instances` (buildTraceScene with { instancing: true }), or leave the option out.');
+    }
+    if (!Array.isArray(reducedMaterials.materialRecords) || !reducedMaterials.textureCollector) {
+      throw new TypeError('buildNativeInputV2 option `reducedMaterials` must be the result of reduceV1MaterialTable (materialRecords and textureCollector).');
+    }
+  }
+  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector();
   const packedGeometry = explicitInstances
-    ? packInstancedGeometry(explicitInstances, options.materials ?? scene.materials ?? [{}], textureCollector)
+    ? packInstancedGeometry(explicitInstances, options.materials ?? scene.materials ?? [{}], textureCollector, reducedMaterials)
     : packFlattenedTraceScene(scene, options.parts ?? scene.parts, textureCollector);
 
   const packedTextures = textureCollector.finish();
@@ -2344,11 +2535,143 @@ function extractAtlasSubtexture(atlasWords, atlasWidth, rectX, rectY, width, hei
   return words;
 }
 
+// The texture slots of a material record that the v1 tables have no atlas rectangle for, with the colour space of each.
+// `carried.textures` names them; the record field is the index the collector hands back.
+const CARRIED_TEXTURE_SLOTS = Object.freeze([
+  ['transmission', 'transmissionTex', false],
+  ['coatWeightRoughness', 'coatWeightRoughnessTex', false],
+  ['coatTint', 'coatTintTex', true],
+  ['coatNormal', 'coatNormalTex', false],
+  ['sheenColorRoughness', 'sheenColorRoughnessTex', true],
+  ['anisotropy', 'anisotropyTex', false],
+  ['bump', 'bumpTex', false],
+]);
+
+/**
+ * The record descriptor of a material with the fields beyond the v1 tables laid over it. `carried` is the result of
+ * `carriedMaterialFields` (src names of the record fields, plus `textures`, resolved images by slot). The descriptor keeps
+ * every field the v1 tables carry as they are: carried fields never replace them, so a material that carries nothing packs
+ * to the bytes it always did. Blending applies only to a material the tables made opaque.
+ */
+function withCarriedFields(descriptor, carried, textureCollector) {
+  if (!carried) return descriptor;
+  const { textures, alphaMode, ...fields } = carried;
+  const carriedDescriptor = { ...descriptor, ...fields };
+  if (alphaMode === 'blend' && descriptor.alphaMode === 'opaque') carriedDescriptor.alphaMode = 'blend';
+  for (const [slot, field, isSrgb] of CARRIED_TEXTURE_SLOTS) {
+    const image = textures?.[slot];
+    if (image) carriedDescriptor[field] = textureCollector.addTexture(image, isSrgb).index;
+  }
+  return carriedDescriptor;
+}
+
+/**
+ * The material records of a v1 material table. The fields the v1 tables carry (base colour, metallic, roughness, emission,
+ * clearcoat, transmission, ior, normal scale, mask cutoff, subsurface and the four atlas textures) are read from the tables.
+ * `carriedFields`, when given, holds one `carriedMaterialFields` result per material for everything the tables cannot hold
+ * (blend opacity, sheen, specular, anisotropy, iridescence, attenuation, the layer textures and the rest of the record).
+ * `materials` holds the table with the subsurface table after it, `atlas` the atlas words and `atlasWidth` their row width.
+ */
+export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields }) {
+  const textureCollector = createTextureCollector();
+  const atlasCache = new Map();
+
+  function registerAtlasRect(rectX, rectY, width, height, flagsValue) {
+    if (!(width > 0 && height > 0) || !atlasWords) {
+      return { index: -1, meanLinearRgb: [1, 1, 1] };
+    }
+    const x = Math.round(rectX);
+    const y = Math.round(rectY);
+    const w = Math.round(width);
+    const h = Math.round(height);
+    const flags = Math.round(flagsValue);
+    const key = `${x},${y},${w},${h},${flags}`;
+    if (atlasCache.has(key)) {
+      return atlasCache.get(key);
+    }
+    const repeat = (flags & 1) !== 0;
+    const isSrgb = (flags & 2) !== 0;
+    const subWords = extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h);
+    const added = textureCollector.addPackedRgba8Words(subWords, w, h, isSrgb, repeat);
+    atlasCache.set(key, added);
+    return added;
+  }
+
+  const materialRecords = [];
+  const materialLightMasks = [];
+  const materialShadowOnly = [];
+  for (let m = 0; m < materialCount; m++) {
+    const base = m * 40;
+    const baseColor = [matSource[base], matSource[base + 1], matSource[base + 2]];
+    const metallic = matSource[base + 3];
+    const emission = [matSource[base + 4], matSource[base + 5], matSource[base + 6]];
+    const roughness = matSource[base + 7];
+    const clearcoat = matSource[base + 8];
+    const clearcoatRoughness = matSource[base + 9];
+    const transmission = matSource[base + 10];
+    const ior = matSource[base + 11] > 0 ? matSource[base + 11] : 1.5;
+    const normalScale = [matSource[base + 12] || 1, matSource[base + 13] || 1];
+    const alphaCutoff = matSource[base + 14];
+    const maskLo = ((Math.round(matSource[base + 15]) & 0xffff) | ((Math.round(matSource[base + 16]) & 0xffff) << 16)) >>> 0;
+    materialLightMasks.push(maskLo);
+    // The v1 tables flag a shadow-only part in the second channel of material texel 5 (SHADOW_ONLY_SLOT in src/path-tracer-gpu-pack.js).
+    materialShadowOnly.push(matSource[base + 21] > 0);
+
+    const baseTex = registerAtlasRect(matSource[base + 24], matSource[base + 25], matSource[base + 26], matSource[base + 27], matSource[base + 17]);
+    const normalTex = registerAtlasRect(matSource[base + 28], matSource[base + 29], matSource[base + 30], matSource[base + 31], matSource[base + 18]);
+    const mrTex = registerAtlasRect(matSource[base + 32], matSource[base + 33], matSource[base + 34], matSource[base + 35], matSource[base + 19]);
+    const emissionTex = registerAtlasRect(matSource[base + 36], matSource[base + 37], matSource[base + 38], matSource[base + 39], matSource[base + 20]);
+
+    let subsurface = null;
+    if (subsurfaceVec4Offset > 0) {
+      const subBase = subsurfaceVec4Offset * 4 + m * 8;
+      if (subBase + 7 < matSource.length && matSource[subBase] > 0) {
+        const hasCustomColor = matSource[subBase + 4] >= 0;
+        subsurface = {
+          weight: matSource[subBase],
+          meanFreePath: [matSource[subBase + 1], matSource[subBase + 2], matSource[subBase + 3]],
+          color: hasCustomColor ? [matSource[subBase + 4], matSource[subBase + 5], matSource[subBase + 6]] : baseColor,
+        };
+      }
+    }
+
+    const packedMat = packMaterialRecordV2(withCarriedFields({
+      baseColor,
+      metallic,
+      roughness,
+      ior,
+      clearcoat,
+      clearcoatRoughness,
+      transmission,
+      normalScale,
+      emission,
+      subsurface,
+      alphaMode: alphaCutoff > 0 && baseTex.index >= 0 ? 'mask' : 'opaque',
+      alphaCutoff: alphaCutoff > 0 && baseTex.index >= 0 ? alphaCutoff : 0,
+      baseColorTex: baseTex.index,
+      normalTex: normalTex.index,
+      metallicRoughnessTex: mrTex.index,
+      emissionTex: emissionTex.index,
+      alphaTex: -1,
+    }, carriedFields?.[m], textureCollector), null);
+    packedMat.meanEmissiveRadiance = [
+      packedMat.meanEmissiveRadiance[0] * emissionTex.meanLinearRgb[0],
+      packedMat.meanEmissiveRadiance[1] * emissionTex.meanLinearRgb[1],
+      packedMat.meanEmissiveRadiance[2] * emissionTex.meanLinearRgb[2],
+    ];
+    packedMat.isEmissive = luminance(packedMat.meanEmissiveRadiance) > 0;
+    materialRecords.push(packedMat);
+  }
+  return { materialRecords, materialLightMasks, materialShadowOnly, textureCollector };
+}
+
 /**
  * Upgrades a legacy v1 `buildNativeInput` payload to `FORMAT-v2` (`schemaVersion: 2`) so existing callers passing v1
- * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites.
+ * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites. `carriedFields` (one
+ * `carriedMaterialFields` result per material) adds what the v1 material table cannot hold; without it the records hold the
+ * v1 fields alone.
  */
-export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
+export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = undefined) {
   if (v1Input?.schemaVersion === FORMAT_V2_VERSION) {
     return v1Input;
   }
@@ -2381,95 +2704,14 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
   }
   const materialCount = Math.min(maxPossibleMaterials, highestMaterialIndex + 1);
 
-  const textureCollector = createTextureCollector();
-  const atlasCache = new Map();
-  const atlasWidth = paramU32[45] || 1;
-  const atlasWords = v1Input.atlas;
-
-  function registerAtlasRect(rectX, rectY, width, height, flagsValue) {
-    if (!(width > 0 && height > 0) || !atlasWords) {
-      return { index: -1, meanLinearRgb: [1, 1, 1] };
-    }
-    const x = Math.round(rectX);
-    const y = Math.round(rectY);
-    const w = Math.round(width);
-    const h = Math.round(height);
-    const flags = Math.round(flagsValue);
-    const key = `${x},${y},${w},${h},${flags}`;
-    if (atlasCache.has(key)) {
-      return atlasCache.get(key);
-    }
-    const repeat = (flags & 1) !== 0;
-    const isSrgb = (flags & 2) !== 0;
-    const subWords = extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h);
-    const added = textureCollector.addPackedRgba8Words(subWords, w, h, isSrgb, repeat);
-    atlasCache.set(key, added);
-    return added;
-  }
-
-  const matSource = v1Input.materials;
-  const materialRecords = [];
-  const materialLightMasks = [];
-  for (let m = 0; m < materialCount; m++) {
-    const base = m * 40;
-    const baseColor = [matSource[base], matSource[base + 1], matSource[base + 2]];
-    const metallic = matSource[base + 3];
-    const emission = [matSource[base + 4], matSource[base + 5], matSource[base + 6]];
-    const roughness = matSource[base + 7];
-    const clearcoat = matSource[base + 8];
-    const clearcoatRoughness = matSource[base + 9];
-    const transmission = matSource[base + 10];
-    const ior = matSource[base + 11] > 0 ? matSource[base + 11] : 1.5;
-    const normalScale = [matSource[base + 12] || 1, matSource[base + 13] || 1];
-    const alphaCutoff = matSource[base + 14];
-    const maskLo = ((Math.round(matSource[base + 15]) & 0xffff) | ((Math.round(matSource[base + 16]) & 0xffff) << 16)) >>> 0;
-    materialLightMasks.push(maskLo);
-
-    const baseTex = registerAtlasRect(matSource[base + 24], matSource[base + 25], matSource[base + 26], matSource[base + 27], matSource[base + 17]);
-    const normalTex = registerAtlasRect(matSource[base + 28], matSource[base + 29], matSource[base + 30], matSource[base + 31], matSource[base + 18]);
-    const mrTex = registerAtlasRect(matSource[base + 32], matSource[base + 33], matSource[base + 34], matSource[base + 35], matSource[base + 19]);
-    const emissionTex = registerAtlasRect(matSource[base + 36], matSource[base + 37], matSource[base + 38], matSource[base + 39], matSource[base + 20]);
-
-    let subsurface = null;
-    if (subsurfaceVec4Offset > 0) {
-      const subBase = subsurfaceVec4Offset * 4 + m * 8;
-      if (subBase + 7 < matSource.length && matSource[subBase] > 0) {
-        const hasCustomColor = matSource[subBase + 4] >= 0;
-        subsurface = {
-          weight: matSource[subBase],
-          meanFreePath: [matSource[subBase + 1], matSource[subBase + 2], matSource[subBase + 3]],
-          color: hasCustomColor ? [matSource[subBase + 4], matSource[subBase + 5], matSource[subBase + 6]] : baseColor,
-        };
-      }
-    }
-
-    const packedMat = packMaterialRecordV2({
-      baseColor,
-      metallic,
-      roughness,
-      ior,
-      clearcoat,
-      clearcoatRoughness,
-      transmission,
-      normalScale,
-      emission,
-      subsurface,
-      alphaMode: alphaCutoff > 0 && baseTex.index >= 0 ? 'mask' : 'opaque',
-      alphaCutoff: alphaCutoff > 0 && baseTex.index >= 0 ? alphaCutoff : 0,
-      baseColorTex: baseTex.index,
-      normalTex: normalTex.index,
-      metallicRoughnessTex: mrTex.index,
-      emissionTex: emissionTex.index,
-      alphaTex: alphaCutoff > 0 && baseTex.index >= 0 ? baseTex.index : -1,
-    }, null);
-    packedMat.meanEmissiveRadiance = [
-      packedMat.meanEmissiveRadiance[0] * emissionTex.meanLinearRgb[0],
-      packedMat.meanEmissiveRadiance[1] * emissionTex.meanLinearRgb[1],
-      packedMat.meanEmissiveRadiance[2] * emissionTex.meanLinearRgb[2],
-    ];
-    packedMat.isEmissive = luminance(packedMat.meanEmissiveRadiance) > 0;
-    materialRecords.push(packedMat);
-  }
+  const { materialRecords, materialLightMasks, materialShadowOnly, textureCollector } = reduceV1MaterialTable({
+    materials: v1Input.materials,
+    atlas: v1Input.atlas,
+    atlasWidth: paramU32[45] || 1,
+    subsurfaceVec4Offset,
+    materialCount,
+    carriedFields,
+  });
 
   const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
   materialRecords.forEach((rec, idx) => materialsBuffer.set(rec.bytes, idx * STRUCT_STRIDES_V2.material));
@@ -2586,7 +2828,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
       opaqueTriangleCount: opaque.length,
       totalTriangleCount: ordered.length,
       materialOverride: INVALID_INDEX_V2,
-      visibilityFlags: INSTANCE_DEFAULT_VISIBILITY,
+      visibilityFlags: materialShadowOnly[matIdx] ? INSTANCE_DEFAULT_VISIBILITY & ~INSTANCE_VISIBILITY_CAMERA : INSTANCE_DEFAULT_VISIBILITY,
       lightGroupMaskLo: maskLo,
       lightGroupMaskHi: maskHi,
       emissiveBaseOffset,
@@ -2692,6 +2934,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     above: [paramF32[12], paramF32[13], paramF32[14]],
     halfWidth: paramF32[32],
     halfHeight: paramF32[33],
+    ...readV1ThinLens(paramF32),
   };
 
   const packedTextures = textureCollector.finish();

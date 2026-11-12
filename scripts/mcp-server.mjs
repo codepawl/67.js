@@ -739,6 +739,7 @@ const otherOperations = [
     type: z.literal('fracture-node'), node: identifier, cells: z.number().int().min(2).max(64), strength: positive,
     seed: detail(0, 4294967295), impact: vector3.optional(), impactRadius: positive.optional(), density: positive.optional(), friction: nonnegative.optional(),
   }).describe('Break a convex root node into glued physics pieces. Fields: scene_capabilities physics.'),
+  z.strictObject({ type: z.literal('settle'), settle: z.record(z.string(), z.unknown()).describe('See scene_capabilities topic settle.') }),
   z.strictObject({ type: z.literal('set-armatures'), armatures: armaturesReference.nullable() }),
   z.strictObject({ type: z.literal('set-physics'), physics: z.record(z.string(), z.unknown()).nullable().describe('Same object as recipe.physics in scene_create.') }),
   z.strictObject({ type: z.literal('set-cloth'), cloth: z.record(z.string(), z.unknown()).nullable() }),

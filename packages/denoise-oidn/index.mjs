@@ -91,3 +91,69 @@ export async function denoiseWithOidn({ width, height, color, albedo, normal, de
     await rm(directory, { recursive: true, force: true });
   }
 }
+
+const LIBRARY_FILES = {
+  win32: { directories: ['bin'], names: ['OpenImageDenoise.dll'] },
+  darwin: { directories: ['lib'], names: ['libOpenImageDenoise.2.dylib', `libOpenImageDenoise.${OIDN_VERSION}.dylib`, 'libOpenImageDenoise.dylib'] },
+  linux: { directories: ['lib', 'lib64'], names: ['libOpenImageDenoise.so.2', `libOpenImageDenoise.so.${OIDN_VERSION}`, 'libOpenImageDenoise.so'] },
+};
+
+function findFirstExisting(directories, names) {
+  for (const directory of directories) {
+    for (const name of names) {
+      const candidate = join(directory, name);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * The path of the OIDN shared library that the in-process denoiser loads, or null when none is installed. Looks at
+ * `OIDN_LIBRARY_PATH`, then next to the tool named by `OIDN_DENOISE_PATH` (its release folder), then in ./vendor.
+ */
+export function findOidnLibrary() {
+  const configured = process.env.OIDN_LIBRARY_PATH;
+  if (configured) return existsSync(configured) ? configured : null;
+  const layout = LIBRARY_FILES[process.platform];
+  if (!layout) return null;
+  const binary = findOidnBinary();
+  if (!binary) return null;
+  const releaseDirectory = dirname(dirname(binary));
+  return findFirstExisting(layout.directories.map(directory => join(releaseDirectory, directory)), layout.names);
+}
+
+const NATIVE_DEVICE_NAMES = /^(default|cpu|sycl|cuda|hip|metal|\d+)$/;
+
+/**
+ * An OIDN device and filter that stay loaded between calls, so only the first call pays for the device, the weights and the
+ * filter commit. `createNative` is `createNativeOidnDenoiser` of `@codepawlhq/67js-render-native`, whose addon links the
+ * OIDN library at run time; this package does not load the addon itself. Returns `{ denoise, close, deviceSeconds,
+ * lastTimings, libraryPath }`; `denoise` takes what `denoiseWithOidn` takes and resolves with a new Float32Array.
+ * Throws, with what to do, when the library or the addon is missing, so a caller can use `denoiseWithOidn` instead.
+ */
+export function createOidnDenoiser({ createNative, device = 'cpu', quality = 'high', cleanAux = false, threads = 0, libraryPath = findOidnLibrary() } = {}) {
+  if (typeof createNative !== 'function') {
+    throw new TypeError('createOidnDenoiser needs `createNative`: pass createNativeOidnDenoiser from the render-native package.');
+  }
+  if (!libraryPath) {
+    throw new Error('The OIDN shared library is not installed: run `npm run fetch` in the denoise package, or set OIDN_LIBRARY_PATH.');
+  }
+  if (typeof device !== 'string' || !NATIVE_DEVICE_NAMES.test(device)) {
+    throw new TypeError(`createOidnDenoiser: device ${JSON.stringify(device)} is unknown: pass "cpu", "cuda", "hip", "sycl", "metal", "default" or a device index.`);
+  }
+  const native = createNative({ libraryPath, device, quality, cleanAux, threads });
+  let lastTimings = null;
+  return {
+    libraryPath,
+    deviceSeconds: native.deviceSeconds,
+    get lastTimings() { return lastTimings; },
+    async denoise({ width, height, color, albedo, normal }) {
+      const result = native.denoise({ width, height, color, albedo, normal });
+      const { color: denoised, ...timings } = result;
+      lastTimings = timings;
+      return denoised;
+    },
+    close() { native.close(); },
+  };
+}

@@ -1,4 +1,4 @@
-import { cameraFieldOfView } from './camera.js';
+import { cameraFieldOfView, resolveThinLens } from './camera.js';
 import { fresnelSchlick } from './material-layers.js';
 import { pointLightFalloff } from './ray-query.js';
 import { profileGain } from './light-profile.js';
@@ -45,13 +45,24 @@ const CONVERGENCE_LUMINANCE_FLOOR = 0.05;
 const IGNORED_MAP_FIELDS = ['occlusionMap'];
 // Shading layers of the rasterizer that the tracer's surface model has no term for.
 const IGNORED_LAYERS = [
-  ['anisotropy', material => material.anisotropy > 0],
-  ['iridescence', material => material.iridescence > 0],
-  ['sheen', material => (material.sheenColor ?? []).some(channel => channel !== 0)],
+  ['anisotropy', material => material.anisotropy > 0, true],
+  ['iridescence', material => material.iridescence > 0, true],
+  ['sheen', material => (material.sheenColor ?? []).some(channel => channel !== 0), true],
   ['moss', material => material.moss > 0],
-  ['splat layers', material => Boolean(material.layers || Object.keys(material.layerMaps ?? {}).some(name => name !== 'clearcoatTexture'))],
+  ['splat layers', (material, kernelMaterials) => Boolean(material.layers || Object.keys(material.layerMaps ?? {}).some(name => !(kernelMaterials ? KERNEL_LAYER_MAPS : ['clearcoatTexture']).includes(name)))],
   ['lightMap', material => Boolean(material.lightMap)],
 ];
+// The layer maps the native "cycles" kernel reads with its whole materials (the roughness maps of the coat and the sheen have no slot).
+const KERNEL_LAYER_MAPS = ['clearcoatTexture', 'clearcoatNormalTexture', 'anisotropyTexture', 'sheenColorTexture'];
+
+// The native kernel reads a coat's weight and roughness, and a sheen's tint and roughness, from one map each
+// (packages/render-native/job-input.mjs carries the map only when it cannot change the roughness).
+function hasSplitLayerMap(material) {
+  const maps = material.layerMaps ?? {};
+  const coatIsSplit = Boolean(maps.clearcoatTexture) && material.clearcoatRoughness > 0 && maps.clearcoatTexture.image !== maps.clearcoatRoughnessTexture?.image;
+  const sheenIsSplit = Boolean(maps.sheenColorTexture) && material.sheenRoughness > 0 && maps.sheenColorTexture.image !== maps.sheenRoughnessTexture?.image;
+  return coatIsSplit || sheenIsSplit;
+}
 
 function hasGraphOpacity(material) {
   return material.pattern?.type === 'graph' && Object.hasOwn(material.pattern.graph ?? {}, 'opacity');
@@ -155,7 +166,11 @@ export function createCamera(camera, width, height) {
   for (let axis = 0; axis < 3; axis++) right[axis] /= rightLength;
   const above = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
   const halfHeight = Math.tan(fov * Math.PI / 360);
-  return { eye, forward, right, above, halfHeight, halfWidth: halfHeight * width / height };
+  const view = { eye, forward, right, above, halfHeight, halfWidth: halfHeight * width / height };
+  // A camera with an fStop adds its thin lens (apertureRadius, focalDistance, apertureBlades, apertureRotation). Only the
+  // native "cycles" kernel draws it; every other tracer ignores the extra fields, and a pinhole view is unchanged.
+  const thinLens = resolveThinLens(camera, { aspect: width / height, eye, target });
+  return thinLens ? { ...view, ...thinLens } : view;
 }
 
 // ---- Random numbers ----
@@ -974,7 +989,7 @@ export function toneMapToRgba8(linear, width, height, { viewTransform = 'aces', 
 }
 
 /** Names what this scene asks for that the path tracer does not draw, so a result never claims more than it traced. */
-export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
+export function describeIgnoredFeatures(parts, environment, backend = 'cpu', { kernelMaterials = false } = {}) {
   const notes = new Set();
   const fog = environment?.volumeFog;
   if (fog?.density > 0 && (fog.noiseAmount ?? 0.5) > 0) notes.add('volumeFog is traced as a uniform medium: noiseAmount, noiseScale and drift are ignored.');
@@ -982,13 +997,14 @@ export function describeIgnoredFeatures(parts, environment, backend = 'cpu') {
   if (!environment?.map) notes.add('There is no environment map, so the sky is black and only the lights shine.');
   for (const part of parts) {
     const material = part.material ?? {};
-    if (part.shadowOnly === true && backend !== 'cpu') notes.add('shadowOnly is left out of camera rays by the cpu backend only; the GPU path tracers draw the part.');
     for (const field of IGNORED_MAP_FIELDS) if (material[field]) notes.add(`${field} is ignored.`);
     if (material.tag && material.tag !== 'surface') notes.add(`${material.tag} materials are traced as plain surfaces.`);
-    if (material.alphaMode === 'blend') notes.add(hasGraphOpacity(material) ? 'A graph opacity output is traced as a cutout at 0.5.' : 'Blended transparency is traced as opaque.');
-    if (material.layerMaps?.clearcoatTexture || material.transmissionMap) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
+    if (material.alphaMode === 'blend' && hasGraphOpacity(material)) notes.add('A graph opacity output is traced as a cutout at 0.5.');
+    else if (material.alphaMode === 'blend' && !kernelMaterials) notes.add('Blended transparency is traced as opaque.');
+    if (!kernelMaterials && (material.layerMaps?.clearcoatTexture || material.transmissionMap)) notes.add('Graph clearcoat and transmission masks are read by the CPU tracer; the GPU tracers use the factors.');
+    if (kernelMaterials && hasSplitLayerMap(material)) notes.add('A clearcoat or sheen colour map is ignored when the layer has a roughness above 0 kept in another map.');
     if (material.emissionFresnel > 0 && backend !== 'cpu') notes.add('emission fresnel is ignored by the GPU path tracers; the cpu backend applies it.');
-    for (const [name, isUsed] of IGNORED_LAYERS) if (isUsed(material)) notes.add(`${name} is ignored.`);
+    for (const [name, isUsed, kernelShades] of IGNORED_LAYERS) if (!(kernelMaterials && kernelShades) && isUsed(material, kernelMaterials)) notes.add(`${name} is ignored.`);
   }
   return [...notes];
 }

@@ -1,0 +1,1 @@
+- `createNativeSession` in `@codepawlhq/67js-render-native` keeps a scene on the GPU between Cook frames, so a later frame of the same scene compiles no shader and builds no acceleration structure (#896)

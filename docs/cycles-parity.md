@@ -47,7 +47,7 @@ Exported losslessly from [`bench/reference/scenes.js`](../bench/reference/scenes
   - In **Cycles** (`intern/cycles/scene/integrator.cpp:227`, `kernel/integrator/path_state.h:146`, `shade_surface.h:840-867`), setting `max_bounces = B` stores `kintegrator->max_bounce = B + 1`. Camera hits start at `path.bounce = 0`. Surface direct-light NEE (`integrate_surface_direct_light`) executes at `path.bounce = 0, 1, ..., B` (`B + 1` surface vertices). After sampling the BSDF at `bounce = B`, `bounce` increments to `B + 1 == max_bounce`, which sets `PATH_RAY_TERMINATE_AFTER_TRANSPARENT`: ray `B + 1` is traced **only** to accumulate emission/background MIS if it hits a light or escapes, and terminates immediately on any opaque surface without shading.
   - In **67js** ([`packages/render-native/src/kernel.wgsl`](../packages/render-native/src/kernel.wgsl) lines `609-618`, `808-832`, `963-1048`), `tracePath` loops `for (var depth = 0; depth <= bounces; depth++)`, evaluating `addLights` (NEE) at `depth = 0, 1, ..., B` (`B + 1` surface vertices) and exiting after `depth = B` **without** tracing continuation ray `B + 1`.
   - **Subtle sky-MIS consequence `[source]` + `[measured]`**: For analytical lights (`point`, `spot`, `area`, `sun`), 67js uses pure NEE (`directWeight = 1 / selectionProbability`), so `bounces = B` matches Cycles `max_bounces = B` vertex-for-vertex (`B + 1` NEE evaluations). For the environment map (`weightMode = 1`), 67js multiplies NEE at `depth = B` by the MIS weight `p_env^2 / (p_env^2 + p_bsdf^2)` (`kernel.wgsl:609-613`) expecting `depth = B + 1` to add the complementary BSDF escape weight `p_bsdf^2 / (p_env^2 + p_bsdf^2)` in `addEscape`, which never runs on the final bounce `depth == B`.
-- **Transparent bounce limit of 0 `[source]`**: with `transparent_max = 0` the Cycles kernel lets the path through the first transparent surface before it terminates, while the Cook kernel stops at the first transparent surface (`integrator.wgsl`, the `max_transparent_bounces == 0` test). The parity scenes use a limit of 8, so none reaches this case.
+- **Transparent bounce limit `[source]` + `[measured]`**: Cycles' `path_state_next` (`kernel/integrator/path_state.h`) counts the transparent surface it passes and sets `PATH_RAY_TERMINATE_ON_NEXT_SURFACE` once the count reaches `transparent_max_bounce`, so a path always passes the first transparent surface, also with a limit of 0 (its own FIXME note), and ends at the next surface with only that surface's emission. A limit of 0 therefore renders the same picture as a limit of 1. Shadow rays may pass `max(transparent_max_bounce - transparent_bounce, 0)` transparent surfaces (`integrate_shadow_max_transparent_hits` in `intersect_shadow.h`), so the surfaces the camera path already passed count against the shadow ray's limit. Both are in the Cook kernel since #894, measured in "Transparent bounce limits" below. Before, Cook stopped at the first transparent surface when the limit was 0, and gave every shadow ray the full limit.
 - **Empirical white-furnace sphere check (`color = [0.8, 0.8, 0.8]`, `roughness = 1.0`, `specular = 0.0`, constant `1.0` sky, `128 × 128`, `256` spp) `[measured]`**:
   - `B = 0`: Cycles center patch mean = **`0.79971`** (exact `0.8`, because ray `B + 1` completes background MIS) vs 67js = **`0.13334`** (`ratio = 0.16674 ≈ 1/6`, confirming analytically that $(1/4\pi)^2 / ((1/4\pi)^2 + (\cos\theta/\pi)^2)$ integrated over the cosine hemisphere equals `1/6`, so `0.8 / 6 = 0.13333` when ray `B + 1` is omitted).
   - `B = 1` and `B = 8`: Cycles = **`0.79971`** vs 67js = **`0.79923`** (**`ratio = 0.9994`**, within `0.06%`), because every ray from the convex sphere escapes at `depth = 1` and completes vertex `0`'s MIS pair.
@@ -344,6 +344,53 @@ These are per-sample times on one scene. An equal-error comparison between the `
 
 ---
 
+### Path regeneration (`pathRegeneration`, on by default since #897)
+
+With `pathRegeneration: false` (`--no-path-regeneration` in `trace-native.mjs`) a thread of the `cycles` kernel traces one whole path, then starts the next sample of its pixel, so a group of lanes waits for its longest path before any lane starts again. Without that option (`pathRegeneration: true`, `--path-regeneration` still accepted) the kernel runs one bounce per loop iteration, and a lane whose path ended starts the next sample of the same pixel at once. The sample index, the random numbers and the sums are the same, so the image is the same: the relMSE against the Cycles reference matched to the last digit in all 8 cells below, and so did the mean ratio. Only the time per sample changes.
+
+Sampling time, `960 x 540`, `8` bounces, seed `3`, NVIDIA A10 on Modal, baseline and trial interleaved in one container, three rounds, median and range `[measured]`:
+
+| Scene | spp | `pathRegeneration: false` | `pathRegeneration: true` | Ratio |
+| --- | --- | --- | --- | --- |
+| `lit-interior` | 256 | `3.296 s` [3.285-3.358] | `2.112 s` [2.100-2.164] | `0.64` |
+| `lit-interior` | 1024 | `12.620 s` [12.340-12.633] | `7.966 s` [7.918-7.992] | `0.63` |
+| `glass` | 256 | `2.100 s` [2.097-2.138] | `1.501 s` [1.464-1.614] | `0.71` |
+| `glass` | 1024 | `7.639 s` [7.604-7.656] | `5.552 s` [5.492-5.577] | `0.73` |
+| `many-lights-500` | 256 | `12.557 s` [12.551-12.645] | `8.567 s` [8.488-8.636] | `0.68` |
+| `many-lights-500` | 1024 | `50.041 s` [49.938-50.305] | `33.873 s` [33.737-33.943] | `0.68` |
+| `metal` | 256 | `1.277 s` [1.250-1.400] | `1.237 s` [1.163-1.243] | `0.97` |
+| `metal` | 1024 | `4.658 s` [4.651-4.679] | `4.224 s` [4.179-4.240] | `0.91` |
+
+The image does not change, so equal error is reached in the ratio's share of the time. The gain is largest where path lengths differ most between neighbouring pixels (the interior, glass and the many-lights scene) and smallest on `metal`, where most paths end at the same depth. One GPU and one batch size (`32` samples per dispatch) were measured in full; `64` and `128` gave `0.66` to `0.71` on `lit-interior` at 256 spp. The option is off by default; the seven-scene 4096 spp parity run passed every gate with the option off and with it on, with identical channel means and relMSE in both runs, and the cargo tests (25), node tests, lobe checks and furnace scenes passed.
+
+### Path regeneration on by default (#897)
+
+The `cycles` kernel now regenerates paths unless the caller passes `pathRegeneration: false`. Reason: the table above shows 9 to 37 percent less sampling time for the same image on the scenes with long and short paths together, and every caller that did not know the option paid the full time. Short renders do not gain: in the run below `outdoor-hdri` (paths end early) took 0.55 s off and 0.64 s on at 256 spp, and `glass` and `lit-interior` at 16 spp took 0.05 to 0.08 s more. The legacy kernel ignores the option and is untouched.
+
+**Correctness** `[measured]`, one Modal container (NVIDIA A10) for the tests, the parity runs and the identity checks, at the new default: `cargo test` 32 passed, 0 failed; `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 119 tests, 117 passed, 0 failed, 2 skipped; `check-lobes.mjs` and `verify-lobes.py` exit 0. The seven scenes at 4096 spp, seed 1, 8 bounces, box filter, pass every gate (smallest tile ratio 0.9823 on `glass` against a gate of 0.95; FLIP LDR 0.0160 on `lit-interior` against a ceiling of 0.0365; relMSE as in the "Final gates for #895" table, except `many-lights-500` at 0.000728 after the square-root roulette of #966). `area-shapes` and `transparent-shadow` pass (smallest tile ratios 0.9981 and 1.0000), and so does the transparent-bounce limits scene at limits 0, 1, 2 and 8 (mean ratios 1.0011 to 1.0017, tile ratios 0.9999 to 1.0029).
+
+**Byte identity** `[measured]`, `lit-interior` and `glass`, 256 spp, seed 3, `960 x 540`: the image with regeneration on equals the image with it off byte for byte at `--samples-per-dispatch 32` and at `7` (max relative difference 0, 0 differing values). Two time-budgeted runs at the default are identical to each other, to the same run with `--no-path-regeneration` (which chose other dispatch sizes: 57 against 40 samples on `lit-interior`, 100 against 67 on `glass`) and to the fixed 32. The dispatch-determinism change of #1011 therefore did not break the claim above.
+
+**Time and error against Cycles** `[measured]`: one container (NVIDIA A10), `960 x 540`, seed 3, two rounds, medians, error against the Cycles 4096 spp seed 1 reference. Cook is denoised with OIDN on CUDA, Cycles 5.3.0 on OptiX with OpenImageDenoise. Total seconds are sampling plus denoising.
+
+| scene | spp | Cook sampling s, regeneration off / on | Cycles sampling s | Cook + OIDN total s, off / on | Cycles + OIDN total s | relMSE Cook / Cycles, denoised | FLIP Cook / Cycles, denoised |
+| --- | ---: | --- | ---: | --- | ---: | --- | --- |
+| `many-lights-500` | 64 | 3.23 / 2.45 | 2.96 | 3.61 / 2.80 | 3.06 | 0.000544 / 0.000503 | 0.032 / 0.032 |
+| `lit-interior` | 64 | 0.80 / 0.57 | 0.86 | 1.14 / 0.94 | 0.95 | 0.000213 / 0.000207 | 0.027 / 0.028 |
+
+The images are the same with regeneration on and off, so relMSE and FLIP are the same for both. The other cells (`glass`, `outdoor-hdri`, 16, 64 and 256 spp) are in the pull request.
+
+Cook over Cycles, relMSE at equal total seconds for the denoised images (log-log interpolation between the measured rungs, at the middle of the range both cover; below 1 means Cook has the lower error):
+
+| scene | regeneration off | regeneration on |
+| --- | ---: | ---: |
+| `many-lights-500` | 1.09 | 1.07 |
+| `lit-interior` | 1.06 | 1.02 |
+| `glass` | 1.48 | 1.35 |
+| `outdoor-hdri` | 1.22 | 1.20 |
+
+Cook still has a higher denoised error than Cycles at equal time on all four scenes. Most of the remainder is the OIDN call: 0.35 s in Cook against 0.10 s inside Blender at 960 x 540. The raw images keep their lead (`lit-interior` 0.67 off, 0.45 on; `glass` 0.45, 0.33; `outdoor-hdri` 0.10, 0.13 on the 0.3 s budget).
+
 ### Pixel filter: box versus Blackman-Harris
 
 The six-scene references use the box filter of width 1, so the box filter stays the default of the `cycles` kernel. Cycles' own default is Blackman-Harris with width 1.5. To show which choice matches Cycles, `render-cycles.py --filter-type blackman-harris --filter-width 1.5` rendered a second Cycles 5.3 reference (4096 spp, seed 1, OptiX) and the `cycles` kernel ran at 1024 spp, seed 1, 8 bounces, 960 x 540 with each filter `[measured]`:
@@ -441,7 +488,7 @@ Time to equal error, log-log interpolation of time against relMSE on each render
 What the table says:
 
 - `lit-interior`: at equal samples Cook has 7 to 15 % lower error (0.00274 against 0.00310 at 256 spp, 0.000656 against 0.000771 at 1024) and takes 5 to 14 % less time on the medians from 64 spp up, so it reaches equal error about 1.2 times faster. The 16 and 64 spp Cycles times carry up to 5 s of noise in their ranges, probably start-up and load from other sessions on the shared card `[inferred]`; the cost per sample of both is close to 24 to 25 ms at 1024 spp. The earlier figure of 11.4 s for Cycles at 256 spp differs from the 5.7 to 8.3 s measured here; the card was shared in both cases.
-- `many-lights-500`: Cook is slightly worse. The error is 9 to 10 % higher at equal samples at every rung, while the time per sample is between 1.5 % higher and 8 % lower than Cycles (16 spp +1.5 %, 64 spp -1 %, 256 spp -8 %, 1024 spp -3 %), so Cook needs about 3 to 6 % more time for the same error. This is the one scene where Cook is slower. The gap is small next to the run-to-run range of the Cycles 1024 spp time (93 to 145 s), so read it as a tie to slightly behind, not a clear loss. Where the 9 % comes from (differences between this tree and the Cycles tree, such as the double-sided emissive-triangle cone, or the sampler dimensions) was not isolated.
+- `many-lights-500`: Cook is slightly worse. The error is 9 to 10 % higher at equal samples at every rung, while the time per sample is between 1.5 % higher and 8 % lower than Cycles (16 spp +1.5 %, 64 spp -1 %, 256 spp -8 %, 1024 spp -3 %), so Cook needs about 3 to 6 % more time for the same error. This is the one scene where Cook is slower. The gap is small next to the run-to-run range of the Cycles 1024 spp time (93 to 145 s), so read it as a tie to slightly behind, not a clear loss. Where the 9 % came from was isolated later: see "Noise gap on `many-lights-500` (#966)".
 - `metal`: no equal-error time can be given. The error looks dominated by a few very bright paths rather than by smooth noise `[inferred]`. The reference's own seed-to-seed relMSE is 0.0034, higher than both targets, and neither ladder falls monotonically (Cook 0.0045, 0.281, 0.0181, 0.0083; Cycles 0.628, 0.0042, 0.0750, 0.0059): a single firefly decides a rung. Per sample the two run at the same speed (9.5 s against 9.3 s at 1024 spp). Parity of the converged image is separate and passes (4096 spp relMSE 0.00271 against the 0.0034 noise floor).
 - The error gap on `many-lights-500` survived the review fix to `ltr_importance` (maximum importance now divided by the squared nearest distance and minimum by the squared farthest, as in Cycles): see "Repeat on Modal".
 - Nothing here changes a gate or retunes a kernel default. The comparison is one seed per renderer and one Cycles reference; the error of a single rung moves with the seed, and the interpolation uses four points per curve, so ratios under about 10 % are not resolved.
@@ -471,11 +518,100 @@ Time to equal error, same interpolation as above `[measured and interpolated]`:
 | `many-lights-500` | 0.005 | 15.69 | 16.02 | 1.02x faster |
 | `many-lights-500` | 0.002174 (lowest both reach) | 39.32 | 40.32 | 1.03x faster |
 
-- Against the RTX 3060 figures, the Cook relMSE moved by at most 0.1 percent on `lit-interior` and 0.1 percent on `many-lights-500` (for example 0.127595 against 0.127697 at 16 spp and 0.002174 against 0.002175 at 1024 spp): the importance fix changes which emitter is picked, but not by much on these two scenes, and it does not close the 9 percent error gap to Cycles on `many-lights-500` (0.002174 against 0.002001 at 1024 spp). That gap is still not isolated.
+- Against the RTX 3060 figures, the Cook relMSE moved by at most 0.1 percent on `lit-interior` and 0.1 percent on `many-lights-500` (for example 0.127595 against 0.127697 at 16 spp and 0.002174 against 0.002175 at 1024 spp): the importance fix changes which emitter is picked, but not by much on these two scenes, and it does not close the 9 percent error gap to Cycles on `many-lights-500` (0.002174 against 0.002001 at 1024 spp). That gap was isolated and fixed afterwards: see "Noise gap on `many-lights-500` (#966)".
 - Both renderers are 2.0 to 2.5 times faster on the A10G than on the 3060 in these runs (Cook 2.4 to 2.5 times, Cycles 2.0 to 2.2 times), and the job ran alone in its container, so the Cycles ranges are tight (no 5 s outliers). On this card Cook is 1.45 to 1.52 times faster at equal error on `lit-interior` (1.2 times on the 3060) and level with Cycles on `many-lights-500` (3 to 6 percent slower on the 3060). The ratios depend on the GPU and on load `[inferred]`; no claim is made about other cards.
 - The tree against the flat pick on `many-lights-500` (Cook, seed 3, A10G): error ratio uniform / tree 2.98, 2.86, 2.67 and 2.03 at 16, 64, 256 and 1024 spp, tree time 1.30 to 1.32 times the flat pick per sample (1.16 to 1.18 on the 3060). Time to equal error, tree against flat: 2.03 times faster at relMSE 0.0237, 2.05 at 0.0304, 1.80 at 0.00664 and 1.70 at 0.005 (the flat pick's 1024 spp run reaches only 0.00442, so it was run once there). The "less than half the time" reading of the gate holds at the larger errors and is 1.7 to 1.8 times near 0.005 on this card; the RTX 3060 figures above (2.0 to 2.3 times) were measured before the fix and on a different card.
 - 4096 spp parity of the `cycles` kernel at its defaults, seven scenes, seed 1, on a Modal NVIDIA A10: 7 of 7 pass, with the same mean ratios, tile counts, FLIP LDR and relMSE as the table below to the digits shown (worst per-channel mean ratio 1.0035 on `lit-interior`, against the 2 percent limit). Cook sampling seconds at 4096 spp: `spot-area` 24.3, `light-linking` 27.2, `metal` 17.8, `glass` 30.1, `outdoor-hdri` 9.4, `lit-interior` 49.4, `many-lights-500` 205.7.
 - Checks on the same Modal container: `cargo test` 25 passed, 0 failed (no GPU needed; the napi symbols are left unresolved at link time on Linux, and the one new test covers a tree flag without emitter tables); `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 76 tests, 75 passed, 1 skipped, 0 failed; lobe probes 22 of 22 and sphere furnace scenes 6 of 6 at 512 spp.
+
+### Noise gap on `many-lights-500` (#966)
+
+At equal samples Cook carried 9 percent more error than Cycles on `many-lights-500` (relMSE 0.002174 against 0.002001 at 1024 spp) and less on `lit-interior`. All runs below are Modal containers (NVIDIA A10), seed 3 and 4 for both renderers, error against the Cycles 4096 spp seed 1 reference of the same scene, Cycles 5.3.0 on OptiX in the same container `[measured]`.
+
+**Where it lived.** Variants of the scene keep one emitter kind (the other lights are dropped, the other emissive parts get a zero-emission copy of their material; same positions and seed). Cycles references at 4096 spp seed 1 were rendered per variant. Cook relMSE over Cycles relMSE, before the fix, mean of seeds 3 and 4 (A10):
+
+| kind (count) | 64 spp | 256 spp |
+| --- | ---: | ---: |
+| point lights (200) | 0.914 | 0.919 |
+| spot lights (150) | 0.926 | 0.939 |
+| emissive quads (100, 200 triangles) | 1.476 | 1.474 |
+| emissive triangles (50) | 1.490 | 1.465 |
+| all four, the scene | 1.090 | 1.094 |
+
+The whole gap sat in emissive geometry; point and spot lights were already 7 to 9 percent better than Cycles, which is why the full scene showed only 9 percent. The excess was uniform over the image (6 x 4 block ratios 1.35 to 1.65 on the quads), not a few pixels near the lamps, and it depended on the path depth: on the triangles Cook over Cycles was 1.19 with direct light only (`--bounces 1`), 1.06 with one indirect bounce (`--bounces 2`) and 1.47 with 8 bounces, so roulette (which starts after bounce 3) was the suspect for the large part.
+
+**Cause.** Russian roulette. Cycles continues a path with probability `sqrt(max channel of the throughput)` (`path_state_continuation_probability`, `kernel/integrator/path_state.h`); the `cycles` kernel used the max channel itself. After a few diffuse bounces the survival probability was therefore about the square of Cycles', and the paths that lived carried correspondingly larger weights. Emissive scenes are dim and lit mostly by indirect light, so they paid most `[inferred]`. The fix is `int_russian_roulette_survival` in `src/cycles/integrator.wgsl`, used after a surface bounce and after a volume scatter; the first bounce at which roulette starts (`min_bounce_rr`, 3) is unchanged.
+
+**Ruled out** by measurement: a joint three-dimensional light sample as in Cycles (`PRNG_LIGHT`: z picks the emitter, xy the point; quads 0.011271 against 0.011272 at 256 spp), the tree structure (the 50-triangle scene has the same emitter count in both trees and showed the same gap), flat instead of tree selection (worse: 0.01507 against 0.01125 on the quads) and Cycles' spherical triangle sampling (its switch compares the longest edge with the plane distance divided by twice the area, so it only acts within 4 to 7 cm of a lamp).
+
+**After the fix**, Modal NVIDIA A10 (one container for every number below: the linear rule is the same binary with a measurement switch, `--clamp-indirect 12345` in a build that is not committed, so the only difference is the survival rule), seed 3, three rounds interleaved (relMSE does not vary between rounds), Cycles 5.3.0 OptiX in the same container `[measured]`:
+
+| scene | spp | Cook relMSE before | Cook relMSE after | Cycles relMSE | after / Cycles | before / Cycles |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `many-lights-500` | 64 | 0.030592 | 0.023719 | 0.027925 | 0.849 | 1.096 |
+| `many-lights-500` | 256 | 0.007630 | 0.005939 | 0.006984 | 0.850 | 1.092 |
+| `many-lights-500` | 1024 | 0.002174 | 0.001751 | 0.002001 | 0.875 | 1.086 |
+| `lit-interior` | 64 | 0.012832 | 0.010754 | 0.014834 | 0.725 | 0.865 |
+| `lit-interior` | 256 | 0.002741 | 0.002198 | 0.003103 | 0.709 | 0.883 |
+| `lit-interior` | 1024 | 0.000656 | 0.000521 | 0.000771 | 0.676 | 0.850 |
+| `glass` | 64 | 0.000962 | 0.000864 | 0.002499 | 0.346 | 0.385 |
+| `glass` | 256 | 0.000265 | 0.000243 | 0.000532 | 0.456 | 0.499 |
+| `glass` | 1024 | 0.000095 | 0.000089 | 0.000119 | 0.747 | 0.794 |
+| `outdoor-hdri` | 64 | 0.000198 | 0.000196 | 0.001181 | 0.166 | 0.168 |
+| `outdoor-hdri` | 256 | 0.000051 | 0.000050 | 0.000169 | 0.297 | 0.300 |
+| `outdoor-hdri` | 1024 | 0.000010 | 0.000009 | 0.000026 | 0.364 | 0.368 |
+
+Per emitter kind on `many-lights-500` (the kind variants as above, mean of seeds 3 and 4, one round) `[measured]`:
+
+| kind (count) | spp | before / Cycles | after / Cycles | error after / before | time per sample after / before |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| point lights (200) | 64 | 0.914 | 0.753 | 0.823 | 1.016 |
+| point lights (200) | 256 | 0.919 | 0.761 | 0.828 | 1.079 |
+| spot lights (150) | 64 | 0.926 | 0.795 | 0.859 | 1.093 |
+| spot lights (150) | 256 | 0.939 | 0.801 | 0.853 | 1.091 |
+| emissive quads (100, 200 triangles) | 64 | 1.476 | 1.005 | 0.681 | 0.996 |
+| emissive quads (100, 200 triangles) | 256 | 1.474 | 1.005 | 0.682 | 1.076 |
+| emissive triangles (50) | 64 | 1.490 | 1.111 | 0.746 | 1.056 |
+| emissive triangles (50) | 256 | 1.465 | 1.108 | 0.756 | 1.059 |
+| all four, the scene | 64 | 1.090 | 0.845 | 0.776 | 1.096 |
+| all four, the scene | 256 | 1.094 | 0.853 | 0.780 | 1.099 |
+
+Point and spot lights improve by 14 to 18 percent as well, so with the fix every emitter kind is at or below Cycles except the 50 triangles (see "Still open"). The mean image ratio against the reference did not move (`many-lights-500` 1.0009 before and after). At 4096 spp, seed 1, on the same A10 with the fix: all nine scenes (the seven parity scenes, `area-shapes` and `transparent-shadow`) pass every gate (mean ratio, 8 x 8 tiles, relMSE and FLIP). The tightest values: per-channel mean ratio 1.0034 on `lit-interior` (limit 2 percent), lowest tile ratio 0.9823 on `glass` (a tile counts when within 5 percent; 64 of 64 count on every scene but `spot-area`, where 47 of 47 do), FLIP LDR 0.0169 on `many-lights-500` against its ceiling 0.0373. `many-lights-500` at 4096 spp has relMSE 0.000728 (0.000832 before the fix) and `lit-interior` 0.000226. Checks in the same run: `cargo test` 32 passed, 0 failed; `node --test` of the native, kernel parity and many-lights tests 89 tests, 88 passed, 1 skipped, 0 failed; lobe probes and furnace scenes pass `[measured]`.
+
+![many-lights-500 at 64 samples, seed 3: Cook before the fix, Cook after the fix and Blender Cycles 5.3 at 64 samples, then the Cycles 4096 sample reference, each with its relMSE against the reference; the second row crops one wall region 2x (same exposure, no denoiser)](cook-roulette-comparison.jpg)
+
+**Cost.** Longer paths cost time per sample, and the error falls more than the time rises. Time to equal error is time per sample times error (error falls as one over the sample count); columns 5 to 7 are that product, so below 1 means faster for the same error `[measured, derived]`:
+
+| scene | spp | time per sample after / before | error after / before | time to equal error after / before | after, time to equal error / Cycles | before, time to equal error / Cycles |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `lit-interior` | 64 | 1.099 | 0.838 | 0.921 | 0.69 | 0.75 |
+| `lit-interior` | 256 | 1.089 | 0.802 | 0.873 | 0.68 | 0.78 |
+| `lit-interior` | 1024 | 1.087 | 0.795 | 0.864 | 0.65 | 0.75 |
+| `many-lights-500` | 64 | 1.093 | 0.775 | 0.847 | 0.99 | 1.17 |
+| `many-lights-500` | 256 | 1.095 | 0.778 | 0.853 | 1.00 | 1.17 |
+| `many-lights-500` | 1024 | 1.098 | 0.805 | 0.885 | 1.04 | 1.17 |
+| `glass` | 64 | 1.039 | 0.899 | 0.934 | 0.44 | 0.47 |
+| `glass` | 256 | 1.044 | 0.914 | 0.955 | 0.60 | 0.63 |
+| `glass` | 1024 | 1.041 | 0.941 | 0.980 | 0.98 | 1.00 |
+| `outdoor-hdri` | 64 | 0.996 | 0.990 | 0.986 | 0.11 | 0.11 |
+| `outdoor-hdri` | 256 | 1.013 | 0.991 | 1.004 | 0.19 | 0.19 |
+| `outdoor-hdri` | 1024 | 1.013 | 0.988 | 1.001 | 0.23 | 0.23 |
+
+The fix is a net win on the three scenes lit mostly by indirect light (`many-lights-500` 11 to 15 percent less time for the same error, `lit-interior` 8 to 14 percent, `glass` 2 to 7 percent) and neutral on `outdoor-hdri` (a sun and sky scene whose paths end by escaping, so roulette hardly acts). Against Cycles, `many-lights-500` moves from 17 percent slower at equal error to level (0.99 at 64 and 256 spp, 1.04 at 1024 spp, so 4 percent slower there); `lit-interior` stays 1.5 times faster and `outdoor-hdri` 4 to 9 times faster. `glass` is faster than Cycles at 64 and 256 spp and level at 1024. The relMSE floor from the reference's own noise flattens the ratio at 1024 spp on the low-error scenes `[inferred]`. An earlier one-round T4 run gave +7 to +14 percent time per sample; this A10 run gives +9 to +10 percent on the two emissive scenes, +4 on `glass` and 0 to +1 on `outdoor-hdri`.
+
+**Still open.** The 50-triangle variant alone stays 11 percent above Cycles after the fix (uniform over the image, not near the lamps); the scene as a whole, the quads, the points, the spots and `lit-interior` are at or below Cycles. Its cause was not isolated; the 1.19 with direct light only cannot come from roulette, which does not act there, and was not re-measured with the fix. The issue's second criterion (within 3 percent of Cycles at 64, 256 and 1024 spp) is met on the full scene, which is now 12 to 15 percent below Cycles' error.
+
+### MIS compensation of the environment map (`envCompensation`, off by default, #895)
+
+`envCompensation: true` (or a fraction from 0 to 1; `trace-native.mjs --env-compensation 1`) builds the environment sampling table after Karlik et al. 2019 (the same step as pbrt-v4 `ImageInfiniteLight`, Apache-2.0): the host subtracts the sphere-mean radiance from every texel's weight and clamps at zero, so light sampling spends its samples where BSDF sampling does badly, and the BSDF-hit side reads the same table for its MIS weight. The kernel is unchanged: it reads its probability from the table it samples, so the pdf used in MIS is the pdf that was sampled, and a dim texel that gets zero probability is reached by BSDF sampling with weight 1. A map that would end up all zero (a uniform map) keeps the plain table. Radiance stays unbiased while every non-delta lobe has a positive pdf in the dropped directions, which holds for all closures of the kernel. `[measured]` on an NVIDIA A10, 960 x 540, 8 bounces, seed 3 against the Cycles 4096-spp seed-1 reference, baseline and trial interleaved in one container, three rounds (the image is deterministic, so the three rounds differ only in time):
+
+| Scene | relMSE at 16 / 64 / 256 / 1024 spp, off | on | Error ratio | Mean ratio off / on |
+| --- | --- | --- | --- | --- |
+| `outdoor-hdri` | 0.001168 / 0.000198 / 0.000051 / 0.000010 | 0.000661 / 0.000109 / 0.000023 / 0.000007 | 1.77 / 1.81 / 2.18 / 1.36 | 0.99965 / 0.99965 |
+| `lit-interior` | 0.065292 / 0.012832 / 0.002741 / 0.000656 | same to 5 digits | 1.00 | 1.00334 / 1.00334 |
+| `metal` | 0.004500 / 0.280629 / 0.018116 / 0.008311 | 0.003695 / 0.280517 / 0.018077 / 0.008307 | 1.22 / 1.00 / 1.00 / 1.00 | 0.99650 / 0.99651 at 64 spp |
+
+The sampling time per sample is the same with the option on or off (ratio 0.90 to 1.03 over the rungs, inside the run to run spread, since only the table changes), so the error ratio at equal samples is also the ratio at equal time. At 1024 spp `outdoor-hdri` sits close to the reference's own noise floor (0.000007 at 4096 spp), which compresses the last ratio. The `metal` 64 spp value is one firefly-dominated image of the baseline and the trial alike. `lit-interior` has no sunny environment, so it does not change. At 4096 spp, seed 1, the seven scenes give the same mean ratios and relMSE with the option off as the table above and with it on (`glass` relMSE 0.000058 to 0.000056, `outdoor-hdri` 0.000005 both, the mean ratio of every scene equal to five digits). Tests: `tests/native-pack-v2.test.js` (default off, dim texels dropped with valid CDFs, uniform map fallback, option validation).
 
 ### Final gates for #895
 
@@ -490,6 +626,380 @@ Release addon built; on the RTX 3060 `cargo test --target x86_64-pc-windows-msvc
 | `outdoor-hdri` | 0.9995 / 0.9996 / 0.9998 | 64 of 64 | 0.0023 (0.0215) | 0.000005 (0.000007) |
 | `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 of 64 | 0.0168 (0.0365) | 0.00026 (0.000285) |
 | `many-lights-500` | 1.0009 / 1.0010 / 1.0009 | 64 of 64 | 0.0178 (0.0373) | 0.000832 (0.000791) |
+
+### Optional GPU a-trous wavelet filter (`denoise: "atrous"`, #895)
+
+`traceNative(..., { kernel: 'cycles', denoise: 'atrous' })` also runs an edge-avoiding a-trous wavelet filter (Dammertz 2010 with the variance guidance of SVGF, spatial only) in WGSL on the traced image, its first-hit albedo, normal and depth, and the per-pixel variance the kernel already returns. The filtered image comes back as `denoisedRgba`; `rgba` stays the unfiltered estimate. It is off by default and the filter is biased: it smooths, it does not converge. Never compare a filtered image with a converged one as if it were unbiased.
+It is the WGSL form of the CPU filter in `src/path-tracer-denoise.js`, with one difference: pixels whose first ray escaped (zero normal and depth) agree with each other, so the sky is filtered instead of turning to NaN (#969). A node test checks the GPU result against the CPU filter on a synthetic image (relative difference under 2e-3).
+
+Measured on an NVIDIA A10 (Modal), 960 x 540, seed 3, medians of three rounds, error is relMSE (epsilon 0.01) against the Cycles 4096 spp seed 1 reference, FLIP (LDR) mean from one round. The CPU column runs `denoiseRadiance` in Node on the container CPU with the same guides, replacing non-finite pixels by the unfiltered pixel.
+
+| scene, spp | sampling s | relMSE unfiltered / CPU / GPU filter | FLIP unfiltered / CPU / GPU filter | filter ms CPU / GPU (all steps, dispatches only) |
+| --- | --- | --- | --- | --- |
+| lit-interior, 16 | 0.44 | 0.0653 / 0.00157 / 0.00157 | 0.142 / 0.095 / 0.095 | 4088 / 7.4, 1.5 |
+| lit-interior, 64 | 0.95 | 0.0128 / 0.00042 / 0.00042 | 0.076 / 0.037 / 0.037 | 4085 / 8.4, 1.5 |
+| many-lights-500, 16 | 1.00 | 0.128 / 0.00225 / 0.00225 | 0.176 / 0.084 / 0.084 | 4115 / 7.6, 1.5 |
+| many-lights-500, 64 | 3.27 | 0.0306 / 0.00090 / 0.00090 | 0.105 / 0.044 / 0.044 | 4158 / 7.5, 1.4 |
+| glass, 16 | 0.38 | 0.00424 / 0.00155 / 0.00075 | 0.030 / 0.023 / 0.023 | 3673 / 8.2, 1.6 |
+| glass, 64 | 0.72 | 0.00096 / 0.00050 / 0.00040 | 0.018 / 0.017 / 0.018 | 3680 / 8.3, 1.4 |
+| metal, 16 | 0.31 | 0.00450 / 0.00156 / 0.00070 | 0.025 / 0.019 / 0.019 | 3819 / 8.3, 1.3 |
+| metal, 64 | 0.51 | 0.281 / 0.280 / 0.00227 | 0.015 / 0.014 / 0.014 | 3778 / 8.7, 1.5 |
+
+The GPU filter costs about 8 ms in total (upload, seven dispatches, readback of the traced image that already sits on the host) and 1.4 to 1.6 ms for the dispatches, against 3.7 to 4.2 s for the CPU filter at the same error: roughly 500 times faster as built. Against the sampling time in the table the GPU filter is 0.2 to 2.7 percent, while the CPU filter takes 4 to 12 times as long as the 16 spp render. At equal time the filtered image has 10 to 100 times lower relMSE than the unfiltered one at 64 and 256 spp on lit-interior and many-lights-500. Where the reference is nearly converged (glass and metal at 1024 spp) the filter's bias shows: relMSE and FLIP get worse than the unfiltered render (glass 0.00009 to 0.00014). The unfiltered metal render at 64 spp is dominated by a few fireflies (relMSE 0.28); the CPU filter leaves that number almost unchanged, the GPU filter lowers it (the cause was not investigated), and FLIP, which sees little difference, is the fairer score for that scene.
+
+### Path regeneration, environment compensation and the a-trous filter together (#897)
+
+The three options above (`pathRegeneration`, which was off by default when this was measured, `envCompensation: true` and `denoise: 'atrous'`, off by default) were measured alone on separate branches and are measured here on one branch built from `main` after the dispatch budget (#964) and the Blackman-Harris references (#977). The legacy kernel `src/kernel.wgsl` is unchanged and still the default, and the `cycles` kernel at its defaults draws the same images as before. Everything ran on Modal; the GPU is named at each result (Modal scheduled an NVIDIA A10 or an NVIDIA L4, and every row records its GPU).
+
+**Tests** `[measured]`, NVIDIA A10: `cargo test` 32 passed, 0 failed; `node --test tests/native-*.test.js tests/cook-kernel-parity.test.js tests/cycles-parity-many-lights.test.js` 93 tests, 92 passed, 0 failed, 1 skipped; the lobe probes and white furnace scenes (`check-lobes.mjs`, `verify-lobes.py`) exit 0.
+
+**Seven-scene parity, 4096 spp, seed 1, 8 bounces, box filter** `[measured]`. With every option off (NVIDIA L4) the table equals the "Final gates for #895" table above in every column. With `--path-regeneration --env-compensation 1` (NVIDIA A10) every scene passes every gate again with the same mean ratios and tile ranges; relMSE is the same to the printed digits except `glass` (0.000058 off, 0.000056 on, the compensation), and FLIP LDR differs by at most 0.00003:
+
+| scene | mean ratio (R / G / B) | tiles within 5 % | FLIP LDR (ceiling) | relMSE (noise floor), off / on |
+| --- | --- | ---: | --- | --- |
+| `spot-area` | 1.0000 / 1.0000 / 1.0000 | 47 of 47 | 0.0039 (0.0239) | 0.000008 / 0.000008 |
+| `light-linking` | 1.0009 / 1.0007 / 1.0008 | 64 of 64 | 0.0051 (0.0228) | 0.000015 / 0.000015 |
+| `metal` | 0.9991 / 0.9992 / 0.9995 | 64 of 64 | 0.0042 (0.0237) | 0.00271 / 0.00271 |
+| `glass` | 0.9976 / 0.9978 / 0.9982 | 64 of 64 | 0.0070 (0.0234) | 0.000058 / 0.000056 |
+| `outdoor-hdri` | 0.9995 / 0.9996 / 0.9998 | 64 of 64 | 0.0023 (0.0215) | 0.000005 / 0.000005 |
+| `lit-interior` | 1.0032 / 1.0035 / 1.0034 | 64 of 64 | 0.0168 (0.0365) | 0.00026 / 0.00026 |
+| `many-lights-500` | 1.0009 / 1.0010 / 1.0009 | 64 of 64 | 0.0178 (0.0373) | 0.000832 / 0.000832 |
+
+Path regeneration and the compensated environment table are unbiased, so they must pass the parity gates. The a-trous filter is biased and is not gated on parity; its `rgba` is checked instead: on four scenes and three rounds (12 of 12) the unfiltered image of a `denoise: 'atrous'` run equals the image of a run without the filter, bit for bit, at 64 spp and 32 samples per dispatch.
+
+**Combined gain** `[measured]`: baseline (defaults) against trial (`--path-regeneration --env-compensation 1`) and Blender Cycles 5.3.0 OptiX, interleaved in one container (NVIDIA A10), `960 x 540`, 8 bounces, seed 3, three rounds, median [range] of sampling seconds, relMSE (epsilon 0.01) against the Cycles 4096 spp seed 1 reference. Time ratio is trial over baseline. The two Cook variants differ in the image only through the environment table, so the error ratio is 1.00 where there is no sunny HDRI.
+
+| scene | spp | baseline s | trial s | time ratio | relMSE baseline / trial | Cycles s, relMSE |
+| --- | --- | --- | --- | --- | --- | --- |
+| `lit-interior` | 64 | 0.787 [0.778-1.005] | 0.556 [0.541-0.763] | 0.71 | 0.012832 / 0.012832 | 0.874, 0.014834 |
+| `lit-interior` | 256 | 3.198 [3.177-3.273] | 2.167 [2.076-2.210] | 0.68 | 0.002741 / 0.002740 | 3.481, 0.003103 |
+| `lit-interior` | 1024 | 12.848 [12.293-12.881] | 8.630 [8.225-8.639] | 0.67 | 0.000656 / 0.000656 | 14.010, 0.000771 |
+| `glass` | 64 | 0.493 [0.491-0.696] | 0.357 [0.344-0.358] | 0.72 | 0.000962 / 0.000733 | 0.397, 0.002499 |
+| `glass` | 256 | 1.937 [1.873-1.948] | 1.326 [1.282-1.336] | 0.68 | 0.000265 / 0.000208 | 1.520, 0.000532 |
+| `glass` | 1024 | 7.753 [7.525-7.758] | 5.169 [5.028-5.173] | 0.67 | 0.000095 / 0.000086 | 6.076, 0.000119 |
+| `many-lights-500` | 64 | 3.200 [3.191-3.299] | 2.293 [2.234-2.297] | 0.72 | 0.030592 / 0.030592 | 3.036, 0.027925 |
+| `many-lights-500` | 256 | 12.848 [12.504-12.875] | 9.048 [8.831-9.084] | 0.70 | 0.007630 / 0.007630 | 12.020, 0.006984 |
+| `many-lights-500` | 1024 | 51.698 [50.916-51.862] | 36.319 [36.069-36.348] | 0.70 | 0.002174 / 0.002174 | 48.360, 0.002001 |
+| `outdoor-hdri` | 64 | 0.165 [0.160-0.301] | 0.155 [0.154-0.157] | 0.94 | 0.000198 / 0.000109 | 0.237, 0.001181 |
+| `outdoor-hdri` | 256 | 0.596 [0.589-0.597] | 0.608 [0.605-0.611] | 1.02 | 0.000051 / 0.000023 | 0.896, 0.000169 |
+| `outdoor-hdri` | 1024 | 2.361 [2.359-2.380] | 2.428 [2.416-2.456] | 1.03 | 0.000010 / 0.000007 | 3.599, 0.000026 |
+
+The two gains stack where they apply: regeneration cuts the time on the three scenes with uneven path lengths (0.67 to 0.72 here, 0.63 to 0.73 measured alone), and compensation cuts the error under the HDRI (1.36 to 2.18 times; 1.11 to 1.31 on `glass`, which sees the sky). Equal-error ratio against Cycles is the time Cycles needs for the relMSE a Cook rung reaches (log-log interpolation inside the Cycles ladder) over the time of that Cook rung, so above 1 means Cook is faster; a Cook rung whose error lies outside the Cycles ladder has no entry:
+
+| scene | Cook defaults vs Cycles | Cook with both options vs Cycles |
+| --- | --- | --- |
+| `lit-interior` | 1.26x (64 spp), 1.23x (256 spp) | 1.78x (64 spp), 1.82x (256 spp) |
+| `many-lights-500` | 0.86x (256 spp), 0.85x (1024 spp) | 1.22x (256 spp), 1.21x (1024 spp) |
+| `glass` | 1.84x (64 spp), 1.50x (256 spp) | 3.22x (64 spp), 2.74x (256 spp) |
+| `outdoor-hdri` | 4.86x (64 spp), 3.68x (256 spp) | 7.97x (64 spp) |
+
+On `many-lights-500` Cook with defaults was slower than Cycles at equal error and is faster with the options on. The reference carries noise of its own (relMSE 0.000007 to 0.0008 between two 4096 spp seeds), which compresses the ratios at the highest rungs.
+
+**Dispatch budget** `[measured]` (NVIDIA L4, `lit-interior`, 256 spp, seed 3). With no `samplesPerDispatch` the render splits itself into dispatches of about 0.5 s, sized from the time of the previous one, so a faster kernel gets larger batches: 45 samples per dispatch without regeneration and 85 with it (longest dispatch 0.49 s and 0.51 s). The kernel reads the sample count of a dispatch from the same parameter the planner writes, so `pathRegeneration` works with any batch size. With the same fixed batch size the images with and without regeneration are bit-identical (32 and 7 samples per dispatch: 0 different values). This run predates #1011, which made the film sums independent of the dispatch split; the differences described next no longer occur on a tree that has it. At the time of the run the budgeted renders with and without regeneration were not bit-identical to each other, nor to the fixed 32 run, because the planner picks different batch sizes and the sums of the batches are added to the accumulation buffer in float32, so another split of the same samples rounds differently. The same difference appears without regeneration (budgeted against fixed 32, and fixed 32 against fixed 7: 0.9 to 1.1 million of 1.55 million values differ) and is one float32 rounding step: at most 2.9e-6 to 3.8e-6 absolute, 4e-7 to 6e-7 relative. Sampling time at 256 spp: 3.02 s budgeted without regeneration and 1.80 s with it (0.60); fixed 32: 3.09 s and 1.84 s.
+
+**A-trous filter at 64 spp** `[measured]` (NVIDIA L4, `960 x 540`, seed 3, 32 samples per dispatch, medians of three rounds, FLIP LDR mean from round 1). The filter is biased: the mean ratio drops by 0.2 to 1.1 percent.
+
+| scene | relMSE unfiltered / filtered | FLIP unfiltered / filtered | mean ratio unfiltered / filtered | filter ms (all steps, dispatches only, compile once) |
+| --- | --- | --- | --- | --- |
+| `lit-interior` | 0.01283 / 0.00042 | 0.076 / 0.037 | 1.0033 / 0.9966 | 14.1, 1.45, 78 |
+| `many-lights-500` | 0.03059 / 0.00090 | 0.105 / 0.044 | 1.0011 / 0.9905 | 14.1, 1.46, 79 |
+| `glass` | 0.00096 / 0.00040 | 0.018 / 0.018 | 0.9976 / 0.9955 | 12.6, 1.45, 80 |
+| `metal` | 0.28063 / 0.00227 | 0.015 / 0.014 | 0.9965 / 0.9856 | 12.8, 1.47, 79 |
+
+The all-steps time is 8 to 9 ms on an NVIDIA A10 (section above) and 13 to 14 ms on this L4 (upload, seven dispatches, readback). The picture puts the unfiltered and the filtered 64 spp image next to the Cycles 4096 spp reference. The filtered image is smoother and has lower error, and it is softer than the reference at texture and shadow edges: an estimate with bias, not a converged one.
+
+![lit-interior and many-lights-500 at 64 spp: Cook unfiltered, Cook with the a-trous filter, Cycles 4096 spp](cook-atrous-comparison.jpg)
+
+## Denoised Cook against denoised Cycles (#897)
+
+The raw 64 spp images are noisy; the question here is how the finished image compares. Cook (`--kernel cycles`, defaults: no path regeneration, no environment compensation) is compared with Blender Cycles 5.3.0 OptiX, both raw and denoised, on four scenes at 16, 64 and 256 spp. `[measured]`
+
+**Setup.** One Modal container on an NVIDIA A10 (driver 610.57, card pinned), `960 x 540`, 8 bounces, seed 3 for both renderers (the references are Cycles 4096 spp seed 1), two rounds, medians of the two rounds. Modal preempted the first container once and restarted the function with the same input; the numbers come from the complete restarted run (144 rows, none failed). The variants:
+
+- **Cook raw**, **Cook + a-trous** (`denoise: 'atrous'`, the GPU filter of the section above) and **Cook + OIDN**: one trace gives all three images from the same samples. OIDN 2.5.1 runs through `packages/denoise-oidn` (`oidnDenoise`, HDR mode, quality high) on the kernel's first-hit albedo and normal buffers, on the CUDA device; the CPU device is listed too. The denoise seconds are a warm second call and include what the addon does around the filter (PFM files written and read, process start, weights load).
+- **Cycles raw** and **Cycles + OIDN**: two renders per rung with the same seed. The denoised one sets `denoiser = OPENIMAGEDENOISE`, albedo and normal passes, prefilter accurate and GPU denoising explicitly, so the result does not depend on which denoiser is the default (which one it is on 5.3 was not checked). Cycles denoises inside its render call, so its denoise seconds are the time from first sample to end of call of the denoised render minus the same time of the raw render of that rung and round; its sampling seconds are those of the raw render. Every Cycles + OIDN row ran the GPU denoiser.
+- Error is relMSE (epsilon 0.01) and mean ratio against the Cycles 4096 spp seed 1 reference; FLIP is the LDR mean from round 1 (sRGB, exposure set from the reference). Total seconds are sampling plus denoise, scene build and shader compile excluded.
+
+| scene | spp | variant | sampling s | denoise s | total s | relMSE | FLIP | mean ratio |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| glass | 16 | cook-raw | 0.27 | 0.00 | 0.27 | 0.00424 | 0.030 | 0.999 |
+| glass | 16 | cook-atrous | 0.27 | 0.01 | 0.28 | 0.000754 | 0.023 | 0.995 |
+| glass | 16 | cook-oidn-cuda | 0.27 | 0.65 | 0.92 | 0.000275 | 0.022 | 0.995 |
+| glass | 16 | cook-oidn-cpu | 0.27 | 0.61 | 0.88 | 0.000273 | 0.021 | 0.995 |
+| glass | 16 | cycles-raw | 0.11 | 0.00 | 0.11 | 0.0117 | 0.045 | 1.000 |
+| glass | 16 | cycles-oidn | 0.11 | 0.07 | 0.18 | 0.000216 | 0.019 | 0.998 |
+| glass | 64 | cook-raw | 0.48 | 0.00 | 0.48 | 0.000962 | 0.018 | 0.998 |
+| glass | 64 | cook-atrous | 0.48 | 0.01 | 0.49 | 0.000398 | 0.018 | 0.996 |
+| glass | 64 | cook-oidn-cuda | 0.48 | 0.72 | 1.20 | 0.000168 | 0.019 | 0.996 |
+| glass | 64 | cook-oidn-cpu | 0.48 | 0.53 | 1.01 | 0.000165 | 0.018 | 0.996 |
+| glass | 64 | cycles-raw | 0.39 | 0.00 | 0.39 | 0.0025 | 0.024 | 0.999 |
+| glass | 64 | cycles-oidn | 0.39 | 0.08 | 0.47 | 0.000119 | 0.016 | 1.000 |
+| glass | 256 | cook-raw | 1.89 | 0.00 | 1.89 | 0.000265 | 0.013 | 0.999 |
+| glass | 256 | cook-atrous | 1.89 | 0.01 | 1.89 | 0.000231 | 0.015 | 0.997 |
+| glass | 256 | cook-oidn-cuda | 1.89 | 0.35 | 2.23 | 0.000117 | 0.017 | 0.998 |
+| glass | 256 | cook-oidn-cpu | 1.89 | 0.23 | 2.11 | 0.000114 | 0.016 | 0.998 |
+| glass | 256 | cycles-raw | 1.50 | 0.00 | 1.50 | 0.000532 | 0.014 | 1.000 |
+| glass | 256 | cycles-oidn | 1.50 | 0.12 | 1.62 | 9.71e-05 | 0.014 | 1.000 |
+| lit-interior | 16 | cook-raw | 0.34 | 0.00 | 0.34 | 0.0653 | 0.142 | 1.003 |
+| lit-interior | 16 | cook-atrous | 0.34 | 0.01 | 0.35 | 0.00157 | 0.095 | 0.975 |
+| lit-interior | 16 | cook-oidn-cuda | 0.34 | 0.72 | 1.05 | 0.000319 | 0.040 | 0.997 |
+| lit-interior | 16 | cook-oidn-cpu | 0.34 | 0.23 | 0.57 | 0.000319 | 0.040 | 0.997 |
+| lit-interior | 16 | cycles-raw | 0.24 | 0.00 | 0.24 | 0.0702 | 0.152 | 1.000 |
+| lit-interior | 16 | cycles-oidn | 0.24 | 0.10 | 0.34 | 0.000294 | 0.042 | 0.998 |
+| lit-interior | 64 | cook-raw | 0.77 | 0.00 | 0.77 | 0.0128 | 0.076 | 1.003 |
+| lit-interior | 64 | cook-atrous | 0.77 | 0.01 | 0.78 | 0.000421 | 0.037 | 0.997 |
+| lit-interior | 64 | cook-oidn-cuda | 0.77 | 0.35 | 1.12 | 0.000219 | 0.028 | 1.002 |
+| lit-interior | 64 | cook-oidn-cpu | 0.77 | 0.22 | 0.99 | 0.000218 | 0.028 | 1.002 |
+| lit-interior | 64 | cycles-raw | 0.86 | 0.00 | 0.86 | 0.0148 | 0.082 | 1.000 |
+| lit-interior | 64 | cycles-oidn | 0.86 | 0.11 | 0.97 | 0.000207 | 0.028 | 0.998 |
+| lit-interior | 256 | cook-raw | 3.12 | 0.00 | 3.12 | 0.00274 | 0.040 | 1.003 |
+| lit-interior | 256 | cook-atrous | 3.12 | 0.01 | 3.13 | 0.000232 | 0.023 | 1.002 |
+| lit-interior | 256 | cook-oidn-cuda | 3.12 | 0.46 | 3.58 | 0.000184 | 0.023 | 1.002 |
+| lit-interior | 256 | cook-oidn-cpu | 3.12 | 0.33 | 3.45 | 0.000182 | 0.022 | 1.002 |
+| lit-interior | 256 | cycles-raw | 3.44 | 0.00 | 3.44 | 0.0031 | 0.043 | 1.000 |
+| lit-interior | 256 | cycles-oidn | 3.44 | 0.13 | 3.58 | 0.000171 | 0.021 | 1.000 |
+| many-lights-500 | 16 | cook-raw | 0.91 | 0.00 | 0.91 | 0.128 | 0.176 | 1.001 |
+| many-lights-500 | 16 | cook-atrous | 0.91 | 0.01 | 0.92 | 0.00225 | 0.084 | 0.971 |
+| many-lights-500 | 16 | cook-oidn-cuda | 0.91 | 0.36 | 1.28 | 0.000741 | 0.047 | 0.997 |
+| many-lights-500 | 16 | cook-oidn-cpu | 0.91 | 0.22 | 1.14 | 0.000743 | 0.047 | 0.997 |
+| many-lights-500 | 16 | cycles-raw | 0.78 | 0.00 | 0.78 | 0.117 | 0.177 | 1.000 |
+| many-lights-500 | 16 | cycles-oidn | 0.78 | 0.07 | 0.85 | 0.000622 | 0.044 | 1.000 |
+| many-lights-500 | 64 | cook-raw | 3.14 | 0.00 | 3.14 | 0.0306 | 0.105 | 1.001 |
+| many-lights-500 | 64 | cook-atrous | 3.14 | 0.01 | 3.15 | 0.0009 | 0.044 | 0.991 |
+| many-lights-500 | 64 | cook-oidn-cuda | 3.14 | 0.36 | 3.50 | 0.000559 | 0.034 | 1.000 |
+| many-lights-500 | 64 | cook-oidn-cpu | 3.14 | 0.22 | 3.36 | 0.000559 | 0.034 | 1.000 |
+| many-lights-500 | 64 | cycles-raw | 2.99 | 0.00 | 2.99 | 0.0279 | 0.101 | 1.000 |
+| many-lights-500 | 64 | cycles-oidn | 2.99 | 0.08 | 3.08 | 0.000503 | 0.032 | 1.000 |
+| many-lights-500 | 256 | cook-raw | 12.31 | 0.00 | 12.31 | 0.00763 | 0.058 | 1.001 |
+| many-lights-500 | 256 | cook-atrous | 12.31 | 0.01 | 12.32 | 0.000568 | 0.029 | 0.998 |
+| many-lights-500 | 256 | cook-oidn-cuda | 12.31 | 0.37 | 12.68 | 0.00048 | 0.027 | 1.001 |
+| many-lights-500 | 256 | cook-oidn-cpu | 12.31 | 0.22 | 12.53 | 0.00048 | 0.027 | 1.002 |
+| many-lights-500 | 256 | cycles-raw | 11.86 | 0.00 | 11.86 | 0.00698 | 0.055 | 1.000 |
+| many-lights-500 | 256 | cycles-oidn | 11.86 | 0.13 | 11.98 | 0.000453 | 0.025 | 1.000 |
+| outdoor-hdri | 16 | cook-raw | 0.17 | 0.00 | 0.17 | 0.00117 | 0.016 | 1.000 |
+| outdoor-hdri | 16 | cook-atrous | 0.17 | 0.01 | 0.18 | 5.02e-05 | 0.011 | 1.000 |
+| outdoor-hdri | 16 | cook-oidn-cuda | 0.17 | 0.37 | 0.53 | 4.66e-05 | 0.016 | 0.999 |
+| outdoor-hdri | 16 | cook-oidn-cpu | 0.17 | 0.22 | 0.39 | 4.41e-05 | 0.015 | 0.999 |
+| outdoor-hdri | 16 | cycles-raw | 0.07 | 0.00 | 0.07 | 0.00591 | 0.029 | 1.000 |
+| outdoor-hdri | 16 | cycles-oidn | 0.07 | 0.07 | 0.14 | 3.96e-05 | 0.015 | 1.000 |
+| outdoor-hdri | 64 | cook-raw | 0.15 | 0.00 | 0.15 | 0.000198 | 0.010 | 1.000 |
+| outdoor-hdri | 64 | cook-atrous | 0.15 | 0.01 | 0.16 | 2.11e-05 | 0.009 | 1.000 |
+| outdoor-hdri | 64 | cook-oidn-cuda | 0.15 | 0.36 | 0.51 | 2.35e-05 | 0.013 | 0.999 |
+| outdoor-hdri | 64 | cook-oidn-cpu | 0.15 | 0.22 | 0.38 | 2.13e-05 | 0.012 | 0.999 |
+| outdoor-hdri | 64 | cycles-raw | 0.24 | 0.00 | 0.24 | 0.00118 | 0.015 | 1.000 |
+| outdoor-hdri | 64 | cycles-oidn | 0.24 | 0.09 | 0.32 | 2.19e-05 | 0.014 | 1.000 |
+| outdoor-hdri | 256 | cook-raw | 0.58 | 0.00 | 0.58 | 5.05e-05 | 0.008 | 1.000 |
+| outdoor-hdri | 256 | cook-atrous | 0.58 | 0.01 | 0.58 | 1.02e-05 | 0.008 | 1.000 |
+| outdoor-hdri | 256 | cook-oidn-cuda | 0.58 | 0.40 | 0.97 | 1.37e-05 | 0.012 | 0.999 |
+| outdoor-hdri | 256 | cook-oidn-cpu | 0.58 | 0.22 | 0.80 | 1.19e-05 | 0.011 | 1.000 |
+| outdoor-hdri | 256 | cycles-raw | 0.89 | 0.00 | 0.89 | 0.000169 | 0.009 | 1.000 |
+| outdoor-hdri | 256 | cycles-oidn | 0.89 | 0.10 | 0.99 | 1.29e-05 | 0.013 | 1.000 |
+
+The picture is `many-lights-500` at 64 spp. Top row: Cook raw, Cook + OIDN, Cycles + OIDN, Cycles 4096 spp. Bottom row: the same images cropped at 240 x 135 pixels around a door edge, a box and a sphere, enlarged 2x with nearest-neighbour pixels. Labels give relMSE and total seconds.
+
+![many-lights-500 at 64 spp: Cook raw, Cook + OIDN, Cycles + OIDN, Cycles 4096 spp, with a 2x crop](cook-denoised-comparison.jpg)
+
+**Where Cook's denoised image is better or cheaper.**
+
+- Raw Cook is the cheaper estimate at defaults on `lit-interior` at 256 spp (3.12 s against 3.44 s) and on `outdoor-hdri` (0.58 s against 0.89 s at 256 spp); at equal total seconds its raw relMSE is 0.33 to 0.76 times that of raw Cycles on `glass`, `lit-interior` and `outdoor-hdri`.
+- The a-trous filter costs 0.01 s against 0.07 to 0.13 s for Cycles' OIDN and 0.35 to 0.7 s for the OIDN addon call, and it brings relMSE down by about 30 times at 64 spp on `lit-interior` and `many-lights-500`.
+- Where the image is smooth, Cook + OIDN and Cycles + OIDN are the same: on `many-lights-500` at 64 spp, in the flattest 70 percent of pixels (lowest reference gradient), relMSE is 0.00046 against 0.00043 and the mean ratio 1.0006 against 0.9991. FLIP at 64 spp is 0.034 against 0.032 (`many-lights-500`), 0.028 against 0.028 (`lit-interior`), 0.019 against 0.016 (`glass`), 0.013 against 0.014 (`outdoor-hdri`).
+
+**Where Cook's denoised image is worse.**
+
+- Edges: on `many-lights-500` at 64 spp, in the 5 percent of pixels with the highest reference gradient, Cook + OIDN has relMSE 0.00153 against 0.00114 for Cycles + OIDN (34 percent higher), Cook + a-trous 0.00253 (2.2 times). One image, one seed; the cause (guide buffers, filter settings) was not investigated.
+- Mean shift: the a-trous filter darkens the image, mean ratio 0.971 to 0.975 at 16 spp and 0.991 to 0.997 at 64 spp on `lit-interior` and `many-lights-500` (the flat region of `many-lights-500` at 64 spp reads 0.9896). Cook + OIDN stays within 0.3 percent of the reference mean on `lit-interior` and `many-lights-500` (0.997 to 1.002) and reads 0.5 percent low on `glass` (0.995 to 0.998); Cycles + OIDN within 0.2 percent (0.998 to 1.000).
+- Cost of the OIDN step: 0.35 to 0.72 s through the addon (CUDA device; 0.22 to 0.61 s on the CPU device) against 0.07 to 0.13 s inside Cycles. The addon starts the `oidnDenoise` tool and moves the images through files, which Cycles does not; the difference is the integration, not the filter.
+- Texture detail was not measured: none of the four scenes carries an image texture. The reference noise floor (relMSE between two 4096 spp seeds, table above) is 0.000832 for `many-lights-500`, 0.00026 for `lit-interior` and 0.000058 for `glass`, so denoised relMSE values near or below those numbers cannot rank two denoisers; FLIP separates them better, and it shows them close.
+- Cook raw at defaults samples slower than Cycles on `glass` (1.89 s against 1.50 s at 256 spp) and `many-lights-500` (12.31 s against 11.86 s); `--path-regeneration` cuts that by 0.67 to 0.72 on three scenes (section above) but was not part of this run.
+
+**Equal total seconds** (relMSE interpolated log-log between the measured rungs at the budget named; the ratio is Cook over Cycles, above 1 means Cycles has the lower error):
+
+Cook + OIDN against Cycles + OIDN:
+
+- glass at 1.2 s: cook-oidn-cuda relMSE 0.000166, cycles-oidn relMSE 0.000102 (ratio 1.63)
+- lit-interior at 1.9 s: cook-oidn-cuda relMSE 0.000201, cycles-oidn relMSE 0.000187 (ratio 1.08)
+- many-lights-500 at 3.9 s: cook-oidn-cuda relMSE 0.000552, cycles-oidn relMSE 0.000494 (ratio 1.12)
+- outdoor-hdri at 0.7 s: cook-oidn-cuda relMSE 2.63e-05, cycles-oidn relMSE 1.51e-05 (ratio 1.74)
+
+Cook + a-trous against Cycles + OIDN:
+
+- glass at 0.7 s: cook-atrous relMSE 0.000351, cycles-oidn relMSE 0.000113 (ratio 3.12)
+- lit-interior at 1.0 s: cook-atrous relMSE 0.000372, cycles-oidn relMSE 0.000205 (ratio 1.81)
+- many-lights-500 at 3.3 s: cook-atrous relMSE 0.000884, cycles-oidn relMSE 0.0005 (ratio 1.77)
+- outdoor-hdri at 0.3 s: cook-atrous relMSE 2.4e-05, cycles-oidn relMSE 2.25e-05 (ratio 1.07)
+
+Cook raw against Cycles raw:
+
+- glass at 0.6 s: cook-raw relMSE 0.000738, cycles-raw relMSE 0.00143 (ratio 0.52)
+- lit-interior at 1.0 s: cook-raw relMSE 0.00932, cycles-raw relMSE 0.0122 (ratio 0.76)
+- many-lights-500 at 3.3 s: cook-raw relMSE 0.0292, cycles-raw relMSE 0.0254 (ratio 1.15)
+- outdoor-hdri at 0.3 s: cook-raw relMSE 0.000275, cycles-raw relMSE 0.000838 (ratio 0.33)
+
+For the same total seconds, the finished image of Cycles + OIDN has the lower error than Cook + OIDN on all four scenes (1.08 to 1.74 times), with a larger lead over Cook + a-trous (1.07 to 3.12 times at the budgets above). The OIDN gap is mostly the 0.3 s of the addon call: Cook samples as fast or faster on two of the four scenes at defaults, so a denoise step as cheap as Cycles' would close part of it. Both gaps sit where relMSE is near the reference noise floor, so read them with the FLIP column. Raw, Cook is ahead at equal seconds on three scenes and behind on `many-lights-500` (1.15).
+
+Commands (the Modal pipeline stays outside the repository; each step is a script in `bench/cycles-parity/`):
+
+```sh
+node bench/cycles-parity/trace-native.mjs <scene.json> <prefix> --kernel cycles --samples 64 --seed 3 --bounces 8 --denoise atrous --oidn-devices cuda,cpu
+blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <scene.json> <prefix> --samples 64 --bounces 8 --seed 3 --denoise oidn-gpu
+uv run --no-project python bench/cycles-parity/summarize-denoised-comparison.py <rows.json>
+uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-denoised-comparison-figure.py --rows <rows.json> --images <folder> --reference <reference.npy> --crop-x 300 --crop-y 255 --output docs/cook-denoised-comparison.jpg
+```
+
+## Persistent in-process OIDN (#1025)
+
+The `oidnDenoise` tool pays for a process start, CUDA initialisation, the weights and three PFM files on every call. `createNativeOidnDenoiser` (render-native) and `createOidnDenoiser` (denoise package) keep one OIDN device, four buffers and the committed filter alive, and recommit only when the size or the set of guides changes. `trace-native.mjs --oidn-devices cuda,cuda-cli,cpu,cpu-cli` runs the in-process device (`cuda`) beside the tool (`cuda-cli`) on one trace; `node bench/oidn-cost/measure-oidn-cost.mjs --out <file>` writes the split below. Every number is measured on one Modal container with an NVIDIA A10 (driver 610.57) and a 24 thread Xeon, OIDN 2.5.1, quality high, colour plus albedo plus normal, seeded synthetic input, median of seven calls.
+
+| size | device | tool call s | of which process start to exit | in-process first call s (plus device creation) | in-process warm call s | warm: write / execute / read ms |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 960 x 540 | cuda | 0.345 | 0.320 | 0.015 (0.103) | 0.0072 | 1.3 / 3.5 / 2.2 |
+| 960 x 540 | cpu | 0.218 | 0.194 | 0.075 (0.010) | 0.048 | 1.8 / 43.5 / 2.8 |
+| 1920 x 1080 | cuda | 0.787 | 0.671 | 0.033 (0.090) | 0.029 | 7.2 / 13.6 / 7.7 |
+| 1920 x 1080 | cpu | 0.732 | 0.624 | 0.223 (0.002) | 0.178 | 6.5 / 162.5 / 8.3 |
+
+The tool call also spends 0.010 / 0.007 s encoding and writing PFM files and 0.007 s reading one back at 960 x 540 (0.034 / 0.054 / 0.023 s at 1920 x 1080). A bare `oidnDenoise --version` takes 0.007 s, and `--verbose 2` shows 0.110 s for the CUDA device, 0.005 s for the filter commit and 0.007 s for the filter at 960 x 540, so about 0.2 s of the 0.32 s process is CUDA runtime start and teardown that the verbose lines do not count. The three images cost 0.007 s (960 x 540) and 0.024 s (1920 x 1080) to copy in JS, which is the floor left by not sharing memory between the Vulkan tracer and CUDA.
+
+Output: the in-process image equals the tool's image byte for byte (maximum absolute difference 0) on all four rows, the first call equals a warm call, and so does the call after a size change and back. Resizing recommits the filter; warm calls never do.
+
+Equal total time on `lit-interior` and `many-lights-500` (same container, 3 rounds, seed 3, medians): the in-process CUDA denoise costs 0.008 s against 0.34 to 0.38 s for the tool, so the total of Cook + OIDN falls from 0.56 to 0.23 s at 16 spp on `lit-interior`, with the same relMSE (3.09e-4) as the tool path. The in-process CPU device costs 0.047 s against 0.22 s.
+
+## Depth and grey-diffuse comparison (#896, slice C1a)
+
+The Done-when item of #896 for the Classroom scene asks for two checks against Cycles with every material overridden to grey diffuse: the image-match gates and a depth pass that agrees on 99.9 percent of pixels. This slice adds the harness for both and proves it on two existing scenes; the Classroom scene itself is a later slice. Only `bench/`, `tests/` and this guide change.
+
+Options, all off by default so existing references and runs are unchanged:
+
+- `render-cycles.py --grey-diffuse` sets the view layer's material override to one Principled material (base colour 0.8, roughness 1, metallic 0, specular 0). `--z-depth` renders the camera Z depth to `<prefix>-depth.npy` (rows from the top, 0 where nothing is hit) with `--depth-samples` samples (default 64). The depth comes from the Camera Data node's View Z Depth through an emission-only override with the world switched off, not from a multilayer EXR: it is the same quantity as Cycles' Z pass, goes through the single-layer path the colour image uses, and averages silhouette pixels with misses counted as 0, as Cook does. It is not the literal Z pass.
+- `trace-native.mjs --grey-diffuse` gives every part the same material ([`grey-diffuse-override.mjs`](../bench/cycles-parity/grey-diffuse-override.mjs): the colour, roughness, metallic and specular above, no emission, no texture, no vertex colours; lights are untouched). `--write-depth` writes `<prefix>-depth.npy` and records `depthConvention` and `cameraVerticalFovDegrees` in the JSON.
+- [`compare_depth.py`](../bench/cycles-parity/compare_depth.py) scores a depth pair: the share of pixels where both hit and differ by at most 1 percent (relative to Cycles), or where both missed. A pixel hit by only one side counts as a disagreement. Gate: 99.9 percent. It also reports the share at 0.1, 0.5 and 5 percent, the median ratio (a constant scale shows there), the 99th percentile and maximum relative error, and how many disagreeing pixels sit next to a silhouette (an 8-neighbourhood with a hit/miss change or a depth jump over 5 percent, in either image).
+
+Depth convention, from the code: Cycles' depth is the Z distance (along the view axis, `camera_z_depth`). Cook's `depth` is the first-hit distance along the unit ray (`first_depth = surface_hit.t` in `integrator.wgsl`, direction normalised in `camera.wgsl`), averaged over the samples with misses as 0. The comparator converts Cook to Z, `z = t * cos(angle between the pixel's ray and the view axis)`, from the vertical field of view and the image size; it assumes a symmetric perspective camera with no lens shift, which holds for every reference scene. The conversion is not optional: without it the agreement is 4.1 percent on `lit-interior`.
+
+Result (one Modal container on an NVIDIA A10, Cook on the `NVIDIA A10` adapter, Blender 5.3.0 Cycles OptiX; 960 x 540, 1024 spp, seed 1 for both, Cycles seed 2 for the FLIP noise floor, 8 bounces, box filter, depth at 64 samples; `app.py::depth_parity` in the Cook Modal app) `[measured]`:
+
+| Scene | Mean ratio (R / G / B) | Tiles within 5 % | FLIP LDR (ceiling) | Depth agreement at 1 % | at 0.1 % | median Cook / Cycles | max relative error |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
+| `lit-interior` | 1.0027 / 1.0027 / 1.0026 | 64 of 64 | 0.0222 (0.0420) | 99.985 % (78 pixels) | 99.83 % | 1.0000002 | 2.2 % |
+| `many-lights-500` | 1.0008 / 1.0008 / 1.0008 | 64 of 64 | 0.0176 (0.0375) | 99.971 % (151 pixels) | 99.66 % | 1.00000005 | 3.0 % |
+
+All image gates and the depth gate pass on both scenes. Every disagreeing pixel sits on a silhouette (78 and 151 pixels, none in the interior of a surface); away from silhouettes the agreement is 100 percent and the 99th percentile of the relative error is below 0.01 percent, so there is no constant scale or slope. Both scenes are closed rooms, so no pixel misses: the miss handling (background in both, one side only, infinity, NaN) is covered by `bench/cycles-parity/test_compare_depth.py` on synthetic arrays and not yet by a rendered scene. `tests/cycles-grey-diffuse.test.js` covers the override. Run the comparator tests with `uv run --no-project --with numpy python -m unittest bench/cycles-parity/test_compare_depth.py`.
+
+Not covered: the Classroom scene (instancing, 854 instances, depth of field, which the depth comparator does not model: a thin lens changes the ray-to-Z conversion), a scene with a background, and 4096 spp references.
+
+## Depth of field (#896, slice D1)
+
+A camera with an `fStop` is a thin lens in the `cycles` kernel, with Cycles' model: aperture radius `focal length / 1000 / (2 * f-stop)` metres, a disk or a regular polygon of `apertureBlades` corners, and a focus distance measured along the view axis. The kernel already held the lens maths (`camera.wgsl`, a port of Cycles' `camera.h`); this slice connects it: `createCamera` turns `fStop`, `focalLength` or `fov` with `sensorWidth`, `focusDistance`, `apertureBlades` and `apertureRotation` (degrees, Blender's sense) into the aperture fields of the params block. Layout and options: [FORMAT-v2.md](../packages/render-native/FORMAT-v2.md) and the [render-native README](../packages/render-native/README.md#depth-of-field-cycles-kernel). The kernel and the legacy kernel are unchanged. Motion blur is not in Cook; it is a known gap and out of scope for #896.
+
+Depth of field off: the packed params bytes and the random numbers drawn do not change. The lens sample (`lens_uv`) is drawn for every sample whether or not the aperture is above 0, and a pinhole camera writes the same lens words as before (`0`, `10`, `0`, `0`). Measured on an RTX 4090: 128-sample images of `lit-interior` and `glass` (480 x 270, fixed 32 samples per dispatch, seed 3), with this tree merged with origin/main and with origin/main's JavaScript on the same addon, have identical SHA-256 for the `cycles` and the `legacy` kernel (4 of 4), and two runs of this tree agree. Earlier runs, before the merge, on an L4 and on the 4090 gave the same hashes. The native node suite on the 4090: 194 tests, 191 pass, 0 fail, 3 skipped, with both GPU depth of field tests running.
+
+Cycles comparison (`dof-depth` scene in `bench/reference/scenes.js`: objects 2 m, 6 m and 15 m from the camera and a grid of small lamps 15 m away; 960 x 540, f/1.0 on a 150 mm wide sensor, a 116 mm lens, focus on the ball 6 m away; the near spheres blur by about 28 pixels, the lamps by about 9; Blender 5.3.0 Cycles OptiX and Cook on one RTX 4090; seed 1, 8 bounces, box filter; `trace-native.mjs` and `render-cycles.py` take the same `--f-stop`, `--focus-distance`, `--aperture-blades`, `--aperture-rotation` (degrees) and `--sensor-width`; Cook goes through `createCamera`) `[measured]`:
+
+| Aperture, Cook 4096 spp against Cycles 4096 spp | mean ratio (R / G / B) | relMSE (eps 0.01) | Cycles seed 2 against seed 1 | tiles within 5 % |
+| --- | --- | ---: | ---: | ---: |
+| disk, focus 6 m | 0.9996 / 0.9996 / 0.9996 | 3.4e-5 | 3.5e-5 | 45 of 45 |
+| triangle, rotation 10 | 0.9996 / 0.9997 / 0.9998 | 2.8e-5 | 2.6e-5 | 44 of 44 |
+| pentagon, rotation 40 | 0.9994 / 0.9995 / 0.9995 | 3.0e-5 | 3.2e-5 | 44 of 44 |
+| hexagon, rotation 15 | 0.9996 / 0.9996 / 0.9996 | 3.6e-5 | 3.0e-5 | 44 of 44 |
+| heptagon, rotation 25 | 0.9995 / 0.9995 / 0.9996 | 3.4e-5 | 3.2e-5 | 44 of 44 |
+
+Of 64 tiles, 19 (disk) and 20 (polygons) are too dark to count. Every row is at Cycles' own noise floor (the polygon rows differ from their floor by at most 6e-6, and the lamp-region relMSE, where bokeh shows, is 0.0039 to 0.0047 against 0.0038 to 0.0043 for Cycles seed 2). Odd and even corner counts and four rotations leave no symmetry to hide a wrong offset or sign. A Cook pinhole against the Cycles disk image scores 7.8e-3 (230 times worse), with 35 of 45 tiles within 5 percent and a tile ratio as low as 0.44, so the scene does tell a lens from a pinhole.
+
+The polygon conventions differ in one place, derived from Cycles' code and not fitted. Cycles' `regular_polygon_sample` (`intern/cycles/kernel/sample/mapping.h`) builds each sector as a triangle whose outer points sit at -pi/n and +pi/n around an axis at `rotation + 2 pi k / n`, so its corners are at `rotation + pi/n + 2 pi k / n`; Blender's `aperture_rotation` reaches `bladesrotation` unchanged in radians (`intern/cycles/blender/camera.cpp`, `camera_sample_aperture` in `kernel/camera/camera.h`). Cook's `cam_sample_regular_polygon` (`camera.wgsl`) puts corners at `rotation + 2 pi k / n`. Same direction and same unit, so `createCamera` adds `180 / blades` degrees (`kernelApertureRotation` in `src/camera.js`). A first fit on the hexagon alone (a sign flip, commit `272003cd`) was wrong, as the pentagon at 40 degrees showed (relMSE 9.2e-4 against a floor of 3.2e-5). Picture: `docs/cook-depth-of-field-comparison.jpg` (rows disk and pentagon; Cook and Cycles at 256 spp, Cook and Cycles at 4096, difference times 4).
+
+Bundle size (`node scripts/measure-size.mjs`, growth against origin/main, gzip bytes): `entry:path-tracer` 29,509 to 29,857 (+348, allowed 590), `entry:path-tracer-progressive` 38,118 to 38,468 (+350), `entry:path-tracer-realtime` 42,565 to 42,906 (+341), `entry:core` 90,098 to 90,103 (+5, allowed 64), `scene:lit-box` unchanged at 58,841. No bundle grew past its allowance, so there is no size note.
+
+Not covered: anamorphic bokeh (slice D2), lens shift and orthographic cameras (`createCamera` refuses both), and the depth pass of a lens camera (not compared).
+
+## Progressive film and scene updates (#896, slice S2)
+
+A native session builds one image over several `render` calls (`accumulate: true`, `targetSamples`, `reset()`, `resolve()`) and applies new material values, lights, selection weights and instance transforms with `update()`. The kernel adds one sample at a time to the film in sample order and the Sobol-Burley sequence is indexed by the whole image's target count, so call boundaries cannot change a sum. The TLAS is rebuilt over the kept BLAS on a transform change (wgpu 30.0.1 has no refit); a change of counts, triangles or mesh topology is refused with a message that says to create a new session.
+
+Measured on one NVIDIA A10 (480 x 270, 32 samples, `bench/cycles-parity/session-progressive.mjs`):
+
+| Check | `lit-interior` | `many-lights-500` |
+| --- | --- | --- |
+| Split calls (16+16, 8+15+9; both samplers; path regeneration on and off) equal one call, byte for byte | 8 of 8 | 8 of 8 |
+| `update()` then `render` equals a fresh one-shot of the final input, byte for byte (materials; materials and transforms; back to start) | 3 of 3 | 3 of 3 |
+| New session, cold pipeline | 6721 ms | 6899 ms |
+| New session, pipeline already compiled in the process | 65 ms | 44 ms |
+| Update plus render (4 samples), materials only | 17.5 ms | 43.1 ms |
+| Update plus render, transforms (TLAS rebuilt) | 17.7 ms | 44.9 ms |
+
+One-shot `traceNative` images (both kernels) and S1 session frames hash the same as origin/main built in the same container.
+
+## Sequence jobs through a persistent session (#896, slice S3)
+
+A stills or video job with `renderer.backend: "native"` and more than one frame holds one native session for the whole job. Frame 1 creates it; each later frame is decided by comparing its FORMAT-v2 tables with the ones the session holds: the same tables (a camera move) render with the frame's own `kernelParams`; changed `materials`, lights or instance transforms go through `session.update`; changed counts, geometry, textures or environment close the session and create a new one for that frame. A failed update (which closes the session by design), a failed render or a package without sessions falls to a new session or a one-shot trace for that frame and the job carries on. `metrics.pathTracer.nativeSession` names the route of each frame (`path`: `new-session`, `reused`, `updated` or `one-shot`, with `reason`, `changedTables`, `pipelineReused`, `accelerationReused`, `frameIndex`). Every frame equals the one-shot render of the same input byte for byte (`tests/native-sequence.test.js`, and the SHA-256 of all 24 frames in each run below).
+
+Measured on one NVIDIA RTX 4090 (Vast instance, 24 frames, 480 x 270, 16 samples, `bench/cycles-parity/sequence-timing.mjs`, one process per mode so the cold compile of one mode never warms the other; medians of three runs; milliseconds) `[measured]`:
+
+| Sequence | Mode | Frame 1 setup / compile / upload / accel / trace | Frame 2-24 mean setup / compile / upload / accel / trace | Sequence total (s) | Routes |
+| --- | --- | --- | --- | --- | --- |
+| `lit-interior`, camera orbit | session | 300 / 33 / 0.5 / 1.0 / 24 | 0 / 1.8 / 0.1 / 0 / 19 | 1.03 | 1 new, 23 reused |
+| | one-shot | 324 / 32 / 0.5 / 1.7 / 25 | 0 / 1.9 / 0.3 / 0.9 / 18 | 0.98 | |
+| `lit-interior`, block moves and key light swings (flattened) | session | 296 / 33 / 0.5 / 1.2 / 26 | 0 / 1.9 / 0.2 / 0.8 / 21 | 1.02 | 24 new (triangles differ) |
+| | one-shot | 304 / 33 / 0.5 / 1.4 / 27 | 0 / 1.9 / 0.3 / 1.0 / 21 | 1.02 | |
+| same, instanced (`buildTraceScene` `instancing: true`) | session | 295 / 33 / 0.5 / 0.9 / 21 | 0 / 1.8 / 0.0 / 0 / 13 | 0.88 | 1 new, 23 updated |
+| | one-shot | 233 / 34 / 0.5 / 0.8 / 20 | 0 / 1.8 / 0.2 / 0.5 / 13 | 0.75 | |
+| `many-lights-500` (3,646 triangles, 350 lights), camera orbit | session | 302 / 33 / 0.7 / 2.7 / 70 | 0 / 1.9 / 0.1 / 0 / 19 | 1.00 | 1 new, 23 reused |
+| | one-shot | 286 / 33 / 0.7 / 2.6 / 66 | 0 / 1.8 / 0.3 / 2.0 / 18 | 1.32 (one run 7.5 s, two near 1.0) | |
+
+What the numbers say `[inferred]`: a session removes the acceleration build and most of the upload from frame 2 on (camera-only: 0 ms against 0.9 to 2.0 ms of build, 0.1 against 0.3 ms of upload), and `pipelineReused` and `accelerationReused` are true on every later frame. Compile does not read zero: the 1.8 ms is the lookup of the process-wide compiled-kernel cache, which a one-shot trace also hits from its second frame, so a one-shot sequence in a warm process already skips the 33 ms compile and the 240 to 320 ms device start. These scenes hold about 3,000 triangles, so the saving is 1 to 3 ms of a 18 to 25 ms frame and the sequence totals sit within run-to-run noise (the instanced rows show the spread: 0.73 to 1.04 s for the same work). A moving object in the flattened scene changes the `triangles` table, so every frame there is a new session (as costly as a one-shot trace); only a scene packed with shared geometry turns a moved object into an instance-transform update.
+
+### Real jobs (8 stills through the MCP server, RTX 4090, page on SwiftShader, native tracer on the GPU)
+
+`bench/native-tracer/sequence-job.mjs` on the demo room, each variant run with sessions and with `JS67_NATIVE_SESSIONS=off`: every frame of every variant is byte-identical between the two runs. Routes of frames 2 to 8 `[measured]`: camera tracks only, `reused` on all 7; plus a roughness track, `updated` on all 7 (table `materials`); plus a point light intensity track, `updated` on all 7 (tables `lights`, `lightTreeNodes`, `lightTreeEmitters`); the recipe's own motion (a pendant swings), `updated` on 6 with the top-level acceleration structure rebuilt (tables `instances`, `emissiveTriangles`, `lights` and the light tree) and `reused` on 1 (the swing returned to an earlier pose), since jobs export shared geometry as instances (before that export every such frame took `new-session`, because the flattened tables hold the pendant's triangles); with the sparks and fur particle systems left in, `new-session` on all 7 (`emissiveTriangleCount` changes from frame to frame). Cause, found by diffing the page export between times in Node (`[measured]`): the demo room's `particles` (sparks emit glowing triangles over time, hair sways) rebuild the triangle and emissive tables at every time, so a camera-only edit of the recipe with its particles left in still changes `triangles`; with them removed only the camera block differs. The export itself is deterministic and does not cull by camera. A session cannot keep the acceleration structure across a change of the emissive or triangle count: `update` refuses a count change by design, because the BLAS holds the triangles and the session's buffers and bind group are sized at creation; allowing it needs a Rust change to re-create the emissive, light and light tree buffers and the bind group (and re-specialize the kernel) while keeping the BLAS, which is not worth it while the triangles change in the same frames.
+
+### Large scenes (12 frames, same card)
+
+Generated scenes from `bench/cycles-parity/large-scene.mjs` through `large-sequence-timing.mjs` (480 x 270, 16 samples, medians of three runs, session against one-shot on identical inputs; every frame of every run is byte-identical between the two modes). "Camera" orbits the camera and runs first in the process, so its frame 1 includes the 300 to 400 ms start of the device; "moving" orbits the camera and alternates one instance between two placements every frame (an instance-table update, the TLAS rebuilt over the kept BLAS), and runs second in a warm process. `[measured]`
+
+| Scene | Variant | Mode | Sequence total (s) | Frames 2-12 mean: upload / acceleration / trace / wall (ms) | Routes |
+| --- | --- | --- | --- | --- | --- |
+| terrain, 400k triangles | camera | session | 0.66 | 0 / 0 / 5 / 18 | 1 new, 11 reused |
+| | | one-shot | 1.26 | 47 / 14 / 5 / 73 | |
+| | moving | session | 0.37 | 0 / 0 / 5 / 25 | 1 new, 11 updated |
+| | | one-shot | 0.88 | 46 / 14 / 5 / 72 | |
+| terrain, 1M triangles | camera | session | 1.16 | 0 / 0 / 5 / 29 | 1 new, 11 reused |
+| | | one-shot | 3.32 | 141 / 58 / 6 / 213 | |
+| | moving | session | 0.73 | 0 / 0 / 5 / 46 | 1 new, 11 updated |
+| | | one-shot | 3.67 | 143 / 130 / 24 / 308 | |
+| forest, 1,002 instances of one 10k mesh | camera | session | 0.53 | 0 / 0 / 10 / 14 | 1 new, 11 reused |
+| | | one-shot | 0.51 | 1 / 1 / 10 / 16 | |
+| | moving | session | 0.19 | 0 / 0 / 10 / 15 | 1 new, 11 updated |
+| | | one-shot | 0.19 | 1 / 1 / 10 / 15 | |
+
+What this says `[inferred]`: a one-shot frame pays about 120 to 140 ns per triangle for upload and 35 to 60 ns for the acceleration build every frame, so a session saves roughly 60 ms per frame at 400,000 triangles and 200 ms at 1,000,000 (3.32 s against 1.16 s for a 12 frame orbit, about 2.9 times faster; 0.88 against 0.37 s with a moving instance), and the saving grows with the triangle count. On small scenes there is no gain: the 3,000 triangle rooms above and the forest here (10,000 unique triangles, many instances) cost 1 to 3 ms of build and upload per frame, which a session removes, but the sequence totals do not move. The forest case also shows that the cost follows unique triangles, not instances. The job path takes at most 400,000 triangles, so a job reaches the first row only; the next section measures larger sizes through the bench.
+
+#### 2,000,000 and 4,000,000 triangles, and GPU memory (#896)
+
+Same terrain scene, frames, resolution and samples as above (12 frames, 480 x 270, 16 samples), one run per cell on the same RTX 4090 (24,564 MiB), through `bench/cycles-parity/large-sequence-memory.mjs`, which starts `large-sequence-timing.mjs` once per size and mode in its own process and polls `nvidia-smi` every 100 ms while it runs. The 4,000,000 triangle scene (3,998,796 triangles) packs in the Node process with `NODE_OPTIONS=--max-old-space-size=16384`. A single run per cell, so read small differences as noise (the camera session at 1M took 1.84 s here against a median of 1.16 s above, because its frame 1 paid a 1.2 s device start in this run). `[measured]`
+
+| Triangles | Variant | Mode | Sequence total (s) | Frames 2-12 mean: upload / acceleration / trace / wall (ms) | Frame 1 upload + acceleration (s) | Peak GPU memory (MiB) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1M | camera | one-shot | 3.62 | 146 / 62 / 7 / 224 | 0.20 | 843 |
+| | | session | 1.84 | 0 / 0 / 5 / 29 | 0.20 | 839 |
+| | moving | one-shot | 3.39 | 150 / 105 / 18 / 282 | 0.25 | (same process) |
+| | | session | 0.76 | 0 / 0 / 5 / 47 | 0.21 | (same process) |
+| 2M | camera | one-shot | 6.54 | 300 / 176 / 10 / 504 | 0.42 | 1,330 |
+| | | session | 1.55 | 0 / 0 / 6 / 52 | 0.41 | 1,330 |
+| | moving | one-shot | 6.07 | 301 / 174 / 9 / 501 | 0.51 | (same process) |
+| | | session | 1.55 | 0 / 0 / 22 / 98 | 0.43 | (same process) |
+| 4M | camera | one-shot | 14.20 | 590 / 338 / 8 / 963 | 0.84 | 2,097 |
+| | | session | 2.87 | 0 / 0 / 17 / 90 | 0.87 | 2,097 |
+| | moving | one-shot | 11.51 | 590 / 339 / 9 / 965 | 0.85 | (same process) |
+| | | session | 3.37 | 0 / 0 / 27 / 183 | 1.29 | (same process) |
+
+Session creation is frame 1 of a session run: upload plus acceleration structure build, 0.20 s at 1M, 0.41 to 0.43 s at 2M and 0.87 to 1.29 s at 4M (the 1.29 s run built in 0.67 s against 0.28 s in the other 4M session run, so treat the 4M figure as 0.9 to 1.3 s). The "camera" frame 1 also pays the device start (0.46 to 2.64 s of `setupSeconds` in these runs), which the "moving" variant, second in the same process, does not. A 12 frame orbit at 4M triangles takes 14.2 s one-shot against 2.9 s with a session (about 5 times), 6.5 against 1.6 s at 2M (about 4 times) and 3.6 against 1.8 s at 1M (about 2 times in this run; the median of three above says 2.9 times), and the saving per frame after the first grows with the triangle count: about 0.93 s per frame at 4M. Every one of the 12 frames of both variants equals the one-shot frame by SHA-256 at all three sizes (12 of 12 in each of the six comparisons).
+
+GPU memory: `nvidia-smi --query-compute-apps=pid,used_memory` returned the child's own row in this container, so the numbers are the process's, with the whole card's `--query-gpu=memory.used` peak 20 to 30 MiB higher and an idle card of 1 MiB. Both variants of a mode run in the same process, so each figure is the peak over both. The peak of a session and of a one-shot run is the same within 4 MiB at every size, because a one-shot trace frees its buffers after each frame and a session holds one scene's buffers for the whole run; what a session keeps resident is the same size as what one frame needs. The memory grows about linearly with the triangle count, 843 MiB at 1M, 1,330 MiB at 2M and 2,097 MiB at 4M, which is about 0.4 KiB per triangle (1,254 MiB for the 3,000,000 triangles between 1M and 4M) on top of roughly 440 MiB that does not grow `[inferred]` from the three points. A second session beside the first would add about the same again; this was not measured.
+
+```sh
+NODE_OPTIONS=--max-old-space-size=16384 node bench/cycles-parity/large-sequence-memory.mjs --sizes 1000000,2000000,4000000 --out artifacts/large-seq/memory.json
+```
+
+Not measured: sizes above 4,000,000 triangles (nothing failed at 4M, so the largest working size is not known), more than one run per cell, two sessions alive at once, and peak host memory.
 
 ## Reproducible Commands
 
@@ -563,6 +1073,150 @@ Result, Cook `cycles` kernel at 4096 spp, seed 1, 8 bounces, box filter, against
 
 Left Cook, right Cycles 5.3, both 4096 spp, sRGB curve and no tone mapping. The disk, the ellipse with spread 1.2 and the square with spread 0.9 give one soft pool on the floor in both; the two panes of opacity 0.4 and 0.75 cast shadows of the two densities in both.
 
-The `lit-interior` reference was rendered again with the current `render-cycles.py` (4096 spp, seed 1): relMSE against the stored reference 4.9e-10 (the seed 1 versus seed 2 floor is 0.000285) and mean ratio 1.0000 in all channels, so the stored reference is what the current script produces `[measured]`. The seven-scene parity, cargo, lobe and furnace results above are those of the previous kernel: this change touches no WGSL or Rust.
+The `lit-interior` reference was rendered again with the current `render-cycles.py` (4096 spp, seed 1): relMSE against the stored reference 4.9e-10 (the seed 1 versus seed 2 floor is 0.000285) and mean ratio 1.0000 in all channels, so the stored reference is what the current script produces `[measured]`. The seven-scene parity, cargo, lobe and furnace results above are those of the kernel before "Transparent bounce limits" below; that change was run through all of them again.
 
-Still open: the `transparent_max = 0` edge (first paragraph of "Bounce-Count Semantics Verification") has not been compared with Cycles on a scene.
+## Transparent bounce limits (#894)
+
+The `transparent_max = 0` edge was the last open point of #894. The reference scene `transparent-bounces` (in `bench/reference/scenes.js`) has three blended layers of opacity 0.5 (red, green, blue, nearest first) in front of a lit grey backdrop that stops short of the top of the frame, where a uniform sky shows. The layers cover different parts of the frame: the left third of the picture sees one layer, the middle third two and the right third three. `bench/cycles-parity/trace-native.mjs` and `render-cycles.py` take `--transparent-bounces N` to set the limit on its own (the other limits stay 8).
+
+Cook `cycles` kernel at 4096 spp, seed 1, box filter, against Cycles 5.3 OptiX at 4096 spp seeds 1 and 2, `run-m1-parity.py` gates, one Modal container per run (NVIDIA A10 before, NVIDIA L4 after; Cook on the NVIDIA adapter) `[measured]`. The seed 1 versus seed 2 floor of the Cycles renders is a relMSE below 1e-6 and a mean ratio of 1.0000 in every setting. The last column is the ratio Cook over Cycles of the sky seen through one layer.
+
+| Limit | State | Mean ratio (R / G / B) | Tiles within 5 % | Tile min / max | FLIP LDR (ceiling) | relMSE | Sky behind one layer | Gates |
+| ---: | --- | --- | ---: | --- | --- | ---: | --- | --- |
+| 0 | before | 0.9675 / 0.9082 / 0.8897 | 52 of 64 | 0.5779 / 1.0029 | 0.0742 (0.0207) | 0.024720 | 0.757 / 0.512 / 0.460 | fail |
+| 0 | after | 1.0017 / 1.0016 / 1.0016 | 64 of 64 | 1.0002 / 1.0029 | 0.0059 (0.0207) | 0.000003 | 1.001 / 1.001 / 1.001 | pass |
+| 1 | before | 1.0017 / 1.0016 / 1.0016 | 64 of 64 | 1.0002 / 1.0029 | 0.0059 (0.0207) | 0.000003 | 1.001 / 1.001 / 1.001 | pass |
+| 1 | after | 1.0017 / 1.0016 / 1.0016 | 64 of 64 | 1.0002 / 1.0029 | 0.0059 (0.0207) | 0.000003 | 1.001 / 1.001 / 1.001 | pass |
+| 2 | before | 1.0034 / 1.0052 / 1.0059 | 64 of 64 | 1.0003 / 1.0385 | 0.0138 (0.0243) | 0.000233 | 1.001 / 1.000 / 1.000 | pass |
+| 2 | after | 1.0012 / 1.0010 / 1.0010 | 64 of 64 | 0.9999 / 1.0023 | 0.0055 (0.0243) | 0.000006 | 1.001 / 1.000 / 1.000 | pass |
+| 8 | before | 1.0011 / 1.0008 / 1.0008 | 64 of 64 | 0.9999 / 1.0020 | 0.0050 (0.0241) | 0.000007 | 1.001 / 1.000 / 1.000 | pass |
+| 8 | after | 1.0011 / 1.0008 / 1.0008 | 64 of 64 | 0.9999 / 1.0020 | 0.0050 (0.0241) | 0.000007 | 1.001 / 1.000 / 1.000 | pass |
+
+What it showed `[measured]`:
+
+- Cycles renders a limit of 0 and a limit of 1 identically (mean 0.54387 / 0.19923 / 0.16623 in both): the first layer is always passed, and the path ends at the second layer, which adds only its emission. The sky behind two layers reads 0.7641 (red) at limits 0 and 1 and 0.8986 at 2; behind three layers 0.8748, 0.9335 at 2 and 0.9863 at 8.
+- Before the fix Cook at a limit of 0 ended the path at the first layer, so the sky behind it was dark (46 to 76 percent of Cycles) and the image mean was 3 to 11 percent low. This is the edge the audit named.
+- A second difference showed at a limit of 2, which the audit had not listed: Cook was 1 to 2 percent too bright behind one layer, because its shadow rays got the full limit while Cycles gives them the limit minus the layers the camera path already passed. The image mean was within the gates (1.003 to 1.006), the tile maximum was 1.0385.
+- Both are fixed in `integrator.wgsl` (`int_trace_shadow` takes the path's transparent count; the two `max_transparent_bounces == 0` tests are gone, with the Cycles function named in the comment). All four limits pass every gate after the change, and the limits 1 and 8 did not move.
+
+![Cook (left) and Cycles 5.3 (right) at transparent limit 0 (top) and 1 (bottom)](cycles-transparent-bounces.jpg)
+
+Both pairs are identical in Cook and in Cycles: left Cook, right Cycles, 4096 spp, sRGB curve and no tone mapping. The lighter patches at the left are the sky behind one layer and the backdrop behind one layer.
+
+With the fix, on one Modal container (NVIDIA A10) `[measured]`: the seven scenes at 4096 spp (box filter) pass 7 of 7 (mean ratios 1.0000 `spot-area`, 1.0008 `light-linking`, 0.9993 `metal`, 0.9979 `glass`, 0.9996 `outdoor-hdri`, 1.0034 `lit-interior`, 1.0009 `many-lights-500`); `area-shapes` (0.9997) and `transparent-shadow` (1.0006) still pass 64 of 64 tiles with the numbers of the table above; `cargo test` 32 passed, 0 failed; the native node tests 84 passed, 0 failed, 1 skipped (it skipped before); `check-lobes.mjs` and `verify-lobes.py` (lobe probes and furnace scenes) exit 0. Against the kernel before the fix, the new test fails all three cases (the limit 0 mean was 3.3 percent off in red, the backdrop at limit 2 0.99 percent).
+
+`tests/native-transparent-bounces.test.js` pins the behaviour on a GPU (it skips without the addon): the image mean and the sky behind one layer at limits 0 and 1, and the image mean and the backdrop behind one layer at limit 2, against the Cycles means above with a tolerance of 0.5 percent.
+
+## One texture sampler for shading and alpha tests (#896, slice T1)
+
+The `cycles` kernel had three texture readers: `closure_sample_texture_uv` (shading), `int_sample_texture_channel` (the alpha of cutouts and blended surfaces for every ray) and an inline nearest read in `bootstrap_main.wgsl`. They now call one function, `texture_sample` in `closure.wgsl`, so a cutout is seen and shaded through the same wrap, filter and format. The `legacy` kernel is untouched. The texture pool also fails early now: a pool past the 1 GiB storage binding raises an error that names the size and the limit at `buildNativeInputV2` (and at the host, against the device's binding size), where the base build aborted the process in the device. The host no longer copies the pool once more before upload (`storage_buffer` borrows bytes that already fit), and the packer drops its per-texture arrays once they are joined.
+
+**Why pixels moved, and a packer bug the move exposed.** The packer pointed `alpha_tex` at the base colour map of every non-opaque material, and the kernel reads `alpha_tex` as a separate map through its red channel. A cutout's alpha was therefore the base alpha times the colour's red: texels that were not red enough turned transparent. In the old kernel the shading sampler decoded an sRGB map's red to linear and the integrator's alpha test read it raw, so visibility and shading disagreed; the shared sampler decodes it in both. The second commit stops setting `alpha_tex` from the base map (an explicit `alphaMap` still binds). Measured on an NVIDIA A10G (Modal), 64 spp, fixed seed, image bytes `[measured]`:
+
+| Scene | base against T1 sampler only | base against T1 plus packer fix |
+| --- | --- | --- |
+| `lit-interior`, `glass` (cycles, no mask) | identical | identical |
+| `brick-graph` (colour and normal map, no mask) | identical | identical |
+| `legacy` kernel, `lit-interior` and `tex-repeat` | identical | identical |
+| `tex-repeat`, sRGB mask map | 81,634 of 172,800 values differ | 104,138 differ |
+| `tex-repeat-linear`, same mask in a linear map | 3,253 differ (the sRGB decode of red accounts for the rest) | 96,810 differ |
+| `tex-wraps` (mask, blend, clamp, mirror, nearest, normal map) | 82,387 differ | 113,768 differ |
+
+The 3,253 left on `tex-repeat-linear` are not explained; an emulation of both samplers over a 3000 x 3000 UV grid differs at 108 of 9,000,000 cutoff decisions (exact ties at alpha 0.5 of the test texture), which fits a residual of a few pixels in this size, not proven. No site draws a random number. Every build is deterministic run to run.
+
+Against Cycles on `tex-repeat` (2048 spp, 960x540, seed 1; Cycles shows half of each strip opaque):
+
+| Build | Mean ratio (R, G, B) | relMSE (eps 0.01) | Tiles within 5 percent |
+| --- | --- | --- | --- |
+| base | 1.061, 0.971, 1.008 | 0.0215 | 31 of 64 |
+| T1 sampler only | 1.077, 0.978, 1.017 | 0.0272 | 31 of 64 |
+| T1 plus packer fix | 1.040, 1.039, 1.051 | 0.0039 | 39 of 64 |
+
+Cycles' own seed-to-seed relMSE is 1.7e-6. Cook with the fix is still 4 to 5 percent bright over the whole image, which no gate passes. Split on the same room (Cook over Cycles, mean ratio R, G, B): the room alone 1.000, 1.000, 1.000; both quads as flat untextured colours 1.000, 1.000, 1.000; the opaque sRGB colour-map quad alone 1.021, 1.028, 1.036; the mask quad alone 1.018, 1.025, 1.023. So the excess sits in the textured surfaces, not in the room or the cutout edge; the cause is not known.
+
+Texture cost on the same A10G, one scene per process `[measured]`:
+
+| | Base | T1 |
+| --- | --- | --- |
+| 256 textures of 512x512 (256 MiB), peak process memory, two runs | 2240 and 2161 MiB | 1753 and 1646 MiB |
+| same, upload seconds | 0.28 and 0.14 | 0.20 and 0.06 |
+| pool of 1100 MiB | process aborted in the device | `RangeError` at packing with size and limit |
+| cycles kernel WGSL | 6607 lines, 242,913 bytes | 6538 lines, 240,235 bytes |
+
+The number of textures is not limited by either build (2000 descriptors of 16x16 packed and rendered the same); the limit is the 1 GiB pool. Bindings, bind groups and struct sizes are unchanged.
+
+Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` writes `tex-repeat` (Cycles can render it), `tex-repeat-linear` and `tex-wraps` (clamp, mirror, nearest, blend and normal map; Cook only), `node bench/cycles-parity/texture-pool-bench.mjs --textures 256 --size 512` prints pack, setup, compile and upload seconds and peak memory.
+
+## Instancing equivalence (#896, slice I2)
+
+Instanced against flattened on the `cycles` kernel, `bench/instancing/instancing-checks.mjs equivalence`: 200 copies of a 320-triangle icosphere on a grid, 128 x 96, 1024 samples, seed 1, NVIDIA GeForce RTX 4090. The flattened scene holds 64,000 triangles (64,200 with the degenerate one) and the instanced one 320 (321). The measures are in `bench/instancing/image-compare.mjs`: mean ratio of RGB, relative MSE with epsilon 0.01, and 8 x 8 tiles whose mean is within 5 percent (tiles too dark to compare are left out).
+
+| Variant | Mean ratio RGB | relMSE | Tiles within 5 percent |
+|---|---|---|---|
+| translate | 1.0000, 1.0000, 1.0000 | 8.1e-8 | 20 of 20 |
+| rotscale (rotated, stretched) | 1.0032, 1.0038, 1.0045 | 4.9e-5 | 20 of 20 |
+| emissive (every fourth copy emissive by its own material) | 0.9997, 0.9998, 1.0000 | 2.0e-5 | 20 of 20 |
+| emissive-rotscale | 1.0010, 1.0006, 1.0017 | 7.2e-5 | 20 of 20 |
+| emissive-degenerate (first triangle has no area) | 0.9997, 0.9998, 1.0000 | 2.0e-5 | 20 of 20 |
+
+The test (`tests/native-instancing-equivalence.test.js`) asks for a mean ratio and every tile ratio inside 0.98 to 1.02 and a relMSE under 5e-4, which is about the seed-to-seed noise of the flattened scene. The images are not bitwise equal, because the instanced kernel transforms rays into object space and the flattened scene stores world-space triangles. Mirrored copies are not in the table: the flattened path winds mirrored parts the wrong way until #1026, so that comparison waits for it.
+
+Scenes without shared geometry did not change. The packed tables (v1 for both kernels, v2 flattened, v2 with `instancing: true` but no sharing, and an instanced scene) and the traced pixels of the `legacy` and `cycles` kernels at 48 x 32 and 16 samples have the same SHA-256 on `origin/main` and on this branch, with both addons built in the same run.
+
+## Why textured surfaces rendered bright (#1030)
+
+The `cycles` kernel decoded every texel of an 8-bit sRGB map to linear and then filtered the decoded values. Blender Cycles filters the stored 8-bit values and decodes the blend. The decode curve is convex, so a blended texel decoded first is always brighter than one decoded last, and the gap is largest where neighbouring texels differ, at the edges of a checker. The kernel now fetches stored values and decodes the filtered result (`texture_decode_filtered` in `closure.wgsl`). Nearest reads, linear maps and every untextured scene give the same values as before (lit-interior and glass match the base byte for byte on both kernels). Every scene with a filtered sRGB map changes: this is a look change toward Cycles.
+
+Proof on the smallest scene, `tex-emit-srgb` (an emissive quad seen head on with nothing else in the room, 128 x 128, 256 spp, RTX 4090, Blender 5.3). The mean of the picture in closed form from the texels, for each order of decode and filter, against what each renderer drew (R, G, B):
+
+| | Mean linear value |
+| --- | --- |
+| closed form, decode then filter | 0.47000, 0.36315, 0.19351 |
+| closed form, filter then decode | 0.44136, 0.34604, 0.17975 |
+| Cook before | 0.47000, 0.36314, 0.19350 |
+| Cycles | 0.44144, 0.34608, 0.17978 |
+| Cook after | 0.44144, 0.34608, 0.17979 |
+
+`tex-emit-linear` (the same map as a linear map) is 0.64706, 0.58824, 0.42157 in closed form, in Cook and in Cycles, so the sampler's geometry (texel centres, wrap, flip) was right and the colour curve order was the whole gap on opaque maps. `render-cycles.py` now builds a `colorSpace: 'linear'` map as a Non-Color image; before, it always used sRGB, so a linear map could not be compared.
+
+Cook over Cycles, 2048 spp, 960 x 540, seed 1, mean ratio R, G, B and relMSE (eps 0.01); Cycles seed against seed is 7.9e-7 to 1.7e-6:
+
+| Scene | Before | After |
+| --- | --- | --- |
+| `tex-split-colour` (opaque colour map) | 1.0207, 1.0275, 1.0357; 2.2e-3 | 1.0001, 1.0002, 1.0002; 7.6e-7 |
+| `tex-split-mask` (colour map with an alpha ramp, cutout) | 1.0182, 1.0246, 1.0234; 1.6e-3 | 1.0131, 1.0110, 1.0145; 1.3e-3 |
+| `tex-repeat` (both quads) | 1.0396, 1.0388, 1.0512; 3.9e-3 | 1.0131, 1.0065, 1.0099; 1.3e-3 |
+| `tex-split-room`, `tex-split-flat` (no texture) | 1.000 | 1.000 |
+| `brick-graph` (graph material with a map) | 0.9817, 0.9880, 0.9925; 1.61e-2 | 0.9817, 0.9879, 0.9923; 1.61e-2 |
+
+Still open: the mask quad is 1.1 to 1.5 percent bright. Two renders of the diagnostic scenes (`tex-mask-alone`: the mask quad without the backdrop; `tex-mask-opaque-map`: the backdrop plus the same mask material over an opaque map) put it off the texture read: with the backdrop removed the quad is 1.0021, 1.0022, 1.0012 (measured in a build that also blended colour weighted by alpha, which did not move the full scene beyond 0.2 percent, so it was dropped), and with an opaque map under the mask material the whole scene is 1.0001. The ratio map of `tex-split-mask` puts the excess in the columns of the cutout holes and in the strip of backdrop below the quad, where Cook is up to 40 percent brighter: the light that reaches the backdrop past a cutout, not the colour of the quad. The cause there is not known.
+
+Two known differences from Cycles remain in the read of a map and are not changed here. Cycles premultiplies the stored values of a byte image by alpha before the filter and divides by alpha after it when the alpha output is used; the kernel filters straight colour and alpha independently, which differs only where alpha varies between neighbouring texels. And the packed mean colour of an emissive map (`meanLinearRgb`, used for the radiance of a light sample on a textured emitter) is still the mean of the decoded texels, a few percent above the filtered read on a high-contrast sRGB map.
+
+Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` also writes `tex-emit-srgb`, `tex-emit-linear`, `tex-split-*`, `tex-mask-alone` and `tex-mask-opaque-map`; `native-texture-sampler.test.js` holds a GPU-gated test of the seam between a black and a white texel (0.214 linear when blended before decoding, 0.5 when decoded first).
+
+## Native job materials (#1036)
+
+A native render job on the `cycles` kernel used to send v1 material tables, which hold base colour, metallic, roughness, emission, clearcoat, transmission, ior, normal scale, the mask cutoff, subsurface, the light mask and four atlas textures. The page now exports FORMAT-v2 for every `cycles` job (instanced or not) and lays the rest of each material over those fields (`carriedMaterialFields` in `packages/render-native/job-input.mjs`): blend opacity, sheen, `specular` and `specularColor`, anisotropy, iridescence, attenuation, the clearcoat, transmission, sheen, anisotropy and coat normal maps, and the record fields a material may set by their record names. `docs/agent-render-jobs.md` lists what the report still says it ignores.
+
+Same scene, same 4096 samples, 192 x 128, box filter, 8 bounces, seed 1, against Cycles 5.3 (4096 spp, `render-cycles.py`), RTX 4090 `[measured]`. `before` is the v1 tables (what a job sent), `after` the export a job sends now, `bench` the scene packed with `buildNativeInputV2` as the parity benches do. The gates are those of the M1 suite: per-channel mean ratio within 2 percent, 8 x 8 tiles within 5 percent.
+
+| Scene (field) | Mean ratio RGB, before | Mean ratio RGB, after | relMSE (eps 0.01), before | relMSE, after | Tiles within 5 percent, before / after |
+|---|---|---|---|---|---|
+| `blend` (opacity 0.3 pane) | 0.9436, 1.0592, 1.1458 | 0.9997, 0.9998, 0.9998 | 3.81e-2 | 1.12e-5 | 41 / 64 to 64 / 64 |
+| `sheen` (sheenColor, sheenRoughness) | 0.9874, 0.9838, 0.9901 | 0.9996, 0.9996, 0.9996 | 5.33e-3 | 4.74e-6 | 55 / 64 to 64 / 64 |
+| `specular-tint` (specular 0.8, specularColor) | 0.9997, 1.0070, 1.0094 | 0.9997, 0.9997, 0.9997 | 5.68e-3 | 6.77e-6 | 64 / 64 to 64 / 64 |
+| `anisotropy` (0.7, rotated) | 1.0027, 1.0048, 1.0070 | 0.9997, 0.9997, 0.9997 | 2.36e-2 | 7.33e-6 | 55 / 64 to 64 / 64 |
+| `iridescence` (thickness 500, ior 1.4) | 1.0010, 1.0027, 1.0022 | 0.9997, 0.9997, 0.9997 | 7.74e-5 | 6.64e-6 | 64 / 64 to 64 / 64 |
+| `absorption` (attenuation 1 m, green) | 1.1030, 1.0356, 1.0885 | 0.9649, 0.9906, 0.9715 | 1.73e-1 | 1.60e-2 | 48 / 64 to 55 / 64 |
+| `composite` (blend pane over a sheen sphere) | 0.9828, 1.1051, 1.1714 | 0.9997, 0.9998, 0.9998 | 6.73e-2 | 1.14e-5 | 39 / 64 to 64 / 64 |
+
+- The job export and the `bench` packing give the same numbers for every scene except `anisotropy`, so the job path delivers the bench's input. `anisotropy` differs on purpose: the kernel reads the Cycles Principled parameters (a strength that stretches the roughness, a rotation in turns), while a 67js material holds the glTF strength and a rotation in radians. The job converts them as `render-cycles.py` does for Blender; `buildNativeInputV2` on the raw material does not (relMSE 2.26e-2, 55 of 64 tiles, because the lobe is the wrong shape).
+- `absorption` improves by a factor of 11 in relMSE but does not pass the 2 percent mean gate (red 0.9649, blue 0.9715) and has 9 tiles outside 5 percent, in the job export and the bench packing alike. The kernel applies the glTF attenuation exactly (transmittance equals `attenuationColor` after `attenuationDistance`); `render-cycles.py` gives Blender one grey density from the mean log of the colour `[inferred]`, so part of the gap is likely the reference, not the kernel. This was not separated.
+- The v1 tables are still what the legacy kernel and light bakes read. Not carried: `doubleSided` (a job traces every surface two sided, and carrying the 67js default `false` would cull the backs of every material), the `liquid` tag, `occlusionMap`, `lightMap`, `moss` and splat layers, the coat and sheen roughness maps (the record has one slot for each pair), and `thickness`.
+- A scene whose materials cannot be exported whole is traced from the v1 tables for that frame, with the reason in `materialsReason`.
+- Known limits of the carried layers. The kernel reads a coat's weight and roughness from one map and a sheen's tint and roughness from one map, so a clearcoat or sheen colour map is carried only when the layer's roughness is 0 or its roughness map is the same image; otherwise the factor alone is used and the job report says so. An iridescence factor below 1 thins the film (the record holds thickness times the factor) where the rasteriser weights the effect, so the hue differs from a full-strength film; the parity row is at factor 1. An anisotropy map scales the converted Cycles strength, which is not the conversion of the scaled glTF strength, so the lobe shape is approximate where the map is below 1. The record-name fields (`coatTint`, `coatIor`, `thinWalled` and the rest of `RECORD_FIELDS`) are for callers that build parts in code; no MCP material sets them, and a value that is not a finite number, a boolean or an array of finite numbers is refused.
+
+![Opaque pane before, blend pane after, Cycles 5.3 (left to right) for a blend pane over a sheen sphere](native-job-materials.jpg)
+
+Jobs that use none of these fields are unchanged: the tables of a flattened job (all of them, including the kernel parameters), the instanced input of a shared-geometry job, and the PNG of a real job on the demo room, a textured scene, a scene with 40 copies of one mesh and a scene with glass and clearcoat have the same bytes as on the base branch (`tests/native-job-materials.test.js`, `bench/job-materials`).

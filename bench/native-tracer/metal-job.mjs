@@ -11,7 +11,7 @@ import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
 import * as renderNative from '../../packages/render-native/index.mjs';
 import { encodeNativeTables } from '../../scripts/native-bake-page.js';
 import { chooseDenoiser } from '../../scripts/agent-path-trace-denoise.mjs';
-import { traceFrameNative } from '../../scripts/agent-native-trace.mjs';
+import { denoiseFrameWithOidn, traceFrameNative } from '../../scripts/agent-native-trace.mjs';
 import { loadReferenceScene } from '../cycles-parity/scene-bridge.mjs';
 import { writeFloat32Npy } from '../cycles-parity/npy.mjs';
 
@@ -39,7 +39,7 @@ const input = buildNativeInput(buildTraceScene(source.parts, source.environment)
 const exported = { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: input.triangleCount, ignored: [] };
 
 let captured;
-const tracer = { traceNative(tables, traceOptions) {
+const tracer = { createNativeOidnDenoiser: renderNative.createNativeOidnDenoiser, traceNative(tables, traceOptions) {
   captured = renderNative.traceNative(tables, traceOptions);
   return captured;
 } };
@@ -55,7 +55,7 @@ for (let offset = 0; offset < features.normal.length; offset += 3) {
   if (length > 1e-6) for (let axis = 0; axis < 3; axis++) features.normal[offset + axis] /= length;
 }
 let linear = features.color;
-if (measured.report.denoiser === 'oidn') linear = await choice.denoiser.denoiseWithOidn(features);
+if (measured.report.denoiser === 'oidn') linear = (await denoiseFrameWithOidn({ tracer, denoiser: choice.denoiser, ...features })).linear;
 else if (measured.report.denoiser === 'wavelet') linear = (await import('../../src/path-tracer-denoise.js')).denoiseRadiance(features);
 await mkdir(outputDirectory, { recursive: true });
 await writeFile(`${outputDirectory}/job-${label}.png`, Buffer.from(measured.data, 'base64'));

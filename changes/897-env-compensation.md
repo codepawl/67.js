@@ -1,0 +1,1 @@
+- The Cook `cycles` kernel can sample the environment map with MIS compensation (`envCompensation: true` or a fraction from 0 to 1; `--env-compensation` in `trace-native.mjs`), which lowers the error under a sunny HDRI and is off by default (#897)

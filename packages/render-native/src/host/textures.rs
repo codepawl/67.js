@@ -1,6 +1,6 @@
 use wgpu::util::DeviceExt;
 
-use crate::host::device::storage_buffer;
+use crate::host::device::{failure, storage_buffer};
 use crate::{NativeTraceInput, NativeTraceInputV2};
 
 const MATERIAL_TEXELS: usize = 10;
@@ -14,12 +14,29 @@ pub(crate) struct UploadedSceneBuffers {
 
 /// Whether a material takes its alpha from a colour map and cuts at a threshold. A material is `MATERIAL_TEXELS` vec4s: the cutoff
 /// is the third float of texel 3 and the width of the colour map's atlas rectangle the third float of texel 6.
+/// A shadow-only material (the second float of texel 5) also goes in the non-opaque geometry: hardware commits opaque
+/// triangles without asking the shader, and a camera ray must be able to step through this one.
 pub(crate) fn material_is_cutout(materials: &[f32], material: usize) -> bool {
     let base = material * MATERIAL_TEXELS * 4;
     if base + 7 * 4 > materials.len() {
         return false;
     }
-    materials[base + 3 * 4 + 2] > 0.0 && materials[base + 6 * 4 + 2] > 0.0
+    let is_shadow_only = materials[base + 5 * 4 + 1] > 0.0;
+    is_shadow_only || (materials[base + 3 * 4 + 2] > 0.0 && materials[base + 6 * 4 + 2] > 0.0)
+}
+
+/// The texel pool is one storage binding, so it cannot outgrow `limit_bytes` (the device's storage binding size, at most 1 GiB).
+/// Failing here names the size and the way out; the device would only report a validation error with no hint about textures.
+pub(crate) fn check_texture_pool_budget(pool_bytes: u64, limit_bytes: u64) -> napi::Result<()> {
+    if pool_bytes <= limit_bytes {
+        return Ok(());
+    }
+    const MEBIBYTE: u64 = 1 << 20;
+    Err(failure(format!(
+        "The textures take {} MiB but one texture pool holds at most {} MiB on this device. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.",
+        pool_bytes.div_ceil(MEBIBYTE),
+        limit_bytes / MEBIBYTE,
+    )))
 }
 
 pub(crate) fn upload_scene_buffers(
@@ -86,21 +103,10 @@ fn light_to_tree_words(input: &NativeTraceInputV2) -> &[u32] {
     }
 }
 
-pub(crate) fn upload_cycles_scene_buffers(
-    device: &wgpu::Device,
-    input: &NativeTraceInputV2,
-    width: u32,
-    height: u32,
-    total_samples: u32,
-    accumulation_bytes: u64,
-) -> UploadedSceneBuffers {
-    let mut parameter_bytes = input.kernel_params.to_vec();
-    parameter_bytes[8..12].copy_from_slice(&width.to_le_bytes());
-    parameter_bytes[12..16].copy_from_slice(&height.to_le_bytes());
-    parameter_bytes[24..28].copy_from_slice(&total_samples.to_le_bytes());
-
-    // Bindings 2..=10 in FORMAT-v2 order, then the light tree tables for bindings 13 and 14.
-    let buffers = vec![
+/// The scene tables in FORMAT-v2 order: bindings 2..=10, then the light tree tables bound at 13 and 14 by
+/// `create_cycles_bind_group`. These stay on the card for as long as a session lives.
+pub(crate) fn upload_cycles_scene_tables(device: &wgpu::Device, input: &NativeTraceInputV2) -> Vec<wgpu::Buffer> {
+    vec![
         storage_buffer(device, "cycles instances", &input.instances),
         storage_buffer(device, "cycles triangles", &input.triangles),
         storage_buffer(device, "cycles materials", &input.materials),
@@ -113,21 +119,42 @@ pub(crate) fn upload_cycles_scene_buffers(
         // Bound at 13 and 14 by `create_cycles_bind_group`: the light tree emitters and the emitter-to-slot table.
         storage_buffer(device, "cycles light tree emitters", light_tree_emitter_bytes(input)),
         storage_buffer(device, "cycles light to tree", bytemuck::cast_slice(light_to_tree_words(input))),
-    ];
-    let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
+    ]
+}
+
+/// A zeroed film. `COPY_DST` lets a session clear it between renders.
+pub(crate) fn create_cycles_film(device: &wgpu::Device, accumulation_bytes: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("cycles film accumulation"),
         size: accumulation_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
-    });
-    let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    })
+}
+
+pub(crate) fn create_cycles_parameters(device: &wgpu::Device, kernel_params: &[u8]) -> wgpu::Buffer {
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("cycles kernel params"),
-        contents: &parameter_bytes,
+        contents: kernel_params,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    UploadedSceneBuffers {
-        buffers,
-        accumulation,
-        parameters,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_texture_pool_budget;
+
+    #[test]
+    fn texture_pool_budget_accepts_a_pool_at_the_limit() {
+        assert!(check_texture_pool_budget(1 << 30, 1 << 30).is_ok());
+        assert!(check_texture_pool_budget(0, 1 << 20).is_ok());
+    }
+
+    #[test]
+    fn texture_pool_budget_error_names_the_size_the_limit_and_the_fix() {
+        let message = check_texture_pool_budget((1 << 30) + 1, 1 << 30).unwrap_err().reason;
+        assert!(message.contains("1025 MiB"), "{message}");
+        assert!(message.contains("1024 MiB"), "{message}");
+        assert!(message.contains("Pass smaller textures"), "{message}");
     }
 }

@@ -8,16 +8,15 @@ use std::time::Instant;
 use napi::Result;
 use wgpu::util::DeviceExt;
 
-use crate::cycles::{check_counts_match_kernel_params, specialize_cycles_kernel, trace_entry_point, unit_filter_table_words, CYCLES_LUT_WORDS};
+use crate::cycles::{unit_filter_table_words, CYCLES_LUT_WORDS};
 use crate::host::accel::{
-    build_acceleration_structure, build_cycles_acceleration_structure, build_empty_cycles_acceleration,
-    create_vertex_buffer, unpack_triangles, CyclesAcceleration, INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS,
-    TRIANGLE_RECORD_BYTES,
+    build_acceleration_structure, build_empty_cycles_acceleration, create_vertex_buffer, unpack_triangles,
+    INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS, TRIANGLE_RECORD_BYTES,
 };
 use crate::host::dispatch::{DispatchPlanner, DISPATCH_BUDGET_SECONDS};
 use crate::host::device::{failure, layout_entry, open_device, storage_buffer, storage_entry};
 use crate::host::film::{image_accumulation_bytes, read_accumulation};
-use crate::host::textures::{upload_cycles_scene_buffers, upload_scene_buffers};
+use crate::host::textures::upload_scene_buffers;
 use crate::{NativeTraceInput, NativeTraceInputV2, ProbeCyclesLobeOptions};
 
 // ---- In-process device and pipeline cache ----
@@ -33,9 +32,9 @@ const MAX_CACHED_PIPELINES: usize = 32;
 
 /// A pipeline cache key: the entry point plus a 64 bit hash of the specialized source, so the cache never
 /// holds a second copy of a kernel text that is hundreds of kilobytes long.
-type PipelineKey = (String, u64);
+pub(crate) type PipelineKey = (String, u64);
 
-fn pipeline_key(entry_point: &str, specialized_source: &str) -> PipelineKey {
+pub(crate) fn pipeline_key(entry_point: &str, specialized_source: &str) -> PipelineKey {
     let mut hasher = DefaultHasher::new();
     specialized_source.hash(&mut hasher);
     (entry_point.to_string(), hasher.finish())
@@ -108,7 +107,7 @@ fn lock_device_cache() -> MutexGuard<'static, Option<CachedDevice>> {
 
 /// Returns cloned device/queue/metadata from the cache, opening once per process.
 /// When the device was lost the cache is dropped and a fresh device is opened.
-fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, String)> {
+pub(crate) fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, String)> {
     let mut guard = lock_device_cache();
     let was_lost = guard.as_ref().is_some_and(|cached| cached.device_lost.load(Ordering::SeqCst));
     if was_lost {
@@ -183,15 +182,27 @@ fn cache_was_reset_failure() -> napi::Error {
 
 /// Looks up or compiles and caches a Cycles `ComputePipeline` for `(entry_point, specialized_source)`.
 fn get_or_compile_cycles_pipeline(entry_point: &str, specialized_source: String) -> Result<wgpu::ComputePipeline> {
+    get_or_compile_cycles_pipeline_on(None, entry_point, specialized_source)
+}
+
+/// As `get_or_compile_cycles_pipeline`, for a caller that holds buffers on one device. `expected_device` is that device's
+/// lost flag: when the cache has since moved to another device the call fails instead of returning a pipeline that
+/// does not belong to the caller's device.
+pub(crate) fn get_or_compile_cycles_pipeline_on(
+    expected_device: Option<&Arc<AtomicBool>>,
+    entry_point: &str,
+    specialized_source: String,
+) -> Result<wgpu::ComputePipeline> {
     let key = pipeline_key(entry_point, &specialized_source);
     {
         let guard = lock_device_cache();
         let cached = guard.as_ref().ok_or_else(cache_was_reset_failure)?;
+        check_same_device(cached, expected_device)?;
         if let Some(existing) = cached.cycles_pipelines.get(&key) {
             return Ok(existing);
         }
     }
-    let compiled = with_cycles_cache(|device, _queue, layout, _lut| {
+    let compiled = with_cycles_cache_on(expected_device, |device, _queue, layout, _lut| {
         compile_compute_pipeline(device, specialized_source, entry_point, layout)
     })??;
     let mut guard = lock_device_cache();
@@ -201,15 +212,51 @@ fn get_or_compile_cycles_pipeline(entry_point: &str, specialized_source: String)
     Ok(compiled)
 }
 
+fn check_same_device(cached: &CachedDevice, expected_device: Option<&Arc<AtomicBool>>) -> Result<()> {
+    match expected_device {
+        Some(expected) if !Arc::ptr_eq(&cached.device_lost, expected) => Err(failure(
+            "The GPU device this session was created on has been replaced. Close the session and create a new one.",
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Returns the cached Cycles bind group layout and LUT buffer, with cloned device/queue.
 /// Fails when the cache was reset since `get_cached_device` succeeded (device loss or a poisoned lock).
 fn with_cycles_cache<F, T>(f: F) -> Result<T>
 where
     F: FnOnce(&wgpu::Device, &wgpu::Queue, &wgpu::BindGroupLayout, &wgpu::Buffer) -> T,
 {
+    with_cycles_cache_on(None, f)
+}
+
+/// As `with_cycles_cache`, failing when the cache no longer holds the device whose lost flag is `expected_device`.
+pub(crate) fn with_cycles_cache_on<F, T>(expected_device: Option<&Arc<AtomicBool>>, f: F) -> Result<T>
+where
+    F: FnOnce(&wgpu::Device, &wgpu::Queue, &wgpu::BindGroupLayout, &wgpu::Buffer) -> T,
+{
     let guard = lock_device_cache();
     let cached = guard.as_ref().ok_or_else(cache_was_reset_failure)?;
+    check_same_device(cached, expected_device)?;
     Ok(f(&cached.device, &cached.queue, &cached.cycles_bind_group_layout, &cached.lut_buffer))
+}
+
+/// The cached device with everything a Cycles session needs to know about it. The loss flag identifies the device: two
+/// contexts with the same flag (`Arc::ptr_eq`) share one device.
+pub(crate) struct CyclesDeviceContext {
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) adapter_name: String,
+    pub(crate) backend_name: String,
+    pub(crate) features: String,
+    pub(crate) device_lost: Arc<AtomicBool>,
+    pub(crate) device_error: Arc<Mutex<String>>,
+}
+
+pub(crate) fn get_cycles_device_context() -> Result<CyclesDeviceContext> {
+    let (device, queue, adapter_name, backend_name, features) = get_cached_device()?;
+    let (device_lost, device_error) = cached_device_loss_state()?;
+    Ok(CyclesDeviceContext { device, queue, adapter_name, backend_name, features, device_lost, device_error })
 }
 
 const PARAMETER_BYTES: usize = 16 * 16;
@@ -253,24 +300,16 @@ pub(crate) struct PreparedScene {
     pub(crate) _tlas: wgpu::Tlas,
 }
 
-pub(crate) struct PreparedCyclesScene {
-    pub(crate) device: wgpu::Device,
-    pub(crate) queue: wgpu::Queue,
-    pub(crate) pipeline: wgpu::ComputePipeline,
-    pub(crate) bind_group: wgpu::BindGroup,
-    pub(crate) accumulation: wgpu::Buffer,
-    pub(crate) parameters: wgpu::Buffer,
-    pub(crate) adapter_name: String,
-    pub(crate) backend_name: String,
-    pub(crate) features: String,
-    pub(crate) device_lost: Arc<AtomicBool>,
-    pub(crate) device_error: Arc<Mutex<String>>,
-    pub(crate) setup_seconds: f64,
-    pub(crate) compile_seconds: f64,
-    pub(crate) upload_seconds: f64,
-    pub(crate) acceleration_build_seconds: f64,
-    pub(crate) _buffers: Vec<wgpu::Buffer>,
-    pub(crate) _acceleration: CyclesAcceleration,
+/// Everything one run of Cycles dispatches touches, borrowed from the session that owns it.
+pub(crate) struct CyclesDispatchTarget<'a> {
+    pub(crate) device: &'a wgpu::Device,
+    pub(crate) queue: &'a wgpu::Queue,
+    pub(crate) pipeline: &'a wgpu::ComputePipeline,
+    pub(crate) bind_group: &'a wgpu::BindGroup,
+    pub(crate) parameters: &'a wgpu::Buffer,
+    pub(crate) accumulation: &'a wgpu::Buffer,
+    pub(crate) device_lost: &'a AtomicBool,
+    pub(crate) device_error: &'a Mutex<String>,
 }
 
 /// What one kind of job adds to the shared scene setup: the kernel text, its entry point, the accumulation size and the
@@ -342,7 +381,7 @@ fn create_cycles_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     })
 }
 
-fn compile_compute_pipeline(
+pub(crate) fn compile_compute_pipeline(
     device: &wgpu::Device,
     shader_source: String,
     entry_point: &str,
@@ -407,7 +446,7 @@ fn create_scene_bind_group(
     })
 }
 
-fn create_cycles_bind_group(
+pub(crate) fn create_cycles_bind_group(
     device: &wgpu::Device,
     bind_group_layout: &wgpu::BindGroupLayout,
     parameters: &wgpu::Buffer,
@@ -560,7 +599,7 @@ pub(crate) fn trace_samples(
     Ok((sums, trace_started.elapsed().as_secs_f64()))
 }
 
-fn validate_kernel_params_v2(parameter_bytes: &[u8]) -> Result<()> {
+pub(crate) fn validate_kernel_params_v2(parameter_bytes: &[u8]) -> Result<()> {
     if parameter_bytes.len() != KERNEL_PARAMS_V2_BYTES {
         return Err(failure(format!(
             "KernelParamsV2 must be {KERNEL_PARAMS_V2_BYTES} bytes, got {}.",
@@ -582,7 +621,7 @@ fn validate_kernel_params_v2(parameter_bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) -> Result<()> {
+pub(crate) fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) -> Result<()> {
     let minimum_bytes = (count.max(1) as usize) * stride;
     if bytes.len() < minimum_bytes || bytes.len() % stride != 0 {
         return Err(failure(format!(
@@ -597,6 +636,24 @@ fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stride: usize) 
 const KERNEL_PARAMS_KERNEL_FLAGS_BYTE: usize = 32;
 const KERNEL_FLAG_USE_LIGHT_TREE: u32 = 1;
 
+/// Refuses kernel parameters that switch the light tree on for an input that carries tree nodes but no emitter tables.
+pub(crate) fn validate_light_tree_flag_has_tables(
+    kernel_params: &[u8],
+    light_tree_node_count: u32,
+    has_emitter_tables: bool,
+) -> Result<()> {
+    let tree_flag_set = kernel_params
+        .get(KERNEL_PARAMS_KERNEL_FLAGS_BYTE..KERNEL_PARAMS_KERNEL_FLAGS_BYTE + 4)
+        .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) & KERNEL_FLAG_USE_LIGHT_TREE != 0)
+        .unwrap_or(false);
+    if tree_flag_set && light_tree_node_count > 0 && !has_emitter_tables {
+        return Err(failure(
+            "The light-tree kernel flag is set and the input has light tree nodes, but lightTreeEmitters, lightTreeEmitterCount and lightToTree are missing. Repack the scene with buildNativeInputV2.",
+        ));
+    }
+    Ok(())
+}
+
 /// The emitter table and the emitter-to-slot table come together or not at all, and the slot table must cover
 /// every analytic light and emissive triangle of the input.
 pub(crate) fn validate_light_tree_tables(input: &NativeTraceInputV2) -> Result<()> {
@@ -606,17 +663,7 @@ pub(crate) fn validate_light_tree_tables(input: &NativeTraceInputV2) -> Result<(
         &input.light_to_tree,
     ) {
         (None, None, None) => {
-            let tree_flag_set = input
-                .kernel_params
-                .get(KERNEL_PARAMS_KERNEL_FLAGS_BYTE..KERNEL_PARAMS_KERNEL_FLAGS_BYTE + 4)
-                .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) & KERNEL_FLAG_USE_LIGHT_TREE != 0)
-                .unwrap_or(false);
-            if tree_flag_set && input.light_tree_node_count > 0 {
-                return Err(failure(
-                    "The light-tree kernel flag is set and the input has light tree nodes, but lightTreeEmitters, lightTreeEmitterCount and lightToTree are missing. Repack the scene with buildNativeInputV2.",
-                ));
-            }
-            return Ok(());
+            return validate_light_tree_flag_has_tables(&input.kernel_params, input.light_tree_node_count, false);
         }
         (Some(emitters), Some(emitter_count), Some(light_to_tree)) => (emitters, emitter_count, light_to_tree),
         _ => {
@@ -641,21 +688,19 @@ pub(crate) fn validate_light_tree_tables(input: &NativeTraceInputV2) -> Result<(
     Ok(())
 }
 
-pub(crate) fn prepare_cycles_scene(
-    input: &NativeTraceInputV2,
-    shader_source: String,
-    width: u32,
-    height: u32,
-    total_samples: u32,
-    accumulation_bytes: u64,
-) -> Result<PreparedCyclesScene> {
-    let setup_started = Instant::now();
+/// Refuses a render size or sample count the kernel cannot run.
+pub(crate) fn validate_render_extent(width: u32, height: u32, total_samples: u32) -> Result<()> {
     if width == 0 || height == 0 {
         return Err(failure("Trace width and height must both be >= 1."));
     }
     if total_samples == 0 {
         return Err(failure("Trace samples must be >= 1."));
     }
+    Ok(())
+}
+
+/// Checks a FORMAT-v2 input before a session uploads it: schema, parameter block and the size of every table.
+pub(crate) fn validate_cycles_input(input: &NativeTraceInputV2) -> Result<()> {
     if input.schema_version != FORMAT_V2_VERSION {
         return Err(failure(format!(
             "Invalid FORMAT-v2 input schemaVersion {}: expected {FORMAT_V2_VERSION}.",
@@ -685,66 +730,7 @@ pub(crate) fn prepare_cycles_scene(
         input.texture_count,
         TEXTURE_DESCRIPTOR_BYTES,
     )?;
-    validate_light_tree_tables(input)?;
-
-    // Use cached device; open once per process.
-    let (device, queue, adapter_name, backend_name, features) = get_cached_device()?;
-    let (device_lost, device_error) = cached_device_loss_state()?;
-    let setup_seconds = setup_started.elapsed().as_secs_f64();
-
-    let compile_started = Instant::now();
-    // Specialise the kernel source for this scene (replaces SCENE_HAS_* sentinels).
-    check_counts_match_kernel_params(input)?;
-    let specialized_source = specialize_cycles_kernel(&shader_source, input);
-    let pipeline = get_or_compile_cycles_pipeline(trace_entry_point(input), specialized_source)?;
-    let compile_seconds = compile_started.elapsed().as_secs_f64();
-
-    let upload_started = Instant::now();
-    let uploaded = upload_cycles_scene_buffers(&device, input, width, height, total_samples, accumulation_bytes);
-    let upload_seconds = upload_started.elapsed().as_secs_f64();
-
-    let build_started = Instant::now();
-    let acceleration = build_cycles_acceleration_structure(
-        &device,
-        &queue,
-        &input.instances,
-        input.instance_count as usize,
-        &input.triangles,
-        input.triangle_count as usize,
-    )?;
-    let acceleration_build_seconds = build_started.elapsed().as_secs_f64();
-
-    // Bind group: take layout and LUT reference under a brief lock, build the group, then release.
-    let bind_group = with_cycles_cache(|device, _queue, layout, lut| {
-        create_cycles_bind_group(
-            device,
-            layout,
-            &uploaded.parameters,
-            &acceleration.tlas,
-            &uploaded.buffers,
-            &uploaded.accumulation,
-            lut,
-        )
-    })?;
-    Ok(PreparedCyclesScene {
-        device,
-        queue,
-        pipeline,
-        bind_group,
-        accumulation: uploaded.accumulation,
-        parameters: uploaded.parameters,
-        adapter_name,
-        backend_name,
-        features,
-        device_lost,
-        device_error,
-        setup_seconds,
-        compile_seconds,
-        upload_seconds,
-        acceleration_build_seconds,
-        _buffers: uploaded.buffers,
-        _acceleration: acceleration,
-    })
+    validate_light_tree_tables(input)
 }
 
 /// How `trace_cycles_samples` splits the samples into dispatches.
@@ -767,15 +753,15 @@ pub(crate) struct CyclesTrace {
 
 /// Raises the error for a lost device, naming the dispatch that was running and how to lower the work per dispatch.
 fn fail_if_device_lost(
-    prepared: &PreparedCyclesScene,
+    target: &CyclesDispatchTarget<'_>,
     sample_offset: u32,
     batch_samples: u32,
     samples: u32,
 ) -> Result<()> {
-    if !prepared.device_lost.load(Ordering::SeqCst) {
+    if !target.device_lost.load(Ordering::SeqCst) {
         return Ok(());
     }
-    let detail = prepared.device_error.lock().map(|stored| stored.clone()).unwrap_or_default();
+    let detail = target.device_error.lock().map(|stored| stored.clone()).unwrap_or_default();
     let smaller_batch = (batch_samples / 2).max(1);
     Err(failure(format!(
         "The GPU device was lost during the render, while drawing samples {sample_offset} to {} of {samples} in one dispatch of \
@@ -787,8 +773,11 @@ fn fail_if_device_lost(
     )))
 }
 
+/// Draws `samples` samples numbered `first_sample` onwards, adding them to what the film already holds. A one-shot render
+/// and the first call of a progressive film start at sample 0.
 pub(crate) fn trace_cycles_samples(
-    prepared: &PreparedCyclesScene,
+    target: &CyclesDispatchTarget<'_>,
+    first_sample: u32,
     samples: u32,
     plan: DispatchPlan,
     groups: (u32, u32),
@@ -796,19 +785,20 @@ pub(crate) fn trace_cycles_samples(
     max_seconds: Option<f64>,
 ) -> Result<CyclesTrace> {
     let trace_started = Instant::now();
-    let device = &prepared.device;
-    let queue = &prepared.queue;
+    let device = target.device;
+    let queue = target.queue;
     let mut planner = match plan {
         DispatchPlan::TimeBudget { largest_batch } => Some(DispatchPlanner::new(DISPATCH_BUDGET_SECONDS, largest_batch)),
         DispatchPlan::Fixed(_) => None,
     };
-    let mut sample_offset = 0u32;
+    let end_sample = first_sample + samples;
+    let mut sample_offset = first_sample;
     let mut dispatch_count = 0u32;
     let mut largest_batch = 0u32;
     let mut longest_dispatch_seconds: Option<f64> = None;
 
-    while sample_offset < samples {
-        let remaining_samples = samples - sample_offset;
+    while sample_offset < end_sample {
+        let remaining_samples = end_sample - sample_offset;
         let batch_samples = match (&planner, plan) {
             (Some(planner), _) => planner.next_batch(remaining_samples),
             (None, DispatchPlan::Fixed(step)) => remaining_samples.min(step.max(1)),
@@ -819,7 +809,7 @@ pub(crate) fn trace_cycles_samples(
         let mut dispatch_words = [0u8; 8];
         dispatch_words[0..4].copy_from_slice(&sample_offset.to_le_bytes());
         dispatch_words[4..8].copy_from_slice(&batch_samples.to_le_bytes());
-        queue.write_buffer(&prepared.parameters, CYCLES_SAMPLE_OFFSET_BYTE_OFFSET, &dispatch_words);
+        queue.write_buffer(target.parameters, CYCLES_SAMPLE_OFFSET_BYTE_OFFSET, &dispatch_words);
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("cycles sample batch"),
@@ -829,8 +819,8 @@ pub(crate) fn trace_cycles_samples(
                 label: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&prepared.pipeline);
-            pass.set_bind_group(0, &prepared.bind_group, &[]);
+            pass.set_pipeline(target.pipeline);
+            pass.set_bind_group(0, target.bind_group, &[]);
             pass.dispatch_workgroups(groups.0, groups.1, 1);
         }
         queue.submit(Some(encoder.finish()));
@@ -844,13 +834,13 @@ pub(crate) fn trace_cycles_samples(
         let should_poll = if planner.is_some() {
             true
         } else if max_seconds.is_some() {
-            dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= samples
+            dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= end_sample
         } else {
-            sample_offset < samples && dispatch_count % SAMPLES_PER_WAIT == 0
+            sample_offset < end_sample && dispatch_count % SAMPLES_PER_WAIT == 0
         };
         if should_poll {
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
-            fail_if_device_lost(prepared, dispatch_offset, batch_samples, samples)?;
+            fail_if_device_lost(target, dispatch_offset, batch_samples, end_sample)?;
             if let Some(planner) = planner.as_mut() {
                 let dispatch_seconds = dispatch_started.elapsed().as_secs_f64();
                 planner.record(batch_samples, dispatch_seconds);
@@ -859,15 +849,15 @@ pub(crate) fn trace_cycles_samples(
             if let Some(limit) = max_seconds {
                 if trace_started.elapsed().as_secs_f64() > limit {
                     return Err(failure(format!(
-                        "The native trace passed its time limit of {limit} s after {sample_offset} of {samples} samples."
+                        "The native trace passed its time limit of {limit} s after {sample_offset} of {end_sample} samples."
                     )));
                 }
             }
         }
     }
 
-    let sums = read_accumulation(device, queue, &prepared.accumulation, accumulation_bytes);
-    fail_if_device_lost(prepared, samples.saturating_sub(largest_batch), largest_batch, samples)?;
+    let sums = read_accumulation(device, queue, target.accumulation, accumulation_bytes);
+    fail_if_device_lost(target, end_sample.saturating_sub(largest_batch), largest_batch, end_sample)?;
     Ok(CyclesTrace {
         sums: sums?,
         traced_seconds: trace_started.elapsed().as_secs_f64(),
@@ -1032,5 +1022,44 @@ mod tests {
         assert!(!cache.is_poisoned());
         *lock_resetting_when_poisoned(&cache) = Some(9);
         assert_eq!(*lock_resetting_when_poisoned(&cache), Some(9));
+    }
+
+    fn kernel_params_with_flags(kernel_flags: u32) -> Vec<u8> {
+        let mut kernel_params = vec![0u8; KERNEL_PARAMS_V2_BYTES];
+        kernel_params[0..4].copy_from_slice(&FORMAT_V2_MAGIC.to_le_bytes());
+        kernel_params[4..8].copy_from_slice(&FORMAT_V2_VERSION.to_le_bytes());
+        kernel_params[KERNEL_PARAMS_KERNEL_FLAGS_BYTE..KERNEL_PARAMS_KERNEL_FLAGS_BYTE + 4]
+            .copy_from_slice(&kernel_flags.to_le_bytes());
+        kernel_params
+    }
+
+    #[test]
+    fn a_frame_may_switch_the_light_tree_on_only_when_the_session_holds_the_emitter_tables() {
+        let tree_on = kernel_params_with_flags(KERNEL_FLAG_USE_LIGHT_TREE);
+        let tree_off = kernel_params_with_flags(0);
+        assert!(validate_light_tree_flag_has_tables(&tree_on, 3, true).is_ok());
+        assert!(validate_light_tree_flag_has_tables(&tree_on, 0, false).is_ok());
+        assert!(validate_light_tree_flag_has_tables(&tree_off, 3, false).is_ok());
+        let message = validate_light_tree_flag_has_tables(&tree_on, 3, false)
+            .expect_err("the tree flag without emitter tables must be refused")
+            .to_string();
+        assert!(message.contains("buildNativeInputV2"), "{message}");
+    }
+
+    #[test]
+    fn a_frame_kernel_params_block_must_be_the_v2_block() {
+        assert!(validate_kernel_params_v2(&kernel_params_with_flags(0)).is_ok());
+        assert!(validate_kernel_params_v2(&[0u8; 12]).is_err());
+        let mut wrong_version = kernel_params_with_flags(0);
+        wrong_version[4..8].copy_from_slice(&1u32.to_le_bytes());
+        assert!(validate_kernel_params_v2(&wrong_version).is_err());
+    }
+
+    #[test]
+    fn an_image_of_zero_pixels_or_zero_samples_is_refused() {
+        assert!(validate_render_extent(16, 16, 1).is_ok());
+        assert!(validate_render_extent(0, 16, 1).is_err());
+        assert!(validate_render_extent(16, 0, 1).is_err());
+        assert!(validate_render_extent(16, 16, 0).is_err());
     }
 }

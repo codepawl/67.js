@@ -3,6 +3,20 @@
 const PARAMETER_BYTES = 16 * 16;
 const SUN_CONE_COSINE = Math.cos(Math.PI / 360);
 
+// A thin lens rides in the unused fourth float of the four camera vectors: aperture radius (eye), focus distance (forward),
+// aperture blades (right) and aperture rotation in radians (above). The legacy kernel reads only xyz of those vectors, so it
+// draws a pinhole as before; the "cycles" kernel gets them when the input is upgraded to FORMAT-v2. A pinhole leaves all four 0.
+export const THIN_LENS_FLOAT_INDEXES =Object.freeze({ apertureRadius: 3, focalDistance: 7, apertureBlades: 11, apertureRotation: 15 });
+
+function writeThinLens(floats, camera) {
+  if (!(camera.apertureRadius > 0)) {
+    return;
+  }
+  for (const [fieldName, floatIndex] of Object.entries(THIN_LENS_FLOAT_INDEXES)) {
+    floats[floatIndex] = Number(camera[fieldName] ?? 0);
+  }
+}
+
 function writeParameters(scene, camera, options, lightCount, atlasWidth, subsurfaceOffset) {
   const buffer = new ArrayBuffer(PARAMETER_BYTES);
   const floats = new Float32Array(buffer);
@@ -14,6 +28,7 @@ function writeParameters(scene, camera, options, lightCount, atlasWidth, subsurf
   floats.set([...camera.forward, 0], 4);
   floats.set([...camera.right, 0], 8);
   floats.set([...camera.above, 0], 12);
+  writeThinLens(floats, camera);
   floats.set([...(sun?.direction ?? [0, 1, 0]), 0], 16);
   floats.set([...(sun?.color ?? [0, 0, 0]), SUN_CONE_COSINE], 20);
   floats.set([environment?.width ?? 1, environment?.height ?? 1, environment?.intensity ?? 1, environment?.total ?? 1], 24);
@@ -36,7 +51,10 @@ function writeParameters(scene, camera, options, lightCount, atlasWidth, subsurf
  * `pack` is the module `src/path-tracer-gpu-pack.js`, passed in so this package never imports the engine's source.
  */
 export function buildNativeInput(scene, camera, options, pack) {
-  const atlas = pack.packAtlas(scene.materials);
+  if (scene.instances) {
+    throw new TypeError('buildNativeInput packs flattened scenes for kernel "legacy" and cannot read instances: build the scene without { instancing: true }, or pack it with buildNativeInputV2 and trace with kernel "cycles".');
+  }
+  const materialTables = packNativeMaterialTables(scene.materials, scene.shadowOnlyParts, pack);
   const lights = pack.packLights(scene.lights);
   const environment = pack.packEnvironment(scene.environment);
   const environmentTables = new Float32Array(environment ? environment.height + environment.width * environment.height : 4);
@@ -44,23 +62,35 @@ export function buildNativeInput(scene, camera, options, pack) {
     environmentTables.set(environment.rows.data.subarray(0, environment.height), 0);
     environmentTables.set(environment.pixels.data.subarray(0, environment.width * environment.height), environment.height);
   }
-  // The subsurface table (two vectors per material) follows the material table in the same buffer; its offset is 0 when no
-  // material scatters light under its surface, which keeps the walk out of the kernel.
-  const materialData = pack.packMaterials(scene.materials, atlas).data;
-  const usesSubsurface = pack.sceneUsesSubsurface(scene.materials);
-  const subsurfaceData = usesSubsurface ? pack.packSubsurface(scene.materials).data : new Float32Array(0);
-  const materials = new Float32Array(materialData.length + subsurfaceData.length);
-  materials.set(materialData);
-  materials.set(subsurfaceData, materialData.length);
   return {
     triangles: pack.packTriangles(scene).data,
     triangleCount: scene.bvh.triangleOrder.length,
-    materials,
+    materials: materialTables.materials,
     lights: lights.table.data,
-    atlas: new Uint32Array(atlas.data.buffer, atlas.data.byteOffset, Math.floor(atlas.data.byteLength / 4)),
+    atlas: materialTables.atlas,
     environmentColors: environment?.colors ?? new Float32Array(4),
     environmentTables,
-    parameters: writeParameters(scene, camera, options, lights.count, atlas.width, usesSubsurface ? materialData.length / 4 : 0),
+    parameters: writeParameters(scene, camera, options, lights.count, materialTables.atlasWidth, materialTables.subsurfaceVec4Offset),
+  };
+}
+
+/**
+ * The v1 material tables of resolved trace materials: the material table with the subsurface table after it (its offset is 0
+ * when no material scatters light under its surface, which keeps the walk out of the kernel), the texture atlas and its width.
+ */
+export function packNativeMaterialTables(materials, shadowOnlyParts, pack) {
+  const atlas = pack.packAtlas(materials);
+  const materialData = pack.packMaterials(materials, atlas, shadowOnlyParts).data;
+  const usesSubsurface = pack.sceneUsesSubsurface(materials);
+  const subsurfaceData = usesSubsurface ? pack.packSubsurface(materials).data : new Float32Array(0);
+  const combined = new Float32Array(materialData.length + subsurfaceData.length);
+  combined.set(materialData);
+  combined.set(subsurfaceData, materialData.length);
+  return {
+    materials: combined,
+    atlas: new Uint32Array(atlas.data.buffer, atlas.data.byteOffset, Math.floor(atlas.data.byteLength / 4)),
+    atlasWidth: atlas.width,
+    subsurfaceVec4Offset: usesSubsurface ? materialData.length / 4 : 0,
   };
 }
 

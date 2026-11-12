@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import packageMetadata from '../package.json' with { type: 'json' };
 import { VEGETATION_CAPABILITY_NOTE } from '../src/agent-vegetation-notes.js';
 import { CROWD_CAPABILITY_NOTE } from '../src/agent-crowd-notes.js';
+import { SETTLE_CAPABILITY_NOTE } from '../src/settle-notes.js';
 import { USER_PASS_CAPABILITIES } from '../src/user-pass.js';
 import { GAME_CAPABILITIES } from '../src/game-setup-notes.js';
 import { MESH_BLEND_CAPABILITIES } from '../src/mesh-blend.js';
@@ -15,7 +16,8 @@ import { MATERIAL_SNIPPET_CAPABILITIES } from '../src/material-snippet.js';
 import { AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS } from '../src/agent-scene-capabilities.js';
 import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
-import { chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
+import { createNativeSequence } from './agent-native-sequence.mjs';
+import { chooseNativeInstancing, chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
 import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
@@ -463,6 +465,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     let jobPage;
     let encoder;
     let frameReceiver;
+    // A stills or video job of native frames renders them all through one session; it is closed when the job ends.
+    let nativeSequence;
     let pageEncodes = false;
     let suspended = false;
     const started = performance.now();
@@ -564,16 +568,22 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           let traced;
           let backendNote = trace.note;
           if (trace.backend === 'native') {
+            let exportedScene = false;
             try {
-              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold } });
-              traced = await traceFrameNative({ tracer: trace.tracer, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
+              const exported = await jobPage.evaluate(input => window.__agentPreview.exportNativeScene(input), { ...frameInput, options: { width, height, bounces: tracerOptions.bounces, seed: tracerOptions.seed, fireflyClamp: 20, noiseThreshold: tracerOptions.noiseThreshold, samples: tracerOptions.samples, instancing: chooseNativeInstancing(), kernel: chooseNativeKernel() } });
+              exportedScene = true;
+              if (settings.frameCount > 1 && process.env.JS67_NATIVE_SESSIONS !== 'off') nativeSequence ??= createNativeSequence({ tracer: trace.tracer });
+              traced = await traceFrameNative({ tracer: trace.tracer, sequence: nativeSequence, exported, width, height, samples: tracerOptions.samples, bounces: tracerOptions.bounces,
                 seed: tracerOptions.seed, denoise: choice.denoise === true ? 'wavelet' : choice.denoise === false ? 'none' : choice.denoise, denoiser: choice.denoiser,
                 maxSeconds: tracerOptions.maxSeconds, noiseThreshold: tracerOptions.noiseThreshold });
             } catch (error) {
               // Past maxSeconds the job fails as it does on every backend; falling back would only run it twice as long.
               if (isNativeTimeLimitError(error)) throw error;
-              nativeTracerLocator.markUnusable(error.message);
-              backendNote = (await nativeTracerLocator.find()).reason;
+              nativeSequence?.close();
+              nativeSequence = undefined;
+              // Only a tracer or adapter failure makes the tracer unusable; a scene that failed to export says so for this job alone.
+              if (exportedScene) nativeTracerLocator.markUnusable(error.message);
+              backendNote = exportedScene ? (await nativeTracerLocator.find()).reason : `renderer.backend "native" could not export the scene (${error.message}).`;
               traceOptions.backend = backend === 'cpu' ? 'cpu' : 'gpu';
               choice = await chooseDenoiser(settings.renderer.denoise);
               traceOptions.denoise = choice.denoise;
@@ -587,11 +597,13 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             }
           }
           if (backendNote) traced.report.backendNote = backendNote;
-          if (choice.note) traced.report.denoiserNote = choice.note;
+          const denoiserNote = [choice.note, traced.report.denoiserNote].filter(Boolean).join(' ');
+          if (denoiserNote) traced.report.denoiserNote = denoiserNote;
           metrics.renderSeconds += (performance.now() - renderStarted) / 1000;
           metrics.width = width;
           metrics.height = height;
           metrics.pathTracer = traced.report;
+          if (traced.report.nativeSession) (metrics.nativeSessionRoutes ??= []).push(traced.report.nativeSession.path);
           const tracedBytes = Buffer.from(traced.data, 'base64');
           if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced frame exceeded 12 MiB.');
           if (encoder) {
@@ -725,6 +737,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       return { artifacts, metrics };
     } finally {
       signal.removeEventListener('abort', abort);
+      nativeSequence?.close();
       activeFrameReceiver = undefined;
       frameReceiver?.close();
       try { await encoder?.close(); }
@@ -777,7 +790,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   return Object.freeze({
     async capabilities() {
       return {
-        scene: { ...AGENT_SCENE_CAPABILITIES, game: GAME_CAPABILITIES, postPasses: USER_PASS_CAPABILITIES, meshBlend: MESH_BLEND_CAPABILITIES, materialSnippet: MATERIAL_SNIPPET_CAPABILITIES, vegetation: VEGETATION_CAPABILITY_NOTE, crowd: CROWD_CAPABILITY_NOTE, textureSequence: TEXTURE_SEQUENCE_CAPABILITIES },
+        scene: { ...AGENT_SCENE_CAPABILITIES, game: GAME_CAPABILITIES, postPasses: USER_PASS_CAPABILITIES, meshBlend: MESH_BLEND_CAPABILITIES, materialSnippet: MATERIAL_SNIPPET_CAPABILITIES, vegetation: VEGETATION_CAPABILITY_NOTE, crowd: CROWD_CAPABILITY_NOTE, settle: SETTLE_CAPABILITY_NOTE, textureSequence: TEXTURE_SEQUENCE_CAPABILITIES },
         sceneLimits: SCENE_LIMITS,
         preview: { backend, memoryBudgetMiB: memory, maximumWidth: 1024, maximumHeight: 1024, maximumImageBytes: MAXIMUM_IMAGE_BYTES, maximumActiveScenes: SCENE_STORE_LIMITS.maxOpenScenes, maximumOpenSceneBytes: SCENE_STORE_LIMITS.maxOpenSceneBytes, maximumQueuedCalls: MAXIMUM_QUEUED_CALLS, evaluationTimeoutMs: EVALUATION_TIMEOUT_MS },
         review: { ...REVIEW_LIMITS, backend, memoryBudgetMiB: memory, evaluationTimeoutMs: EVALUATION_TIMEOUT_MS,

@@ -44,6 +44,9 @@ def read_flag_value(argument_list, flag_name, fallback_value):
 
 
 PIXEL_FILTER_TYPES = {"box": "BOX", "gaussian": "GAUSSIAN", "blackman-harris": "BLACKMAN_HARRIS"}
+# Keep in step with GREY_DIFFUSE_MATERIAL in grey-diffuse-override.mjs: both renderers must shade the same thing.
+GREY_DIFFUSE_ENTRY = {"color": [0.8, 0.8, 0.8], "metallic": 0.0, "roughness": 1.0, "specular": 0.0}
+DEFAULT_DEPTH_SAMPLES = 64
 
 
 def parse_cli_arguments():
@@ -51,12 +54,17 @@ def parse_cli_arguments():
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
         "samples": int(read_flag_value(argument_list, "--samples", "256")),
         "bounces": int(read_flag_value(argument_list, "--bounces", "8")),
+        # Transparent Max Bounces on its own; absent means the same value as --bounces.
+        "transparent_bounces": (
+            int(read_flag_value(argument_list, "--transparent-bounces", "-1"))
+            if "--transparent-bounces" in argument_list else None
+        ),
         "seed": int(read_flag_value(argument_list, "--seed", "1")),
         "width": int(read_flag_value(argument_list, "--width", "960")),
         "height": int(read_flag_value(argument_list, "--height", "540")),
@@ -64,6 +72,41 @@ def parse_cli_arguments():
         "filter_width": float(read_flag_value(argument_list, "--filter-width", "1.0")),
         "keep_exr": "--keep-exr" in argument_list,
         "part_ids": "--part-ids" in argument_list,
+        "grey_diffuse": "--grey-diffuse" in argument_list,
+        "z_depth": "--z-depth" in argument_list,
+        "depth_samples": int(read_flag_value(argument_list, "--depth-samples", str(DEFAULT_DEPTH_SAMPLES))),
+        "denoise": read_flag_value(argument_list, "--denoise", "none"),
+        "f_stop": float(read_flag_value(argument_list, "--f-stop", "0")) if "--f-stop" in argument_list else None,
+        "focus_distance": float(read_flag_value(argument_list, "--focus-distance", "0")) if "--focus-distance" in argument_list else None,
+        "aperture_blades": int(read_flag_value(argument_list, "--aperture-blades", "0")),
+        "aperture_rotation": float(read_flag_value(argument_list, "--aperture-rotation", "0")),
+        "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
+    }
+
+
+def resolve_lens_options(options, camera_entry):
+    """Depth-of-field settings from --f-stop and its companions, or None for a pinhole (the default).
+
+    Without --focus-distance the focus is the eye-to-target distance, as in createCamera.
+    """
+    if options["f_stop"] is None:
+        stray_flags = [name for name in ("--focus-distance", "--aperture-blades", "--aperture-rotation", "--sensor-width") if name in sys.argv]
+        if stray_flags:
+            raise ValueError(f"Option {stray_flags[0]} needs --f-stop: pass the f-stop that turns on depth of field, such as --f-stop 2.8.")
+        return None
+    if options["f_stop"] <= 0:
+        raise ValueError(f"--f-stop must be above 0, got {options['f_stop']}.")
+    if options["aperture_blades"] != 0 and not 3 <= options["aperture_blades"] <= 64:
+        raise ValueError(f"--aperture-blades must be 0 (a round aperture) or from 3 to 64, got {options['aperture_blades']}.")
+    focus_distance = options["focus_distance"]
+    if focus_distance is None:
+        focus_distance = math.dist(camera_entry["eye"], camera_entry["target"])
+    return {
+        "f_stop": options["f_stop"],
+        "focus_distance": focus_distance,
+        "aperture_blades": options["aperture_blades"],
+        "aperture_rotation": options["aperture_rotation"],
+        "sensor_width": options["sensor_width"],
     }
 
 
@@ -112,14 +155,17 @@ def build_blender_mesh(mesh_name, geometry_entry):
 
 
 def unpack_shared_image(image_name, texture_descriptor, image_entries, built_images):
-    image_identifier = texture_descriptor["image"]["imageId"]
+    image_identifier = (texture_descriptor["image"]["imageId"], texture_descriptor.get("colorSpace", "srgb"))
     if image_identifier in built_images:
         return built_images[image_identifier]
-    source_entry = image_entries[image_identifier]
+    source_entry = image_entries[image_identifier[0]]
     raw_pixels = decode_typed_array(source_entry["data"])
     width = source_entry["width"]
     height = source_entry["height"]
     blender_image = bpy.data.images.new(image_name, width, height, alpha=True)
+    if image_identifier[1] == "linear":
+        # Set before the pixels: changing the colour space of an image that holds pixels reloads it and drops them.
+        blender_image.colorspace_settings.name = "Non-Color"
     flipped_pixels = raw_pixels.reshape(height, width, 4)[::-1].astype(numpy.float32) / 255.0
     blender_image.pixels.foreach_set(flipped_pixels.reshape(-1))
     blender_image.pack()
@@ -406,9 +452,26 @@ def build_scene_lights(scene, environment_entry):
         add_area_light(scene, light_index, area_entry)
 
 
-def build_camera_object(scene, camera_entry):
+def configure_depth_of_field(camera_data, lens_options, aspect):
+    """Thin-lens depth of field, matching createCamera in src/path-tracer.js (the same flags go to trace-native.mjs).
+
+    The sensor is sensor-width / aspect tall, so the focal length Cycles derives from the vertical field of view is the one
+    the native side computes; the aperture radius is then focal length / (2 * f-stop) in metres.
+    """
+    camera_data.sensor_height = lens_options["sensor_width"] / aspect
+    camera_data.dof.use_dof = True
+    camera_data.dof.aperture_fstop = lens_options["f_stop"]
+    camera_data.dof.focus_distance = lens_options["focus_distance"]
+    if lens_options["aperture_blades"] > 0:
+        camera_data.dof.aperture_blades = lens_options["aperture_blades"]
+        camera_data.dof.aperture_rotation = math.radians(lens_options["aperture_rotation"])
+
+
+def build_camera_object(scene, camera_entry, lens_options=None, aspect=16.0 / 9.0):
     camera_data = bpy.data.cameras.new("Camera")
     camera_data.sensor_fit = "VERTICAL"
+    if lens_options is not None:
+        configure_depth_of_field(camera_data, lens_options, aspect)
     camera_data.angle_y = math.radians(camera_entry["fov"])
     camera_data.clip_start = camera_entry["near"]
     camera_data.clip_end = camera_entry["far"]
@@ -434,6 +497,25 @@ def configure_linear_exr_output(scene, width, height):
     scene.view_settings.look = "None"
 
 
+def configure_cycles_denoising(scene, mode):
+    """Off by default. "oidn-gpu" and "oidn-cpu" run Cycles' own Open Image Denoise with albedo and normal passes.
+
+    Blender's default denoiser for final renders is Open Image Denoise (the other choice is OptiX), with the
+    albedo and normal passes, the accurate prefilter and, when a GPU renders, GPU denoising. This sets those
+    values explicitly so the comparison does not depend on a default.
+    """
+    if mode == "none":
+        scene.cycles.use_denoising = False
+        return
+    if mode not in ("oidn-gpu", "oidn-cpu"):
+        raise ValueError(f"--denoise must be none, oidn-gpu or oidn-cpu, got {mode!r}.")
+    scene.cycles.use_denoising = True
+    scene.cycles.denoiser = "OPENIMAGEDENOISE"
+    scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL"
+    scene.cycles.denoising_prefilter = "ACCURATE"
+    scene.cycles.denoising_use_gpu = mode == "oidn-gpu"
+
+
 def configure_cycles_parity(scene, options):
     scene.render.engine = "CYCLES"
     preferences = bpy.context.preferences.addons["cycles"].preferences
@@ -449,7 +531,7 @@ def configure_cycles_parity(scene, options):
     scene.cycles.device = "GPU"
     scene.cycles.samples = options["samples"]
     scene.cycles.seed = options["seed"]
-    scene.cycles.use_denoising = False
+    configure_cycles_denoising(scene, options["denoise"])
     scene.cycles.use_adaptive_sampling = False
     scene.cycles.pixel_filter_type = PIXEL_FILTER_TYPES[options["filter_type"]]
     scene.cycles.filter_width = options["filter_width"]
@@ -463,7 +545,8 @@ def configure_cycles_parity(scene, options):
     scene.cycles.glossy_bounces = bounces
     scene.cycles.transmission_bounces = bounces
     scene.cycles.volume_bounces = bounces
-    scene.cycles.transparent_max_bounces = bounces
+    transparent_bounces = options["transparent_bounces"]
+    scene.cycles.transparent_max_bounces = bounces if transparent_bounces is None else transparent_bounces
     return used_devices
 
 
@@ -514,6 +597,46 @@ def render_part_identifier_map(scene, output_prefix, width, height):
     print("PART_IDS " + json.dumps({"parts": part_names, "outputPrefix": output_prefix}))
 
 
+def apply_grey_diffuse_override(scene):
+    """Shades every object with one grey diffuse material, as the view layer's material override does."""
+    grey_material = build_blender_material("grey-diffuse-override", GREY_DIFFUSE_ENTRY, False, [], {})
+    scene.view_layers[0].material_override = grey_material
+
+
+def build_camera_z_depth_material():
+    """An emission material whose colour is the camera Z depth: the distance along the view axis, not along the ray."""
+    material = bpy.data.materials.new("camera-z-depth")
+    node_tree = material.node_tree
+    node_tree.nodes.clear()
+    camera_data_node = node_tree.nodes.new("ShaderNodeCameraData")
+    emission_node = node_tree.nodes.new("ShaderNodeEmission")
+    emission_node.inputs["Strength"].default_value = 1.0
+    output_node = node_tree.nodes.new("ShaderNodeOutputMaterial")
+    node_tree.links.new(camera_data_node.outputs["View Z Depth"], emission_node.inputs["Color"])
+    node_tree.links.new(emission_node.outputs["Emission"], output_node.inputs["Surface"])
+    return material
+
+
+def render_camera_z_depth(scene, output_prefix, width, height, depth_samples):
+    """Renders the camera Z depth through Cycles into <prefix>-depth.npy (rows from the top, 0 where nothing is hit).
+
+    A real Z pass needs a multilayer EXR or compositor nodes; the Camera Data node's View Z Depth is the same
+    quantity (Cycles' pass is camera_z_depth too) and goes through the single-layer path used for the colour image.
+    The world is switched off so a miss reads 0, which is also what Cook writes.
+    """
+    scene.view_layers[0].material_override = build_camera_z_depth_material()
+    scene.world.node_tree.nodes["Background"].inputs[1].default_value = 0.0
+    scene.cycles.samples = depth_samples
+    depth_exr_path = f"{output_prefix}-depth.exr"
+    depth_npy_path = f"{output_prefix}-depth.npy"
+    scene.render.filepath = depth_exr_path
+    bpy.ops.render.render(write_still=True)
+    load_exr_into_npy(depth_exr_path, depth_npy_path, width, height, False)
+    z_depth = numpy.load(depth_npy_path)[:, :, 0].copy()
+    numpy.save(depth_npy_path, z_depth)
+    return depth_npy_path
+
+
 def execute_timed_cycles_render(scene, exr_path):
     scene.render.filepath = exr_path
     stats_events = []
@@ -552,6 +675,7 @@ def execute_timed_cycles_render(scene, exr_path):
         "render_call_seconds": render_call_seconds,
         "cycles_sync_seconds": cycles_sync_seconds,
         "sampling_seconds": sampling_seconds,
+        "after_last_sample_seconds": max(0.0, render_call_seconds - (last_sample_seconds or render_call_seconds)),
         "peak_stats_megabytes": peak_stats_megabytes,
         "stats_event_count": len(stats_events),
         "last_stats_text": stats_events[-1][1] if stats_events else "",
@@ -580,12 +704,15 @@ def main():
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
     build_scene_lights(scene, description["environment"])
-    build_camera_object(scene, description["camera"])
+    lens_options = resolve_lens_options(options, description["camera"])
+    build_camera_object(scene, description["camera"], lens_options, options["width"] / options["height"])
     configure_linear_exr_output(scene, options["width"], options["height"])
     if options["part_ids"]:
         render_part_identifier_map(scene, options["output_prefix"], options["width"], options["height"])
         return
     used_devices = configure_cycles_parity(scene, options)
+    if options["grey_diffuse"]:
+        apply_grey_diffuse_override(scene)
     scene_build_seconds = time.perf_counter() - build_started
     exr_path = f"{options['output_prefix']}.exr"
     npy_path = f"{options['output_prefix']}.npy"
@@ -593,7 +720,25 @@ def main():
     load_exr_into_npy(exr_path, npy_path, options["width"], options["height"], options["keep_exr"])
     setup_seconds = scene_build_seconds + timing["cycles_sync_seconds"]
     total_trace_seconds = scene_build_seconds + timing["render_call_seconds"]
+    report_samples = scene.cycles.samples
+    depth_npy_path = None
+    depth_error = None
+    if options["z_depth"]:
+        try:
+            depth_npy_path = render_camera_z_depth(scene, options["output_prefix"], options["width"], options["height"], options["depth_samples"])
+        except Exception as error:  # the colour image is already on disk; keep its report even when the depth pass fails
+            depth_error = repr(error)
+            print("DEPTH_PASS_FAILED " + depth_error)
     report = {
+        "greyDiffuse": options["grey_diffuse"],
+        "thinLens": None if lens_options is None else {
+            **lens_options,
+            "blenderLensMillimetres": scene.camera.data.lens,
+            "blenderApertureRadius": scene.camera.data.lens / 1000.0 / (2.0 * lens_options["f_stop"]),
+        },
+        "depthNpyPath": depth_npy_path,
+        "depthError": depth_error,
+        "depthSamples": options["depth_samples"] if options["z_depth"] else None,
         "engine": "cycles-optix",
         "blenderVersion": bpy.app.version_string,
         "devices": used_devices,
@@ -602,7 +747,7 @@ def main():
         "exrPath": exr_path if options["keep_exr"] else None,
         "width": options["width"],
         "height": options["height"],
-        "samples": scene.cycles.samples,
+        "samples": report_samples,
         "seed": scene.cycles.seed,
         "bounces": scene.cycles.max_bounces,
         "diffuseBounces": scene.cycles.diffuse_bounces,
@@ -625,6 +770,9 @@ def main():
         "cyclesSyncSeconds": round(timing["cycles_sync_seconds"], 6),
         "setupSeconds": round(setup_seconds, 6),
         "samplingSeconds": round(timing["sampling_seconds"], 6),
+        "secondsAfterLastSample": round(timing["after_last_sample_seconds"], 6),
+        "denoiseMode": options["denoise"],
+        "denoiser": scene.cycles.denoiser if scene.cycles.use_denoising else None,
         "renderCallSeconds": round(timing["render_call_seconds"], 6),
         "totalTraceSeconds": round(total_trace_seconds, 6),
         "cyclesPeakMemoryMegabytes": round(timing["peak_stats_megabytes"], 2),

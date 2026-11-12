@@ -1,0 +1,1 @@
+- The Cook `cycles` kernel now starts a pixel's next sample as soon as a path ends by default (`pathRegeneration: false` or `--no-path-regeneration` in `trace-native.mjs` restores the old order), which cuts sampling time with the same image (#897)
