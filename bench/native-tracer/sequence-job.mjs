@@ -4,7 +4,7 @@
 // Variants (the demo room with its motion edited and, except "particles", its particle systems removed, since sparks and swaying hair rebuild the
 // triangles and the emissive list at every time and a session is only reused when the exported tables are equal): camera (camera tracks only,
 // every later frame `reused`), material (plus a roughness track: `updated`), light (plus a point light intensity track: `updated`), transform
-// (the recipe's own tracks, where a pendant swings: the exported triangles change, so a frame gets a new session unless the swing has returned to an earlier pose) and particles (camera tracks
+// (the recipe's own tracks, where a pendant swings: the job exports shared geometry as instances, so the swing is an instance transform: `updated`, or `reused` when it has returned to an earlier pose) and particles (camera tracks
 // with the sparks left in: a new session per frame, as costly as a one-shot trace).
 // A run with sessions off carries no `nativeSession` in its reports, so its route list is empty by design.
 // Prints one SEQUENCE_JOB line of JSON and exits 1 when a frame differs or a route is not the expected one.
@@ -42,7 +42,7 @@ function buildVariants(recipe) {
     camera: { recipe: withMotion(cameraTracks), expectedLaterRoute: 'reused' },
     material: { recipe: withMotion([...cameraTracks, { kind: 'material', id: materialId, property: 'roughness', interpolation: 'LINEAR', keyframes: keyframes(0.9, 0.2) }]), expectedLaterRoute: 'updated' },
     light: { recipe: withMotion([...cameraTracks, { kind: 'light', id: 'point:0', property: 'intensity', interpolation: 'LINEAR', keyframes: keyframes(14, 4) }]), expectedLaterRoute: 'updated' },
-    transform: { recipe: withMotion(recipe.motion.tracks), expectedLaterRoute: 'new-session', allowedRoutes: ['new-session', 'reused'] },
+    transform: { recipe: withMotion(recipe.motion.tracks), expectedLaterRoute: 'updated', allowedRoutes: ['updated', 'reused'] },
     particles: { recipe: { ...recipe, motion: { ...recipe.motion, tracks: cameraTracks } }, expectedLaterRoute: 'new-session' },
   };
 }
