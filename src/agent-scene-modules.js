@@ -9,8 +9,10 @@ const MODULE_LOADERS = {
   text: () => import('./text-geometry.js'),
   motion: () => import('./agent-motion.js'),
   motionBake: () => import('./agent-motion-bake.js'),
+  settle: () => import('./agent-settle.js'),
   drive: () => import('./agent-drive.js'),
   physics: () => import('./agent-physics.js'),
+  fracture: () => import('./agent-fracture.js'),
   cloth: () => import('./agent-cloth.js'),
   particles: () => import('./agent-particles.js'),
   bake: () => import('./agent-bake.js'),
@@ -54,8 +56,10 @@ const MODULE_MARKERS = {
   text: ['"type":"text"'],
   motion: ['"motion":{', '"bake-motion"'],
   motionBake: ['"bake-motion"'],
+  settle: ['"type":"settle"'],
   drive: ['"drive":{'],
-  physics: ['"physics":{'],
+  physics: ['"physics":{', '"fracture-node"'],
+  fracture: ['"type":"fragment"', '"fracture-node"'],
   cloth: ['"cloth":{'],
   particles: ['"particles":{'],
   bake: ['"bake":{'],
@@ -101,9 +105,10 @@ export function needsMeshBooleans(value) {
   return JSON.stringify(value ?? null).includes('"op":"boolean"');
 }
 
-/** True when a recipe or an operation list carries a physics section, so the host loads the solver first. */
+/** True when a recipe or an operation list carries a physics section or a settle operation, so the host loads the solver first. */
 export function needsPhysics(value) {
-  return JSON.stringify(value ?? null).includes('"physics":{');
+  const text = JSON.stringify(value ?? null);
+  return text.includes('"physics":{') || text.includes('"fracture-node"') || text.includes('"type":"settle"');
 }
 
 /** Names of the on-demand modules a recipe, or a list of edit operations, needs. */

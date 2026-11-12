@@ -93,7 +93,7 @@ Connected bodies do not collide unless `contactsEnabled` is `true`.
 | `spherical` | None. The joint permits relative rotation. |
 | `revolute` | Required unit `axis` expressed in both bodies' local frames. Optional `limits` and `motor`. |
 | `prismatic` | Required unit `axis` expressed in both bodies' local frames. Optional `limits` and `motor`. |
-| `fixed` | Optional unit `frameA` and `frameB` quaternions. Both default to identity. |
+| `fixed` | Optional unit `frameA` and `frameB` quaternions, both default to identity, and optional `breakImpulse` (see Fracture and breakable glue). |
 | `spring` | `restLength` (default `0`), positive `stiffness` and nonnegative `damping` (default `0`). |
 
 An articulated ragdoll is a graph of dynamic bodies, colliders, and joints.
@@ -380,7 +380,7 @@ Recipe joints also accept `spring` (`restLength`, `stiffness`, `damping`), `moto
 Defaults are `box` for dynamic bodies and sensors, `trimesh` for fixed ones.
 `layer` (0 to 15) and `collidesWith` replace raw bit masks.
 A node cannot have both a physics body and a motion `translation` or `rotation` track.
-Limits: 64 bodies, 64 joints, 10 seconds, 60 steps a second, so at most 601 frames.
+Limits: 128 bodies, 512 joints, 10 seconds, 60 steps a second, so at most 601 frames.
 
 The bake runs once, when the scene is created or the section changes, and is reused while the section and the geometry stay the same.
 After that the scene treats physics like motion: `sampleMotion(time)` and the MCP `motionTime` read the recording, so a seek back gives the same matrices. A time past `duration` holds the last pose, and `null` restores the authored pose.
@@ -388,6 +388,55 @@ Rapier is loaded on demand, an optional peer dependency. The MCP runtime serves 
 
 `scene_inspect` returns a `physics` report: per body the `finalPosition`, `finalSpeed` and `restsAtTime` (null while moving), the `contacts` between bodies with `firstTime`, `count` and `touchingAtEnd`, and the sensor `enter` and `leave` events with times.
 An agent can check that a ball came to rest on a mesh from these numbers, without a picture.
+
+## Fracture and breakable glue
+
+`src/fracture.js` splits a closed convex part (a box, cylinder, sphere or any convex mesh of at most 2048 triangles) into Voronoi fragments and describes the glue that holds them together. A concave part is rejected with a message to split it into convex parts first.
+
+```js
+import { fractureMesh, fragmentPhysics } from './src/fracture.js';
+const fracture = fractureMesh(wallGeometry, { seed: 7, cells: 24, impact: [1.2, 0.5, 0], impactRadius: 0.6 });
+const parts = fragmentPhysics(fracture, { translation: [0, 2, 0], strength: 20, density: 100 });
+// parts.bodies, parts.colliders and parts.joints go into a physics definition next to a ball and a floor.
+```
+
+| Field | Meaning |
+| --- | --- |
+| `seed` | Integer from 0 (default 1). The same seed, cell count and impact give the same fragments byte for byte. |
+| `cells` | 2 to 64 fragments. |
+| `impact`, `impactRadius` | Optional point in the part's local space. Half the cells are placed within `impactRadius` of it (default 0.3 of the part's diagonal), so smaller pieces sit where the hit lands. |
+
+`fractureMesh` returns `fragments`, `glue` and `volume`. Each fragment has `positions`, `normals`, `indices`, `volume` and `center` in the part's local space, and `groups`: the outside faces are material slot 0 and the new inside faces slot 1, each as a `{ slot, start, count }` range of `indices`. Fragment volumes sum to the part volume. `glue` lists each neighbouring pair `{ a, b, anchor, area }`.
+
+`fragmentPhysics` turns that into bodies, convex hull colliders and one fixed joint per neighbouring pair, each with `breakImpulse: strength`. A fixed joint takes `breakImpulse` (N s, above 0): in the bake the joint is removed on the first step in which either of its bodies takes a contact impulse (contact force times the timestep) at or above it. A body resting under its own weight takes about `mass * 9.81 / 60`, so a strength above that holds a structure up and a ball or a falling slab below it breaks the glue. All the joints of a hit fragment that are weaker than the hit break together; the rest of the structure stays glued. `recording.jointBreaks` lists `{ frame, joint, impulse }`. Recipes take `breakImpulse` on a fixed `physics.joints` entry, and `scene_inspect` reports `jointBreaks`.
+
+### Fracture from a recipe or the MCP tool
+
+`scene_apply` (and `apply` on a scene) takes a `fracture-node` operation, so an agent breaks a part without code:
+
+```json
+[
+  { "type": "set-physics", "physics": { "duration": 2, "bodies": [
+    { "node": "floor", "type": "fixed", "shape": "box" },
+    { "node": "ball", "shape": "ball", "density": 400, "velocity": [0, 0.5, -14] } ] } },
+  { "type": "fracture-node", "node": "wall", "seed": 7, "cells": 24, "strength": 5, "impact": [0, 0, 0.2], "impactRadius": 0.5 }
+]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `node` | A root mesh node with a convex geometry (a box, cylinder, sphere or convex mesh of at most 2048 triangles), no children and no motion track. |
+| `cells` | 2 to 64 pieces. |
+| `strength` | Glue strength in N s, above 0: a piece hit harder than this in one 1/60 s step loses its glue (see `breakImpulse`). |
+| `seed`, `impact`, `impactRadius` | As for `fractureMesh`; `impact` is in the node's geometry space, before the node scale. |
+| `density`, `friction` | Optional, passed to every piece body (density default 1). |
+
+The operation replaces the node by `cells` nodes named `<node>-frag-<i>` with the same transform and material, adds one `fragment` geometry per piece, one dynamic `convex` body per piece to `physics`, and one fixed joint `<node>-glue-<a>-<b>` per neighbouring pair with `breakImpulse: strength`. Without a physics section it creates one of 3 seconds. Set the ball, floor and duration first in a `set-physics` in the same batch (it replaces the section, so a later `set-physics` drops the pieces). 128 bodies and 512 joints are the limits; a part that needs more glue joints is rejected with a message to use fewer cells.
+
+A `fragment` geometry is `{ id, type: "fragment", source, index, cells, seed, impact?, impactRadius? }`: piece `index` of the fracture of the geometry `source`, in its local space. The same recipe gives the same bytes, and the cache key includes the source geometry, so editing the source regenerates every piece. Fragments are not nested: `source` must not be a fragment.
+`scene_inspect` lists the broken glue as `physics.jointBreaks` with the time of each break. The inside faces are material slot 1 of the geometry (`fractureMesh` returns the group ranges); recipe nodes carry one material, so pieces show it on both sides.
+
+Not yet: clusters that break as one, and breaking in the live runtime (glue joints there never break).
 
 ## Recipe ragdoll
 
@@ -560,6 +609,55 @@ renderer.render(frame);
 - It refuses skinned, morphed, crowd and level-of-detail parts. A textured part works, since only positions and normals move.
 - The culling bounds and the shadow map follow the new positions.
 - Per vertex a cloth steps on welded particles, so copy each vertex from its particle (`weldVertices(...).particleOfVertex`) and recompute normals (`recomputeNormals`) before the call.
+
+## Settling props
+
+`@codepawlhq/67js/addons/settle` drops props as rigid bodies onto colliders, runs Rapier at 60 Hz for a bounded time and returns the resting transforms, so rubble, crates and pebbles lie against each other instead of hovering where they were placed. The caller keeps the result as static parts. Same seed and inputs give the same transforms byte for byte (they are rounded to 1e-5).
+
+```js
+import { loadPhysicsEngine } from '@codepawlhq/67js/addons/physics';
+import { settleInstances } from '@codepawlhq/67js/addons/settle';
+
+await loadPhysicsEngine();
+const { instances, report } = settleInstances({
+  colliders: [
+    { shape: 'box', translation: [0, -0.1, 0], halfExtents: [4, 0.1, 4] },
+    { shape: 'box', translation: [0, 1, -2], halfExtents: [4, 1, 0.2] },
+  ],
+  area: { min: [-2, -1.7], max: [2, -0.5] }, count: 80, size: [0.1, 0.25], seed: 5,
+});
+// instances: [{ translation, rotation (quaternion), size }]; report: { requested, placed, skipped, fellOff, unsettled, duration }
+```
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `colliders` | required | Up to 512 `box` ({ translation, rotation, halfExtents }) or `ball` ({ translation, radius }) shapes to land on. List earlier settled props here to stack on them. |
+| `shape` | `box` | Prop shape, `box` or `ball`. |
+| `area`, `count` or `density` | required | Where to scatter, and how many (256 at most) or how many per square metre. |
+| `instances` | none | Instead of `area`, `count`, `density` and `size`: your own start poses `[{ translation, rotation, size }]` (size is three edge lengths for a box, a diameter for a ball). |
+| `size` | `[0.1, 0.25]` | Smallest and largest edge (box) or diameter (ball), in metres. |
+| `aspect` | 0.3 | Per-axis edge variation of a box, 0 to 1. |
+| `rotation` | 1 | Start tumble, 0 (yaw only) to 1 (any orientation). |
+| `spacing` | 0.01 | Minimum gap between props and colliders at the start, so no prop starts overlapping. |
+| `maxSlope` | 60 | Props are not placed where the ground below is steeper than this, in degrees. |
+| `duration` | 3 | Seconds simulated, 0.5 to 6. |
+| `friction`, `restitution` | 0.6, 0.1 | Contact material of props and colliders. |
+
+A prop that falls off the world is left out (`report.fellOff`); one still moving at the end is kept (`report.unsettled`; raise `duration`). `report.skipped` counts rejected placement attempts, not props. Props use continuous collision detection, so thin ones do not tunnel through a floor.
+
+In a recipe the same step is the `settle` operation of `scene_apply` (see [Recipe settle](#recipe-settle)). Clutter tiles (`addons/clutter`) are streamed meshes, not instance lists, so to settle stones list the poses you want as `instances`.
+
+### Recipe settle
+
+```json
+{ "type": "settle", "settle": {
+  "id": "rubble", "geometry": "block", "material": ["stone", "rust"],
+  "colliders": ["floor", "wall"],
+  "area": { "min": [-2, -1.7], "max": [2, -0.5] }, "count": 80, "size": [0.1, 0.25], "seed": 5
+} }
+```
+
+`colliders` are node IDs. A node needs a `box` or `sphere` geometry (a sphere must have equal scale on all axes); a group node stands for its mesh children. `geometry` is a recipe `box` or `sphere` geometry and decides the prop shape; `material` is an ID or a list of up to 8 that props pick from by seed. The operation adds a group node `rubble` and one static child per resting prop, `rubble-0`, `rubble-1` and so on, with no physics section. List `rubble` in a later settle's `colliders` to stack on it. Settling needs the Rapier peer loaded like recipe physics does, and `scene_capabilities` topic `settle` has the field list. Remove the group and its children before settling again under the same ID.
 
 ## Force fields
 

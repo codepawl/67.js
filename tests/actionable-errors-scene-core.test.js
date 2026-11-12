@@ -36,7 +36,7 @@ const RECIPE_CASES = [
   ['a camera takes fov or focalLength, never both', recipe => { recipe.camera = { fov: 40, focalLength: 50 }; }, RangeError, /^camera\.focalLength: got 50; expected only one of fov \(degrees\) or focalLength \(millimetres with sensorWidth\), such as fov 45; remove the other\.$/],
   ['a missing material names the choices', recipe => { recipe.nodes[0].material = 'ghost'; }, RangeError, /^nodes\.body\.material: got "ghost"; expected one of plain\.$/],
   ['a duplicate ID names the collection', recipe => { recipe.nodes[1].id = 'body'; }, RangeError, /^nodes\[1\]\.id: got "body"; expected an ID no other nodes entry uses; rename one, or remove the other\.$/],
-  ['a geometry type outside the list names the list', recipe => { recipe.geometries[0].type = 'blob'; }, TypeError, /^geometries\[0\]\.type: got "blob"; expected one of box, cylinder.*terrain\.$/],
+  ['a geometry type outside the list names the list', recipe => { recipe.geometries[0].type = 'blob'; }, TypeError, /^geometries\[0\]\.type: got "blob"; expected one of box, cylinder.*terrain, fragment.$/],
   ['a point list gives the range and an example', recipe => { recipe.geometries.push({ id: 'ring', type: 'lathe', profile: [[1, 0]] }); }, RangeError, /^geometries\[2\]\.profile: got "1 points"; expected a list of 2 to 4096 points of 2 numbers, such as \[\[0,0\],\[1,1\]\]\.$/],
   ['a wrong schema version gives the expected value', recipe => { recipe.schemaVersion = 2; }, RangeError, /^schemaVersion: got 2; expected 1\.$/],
   // src/agent-terrain.js

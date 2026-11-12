@@ -4,14 +4,14 @@ import { restWorldMatrix, boneTails, boneNodeId } from './rig.js';
 import { createRagdoll, ragdollPatches, ragdollReport } from './ragdoll.js';
 import { bakePhysicsScene, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from './physics.js';
 import { normalizeForceFields } from './force-fields.js';
+import { AGENT_SCENE_CAPABILITIES } from './agent-scene-capabilities.js';
 
 export { loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader };
 export { needsPhysics } from './agent-scene-modules.js';
 
 const FRAMES_PER_SECOND = 60;
 const MAX_DURATION_SECONDS = 10;
-const MAX_BODIES = 64;
-const MAX_JOINTS = 64;
+const { maxBodies: MAX_BODIES, maxJoints: MAX_JOINTS } = AGENT_SCENE_CAPABILITIES.physics.limits;
 const MAX_LAYER = 15;
 const MAX_TRIMESH_TRIANGLES = 20000;
 const MAX_HULL_POINTS = 2048;
@@ -26,7 +26,7 @@ const COMPOUND_PART_SHAPES = ['box', 'ball', 'capsule', 'cylinder', 'cone'];
 const JOINT_TYPES = ['spherical', 'revolute', 'prismatic', 'fixed', 'spring'];
 const BODY_FIELDS = ['node', 'type', 'shape', 'shapes', 'mass', 'density', 'friction', 'restitution', 'sensor', 'velocity', 'angularVelocity', 'layer', 'collidesWith'];
 const COMPOUND_PART_FIELDS = ['shape', 'translation', 'rotation', 'halfExtents', 'radius', 'halfHeight'];
-const JOINT_FIELDS = ['name', 'type', 'bodyA', 'bodyB', 'anchorA', 'anchorB', 'axis', 'limits', 'motor', 'restLength', 'stiffness', 'damping', 'contactsEnabled'];
+const JOINT_FIELDS = ['name', 'type', 'bodyA', 'bodyB', 'anchorA', 'anchorB', 'axis', 'limits', 'motor', 'restLength', 'stiffness', 'damping', 'contactsEnabled', 'breakImpulse'];
 const MOTOR_FIELDS = ['mode', 'target', 'stiffness', 'damping', 'maxForce'];
 const EVENT_FIELDS = ['time', 'tick', 'type', 'body', 'joint', 'impulse', 'torqueImpulse', 'point', 'translation', 'rotation', 'motor'];
 const PHYSICS_FIELDS = ['duration', 'gravity', 'bodies', 'joints', 'events', 'fields', 'ragdoll'];
@@ -207,6 +207,12 @@ function normalizeJoint(input, bodyNodeIds, jointNames, path) {
       throw invalidField(`${path}.contactsEnabled`, input.contactsEnabled, 'true or false', TypeError);
     }
     joint.contactsEnabled = input.contactsEnabled;
+  }
+  if (input.breakImpulse !== undefined) {
+    if (input.type !== 'fixed') {
+      throw invalidField(`${path}.breakImpulse`, input.breakImpulse, 'a field left out unless joint type is "fixed"', TypeError);
+    }
+    joint.breakImpulse = finiteNumber(input.breakImpulse, `${path}.breakImpulse`, 1e-6, 1e9);
   }
   if (input.limits !== undefined) joint.limits = numberList(input.limits, 2, `${path}.limits`);
   if (input.motor !== undefined) joint.motor = normalizeMotor(input.motor, `${path}.motor`);
@@ -555,6 +561,7 @@ export function bakeAgentPhysics(physics, recipe, geometries) {
         duration: physics.duration, frames: scene.frameCount, gravity: physics.gravity ?? [0, -9.81, 0],
         bodies: bodyReport(scene, physics), ...contactReport(scene, physics),
         eventsTruncated: scene.contactEventsTruncated,
+        ...(scene.jointBreaks.length ? { jointBreaks: scene.jointBreaks.slice(0, MAX_REPORTED_CONTACTS).map(({ frame, joint, impulse }) => ({ joint, time: roundedTime(frame, scene.timestep), impulse: Number(impulse.toFixed(3)) })) } : {}),
         ...(ragdoll ? { ragdoll: ragdollReport(ragdoll, scene) } : {}),
       };
       return structuredClone(reportCache);

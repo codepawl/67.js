@@ -1001,6 +1001,94 @@ NODE_OPTIONS=--max-old-space-size=16384 node bench/cycles-parity/large-sequence-
 
 Not measured: sizes above 4,000,000 triangles (nothing failed at 4M, so the largest working size is not known), more than one run per cell, two sessions alive at once, and peak host memory.
 
+## Classroom scene against Cycles, every material grey diffuse (#896, slice C1b)
+
+The last Done-when item of #896 asks for the Blender "Classroom" demo scene (Christophe Seux, CC0, from blender.org's demo files) with every material overridden to grey diffuse to pass the image-match checks against Cycles, and a depth pass that matches Cycles on 99.9 percent of pixels. This slice is the bridge, the harness and the first full measurement. The depth gate passes. The image gates do not pass, and the cause is pinned to one thing, point lights with a radius (below). Only `bench/`, `tests/` and this guide change; the `.blend` and everything derived from it stay outside the repository.
+
+Picture (Cook left, Cycles right, 1024 samples, depth of field on, grey diffuse): `docs/cook-classroom-comparison.jpg`.
+
+### The bridge
+
+[`classroom_bridge.py`](../bench/cycles-parity/classroom_bridge.py) runs inside Blender 5.3 on the opened scene, with auto-run scripts disabled (`blender -b --disable-autoexec classroom.blend --python ... -- export <dir>`). `export` writes the evaluated scene in the JSON format the other parity benches read: one geometry per mesh datablock and modifier stack (so linked copies share it), one part per instance with its world matrix, the camera, the lights, the world and one grey material (base 0.8, roughness 1, as the harness defines). `render-cycles.py` builds the Cycles side from that same JSON, so both renderers see exactly the same scene. `reference` renders the original `.blend` in Cycles with the same drops and the same override, to measure the bridge itself.
+
+[`run-classroom-parity.py`](../bench/cycles-parity/run-classroom-parity.py) (started by `run-classroom-parity.sh`) does everything in one call: download once, export, Cook and Cycles renders, comparisons, depth, a figure and the diagnostic experiments. Small changes elsewhere in `bench/`: `trace-native.mjs --instancing` keeps shared geometry as instances (through `instanced-scene-in-batches.mjs`, below), parts may carry `rayVisibility` (read by `render-cycles.py` and by Cook's instance visibility bits), and `render-cycles.py` reads `environment.sunAngularRadius` as Cook does.
+
+`buildTraceScene` refuses an instanced scene with more than 400,000 unique triangles, counted once per shared geometry, and the Classroom holds 427,769. The kernel has no such limit. `instanced-scene-in-batches.mjs` builds the scene in two batches that each fit and joins their instance lists, so `src/` is untouched (tests: `tests/cycles-parity-instanced-batches.test.js`, `tests/cycles-parity-instancing-option.test.js`).
+
+### Counts `[measured]`
+
+| | |
+| --- | --- |
+| Instances (parts) | 886 |
+| Distinct geometries | 231 |
+| Unique triangles | 427,769 (271,605 vertices) |
+| Triangles counting every instance | 1,229,429 |
+| Mirrored instances (negative determinant) | 26 |
+| Lights | 1 sun (angular radius 0.0150 rad, strength 1), 7 point, 2 area, 0 spot |
+| World | constant black (strength 0) |
+| Camera | 25 mm on a 32 mm sensor, 960 x 540, vertical field of view 39.60 degrees, no roll, no shift |
+| Depth of field | f/2.083 (aperture radius 6.0 mm), 6 blades, focus 7.959 m |
+
+### Dropped or approximated, the same on both sides unless noted
+
+- Glass: 2 objects (`glass`, `Box309.002`) are removed from both renders. As opaque grey they would seal the windows.
+- Particle system: 1 halo emitter is switched off in both.
+- Four objects with a transparent or alpha-cutout material render opaque under the override, in both (no object is dropped for it).
+- Five spot lights exist in the file but belong to hidden objects; neither the original nor the bridge renders them.
+- 22 instances evaluate to no triangles through `Object.to_mesh` and are not exported: `porte`, `porte.001`, `focus`, eight `venitianBlind*`, six `Circle.002`, four suitcase wheels (`kolesa01_k*`) and `Plane.013`. The original renders at least some of them (the exporter also lists `beamWithHole`, `ceilingWithHole`, `volumeLightMask` and `DustParticules` as not exported). This is a gap between the bridge and the original file, not between Cook and Cycles `[inferred: these objects get their shape from modifiers (lattice, hook, armature) or nodes that the evaluated-mesh read does not return]`.
+- Ray visibility is exported: 13 parts hidden from shadow rays and 1 from camera rays. Without it the sun was blocked in the bridge (sun-only mean radiance 0.0001 against 0.0388 with it). Shadow catchers and holdouts (10 objects) are counted and not handled.
+- Lights keep shadows on in the bridge even where the file turns them off (`exterior_fillLight`), and per-light bounce limits are not carried.
+- The JSON camera's far clip is 1000 (the file has 100), because Cook ignores it; the original-file renders use 100.
+- Depth of field has no anamorphic ratio (it is 1 here), so nothing was dropped for the lens.
+
+### Gates, Cook against Cycles on the same exported scene `[measured]`
+
+960 x 540, 1024 spp, seed 1 for both (Cycles seed 2 for the noise floor), 8 bounces, box filter, Blender 5.3.0 OptiX and Cook on one RTX 4090. Colour with the scene's depth of field on both sides; depth with the aperture closed on both sides (Cook's depth is ray distance, converted to Z by `compare_depth.py`, which assumes no lens), at 1024 samples on both (at the 64 Cycles samples of the earlier rows the silhouette pixels of this scene are noisy and the same comparison scored 99.57 percent).
+
+| Gate | Result | Pass |
+| --- | --- | --- |
+| Mean ratio per channel within 2 % | 1.123 / 1.129 / 1.138 | fail |
+| 8 x 8 tiles within 5 % | 2 of 64 (min 1.003, max 2.914) | fail |
+| FLIP LDR against the seed floor + 0.02 | 0.183 (floor 0.115, ceiling 0.135) | fail |
+| relMSE (reported) | 0.334 against a Cycles seed-to-seed floor of 0.066 | n/a |
+| Depth agreement at 1 % on 99.9 % of pixels | 99.939 % (316 of 518,400 pixels disagree) | pass |
+| Depth at 0.1 % / 0.5 % | 98.97 % / 99.86 % | reported |
+
+The pinhole colour comparison gives the same numbers (1.124 / 1.129 / 1.138, 2 of 64 tiles, relMSE 0.336), so depth of field is not what fails the colour gates. The room is dark and noisy (mean radiance 0.17, a small window and a few lamps), so the Cycles noise floor itself is high.
+
+Depth: every one of the 316 disagreeing pixels sits next to a silhouette (none in the interior of a surface; away from silhouettes the agreement is 100 percent and the 99th percentile of the relative error is 0.10 percent). They gather in the right-hand tiles of rows 1 to 4 (107, 119, 45 and 10 pixels in the last column), where the venetian blinds' thin slats are, and a handful are scattered along the floor. 311 are both-hit pixels over 1 percent, 68 over 5 and 17 over 20 percent (a slat edge against what is behind it); 2 are hit only by Cycles and 3 only by Cook. 1,637 pixels are background in both (the window openings), so the miss handling is exercised by a rendered scene for the first time.
+
+### Why the colour gates fail (measured gap, inferred cause)
+
+Same JSON, one light class at a time (pinhole, 256 spp, mean of the green channel; Cook over Cycles):
+
+| Lights | Cook / Cycles |
+| --- | --- |
+| sun only | 1.0015 (0.03884 / 0.03878) |
+| 2 area lights only | 0.9985 (0.08935 / 0.08948) |
+| 7 point lights, radius as in the file (0.08 to 0.18) | 1.41 (0.0770 / 0.0545, all channels) |
+| the same 7 point lights, radius 0 | 1.0023 (0.05596 / 0.05583) |
+| one point light at a time | 1.09 (radius 0.08), 1.50 to 2.09 (the six lamps of radius 0.18) |
+
+The sun and the area lights agree to 0.2 percent, and the point lights agree to 0.2 percent too once their radius is 0. With a radius, Cook is 1.5 to 2.1 times brighter than Cycles on each of the six 0.18 m lamps, which sit at 2.31 m under a ceiling fixture (inferred: inside or against geometry). Everything above comes from a single pair of renders per row, so the second decimal of the small values is noise. The suspect is how the `cycles` kernel samples and shadows a sphere light whose sphere overlaps or touches geometry (light sampling in `packages/render-native`, point lights with `radius` in `src/cycles/`, against Cycles' sphere light sampling); I did not read or change kernel code, so the function is not named. That is for an issue: "point light with radius overlapping geometry is up to 2x brighter than Cycles", with this scene or a reduced one (a 0.18 m sphere light inside an open shade) as the reproduction. With the radius set to 0 on both sides the full gates would very likely come close to passing, but that full-resolution run was not made, so it is not claimed.
+
+### The bridge against the original file `[measured]`
+
+The bridge is not exact. Cycles on the exported JSON has a mean radiance of 0.17 against 0.668 for Cycles on the original `.blend` with the same drops and override (ratio 0.24 to 0.27), and the depth passes of the two agree on 91.2 percent of pixels, with the disagreement in the central tiles (rows 1 to 4, columns 2 and 3: the blackboard wall). Sun-only is 0.0388 against 0.376. The likely causes are the 22 unexported instances and lights whose file settings the format cannot carry (shadows off on `exterior_fillLight`, per-light bounce limits), but the experiments to separate them were not run, so the cause is open. This does not affect the Cook against Cycles comparison above, which reads one file on both sides; it means the scene Cook was tested on is a faithful reading of the Classroom only in its camera, the 886 instances it exports, the sun and the world.
+
+### Commands
+
+On a machine with Blender 5.3, Node, `uv` and the built `packages/render-native` addon (a GPU):
+
+```sh
+(cd packages/render-native && node build.mjs)
+bash bench/cycles-parity/run-classroom-parity.sh [--samples 1024] [--force export,cook,cycles,reference,diagnose]
+```
+
+Output goes to `artifacts/classroom/` (ignored by Git): `summary.json`, `classroom-comparison.jpg`, the logs, and in `out/` the small files. The scene is read from `~/cook-data/classroom` and downloaded from `https://download.blender.org/demo/test/classroom.zip` on the first run.
+
+Not covered: the 22 unexported instances and the bridge gap above; the point light difference (to be filed); a full-resolution run with point-light radius 0 on both sides; 4096 samples.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
