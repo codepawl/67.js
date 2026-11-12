@@ -232,3 +232,37 @@ test('a light sample on an emissive map reads the map at the sampled point, like
     assert.ok(Math.abs(ratio - 1) < 0.04, `channel ${channel}: light sampling ${neeOnly[channel]} against bounce rays ${bsdfOnly[channel]}`);
   }
 });
+
+// A cutout casts a hard shadow: a texel above the cutoff is solid whatever its stored alpha. The same quad with every texel at an
+// alpha of 0.8 and at 1.0 must shade the floor under it alike; a shadow ray that took 0.8 as partial transparency let 20 percent
+// of the light through (#1030).
+test('a cutout texel above the cutoff blocks light fully, whatever its stored alpha', { skip: !findNativeAddon() }, () => {
+  const width = 48;
+  const height = 32;
+  const samples = 256;
+  const alphaImage = (alphaByte) => ({ width: 2, height: 2, data: new Uint8Array(16).fill(255).map((value, index) => (index % 4 === 3 ? alphaByte : value)) });
+  const meanWithAlpha = (alphaByte) => {
+    const scene = {
+      materials: [
+        { color: [0.6, 0.6, 0.6], roughness: 0.9 },
+        { color: [1, 1, 1], roughness: 0.9, alphaMode: 'mask', alphaCutoff: 0.5, map: { image: alphaImage(alphaByte), colorSpace: 'srgb' } },
+      ],
+      instances: [
+        { geometry: quadGeometry(0), matrix: [3, 0, 0, 0, 0, 0, -3, 0, 0, 1, 0, 0, 0, -1, 0, 1], materialIndex: 0 },
+        { geometry: quadGeometry(0), matrix: [1.5, 0, 0, 0, 0, 0, -1.5, 0, 0, 1, 0, 0, 0, 0.4, 0, 1], materialIndex: 1 },
+      ],
+      lights: { points: [{ position: [0, 3, 0], intensity: 40, radius: 0.1 }] },
+    };
+    const camera = createCamera({ eye: [0, 2, 5], target: [0, -1, 0], fov: 45 }, width, height);
+    const options = { width, height, samples, samplesPerDispatch: 32, seed: 3 };
+    const input = buildNativeInputV2(scene, camera, options);
+    return meanChannels(traceNative(input, { ...options, kernel: 'cycles' }).rgba);
+  };
+  const fullyOpaque = meanWithAlpha(255);
+  const alphaEightTenths = meanWithAlpha(204);
+  for (let channel = 0; channel < 3; channel++) {
+    assert.ok(fullyOpaque[channel] > 0.01, `channel ${channel} is lit`);
+    const ratio = alphaEightTenths[channel] / fullyOpaque[channel];
+    assert.ok(Math.abs(ratio - 1) < 0.005, `channel ${channel}: alpha 0.8 gives ${alphaEightTenths[channel]}, alpha 1 gives ${fullyOpaque[channel]}`);
+  }
+});

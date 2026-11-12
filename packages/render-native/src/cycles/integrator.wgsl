@@ -299,8 +299,11 @@ fn int_trace_shadow(
 
       let hit_tri = triangles[hit_tri_idx];
       let hit_mat = materials[int_resolve_material_index(hit_inst, hit_tri)];
-      let supports_transparent_shadow = hit_mat.alpha_mode == ALPHA_MODE_BLEND
-        || (hit_mat.flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0u;
+      // A cutout that passed its alpha test above is solid: its alpha reads 1 from there on, as it does for a ray that hits it
+      // and as Cycles sees the 0 or 1 of a cutoff node. Taking the stored alpha as partial transparency again lets light through
+      // every texel of a map whose alpha is below 1, a quarter of it at an alpha of 0.75 (#1030).
+      let supports_transparent_shadow = hit_mat.alpha_mode != ALPHA_MODE_MASK
+        && (hit_mat.alpha_mode == ALPHA_MODE_BLEND || (hit_mat.flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0u);
       if (supports_transparent_shadow) {
         let opacity = int_evaluate_surface_opacity(hit_tri, hit_mat, committed.barycentrics);
         if (opacity < 1.0) {
