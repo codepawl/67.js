@@ -1,7 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::host::device::storage_buffer;
-use crate::NativeTraceInput;
+use crate::{NativeTraceInput, NativeTraceInputV2};
 
 const MATERIAL_TEXELS: usize = 10;
 const CUTOUT_START_WORD_INDEX: usize = 47;
@@ -58,6 +58,49 @@ pub(crate) fn upload_scene_buffers(
     }
     let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("parameters"),
+        contents: &parameter_bytes,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    UploadedSceneBuffers {
+        buffers,
+        accumulation,
+        parameters,
+    }
+}
+
+pub(crate) fn upload_cycles_scene_buffers(
+    device: &wgpu::Device,
+    input: &NativeTraceInputV2,
+    width: u32,
+    height: u32,
+    total_samples: u32,
+    accumulation_bytes: u64,
+) -> UploadedSceneBuffers {
+    let mut parameter_bytes = input.kernel_params.to_vec();
+    parameter_bytes[8..12].copy_from_slice(&width.to_le_bytes());
+    parameter_bytes[12..16].copy_from_slice(&height.to_le_bytes());
+    parameter_bytes[24..28].copy_from_slice(&total_samples.to_le_bytes());
+
+    // Bindings 2..=10 in FORMAT-v2 order.
+    let buffers = vec![
+        storage_buffer(device, "cycles instances", &input.instances),
+        storage_buffer(device, "cycles triangles", &input.triangles),
+        storage_buffer(device, "cycles materials", &input.materials),
+        storage_buffer(device, "cycles emissive triangles", &input.emissive_triangles),
+        storage_buffer(device, "cycles lights", &input.lights),
+        storage_buffer(device, "cycles light tree nodes", &input.light_tree_nodes),
+        storage_buffer(device, "cycles texture descriptors", &input.texture_descriptors),
+        storage_buffer(device, "cycles texture texels", bytemuck::cast_slice(&input.texture_texels)),
+        storage_buffer(device, "cycles environment texels", bytemuck::cast_slice(&input.environment_texels)),
+    ];
+    let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("cycles film accumulation"),
+        size: accumulation_bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("cycles kernel params"),
         contents: &parameter_bytes,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });

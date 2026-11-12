@@ -364,3 +364,15 @@ test('hair limits the vertices it draws, and an empty surface is refused', () =>
   flat.nodes[0].scale = [0, 0, 0];
   assert.throws(() => createAgentScene(flat), /no triangle with area|scale/);
 });
+
+test('a spinning system keeps every vertex finite once its first particle has died', () => {
+  const recipe = sparkRecipe({ systems: [{ node: 'sparks', seed: 7, count: 40, rate: 40, lifetime: [0.2, 0.4], speed: [1, 2], spin: [10, 200], size: 0.05 }] });
+  const scene = createAgentScene(recipe);
+  for (const time of [0, 0.1, 0.5, 1, 1.5]) {
+    scene.sampleMotion(time);
+    const geometry = scene.parts.find(part => part.name === 'sparks').geometry;
+    for (const values of [geometry.positions, geometry.normals]) {
+      assert.ok(values.every(Number.isFinite), `a vertex is not finite at ${time} s`);
+    }
+  }
+});

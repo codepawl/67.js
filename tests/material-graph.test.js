@@ -178,12 +178,13 @@ test('graph and preset fields do not mix', () => {
 test('every capability operator compiles, and no other operator does', () => {
   const samples = {
     uv: { uv: 'u' }, image: { image: { asset: 'a'.repeat(64) } }, coord: { coord: 'object' }, mapping: { mapping: {} }, whiteNoise: { whiteNoise: {} }, brick: { brick: {} }, vec: { vec: [1, 2, 3] }, ramp: { ramp: { value: 0.5, stops: [[0, 0], [1, 1]] } },
-    noise: { noise: {} }, voronoi: { voronoi: {} }, wave: { wave: {} }, checker: { checker: {} }, gradient: { gradient: {} },
+    fresnel: { fresnel: {} }, noise: { noise: {} }, voronoi: { voronoi: {} }, wave: { wave: {} }, checker: { checker: {} }, gradient: { gradient: {} },
     layer: { layer: { base: [0, 0, 0], top: [1, 1, 1], mask: 0.5 } }, hue: { hue: { color: [1, 0, 0], shift: 0.1 } }, curve: { curve: { value: 0.5, points: [[0, 0], [1, 1]] } },
   };
   for (const name of MATERIAL_GRAPH_OPERATORS) {
     const node = samples[name] ?? (['abs', 'floor', 'fract', 'sqrt', 'invert'].includes(name) ? { [name]: 0.5 } : { [name]: [0.2, 0.4, 0.6].slice(0, ['clamp', 'smoothstep', 'mix'].includes(name) ? 3 : 2) });
-    assert.doesNotThrow(() => compileMaterialGraph({ color: node }), name);
+    // Fresnel is view dependent, so only the emission output accepts it.
+    assert.doesNotThrow(() => compileMaterialGraph({ [name === 'fresnel' ? 'emission' : 'color']: node }), name);
   }
   assert.deepEqual(AGENT_SCENE_CAPABILITIES.materialGraph.operators, MATERIAL_GRAPH_OPERATORS);
   assert.equal(AGENT_SCENE_CAPABILITIES.materialGraph.maxNodes, MATERIAL_GRAPH_LIMITS.maxNodes);

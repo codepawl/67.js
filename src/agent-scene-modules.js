@@ -64,7 +64,7 @@ const MODULE_MARKERS = {
   patterns: ['"pattern"'],
   relations: ['"relations":'],
   timeline: ['"timeline":{'],
-  layerShaders: ['"anisotropy"', '"iridescence"'],
+  layerShaders: ['"anisotropy"', '"iridescence"', '"fresnel"'],
   liquidShader: ['"transmission"', '"liquid"', '"foam"'],
   subsurfaceShader: ['"subsurface"'],
   // Any mention loads it, because an edit can set the density through a path or the environment of an operation.
@@ -82,8 +82,9 @@ const MODULE_MARKERS = {
   lineArt: ['"lines":{', '"toon":'],
   viewTransform: ['"viewTransform":"agx"', '"viewTransform":"neutral"', '"look":"'],
   // Flush faces are ranked whenever this is loaded (issue #751): the MCP preview registers it, loadAllAgentSceneModules loads it,
-  // and so does a recipe that names resolveCoplanar. A plain recipe in a host without it still needs no on-demand module.
-  coplanar: ['"resolveCoplanar"'],
+  // and so does a recipe that names resolveCoplanar or places an asset, since glTF models nest facades a few millimetres apart.
+  // A recipe of plain primitives in a host without it stays free of the 85 KB of flush code, so it needs no on-demand module.
+  coplanar: ['"resolveCoplanar"', '"asset":{'],
   // A closed room a sun lights gets the floor sky trace by default. The recipe text can not say whether a room is closed, so a recipe that names its sun loads it and the module skips an open scene.
   floorSky: ['"keyColor"', '"keyIntensity"'],
   physicalSky: ['"type":"physical"'],

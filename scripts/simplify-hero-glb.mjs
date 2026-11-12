@@ -5,10 +5,14 @@
 //
 //   node scripts/simplify-hero-glb.mjs <scene id> <input.glb> <output.glb> [--pixels 1.2] [--levels 0.0008,0.005,0.025,0.1]
 //        [--max-texture 1024] [--prop-texture 512] [--prop-prefix m_] [--webp-quality 78] [--height 900]
+//        [--world-error 0.3 --uv-weight 1]
 //
 // The route is read from src/hero-lab/loop/scenes.js, so rerun this after a flight changes.
 // --levels         relative errors (share of the mesh's own size) the copies are simplified to; the first is applied to every mesh
 // --prop-prefix    materials whose name starts with this text get --prop-texture instead of --max-texture
+// --world-error    a first view instead of levels: every mesh gets one copy simplified until it moves by this many world units (metres)
+//                  at most, whatever its node scale (--levels is then ignored, and so is the route)
+// --uv-weight      how much the simplifier keeps texture coordinates and normals in place (0 ignores them, 1 is a good start)
 // Nothing is read from the network and no input script is run.
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, EXTMeshoptCompression, EXTMeshGPUInstancing } from '@gltf-transform/extensions';
@@ -18,7 +22,7 @@ import sharp from 'sharp';
 import { SCENES } from '../src/hero-lab/loop/scenes.js';
 import { createCameraSpline } from '../src/hero-lab/camera-spline.js';
 
-const DEFAULTS = { pixels: 1.2, levels: '0.0008,0.005,0.025,0.1', maxTexture: 1024, propTexture: 512, propPrefix: 'm_', webpQuality: 78, height: 900 };
+const DEFAULTS = { pixels: 1.2, levels: '0.0008,0.005,0.025,0.1', maxTexture: 1024, propTexture: 512, propPrefix: 'm_', webpQuality: 78, height: 900, worldError: 0, uvWeight: 0 };
 const ROUTE_SAMPLES = 240;
 const MINIMUM_TRIANGLES = 12;
 const UNUSED = 0xffffffff;
@@ -95,11 +99,35 @@ function pickElements(document, source, slots, count) {
 }
 
 // A copy of one primitive simplified until its error reaches relativeError of its own size; the same primitive when nothing is gained.
-function simplifiedPrimitive(document, primitive, relativeError) {
+// Per-vertex texture coordinates and normals, so the simplifier does not smear a texture atlas or fold a surface it must keep.
+function attributesFor(primitive, weight) {
+  const coordinates = primitive.getAttribute('TEXCOORD_0');
+  const normals = primitive.getAttribute('NORMAL');
+  if (!weight || !coordinates || !normals) return null;
+  const count = coordinates.getCount();
+  const values = new Float32Array(count * 5);
+  const element = [0, 0, 0];
+  for (let index = 0; index < count; index++) {
+    coordinates.getElement(index, element);
+    values[index * 5] = element[0];
+    values[index * 5 + 1] = element[1];
+    normals.getElement(index, element);
+    values.set(element, index * 5 + 2);
+  }
+  return { values, weights: [weight, weight, weight * 0.5, weight * 0.5, weight * 0.5] };
+}
+
+function simplifiedPrimitive(document, primitive, relativeError, { absolute = false, uvWeight = 0 } = {}) {
   const indices = primitive.getIndices();
   if (!indices || (primitive.getMode() ?? 4) !== 4 || primitive.listTargets().length) return primitive;
   const source = Uint32Array.from(indices.getArray());
-  const [reduced] = MeshoptSimplifier.simplify(source, positionsOf(primitive.getAttribute('POSITION')), 3, Math.min(MINIMUM_TRIANGLES * 3, source.length), relativeError, ['Permissive']);
+  const positions = positionsOf(primitive.getAttribute('POSITION'));
+  const targetIndexCount = Math.min(MINIMUM_TRIANGLES * 3, source.length);
+  const flags = absolute ? ['Permissive', 'ErrorAbsolute', 'Prune'] : ['Permissive'];
+  const attributes = attributesFor(primitive, uvWeight);
+  const [reduced] = attributes
+    ? MeshoptSimplifier.simplifyWithAttributes(source, positions, 3, attributes.values, 5, attributes.weights, null, targetIndexCount, relativeError, flags)
+    : MeshoptSimplifier.simplify(source, positions, 3, targetIndexCount, relativeError, flags);
   if (reduced.length > source.length * 0.97) return primitive;
   const [remap, unique] = MeshoptSimplifier.compactMesh(reduced);
   const copy = document.createPrimitive().setMaterial(primitive.getMaterial()).setMode(4);
@@ -173,6 +201,7 @@ function sliceInstancing(document, extension, instancing, members) {
 }
 
 function splitNodeByLevel(document, node, chosen, variantOf, extension) {
+  const nodeScale = largestScale(node.getWorldMatrix());
   const mesh = node.getMesh();
   const instancing = node.getExtension('EXT_mesh_gpu_instancing');
   const groups = new Map();
@@ -184,7 +213,7 @@ function splitNodeByLevel(document, node, chosen, variantOf, extension) {
   for (const [level, members] of groups) {
     const replacement = document.createNode(`${node.getName()}-level${level}`)
       .setTranslation(node.getTranslation()).setRotation(node.getRotation()).setScale(node.getScale())
-      .setMesh(variantOf(mesh, level));
+      .setMesh(variantOf(mesh, level, nodeScale));
     if (instancing) replacement.setExtension('EXT_mesh_gpu_instancing', sliceInstancing(document, extension, instancing, members));
     for (const parent of node.listParents()) if (typeof parent.addChild === 'function') parent.addChild(replacement);
     created.push(replacement);
@@ -235,11 +264,11 @@ const pixelsPerRadian = options.height / (2 * Math.tan((narrowestFov * Math.PI) 
 const extension = document.createExtension(EXTMeshGPUInstancing);
 const variants = new Map();
 const meshIndex = new Map(document.getRoot().listMeshes().map((mesh, index) => [mesh, index]));
-function variantOf(mesh, level) {
-  const key = `${meshIndex.get(mesh)}:${level}`;
+function variantOf(mesh, level, nodeScale = 1) {
+  const key = `${meshIndex.get(mesh)}:${level}:${options.worldError ? nodeScale : 1}`;
   if (!variants.has(key)) {
     const variant = document.createMesh(`${mesh.getName()}-level${level}`);
-    mesh.listPrimitives().forEach(primitive => variant.addPrimitive(simplifiedPrimitive(document, primitive, levels[level])));
+    mesh.listPrimitives().forEach(primitive => variant.addPrimitive(simplifiedPrimitive(document, primitive, options.worldError ? options.worldError / nodeScale : levels[level], { absolute: options.worldError > 0, uvWeight: options.uvWeight })));
     variants.set(key, variant);
   }
   return variants.get(key);

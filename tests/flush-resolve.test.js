@@ -278,3 +278,19 @@ test('the bias moves depth to where the point would be that much closer to the e
   assert.match(source, /uniform vec3 flushBias;\s+uniform vec4 clipPerMetre;/);
   assert.match(source, /gl_Position = viewProjection \* world;\s+\/\/[^\n]*\n[^\n]*\n\s+if \(flushBias != vec3\(0\.0\)\) \{\s+vec4 lifted = gl_Position - \(flushBias\.x \+ flushBias\.y \* gl_Position\.w\) \* clipPerMetre;\s+gl_Position\.z = \(lifted\.z \/ lifted\.w \+ flushBias\.z\) \* gl_Position\.w;/);
 });
+
+test('glass a centimetre in front of nested facades is ranked above them with no rank-overflow', () => {
+  // Melbourne's towers: facades of stacked blocks a few millimetres apart, 17 deep, with a glass skin 1 cm out from the outermost.
+  const facade = (index, offset) => {
+    const height = 40 + index * 5;
+    return [0, 0, offset, 30, 0, offset, 30, height, offset, 0, height, offset];
+  };
+  const walls = partOf('walls', Array.from({ length: 17 }, (unused, index) => facade(index, index * 0.005)));
+  const glass = partOf('glass', Array.from({ length: 3 }, (unused, index) => facade(index * 8, 17 * 0.005 + 0.01)), { material: { alphaMode: 'blend' } });
+  assert.deepEqual(resolveFlush([walls, glass]), { ranked: 2, leftovers: [] });
+  assert.ok(Math.abs(drawnArea(walls) - 30 * 120) < 1, 'the walls draw the union of their facades once');
+  const wallRanks = ranksOf(walls);
+  const glassRanks = ranksOf(glass);
+  assert.ok(Math.max(...wallRanks) < Math.min(...glassRanks), 'the glass is above every wall it covers');
+  assert.ok(Math.max(...glassRanks) <= MAXIMUM_FLUSH_RANK);
+});

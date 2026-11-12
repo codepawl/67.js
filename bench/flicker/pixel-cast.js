@@ -5,7 +5,7 @@
 export const NO_TRIANGLE = -1;
 export const RIVALS_PER_PIXEL = 2;
 const TIE_RELATIVE_DISTANCE = 1e-9;
-const HITS_PER_PIXEL = 6;
+export const DEFAULT_HITS_PER_PIXEL = 6;
 const NEAR_DEPTH = 1e-4;
 // A pixel centre exactly on an edge shared by two triangles must not fall between them through rounding.
 const EDGE_SLACK = 1e-9;
@@ -63,10 +63,11 @@ function isNearer(world, firstDistance, firstTriangle, secondDistance, secondTri
   return world.ranks[firstTriangle] !== world.ranks[secondTriangle] ? world.ranks[firstTriangle] > world.ranks[secondTriangle] : firstTriangle > secondTriangle;
 }
 
-function recordHit(world, hitDistances, hitTriangles, pixel, distance, triangle) {
-  const base = pixel * HITS_PER_PIXEL;
+function recordHit(world, hits, pixel, distance, triangle) {
+  const { hitDistances, hitTriangles, hitsPerPixel } = hits;
+  const base = pixel * hitsPerPixel;
   let slot = 0;
-  while (slot < HITS_PER_PIXEL - 1 && hitTriangles[base + slot] !== NO_TRIANGLE) slot++;
+  while (slot < hitsPerPixel - 1 && hitTriangles[base + slot] !== NO_TRIANGLE) slot++;
   const full = hitTriangles[base + slot] !== NO_TRIANGLE;
   if (full && !isNearer(world, distance, triangle, hitDistances[base + slot], hitTriangles[base + slot])) return;
   while (slot > 0 && isNearer(world, distance, triangle, hitDistances[base + slot - 1], hitTriangles[base + slot - 1])) {
@@ -79,7 +80,7 @@ function recordHit(world, hitDistances, hitTriangles, pixel, distance, triangle)
 }
 
 // Scan-converts one camera-space triangle: pixel centres inside it, with depth interpolated as 1/depth in screen space.
-function rasterize(world, basis, triangle, points, width, height, hitDistances, hitTriangles) {
+function rasterize(world, basis, triangle, points, width, height, hits) {
   const screen = points.map(([sideways, upward, depth]) => [
     (sideways / depth / (basis.aspect * basis.tangent) * 0.5 + 0.5) * width,
     (0.5 - upward / depth / basis.tangent * 0.5) * height,
@@ -101,7 +102,7 @@ function rasterize(world, basis, triangle, points, width, height, hitDistances, 
       const weightThird = 1 - weightFirst - weightSecond;
       if (weightFirst < -EDGE_SLACK || weightSecond < -EDGE_SLACK || weightThird < -EDGE_SLACK) continue;
       const inverseDepth = weightFirst * first[2] + weightSecond * second[2] + weightThird * third[2];
-      recordHit(world, hitDistances, hitTriangles, y * width + x, 1 / inverseDepth, triangle);
+      recordHit(world, hits, y * width + x, 1 / inverseDepth, triangle);
     }
   }
 }
@@ -117,9 +118,9 @@ function facesEye(world, basis, triangle) {
 }
 
 // Two faces of different colour at one distance with one rank: nothing in the scene says which is in front, so no render is wrong.
-function isTie(world, distances, triangles, base) {
+function isTie(world, distances, triangles, base, hitsPerPixel) {
   const nearestTriangle = triangles[base];
-  for (let slot = 1; slot < HITS_PER_PIXEL && triangles[base + slot] !== NO_TRIANGLE; slot++) {
+  for (let slot = 1; slot < hitsPerPixel && triangles[base + slot] !== NO_TRIANGLE; slot++) {
     if (Math.abs(distances[base + slot] - distances[base]) > TIE_RELATIVE_DISTANCE * distances[base]) return false;
     const other = triangles[base + slot];
     if (world.keyOf[nearestTriangle] !== world.keyOf[other] && world.ranks[nearestTriangle] === world.ranks[other]) return true;
@@ -129,39 +130,42 @@ function isTie(world, distances, triangles, base) {
 
 /**
  * Casts one ray through every pixel centre of a `width` x `height` image. `world` is the result of `collectWorldTriangles`,
- * `camera` the `{ eye, target, up, fov }` of the frame. Returns `{ owner, rivals, tied }`: `owner` is the visible triangle of
+ * `camera` the `{ eye, target, up, fov }` of the frame. Returns `{ owner, rivals, tied, distance }`: `distance` is the depth of the visible face in front of the camera (0 for the background); `owner` is the visible triangle of
  * each pixel (`NO_TRIANGLE` for the background), `rivals` holds up to two colour keys of other triangles on the same ray, or
- * -1, and `tied` marks pixels where two faces of different colour lie at one distance with one rank. Only the six nearest
+ * -1, and `tied` marks pixels where two faces of different colour lie at one distance with one rank. Only the `hitsPerPixel` (default six) nearest
  * faces of a ray are kept, which is enough to name its visible face and the faces right behind it.
  */
-export function castPixelOwners(world, camera, width, height) {
+export function castPixelOwners(world, camera, width, height, hitsPerPixel = DEFAULT_HITS_PER_PIXEL) {
   const basis = cameraBasis(camera, width, height);
-  const hitDistances = new Float64Array(width * height * HITS_PER_PIXEL);
-  const hitTriangles = new Int32Array(width * height * HITS_PER_PIXEL).fill(NO_TRIANGLE);
+  const hitDistances = new Float64Array(width * height * hitsPerPixel);
+  const hitTriangles = new Int32Array(width * height * hitsPerPixel).fill(NO_TRIANGLE);
+  const hits = { hitDistances, hitTriangles, hitsPerPixel };
   for (let triangle = 0; triangle < world.count; triangle++) {
     if (!facesEye(world, basis, triangle)) continue;
     const base = triangle * 9;
     const points = [0, 1, 2].map(corner => toCameraSpace(basis, world.corners[base + corner * 3], world.corners[base + corner * 3 + 1], world.corners[base + corner * 3 + 2]));
     const polygon = points.every(point => point[2] >= NEAR_DEPTH) ? points : clipToNear(points);
     for (let corner = 1; corner + 1 < polygon.length; corner++) {
-      rasterize(world, basis, triangle, [polygon[0], polygon[corner], polygon[corner + 1]], width, height, hitDistances, hitTriangles);
+      rasterize(world, basis, triangle, [polygon[0], polygon[corner], polygon[corner + 1]], width, height, hits);
     }
   }
   const owner = new Int32Array(width * height).fill(NO_TRIANGLE);
   const rivals = new Int32Array(width * height * RIVALS_PER_PIXEL).fill(-1);
   const tied = new Uint8Array(width * height);
+  const distance = new Float64Array(width * height);
   for (let pixel = 0; pixel < width * height; pixel++) {
-    const base = pixel * HITS_PER_PIXEL;
+    const base = pixel * hitsPerPixel;
     if (hitTriangles[base] === NO_TRIANGLE) continue;
     owner[pixel] = hitTriangles[base];
-    tied[pixel] = isTie(world, hitDistances, hitTriangles, base) ? 1 : 0;
+    distance[pixel] = hitDistances[base];
+    tied[pixel] = isTie(world, hitDistances, hitTriangles, base, hitsPerPixel) ? 1 : 0;
     const ownKey = world.keyOf[hitTriangles[base]];
     let stored = 0;
-    for (let slot = 1; slot < HITS_PER_PIXEL && hitTriangles[base + slot] !== NO_TRIANGLE && stored < RIVALS_PER_PIXEL; slot++) {
+    for (let slot = 1; slot < hitsPerPixel && hitTriangles[base + slot] !== NO_TRIANGLE && stored < RIVALS_PER_PIXEL; slot++) {
       const key = world.keyOf[hitTriangles[base + slot]];
       const known = key === ownKey || (stored > 0 && rivals[pixel * RIVALS_PER_PIXEL] === key);
       if (!known) rivals[pixel * RIVALS_PER_PIXEL + stored++] = key;
     }
   }
-  return { owner, rivals, tied };
+  return { owner, rivals, tied, distance, hitTriangles, hitDistances, hitsPerPixel };
 }

@@ -1,0 +1,1 @@
+- A game recipe drives the animation state graph, blend spaces and path-following NPCs with `player.animation` and `npcs`, and the exported web page plays them, checked in headless Chrome by `smoke-game-web` (#872)

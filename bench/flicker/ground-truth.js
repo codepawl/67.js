@@ -14,9 +14,13 @@ import { castPixelOwners, crossProduct, normalized, subtract, NO_TRIANGLE, RIVAL
 export { castPixelOwners, NO_TRIANGLE };
 
 const NORMAL_KEY_SCALE = 100;
-const COLOUR_KEY_SCALE = 255;
+// Fine enough that triangle ids painted as 24-bit colours stay apart as keys, however a frame encodes them.
+export const COLOUR_KEY_SCALE = 1e7;
 export const DEFAULT_COLOUR_THRESHOLD = 40;
 const MINIMUM_REFERENCE_PIXELS = 3;
+// A shown colour this close (largest channel, in bytes) to the one the ray cast expects is a rounding step of the frame, not another face.
+const OFF_BY_ONE_STEP = 2;
+const SMALL_COLOUR_GAP = 16;
 
 function transformPoint(matrix, x, y, z, target, offset) {
   target[offset] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
@@ -51,6 +55,7 @@ function colourKey(part, geometry, firstVertex, vertexCount, facing) {
 export function collectWorldTriangles(parts, flushOrderOf) {
   const cornerChunks = [];
   const keyIds = new Map();
+  const keyColours = [];
   const keyOf = [];
   const rankList = [];
   const doubleSidedList = [];
@@ -70,7 +75,10 @@ export function collectWorldTriangles(parts, flushOrderOf) {
       const edgeOne = subtract([corners[base + 3], corners[base + 4], corners[base + 5]], first);
       const edgeTwo = subtract([corners[base + 6], corners[base + 7], corners[base + 8]], first);
       const key = colourKey(part, geometry, indices[triangle * 3], vertexCount, normalized(crossProduct(edgeOne, edgeTwo)));
-      if (!keyIds.has(key)) keyIds.set(key, keyIds.size);
+      if (!keyIds.has(key)) {
+        keyIds.set(key, keyIds.size);
+        keyColours.push(key.split('|')[0].split(',').map(Number));
+      }
       keyOf.push(keyIds.get(key));
       rankList.push(depthLayerOf(part) * RANKS_PER_LAYER + (ranks ? ranks[triangle] : 0));
       doubleSidedList.push(part.material?.doubleSided === true ? 1 : 0);
@@ -84,7 +92,7 @@ export function collectWorldTriangles(parts, flushOrderOf) {
     corners.set(chunk, offset);
     offset += chunk.length;
   }
-  return { corners, keyOf: Int32Array.from(keyOf), ranks: Uint8Array.from(rankList), doubleSided: Uint8Array.from(doubleSidedList), keyCount: keyIds.size, count: keyOf.length };
+  return { corners, keyOf: Int32Array.from(keyOf), ranks: Uint8Array.from(rankList), doubleSided: Uint8Array.from(doubleSidedList), keyCount: keyIds.size, keyColours, count: keyOf.length };
 }
 
 function channelDistance(pixels, index, reference) {
@@ -109,6 +117,56 @@ function hasUniformSurroundings(keyAt, width, height, x, y) {
   return true;
 }
 
+// The rank of the nearest face of colour key `key` on the ray of `pixel`, which is the face a swapped pixel shows.
+function shownRank(world, cast, pixel, key) {
+  for (let slot = 0; slot < cast.hitsPerPixel; slot++) {
+    const triangle = cast.hitTriangles[pixel * cast.hitsPerPixel + slot];
+    if (triangle === NO_TRIANGLE) break;
+    if (world.keyOf[triangle] === key) return world.ranks[triangle];
+  }
+  return -1;
+}
+
+// Whether any of the eight neighbours of a pixel has another visible triangle (or none): the pixel then sits within a pixel of an
+// edge, silhouette or crease of the ray cast, where the rasteriser and the cast may disagree about which side the centre is on.
+function touchesOwnerChange(owner, width, pixel) {
+  const own = owner[pixel];
+  for (let row = -1; row <= 1; row++) {
+    for (let column = -1; column <= 1; column++) {
+      if (owner[pixel + row * width + column] !== own) return true;
+    }
+  }
+  return false;
+}
+
+// Says what a wrong pixel of an exact frame shows. The colour names a face: when that face lies on the ray (one of its six nearest
+// hits) the pixel is swapped, and it is flipped when the face has no higher rank than the one the ray cast puts in front. A face
+// that is not on the ray is the rasteriser and the ray cast disagreeing about a pixel centre (offRay), and a colour that names no
+// face is a blend of two (blended). Neither is depth fighting.
+function classifyExactMismatch(result, mismatchMask, { pixels, pixel, width, world, cast, keyByColour, expected }) {
+  const shownKey = keyByColour.get(`${pixels[pixel * 4]},${pixels[pixel * 4 + 1]},${pixels[pixel * 4 + 2]}`);
+  if (shownKey === undefined) {
+    result.blended++;
+    return;
+  }
+  const rank = shownRank(world, cast, pixel, shownKey);
+  if (rank < 0) {
+    result.offRay++;
+    const gap = channelDistance(pixels, pixel * 4, expected);
+    const atEdge = touchesOwnerChange(cast.owner, width, pixel);
+    if (atEdge) result.offRayEdge++;
+    else result.offRayInterior++;
+    if (gap <= OFF_BY_ONE_STEP) result.offRayNearColour++;
+    else if (gap <= SMALL_COLOUR_GAP) result.offRaySmallGap++;
+    if (!atEdge && gap > SMALL_COLOUR_GAP) result.offRayUnexplained++;
+    return;
+  }
+  result.swapped++;
+  mismatchMask[pixel] = 2;
+  if (rank > world.ranks[cast.owner[pixel]]) result.ranked++;
+  else result.flipped++;
+}
+
 /**
  * Compares a rendered frame (RGBA bytes, rows from the top) with the ray cast of `castPixelOwners`.
  * Returns `{ contested, wrong, swapped, tied, unjudged, edge }`:
@@ -117,15 +175,31 @@ function hasUniformSurroundings(keyAt, width, height, x, y) {
  * - `swapped`: wrong pixels that sit within `threshold` of the colour of a face behind, a fight and not shading;
  * - `tied`: contested pixels where the scene itself does not say which face is in front (the flush pass off, or a seam); left out of the other counts;
  * - `unjudged`: contested pixels whose face has too few clean pixels to know its colour;
+ * - `offRay` and `blended`: with `exact`, wrong pixels that show a face not on the ray, or no single face (see classifyExactMismatch);
+ * - `offRayEdge` and `offRayInterior`: `offRay` split by whether the pixel touches an owner change of the ray cast in its 3x3
+ *   neighbourhood. Edge pixels are the rasteriser and the cast disagreeing about a pixel centre. An interior pixel has no such excuse:
+ *   its face may be one deeper than `hitsPerPixel` of the cast, which would be a real flip. `offRayUnexplained` is the interior part
+ *   whose shown colour is also more than 16 bytes from the colour expected there, so `flipped + offRayUnexplained` is the upper bound
+ *   of true flips (`flipUpperBound`);
+ * - `offRayNearColour` and `offRaySmallGap`: offRay pixels whose shown colour is within 2 bytes, or 3 to 16, of the colour the ray cast
+ *   expects. Triangle numbers are neighbours in colour, so a rounding step of the frame can name another, unrelated triangle.
+ * - `flipped`: with `exact`, the swapped pixels where the face shown has no higher rank than the face the ray cast puts in front, so
+ *   a face behind covers one in front and nothing in the scene asked for it: a true visibility flip. The rest of `swapped` is
+ *   `ranked`, a face that the flush pass deliberately lifts over the nearer one inside its bias, which is stable and not flicker;
  * - `edge`: pixels left out for having another colour next to them.
- * `mismatchMask` marks the wrong pixels for a picture.
+ * With `exact`, a function from the colour of a face (0 to 1 per channel) to the bytes the frame shows for it, the frame holds an
+ * unshaded colour per face (an unlit scene painted with one colour per triangle): the colour a face must show is that, not a median
+ * of its pixels, and `threshold` is 0, so a swapped pixel is a true visibility
+ * flip (the raster shows another face's id where the ray cast says this face is in front) and no shading step can pass for one.
+ * `mismatchMask` marks the wrong pixels for a picture: 1 for a wrong pixel, 2 for a swapped one.
  */
-export function compareWithGroundTruth({ pixels, world, cast, width, height, threshold = DEFAULT_COLOUR_THRESHOLD }) {
+export function compareWithGroundTruth({ pixels, world, cast, width, height, exact = null, threshold = exact ? 0 : DEFAULT_COLOUR_THRESHOLD }) {
   const keyAt = new Int32Array(width * height);
   for (let pixel = 0; pixel < keyAt.length; pixel++) keyAt[pixel] = cast.owner[pixel] === NO_TRIANGLE ? -1 : world.keyOf[cast.owner[pixel]];
   const references = new Array(world.keyCount);
-  const samples = Array.from({ length: world.keyCount }, () => ({ clean: [[], [], []], any: [[], [], []], cleanCount: 0 }));
-  for (let y = 1; y < height - 1; y++) {
+  const samples = Array.from({ length: exact ? 0 : world.keyCount }, () => ({ clean: [[], [], []], any: [[], [], []], cleanCount: 0 }));
+  if (exact) world.keyColours.forEach((colour, key) => { references[key] = exact(colour.map(channel => channel / COLOUR_KEY_SCALE)); });
+  for (let y = 1; y < height - 1 && !exact; y++) {
     for (let x = 1; x < width - 1; x++) {
       if (!hasUniformSurroundings(keyAt, width, height, x, y)) continue;
       const pixel = y * width + x;
@@ -142,7 +216,9 @@ export function compareWithGroundTruth({ pixels, world, cast, width, height, thr
     const source = bucket.cleanCount >= MINIMUM_REFERENCE_PIXELS ? bucket.clean : bucket.any;
     if (source[0].length >= MINIMUM_REFERENCE_PIXELS) references[key] = source.map(median);
   });
-  const result = { contested: 0, wrong: 0, swapped: 0, tied: 0, unjudged: 0, edge: 0 };
+  const result = { contested: 0, wrong: 0, swapped: 0, tied: 0, unjudged: 0, edge: 0, flipped: 0, ranked: 0, offRay: 0, offRayEdge: 0, offRayInterior: 0, offRayNearColour: 0, offRaySmallGap: 0, offRayUnexplained: 0, blended: 0 };
+  const keyByColour = new Map();
+  references.forEach((reference, key) => { if (exact) keyByColour.set(reference.join(','), key); });
   const mismatchMask = new Uint8Array(width * height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -165,14 +241,19 @@ export function compareWithGroundTruth({ pixels, world, cast, width, height, thr
       if (channelDistance(pixels, pixel * 4, reference) <= threshold) continue;
       result.wrong++;
       mismatchMask[pixel] = 1;
+      if (exact) {
+        classifyExactMismatch(result, mismatchMask, { pixels, pixel, width, world, cast, keyByColour, expected: reference });
+        continue;
+      }
       for (let slot = 0; slot < RIVALS_PER_PIXEL; slot++) {
         const rival = references[cast.rivals[pixel * RIVALS_PER_PIXEL + slot]];
         if (rival && channelDistance(pixels, pixel * 4, rival) <= threshold) {
           result.swapped++;
+          mismatchMask[pixel] = 2;
           break;
         }
       }
     }
   }
-  return { ...result, mismatchMask };
+  return { ...result, flipUpperBound: result.flipped + result.offRayUnexplained, mismatchMask };
 }

@@ -1,0 +1,1 @@
+- A particle system with `spin` no longer turns every vertex to NaN while its first particle is unborn or dead, which made the coplanar diagnostics of a video render throw at the frame where that happened (#839)

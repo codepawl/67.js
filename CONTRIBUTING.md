@@ -158,6 +158,11 @@ Keep site assets out of the npm package: the `files` list in `package.json` deci
 
 Maintainers make releases. `package.json` holds the version, and the publish workflow runs when it changes on `main`.
 
+A minor release ships about once a week, give or take one to three days. A maintainer picks the issues that must be in it,
+waits a few days at most for the issues that should be in it, and moves the rest to the next release. A look change still
+waiting for the owner's approval does not hold a release back. A serious bug ships alone as a patch release, without
+waiting for the week.
+
 1. Update the version in `package.json` and in `src/version.js`, run `npm run plugin:sync` to copy it into `.claude-plugin/marketplace.json`, then run `npm run changes:fold`. It writes the files in `changes/` into `CHANGELOG.md` as that version's section and deletes them. Read `npm run changes` first to see what it will fold. It also deletes the `changes/*.size.md` notes.
 2. Run `npm run size:release` and `npm run tool-cost:release`. They reset the size budgets, the baseline and the tool cost ceilings to the release numbers. Read the diffs of `bench/size/budgets.json` and `bench/tool-cost-budgets.json`.
 3. Run `npm test`, `npm run build` and `npm run smoke:package`.

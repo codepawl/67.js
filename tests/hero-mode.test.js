@@ -47,9 +47,10 @@ test('a desktop on a good connection goes live and starts the first world only o
   assert.deepEqual(fetched, [], 'nothing competes with the poster');
   window.__heroPosterSettled();
   assert.ok(fetched.length > 0);
-  assert.deepEqual(Object.keys(window.__heroPrefetch), fetched);
+  assert.equal(fetched.length, 3, 'only the first view starts at once');
   await window.__heroPrefetchReady;
-  for (const href of fetched) assert.deepEqual(await window.__heroPrefetch[href], { href });
+  for (const href of Object.keys(window.__heroPrefetch)) assert.deepEqual(await window.__heroPrefetch[href], { href });
+  assert.equal(fetched.length, 6, 'the full world follows once the first view has settled');
 });
 
 test('a poster that never settles does not hold the world back for ever', () => {
@@ -83,11 +84,15 @@ test('a browser that reports nothing about the connection goes live', () => {
   assert.equal(runHeroMode().mode, 'live');
 });
 
-test('the prefetched files are the ones the port description names', () => {
+test('the prefetched files are the ones the port description names, the first view before the full world', async () => {
   const description = JSON.parse(readFileSync(new URL('../public/showcase/port/scene.json', import.meta.url), 'utf8'));
-  const { fetched, runTimers } = runHeroMode();
+  const { fetched, runTimers, window } = runHeroMode();
   runTimers();
-  const expected = ['/showcase/port/scene.json', description.glb, ...description.glbRest, description.hdri];
+  const firstView = ['/showcase/port/scene.json', description.glbFirstView, description.hdriPreview];
+  const fullWorld = [description.glb, ...description.glbRest, description.hdri];
+  assert.deepEqual(fetched, firstView, 'the full world has not started while the first view is in flight');
+  await Promise.all(Object.values(window.__heroPrefetch));
+  const expected = [...firstView, ...fullWorld];
   assert.deepEqual(fetched, expected);
   for (const href of expected) assert.ok(existsSync(new URL(`../public${href}`, import.meta.url)), `${href} exists`);
 });
@@ -96,6 +101,14 @@ test('a failed prefetch is a rejected promise that never goes unhandled', async 
   const { window, runTimers } = runHeroMode({ respond: () => ({ ok: false, status: 404 }) });
   runTimers();
   await assert.rejects(window.__heroPrefetch['/showcase/port/scene.glb'], /is not available \(404\)/);
+  await assert.rejects(window.__heroPrefetch['/showcase/port/scene.first.glb'], /is not available \(404\)/);
+});
+
+test('the full world still starts when the first view failed', async () => {
+  const { fetched, window, runTimers } = runHeroMode({ respond: href => (href.includes('first') ? { ok: false, status: 503 } : { ok: true, blob: () => Promise.resolve({ href }) }) });
+  runTimers();
+  await window.__heroPrefetch['/showcase/port/scene.glb'];
+  assert.ok(fetched.includes('/showcase/port/sky.hdr'));
 });
 
 test('the light path shows the poster and fetches nothing', () => {

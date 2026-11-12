@@ -63,6 +63,8 @@ const parameterSystem = {
 
 To let the clips move the body instead, see [Root motion](#root-motion).
 
+An agent builds the same graph without code: a scene recipe carries it in `game.player.animation` and `game.npcs[].animation`, played by the web export (see [game](game.md#animation-and-npcs)).
+
 ## Parameters
 
 `parameters` maps a name to `{ type, initial }`.
