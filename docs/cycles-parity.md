@@ -887,6 +887,23 @@ All image gates and the depth gate pass on both scenes. Every disagreeing pixel 
 
 Not covered: the Classroom scene (instancing, 854 instances, depth of field, which the depth comparator does not model: a thin lens changes the ray-to-Z conversion), a scene with a background, and 4096 spp references.
 
+## Progressive film and scene updates (#896, slice S2)
+
+A native session builds one image over several `render` calls (`accumulate: true`, `targetSamples`, `reset()`, `resolve()`) and applies new material values, lights, selection weights and instance transforms with `update()`. The kernel adds one sample at a time to the film in sample order and the Sobol-Burley sequence is indexed by the whole image's target count, so call boundaries cannot change a sum. The TLAS is rebuilt over the kept BLAS on a transform change (wgpu 30.0.1 has no refit); a change of counts, triangles or mesh topology is refused with a message that says to create a new session.
+
+Measured on one NVIDIA A10 (480 x 270, 32 samples, `bench/cycles-parity/session-progressive.mjs`):
+
+| Check | `lit-interior` | `many-lights-500` |
+| --- | --- | --- |
+| Split calls (16+16, 8+15+9; both samplers; path regeneration on and off) equal one call, byte for byte | 8 of 8 | 8 of 8 |
+| `update()` then `render` equals a fresh one-shot of the final input, byte for byte (materials; materials and transforms; back to start) | 3 of 3 | 3 of 3 |
+| New session, cold pipeline | 6721 ms | 6899 ms |
+| New session, pipeline already compiled in the process | 65 ms | 44 ms |
+| Update plus render (4 samples), materials only | 17.5 ms | 43.1 ms |
+| Update plus render, transforms (TLAS rebuilt) | 17.7 ms | 44.9 ms |
+
+One-shot `traceNative` images (both kernels) and S1 session frames hash the same as origin/main built in the same container.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
