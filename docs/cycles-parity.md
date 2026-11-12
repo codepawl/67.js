@@ -370,6 +370,27 @@ The `cycles` kernel picks one emitter per surface bounce by walking the Cycles l
 
 On `lit-interior` the tree costs 30 % more per sample and removes 37 % of the noise, so it wins by about 17 % at equal time (inferred from relMSE falling as 1/samples). The probe is a GPU test entry, not a Rust port; `tests/native-light-tree-kernel.test.js` repeats the three checks on a small scene.
 
+### Seventh scene: `many-lights-500` (light tree gate, #895)
+
+A 60 m hall cut into ten cells by partition walls with one doorway each, lit by 500 small lights placed from a fixed seed: 200 point lights, 150 spot lights, 100 emissive quads on the side walls and 50 emissive triangles on the ceiling (350 analytic lights and 200 emissive triangles). A surface sees the lights of its own cell and, through the doorways, a few of the next ones, so most of the 500 are far or hidden from any shading point and a flat pick wastes almost every sample. It is defined in [`bench/reference/scenes.js`](../bench/reference/scenes.js) as `many-lights-500` (the id `many-lights` is the 24-lamp corridor of issue #623), exported by the same `export-scene.mjs` path as the other six, and built by `render-cycles.py` from the same JSON, so both renderers read one scene. Export, a Cycles reference and a Cook run are the same commands as for the six, with `--scene many-lights-500`; `run-m1-parity.py` lists it as the seventh scene.
+
+`buildTraceScene` takes at most 32 analytic lights (`MAX_TRACE_LIGHTS`, one light-link mask bit each). The parity harness has no light links, so [`trace-scene-many-lights.mjs`](../bench/cycles-parity/trace-scene-many-lights.mjs) builds the lights in chunks of 32 and joins the lists, giving every light the "all groups" bit; the core limit and the legacy kernel are unchanged. `tests/cycles-parity-many-lights.test.js` checks the counts, the fixed seed and the join.
+
+Cycles 5.3 reference: Blender 5.3.0 OptiX, 960x540, 4096 spp, seeds 1 and 2, 8 bounces, light tree on (the Cycles default, `use_light_tree = true` in the render report), box filter 1, no denoiser, no clamps. The seed 1 versus seed 2 noise floor is relMSE 0.000791, per-channel mean ratio 1.0000 / 1.0000 / 1.0000, tiles 0.9995 to 1.0009, FLIP LDR 0.0173 `[measured]`. Sampling took 732 s (seed 1) and 1391 s (seed 2) with other jobs on the card, so they are not a speed figure.
+
+**Gate 1, the tree against the flat pick** (Cook `cycles` kernel, seed 1, 8 bounces, sampling seconds from the report, three interleaved rounds, relMSE against the seed 1 reference; the three runs of a rung give the same image, so relMSE has no range) `[measured]`:
+
+| spp | uniform relMSE | tree relMSE | uniform / tree error | uniform sampling s | tree sampling s | tree / uniform time |
+| ---: | ---: | ---: | ---: | --- | --- | ---: |
+| 16 | 0.37364 | 0.12644 | 2.95 | 1.344 [1.331-1.348] | 1.558 [1.555-1.559] | 1.16 |
+| 64 | 0.08809 | 0.03041 | 2.90 | 5.114 [5.095-5.160] | 5.991 [5.968-6.074] | 1.17 |
+| 256 | 0.02032 | 0.00766 | 2.65 | 20.474 [20.447-21.442] | 24.159 [24.015-24.450] | 1.18 |
+| 1024 | 0.00442 | 0.00218 | 2.03 | 81.958 [81.881-82.966] | 96.484 [95.916-96.609] | 1.18 |
+
+Time to equal error, from the two ladders on a log-log interpolation of time against relMSE (both curves cover 0.00442 to 0.126, so no extrapolation): at relMSE 0.0237 (geometric middle of that range) the flat pick needs 17.7 s and the tree 7.7 s, 2.30 times faster; at 0.00664 (1.5 times the lowest error both reach) 56.7 s and 28.3 s, 2.00 times faster; at 0.0304 (the tree at 64 spp) 14.0 s and 6.0 s, 2.33 times faster `[measured and interpolated]`. **The gate is met**: the tree reaches equal error in less than half the time. The tree costs 16 to 18 % more per sample here and removes 51 to 66 % of the noise per sample. At 1024 spp both curves approach the floor set by the 4096 spp reference's own noise (about half of the 0.000791 seed-to-seed figure), which is why the ratio falls toward 2.
+
+**Gate 2, parity with Cycles** (Cook `cycles` kernel, tree, 4096 spp, seed 1, against the Cycles seed 1 reference, `run-m1-parity.py`) `[measured]`: per-channel mean ratio 1.0009 / 1.0010 / 1.0009 (limit 2 %); 64 of 64 tiles within 5 %, tile ratios 0.9999 to 1.0034; FLIP LDR 0.0178 against a ceiling of 0.0373; relMSE 0.000832 against the 0.000791 noise floor. All gates pass, and nothing in the kernel or the scene export was changed to get there: light types, spot cone and units already matched (spot `angle`, `penumbra` and the 4 pi and pi watt factors are the ones the other scenes use; emissive quads and triangles go through Principled emission strength on both sides, as the kernel emits). Cook took 386.6 s of sampling for 4096 spp with other jobs on the card.
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
@@ -385,8 +406,8 @@ $OutDir = "artifacts/cycles-parity"
 # 2. Build packages/render-native if build/render-native.node is not present yet
 node packages/render-native/build.mjs
 
-# 3. Export all 6 M1 reference scenes and verify byte-identical round-trip packing
-foreach ($Scene in @("spot-area", "light-linking", "metal", "glass", "outdoor-hdri", "lit-interior")) {
+# 3. Export all 7 reference scenes (the six M1 scenes and many-lights-500) and verify byte-identical round-trip packing
+foreach ($Scene in @("spot-area", "light-linking", "metal", "glass", "outdoor-hdri", "lit-interior", "many-lights-500")) {
   node bench/cycles-parity/export-scene.mjs $OutDir --scene $Scene
 }
 

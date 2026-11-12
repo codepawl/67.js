@@ -5,7 +5,7 @@ import { constants, setPriority } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
-import { buildTraceScene } from '../../src/path-tracer-scene.js';
+import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import * as renderNative from '../../packages/render-native/index.mjs';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
@@ -135,7 +135,7 @@ async function runCli() {
   const totalStarted = performance.now();
   const buildStarted = performance.now();
   const traceSource = await reconstructTraceSceneSource(description);
-  const traceScene = buildTraceScene(traceSource.parts, traceSource.environment);
+  const traceScene = buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
   const camera = createCamera(traceSource.camera, options.width, options.height);
   const samplesPerDispatch = options.samplesPerDispatch !== undefined
     ? options.samplesPerDispatch
