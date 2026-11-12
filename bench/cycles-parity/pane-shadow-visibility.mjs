@@ -1,5 +1,5 @@
 // A small room lit only by the sky through a window with a glass pane, traced by the native "cycles" kernel with the pane
-// blocking shadow rays (the default) and with `castShadow: false` (#1054). For each setting it renders 64 and 512 spp and a
+// blocking shadow rays (the default) and with `rayVisibility: { shadow: false }` (#1054). For each setting it renders 64 and 512 spp and a
 // 4096 spp reference of the same setting, and writes the mean radiance, the relMSE against that reference and a side-by-side image.
 //
 // node bench/cycles-parity/pane-shadow-visibility.mjs <output directory>
@@ -106,7 +106,7 @@ function toPpmPanel(panels) {
 
 const outputDirectory = resolve(process.argv[2] ?? 'artifacts/pane-shadow-visibility');
 mkdirSync(outputDirectory, { recursive: true });
-const settings = { 'pane blocks shadow rays': {}, 'pane with castShadow false': { castShadow: false } };
+const settings = { 'pane blocks shadow rays': {}, 'pane with shadow rays off': { rayVisibility: { shadow: false } } };
 // The sun is a small bright source that only a shadow ray can find, so the sky-only room tests the soft light and the sun room the hard one.
 const suns = {
   'sky only': { keyColor: [0, 0, 0], lightDirection: [0, 1, 0] },

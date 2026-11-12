@@ -387,8 +387,8 @@ function rayKindBit(kind, value, label) {
 
 /**
  * The FORMAT-v2 visibility bits of one part: `rayVisibility: { camera, diffuse, glossy, transmission, shadow, volumeScatter }`
- * (a kind set to false hides the part from those rays), `castShadow: false` as shadow off, and `shadowOnly` as camera off.
- * A part that sets none of them gets 63, every ray kind.
+ * (a kind set to false hides the part from those rays) and `shadowOnly` as camera off. `castShadow` is a raster flag that
+ * library code sets by default, so it never reaches these bits. A part that hides from nothing gets 63, every ray kind.
  */
 export function partRayVisibilityFlags(part, index = 0) {
   const label = describePart(part, index);
@@ -400,29 +400,39 @@ export function partRayVisibilityFlags(part, index = 0) {
       if (value === false) flags &= ~bit;
     }
   }
-  if (part.castShadow === false) {
-    if (part.rayVisibility?.shadow === true) {
-      throw new TypeError(`${label} sets castShadow: false and rayVisibility.shadow: true, which disagree: drop one of them.`);
-    }
-    flags &= ~RAY_VISIBILITY_BITS.shadow;
-  }
+  requireEmitterStaysVisibleToBounces(part, flags, label);
   if (part.shadowOnly === true) {
     if ((flags & RAY_VISIBILITY_BITS.shadow) === 0) {
-      throw new TypeError(`${label} sets shadowOnly with shadow rays off (castShadow: false or rayVisibility.shadow: false), which would hide it from every ray: keep shadow rays on, or drop shadowOnly.`);
+      throw new TypeError(`${label} sets shadowOnly with rayVisibility.shadow: false, which would hide it from every ray: keep shadow rays on, or drop shadowOnly.`);
     }
     flags &= ~RAY_VISIBILITY_BITS.camera;
   }
   return flags;
 }
 
-function requestsRayVisibility(part) {
-  return part.rayVisibility !== undefined || part.castShadow === false;
+const BOUNCE_RAY_BITS = RAY_VISIBILITY_BITS.diffuse | RAY_VISIBILITY_BITS.glossy | RAY_VISIBILITY_BITS.transmission;
+
+/**
+ * The kernel samples an emissive mesh by next-event estimation with a multiple-importance weight below 1 and weights its
+ * bounce hits to match. Hiding the emitter from a bounce ray culls those hits while the sampled share stays, so part of its
+ * light would vanish. Camera, shadow and volume rays do not take part in that weighting, so those stay allowed.
+ */
+function requireEmitterStaysVisibleToBounces(part, flags, label) {
+  if ((flags & BOUNCE_RAY_BITS) === BOUNCE_RAY_BITS) return;
+  if (!(part.material?.emission > 0)) return;
+  throw new TypeError(`${label} emits light and sets rayVisibility.diffuse, glossy or transmission to false, which would drop part of its light. Hide an emitter with camera: false or shadow: false instead, or keep diffuse, glossy and transmission true.`);
 }
 
-// One byte per part for a flattened scene, or null when no part asks for a ray visibility (shadowOnly alone keeps its own path).
+// True when the part's rayVisibility turns at least one ray kind off; an empty object or all true is the default.
+function hidesFromSomeRay(part) {
+  return part.rayVisibility !== undefined && Object.values(part.rayVisibility).includes(false);
+}
+
+// One byte per part for a flattened scene, or null when no part hides from a ray kind (shadowOnly alone keeps its own path).
 function flattenedRayVisibility(parts) {
-  if (!parts.some(requestsRayVisibility)) return null;
-  return Uint8Array.from(parts, (part, index) => partRayVisibilityFlags(part, index));
+  const flags = parts.map((part, index) => partRayVisibilityFlags(part, index));
+  if (!parts.some(hidesFromSomeRay)) return null;
+  return Uint8Array.from(flags);
 }
 
 /**

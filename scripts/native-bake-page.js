@@ -79,13 +79,14 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
       materialsReason = error.message;
     }
   }
-  if (traceScene.partRayVisibility) {
-    const why = materialsReason ?? 'the kernel is not "cycles"';
-    throw new TypeError(`A part sets rayVisibility or castShadow: false, which only the "cycles" kernel with FORMAT-v2 tables can carry, and this scene would be exported as v1 tables (${why}). Use kernel "cycles", or drop the part setting.`);
+  if (traceScene.partRayVisibility && !wholeMaterials) {
+    throw new TypeError('A part sets rayVisibility to hide from a ray kind, which only the "cycles" kernel can carry. Use kernel "cycles", or drop the rayVisibility of the part.');
   }
-  const input = buildNativeInput(traceScene, camera, options, pack);
+  // The v1 tables of the "cycles" job fallback cannot carry visibility: the scene is drawn without it, and the report says so.
+  const visibilityNote = traceScene.partRayVisibility ? { rayVisibility: 'ignored', rayVisibilityReason: materialsReason } : {};
+  const input = buildNativeInput({ ...traceScene, partRayVisibility: null }, camera, options, pack);
   return { tables: encodeNativeTables(input), triangleCount: input.triangleCount, triangles: traceScene.indices.length / 3, wholeMaterials: false,
-    ...(materialsReason === undefined ? {} : { materialsReason }), ...instancingNote };
+    ...(materialsReason === undefined ? {} : { materialsReason }), ...visibilityNote, ...instancingNote };
 }
 
 function floatsFromBase64(data) {

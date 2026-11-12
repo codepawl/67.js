@@ -53,10 +53,10 @@ test('the bits are the FORMAT-v2 instance visibility layout', () => {
   assert.deepEqual({ ...RAY_VISIBILITY_BITS }, { camera: 1, diffuse: 2, glossy: 4, transmission: 8, shadow: 16, volumeScatter: 32 });
 });
 
-test('a part maps rayVisibility, castShadow false and shadowOnly to visibility bits', () => {
+test('a part maps rayVisibility and shadowOnly to visibility bits', () => {
   assert.equal(partRayVisibilityFlags({}), ALL_RAY_KINDS);
-  assert.equal(partRayVisibilityFlags({ castShadow: true, rayVisibility: { shadow: true } }), ALL_RAY_KINDS);
-  assert.equal(partRayVisibilityFlags({ castShadow: false }), SHADOW_OFF);
+  assert.equal(partRayVisibilityFlags({ rayVisibility: {} }), ALL_RAY_KINDS);
+  assert.equal(partRayVisibilityFlags({ rayVisibility: { shadow: true, camera: true } }), ALL_RAY_KINDS);
   assert.equal(partRayVisibilityFlags({ rayVisibility: { shadow: false } }), SHADOW_OFF);
   assert.equal(partRayVisibilityFlags({ rayVisibility: { camera: false, glossy: false } }), ALL_RAY_KINDS & ~1 & ~4);
   assert.equal(partRayVisibilityFlags({ rayVisibility: { diffuse: false, transmission: false, volumeScatter: false } }), 1 | 4 | 16);
@@ -64,13 +64,38 @@ test('a part maps rayVisibility, castShadow false and shadowOnly to visibility b
   assert.equal(partRayVisibilityFlags({ shadowOnly: true, rayVisibility: { glossy: false } }), 62 & ~4);
 });
 
+test('castShadow never reaches the ray visibility, because library code sets it as a raster default', () => {
+  assert.equal(partRayVisibilityFlags({ castShadow: false }), ALL_RAY_KINDS);
+  const castingOff = [uniquePart('a', 0, { castShadow: false }), uniquePart('b', 2, { castShadow: false, shadowOnly: true })];
+  assert.equal(buildTraceScene(castingOff, environment).partRayVisibility, null);
+  const instanced = buildTraceScene([sharedPart('a', 0, { castShadow: false }), sharedPart('b', 2)], environment, { instancing: true });
+  assert.equal(instanced.instances.some(instance => 'visibilityFlags' in instance), false);
+  const plainFlattened = [uniquePart('a', 0), uniquePart('b', 2, { shadowOnly: true })];
+  assert.equal(digestOfTables(exportedVisibility(castingOff, false).exported), digestOfTables(exportedVisibility(plainFlattened, false).exported));
+  const plainShared = [sharedPart('a', 0), sharedPart('b', 2)];
+  const castingOffShared = plainShared.map(part => ({ ...part, castShadow: false }));
+  assert.equal(digestOfTables(exportedVisibility(castingOffShared, true).exported), digestOfTables(exportedVisibility(plainShared, true).exported));
+});
+
 test('a bad rayVisibility says what to pass', () => {
   assert.throws(() => partRayVisibilityFlags({ name: 'pane', rayVisibility: 'shadow' }), /part "pane" rayVisibility must be an object such as \{ shadow: false \}/);
   assert.throws(() => partRayVisibilityFlags({ rayVisibility: [] }), /part 0 rayVisibility must be an object/);
   assert.throws(() => partRayVisibilityFlags({ name: 'pane', rayVisibility: { refraction: false } }), /unknown ray kind "refraction": use camera, diffuse, glossy, transmission, shadow, volumeScatter/);
   assert.throws(() => partRayVisibilityFlags({ name: 'pane', rayVisibility: { shadow: 0 } }), /rayVisibility\.shadow must be true or false, got 0/);
-  assert.throws(() => partRayVisibilityFlags({ name: 'pane', castShadow: false, rayVisibility: { shadow: true } }), /castShadow: false and rayVisibility\.shadow: true, which disagree/);
-  assert.throws(() => partRayVisibilityFlags({ name: 'ghost', shadowOnly: true, castShadow: false }), /shadowOnly with shadow rays off/);
+  assert.throws(() => partRayVisibilityFlags({ name: 'ghost', shadowOnly: true, rayVisibility: { shadow: false } }), /shadowOnly with rayVisibility\.shadow: false/);
+});
+
+test('an emitter may hide from camera, shadow and volume rays but not from bounce rays, which would drop part of its light', () => {
+  const lamp = { tag: 'surface', color: [1, 0.8, 0.6], emission: 4, roughness: 1 };
+  assert.equal(partRayVisibilityFlags({ material: lamp, rayVisibility: { camera: false } }), ALL_RAY_KINDS & ~1);
+  assert.equal(partRayVisibilityFlags({ material: lamp, rayVisibility: { shadow: false, volumeScatter: false } }), ALL_RAY_KINDS & ~16 & ~32);
+  for (const kind of ['diffuse', 'glossy', 'transmission']) {
+    assert.throws(() => partRayVisibilityFlags({ name: 'lamp', material: lamp, rayVisibility: { [kind]: false } }), /part "lamp" emits light and sets rayVisibility\.diffuse, glossy or transmission to false/);
+  }
+  assert.equal(partRayVisibilityFlags({ material: surface, rayVisibility: { diffuse: false } }), ALL_RAY_KINDS & ~2, 'a part that does not emit may hide from bounce rays');
+  const parts = [uniquePart('wall', 0), uniquePart('lamp', 2, { material: lamp, rayVisibility: { glossy: false } })];
+  assert.throws(() => buildTraceScene(parts, environment), /part "lamp" emits light/);
+  assert.throws(() => buildTraceScene(parts.map(part => ({ ...part, geometry: sharedBox })), environment, { instancing: true }), /part "lamp" emits light/);
 });
 
 test('buildTraceScene refuses a bad rayVisibility on both scene shapes', () => {
@@ -80,21 +105,30 @@ test('buildTraceScene refuses a bad rayVisibility on both scene shapes', () => {
   assert.throws(() => buildTraceScene(instanced, environment, { instancing: true }), /unknown ray kind "bogus"/);
 });
 
-test('an instanced scene carries visibility only on the parts that ask for it', () => {
-  const scene = buildTraceScene([sharedPart('plain', 0), sharedPart('pane', 2, { castShadow: false }), sharedPart('glow', 4, { rayVisibility: { camera: false, shadow: false } })], environment, { instancing: true });
+test('an instanced scene carries visibility only on the parts that hide from a ray kind', () => {
+  const parts = [
+    sharedPart('plain', 0),
+    sharedPart('pane', 2, { rayVisibility: { shadow: false } }),
+    sharedPart('glow', 4, { rayVisibility: { camera: false, shadow: false } }),
+    sharedPart('empty', 6, { rayVisibility: {} }),
+  ];
+  const scene = buildTraceScene(parts, environment, { instancing: true });
   assert.equal('visibilityFlags' in scene.instances[0], false, 'a default part adds no field');
   assert.equal(scene.instances[1].visibilityFlags, SHADOW_OFF);
   assert.equal(scene.instances[2].visibilityFlags, ALL_RAY_KINDS & ~1 & ~16);
+  assert.equal('visibilityFlags' in scene.instances[3], false, 'an empty rayVisibility is the default');
 });
 
-test('a flattened scene carries one visibility byte per part, or none when no part asks', () => {
+test('a flattened scene carries one visibility byte per part, or none when no part hides from a ray kind', () => {
   assert.equal(buildTraceScene([uniquePart('a', 0), uniquePart('b', 2, { shadowOnly: true })], environment).partRayVisibility, null);
-  const scene = buildTraceScene([uniquePart('a', 0), uniquePart('b', 2, { castShadow: false }), uniquePart('c', 4, { shadowOnly: true, rayVisibility: { glossy: false } })], environment);
-  assert.deepEqual([...scene.partRayVisibility], [ALL_RAY_KINDS, SHADOW_OFF, 62 & ~4]);
+  const hidingNothing = [uniquePart('a', 0, { rayVisibility: {} }), uniquePart('b', 2, { rayVisibility: { shadow: true, camera: true } })];
+  assert.equal(buildTraceScene(hidingNothing, environment).partRayVisibility, null);
+  const hiding = [uniquePart('a', 0), uniquePart('b', 2, { rayVisibility: { shadow: false } }), uniquePart('c', 4, { shadowOnly: true, rayVisibility: { glossy: false } })];
+  assert.deepEqual([...buildTraceScene(hiding, environment).partRayVisibility], [ALL_RAY_KINDS, SHADOW_OFF, 62 & ~4]);
 });
 
 test('a native render job packs the visibility of an instanced scene into the instance table', () => {
-  const parts = [sharedPart('wall', 0), sharedPart('pane', 2, { castShadow: false }), sharedPart('wall2', 4)];
+  const parts = [sharedPart('wall', 0), sharedPart('pane', 2, { rayVisibility: { shadow: false } }), sharedPart('wall2', 4)];
   const { exported, flags } = exportedVisibility(parts, true);
   assert.equal(exported.instances, 3, 'the copies stay instances');
   assert.deepEqual(flags, [ALL_RAY_KINDS, SHADOW_OFF, ALL_RAY_KINDS]);
@@ -107,30 +141,50 @@ test('a native render job packs the visibility of a flattened scene into the ins
   assert.deepEqual(flags, [ALL_RAY_KINDS, SHADOW_OFF, 62]);
 });
 
-test('scenes that ask for no visibility export the same tables whether or not shadowOnly is the only flag', () => {
+test('scenes whose rayVisibility hides nothing export the same tables as scenes without it', () => {
   const plain = [uniquePart('wall', 0), uniquePart('lamp', 4, { shadowOnly: true })];
-  const withDefaults = [uniquePart('wall', 0, { rayVisibility: {}, castShadow: true }), uniquePart('lamp', 4, { shadowOnly: true, rayVisibility: {} })];
+  const withDefaults = [uniquePart('wall', 0, { rayVisibility: {} }), uniquePart('lamp', 4, { shadowOnly: true, rayVisibility: { shadow: true } })];
   assert.equal(digestOfTables(exportedVisibility(withDefaults, false).exported), digestOfTables(exportedVisibility(plain, false).exported));
   const sharedPlain = [sharedPart('a', 0), sharedPart('b', 2, { shadowOnly: true })];
-  const sharedDefaults = [sharedPart('a', 0, { rayVisibility: {} }), sharedPart('b', 2, { shadowOnly: true, rayVisibility: {} })];
+  const sharedDefaults = [sharedPart('a', 0, { rayVisibility: {} }), sharedPart('b', 2, { shadowOnly: true, rayVisibility: { camera: true } })];
   assert.equal(digestOfTables(exportedVisibility(sharedDefaults, true).exported), digestOfTables(exportedVisibility(sharedPlain, true).exported));
 });
 
-test('the v1 tables and a light bake refuse a flattened scene with part visibility instead of ignoring it', () => {
-  const scene = buildTraceScene([uniquePart('wall', 0), uniquePart('pane', 2, { castShadow: false })], environment);
-  assert.throws(() => buildNativeInput(scene, camera, options, pack), /cannot carry.*kernel "cycles"/);
-  assert.throws(() => buildNativeTexelInput(scene, { texelCount: 4, samples: 4, bounces: 2, seed: 1 }, pack), /cannot carry/);
+function withoutRayVisibility(parts) {
+  return parts.map(({ rayVisibility, ...part }) => part);
+}
+
+test('the v1 tables of the legacy kernel refuse a hidden ray kind, and a light bake leaves it out', () => {
+  const hiding = [uniquePart('wall', 0), uniquePart('pane', 2, { rayVisibility: { shadow: false } })];
+  const scene = buildTraceScene(hiding, environment);
+  assert.throws(() => buildNativeInput(scene, camera, options, pack), /v1 tables of kernel "legacy" cannot carry.*kernel "cycles"/);
+  const bakeOptions = { texelCount: 4, samples: 4, bounces: 2, seed: 1 };
+  const plainScene = buildTraceScene(withoutRayVisibility(hiding), environment);
+  assert.deepEqual(buildNativeTexelInput(scene, bakeOptions, pack), buildNativeTexelInput(plainScene, bakeOptions, pack));
 });
 
-test('a job on the legacy kernel refuses part visibility', () => {
-  const parts = [uniquePart('wall', 0), uniquePart('pane', 2, { castShadow: false })];
+test('a job on the legacy kernel refuses a hidden ray kind', () => {
+  const parts = [uniquePart('wall', 0), uniquePart('pane', 2, { rayVisibility: { shadow: false } })];
   assert.throws(
     () => exportNativeSceneTables({ parts, environment, camera, options, kernel: 'legacy', instancing: false, modules }),
-    /only the "cycles" kernel with FORMAT-v2 tables can carry/,
+    /only the "cycles" kernel can carry/,
   );
 });
 
-// The sun is a delta light: only a shadow ray can reach it, so a glass pane over the floor leaves the floor dark until the pane stops blocking shadow rays.
+test('the v1 fallback of a cycles job draws without the visibility and reports why', () => {
+  const parts = [uniquePart('wall', 0), uniquePart('pane', 2, { rayVisibility: { shadow: false } })];
+  const failingModules = { ...modules, buildFlattenedJobNativeInput: () => { throw new Error('forced material failure'); } };
+  const exported = exportNativeSceneTables({ parts, environment, camera, options, kernel: 'cycles', instancing: false, modules: failingModules });
+  assert.equal(exported.wholeMaterials, false);
+  assert.equal(exported.materialsReason, 'forced material failure');
+  assert.equal(exported.rayVisibility, 'ignored');
+  assert.equal(exported.rayVisibilityReason, 'forced material failure');
+  const withoutSetting = exportNativeSceneTables({ parts: withoutRayVisibility(parts), environment, camera, options, kernel: 'cycles', instancing: false, modules: failingModules });
+  assert.deepEqual(exported.tables, withoutSetting.tables);
+});
+
+// The sun is a delta light: only a shadow ray can reach it. Measured on the native kernel, the mean of the top-down picture
+// is about 5.6 with the clear pane blocking shadow rays (the floor is dimmer, not black) and about 9.3 once it does not.
 const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
 const SIZE = 16;
 const sunEnvironment = { keyColor: [3, 3, 3], lightDirection: [0, 1, 0] };
@@ -165,12 +219,10 @@ for (const [shape, instancing, geometryFor] of [
   ['flattened', false, () => box(0, 1)],
   ['instanced', true, () => sharedBox],
 ]) {
-  test(`the native cycles kernel lights the floor through a ${shape} pane with castShadow false`, { skip: skipWithoutAddon }, () => {
+  test(`the native cycles kernel lights the floor through a ${shape} pane with rayVisibility shadow false`, { skip: skipWithoutAddon }, () => {
     const blocked = floorBrightness(paneOverFloor({}, geometryFor), instancing);
-    const lit = floorBrightness(paneOverFloor({ castShadow: false }, geometryFor), instancing);
-    const viaRayVisibility = floorBrightness(paneOverFloor({ rayVisibility: { shadow: false } }, geometryFor), instancing);
-    // Measured on the native kernel: the mean of the pane-over-floor picture is 5.59 blocked and 9.30 with the pane out of the shadow rays' way.
+    const lit = floorBrightness(paneOverFloor({ rayVisibility: { shadow: false } }, geometryFor), instancing);
     assert.ok(lit > blocked * 1.3, `shadow rays that pass the pane reach the sun: ${lit} against ${blocked}`);
-    assert.ok(Math.abs(viaRayVisibility - lit) < lit * 0.01, `castShadow false and rayVisibility.shadow false are the same setting: ${viaRayVisibility} against ${lit}`);
+    assert.ok(lit - blocked > 2, `the sun reaches the floor through the pane: ${lit} less ${blocked}`);
   });
 }
