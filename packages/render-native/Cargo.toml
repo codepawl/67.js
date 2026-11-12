@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 bytemuck = "1"
+libloading = "0.8"
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
 pollster = "0.4"
