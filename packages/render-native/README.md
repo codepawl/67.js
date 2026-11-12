@@ -50,7 +50,7 @@ A camera with an `fStop` is a thin lens in the `cycles` kernel, with Cycles' mod
 
 - `fStop`: the aperture radius is `focalLength / 1000 / (2 * fStop)` metres. The focal length is `focalLength` (mm), or the one that gives `fov` on a sensor `sensorWidth` mm wide (default 36) across the image.
 - `focusDistance` (metres, along the view axis; default: the distance from eye to target).
-- `apertureBlades` (0 for a round aperture, or 3 to 64 for a regular polygon) and `apertureRotation` (degrees).
+- `apertureBlades` (0 for a round aperture, or 3 to 64 for a regular polygon) and `apertureRotation` (degrees, Blender's sense; `createCamera` adds half a corner step, `180 / blades` degrees, because the kernel polygon sits that far from the Cycles one).
 - Lower-level: pass `apertureRadius`, `focalDistance`, `apertureBlades` or `apertureRotation` (radians) on the camera or in the pack options. Values the kernel cannot use throw a `RangeError` that names the field and what to pass.
 - The legacy kernel draws a pinhole. `bench/cycles-parity/trace-native.mjs` and `render-cycles.py` take `--f-stop`, `--focus-distance`, `--aperture-blades`, `--aperture-rotation` (degrees) and `--sensor-width`, so the same camera goes to both renderers. Layout: [FORMAT-v2.md](./FORMAT-v2.md). Measurements: [docs/cycles-parity.md](../../docs/cycles-parity.md), "Depth of field (#896, slice D1)".
 
