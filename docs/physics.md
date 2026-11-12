@@ -410,8 +410,6 @@ Each `float` body carries sample points in body space, 16 at most. Without `poin
 
 The definition form of the same thing is `ocean` on the definition and `float` on a body (`src/physics-buoyancy.js`); the live runtime applies it on every step with the same code, and the bake is identical across runs. The cost is waves x points x frames, capped at 100 million wave evaluations, so a long bake with 16 points and `resolution` 16 is rejected with a message that names the limits. A boat controller and a wake behind a moving hull are not part of this yet ([#982](https://github.com/codepawl/67.js/issues/982)).
 
-![Crates and a boat riding waves](buoyancy-still.jpg)
-
 ## Fracture and breakable glue
 
 `src/fracture.js` splits a closed convex part (a box, cylinder, sphere or any convex mesh of at most 2048 triangles) into Voronoi fragments and describes the glue that holds them together. A concave part is rejected with a message to split it into convex parts first.
