@@ -83,6 +83,11 @@ function decodeTablesV2(exported) {
   return input;
 }
 
+// The bytes of every table the tracer is handed, which is what it uploads to the card (before alignment).
+function tableBytes(tables) {
+  return Object.values(tables).reduce((total, value) => total + (ArrayBuffer.isView(value) ? value.byteLength : 0), 0);
+}
+
 function decodeTables(exported) {
   if (exported.schemaVersion !== undefined) return decodeTablesV2(exported);
   const input = { triangleCount: exported.triangleCount };
@@ -122,6 +127,14 @@ function withoutAlpha(rgba, pixelCount) {
 export function chooseNativeKernel(environment = process.env) {
   const requested = environment.JS67_NATIVE_KERNEL;
   return requested === undefined || requested === '' ? 'cycles' : requested;
+}
+
+/**
+ * Whether a job keeps repeated geometry as instances: on with the "cycles" kernel, off with the legacy kernel and when
+ * JS67_NATIVE_INSTANCING=off asks for flattened triangles (to compare the two, or to rule instancing out of a bug).
+ */
+export function chooseNativeInstancing(environment = process.env) {
+  return chooseNativeKernel(environment) === 'cycles' && environment.JS67_NATIVE_INSTANCING !== 'off';
 }
 
 /**
@@ -181,7 +194,8 @@ export async function denoiseFrameWithOidn({ tracer, denoiser, width, height, co
 export async function traceFrameNative({ tracer, exported, width, height, samples, bounces, seed, denoise, denoiser, maxSeconds, noiseThreshold = 0, kernel = chooseNativeKernel() }) {
   const started = performance.now();
   const filtersInTrace = denoise === 'atrous' && kernel === 'cycles';
-  const traced = tracer.traceNative(decodeTables(exported), { width, height, samples, maxSeconds, kernel, noiseThreshold, ...(filtersInTrace ? { denoise: 'atrous' } : {}) });
+  const tables = decodeTables(exported);
+  const traced = tracer.traceNative(tables, { width, height, samples, maxSeconds, kernel, noiseThreshold, ...(filtersInTrace ? { denoise: 'atrous' } : {}) });
   const tracedSeconds = (performance.now() - started) / 1000;
   const pixelCount = width * height;
   const features = { color: withoutAlpha(traced.rgba, pixelCount), albedo: traced.albedo, normal: traced.normal,
@@ -190,7 +204,7 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const report = { width, height, samples, bounces, seed, denoised: false, denoiser: 'none', threads: 1, backend: 'native',
     gpu: traced.adapter, nativeBackend: traced.backend, nativeFeatures: traced.features, setupSeconds: traced.setupSeconds, compileSeconds: traced.compileSeconds,
     uploadSeconds: traced.uploadSeconds, accelerationBuildSeconds: traced.accelerationBuildSeconds,
-    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, ...(exported.instances === undefined ? {} : { instances: exported.instances }), tracedSeconds, ignored: exported.ignored };
+    kernel, averageSamples: traced.averageSamples ?? samples, noiseThreshold, triangles: exported.triangles, inputBytes: tableBytes(tables), ...(exported.instances === undefined ? {} : { instances: exported.instances }), tracedSeconds, ignored: exported.ignored };
   let linear = features.color;
   const denoiseStarted = performance.now();
   if (denoise === 'oidn') {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
 import { buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
-import { traceFrameNative } from '../scripts/agent-native-trace.mjs';
+import { chooseNativeInstancing, traceFrameNative } from '../scripts/agent-native-trace.mjs';
 import { encodeNativeInputV2 } from '../scripts/native-bake-page.js';
 import { buildCopyScene } from '../bench/instancing/copies-scene.mjs';
 import { createCamera } from '../src/path-tracer.js';
@@ -68,6 +68,21 @@ test('the legacy packer refuses an instanced scene and a scene without shared ge
   const flattened = buildTraceScene(distinct, environment, { instancing: true });
   assert.equal(flattened.instances, undefined);
   assert.ok(flattened.indices.length > 0);
+});
+
+test('a job instances on the cycles kernel unless JS67_NATIVE_INSTANCING=off or the legacy kernel is chosen', () => {
+  assert.equal(chooseNativeInstancing({}), true);
+  assert.equal(chooseNativeInstancing({ JS67_NATIVE_INSTANCING: 'on' }), true);
+  assert.equal(chooseNativeInstancing({ JS67_NATIVE_INSTANCING: 'off' }), false);
+  assert.equal(chooseNativeInstancing({ JS67_NATIVE_KERNEL: 'legacy' }), false);
+});
+
+test('the job report counts the bytes handed to the tracer', async () => {
+  const { input } = instancedInput('translate');
+  const exported = JSON.parse(JSON.stringify({ ...encodeNativeInputV2(input), triangleCount: input.triangleCount, triangles: input.triangleCount, instances: input.instanceCount, ignored: [] }));
+  const traced = await traceFrameNative({ tracer: recordingTracer([]), exported, width: WIDTH, height: HEIGHT, samples: 4, denoise: 'none', kernel: 'cycles' });
+  const expected = Object.values(input).reduce((total, value) => total + (ArrayBuffer.isView(value) ? value.byteLength : 0), 0);
+  assert.equal(traced.report.inputBytes, expected);
 });
 
 const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
