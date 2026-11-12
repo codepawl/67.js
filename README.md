@@ -270,6 +270,13 @@ Read [CONTRIBUTING.md](https://github.com/codepawl/67.js/blob/main/CONTRIBUTING.
 Coding agents start with [AGENTS.md](https://github.com/codepawl/67.js/blob/main/AGENTS.md), and `npm run preflight` runs the pull request checks locally.
 Questions, ideas and what you made go in [Discussions](https://github.com/codepawl/67.js/discussions). Bug reports: [SUPPORT.md](https://github.com/codepawl/67.js/blob/main/SUPPORT.md).
 
+## Sponsors
+
+67js is free and MIT licensed. [Sponsors](https://github.com/sponsors/codepawl) pay for GPU time, test hardware and the hours that go into it.
+Company sponsors get their logo here from $100 a month.
+
+[![Sponsor CodePawl](https://img.shields.io/badge/Sponsor-CodePawl-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/codepawl)
+
 ## Credits
 
 - [gl-matrix](https://github.com/toji/gl-matrix) supplies the matrix math.

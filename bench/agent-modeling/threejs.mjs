@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { createRunGuard } from './run-guard.mjs';
 import { removeLocalPaths, totalsByModel, totalsOf } from './aggregate.mjs';
 import { checkOne } from './check.mjs';
 import { camerasForTask, worldGeometriesOf } from './look.mjs';
@@ -201,15 +202,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       '-p', prompt, '--model', options.model, '--output-format', 'stream-json', '--verbose', '--strict-mcp-config',
       '--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
       '--disallowedTools', ...BUILT_IN_TOOLS_DENIED,
-      '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--no-session-persistence', '--max-budget-usd', options.budget,
+      '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--no-session-persistence',
     ], { cwd: workingDirectory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     let errors = '';
-    child.stdout.on('data', chunk => { output += chunk; });
+    const guard = createRunGuard({ child, model: options.model, budgetUsd: options.budget, timeoutSeconds: options.timeout });
+    child.stdout.on('data', chunk => { output += chunk; guard.feed(chunk); });
     child.stderr.on('data', chunk => { errors += chunk; });
-    const timer = setTimeout(() => child.kill(), Number(options.timeout) * 1000);
     child.on('close', code => {
-      clearTimeout(timer);
+      guard.stop();
       resolvePromise({ output, errors, code, wallMs: Math.round(performance.now() - started) });
     });
   });
