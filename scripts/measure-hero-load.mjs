@@ -248,6 +248,7 @@ async function runMatrix(browser, options) {
         swapLongestGapMs: median(runs.map(run => run.swapLongestGapMs)),
         longTasksOver50AfterFirstPaint: runs.map(run => run.longTaskCount),
         longestTaskMs: Math.max(...runs.map(run => run.longestTaskMs)),
+        longTasks: runs.map(run => run.longTasks),
         detailRangeMs: [Math.min(...runs.map(run => run.detailMs ?? Infinity)), Math.max(...runs.map(run => run.detailMs ?? 0))],
         bytesBeforeFirstFrame: median(runs.map(run => run.bytesBeforeFirstFrame)),
         bytesAtDetail: median(runs.map(run => run.bytesAtDetail)),
