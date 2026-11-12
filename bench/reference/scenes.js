@@ -996,6 +996,57 @@ export const REFERENCE_SCENES = {
     };
   },
 
+  // Issue #894: a disk, an ellipse with spread and a square with spread over glossy and rough surfaces. Only the Cook `cycles` kernel
+  // and Cycles read `shape` and `spread`; the rasterizer and the legacy kernel draw rectangles.
+  async 'area-shapes'() {
+    const lighting = constantLighting(0.01);
+    const cube = box(0, 1);
+    const parts = [
+      part('stage-floor', cube, [0, -0.05, 0], [10, 0.1, 10], { color: [0.6, 0.55, 0.5], roughness: 0.35 }),
+      part('stage-back', cube, [0, 1.5, -3.05], [10, 3.2, 0.1], { color: [0.7, 0.68, 0.62], roughness: 0.9 }),
+      part('column', cube, [-1.2, 0.75, -1.2], [0.4, 1.5, 0.4], { color: [0.6, 0.6, 0.65], roughness: 0.5 }),
+      part('ball', sphere(48, 32), [0.5, 0.5, -0.6], [0.5, 0.5, 0.5], { color: [0.8, 0.25, 0.2], roughness: 0.25 }),
+      part('block', cube, [1.7, 0.3, -1.4], [0.6, 0.6, 0.6], { color: [0.2, 0.45, 0.75], roughness: 0.6 }),
+    ];
+    const areaLights = [
+      { position: [-1.8, 2.6, 0.4], direction: [0.5, -1, -0.2], width: 0.9, height: 0.9, shape: 'disk', color: [1, 0.9, 0.8], intensity: 8 },
+      { position: [1.8, 2.4, 0.3], direction: [-0.4, -1, -0.1], up: [0, 0, 1], width: 1.6, height: 0.6, shape: 'ellipse', spread: 1.2, color: [0.8, 0.9, 1], intensity: 10 },
+      { position: [0, 3, -1.4], direction: [0, -1, 0.3], up: [0, 0, 1], width: 1.2, height: 1.2, spread: 0.9, color: [1, 1, 1], intensity: 10 },
+    ];
+    return {
+      parts, blenderWorld: lighting.blenderWorld,
+      environment: environment(lighting, { areaLights }),
+      camera: { eye: [0, 1.8, 4.5], target: [0, 0.7, -1], up: [0, 1, 0], fov: 50, near: 0.05, far: 50 },
+    };
+  },
+
+  // Issue #894: two blended panes (opacity 0.4 and 0.75) between the lights and the floor. Shadow rays pass through them with
+  // 1 - opacity of the light left, as Cycles does for a Principled alpha below 1.
+  async 'transparent-shadow'() {
+    const lighting = constantLighting(0.01);
+    const cube = box(0, 1);
+    const pane = opacity => ({ color: [0.9, 0.5, 0.3], roughness: 0.4, alphaMode: 'blend', opacity });
+    const parts = [
+      part('stage-floor', cube, [0, -0.05, 0], [10, 0.1, 10], { color: [0.6, 0.55, 0.5], roughness: 0.7 }),
+      part('stage-back', cube, [0, 1.5, -3.05], [10, 3.2, 0.1], { color: [0.7, 0.68, 0.62], roughness: 0.9 }),
+      part('ball', sphere(48, 32), [0, 0.5, -0.8], [0.5, 0.5, 0.5], { color: [0.3, 0.55, 0.8], roughness: 0.5 }),
+      part('pane-faint', cube, [-1.1, 1.6, 0.2], [1.2, 0.03, 1.2], pane(0.4)),
+      part('pane-dense', cube, [1.1, 1.6, 0.2], [1.2, 0.03, 1.2], pane(0.75)),
+    ];
+    const pointLights = [
+      { position: [-1.1, 3.2, 0.2], color: [1, 0.95, 0.85], intensity: 30, radius: 0.1, castShadow: true },
+      { position: [1.1, 3.2, 0.2], color: [0.85, 0.92, 1], intensity: 30, radius: 0.1, castShadow: true },
+    ];
+    const areaLights = [
+      { position: [0, 3, -1.6], direction: [0, -1, 0.3], up: [0, 0, 1], width: 1.5, height: 0.8, color: [1, 1, 1], intensity: 4 },
+    ];
+    return {
+      parts, blenderWorld: lighting.blenderWorld,
+      environment: environment(lighting, { pointLights, areaLights }),
+      camera: { eye: [0, 1.8, 4.5], target: [0, 0.7, -0.5], up: [0, 1, 0], fov: 50, near: 0.05, far: 50 },
+    };
+  },
+
   // Issue #623: a 36 m corridor with 24 lamps (16 point, 8 spot) along the ceiling and nothing else lighting it, so most lamps are far from
   // any point and a light tree has something to choose. The lamps do not cast shadow maps (the rasterizer's atlas holds 24 tiles); the path tracer and Cycles shadow every light.
   async 'many-lights'() {

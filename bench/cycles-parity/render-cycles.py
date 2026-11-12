@@ -253,6 +253,8 @@ def build_blender_material(material_name, material_entry, has_vertex_colors, ima
         principled_node.inputs["Transmission Weight"].default_value = 1.0
         principled_node.inputs["IOR"].default_value = material_entry["liquid"]["ior"]
     configure_principled_layers(material, principled_node, material_entry)
+    if material_entry.get("alphaMode") == "blend" and 0.0 <= material_entry.get("opacity", 1.0) < 1.0:
+        principled_node.inputs["Alpha"].default_value = material_entry["opacity"]
     if material_entry.get("emission", 0.0) > 0.0:
         emission_color = material_entry.get("emissiveColor", material_entry["color"])
         set_linear_rgba_socket(principled_node.inputs["Emission Color"], emission_color)
@@ -352,9 +354,13 @@ def add_area_light(scene, light_index, area_entry):
     light_data = bpy.data.lights.new(f"Area-{light_index}", "AREA")
     light_data.energy = area_entry["intensity"] * WATTS_PER_AREA_INTENSITY
     light_data.color = area_entry["color"]
-    light_data.shape = "RECTANGLE"
+    shape_name = area_entry.get("shape", "rectangle")
+    light_data.shape = {"rectangle": "RECTANGLE", "disk": "DISK", "ellipse": "ELLIPSE"}[shape_name]
     light_data.size = area_entry["width"]
-    light_data.size_y = area_entry["height"]
+    if shape_name != "disk":
+        light_data.size_y = area_entry["height"]
+    if "spread" in area_entry:
+        light_data.spread = area_entry["spread"]
     area_object = bpy.data.objects.new(f"Area-{light_index}", light_data)
     area_object.location = convert_position_to_blender(area_entry["position"])
     normal_vector = Vector(convert_position_to_blender(area_entry["direction"])).normalized()
