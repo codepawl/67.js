@@ -278,6 +278,7 @@ test('a first view that fails to build is replaced by the full world, and a full
 function fakeRenderer(calls) {
   return {
     prepareEnvironmentInSlices: async () => { calls.push('environment'); },
+    preloadTextures: async () => { calls.push('preloadTextures'); },
     replaceParts: () => { calls.push('replaceParts'); },
     prepareFrame: async () => { calls.push('prepareFrame'); },
   };
@@ -288,11 +289,15 @@ const fakeParts = [{ geometry: { indices: [0, 1, 2] } }, { geometry: { indices: 
 test('the swap prefilters the sky before it replaces the parts, and stops when the world is freed on the way', async () => {
   const calls = [];
   assert.equal(await replaceRendererWorld(fakeRenderer(calls), fakeParts, {}, () => false), true);
-  assert.equal(calls[0], 'environment');
-  assert.ok(calls.length > 1 && calls.slice(1).every(name => name === 'replaceParts'));
+  assert.deepEqual(calls.slice(0, 2), ['environment', 'preloadTextures'], 'large textures upload in bands before the parts arrive');
+  assert.ok(calls.length > 2 && calls.slice(2).every(name => name === 'replaceParts'));
   const freedCalls = [];
   assert.equal(await replaceRendererWorld(fakeRenderer(freedCalls), fakeParts, {}, () => true), false);
   assert.deepEqual(freedCalls, ['environment']);
+  const freedDuringUploadCalls = [];
+  const answers = [false, true];
+  assert.equal(await replaceRendererWorld(fakeRenderer(freedDuringUploadCalls), fakeParts, {}, () => answers.shift() ?? true), false);
+  assert.deepEqual(freedDuringUploadCalls, ['environment', 'preloadTextures']);
 });
 
 test('the swap prepares a draw at the last pose, and none when the world was never drawn', async () => {

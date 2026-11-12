@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
-import { buildInstancedTraceSceneInBatches } from './instanced-scene-in-batches.mjs';
+import { buildInstancedTraceScene } from './instanced-scene.mjs';
 import * as renderNative from '../../packages/render-native/index.mjs';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
@@ -321,8 +321,7 @@ async function runCli() {
   if (options.instancing && options.kernel !== 'cycles') {
     throw new RangeError('Option --instancing needs --kernel cycles: the legacy kernel packs flattened scenes only.');
   }
-  const instancedBatches = options.instancing ? buildInstancedTraceSceneInBatches(traceSource.parts, traceSource.environment) : null;
-  const traceScene = instancedBatches ? instancedBatches.scene : buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
+  const traceScene = options.instancing ? buildInstancedTraceScene(traceSource.parts, traceSource.environment) : buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
   // render-cycles.py takes the lens from the flags only, so a lens set in the scene file is dropped here to keep the two sides comparable.
   const { fStop: ignoredSceneFStop, ...sceneCameraWithoutLens } = traceSource.camera;
   const camera = createCamera({ ...sceneCameraWithoutLens, ...options.lens }, options.width, options.height);
@@ -416,7 +415,6 @@ async function runCli() {
     triangleCount: nativeInput.triangleCount,
     instanceCount: nativeInput.instanceCount ?? null,
     instancing: options.instancing,
-    instanceBatches: instancedBatches ? instancedBatches.uniqueTrianglesPerBatch : null,
     adapter: traced.adapter,
     backend: traced.backend,
     features: traced.features,
