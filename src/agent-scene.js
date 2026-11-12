@@ -1935,7 +1935,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
             knownKeys(patch[nestedField], nestedKeys, nestedField);
             merged[nestedField] = { ...candidate[lookField][nestedField], ...patch[nestedField] };
           }
-          if (patch.sky) merged.sky = { ...candidate[lookField].sky, ...patch.sky };
+          // A preset starts the sky again from its own sun, so fields kept from the earlier sky never hide it.
+          if (patch.sky) merged.sky = { ...!patch.sky.preset && candidate[lookField].sky, type: 'physical', ...patch.sky };
           candidate[lookField] = merged;
           continue;
         }
