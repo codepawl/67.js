@@ -108,7 +108,7 @@ fn lock_device_cache() -> MutexGuard<'static, Option<CachedDevice>> {
 
 /// Returns cloned device/queue/metadata from the cache, opening once per process.
 /// When the device was lost the cache is dropped and a fresh device is opened.
-fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, String)> {
+pub(crate) fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, String)> {
     let mut guard = lock_device_cache();
     let was_lost = guard.as_ref().is_some_and(|cached| cached.device_lost.load(Ordering::SeqCst));
     if was_lost {
@@ -342,7 +342,7 @@ fn create_cycles_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     })
 }
 
-fn compile_compute_pipeline(
+pub(crate) fn compile_compute_pipeline(
     device: &wgpu::Device,
     shader_source: String,
     entry_point: &str,

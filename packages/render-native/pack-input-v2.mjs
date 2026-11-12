@@ -44,7 +44,9 @@ const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA = 8;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING = 16;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
 export const KERNEL_FLAG_WHITE_NOISE_SAMPLER = 64;
+export const KERNEL_FLAG_PATH_REGENERATION = 1024;
 
+const INSTANCE_VISIBILITY_CAMERA = 1;
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
 
@@ -1329,6 +1331,69 @@ function packLightTree(packedLights, packedEmissives) {
   };
 }
 
+/**
+ * Reads the `envCompensation` option: `undefined`, `false` or `0` (off, the default), `true` (the full mean) or a
+ * fraction in (0, 1] of the mean radiance to subtract from the sampling table. Returns the fraction, 0 when off.
+ */
+export function resolveEnvCompensationFraction(envCompensation, callerName) {
+  if (envCompensation === undefined || envCompensation === false) {
+    return 0;
+  }
+  if (envCompensation === true) {
+    return 1;
+  }
+  if (typeof envCompensation !== 'number' || !Number.isFinite(envCompensation) || envCompensation < 0 || envCompensation > 1) {
+    throw new RangeError(
+      `${callerName}: \`envCompensation\` must be true, false or a number from 0 to 1 (the fraction of the mean radiance to subtract), got ${JSON.stringify(envCompensation)}.`
+    );
+  }
+  return envCompensation;
+}
+
+const MINIMUM_COMPENSATED_TABLE_FRACTION = 1e-6;
+
+/**
+ * MIS compensation of the environment sampling table (Karlik et al. 2019; pbrt-v4 ImageInfiniteLight, Apache-2.0).
+ * Subtracts `fraction` times the sphere-mean radiance from every texel's weight and clamps at zero, so light sampling
+ * spends its samples where BSDF sampling does badly. The kernel reads the pdf from the same table, so the pdf used in
+ * MIS stays the pdf that was sampled. A map that would end up all zero, or nearly so, keeps its original table.
+ * Rewrites `pixelWeights` and `rowTotals` in place and returns the new total.
+ */
+function compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, fraction, originalTotal) {
+  const deltaPhi = (2 * Math.PI) / width;
+  const deltaTheta = Math.PI / height;
+  let solidAngleSum = 0;
+  for (let y = 0; y < height; y++) {
+    solidAngleSum += Math.sin(Math.PI * (y + 0.5) / height) * deltaPhi * deltaTheta * width;
+  }
+  const meanRadiance = originalTotal / solidAngleSum;
+
+  const compensatedWeights = new Float64Array(pixelWeights.length);
+  const compensatedRowTotals = new Float64Array(height);
+  let compensatedTotal = 0;
+  for (let y = 0; y < height; y++) {
+    const texelSolidAngle = Math.sin(Math.PI * (y + 0.5) / height) * deltaPhi * deltaTheta;
+    const subtractedWeight = fraction * meanRadiance * texelSolidAngle;
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      const pixelIndex = y * width + x;
+      const weight = Math.max(0, pixelWeights[pixelIndex] - subtractedWeight);
+      compensatedWeights[pixelIndex] = weight;
+      rowSum += weight;
+    }
+    compensatedRowTotals[y] = rowSum;
+    compensatedTotal += rowSum;
+  }
+  // A constant map leaves only rounding residue (about 1e-16 of the total) after the subtraction, and a table built
+  // from that residue would sample an arbitrary patch of the sky, so anything this small counts as all zero.
+  if (!(compensatedTotal > originalTotal * MINIMUM_COMPENSATED_TABLE_FRACTION)) {
+    return originalTotal;
+  }
+  pixelWeights.set(compensatedWeights);
+  rowTotals.set(compensatedRowTotals);
+  return compensatedTotal;
+}
+
 function packEnvironmentTexelsV2(environment, options = {}) {
   if (!environment || !(environment.width > 0 && environment.height > 0)) {
     const bg = options.backgroundColor ?? [0, 0, 0];
@@ -1355,6 +1420,7 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     ? Number(environment.rotation)
     : Math.atan2(Number(environment.sine ?? 0), Number(environment.cosine ?? 1));
 
+  const compensationFraction = resolveEnvCompensationFraction(options.envCompensation, 'buildNativeInputV2');
   const pixelCount = width * height;
   const totalVec4 = 2 * pixelCount + height;
   const texels = new Float32Array(totalVec4 * 4);
@@ -1385,6 +1451,10 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     }
     rowTotals[y] = rowSum;
     totalWeight += rowSum;
+  }
+
+  if (compensationFraction > 0) {
+    totalWeight = compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, compensationFraction, totalWeight);
   }
 
   const envCdfOffset = pixelCount;
@@ -1507,6 +1577,15 @@ export function validateSamplerOption(sampler, callerName) {
   }
 }
 
+/** Throws unless `denoise` is undefined, "none" or "atrous". */
+export function validateDenoiseOption(denoise, callerName) {
+  if (denoise !== undefined && denoise !== 'none' && denoise !== 'atrous') {
+    throw new RangeError(
+      `${callerName}: \`denoise\` must be "none" (default) or "atrous", got ${JSON.stringify(denoise)}.`
+    );
+  }
+}
+
 /** Throws unless `lightSampling` is undefined, "auto", "tree" or "uniform". */
 export function validateLightSamplingOption(lightSampling, callerName) {
   if (lightSampling !== undefined && !VALID_LIGHT_SAMPLING.includes(lightSampling)) {
@@ -1549,6 +1628,15 @@ export function resolveSamplingOptions(options, callerName) {
   return { sampler, lightSampling };
 }
 
+/** Throws unless `pathRegeneration` is undefined, true or false. */
+export function validatePathRegenerationOption(pathRegeneration, callerName) {
+  if (pathRegeneration !== undefined && typeof pathRegeneration !== 'boolean') {
+    throw new TypeError(
+      `${callerName}: \`pathRegeneration\` must be true, false (default) or left out, got ${JSON.stringify(pathRegeneration)}.`
+    );
+  }
+}
+
 /** True when the kernel should pick lights through the light tree for this scene and mode. */
 export function resolveUseLightTree(lightSampling, emitterCount, lightTreeNodeCount) {
   if (lightTreeNodeCount <= 0 || lightSampling === 'uniform') {
@@ -1578,6 +1666,8 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
   resolveSamplingOptions(options, callerName);
+  resolveEnvCompensationFraction(options.envCompensation, callerName);
+  validateDenoiseOption(options.denoise, callerName);
   validateFilterOptions(options, callerName);
   if (width !== undefined && height !== undefined) {
     validateImagePixelCount(width, height, callerName);
@@ -2410,6 +2500,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
   const matSource = v1Input.materials;
   const materialRecords = [];
   const materialLightMasks = [];
+  const materialShadowOnly = [];
   for (let m = 0; m < materialCount; m++) {
     const base = m * 40;
     const baseColor = [matSource[base], matSource[base + 1], matSource[base + 2]];
@@ -2424,6 +2515,8 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
     const alphaCutoff = matSource[base + 14];
     const maskLo = ((Math.round(matSource[base + 15]) & 0xffff) | ((Math.round(matSource[base + 16]) & 0xffff) << 16)) >>> 0;
     materialLightMasks.push(maskLo);
+    // The v1 tables flag a shadow-only part in the second channel of material texel 5 (SHADOW_ONLY_SLOT in src/path-tracer-gpu-pack.js).
+    materialShadowOnly.push(matSource[base + 21] > 0);
 
     const baseTex = registerAtlasRect(matSource[base + 24], matSource[base + 25], matSource[base + 26], matSource[base + 27], matSource[base + 17]);
     const normalTex = registerAtlasRect(matSource[base + 28], matSource[base + 29], matSource[base + 30], matSource[base + 31], matSource[base + 18]);
@@ -2586,7 +2679,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
       opaqueTriangleCount: opaque.length,
       totalTriangleCount: ordered.length,
       materialOverride: INVALID_INDEX_V2,
-      visibilityFlags: INSTANCE_DEFAULT_VISIBILITY,
+      visibilityFlags: materialShadowOnly[matIdx] ? INSTANCE_DEFAULT_VISIBILITY & ~INSTANCE_VISIBILITY_CAMERA : INSTANCE_DEFAULT_VISIBILITY,
       lightGroupMaskLo: maskLo,
       lightGroupMaskHi: maskHi,
       emissiveBaseOffset,

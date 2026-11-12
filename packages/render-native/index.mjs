@@ -11,6 +11,8 @@ import {
   STRUCT_STRIDES_V2,
   KERNEL_FLAG_USE_LIGHT_TREE,
   KERNEL_FLAG_WHITE_NOISE_SAMPLER,
+  KERNEL_FLAG_PATH_REGENERATION,
+  validatePathRegenerationOption,
   resolveSamplingOptions,
   resolveUseLightTree,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
@@ -71,10 +73,14 @@ export function resolveNativeKernel(kernel) {
 export function traceNative(input, options = {}) {
   validatePackOptions(options, 'traceNative', true);
   const { sampler, lightSampling } = resolveSamplingOptions(options, 'traceNative');
-  const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel } = options;
+  validatePathRegenerationOption(options.pathRegeneration, 'traceNative');
+  const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel, denoise } = options;
   const selectedKernel = resolveNativeKernel(kernel);
   const addon = loadAddon();
   if (selectedKernel === 'legacy') {
+    if (denoise === 'atrous') {
+      throw new TypeError('traceNative: `denoise: "atrous"` filters the Cycles kernel result; pass kernel "cycles", or call denoiseAtrous with the traced guide buffers.');
+    }
     if (input?.schemaVersion === FORMAT_V2_VERSION) {
       throw new TypeError(
         'Cannot pass a FORMAT-v2 scene input to kernel "legacy": pass kernel "cycles" or build a v1 input with buildNativeInput.'
@@ -99,6 +105,9 @@ export function traceNative(input, options = {}) {
   if (input?.schemaVersion === FORMAT_V2_VERSION && sampler !== undefined) {
     v2Input = { ...v2Input, kernelParams: withSamplerFlag(v2Input.kernelParams, sampler) };
   }
+  if (input?.schemaVersion === FORMAT_V2_VERSION && options.pathRegeneration !== undefined) {
+    v2Input = { ...v2Input, kernelParams: withPathRegenerationFlag(v2Input.kernelParams, options.pathRegeneration) };
+  }
   if (input?.schemaVersion === FORMAT_V2_VERSION && lightSampling !== undefined) {
     v2Input = { ...v2Input, kernelParams: withLightSamplingFlag(v2Input, lightSampling) };
   }
@@ -109,7 +118,26 @@ export function traceNative(input, options = {}) {
     samplesPerDispatch,
     maxSeconds,
     bootstrapKernel,
+    denoise,
   });
+}
+
+/**
+ * Filters a traced image with the edge-avoiding a-trous wavelet filter on the GPU (Dammertz 2010 with SVGF's variance
+ * guidance, spatial only). `rgba` holds four floats per pixel; `albedo`, `normal` (any length, zero where nothing was
+ * hit), `depth` and `variance` are the guide buffers `traceNative` returns. The result is smoothed and biased: it is not
+ * a converged image. Returns `{ rgba, compileSeconds, uploadSeconds, gpuSeconds, readbackSeconds }`.
+ */
+export function denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance }) {
+  const pixelCount = width * height;
+  validateImagePixelCount(width, height, 'denoiseAtrous');
+  const planes = { rgba: [rgba, 4], albedo: [albedo, 3], normal: [normal, 3], depth: [depth, 1], variance: [variance, 1] };
+  for (const [name, [plane, floatsPerPixel]] of Object.entries(planes)) {
+    if (!(plane instanceof Float32Array) || plane.length !== pixelCount * floatsPerPixel) {
+      throw new TypeError(`denoiseAtrous: \`${name}\` must be a Float32Array of ${pixelCount * floatsPerPixel} floats for a ${width}x${height} image.`);
+    }
+  }
+  return loadAddon().denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance });
 }
 
 function hasFilterOptions(options) {
@@ -168,6 +196,18 @@ function withSamplerFlag(kernelParams, sampler) {
   const patchedFlags = sampler === 'white'
     ? (flags | KERNEL_FLAG_WHITE_NOISE_SAMPLER) >>> 0
     : (flags & ~KERNEL_FLAG_WHITE_NOISE_SAMPLER) >>> 0;
+  view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
+  return patchedParams;
+}
+
+// Exported for tests; not part of the public API.
+export function withPathRegenerationFlag(kernelParams, pathRegeneration) {
+  const patchedParams = new Uint8Array(kernelParams);
+  const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
+  const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
+  const patchedFlags = pathRegeneration
+    ? (flags | KERNEL_FLAG_PATH_REGENERATION) >>> 0
+    : (flags & ~KERNEL_FLAG_PATH_REGENERATION) >>> 0;
   view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
   return patchedParams;
 }

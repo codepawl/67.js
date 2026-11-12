@@ -294,6 +294,7 @@ fn int_trace_shadow(
   self_triangle: u32,
   target_instance: u32,
   target_triangle: u32,
+  path_transparent_bounces: u32,
 ) -> vec3<f32> {
   let step_eps = max(kernel_params.ray_epsilon, 1.0e-6);
   let shadow_t_max = select(1.0e30, max(max_distance - step_eps, 0.0), max_distance < 1.0e29);
@@ -301,7 +302,10 @@ fn int_trace_shadow(
 
   if (shadow_t_max > 0.0 && kernel_params.instance_count > 0u && kernel_params.triangle_count > 0u) {
     var current_t_min = 0.0;
-    var transparent_hits = 0u;
+    // `integrate_shadow_max_transparent_hits` (kernel/integrator/intersect_shadow.h) allows
+    // max(transparent_max_bounce - transparent_bounce, 0) transparent hits: the transparent
+    // surfaces the camera path already passed count against the same limit as the shadow ray's.
+    var transparent_hits = path_transparent_bounces;
     for (var step = 0u; step <= INT_MAX_PATH_STEPS; step += 1u) {
       if (current_t_min >= shadow_t_max) {
         break;
@@ -590,6 +594,7 @@ fn int_accumulate_direct_sample(
   medium_sigma: vec3<f32>,
   in_medium: bool,
   bounce: u32,
+  transparent_bounces: u32,
   radiance: ptr<function, vec3<f32>>,
 ) {
   if (sample.valid == 0u || sample.pdf <= 0.0) {
@@ -623,6 +628,7 @@ fn int_accumulate_direct_sample(
       (*point).triangle_index,
       sample.target_instance,
       sample.target_triangle,
+      transparent_bounces,
     );
   }
   if (visibility.x <= 0.0 && visibility.y <= 0.0 && visibility.z <= 0.0) {
@@ -661,6 +667,7 @@ fn int_accumulate_volume_direct_sample(
   incident_dir: vec3<f32>,
   throughput: vec3<f32>,
   bounce: u32,
+  transparent_bounces: u32,
   radiance: ptr<function, vec3<f32>>,
 ) {
   if (sample.valid == 0u || sample.pdf <= 0.0) {
@@ -682,6 +689,7 @@ fn int_accumulate_volume_direct_sample(
       INVALID_INDEX,
       sample.target_instance,
       sample.target_triangle,
+      transparent_bounces,
     );
   }
   *radiance += int_clamp_contribution(unshadowed * visibility, i32(bounce));
@@ -715,59 +723,123 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let filter_glossy_enabled = kernel_params.filter_glossy > 0.0;
   let inv_filter_glossy = select(1.0e30, 1.0 / max(kernel_params.filter_glossy, 1.0e-8), filter_glossy_enabled);
 
-  var batch_radiance = vec3<f32>(0.0);
-  var batch_depth = 0.0;
-  var batch_albedo = vec3<f32>(0.0);
-  var batch_normal = vec3<f32>(0.0);
+  // The running sums start from what the film holds and take one sample at a time in sample order. That is the same
+  // sequence of float additions as adding every sample straight to the film, so the image does not depend on where one
+  // dispatch ends and the next begins (summing a batch from zero first would regroup the additions per split).
+  let film_radiance_and_depth = film_accumulation[pixel_index];
+  var batch_radiance = film_radiance_and_depth.xyz;
+  var batch_depth = film_radiance_and_depth.w;
+  let film_albedo_lane = film_accumulation[pixel_count + pixel_index];
+  let film_normal_lane = film_accumulation[2u * pixel_count + pixel_index];
+  var batch_albedo = film_albedo_lane.xyz;
+  var batch_normal = film_normal_lane.xyz;
   var taken_in_batch = 0u;
 
-  for (var s = 0u; s < sample_count; s += 1u) {
-    if (s > 0u && int_pixel_has_converged(stats)) {
-      stats.z = 1.0;
-      break;
+  // Per-path state lives outside the loops so that, with KERNEL_FLAG_PATH_REGENERATION, a path that ends is replaced by the
+  // pixel's next sample at once instead of idling until the longest path of the dispatch ends. Without the flag a whole path
+  // runs inside one iteration of the outer loop, which is the order of work before regeneration existed.
+  let steps_per_iteration = select(INT_MAX_PATH_STEPS, 1u, (kernel_params.kernel_flags & KERNEL_FLAG_PATH_REGENERATION) != 0u);
+  var rng = smp_init(pixel_x, pixel_y, kernel_params.sample_offset, kernel_params.seed);
+  var next_sample = 0u;
+  var path_active = false;
+  var path_step = 0u;
+
+  var ray_origin = vec3<f32>(0.0);
+  var ray_dir = vec3<f32>(0.0);
+  var ray_t_min = 0.0;
+  var ray_t_max = 0.0;
+  var ray_visibility = INSTANCE_VISIBILITY_CAMERA;
+  var self_instance = INVALID_INDEX;
+  var self_triangle = INVALID_INDEX;
+
+  var throughput = vec3<f32>(1.0);
+  var medium_sigma = vec3<f32>(0.0);
+  var in_medium = false;
+  var is_camera_ray = true;
+  var is_transparent_bg_ray = false;
+  var mis_skip = true;
+  var prev_bsdf_pdf = 0.0;
+  var min_ray_pdf = 1.0e30;
+  var prev_recv_lo = 0xFFFFFFFFu;
+  var prev_recv_hi = 0xFFFFFFFFu;
+  var terminate_on_hit = false;
+  var terminate_on_next_surface = false;
+
+  var bounce = 0u;
+  var diffuse_bounces = 0u;
+  var glossy_bounces = 0u;
+  var transmission_bounces = 0u;
+  var volume_bounces = 0u;
+  var transparent_bounces = 0u;
+
+  var sample_radiance = vec3<f32>(0.0);
+  var first_depth = 0.0;
+  var first_albedo = vec3<f32>(0.0);
+  var first_normal = vec3<f32>(0.0);
+  var recorded_features = false;
+
+  loop {
+    if (!path_active) {
+      if (next_sample >= sample_count) {
+        break;
+      }
+      if (next_sample > 0u && int_pixel_has_converged(stats)) {
+        stats.z = 1.0;
+        break;
+      }
+
+      let sample_index = kernel_params.sample_offset + next_sample;
+      next_sample += 1u;
+      rng = smp_init(pixel_x, pixel_y, sample_index, kernel_params.seed);
+      let filter_offset = flt_sample_offset(smp_next_2d(&rng));
+      let lens_uv = smp_next_2d(&rng);
+      let cam_ray = cam_generate_ray(pixel_x, pixel_y, filter_offset, lens_uv);
+
+      ray_origin = cam_ray.origin;
+      ray_dir = cam_ray.direction;
+      ray_t_min = cam_ray.t_min;
+      ray_t_max = cam_ray.t_max;
+      ray_visibility = INSTANCE_VISIBILITY_CAMERA;
+      self_instance = INVALID_INDEX;
+      self_triangle = INVALID_INDEX;
+
+      throughput = vec3<f32>(1.0);
+      medium_sigma = vec3<f32>(0.0);
+      in_medium = false;
+      is_camera_ray = true;
+      is_transparent_bg_ray = (kernel_params.kernel_flags & KERNEL_FLAG_TRANSPARENT_BACKGROUND) != 0u;
+      mis_skip = true;
+      prev_bsdf_pdf = 0.0;
+      min_ray_pdf = 1.0e30;
+      prev_recv_lo = 0xFFFFFFFFu;
+      prev_recv_hi = 0xFFFFFFFFu;
+      terminate_on_hit = false;
+      terminate_on_next_surface = false;
+
+      bounce = 0u;
+      diffuse_bounces = 0u;
+      glossy_bounces = 0u;
+      transmission_bounces = 0u;
+      volume_bounces = 0u;
+      transparent_bounces = 0u;
+
+      sample_radiance = vec3<f32>(0.0);
+      first_depth = 0.0;
+      first_albedo = vec3<f32>(0.0);
+      first_normal = vec3<f32>(0.0);
+      recorded_features = false;
+      path_step = 0u;
+      path_active = true;
     }
 
-    let sample_index = kernel_params.sample_offset + s;
-    var rng = smp_init(pixel_x, pixel_y, sample_index, kernel_params.seed);
-    let filter_offset = flt_sample_offset(smp_next_2d(&rng));
-    let lens_uv = smp_next_2d(&rng);
-    let cam_ray = cam_generate_ray(pixel_x, pixel_y, filter_offset, lens_uv);
-
-    var ray_origin = cam_ray.origin;
-    var ray_dir = cam_ray.direction;
-    var ray_t_min = cam_ray.t_min;
-    var ray_t_max = cam_ray.t_max;
-    var ray_visibility = INSTANCE_VISIBILITY_CAMERA;
-    var self_instance = INVALID_INDEX;
-    var self_triangle = INVALID_INDEX;
-
-    var throughput = vec3<f32>(1.0);
-    var medium_sigma = vec3<f32>(0.0);
-    var in_medium = false;
-    var is_camera_ray = true;
-    var is_transparent_bg_ray = (kernel_params.kernel_flags & KERNEL_FLAG_TRANSPARENT_BACKGROUND) != 0u;
-    var mis_skip = true;
-    var prev_bsdf_pdf = 0.0;
-    var min_ray_pdf = 1.0e30;
-    var prev_recv_lo = 0xFFFFFFFFu;
-    var prev_recv_hi = 0xFFFFFFFFu;
-    var terminate_on_hit = false;
-    var terminate_on_next_surface = false;
-
-    var bounce = 0u;
-    var diffuse_bounces = 0u;
-    var glossy_bounces = 0u;
-    var transmission_bounces = 0u;
-    var volume_bounces = 0u;
-    var transparent_bounces = 0u;
-
-    var sample_radiance = vec3<f32>(0.0);
-    var first_depth = 0.0;
-    var first_albedo = vec3<f32>(0.0);
-    var first_normal = vec3<f32>(0.0);
-    var recorded_features = false;
-
-    for (var step = 0u; step < INT_MAX_PATH_STEPS; step += 1u) {
+    for (var iteration_step = 0u; iteration_step < steps_per_iteration; iteration_step += 1u) {
+      // A `break` below ends the path. Only the places that go on to the next step set `path_active` again.
+      path_active = false;
+      if (path_step >= INT_MAX_PATH_STEPS) {
+        break;
+      }
+      let step = path_step;
+      path_step += 1u;
       let surface_hit = int_trace_closest_surface(
         ray_origin,
         ray_dir,
@@ -831,12 +903,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (SCENE_HAS_ANALYTIC_LIGHTS && kernel_params.light_count > 0u) {
           smp_seek(&rng, step, SMP_SLOT_VOLUME_ANALYTIC_PICK);
           let light_samp = lgt_sample_analytic_light(scatter_pos, 0xFFFFFFFFu, 0xFFFFFFFFu, smp_next_1d(&rng), smp_next_2d(&rng));
-          int_accumulate_volume_direct_sample(light_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
+          int_accumulate_volume_direct_sample(light_samp, scatter_pos, ray_dir, throughput, bounce, transparent_bounces, &sample_radiance);
         }
         if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
           smp_seek(&rng, step, SMP_SLOT_VOLUME_ENVIRONMENT);
           let env_samp = lgt_sample_environment(smp_next_4d(&rng));
-          int_accumulate_volume_direct_sample(env_samp, scatter_pos, ray_dir, throughput, bounce, &sample_radiance);
+          int_accumulate_volume_direct_sample(env_samp, scatter_pos, ray_dir, throughput, bounce, transparent_bounces, &sample_radiance);
         }
 
         var phase_pdf = 0.0;
@@ -872,6 +944,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         prev_recv_lo = 0xFFFFFFFFu;
         prev_recv_hi = 0xFFFFFFFFu;
         lgt_remember_mis_origin(scatter_pos, ray_dir, false, false);
+        path_active = true;
         continue;
       }
 
@@ -938,7 +1011,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
       if (terminate_on_hit) {
         if (closure.lobe_count > 0u && closure.lobes[0].lobe_type == LOBE_TRANSPARENT && closure.total_sample_weight > 0.0) {
-          if (kernel_params.max_transparent_bounces > 0u && transparent_bounces < kernel_params.max_transparent_bounces) {
+          // `path_state_next` (kernel/integrator/path_state.h) counts the transparent surface it passes and sets
+          // PATH_RAY_TERMINATE_ON_NEXT_SURFACE once the count reaches transparent_max_bounce, so the first
+          // surface is always passed, also with a limit of 0. The break on terminate_on_next_surface above ends
+          // the path at the next surface and the count never exceeds the limit here.
+          {
             let trans_prob = clamp(closure.lobes[0].sample_weight / closure.total_sample_weight, 0.0, 1.0);
             smp_seek(&rng, step, SMP_SLOT_TRANSPARENT);
             if (trans_prob > 0.0 && smp_next_1d(&rng) < trans_prob) {
@@ -950,6 +1027,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
               ray_t_min = surface_hit.t + max(kernel_params.ray_epsilon, 1.0e-6);
               self_instance = point.instance_index;
               self_triangle = point.triangle_index;
+              path_active = true;
               continue;
             }
           }
@@ -999,7 +1077,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             direct_sample = lgt_sample_environment(smp_next_4d(&rng));
           }
         }
-        int_accumulate_direct_sample(direct_sample, &closure, &point, wo, throughput, medium_sigma, in_medium, bounce, &sample_radiance);
+        int_accumulate_direct_sample(direct_sample, &closure, &point, wo, throughput, medium_sigma, in_medium, bounce, transparent_bounces, &sample_radiance);
       }
 
       smp_seek(&rng, step, SMP_SLOT_SURFACE_BSDF);
@@ -1009,9 +1087,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       if (bsdf_sample.sampled_lobe_type == LOBE_TRANSPARENT) {
-        if (kernel_params.max_transparent_bounces == 0u || transparent_bounces >= kernel_params.max_transparent_bounces) {
-          break;
-        }
+        // As above: `path_state_next` passes the transparent surface and then terminates on the next surface
+        // when the count reaches transparent_max_bounce, with a limit of 0 as well (its FIXME note).
         transparent_bounces += 1u;
         if (transparent_bounces >= kernel_params.max_transparent_bounces) {
           terminate_on_next_surface = true;
@@ -1020,6 +1097,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         ray_t_min = surface_hit.t + max(kernel_params.ray_epsilon, 1.0e-6);
         self_instance = point.instance_index;
         self_triangle = point.triangle_index;
+        path_active = true;
         continue;
       }
 
@@ -1088,24 +1166,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       prev_recv_lo = point.light_group_mask_lo;
       prev_recv_hi = point.light_group_mask_hi;
       lgt_remember_mis_origin(point.position, point.shading_normal, closure_has_transmission, picks_through_tree);
+      path_active = true;
     }
 
-    let exposed = int_sanitize_radiance(sample_radiance * exposure);
-    let lum = int_luminance(exposed);
-    batch_radiance += exposed;
-    batch_depth += select(0.0, first_depth, first_depth >= 0.0 && first_depth < 1.0e29);
-    batch_albedo += int_sanitize_radiance(first_albedo);
-    batch_normal += first_normal;
-    stats.x += lum;
-    stats.y += lum * lum;
-    stats.w += 1.0;
-    taken_in_batch += 1u;
+    if (!path_active) {
+      let exposed = int_sanitize_radiance(sample_radiance * exposure);
+      let lum = int_luminance(exposed);
+      batch_radiance += exposed;
+      batch_depth += select(0.0, first_depth, first_depth >= 0.0 && first_depth < 1.0e29);
+      batch_albedo += int_sanitize_radiance(first_albedo);
+      batch_normal += first_normal;
+      stats.x += lum;
+      stats.y += lum * lum;
+      stats.w += 1.0;
+      taken_in_batch += 1u;
+    }
   }
 
   if (taken_in_batch > 0u) {
-    film_accumulation[pixel_index] += vec4<f32>(batch_radiance, batch_depth);
-    film_accumulation[pixel_count + pixel_index] += vec4<f32>(batch_albedo, 0.0);
-    film_accumulation[2u * pixel_count + pixel_index] += vec4<f32>(batch_normal, 0.0);
+    film_accumulation[pixel_index] = vec4<f32>(batch_radiance, batch_depth);
+    film_accumulation[pixel_count + pixel_index] = vec4<f32>(batch_albedo, film_albedo_lane.w);
+    film_accumulation[2u * pixel_count + pixel_index] = vec4<f32>(batch_normal, film_normal_lane.w);
     film_accumulation[3u * pixel_count + pixel_index] = stats;
   }
 }

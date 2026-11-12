@@ -2,6 +2,7 @@
 // any figure falls more than the allowed margin below the committed baseline (coverage-baseline.json).
 // Raising the baseline is a manual edit of that file. The function figure counts each function once per source line,
 // so the baseline was re-measured (93.4 to 92.28 on the same commit) when unnamed functions stopped being counted per shard.
+// The branch figure counts each branch once per source line and position on that line, for the same reason (see branchKey).
 // Usage: node scripts/coverage-gate.mjs <lcov file or folder>... [--baseline coverage-baseline.json] [--merged-out merged.lcov]
 import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -52,11 +53,24 @@ function functionEntry(record, key, line, name) {
   return record.functions.get(key);
 }
 
+// V8 numbers the blocks of a file per process, in the order it reports them, and a shard that never runs a function reports
+// that function as one range instead of its nested blocks. The same block id therefore points at different branches in
+// different shards, and keying by it counted one branch once per shard layout (more shards, lower figure). A branch is
+// identified by its line and by its position among the branches reported for that line, which every shard agrees on
+// for the branches it reports. A shard that reports fewer branches on a line only adds hits to the first ones.
+function branchKey(line, branch, positionByLine) {
+  const lineAndBranch = `${line},${branch}`;
+  const position = positionByLine.get(lineAndBranch) ?? 0;
+  positionByLine.set(lineAndBranch, position + 1);
+  return `${line},${position},${branch}`;
+}
+
 export function mergeLcov(texts) {
   const files = new Map();
   for (const text of texts) {
     let record = null;
     let keyByName = new Map();
+    let branchPositionByLine = new Map();
     for (const row of text.split(/\r?\n/)) {
       const separator = row.indexOf(':');
       const tag = separator < 0 ? row : row.slice(0, separator);
@@ -64,14 +78,15 @@ export function mergeLcov(texts) {
       if (tag === 'SF') {
         record = fileRecord(files, value);
         keyByName = new Map();
+        branchPositionByLine = new Map();
       } else if (!record) {
         continue;
       } else if (tag === 'DA') {
         const [line, hits] = value.split(',');
         addHits(record.lines, line, Number(hits));
       } else if (tag === 'BRDA') {
-        const [line, block, branch, hits] = value.split(',');
-        addHits(record.branches, `${line},${block},${branch}`, hits === '-' ? 0 : Number(hits));
+        const [line, , branch, hits] = value.split(',');
+        addHits(record.branches, branchKey(line, branch, branchPositionByLine), hits === '-' ? 0 : Number(hits));
       } else if (tag === 'FN') {
         const [line, name] = value.split(',');
         const key = functionKey(line, name);

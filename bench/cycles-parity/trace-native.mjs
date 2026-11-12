@@ -9,6 +9,8 @@ import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import * as renderNative from '../../packages/render-native/index.mjs';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
+import { denoiseRadiance } from '../../src/path-tracer-denoise.js';
+import { applyGreyDiffuseOverride } from './grey-diffuse-override.mjs';
 
 const SUPPORTED_KERNELS = new Set(['legacy', 'cycles']);
 const SUPPORTED_FILTERS = new Set(['box', 'gaussian', 'blackman-harris']);
@@ -78,6 +80,10 @@ function parseSamplerOption(argumentList) {
   return sampler;
 }
 
+function parseDenoiseOption(argumentList) {
+  return parseChoiceOption(argumentList, '--denoise', ['none', 'wavelet', 'atrous'], 'none');
+}
+
 function parseLightSamplingOption(argumentList) {
   const lightSampling = String(readFlagValue(argumentList, '--light-sampling', 'auto'));
   if (!['auto', 'tree', 'uniform'].includes(lightSampling)) {
@@ -96,7 +102,7 @@ function parseLightSamplingOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--grey-diffuse] [--write-depth]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -106,22 +112,31 @@ function parseTraceArguments(argumentList) {
     height: parseIntegerOption(argumentList, '--height', 540, 16),
     samples: parseIntegerOption(argumentList, '--samples', 256, 1),
     bounces: parseIntegerOption(argumentList, '--bounces', 8, 0),
+    // Transparent max bounces on its own; undefined keeps the pack default (the larger of --bounces and 8).
+    transparentBounces: argumentList.includes('--transparent-bounces')
+      ? parseIntegerOption(argumentList, '--transparent-bounces', 8, 0)
+      : undefined,
     seed: parseIntegerOption(argumentList, '--seed', 1, 0),
     filterType: parseFilterTypeOption(argumentList),
     sampler: parseSamplerOption(argumentList),
     lightSampling: parseLightSamplingOption(argumentList),
+    envCompensation: parseNumberOption(argumentList, '--env-compensation', 0, 0),
     directLighting: String(readFlagValue(argumentList, '--direct-lighting', 'both')),
     lightTreeProbe: argumentList.includes('--light-tree-probe'),
+    pathRegeneration: argumentList.includes('--path-regeneration'),
     filterWidth: parseNumberOption(argumentList, '--filter-width', 1.0, 0.01),
     clampDirect: parseNumberOption(argumentList, '--clamp-direct', 0, 0),
     clampIndirect: parseNumberOption(argumentList, '--clamp-indirect', 0, 0),
     filterGlossy: parseNumberOption(argumentList, '--filter-glossy', 1.0, 0),
     fireflyClamp: parseNumberOption(argumentList, '--firefly-clamp', 1e9, 0),
     noiseThreshold: parseNumberOption(argumentList, '--noise-threshold', 0, 0),
+    denoise: parseDenoiseOption(argumentList),
     samplesPerDispatch: argumentList.includes('--samples-per-dispatch')
       ? parseIntegerOption(argumentList, '--samples-per-dispatch', 16, 1)
       : undefined,
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
+    greyDiffuse: argumentList.includes('--grey-diffuse'),
+    writeDepth: argumentList.includes('--write-depth'),
   };
 }
 
@@ -144,13 +159,48 @@ function extractLinearRgb(rgbaPixels, pixelCount) {
   return linearRgb;
 }
 
+function normalizeNormals(normal) {
+  for (let offset = 0; offset < normal.length; offset += 3) {
+    const length = Math.hypot(normal[offset], normal[offset + 1], normal[offset + 2]);
+    if (length > 1e-6) {
+      normal[offset] /= length;
+      normal[offset + 1] /= length;
+      normal[offset + 2] /= length;
+    }
+  }
+}
+
+/**
+ * Runs the existing wavelet filter (src/path-tracer-denoise.js) on the traced guides. Pixels where it returns a value that
+ * is not finite (background pixels with zero normal and depth, issue 969) keep their unfiltered colour; the count is reported.
+ */
+function applyWavelet(traced, linearRgb, width, height) {
+  const features = { color: linearRgb, albedo: traced.albedo, normal: traced.normal, depth: traced.depth, variance: traced.variance };
+  normalizeNormals(features.normal);
+  const started = performance.now();
+  const filtered = denoiseRadiance({ width, height, ...features });
+  const seconds = (performance.now() - started) / 1000;
+  const result = new Float32Array(linearRgb);
+  let replacedPixels = 0;
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const offset = pixel * 3;
+    if (Number.isFinite(filtered[offset]) && Number.isFinite(filtered[offset + 1]) && Number.isFinite(filtered[offset + 2])) {
+      result.set(filtered.subarray(offset, offset + 3), offset);
+    } else {
+      replacedPixels++;
+    }
+  }
+  return { image: result, seconds, replacedPixels };
+}
+
 async function runCli() {
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   const options = parseTraceArguments(process.argv.slice(2));
   if (!renderNative.findNativeAddon()) {
     throw new Error('The render-native addon is missing. Build packages/render-native before running trace-native.mjs.');
   }
-  const description = JSON.parse(await readFile(options.sceneJsonPath, 'utf8'));
+  const loadedDescription = JSON.parse(await readFile(options.sceneJsonPath, 'utf8'));
+  const description = options.greyDiffuse ? applyGreyDiffuseOverride(loadedDescription) : loadedDescription;
   await mkdir(dirname(options.outputPrefix), { recursive: true });
   const totalStarted = performance.now();
   const buildStarted = performance.now();
@@ -174,24 +224,49 @@ async function runCli() {
     filterType: options.filterType,
     sampler: options.sampler,
     lightSampling: options.lightSampling,
+    pathRegeneration: options.pathRegeneration,
     filterWidth: options.filterWidth,
     clampDirect: options.clampDirect,
     clampIndirect: options.clampIndirect,
     filterGlossy: options.filterGlossy,
+    denoise: options.denoise === 'atrous' ? 'atrous' : 'none',
   });
   const totalTraceSeconds = (performance.now() - totalStarted) / 1000;
   const postTraceRssMegabytes = process.memoryUsage().rss / (1024 * 1024);
   const pixelCount = options.width * options.height;
-  const linearRgb = extractLinearRgb(traced.rgba, pixelCount);
+  const unfilteredRgb = extractLinearRgb(traced.rgba, pixelCount);
+  // A filtered image is a biased, smoothed estimate, never a converged one.
+  const wavelet = options.denoise === 'wavelet' ? applyWavelet(traced, unfilteredRgb, options.width, options.height) : null;
+  const atrousRgb = options.denoise === 'atrous' ? extractLinearRgb(traced.denoisedRgba, pixelCount) : null;
+  const linearRgb = wavelet ? wavelet.image : (atrousRgb ?? unfilteredRgb);
   const npyPath = `${options.outputPrefix}.npy`;
   await writeFloat32Npy(npyPath, linearRgb, [options.height, options.width, 3]);
+  // The a-trous filter returns the unfiltered image beside the filtered one; keeping it shows that the filter leaves `rgba` alone.
+  const unfilteredNpyPath = atrousRgb ? `${options.outputPrefix}.unfiltered.npy` : null;
+  if (unfilteredNpyPath) {
+    await writeFloat32Npy(unfilteredNpyPath, unfilteredRgb, [options.height, options.width, 3]);
+  }
   const setupSeconds = sceneBuildSeconds + traced.setupSeconds + traced.compileSeconds + traced.uploadSeconds + traced.accelerationBuildSeconds;
+  // The depth buffer is the mean first-hit distance ALONG THE RAY (unit direction), 0 where the ray missed; Cycles' Z is
+  // the distance along the view axis. compare-depth.py converts. Cook's film averages over all samples, misses included.
+  const depthNpyPath = options.writeDepth ? `${options.outputPrefix}-depth.npy` : null;
+  if (depthNpyPath) {
+    if (!traced.depth || traced.depth.length !== options.width * options.height) {
+      throw new Error(`--write-depth needs the native tracer to return a depth buffer of ${options.width * options.height} floats (kernel "${options.kernel}" returned ${traced.depth?.length ?? 'none'}).`);
+    }
+    await writeFloat32Npy(depthNpyPath, Float32Array.from(traced.depth), [options.height, options.width]);
+  }
   const report = {
+    greyDiffuse: options.greyDiffuse,
+    depthNpyPath,
+    depthConvention: depthNpyPath ? 'ray-distance' : null,
+    cameraVerticalFovDegrees: traceSource.camera.fov,
     engine: options.kernel === 'cycles' ? 'cook-render-native' : '67js-render-native',
     kernel: traced.kernel ?? options.kernel,
     inputSchemaVersion: nativeInput.schemaVersion ?? 1,
     sceneId: description.id,
     npyPath,
+    unfilteredNpyPath,
     width: options.width,
     height: options.height,
     samples: options.samples,
@@ -199,6 +274,7 @@ async function runCli() {
     samplesPerDispatch: traced.samplesPerDispatch ?? null,
     longestDispatchSeconds: traced.longestDispatchSeconds ?? null,
     bounces: options.bounces,
+    transparentBounces: options.transparentBounces ?? null,
     seed: options.seed,
     filterType: options.filterType,
     sampler: options.sampler,
@@ -208,6 +284,11 @@ async function runCli() {
     clampIndirect: options.clampIndirect,
     fireflyClamp: options.fireflyClamp,
     noiseThreshold: options.noiseThreshold,
+    denoise: options.denoise,
+    denoiseSeconds: wavelet ? Number(wavelet.seconds.toFixed(6)) : Number((traced.denoiseSeconds ?? 0).toFixed(6)),
+    denoiseGpuSeconds: Number((traced.denoiseGpuSeconds ?? 0).toFixed(6)),
+    denoiseCompileSeconds: Number((traced.denoiseCompileSeconds ?? 0).toFixed(6)),
+    denoiseNonFinitePixelsReplaced: wavelet ? wavelet.replacedPixels : 0,
     triangleCount: nativeInput.triangleCount,
     adapter: traced.adapter,
     backend: traced.backend,
