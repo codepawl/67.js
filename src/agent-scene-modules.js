@@ -113,6 +113,11 @@ export function needsPhysics(value) {
   return text.includes('"physics":{') || text.includes('"fracture-node"') || text.includes('"type":"settle"');
 }
 
+/** True when a recipe has a body with a float field, so the host passes { buoyancy: true } to loadPhysicsEngine. */
+export function needsBuoyancy(value) {
+  return JSON.stringify(value ?? null).includes('"float":{');
+}
+
 /** Names of the on-demand modules a recipe, or a list of edit operations, needs. */
 export function agentSceneModulesNeeded(value) {
   let text;

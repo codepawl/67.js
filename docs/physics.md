@@ -389,6 +389,27 @@ Rapier is loaded on demand, an optional peer dependency. The MCP runtime serves 
 `scene_inspect` returns a `physics` report: per body the `finalPosition`, `finalSpeed` and `restsAtTime` (null while moving), the `contacts` between bodies with `firstTime`, `count` and `touchingAtEnd`, and the sensor `enter` and `leave` events with times.
 An agent can check that a ball came to rest on a mesh from these numbers, without a picture.
 
+### Floating on the ocean
+
+A crate or a boat can float on the sea that the `ocean` mesh edit draws. Give the section a sea and mark the bodies that float:
+
+```json
+"physics": {
+  "duration": 8,
+  "ocean": { "geometry": "sea", "waterDensity": 1000 },
+  "bodies": [
+    { "node": "crate", "density": 500, "float": { "drag": 2, "angularDrag": 2 } },
+    { "node": "boat", "shape": "convex", "density": 300, "float": { "points": [[-1.5, 0, -0.6], [1.5, 0, -0.6], [-1.5, 0, 0.6], [1.5, 0, 0.6]] } }
+  ]
+}
+```
+
+`ocean.geometry` names a mesh geometry whose stack has an `ocean` node with axis `y`. The body floats on that node's waves (`windSpeed`, `direction`, `choppiness`, `size`, `seed`, `resolution`), read through the same function that moves the drawn vertices, so what the body rides is what the camera sees. The sea clock at physics time 0 is the node's `time`; drive an `oceanTime` track at one second per second to keep the drawn sea in step. `level` is the world height of the calm sea. Leave it out: it then follows the sea as drawn (the node's translation plus its y scale times the mean height of the sheet, so a sheet cut from the top of a unit box drawn at y 2 floats bodies at 2.5). A `level` that differs from the drawn sea by more than 0.05 m is used as given, and `scene_inspect` returns a `warnings` entry in the physics report that names both heights. `waterDensity` is in kg/m3.
+
+Each `float` body carries sample points in body space, 16 at most. Without `points` it gets four, in a 2 x 2 grid across the collider bounds at mid height. Every point owns an equal share of the body's volume as a column as tall as the body. Where the surface stands above the point, the column is submerged by a fraction and the water pushes up at that point with `waterDensity x gravity x volume / points x fraction`. A body lighter than water bobs and rolls; a box of density 500 sinks to half its height. Spread the points over the hull, wide for roll and long for pitch, so the body rights itself when a wave tips it. `drag` and `angularDrag` (1/s, 0 to 100, default 2) damp the linear and angular velocity in proportion to the mean submerged fraction. Only dynamic bodies float, and a float body needs a volume, so trimesh does not work.
+
+The definition form of the same thing is `ocean` on the definition and `float` on a body (`src/physics-buoyancy.js`); the live runtime applies it on every step with the same code, and the bake is identical across runs. The cost is waves x points x frames, capped at 100 million wave evaluations, so a long bake with 16 points and `resolution` 16 is rejected with a message that names the limits. A boat controller and a wake behind a moving hull are not part of this yet ([#982](https://github.com/codepawl/67.js/issues/982)).
+
 ## Fracture and breakable glue
 
 `src/fracture.js` splits a closed convex part (a box, cylinder, sphere or any convex mesh of at most 2048 triangles) into Voronoi fragments and describes the glue that holds them together. A concave part is rejected with a message to split it into convex parts first.
