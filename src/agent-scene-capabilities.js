@@ -198,7 +198,7 @@ export const MESH_BOOLEAN_NOTES = Object.freeze({
 
 export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   format: '67js.scene', schemaVersion: 1,
-  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'sdf', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh']),
+  geometryTypes: Object.freeze(['box', 'cylinder', 'sphere', 'cone', 'icoSphere', 'torus', 'lathe', 'extrude', 'tube', 'curve', 'sdf', 'text', 'grid', 'plane', 'circle', 'line', 'terrain', 'mesh', 'fragment']),
   camera: 'eye, target, up, near, far, then fov (vertical degrees) or focalLength (mm, with sensorWidth mm, 36; not both). projection orthographic with orthoScale (view height in m, default 4). shift [x, y] moves the frame by a fraction of its size. fStop (0.7-64) turns on depth of field focused on target; 1.4 or lower is full blur; effects.depthOfField.blur must stay 0. Orthographic/shifted cameras use the rasterizer.',
   terrain: 'One mesh, x and z from -size/2 to size/2, hills about y = 0. size 40 m (1-2000), resolution 64 cells (2-256), seed 1, amplitude 1 m (0-200), holes up to 16 of {center:[x,z],radius}, no surface inside; radius a few cells or more.',
   placedAssets: 'Node field asset:{id,materials?,clip?,drive?} turns a group node into a catalog GLB (id from asset_catalog). Its transform places it. materials:[{name,color,metallic,roughness,opacity,emission,emissiveColor}] override source materials by name. clip:{index,start=0,speed=1,loop=true} plays that clip from scene time start; set-motion tracks move the node and scene time seeks the clip. drive:{path | legs, cruiseSpeed | speed, wheels, lights} drives a car along a path in the placement frame (docs/vehicle.md). Max 512 placements, 16 assets, 16 animated.',
@@ -227,7 +227,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   operations: Object.freeze([
     'set-node', 'set-material', 'set-camera', 'add-node', 'remove-node',
     'add-geometry', 'remove-geometry', 'add-material', 'remove-material',
-    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'set-game', 'edit-mesh', 'set-mesh-stack', 'bake-motion',
+    'set-environment', 'set-effects', 'set-shadow', 'set-motion', 'set-armatures', 'set-physics', 'set-cloth', 'set-timeline', 'set-particles', 'set-bake', 'set-post-passes', 'set-game', 'edit-mesh', 'set-mesh-stack', 'bake-motion', 'fracture-node',
   ]),
   materialTags: Object.freeze(['surface', 'unlit', 'liquid', 'foam', 'foliage', 'grass', 'water']),
   // A flat water sheet; the largest sets the level. A bed d metres down keeps exp(-absorption * d) per channel (RGB per metre).
@@ -308,9 +308,9 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     shapes: Object.freeze(['box', 'ball', 'capsule', 'convex', 'trimesh']),
     jointTypes: Object.freeze(['spherical', 'revolute', 'prismatic', 'fixed']),
     sensors: true, collisionLayers: 16,
-    breakableJoints: 'fixed joint breakImpulse (N s): breaks when a body takes a contact impulse (force x 1/60 s) over it in one step; scene_inspect lists jointBreaks. fractureMesh in src/fracture.js makes glued fragments (docs/physics.md).',
+    breakableJoints: 'fixed joint breakImpulse (N s): breaks when a body takes a contact impulse (force x 1/60 s) over it in one step; scene_inspect lists jointBreaks. scene_apply fracture-node { node, cells 2-64, strength N s, seed 1, impact [x,y,z] in geometry space, impactRadius, density 1, friction }: replaces a convex root node by cells nodes NAME-frag-i (fragment geometries) with convex bodies and one breakable fixed joint NAME-glue-a-b per neighbour pair; send it after the set-physics that holds the floor, ball and duration (set-physics replaces the section). docs/physics.md.',
     ragdoll: 'physics.ragdoll {armature}: limp capsule per bone; needs a floor',
-    limits: Object.freeze({ maxBodies: 64, maxJoints: 64, maxDuration: 10, framesPerSecond: 60, maxTrimeshTriangles: 20000, maxHullPoints: 2048 }),
+    limits: Object.freeze({ maxBodies: 128, maxJoints: 512, maxDuration: 10, framesPerSecond: 60, maxTrimeshTriangles: 20000, maxHullPoints: 2048 }),
   }),
   // Recipe cloth: a position-based solver (no peer dependency) records any root mesh node as a deformable sheet.
   cloth: Object.freeze({

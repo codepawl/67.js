@@ -108,6 +108,9 @@ function describeOperation(working, operation, maxText) {
     else working[name] = structuredClone(next);
     return { changed: operation[name] === null ? `cleared ${name}` : `set ${name}` };
   }
+  if (type === 'fracture-node') {
+    return { changed: `fractured ${operation.node} into ${operation.cells} pieces with glue` };
+  }
   if (type === 'bake-motion') {
     return { changed: `baked ${shortList(operation.nodes ?? [], maxText)} to keys` };
   }

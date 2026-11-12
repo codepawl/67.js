@@ -492,6 +492,7 @@ const geometry = z.discriminatedUnion('type', [
   z.strictObject({ id: identifier, type: z.literal('icoSphere'), subdivisions: detail(0, 7) }),
   z.strictObject({ id: identifier, type: z.literal('circle'), segments, innerRadius: finite.optional() }).describe('Unit disc facing +Z; innerRadius makes a ring.'),
   z.strictObject({ id: identifier, type: z.literal('line'), from: vector3, to: vector3, radius: finite.optional(), radialSegments: detail(3, 128) }),
+  z.strictObject({ id: identifier, type: z.literal('fragment'), source: identifier, index: z.number().int().min(0).max(63), cells: z.number().int().min(2).max(64), seed: detail(0, 4294967295), impact: vector3.optional(), impactRadius: positive.optional() }).describe('Piece of a fractured geometry; made by fracture-node.'),
   z.strictObject({ id: identifier, type: z.literal('mesh'), base: z.discriminatedUnion('type', primitiveGeometries(false)).describe('Starting shape, converted to welded quads with axis face tags.'), edits: recipeMeshEdits.optional().describe('Replayable edit log, applied in order. Each item has the shape of one mesh_edit edit; read that tool for every op and field.'), stack: recipeMeshStack.optional().describe('Non-destructive modifier stack evaluated after the edits. Each item has the shape of one mesh_stack node; read that tool for the ops.'), smoothAngle: bounded(0, 180).optional().describe('Edges bending more than this many degrees render hard. Defaults to 30.'), shapeKeys: recipeMeshEdits.optional().describe('Named morph targets, at most 16: { name, offsets | edits, value }. See scene_capabilities meshShapeKeys.') }),
 ]);
 // No description: this field repeats in every motion track schema. A wrong name fails with every valid form, and docs/agent-motion.md lists them.
@@ -734,6 +735,10 @@ const otherOperations = [
   z.strictObject({ type: z.literal('set-camera'), ...cameraFields }),
   z.strictObject({ type: z.literal('set-motion'), motion: recipeMotionReference.nullable() }),
   z.strictObject({ type: z.literal('bake-motion'), nodes: z.array(identifier).min(1).max(32), start: nonnegative.optional(), end: nonnegative.optional(), step: positive.optional(), tolerance: z.record(z.string(), z.number()).optional() }),
+  z.strictObject({
+    type: z.literal('fracture-node'), node: identifier, cells: z.number().int().min(2).max(64), strength: positive,
+    seed: detail(0, 4294967295), impact: vector3.optional(), impactRadius: positive.optional(), density: positive.optional(), friction: nonnegative.optional(),
+  }).describe('Break a convex root node into glued physics pieces. Fields: scene_capabilities physics.'),
   z.strictObject({ type: z.literal('set-armatures'), armatures: armaturesReference.nullable() }),
   z.strictObject({ type: z.literal('set-physics'), physics: z.record(z.string(), z.unknown()).nullable().describe('Same object as recipe.physics in scene_create.') }),
   z.strictObject({ type: z.literal('set-cloth'), cloth: z.record(z.string(), z.unknown()).nullable() }),

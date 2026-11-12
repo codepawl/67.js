@@ -464,6 +464,7 @@ const GEOMETRY_FIELDS = {
   text: ['text', 'size', 'depth', 'font', 'align', 'curveSegments'],
   mesh: ['base', 'edits', 'stack', 'smoothAngle', 'shapeKeys'],
   terrain: ['size', 'resolution', 'seed', 'amplitude', 'holes'],
+  fragment: ['source', 'seed', 'cells', 'index', 'impact', 'impactRadius'],
 };
 
 // A line is a two-point curve; both ends must be finite and apart.
@@ -494,7 +495,7 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
     return input.length;
   }
   for (const field of GEOMETRY_FIELDS[value.type]) {
-    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'order', 'knots', 'knotMode', 'trim', 'grow', 'root'].includes(field)) {
+    if (value[field] !== undefined && !['profile', 'contour', 'holes', 'path', 'closed', 'base', 'edits', 'stack', 'shapeKeys', 'points', 'taper', 'text', 'font', 'align', 'from', 'to', 'shape', 'splines', 'kind', 'weights', 'order', 'knots', 'knotMode', 'trim', 'grow', 'root', 'source', 'impact'].includes(field)) {
       finite(value[field], field);
     }
   }
@@ -564,6 +565,8 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
       const beveled = (value.bevel ?? 0) > 0 || (value.bevelThickness ?? value.bevel ?? 0) > 0;
       return 6 * (count + holes.length * 2 - 2) + 6 * count * (detail('steps', 1, 1, 256) + (beveled ? detail('bevelSegments', 3, 1, 32) * 2 : 0));
     }
+    case 'fragment':
+      return fragmentEstimate(value, scope);
     case 'mesh': {
       const base = value.base;
       if (!base || typeof base !== 'object' || Array.isArray(base) || base.type === 'mesh' || Object.hasOwn(base, 'id')) {
@@ -591,6 +594,27 @@ function geometryEstimate(value, scope = PENDING_CUTTER_SCOPE) {
       return estimate * 2;
     }
   }
+}
+
+// One Voronoi piece of the geometry named by `source`. Its size is only bounded by the source, so it is checked against maxVertices once built.
+function fragmentEstimate(value, scope) {
+  if (typeof value.source !== 'string') {
+    throw invalidField('source', value.source, 'the ID of a convex geometry in geometries, such as "wall"', TypeError);
+  }
+  const cells = integer(value.cells, 2, 64, 'cells');
+  integer(value.index, 0, cells - 1, 'index');
+  integer(value.seed ?? 1, 0, 4294967295, 'seed');
+  if (value.impact !== undefined) vector(value.impact, 3, 'impact');
+  if (value.impactRadius !== undefined && !(value.impactRadius > 0)) {
+    throw invalidField('impactRadius', value.impactRadius, 'a distance above 0 in the source local space, such as 0.5');
+  }
+  if (!scope.definitions) return 16 * cells;
+  const source = scope.definitions.get(value.source);
+  if (!source || source.type === 'fragment') {
+    const reason = source ? 'a geometry that is not itself a fragment' : `the ID of a geometry in geometries, one of ${[...scope.definitions.keys()].slice(0, 8).join(', ') || 'none yet'}`;
+    throw invalidField(`geometries.${value.id}.source`, value.source, reason);
+  }
+  return geometryEstimate(source, { definitions: scope.definitions, chain: [] }) + 16 * cells;
 }
 
 function hasInstancedNodes(nodes) {
@@ -660,6 +684,11 @@ function checkedCutterDependencies(meshDefinition, definitions) {
 
 /** Cache identity of a geometry record: its own fields plus the cutter geometries it depends on. */
 function geometrySignature(definition, definitions) {
+  if (definition.type === 'fragment') {
+    // The pieces depend on the source record, so editing the source changes the key. Estimating first rejects a missing or fragment source.
+    geometryEstimate(definition, { definitions, chain: [] });
+    return `${JSON.stringify(definition)}|source|${geometrySignature(definitions.get(definition.source), definitions)}`;
+  }
   const dependencies = definition.type === 'mesh' ? checkedCutterDependencies(definition, definitions) : '';
   return dependencies ? `${JSON.stringify(definition)}|cutters|${dependencies}` : JSON.stringify(definition);
 }
@@ -713,6 +742,12 @@ function generateGeometry(value, maxVertices, scope) {
       return agentSceneModule('text').text(value.text, { ...value, maxVertices });
     case 'terrain':
       return agentSceneModule('terrain').generateTerrainGeometry(value, maxVertices);
+    case 'fragment': {
+      if (!scope) throw invalidField('type', 'fragment', 'a geometry inside a recipe, where its source geometry is found by ID');
+      const source = scope.definitions.get(value.source);
+      return agentSceneModule('fracture').fragmentGeometry(value, geometrySignature(source, scope.definitions),
+        () => generateGeometry(source, maxVertices, { definitions: scope.definitions, chain: [] }));
+    }
     case 'mesh': {
       const cutterScope = meshCutterScope(value, scope);
       const dependencies = scope ? checkedCutterDependencies(value, scope.definitions) : '';
@@ -730,6 +765,17 @@ function generateGeometry(value, maxVertices, scope) {
       });
     }
   }
+}
+
+/** Render geometry of a candidate recipe's geometry by ID, for an operation that needs the real mesh (fracture-node). */
+function generateOperationGeometry(candidate, geometryId, limits) {
+  const definitions = geometryDefinitions(candidate.geometries);
+  const definition = definitions.get(geometryId);
+  if (!definition) {
+    throw invalidField('node', geometryId, `a node whose geometry exists; add the geometry ${geometryId} first`);
+  }
+  geometryEstimate(definition, { definitions, chain: [] });
+  return generateGeometry(definition, Math.min(limits.maxVertices, 1_000_000), { definitions, chain: [] });
 }
 
 function compile(recipe, geometries, localBounds, limits) {
@@ -1442,7 +1488,7 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         const geometry = Object.freeze(generateGeometry(plan.definition, Math.min(limits.maxVertices, 1_000_000), { definitions: definitionsById, chain: [] }));
         const geometryBytes = Object.values(geometry).reduce((total, array) => total + array.byteLength, 0);
         const vertices = geometry.positions.length / 3;
-        if (plan.definition.type === 'mesh') {
+        if (plan.definition.type === 'mesh' || plan.definition.type === 'fragment') {
           // Edits can grow a mesh past its estimate. Undo history never blocks an edit, so release the oldest revisions before refusing.
           while (revisionHistory.length > 0 && residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
             revisionHistory.shift();
@@ -1450,6 +1496,9 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
             residentStats = geometryStats(ownedGeometryRecords());
           }
           if (residentStats.vertices + pendingVertices - plan.estimatedVertices + vertices > limits.maxVertices) {
+            if (plan.definition.type === 'fragment') {
+              throw invalidField(`geometries.${plan.definition.id}`, `${vertices} render vertices`, 'pieces that fit maxVertices across the scene; use fewer cells or a coarser source geometry');
+            }
             throw new RangeError(`Mesh ${plan.definition.id} has ${vertices} render vertices after its edits, which exceeds maxVertices across the scene. Reduce detail or edits.`);
           }
         } else if (vertices > plan.estimatedVertices || geometryBytes > plan.estimatedVertices * (56 + TERRAIN_SKY_VISIBILITY_BYTES)) {
@@ -1907,6 +1956,12 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
         }
         if (operation.type === 'bake-motion') {
           agentSceneModule('motionBake').bakeMotion(candidate, operation, motionBakeSource(state));
+          continue;
+        }
+        if (operation.type === 'fracture-node') {
+          const { id: fracturedId } = candidate.nodes.find(node => node.id === operation.node) ?? {};
+          agentSceneModule('fracture').fractureNode(candidate, operation, geometryId => generateOperationGeometry(candidate, geometryId, limits));
+          if (fracturedId !== undefined) removedNodes.add(fracturedId);
           continue;
         }
         if (operation.type === 'edit-mesh') {

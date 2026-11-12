@@ -11,6 +11,7 @@ const MODULE_LOADERS = {
   motionBake: () => import('./agent-motion-bake.js'),
   drive: () => import('./agent-drive.js'),
   physics: () => import('./agent-physics.js'),
+  fracture: () => import('./agent-fracture.js'),
   cloth: () => import('./agent-cloth.js'),
   particles: () => import('./agent-particles.js'),
   bake: () => import('./agent-bake.js'),
@@ -55,7 +56,8 @@ const MODULE_MARKERS = {
   motion: ['"motion":{', '"bake-motion"'],
   motionBake: ['"bake-motion"'],
   drive: ['"drive":{'],
-  physics: ['"physics":{'],
+  physics: ['"physics":{', '"fracture-node"'],
+  fracture: ['"type":"fragment"', '"fracture-node"'],
   cloth: ['"cloth":{'],
   particles: ['"particles":{'],
   bake: ['"bake":{'],
@@ -103,7 +105,8 @@ export function needsMeshBooleans(value) {
 
 /** True when a recipe or an operation list carries a physics section, so the host loads the solver first. */
 export function needsPhysics(value) {
-  return JSON.stringify(value ?? null).includes('"physics":{');
+  const text = JSON.stringify(value ?? null);
+  return text.includes('"physics":{') || text.includes('"fracture-node"');
 }
 
 /** Names of the on-demand modules a recipe, or a list of edit operations, needs. */

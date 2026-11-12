@@ -380,7 +380,7 @@ Recipe joints also accept `spring` (`restLength`, `stiffness`, `damping`), `moto
 Defaults are `box` for dynamic bodies and sensors, `trimesh` for fixed ones.
 `layer` (0 to 15) and `collidesWith` replace raw bit masks.
 A node cannot have both a physics body and a motion `translation` or `rotation` track.
-Limits: 64 bodies, 64 joints, 10 seconds, 60 steps a second, so at most 601 frames.
+Limits: 128 bodies, 512 joints, 10 seconds, 60 steps a second, so at most 601 frames.
 
 The bake runs once, when the scene is created or the section changes, and is reused while the section and the geometry stay the same.
 After that the scene treats physics like motion: `sampleMotion(time)` and the MCP `motionTime` read the recording, so a seek back gives the same matrices. A time past `duration` holds the last pose, and `null` restores the authored pose.
@@ -410,7 +410,33 @@ const parts = fragmentPhysics(fracture, { translation: [0, 2, 0], strength: 20, 
 
 `fragmentPhysics` turns that into bodies, convex hull colliders and one fixed joint per neighbouring pair, each with `breakImpulse: strength`. A fixed joint takes `breakImpulse` (N s, above 0): in the bake the joint is removed on the first step in which either of its bodies takes a contact impulse (contact force times the timestep) at or above it. A body resting under its own weight takes about `mass * 9.81 / 60`, so a strength above that holds a structure up and a ball or a falling slab below it breaks the glue. All the joints of a hit fragment that are weaker than the hit break together; the rest of the structure stays glued. `recording.jointBreaks` lists `{ frame, joint, impulse }`. Recipes take `breakImpulse` on a fixed `physics.joints` entry, and `scene_inspect` reports `jointBreaks`.
 
-Not yet: reaching `fractureMesh` from a recipe or the MCP tool without writing the fragments out as nodes, clusters that break as one, and breaking in the live runtime (glue joints there never break).
+### Fracture from a recipe or the MCP tool
+
+`scene_apply` (and `apply` on a scene) takes a `fracture-node` operation, so an agent breaks a part without code:
+
+```json
+[
+  { "type": "set-physics", "physics": { "duration": 2, "bodies": [
+    { "node": "floor", "type": "fixed", "shape": "box" },
+    { "node": "ball", "shape": "ball", "density": 400, "velocity": [0, 0.5, -14] } ] } },
+  { "type": "fracture-node", "node": "wall", "seed": 7, "cells": 24, "strength": 5, "impact": [0, 0, 0.2], "impactRadius": 0.5 }
+]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `node` | A root mesh node with a convex geometry (a box, cylinder, sphere or convex mesh of at most 2048 triangles), no children and no motion track. |
+| `cells` | 2 to 64 pieces. |
+| `strength` | Glue strength in N s, above 0: a piece hit harder than this in one 1/60 s step loses its glue (see `breakImpulse`). |
+| `seed`, `impact`, `impactRadius` | As for `fractureMesh`; `impact` is in the node's geometry space, before the node scale. |
+| `density`, `friction` | Optional, passed to every piece body (density default 1). |
+
+The operation replaces the node by `cells` nodes named `<node>-frag-<i>` with the same transform and material, adds one `fragment` geometry per piece, one dynamic `convex` body per piece to `physics`, and one fixed joint `<node>-glue-<a>-<b>` per neighbouring pair with `breakImpulse: strength`. Without a physics section it creates one of 3 seconds. Set the ball, floor and duration first in a `set-physics` in the same batch (it replaces the section, so a later `set-physics` drops the pieces). 128 bodies and 512 joints are the limits; a part that needs more glue joints is rejected with a message to use fewer cells.
+
+A `fragment` geometry is `{ id, type: "fragment", source, index, cells, seed, impact?, impactRadius? }`: piece `index` of the fracture of the geometry `source`, in its local space. The same recipe gives the same bytes, and the cache key includes the source geometry, so editing the source regenerates every piece. Fragments are not nested: `source` must not be a fragment.
+`scene_inspect` lists the broken glue as `physics.jointBreaks` with the time of each break. The inside faces are material slot 1 of the geometry (`fractureMesh` returns the group ranges); recipe nodes carry one material, so pieces show it on both sides.
+
+Not yet: clusters that break as one, and breaking in the live runtime (glue joints there never break).
 
 ## Recipe ragdoll
 
