@@ -1,6 +1,7 @@
+#!/usr/bin/env node
 // Checks a folder against the 67js third-party addon contract (docs/addons.md).
-// Usage: node scripts/addon-check.mjs <addon-folder> [--version <67js version>]
-import { existsSync, readFileSync, statSync } from 'node:fs';
+// Usage: npx 67js-addon-check <addon-folder> [--version <67js version>]
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -156,7 +157,7 @@ function main(argumentsList) {
   const valueIndex = versionIndex >= 0 ? versionIndex + 1 : -1;
   const folder = argumentsList.find((value, index) => !value.startsWith('--') && index !== valueIndex);
   if (!folder) {
-    console.error('Pass the addon package folder: node scripts/addon-check.mjs <addon-folder> [--version <67js version>]');
+    console.error('Pass the addon package folder: npx 67js-addon-check <addon-folder> [--version <67js version>]');
     return 2;
   }
   const { errors, warnings } = checkAddon(resolve(folder), { version });
@@ -166,4 +167,5 @@ function main(argumentsList) {
   return errors.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+// npm links bin entries through a symlink or shim, so compare real paths to know this file is the program.
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) process.exitCode = main(process.argv.slice(2));

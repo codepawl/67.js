@@ -50,7 +50,7 @@ Copy [templates/addon-starter](https://github.com/codepawl/67.js/tree/main/templ
 Run your own tests with `@codepawlhq/67js` installed as a dev dependency next to the peer entry. Then check the contract:
 
 ```sh
-node node_modules/@codepawlhq/67js/scripts/addon-check.mjs . --version 0.19.0
+npx 67js-addon-check . --version 0.19.0
 ```
 
 The check says what failed and what to pass instead. It tests the keyword, the peer dependency, the license, the `67js` field, the entry size, and that the range allows the version you pass.

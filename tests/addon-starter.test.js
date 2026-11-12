@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { checkAddon, parseRange, rangeAllows } from '../scripts/addon-check.mjs';
+import { checkAddon, parseRange, rangeAllows } from '../bin/67js-addon-check.mjs';
 import { VERSION } from '../src/version.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -88,7 +88,7 @@ test('a range that excludes the running version and an oversized entry are refus
 test('the command line exits non-zero for a folder that breaks the contract', () => {
   const folder = copyStarter(pack => { pack.keywords = []; });
   try {
-    const result = spawnSync(process.execPath, [join(root, 'scripts', 'addon-check.mjs'), folder], { encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [join(root, 'bin', '67js-addon-check.mjs'), folder], { encoding: 'utf8' });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /error: /);
   } finally {
