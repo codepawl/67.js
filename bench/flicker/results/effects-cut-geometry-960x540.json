@@ -1,0 +1,242 @@
+[
+ {
+  "trap": "plaque-2m",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 108,
+  "stagedDiff": 110
+ },
+ {
+  "trap": "plaque-2m",
+  "effect": "dof",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 108,
+  "stagedDiff": 17
+ },
+ {
+  "trap": "plaque-2m",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 103,
+  "plainDiff": 108,
+  "stagedDiff": 469
+ },
+ {
+  "trap": "plaque-20m",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 94,
+  "stagedDiff": 97
+ },
+ {
+  "trap": "plaque-20m",
+  "effect": "dof",
+  "spuriousFlushOn": 1358,
+  "spuriousReference": 1369,
+  "plainDiff": 94,
+  "stagedDiff": 99
+ },
+ {
+  "trap": "plaque-20m",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 83,
+  "plainDiff": 94,
+  "stagedDiff": 279
+ },
+ {
+  "trap": "stack-30-exact",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 2744,
+  "stagedDiff": 2769
+ },
+ {
+  "trap": "stack-30-exact",
+  "effect": "dof",
+  "spuriousFlushOn": 2198,
+  "spuriousReference": 2198,
+  "plainDiff": 2744,
+  "stagedDiff": 1469
+ },
+ {
+  "trap": "stack-30-exact",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 2744,
+  "stagedDiff": 7056
+ },
+ {
+  "trap": "panel-15mm-176m",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "panel-15mm-176m",
+  "effect": "dof",
+  "spuriousFlushOn": 1542,
+  "spuriousReference": 1542,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "panel-15mm-176m",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "walls-16mm-1km-5deg",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "walls-16mm-1km-5deg",
+  "effect": "dof",
+  "spuriousFlushOn": 60,
+  "spuriousReference": 60,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "walls-16mm-1km-5deg",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "decal-grazing-2deg",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "decal-grazing-2deg",
+  "effect": "dof",
+  "spuriousFlushOn": 2375,
+  "spuriousReference": 2375,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "decal-grazing-2deg",
+  "effect": "lines",
+  "spuriousFlushOn": 6,
+  "spuriousReference": 6,
+  "plainDiff": 0,
+  "stagedDiff": 0
+ },
+ {
+  "trap": "plaque-200m",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 11,
+  "stagedDiff": 11
+ },
+ {
+  "trap": "plaque-200m",
+  "effect": "dof",
+  "spuriousFlushOn": 72,
+  "spuriousReference": 77,
+  "plainDiff": 11,
+  "stagedDiff": 14
+ },
+ {
+  "trap": "plaque-200m",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 11,
+  "stagedDiff": 10
+ },
+ {
+  "trap": "kitbash-duplicates",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 68191,
+  "stagedDiff": 68198
+ },
+ {
+  "trap": "kitbash-duplicates",
+  "effect": "dof",
+  "spuriousFlushOn": 1516,
+  "spuriousReference": 2011,
+  "plainDiff": 68191,
+  "stagedDiff": 71504
+ },
+ {
+  "trap": "kitbash-duplicates",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 68191,
+  "stagedDiff": 68235
+ },
+ {
+  "trap": "instanced-flush",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 241,
+  "stagedDiff": 241
+ },
+ {
+  "trap": "instanced-flush",
+  "effect": "dof",
+  "spuriousFlushOn": 2785,
+  "spuriousReference": 2786,
+  "plainDiff": 241,
+  "stagedDiff": 244
+ },
+ {
+  "trap": "instanced-flush",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 241,
+  "stagedDiff": 335
+ },
+ {
+  "trap": "plaque-closeup-0.5m",
+  "effect": "ao",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 58405,
+  "stagedDiff": 58405
+ },
+ {
+  "trap": "plaque-closeup-0.5m",
+  "effect": "dof",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 0,
+  "plainDiff": 58405,
+  "stagedDiff": 58477
+ },
+ {
+  "trap": "plaque-closeup-0.5m",
+  "effect": "lines",
+  "spuriousFlushOn": 0,
+  "spuriousReference": 11,
+  "plainDiff": 58405,
+  "stagedDiff": 60128
+ }
+]

@@ -91,11 +91,11 @@ Các recipe nằm ở cuối file (A1 đến A9). Mỗi recipe đã chạy qua `
 - Nhìn: test báo pass. Nạp một GLB dùng `KHR_materials_pbrSpecularGlossiness` bằng `scene_create_asset` thì `warnings` có dòng "converted to metallic-roughness".
 - Đạt: file nạp được, có warning và không báo lỗi. Trượt: nạp file bị throw.
 
-## 12. Depth MSAA 16 bit (#387)
+## 12. Depth MSAA 24 bit (#387)
 
 - Mở: `https://67js.codepawl.com/object.html`, hoặc `http://127.0.0.1:5173/object.html` khi chạy local. Mở Console và chạy `__studio.renderer.renderTargets.report()`.
-- Nhìn: trong `targets`, mục `multisampleDepth` có `format` `DEPTH_COMPONENT16` và `samples` 4.
-- Đạt: thấy `DEPTH_COMPONENT16` và ảnh bình thường. Trượt: `multisampleDepth` vẫn dùng `DEPTH_COMPONENT24`.
+- Nhìn: trong `targets`, mục `multisampleDepth` có `format` `DEPTH_COMPONENT24` và `samples` 4.
+- Đạt: thấy `DEPTH_COMPONENT24` và ảnh bình thường. Trượt: `multisampleDepth` dùng `DEPTH_COMPONENT16`.
 
 ## Recipe
 

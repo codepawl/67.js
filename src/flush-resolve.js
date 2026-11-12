@@ -13,7 +13,7 @@ const CACHED_ORDERS_PER_GEOMETRY = 8;
 // A face this close in front of another, facing the same way, is cut like a flush one. Seen at a grazing angle, the cut
 // can open a strip no wider than the gap at the front face's edge: a thousandth of the shared face, never less than a
 // millimetre and never more than a centimetre, does not show. A wider gap, such as a sign standing off a wall, is ranked
-// instead. Without the cut, assets built as stacked blocks nest facades a few millimetres apart deeper than the 15 ranks
+// instead. Without the cut, assets built as stacked blocks nest facades a few millimetres apart deeper than the 16 ranks
 // (the Melbourne city model nests 17).
 const NEAR_FLUSH_CUT_GAP_SHARE = 1e-3;
 const NEAR_FLUSH_CUT_MINIMUM_GAP = 1e-3;
