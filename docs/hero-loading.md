@@ -4,8 +4,8 @@ The hero on the home page plays a flight over the Port showcase world. The world
 
 ## Order of the files
 
-1. The poster image loads. Nothing else competes with it.
-2. When the poster has settled (or after 5 s), `index.html` starts the first view: `scene.json`, `scene.first.glb` (about 2 MB) and `sky.preview.hdr` (256 by 128, 131 KB, a block average of the full `sky.hdr` at the same orientation; exposure, tone mapping, sun, fog and sky intensity come from the same `scene.json` for both, so only the sky's detail differs at the swap. Make it with `node scripts/downsample-hdr.mjs <sky.hdr> <sky.preview.hdr> 256 128`; the Fast 4G first frame budget keeps it under 150 KB).
+1. The poster image (49 KB, 15 KB on a phone, `fetchpriority="high"`) and the first view start together. The poster is the largest contentful paint and the first view is small enough not to starve it; only the 9.7 MB full world waits for something else (step 3).
+2. The inline script of `index.html` starts the first view as the head is parsed, without waiting for the poster: `scene.json`, `scene.first.glb` (about 2 MB) and `sky.preview.hdr` (256 by 128, 131 KB, a block average of the full `sky.hdr` at the same orientation; exposure, tone mapping, sun, fog and sky intensity come from the same `scene.json` for both, so only the sky's detail differs at the swap. Make it with `node scripts/downsample-hdr.mjs <sky.hdr> <sky.preview.hdr> 256 128`; the Fast 4G first frame budget keeps it under 150 KB).
 3. When those have settled, it starts the full world: `scene.glb`, `scene.rest.glb` and `sky.hdr`.
 4. `fetchWorld(url, { firstView: true })` in `src/hero-lab/loop/world.js` resolves as soon as the first view is in. It holds a `detail` promise for the full world.
 5. The world is built from the first view and draws. `completeDetail` (`src/hero-lab/loop/detail.js`) then waits for `detail`, parses it and calls `world.upgrade(detail)`. The upgrade uploads the textures and the sky while the first view keeps drawing. Only the swap itself (the sky prefilter, one `replaceParts` and a prepared draw) holds the draws: about 140 ms on a desktop and a phone viewport (`swapHeldMs` of `scripts/measure-hero-load.mjs`, GPU shared with other jobs). Feeding `replaceParts` in slices was tried and doubled the hold (swap 0.8 s to 1.5 s) without shortening the longest gap between frames (about 110 ms either way).
@@ -38,9 +38,10 @@ The chip fab is the one world with an animation clip: engineers walk, hoist vehi
 
 ```sh
 npx vite build --outDir <folder>
-node scripts/measure-hero-load.mjs --dist <folder> --label <name> --runs 3
+node scripts/measure-hero-load.mjs --dist <folder> --label <name> --runs 3 [--cpu 4]
+node scripts/measure-hero-load.mjs --origin https://67js.codepawl.com --label live --runs 3
 node scripts/measure-hero-load.mjs --dist <folder> --stills <directory>
 node scripts/measure-hero-load.mjs --dist <folder> --video <file.mp4>
 ```
 
-It serves the folder with brotli and throttles through the DevTools protocol (Fast 4G, 1.6 Mbit/s with 150 ms round trip, unthrottled), on a desktop and a phone viewport. Network times do not depend on the GPU load; frame times do. `--stills` scores the first view against the full world at the same pose with PSNR.
+It serves the folder with brotli and throttles through the DevTools protocol (Fast 4G, 1.6 Mbit/s with 150 ms round trip, unthrottled), on a desktop and a phone viewport. `--cpu 4` slows the CPU four times through the DevTools protocol (emulated, not a slow phone); the output has the largest contentful paint (`lcpMs`) and the layout shift beside the first frame. `CHROME_PATH` and `HERO_CHROME_ARGUMENTS` set the browser for a container. Network times do not depend on the GPU load; frame times do. `--stills` scores the first view against the full world at the same pose with PSNR.

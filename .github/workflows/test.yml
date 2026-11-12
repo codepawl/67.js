@@ -64,7 +64,7 @@ jobs:
       - run: npm run tool-cost -- --base "$SIZE_BASE_REF"
 
   # `node --test` already runs every file in its own process (Node 24 default, --test-isolation=process), so one pass over
-  # the files is also the isolation check. Twelve shards balanced by measured time (scripts/shard-test-files.mjs). The light bake tests are heavy, so one shard of three took twice as long as the others.
+  # the files is also the isolation check. Twelve shards dealt by measured file time (scripts/shard-test-files.mjs, test-timings.json). The slowest file (about 150 s) is the floor that more shards approach. Change the matrix and the count in the test command together; tests/shard-test-files.test.js checks they agree.
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15

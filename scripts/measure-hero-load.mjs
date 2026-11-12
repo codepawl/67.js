@@ -2,6 +2,8 @@
 //
 //   node scripts/measure-hero-load.mjs --dist <built site folder> [--label name] [--runs 3] [--conditions fast4g,slow,none]
 //        [--viewports desktop,phone] [--out directory]
+//        [--cpu 4]            CPU slowdown factor (emulated by the DevTools protocol, not a slow device)
+//        [--origin <url>]     measure a deployed site instead of serving --dist (it then needs no folder)
 //   node scripts/measure-hero-load.mjs --dist <folder> --stills <directory>      stills before and after the swap, with PSNR
 //   node scripts/measure-hero-load.mjs --dist <folder> --video <file.mp4>        CDP screencast of the first 8 s on Fast 4G
 //
@@ -20,8 +22,9 @@ import { spawnSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import sharp from 'sharp';
 
-const CHROME_PATH = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const GPU_ARGUMENTS = ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'];
+// CHROME_PATH and HERO_CHROME_ARGUMENTS (space separated) override these, for a container with Vulkan instead of Direct3D.
+const CHROME_PATH = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const GPU_ARGUMENTS = process.env.HERO_CHROME_ARGUMENTS ? process.env.HERO_CHROME_ARGUMENTS.split(' ') : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'];
 const FIRST_FRAME_MARKER = 'hero-first-world-draw';
 const CONDITIONS = {
   fast4g: { label: 'Fast 4G', downloadBitsPerSecond: 9e6, uploadBitsPerSecond: 1.5e6, latency: 60 },
@@ -36,7 +39,7 @@ const CONTENT_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 
 const TEXT_TYPES = new Set(['.html', '.js', '.css', '.json', '.svg']);
 
 function parseArguments(argv) {
-  const options = { dist: null, label: 'build', runs: 3, conditions: ['fast4g', 'slow', 'none'], viewports: ['desktop', 'phone'], out: null, stills: null, video: null, timeoutSeconds: 120 };
+  const options = { dist: null, label: 'build', runs: 3, conditions: ['fast4g', 'slow', 'none'], viewports: ['desktop', 'phone'], out: null, cpu: 1, remoteOrigin: null, stills: null, video: null, timeoutSeconds: 120 };
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     const value = () => argv[++index];
@@ -45,12 +48,15 @@ function parseArguments(argv) {
     else if (flag === '--runs') options.runs = Number(value());
     else if (flag === '--conditions') options.conditions = value().split(',');
     else if (flag === '--viewports') options.viewports = value().split(',');
+    else if (flag === '--cpu') options.cpu = Number(value());
+    else if (flag === '--origin') options.remoteOrigin = value().replace(/[/]$/, '');
     else if (flag === '--out') options.out = resolve(value());
     else if (flag === '--stills') options.stills = resolve(value());
     else if (flag === '--video') options.video = resolve(value());
     else if (flag === '--timeout') options.timeoutSeconds = Number(value());
     else throw new Error(`Unknown argument ${flag}.`);
   }
+  if (!options.dist && options.remoteOrigin) return options;
   if (!options.dist || !existsSync(join(options.dist, 'index.html'))) throw new Error('Pass --dist <folder with index.html>.');
   return options;
 }
@@ -88,6 +94,14 @@ async function startServer(root) {
 // first live 3D frame a visitor sees. The poster fades out only after that.
 function installFrameTimer(marker) {
   window.__firstWorldDraw = null;
+  window.__largestContentfulPaint = null;
+  new PerformanceObserver(list => {
+    for (const entry of list.getEntries()) window.__largestContentfulPaint = entry.startTime;
+  }).observe({ type: 'largest-contentful-paint', buffered: true });
+  window.__layoutShift = 0;
+  new PerformanceObserver(list => {
+    for (const entry of list.getEntries()) if (!entry.hadRecentInput) window.__layoutShift += entry.value;
+  }).observe({ type: 'layout-shift', buffered: true });
   // Gaps between animation frames over 50 ms: the main thread was blocked. The swap to the full world should leave none that is long.
   window.__frameGaps = [];
   let previousFrameAt = performance.now();
@@ -105,12 +119,13 @@ function installFrameTimer(marker) {
   }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-live'] });
 }
 
-async function openPage(browser, viewport, condition) {
+async function openPage(browser, viewport, condition, cpuSlowdown = 1) {
   const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: viewport.deviceScaleFactor, isMobile: viewport.isMobile });
   const page = await context.newPage();
   const session = await context.newCDPSession(page);
   await session.send('Network.enable');
   await session.send('Network.setCacheDisabled', { cacheDisabled: true });
+  if (cpuSlowdown > 1) await session.send('Emulation.setCPUThrottlingRate', { rate: cpuSlowdown });
   if (condition.downloadBitsPerSecond > 0) {
     await session.send('Network.emulateNetworkConditions', {
       offline: false,
@@ -144,7 +159,7 @@ function bytesAt(state, milliseconds) {
 
 async function measureOnce(browser, options, viewportName, conditionName) {
   const condition = CONDITIONS[conditionName];
-  const { context, page, session } = await openPage(browser, VIEWPORTS[viewportName], condition);
+  const { context, page, session } = await openPage(browser, VIEWPORTS[viewportName], condition, options.cpu);
   const bytes = watchBytes(session, page);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -155,7 +170,7 @@ async function measureOnce(browser, options, viewportName, conditionName) {
     const failed = events.find(event => event.kind === 'failed');
     const swapEnd = detailed?.at ?? Infinity;
     const swapGaps = (window.__frameGaps ?? []).filter(([at, gap]) => at + gap > swapEnd - (detailed?.ms ?? 0) - 100 && at < swapEnd + 100);
-    return { first: window.__firstWorldDraw, detailed: detailed?.at ?? null, swapMs: detailed?.ms ?? null, swapHeldMs: (window.__phases ?? []).filter(phase => phase[0] === "swap").reduce((total, phase) => total + phase[3] - phase[2], 0), swapLongestGapMs: swapGaps.length ? Math.max(...swapGaps.map(([, gap]) => gap)) : 0, failed: failed?.message ?? null, state: window.__loop?.detail?.() ?? null, mode: window.__heroMode };
+    return { lcp: window.__largestContentfulPaint, layoutShift: window.__layoutShift, first: window.__firstWorldDraw, detailed: detailed?.at ?? null, swapMs: detailed?.ms ?? null, swapHeldMs: (window.__phases ?? []).filter(phase => phase[0] === "swap").reduce((total, phase) => total + phase[3] - phase[2], 0), swapLongestGapMs: swapGaps.length ? Math.max(...swapGaps.map(([, gap]) => gap)) : 0, failed: failed?.message ?? null, state: window.__loop?.detail?.() ?? null, mode: window.__heroMode };
   });
   const deadline = Date.now() + options.timeoutSeconds * 1000;
   let status = await finished();
@@ -174,6 +189,8 @@ async function measureOnce(browser, options, viewportName, conditionName) {
     condition: condition.label,
     mode: status.mode,
     posterEndMs: poster,
+    lcpMs: status.lcp === null ? null : Math.round(status.lcp),
+    layoutShift: Number(status.layoutShift.toFixed(4)),
     firstFrameMs,
     detailMs,
     swapMs: status.swapMs,
@@ -204,7 +221,10 @@ async function runMatrix(browser, options) {
         condition: CONDITIONS[conditionName].label,
         mode: runs[0].mode,
         runs: runs.length,
+        cpuSlowdown: options.cpu,
         posterEndMs: median(runs.map(run => run.posterEndMs)),
+        lcpMs: median(runs.map(run => run.lcpMs)),
+        layoutShift: median(runs.map(run => run.layoutShift)),
         firstFrameMs: median(runs.map(run => run.firstFrameMs)),
         firstFrameRangeMs: [Math.min(...runs.map(run => run.firstFrameMs ?? Infinity)), Math.max(...runs.map(run => run.firstFrameMs ?? 0))],
         detailMs: median(runs.map(run => run.detailMs)),
@@ -301,7 +321,7 @@ async function recordVideo(browser, options) {
 }
 
 const options = parseArguments(process.argv.slice(2));
-const { server, origin } = await startServer(options.dist);
+const { server, origin } = options.remoteOrigin ? { server: null, origin: options.remoteOrigin } : await startServer(options.dist);
 options.origin = origin;
 const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true, args: GPU_ARGUMENTS });
 try {
@@ -310,5 +330,5 @@ try {
   else await runMatrix(browser, options);
 } finally {
   await browser.close();
-  server.close();
+  server?.close();
 }

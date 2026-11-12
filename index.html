@@ -17,8 +17,8 @@
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="canonical" href="https://67js.codepawl.com/" />
     <script id="hero-mode">
-      // Decides how the home hero loads before the page body parses, so a visitor's first world starts downloading the moment the poster
-      // has arrived, before the scripts are ready, and a visitor on a light connection downloads no 3D at all. hero-loop.js reads window.__heroMode: 'live', 'deferred' (a phone,
+      // Decides how the home hero loads before the page body parses, so a visitor's first world starts downloading with the page, in
+      // parallel with the poster and before the scripts are ready, and a visitor on a light connection downloads no 3D at all. hero-loop.js reads window.__heroMode: 'live', 'deferred' (a phone,
       // starts after the poster and an idle moment) or 'poster' (no 3D until the visitor presses Play live 3D).
       (function () {
         var connection = navigator.connection || {};
@@ -33,17 +33,14 @@
         // ?scout=1 builds one world on request and never runs the loop, so nothing is prefetched for it.
         if (mode !== 'live' || query.has('scout')) return;
         // Plain fetches, not <link rel=preload>: a preload that fetch() should have reused failed now and then, with no error to read.
-        // They start when the poster has loaded (or after POSTER_WAIT_MS if it has not): on a slow link, 12 MB of world files started
-        // ahead of the poster delayed the poster by several seconds. hero-lab/loop/world.js waits for window.__heroPrefetchReady, takes
-        // these promises by URL and falls back to its own request when one is missing or failed.
-        var POSTER_WAIT_MS = 5000;
+        // They start with the page, beside the poster (49 KB, 15 KB on a phone): only the 2 MB first view starts now and the 9.7 MB full
+        // world waits for it, so the poster is not starved the way 12 MB of world files started at once once starved it.
+        // hero-lab/loop/world.js waits for window.__heroPrefetchReady, takes these promises by URL and falls back to its own request when
+        // one is missing or failed.
         var prefetched = window.__heroPrefetch = {};
-        var started = false;
         var releaseReady;
         window.__heroPrefetchReady = new Promise(function (resolve) { releaseReady = resolve; });
         function startPrefetch() {
-          if (started) return;
-          started = true;
           // The first view (a small copy of the whole world) goes first and the full world's files start when those have settled, so
           // the first 3D frame does not wait for the full 9 MB. The promises exist at once; world.js takes them by URL.
           var firstViewFiles = ['/showcase/port/scene.json', '/showcase/port/scene.first.glb', '/showcase/port/sky.preview.hdr'];
@@ -61,9 +58,7 @@
           firstViewFiles.concat(fullWorldFiles).forEach(function (href) { prefetched[href].catch(function () {}); });
           releaseReady();
         }
-        // The poster <img> calls this from its load and error events.
-        window.__heroPosterSettled = startPrefetch;
-        setTimeout(startPrefetch, POSTER_WAIT_MS);
+        startPrefetch();
       })();
     </script>
     <title>67js · 3D engine that AI agents drive</title>
@@ -81,7 +76,7 @@
     </header>
     <section id="hero" class="hero-loop" data-scene="port" aria-label="67js introduction and live preview">
       <div class="stage" id="stage" tabindex="-1" role="img" aria-label="A live 3D scene: Container port">
-        <picture><source media="(max-width: 700px)" srcset="/hero-lab/poster-b-port-mobile.webp" /><img class="poster" id="poster" src="/hero-lab/poster-b-port.webp" alt="" width="1440" height="900" fetchpriority="high" onload="window.__heroPosterSettled&&window.__heroPosterSettled()" onerror="window.__heroPosterSettled&&window.__heroPosterSettled()" /></picture>
+        <picture><source media="(max-width: 700px)" srcset="/hero-lab/poster-b-port-mobile.webp" /><img class="poster" id="poster" src="/hero-lab/poster-b-port.webp" alt="" width="1440" height="900" fetchpriority="high" /></picture>
       </div>
       <div class="copy">
         <h1>3D engine that<br />AI agents drive</h1>
