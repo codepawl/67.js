@@ -69,8 +69,30 @@ bash packages/blender-addon/tests/run-checks.sh 256
 
 `run-checks.sh` renders two fixture scenes (`tests/scene_fixtures.py`) with Cycles (OptiX) and with Cook at the same samples (256), 8 bounces, box filter of width 1, no denoiser and no clamping, and compares them with the repository's [`compare.py`](../bench/cycles-parity/compare.py) gates: the mean ratio of each channel within 2 percent and every 8x8 tile within 5 percent. It writes `artifacts/900/cook-blender-addon-900.jpg`.
 
-The Classroom demo scene goes through the same scene reading with `bash bench/cycles-parity/run-classroom-parity.sh` (see the Classroom section of [cycles-parity.md](./cycles-parity.md)).
+`bash packages/blender-addon/tests/run-classroom-check.sh` renders the Classroom demo through the add-on engine, then runs `bench/cycles-parity/run-classroom-parity.sh`, which reads the scene with the same code (see the Classroom section of [cycles-parity.md](./cycles-parity.md)).
 
 ## Results
 
-RESULTS_PLACEHOLDER
+Measured on one machine (RTX 4090, Blender 5.3.0, Cycles OptiX, Cook through this add-on), 480 x 270, 256 samples, 8 bounces, box filter of width 1, no denoiser, seed 1, per-channel mean ratio Cook over Cycles and the 8x8 tile ratios of `compare.py`. The gates are 0.98 to 1.02 for the channel means and 0.95 to 1.05 for every tile.
+
+| Scene | Channel mean ratio (R, G, B) | Tile ratio range | Gates |
+| --- | --- | --- | --- |
+| `small`: floor with an image on Base Color, three objects sharing one mesh, an emissive cube, a sun, a point light, a constant world | 1.0003, 1.0002, 1.0002 | 0.9991 to 1.0025 | pass |
+| `hdri`: the same objects lit by an environment image with a broad warm lobe | 0.9975, 0.9973, 0.9968 | 0.9961 to 0.9998 | pass |
+| `maps`: `small` with images on Roughness, Normal and Alpha | 1.0136, 1.0067, 1.0066 | 0.9753 to 1.1682 | means pass, tiles fail (60 of 64 within 5 percent) |
+| `hdri-patch`: `hdri` with the lobe replaced by a patch of 8 x 6 pixels at 30 to 20 times the sky | 0.9042, 0.9170, 0.9674 | 0.7906 to 0.9976 | fail |
+
+The picture `docs/cook-blender-addon-900.jpg` shows `small` and `hdri`, Cycles on the left and Cook on the right.
+
+What the failures are, as far as measured:
+
+- `maps`: the failing tiles are on the three balls, which carry the normal map. The bump shading is close but not the same; the roughness ramp and the alpha cutout match. The cause is not isolated: it may be this add-on's normal map export or the kernel's normal map handling `[open]`.
+- `hdri-patch`: the add-on writes the same kind of file for this map as for `hdri`, which passes, so the gap follows the small bright source and not the export `[inferred]`. Cook is 9.6 percent darker in red over the frame, and up to 35 percent darker on the worst floor tiles.
+
+The Cook render call includes starting Node, packing and the device set-up; it took 0.6 to 1.0 s here (Cycles' render call took 0.4 to 0.6 s). `maps` took 15.5 s on its first run and 1.0 s on the rerun, so the first run paid a one-time cost `[cause not found]`. These are single runs, not a speed comparison.
+
+Classroom (the Blender demo scene, CC0), 960 x 540:
+
+- Through the add-on engine with the scene's real materials, 128 samples: it exports (914 parts over 241 geometries, 431,109 unique triangles, 79 materials) and renders. The render log carries a note for 60 materials, mostly a surface that is a Mix Shader, Glossy, Glass or node group (replaced by the viewport colour as a diffuse material), or a Mix, Curve or Hue node on Base Color (replaced by the constant). It does **not** match Cycles: channel mean ratio 0.40, 0.41, 0.38 and 1 of 64 tiles within 5 percent. That is expected with so many approximated materials; the likely main cause is that the window glass and the daylight portal become opaque diffuse surfaces, because the add-on has no glass or portal fallback yet (the Classroom bridge hides glass instead) `[inferred, not isolated]`.
+- Through the Classroom parity driver, grey diffuse everywhere, 256 samples, which now reads the scene with the same code as the add-on: channel mean ratio 0.9996 on all three channels, 64 of 64 tiles within 5 percent (0.978 to 1.028), FLIP within its ceiling, depth agreement at 1 percent on 99.849 percent of pixels. The depth gate (99.9 percent) fails by 783 pixels, all on edges (none in the interior). The measurement of 99.939 percent in the section "Classroom scene against Cycles" was taken before other changes on `main`. The scene file the bridge exports is identical before and after this change in every section (camera, environment, world, materials, images, parts, geometries) `[measured by comparing the two exports]`, so the depth difference does not come from moving the code `[open: not investigated further]`.
+
