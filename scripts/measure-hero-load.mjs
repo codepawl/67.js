@@ -3,6 +3,7 @@
 //   node scripts/measure-hero-load.mjs --dist <built site folder> [--label name] [--runs 3] [--conditions fast4g,slow,none]
 //        [--viewports desktop,phone] [--out directory]
 //        [--cpu 4]            CPU slowdown factor (emulated by the DevTools protocol, not a slow device)
+//        [--watch-seconds N]  keep each page open N seconds after the swap (the loop changes worlds) and report the main-thread tasks over 50 ms after first paint
 //        [--origin <url>]     measure a deployed site instead of serving --dist (it then needs no folder)
 //   node scripts/measure-hero-load.mjs --dist <folder> --stills <directory>      stills before and after the swap, with PSNR
 //   node scripts/measure-hero-load.mjs --dist <folder> --video <file.mp4>        CDP screencast of the first 8 s on Fast 4G
@@ -39,7 +40,7 @@ const CONTENT_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 
 const TEXT_TYPES = new Set(['.html', '.js', '.css', '.json', '.svg']);
 
 function parseArguments(argv) {
-  const options = { dist: null, label: 'build', runs: 3, conditions: ['fast4g', 'slow', 'none'], viewports: ['desktop', 'phone'], out: null, cpu: 1, remoteOrigin: null, stills: null, video: null, timeoutSeconds: 120 };
+  const options = { dist: null, label: 'build', runs: 3, conditions: ['fast4g', 'slow', 'none'], viewports: ['desktop', 'phone'], out: null, cpu: 1, remoteOrigin: null, stills: null, video: null, timeoutSeconds: 120, watchSeconds: 0 };
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     const value = () => argv[++index];
@@ -54,6 +55,7 @@ function parseArguments(argv) {
     else if (flag === '--stills') options.stills = resolve(value());
     else if (flag === '--video') options.video = resolve(value());
     else if (flag === '--timeout') options.timeoutSeconds = Number(value());
+    else if (flag === '--watch-seconds') options.watchSeconds = Number(value());
     else throw new Error(`Unknown argument ${flag}.`);
   }
   if (!options.dist && options.remoteOrigin) return options;
@@ -103,6 +105,11 @@ function installFrameTimer(marker) {
     for (const entry of list.getEntries()) if (!entry.hadRecentInput) window.__layoutShift += entry.value;
   }).observe({ type: 'layout-shift', buffered: true });
   // Gaps between animation frames over 50 ms: the main thread was blocked. The swap to the full world should leave none that is long.
+  // Main-thread tasks over 50 ms (the Long Tasks API), kept with their start so a run can count the ones after the first paint.
+  window.__longTasks = [];
+  new PerformanceObserver(list => {
+    for (const entry of list.getEntries()) window.__longTasks.push([Math.round(entry.startTime), Math.round(entry.duration)]);
+  }).observe({ type: 'longtask', buffered: true });
   window.__frameGaps = [];
   let previousFrameAt = performance.now();
   const watchFrameGaps = now => {
@@ -170,12 +177,17 @@ async function measureOnce(browser, options, viewportName, conditionName) {
     const failed = events.find(event => event.kind === 'failed');
     const swapEnd = detailed?.at ?? Infinity;
     const swapGaps = (window.__frameGaps ?? []).filter(([at, gap]) => at + gap > swapEnd - (detailed?.ms ?? 0) - 100 && at < swapEnd + 100);
-    return { lcp: window.__largestContentfulPaint, layoutShift: window.__layoutShift, first: window.__firstWorldDraw, detailed: detailed?.at ?? null, swapMs: detailed?.ms ?? null, swapHeldMs: (window.__phases ?? []).filter(phase => phase[0] === "swap").reduce((total, phase) => total + phase[3] - phase[2], 0), swapLongestGapMs: swapGaps.length ? Math.max(...swapGaps.map(([, gap]) => gap)) : 0, failed: failed?.message ?? null, state: window.__loop?.detail?.() ?? null, mode: window.__heroMode };
+    const longTasksAfterFirstPaint = (window.__longTasks ?? []).filter(([start]) => window.__firstWorldDraw !== null && start >= window.__firstWorldDraw);
+    return { longTaskCount: longTasksAfterFirstPaint.length, longestTaskMs: longTasksAfterFirstPaint.reduce((longest, [, duration]) => Math.max(longest, duration), 0), longTasks: longTasksAfterFirstPaint, lcp: window.__largestContentfulPaint, layoutShift: window.__layoutShift, first: window.__firstWorldDraw, detailed: detailed?.at ?? null, swapMs: detailed?.ms ?? null, swapHeldMs: (window.__phases ?? []).filter(phase => phase[0] === "swap").reduce((total, phase) => total + phase[3] - phase[2], 0), swapLongestGapMs: swapGaps.length ? Math.max(...swapGaps.map(([, gap]) => gap)) : 0, failed: failed?.message ?? null, state: window.__loop?.detail?.() ?? null, mode: window.__heroMode };
   });
   const deadline = Date.now() + options.timeoutSeconds * 1000;
   let status = await finished();
   while (Date.now() < deadline && (status.first === null || (status.state === 'pending' && status.detailed === null)) && !status.failed) {
     await new Promise(resolveWait => setTimeout(resolveWait, 100));
+    status = await finished();
+  }
+  if (options.watchSeconds > 0) {
+    await new Promise(resolveWait => setTimeout(resolveWait, options.watchSeconds * 1000));
     status = await finished();
   }
   const poster = await page.evaluate(() => {
@@ -195,6 +207,9 @@ async function measureOnce(browser, options, viewportName, conditionName) {
     detailMs,
     swapMs: status.swapMs,
     swapLongestGapMs: status.swapLongestGapMs,
+    longTaskCount: status.longTaskCount,
+    longestTaskMs: status.longestTaskMs,
+    longTasks: status.longTasks,
     swapHeldMs: status.swapHeldMs,
     bytesBeforeFirstFrame: bytes.atFirstFrame,
     bytesAtDetail: detailMs === null ? null : bytesAt(bytes, detailMs),
@@ -231,6 +246,9 @@ async function runMatrix(browser, options) {
         swapMs: median(runs.map(run => run.swapMs)),
         swapHeldMs: median(runs.map(run => run.swapHeldMs)),
         swapLongestGapMs: median(runs.map(run => run.swapLongestGapMs)),
+        longTasksOver50AfterFirstPaint: runs.map(run => run.longTaskCount),
+        longestTaskMs: Math.max(...runs.map(run => run.longestTaskMs)),
+        longTasks: runs.map(run => run.longTasks),
         detailRangeMs: [Math.min(...runs.map(run => run.detailMs ?? Infinity)), Math.max(...runs.map(run => run.detailMs ?? 0))],
         bytesBeforeFirstFrame: median(runs.map(run => run.bytesBeforeFirstFrame)),
         bytesAtDetail: median(runs.map(run => run.bytesAtDetail)),
