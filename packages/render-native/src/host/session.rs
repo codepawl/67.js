@@ -14,6 +14,7 @@ use crate::host::accel::{
     create_vertex_buffer, unpack_triangles, CyclesAcceleration, INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS,
     TRIANGLE_RECORD_BYTES,
 };
+use crate::host::dispatch::{DispatchPlanner, DISPATCH_BUDGET_SECONDS};
 use crate::host::device::{failure, layout_entry, open_device, storage_buffer, storage_entry};
 use crate::host::film::{image_accumulation_bytes, read_accumulation};
 use crate::host::textures::{upload_cycles_scene_buffers, upload_scene_buffers};
@@ -71,6 +72,8 @@ struct CachedDevice {
     features: String,
     /// Set by the device lost callback; the next call then opens a fresh device and drops everything below.
     device_lost: Arc<AtomicBool>,
+    /// What wgpu reported when it lost the device or rejected work, for the error a failed render raises.
+    device_error: Arc<Mutex<String>>,
     /// Static 118,848-byte LUT storage buffer for Cycles binding 12.
     lut_buffer: wgpu::Buffer,
     /// Bind group layout for the Cycles kernel (bindings 0..=12).
@@ -115,9 +118,23 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
         let (device, queue, adapter_info) = open_device()?;
         let device_lost = Arc::new(AtomicBool::new(false));
         let lost_flag = Arc::clone(&device_lost);
-        device.set_device_lost_callback(move |_reason, _message| {
+        let device_error = Arc::new(Mutex::new(String::new()));
+        let lost_message = Arc::clone(&device_error);
+        device.set_device_lost_callback(move |reason, message| {
+            if let Ok(mut stored) = lost_message.lock() {
+                *stored = format!("{reason:?}: {message}");
+            }
             lost_flag.store(true, Ordering::SeqCst);
         });
+        // The default handler panics on a lost device; record the report so the render can raise a readable error.
+        let error_flag = Arc::clone(&device_lost);
+        let error_message = Arc::clone(&device_error);
+        device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| {
+            if let Ok(mut stored) = error_message.lock() {
+                stored.push_str(&error.to_string());
+            }
+            error_flag.store(true, Ordering::SeqCst);
+        }));
         let lut_bytes: &[u8] = bytemuck::cast_slice(&CYCLES_LUT_WORDS[..]);
         let lut_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cycles LUT binding 12"),
@@ -133,6 +150,7 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
             backend_name: format!("{:?}", adapter_info.backend),
             features: if has_ray_query { "EXPERIMENTAL_RAY_QUERY".to_string() } else { String::new() },
             device_lost,
+            device_error,
             lut_buffer,
             cycles_bind_group_layout,
             cycles_pipelines: BoundedCache::new(MAX_CACHED_PIPELINES),
@@ -146,6 +164,15 @@ fn get_cached_device() -> Result<(wgpu::Device, wgpu::Queue, String, String, Str
         cached.backend_name.clone(),
         cached.features.clone(),
     ))
+}
+
+/// The flag and message the device callbacks fill in when the cached device is lost.
+fn cached_device_loss_state() -> Result<(Arc<AtomicBool>, Arc<Mutex<String>>)> {
+    let guard = lock_device_cache();
+    match guard.as_ref() {
+        Some(cached) => Ok((Arc::clone(&cached.device_lost), Arc::clone(&cached.device_error))),
+        None => Err(cache_was_reset_failure()),
+    }
 }
 
 fn cache_was_reset_failure() -> napi::Error {
@@ -231,6 +258,8 @@ pub(crate) struct PreparedCyclesScene {
     pub(crate) adapter_name: String,
     pub(crate) backend_name: String,
     pub(crate) features: String,
+    pub(crate) device_lost: Arc<AtomicBool>,
+    pub(crate) device_error: Arc<Mutex<String>>,
     pub(crate) setup_seconds: f64,
     pub(crate) compile_seconds: f64,
     pub(crate) upload_seconds: f64,
@@ -598,6 +627,7 @@ pub(crate) fn prepare_cycles_scene(
 
     // Use cached device; open once per process.
     let (device, queue, adapter_name, backend_name, features) = get_cached_device()?;
+    let (device_lost, device_error) = cached_device_loss_state()?;
     let setup_seconds = setup_started.elapsed().as_secs_f64();
 
     let compile_started = Instant::now();
@@ -644,6 +674,8 @@ pub(crate) fn prepare_cycles_scene(
         adapter_name,
         backend_name,
         features,
+        device_lost,
+        device_error,
         setup_seconds,
         compile_seconds,
         upload_seconds,
@@ -653,23 +685,75 @@ pub(crate) fn prepare_cycles_scene(
     })
 }
 
+/// How `trace_cycles_samples` splits the samples into dispatches.
+#[derive(Clone, Copy)]
+pub(crate) enum DispatchPlan {
+    /// Every dispatch draws this many samples, as the caller asked.
+    Fixed(u32),
+    /// Each dispatch is sized from the time of the last so none runs past the time budget; no batch is larger than `largest_batch`.
+    TimeBudget { largest_batch: u32 },
+}
+
+pub(crate) struct CyclesTrace {
+    pub(crate) sums: Vec<f32>,
+    pub(crate) traced_seconds: f64,
+    /// The most samples one dispatch drew.
+    pub(crate) largest_batch: u32,
+    /// The longest single dispatch; only measured when the dispatches are sized by time.
+    pub(crate) longest_dispatch_seconds: Option<f64>,
+}
+
+/// Raises the error for a lost device, naming the dispatch that was running and how to lower the work per dispatch.
+fn fail_if_device_lost(
+    prepared: &PreparedCyclesScene,
+    sample_offset: u32,
+    batch_samples: u32,
+    samples: u32,
+) -> Result<()> {
+    if !prepared.device_lost.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let detail = prepared.device_error.lock().map(|stored| stored.clone()).unwrap_or_default();
+    let smaller_batch = (batch_samples / 2).max(1);
+    Err(failure(format!(
+        "The GPU device was lost during the render, while drawing samples {sample_offset} to {} of {samples} in one dispatch of \
+         {batch_samples} samples ({}). The driver resets a GPU when a single dispatch runs too long. Lower the work per dispatch: \
+         pass samplesPerDispatch {smaller_batch} or less, or leave it unset so the render splits itself into dispatches of \
+         about {DISPATCH_BUDGET_SECONDS} s, or lower the samples or the resolution. Then run the render again.",
+        sample_offset + batch_samples,
+        if detail.is_empty() { "no detail from the driver".to_string() } else { detail },
+    )))
+}
+
 pub(crate) fn trace_cycles_samples(
     prepared: &PreparedCyclesScene,
     samples: u32,
-    samples_per_dispatch: u32,
+    plan: DispatchPlan,
     groups: (u32, u32),
     accumulation_bytes: u64,
     max_seconds: Option<f64>,
-) -> Result<(Vec<f32>, f64)> {
+) -> Result<CyclesTrace> {
     let trace_started = Instant::now();
     let device = &prepared.device;
     let queue = &prepared.queue;
-    let step = samples_per_dispatch.max(1);
+    let mut planner = match plan {
+        DispatchPlan::TimeBudget { largest_batch } => Some(DispatchPlanner::new(DISPATCH_BUDGET_SECONDS, largest_batch)),
+        DispatchPlan::Fixed(_) => None,
+    };
     let mut sample_offset = 0u32;
     let mut dispatch_count = 0u32;
+    let mut largest_batch = 0u32;
+    let mut longest_dispatch_seconds: Option<f64> = None;
 
     while sample_offset < samples {
-        let batch_samples = (samples - sample_offset).min(step);
+        let remaining_samples = samples - sample_offset;
+        let batch_samples = match (&planner, plan) {
+            (Some(planner), _) => planner.next_batch(remaining_samples),
+            (None, DispatchPlan::Fixed(step)) => remaining_samples.min(step.max(1)),
+            (None, DispatchPlan::TimeBudget { .. }) => unreachable!("a time budget always has a planner"),
+        };
+        largest_batch = largest_batch.max(batch_samples);
+        let dispatch_started = Instant::now();
         let mut dispatch_words = [0u8; 8];
         dispatch_words[0..4].copy_from_slice(&sample_offset.to_le_bytes());
         dispatch_words[4..8].copy_from_slice(&batch_samples.to_le_bytes());
@@ -689,17 +773,27 @@ pub(crate) fn trace_cycles_samples(
         }
         queue.submit(Some(encoder.finish()));
 
+        let dispatch_offset = sample_offset;
         sample_offset += batch_samples;
         dispatch_count += 1;
-        // When no time limit is set poll every 4 dispatches (excluding the final batch, which
-        // `read_accumulation` waits on directly) to drain staging belts without stalling each batch.
-        let should_poll = if max_seconds.is_some() {
+        // A planned render waits for every dispatch to time it. A fixed one, when no time limit is set, polls every 4
+        // dispatches (excluding the final batch, which `read_accumulation` waits on directly) to drain staging belts
+        // without stalling each batch.
+        let should_poll = if planner.is_some() {
+            true
+        } else if max_seconds.is_some() {
             dispatch_count % SAMPLES_PER_WAIT == 0 || sample_offset >= samples
         } else {
             sample_offset < samples && dispatch_count % SAMPLES_PER_WAIT == 0
         };
         if should_poll {
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            fail_if_device_lost(prepared, dispatch_offset, batch_samples, samples)?;
+            if let Some(planner) = planner.as_mut() {
+                let dispatch_seconds = dispatch_started.elapsed().as_secs_f64();
+                planner.record(batch_samples, dispatch_seconds);
+                longest_dispatch_seconds = Some(longest_dispatch_seconds.map_or(dispatch_seconds, |longest| longest.max(dispatch_seconds)));
+            }
             if let Some(limit) = max_seconds {
                 if trace_started.elapsed().as_secs_f64() > limit {
                     return Err(failure(format!(
@@ -710,8 +804,14 @@ pub(crate) fn trace_cycles_samples(
         }
     }
 
-    let sums = read_accumulation(device, queue, &prepared.accumulation, accumulation_bytes)?;
-    Ok((sums, trace_started.elapsed().as_secs_f64()))
+    let sums = read_accumulation(device, queue, &prepared.accumulation, accumulation_bytes);
+    fail_if_device_lost(prepared, samples.saturating_sub(largest_batch), largest_batch, samples)?;
+    Ok(CyclesTrace {
+        sums: sums?,
+        traced_seconds: trace_started.elapsed().as_secs_f64(),
+        largest_batch,
+        longest_dispatch_seconds,
+    })
 }
 
 pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_source: String) -> Result<Vec<f32>> {
