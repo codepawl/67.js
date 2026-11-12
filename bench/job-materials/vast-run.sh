@@ -43,7 +43,7 @@ for stage in "$@"; do
       folder="$out/parity"
       mkdir -p "$folder"
       node bench/job-materials/parity.mjs describe "$folder" 2>&1 | tail -3
-      blender_binary="$(command -v blender || ls -d /opt/blender*/blender /usr/local/blender*/blender /root/blender*/blender /usr/local/bin/blender* 2>/dev/null | head -1 || find / -maxdepth 4 -name blender -type f 2>/dev/null | head -1 || true)"
+      blender_binary="$( (command -v blender; ls -d /opt/blender*/blender /usr/local/blender*/blender /root/blender*/blender /usr/local/bin/blender* 2>/dev/null ; find / -maxdepth 4 -name blender -type f 2>/dev/null) | head -1)"
       echo "blender: ${blender_binary:-none}"
       for scene in blend sheen specular-tint anisotropy iridescence absorption composite; do
         "$blender_binary" -b --factory-startup --python bench/cycles-parity/render-cycles.py -- "$folder/$scene.json" "$folder/$scene-cycles" --samples 4096 --bounces 8 --seed 1 --width 192 --height 128 > "$folder/$scene-cycles.log" 2>&1 || tail -5 "$folder/$scene-cycles.log" | cut -c1-200
@@ -51,9 +51,12 @@ for stage in "$@"; do
       ls "$folder" | head -40
       node bench/job-materials/parity.mjs cook "$folder" 4096 2>&1 | tail -10
       node bench/job-materials/parity.mjs before "$folder" 4096 2>&1 | tail -10
+      python_binary=python3
+      python3 -c 'import numpy' 2>/dev/null || python_binary="$(find /root/blender -maxdepth 4 -path '*bin*' -name 'python3*' -type f 2>/dev/null | head -1)"
+      echo "python: $python_binary"
       for scene in blend sheen specular-tint anisotropy iridescence absorption composite; do
         for variant in cook before; do
-          python3 bench/cycles-parity/compare.py pair --no-flip --json-out "$folder/$scene-$variant-compare.json" "$folder/$scene-cycles.npy" "$folder/$scene-$variant.npy" >/dev/null 2>&1 || echo "COMPARE-FAILED $scene $variant"
+          "$python_binary" bench/cycles-parity/compare.py pair --no-flip --json-out "$folder/$scene-$variant-compare.json" "$folder/$scene-cycles.npy" "$folder/$scene-$variant.npy" >/dev/null 2>&1 || echo "COMPARE-FAILED $scene $variant"
         done
       done
       node bench/job-materials/figure.mjs "$folder" composite "$out/composite.jpg" 2>&1 | tail -2
