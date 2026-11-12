@@ -65,6 +65,8 @@ Also checked before any ray is traced: samples times pixels times bounces at mos
 - A part's material is its own entry in `materials`, so copies may differ in material; a multi-material mesh stays one geometry with the materials the part names.
 - `buildNativeInput` (the `legacy` kernel) refuses an instanced scene with an error; build the scene without `instancing` for that kernel. Render jobs still export flattened tables.
 
+A part whose matrix mirrors (negative determinant) is flattened with its vertex normals kept outward and the last two corners of each triangle swapped, so the cross-product normal of every triangle points outward too. The native `cycles` kernel derives its geometric normal from that winding, and an instanced mirrored part reaches the same result through its negative-scale flag; a scene without a mirrored part is unchanged byte for byte.
+
 The same scene and options give the same bytes. Random numbers come from a hash of the pixel, the sample and the seed, never from `Math.random` or the clock, and a pixel does not depend on which thread drew it.
 
 ## Choosing a backend

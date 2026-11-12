@@ -56,7 +56,7 @@ function tileMeanRatios(candidate, reference) {
 
 const addonSkip = findNativeAddon() ? false : 'the native addon is not built';
 
-for (const variant of ['translate', 'rotscale', 'emissive']) {
+for (const variant of ['translate', 'rotscale', 'mirror', 'mirror-rotscale', 'emissive']) {
   test(`instanced ${variant} copies render the flattened image within tolerance`, { skip: addonSkip }, t => {
     let flattened;
     try {

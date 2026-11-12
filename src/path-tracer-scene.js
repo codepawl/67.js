@@ -65,6 +65,12 @@ function normalMatrix(matrix) {
   return cofactors.map(value => value * sign);
 }
 
+/** True when the matrix mirrors (negative determinant of its upper 3x3), which turns every triangle inside out. */
+function mirrorsGeometry(matrix) {
+  const [a, b, c, , d, e, f, , g, h, i] = matrix;
+  return a * (e * i - f * h) + b * (f * g - d * i) + c * (d * h - e * g) < 0;
+}
+
 function srgbToLinearTable() {
   const table = new Float32Array(256);
   for (let value = 0; value < 256; value++) {
@@ -240,7 +246,14 @@ function writeWorldPart(world, part, geometry, partIndex, vertexOffset, triangle
   }
   if (geometry.uvs) world.uvs.set(geometry.uvs, (vertexOffset) * 2);
   if (geometry.colors) world.colors.set(geometry.colors, vertexOffset * 3);
-  for (let slot = 0; slot < geometry.indices.length; slot++) world.indices[triangleOffset * 3 + slot] = geometry.indices[slot] + vertexOffset;
+  // A mirrored part keeps outward vertex normals, so its triangles swap their last two corners to keep the winding
+  // (and the cross-product normal) outward too.
+  const mirrored = mirrorsGeometry(matrix);
+  const cornerOrder = mirrored ? [0, 2, 1] : [0, 1, 2];
+  for (let slot = 0; slot < geometry.indices.length; slot++) {
+    const sourceSlot = slot - (slot % 3) + cornerOrder[slot % 3];
+    world.indices[triangleOffset * 3 + slot] = geometry.indices[sourceSlot] + vertexOffset;
+  }
   world.triangleMaterial.fill(partIndex, triangleOffset, triangleOffset + geometry.indices.length / 3);
 }
 
