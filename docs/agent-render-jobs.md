@@ -324,6 +324,8 @@ The controller never removes a dead process's lock automatically.
 After a crash, confirm that no process owns the dedicated private store before manually removing `store.lock`.
 This conservative repair step prevents two recovery processes from deleting a newly acquired lock.
 
+A render or review job fails when its Node RSS passes 512 MiB or its browser heap passes 256 MiB. After each frame the browser heap is read, and when it is over the limit it is garbage collected and read again, so only memory the page still holds counts. A physics bake leaves tens of MiB of garbage after its first frame; a real leak survives the collection and still stops the job.
+
 | Budget | Default |
 | --- | --- |
 | Retained records | 32 |
