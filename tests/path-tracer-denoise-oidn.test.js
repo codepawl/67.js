@@ -76,3 +76,22 @@ test('the installed OIDN removes noise from a flat image and gives the same byte
   assert.ok(spread(first) < spread(color), `spread ${spread(first)} against ${spread(color)}`);
   assert.deepEqual(first, second);
 });
+
+test('the native default (denoise true) picks OIDN when it is installed and the wavelet filter with a note when it is not', async () => {
+  const installed = { findOidnBinary: () => 'oidn' };
+  const withOidn = await chooseDenoiser(true, { preferOidn: true, loadOidn: async () => installed });
+  assert.equal(withOidn.denoise, 'oidn');
+  assert.equal(withOidn.denoiser, installed);
+  assert.match(withOidn.note, /OIDN and the albedo and normal guides by default/);
+  const without = await chooseDenoiser(true, { preferOidn: true, loadOidn: async () => null });
+  assert.equal(without.denoise, 'wavelet');
+  assert.match(without.note, /native backend denoises with OIDN.*wavelet filter ran instead/s);
+});
+
+test('explicit denoise values keep their meaning on native and the other backends keep the plain default', async () => {
+  const loadOidn = async () => { throw new Error('must not load OIDN'); };
+  assert.deepEqual(await chooseDenoiser(false, { preferOidn: true, loadOidn }), { denoise: false });
+  assert.deepEqual(await chooseDenoiser('wavelet', { preferOidn: true, loadOidn }), { denoise: 'wavelet' });
+  assert.deepEqual(await chooseDenoiser('none', { preferOidn: true, loadOidn }), { denoise: 'none' });
+  assert.deepEqual(await chooseDenoiser(true, { loadOidn }), { denoise: true });
+});

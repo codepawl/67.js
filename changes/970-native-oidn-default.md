@@ -1,0 +1,1 @@
+- Render jobs with `backend: "native"` trace with the Cycles-matching kernel, pass `noiseThreshold` to it and denoise with OIDN and the albedo and normal guides by default (the wavelet filter with a note when OIDN is missing); `JS67_NATIVE_KERNEL=legacy` keeps the old kernel (#970)
