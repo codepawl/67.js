@@ -51,7 +51,7 @@ class LightTests(unittest.TestCase):
         self.assertAlmostEqual(point["intensity"], 10.0)
         area = conversions.area_light_entry([0, 0, 0], [1, 1, 1], math.pi * 5.0, [0, -1, 0], [0, 0, 1], "SQUARE", 2.0, 9.0, 3.0, 4.0, math.pi)
         self.assertAlmostEqual(area["intensity"], 5.0)
-        self.assertEqual((area["width"], area["height"]), (6.0, 6.0))
+        self.assertEqual((area["width"], area["height"]), (6.0, 8.0))
         self.assertEqual(area["up"], [-0.0, -0.0, -1.0])
 
     def test_sun_points_toward_the_light(self):
@@ -59,6 +59,49 @@ class LightTests(unittest.TestCase):
         self.assertEqual(sun["lightDirection"], [-0.0, 1.0, -0.0])
         self.assertEqual(sun["keyColor"], [3.0, 1.5, 0.0])
         self.assertAlmostEqual(sun["sunAngularRadius"], 0.05)
+
+
+class AreaLightScaleTests(unittest.TestCase):
+    def build(self, shape, scale_x, scale_y):
+        return conversions.area_light_entry([0, 0, 0], [1, 1, 1], 10.0, [0, -1, 0], [0, 0, 1], shape, 2.0, 5.0, scale_x, scale_y, math.pi)
+
+    def test_square_strip_light_keeps_its_y_scale(self):
+        strip = self.build("SQUARE", 4.0, 1.0)
+        self.assertEqual((strip["width"], strip["height"]), (8.0, 2.0))
+
+    def test_disk_uses_both_scales_and_rectangle_uses_its_second_size(self):
+        disk = self.build("DISK", 2.0, 3.0)
+        self.assertEqual((disk["width"], disk["height"]), (4.0, 6.0))
+        rectangle = self.build("RECTANGLE", 2.0, 3.0)
+        self.assertEqual((rectangle["width"], rectangle["height"]), (4.0, 15.0))
+
+
+class ColorSpaceTests(unittest.TestCase):
+    def test_names_are_sorted_into_srgb_linear_or_unknown(self):
+        for name in ("sRGB", "sRGB EOTF"):
+            self.assertEqual(conversions.classify_color_space(name), "srgb")
+        for name in ("Non-Color", "Raw", "Linear Rec.709", "Linear CIE-XYZ E", "scene linear"):
+            self.assertEqual(conversions.classify_color_space(name), "linear")
+        for name in ("Filmic Log", "AgX Base sRGB", "Khronos PBR Neutral sRGB"):
+            self.assertIsNone(conversions.classify_color_space(name), name)
+
+    def test_srgb_decode_matches_the_standard_curve(self):
+        decoded = conversions.srgb_to_linear(numpy.array([0.0, 0.04045, 0.5, 1.0]))
+        self.assertAlmostEqual(float(decoded[0]), 0.0)
+        self.assertAlmostEqual(float(decoded[1]), 0.04045 / 12.92)
+        self.assertAlmostEqual(float(decoded[2]), 0.21404, places=4)
+        self.assertAlmostEqual(float(decoded[3]), 1.0)
+
+
+class LightNoteTests(unittest.TestCase):
+    def test_plain_light_has_no_notes(self):
+        self.assertEqual(conversions.light_feature_notes("Lamp", "POINT", False, True, 1.0, 1.0, False), [])
+
+    def test_each_unread_feature_is_named(self):
+        notes = conversions.light_feature_notes("Lamp", "POINT", True, False, 0.5, 1.0, True)
+        self.assertEqual(len(notes), 4)
+        self.assertTrue(any("blackbody" in note for note in notes))
+        self.assertTrue(any("shadows off" in note for note in notes))
 
 
 class DepthTests(unittest.TestCase):

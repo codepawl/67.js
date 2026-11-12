@@ -78,6 +78,7 @@ def main():
     scene.cook.seed = 1
     scene.cook.pixel_filter = "box"
     scene.cook.filter_width = 1.0
+    scene.cook.environment_cap = float(os.environ.get("COOK_TEST_ENVIRONMENT_CAP", "0"))
     timing["cookRenderCallSeconds"] = round(render_to_npy(scene, render_cycles, os.path.join(output_directory, "cook"), width, height), 3)
     with open(os.path.join(output_directory, "timing.json"), "w", encoding="utf-8") as handle:
         json.dump(timing, handle, indent=2)

@@ -14,7 +14,10 @@ status=0
 export COOK_NATIVE_DIR="$PWD"
 
 echo "== python tests"
-uv run --no-project --with numpy python -m unittest discover -s packages/blender-addon/tests -p "test_blender_conversions.py" 2>&1 | tail -4 || status=1
+uv run --no-project --with numpy python -m unittest discover -s packages/blender-addon/tests -p "test_blender_conversions.py" 2>&1 | tail -4
+python_tests_exit=${PIPESTATUS[0]}
+echo "python tests exit code: $python_tests_exit"
+[ "$python_tests_exit" = "0" ] || status=1
 
 echo "== exporter test in Blender"
 "$BLENDER" -b --factory-startup --python-exit-code 1 --python packages/blender-addon/tests/test_exporter_in_blender.py 2>&1 | grep -E "^(PASS|FAILED|[0-9]+ checks passed|Error|Traceback|  File|[A-Za-z]*Error)" | tail -60
@@ -41,8 +44,6 @@ done
 
 # The environment cap: 16 is the packer's default and clips the patch; the add-on exports no cap unless asked.
 COOK_TEST_ENVIRONMENT_CAP=16 render_and_compare hdri-patch hdri-patch-cap16
-
-COOK_EXPERIMENT_FLIP_GREEN=1 render_and_compare maps-normal maps-normal-flipgreen
 
 uv run --no-project --with numpy --with pillow python packages/blender-addon/tests/make_side_by_side.py "$OUT/cook-blender-addon-900.jpg" small="$OUT/small" "environment image"="$OUT/hdri" 2>&1 | tail -2
 exit $status

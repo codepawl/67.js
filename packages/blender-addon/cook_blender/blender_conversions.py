@@ -70,7 +70,7 @@ def spot_light_entry(position, color, energy, radius, emission_direction, spot_s
 
 def area_light_entry(position, color, energy, emission_direction, local_up, shape, size, size_y, scale_x, scale_y, spread):
     width_value = size * abs(scale_x)
-    height_value = width_value if shape in ("SQUARE", "DISK") else size_y * abs(scale_y)
+    height_value = (size if shape in ("SQUARE", "DISK") else size_y) * abs(scale_y)
     return {
         "position": position,
         "color": color,
@@ -123,6 +123,20 @@ def write_radiance_hdr(path, linear_rgb_top_first):
         handle.write(rgbe_bytes(linear_rgb_top_first))
 
 
+def light_feature_notes(light_name, light_type, use_temperature, use_shadow, diffuse_factor, specular_factor, uses_nodes):
+    """What a light carries that Cook does not read, one sentence each."""
+    notes = []
+    if use_temperature:
+        notes.append(f"light {light_name} uses a blackbody temperature; Cook uses its plain colour")
+    if not use_shadow:
+        notes.append(f"light {light_name} has shadows off; Cook casts them")
+    if abs(diffuse_factor - 1.0) > 1e-6 or abs(specular_factor - 1.0) > 1e-6:
+        notes.append(f"light {light_name} has a diffuse or specular factor other than 1; Cook ignores the factors")
+    if uses_nodes:
+        notes.append(f"light {light_name} has a node tree; Cook ignores it")
+    return notes
+
+
 def blender_environment_to_cook_rows(linear_rgb_bottom_first):
     """Re-orients a Blender equirectangular image (first row at the bottom) for Cook: rows top first, turned a quarter.
 
@@ -132,6 +146,22 @@ def blender_environment_to_cook_rows(linear_rgb_bottom_first):
 
     top_first = linear_rgb_bottom_first[::-1]
     return numpy.roll(top_first, top_first.shape[1] // 4, axis=1)
+
+
+def classify_color_space(name):
+    """'srgb', 'linear', or None for a colour space Cook has no decoder for (the caller reports it)."""
+    lowered = name.lower()
+    if lowered == "srgb" or lowered.startswith("srgb "):
+        return "srgb"
+    if lowered in ("non-color", "raw") or lowered.startswith("linear") or lowered.startswith("scene linear"):
+        return "linear"
+    return None
+
+
+def srgb_to_linear(encoded):
+    import numpy
+
+    return numpy.where(encoded <= 0.04045, encoded / 12.92, ((encoded + 0.055) / 1.055) ** 2.4)
 
 
 def luminance(rgb):

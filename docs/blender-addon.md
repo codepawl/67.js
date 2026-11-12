@@ -12,9 +12,9 @@ The add-on is not part of the npm package (`files` is unchanged) and runs no dow
    (cd packages/render-native && node build.mjs)
    ```
 
-2. In Blender (4.2 or later, written and checked on 5.3): Edit > Preferences > Add-ons > Install from Disk, and pick `packages/blender-addon/cook_blender/__init__.py`, or copy the `cook_blender` folder into your add-ons folder. Enable "Cook renderer (67js)".
+2. In Blender (4.2 or later, written and checked on 5.3): zip the add-on folder so the zip holds `cook_blender/` at its root (`cd packages/blender-addon && zip -r cook_blender.zip cook_blender`, or compress the folder in your file manager), then Edit > Preferences > Add-ons > Install from Disk and pick the zip. Or copy the whole `cook_blender` folder into Blender's add-ons folder. Installing the single `__init__.py` does not work: the add-on has several modules. Enable "Cook renderer (67js)".
 3. In the add-on's preferences set **Native tracer folder** to the root of the 67js checkout. When it is empty the `COOK_NATIVE_DIR` environment variable is used. Node 20.19 or later must be on `PATH`, or set **Node executable**.
-4. Render properties > Render Engine > **Cook**. Samples, max bounces, seed and pixel filter are in the Sampling panel. F12 renders a frame.
+4. Render properties > Render Engine > **Cook**. Samples, max bounces, seed, pixel filter and environment cap are in the Sampling panel. F12 renders a frame. The environment cap is 0 (the world image is not clamped, as in Cycles); a positive value limits each texel of the world image to that radiance, which lowers noise from small very bright spots and takes their energy away.
 
 A missing folder, an unbuilt addon or a missing Node stops the render with a message that names what to set.
 
@@ -42,7 +42,7 @@ Everything below is reported **once per material** in the render log (a `COOK ma
 - A surface shader other than Principled, Diffuse or Emission (Glass, Mix Shader, Add Shader, Toon, group nodes): the material's viewport colour as a rough diffuse material.
 - Volume and Displacement outputs, Sheen, Subsurface, Anisotropic, Thin Film and a non-white Specular Tint: left out.
 - Image Texture node projections other than Flat, Closest interpolation, extension modes other than Repeat, and a Vector input: read as a flat, linearly filtered, repeating lookup with the first UV map.
-- More than one sun (the first is used), light nodes, light linking, shadow-catcher and holdout objects, hair and curves objects, point clouds, volumes and Grease Pencil, orthographic and panoramic cameras (an error that says to use Perspective), camera lens shift, the render border and motion blur.
+- More than one sun (the first is used), light nodes, light linking, blackbody temperature, light shadow and diffuse/specular factors, shadow-catcher and holdout objects, Film > Transparent, a pixel aspect other than 1:1, hair and curves objects, point clouds, volumes and Grease Pencil, orthographic and panoramic cameras (an error that says to use Perspective), camera lens shift, the render border and motion blur.
 - Geometry whose evaluated shape differs per instance of one object (some Geometry Nodes setups) is exported once per object datablock: check the result. `[untested]`
 
 ## Settings and environment

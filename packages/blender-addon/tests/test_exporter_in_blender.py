@@ -169,8 +169,109 @@ def test_hdri_world():
     check(magic == b"#?RADIANCE", "the HDRI is written as a Radiance file")
 
 
+def test_world_without_a_background_uses_the_fallback():
+    scene = scene_fixtures.build_small_scene("small")
+    tree = scene.world.node_tree
+    for node in list(tree.nodes):
+        if node.type == "BACKGROUND":
+            tree.nodes.remove(node)
+    description, _, report, _ = export(scene)
+    check(description["world"]["type"] == "constant", "a world with no Background node falls back to a constant colour")
+    mix = tree.nodes.new("ShaderNodeMixShader")
+    tree.links.new(mix.outputs[0], tree.get_output_node("ALL").inputs["Surface"])
+    description, _, report, _ = export(scene)
+    check(description["world"]["type"] == "constant" and any("world is not a constant" in note for note in report["notes"]), "a Mix Shader on the world output is reported and falls back")
+
+
+def test_geometry_edge_cases():
+    scene = scene_fixtures.build_small_scene("small")
+    ball_mesh = bpy.data.meshes["BallMesh"]
+    ball_mesh.materials.append(scene_fixtures.make_principled_material("Second", (0.1, 0.9, 0.1), 0.5))
+    for polygon in ball_mesh.polygons:
+        polygon.material_index = 7
+    bpy.context.view_layer.update()
+    description, _, report, _ = export(scene)
+    ball_part = next(part for part in description["parts"] if part["name"] == "Ball0")
+    second_index = next(index for index, material in enumerate(description["materials"]) if material["color"][1] > 0.8 and material["color"][0] < 0.2)
+    check(ball_part["material"] == second_index, "a face index past the last slot uses the last slot's material")
+    # Two metaballs in one family: only the basis converts, and the other must not abort the export.
+    for object_name, location in (("Blob", (0.0, 4.0, 0.5)), ("Blob.001", (0.4, 4.0, 0.5))):
+        metaball_data = bpy.data.metaballs.new(object_name)
+        metaball_data.elements.new()
+        metaball_object = bpy.data.objects.new(object_name, metaball_data)
+        metaball_object.location = location
+        scene.collection.objects.link(metaball_object)
+    bpy.context.view_layer.update()
+    export(scene)
+    check(True, "two metaballs in one family do not abort the export")
+    # A UV map made render-active is the one exported.
+    floor_mesh = bpy.data.meshes["FloorMesh"]
+    second_map = floor_mesh.uv_layers.new(name="Other")
+    for loop in second_map.uv:
+        loop.vector = (0.0, 0.0)
+    floor_mesh.uv_layers.active_index = 1
+    floor_mesh.uv_layers[0].active_render = True
+    bpy.context.view_layer.update()
+    description, _, report, _ = export(scene)
+    floor_part = next(part for part in description["parts"] if part["name"] == "Floor")
+    uvs = decode_floats(description["geometries"][floor_part["geometry"]]["uvs"])
+    check(float(uvs.max()) > 0.5, "the render-active UV map is exported, not the one selected for editing")
+
+
+def test_scene_notes_and_color_spaces():
+    scene = scene_fixtures.build_small_scene("small")
+    scene.render.film_transparent = True
+    scene.render.pixel_aspect_x = 2.0
+    lamp = bpy.data.lights["Lamp"]
+    lamp.use_temperature = True
+    lamp.use_shadow = False
+    bpy.context.view_layer.update()
+    description, _, report, _ = export(scene)
+    joined = " ".join(report["notes"])
+    for fragment in ("Transparent", "pixel aspect", "blackbody", "shadows off"):
+        check(fragment in joined, f"the notes mention {fragment}")
+    floor_material = bpy.data.materials["Floor"]
+    image = floor_material.node_tree.nodes["Image Texture"].image
+    image.colorspace_settings.name = "Linear Rec.709"
+    description, _, _, _ = export(scene)
+    floor_part = next(part for part in description["parts"] if part["name"] == "Floor")
+    check(description["materials"][floor_part["material"]]["map"]["colorSpace"] == "linear", "an image tagged Linear Rec.709 is declared linear, not sRGB")
+
+
+def test_geometry_nodes_instances():
+    scene = scene_fixtures.build_small_scene("small")
+    cube = bpy.data.objects.new("InstCube", scene_fixtures.make_mesh("cube", "InstCubeMesh"))
+    sphere = bpy.data.objects.new("InstSphere", scene_fixtures.make_mesh("sphere", "InstSphereMesh"))
+    for source in (cube, sphere):
+        scene.collection.objects.link(source)
+        source.hide_render = True
+        source.location = (0.0, 0.0, -20.0)
+    host = bpy.data.objects.new("Host", scene_fixtures.make_mesh("cube", "HostMesh"))
+    scene.collection.objects.link(host)
+    group = bpy.data.node_groups.new("Pair", "GeometryNodeTree")
+    group.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    group.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    nodes = group.nodes
+    group_output = nodes.new("NodeGroupOutput")
+    join = nodes.new("GeometryNodeJoinGeometry")
+    for source in (cube, sphere):
+        info = nodes.new("GeometryNodeObjectInfo")
+        info.transform_space = "RELATIVE"
+        info.inputs["Object"].default_value = source
+        info.inputs["As Instance"].default_value = True
+        group.links.new(info.outputs["Geometry"], join.inputs["Geometry"])
+    group.links.new(join.outputs["Geometry"], group_output.inputs["Geometry"])
+    modifier = host.modifiers.new("Pair", "NODES")
+    modifier.node_group = group
+    bpy.context.view_layer.update()
+    description, _, report, _ = export(scene)
+    host_geometries = {part["geometry"] for part in description["parts"] if part["name"].endswith("Host") or part["name"].startswith("Host")}
+    triangle_counts = {len(decode_floats(description["geometries"][index]["positions"])) for index in host_geometries}
+    check(len(host_geometries) >= 2 and len(triangle_counts) >= 2, f"two different Geometry Nodes instances keep their own geometry (geometries {len(host_geometries)}, sizes {sorted(triangle_counts)})")
+
+
 def main():
-    for test in (test_small_scene, test_collection_instances, test_material_slots_and_notes, test_other_surface_shaders, test_lights_and_camera, test_hdri_world):
+    for test in (test_small_scene, test_collection_instances, test_material_slots_and_notes, test_other_surface_shaders, test_lights_and_camera, test_hdri_world, test_world_without_a_background_uses_the_fallback, test_geometry_edge_cases, test_scene_notes_and_color_spaces, test_geometry_nodes_instances):
         test()
     print(f"{len(CHECKS_PASSED)} checks passed", flush=True)
 

@@ -93,7 +93,7 @@ class CookRenderEngine(bpy.types.RenderEngine):
             options = {
                 "width": width, "height": height, "samples": settings.samples, "bounces": settings.max_bounces, "seed": settings.seed,
                 "filter_type": settings.pixel_filter, "filter_width": settings.filter_width, "lens": lens_entry,
-                "environment_cap": float(os.environ.get("COOK_TEST_ENVIRONMENT_CAP", settings.environment_cap)),
+                "environment_cap": settings.environment_cap,
             }
             output_prefix = os.path.join(work_directory, "trace")
             command = native_runner.build_trace_command(node_executable, native_directory, scene_path, output_prefix, options)

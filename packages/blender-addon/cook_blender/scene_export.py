@@ -109,6 +109,12 @@ def add_light_entry(environment, light_object, light_matrix, report):
     color, energy = light_color_with_exposure(light_data)
     if energy <= 0.0:
         return
+    for note in conversions.light_feature_notes(
+        light_object.name, light_data.type, getattr(light_data, "use_temperature", False), getattr(light_data, "use_shadow", True),
+        getattr(light_data, "diffuse_factor", 1.0), getattr(light_data, "specular_factor", 1.0), bool(getattr(light_data, "node_tree", None)),
+    ):
+        if note not in report["notes"]:
+            report["notes"].append(note)
     position = to_yup(light_matrix.translation)
     emission_direction = to_yup((light_matrix.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized())
     if light_data.type == "SUN":
@@ -185,7 +191,11 @@ def export_world(world, work_directory, report):
 
 def export_environment_texture(world, work_directory, report):
     output_node = next((node for node in world.node_tree.nodes if node.type == "OUTPUT_WORLD" and node.is_active_output), None)
+    if output_node is None or not output_node.inputs["Surface"].is_linked:
+        return None
     background_node = output_node.inputs["Surface"].links[0].from_node
+    if background_node.type != "BACKGROUND":
+        return None
     strength_socket = background_node.inputs["Strength"]
     color_socket = background_node.inputs["Color"]
     if strength_socket.is_linked or not color_socket.is_linked:
@@ -210,6 +220,21 @@ def export_environment_texture(world, work_directory, report):
 
 # ---- Geometry ----
 
+def geometry_nodes_input_values(modifier):
+    """The custom properties of a modifier (Geometry Nodes inputs), as a tuple; None when one names another object or collection."""
+    values = []
+    for key in modifier.keys():
+        value = modifier[key]
+        if isinstance(value, (bpy.types.Object, bpy.types.Collection)):
+            return None
+        if hasattr(value, "to_list"):
+            value = tuple(value.to_list())
+        elif hasattr(value, "to_dict"):
+            value = repr(value.to_dict())
+        values.append((key, value))
+    return tuple(values)
+
+
 def modifier_signature(original_object, use_render_flags=False):
     """A text key for the modifier stack; None when a modifier reads another object, so two copies could evaluate differently."""
     entries = []
@@ -230,7 +255,10 @@ def modifier_signature(original_object, use_render_flags=False):
             if hasattr(value, "__len__") and not isinstance(value, str):
                 value = tuple(value)
             properties.append((identifier, value))
-        entries.append((modifier.type, tuple(properties)))
+        input_values = geometry_nodes_input_values(modifier)
+        if input_values is None:
+            return None
+        entries.append((modifier.type, tuple(properties), input_values))
     return repr(entries)
 
 
@@ -244,7 +272,7 @@ def geometry_key(original_object, use_render_flags=False):
 
 def corner_uv_values(mesh):
     """(corner count, 2) UVs of the active UV map with V flipped to start at the top, or None without a UV map."""
-    uv_layer = mesh.uv_layers.active
+    uv_layer = mesh.uv_layers.active_render or mesh.uv_layers.active
     if uv_layer is None:
         return None
     corner_uvs = numpy.empty(len(mesh.loops) * 2, dtype=numpy.float32)
@@ -269,6 +297,9 @@ def unique_vertex_arrays(stacked_rows, include_uvs):
 def mesh_to_triangle_groups(evaluated_object, include_uvs=False, split_by_material=False):
     """Welded vertex arrays of an evaluated object, as {material slot: arrays}; slot 0 holds everything unless split_by_material."""
     mesh = evaluated_object.to_mesh()
+    if mesh is None:
+        # Only the basis metaball of a family converts; the others give nothing.
+        return {}
     try:
         mesh.calc_loop_triangles()
         triangle_count = len(mesh.loop_triangles)
@@ -327,9 +358,11 @@ def new_environment():
 
 
 def slot_material(evaluated_object, slot):
-    if slot < len(evaluated_object.material_slots):
-        return evaluated_object.material_slots[slot].material
-    return None
+    """The material of a face slot; a slot past the last one uses the last slot, as Blender does."""
+    slot_count = len(evaluated_object.material_slots)
+    if slot_count == 0:
+        return None
+    return evaluated_object.material_slots[max(0, min(slot, slot_count - 1))].material
 
 
 def collect_parts(depsgraph, materials, report):
@@ -345,12 +378,18 @@ def collect_parts(depsgraph, materials, report):
         if original_object.type == "LIGHT":
             add_light_entry(environment, evaluated_object, instance.matrix_world, report)
             continue
+        if getattr(original_object, "is_holdout", False) or getattr(original_object, "is_shadow_catcher", False):
+            report["notes"].append(f"object {original_object.name} is a holdout or shadow catcher; Cook renders it as an ordinary object")
         if original_object.type in UNSUPPORTED_OBJECT_TYPES:
             report["unsupportedObjects"][original_object.type] = report["unsupportedObjects"].get(original_object.type, 0) + 1
             continue
         if original_object.type not in MESH_LIKE_OBJECT_TYPES:
             continue
         key = geometry_key(original_object, use_render_flags=True)
+        if instance.is_instance and evaluated_object.type == "MESH":
+            # Geometry Nodes instances share one original (their host); the instanced mesh itself tells them apart.
+            evaluated_data = evaluated_object.data
+            key = key + ("instance", evaluated_data.name, len(evaluated_data.vertices), len(evaluated_data.polygons))
         if key not in geometry_indices:
             groups = mesh_to_triangle_groups(evaluated_object, include_uvs=True, split_by_material=True)
             geometry_indices[key] = {}
@@ -381,6 +420,10 @@ def export_scene(depsgraph, width, height, work_directory):
     camera_entry, lens_entry = build_camera_entries(scene, width, height, report, camera_object=camera_object, honor_roll=True)
     if camera_object.data.shift_x or camera_object.data.shift_y:
         report["notes"].append("camera lens shift is ignored")
+    if scene.render.film_transparent:
+        report["notes"].append("Film > Transparent is on; Cook renders an opaque background and writes alpha 1")
+    if scene.render.pixel_aspect_x != scene.render.pixel_aspect_y:
+        report["notes"].append("the pixel aspect is not 1:1; Cook renders square pixels")
     materials = MaterialExporter()
     environment, geometries, parts = collect_parts(depsgraph, materials, report)
     if not parts:

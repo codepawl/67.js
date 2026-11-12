@@ -5,7 +5,6 @@ or an Image Texture node linked directly to it; anything else is replaced by the
 `notes` under the material name, so the render log can say what was approximated.
 """
 import base64
-import os
 
 import numpy
 
@@ -96,18 +95,33 @@ class MaterialExporter:
             return None
         key = (image.name_full, color_space)
         if key not in self._index_by_image:
-            values = self.read_image_floats(image)
-            if color_space == SRGB and image.is_float:
-                encoded = values.copy()
-                encoded[..., :3] = srgb_encode(values[..., :3])
-                values = encoded
-            quantized = numpy.rint(numpy.clip(values, 0.0, 1.0) * 255.0).astype(numpy.uint8)
-            self._register_image(key, quantized)
+            self._register_image(key, self.quantized_image(material_name, image, color_space))
         return self._texture_descriptor(self._index_by_image[key], color_space)
 
-    def scalar_texture_pixels(self, image):
+    def values_in_space(self, material_name, image, wanted_space):
+        """Image values as Blender would hand them to the shader, in `wanted_space`: byte images hold their colour space's encoding,
+        float images hold linear values."""
+        values = self.read_image_floats(image).copy()
+        tag = image.colorspace_settings.name
+        stored_space = "linear" if image.is_float else conversions.classify_color_space(tag)
+        if stored_space is None:
+            self.note(material_name, f"image {image.name} uses the colour space {tag}, which Cook cannot convert; its values are read as linear")
+            stored_space = LINEAR
+        if stored_space == SRGB and wanted_space == LINEAR:
+            values[..., :3] = conversions.srgb_to_linear(values[..., :3])
+        elif stored_space == LINEAR and wanted_space == SRGB:
+            values[..., :3] = srgb_encode(values[..., :3])
+        return values
+
+    def quantized_image(self, material_name, image, color_space, flip_green=False):
+        values = self.values_in_space(material_name, image, color_space)
+        if flip_green:
+            values[..., 1] = 1.0 - values[..., 1]
+        return numpy.rint(numpy.clip(values, 0.0, 1.0) * 255.0).astype(numpy.uint8)
+
+    def scalar_texture_pixels(self, material_name, image):
         """Luminance of an image read as data (Blender converts a colour to a number this way), (height, width) floats."""
-        values = self.read_image_floats(image)[..., :3]
+        values = self.values_in_space(material_name, image, LINEAR)[..., :3]
         return values[..., 0] * conversions.LUMINANCE_WEIGHTS[0] + values[..., 1] * conversions.LUMINANCE_WEIGHTS[1] + values[..., 2] * conversions.LUMINANCE_WEIGHTS[2]
 
     # ---- Sockets ----
@@ -159,7 +173,8 @@ class MaterialExporter:
         return float(socket.default_value)
 
     def color_space_of(self, image_node):
-        return LINEAR if image_node.image.colorspace_settings.name == "Non-Color" else SRGB
+        """The space a colour texture is declared in: what its colour space tag says, sRGB when Cook cannot tell."""
+        return conversions.classify_color_space(image_node.image.colorspace_settings.name) or SRGB
 
     # ---- Materials ----
 
@@ -274,7 +289,7 @@ class MaterialExporter:
         pixel_grids = {}
         for label, image_node in (("roughness", roughness_node), ("metallic", metallic_node)):
             if image_node is not None:
-                pixel_grids[label] = self.scalar_texture_pixels(image_node.image)
+                pixel_grids[label] = self.scalar_texture_pixels(name, image_node.image)
         shapes = {grid.shape for grid in pixel_grids.values()}
         if len(shapes) > 1:
             self.note(name, "Metallic and Roughness images differ in size; the Metallic image is left out and its constant is used")
@@ -303,7 +318,7 @@ class MaterialExporter:
         if alpha_node is base_image_node and alpha_output == "Alpha":
             return
         key = (alpha_node.image.name_full, "alpha-" + (alpha_output or ""))
-        grid = self.scalar_texture_pixels(alpha_node.image) if alpha_output == "Color" else self.read_image_floats(alpha_node.image)[..., 3]
+        grid = self.scalar_texture_pixels(name, alpha_node.image) if alpha_output == "Color" else self.read_image_floats(alpha_node.image)[..., 3]
         quantized = numpy.rint(numpy.clip(numpy.stack([grid, grid, grid, numpy.ones_like(grid)], axis=-1), 0.0, 1.0) * 255.0).astype(numpy.uint8)
         entry["alphaMap"] = self._texture_descriptor(self._register_image(key, quantized), LINEAR)
 
@@ -321,22 +336,20 @@ class MaterialExporter:
             self.note(name, "the Normal Map node is not fed directly by an Image Texture; the surface normal is left unperturbed")
             return
         self.check_image_node(name, image_node)
-        texture = self.texture_from_image(name, image_node.image, LINEAR)
-        if texture is None:
+        image = image_node.image
+        if image.size[0] == 0 or image.size[1] == 0:
+            self.note(name, f"image {image.name} has no pixels (missing file?); the surface normal is left unperturbed")
             return
+        # Blender's bitangent follows V upward; Cook's V runs downward, so the green channel is inverted to keep the same bumps.
+        key = (image.name_full, "normal-green-inverted")
+        if key not in self._index_by_image:
+            self._register_image(key, self.quantized_image(name, image, LINEAR, flip_green=True))
+        texture = self._texture_descriptor(self._index_by_image[key], LINEAR)
         strength = float(source_node.inputs["Strength"].default_value)
-        if os.environ.get("COOK_EXPERIMENT_FLIP_GREEN") == "1":
-            self.invert_green_of_last_image()
         entry["normalMap"] = texture
         entry["normalScale"] = [strength, strength]
         if source_node.inputs["Strength"].is_linked:
             self.note(name, f"Normal Map strength is linked; the constant {strength:g} is used")
-
-    def invert_green_of_last_image(self):
-        raw = base64.b64decode(self.images[-1]["data"]["base64"])
-        pixels = numpy.frombuffer(raw, dtype=numpy.uint8).copy().reshape(-1, 4)
-        pixels[:, 1] = 255 - pixels[:, 1]
-        self.images[-1]["data"]["base64"] = base64.b64encode(pixels.tobytes()).decode("ascii")
 
     def apply_emission(self, name, node, entry):
         strength = self.read_constant(name, node, "Emission Strength", "Emission Strength")
