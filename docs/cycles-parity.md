@@ -1253,7 +1253,7 @@ The relMSE of the shade scenes sits at its seed floor because the light only lea
 
 Scenes of `bench/reference/scenes.js` whose Cycles reference changes with the new default (a light with a radius), real materials, same settings, Cook over Cycles mean, R channel, before to after `[measured]`: `lit-interior` 1.0034 to 1.0003, `many-lights-500` 1.0011 to 1.0005, `light-linking` 1.0008 to 0.9998, `spot-area` 1.0000 to 0.9999 (all tiles within 5 percent before and after). `metal`, `glass` and `outdoor-hdri` have no light with a radius and their numbers do not change. Cook's own output is byte identical to `origin/main` for `lit-interior`, `glass` and `many-lights-500` on both kernels (64 spp, seed 3, 4 bounces, 480 x 270, built beside each other in one run).
 
-![Cycles with Blender's default Soft Falloff, Cook, Cycles with Soft Falloff off (left to right) for a 0.18 m lamp poking through a shade](cycles-sphere-light-comparison.jpg)
+![Cycles with Blender's default Soft Falloff (left, mean radiance 0.109) and with Soft Falloff off (right, 0.566) for a 0.18 m lamp poking through a shade, 1024 spp. Cook is within 1 percent of the right panel, 5.1 times the left (table above); its own picture was not kept because the GPU box was replaced during the run.](cycles-sphere-light-comparison.jpg)
 
 Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
 
