@@ -1346,7 +1346,7 @@ On the Classroom scene Cook rendered the seven point lights with a radius 41 per
 - Cook implements the sphere (`lgt_sample_point_or_spot_light`, `lgt_sphere_solid_angle_pdf` in `lights.wgsl`), with the radiance `intensity / (pi r^2)` that Cycles uses (`eval_fac` in `PointLight::copy_to_kernel`), so the power does not change with the radius.
 - `render-cycles.py` never set the property, so every Cycles reference with a light radius used the disk and Cook the sphere. The two agree far from geometry (radius 0.05 m: 0.05 percent apart) and drift as the lamp grows or touches geometry.
 
-Fix: `render-cycles.py` sets `use_soft_falloff` explicitly, to off by default, so both renderers draw a sphere. `--soft-falloff default|on|off` keeps the Blender default (`default`) or the disk (`on`) available. The kernel and the packer are unchanged (SHA-256 of the Cook output is identical to `origin/main`, below). Cook has no disk light, so a scene authored in Blender with the default Soft Falloff still differs by the amounts in the left column.
+Fix: `render-cycles.py` sets `use_soft_falloff` explicitly, to off by default, so both renderers draw a sphere. `--soft-falloff default|on|off` keeps the Blender default (`default`) or the disk (`on`) available. The kernel and the packer are unchanged (SHA-256 of the Cook output is identical to `origin/main`, below). Cook had no disk light then, so a scene authored in Blender with the default Soft Falloff differed by the amounts in the left column; [Soft Falloff lights](#soft-falloff-lights-1060) adds it.
 
 Cook over Cycles mean radiance (the three channels agree to 4 digits on grey diffuse scenes), 1024 spp, 480 x 270, 8 bounces, box filter, seed 1, one RTX 4090, Blender 5.3.0 OptiX, all materials grey diffuse, one lamp of intensity 8 at 1.6 m in the `lit-interior` room (`make-sphere-light-scenes.mjs`). "Before" is Cycles with the Blender default (disk), "after" is Cycles with Soft Falloff off `[measured]`:
 
@@ -1380,6 +1380,46 @@ uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-par
 ```
 
 `make-sphere-light-scenes.mjs` writes the lamp scenes and `run-sphere-light-parity.py` renders them with Cook and with Cycles (Soft Falloff default and off) and prints one line per scene. The scenes hidden from shadow rays need `--instancing` in `trace-native.mjs` and `rayVisibility` in `render-cycles.py`, which come with the Classroom bridge (#896). `tests/cycles-sphere-light-parity.test.js` pins the default and the closed form (floor radiance `albedo / pi * intensity / d^2` for radius 0, 0.18 and 0.5 m).
+
+## Soft Falloff lights (#1060)
+
+[Sphere lights and Soft Falloff](#sphere-lights-and-soft-falloff-1040) left Cook with the sphere only: a scene authored in Blender with the default `use_soft_falloff` on rendered 4 to 400 percent apart from its Cycles reference. A point or spot light now takes `softFalloff: true` and the `cycles` kernel draws it as Cycles does (`kernel/light/point.h` and `spot.h`, the branch without `is_sphere`):
+
+- **Shape.** A disk of the light's radius through its centre, perpendicular to the line from the centre to the shading point, so it faces whatever it lights. There is no inside or outside: a spot's cone applies at every distance, where the sphere skips it inside the radius.
+- **Sampling and pdf.** A point on the disk by the concentric map, pdf `t^2 / (cos * pi * r^2)` per steradian with `cos` the angle between the disk normal and the line to the receiver (Cycles: `invarea * light_pdf_area_to_solid_angle`). A path hits the disk where it crosses it in front of its origin (`ray_disk_intersect`) and uses the same pdf, so MIS against the BSDF is consistent. A spot's hit is one-sided as before.
+- **Radiance.** Unchanged: intensity over `pi r^2`, as for the sphere (Cycles uses one `eval_fac` for both). The power of a light does not change with the radius or the shape.
+- **Light tree.** The profile of the light is the disk's: `cos(theta_u) = d / sqrt(d^2 + r^2)` and the far distance `sqrt(d^2 + r^2)` (`point_light_tree_parameters`), where the sphere uses the angle of its silhouette.
+- **Request.** `softFalloff: true` on an entry of `environment.pointLights` or `spotLights` (scene recipes, `buildTraceScene`, the bench scene JSON); a boolean, anything else throws and says what to pass; `false` or a missing field is the sphere. The packer sets bit `32` (`SOFT_FALLOFF`) in the light record's `flags` for a light with a radius above 0 ([FORMAT-v2.md](../packages/render-native/FORMAT-v2.md)); the flattened path carries it in the third float of the light's last v1 texel, which nothing else reads, so every table of a scene without the field keeps its bytes.
+- **Not drawn elsewhere.** The legacy kernel, the WebGL and WebGPU path tracers and the rasterizer ignore the field and draw the light as before.
+- **Reference.** `render-cycles.py` sets `use_soft_falloff` per light from the scene's `softFalloff` (off when absent, as since #1040). `--soft-falloff default|on|off` still overrides every light.
+
+Closed form `[derived, checked by tests/cycles-sphere-light-parity.test.js on the GPU]`: a disk of radius `r` and radiance `I / (pi r^2)` facing a floor point at distance `d` from its centre, with every part of the disk above the floor, gives `E = I cos(beta) / (d^2 + r^2)` with `cos(beta) = h / d` (the azimuth term of the floor's cosine integrates to zero). The test lights a diffuse floor from 2 m with a point and a spot light of radius 0.18, 0.5 and 1 m, averages the pixel patch it renders, and stays within 3 percent of the integral over the same patch for all six, while a light without the field keeps the sphere's value.
+
+Cook over Cycles mean radiance on the lamp scenes of [#1040](#sphere-lights-and-soft-falloff-1040) (grey diffuse room, lamp of intensity 8 at 1.6 m, 1024 spp, 480 x 270, 8 bounces, box filter, seed 1, one RTX 4090, Blender 5.3.0 OptiX) `[measured]`. "Sphere" is Cook without the field against Cycles with Soft Falloff off, "soft" is Cook with `softFalloff: true` against Cycles with it on. "Seed floor" is Cycles seed 2 over seed 1 in the same setting:
+
+| Scene | Sphere mean | Soft mean | Sphere / soft tiles within 5 % | Sphere / soft relMSE | Seed floor mean, sphere / soft | Seed floor relMSE, sphere / soft |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| bare room, radius 0.05 m | 1.0001 | 1.0001 | 64 / 64 | 0.000471 / 0.000471 | 1.0001 / 1.0000 | 0.000543 / 0.000542 |
+| bare room, radius 0.18 m | 1.0001 | 1.0001 | 64 / 64 | 0.000472 / 0.000468 | 1.0001 / 1.0000 | 0.000543 / 0.000538 |
+| bare room, radius 0.5 m | 1.0001 | 1.0001 | 64 / 64 | 0.000480 / 0.000449 | 1.0001 / 1.0000 | 0.000551 / 0.000516 |
+| 0.18 m lamp inside an open-bottomed shade | 1.0011 | 1.0012 | 64 / 64 | 0.146 / 0.105 | 1.0003 / 1.0004 | 0.161 / 0.116 |
+| 0.18 m lamp poking through the shade walls | 0.9901 | 1.0039 | 64 / 63 | 0.120 / 0.192 | 1.0005 / 1.0016 | 0.120 / 0.202 |
+
+All ten means are within 1 percent of Cycles. The poking lamp with Soft Falloff on has one tile outside 5 percent (1.059; the tiles of the seed floor run from 0.966 to 1.043 on that scene), so its relMSE sits at the noise floor (0.192 against 0.202). Cook's sphere against Cycles' default disk was 1.0059, 1.0441, 1.1584 and 5.138 for the 0.18 m, 0.5 m, shade and poking lamps (the #1040 table): the difference this section removes.
+
+Without the field the output is the old output `[measured, one run each, the build of origin/main and this branch beside each other on the same box]`: the SHA-256 of every packed table (flattened v1, flattened job v2 and an instanced scene) of `lit-interior`, `many-lights-500` and `spot-area` is equal, and so is the SHA-256 of the traced float image of each scene on the `cycles` and on the `legacy` kernel (64 spp, seed 3, 4 bounces, 480 x 270). `bench/cycles-parity/packed-table-hashes.mjs --scenes lit-interior,many-lights-500,spot-area` prints the table hashes.
+
+![Cook with the lamp as a sphere (left, mean radiance 0.5605), Cook with softFalloff true (middle, 0.1095) and Cycles with Soft Falloff on (right, 0.1091) for a 0.18 m lamp poking through a shade, 1024 spp, one exposure for the three panels. The sphere is 5.1 times the Cycles panel; Cook's soft falloff is 1.004 times it.](cook-soft-falloff-comparison.jpg)
+
+Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
+
+```sh
+node packages/render-native/build.mjs
+uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/soft-falloff --soft-falloff off --repeat-cycles-seed2 --scenes bare-r0.18,bare-r0.18-soft,poking-r0.18,poking-r0.18-soft
+uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-soft-falloff-figure.py --cook-sphere artifacts/soft-falloff/renders/poking-r0.18-cook.npy --cook-soft artifacts/soft-falloff/renders/poking-r0.18-soft-cook.npy --cycles-soft artifacts/soft-falloff/renders/poking-r0.18-soft-cycles-scene.npy --output docs/cook-soft-falloff-comparison.jpg
+```
+
+`make-sphere-light-scenes.mjs` writes every lamp with a radius twice, as `<id>` (sphere) and `<id>-soft` (`softFalloff: true`); `run-sphere-light-parity.py` compares the `-soft` scenes with Cycles following the scene and the others with the `--soft-falloff` settings.
 
 ## Triangle bound of a native scene (#1041)
 
