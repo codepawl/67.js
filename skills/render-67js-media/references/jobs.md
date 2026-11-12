@@ -33,6 +33,9 @@ render the video.
 
 Video is H.264 with one frame in flight. At most 60 s and 900 frames, so 60 s needs 15 fps or less. A nonlooping
 motion must cover `start + duration`. The animated lights, sun, sky and effects tracks play with the same setting.
+A recipe with `physics` or `cloth` and no authored motion plays its bake on the same clock: send `motion: { "start": 0 }`,
+leave `duration` out to film the whole bake, and skip `bake-motion` (its 32 node cap does not apply). Nothing that moves
+still fails with an error naming motion, physics, cloth, particles, clips and map sequences.
 Motion blur (`effects.motionBlur.shutter`) needs camera tracks and this `motion` setting.
 
 ## Shots, cuts and sound

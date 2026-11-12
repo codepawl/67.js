@@ -310,6 +310,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     sensors: true, collisionLayers: 16,
     breakableJoints: 'fixed joint breakImpulse (N s): breaks when a body takes a contact impulse (force x 1/60 s) over it in one step; scene_inspect lists jointBreaks. scene_apply fracture-node { node, cells 2-64, strength N s, seed 1, impact [x,y,z] in geometry space, impactRadius, density 1, friction }: replaces a convex root node by cells nodes NAME-frag-i (fragment geometries) with convex bodies and one breakable fixed joint NAME-glue-a-b per neighbour pair; send it after the set-physics that holds the floor, ball and duration (set-physics replaces the section). docs/physics.md.',
     ragdoll: 'physics.ragdoll {armature}: limp capsule per bone; needs a floor',
+    film: 'render motion {start 0} plays this bake, cloth and particles with no bake-motion; video duration defaults to the bake.',
     limits: Object.freeze({ maxBodies: 128, maxJoints: 512, maxDuration: 10, framesPerSecond: 60, maxTrimeshTriangles: 20000, maxHullPoints: 2048 }),
   }),
   // Recipe cloth: a position-based solver (no peer dependency) records any root mesh node as a deformable sheet.
