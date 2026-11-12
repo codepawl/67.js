@@ -27,7 +27,9 @@ function createBoxPart(name, center, size, materialIndex, rayVisibility) {
   return part;
 }
 
-// Four walls and a lid, open at the bottom, centred on the lamp.
+// Four walls and a lid, open at the bottom, centred on the lamp. The left and right walls run the full span and the front and back
+// walls stop at the inside of the side walls, so no two boxes overlap or share a coplanar face. Overlapping boxes made the two
+// renderers disagree along the shared edge (#1070).
 function createShadeParts(halfWidth, rayVisibility) {
   const [lampX, lampY, lampZ] = LAMP_POSITION;
   const bottom = lampY - SHADE_CLEARANCE_BELOW_LAMP;
@@ -35,12 +37,13 @@ function createShadeParts(halfWidth, rayVisibility) {
   const height = top - bottom;
   const middleY = (top + bottom) / 2;
   const span = 2 * halfWidth + 2 * SHADE_WALL_THICKNESS;
+  const endWallSpanX = 2 * halfWidth;
   return [
     createBoxPart('shade-lid', [lampX, top + SHADE_WALL_THICKNESS / 2, lampZ], [span, SHADE_WALL_THICKNESS, span], 0, rayVisibility),
     createBoxPart('shade-left', [lampX - halfWidth - SHADE_WALL_THICKNESS / 2, middleY, lampZ], [SHADE_WALL_THICKNESS, height, span], 0, rayVisibility),
     createBoxPart('shade-right', [lampX + halfWidth + SHADE_WALL_THICKNESS / 2, middleY, lampZ], [SHADE_WALL_THICKNESS, height, span], 0, rayVisibility),
-    createBoxPart('shade-back', [lampX, middleY, lampZ - halfWidth - SHADE_WALL_THICKNESS / 2], [span, height, SHADE_WALL_THICKNESS], 0, rayVisibility),
-    createBoxPart('shade-front', [lampX, middleY, lampZ + halfWidth + SHADE_WALL_THICKNESS / 2], [span, height, SHADE_WALL_THICKNESS], 0, rayVisibility),
+    createBoxPart('shade-back', [lampX, middleY, lampZ - halfWidth - SHADE_WALL_THICKNESS / 2], [endWallSpanX, height, SHADE_WALL_THICKNESS], 0, rayVisibility),
+    createBoxPart('shade-front', [lampX, middleY, lampZ + halfWidth + SHADE_WALL_THICKNESS / 2], [endWallSpanX, height, SHADE_WALL_THICKNESS], 0, rayVisibility),
   ];
 }
 

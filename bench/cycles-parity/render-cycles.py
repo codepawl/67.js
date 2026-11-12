@@ -30,6 +30,10 @@ RAY_VISIBILITY_ATTRIBUTES = {
 # (default keeps the Blender default, represented here by None).
 SOFT_FALLOFF_FROM_SCENE = "scene"
 soft_falloff_setting = SOFT_FALLOFF_FROM_SCENE
+# Set by --light-mis off: lights stop being hit by BSDF rays and are sampled by next event estimation only (a diagnostic).
+light_mis_enabled = True
+# Set by --cycles-property name=value (repeatable): diagnostic overrides of scene.cycles properties, such as light_sampling_threshold=0.
+cycles_property_assignments = []
 Y_UP_TO_Z_UP = Matrix((
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 0.0, -1.0, 0.0),
@@ -106,6 +110,7 @@ def parse_cli_arguments():
         "aperture_rotation": float(read_flag_value(argument_list, "--aperture-rotation", "0")),
         "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
         "soft_falloff": read_soft_falloff(argument_list),
+        "light_mis": read_flag_value(argument_list, "--light-mis", "on") != "off",
     }
 
 
@@ -412,6 +417,8 @@ def apply_soft_falloff_setting(light_data, light_entry):
         light_data.use_soft_falloff = light_entry.get("softFalloff") is True
     elif soft_falloff_setting is not None:
         light_data.use_soft_falloff = soft_falloff_setting
+    if not light_mis_enabled:
+        light_data.cycles.use_multiple_importance_sampling = False
 
 
 def add_spot_light(scene, light_index, spot_entry):
@@ -585,7 +592,30 @@ def configure_cycles_parity(scene, options):
     scene.cycles.volume_bounces = bounces
     transparent_bounces = options["transparent_bounces"]
     scene.cycles.transparent_max_bounces = bounces if transparent_bounces is None else transparent_bounces
+    for property_assignment in cycles_property_assignments:
+        apply_cycles_property(scene, property_assignment)
     return used_devices
+
+
+# One --cycles-property name=value, applied after every setting above so that the override is what renders.
+def apply_cycles_property(scene, property_assignment):
+    if "=" not in property_assignment:
+        raise ValueError(f"--cycles-property takes name=value, got {property_assignment!r}.")
+    property_name, property_text = property_assignment.split("=", 1)
+    if not hasattr(scene.cycles, property_name):
+        raise ValueError(f"--cycles-property names a scene.cycles property, and {property_name!r} is not one.")
+    current_value = getattr(scene.cycles, property_name)
+    try:
+        property_value = json.loads(property_text)
+    except json.JSONDecodeError:
+        raise ValueError(f"--cycles-property {property_name} takes a JSON value such as 0, 0.5, true or \"NAME\", got {property_text!r}.")
+    if isinstance(current_value, bool) != isinstance(property_value, bool):
+        raise ValueError(f"--cycles-property {property_name} is {'a boolean' if isinstance(current_value, bool) else 'not a boolean'}, got {property_text!r}.")
+    if isinstance(current_value, int) and not isinstance(property_value, int):
+        raise ValueError(f"--cycles-property {property_name} is a whole number, got {property_text!r}.")
+    if isinstance(current_value, str) != isinstance(property_value, str):
+        raise ValueError(f"--cycles-property {property_name} is {'a name in quotes' if isinstance(current_value, str) else 'a number'}, got {property_text!r}.")
+    setattr(scene.cycles, property_name, type(current_value)(property_value))
 
 
 def parse_megabytes_from_stats(stats_text):
@@ -741,6 +771,16 @@ def main():
     scene = bpy.context.scene
     global soft_falloff_setting
     soft_falloff_setting = options["soft_falloff"]
+    global light_mis_enabled
+    light_mis_enabled = options["light_mis"]
+    global cycles_property_assignments
+    cycles_property_assignments = []
+    for index, token in enumerate(sys.argv):
+        if token != "--cycles-property":
+            continue
+        if index + 1 >= len(sys.argv):
+            raise ValueError("--cycles-property takes name=value after it.")
+        cycles_property_assignments.append(sys.argv[index + 1])
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
     build_scene_lights(scene, description["environment"])

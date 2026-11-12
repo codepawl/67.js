@@ -33,6 +33,11 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 DIRECT_ONLY_SCENES = ("bare-r0", "bare-r0.18", "enclosed-r0", "enclosed-r0.18", "enclosed-hidden-r0", "enclosed-hidden-r0.18")
 INSTANCED_CONTROL_SCENES = ("enclosed-r0.18", "poking-r0.18")
 HIDDEN_PREFIXES = ("enclosed-hidden", "poking-hidden")
+# Cycles counts a ray that hits a lamp as one transparent bounce and ends the path there once the count reaches the limit
+# (`integrator_shade_light_forward`, kernel/integrator/shade_light.h), so with one bounce and a transparent limit of one the energy that
+# passes through a sphere light and goes on to a wall behind it is lost. Cook does not count lamps. The Cycles reference keeps the
+# Blender default of 8 at least, which leaves the one bounce rows comparable (#1070).
+MINIMUM_TRANSPARENT_BOUNCES = 8
 SPHERE_SCENE_PREFIXES = ("bare-", "enclosed-", "poking-")
 SOFT_FALLOFF_SCENE_SUFFIX = "-soft"
 FOLLOW_SCENE = "scene"  # render-cycles.py reads each light's own softFalloff field
@@ -77,7 +82,8 @@ def render_cycles(blender, scene_path, prefix, options, bounces, seed, soft_fall
         return
     command = [blender, "-b", "--factory-startup", "--python", os.path.join(HERE, "render-cycles.py"), "--", scene_path, prefix,
                "--samples", str(options["samples"]), "--bounces", str(bounces), "--seed", str(seed),
-               "--width", str(options["width"]), "--height", str(options["height"])]
+               "--width", str(options["width"]), "--height", str(options["height"]),
+               "--transparent-bounces", str(max(bounces, MINIMUM_TRANSPARENT_BOUNCES))]
     if soft_falloff != FOLLOW_SCENE:
         command += ["--soft-falloff", soft_falloff]
     if grey_diffuse:
