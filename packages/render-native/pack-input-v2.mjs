@@ -670,9 +670,10 @@ export function packMaterialRecordV2(material = {}, textureCollector = null) {
     ? collector.addTexture(material.bumpTexture ?? material.bumpMap, false)
     : { index: Number(material.bumpTex ?? -1), meanLinearRgb: [1, 1, 1] };
 
-  const alphaTexIndex = explicitAlphaTex.index >= 0
-    ? explicitAlphaTex.index
-    : (alphaMode !== ALPHA_MODE_OPAQUE ? baseTex.index : -1);
+  // The kernel reads the alpha of the base colour map itself (its alpha channel). `alpha_tex` is a separate map read through its
+  // red channel, so pointing it at the base colour map would multiply the alpha by the colour's red (and, for an sRGB map, by its
+  // linearised red): a cutout then loses every texel that is not red enough. Only an explicit alpha map sets it.
+  const alphaTexIndex = explicitAlphaTex.index;
 
   let flags = 0;
   if (material.multiscatterGgx !== false) {
@@ -2588,7 +2589,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}) {
       normalTex: normalTex.index,
       metallicRoughnessTex: mrTex.index,
       emissionTex: emissionTex.index,
-      alphaTex: alphaCutoff > 0 && baseTex.index >= 0 ? baseTex.index : -1,
+      alphaTex: -1,
     }, null);
     packedMat.meanEmissiveRadiance = [
       packedMat.meanEmissiveRadiance[0] * emissionTex.meanLinearRgb[0],

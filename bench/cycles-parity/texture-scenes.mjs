@@ -86,9 +86,9 @@ function backdrop() {
   return part('backdrop', quadGeometry(1), [0, 0, -1.5], [7, 4, 1], { color: [0.55, 0.12, 0.1], roughness: 0.9 });
 }
 
-function textureRepeatScene() {
+function textureRepeatScene(maskColorSpace = 'srgb') {
   const colourMap = { image: gradientChecker(false), colorSpace: 'srgb' };
-  const maskMap = { image: gradientChecker(true), colorSpace: 'srgb' };
+  const maskMap = { image: gradientChecker(true), colorSpace: maskColorSpace };
   return sceneWithParts([
     backdrop(),
     part('colour', quadGeometry(3), [-2.2, 0, 0], [1.9, 1.9, 1], { color: [1, 1, 1], map: colourMap }),
@@ -119,7 +119,11 @@ function textureWrapsScene() {
   ]);
 }
 
-export const TEXTURE_SCENES = { 'tex-repeat': textureRepeatScene, 'tex-wraps': textureWrapsScene };
+export const TEXTURE_SCENES = {
+  'tex-repeat': () => textureRepeatScene('srgb'),
+  'tex-repeat-linear': () => textureRepeatScene('linear'),
+  'tex-wraps': textureWrapsScene,
+};
 
 async function writeScenes(outputDirectory) {
   const scenesDirectory = join(outputDirectory, 'scenes');

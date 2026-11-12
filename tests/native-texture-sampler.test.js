@@ -132,3 +132,32 @@ test('a pool of many small textures packs, uploads and renders', { skip: !findNa
   const result = traceNative(input, { width: 8, height: 8, samples: 1, kernel: 'cycles' });
   assert.ok(result.rgba.every(Number.isFinite));
 });
+
+const ALPHA_TEX_WORD = 62;
+const BASE_COLOR_TEX_WORD = 52;
+
+function readMaterialWord(input, materialIndex, wordIndex) {
+  const stride = STRUCT_STRIDES_V2.material;
+  const view = new Int32Array(input.materials.buffer, input.materials.byteOffset + materialIndex * stride, stride / 4);
+  return view[wordIndex];
+}
+
+test('a masked material reads its base map alpha through base_color_tex, not through alpha_tex (whose red channel it would multiply in)', () => {
+  const image = solidImage(4, 4, 200);
+  const camera = createCamera({ eye: [0, 0, 3], target: [0, 0, 0], fov: 40 }, 8, 8);
+  const input = buildNativeInputV2(
+    {
+      materials: [
+        { color: [1, 1, 1], alphaMode: 'mask', alphaCutoff: 0.5, map: { image, colorSpace: 'srgb' } },
+        { color: [1, 1, 1], alphaMode: 'mask', alphaCutoff: 0.5, map: { image, colorSpace: 'srgb' }, alphaMap: { image: solidImage(2, 2, 90), colorSpace: 'linear' } },
+      ],
+      instances: [{ geometry: quadGeometry(0), materialIndex: 0 }, { geometry: quadGeometry(1), materialIndex: 1 }],
+      lights: {},
+    },
+    camera,
+    { width: 8, height: 8, samples: 1 },
+  );
+  assert.equal(readMaterialWord(input, 0, BASE_COLOR_TEX_WORD), 0);
+  assert.equal(readMaterialWord(input, 0, ALPHA_TEX_WORD), -1);
+  assert.equal(readMaterialWord(input, 1, ALPHA_TEX_WORD), 1, 'an explicit alpha map is still bound');
+});
