@@ -208,6 +208,33 @@ pub(crate) fn check_frame_params_keep_scene_counts(session_kernel_params: &[u8],
     Ok(())
 }
 
+/// The scene-bound words an update of the light or emission tables may change: the selection weights are sums over the
+/// tables the update replaces. Every other scene-bound word (counts, environment, texel pool offsets) must stay.
+const UPDATABLE_SCENE_WORD_OFFSETS: [usize; 3] = [268, 272, 292];
+
+/// Checks that the kernel parameters of a session update describe a scene of the same shape as the session's: the same
+/// counts, environment and texel pool offsets. The light and emission selection weights may differ.
+pub(crate) fn check_update_params_keep_scene_shape(session_kernel_params: &[u8], update_kernel_params: &[u8]) -> Result<()> {
+    for (name, byte_offset) in SCENE_BOUND_FIELDS {
+        if UPDATABLE_SCENE_WORD_OFFSETS.contains(&byte_offset) {
+            continue;
+        }
+        if session_kernel_params.len() < byte_offset + 4 || update_kernel_params.len() < byte_offset + 4 {
+            return Err(failure(format!(
+                "kernelParams must hold the 320 byte KernelParamsV2 block to read {name} at byte {byte_offset}."
+            )));
+        }
+        let session_word = read_u32_le(session_kernel_params, byte_offset);
+        let update_word = read_u32_le(update_kernel_params, byte_offset);
+        if session_word != update_word {
+            return Err(failure(format!(
+                "The update changes {name} (byte {byte_offset}) from {session_word} to {update_word} (raw 32 bit words). A session update keeps the shape of the scene it holds (the record counts, the environment and the textures); create a new session for this input."
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// The compute entry point to run for a kernel parameter block: `main`, or `light_tree_probe` when it carries
 /// `KERNEL_FLAG_LIGHT_TREE_PROBE` (tests).
 pub(crate) fn trace_entry_point_for_params(kernel_params: &[u8]) -> &'static str {
@@ -751,6 +778,29 @@ mod specialization_tests {
         assert!(message.contains("envWidth"), "{message}");
         assert!(check_frame_params_keep_scene_counts(&no_environment, &with_environment).is_err());
         assert!(check_frame_params_keep_scene_counts(&with_environment, &no_environment).is_err());
+    }
+
+    #[test]
+    fn an_update_may_change_the_selection_weights_but_not_the_shape_of_the_scene() {
+        let session_params = make_kp(0, 0.0, 512, 256, 3.0);
+        for byte_offset in UPDATABLE_SCENE_WORD_OFFSETS {
+            let mut reweighted = session_params.clone();
+            reweighted[byte_offset..byte_offset + 4].copy_from_slice(&0x4000_0000u32.to_le_bytes());
+            assert!(check_update_params_keep_scene_shape(&session_params, &reweighted).is_ok(), "byte {byte_offset}");
+        }
+        for (name, byte_offset) in SCENE_BOUND_FIELDS {
+            if UPDATABLE_SCENE_WORD_OFFSETS.contains(&byte_offset) {
+                continue;
+            }
+            let mut reshaped = session_params.clone();
+            reshaped[byte_offset..byte_offset + 4].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+            let message = check_update_params_keep_scene_shape(&session_params, &reshaped)
+                .expect_err("a changed scene shape must be refused")
+                .to_string();
+            assert!(message.contains(name), "{name}: {message}");
+            assert!(message.contains("create a new session"), "{name}: {message}");
+        }
+        assert!(check_update_params_keep_scene_shape(&session_params, &session_params[..64]).is_err());
     }
 
     #[test]

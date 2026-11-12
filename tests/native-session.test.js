@@ -4,6 +4,7 @@ import {
   buildNativeInputV2,
   createNativeSession,
   findNativeAddon,
+  planNativeSessionUpdate,
   resolveSessionCreation,
   resolveSessionFrame,
   traceNative,
@@ -220,6 +221,164 @@ test('a closed session refuses to render and closing twice frees the card once',
   assert.deepEqual(calls, ['close']);
 });
 
+// ---- Progressive film and scene updates: argument checks and the wrapper, without the addon ----
+
+function roomInputWith(changeScene, eye = [0, 2.2, 6], options = IMAGE_OPTIONS) {
+  const scene = buildRoomScene();
+  changeScene(scene);
+  const camera = createCamera({ eye, target: [0, 0.5, 0], fov: 45 }, options.width, options.height);
+  return buildNativeInputV2(scene, camera, options);
+}
+
+const DEFAULT_FRAME = { width: 24, height: 16, samples: 8 };
+
+test('a frame passes accumulate and targetSamples on and checks them', () => {
+  const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
+  const frame = resolveSessionFrame(sessionInput, DEFAULT_FRAME, { accumulate: true, targetSamples: 32 });
+  assert.equal(frame.accumulate, true);
+  assert.equal(frame.targetSamples, 32);
+  const plain = resolveSessionFrame(sessionInput, DEFAULT_FRAME, {});
+  assert.equal(plain.accumulate, undefined);
+  assert.equal(plain.targetSamples, undefined);
+  const fromDefaults = resolveSessionFrame(sessionInput, { ...DEFAULT_FRAME, accumulate: true, targetSamples: 64 }, {});
+  assert.equal(fromDefaults.targetSamples, 64);
+
+  assert.throws(() => resolveSessionFrame(sessionInput, DEFAULT_FRAME, { accumulate: 'yes' }), { name: 'TypeError', message: /accumulate/ });
+  assert.throws(() => resolveSessionFrame(sessionInput, DEFAULT_FRAME, { targetSamples: 32 }), { name: 'TypeError', message: /accumulate: true/ });
+  assert.throws(() => resolveSessionFrame(sessionInput, DEFAULT_FRAME, { accumulate: true, targetSamples: 1.5 }), { name: 'RangeError', message: /targetSamples/ });
+  assert.throws(() => resolveSessionFrame(sessionInput, DEFAULT_FRAME, { accumulate: true, targetSamples: 0 }), { name: 'RangeError', message: /targetSamples/ });
+  assert.throws(() => resolveSessionFrame(sessionInput, DEFAULT_FRAME, { accumulate: true, targetSamples: 4 }), { name: 'RangeError', message: /more than .targetSamples/ });
+});
+
+test('planNativeSessionUpdate sends nothing for the same input and only the tables whose bytes changed', () => {
+  const current = roomInput([0, 2.2, 6]);
+  assert.deepEqual(planNativeSessionUpdate(current, roomInput([1.5, 2.2, 5])), {}, 'a camera is not a table');
+
+  const recoloured = roomInputWith((scene) => {
+    scene.materials[0].color = [0.2, 0.5, 0.8];
+  });
+  const colourPlan = planNativeSessionUpdate(current, recoloured);
+  assert.deepEqual(Object.keys(colourPlan), ['materials']);
+  assert.equal(colourPlan.materials, recoloured.materials);
+
+  const moved = roomInputWith((scene) => {
+    scene.instances[0].matrix = horizontalQuadMatrix(8, -0.25, true);
+  });
+  const movePlan = planNativeSessionUpdate(current, moved);
+  assert.ok(Object.keys(movePlan).includes('instances'));
+  assert.ok(!Object.keys(movePlan).includes('materials'));
+});
+
+test('planNativeSessionUpdate refuses a change of record counts and names it', () => {
+  const current = roomInput([0, 2.2, 6]);
+  const withExtraQuad = roomInputWith((scene) => {
+    scene.instances.push({ geometry: UNIT_QUAD, matrix: horizontalQuadMatrix(1, 1, true), materialIndex: 0 });
+  });
+  assert.throws(() => planNativeSessionUpdate(current, withExtraQuad), { message: /`instanceCount` changes from 3 to 4.*createNativeSession/ });
+  const withExtraMaterial = roomInputWith((scene) => {
+    scene.materials.push({ color: [1, 0, 0] });
+  });
+  assert.throws(() => planNativeSessionUpdate(current, withExtraMaterial), { message: /`materialCount` changes from 2 to 3/ });
+});
+
+test('planNativeSessionUpdate refuses other geometry, other textures and an instance that places another mesh', () => {
+  const current = roomInput([0, 2.2, 6]);
+  const bent = { ...current, triangles: new Uint8Array(current.triangles) };
+  new DataView(bent.triangles.buffer).setFloat32(8, 0.5, true);
+  assert.throws(() => planNativeSessionUpdate(current, bent), { message: /`triangles` differs.*the geometry/ });
+  const otherMesh = roomInputWith((scene) => {
+    scene.instances[0].geometry = { ...UNIT_QUAD, positions: new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0.5, -1, 1, 0]) };
+  });
+  assert.throws(() => planNativeSessionUpdate(current, otherMesh), { message: /`triangleCount` changes from 2 to 4/ });
+
+  const otherTexels = { ...current, textureTexels: new Uint32Array([1, 2, 3, 4]) };
+  assert.throws(() => planNativeSessionUpdate({ ...current, textureTexels: new Uint32Array(4) }, otherTexels), { message: /`textureTexels` differs.*the textures/ });
+
+  const swappedMesh = { ...current, instances: new Uint8Array(current.instances) };
+  new DataView(swappedMesh.instances.buffer).setUint32(160 + 100, 77, true);
+  assert.throws(() => planNativeSessionUpdate(current, swappedMesh), { message: /instance 1 changes `triangleOffset` from \d+ to 77.*not change the mesh/ });
+});
+
+test('a wrapped session resets, resolves and updates through the addon and keeps the new defaults', () => {
+  const first = roomInput([0, 2.2, 6]);
+  const second = roomInputWith((scene) => {
+    scene.materials[0].color = [0.2, 0.5, 0.8];
+  }, [1.5, 2.2, 5]);
+  const calls = [];
+  const nativeSession = {
+    render(frame) {
+      calls.push(['render', frame]);
+      return { trace: { rgba: new Float32Array(4) }, session: { filmSamples: frame.samples } };
+    },
+    reset() {
+      calls.push(['reset']);
+    },
+    resolve(options) {
+      calls.push(['resolve', options]);
+      return { trace: { rgba: new Float32Array(4), tracedSeconds: 0 }, session: { filmSamples: 8 } };
+    },
+    update(options) {
+      calls.push(['update', options]);
+      return { uploadedTables: Object.keys(options).filter((name) => name !== 'kernelParams'), accelerationRebuilt: false };
+    },
+    close() {
+      calls.push(['close']);
+    },
+  };
+  const sessionInput = resolveSessionCreation(first, {});
+  const session = wrapNativeSession(nativeSession, sessionInput, { width: 24, height: 16, samples: 4 });
+
+  session.reset();
+  assert.equal(session.resolve().filmSamples, 8);
+  assert.deepEqual(calls[1], ['resolve', { denoise: undefined }]);
+  session.resolve({ denoise: 'atrous' });
+  assert.deepEqual(calls[2], ['resolve', { denoise: 'atrous' }]);
+  assert.throws(() => session.resolve({ denoise: 'bilateral' }), { message: /denoise/ });
+  assert.throws(() => session.resolve(null), { name: 'TypeError', message: /resolveOptions/ });
+
+  const report = session.update(second);
+  assert.deepEqual(report.uploadedTables, ['materials']);
+  const updateCall = calls.find(([name]) => name === 'update')[1];
+  assert.deepEqual(Object.keys(updateCall).sort(), ['kernelParams', 'materials']);
+  assert.deepEqual(updateCall.kernelParams, resolveSessionCreation(second, {}).kernelParams);
+
+  session.render({});
+  const frameAfterUpdate = calls.filter(([name]) => name === 'render').pop()[1];
+  assert.deepEqual(frameAfterUpdate.kernelParams, updateCall.kernelParams, 'a frame after the update starts from the new kernel parameters');
+});
+
+test('a refused update changes nothing and a closed session refuses reset, resolve and update', () => {
+  const current = roomInput([0, 2.2, 6]);
+  const calls = [];
+  const nativeSession = {
+    update() {
+      calls.push('update');
+      return {};
+    },
+    reset() {
+      calls.push('reset');
+    },
+    resolve() {
+      calls.push('resolve');
+      return { trace: {}, session: {} };
+    },
+    close() {},
+  };
+  const session = wrapNativeSession(nativeSession, resolveSessionCreation(current, {}), {});
+  const withExtraQuad = roomInputWith((scene) => {
+    scene.instances.push({ geometry: UNIT_QUAD, matrix: horizontalQuadMatrix(1, 1, true), materialIndex: 0 });
+  });
+  assert.throws(() => session.update(withExtraQuad), { message: /instanceCount/ });
+  assert.throws(() => session.update(undefined), { name: 'TypeError', message: /FORMAT-v2/ });
+  assert.deepEqual(calls, [], 'the addon is not called for a refused update');
+  session.close();
+  for (const method of ['reset', 'resolve']) {
+    assert.throws(() => session[method](), { message: new RegExp(`NativeSession.${method}: this session is closed`) });
+  }
+  assert.throws(() => session.update(current), { message: /NativeSession.update: this session is closed/ });
+  assert.deepEqual(calls, []);
+});
+
 // ---- Renders on the GPU ----
 
 test('a session render equals the one-shot render byte for byte and the second frame reuses the setup', { skip: skipWithoutAddon }, () => {
@@ -360,6 +519,285 @@ test('a first frame that fails leaves the creation costs for the retry', { skip:
     assert.ok(retry.setupSeconds > 0, 'the creation setup seconds are reported by the first frame that succeeds');
     assertSameBytes(traceNative(input, options), retry, 'the retry against the one-shot render');
     assert.equal(session.render(options).accelerationReused, true);
+  } finally {
+    session.close();
+  }
+});
+
+// ---- Progressive film on the GPU ----
+
+const FILM_SAMPLES = 32;
+const FILM_SPLITS = [[16, 16], [8, 8, 16], [5, 11, 7, 9], [1, 31]];
+
+function renderInParts(session, options, parts, targetSamples = FILM_SAMPLES) {
+  let drawn = 0;
+  let last;
+  for (const samples of parts) {
+    last = session.render({ ...options, samples, accumulate: true, ...(drawn === 0 ? { targetSamples } : {}) });
+    assert.equal(last.firstSample, drawn, 'the call continues where the film left off');
+    drawn += samples;
+    assert.equal(last.filmSamples, drawn);
+    assert.equal(last.targetSamples, targetSamples);
+  }
+  return last;
+}
+
+test('one image over several calls equals one render of the same samples, for both samplers, with and without path regeneration', { skip: skipWithoutAddon }, () => {
+  const input = roomInput([0, 2.2, 6]);
+  const session = createNativeSession(input);
+  try {
+    for (const sampler of ['sobol-burley', 'white']) {
+      for (const pathRegeneration of [true, false]) {
+        for (const samplesPerDispatch of [undefined, 3]) {
+          const options = { ...IMAGE_OPTIONS, samples: FILM_SAMPLES, kernel: 'cycles', sampler, pathRegeneration, samplesPerDispatch };
+          const oneShot = traceNative(input, options);
+          for (const parts of FILM_SPLITS) {
+            session.reset();
+            const label = `${sampler}, regeneration ${pathRegeneration}, samplesPerDispatch ${samplesPerDispatch}, split ${parts.join('+')}`;
+            const split = renderInParts(session, options, parts);
+            assertSameBytes(oneShot, split, label);
+            assertSameBytes(oneShot, session.resolve(), `${label}, resolved without tracing`);
+          }
+        }
+      }
+    }
+  } finally {
+    session.close();
+  }
+});
+
+test('resolve gives the a-trous image of the film and traces nothing', { skip: skipWithoutAddon }, () => {
+  const input = roomInput([0, 2.2, 6]);
+  const options = { ...IMAGE_OPTIONS, samples: FILM_SAMPLES, kernel: 'cycles', denoise: 'atrous' };
+  const oneShot = traceNative(input, options);
+  const session = createNativeSession(input);
+  try {
+    renderInParts(session, options, [10, 22]);
+    const resolved = session.resolve({ denoise: 'atrous' });
+    assertSameBytes(oneShot, resolved, 'the film');
+    assert.ok(bytesOf(oneShot, 'denoisedRgba').equals(bytesOf(resolved, 'denoisedRgba')), 'the denoised image');
+    assert.equal(resolved.tracedSeconds, 0);
+    assert.equal(resolved.compileSeconds, 0);
+    assert.equal(resolved.accelerationBuildSeconds, 0);
+    assert.equal(resolved.pipelineReused, true);
+    assert.equal(resolved.filmSamples, FILM_SAMPLES);
+    assert.equal(resolved.denoisedRgba.length, 24 * 16 * 4);
+    assert.ok([null, undefined].includes(session.resolve().denoisedRgba), 'no denoise unless asked');
+  } finally {
+    session.close();
+  }
+});
+
+test('a call that does not belong to the film is refused and leaves the film as it was', { skip: skipWithoutAddon }, () => {
+  const input = roomInput([0, 2.2, 6]);
+  const movedCamera = roomInput([1.5, 2.2, 5]);
+  const options = { ...IMAGE_OPTIONS, samples: 16, kernel: 'cycles' };
+  const session = createNativeSession(input);
+  try {
+    assert.throws(() => session.render({ ...options, accumulate: true }), { message: /needs targetSamples/ });
+    session.render({ ...options, accumulate: true, targetSamples: FILM_SAMPLES });
+    assert.throws(() => session.render({ ...options, accumulate: true, kernelParams: movedCamera.kernelParams }), { message: /kernel parameters.*reset\(\)/ });
+    assert.throws(() => session.render({ ...options, samples: 20, accumulate: true }), { message: /Ask for 16 or fewer/ });
+    assert.throws(() => session.render({ ...options, width: 32, height: 20, accumulate: true }), { message: /24x16.*32x20/ });
+    assert.throws(() => session.render({ ...options, accumulate: true, targetSamples: 64 }), { message: /started for 32/ });
+    const finished = session.render({ ...options, accumulate: true });
+    assert.equal(finished.firstSample, 16);
+    assertSameBytes(traceNative(input, { ...options, samples: FILM_SAMPLES }), finished, 'after the refused calls');
+    assert.throws(() => session.render({ ...options, samples: 1, accumulate: true }), { message: /more would pass targetSamples/ });
+  } finally {
+    session.close();
+  }
+});
+
+test('reset starts over, a plain frame discards the image and resolve needs samples', { skip: skipWithoutAddon }, () => {
+  const input = roomInput([0, 2.2, 6]);
+  const options = { ...IMAGE_OPTIONS, samples: FILM_SAMPLES, kernel: 'cycles' };
+  const oneShot = traceNative(input, options);
+  const session = createNativeSession(input);
+  try {
+    assert.throws(() => session.resolve(), { message: /holds no samples/ });
+    renderInParts(session, options, [10]);
+    session.reset();
+    assert.throws(() => session.resolve(), { message: /holds no samples/ });
+    assertSameBytes(oneShot, renderInParts(session, options, [12, 20]), 'after a reset');
+
+    const plain = session.render(options);
+    assertSameBytes(oneShot, plain, 'a plain frame');
+    assert.equal(plain.firstSample, 0);
+    assert.equal(plain.filmSamples, FILM_SAMPLES);
+    assert.ok(plain.targetSamples === null || plain.targetSamples === undefined, 'a plain frame has no target');
+    assert.throws(() => session.render({ ...options, samples: 4, accumulate: true }), { message: /needs targetSamples/ });
+    assertSameBytes(oneShot, session.resolve(), 'the plain frame as the film');
+  } finally {
+    session.close();
+  }
+});
+
+// ---- Scene updates on the GPU ----
+
+function recolourFloor(scene) {
+  scene.materials[0].color = [0.2, 0.5, 0.8];
+}
+
+function moveFloorAndLamp(scene) {
+  scene.instances[0].matrix = horizontalQuadMatrix(8, -0.25, true);
+  scene.instances[2].matrix = horizontalQuadMatrix(1, 2.4, false);
+}
+
+test('an update of material values equals a fresh render of the final input and keeps the pipeline and the BLAS', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
+  const before = roomInput([0, 2.2, 6]);
+  const after = roomInputWith(recolourFloor);
+  const session = createNativeSession(before);
+  try {
+    const cold = session.render(options);
+    const report = session.update(after);
+    assert.deepEqual(report.uploadedTables, ['materials']);
+    assert.equal(report.accelerationRebuilt, false);
+    assert.equal(report.changedInstances, 0);
+    assert.equal(report.kernelRespecialized, false);
+    const warm = session.render(options);
+    assertSameBytes(traceNative(after, options), warm, 'the update then render against a fresh one-shot render');
+    assert.ok(!bytesOf(cold, 'rgba').equals(bytesOf(warm, 'rgba')), 'the new colour must show');
+    assert.equal(warm.accelerationReused, true);
+    assert.equal(warm.pipelineReused, true);
+    assert.equal(warm.accelerationBuildSeconds, 0);
+  } finally {
+    session.close();
+  }
+});
+
+test('moving instances rebuilds only the TLAS and the next render equals a fresh render of the moved scene', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
+  const before = roomInput([0, 2.2, 6]);
+  const after = roomInputWith(moveFloorAndLamp);
+  const session = createNativeSession(before);
+  try {
+    const cold = session.render(options);
+    const report = session.update(after);
+    assert.ok(report.uploadedTables.includes('instances'));
+    assert.equal(report.accelerationRebuilt, true);
+    assert.equal(report.changedInstances, 2);
+    const moved = session.render(options);
+    assertSameBytes(traceNative(after, options), moved, 'the moved scene');
+    assert.ok(!bytesOf(cold, 'rgba').equals(bytesOf(moved, 'rgba')));
+    assert.equal(moved.accelerationReused, true);
+    assert.equal(moved.accelerationBuildSeconds, 0);
+    assert.equal(moved.pipelineReused, true);
+
+    const back = session.update(before);
+    assert.equal(back.accelerationRebuilt, true);
+    assertSameBytes(cold, session.render(options), 'moved back to the first placement');
+  } finally {
+    session.close();
+  }
+});
+
+test('an update that changes what the kernel is specialized for compiles again and still equals a fresh render', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
+  const before = roomInput([0, 2.2, 6]);
+  const glass = roomInputWith((scene) => {
+    scene.materials[0].transmission = 0.8;
+  });
+  const session = createNativeSession(before);
+  try {
+    session.render(options);
+    const report = session.update(glass);
+    assert.equal(report.kernelRespecialized, true);
+    const rendered = session.render(options);
+    assert.equal(rendered.pipelineReused, false);
+    assert.equal(rendered.accelerationReused, true);
+    assertSameBytes(traceNative(glass, options), rendered, 'the transmissive floor');
+  } finally {
+    session.close();
+  }
+});
+
+test('an update with a new camera only sends no table, and the same input again changes nothing', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
+  const first = roomInput([0, 2.2, 6]);
+  const moved = roomInput([1.5, 2.2, 5]);
+  const session = createNativeSession(first);
+  try {
+    session.render(options);
+    const same = session.update(first);
+    assert.deepEqual(same.uploadedTables, []);
+    assert.equal(same.accelerationRebuilt, false);
+    const cameraOnly = session.update(moved);
+    assert.deepEqual(cameraOnly.uploadedTables, []);
+    assertSameBytes(traceNative(moved, options), session.render(options), 'the new default camera');
+  } finally {
+    session.close();
+  }
+});
+
+test('an update ends the progressive image and the next one equals a fresh render of the final input', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, samples: FILM_SAMPLES, kernel: 'cycles' };
+  const before = roomInput([0, 2.2, 6]);
+  const after = roomInputWith(moveFloorAndLamp);
+  const session = createNativeSession(before);
+  try {
+    renderInParts(session, options, [10]);
+    session.update(after);
+    assert.throws(() => session.resolve(), { message: /holds no samples/ });
+    assert.throws(() => session.render({ ...options, samples: 4, accumulate: true }), { message: /needs targetSamples/ });
+    assertSameBytes(traceNative(after, options), renderInParts(session, options, [7, 25]), 'the image after the update');
+  } finally {
+    session.close();
+  }
+});
+
+test('an update that cannot be applied is refused before anything changes', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
+  const before = roomInput([0, 2.2, 6]);
+  const session = createNativeSession(before);
+  try {
+    const oneShot = traceNative(before, options);
+    assertSameBytes(oneShot, session.render(options), 'before the refused updates');
+    const withExtraQuad = roomInputWith((scene) => {
+      scene.instances.push({ geometry: UNIT_QUAD, matrix: horizontalQuadMatrix(1, 1, true), materialIndex: 0 });
+    });
+    assert.throws(() => session.update(withExtraQuad), { message: /instanceCount.*createNativeSession/ });
+    const otherEnvironment = new Uint8Array(before.kernelParams);
+    new DataView(otherEnvironment.buffer).setUint32(ENV_WIDTH_BYTE_OFFSET, 64, true);
+    assert.throws(() => session.update({ ...before, kernelParams: otherEnvironment }), { message: /envWidth.*create a new session/ });
+    assertSameBytes(oneShot, session.render(options), 'after the refused updates');
+  } finally {
+    session.close();
+  }
+  assert.throws(() => session.update(before), { message: /closed/ });
+});
+
+test('an updated session renders like a new session and the timings of both are printed', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, samples: 4, kernel: 'cycles' };
+  const before = roomInput([0, 2.2, 6]);
+  const after = roomInputWith(moveFloorAndLamp);
+  const session = createNativeSession(before);
+  try {
+    session.render(options);
+    const updateStarted = performance.now();
+    const report = session.update(after);
+    const updated = session.render(options);
+    const updateMilliseconds = performance.now() - updateStarted;
+    const newSessionStarted = performance.now();
+    const fresh = createNativeSession(after);
+    let newSessionFrame;
+    try {
+      newSessionFrame = fresh.render(options);
+    } finally {
+      fresh.close();
+    }
+    const newSessionMilliseconds = performance.now() - newSessionStarted;
+    assertSameBytes(newSessionFrame, updated, 'the updated session against a new session');
+    console.log(`SESSION_UPDATE_TIMING ${JSON.stringify({
+      updateAndRenderMilliseconds: Number(updateMilliseconds.toFixed(2)),
+      newSessionAndRenderMilliseconds: Number(newSessionMilliseconds.toFixed(2)),
+      updateSeconds: report.updateSeconds,
+      accelerationRebuildSeconds: report.accelerationRebuildSeconds,
+      newSessionCompileSeconds: newSessionFrame.compileSeconds,
+      newSessionAccelerationBuildSeconds: newSessionFrame.accelerationBuildSeconds,
+    })}`);
+    assert.equal(updated.accelerationBuildSeconds, 0);
   } finally {
     session.close();
   }
