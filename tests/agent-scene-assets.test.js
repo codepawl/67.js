@@ -113,3 +113,25 @@ test('apply can add and remove placed assets', async () => {
   scene.apply([{ type: 'remove-node', id: 'late-tree' }], { expectedRevision: 2 });
   assert.equal(scene.parts.filter(part => part.name.startsWith('late-tree')).length, 0);
 });
+
+test('a scene created without assets places its first catalog asset, then a second instance, through apply', async () => {
+  const scene = createAgentScene(recipe([]), {}, {});
+  assert.throws(() => scene.apply([{ type: 'add-node', node: { id: 'boat', asset: { id: ASSET_ID } } }], { expectedRevision: scene.revision }), /places catalog assets/);
+  assert.equal(scene.exportRecipe().nodes.length, 1, 'the refused edit leaves the scene alone');
+  scene.provideAssets(await loadedAssets());
+  scene.apply([{ type: 'add-node', node: { id: 'boat', translation: [3, 0, 0], asset: { id: ASSET_ID } } }], { expectedRevision: scene.revision });
+  scene.apply([{ type: 'add-node', node: { id: 'boat-2', translation: [-3, 0, 0], asset: { id: ASSET_ID } } }], { expectedRevision: scene.revision });
+  const placed = scene.inspect().assets;
+  assert.deepEqual(placed.map(placement => placement.assetId), [ASSET_ID, ASSET_ID]);
+});
+
+test('an asset that is not in the pool is refused by id, and the 16 distinct asset bound still applies', async () => {
+  const scene = createAgentScene(recipe([]), {}, {});
+  scene.provideAssets(new Map());
+  assert.throws(() => scene.apply([{ type: 'add-node', node: { id: 'boat', asset: { id: ASSET_ID } } }], { expectedRevision: scene.revision }), /Asset abababababab copy 0 is not loaded/);
+  const many = Array.from({ length: 17 }, (_, index) => ({ type: 'add-node', node: { id: `asset-${index}`, asset: { id: index.toString(16).padStart(2, '0').repeat(32) } } }));
+  const pool = new Map();
+  for (const operation of many) pool.set(assetCopyKey(operation.node.asset.id, 0), await strip());
+  scene.provideAssets(pool);
+  assert.throws(() => scene.apply(many, { expectedRevision: scene.revision }), /at most 512 assets, 16 different ones/);
+});

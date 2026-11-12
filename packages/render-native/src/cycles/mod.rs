@@ -1189,6 +1189,24 @@ mod tests {
         }
     }
 
+    /// A point or spot light with a radius is a sphere (Blender's `use_soft_falloff` off, #1040): outside it Cook samples the cone
+    /// of the sphere and a path that hits it uses the same cone pdf, inside it samples the surface, and the packed radiance is
+    /// intensity over pi r^2 so the power does not change with the radius. The Cycles reference script switches
+    /// `use_soft_falloff` off to render the same light; with it on Cycles uses an oriented disk this kernel does not model.
+    #[test]
+    fn a_light_with_a_radius_is_a_sphere_with_one_pdf_for_sampling_and_hits() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        let sampler_start = kernel.find("fn lgt_sample_point_or_spot_light(").expect("the point and spot sampler exists");
+        let sampler_end = sampler_start + kernel[sampler_start..].find("\nfn lgt_sample_area_light(").expect("the sampler ends");
+        let sampler = &kernel[sampler_start..sampler_end];
+        assert!(sampler.contains("lgt_sample_uniform_cone(center_dir, one_minus_cos_sphere, rand_uv, &cos_theta)"));
+        assert!(sampler.contains("pdf_solid_angle = 1.0 / max(TWO_PI * one_minus_cos_sphere, 1.0e-30)"));
+        assert!(sampler.contains("lgt_sample_uniform_sphere(rand_uv)"));
+        assert!(kernel.contains("lgt_sphere_solid_angle_pdf(dist_sq, light.radius, hit_t, ray_origin, ray_dir, light.position)"));
+        assert!(kernel.contains("if (hit_t <= t_min || hit_t >= t_max) {"));
+        assert!(!kernel.contains("disk_light_sample"));
+    }
+
     #[test]
     fn the_bootstrap_entry_samples_alpha_through_the_shared_sampler() {
         let bootstrap = include_str!("bootstrap_main.wgsl");

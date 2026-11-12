@@ -176,6 +176,9 @@ export async function replaceRendererWorld(renderer, parts, environmentMap, isFr
   await renderer.prepareEnvironmentInSlices(environmentMap, createSlicer(SLICE_MILLISECONDS));
   recordSwapPhase('prefilter', prefilterStart);
   if (isFreed()) return false;
+  // Large textures go to the driver in bands between slices, so replaceParts finds them uploaded.
+  await renderer.preloadTextures(parts, { checkpoint: createSlicer(SLICE_MILLISECONDS) });
+  if (isFreed()) return false;
   const replaceStart = performance.now();
   renderer.replaceParts(parts);
   recordSwapPhase('replaceParts', replaceStart);
