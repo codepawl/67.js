@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { buildNativeInput, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
 import { box } from '../src/geometry.js';
@@ -85,3 +89,38 @@ for (const radius of [0, 0.18, 0.5]) {
     assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);
   });
 }
+
+// Boxes of the lamp scenes that overlap or share a coplanar front face made Cook and Cycles disagree by a column of pixels
+// on the shade (#1070), so the scenes must be made of boxes that only touch.
+function boxBounds(part) {
+  const matrix = part.matrix;
+  return [0, 1, 2].map((axis) => ({ low: matrix[12 + axis] - matrix[axis * 5] / 2, high: matrix[12 + axis] + matrix[axis * 5] / 2 }));
+}
+
+function boxesOverlapInVolume(firstBounds, secondBounds) {
+  const overlapPerAxis = [0, 1, 2].map((axis) => Math.min(firstBounds[axis].high, secondBounds[axis].high) - Math.max(firstBounds[axis].low, secondBounds[axis].low));
+  return overlapPerAxis.every((overlap) => overlap > 1e-9);
+}
+
+test('the shade of the lamp scenes is built from boxes that do not overlap', () => {
+  const workDirectory = mkdtempSync(join(tmpdir(), 'sphere-light-scenes-'));
+  try {
+    const baseScenePath = join(workDirectory, 'base.json');
+    const roomParts = Array.from({ length: 5 }, (_, index) => ({ name: `room-${index}`, geometry: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100 * index, 0, 0, 1], material: 0 }));
+    writeFileSync(baseScenePath, JSON.stringify({ id: 'base', parts: roomParts, environment: {} }));
+    execFileSync('node', [fileURLToPath(new URL('../bench/cycles-parity/make-sphere-light-scenes.mjs', import.meta.url)), baseScenePath, workDirectory], { stdio: 'ignore' });
+    for (const sceneName of ['enclosed-r0.18', 'enclosed-hidden-r0.18', 'poking-r0.18', 'poking-hidden-r0.18']) {
+      const scene = JSON.parse(readFileSync(join(workDirectory, 'scenes', `${sceneName}.json`), 'utf8'));
+      const shadeParts = scene.parts.filter((part) => part.name.startsWith('shade-'));
+      assert.equal(shadeParts.length, 5, `${sceneName} has a lid and four walls`);
+      for (let first = 0; first < shadeParts.length; first++) {
+        for (let second = first + 1; second < shadeParts.length; second++) {
+          const overlaps = boxesOverlapInVolume(boxBounds(shadeParts[first]), boxBounds(shadeParts[second]));
+          assert.equal(overlaps, false, `${sceneName}: ${shadeParts[first].name} and ${shadeParts[second].name} overlap`);
+        }
+      }
+    }
+  } finally {
+    rmSync(workDirectory, { recursive: true, force: true });
+  }
+});

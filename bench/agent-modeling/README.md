@@ -474,6 +474,21 @@ The three.js half of issue #31 and the 67js side of the same table. The Blender 
 - A first attempt of the 67js run failed on every task because the checkout had no `build/mcp` folder (`npm run build:lib` creates it); those results were discarded. The first three.js run stopped after `bolt` when its process disappeared, so `window`, `table`, `fence` and `bracket` were run again as a second run and joined with `compare-threejs.mjs`.
 - Limits: 1 run per cell, one model, tasks the 67js suite was built around (they favour 67js's checks, not three.js). The `window` three.js failure label came from an earlier wording of the same check.
 
+### Blind pairwise look judge (2026-11-13, issue #987)
+
+The silhouette look score does not say which render a person or a vision model prefers. `pairwise-judge.mjs` shows the render of system A and the render of system B for one task as "first" and "second", in a seeded random order (`default-judge.mjs`'s `firstSideOf`; the repeats of one task swap sides), and asks which is the better finished render. It records the winner per task and attempt, then wins per system and an exact two-sided binomial p against 0.5. A control shows system A's own render on both sides: any preference for "first" or "second" is position bias, and a pairwise result no larger than the control's is not a preference for a system. Calls go through headless `claude -p` on the subscription, one per task, attempt and pairing.
+
+```sh
+node bench/agent-modeling/pairwise-judge.mjs --name <result name> --model sonnet --tasks crate,bolt,window,table,fence,bracket --attempts 1 \
+  --a "67js MCP=artifacts/agent-modeling/<67js run>/look/{attempt}/{task}-three-quarter.png" \
+  --b "three.js by code=artifacts/agent-modeling/<three.js run>/{task}-{attempt}.png"
+node bench/agent-modeling/compare-threejs.mjs <67js run json> <three.js run json> <output json> --pairwise bench/agent-modeling/results/<result name>.json
+```
+
+Each side is `label=image pattern` with `{task}` and `{attempt}` filled in. `--control-only` skips the pairing and runs only the control on side A; `--seed` changes the order. The judge writes `results/<result name>.json` (summary and one record per call, with the note the judge gave), and `compare-threejs.mjs --pairwise` prints wins per system, the p and the control next to the usual tables. Run records also carry `fixRounds`, next to `toolCalls` and `toolErrors`: the number of write steps after the first render (`scene_apply` or `scene_create_asset` after the first `scene_look` or render for 67js; `Write` or `Edit` after the first `node` run for three.js). A run that renders once has 0. Records from before this change have none and print `-`.
+
+Run on 2026-11-13 (measured): the raw renders of the 2026-11-07 head-to-head run are no longer on disk (only the scene numbers are in the result file), so the pairing was not re-run. The control ran on the 67js three-quarter renders that exist (`crate`, `bolt`, `table`, `chair`, `gear`, three attempts each, Sonnet, 15 calls, $1.76): the judge picked "first" 7 times and "second" 8 times, p = 1.0, so no position bias at this size. `results/2026-11-13-pairwise-control-67js.json`. The next three.js run saves `scene.png` in `artifacts/agent-modeling/<run>/`, which is what the `--b` pattern above reads.
+
 ### Blender MCP half (2026-11-07, issue #31)
 
 The official Blender MCP server (Blender Lab, v1.0.3, add-on and server) driving Blender 5.1.2, same model, same six tasks, 1 run each, in `results/2026-11-07-blender-mcp.json`. The server runs model-written Python with no guards, so `blender.mjs` never runs it on the benchmark machine: Blender (headless, `--command blender_mcp`) and the HTTP MCP server run inside a throwaway Docker container (`blender-container/`, x86_64 under Rosetta on an Apple silicon laptop, one scratch folder mounted, a fresh container per task). `claude -p` reaches the server through an SSH port forward and gets only the MCP tools: no Bash and no file tools on its own machine. The prompt asks the agent to leave `geometry.json` (world-space triangles, Y up) and `scene.png` in the container's `/work`; the script copies them back and grades them exactly like the three.js run.

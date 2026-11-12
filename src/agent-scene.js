@@ -25,7 +25,7 @@ import { OWN_SECTIONS as NULLABLE_SECTION_OPERATIONS } from './agent-apply-repor
 export { describeApplication } from './agent-apply-report.js';
 export {
   needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader,
-  needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader,
+  needsPhysics, needsBuoyancy, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader,
   loadAgentSceneModules, loadAllAgentSceneModules, registerAgentSceneFont, allAgentSceneModulesLoaded, agentSceneModulesNeeded,
 } from './agent-scene-modules.js';
 

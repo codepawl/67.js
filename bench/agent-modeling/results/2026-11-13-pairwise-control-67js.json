@@ -1,0 +1,181 @@
+{
+  "mode": "pairwise",
+  "model": "sonnet",
+  "seed": 53,
+  "tasks": [
+    "crate",
+    "bolt",
+    "table",
+    "chair",
+    "gear"
+  ],
+  "attempts": 3,
+  "labels": {
+    "a": "67js MCP",
+    "b": "67js MCP"
+  },
+  "pairing": null,
+  "control": {
+    "label": "67js MCP",
+    "summary": {
+      "trials": 15,
+      "undecided": 0,
+      "pickedFirst": 7,
+      "pickedSecond": 8,
+      "pBias": 1,
+      "costUsd": 1.7564
+    },
+    "records": [
+      {
+        "task": "crate",
+        "attempt": 1,
+        "firstSide": "a",
+        "answer": "first",
+        "winnerSide": "a",
+        "winner": "67js MCP",
+        "costUsd": 0.133934,
+        "note": "The two renders look identical in shape, proportions, surface, lighting and grounding, so nothing separates them and the pick is arbitrary."
+      },
+      {
+        "task": "crate",
+        "attempt": 2,
+        "firstSide": "b",
+        "answer": "first",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.133982,
+        "note": "The two renders look identical in shape, proportions, surface detail, lighting and shadow, so nothing separates them and I'm picking arbitrarily."
+      },
+      {
+        "task": "crate",
+        "attempt": 3,
+        "firstSide": "a",
+        "answer": "second",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.133892,
+        "note": "The two renders look identical in shape, lighting, shadow, and surface, so nothing separates them; I'm picking the second by default."
+      },
+      {
+        "task": "bolt",
+        "attempt": 1,
+        "firstSide": "b",
+        "answer": "second",
+        "winnerSide": "a",
+        "winner": "67js MCP",
+        "costUsd": 0.13393,
+        "note": "The two renders look identical in shape, proportions, surface, lighting and shadow, so nothing separates them and I'm picking the second by default."
+      },
+      {
+        "task": "bolt",
+        "attempt": 2,
+        "firstSide": "a",
+        "answer": "second",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.13391999999999998,
+        "note": "The two renders look identical in shape, lighting, shadow and grounding, so nothing visible separates them; I'm picking the second by default."
+      },
+      {
+        "task": "bolt",
+        "attempt": 3,
+        "firstSide": "a",
+        "answer": "second",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.0075659,
+        "note": "The two renders look identical in shape, proportions, shading and shadow, so nothing separates them; I'm picking the second arbitrarily."
+      },
+      {
+        "task": "table",
+        "attempt": 1,
+        "firstSide": "b",
+        "answer": "second",
+        "winnerSide": "a",
+        "winner": "67js MCP",
+        "costUsd": 0.133938,
+        "note": "The two renders look identical in shape, proportions, lighting, shadow and grounding, so nothing separates them, and I'm picking the second by default."
+      },
+      {
+        "task": "table",
+        "attempt": 2,
+        "firstSide": "a",
+        "answer": "second",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.0075739,
+        "note": "The two renders look identical in shape, proportions, surface, lighting and shadow, so nothing separates them; I'm picking the second by default."
+      },
+      {
+        "task": "table",
+        "attempt": 3,
+        "firstSide": "b",
+        "answer": "first",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.133984,
+        "note": "The two renders look identical in shape, proportions, lighting, shadow and grounding, with no visible difference to separate them, so I'm picking the first by default."
+      },
+      {
+        "task": "chair",
+        "attempt": 1,
+        "firstSide": "a",
+        "answer": "first",
+        "winnerSide": "a",
+        "winner": "67js MCP",
+        "costUsd": 0.133856,
+        "note": "The two renders look identical in shape, proportions, surface, lighting and grounding, with no visible difference to separate them."
+      },
+      {
+        "task": "chair",
+        "attempt": 2,
+        "firstSide": "b",
+        "answer": "first",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.134016,
+        "note": "The two renders look identical in shape, proportions, surface, lighting, shadow and grounding, so nothing separates them and I'm picking one arbitrarily."
+      },
+      {
+        "task": "chair",
+        "attempt": 3,
+        "firstSide": "b",
+        "answer": "first",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.13398200000000002,
+        "note": "The two renders look identical in shape, proportions, surface, lighting and shadow, with no visible difference to decide on, so I'm picking arbitrarily."
+      },
+      {
+        "task": "gear",
+        "attempt": 1,
+        "firstSide": "a",
+        "answer": "second",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.13392600000000002,
+        "note": "The two renders look identical in shape, proportions, surface, lighting and grounding, so nothing separates them; I'm picking the second by default."
+      },
+      {
+        "task": "gear",
+        "attempt": 2,
+        "firstSide": "b",
+        "answer": "second",
+        "winnerSide": "a",
+        "winner": "67js MCP",
+        "costUsd": 0.13396999999999998,
+        "note": "The two renders look identical in shape, proportions, surface, lighting and grounding, so nothing separates them and I'm picking the second arbitrarily."
+      },
+      {
+        "task": "gear",
+        "attempt": 3,
+        "firstSide": "b",
+        "answer": "first",
+        "winnerSide": "b",
+        "winner": "67js MCP",
+        "costUsd": 0.133934,
+        "note": "The two renders look identical in shape, proportions, lighting, and shadow, so nothing separates them; I'm picking arbitrarily."
+      }
+    ]
+  }
+}
