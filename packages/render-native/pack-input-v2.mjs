@@ -1632,7 +1632,7 @@ export function resolveSamplingOptions(options, callerName) {
 export function validatePathRegenerationOption(pathRegeneration, callerName) {
   if (pathRegeneration !== undefined && typeof pathRegeneration !== 'boolean') {
     throw new TypeError(
-      `${callerName}: \`pathRegeneration\` must be true, false (default) or left out, got ${JSON.stringify(pathRegeneration)}.`
+      `${callerName}: \`pathRegeneration\` must be true, false or left out (the "cycles" kernel defaults to true), got ${JSON.stringify(pathRegeneration)}.`
     );
   }
 }
