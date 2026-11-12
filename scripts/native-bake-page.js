@@ -46,6 +46,8 @@ export function encodeNativeInputV2(input) {
 // The triangle bound of a scene exported to the "cycles" kernel (see buildTraceScene's maximumTriangles); the legacy kernel and every
 // other tracer keep the 400,000 of the CPU and WebGL paths.
 export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
+// The instance bound of the same export (see buildTraceScene's maximumInstances).
+export const NATIVE_JOB_MAXIMUM_INSTANCES = 500_000;
 
 /**
  * The scene of a native render job as the tables the job runner traces. With the "cycles" kernel (`kernel`) every scene is
@@ -59,8 +61,8 @@ export const NATIVE_JOB_MAXIMUM_TRIANGLES = 1_500_000;
 export function exportNativeSceneTables({ parts, environment, camera, options, kernel, instancing, modules }) {
   const { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack } = modules;
   const wholeMaterials = kernel === 'cycles';
-  const triangleLimit = wholeMaterials ? { maximumTriangles: NATIVE_JOB_MAXIMUM_TRIANGLES } : {};
-  let traceScene = buildTraceScene(parts, environment, { instancing: wholeMaterials && instancing === true, ...triangleLimit });
+  const nativeLimits = wholeMaterials ? { maximumTriangles: NATIVE_JOB_MAXIMUM_TRIANGLES, maximumInstances: NATIVE_JOB_MAXIMUM_INSTANCES } : {};
+  let traceScene = buildTraceScene(parts, environment, { instancing: wholeMaterials && instancing === true, ...nativeLimits });
   refuseLocalVolumes(traceScene, 'the native path tracer');
   let flattenedBecause;
   if (traceScene.instances) {
@@ -71,7 +73,7 @@ export function exportNativeSceneTables({ parts, environment, camera, options, k
       // A scene over the texture pool stays over it flattened: the caller gets that refusal, not a v1 atlas one.
       if (!(error instanceof RangeError) || error.texturePoolFull) throw error;
       flattenedBecause = error.message;
-      traceScene = flattenRefusedScene(buildTraceScene, parts, environment, triangleLimit, flattenedBecause);
+      traceScene = flattenRefusedScene(buildTraceScene, parts, environment, nativeLimits, flattenedBecause);
     }
   }
   const instancingNote = flattenedBecause === undefined ? {} : { instancing: 'flattened', instancingReason: flattenedBecause };
@@ -108,9 +110,9 @@ function buildNativeInputOrExplain(buildNativeInput, traceScene, camera, options
 
 // The flattened scene of parts the packer refused as instances. Every copy counts against the bound once flattened, so a scene
 // that fitted as instances can be over it; the error then names the packer's refusal, since the geometry was already shared.
-function flattenRefusedScene(buildTraceScene, parts, environment, triangleLimit, refusal) {
+function flattenRefusedScene(buildTraceScene, parts, environment, nativeLimits, refusal) {
   try {
-    return buildTraceScene(parts, environment, triangleLimit);
+    return buildTraceScene(parts, environment, nativeLimits);
   } catch (error) {
     if (!(error instanceof RangeError)) throw error;
     throw new RangeError(`The scene could not stay instanced (${refusal}) and is too large once every copy is flattened: ${error.message}`);
