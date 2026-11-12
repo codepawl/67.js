@@ -114,7 +114,7 @@ function parseLightSamplingOption(argumentList) {
 
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda] [--grey-diffuse] [--write-depth]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda] [--grey-diffuse] [--write-depth] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -151,7 +151,37 @@ function parseTraceArguments(argumentList) {
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
     greyDiffuse: argumentList.includes('--grey-diffuse'),
     writeDepth: argumentList.includes('--write-depth'),
+    lens: parseLensOptions(argumentList),
   };
+}
+
+/**
+ * Thin-lens fields for the scene camera, in the names `createCamera` reads (render-cycles.py takes the same flags). Empty
+ * without --f-stop: the scene camera stays a pinhole. --aperture-rotation is in degrees.
+ */
+function parseLensOptions(argumentList) {
+  const lensFlags = ['--focus-distance', '--aperture-blades', '--aperture-rotation', '--sensor-width'];
+  if (!argumentList.includes('--f-stop')) {
+    const strayFlag = lensFlags.find((flagName) => argumentList.includes(flagName));
+    if (strayFlag) {
+      throw new RangeError(`Option ${strayFlag} needs --f-stop: pass the f-stop that turns on depth of field, such as --f-stop 2.8.`);
+    }
+    return {};
+  }
+  const lens = { fStop: parseNumberOption(argumentList, '--f-stop', 2.8, 0.01) };
+  if (argumentList.includes('--focus-distance')) {
+    lens.focusDistance = parseNumberOption(argumentList, '--focus-distance', 1, 0.001);
+  }
+  if (argumentList.includes('--aperture-blades')) {
+    lens.apertureBlades = parseIntegerOption(argumentList, '--aperture-blades', 0, 0);
+  }
+  if (argumentList.includes('--aperture-rotation')) {
+    lens.apertureRotation = parseNumberOption(argumentList, '--aperture-rotation', 0, -3600);
+  }
+  if (argumentList.includes('--sensor-width')) {
+    lens.sensorWidth = parseNumberOption(argumentList, '--sensor-width', 36, 0.1);
+  }
+  return lens;
 }
 
 function packSceneForKernel(traceScene, camera, options) {
@@ -242,6 +272,9 @@ async function runOidnComparison(traced, linearRgb, options, outputPrefix) {
 async function runCli() {
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   const options = parseTraceArguments(process.argv.slice(2));
+  if (options.lens.fStop !== undefined && options.kernel !== 'cycles') {
+    throw new RangeError('Option --f-stop (depth of field) needs --kernel cycles: the legacy kernel draws a pinhole.');
+  }
   if (!renderNative.findNativeAddon()) {
     throw new Error('The render-native addon is missing. Build packages/render-native before running trace-native.mjs.');
   }
@@ -252,7 +285,7 @@ async function runCli() {
   const buildStarted = performance.now();
   const traceSource = await reconstructTraceSceneSource(description);
   const traceScene = buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
-  const camera = createCamera(traceSource.camera, options.width, options.height);
+  const camera = createCamera({ ...traceSource.camera, ...options.lens }, options.width, options.height);
   const samplesPerDispatch = options.samplesPerDispatch !== undefined
     ? options.samplesPerDispatch
     : (options.noiseThreshold > 0 ? 8 : undefined);
@@ -305,6 +338,9 @@ async function runCli() {
   }
   const report = {
     greyDiffuse: options.greyDiffuse,
+    thinLens: camera.apertureRadius > 0
+      ? { apertureRadius: camera.apertureRadius, focalDistance: camera.focalDistance, apertureBlades: camera.apertureBlades, apertureRotation: camera.apertureRotation }
+      : null,
     depthNpyPath,
     depthConvention: depthNpyPath ? 'ray-distance' : null,
     cameraVerticalFovDegrees: traceSource.camera.fov,

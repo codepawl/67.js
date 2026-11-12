@@ -61,6 +61,53 @@ export function cameraFieldOfView(frame, aspect) {
   return fov;
 }
 
+export const MAX_APERTURE_BLADES = 64;
+
+function requirePositiveFinite(value, name) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`Camera ${name} must be a positive finite number, got ${JSON.stringify(value)}.`);
+  }
+}
+
+/** Focal length in millimetres: `focalLength` as given, or the one that gives `fov` on a sensor `sensorWidth` wide across the image. */
+export function cameraFocalLength(frame, aspect) {
+  if (frame.focalLength !== undefined) {
+    requirePositiveFinite(frame.focalLength, 'focalLength');
+    return frame.focalLength;
+  }
+  const sensorWidth = frame.sensorWidth ?? 36;
+  requirePositiveFinite(sensorWidth, 'sensorWidth');
+  const fieldOfView = cameraFieldOfView(frame, aspect);
+  return sensorWidth / aspect / (2 * Math.tan(fieldOfView * Math.PI / 360));
+}
+
+/**
+ * The thin lens a camera with an `fStop` describes, for the native path tracer (Cycles' camera model): the aperture radius in
+ * scene units (focalLength / (2 * fStop), millimetres to metres), the focus distance along the view axis (`focusDistance`, by
+ * default the distance from eye to target), and the optional polygonal blades (`apertureBlades`, 0 or 3 to 64) turned by
+ * `apertureRotation` degrees. Returns null for a camera without `fStop`: a pinhole.
+ */
+export function resolveThinLens(frame, { aspect, eye, target }) {
+  if (frame.fStop === undefined) return null;
+  requirePositiveFinite(frame.fStop, 'fStop');
+  const focusDistance = frame.focusDistance ?? Math.hypot(target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]);
+  requirePositiveFinite(focusDistance, 'focusDistance');
+  const blades = frame.apertureBlades ?? 0;
+  if (!Number.isInteger(blades) || blades < 0 || blades === 1 || blades === 2 || blades > MAX_APERTURE_BLADES) {
+    throw new RangeError(`Camera apertureBlades must be 0 (a round aperture) or a whole number from 3 to ${MAX_APERTURE_BLADES}, got ${JSON.stringify(frame.apertureBlades)}.`);
+  }
+  const rotationDegrees = frame.apertureRotation ?? 0;
+  if (typeof rotationDegrees !== 'number' || !Number.isFinite(rotationDegrees)) {
+    throw new RangeError(`Camera apertureRotation must be a finite number of degrees, got ${JSON.stringify(frame.apertureRotation)}.`);
+  }
+  return {
+    apertureRadius: cameraFocalLength(frame, aspect) / 1000 / (2 * frame.fStop),
+    focalDistance: focusDistance,
+    apertureBlades: blades,
+    apertureRotation: rotationDegrees * Math.PI / 180,
+  };
+}
+
 const viewDirections = { front: [0, 0, 1], right: [1, 0, 0], top: [0, 1, 0], perspective: [0.58, 0.34, 0.74] };
 
 export function cameraView(name = 'front', { target = [0, 1.5, 0], height = 3.8, distance = 8 } = {}) {
