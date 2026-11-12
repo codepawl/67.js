@@ -209,6 +209,7 @@ function dropLiveSources(candidate, idList) {
     requireWholeGroup(joints, `${solver.type} IK solver`, 'its joints bake together', ids);
     return false;
   });
+  const springs = bakedSprings(motion.springs, ids);
   const remaining = {
     ik: solvers,
     constraints: (motion.constraints ?? []).filter(constraint => !ids.has(constraint.node)),
@@ -218,10 +219,25 @@ function dropLiveSources(candidate, idList) {
     if (list.length) motion[field] = list;
     else delete motion[field];
   }
+  if (springs) motion.springs = springs;
+  else delete motion.springs;
+}
+
+/** The spring chains that stay live. A chain moves its bones together, so a bake that takes one must take all of them. */
+function bakedSprings(springs, ids) {
+  if (!springs) return null;
+  const chains = springs.chains.filter(chain => {
+    if (!chain.bones.some(id => ids.has(id))) return true;
+    requireWholeGroup(chain.bones, 'spring chain', 'its bones bake together', ids);
+    return false;
+  });
+  if (!chains.length) return null;
+  const used = new Set(chains.flatMap(chain => chain.colliders));
+  return { chains, colliders: springs.colliders.filter(collider => used.has(collider.id)) };
 }
 
 function motionHasContent(motion) {
-  return Boolean(motion.tracks.length || motion.layers?.length || motion.ik?.length || motion.constraints?.length || motion.drivers?.length || motion.drive);
+  return Boolean(motion.tracks.length || motion.layers?.length || motion.ik?.length || motion.springs || motion.constraints?.length || motion.drivers?.length || motion.drive);
 }
 
 /**
