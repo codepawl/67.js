@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createAgentScene } from '../src/agent-scene.js';
 import { FILM_FRAMES_PER_SECOND, FINE_FLAG_FILM_SECONDS, FLAG_FILM_SECONDS, axisRange, foldCrossings, foldingFlagRecipe, jellyCubeRecipe, measureLanding, normalSpread, recordFilm, unjoinedMinimumDistance } from '../scripts/soft-body-film.mjs';
 
 // Film tests for #696: each film is one recipe baked twice. The frames must match byte for byte, and the numbers a viewer
@@ -9,6 +8,14 @@ import { FILM_FRAMES_PER_SECOND, FINE_FLAG_FILM_SECONDS, FLAG_FILM_SECONDS, axis
 const JELLY_FRAMES = 120;
 const FLAG_FRAMES = FLAG_FILM_SECONDS * FILM_FRAMES_PER_SECOND;
 const FLAG_SAMPLE_EVERY = 12;
+// The default 38 by 38 flag films are baked once per file and shared by the flag test and the digest test. Each is a pure function of its
+// recipe (the determinism test below bakes a second copy on purpose), so a second bake in the digest test would only repeat the same work.
+const flagFilms = new Map();
+function flagFilm(options = {}) {
+  const key = JSON.stringify(options);
+  if (!flagFilms.has(key)) flagFilms.set(key, recordFilm(foldingFlagRecipe(options), 'flag', FLAG_FRAMES));
+  return flagFilms.get(key);
+}
 function milliseconds(value) {
   return Number(value.toFixed(2));
 }
@@ -39,13 +46,13 @@ test('measureLanding names the problem when the body never reaches the floor', (
 });
 
 test('a flag dropped by its pole falls to the floor and ends as a thin layer whose folds keep their layers apart', context => {
-  const first = recordFilm(foldingFlagRecipe(), 'flag', FLAG_FRAMES);
+  const first = flagFilm();
   const second = recordFilm(foldingFlagRecipe(), 'flag', FLAG_FRAMES);
   assert.deepEqual(first.hashes, second.hashes, 'two bakes of the same recipe give the same bytes in every frame');
   const last = FLAG_FRAMES - 1;
   assert.ok(Buffer.from(first.frames[last].buffer).equals(Buffer.from(second.frames[last].buffer)));
 
-  const indices = createAgentScene(foldingFlagRecipe()).parts.find(part => part.name === 'flag').geometry.indices;
+  const indices = first.indices;
   const restHeight = axisRange(first.frames[0], 1).extent;
   const touch = measureLanding(first.frames, restHeight).contact;
   assert.ok(touch > 30 && touch < 90, `the hanging flag first touches the floor within frames 30 to 90, got ${touch}`);
@@ -73,7 +80,7 @@ test('a flag dropped by its pole falls to the floor and ends as a thin layer who
   assert.ok(heightAt(0.9) > 0.02, `a tenth of the cloth stands in folds above 2 cm, got ${heightAt(0.9)} m`);
   assert.ok(axisRange(first.frames[last], 2).extent > 0.7, 'the flag lies spread over the floor, not stacked in one place');
 
-  const without = recordFilm(foldingFlagRecipe({ selfCollision: false }), 'flag', FLAG_FRAMES);
+  const without = flagFilm({ selfCollision: false });
   let closestWith = Infinity;
   let closestWithout = Infinity;
   for (let frame = touch; frame < FLAG_FRAMES; frame += FLAG_SAMPLE_EVERY) {
@@ -92,7 +99,7 @@ test('a 64 by 64 flag with dihedral bending and creases folds softly, keeps its 
   const frameCount = FINE_FLAG_FILM_SECONDS * FILM_FRAMES_PER_SECOND;
   const recipe = foldingFlagRecipe({ fine: true });
   const film = recordFilm(recipe, 'flag', frameCount);
-  const indices = createAgentScene(recipe).parts.find(part => part.name === 'flag').geometry.indices;
+  const indices = film.indices;
   const last = frameCount - 1;
   assert.equal(film.frames[0].length / 3, 64 * 64, 'the sheet has 4096 particles');
 
@@ -139,7 +146,7 @@ test('a 64 by 64 flag with dihedral bending and creases folds softly, keeps its 
 
 test('the default flag films keep their exact frames (sha256 over every frame of the 38 by 38 flag, with and without self collision)', () => {
   const digestOf = options => {
-    const record = recordFilm(foldingFlagRecipe(options), 'flag', FLAG_FRAMES);
+    const record = flagFilm(options);
     const digest = createHash('sha256');
     record.hashes.forEach(frameDigest => digest.update(frameDigest));
     return digest.digest('hex');
