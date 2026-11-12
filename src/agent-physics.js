@@ -384,12 +384,33 @@ function normalizeOceanReference(input, recipe) {
   return ocean;
 }
 
-/** The sea of the definition: the wave fields of the referenced ocean node plus the level and water density. */
-function oceanDefinition(oceanReference, recipe) {
+const SEA_LEVEL_TOLERANCE = 0.05;
+
+/**
+ * World height of the sea as drawn: the first node showing the ocean geometry, at its translation plus its y scale times the
+ * mean height of the geometry (waves average out to the calm surface). Null when no node shows it. Rotation and parents are ignored.
+ */
+function drawnSeaLevel(oceanReference, recipe, geometries) {
+  const node = recipe.nodes.find(candidate => candidate.geometry === oceanReference.geometry);
+  const positions = geometries.get(oceanReference.geometry)?.positions;
+  if (!node || !positions?.length) return null;
+  let heightTotal = 0;
+  for (let index = 1; index < positions.length; index += 3) heightTotal += positions[index];
+  return node.translation[1] + node.scale[1] * heightTotal / (positions.length / 3);
+}
+
+/** A warning when the level the recipe gives differs from the drawn sea, which makes floating bodies sink out of view; else null. */
+function seaLevelWarning(oceanReference, drawnLevel) {
+  if (oceanReference.level === undefined || drawnLevel === null || Math.abs(oceanReference.level - drawnLevel) <= SEA_LEVEL_TOLERANCE) return null;
+  return `physics.ocean.level is ${oceanReference.level} but the sea geometry "${oceanReference.geometry}" is drawn at height ${Number(drawnLevel.toFixed(3))}; bodies float on the level, so they sit ${Number(Math.abs(oceanReference.level - drawnLevel).toFixed(3))} m ${oceanReference.level < drawnLevel ? 'below' : 'above'} the visible water. Leave level out to follow the drawn sea.`;
+}
+
+/** The sea of the definition: the wave fields of the referenced ocean node, the level (default: the drawn sea) and the water density. */
+function oceanDefinition(oceanReference, recipe, drawnLevel) {
   const node = oceanNodeOf(oceanReference.geometry, recipe);
   const waves = Object.fromEntries(OCEAN_WAVE_KEYS.filter(key => node[key] !== undefined).map(key => [key, node[key]]));
   const { geometry, ...water } = oceanReference;
-  return { ...waves, ...water };
+  return { ...waves, level: drawnLevel ?? 0, ...water };
 }
 
 function scaledBounds(positions, scale) {
@@ -518,7 +539,7 @@ function physicsDefinition(physics, recipe, geometries, ragdoll) {
   (physics.joints ?? []).forEach((joint, index) => definition.joints.push({ name: joint.name ?? `joint-${index}`, ...joint }));
   if (physics.events) definition.events = physics.events;
   if (physics.fields) definition.fields = physics.fields;
-  if (physics.ocean) definition.ocean = oceanDefinition(physics.ocean, recipe);
+  if (physics.ocean) definition.ocean = oceanDefinition(physics.ocean, recipe, drawnSeaLevel(physics.ocean, recipe, geometries));
   for (const body of physics.bodies) {
     if (body.float) definition.bodies.find(candidate => candidate.name === body.node).float = body.float;
   }
@@ -594,6 +615,7 @@ export function bakeAgentPhysics(physics, recipe, geometries) {
     const offset = scene.bodyIndex(nodeId) * 7;
     return { translation: pose.subarray(offset, offset + 3), rotation: pose.subarray(offset + 3, offset + 7) };
   };
+  const seaWarning = physics.ocean ? seaLevelWarning(physics.ocean, drawnSeaLevel(physics.ocean, recipe, geometries)) : null;
   let reportCache = null;
   return Object.freeze({
     duration: physics.duration,
@@ -614,6 +636,7 @@ export function bakeAgentPhysics(physics, recipe, geometries) {
         duration: physics.duration, frames: scene.frameCount, gravity: physics.gravity ?? [0, -9.81, 0],
         bodies: bodyReport(scene, physics), ...contactReport(scene, physics),
         eventsTruncated: scene.contactEventsTruncated,
+        ...(seaWarning ? { warnings: [seaWarning] } : {}),
         ...(scene.jointBreaks.length ? { jointBreaks: scene.jointBreaks.slice(0, MAX_REPORTED_CONTACTS).map(({ frame, joint, impulse }) => ({ joint, time: roundedTime(frame, scene.timestep), impulse: Number(impulse.toFixed(3)) })) } : {}),
         ...(ragdoll ? { ragdoll: ragdollReport(ragdoll, scene) } : {}),
       };

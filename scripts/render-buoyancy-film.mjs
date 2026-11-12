@@ -87,8 +87,7 @@ function buildRecipe(boatAssetId) {
     motion: { duration, tracks: [{ kind: 'geometry', id: 'sea', property: 'oceanTime', interpolation: 'LINEAR', keyframes: [{ time: 0, value: 0 }, { time: duration, value: duration }] }] },
     physics: {
       duration,
-      // The sheet is the top of a unit box, so it draws at y = 0.5.
-      ocean: { geometry: 'sea', level: 0.5 },
+      ocean: { geometry: 'sea' },
       bodies: [
         ...crates.map(entry => entry.body),
         { node: 'hull', density: 300, float: { drag: 1.5, angularDrag: 1.5, points: [[-0.6, 0, -1.4], [0.6, 0, -1.4], [-0.6, 0, 1.4], [0.6, 0, 1.4]] } },

@@ -396,7 +396,7 @@ A crate or a boat can float on the sea that the `ocean` mesh edit draws. Give th
 ```json
 "physics": {
   "duration": 8,
-  "ocean": { "geometry": "sea", "level": 0, "waterDensity": 1000 },
+  "ocean": { "geometry": "sea", "waterDensity": 1000 },
   "bodies": [
     { "node": "crate", "density": 500, "float": { "drag": 2, "angularDrag": 2 } },
     { "node": "boat", "shape": "convex", "density": 300, "float": { "points": [[-1.5, 0, -0.6], [1.5, 0, -0.6], [-1.5, 0, 0.6], [1.5, 0, 0.6]] } }
@@ -404,7 +404,7 @@ A crate or a boat can float on the sea that the `ocean` mesh edit draws. Give th
 }
 ```
 
-`ocean.geometry` names a mesh geometry whose stack has an `ocean` node with axis `y`. The body floats on that node's waves (`windSpeed`, `direction`, `choppiness`, `size`, `seed`, `resolution`), read through the same function that moves the drawn vertices, so what the body rides is what the camera sees. The sea clock at physics time 0 is the node's `time`; drive an `oceanTime` track at one second per second to keep the drawn sea in step. `level` is the world height of the calm sea and `waterDensity` is in kg/m3.
+`ocean.geometry` names a mesh geometry whose stack has an `ocean` node with axis `y`. The body floats on that node's waves (`windSpeed`, `direction`, `choppiness`, `size`, `seed`, `resolution`), read through the same function that moves the drawn vertices, so what the body rides is what the camera sees. The sea clock at physics time 0 is the node's `time`; drive an `oceanTime` track at one second per second to keep the drawn sea in step. `level` is the world height of the calm sea. Leave it out: it then follows the sea as drawn (the node's translation plus its y scale times the mean height of the sheet, so a sheet cut from the top of a unit box drawn at y 2 floats bodies at 2.5). A `level` that differs from the drawn sea by more than 0.05 m is used as given, and `scene_inspect` returns a `warnings` entry in the physics report that names both heights. `waterDensity` is in kg/m3.
 
 Each `float` body carries sample points in body space, 16 at most. Without `points` it gets four, in a 2 x 2 grid across the collider bounds at mid height. Every point owns an equal share of the body's volume as a column as tall as the body. Where the surface stands above the point, the column is submerged by a fraction and the water pushes up at that point with `waterDensity x gravity x volume / points x fraction`. A body lighter than water bobs and rolls; a box of density 500 sinks to half its height. Spread the points over the hull, wide for roll and long for pitch, so the body rights itself when a wave tips it. `drag` and `angularDrag` (1/s, 0 to 100, default 2) damp the linear and angular velocity in proportion to the mean submerged fraction. Only dynamic bodies float, and a float body needs a volume, so trimesh does not work.
 

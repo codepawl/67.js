@@ -635,7 +635,7 @@ const physics = z.strictObject({
   gravity: vector3.optional().describe('Defaults to [0, -9.81, 0].'),
   bodies: z.array(physicsBody).min(1).max(64),
   joints: z.array(physicsJoint).max(64).optional().describe('Joint bodies are the node IDs of physics bodies.'),
-  ocean: z.record(z.string(), z.unknown()).optional().describe('Sea for floating bodies: geometry is a mesh geometry whose stack has an ocean node (axis y) whose waves they ride; level 0 is the world height of the calm sea; waterDensity 1000 kg/m3. The sea clock at physics time 0 is the ocean node time, so drive an oceanTime track at 1 s per s to keep the drawn sea in step.'),
+  ocean: z.record(z.string(), z.unknown()).optional().describe('Sea for floating bodies: geometry is a mesh geometry whose stack has an ocean node (axis y) whose waves they ride; level is the world height of the calm sea (leave it out to follow the drawn sea; a different value adds a warning to the scene_inspect physics report); waterDensity 1000 kg/m3. The sea clock at physics time 0 is the ocean node time, so drive an oceanTime track at 1 s per s to keep the drawn sea in step.'),
 }).describe('Rigid bodies recorded offline with Rapier (optional peer) at 60 fps and seeked by motionTime. scene_inspect reports contacts and resting state. A node cannot have a body and a motion translation or rotation track.');
 const looseRecord = z.record(z.string(), z.unknown()).meta({ id: 'LooseRecord' });
 const clothSheet = z.strictObject({
