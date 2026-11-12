@@ -212,3 +212,48 @@ test('a 64 piece fractured wall encodes as video for the length of the bake', { 
   }
   await call('scene_dispose', { sessionId });
 });
+
+function markerCentroid(frame, width, height) {
+  let sumX = 0;
+  let sumY = 0;
+  let count = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 3;
+      const [red, green, blue] = [frame[offset], frame[offset + 1], frame[offset + 2]];
+      if (green > red + 40 && green > blue + 40) {
+        sumX += x;
+        sumY += y;
+        count++;
+      }
+    }
+  }
+  assert.ok(count > 0, 'the green marker is visible in the frame');
+  return { x: sumX / count, y: sumY / count, count };
+}
+
+test('a fixed camera stays locked while a fractured wall flies apart', { skip: !hasFfmpeg && 'ffmpeg is not installed' }, async () => {
+  const width = 320;
+  const height = 180;
+  const recipe = sceneWithGround([
+    { id: 'wall', geometry: 'slab', material: 'brick', translation: [0, 1.25, 0], scale: [4, 2.5, 0.4] },
+    { id: 'ball', geometry: 'ball', material: 'steel', translation: [0, 1.2, 5], scale: [0.5, 0.5, 0.5] },
+    { id: 'marker', geometry: 'slab', material: 'green', translation: [1.5, 0.5, 3], scale: [0.6, 1, 0.6] },
+  ]);
+  recipe.materials.push({ id: 'green', color: [0.1, 0.9, 0.1] });
+  const { sessionId } = await call('scene_create', { recipe });
+  await call('scene_apply', { sessionId, expectedRevision: 0, operations: [
+    { type: 'set-physics', physics: { duration: 3, bodies: [
+      { node: 'floor', type: 'fixed', shape: 'box' },
+      { node: 'ball', shape: 'ball', density: 400, velocity: [0, 0.3, -18] },
+    ] } },
+    { type: 'fracture-node', node: 'wall', seed: 7, cells: 64, strength: 1, impact: [0, 0, 0.2], impactRadius: 0.8 },
+  ] });
+  const result = await submitJob(sessionId, 'video', { width, height, fps: 6, motion: { start: 0 } });
+  const frames = decodedFrames(result.artifacts[0].path, width, height);
+  const first = markerCentroid(frames[0], width, height);
+  const last = markerCentroid(frames[frames.length - 1], width, height);
+  assert.ok(Math.abs(first.x - last.x) < 1 && Math.abs(first.y - last.y) < 1,
+    `the static marker moved on screen from ${JSON.stringify(first)} to ${JSON.stringify(last)}`);
+  await call('scene_dispose', { sessionId });
+});

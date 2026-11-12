@@ -12,7 +12,7 @@ Only the latest published version of `@codepawlhq/67js` gets security fixes.
 
 The MCP server takes input from AI agents, and that input can come from a prompt injection. The server must therefore hold these limits:
 
-- It runs no code that a tool call supplies.
+- It runs no code that a tool call supplies. One startup exception exists: `--addons <folder>` with `--allow-addon <package>` loads the named npm packages from that folder into the preview page. The person who starts the server chooses them, never a tool call, and an addon runs with the full rights of the preview page. The server serves only the allowlisted packages' own files, requires each to pass the addon contract, and refuses any real path outside the folder ([docs/addons.md](docs/addons.md#the-mcp-server-and-addons)).
 - It reads assets only from the configured catalog, and it fetches no remote URLs for assets.
 - It writes render output and GLB exports (`scene_export_glb`, under `exports/`, server-chosen names) only to the configured jobs folder.
 - It bounds every collection, count and size before it allocates memory.
