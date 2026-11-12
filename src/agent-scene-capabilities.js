@@ -310,6 +310,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
     sensors: true, collisionLayers: 16,
     breakableJoints: 'fixed joint breakImpulse (N s): breaks when a body takes a contact impulse (force x 1/60 s) over it in one step; scene_inspect lists jointBreaks. scene_apply fracture-node { node, cells 2-64, strength N s, seed 1, impact [x,y,z] in geometry space, impactRadius, density 1, friction }: replaces a convex root node by cells nodes NAME-frag-i (fragment geometries) with convex bodies and one breakable fixed joint NAME-glue-a-b per neighbour pair; send it after the set-physics that holds the floor, ball and duration (set-physics replaces the section). docs/physics.md.',
     ragdoll: 'physics.ragdoll {armature}: limp capsule per bone; needs a floor',
+    film: 'render motion {start 0} plays this bake, cloth and particles with no bake-motion; video duration defaults to the bake.',
     limits: Object.freeze({ maxBodies: 128, maxJoints: 512, maxDuration: 10, framesPerSecond: 60, maxTrimeshTriangles: 20000, maxHullPoints: 2048 }),
   }),
   // Recipe cloth: a position-based solver (no peer dependency) records any root mesh node as a deformable sheet.
@@ -345,6 +346,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   motionModifiers: 'Track extrapolation constant|linear; modifiers [{type: cycles|stepped|noise|generator|limits|envelope, ...}], 8 at most; cycles and stepped remap time first.',
   motionLimits: Object.freeze({ maxTracks: 128, maxKeyframesPerTrack: 64, maxKeyframes: 2048, maxDuration: 30 }),
   motionBake: 'scene_apply bake-motion { nodes (32 at most), start 0, end (motion or physics duration), step 1/30 (512 samples), tolerance { position m, angle deg, scale } }: samples tracks, IK, constraints, drivers and physics into LINEAR tracks and removes those sources (an IK solver or the physics world only when all its nodes are baked). tolerance drops keys within it; without it a track keeps every sample, 64 keys at most. Procedural scenes only.',
+  springBones: 'motion.springs { chains: [{ bones: [node IDs root to tip, each the child of the one before, 16 per chain, 64 in all], stiffness 0-4 (1), dragForce 0-1 (0.4), gravityPower 0-2 (0), gravityDir [0,-1,0], hitRadius (0.02), tipLength (0.07), colliders: [ids] }] (16 at most), colliders: [{ id, bone, type sphere|capsule, offset, radius, tail }] }: VRM spring bones for hair and tails; fixed 1/60 s steps, sample times in increasing order; bake-motion bakes whole chains; needs loadAgentSceneModules.',
 });
 
 /** Degrees between faces above which a mesh geometry keeps a hard edge, as Blender's auto smooth does. */

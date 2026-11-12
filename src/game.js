@@ -6,7 +6,7 @@ import { groundBounceEnvironment } from './ground-bounce.js';
 import { createRuntime } from './runtime.js';
 import { createInput, gamepadSource, keyboardSource } from './input.js';
 import { replaySource, touchSource } from './input-sources.js';
-import { createCharacterController, createChaseCamera, createFirstPersonCamera, createFollowCamera, createTopDownCamera, createVehicleController } from './player.js';
+import { createCharacterController, createChaseCamera, createController, createCameraRigOfKind, createFirstPersonCamera, createFollowCamera, createTopDownCamera, createVehicleController } from './player.js';
 import { createGameRules } from './game-rules.js';
 import { hasTexturedMaterial } from './game-needs.js';
 
@@ -52,6 +52,7 @@ function cameraRigFor(kind, controller, input) {
   if (kind === 'first-person') return createFirstPersonCamera(rigOptions);
   if (kind === 'top-down') return createTopDownCamera(rigOptions);
   if (kind === 'chase') return createChaseCamera(rigOptions);
+  if (kind !== 'follow') return createCameraRigOfKind(kind, rigOptions);
   return createFollowCamera(rigOptions);
 }
 
@@ -178,7 +179,11 @@ async function buildGame(canvas, recipe, { replay, showStatus = true, assets: pr
   const { createGameAnimation, createPathFollower } = hasAnimation ? await loadAnimationRuntime() : {};
   const playerAnimation = game.player.animation ? createGameAnimation(game.player.animation, recipe.nodes, game.player.node, { assets }) : null;
   const startPosition = [start[0], start[1] - footOffset, start[2]];
-  const controller = game.player.controller === 'vehicle'
+  // Any other name is a kind a host registered with registerController, such as one from an allowlisted addon.
+  const customKind = !['character', 'vehicle'].includes(game.player.controller);
+  const controller = customKind
+    ? createController(game.player.controller, { input, position: startPosition, ground: game.ground, node: body })
+    : game.player.controller === 'vehicle'
     ? createVehicleController({ input, position: startPosition, ground: game.ground, maximumSpeed: game.player.maximumSpeed, node: body })
     : createCharacterController({
       input,

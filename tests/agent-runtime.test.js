@@ -2,6 +2,8 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentRuntime } from '../scripts/agent-runtime.mjs';
 import { isPreviewHost } from '../scripts/preview-host.mjs';
+import { addonCapabilities, addonFileFor, addonImportMap } from '../scripts/mcp-addons.mjs';
+import { sampleBrowserHeap, exceedsMemoryGuard } from '../scripts/agent-memory-guard.mjs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -9,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { writeWebBuild } from '../scripts/web-export.mjs';
 import { EXPORT_DIRECTORY_NAME } from '../scripts/agent-render-jobs.mjs';
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createContext, Script } from 'node:vm';
 import { VEGETATION_CAPABILITY_NOTE } from '../src/agent-vegetation-notes.js';
 import { CROWD_CAPABILITY_NOTE } from '../src/agent-crowd-notes.js';
@@ -32,6 +34,8 @@ import { normalizeReview, REVIEW_LIMITS } from '../scripts/agent-review.mjs';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 import { ANNOTATE_LIMITS } from '../src/agent-annotate.js';
+import * as packLimits from '../src/pack-manifest.js';
+import { createPackRegistry } from '../scripts/agent-packs.mjs';
 
 test('runtime reports real scene capabilities without launching a browser and closes idempotently', async () => {
   const runtime = createAgentRuntime({ backend: 'cpu', memory: 64 });
@@ -119,13 +123,15 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     .replaceAll('import.meta.url', JSON.stringify(import.meta.url))
     .replace("import('playwright-core')", 'Promise.resolve({ chromium: globalThis.chromium })');
   if (deadlineMs) source = source.replace('const EVALUATION_TIMEOUT_MS = 30000;', `const EVALUATION_TIMEOUT_MS = ${deadlineMs};`);
-  const context = createContext({ createServer, randomUUID, existsSync: () => true,
+  const context = createContext({ createServer, randomUUID, createHash, addonCapabilities, addonFileFor, addonImportMap, existsSync: () => true,
     readFile: async () => '', packageMetadata: { version: 'test' },
     createRequire: () => ({ resolve: () => { throw new Error('no peer in tests'); } }),
     VEGETATION_CAPABILITY_NOTE, CROWD_CAPABILITY_NOTE, SETTLE_CAPABILITY_NOTE, GAME_CAPABILITIES, USER_PASS_CAPABILITIES, MESH_BLEND_CAPABILITIES, MATERIAL_SNIPPET_CAPABILITIES, AGENT_SCENE_CAPABILITIES, AGENT_SCENE_DEFAULT_LIMITS, RENDER_PASS_NAMES, RENDER_PASS_DEPTH_RANGE, VIDEO_ENCODERS, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS, MAXIMUM_MEMORY_MIB, BAKE_WORKER_MAXIMUM_SECONDS, PATH_TRACER_CAPABILITIES,
     recipeAssetNeeds, gameAssetIds, sequenceFrameIds, catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, TEXTURE_SEQUENCE_CAPABILITIES, AGENT_ASSET_LIMITS, assertCombinedAssetBytes,
     audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName, sessionProblem, SCENE_STORE_LIMITS,
     runAnnotateSession: async () => ({ outcome: 'timeout' }), openInDefaultBrowser: async () => {}, ANNOTATE_LIMITS,
+    ...packLimits, createPackRegistry,
+    sampleBrowserHeap, exceedsMemoryGuard,
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
     runtimeOptions, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
     setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },

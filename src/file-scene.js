@@ -4,10 +4,27 @@ import { loadHdri } from './hdri.js';
 import { createCascadedShadows } from './cascaded-shadows.js';
 import { applyWaterReflection, attachWaterReflection } from './water-reflection.js';
 import { createCameraSampler } from './camera-track.js';
+import { inWholeWorldOrder, readPartRanks } from './showcase-download.js';
 
 // Headless twin of the showcase page for scripts/render-media.mjs (--scene file). The export script serves the scene.json
 // at /__file/config.json with every asset path already pointing at a file it can read, and an optional camera track at
 // /__file/camera.json. The renderer options, sky, exposure and frame effects are read exactly as src/showcase.js reads them.
+
+// Loads the "glbRest" files with the first file's shared textures and joins every file's parts in the order the showcase page
+// uses, so a headless frame matches the page. A scene with no "glbRest" keeps the first file's parts as they are.
+async function loadStagedParts(description, asset, model, sharedTextures) {
+  const restPaths = description.glbRest ?? [];
+  if (!restPaths.length) return asset.parts;
+  const files = [{ parts: asset.parts, ranks: await readPartRanks(model) }];
+  for (const restPath of restPaths) {
+    const restModel = await fetch(restPath).then(response => response.blob());
+    const baseUrl = new URL('.', new URL(restPath, location.href)).href;
+    const rest = await loadGltf(restModel, { baseUrl, sharedTextures, ...(description.gltfOptions ?? {}) });
+    files.push({ parts: rest.parts, ranks: await readPartRanks(restModel) });
+  }
+  await import('./replace-textured-parts.js');
+  return inWholeWorldOrder(files);
+}
 
 async function readJson(url) {
   const response = await fetch(url);
@@ -19,12 +36,14 @@ async function start() {
   const description = await readJson('/__file/config.json');
   const cameraResponse = await fetch('/__file/camera.json');
   const camera = cameraResponse.ok ? createCameraSampler(await cameraResponse.json()) : null;
-  if (description.glbRest?.length || description.hdriPreview) throw new Error('Staged scene.json files (glbRest, hdriPreview) are not supported by --scene file yet.');
   const [model, map] = await Promise.all([
     fetch(description.glb).then(response => response.blob()),
     loadHdri(description.hdri, description.hdriOptions ?? {}),
   ]);
-  const asset = await loadGltf(model, { baseUrl: new URL('.', new URL(description.glb, location.href)).href, sharedTextures: createSharedTextures(), ...(description.gltfOptions ?? {}) });
+  const sharedTextures = createSharedTextures();
+  const gltfOptions = description.gltfOptions ?? {};
+  const asset = await loadGltf(model, { baseUrl: new URL('.', new URL(description.glb, location.href)).href, sharedTextures, ...gltfOptions });
+  asset.parts = await loadStagedParts(description, asset, model, sharedTextures);
   const rendererOptions = description.renderer ?? {};
   const shadowCascades = rendererOptions.shadowCascades ? createCascadedShadows(rendererOptions.shadowCascades) : undefined;
   const reflection = description.waterReflection ? applyWaterReflection(asset.parts) : { parts: asset.parts, surface: null };

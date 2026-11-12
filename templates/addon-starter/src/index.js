@@ -27,3 +27,8 @@ export function registerHoverController(kind = 'hover') {
   registerController(kind, createHoverController);
   return kind;
 }
+
+// The hook an MCP server calls once after it loads this package (docs/addons.md).
+export function registerAddon() {
+  registerHoverController();
+}

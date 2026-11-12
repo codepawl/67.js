@@ -321,6 +321,10 @@ function bendWarnings(solver, state, prepared) {
 function createSolver(definition, position, prepared, resolveJoint) {
   const label = `IK ${position}`;
   const weight = weightFunction(definition?.weight ?? 1, `${label} weight`);
+  if (definition?.type === 'custom') {
+    if (typeof definition.create !== 'function') throw new TypeError(`${label} type custom needs create(prepared, resolveJoint, label) => { joints, solve(time, context, weight) }.`);
+    return { type: 'custom', label, weight, ...definition.create(prepared, resolveJoint, label) };
+  }
   const solverType = definition?.type === 'ik' ? 'chain' : definition?.type === 'spline_ik' ? 'spline' : definition?.type;
   if (solverType !== 'spline' && typeof definition?.target !== 'function') checkedVector(definition?.target, `${label} target`);
   if (definition.type === 'two-bone') {
@@ -719,7 +723,12 @@ function solveSpline(solver, time, context) {
   return { reached: error <= Math.max(table.totalLength, totalBoneLength) * 1e-2 + 1e-4, error };
 }
 
-const SOLVERS = { 'two-bone': solveTwoBone, aim: solveAim, chain: solveChain, spline: solveSpline };
+// A custom solver (spring bones) brings its own `solve`; it keeps its own state between calls.
+function solveCustom(solver, time, context) {
+  return solver.solve(time, context, checkedWeight(solver.weight, time, `${solver.label} weight`));
+}
+
+const SOLVERS = { 'two-bone': solveTwoBone, aim: solveAim, chain: solveChain, spline: solveSpline, custom: solveCustom };
 
 const GLTF_TRACK_PROPERTIES = { position: 'translation', quaternion: 'rotation', scale: 'scale' };
 const GLTF_STEP_INTERPOLATION = 2300;

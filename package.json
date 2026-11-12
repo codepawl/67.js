@@ -41,6 +41,7 @@
     "docs/mcp.md",
     "docs/mesh.md",
     "docs/modeling.md",
+    "docs/packs.md",
     "docs/physics.md",
     "docs/runtime.md",
     "docs/streaming.md",
@@ -150,7 +151,9 @@
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
     "dev": "vite --host 127.0.0.1",
-    "build": "node scripts/prepare-release.mjs && vite build",
+    "pack:check": "node scripts/pack-check.mjs",
+    "packs:index": "node scripts/build-pack-index.mjs",
+    "build": "node scripts/prepare-release.mjs && node scripts/build-pack-index.mjs && vite build",
     "build:lib": "vite build --config vite.lib.config.js && vite build --config vite.browser.config.js",
     "prepare:release": "node scripts/prepare-release.mjs",
     "prepack": "npm run build:lib",
