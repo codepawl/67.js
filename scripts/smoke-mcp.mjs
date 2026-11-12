@@ -110,10 +110,11 @@ try {
   assert.equal(restoredStatus.renderSucceeded, true);
   const restored = await look(sessionId, 'restored');
   assert.deepEqual(restored.bytes, before.bytes);
+  // The ornament stays inside the pedestal's footprint: a wider scene stops the pedestal counting as the floor, and the automatic floor disc adds a geometry buffer of its own.
   const enlarged = (await call('scene_apply', { sessionId, expectedRevision: 3, operations: [
     { type: 'add-geometry', geometry: { id: 'ornament', type: 'sphere', segments: 24, rings: 16 } },
     { type: 'add-material', material: { id: 'ruby', color: [0.8, 0.04, 0.06], metallic: 0.6, roughness: 0.2 } },
-    { type: 'add-node', node: { id: 'ornament', geometry: 'ornament', material: 'ruby', translation: [-1.2, 0.8, 0], scale: [0.28, 0.28, 0.28] } },
+    { type: 'add-node', node: { id: 'ornament', geometry: 'ornament', material: 'ruby', translation: [-0.5, 0.8, 0], scale: [0.28, 0.28, 0.28] } },
   ] })).structuredContent;
   assert.equal(enlarged.renderSucceeded, true);
   assert.equal((await call('scene_inspect', { sessionId })).structuredContent.counts.parts, 20);
