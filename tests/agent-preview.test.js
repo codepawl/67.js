@@ -197,3 +197,25 @@ test('scene_look with labels names the parts of an imported asset instead of thr
     assert.equal(label.tag, null);
   }
 });
+
+test('annotateFrame returns the camera and pickMarks turns pixels into part hits', async () => {
+  const { preview } = previewHarness();
+  const input = recipe();
+  input.camera = { eye: [0, 0, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 50 };
+  preview.create({ recipe: input, sessionId: 'marks', backend: 'cpu', memoryBudgetMiB: 64 });
+  const frame = preview.annotateFrame({ sessionId: 'marks' });
+  assert.equal(frame.width, 768);
+  assert.equal(frame.height, 512);
+  assert.deepEqual(frame.camera.eye, [0, 0, 5]);
+  const picked = await preview.pickMarks({ sessionId: 'marks', camera: frame.camera, width: frame.width, height: frame.height,
+    marks: [{ x: 384, y: 256, note: 'scuffed' }, { x: 2, y: 2, note: 'empty' }] });
+  assert.equal(picked.revision, 0);
+  const [onCube, onSky] = picked.marks;
+  assert.equal(onCube.partId, 'cube');
+  assert.equal(onCube.note, 'scuffed');
+  assert.ok(Math.abs(onCube.point[2] - 0.5) < 0.05, `front face near z 0.5, got ${onCube.point}`);
+  assert.deepEqual(onCube.normal.map(Math.round), [0, 0, 1]);
+  assert.equal(onCube.material, 'paint');
+  assert.equal(onSky.partId, null);
+  await assert.rejects(preview.pickMarks({ sessionId: 'marks', camera: frame.camera, width: 768, height: 512, marks: [{ x: 900, y: 1 }] }), /mark 1 x/);
+});

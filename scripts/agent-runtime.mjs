@@ -32,6 +32,9 @@ import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, startVideoEncoderI
 import { audioInputArguments, createAudioLibrary, measureStreamSeconds } from './job-audio.mjs';
 import { filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline } from '../src/film-timeline.js';
 import { isPreviewHost } from './preview-host.mjs';
+import { runAnnotateSession } from './annotate-session.mjs';
+import { openInDefaultBrowser } from './annotate-open.mjs';
+import { ANNOTATE_LIMITS } from '../src/agent-annotate.js';
 import { normalizeReview, REVIEW_LIMITS } from './agent-review.mjs';
 import { mergeFrameDiagnostics } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
@@ -80,7 +83,7 @@ const VENDOR_FILES = Object.freeze({
 });
 
 export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', browser: browserPath, memory = 192, assets: assetRoot,
-  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot,
+  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot, openPage = openInDefaultBrowser,
   previewUrl = new URL(/* @vite-ignore */ '../build/mcp/preview.js', import.meta.url) } = {}) {
   if (!['gpu', 'cpu'].includes(backend)) {
     throw new RangeError('backend must be gpu or cpu.');
@@ -878,6 +881,38 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         result.metadata.backend = backend;
         return result;
       });
+    },
+    // Shows the current view in the person's own browser, waits for their pins and notes, and resolves each pin to a part and a
+    // world point. The wait holds no preview queue slot, so other tools keep working while the person marks.
+    async askUser(input) {
+      const width = input.width ?? 768;
+      const height = input.height ?? 512;
+      if (![width, height].every(value => Number.isInteger(value) && value >= 64 && value <= 1024)) {
+        throw new RangeError('Preview dimensions must be integers from 64 to 1024.');
+      }
+      const maxMarks = input.maxMarks ?? ANNOTATE_LIMITS.maxMarks;
+      const timeoutSeconds = input.timeoutSeconds ?? ANNOTATE_LIMITS.defaultTimeoutSeconds;
+      const frame = await enqueue(async () => {
+        await requirePreviewRenderer();
+        requireSession(input.sessionId);
+        await page.setViewportSize({ width, height });
+        return invoke('annotateFrame', { sessionId: input.sessionId });
+      });
+      const session = await runAnnotateSession({ png: frame.data, width: frame.width, height: frame.height, prompt: input.prompt ?? '',
+        maxMarks, waitMs: timeoutSeconds * 1000, open: async url => {
+          console.error(`67js annotate page: ${url}`);
+          await openPage(url);
+        } });
+      const base = { sessionId: input.sessionId, revision: frame.metadata.revision, view: { width: frame.width, height: frame.height, camera: frame.camera } };
+      if (session.outcome !== 'sent') {
+        return { content: { ...base, outcome: session.outcome, marks: [], message: session.outcome === 'timeout'
+          ? `The person did not press Send within ${timeoutSeconds} seconds. Ask in text, or call scene_ask_user again with a longer timeoutSeconds.`
+          : 'The person cancelled without sending marks. Ask what they meant in text.' } };
+      }
+      const picked = await enqueue(() => invoke('pickMarks', { sessionId: input.sessionId, camera: frame.camera, marks: session.marks, width: frame.width, height: frame.height }));
+      const sceneChanged = picked.revision !== frame.metadata.revision;
+      return { image: session.image, content: { ...base, outcome: 'sent', marks: picked.marks,
+        ...(sceneChanged ? { warning: `The scene changed from revision ${frame.metadata.revision} to ${picked.revision} while the person marked; part IDs and points describe revision ${picked.revision}, the picture shows ${frame.metadata.revision}.` } : {}) } };
     },
     checkpoint(input) {
       return enqueue(async () => {

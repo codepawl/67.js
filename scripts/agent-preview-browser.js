@@ -33,6 +33,7 @@ import { describeApplication } from '../src/agent-apply-report.js';
 import { framingProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
+import { describeMarks, validateMarks } from '../src/agent-annotate.js';
 import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from './agent-walkmap.js';
 
 // Open scenes by sessionId, least recently used first. One canvas serves them all, so at most one record owns a renderer;
@@ -1175,6 +1176,20 @@ window.__agentPreview = {
       metadata: { sessionId, revision: record.scene.revision, topologyRevision: record.scene.topologyRevision,
         motionTime: record.scene.motionTime ?? null, ...render, ...(labels ? { labels } : {}) },
     };
+  },
+  // One frame for scene_ask_user: the look, plus the camera it was drawn with so the marks can be turned into rays later.
+  annotateFrame({ sessionId }) {
+    const frame = this.look({ sessionId });
+    const camera = Object.fromEntries(Object.entries(requireSession(sessionId).scene.camera)
+      .map(([field, value]) => [field, ArrayBuffer.isView(value) ? Array.from(value) : value]));
+    return { ...frame, width: canvas.width, height: canvas.height, camera };
+  },
+  async pickMarks({ sessionId, camera, marks, width, height }) {
+    const record = requireSession(sessionId);
+    if (!allAgentSceneModulesLoaded()) await loadAllAgentSceneModules();
+    const clean = validateMarks(marks, { width, height });
+    const query = sceneQueryFor(record);
+    return { revision: record.scene.revision, marks: describeMarks(clean, camera, { width, height, raycast: ray => query.raycast(ray) }) };
   },
   checkpoint({ sessionId, checkpointId }) {
     const record = requireSession(sessionId);
