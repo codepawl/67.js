@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { register } from 'node:module';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 register('./root-loader.mjs', import.meta.url);
@@ -267,7 +267,12 @@ function restorePlainValue(value, decodedImages) {
 async function rebuildEnvironmentMap(worldDescription, repositoryRootPath = REPOSITORY_ROOT_PATH) {
   const { createEnvironmentMap, parseRadianceHdr } = await import('../../src/hdri.js');
   if (worldDescription.type === 'constant') {
-    const constantData = new Float32Array(8 * 4 * 3).fill(worldDescription.value);
+    // `color` carries a tinted constant world; the grey `value` alone is what the parity bridges write.
+    const [red, green, blue] = worldDescription.color ?? [worldDescription.value, worldDescription.value, worldDescription.value];
+    const constantData = new Float32Array(8 * 4 * 3);
+    for (let pixelOffset = 0; pixelOffset < constantData.length; pixelOffset += 3) {
+      constantData.set([red, green, blue], pixelOffset);
+    }
     return createEnvironmentMap({
       width: 8,
       height: 4,
@@ -276,7 +281,7 @@ async function rebuildEnvironmentMap(worldDescription, repositoryRootPath = REPO
     });
   }
   if (worldDescription.type === 'hdri') {
-    const hdriBytes = await readFile(join(repositoryRootPath, worldDescription.file));
+    const hdriBytes = await readFile(resolve(repositoryRootPath, worldDescription.file));
     const parsedHdri = parseRadianceHdr(hdriBytes.buffer.slice(hdriBytes.byteOffset, hdriBytes.byteOffset + hdriBytes.byteLength));
     const cappedData = parsedHdri.data.map((radiance) => Math.min(radiance, worldDescription.radianceLimit));
     return createEnvironmentMap({
