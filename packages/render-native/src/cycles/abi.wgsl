@@ -46,6 +46,9 @@ const KERNEL_FLAG_LIGHT_TREE_PROBE: u32 = 128u;
 // reverse: no direct light samples and emissive hits count fully (BSDF only). Both clear is the normal MIS combination.
 const KERNEL_FLAG_TEST_NEE_ONLY: u32 = 256u;
 const KERNEL_FLAG_TEST_BSDF_ONLY: u32 = 512u;
+// Set: a path that ends is replaced at once by the pixel's next sample (one bounce per loop iteration). Clear (default): each path
+// runs to its end before the next one starts. The image is the same either way; only the time per sample differs.
+const KERNEL_FLAG_PATH_REGENERATION: u32 = 1024u;
 
 // `KernelParamsV2.filter_type` values.
 const FILTER_BOX: u32 = 0u;

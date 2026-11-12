@@ -713,53 +713,111 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   var batch_normal = vec3<f32>(0.0);
   var taken_in_batch = 0u;
 
-  for (var s = 0u; s < sample_count; s += 1u) {
-    if (s > 0u && int_pixel_has_converged(stats)) {
-      stats.z = 1.0;
-      break;
+  // Per-path state lives outside the loops so that, with KERNEL_FLAG_PATH_REGENERATION, a path that ends is replaced by the
+  // pixel's next sample at once instead of idling until the longest path of the dispatch ends. Without the flag a whole path
+  // runs inside one iteration of the outer loop, which is the order of work before regeneration existed.
+  let steps_per_iteration = select(INT_MAX_PATH_STEPS, 1u, (kernel_params.kernel_flags & KERNEL_FLAG_PATH_REGENERATION) != 0u);
+  var rng = smp_init(pixel_x, pixel_y, kernel_params.sample_offset, kernel_params.seed);
+  var next_sample = 0u;
+  var path_active = false;
+  var path_step = 0u;
+
+  var ray_origin = vec3<f32>(0.0);
+  var ray_dir = vec3<f32>(0.0);
+  var ray_t_min = 0.0;
+  var ray_t_max = 0.0;
+  var ray_visibility = INSTANCE_VISIBILITY_CAMERA;
+  var self_instance = INVALID_INDEX;
+  var self_triangle = INVALID_INDEX;
+
+  var throughput = vec3<f32>(1.0);
+  var medium_sigma = vec3<f32>(0.0);
+  var in_medium = false;
+  var is_camera_ray = true;
+  var is_transparent_bg_ray = false;
+  var mis_skip = true;
+  var prev_bsdf_pdf = 0.0;
+  var min_ray_pdf = 1.0e30;
+  var prev_recv_lo = 0xFFFFFFFFu;
+  var prev_recv_hi = 0xFFFFFFFFu;
+  var terminate_on_hit = false;
+  var terminate_on_next_surface = false;
+
+  var bounce = 0u;
+  var diffuse_bounces = 0u;
+  var glossy_bounces = 0u;
+  var transmission_bounces = 0u;
+  var volume_bounces = 0u;
+  var transparent_bounces = 0u;
+
+  var sample_radiance = vec3<f32>(0.0);
+  var first_depth = 0.0;
+  var first_albedo = vec3<f32>(0.0);
+  var first_normal = vec3<f32>(0.0);
+  var recorded_features = false;
+
+  loop {
+    if (!path_active) {
+      if (next_sample >= sample_count) {
+        break;
+      }
+      if (next_sample > 0u && int_pixel_has_converged(stats)) {
+        stats.z = 1.0;
+        break;
+      }
+
+      let sample_index = kernel_params.sample_offset + next_sample;
+      next_sample += 1u;
+      rng = smp_init(pixel_x, pixel_y, sample_index, kernel_params.seed);
+      let filter_offset = flt_sample_offset(smp_next_2d(&rng));
+      let lens_uv = smp_next_2d(&rng);
+      let cam_ray = cam_generate_ray(pixel_x, pixel_y, filter_offset, lens_uv);
+
+      ray_origin = cam_ray.origin;
+      ray_dir = cam_ray.direction;
+      ray_t_min = cam_ray.t_min;
+      ray_t_max = cam_ray.t_max;
+      ray_visibility = INSTANCE_VISIBILITY_CAMERA;
+      self_instance = INVALID_INDEX;
+      self_triangle = INVALID_INDEX;
+
+      throughput = vec3<f32>(1.0);
+      medium_sigma = vec3<f32>(0.0);
+      in_medium = false;
+      is_camera_ray = true;
+      is_transparent_bg_ray = (kernel_params.kernel_flags & KERNEL_FLAG_TRANSPARENT_BACKGROUND) != 0u;
+      mis_skip = true;
+      prev_bsdf_pdf = 0.0;
+      min_ray_pdf = 1.0e30;
+      prev_recv_lo = 0xFFFFFFFFu;
+      prev_recv_hi = 0xFFFFFFFFu;
+      terminate_on_hit = false;
+      terminate_on_next_surface = false;
+
+      bounce = 0u;
+      diffuse_bounces = 0u;
+      glossy_bounces = 0u;
+      transmission_bounces = 0u;
+      volume_bounces = 0u;
+      transparent_bounces = 0u;
+
+      sample_radiance = vec3<f32>(0.0);
+      first_depth = 0.0;
+      first_albedo = vec3<f32>(0.0);
+      first_normal = vec3<f32>(0.0);
+      recorded_features = false;
+      path_step = 0u;
+      path_active = true;
     }
 
-    let sample_index = kernel_params.sample_offset + s;
-    var rng = smp_init(pixel_x, pixel_y, sample_index, kernel_params.seed);
-    let filter_offset = flt_sample_offset(smp_next_2d(&rng));
-    let lens_uv = smp_next_2d(&rng);
-    let cam_ray = cam_generate_ray(pixel_x, pixel_y, filter_offset, lens_uv);
-
-    var ray_origin = cam_ray.origin;
-    var ray_dir = cam_ray.direction;
-    var ray_t_min = cam_ray.t_min;
-    var ray_t_max = cam_ray.t_max;
-    var ray_visibility = INSTANCE_VISIBILITY_CAMERA;
-    var self_instance = INVALID_INDEX;
-    var self_triangle = INVALID_INDEX;
-
-    var throughput = vec3<f32>(1.0);
-    var medium_sigma = vec3<f32>(0.0);
-    var in_medium = false;
-    var is_camera_ray = true;
-    var is_transparent_bg_ray = (kernel_params.kernel_flags & KERNEL_FLAG_TRANSPARENT_BACKGROUND) != 0u;
-    var mis_skip = true;
-    var prev_bsdf_pdf = 0.0;
-    var min_ray_pdf = 1.0e30;
-    var prev_recv_lo = 0xFFFFFFFFu;
-    var prev_recv_hi = 0xFFFFFFFFu;
-    var terminate_on_hit = false;
-    var terminate_on_next_surface = false;
-
-    var bounce = 0u;
-    var diffuse_bounces = 0u;
-    var glossy_bounces = 0u;
-    var transmission_bounces = 0u;
-    var volume_bounces = 0u;
-    var transparent_bounces = 0u;
-
-    var sample_radiance = vec3<f32>(0.0);
-    var first_depth = 0.0;
-    var first_albedo = vec3<f32>(0.0);
-    var first_normal = vec3<f32>(0.0);
-    var recorded_features = false;
-
-    for (var step = 0u; step < INT_MAX_PATH_STEPS; step += 1u) {
+    for (var iteration_step = 0u; iteration_step < steps_per_iteration; iteration_step += 1u) {
+      // A `break` below ends the path. Only the places that go on to the next step set `path_active` again.
+      path_active = false;
+      if (path_step >= INT_MAX_PATH_STEPS) {
+        break;
+      }
+      let step = path_step;
+      path_step += 1u;
       let surface_hit = int_trace_closest_surface(
         ray_origin,
         ray_dir,
@@ -865,6 +923,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         prev_recv_lo = 0xFFFFFFFFu;
         prev_recv_hi = 0xFFFFFFFFu;
         lgt_remember_mis_origin(scatter_pos, ray_dir, false, false);
+        path_active = true;
         continue;
       }
 
@@ -943,6 +1002,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
               ray_t_min = surface_hit.t + max(kernel_params.ray_epsilon, 1.0e-6);
               self_instance = point.instance_index;
               self_triangle = point.triangle_index;
+              path_active = true;
               continue;
             }
           }
@@ -1013,6 +1073,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         ray_t_min = surface_hit.t + max(kernel_params.ray_epsilon, 1.0e-6);
         self_instance = point.instance_index;
         self_triangle = point.triangle_index;
+        path_active = true;
         continue;
       }
 
@@ -1082,18 +1143,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       prev_recv_lo = point.light_group_mask_lo;
       prev_recv_hi = point.light_group_mask_hi;
       lgt_remember_mis_origin(point.position, point.shading_normal, closure_has_transmission, picks_through_tree);
+      path_active = true;
     }
 
-    let exposed = int_sanitize_radiance(sample_radiance * exposure);
-    let lum = int_luminance(exposed);
-    batch_radiance += exposed;
-    batch_depth += select(0.0, first_depth, first_depth >= 0.0 && first_depth < 1.0e29);
-    batch_albedo += int_sanitize_radiance(first_albedo);
-    batch_normal += first_normal;
-    stats.x += lum;
-    stats.y += lum * lum;
-    stats.w += 1.0;
-    taken_in_batch += 1u;
+    if (!path_active) {
+      let exposed = int_sanitize_radiance(sample_radiance * exposure);
+      let lum = int_luminance(exposed);
+      batch_radiance += exposed;
+      batch_depth += select(0.0, first_depth, first_depth >= 0.0 && first_depth < 1.0e29);
+      batch_albedo += int_sanitize_radiance(first_albedo);
+      batch_normal += first_normal;
+      stats.x += lum;
+      stats.y += lum * lum;
+      stats.w += 1.0;
+      taken_in_batch += 1u;
+    }
   }
 
   if (taken_in_batch > 0u) {

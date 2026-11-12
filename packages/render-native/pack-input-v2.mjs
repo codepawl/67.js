@@ -44,6 +44,7 @@ const KERNEL_FLAG_ORTHOGRAPHIC_CAMERA = 8;
 const KERNEL_FLAG_ADAPTIVE_SAMPLING = 16;
 const KERNEL_FLAG_TRANSPARENT_BACKGROUND = 32;
 export const KERNEL_FLAG_WHITE_NOISE_SAMPLER = 64;
+export const KERNEL_FLAG_PATH_REGENERATION = 1024;
 
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
@@ -1547,6 +1548,15 @@ export function resolveSamplingOptions(options, callerName) {
     lightSampling = aliasedLightSampling;
   }
   return { sampler, lightSampling };
+}
+
+/** Throws unless `pathRegeneration` is undefined, true or false. */
+export function validatePathRegenerationOption(pathRegeneration, callerName) {
+  if (pathRegeneration !== undefined && typeof pathRegeneration !== 'boolean') {
+    throw new TypeError(
+      `${callerName}: \`pathRegeneration\` must be true, false (default) or left out, got ${JSON.stringify(pathRegeneration)}.`
+    );
+  }
 }
 
 /** True when the kernel should pick lights through the light tree for this scene and mode. */
