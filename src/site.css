@@ -376,3 +376,70 @@ body.site > main > section { scroll-margin-top: 96px; }
 .site .size-bar-fill.is-other {
   background: #ffffff36;
 }
+
+/* Measured tiers */
+.site .tiers { display: grid; gap: 18px; }
+.site .tiers > * { margin: 0; }
+.site .tiers p { color: var(--muted); max-width: none; }
+.site .tiers p a { text-decoration: underline; }
+.site .tiers #tiers-table { --rail-accent: #ff6a2b; --rail-size: 16px; position: relative; display: grid; padding-top: 54px; }
+.site .tier-rail { position: absolute; inset: 0 0 auto 0; height: 40px; color: var(--muted); font-size: 12.5px; line-height: 16px; user-select: none; pointer-events: none; }
+.site .tier-line { position: absolute; left: 0; right: 14px; top: 29px; height: 4px; border-radius: 999px; overflow: hidden; background: linear-gradient(90deg, #ffffff26, #ff6a2bcc 70%, #f59e0b); box-shadow: 0 0 14px #ff6a2b40; }
+.site .tier-line::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 18%; background: linear-gradient(90deg, transparent, #fff8, transparent); transform: translateX(-100%); animation: tier-glow 4.8s ease-in-out infinite; }
+.site .tier-rail::after { content: ""; position: absolute; right: 3px; top: 27px; width: 8px; height: 8px; border-top: 2.5px solid #f59e0b; border-right: 2.5px solid #f59e0b; border-radius: 1px 3px 1px 1px; transform: rotate(45deg); }
+.site .tier-end { position: absolute; top: 0; white-space: nowrap; }
+.site .tier-end.is-start { left: 0; }
+.site .tier-end.is-finish { right: 0; color: #ffb877; }
+.site .tier-cards { position: relative; z-index: 1; }
+.site .tier-card { position: relative; }
+.site .tier-card::before { content: ""; position: absolute; z-index: 2; left: calc(50% - var(--rail-size) / 2); top: calc(-23px - var(--rail-size) / 2); width: var(--rail-size); height: var(--rail-size); box-sizing: border-box; border-radius: 50%; border: 2px solid var(--rail-accent); background: linear-gradient(var(--node-fill, transparent), var(--node-fill, transparent)), var(--window); }
+.site .tier-card:nth-child(1) { --node-fill: #ff6a2b26; }
+.site .tier-card:nth-child(2) { --node-fill: #ff6a2b70; }
+.site .tier-card:nth-child(4) { --node-fill: var(--rail-accent); }
+.site .tier-card:nth-child(4)::before { box-shadow: 0 0 0 4px #ff6a2b33, 0 0 16px #ff6a2b99; }
+.site .tier-card.is-planned::before { border: 0; background: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ccircle cx=%278%27 cy=%278%27 r=%276.5%27 fill=%27none%27 stroke=%27%23ff6a2b%27 stroke-width=%272.2%27 stroke-dasharray=%273.4 2.4%27/%3E%3C/svg%3E") center / 100% no-repeat, var(--window); opacity: 1; }
+@keyframes tier-glow { 0% { transform: translateX(-100%); } 70%, 100% { transform: translateX(560%); } }
+@keyframes tier-glow-down { 0% { transform: translateY(-100%); } 70%, 100% { transform: translateY(560%); } }
+@media (prefers-reduced-motion: reduce) {
+  .site .tier-line::after { animation: none; display: none; }
+}
+.site .tier-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.site .tier-card { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 18px; border-radius: var(--panel-radius); background: var(--bg); }
+.site .tier-card.is-planned > * { opacity: 0.55; }
+.site .tier-card.is-planned { background: #ffffff08; }
+.site .tier-top { display: flex; align-items: center; gap: 10px; user-select: none; }
+.site .tier-top h3 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.site .tier-icon { flex: none; width: 28px; height: 28px; padding: 5px; border-radius: 9px; background: #ffffff12; fill: none; stroke: #ffb877; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; box-sizing: border-box; }
+.site .tier-card.is-planned .tier-icon { stroke: var(--muted); stroke-dasharray: 3 2.5; }
+.site .tier-for { margin: 0; font-size: 13px; }
+.site .tier-big { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 2px 0 0; }
+.site .tier-big strong { color: var(--text); font-size: 26px; line-height: 1.1; font-weight: 650; font-variant-numeric: tabular-nums; }
+.site .tier-big span { font-size: 12.5px; }
+.site .tier-bars { display: grid; gap: 8px; user-select: none; }
+.site .tier-bars.is-quality { padding-top: 6px; }
+.site .tier-bars-title { margin: 0 0 2px; font-size: 12px; }
+.site .tier-bar-label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.site .tier-bar-label > span:first-child { min-width: 0; }
+.site .tier-bar-label > span:last-child { flex: none; color: var(--text); }
+.site .tier-track { position: relative; display: block; height: 8px; border-radius: 999px; background: #ffffff10; overflow: hidden; }
+.site .is-quality .tier-track { height: 5px; }
+.site .tier-fill { position: absolute; top: 0; bottom: 0; left: var(--l, 0%); width: max(var(--w), 6px); border-radius: 999px; background: #ffffff40; }
+.site .is-67js .tier-fill { background: linear-gradient(90deg, #ff6a2b, #f59e0b); }
+.site .tier-card.is-planned .tier-fill { width: 0; }
+.site .tier-plan { margin: 0; font-size: 12.5px; }
+.site .tiers .tiers-note { font-size: 12.5px; }
+@media (max-width: 1000px) {
+  .site .tiers #tiers-table { padding: 30px 0 30px 48px; }
+  .site .tier-cards { grid-template-columns: minmax(0, 1fr); }
+  .site .tier-rail { inset: 0 auto 0 0; width: 100%; height: auto; font-size: 13px; }
+  .site .tier-line { left: 10px; right: auto; top: 0; bottom: 14px; width: 4px; height: auto; background: linear-gradient(180deg, #ffffff26, #ff6a2bcc 70%, #f59e0b); }
+  .site .tier-line::after { top: 0; bottom: auto; left: 0; right: 0; width: auto; height: 18%; background: linear-gradient(180deg, transparent, #fff8, transparent); animation-name: tier-glow-down; }
+  .site .tier-rail::after { right: auto; left: 6.75px; top: auto; bottom: 4px; transform: rotate(135deg); }
+  .site .tier-end.is-start { top: -2px; left: 30px; right: auto; }
+  .site .tier-end.is-finish { top: auto; bottom: -2px; left: 30px; right: auto; }
+  .site .tier-card::before { left: calc(-36px - var(--rail-size) / 2); top: 24px; }
+}
+@media (max-width: 560px) {
+  .site .tier-cards { grid-template-columns: minmax(0, 1fr); }
+  .site .tier-big strong { font-size: 24px; }
+}

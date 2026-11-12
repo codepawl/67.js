@@ -5,14 +5,14 @@
     "url": "https://67js.codepawl.com"
   },
   "metadata": {
-    "description": "67js, a 3D engine an AI agent drives through MCP."
+    "description": "67js, a 3D engine an AI agent drives through MCP, with a WebGL2 rasterizer and a path tracer on CPU and WebGL2, plus Vulkan with the optional render-native package."
   },
   "plugins": [
     {
       "name": "67js",
       "source": "./skills",
       "strict": false,
-      "description": "The 67js MCP server and the build-67js-scene and render-67js-media skills.",
+      "description": "The 67js MCP server for WebGL2 and path-traced scenes, and the build-67js-scene and render-67js-media skills.",
       "version": "0.19.0",
       "category": "development",
       "homepage": "https://67js.codepawl.com",

@@ -1,0 +1,1078 @@
+{
+ "scene": "lit-interior",
+ "width": 960,
+ "rows": [
+  {
+   "engine": "cook-cpu",
+   "samples": 64,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0779,
+    "min": 0.0779,
+    "max": 0.0779,
+    "runs": [
+     0.0779
+    ]
+   },
+   "flip": 0.1271,
+   "channelMeanRatio": [
+    1.0099,
+    1.0087,
+    1.0066
+   ],
+   "samplingSeconds": {
+    "median": 38.9,
+    "min": 38.9,
+    "max": 38.9,
+    "runs": [
+     38.9
+    ]
+   },
+   "totalSeconds": {
+    "median": 38.9,
+    "min": 38.9,
+    "max": 38.9,
+    "runs": [
+     38.9
+    ]
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": {
+    "median": 3195,
+    "min": 3195,
+    "max": 3195,
+    "runs": [
+     3195
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cook-cpu",
+   "samples": 256,
+   "runs": 3,
+   "relMse": {
+    "median": 0.0198,
+    "min": 0.0198,
+    "max": 0.0198,
+    "runs": [
+     0.0198,
+     0.0198,
+     0.0198
+    ]
+   },
+   "flip": 0.0803,
+   "channelMeanRatio": [
+    1.0105,
+    1.0091,
+    1.0069
+   ],
+   "samplingSeconds": {
+    "median": 201.2169,
+    "min": 143.5588,
+    "max": 261.581,
+    "runs": [
+     261.581,
+     143.5588,
+     201.2169
+    ]
+   },
+   "totalSeconds": {
+    "median": 201.2169,
+    "min": 143.5588,
+    "max": 261.581,
+    "runs": [
+     261.581,
+     143.5588,
+     201.2169
+    ]
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": {
+    "median": 2096,
+    "min": 1422,
+    "max": 2129,
+    "runs": [
+     2129,
+     2096,
+     1422
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cook-gpu",
+   "samples": 64,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0779,
+    "min": 0.0779,
+    "max": 0.0779,
+    "runs": [
+     0.0779
+    ]
+   },
+   "flip": 0.1272,
+   "channelMeanRatio": [
+    1.0099,
+    1.0087,
+    1.0065
+   ],
+   "samplingSeconds": {
+    "median": 6.5128,
+    "min": 6.5128,
+    "max": 6.5128,
+    "runs": [
+     6.5128
+    ]
+   },
+   "totalSeconds": {
+    "median": 10.7589,
+    "min": 10.7589,
+    "max": 10.7589,
+    "runs": [
+     10.7589
+    ]
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": {
+    "median": 209,
+    "min": 209,
+    "max": 209,
+    "runs": [
+     209
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cook-gpu",
+   "samples": 256,
+   "runs": 3,
+   "relMse": {
+    "median": 0.0198,
+    "min": 0.0198,
+    "max": 0.0198,
+    "runs": [
+     0.0198,
+     0.0198,
+     0.0198
+    ]
+   },
+   "flip": 0.0803,
+   "channelMeanRatio": [
+    1.0104,
+    1.0091,
+    1.0069
+   ],
+   "samplingSeconds": {
+    "median": 19.045,
+    "min": 14.6641,
+    "max": 20.2678,
+    "runs": [
+     20.2678,
+     14.6641,
+     19.045
+    ]
+   },
+   "totalSeconds": {
+    "median": 28.161,
+    "min": 19.4665,
+    "max": 28.4226,
+    "runs": [
+     28.161,
+     19.4665,
+     28.4226
+    ]
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": {
+    "median": 496,
+    "min": 53,
+    "max": 2137,
+    "runs": [
+     2137,
+     496,
+     53
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cook-webgpu",
+   "samples": 64,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0779,
+    "min": 0.0779,
+    "max": 0.0779,
+    "runs": [
+     0.0779
+    ]
+   },
+   "flip": 0.1272,
+   "channelMeanRatio": [
+    1.0099,
+    1.0087,
+    1.0065
+   ],
+   "samplingSeconds": {
+    "median": 2.8475,
+    "min": 2.8475,
+    "max": 2.8475,
+    "runs": [
+     2.8475
+    ]
+   },
+   "totalSeconds": {
+    "median": 3.3462,
+    "min": 3.3462,
+    "max": 3.3462,
+    "runs": [
+     3.3462
+    ]
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": {
+    "median": 377,
+    "min": 377,
+    "max": 377,
+    "runs": [
+     377
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cook-webgpu",
+   "samples": 256,
+   "runs": 3,
+   "relMse": {
+    "median": 0.0198,
+    "min": 0.0198,
+    "max": 0.0198,
+    "runs": [
+     0.0198,
+     0.0198,
+     0.0198
+    ]
+   },
+   "flip": 0.0803,
+   "channelMeanRatio": [
+    1.0104,
+    1.0091,
+    1.0069
+   ],
+   "samplingSeconds": {
+    "median": 8.8039,
+    "min": 5.7971,
+    "max": 15.5105,
+    "runs": [
+     15.5105,
+     8.8039,
+     5.7971
+    ]
+   },
+   "totalSeconds": {
+    "median": 9.3003,
+    "min": 6.9498,
+    "max": 16.2285,
+    "runs": [
+     16.2285,
+     9.3003,
+     6.9498
+    ]
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": {
+    "median": 456,
+    "min": 131,
+    "max": 497,
+    "runs": [
+     497,
+     456,
+     131
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cycles",
+   "samples": 64,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0148,
+    "min": 0.0148,
+    "max": 0.0148,
+    "runs": [
+     0.0148
+    ]
+   },
+   "flip": 0.0686,
+   "channelMeanRatio": [
+    0.9999,
+    0.9999,
+    1.0
+   ],
+   "samplingSeconds": {
+    "median": 3.8778,
+    "min": 3.8778,
+    "max": 3.8778,
+    "runs": [
+     3.8778
+    ]
+   },
+   "totalSeconds": {
+    "median": 36.8176,
+    "min": 36.8176,
+    "max": 36.8176,
+    "runs": [
+     36.8176
+    ]
+   },
+   "processWallSeconds": {
+    "median": 96.7579,
+    "min": 96.7579,
+    "max": 96.7579,
+    "runs": [
+     96.7579
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 587.73,
+    "min": 587.73,
+    "max": 587.73,
+    "runs": [
+     587.73
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 2365.0,
+    "min": 2365.0,
+    "max": 2365.0,
+    "runs": [
+     2365.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cycles",
+   "samples": 256,
+   "runs": 3,
+   "relMse": {
+    "median": 0.0031,
+    "min": 0.0031,
+    "max": 0.0031,
+    "runs": [
+     0.0031,
+     0.0031,
+     0.0031
+    ]
+   },
+   "flip": 0.0392,
+   "channelMeanRatio": [
+    1.0001,
+    1.0001,
+    1.0001
+   ],
+   "samplingSeconds": {
+    "median": 9.2553,
+    "min": 7.3412,
+    "max": 56.4507,
+    "runs": [
+     56.4507,
+     7.3412,
+     9.2553
+    ]
+   },
+   "totalSeconds": {
+    "median": 12.5941,
+    "min": 8.9042,
+    "max": 58.6336,
+    "runs": [
+     58.6336,
+     8.9042,
+     12.5941
+    ]
+   },
+   "processWallSeconds": {
+    "median": 17.362,
+    "min": 10.5501,
+    "max": 60.5137,
+    "runs": [
+     60.5137,
+     10.5501,
+     17.362
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 582.44,
+    "min": 581.05,
+    "max": 596.45,
+    "runs": [
+     582.44,
+     596.45,
+     581.05
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 733.0,
+    "min": 718.0,
+    "max": 2472.0,
+    "runs": [
+     2472.0,
+     733.0,
+     718.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cycles",
+   "samples": 1024,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0008,
+    "min": 0.0008,
+    "max": 0.0008,
+    "runs": [
+     0.0008
+    ]
+   },
+   "flip": 0.0244,
+   "channelMeanRatio": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "samplingSeconds": {
+    "median": 108.9787,
+    "min": 108.9787,
+    "max": 108.9787,
+    "runs": [
+     108.9787
+    ]
+   },
+   "totalSeconds": {
+    "median": 111.9143,
+    "min": 111.9143,
+    "max": 111.9143,
+    "runs": [
+     111.9143
+    ]
+   },
+   "processWallSeconds": {
+    "median": 113.6914,
+    "min": 113.6914,
+    "max": 113.6914,
+    "runs": [
+     113.6914
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 599.27,
+    "min": 599.27,
+    "max": 599.27,
+    "runs": [
+     599.27
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 339.0,
+    "min": 339.0,
+    "max": 339.0,
+    "runs": [
+     339.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "native",
+   "samples": 64,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0779,
+    "min": 0.0779,
+    "max": 0.0779,
+    "runs": [
+     0.0779
+    ]
+   },
+   "flip": 0.1271,
+   "channelMeanRatio": [
+    1.0099,
+    1.0087,
+    1.0065
+   ],
+   "samplingSeconds": {
+    "median": 0.8081,
+    "min": 0.8081,
+    "max": 0.8081,
+    "runs": [
+     0.8081
+    ]
+   },
+   "totalSeconds": {
+    "median": 1.0909,
+    "min": 1.0909,
+    "max": 1.0909,
+    "runs": [
+     1.0909
+    ]
+   },
+   "processWallSeconds": {
+    "median": 1.2913,
+    "min": 1.2913,
+    "max": 1.2913,
+    "runs": [
+     1.2913
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 275.58,
+    "min": 275.58,
+    "max": 275.58,
+    "runs": [
+     275.58
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 239.0,
+    "min": 239.0,
+    "max": 239.0,
+    "runs": [
+     239.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "native",
+   "samples": 256,
+   "runs": 3,
+   "relMse": {
+    "median": 0.0198,
+    "min": 0.0198,
+    "max": 0.0198,
+    "runs": [
+     0.0198,
+     0.0198,
+     0.0198
+    ]
+   },
+   "flip": 0.0803,
+   "channelMeanRatio": [
+    1.0104,
+    1.0091,
+    1.0069
+   ],
+   "samplingSeconds": {
+    "median": 1.5478,
+    "min": 1.1904,
+    "max": 1.6446,
+    "runs": [
+     1.1904,
+     1.6446,
+     1.5478
+    ]
+   },
+   "totalSeconds": {
+    "median": 1.8852,
+    "min": 1.5934,
+    "max": 2.1819,
+    "runs": [
+     1.5934,
+     1.8852,
+     2.1819
+    ]
+   },
+   "processWallSeconds": {
+    "median": 2.0554,
+    "min": 1.8441,
+    "max": 2.4908,
+    "runs": [
+     1.8441,
+     2.0554,
+     2.4908
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 287.28,
+    "min": 274.16,
+    "max": 303.73,
+    "runs": [
+     274.16,
+     303.73,
+     287.28
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 622.0,
+    "min": 319.0,
+    "max": 1073.0,
+    "runs": [
+     1073.0,
+     319.0,
+     622.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "native",
+   "samples": 1024,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0051,
+    "min": 0.0051,
+    "max": 0.0051,
+    "runs": [
+     0.0051
+    ]
+   },
+   "flip": 0.0525,
+   "channelMeanRatio": [
+    1.0105,
+    1.0091,
+    1.0068
+   ],
+   "samplingSeconds": {
+    "median": 28.5228,
+    "min": 28.5228,
+    "max": 28.5228,
+    "runs": [
+     28.5228
+    ]
+   },
+   "totalSeconds": {
+    "median": 28.7835,
+    "min": 28.7835,
+    "max": 28.7835,
+    "runs": [
+     28.7835
+    ]
+   },
+   "processWallSeconds": {
+    "median": 28.9363,
+    "min": 28.9363,
+    "max": 28.9363,
+    "runs": [
+     28.9363
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 403.01,
+    "min": 403.01,
+    "max": 403.01,
+    "runs": [
+     403.01
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 2358.0,
+    "min": 2358.0,
+    "max": 2358.0,
+    "runs": [
+     2358.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "native",
+   "samples": 2048,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0027,
+    "min": 0.0027,
+    "max": 0.0027,
+    "runs": [
+     0.0027
+    ]
+   },
+   "flip": 0.0441,
+   "channelMeanRatio": [
+    1.0105,
+    1.0091,
+    1.0068
+   ],
+   "samplingSeconds": {
+    "median": 11.4062,
+    "min": 11.4062,
+    "max": 11.4062,
+    "runs": [
+     11.4062
+    ]
+   },
+   "totalSeconds": {
+    "median": 11.8967,
+    "min": 11.8967,
+    "max": 11.8967,
+    "runs": [
+     11.8967
+    ]
+   },
+   "processWallSeconds": {
+    "median": 12.3195,
+    "min": 12.3195,
+    "max": 12.3195,
+    "runs": [
+     12.3195
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 275.12,
+    "min": 275.12,
+    "max": 275.12,
+    "runs": [
+     275.12
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 580.0,
+    "min": 580.0,
+    "max": 580.0,
+    "runs": [
+     580.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "native",
+   "samples": 4096,
+   "runs": 1,
+   "relMse": {
+    "median": 0.0015,
+    "min": 0.0015,
+    "max": 0.0015,
+    "runs": [
+     0.0015
+    ]
+   },
+   "flip": 0.0382,
+   "channelMeanRatio": [
+    1.0104,
+    1.009,
+    1.0068
+   ],
+   "samplingSeconds": {
+    "median": 32.7556,
+    "min": 32.7556,
+    "max": 32.7556,
+    "runs": [
+     32.7556
+    ]
+   },
+   "totalSeconds": {
+    "median": 33.025,
+    "min": 33.025,
+    "max": 33.025,
+    "runs": [
+     33.025
+    ]
+   },
+   "processWallSeconds": {
+    "median": 33.2282,
+    "min": 33.2282,
+    "max": 33.2282,
+    "runs": [
+     33.2282
+    ]
+   },
+   "peakRamMegabytes": {
+    "median": 318.0,
+    "min": 318.0,
+    "max": 318.0,
+    "runs": [
+     318.0
+    ]
+   },
+   "peakCardVramDeltaMegabytes": {
+    "median": 490.0,
+    "min": 490.0,
+    "max": 490.0,
+    "runs": [
+     490.0
+    ]
+   },
+   "cardWasShared": true
+  },
+  {
+   "engine": "cook-gpu",
+   "samples": 512,
+   "runs": 1,
+   "stackOf": 2,
+   "relMse": {
+    "median": 0.009957,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "flip": 0.0642,
+   "channelMeanRatio": [
+    1.0104,
+    1.009,
+    1.0067
+   ],
+   "samplingSeconds": {
+    "median": 34.3315,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "totalSeconds": {
+    "median": 42.2247,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": null,
+   "cardWasShared": null
+  },
+  {
+   "engine": "cook-gpu",
+   "samples": 1024,
+   "runs": 1,
+   "stackOf": 4,
+   "relMse": {
+    "median": 0.005109,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "flip": 0.0523,
+   "channelMeanRatio": [
+    1.0104,
+    1.009,
+    1.0067
+   ],
+   "samplingSeconds": {
+    "median": 63.6358,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "totalSeconds": {
+    "median": 71.5289,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": null,
+   "cardWasShared": null
+  },
+  {
+   "engine": "cook-webgpu",
+   "samples": 512,
+   "runs": 1,
+   "stackOf": 2,
+   "relMse": {
+    "median": 0.009957,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "flip": 0.0642,
+   "channelMeanRatio": [
+    1.0104,
+    1.009,
+    1.0067
+   ],
+   "samplingSeconds": {
+    "median": 19.9028,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "totalSeconds": {
+    "median": 20.6208,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": null,
+   "cardWasShared": null
+  },
+  {
+   "engine": "cook-webgpu",
+   "samples": 1024,
+   "runs": 1,
+   "stackOf": 4,
+   "relMse": {
+    "median": 0.005109,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "flip": 0.0523,
+   "channelMeanRatio": [
+    1.0104,
+    1.009,
+    1.0067
+   ],
+   "samplingSeconds": {
+    "median": 39.2794,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "totalSeconds": {
+    "median": 39.9974,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": null,
+   "cardWasShared": null
+  },
+  {
+   "engine": "cook-webgpu",
+   "samples": 2048,
+   "runs": 1,
+   "stackOf": 8,
+   "relMse": {
+    "median": 0.002669,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "flip": 0.044,
+   "channelMeanRatio": [
+    1.0104,
+    1.0089,
+    1.0067
+   ],
+   "samplingSeconds": {
+    "median": 59.4494,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "totalSeconds": {
+    "median": 60.1674,
+    "min": 0,
+    "max": 0,
+    "runs": []
+   },
+   "processWallSeconds": null,
+   "peakRamMegabytes": null,
+   "peakCardVramDeltaMegabytes": null,
+   "cardWasShared": null
+  }
+ ],
+ "equalError": {
+  "target": {
+   "cyclesSamples": 256,
+   "relMse": 0.0031,
+   "samplingSeconds": 9.2553,
+   "totalSeconds": 12.5941
+  },
+  "engines": {
+   "cook-cpu": {
+    "samplingSeconds": {
+     "secondsAtEqualError": null,
+     "samplesAtEqualError": null,
+     "relMseAtEqualTime": null,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 256,
+      "bestRelMse": 0.0198
+     }
+    },
+    "totalSeconds": {
+     "secondsAtEqualError": null,
+     "samplesAtEqualError": null,
+     "relMseAtEqualTime": null,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 256,
+      "bestRelMse": 0.0198
+     }
+    }
+   },
+   "cook-gpu": {
+    "samplingSeconds": {
+     "secondsAtEqualError": null,
+     "samplesAtEqualError": null,
+     "relMseAtEqualTime": 0.049741,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 1024,
+      "bestRelMse": 0.005109
+     }
+    },
+    "totalSeconds": {
+     "secondsAtEqualError": null,
+     "samplesAtEqualError": null,
+     "relMseAtEqualTime": 0.062254,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 1024,
+      "bestRelMse": 0.005109
+     }
+    }
+   },
+   "cook-webgpu": {
+    "samplingSeconds": {
+     "secondsAtEqualError": 54.032,
+     "samplesAtEqualError": 1746,
+     "relMseAtEqualTime": 0.018983,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 2048,
+      "bestRelMse": 0.002669
+     }
+    },
+    "totalSeconds": {
+     "secondsAtEqualError": 54.762,
+     "samplesAtEqualError": 1746,
+     "relMseAtEqualTime": 0.01524,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 2048,
+      "bestRelMse": 0.002669
+     }
+    }
+   },
+   "native": {
+    "samplingSeconds": {
+     "secondsAtEqualError": 13.919,
+     "samplesAtEqualError": 1762,
+     "relMseAtEqualTime": 0.003326,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 4096,
+      "bestRelMse": 0.0015
+     }
+    },
+    "totalSeconds": {
+     "secondsAtEqualError": 14.414,
+     "samplesAtEqualError": 1762,
+     "relMseAtEqualTime": 0.002813,
+     "measuredRange": {
+      "minSamples": 64,
+      "maxSamples": 4096,
+      "bestRelMse": 0.0015
+     }
+    }
+   }
+  }
+ }
+}
