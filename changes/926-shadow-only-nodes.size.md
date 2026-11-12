@@ -1,0 +1,1 @@
+- entry:core: +96 bytes gzip so a node can cast a shadow while staying out of the picture, which a gobo outside the shot needs and no existing flag gives (#926). About 0.1 percent of the bundle.
