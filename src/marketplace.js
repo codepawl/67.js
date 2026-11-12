@@ -1,6 +1,7 @@
 import './site.css';
 import './brand.js';
 import './marketplace.css';
+import { npmManifestPath } from './marketplace-npm.js';
 
 const NPM_SEARCH_URL = 'https://registry.npmjs.org/-/v1/search?text=keywords:67js-addon&size=50';
 const NPM_MANIFEST_URL = 'https://registry.npmjs.org/';
@@ -155,8 +156,10 @@ function addonCard(addon) {
 }
 
 async function fetchLatestRange(name) {
+  const path = npmManifestPath(name);
+  if (!path) return null;
   try {
-    const response = await fetch(`${NPM_MANIFEST_URL}${name.replace('/', '%2F')}/latest`);
+    const response = await fetch(`${NPM_MANIFEST_URL}${path}`);
     if (!response.ok) return null;
     const manifest = await response.json();
     return typeof manifest['67js']?.range === 'string' ? manifest['67js'].range : null;
