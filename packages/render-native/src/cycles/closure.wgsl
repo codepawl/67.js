@@ -107,10 +107,84 @@ fn texture_decode_filtered(color: vec4<f32>, format: u32) -> vec4<f32> {
   return color;
 }
 
+// The descriptor of one mip level. Level 0 is the texture as the descriptor holds it; each level after it is stored right after
+// the one before it, half as wide and as high (never less than one texel), with the same number of words per texel.
+fn texture_level_descriptor(desc: TextureDescriptor, level: u32, format: u32) -> TextureDescriptor {
+  let words_per_texel = select(1u, 4u, format == 2u);
+  var level_desc = desc;
+  for (var skipped = 0u; skipped < level; skipped = skipped + 1u) {
+    level_desc.data_offset = level_desc.data_offset + level_desc.width * level_desc.height * words_per_texel;
+    level_desc.width = max(level_desc.width >> 1u, 1u);
+    level_desc.height = max(level_desc.height >> 1u, 1u);
+  }
+  return level_desc;
+}
+
+// Bilinear filter of one mip level on the stored values. The caller decodes the result (see texture_decode_filtered).
+fn texture_filter_level(
+  desc: TextureDescriptor,
+  level: u32,
+  format: u32,
+  wrap_u: u32,
+  wrap_v: u32,
+  u_wrapped: f32,
+  v_wrapped: f32,
+) -> vec4<f32> {
+  let level_desc = texture_level_descriptor(desc, level, format);
+  let level_width = i32(level_desc.width);
+  let level_height = i32(level_desc.height);
+  let level_fx = u_wrapped * f32(level_width) - 0.5;
+  let level_fy = v_wrapped * f32(level_height) - 0.5;
+  let level_bx0 = i32(floor(level_fx));
+  let level_by0 = i32(floor(level_fy));
+  let level_tx = level_fx - f32(level_bx0);
+  let level_ty = level_fy - f32(level_by0);
+  let level_ix0 = texture_wrap_texel_index(level_bx0, level_width, wrap_u);
+  let level_ix1 = texture_wrap_texel_index(level_bx0 + 1, level_width, wrap_u);
+  let level_iy0 = texture_wrap_texel_index(level_by0, level_height, wrap_v);
+  let level_iy1 = texture_wrap_texel_index(level_by0 + 1, level_height, wrap_v);
+  let level_c00 = texture_fetch_texel(level_desc, level_ix0, level_iy0, format);
+  let level_c10 = texture_fetch_texel(level_desc, level_ix1, level_iy0, format);
+  let level_c01 = texture_fetch_texel(level_desc, level_ix0, level_iy1, format);
+  let level_c11 = texture_fetch_texel(level_desc, level_ix1, level_iy1, format);
+  return mix(mix(level_c00, level_c10, level_tx), mix(level_c01, level_c11, level_tx), level_ty);
+}
+
+// Trilinear read for a footprint larger than a texel: the two levels around `level_of_detail` are each filtered on their stored
+// values, blended, and only then decoded, so an sRGB map keeps the order of the level 0 path.
+fn texture_filter_trilinear(
+  desc: TextureDescriptor,
+  mip_count: u32,
+  level_of_detail: f32,
+  format: u32,
+  wrap_u: u32,
+  wrap_v: u32,
+  u_wrapped: f32,
+  v_wrapped: f32,
+) -> vec4<f32> {
+  let clamped_detail = min(level_of_detail, f32(mip_count - 1u));
+  let lower_level = u32(floor(clamped_detail));
+  let upper_level = min(lower_level + 1u, mip_count - 1u);
+  let blend = clamped_detail - f32(lower_level);
+  let lower = texture_filter_level(desc, lower_level, format, wrap_u, wrap_v, u_wrapped, v_wrapped);
+  if (upper_level == lower_level) {
+    return texture_decode_filtered(lower, format);
+  }
+  let upper = texture_filter_level(desc, upper_level, format, wrap_u, wrap_v, u_wrapped, v_wrapped);
+  return texture_decode_filtered(mix(lower, upper, blend), format);
+}
+
 // The one texture sampler of the kernel: shading (closure_sample_texture), bump, and the alpha tests of the integrator all
 // read texels here, so the visibility of a cutout and its shading agree on wrap, filter and format. `tex_index` outside the
-// table or an empty descriptor reads as white.
+// table or an empty descriptor reads as white. The alpha tests and the bump taps read level 0.
 fn texture_sample(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>) -> vec4<f32> {
+  return texture_sample_footprint(tex_index, raw_uv0, raw_uv1, 0.0);
+}
+
+// `uv_footprint` is the width of the ray footprint on the surface in the units of the raw uv. 0, or a texture without mip
+// levels or one filtered nearest, reads level 0 exactly as before. A footprint larger than a texel reads the mip level whose
+// texel is as wide as the footprint, blended with the next one.
+fn texture_sample_footprint(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>, uv_footprint: f32) -> vec4<f32> {
   if (tex_index < 0) {
     return vec4<f32>(1.0);
   }
@@ -135,6 +209,16 @@ fn texture_sample(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>) -> vec
   let v_wrapped = texture_wrap_coord(uv.y, wrap_v);
   let w_i = i32(desc.width);
   let h_i = i32(desc.height);
+
+  let mip_count = (flags >> 8u) & 0xFFu;
+  if (uv_footprint > 0.0 && mip_count > 1u && !is_nearest) {
+    let texels_across_u = uv_footprint * abs(desc.uv_scale.x) * f32(w_i);
+    let texels_across_v = uv_footprint * abs(desc.uv_scale.y) * f32(h_i);
+    let level_of_detail = log2(max(max(texels_across_u, texels_across_v), 1.0e-6));
+    if (level_of_detail > 0.0) {
+      return texture_filter_trilinear(desc, mip_count, level_of_detail, format, wrap_u, wrap_v, u_wrapped, v_wrapped);
+    }
+  }
 
   if (is_nearest) {
     let ix = clamp(i32(floor(u_wrapped * f32(w_i))), 0, w_i - 1);
@@ -161,7 +245,7 @@ fn texture_sample(tex_index: i32, raw_uv0: vec2<f32>, raw_uv1: vec2<f32>) -> vec
 }
 
 fn closure_sample_texture(tex_index: i32, point: ptr<function, ShadingPoint>) -> vec4<f32> {
-  return texture_sample(tex_index, (*point).uv0, (*point).uv1);
+  return texture_sample_footprint(tex_index, (*point).uv0, (*point).uv1, (*point).uv_footprint);
 }
 
 fn closure_apply_normal_map(
