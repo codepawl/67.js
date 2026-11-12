@@ -346,6 +346,7 @@ export const AGENT_SCENE_CAPABILITIES = Object.freeze({
   motionModifiers: 'Track extrapolation constant|linear; modifiers [{type: cycles|stepped|noise|generator|limits|envelope, ...}], 8 at most; cycles and stepped remap time first.',
   motionLimits: Object.freeze({ maxTracks: 128, maxKeyframesPerTrack: 64, maxKeyframes: 2048, maxDuration: 30 }),
   motionBake: 'scene_apply bake-motion { nodes (32 at most), start 0, end (motion or physics duration), step 1/30 (512 samples), tolerance { position m, angle deg, scale } }: samples tracks, IK, constraints, drivers and physics into LINEAR tracks and removes those sources (an IK solver or the physics world only when all its nodes are baked). tolerance drops keys within it; without it a track keeps every sample, 64 keys at most. Procedural scenes only.',
+  springBones: 'motion.springs { chains: [{ bones: [node IDs root to tip, each the child of the one before, 16 per chain, 64 in all], stiffness 0-4 (1), dragForce 0-1 (0.4), gravityPower 0-2 (0), gravityDir [0,-1,0], hitRadius (0.02), tipLength (0.07), colliders: [ids] }] (16 at most), colliders: [{ id, bone, type sphere|capsule, offset, radius, tail }] }: VRM spring bones for hair and tails; fixed 1/60 s steps, sample times in increasing order; bake-motion bakes whole chains; needs loadAgentSceneModules.',
 });
 
 /** Degrees between faces above which a mesh geometry keeps a hard edge, as Blender's auto smooth does. */
