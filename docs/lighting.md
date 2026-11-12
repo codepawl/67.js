@@ -67,7 +67,7 @@ Limits: the diffuse term uses L2 spherical harmonics, so a very small intense su
 
 ## Point lights
 
-At most 16 lights are supported per frame. Each light supplies `position`. Optional fields default to white `color`, `intensity: 1`, `radius: 0.05` and unlimited `range: 0`. `softFalloff: true` (point and spot lights, default false) makes a light with a radius an oriented disk facing the shaded point, as Blender's Soft Falloff; only the native `cycles` path tracer draws it, every other renderer keeps the sphere ([Cycles parity](cycles-parity.md#soft-falloff-lights-1060)).
+At most 16 lights are supported per frame. Each light supplies `position`. Optional fields default to white `color`, `intensity: 1`, `radius: 0.05` and unlimited `range: 0`. `softFalloff: true` (point and spot lights, default false) makes a light with a radius an oriented disk facing the shaded point, as Blender's Soft Falloff; only the native `cycles` path tracer draws it, every other renderer keeps the sphere ([Cycles parity](https://github.com/codepawl/67.js/blob/main/docs/cycles-parity.md#soft-falloff-lights-1060)).
 
 The light uses inverse-square falloff outside its radius. Doubling distance reduces incoming illumination to one quarter before material response. Intensity follows the candela convention for a point source, but the renderer's existing exposure and environment are not a calibrated photographic pipeline.
 
