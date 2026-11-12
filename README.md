@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/hero-bistro.webp" alt="A camera glides down a cobbled European street at dusk, rendered by 67js" width="100%"></a>
+  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/hero-airport.webp" alt="A camera dollies along a row of Kestrel Airways 787s at a glass terminal, rendered by 67js" width="100%"></a>
 </p>
 
 <p align="center">
