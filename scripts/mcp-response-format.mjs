@@ -61,6 +61,14 @@ const METRIC_DIAGNOSTICS = [
   'requestedHeight', 'elapsedSeconds', 'captureSeconds',
 ];
 
+/** What an agent acts on: how long the job took, how far off the estimate was, and anything that ran differently from the request. */
+function conciseRenderReport(report) {
+  const concise = { seconds: report.measured?.seconds };
+  if (report.secondsRatio !== undefined) concise.secondsRatio = report.secondsRatio;
+  if (report.fallbacks?.length) concise.fallbacks = report.fallbacks;
+  return concise;
+}
+
 /** Files with their paths and sizes; digests and the render's resource counters stay in the detailed answer. */
 export function conciseJobResult(result) {
   const concise = {
@@ -68,7 +76,10 @@ export function conciseJobResult(result) {
     sourceRevision: result.sourceRevision,
     artifacts: result.artifacts.map(artifact => without(artifact, ['sha256'])),
   };
-  if (result.metrics !== undefined) concise.metrics = without(result.metrics, METRIC_DIAGNOSTICS);
+  if (result.metrics !== undefined) {
+    concise.metrics = without(result.metrics, [...METRIC_DIAGNOSTICS, 'report']);
+    if (result.metrics.report) concise.metrics.report = conciseRenderReport(result.metrics.report);
+  }
   return concise;
 }
 

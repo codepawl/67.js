@@ -22,6 +22,9 @@ const MINIMUM_HISTORY_RUNS = 2;
 export const COST_MODEL = Object.freeze({
   startupSeconds: 0.25,
   setupSecondsPerTriangle: 3.3e-6,
+  // A placed asset is rebuilt from its glTF parts (skeleton, materials, textures) however few triangles it has.
+  setupSecondsPerAssetPart: 1.2e-3,
+  drawSecondsPerAssetPart: 3.5e-5,
   drawFrameSeconds: 0.004,
   drawSecondsPerPixel: 5e-8,
   drawSecondsPerTriangle: 1e-8,
@@ -57,9 +60,18 @@ export function sceneSizeFrom(inspection, recipe) {
   const listed = inspection?.nodes ?? [];
   const listedTriangles = listed.reduce((total, node) => total + (node.triangles ?? 0), 0);
   const scale = inspection?.truncated && listed.length ? (inspection.counts?.parts ?? listed.length) / listed.length : 1;
+  // The node list leaves out the parts of placed assets, and generated geometry (vegetation, crowds, arrays) has no node of its own;
+  // the resident vertex count covers both, so the larger of the two counts stands.
+  // Copies of one placed asset share its geometry in that count, so the part of it that no node lists is counted once per copy.
+  const residentTriangles = Math.round((inspection?.counts?.vertices ?? 0) / 2);
+  const listedScaled = Math.round(listedTriangles * scale);
+  const placements = (inspection?.assets ?? []).filter(placement => typeof placement.assetId === 'string');
+  const copiesPerAsset = placements.length / Math.max(1, new Set(placements.map(placement => placement.assetId)).size);
+  const generatedTriangles = Math.max(0, residentTriangles - listedScaled) * Math.max(1, copiesPerAsset);
   return {
     parts: inspection?.counts?.parts ?? 0,
-    triangles: Math.round(listedTriangles * scale) || Math.round((inspection?.counts?.vertices ?? 0) / 2),
+    assetParts: placements.reduce((total, placement) => total + (placement.parts ?? 0), 0),
+    triangles: listedScaled + generatedTriangles,
     materials: inspection?.counts?.materials ?? 0,
     textures: textureCount(recipe),
     lights: (look.pointLights ?? 0) + (look.spotLights ?? 0) + (look.areaLights ?? 0) + 1,
@@ -80,7 +92,7 @@ function pathTracerFrameSeconds({ size, settings, backend }) {
 
 function rasterFrameSeconds({ size, settings }) {
   const drawSeconds = COST_MODEL.drawFrameSeconds + settings.width * settings.height * COST_MODEL.drawSecondsPerPixel
-    + size.triangles * COST_MODEL.drawSecondsPerTriangle + size.lights * COST_MODEL.drawSecondsPerLight;
+    + size.triangles * COST_MODEL.drawSecondsPerTriangle + size.assetParts * COST_MODEL.drawSecondsPerAssetPart + size.lights * COST_MODEL.drawSecondsPerLight;
   const outputSeconds = settings.kind === 'video' ? COST_MODEL.videoEncodeSeconds : COST_MODEL.imageCaptureSeconds;
   return drawSeconds * (1 + (settings.passes?.length ?? 0) * COST_MODEL.passFactor) + outputSeconds;
 }
@@ -109,11 +121,21 @@ function boundedRatio(ratio) {
 /** Median of measured over estimated, from the last runs of the same kind; 1 when there are too few. */
 export function correctionFromHistory(history, kind) {
   const runs = (history ?? []).filter(entry => entry.kind === kind && entry.estimatedSeconds > 0 && entry.measuredSeconds > 0);
-  if (runs.length < MINIMUM_HISTORY_RUNS) return { seconds: 1, memory: 1, runs: runs.length };
-  const seconds = boundedRatio(medianOf(runs.map(entry => entry.measuredSeconds / entry.estimatedSeconds)));
+  if (runs.length < MINIMUM_HISTORY_RUNS) return { seconds: 1, memory: 1, runs: runs.length, secondsClamped: false, memoryFromHistory: false };
+  const rawSeconds = medianOf(runs.map(entry => entry.measuredSeconds / entry.estimatedSeconds));
+  const seconds = boundedRatio(rawSeconds);
   const memoryRuns = runs.filter(entry => entry.estimatedPeakMemoryMiB > 0 && entry.measuredPeakMemoryMiB > 0);
   const memory = memoryRuns.length >= MINIMUM_HISTORY_RUNS ? boundedRatio(medianOf(memoryRuns.map(entry => entry.measuredPeakMemoryMiB / entry.estimatedPeakMemoryMiB))) : 1;
-  return { seconds, memory, runs: runs.length };
+  return { seconds, memory, runs: runs.length, secondsClamped: seconds !== rawSeconds, memoryFromHistory: memoryRuns.length >= MINIMUM_HISTORY_RUNS };
+}
+
+/** Says where the numbers came from: the history is whatever sits in this jobs folder, not a named machine. */
+function basisOf(correction, kind) {
+  if (correction.runs < MINIMUM_HISTORY_RUNS) return 'scene size';
+  const notes = [];
+  if (correction.secondsClamped) notes.push(`time factor limited to ${CORRECTION_BOUND}x`);
+  if (!correction.memoryFromHistory) notes.push('memory from scene size only');
+  return `scene size and the last ${correction.runs} ${kind} jobs in this jobs folder${notes.length ? ` (${notes.join('; ')})` : ''}`;
 }
 
 /**
@@ -123,14 +145,14 @@ export function correctionFromHistory(history, kind) {
 export function estimateRenderJob({ size, settings, backend, memoryBudgetMiB, history = [], gpuTracerWarm = true }) {
   const frameSeconds = settings.renderer ? pathTracerFrameSeconds({ size, settings, backend }) : rasterFrameSeconds({ size, settings });
   const coldStartSeconds = settings.renderer?.backend === 'gpu' && !gpuTracerWarm ? COST_MODEL.gpuTracerColdStartSeconds : 0;
-  const modelSeconds = COST_MODEL.startupSeconds + coldStartSeconds + size.triangles * COST_MODEL.setupSecondsPerTriangle + frameSeconds * settings.frameCount;
+  const modelSeconds = COST_MODEL.startupSeconds + coldStartSeconds + size.triangles * COST_MODEL.setupSecondsPerTriangle + size.assetParts * COST_MODEL.setupSecondsPerAssetPart + frameSeconds * settings.frameCount;
   const modelPeakMemoryMiB = peakMemoryMiB({ size, settings });
   const correction = correctionFromHistory(history, jobKind(settings, backend));
   const estimate = {
     seconds: round(modelSeconds * correction.seconds, 1),
     peakMemoryMiB: Math.round(modelPeakMemoryMiB * correction.memory),
     framesPerSecond: round(settings.frameCount / Math.max(0.001, modelSeconds * correction.seconds), 2),
-    basis: correction.runs >= MINIMUM_HISTORY_RUNS ? `scene size and the last ${correction.runs} ${jobKind(settings, backend)} jobs on this machine` : 'scene size',
+    basis: basisOf(correction, jobKind(settings, backend)),
     modelSeconds: round(modelSeconds, 1),
     modelPeakMemoryMiB: Math.round(modelPeakMemoryMiB),
     scene: size,
@@ -140,9 +162,13 @@ export function estimateRenderJob({ size, settings, backend, memoryBudgetMiB, hi
 }
 
 /** Facts about what did not run as asked: a budget that shrank the frame, a backend that fell back, a denoiser that was swapped. */
+function frameWasReduced(metrics) {
+  return Boolean(metrics.width && metrics.requestedWidth && (metrics.width < metrics.requestedWidth || metrics.height < metrics.requestedHeight));
+}
+
 function fallbacksFrom(settings, metrics) {
   const fallbacks = [];
-  if (metrics.width && metrics.requestedWidth && (metrics.width < metrics.requestedWidth || metrics.height < metrics.requestedHeight)) {
+  if (frameWasReduced(metrics)) {
     fallbacks.push(`The memory budget reduced the frame from ${metrics.requestedWidth}x${metrics.requestedHeight} to ${metrics.width}x${metrics.height}.`);
   }
   if (metrics.pathTracer?.backendNote) fallbacks.push(metrics.pathTracer.backendNote);
@@ -162,6 +188,7 @@ export function renderReport({ estimate, settings, metrics }) {
     report.estimate = { seconds: estimate.seconds, peakMemoryMiB: estimate.peakMemoryMiB, basis: estimate.basis };
     report.secondsRatio = round(measuredSeconds / estimate.seconds, 2);
   }
+  if (frameWasReduced(metrics)) report.frameReduced = true;
   const traced = metrics.pathTracer;
   if (traced) {
     // The path tracer's report describes the last frame; the samples asked for are in the job's settings.
@@ -173,7 +200,8 @@ export function renderReport({ estimate, settings, metrics }) {
 
 /** The history with this job added, trimmed to the newest HISTORY_LIMIT entries. */
 export function historyWithJob(history, { settings, backend, estimate, report }) {
-  if (!estimate || !report.measured.seconds) return history;
+  // The estimate was for the requested size, so a job that ran smaller says nothing about it.
+  if (!estimate || !report.measured.seconds || report.frameReduced) return history;
   const entry = {
     kind: jobKind(settings, backend),
     estimatedSeconds: estimate.modelSeconds,

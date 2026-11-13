@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgentRenderJobs, normalizeJobSettings, RENDER_HISTORY_FILE } from '../scripts/agent-render-jobs.mjs';
+import { conciseJobResult } from '../scripts/mcp-response-format.mjs';
 import {
   CORRECTION_BOUND, HISTORY_LIMIT, correctionFromHistory, estimateRenderJob, historyWithJob, jobKind, parseHistory, renderReport, sceneSizeFrom,
 } from '../scripts/agent-render-estimate.mjs';
@@ -25,7 +26,7 @@ function settingsFor(overrides) {
 
 test('scene size counts every placed node, textures and lights', () => {
   const size = sceneSizeFrom(inspection({ nodeCount: 10, trianglesEach: 1200 }), recipe);
-  assert.deepEqual(size, { parts: 10, triangles: 12000, materials: 3, textures: 2, lights: 4 });
+  assert.deepEqual(size, { parts: 10, assetParts: 0, triangles: 12000, materials: 3, textures: 2, lights: 4 });
 });
 
 test('a truncated node list is scaled up to the part count', () => {
@@ -75,7 +76,7 @@ function historyEntry(ratio, kind = 'raster-image-gpu') {
 }
 
 test('history needs two runs of the same kind and moves the estimate by their median', () => {
-  assert.deepEqual(correctionFromHistory([historyEntry(3)], 'raster-image-gpu'), { seconds: 1, memory: 1, runs: 1 });
+  assert.deepEqual(correctionFromHistory([historyEntry(3)], 'raster-image-gpu'), { seconds: 1, memory: 1, runs: 1, secondsClamped: false, memoryFromHistory: false });
   assert.equal(correctionFromHistory([historyEntry(3), historyEntry(2), historyEntry(1.5)], 'raster-image-gpu').seconds, 2);
   assert.equal(correctionFromHistory([historyEntry(3), historyEntry(2)], 'raster-video-gpu').runs, 0);
   const size = sceneSizeFrom(inspection({ nodeCount: 5, trianglesEach: 500 }), recipe);
@@ -142,4 +143,52 @@ test('the job store keeps the history file beside its jobs and counts it', async
   while (second.status(jobId).state !== 'completed') await new Promise(resolve => setTimeout(resolve, 5));
   await second.close();
   assert.equal(JSON.parse(await readFile(join(root, RENDER_HISTORY_FILE), 'utf8')).length, 1);
+});
+
+test('placed assets and generated geometry count even though they have no node of their own', () => {
+  const cubeOnly = inspection({ nodeCount: 1, trianglesEach: 12 });
+  assert.equal(sceneSizeFrom(cubeOnly, recipe).triangles, 12);
+  const withAsset = { ...cubeOnly, counts: { ...cubeOnly.counts, vertices: 800000 }, assets: [{ assetId: 'a'.repeat(64), parts: 40 }] };
+  assert.equal(sceneSizeFrom(withAsset, recipe).triangles, 400000);
+  const tenCopies = { ...withAsset, assets: Array.from({ length: 10 }, () => ({ assetId: 'a'.repeat(64), parts: 40 })) };
+  assert.equal(sceneSizeFrom(tenCopies, recipe).triangles, 12 + 399988 * 10);
+  const withVegetation ={ ...cubeOnly, counts: { ...cubeOnly.counts, vertices: 150000 }, vegetation: { trees: 300 } };
+  assert.equal(sceneSizeFrom(withVegetation, recipe).triangles, 75000);
+  const settings = settingsFor({});
+  assert.ok(estimateRenderJob({ size: sceneSizeFrom(withAsset, recipe), settings, backend: 'gpu' }).seconds
+    > 3 * estimateRenderJob({ size: sceneSizeFrom(cubeOnly, recipe), settings, backend: 'gpu' }).seconds);
+});
+
+test('the concise result keeps seconds, the estimate ratio and fallbacks, and drops the rest of the report', () => {
+  const settings = settingsFor({ renderer: { type: 'pathTracer', backend: 'native', samples: 64 } });
+  const metrics = { elapsedSeconds: 3, peakNodeBytes: 2 ** 28, peakBrowserHeap: 2 ** 26, pathTracer: { averageSamples: 64, backendNote: 'The gpu backend ran instead.' } };
+  const report = renderReport({ estimate: { seconds: 2.5, peakMemoryMiB: 300, basis: 'scene size' }, settings, metrics });
+  const result = { jobId: 'x', sourceRevision: 1, artifacts: [{ filename: 'render.png', sha256: 'y' }], metrics: { pathTracer: metrics.pathTracer, report } };
+  const concise = conciseJobResult(result);
+  assert.deepEqual(concise.metrics.report, { seconds: 3, secondsRatio: 1.2, fallbacks: ['The gpu backend ran instead.'] });
+  assert.ok(JSON.stringify(concise.metrics.report).length < 120);
+  const quiet = conciseJobResult({ ...result, metrics: { report: renderReport({ settings: settingsFor({}), metrics: { elapsedSeconds: 1 } }) } });
+  assert.deepEqual(quiet.metrics.report, { seconds: 1 });
+});
+
+test('a job that ran at a smaller size than requested is not added to the history', () => {
+  const settings = settingsFor({ width: 1920, height: 1080 });
+  const estimate = { modelSeconds: 1, modelPeakMemoryMiB: 200, seconds: 1, peakMemoryMiB: 200, basis: 'scene size' };
+  const reduced = renderReport({ estimate, settings, metrics: { elapsedSeconds: 1, requestedWidth: 1920, requestedHeight: 1080, width: 960, height: 540 } });
+  assert.equal(reduced.frameReduced, true);
+  assert.deepEqual(historyWithJob([], { settings, backend: 'gpu', estimate, report: reduced }), []);
+  const normal = renderReport({ estimate, settings, metrics: { elapsedSeconds: 1, requestedWidth: 1920, requestedHeight: 1080, width: 1920, height: 1080 } });
+  assert.equal(historyWithJob([], { settings, backend: 'gpu', estimate, report: normal }).length, 1);
+});
+
+test('the basis names the jobs folder, a clamped time factor and missing memory history', () => {
+  const size = sceneSizeFrom(inspection({ nodeCount: 5, trianglesEach: 500 }), recipe);
+  const settings = settingsFor({});
+  const basis = estimateRenderJob({ size, settings, backend: 'gpu', history: [historyEntry(100), historyEntry(100)] }).basis;
+  assert.match(basis, /in this jobs folder/);
+  assert.match(basis, /time factor limited to 4x/);
+  assert.doesNotMatch(basis, /memory from scene size only/);
+  const noMemory = [{ ...historyEntry(2), measuredPeakMemoryMiB: 0 }, { ...historyEntry(2), measuredPeakMemoryMiB: 0 }];
+  assert.match(estimateRenderJob({ size, settings, backend: 'gpu', history: noMemory }).basis, /memory from scene size only/);
+  assert.doesNotMatch(estimateRenderJob({ size, settings, backend: 'gpu', history: [historyEntry(1.5), historyEntry(1.5)] }).basis, /\(/);
 });

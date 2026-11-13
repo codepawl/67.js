@@ -2,9 +2,9 @@
 // the MCP runtime and prints the estimate next to the measured time and memory as a table.
 //   node scripts/measure-render-estimate.mjs [--backend gpu|cpu] [--json]
 // On a shared machine run it through your GPU job lock, so it waits for a free card.
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, mkdir, copyFile } from 'node:fs/promises';
 import { tmpdir, constants, setPriority } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -13,6 +13,10 @@ setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
 const backendArgument = process.argv.indexOf('--backend');
 const backend = backendArgument > 0 ? process.argv[backendArgument + 1] : 'gpu';
 const printJson = process.argv.includes('--json');
+// --asset <file.glb> adds an asset-heavy scene: ten copies of that model placed from the asset catalog.
+const assetArgument = process.argv.indexOf('--asset');
+const assetFile = assetArgument > 0 ? resolve(process.argv[assetArgument + 1]) : undefined;
+const ASSET_COPIES = 10;
 
 const SCENES = [
   { name: 'small', spheres: 3, segments: 16, rings: 10, pointLights: 1 },
@@ -47,8 +51,13 @@ function recipeFor({ spheres, segments, rings, pointLights }) {
 }
 
 const directory = await mkdtemp(join(tmpdir(), '67js-estimate-'));
+const assetDirectory = join(directory, 'assets');
+if (assetFile) {
+  await mkdir(assetDirectory);
+  await copyFile(assetFile, join(assetDirectory, basename(assetFile)));
+}
 const transport = new StdioClientTransport({ command: process.execPath,
-  args: [resolve('bin/67js-mcp.mjs'), '--backend', backend, '--memory', '256', '--jobs', join(directory, 'jobs')], cwd: directory, stderr: 'pipe' });
+  args: [resolve('bin/67js-mcp.mjs'), '--backend', backend, '--memory', '256', '--jobs', join(directory, 'jobs'), ...(assetFile ? ['--assets', assetDirectory] : [])], cwd: directory, stderr: 'pipe' });
 const client = new Client({ name: '67js-estimate-measure', version: '1' });
 
 async function call(name, argumentsValue = {}, timeout = 120000) {
@@ -70,8 +79,20 @@ async function untilFinished(jobId) {
 const rows = [];
 try {
   await client.connect(transport);
-  for (const scene of SCENES) {
-    const created = (await call('scene_create', { recipe: recipeFor(scene) }, 300000)).structuredContent;
+  const scenes = SCENES.map(scene => ({ scene, recipe: recipeFor(scene) }));
+  if (assetFile) {
+    const catalog = (await call('scene_asset_catalog')).structuredContent;
+    const assetId = catalog.assets.find(asset => asset.name === basename(assetFile)).assetId;
+    const copies = Array.from({ length: ASSET_COPIES }, (_, index) => ({ id: `copy-${index}`, translation: [index * 2 - ASSET_COPIES, 0, 0], asset: { id: assetId } }));
+    scenes.push({ scene: { name: 'asset-heavy', rasterOnly: true }, recipe: {
+      format: '67js.scene', schemaVersion: 1,
+      geometries: [{ id: 'box', type: 'box' }], materials: [{ id: 'matte', color: [0.7, 0.7, 0.7], roughness: 0.6 }],
+      nodes: [{ id: 'floor', geometry: 'box', material: 'matte', translation: [0, -0.1, 0], scale: [30, 0.2, 10] }, ...copies],
+      camera: { eye: [0, 6, 16], target: [0, 1, 0], fov: 45 },
+    } });
+  }
+  for (const { scene, recipe } of scenes) {
+    const created = (await call('scene_create', { recipe }, 300000)).structuredContent;
     for (const job of JOBS.filter(job => !(scene.rasterOnly && job.settings.renderer))) {
       try {
         const started = performance.now();
