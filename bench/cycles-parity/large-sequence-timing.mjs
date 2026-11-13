@@ -7,7 +7,7 @@
 // ran out in the pack step on 2026-11-12).
 //   node bench/cycles-parity/large-sequence-timing.mjs --scene terrain|forest --size <triangles | instances> --mode session|oneshot
 //     [--frames 12] [--samples 16] [--width 480] [--height 270] [--seed 1]
-import * as renderNative from '../../packages/render-native/index.mjs';
+import * as renderNative from '@codepawlhq/cook';
 import { buildLargeScene, describeLargeScene, orbitCameraFor } from './large-scene.mjs';
 import { PHASE_NAMES, averageOfWarmFrames, readFlag, runSequence } from './sequence-bench-core.mjs';
 

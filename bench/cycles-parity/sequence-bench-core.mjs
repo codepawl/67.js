@@ -1,6 +1,6 @@
 // Shared by the sequence benches: hashing, per-frame summaries and the session / one-shot frame loop.
 import { createHash } from 'node:crypto';
-import * as renderNative from '../../packages/render-native/index.mjs';
+import * as renderNative from '@codepawlhq/cook';
 import { createNativeSequence } from '../../scripts/agent-native-sequence.mjs';
 
 export const PHASE_NAMES = ['setupSeconds', 'compileSeconds', 'uploadSeconds', 'accelerationBuildSeconds', 'tracedSeconds'];

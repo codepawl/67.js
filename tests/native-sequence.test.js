@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as renderNative from '../packages/render-native/index.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { createNativeSequence } from '../scripts/agent-native-sequence.mjs';
 import { traceFrameNative } from '../scripts/agent-native-trace.mjs';
 import { createCamera } from '../src/path-tracer.js';
 
-const addonIsBuilt = renderNative.findNativeAddon() !== null;
+const renderNative = (await cookModule()) ?? {};
+const addonIsBuilt = cookInstalled && renderNative.findNativeAddon() !== null;
 const skipWithoutAddon = addonIsBuilt ? false : 'the native addon is not built';
 const TRACE_OPTIONS = { width: 4, height: 4, samples: 2, maxSeconds: 5, kernel: 'cycles' };
 
@@ -64,7 +65,7 @@ function fakeTracer({ failUpdate = false, failRender = null, failCreate = false,
   return tracer;
 }
 
-test('the first frame creates a session and a camera-only frame reuses it with its own kernel parameters', () => {
+cookTest('the first frame creates a session and a camera-only frame reuses it with its own kernel parameters', () => {
   const tracer = fakeTracer();
   const sequence = createNativeSequence({ tracer });
   const first = sequence.trace(inputWith({ camera: 1 }), TRACE_OPTIONS);
@@ -75,7 +76,7 @@ test('the first frame creates a session and a camera-only frame reuses it with i
   assert.deepEqual(tracer.events, [['create', 1], ['render', 1, [1]], ['render', 1, [2]]]);
 });
 
-test('a frame with other materials sends the changed tables through update and keeps the session', () => {
+cookTest('a frame with other materials sends the changed tables through update and keeps the session', () => {
   const tracer = fakeTracer();
   const sequence = createNativeSequence({ tracer });
   sequence.trace(inputWith(), TRACE_OPTIONS);
@@ -87,7 +88,7 @@ test('a frame with other materials sends the changed tables through update and k
   assert.deepEqual(tracer.events.map(event => event[0]), ['create', 'render', 'update', 'render']);
 });
 
-test('a frame the session cannot take closes it and starts a new one, saying what changed', () => {
+cookTest('a frame the session cannot take closes it and starts a new one, saying what changed', () => {
   const tracer = fakeTracer();
   const sequence = createNativeSequence({ tracer });
   sequence.trace(inputWith(), TRACE_OPTIONS);
@@ -100,7 +101,7 @@ test('a frame the session cannot take closes it and starts a new one, saying wha
   assert.deepEqual(tracer.events.filter(event => event[0] !== 'render'), [['create', 1], ['close', 1], ['create', 2], ['close', 2], ['create', 3]]);
 });
 
-test('a failed update, which closes the session by design, falls to a new session for that frame', () => {
+cookTest('a failed update, which closes the session by design, falls to a new session for that frame', () => {
   const tracer = fakeTracer({ failUpdate: true });
   const sequence = createNativeSequence({ tracer });
   sequence.trace(inputWith(), TRACE_OPTIONS);
@@ -112,7 +113,7 @@ test('a failed update, which closes the session by design, falls to a new sessio
   assert.equal(next.route.path, 'reused', 'the new session carries the sequence on');
 });
 
-test('a package without sessions, or a card that cannot make one, traces each frame one-shot and says why', () => {
+cookTest('a package without sessions, or a card that cannot make one, traces each frame one-shot and says why', () => {
   const old = createNativeSequence({ tracer: fakeTracer({ withSessions: false }) });
   const oldFrame = old.trace(inputWith(), TRACE_OPTIONS);
   assert.equal(oldFrame.route.path, 'one-shot');
@@ -125,7 +126,7 @@ test('a package without sessions, or a card that cannot make one, traces each fr
   assert.match(refusedFrame.route.reason, /first frame of the sequence; creating a session failed \(no adapter\)/);
 });
 
-test('a render that fails falls back one-shot and the next frame starts a new session, but a time limit passes through', () => {
+cookTest('a render that fails falls back one-shot and the next frame starts a new session, but a time limit passes through', () => {
   const failing = fakeTracer({ failRender: new Error('device lost') });
   const sequence = createNativeSequence({ tracer: failing });
   const frame = sequence.trace(inputWith(), TRACE_OPTIONS);
@@ -138,7 +139,7 @@ test('a render that fails falls back one-shot and the next frame starts a new se
   assert.deepEqual(slow.events.map(event => event[0]), ['create', 'render', 'close']);
 });
 
-test('closing frees the session and a closed sequence refuses a frame', () => {
+cookTest('closing frees the session and a closed sequence refuses a frame', () => {
   const tracer = fakeTracer();
   const sequence = createNativeSequence({ tracer });
   sequence.trace(inputWith(), TRACE_OPTIONS);
@@ -227,7 +228,7 @@ function paths(frameSpecs) {
   }
 }
 
-test('a camera orbit through a session equals one-shot frames and builds nothing after frame 1', { skip: skipWithoutAddon }, () => {
+cookTest('a camera orbit through a session equals one-shot frames and builds nothing after frame 1', { skip: skipWithoutAddon }, () => {
   const frames = paths([{ eye: [0, 2.2, 6] }, { eye: [1.5, 2.2, 5.5] }, { eye: [3, 2.2, 4.5] }]);
   assert.deepEqual(frames.map(frame => frame.route.path), ['new-session', 'reused', 'reused']);
   for (const { traced, route } of frames.slice(1)) {
@@ -238,7 +239,7 @@ test('a camera orbit through a session equals one-shot frames and builds nothing
   }
 });
 
-test('a material, a light and a transform sequence equal one-shot frames and update in place', { skip: skipWithoutAddon }, () => {
+cookTest('a material, a light and a transform sequence equal one-shot frames and update in place', { skip: skipWithoutAddon }, () => {
   const frames = paths([
     { },
     { floorColor: [0.2, 0.5, 0.8], eye: [1, 2.2, 6] },
@@ -250,7 +251,7 @@ test('a material, a light and a transform sequence equal one-shot frames and upd
   assert.equal(frames[3].route.accelerationRebuilt, true);
 });
 
-test('a sequence that changes its instance count mid-way falls back to a new session and carries on identically', { skip: skipWithoutAddon }, () => {
+cookTest('a sequence that changes its instance count mid-way falls back to a new session and carries on identically', { skip: skipWithoutAddon }, () => {
   const frames = paths([{ }, { eye: [1, 2.2, 6] }, { extraQuad: true }, { extraQuad: true, eye: [2, 2.2, 5] }]);
   assert.deepEqual(frames.map(frame => frame.route.path), ['new-session', 'reused', 'new-session', 'reused']);
   assert.match(frames[2].route.reason, /instanceCount/);

@@ -205,7 +205,7 @@ The [documentation page](https://67js.codepawl.com/docs.html) lists every guide.
 | Name | What it is | Runs on |
 | --- | --- | --- |
 | Glaze (`Renderer67`) | The real-time rasterizer | WebGL2 |
-| Cook | The path tracer, one still per job | CPU (default), WebGL2, Vulkan ray queries through the optional `packages/render-native`, and WebGPU (opt-in, library only) |
+| Cook | The path tracer, one still per job | CPU (default), WebGL2, Vulkan ray queries through the optional Cook package (`@codepawlhq/cook`), and WebGPU (opt-in, library only) |
 | Real-time path tracer | A hybrid tracer with a radiance cache and a temporal denoiser. It is experimental, and the MCP server does not expose it | WebGPU, with a WebGL2 fallback |
 | Light bake | Baked lightmaps | CPU, WebGL2 and WebGPU |
 
@@ -231,7 +231,7 @@ The full per-scene tables are in the [bench/tiers folder](https://github.com/cod
 | draft | A quick look while editing | Glaze, 0.5 render scale, 1 sample, light shading, 8 bit target | Aliased edges, no environment lookup, a quarter of the pixels enlarged | 0.54 to 1.04 ms a frame with the pixel read; 0.26 to 0.33 ms queued back to back | EEVEE 5.3, 1 sample: 56 to 59 ms a render call | Glaze 0.045 to 0.188, EEVEE 0.041 to 0.562 |
 | realtime | Interactive use | Glaze, default settings | Indirect light is approximate | 0.77 to 0.98 ms a frame with the pixel read; 0.35 to 0.50 ms queued back to back | EEVEE 5.3, 64 samples: 288 to 363 ms a render call | Glaze 0.030 to 0.197, EEVEE 0.042 to 0.562 |
 | realtime-high | Better interactive frames | Planned: Glaze on WebGPU with a GI cache and upscaling ([issue 901](https://github.com/codepawl/67.js/issues/901), [issue 902](https://github.com/codepawl/67.js/issues/902)) | More VRAM | not measurable yet | none | none |
-| final | Finished stills | Cook native, 256 samples (Vulkan ray queries, optional `packages/render-native`) | More samples than Cycles for the same noise | 1.73 to 4.24 ms a sample; 0.71 to 1.32 s for 256 samples with setup | Cycles 5.3 OptiX: 6.81 to 26.41 ms a sample; 3.43 to 8.46 s for 256 samples with setup | Cook native 0.019 to 0.080, Cycles 0.010 to 0.039 |
+| final | Finished stills | Cook native, 256 samples (Vulkan ray queries, the optional `@codepawlhq/cook` package) | More samples than Cycles for the same noise | 1.73 to 4.24 ms a sample; 0.71 to 1.32 s for 256 samples with setup | Cycles 5.3 OptiX: 6.81 to 26.41 ms a sample; 3.43 to 8.46 s for 256 samples with setup | Cook native 0.019 to 0.080, Cycles 0.010 to 0.039 |
 | final | Finished stills | Cook webgpu, 256 samples (WGSL compute, software BVH, library only) | Slower per sample than native, same image | 5.88 to 17.33 ms a sample; 1.94 to 4.86 s for 256 samples with setup | same Cycles | Same as native: FLIP between the two images 0.0000 to 0.0003 |
 
 <!-- tiers-table:end -->

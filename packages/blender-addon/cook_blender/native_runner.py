@@ -7,7 +7,8 @@ import time
 
 NATIVE_DIRECTORY_VARIABLE = "COOK_NATIVE_DIR"
 TRACE_SCRIPT_PARTS = ("bench", "cycles-parity", "trace-native.mjs")
-NATIVE_ADDON_PARTS = ("packages", "render-native", "build", "render-native.node")
+ADDON_PATH_VARIABLE = "COOK_ADDON_PATH"
+NATIVE_ADDON_PARTS = ("node_modules", "@codepawlhq", "cook", "build", "render-native.node")
 POLL_SECONDS = 0.25
 LOG_TAIL_CHARACTERS = 2000
 
@@ -22,11 +23,13 @@ def resolve_native_directory(preference_value, environment=None):
     if not candidate:
         raise CookSetupError(
             f"Cook does not know where the native tracer is. Set 'Native tracer folder' in Preferences > Add-ons > Cook, "
-            f"or set the {NATIVE_DIRECTORY_VARIABLE} environment variable, to a 67js checkout whose packages/render-native is built."
+            f"or set the {NATIVE_DIRECTORY_VARIABLE} environment variable, to a 67js checkout with Cook built (npm run cook:build)."
         )
     directory = os.path.abspath(os.path.expanduser(candidate))
-    for parts, fix in ((TRACE_SCRIPT_PARTS, "Point it at the root of a 67js checkout."),
-                       (NATIVE_ADDON_PARTS, "Build it with: cd packages/render-native && node build.mjs")):
+    checks = [(TRACE_SCRIPT_PARTS, "Point it at the root of a 67js checkout.")]
+    if not environment.get(ADDON_PATH_VARIABLE, "").strip():
+        checks.append((NATIVE_ADDON_PARTS, f"Build it with: npm run cook:build, or set {ADDON_PATH_VARIABLE} to a built render-native.node."))
+    for parts, fix in checks:
         missing = os.path.join(directory, *parts)
         if not os.path.isfile(missing):
             raise CookSetupError(f"The native tracer folder {directory} has no {'/'.join(parts)}. {fix}")

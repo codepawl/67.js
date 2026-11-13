@@ -10,7 +10,7 @@ const FIRST_FRAME_REASON = 'first frame of the sequence';
 const REQUIRED_TRACER_FUNCTIONS = ['createNativeSession', 'planNativeSessionUpdate', 'prepareCyclesInput'];
 
 /**
- * @param {{ tracer: object }} options `tracer` is the loaded render-native package.
+ * @param {{ tracer: object }} options `tracer` is the loaded @codepawlhq/cook package.
  * @returns {{ trace(input: object, traceOptions: object): { traced: object, route: object }, close(): void }}
  *   `trace` takes a v1 table set or a FORMAT-v2 input and the `traceNative` options of the frame, and returns the traced
  *   planes with the route the frame took: `path` is "new-session", "reused", "updated" or "one-shot", `reason` says why a
@@ -18,7 +18,7 @@ const REQUIRED_TRACER_FUNCTIONS = ['createNativeSession', 'planNativeSessionUpda
  */
 export function createNativeSequence({ tracer }) {
   if (tracer === null || typeof tracer !== 'object') {
-    throw new TypeError('createNativeSequence: pass `tracer`, the loaded @codepawlhq/67js-render-native package.');
+    throw new TypeError('createNativeSequence: pass `tracer`, the loaded @codepawlhq/cook package.');
   }
   let session = null;
   let heldInput = null;
@@ -37,7 +37,7 @@ export function createNativeSequence({ tracer }) {
 
   function missingSessionSupport() {
     const missing = REQUIRED_TRACER_FUNCTIONS.filter(name => typeof tracer[name] !== 'function');
-    return missing.length === 0 ? null : `the installed render-native package has no ${missing.join(' or ')}`;
+    return missing.length === 0 ? null : `the installed @codepawlhq/cook package has no ${missing.join(' or ')}`;
   }
 
   function traceOnce(input, traceOptions, reason) {

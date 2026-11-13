@@ -141,9 +141,22 @@ jobs:
         env:
           MCP_SERVER_RUNTIME: bun
 
+  # The tests that load Cook through tests/support/cook.js must skip, not fail, when the package is absent. COOK_DISABLE=1
+  # also makes the library build use the stub packer, so this leg checks the build without Cook too.
+  unit-without-cook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COOK_DISABLE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - run: npm run build:lib
+      - run: node --test $(git grep -l "support/cook.js" -- tests)
+
   test:
     if: always()
-    needs: [audit, change-note, size, unit, coverage, package, bun]
+    needs: [audit, change-note, size, unit, unit-without-cook, coverage, package, bun]
     runs-on: ubuntu-latest
     steps:
       # A skipped size job is expected outside pull requests. Anything else that is not a success fails the check.

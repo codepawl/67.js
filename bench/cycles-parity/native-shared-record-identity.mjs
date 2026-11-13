@@ -4,10 +4,10 @@
 //   node bench/cycles-parity/native-shared-record-identity.mjs
 import { createHash } from 'node:crypto';
 import * as pack from '../../src/path-tracer-gpu-pack.js';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../../packages/render-native/job-input.mjs';
+import { buildNativeInput } from '@codepawlhq/cook/pack-input';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '@codepawlhq/cook/job-input';
 import { buildTraceScene, refuseLocalVolumes, resolveTexture } from '../../src/path-tracer-scene.js';
-import { buildNativeInputV2, traceNative } from '../../packages/render-native/index.mjs';
+import { buildNativeInputV2, traceNative } from '@codepawlhq/cook';
 import { exportNativeSceneTables } from '../../scripts/native-bake-page.js';
 import { createCamera } from '../../src/path-tracer.js';
 
@@ -83,7 +83,7 @@ function explicitOverrideHash(parts) {
   return { hash: sha256(Buffer.from(picture.rgba.buffer, picture.rgba.byteOffset, picture.rgba.byteLength)), materialRecords: input.materialCount };
 }
 
-const tracer = await import('../../packages/render-native/index.mjs');
+const tracer = await import('@codepawlhq/cook');
 const { traceFrameNative } = await import('../../scripts/agent-native-trace.mjs');
 const results = {};
 for (const [sceneName, buildParts] of Object.entries(sceneBuilders)) {

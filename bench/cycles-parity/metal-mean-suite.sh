@@ -37,7 +37,7 @@ report() { # label referenceGlob candidateGlob extra...
 }
 
 stage_build() {
-  (cd packages/render-native && node build.mjs) 2>&1 | tail -2
+  npm run cook:build 2>&1 | tail -2
   mkdir -p "$data/scenes"
   node bench/cycles-parity/export-scene.mjs "$data" --scene metal 2>&1 | tail -2
   ls "$data/scenes" 2>&1

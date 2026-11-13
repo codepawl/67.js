@@ -1,4 +1,4 @@
-// The page side of the native tracer (packages/render-native), shared by the agent preview page and the bench harness. The
+// The page side of the native tracer (Cook, @codepawlhq/cook), shared by the agent preview page and the bench harness. The
 // tracer runs in the host process; the host exposes it on the page as `__67jsNativeBake` (see the agent runtime), and
 // everything here packs a scene into the tables it reads and unpacks its answer.
 
@@ -165,7 +165,7 @@ function floatsToBase64(values) {
  * them with ray queries and answers with the light that reaches each texel. Same arguments and answer as `traceTexelsOnGpu`.
  */
 export async function traceTexelsOnNative(scene, texels, options) {
-  const [pack, { buildNativeTexelInput }] = await Promise.all([import('../src/path-tracer-gpu-pack.js'), import('../packages/render-native/pack-input.mjs')]);
+  const [pack, { buildNativeTexelInput }] = await Promise.all([import('../src/path-tracer-gpu-pack.js'), import('@codepawlhq/cook/pack-input')]);
   const input = buildNativeTexelInput(scene, { texelCount: texels.count, samples: options.samples, bounces: options.bounces, seed: options.seed, fireflyClamp: options.fireflyClamp }, pack);
   const answer = await globalThis.__67jsNativeBake({
     action: 'trace',

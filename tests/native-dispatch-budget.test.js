@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { buildNativeInputV2, createNativeSession, findNativeAddon, resolveSessionFrame, traceNative } from '../packages/render-native/index.mjs';
-import { validatePackOptions } from '../packages/render-native/pack-input-v2.mjs';
 import { createCamera } from '../src/path-tracer.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const { buildNativeInputV2, createNativeSession, findNativeAddon, resolveSessionFrame, traceNative } = (await cookModule()) ?? {};
+const { validatePackOptions } = (await cookModule('pack-input-v2')) ?? {};
+
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 
 const UNIT_QUAD = {
   positions: new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]),
@@ -43,7 +44,7 @@ function assertSameBytes(first, second, message) {
   }
 }
 
-test('dispatchBudgetMs must be a finite number of milliseconds from 1 to 1000', () => {
+cookTest('dispatchBudgetMs must be a finite number of milliseconds from 1 to 1000', () => {
   for (const accepted of [undefined, 1, 4, 8.5, 1000]) {
     assert.doesNotThrow(() => validatePackOptions({ dispatchBudgetMs: accepted }, 'test'));
   }
@@ -55,7 +56,7 @@ test('dispatchBudgetMs must be a finite number of milliseconds from 1 to 1000', 
   }
 });
 
-test('a session frame carries dispatchBudgetMs to the addon and checks it', () => {
+cookTest('a session frame carries dispatchBudgetMs to the addon and checks it', () => {
   const sessionInput = buildRoomInput(IMAGE_OPTIONS);
   const frame = resolveSessionFrame(sessionInput, {}, { ...IMAGE_OPTIONS, dispatchBudgetMs: 8 });
   assert.equal(frame.dispatchBudgetMs, 8);
@@ -63,11 +64,11 @@ test('a session frame carries dispatchBudgetMs to the addon and checks it', () =
   assert.throws(() => resolveSessionFrame(sessionInput, {}, { ...IMAGE_OPTIONS, dispatchBudgetMs: 0 }), { name: 'RangeError', message: /`dispatchBudgetMs`/ });
 });
 
-test('the legacy kernel refuses dispatchBudgetMs instead of ignoring it', { skip: skipWithoutAddon }, () => {
+cookTest('the legacy kernel refuses dispatchBudgetMs instead of ignoring it', { skip: skipWithoutAddon }, () => {
   assert.throws(() => traceNative({}, { ...IMAGE_OPTIONS, kernel: 'legacy', dispatchBudgetMs: 8 }), { name: 'TypeError', message: /kernel "cycles"/ });
 });
 
-test('a one-shot render under a dispatch budget gives the same bytes as without one', { skip: skipWithoutAddon }, () => {
+cookTest('a one-shot render under a dispatch budget gives the same bytes as without one', { skip: skipWithoutAddon }, () => {
   const input = buildRoomInput(IMAGE_OPTIONS);
   const whole = traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles' });
   const tiled = traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles', dispatchBudgetMs: 8 });
@@ -80,7 +81,7 @@ test('a one-shot render under a dispatch budget gives the same bytes as without 
   assert.ok(whole.largestTilePixels == null);
 });
 
-test('a one-shot render with a noise threshold gives the same bytes under a dispatch budget', { skip: skipWithoutAddon }, () => {
+cookTest('a one-shot render with a noise threshold gives the same bytes under a dispatch budget', { skip: skipWithoutAddon }, () => {
   const adaptiveOptions = { ...IMAGE_OPTIONS, samples: 96, noiseThreshold: 0.05 };
   const input = buildRoomInput(adaptiveOptions);
   const whole = traceNative(input, { ...adaptiveOptions, kernel: 'cycles' });
@@ -89,14 +90,14 @@ test('a one-shot render with a noise threshold gives the same bytes under a disp
   assert.equal(tiled.averageSamples, whole.averageSamples);
 });
 
-test('samplesPerDispatch caps the samples of a dispatch under a dispatch budget', { skip: skipWithoutAddon }, () => {
+cookTest('samplesPerDispatch caps the samples of a dispatch under a dispatch budget', { skip: skipWithoutAddon }, () => {
   const input = buildRoomInput(IMAGE_OPTIONS);
   const capped = traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles', dispatchBudgetMs: 1000, samplesPerDispatch: 3 });
   assert.ok(capped.samplesPerDispatch <= 3);
   assertSameBytes(traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles' }), capped, 'capped budget against none');
 });
 
-test('session frames under a dispatch budget give the same bytes as frames without one, also when accumulating', { skip: skipWithoutAddon }, () => {
+cookTest('session frames under a dispatch budget give the same bytes as frames without one, also when accumulating', { skip: skipWithoutAddon }, () => {
   const input = buildRoomInput(IMAGE_OPTIONS);
   const session = createNativeSession(input, IMAGE_OPTIONS);
   try {
@@ -128,7 +129,7 @@ function withGarbageTileOrigin(input) {
   return { ...input, kernelParams: new Uint8Array(copy.buffer, copy.byteOffset, copy.byteLength) };
 }
 
-test('the packer leaves the tile origin words 312 to 319 at zero and does not touch 304 to 311', () => {
+cookTest('the packer leaves the tile origin words 312 to 319 at zero and does not touch 304 to 311', () => {
   const input = buildRoomInput(IMAGE_OPTIONS);
   const bytes = parameterBytes(input);
   assert.equal(bytes.length, PARAMS_BYTES);
@@ -137,7 +138,7 @@ test('the packer leaves the tile origin words 312 to 319 at zero and does not to
   assert.ok(parameterBytes(withBudget).equals(bytes), 'a dispatch budget does not change the packed bytes');
 });
 
-test('a pack that carries garbage in the tile origin words renders the same picture, whole or tiled', { skip: skipWithoutAddon }, () => {
+cookTest('a pack that carries garbage in the tile origin words renders the same picture, whole or tiled', { skip: skipWithoutAddon }, () => {
   const input = buildRoomInput(IMAGE_OPTIONS);
   const garbage = withGarbageTileOrigin(input);
   const reference = traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles' });
@@ -145,7 +146,7 @@ test('a pack that carries garbage in the tile origin words renders the same pict
   assertSameBytes(reference, traceNative(garbage, { ...IMAGE_OPTIONS, kernel: 'cycles', dispatchBudgetMs: 4 }), 'garbage tile origin, budget 4');
 });
 
-test('a light tree probe render refuses a dispatch budget instead of tiling over itself', { skip: skipWithoutAddon }, () => {
+cookTest('a light tree probe render refuses a dispatch budget instead of tiling over itself', { skip: skipWithoutAddon }, () => {
   const probeInput = buildRoomInput({ ...IMAGE_OPTIONS, lightSampling: 'tree', lightTreeProbe: true });
   assert.throws(() => traceNative(probeInput, { ...IMAGE_OPTIONS, kernel: 'cycles', dispatchBudgetMs: 8 }), { message: /`dispatchBudgetMs` cannot be used with the light tree probe/ });
 });

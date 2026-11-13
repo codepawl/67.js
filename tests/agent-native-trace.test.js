@@ -1,11 +1,38 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, traceFrameNative } from '../scripts/agent-native-trace.mjs';
+import { fileURLToPath } from 'node:url';
+import {
+  chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative,
+} from '../scripts/agent-native-trace.mjs';
 
-const builtTracer = { findNativeAddon: () => '/build/render-native.node' };
+// These tests use fake engines, so they run with and without Cook installed; a COOK_DISABLE from the suite's absent-mode run
+// must not hide the fakes from the locator. The test that checks COOK_DISABLE sets it itself.
+delete process.env.COOK_DISABLE;
+
+// A fake engine module: this file stays outside the Cook test helper.
+function fakeEngine({ addonPath = '/build/render-native.node', packFormat, limits = { triangles: null, instances: 500 } } = {}) {
+  return {
+    describeEngine: () => ({
+      name: 'fake',
+      packFormat: packFormat ?? { version: 2, revision: 1, readsRevisions: [1, 1] },
+      denoisers: ['none'],
+      sessions: null,
+      limits,
+    }),
+    findNativeAddon: () => addonPath,
+    traceNative() {},
+    traceNativeTexels() {},
+  };
+}
+
+const builtTracer = fakeEngine();
 
 function locatorFor(importPackage) {
   return createNativeTracerLocator({ importPackage });
+}
+
+function moduleNotFound(specifier) {
+  return Object.assign(new Error(`Cannot find package '${specifier}' imported from somewhere`), { code: 'ERR_MODULE_NOT_FOUND' });
 }
 
 test('a native request runs native when the package and its binary are present', async () => {
@@ -16,22 +43,82 @@ test('a native request runs native when the package and its binary are present',
   assert.equal(choice.note, undefined);
 });
 
+test('the engine limits lower the 67js job limits and null declares none', async () => {
+  const found = await locatorFor(async () => builtTracer).find();
+  assert.deepEqual(found.limits, { triangles: 1_500_000, instances: 500 });
+  assert.equal(found.description.name, 'fake');
+});
+
 test('without the package a native job falls back to gpu, or to cpu on a cpu runtime, and says why', async () => {
-  const locator = locatorFor(async () => { throw new Error('Cannot find package'); });
+  const locator = locatorFor(async specifier => { throw moduleNotFound(specifier); });
   const onGpu = await chooseTraceBackend({ requested: 'native', runtimeBackend: 'gpu', locator });
   assert.equal(onGpu.backend, 'gpu');
-  assert.match(onGpu.note, /needs @codepawlhq\/67js-render-native/);
+  assert.match(onGpu.note, /needs @codepawlhq\/cook/);
+  assert.match(onGpu.note, /npm install github:codepawl\/cook, then npm run build/);
   assert.match(onGpu.note, /gpu backend ran instead/);
   const onCpu = await chooseTraceBackend({ requested: 'native', runtimeBackend: 'cpu', locator });
   assert.equal(onCpu.backend, 'cpu');
   assert.match(onCpu.note, /cpu backend ran instead/);
 });
 
+test('an install that exists but fails to load is reported with the error text, not as missing', async () => {
+  const locator = locatorFor(async () => { throw new SyntaxError('Unexpected token'); });
+  const choice = await chooseTraceBackend({ requested: 'native', runtimeBackend: 'gpu', locator });
+  assert.equal(choice.backend, 'gpu');
+  assert.match(choice.note, /failed to load \(Unexpected token\)/);
+});
+
 test('a package without its built binary falls back and names the build step', async () => {
-  const locator = locatorFor(async () => ({ findNativeAddon: () => null }));
+  const locator = locatorFor(async () => fakeEngine({ addonPath: null }));
   const choice = await chooseTraceBackend({ requested: 'native', runtimeBackend: 'gpu', locator });
   assert.equal(choice.backend, 'gpu');
   assert.match(choice.note, /built binary/);
+});
+
+test('a module that is not a render engine, or reads other pack revisions, falls back with one reason', async () => {
+  const notEngine = await chooseTraceBackend({ requested: 'native', runtimeBackend: 'gpu', locator: locatorFor(async () => ({})) });
+  assert.equal(notEngine.backend, 'gpu');
+  assert.match(notEngine.note, /cannot use @codepawlhq\/cook: .*no describeEngine/);
+  const outdated = fakeEngine({ packFormat: { version: 2, revision: 4, readsRevisions: [1, 3] } });
+  const mismatch = await chooseTraceBackend({ requested: 'native', runtimeBackend: 'gpu', locator: locatorFor(async () => outdated) });
+  assert.match(mismatch.note, /revision 4/);
+});
+
+test('COOK_DISABLE=1 acts like an absent package and never imports', async () => {
+  const saved = process.env.COOK_DISABLE;
+  process.env.COOK_DISABLE = '1';
+  try {
+    const locator = locatorFor(async () => { throw new Error('must not be imported'); });
+    const choice = await chooseTraceBackend({ requested: 'native', runtimeBackend: 'gpu', locator });
+    assert.equal(choice.backend, 'gpu');
+    assert.match(choice.note, /needs @codepawlhq\/cook/);
+  } finally {
+    if (saved === undefined) delete process.env.COOK_DISABLE;
+    else process.env.COOK_DISABLE = saved;
+  }
+});
+
+test('COOK_PACKAGE_PATH imports that checkout by file URL and a wrong path says so', async () => {
+  const saved = process.env.COOK_PACKAGE_PATH;
+  try {
+    process.env.COOK_PACKAGE_PATH = 'no-such-cook-checkout';
+    const missing = await locatorFor(async () => { throw new Error('must not be imported'); }).find();
+    assert.match(missing.reason, /found no index\.mjs in COOK_PACKAGE_PATH/);
+    process.env.COOK_PACKAGE_PATH = fileURLToPath(new URL('../scripts', import.meta.url));
+    const specifiers = [];
+    const locator = locatorFor(async specifier => { specifiers.push(specifier); throw moduleNotFound(specifier); });
+    await locator.find();
+    assert.equal(specifiers.length, 0, 'a folder without index.mjs is refused before any import');
+  } finally {
+    if (saved === undefined) delete process.env.COOK_PACKAGE_PATH;
+    else process.env.COOK_PACKAGE_PATH = saved;
+  }
+});
+
+test('a time limit is recognised by the Cook error code, and by the old message', () => {
+  assert.equal(isNativeTimeLimitError(Object.assign(new Error('x'), { code: 'COOK_TIME_LIMIT' })), true);
+  assert.equal(isNativeTimeLimitError(new Error('the trace passed its time limit')), true);
+  assert.equal(isNativeTimeLimitError(new Error('no adapter')), false);
 });
 
 test('a trace that failed once makes later native requests fall back with that reason, without importing again', async () => {

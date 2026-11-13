@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { findNativeAddon } from '../packages/render-native/index.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const { findNativeAddon } = (await cookModule()) ?? {};
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const RUNS = 8;
 
 // Renders once in a fresh process and lets it end on its own. Issue #1136: with the NVIDIA Vulkan driver the process used
 // to die with SIGSEGV inside exit() because the GPU device was still open when the driver unloaded its libraries.
 const RENDER_THEN_EXIT = `
-import { buildNativeInputV2, traceNative } from './packages/render-native/index.mjs';
+import { buildNativeInputV2, traceNative } from '@codepawlhq/cook';
 import { createCamera } from './src/path-tracer.js';
 const quad = {
   positions: new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]),
@@ -37,7 +37,7 @@ function runRenderThenExit() {
   });
 }
 
-test('a process that rendered with the native addon exits with code 0', { skip: skipWithoutAddon }, (context) => {
+cookTest('a process that rendered with the native addon exits with code 0', { skip: skipWithoutAddon }, (context) => {
   const probe = runRenderThenExit();
   if (probe.status !== 0 && /No Vulkan adapter|ray quer/i.test(probe.stderr)) {
     context.skip('this machine has no Vulkan adapter with ray queries');

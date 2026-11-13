@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
+import { cookModule, cookTest } from './support/cook.js';
 import {
   encodedExportLength,
   exportNativeSceneTables,
@@ -20,6 +19,11 @@ import {
   refuseLocalVolumes,
   resolveTexture,
 } from '../src/path-tracer-scene.js';
+
+const jobInputModule = await cookModule('job-input');
+const packInputModule = await cookModule('pack-input');
+const { buildFlattenedJobNativeInput, buildJobNativeInput } = jobInputModule ?? {};
+const { buildNativeInput } = packInputModule ?? {};
 
 // One shared triangle: valid for the builder and cheap to copy many times.
 const TRIANGLE = {
@@ -84,7 +88,7 @@ const camera = createCamera({ eye: [0, 0, 8], target: [0, 0, 0], fov: 50 }, 8, 8
 const packOptions = { width: 8, height: 8, bounces: 2, seed: 1, fireflyClamp: 20, noiseThreshold: 0 };
 const modules = { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack };
 
-test('a native render job with the cycles kernel exports more than 65,536 instances of one geometry', () => {
+cookTest('a native render job with the cycles kernel exports more than 65,536 instances of one geometry', () => {
   assert.ok(NATIVE_JOB_MAXIMUM_INSTANCES > MAX_TRACE_INSTANCES && NATIVE_JOB_MAXIMUM_INSTANCES <= MAX_NATIVE_TRACE_INSTANCES);
   const copyCount = MAX_TRACE_INSTANCES + 100;
   const exported = exportNativeSceneTables({ parts: copiesOfTriangle(copyCount), environment: ENVIRONMENT, camera, options: packOptions, kernel: 'cycles', instancing: true, modules });
@@ -93,13 +97,13 @@ test('a native render job with the cycles kernel exports more than 65,536 instan
   assert.equal(exported.triangleCount, 1);
 });
 
-test('a native render job past its instance bound says so and does not hide the refusal', () => {
+cookTest('a native render job past its instance bound says so and does not hide the refusal', () => {
   const smallBound = (sceneParts, environment, options) => buildTraceScene(sceneParts, environment, { ...options, maximumInstances: 5 });
   assert.throws(() => exportNativeSceneTables({ parts: copiesOfTriangle(6), environment: ENVIRONMENT, camera, options: packOptions, kernel: 'cycles', instancing: true,
     modules: { ...modules, buildTraceScene: smallBound } }), { name: 'RangeError', message: /at most 5 instances, got 6\. Pass fewer parts, or merge small copies into one mesh\./ });
 });
 
-test('a native render job with the legacy kernel keeps its flattened bounds, not the instance bound', () => {
+cookTest('a native render job with the legacy kernel keeps its flattened bounds, not the instance bound', () => {
   assert.throws(() => exportNativeSceneTables({ parts: copiesOfTriangle(MAX_TRACE_INSTANCES + 1), environment: ENVIRONMENT, camera, options: packOptions, kernel: 'legacy', instancing: true, modules }),
     { name: 'RangeError', message: /1 to 1024 parts/ });
 });
@@ -138,7 +142,7 @@ test('both job bounds at once are refused before encoding, with the totals and w
   });
 });
 
-test('an export over one message is rethrown, not flattened or packed another way', () => {
+cookTest('an export over one message is rethrown, not flattened or packed another way', () => {
   const huge = new Uint8Array(1);
   Object.defineProperty(huge, 'byteLength', { value: 400_000_000 });
   let flattenedCalls = 0;

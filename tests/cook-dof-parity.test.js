@@ -1,19 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  buildNativeInputV2,
-  findNativeAddon,
-  traceNative,
-  upgradeNativeInputV1ToV2,
-} from '../packages/render-native/index.mjs';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
-import { resolveThinLensParameters } from '../packages/render-native/pack-input-v2.mjs';
 import { cameraFocalLength, resolveThinLens } from '../src/camera.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const cook = await cookModule();
+const packInput = await cookModule('pack-input');
+const packInputV2 = await cookModule('pack-input-v2');
+const { buildNativeInputV2, findNativeAddon, traceNative, upgradeNativeInputV1ToV2 } = cook ?? {};
+const { buildNativeInput } = packInput ?? {};
+const { resolveThinLensParameters } = packInputV2 ?? {};
+
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 
 // Word indexes in the 320-byte KernelParamsV2 block (abi.wgsl): aperture_radius, focal_distance, aperture_blades, aperture_rotation.
 const APERTURE_RADIUS_WORD = 39;
@@ -106,7 +106,7 @@ test('a lens that cannot be built says what to pass', () => {
   assert.throws(make({ focalLength: -5 }), /focalLength must be a positive finite number/);
 });
 
-test('with depth of field off, the lens words of the params block hold the values they always held', () => {
+cookTest('with depth of field off, the lens words of the params block hold the values they always held', () => {
   const words = kernelWords(packWithCamera(PINHOLE_SPEC));
   assert.equal(words[APERTURE_RADIUS_WORD], 0);
   assert.equal(floatOfWord(words[FOCAL_DISTANCE_WORD]), 10);
@@ -114,7 +114,7 @@ test('with depth of field off, the lens words of the params block hold the value
   assert.equal(words[APERTURE_ROTATION_WORD], 0);
 });
 
-test('depth of field changes only its own words of the params block', () => {
+cookTest('depth of field changes only its own words of the params block', () => {
   const pinhole = kernelWords(packWithCamera(PINHOLE_SPEC));
   const round = kernelWords(packWithCamera({ ...LENS_ON_PINHOLE, focusDistance: 3 }));
   assert.deepEqual(differingWords(pinhole, round), [APERTURE_RADIUS_WORD, FOCAL_DISTANCE_WORD]);
@@ -127,7 +127,7 @@ test('depth of field changes only its own words of the params block', () => {
   assert.equal(floatOfWord(hexagon[APERTURE_ROTATION_WORD]), Math.fround(Math.PI / 2 + Math.PI / 6));
 });
 
-test('a v1 input carries the lens in the free fourth floats and upgrades to the same v2 words', () => {
+cookTest('a v1 input carries the lens in the free fourth floats and upgrades to the same v2 words', () => {
   const scene = buildEdgeScene();
   const options = { width: 16, height: 16, samples: 1 };
   const lensCamera = createCamera({ ...LENS_ON_PINHOLE, focusDistance: 3, apertureBlades: 5, apertureRotation: 12 }, 16, 16);
@@ -143,7 +143,7 @@ test('a v1 input carries the lens in the free fourth floats and upgrades to the 
   }
 });
 
-test('a pinhole v1 input keeps its camera vectors at 0 in the fourth float and upgrades to the default lens words', () => {
+cookTest('a pinhole v1 input keeps its camera vectors at 0 in the fourth float and upgrades to the default lens words', () => {
   const options = { width: 16, height: 16, samples: 1 };
   const v1 = buildNativeInput(buildEdgeScene(), createCamera(PINHOLE_SPEC, 16, 16), options, pack);
   const floats = new Float32Array(v1.parameters.buffer, v1.parameters.byteOffset, 64);
@@ -155,7 +155,7 @@ test('a pinhole v1 input keeps its camera vectors at 0 in the fourth float and u
   }
 });
 
-test('the packer rejects lens values the kernel cannot use, naming the field and what to pass', () => {
+cookTest('the packer rejects lens values the kernel cannot use, naming the field and what to pass', () => {
   const caller = 'buildNativeInputV2';
   assert.throws(() => resolveThinLensParameters({ apertureRadius: -1 }, {}, caller), /buildNativeInputV2: camera `apertureRadius` must be a number of scene units, 0 or more/);
   assert.throws(() => resolveThinLensParameters({ apertureRadius: Number.NaN }, {}, caller), /apertureRadius/);
@@ -174,7 +174,7 @@ function edgeWidth(rgba, width, height) {
   return values.filter((value) => value > 0.05 * brightest && value < 0.95 * brightest).length;
 }
 
-test('the cycles kernel blurs an edge off the focus plane and keeps it sharp on it', { skip: skipWithoutAddon }, () => {
+cookTest('the cycles kernel blurs an edge off the focus plane and keeps it sharp on it', { skip: skipWithoutAddon }, () => {
   const size = { width: 64, height: 32 };
   const traceOptions = { ...size, samples: 96, bounces: 1, seed: 5, kernel: 'cycles' };
   // 200 mm at f/2 is a 5 cm aperture radius; the card edge is 4 m away.
@@ -198,7 +198,7 @@ test('the cycles kernel blurs an edge off the focus plane and keeps it sharp on 
   assert.ok(nearFocus.rgba.every(Number.isFinite));
 });
 
-test('the cycles kernel draws the same bytes for a pinhole whether or not the camera names a lens of aperture 0', { skip: skipWithoutAddon }, () => {
+cookTest('the cycles kernel draws the same bytes for a pinhole whether or not the camera names a lens of aperture 0', { skip: skipWithoutAddon }, () => {
   const traceOptions = { width: 16, height: 16, samples: 8, bounces: 1, seed: 3, kernel: 'cycles', samplesPerDispatch: 8 };
   const camera = createCamera(PINHOLE_SPEC, 16, 16);
   const plain = traceNative(buildNativeInputV2(buildEdgeScene(), camera, traceOptions), traceOptions);

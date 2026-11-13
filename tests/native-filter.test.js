@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { STRUCT_STRIDES_V2, buildNativeInputV2, withFilterOptions } from '../packages/render-native/index.mjs';
-import {
+import { createCamera } from '../src/path-tracer.js';
+import { cookModule, cookTest } from './support/cook.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const { STRUCT_STRIDES_V2, buildNativeInputV2, withFilterOptions } = cook ?? {};
+const {
   KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET,
   KERNEL_PARAMS_V2_FILTER_WIDTH_BYTE_OFFSET,
   validateFilterOptions,
   validatePackOptions,
-} from '../packages/render-native/pack-input-v2.mjs';
-import { createCamera } from '../src/path-tracer.js';
+} = packV2 ?? {};
 
-test('pixel filter options accept the three filters and a width in pixels', () => {
+cookTest('pixel filter options accept the three filters and a width in pixels', () => {
   for (const filterType of [undefined, 'box', 'gaussian', 'blackman-harris', 'blackman_harris', 0, 1, 2]) {
     assert.doesNotThrow(() => validateFilterOptions({ filterType }, 'test'), String(filterType));
   }
@@ -19,7 +22,7 @@ test('pixel filter options accept the three filters and a width in pixels', () =
   assert.doesNotThrow(() => validatePackOptions({ filterType: 'blackman-harris', filterWidth: 1.5 }, 'test'));
 });
 
-test('pixel filter options reject an unknown filter and a width outside 0.01 to 16', () => {
+cookTest('pixel filter options reject an unknown filter and a width outside 0.01 to 16', () => {
   for (const filterType of ['tent', 'Box', 3, -1, null, {}]) {
     assert.throws(
       () => validateFilterOptions({ filterType }, 'test'),
@@ -37,7 +40,7 @@ test('pixel filter options reject an unknown filter and a width outside 0.01 to 
   assert.throws(() => validatePackOptions({ filterType: 'tent' }, 'test'), /`filterType`/);
 });
 
-test('filter options on an already packed v2 input patch the kernel params with the packer offsets', () => {
+cookTest('filter options on an already packed v2 input patch the kernel params with the packer offsets', () => {
   const kernelParams = new Uint8Array(STRUCT_STRIDES_V2.kernelParams);
   const view = new DataView(kernelParams.buffer);
   view.setUint32(KERNEL_PARAMS_V2_FILTER_TYPE_BYTE_OFFSET, 0, true);
@@ -55,7 +58,7 @@ test('filter options on an already packed v2 input patch the kernel params with 
   assert.deepEqual(read(kernelParams), { type: 0, width: 1 }, 'the packed buffer is not modified');
 });
 
-test('the packer writes the filter at the shared byte offsets', () => {
+cookTest('the packer writes the filter at the shared byte offsets', () => {
   const camera = createCamera({ eye: [0, 0, 6], target: [0, 0, 0], fov: 50 }, 8, 8);
   const packed = buildNativeInputV2({ materials: [], instances: [], lights: {} }, camera, {
     width: 8,

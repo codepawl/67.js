@@ -3,10 +3,12 @@ import test from 'node:test';
 import { createCamera } from '../src/path-tracer.js';
 import * as packModule from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
-import { buildNativeInputV2, STRUCT_STRIDES_V2 } from '../packages/render-native/index.mjs';
 import { loadReferenceScene } from '../bench/cycles-parity/scene-bridge.mjs';
 import { applyCookOnlyFields } from '../bench/cycles-parity/cook-only-fields.mjs';
 import { buildTraceSceneWithManyLights } from '../bench/cycles-parity/trace-scene-many-lights.mjs';
+import { cookModule, cookTest } from './support/cook.js';
+
+const { buildNativeInputV2, STRUCT_STRIDES_V2 } = (await cookModule()) ?? {};
 
 const LIGHT_TYPE_AREA_RECT = 2;
 const LIGHT_TYPE_AREA_DISK = 3;
@@ -34,7 +36,7 @@ const triangle = {
 const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const rectangleLight = { position: [0, 2, 0], direction: [0, -1, 0], width: 1, height: 1, color: [1, 1, 1], intensity: 1 };
 
-test('area-shapes packs a disk, an ellipse with spread and a rectangle with spread', async () => {
+cookTest('area-shapes packs a disk, an ellipse with spread and a rectangle with spread', async () => {
   const { traceSource, traceScene, nativeInput } = await packReferenceScene('area-shapes');
   assert.deepEqual(traceScene.lights.areas.map(light => light.shape), ['disk', 'ellipse', undefined]);
   assert.equal(nativeInput.lightCount, 3);
@@ -55,7 +57,7 @@ test('area-shapes packs a disk, an ellipse with spread and a rectangle with spre
   assert.ok(Math.abs(ellipse.f32[5] - (0.9 * 10) / ellipseArea) < 1e-3);
 });
 
-test('transparent-shadow packs blended panes that let shadow rays through', async () => {
+cookTest('transparent-shadow packs blended panes that let shadow rays through', async () => {
   const { traceScene, nativeInput } = await packReferenceScene('transparent-shadow');
   const blended = traceScene.materials.filter(material => material.alphaMode === 'blend');
   assert.deepEqual(blended.map(material => material.opacity).sort(), [0.4, 0.75]);

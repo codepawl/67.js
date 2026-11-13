@@ -1,37 +1,69 @@
-// renderer.backend "native" on render jobs: the optional hardware ray query tracer (packages/render-native) traces the scene
+// renderer.backend "native" on render jobs: the optional hardware ray query tracer (Cook, @codepawlhq/cook) traces the scene
 // the job page exported, then the job runner denoises and writes the PNG. The package and its binary are optional: when they,
 // or a Vulkan ray query adapter, are missing, the job runs on the gpu or cpu backend and the report says why.
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { clampLimitsByEngine, requireRenderEngine } from './render-engine.mjs';
+import { NATIVE_JOB_MAXIMUM_INSTANCES, NATIVE_JOB_MAXIMUM_TRIANGLES } from './native-bake-page.js';
 
-// The names sit in variables so the bundler leaves the imports alone; the package resolves from the user's node_modules.
-const NATIVE_PACKAGE = '@codepawlhq/67js-render-native';
-// A source checkout keeps the package in packages/, beside scripts/ or, from the bundled server, two folders above build/mcp.
-const CHECKOUT_PACKAGE_URLS = ['../packages/render-native/index.mjs', '../../packages/render-native/index.mjs']
-  .map(relative => new URL(/* @vite-ignore */ relative, import.meta.url));
+// The name sits in a variable so the bundler leaves the import alone; the package resolves from the user's node_modules.
+const NATIVE_PACKAGE = '@codepawlhq/cook';
+const INSTALL_HINT = 'npm install github:codepawl/cook, then npm run build inside it';
+const MODULE_NOT_FOUND_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND']);
+// The 67js defaults of a job, lowered by the limits the installed engine declares.
+const DEFAULT_ENGINE_LIMITS = { triangles: NATIVE_JOB_MAXIMUM_TRIANGLES, instances: NATIVE_JOB_MAXIMUM_INSTANCES };
 const TABLE_NAMES = ['triangles', 'materials', 'lights', 'atlas', 'environmentColors', 'environmentTables', 'parameters'];
 const TABLE_TYPES = { triangles: Float32Array, materials: Float32Array, lights: Float32Array, atlas: Uint32Array,
   environmentColors: Float32Array, environmentTables: Float32Array, parameters: Uint8Array };
 
+const NOT_INSTALLED_REASON = `renderer.backend "native" needs ${NATIVE_PACKAGE} (${INSTALL_HINT}).`;
+
+function isModuleNotFound(error, specifier) {
+  return MODULE_NOT_FOUND_CODES.has(error?.code) && String(error.message).includes(specifier);
+}
+
+// COOK_PACKAGE_PATH names a local Cook checkout, whose index.mjs is imported by file URL.
+function chooseSpecifier() {
+  const checkoutPath = process.env.COOK_PACKAGE_PATH;
+  if (!checkoutPath) return { specifier: NATIVE_PACKAGE };
+  const indexPath = join(resolve(checkoutPath), 'index.mjs');
+  if (!existsSync(indexPath)) return { missingReason: `renderer.backend "native" found no index.mjs in COOK_PACKAGE_PATH (${checkoutPath}); point it at a Cook checkout or unset it.` };
+  return { specifier: pathToFileURL(indexPath).href };
+}
+
+// Resolves with { module }, { missingReason } for an absent package or { reason } for an install that exists but fails to load.
 async function importNativePackage(importPackage) {
+  const { specifier, missingReason } = chooseSpecifier();
+  if (missingReason) return { missingReason };
   try {
-    return await importPackage(NATIVE_PACKAGE);
-  } catch {
-    for (const packageUrl of CHECKOUT_PACKAGE_URLS) {
-      if (!existsSync(fileURLToPath(packageUrl))) continue;
-      try {
-        return await importPackage(packageUrl.href);
-      } catch {
-        return null;
-      }
-    }
-    return null;
+    return { module: await importPackage(specifier) };
+  } catch (error) {
+    if (isModuleNotFound(error, specifier)) return { missingReason: NOT_INSTALLED_REASON };
+    return { reason: `renderer.backend "native" found ${NATIVE_PACKAGE} but it failed to load (${error?.message ?? error}); reinstall it (${INSTALL_HINT}).` };
   }
+}
+
+function checkNativePackage(imported) {
+  if (imported.missingReason) return { reason: imported.missingReason };
+  if (imported.reason) return { reason: imported.reason };
+  const checked = requireRenderEngine(imported.module);
+  if (checked.reason) return { reason: `renderer.backend "native" cannot use ${NATIVE_PACKAGE}: ${checked.reason}` };
+  let addonPath;
+  try {
+    addonPath = checked.engine.findNativeAddon();
+  } catch (error) {
+    return { reason: `renderer.backend "native" cannot find the binary of ${NATIVE_PACKAGE}: ${error.message}` };
+  }
+  if (!addonPath) return { reason: `renderer.backend "native" needs the built binary of ${NATIVE_PACKAGE} (npm run build in that package, or COOK_ADDON_PATH for a build elsewhere).` };
+  const limits = clampLimitsByEngine(DEFAULT_ENGINE_LIMITS, checked.description.limits);
+  return { tracer: checked.engine, description: checked.description, limits };
 }
 
 /**
  * A cached look for the native tracer. Looking costs one import and one file check, done once per process. `markUnusable`
  * records a failure from a real trace (usually no ray query adapter), so later jobs skip the attempt and keep the reason.
+ * A found tracer comes with the engine `description` and the job `limits` (67js defaults lowered by the engine's own).
  */
 export function createNativeTracerLocator({ importPackage = specifier => import(specifier) } = {}) {
   let lookup;
@@ -40,11 +72,9 @@ export function createNativeTracerLocator({ importPackage = specifier => import(
     async find() {
       // JS67_NATIVE_TRACER=off keeps a job on the gpu or cpu backend whatever is installed, which is also how the fallback is tested.
       if (process.env.JS67_NATIVE_TRACER === 'off') return { reason: 'renderer.backend "native" is switched off by JS67_NATIVE_TRACER=off.' };
-      lookup ??= importNativePackage(importPackage).then(tracer => {
-        if (!tracer) return { reason: `renderer.backend "native" needs ${NATIVE_PACKAGE}.` };
-        if (!tracer.findNativeAddon()) return { reason: `renderer.backend "native" needs the built binary of ${NATIVE_PACKAGE} (npm run build in that package).` };
-        return { tracer };
-      });
+      // COOK_DISABLE=1 behaves like an absent package (the test helper and the build honour it too).
+      if (process.env.COOK_DISABLE === '1') return { reason: NOT_INSTALLED_REASON };
+      lookup ??= importNativePackage(importPackage).then(checkNativePackage);
       const found = await lookup;
       if (unusableReason) return { reason: unusableReason };
       return found;
@@ -145,7 +175,7 @@ export function chooseNativeInstancing(environment = process.env) {
 function atrousColor({ tracer, traced, width, height }) {
   let filtered = traced.denoisedRgba;
   if (!filtered) {
-    if (typeof tracer.denoiseAtrous !== 'function') throw new Error('the installed render-native package has no a-trous filter');
+    if (typeof tracer.denoiseAtrous !== 'function') throw new Error('the installed @codepawlhq/cook package has no a-trous filter');
     const { rgba, albedo, normal, depth, variance } = traced;
     filtered = tracer.denoiseAtrous({ width, height, rgba, albedo, normal, depth, variance }).rgba;
   }
@@ -272,5 +302,6 @@ export function traceTexelsNative({ tracer, request, maxSeconds }) {
 
 /** True for the error the native tracer raises when a trace passes its `maxSeconds`: a clean failure, not a broken adapter. */
 export function isNativeTimeLimitError(error) {
+  if (error?.code === 'COOK_TIME_LIMIT') return true;
   return /passed its time limit/.test(error?.message ?? '');
 }

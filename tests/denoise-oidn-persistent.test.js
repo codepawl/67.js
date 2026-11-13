@@ -5,8 +5,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { createOidnDenoiser, denoiseWithOidn, findOidnBinary, findOidnLibrary } from '../packages/denoise-oidn/index.mjs';
-import { createNativeOidnDenoiser, findNativeAddon } from '../packages/render-native/index.mjs';
 import { denoiseFrameWithOidn } from '../scripts/agent-native-trace.mjs';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
+
+const { createNativeOidnDenoiser, findNativeAddon } = (await cookModule()) ?? {};
 
 const LIBRARY_LAYOUTS = {
   win32: { directory: 'bin', name: 'OpenImageDenoise.dll', tool: 'oidnDenoise.exe' },
@@ -84,7 +86,7 @@ test('a persistent denoiser resolves with the filtered pixels and keeps the timi
   assert.deepEqual(Object.keys(denoiser.lastTimings).sort(), ['commitSeconds', 'executeSeconds', 'readSeconds', 'recommitted', 'writeSeconds']);
 });
 
-test('createNativeOidnDenoiser asks for the library path before it loads anything', () => {
+cookTest('createNativeOidnDenoiser asks for the library path before it loads anything', () => {
   assert.throws(() => createNativeOidnDenoiser({}), /libraryPath/);
   assert.throws(() => createNativeOidnDenoiser({ libraryPath: '' }), /libraryPath/);
 });
@@ -124,7 +126,7 @@ test('a job frame uses one persistent device per package and the tool when it ca
   assert.equal(tracerWithoutSupport.mode, 'cli');
 });
 
-const skipWithoutLibrary = !findOidnLibrary() || !findOidnBinary() || !findNativeAddon() ? 'needs the OIDN release (npm run fetch) and the built render-native addon' : false;
+const skipWithoutLibrary = !cookInstalled || !findOidnLibrary() || !findOidnBinary() || !findNativeAddon() ? 'needs the OIDN release (npm run fetch) and the built Cook addon' : false;
 
 function noisyFrame(width, height) {
   const pixels = width * height * 3;
@@ -140,7 +142,7 @@ function noisyFrame(width, height) {
   return { width, height, color, albedo, normal };
 }
 
-test('the in-process device matches the tool and repeats exactly on the CPU', { skip: skipWithoutLibrary }, async () => {
+cookTest('the in-process device matches the tool and repeats exactly on the CPU', { skip: skipWithoutLibrary }, async () => {
   const frame = noisyFrame(48, 32);
   const denoiser = createOidnDenoiser({ createNative: createNativeOidnDenoiser, device: 'cpu' });
   try {

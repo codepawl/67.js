@@ -4,7 +4,7 @@ export PATH=$HOME/.local/bin:$PATH
 SAMPLES="${1:-256}"
 export COOK_NATIVE_DIR=$PWD
 mkdir -p artifacts/900/classroom-addon artifacts/classroom
-(cd packages/render-native && node build.mjs) > artifacts/900/build3.log 2>&1
+npm run cook:build > artifacts/900/build3.log 2>&1
 BLEND=$(ls $HOME/cook-data/classroom/*.blend $HOME/cook-data/classroom/*/*.blend 2>/dev/null | head -1)
 echo "classroom blend on the box: ${BLEND:-none}"
 if [ -z "$BLEND" ]; then

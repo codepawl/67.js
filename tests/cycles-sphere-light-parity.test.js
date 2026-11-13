@@ -6,13 +6,15 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { buildNativeInput, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
 import { box } from '../src/geometry.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const { buildNativeInput, findNativeAddon, traceNative } = (await cookModule()) ?? {};
+
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 const SIZE = 16;
 const FLOOR_ALBEDO = 0.8;
 const LAMP_HEIGHT = 2;
@@ -104,7 +106,7 @@ test('the Cycles reference script follows each light softFalloff, off when absen
 });
 
 for (const radius of [0, 0.18, 0.5]) {
-  test(`the native cycles kernel keeps the power of a point light of radius ${radius} m`, { skip: skipWithoutAddon }, () => {
+  cookTest(`the native cycles kernel keeps the power of a point light of radius ${radius} m`, { skip: skipWithoutAddon }, () => {
     const expected = closedFormCentreRadiance();
     const measured = centreRadiance(renderFloorUnderLamp(radius));
     assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);
@@ -113,7 +115,7 @@ for (const radius of [0, 0.18, 0.5]) {
 
 for (const lampKind of ['point', 'spot']) {
   for (const radius of [0.18, 0.5, 1]) {
-    test(`the native cycles kernel lights a floor under a soft falloff ${lampKind} light of radius ${radius} m as an oriented disk`, { skip: skipWithoutAddon }, () => {
+    cookTest(`the native cycles kernel lights a floor under a soft falloff ${lampKind} light of radius ${radius} m as an oriented disk`, { skip: skipWithoutAddon }, () => {
       const expected = closedFormCentreRadiance(softFalloffIrradianceAt(radius));
       const measured = centreRadiance(renderFloorUnderLamp(radius, lampKind, { softFalloff: true }));
       assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);
@@ -121,7 +123,7 @@ for (const lampKind of ['point', 'spot']) {
   }
 }
 
-test('a light without softFalloff stays a sphere: the floor under a 1 m lamp keeps the sphere value', { skip: skipWithoutAddon }, () => {
+cookTest('a light without softFalloff stays a sphere: the floor under a 1 m lamp keeps the sphere value', { skip: skipWithoutAddon }, () => {
   const expected = closedFormCentreRadiance();
   const measured = centreRadiance(renderFloorUnderLamp(1, 'point', { softFalloff: false }));
   assert.ok(Math.abs(measured / expected - 1) < 0.03, `floor radiance ${measured} against the closed form ${expected}`);

@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  STRUCT_STRIDES_V2,
-  buildNativeInput,
-  buildNativeInputV2,
-  upgradeNativeInputV1ToV2,
-} from '../packages/render-native/index.mjs';
+import { cookModule, cookTest } from './support/cook.js';
 import { normalizeAgentLook } from '../src/agent-look.js';
 import { box } from '../src/geometry.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const { STRUCT_STRIDES_V2, buildNativeInput, buildNativeInputV2, upgradeNativeInputV1ToV2 } = cook ?? {};
 
 const LIGHT_FLAG_SOFT_FALLOFF = 32;
 const LIGHT_FLAG_WORD_INDEX = 7;
@@ -51,7 +49,7 @@ function packedLightFlags(v2) {
 const cameraDescription = { eye: [0, 1, 6], target: [0, 0, 0], fov: 45 };
 const optionsOfPack = { width: 8, height: 8, samples: 1 };
 
-test('a point or spot light with a radius and softFalloff true sets the soft falloff flag of its v2 light record', () => {
+cookTest('a point or spot light with a radius and softFalloff true sets the soft falloff flag of its v2 light record', () => {
   const scene = buildTraceScene([floorPart()], lampEnvironment([{ softFalloff: true }, { softFalloff: true }, { softFalloff: true }, { softFalloff: false }]));
   const v2 = buildNativeInputV2(scene, createCamera(cameraDescription, 8, 8), optionsOfPack);
   const flags = packedLightFlags(v2);
@@ -61,7 +59,7 @@ test('a point or spot light with a radius and softFalloff true sets the soft fal
   assert.equal(flags[3] & LIGHT_FLAG_SOFT_FALLOFF, LIGHT_FLAG_SOFT_FALLOFF, 'the spot light with a radius');
 });
 
-test('a scene without softFalloff packs the same light flags as one that sets it to false', () => {
+cookTest('a scene without softFalloff packs the same light flags as one that sets it to false', () => {
   const without = buildTraceScene([floorPart()], lampEnvironment([{}, {}, {}, {}]));
   const withFalse = buildTraceScene([floorPart()], lampEnvironment([{ softFalloff: false }, { softFalloff: false }, { softFalloff: false }, { softFalloff: false }]));
   const camera = createCamera(cameraDescription, 8, 8);
@@ -73,7 +71,7 @@ test('a scene without softFalloff packs the same light flags as one that sets it
   }
 });
 
-test('the v1 light table carries softFalloff in the third float of the last texel and is unchanged without it', () => {
+cookTest('the v1 light table carries softFalloff in the third float of the last texel and is unchanged without it', () => {
   const camera = createCamera(cameraDescription, 8, 8);
   const soft = buildNativeInput(buildTraceScene([floorPart()], lampEnvironment([{ softFalloff: true }, { softFalloff: true }, {}, {}])), camera, optionsOfPack, pack);
   const plain = buildNativeInput(buildTraceScene([floorPart()], lampEnvironment([{}, {}, {}, {}])), camera, optionsOfPack, pack);
@@ -85,7 +83,7 @@ test('the v1 light table carries softFalloff in the third float of the last texe
   assert.deepEqual(Array.from(withFalseFlag.lights), Array.from(plain.lights));
 });
 
-test('the flag survives the upgrade of v1 tables to the v2 input of a flattened scene', () => {
+cookTest('the flag survives the upgrade of v1 tables to the v2 input of a flattened scene', () => {
   const camera = createCamera(cameraDescription, 8, 8);
   const scene = buildTraceScene([floorPart()], lampEnvironment([{ softFalloff: true }, { softFalloff: true }, {}, {}]));
   const upgraded = upgradeNativeInputV1ToV2(buildNativeInput(scene, camera, optionsOfPack, pack), optionsOfPack);

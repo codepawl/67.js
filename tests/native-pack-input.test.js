@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { existsSync, readFileSync } from 'node:fs';
-import { findNativeAddon, resolveNativeKernel, traceNative } from '../packages/render-native/index.mjs';
-import { buildNativeInput } from '../packages/render-native/pack-input.mjs';
+import { cookFile, cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { createCamera } from '../src/path-tracer.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
+
+const cook = await cookModule();
+const packInput = await cookModule('pack-input');
+const { findNativeAddon, resolveNativeKernel, traceNative } = cook ?? {};
+const { buildNativeInput } = packInput ?? {};
 
 function floor() {
   return {
@@ -30,7 +33,7 @@ function unsignedWords(input) {
   return new Uint32Array(input.parameters.buffer, input.parameters.byteOffset, input.parameters.byteLength / 4);
 }
 
-test('a plain scene packs no fog and no subsurface table, so the kernel compiles without either', () => {
+cookTest('a plain scene packs no fog and no subsurface table, so the kernel compiles without either', () => {
   const input = buildNativeInput(buildTraceScene(plainParts, {}), camera, options, pack);
   assert.equal(input.parameters.byteLength, 16 * 16);
   assert.equal(floatWords(input)[51], 0, 'fog density');
@@ -38,7 +41,7 @@ test('a plain scene packs no fog and no subsurface table, so the kernel compiles
   assert.equal(floatWords(input)[35], 0, 'noise threshold');
 });
 
-test('fog packs its box, medium and density where the kernel reads them', () => {
+cookTest('fog packs its box, medium and density where the kernel reads them', () => {
   const input = buildNativeInput(buildTraceScene(plainParts, fog), camera, options, pack);
   const words = floatWords(input);
   assert.deepEqual([...words.subarray(48, 51)], [-30, 1, -30]);
@@ -46,7 +49,7 @@ test('fog packs its box, medium and density where the kernel reads them', () => 
   assert.deepEqual([...words.subarray(52, 55)], [30, 2, 30]);
 });
 
-test('subsurface appends its table after the materials and points the kernel at it', () => {
+cookTest('subsurface appends its table after the materials and points the kernel at it', () => {
   const scene = buildTraceScene(subsurfaceParts, {});
   const plainMaterials = pack.packMaterials(scene.materials, pack.packAtlas(scene.materials)).data;
   const input = buildNativeInput(scene, camera, options, pack);
@@ -56,13 +59,13 @@ test('subsurface appends its table after the materials and points the kernel at 
   assert.equal(input.materials[offset * 4], 1, 'the subsurface weight of the first material');
 });
 
-test('noiseThreshold lands in the parameter block and defaults to drawing every sample', () => {
+cookTest('noiseThreshold lands in the parameter block and defaults to drawing every sample', () => {
   const input = buildNativeInput(buildTraceScene(plainParts, {}), camera, { ...options, noiseThreshold: 0.02 }, pack);
   assert.ok(Math.abs(floatWords(input)[35] - 0.02) < 1e-7);
 });
 
-test('the kernel declares the two constants the host rewrites and reads the vectors the packer writes', () => {
-  const kernel = readFileSync(new URL('../packages/render-native/src/kernel.wgsl', import.meta.url), 'utf8');
+cookTest('the kernel declares the two constants the host rewrites and reads the vectors the packer writes', () => {
+  const kernel = readFileSync(cookFile('src/kernel.wgsl'), 'utf8');
   assert.match(kernel, /const HAS_VOLUME: bool = false;/);
   assert.match(kernel, /const HAS_SUBSURFACE: bool = false;/);
   assert.match(kernel, /volumeMinimumDensity: vec4<f32>,\s+volumeMaximumAnisotropy: vec4<f32>,\s+volumeAlbedoDistance: vec4<f32>,\s+\/\/[^\n]*\n\s+extras: vec4<u32>,/);
@@ -87,7 +90,7 @@ function withKernelEnv(value, callback) {
   }
 }
 
-test('resolveNativeKernel defaults to legacy, falls back to JS67_NATIVE_KERNEL, and rejects unknown names', () => {
+cookTest('resolveNativeKernel defaults to legacy, falls back to JS67_NATIVE_KERNEL, and rejects unknown names', () => {
   withKernelEnv(undefined, () => {
     assert.equal(resolveNativeKernel(undefined), 'legacy');
     assert.equal(resolveNativeKernel('legacy'), 'legacy');
@@ -113,7 +116,7 @@ test('resolveNativeKernel defaults to legacy, falls back to JS67_NATIVE_KERNEL, 
   }
 });
 
-test('traceNative traces finite RGBA pixels on both legacy and cycles kernels', { skip: !findNativeAddon() }, () => {
+cookTest('traceNative traces finite RGBA pixels on both legacy and cycles kernels', { skip: !cookInstalled || !findNativeAddon() }, () => {
   const input = buildNativeInput(buildTraceScene(plainParts, {}), camera, options, pack);
   const cyclesResult = traceNative(input, { ...options, kernel: 'cycles' });
   assert.equal(cyclesResult.rgba.length, options.width * options.height * 4);
@@ -190,21 +193,21 @@ function parseFormatV2Tables(markdown) {
   return sections;
 }
 
-test('cycles kernel manifest, signatures-only abi.wgsl, and FORMAT-v2.md agree byte for byte', () => {
-  const manifestUrl = new URL('../packages/render-native/src/cycles/kernel-manifest.txt', import.meta.url);
-  const manifestEntries = readFileSync(manifestUrl, 'utf8')
+cookTest('cycles kernel manifest, signatures-only abi.wgsl, and FORMAT-v2.md agree byte for byte', () => {
+  const manifestPath = cookFile('src/cycles/kernel-manifest.txt');
+  const manifestEntries = readFileSync(manifestPath, 'utf8')
     .split(/\r?\n/)
     .map(line => line.split('#')[0].trim())
     .filter(Boolean);
   assert.ok(manifestEntries.includes('abi.wgsl'), 'kernel-manifest.txt must list abi.wgsl first');
   for (const entry of manifestEntries) {
     assert.ok(
-      existsSync(new URL(`../packages/render-native/src/cycles/${entry}`, import.meta.url)),
+      existsSync(cookFile(`src/cycles/${entry}`)),
       `Missing WGSL file listed in kernel-manifest.txt: ${entry}`,
     );
   }
 
-  const abiSource = readFileSync(new URL('../packages/render-native/src/cycles/abi.wgsl', import.meta.url), 'utf8');
+  const abiSource = readFileSync(cookFile('src/cycles/abi.wgsl'), 'utf8');
   assert.match(abiSource, /fn closure_eval\(closure: ptr<function, Closure>, wi: vec3<f32>, wo: vec3<f32>\) -> ClosureEval/);
   assert.match(abiSource, /fn closure_sample\(closure: ptr<function, Closure>, wo: vec3<f32>, u: vec3<f32>\) -> ClosureSample/);
 
@@ -217,7 +220,7 @@ test('cycles kernel manifest, signatures-only abi.wgsl, and FORMAT-v2.md agree b
     assert.match(uncommented, new RegExp(`@group\\(0\\)\\s*@binding\\(${binding}\\)`));
   }
 
-  const formatMarkdown = readFileSync(new URL('../packages/render-native/FORMAT-v2.md', import.meta.url), 'utf8');
+  const formatMarkdown = readFileSync(cookFile('FORMAT-v2.md'), 'utf8');
   const documentedStructs = parseFormatV2Tables(formatMarkdown);
   const expectedBufferStructs = [
     'KernelParamsV2',

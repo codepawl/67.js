@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { STRUCT_STRIDES_V2, buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
-import {
-  KERNEL_FLAG_TEXTURE_MIPS,
-  KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET,
-  TEXTURE_POOL_MAX_BYTES,
-} from '../packages/render-native/pack-input-v2.mjs';
-import {
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
+import { createCamera } from '../src/path-tracer.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const mips = await cookModule('texture-mips');
+const { STRUCT_STRIDES_V2, buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
+const { KERNEL_FLAG_TEXTURE_MIPS, KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, TEXTURE_POOL_MAX_BYTES } = packV2 ?? {};
+const {
   TEXTURE_KIND_RG16_FLOAT,
   TEXTURE_KIND_RGBA32_FLOAT,
   TEXTURE_KIND_RGBA8,
@@ -17,8 +18,8 @@ import {
   mipChainWordCount,
   mipLevelCount,
   mipLevelSize,
-} from '../packages/render-native/texture-mips.mjs';
-import { createCamera } from '../src/path-tracer.js';
+} = mips ?? {};
+const addonIsBuilt = cookInstalled && findNativeAddon() !== null;
 
 const QUAD_UVS = new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]);
 const FORMAT_RGBA8_UNORM = 0;
@@ -80,7 +81,7 @@ function kernelFlagsOf(input) {
     .getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
 }
 
-test('the level count and sizes halve each side down to one texel, rounding down', () => {
+cookTest('the level count and sizes halve each side down to one texel, rounding down', () => {
   assert.equal(mipLevelCount(1, 1), 1);
   assert.equal(mipLevelCount(2, 2), 2);
   assert.equal(mipLevelCount(16, 4), 5);
@@ -94,7 +95,7 @@ test('the level count and sizes halve each side down to one texel, rounding down
   assert.throws(() => mipLevelCount(0, 4), /texture side must be an integer from 1/);
 });
 
-test('half floats round trip the values a mip average produces', () => {
+cookTest('half floats round trip the values a mip average produces', () => {
   for (const value of [0, 1, -1, 0.5, 0.333251953125, 65504, 6.103515625e-5, 5.960464477539063e-8]) {
     assert.equal(halfToFloat(floatToHalf(value)), value);
   }
@@ -113,7 +114,7 @@ function byteOf(word, channel) {
   return (word >>> (channel * 8)) & 0xff;
 }
 
-test('level 1 of an 8-bit chain is the mean of the level 0 reconstruction, levels after it are 2 x 2 boxes', () => {
+cookTest('level 1 of an 8-bit chain is the mean of the level 0 reconstruction, levels after it are 2 x 2 boxes', () => {
   const chain = buildMipChain(TEXTURE_KIND_RGBA8, BLACK_WHITE_CHECKER_4X4(), 4, 4);
   assert.equal(chain.length, 4 + 1);
   for (let texel = 0; texel < 5; texel++) {
@@ -126,7 +127,7 @@ test('level 1 of an 8-bit chain is the mean of the level 0 reconstruction, level
   assert.equal(byteOf(alphaChain[0], 0), 10, 'a colour that does not change stays');
 });
 
-test('a chain of an uneven or thin texture keeps every level the size the kernel walks to, and a flat colour stays flat', () => {
+cookTest('a chain of an uneven or thin texture keeps every level the size the kernel walks to, and a flat colour stays flat', () => {
   const flat = Uint32Array.from({ length: 5 * 3 }, () => packedWord(77, 90, 200, 255));
   const chain = buildMipChain(TEXTURE_KIND_RGBA8, flat, 5, 3);
   assert.equal(chain.length, 2 * 1 + 1 * 1);
@@ -143,7 +144,7 @@ test('a chain of an uneven or thin texture keeps every level the size the kernel
   assert.equal(buildMipChain(TEXTURE_KIND_RGBA8, new Uint32Array(1), 1, 1).length, 0);
 });
 
-test('a float chain keeps the energy of a bright texel and does not clamp', () => {
+cookTest('a float chain keeps the energy of a bright texel and does not clamp', () => {
   const level0 = new Float32Array([8, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
   const chain = buildMipChain(TEXTURE_KIND_RGBA32_FLOAT, level0, 2, 2);
   assert.equal(chain.length, 4);
@@ -151,7 +152,7 @@ test('a float chain keeps the energy of a bright texel and does not clamp', () =
   assert.ok(Math.abs(mean[0] - 2) < 1e-5 && mean[1] === 0 && Math.abs(mean[3] - 1) < 1e-6, `mean texel ${mean}`);
 });
 
-test('a two-channel half chain takes the mean of each channel as a float', () => {
+cookTest('a two-channel half chain takes the mean of each channel as a float', () => {
   const pair = (red, green) => (floatToHalf(red) | (floatToHalf(green) << 16)) >>> 0;
   const level0 = new Uint32Array([pair(1, 0), pair(0, 0), pair(0, 0.5), pair(0, 0)]);
   const chain = buildMipChain(TEXTURE_KIND_RG16_FLOAT, level0, 2, 2);
@@ -159,7 +160,7 @@ test('a two-channel half chain takes the mean of each channel as a float', () =>
   assert.ok(Math.abs(halfToFloat(chain[0] >>> 16) - 0.125) < 1e-3);
 });
 
-test('the wrap mode reaches level 1: a clamped edge does not read the opposite side', () => {
+cookTest('the wrap mode reaches level 1: a clamped edge does not read the opposite side', () => {
   const level0 = Uint32Array.from({ length: 4 * 4 }, (_, index) => (index % 4 === 0 ? packedWord(255, 0, 0, 255) : packedWord(0, 0, 0, 255)));
   const repeated = buildMipChain(TEXTURE_KIND_RGBA8, level0, 4, 4, 0, 0);
   const clamped = buildMipChain(TEXTURE_KIND_RGBA8, level0, 4, 4, 1, 1);
@@ -208,7 +209,7 @@ function reconstructionLinearMean(words, side) {
   return total / (side * side * steps * steps);
 }
 
-test('a uniform mid grey keeps its linear value within half a code at every level of an sRGB chain', () => {
+cookTest('a uniform mid grey keeps its linear value within half a code at every level of an sRGB chain', () => {
   for (const grey of [30, 77, 128, 200]) {
     const side = 32;
     const chain = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, new Uint32Array(side * side).fill(packedWord(grey, grey, grey, 255)), side, side);
@@ -218,7 +219,7 @@ test('a uniform mid grey keeps its linear value within half a code at every leve
   }
 });
 
-test('the levels of a random sRGB texture keep the mean light of the level 0 reconstruction, with no downward trend', () => {
+cookTest('the levels of a random sRGB texture keep the mean light of the level 0 reconstruction, with no downward trend', () => {
   let seed = 12345;
   const nextByte = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -239,7 +240,7 @@ test('the levels of a random sRGB texture keep the mean light of the level 0 rec
   assert.ok(averageError > -0.003, `the levels do not drift down together: average ${(averageError * 100).toFixed(2)} percent`);
 });
 
-test('without textureMips a texture is level 0 only, the flag is clear and the pool is as it was', () => {
+cookTest('without textureMips a texture is level 0 only, the flag is clear and the pool is as it was', () => {
   const image = byteImage(8, 8, (x, y) => [x * 30, y * 30, 7, 255]);
   const byDefault = packMaps([{ image }]);
   const explicitOff = packMaps([{ image }], { textureMips: false });
@@ -251,7 +252,7 @@ test('without textureMips a texture is level 0 only, the flag is clear and the p
   assert.deepEqual(explicitOff.kernelParams, byDefault.kernelParams);
 });
 
-test('textureMips stores the chain after level 0, counts the levels in the descriptor and sets the kernel flag', () => {
+cookTest('textureMips stores the chain after level 0, counts the levels in the descriptor and sets the kernel flag', () => {
   const image = byteImage(8, 8, () => [40, 80, 120, 255]);
   const off = packMaps([{ image, colorSpace: 'linear' }]);
   const on = packMaps([{ image, colorSpace: 'linear' }], { textureMips: true });
@@ -266,7 +267,7 @@ test('textureMips stores the chain after level 0, counts the levels in the descr
   }
 });
 
-test('an sRGB chain stores bytes of the mean light: level 1 integrates the reconstruction, which is darker than a box of decoded texels', () => {
+cookTest('an sRGB chain stores bytes of the mean light: level 1 integrates the reconstruction, which is darker than a box of decoded texels', () => {
   const chain = buildMipChain(TEXTURE_KIND_RGBA8_SRGB, BLACK_WHITE_CHECKER_4X4(), 4, 4);
   const level1 = byteOf(chain[0], 0);
   assert.ok(level1 >= 130 && level1 <= 145, `level 1 holds byte ${level1}: the mean of the decoded blend of black and white, near 137`);
@@ -276,7 +277,7 @@ test('an sRGB chain stores bytes of the mean light: level 1 integrates the recon
   assert.ok(Math.abs(byteOf(grey[0], 0) - 77) <= 1, 'a flat colour survives the round trip');
 });
 
-test('an sRGB map keeps its format at every level', () => {
+cookTest('an sRGB map keeps its format at every level', () => {
   const checker = byteImage(4, 4, (x, y) => ((x + y) % 2 === 0 ? [0, 0, 0, 255] : [255, 255, 255, 255]));
   const input = packMaps([{ image: checker, colorSpace: 'srgb' }], { textureMips: true });
   assert.equal(descriptorWord(input, 0, 3) & 0xff, FORMAT_RGBA8_SRGB);
@@ -284,7 +285,7 @@ test('an sRGB map keeps its format at every level', () => {
   assert.ok(level1 >= 130 && level1 <= 145, `level 1 byte ${level1}`);
 });
 
-test('mips are per texture too: mips true on one map, false on another, and nearest maps never take levels', () => {
+cookTest('mips are per texture too: mips true on one map, false on another, and nearest maps never take levels', () => {
   const image = byteImage(8, 8, () => [10, 20, 30, 255]);
   const mixed = packMaps([{ image, mips: true }, { image: byteImage(8, 8, () => [1, 2, 3, 255]), mips: false }]);
   assert.equal(mipCountOf(mixed, 0), 4);
@@ -299,7 +300,7 @@ test('mips are per texture too: mips true on one map, false on another, and near
   assert.equal(mipCountOf(single, 0), 1);
 });
 
-test('one image with and without levels stays two descriptors, and the uv transform stays in the key', () => {
+cookTest('one image with and without levels stays two descriptors, and the uv transform stays in the key', () => {
   const image = byteImage(8, 8, () => [5, 5, 5, 255]);
   const split = packMaps([{ image, mips: true }, { image, mips: false }]);
   assert.equal(split.textureCount, 2);
@@ -313,7 +314,7 @@ test('one image with and without levels stays two descriptors, and the uv transf
   assert.equal(wrapped.textureCount, 2);
 });
 
-test('float and half textures are packed in their own formats, with levels on request', () => {
+cookTest('float and half textures are packed in their own formats, with levels on request', () => {
   const floatData = new Float32Array(4 * 4 * 4).fill(0.5);
   floatData.set([12, 6, 3, 1], 0);
   const halfData = new Uint16Array(4 * 4 * 2).fill(floatToHalf(0.25));
@@ -338,7 +339,7 @@ test('float and half textures are packed in their own formats, with levels on re
   assert.ok(Math.abs(halfToFloat(input.textureTexels[halfStart + 16] & 0xffff) - 0.25) < 1e-3);
 });
 
-test('textureMips and mips fail at the boundary with what to pass', () => {
+cookTest('textureMips and mips fail at the boundary with what to pass', () => {
   const image = byteImage(4, 4, () => [1, 1, 1, 255]);
   assert.throws(() => packMaps([{ image }], { textureMips: 'yes' }), (error) => {
     assert.ok(error instanceof TypeError);
@@ -349,7 +350,7 @@ test('textureMips and mips fail at the boundary with what to pass', () => {
   assert.throws(() => packMaps([{ image, mips: 1 }]), /`mips` must be true/);
 });
 
-test('the pool budget counts the mip levels', () => {
+cookTest('the pool budget counts the mip levels', () => {
   // 16384 x 16384 bytes-per-texel 4 is exactly the 1 GiB pool: level 0 alone would fit, the chain on top of it does not.
   const side = 16384;
   assert.equal(side * side * 4, TEXTURE_POOL_MAX_BYTES);
@@ -367,9 +368,9 @@ test('the pool budget counts the mip levels', () => {
 
 // ---- GPU-gated: the kernel reads the levels ----
 
-const gpuSkip = { skip: !findNativeAddon() };
+const gpuSkip = { skip: !addonIsBuilt };
 
-test('a magnified texture reads level 0 with mip levels on, to the last bit', gpuSkip, async () => {
+cookTest('a magnified texture reads level 0 with mip levels on, to the last bit', gpuSkip, async () => {
   const { renderFloor, maxAbsoluteDifference } = await import('../bench/cycles-parity/texture-mips-bench.mjs');
   const settings = { cameraName: 'magnified', samples: 4, seed: 3, width: 48, height: 27 };
   const withoutMips = renderFloor({ ...settings, textureMips: false });
@@ -377,7 +378,7 @@ test('a magnified texture reads level 0 with mip levels on, to the last bit', gp
   assert.equal(maxAbsoluteDifference(withoutMips, withMips), 0);
 });
 
-test('a minified checker reads other levels with mip levels on, and stays finite', gpuSkip, async () => {
+cookTest('a minified checker reads other levels with mip levels on, and stays finite', gpuSkip, async () => {
   const { renderFloor, maxAbsoluteDifference } = await import('../bench/cycles-parity/texture-mips-bench.mjs');
   const settings = { cameraName: 'receding', width: 96, height: 54, samples: 16, seed: 5 };
   const withoutMips = renderFloor({ ...settings, textureMips: false });
@@ -386,7 +387,7 @@ test('a minified checker reads other levels with mip levels on, and stays finite
   assert.ok(maxAbsoluteDifference(withoutMips, withMips) > 0.01, 'the far floor is read at a coarser level');
 });
 
-test('an HDR float emissive map keeps values above one through the kernel, with and without levels', gpuSkip, () => {
+cookTest('an HDR float emissive map keeps values above one through the kernel, with and without levels', gpuSkip, () => {
   const size = 9;
   const camera = createCamera({ eye: [0, 0, 2.2], target: [0, 0, 0], fov: 30 }, size, size);
   const texelValue = 4;
@@ -413,7 +414,7 @@ test('an HDR float emissive map keeps values above one through the kernel, with 
   }
 });
 
-test('the level follows the footprint with no half level of bias: one texel per pixel reads level 0, two texels per pixel level 1', gpuSkip, () => {
+cookTest('the level follows the footprint with no half level of bias: one texel per pixel reads level 0, two texels per pixel level 1', gpuSkip, () => {
   const size = 32;
   const fieldOfView = 30;
   const distance = 2 / Math.tan(fieldOfView * Math.PI / 360);
@@ -452,7 +453,7 @@ test('the level follows the footprint with no half level of bias: one texel per 
   assert.ok(oneTexel.maximum - oneTexel.minimum > 0.3, 'level 0 keeps the checker: ' + JSON.stringify(oneTexel));
 });
 
-test('a contrasty sRGB map read at level 1 gives the linear mean of the stored level 1 texels, not a blend of stored values', gpuSkip, () => {
+cookTest('a contrasty sRGB map read at level 1 gives the linear mean of the stored level 1 texels, not a blend of stored values', gpuSkip, () => {
   const size = 32;
   const fieldOfView = 30;
   const distance = 2 / Math.tan(fieldOfView * Math.PI / 360);
@@ -491,7 +492,7 @@ test('a contrasty sRGB map read at level 1 gives the linear mean of the stored l
 
 // The tables a scene packs to with mip levels off, as SHA-256 taken on main before the levels existed (#896): the default
 // must not move a byte of the texture descriptors, the texel pool, the kernel parameters or the material records.
-test('with mip levels off the packed tables are the bytes main packed before the levels existed', async () => {
+cookTest('with mip levels off the packed tables are the bytes main packed before the levels existed', async () => {
   const { createHash } = await import('node:crypto');
   const materials = [
     { color: [1, 1, 1], map: { image: byteImage(6, 5, (x, y) => [x * 40, y * 50, 7, 255]) } },
@@ -520,7 +521,7 @@ test('with mip levels off the packed tables are the bytes main packed before the
 
 // A level of odd side halves to floor(side / 2) texels, so each destination texel covers two and a fraction source texels.
 // Every source texel must reach the next level: a 6 x 6 map has a 3 x 3 level 1 and a 1 x 1 level 2 that is the mean of all nine.
-test('a level with an odd side reaches the next level whole, not without its last row and column', () => {
+cookTest('a level with an odd side reaches the next level whole, not without its last row and column', () => {
   const rightThirdWhite = new Uint32Array(36);
   for (let texel = 0; texel < 36; texel++) {
     const value = texel % 6 >= 4 ? 255 : 0;

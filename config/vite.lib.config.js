@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { glslCommentStripperForVite } from '../scripts/strip-glsl-comments.mjs';
+import { cookOptionalForVite } from '../scripts/vite-cook-optional.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 export const MCP_BUILD_RUNNING = 'SIXTYSEVEN_MCP_BUILD_RUNNING';
@@ -32,7 +33,7 @@ function rebuildMcpAfterLibrary() {
 const legalBanner = '/*! 67js, MIT License, Copyright (c) 2026 CodePawl. Bundled gl-matrix: Copyright (c) 2015-2025, Brandon Jones, Colin MacKenzie IV, MIT License. Complete license texts and third-party notices: LICENSE and THIRD-PARTY-NOTICES.md at the package root. */';
 
 export default defineConfig({
-  plugins: [glslCommentStripperForVite(), rebuildMcpAfterLibrary()],
+  plugins: [cookOptionalForVite(), glslCommentStripperForVite(), rebuildMcpAfterLibrary()],
   build: {
     copyPublicDir: false,
     rolldownOptions: {

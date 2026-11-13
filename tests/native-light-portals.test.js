@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 
-import { STRUCT_STRIDES_V2, buildNativeInputV2, findNativeAddon, traceNative } from '../packages/render-native/index.mjs';
 import { box } from '../src/geometry.js';
 import { createEnvironmentMap } from '../src/hdri.js';
 import { createCamera, describeIgnoredFeatures } from '../src/path-tracer.js';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
 
-const hasAddon = findNativeAddon() !== null;
+const cook = await cookModule();
+const { STRUCT_STRIDES_V2, buildNativeInputV2, findNativeAddon, traceNative } = cook ?? {};
+
+const hasAddon = cookInstalled && findNativeAddon() !== null;
 const skipWithoutAddon = hasAddon ? false : 'the native addon is not built';
 
 const LIGHT_FLAG_PORTAL = 8;
@@ -107,7 +109,7 @@ function lightRecordWords(packed, index) {
   return new Uint32Array(packed.lights.buffer, packed.lights.byteOffset + index * STRUCT_STRIDES_V2.light, STRUCT_STRIDES_V2.light / 4);
 }
 
-test('buildTraceScene keeps a portal out of the emitting area lights and carries its rectangle', () => {
+cookTest('buildTraceScene keeps a portal out of the emitting area lights and carries its rectangle', () => {
   const emitter = { position: [0, 2.9, 0], direction: [0, -1, 0], width: 1, height: 1, color: [1, 1, 1], intensity: 5 };
   const { areas, portals } = buildTraceScene(roomParts({ withCeiling: false, withOutsideBox: false }), { areaLights: [emitter, WINDOW_PORTAL] }).lights;
   assert.equal(areas.length, 1);
@@ -119,7 +121,7 @@ test('buildTraceScene keeps a portal out of the emitting area lights and carries
   assert.equal(portals[0].intensity, undefined, 'a portal has no power');
 });
 
-test('a portal must be a rect light with a size, and says what to pass instead', () => {
+cookTest('a portal must be a rect light with a size, and says what to pass instead', () => {
   assert.throws(
     () => buildTraceScene(roomParts({ withCeiling: false, withOutsideBox: false }), { areaLights: [{ ...WINDOW_PORTAL, shape: 'disk' }] }),
     /environment\.areaLights\[0\]\.portal is only supported on a rect area light, got shape "disk"/
@@ -130,7 +132,7 @@ test('a portal must be a rect light with a size, and says what to pass instead',
   );
 });
 
-test('the v2 packer appends a portal record after the emitters and counts it apart', () => {
+cookTest('the v2 packer appends a portal record after the emitters and counts it apart', () => {
   const emitter = { position: [0, 2.9, 0], direction: [0, -1, 0], width: 1, height: 1, color: [1, 1, 1], intensity: 5 };
   const packed = packRoom([WINDOW_PORTAL, emitter]);
   assert.equal(packed.lightCount, 1, 'the portal is not an emitter');
@@ -144,7 +146,7 @@ test('the v2 packer appends a portal record after the emitters and counts it apa
   assert.deepEqual(Array.from(new Float32Array(portalRecord.buffer, portalRecord.byteOffset + 16, 3)), [0, 0, 0], 'radiance');
 });
 
-test('the portal count has its own word, next to the camera environment scale, and a scene without portals leaves it 0', () => {
+cookTest('the portal count has its own word, next to the camera environment scale, and a scene without portals leaves it 0', () => {
   const withoutPortal = packRoom([]);
   assert.equal(parameterWord(withoutPortal, PORTAL_COUNT_PARAM_WORD), 0);
   assert.equal(withoutPortal.portalCount, 0);
@@ -154,7 +156,7 @@ test('the portal count has its own word, next to the camera environment scale, a
   assert.notEqual(parameterWord(packed, CAMERA_ENV_SCALE_PARAM_WORD), 0, 'the camera environment scale is kept');
 });
 
-test('a scene with only a portal has no emitters and no light tree', () => {
+cookTest('a scene with only a portal has no emitters and no light tree', () => {
   const packed = packRoom([WINDOW_PORTAL]);
   assert.equal(packed.lightCount, 0);
   assert.equal(packed.portalCount, 1);
@@ -162,20 +164,20 @@ test('a scene with only a portal has no emitters and no light tree', () => {
   assert.equal(lightRecordWords(packed, 0)[LIGHT_FLAG_WORD_INDEX], LIGHT_FLAG_PORTAL);
 });
 
-test('the v2 packer rejects a disk portal', () => {
+cookTest('the v2 packer rejects a disk portal', () => {
   const scene = buildTraceScene(roomParts({ withCeiling: false, withOutsideBox: false }), {});
   scene.lights.areas.push({ bit: 26, shape: 'disk', portal: true, position: [0, 1, 0], normal: [1, 0, 0], width: 1, height: 1 });
   assert.throws(() => buildNativeInputV2(scene, createCamera(ROOM_CAMERA, 8, 8), { width: 8, height: 8, samples: 1 }), /needs a rect light/);
 });
 
-test('the CPU and WebGL tracers are told that a portal draws nothing, the native kernel is not', () => {
+cookTest('the CPU and WebGL tracers are told that a portal draws nothing, the native kernel is not', () => {
   const environment = { areaLights: [WINDOW_PORTAL] };
   assert.match(describeIgnoredFeatures([], environment, 'cpu').join(' '), /Light portals .* are ignored/);
   assert.doesNotMatch(describeIgnoredFeatures([], environment, 'native', { kernelMaterials: true }).join(' '), /portal/);
   assert.doesNotMatch(describeIgnoredFeatures([], { areaLights: [] }, 'cpu').join(' '), /portal/);
 });
 
-test('a portal keeps the mean of a room lit through a window', { skip: skipWithoutAddon }, t => {
+cookTest('a portal keeps the mean of a room lit through a window', { skip: skipWithoutAddon }, t => {
   const common = { width: 48, height: 32, samples: 2048, samplesPerDispatch: 64, seed: 7 };
   const without = meanRgb(trace(buildRoomScene({ withPortal: false }), common).rgba);
   const withPortal = meanRgb(trace(buildRoomScene({ withPortal: true }), common).rgba);
@@ -186,7 +188,7 @@ test('a portal keeps the mean of a room lit through a window', { skip: skipWitho
   }
 });
 
-test('a portal cuts the change between seeds of a frozen camera by at least 4 times', { skip: skipWithoutAddon }, t => {
+cookTest('a portal cuts the change between seeds of a frozen camera by at least 4 times', { skip: skipWithoutAddon }, t => {
   const common = { width: 48, height: 32, samples: 64, samplesPerDispatch: 64 };
   const framesOf = withPortal => SEEDS.map(seed => trace(buildRoomScene({ withPortal }), { ...common, seed }, WALL_CAMERA).rgba);
   const differenceWithout = meanSeedDifference(framesOf(false));
@@ -196,7 +198,7 @@ test('a portal cuts the change between seeds of a frozen camera by at least 4 ti
   assert.ok(ratio >= 4, `seed difference fell ${ratio.toFixed(2)} times (${differenceWithout} to ${differenceWith})`);
 });
 
-test('a portal does not darken sky seen directly or an object outside the window', { skip: skipWithoutAddon }, t => {
+cookTest('a portal does not darken sky seen directly or an object outside the window', { skip: skipWithoutAddon }, t => {
   const common = { width: 48, height: 32, samples: 2048, samplesPerDispatch: 64, seed: 11 };
   const without = meanRgb(trace(buildRoomScene({ withPortal: false, withCeiling: false, withOutsideBox: true }), common).rgba);
   const withPortal = meanRgb(trace(buildRoomScene({ withPortal: true, withCeiling: false, withOutsideBox: true }), common).rgba);

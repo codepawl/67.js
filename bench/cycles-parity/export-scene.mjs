@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
+import { buildNativeInput } from '@codepawlhq/cook/pack-input';
 import { loadReferenceScene, reconstructTraceSceneSource, serializeSceneDescription } from './scene-bridge.mjs';
 
 const TABLE_NAMES = ['triangles', 'materials', 'lights', 'atlas', 'environmentColors', 'environmentTables', 'parameters'];

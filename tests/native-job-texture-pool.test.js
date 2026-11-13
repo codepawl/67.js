@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import test from 'node:test';
-import { STRUCT_STRIDES_V2 } from '../packages/render-native/index.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput, carriedMaterialFieldsOfScene } from '../packages/render-native/job-input.mjs';
-import { buildNativeInput, packNativeMaterialTables } from '../packages/render-native/pack-input.mjs';
-import { TEXTURE_POOL_MAX_BYTES, TexturePoolFullError, buildNativeInputV2, reduceV1MaterialTable } from '../packages/render-native/pack-input-v2.mjs';
 import { exportNativeSceneTables } from '../scripts/native-bake-page.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
+import { cookModule, cookTest } from './support/cook.js';
 import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const jobInput = await cookModule('job-input');
+const packInput = await cookModule('pack-input');
+const packV2 = await cookModule('pack-input-v2');
+const { STRUCT_STRIDES_V2 } = cook ?? {};
+const { buildFlattenedJobNativeInput, buildJobNativeInput, carriedMaterialFieldsOfScene } = jobInput ?? {};
+const { buildNativeInput, packNativeMaterialTables } = packInput ?? {};
+const { TEXTURE_POOL_MAX_BYTES, TexturePoolFullError, buildNativeInputV2, reduceV1MaterialTable } = packV2 ?? {};
 
 const WIDTH = 24;
 const HEIGHT = 16;
@@ -86,7 +91,7 @@ const GOLDEN_FLATTENED_HASHES = {
   triangles: '96c8ea48ddace72c91112c5b773822350ad6e97fc59755853db57362e7f3fc59',
 };
 
-test('a textured instanced job packs the tables it packed through the v1 atlas', () => {
+cookTest('a textured instanced job packs the tables it packed through the v1 atlas', () => {
   const scene = buildTraceScene(texturedParts(), environment, { instancing: true });
   assert.ok(scene.instances);
   const hashes = hashesOfPackedTables(buildJobNativeInput(scene, camera, packOptions, pack, resolveTexture));
@@ -94,7 +99,7 @@ test('a textured instanced job packs the tables it packed through the v1 atlas',
   assert.deepEqual(hashes, GOLDEN_INSTANCED_HASHES);
 });
 
-test('a textured flattened job packs the tables it packed through the v1 atlas', () => {
+cookTest('a textured flattened job packs the tables it packed through the v1 atlas', () => {
   const scene = buildTraceScene(texturedParts(), environment);
   const hashes = hashesOfPackedTables(buildFlattenedJobNativeInput(scene, camera, packOptions, pack, resolveTexture));
   if (process.env.PRINT_POOL_HASHES) console.log('FLATTENED', JSON.stringify(hashes));
@@ -116,13 +121,13 @@ function manyMapParts(mapCount, mapSize) {
 const OVER_ATLAS_MAP_COUNT = 70;
 const OVER_ATLAS_MAP_SIZE = 1024;
 
-test('v1 atlas alone rejects the maps the v2 pool takes', () => {
+cookTest('v1 atlas alone rejects the maps the v2 pool takes', () => {
   const parts = manyMapParts(OVER_ATLAS_MAP_COUNT, OVER_ATLAS_MAP_SIZE);
   const scene = buildTraceScene(parts, environment, { instancing: true });
   assert.throws(() => pack.packAtlas(scene.traceMaterials), /do not fit the GPU atlas/);
 });
 
-test('an instanced job with maps beyond the v1 atlas packs them into the texture pool', () => {
+cookTest('an instanced job with maps beyond the v1 atlas packs them into the texture pool', () => {
   const parts = manyMapParts(OVER_ATLAS_MAP_COUNT, OVER_ATLAS_MAP_SIZE);
   const scene = buildTraceScene(parts, environment, { instancing: true });
   const input = buildJobNativeInput(scene, camera, packOptions, pack, resolveTexture);
@@ -132,7 +137,7 @@ test('an instanced job with maps beyond the v1 atlas packs them into the texture
   assert.equal(input.textureDescriptors.byteLength / STRUCT_STRIDES_V2.textureDescriptor, OVER_ATLAS_MAP_COUNT);
 });
 
-test('a flattened job with maps beyond the v1 atlas packs them into the texture pool', () => {
+cookTest('a flattened job with maps beyond the v1 atlas packs them into the texture pool', () => {
   const parts = manyMapParts(OVER_ATLAS_MAP_COUNT, OVER_ATLAS_MAP_SIZE);
   const scene = buildTraceScene(parts, environment);
   const input = buildFlattenedJobNativeInput(scene, camera, packOptions, pack, resolveTexture);
@@ -155,12 +160,12 @@ function assertPoolRefusal(callback) {
   assert.throws(callback, error => error instanceof TexturePoolFullError && error instanceof RangeError && error.texturePoolFull === true && POOL_MESSAGE.test(error.message));
 }
 
-test('an instanced job whose map exceeds the texture pool says what to pass instead', () => {
+cookTest('an instanced job whose map exceeds the texture pool says what to pass instead', () => {
   const scene = buildTraceScene(oversizeMapParts(quad(1)), environment, { instancing: true });
   assertPoolRefusal(() => buildJobNativeInput(scene, camera, packOptions, pack, resolveTexture));
 });
 
-test('a flattened job whose map exceeds the texture pool says what to pass instead', () => {
+cookTest('a flattened job whose map exceeds the texture pool says what to pass instead', () => {
   const scene = buildTraceScene(oversizeMapParts(quad(1)), environment);
   assertPoolRefusal(() => buildFlattenedJobNativeInput(scene, camera, packOptions, pack, resolveTexture));
 });
@@ -169,7 +174,7 @@ test('a flattened job whose map exceeds the texture pool says what to pass inste
 // map (4 MiB) fits alone and the second one passes the pool. That option is the seam that keeps these tests from allocating a gigabyte.
 const SMALL_POOL_OPTIONS = { ...packOptions, texturePoolMaxBytes: 6 * 1024 * 1024 };
 
-test('maps that each fit the pool but not together are refused by both job builders', () => {
+cookTest('maps that each fit the pool but not together are refused by both job builders', () => {
   const parts = manyMapParts(3, 1024);
   assertPoolRefusal(() => buildJobNativeInput(buildTraceScene(parts, environment, { instancing: true }), camera, SMALL_POOL_OPTIONS, pack, resolveTexture));
   assertPoolRefusal(() => buildFlattenedJobNativeInput(buildTraceScene(parts, environment), camera, SMALL_POOL_OPTIONS, pack, resolveTexture));
@@ -177,14 +182,14 @@ test('maps that each fit the pool but not together are refused by both job build
   assert.equal(single.textureCount, 1);
 });
 
-test('the pool limit can be lowered and never raised', () => {
+cookTest('the pool limit can be lowered and never raised', () => {
   const scene = buildTraceScene(manyMapParts(1, 8), environment);
   for (const bad of [0, 1.5, TEXTURE_POOL_MAX_BYTES + 1, '4096']) {
     assert.throws(() => buildFlattenedJobNativeInput(scene, camera, { ...packOptions, texturePoolMaxBytes: bad }, pack, resolveTexture), /texturePoolMaxBytes/);
   }
 });
 
-test('a map whose data is shorter than its size is refused with both sizes', () => {
+cookTest('a map whose data is shorter than its size is refused with both sizes', () => {
   const short = { image: { width: 8, height: 8, data: new Uint8ClampedArray(100) }, colorSpace: 'srgb' };
   const shared = quad(1);
   const parts = [
@@ -195,7 +200,7 @@ test('a map whose data is shorter than its size is refused with both sizes', () 
   assert.throws(() => buildJobNativeInput(scene, camera, packOptions, pack, resolveTexture), /8x8 material texture needs 256 bytes[\s\S]*holds 100/);
 });
 
-test('with mip levels the virtual pack equals the pack through the real v1 atlas, byte for byte', () => {
+cookTest('with mip levels the virtual pack equals the pack through the real v1 atlas, byte for byte', () => {
   const scene = buildTraceScene(texturedParts(), environment, { instancing: true });
   const options = { ...packOptions, textureMips: true };
   const tables = packNativeMaterialTables(scene.traceMaterials, null, pack);
@@ -237,17 +242,17 @@ function exportParts(parts, options, modules = exportModules(), instancing = tru
   return exportNativeSceneTables({ parts, environment, camera, options, kernel: 'cycles', instancing, modules });
 }
 
-test('the page export of an instanced scene over the pool shows the pool message, not the atlas one', () => {
+cookTest('the page export of an instanced scene over the pool shows the pool message, not the atlas one', () => {
   const parts = manyMapParts(3, 1024);
   assert.throws(() => exportParts(parts, SMALL_POOL_OPTIONS), error => POOL_MESSAGE.test(error.message) && !/GPU atlas/.test(error.message));
 });
 
-test('the page export of a flattened scene over the pool shows the pool message, not the atlas one', () => {
+cookTest('the page export of a flattened scene over the pool shows the pool message, not the atlas one', () => {
   const parts = manyMapParts(3, 1024).map((part, index) => ({ ...part, geometry: quad(1 + index / 10) }));
   assert.throws(() => exportParts(parts, SMALL_POOL_OPTIONS), error => POOL_MESSAGE.test(error.message) && !/GPU atlas/.test(error.message));
 });
 
-test('the page export keeps the first reason when the v1 fallback fails on the atlas too', () => {
+cookTest('the page export keeps the first reason when the v1 fallback fails on the atlas too', () => {
   const parts = manyMapParts(OVER_ATLAS_MAP_COUNT, OVER_ATLAS_MAP_SIZE);
   const modules = exportModules({ buildFlattenedJobNativeInput: () => { throw new RangeError('the records do not fit'); } });
   assert.throws(() => exportParts(parts, packOptions, modules, false), /GPU atlas[\s\S]*already failed: the records do not fit/);

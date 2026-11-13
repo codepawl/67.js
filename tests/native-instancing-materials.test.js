@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { STRUCT_STRIDES_V2 } from '../packages/render-native/index.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../packages/render-native/job-input.mjs';
+import { cookModule, cookTest } from './support/cook.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
+
+const cook = await cookModule();
+const jobInput = await cookModule('job-input');
+const { STRUCT_STRIDES_V2 } = cook ?? {};
+const { buildFlattenedJobNativeInput, buildJobNativeInput } = jobInput ?? {};
 
 const camera = createCamera({ eye: [0, 0, 8], target: [0, 0, 0], fov: 50 }, 16, 16);
 const options = { width: 16, height: 16, samples: 1, bounces: 4, seed: 1, fireflyClamp: 20, noiseThreshold: 0 };
@@ -47,7 +50,7 @@ function flattenedJobInput(parts) {
   return buildFlattenedJobNativeInput(buildTraceScene(parts, environment), camera, options, pack, resolveTexture);
 }
 
-test('a part keeps the same material record whether or not other geometry in the job is shared', () => {
+cookTest('a part keeps the same material record whether or not other geometry in the job is shared', () => {
   const parts = partsWithSharedMesh();
   const flattened = materialRecords(flattenedJobInput(parts));
   const instancedScene = buildTraceScene(parts, environment, { instancing: true });

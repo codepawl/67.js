@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { buildNativeInputV2, STRUCT_STRIDES_V2 } from '../packages/render-native/index.mjs';
 import { createCamera } from '../src/path-tracer.js';
+import { cookModule, cookTest } from './support/cook.js';
+
+const cook = await cookModule();
+const { buildNativeInputV2, STRUCT_STRIDES_V2 } = cook ?? {};
 
 const NO_INDEX = 0xffffffff;
 const camera = createCamera({ eye: [0, 0, 6], target: [0, 0, 0], fov: 50 }, 16, 16);
@@ -46,7 +48,7 @@ function assertEmissiveLookups(input) {
   }
 }
 
-test('an emissive default material indexes its emissive entries past a degenerate triangle', () => {
+cookTest('an emissive default material indexes its emissive entries past a degenerate triangle', () => {
   const input = pack([WARM_LIGHT], [
     { geometry: stripWithDegenerateTriangle, materialIndex: 0 },
     { geometry: stripWithDegenerateTriangle, materialIndex: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -2, 0, 1] },
@@ -55,7 +57,7 @@ test('an emissive default material indexes its emissive entries past a degenerat
   assertEmissiveLookups(input);
 });
 
-test('an instance whose override makes the shared mesh emissive gets lookups that match its own entries', () => {
+cookTest('an instance whose override makes the shared mesh emissive gets lookups that match its own entries', () => {
   const input = pack([MATTE, WARM_LIGHT], [
     { geometry: stripWithDegenerateTriangle, materialIndex: 0 },
     { geometry: stripWithDegenerateTriangle, materialIndex: 1, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -2, 0, 1] },
@@ -65,7 +67,7 @@ test('an instance whose override makes the shared mesh emissive gets lookups tha
   assertEmissiveLookups(input);
 });
 
-test('an override that switches emission off and another that switches it back on keep the lookups valid', () => {
+cookTest('an override that switches emission off and another that switches it back on keep the lookups valid', () => {
   const input = pack([WARM_LIGHT, MATTE, COOL_LIGHT], [
     { geometry: stripWithDegenerateTriangle, materialIndex: 0 },
     { geometry: stripWithDegenerateTriangle, materialIndex: 1, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -2, 0, 1] },
@@ -77,7 +79,7 @@ test('an override that switches emission off and another that switches it back o
   assertEmissiveLookups(input);
 });
 
-test('a copy scaled so small that it drops an emissive triangle the others keep is refused with the instance named', () => {
+cookTest('a copy scaled so small that it drops an emissive triangle the others keep is refused with the instance named', () => {
   const bigAndSmall = {
     positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 2.05, 0, 0, 2, 0.04, 0]),
     normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),

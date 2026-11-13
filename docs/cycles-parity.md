@@ -1,6 +1,6 @@
 # Cycles 5.3 Parity Baseline & M1 Suite
 
-Milestone M0 measures today's native path tracer ([`packages/render-native`](../packages/render-native/README.md), legacy `kernel.wgsl` on `wgpu 30.0.1` Vulkan `EXPERIMENTAL_RAY_QUERY`) against **Blender 5.3.0 Cycles OptiX** under matched unbiased settings on a single reference scene before any Cycles-kernel port changes land.
+Milestone M0 measures today's native path tracer ([Cook](https://github.com/codepawl/cook/blob/main/README.md), legacy `kernel.wgsl` on `wgpu 30.0.1` Vulkan `EXPERIMENTAL_RAY_QUERY`) against **Blender 5.3.0 Cycles OptiX** under matched unbiased settings on a single reference scene before any Cycles-kernel port changes land.
 
 The Blender add-on that renders a Blender scene with Cook, built on the same scene reading as the Classroom bridge, is described in [blender-addon.md](./blender-addon.md) (#900).
 
@@ -8,7 +8,7 @@ All claims below are tagged `[measured]` (from benchmark artifacts produced by [
 
 ## Summary Verdict
 
-- **Per-sample speed vs equal-error speed (`T_eq`) `[measured]`**: On `lit-interior` (`960 × 540`, `8` bounces, unclamped, undenoised), 67js `render-native` traces `256` samples in **`2.101 s`** median sampling time (`2.381 s` total trace) vs **`11.371 s`** (`13.456 s` total trace) in Cycles 5.3 OptiX — **`5.41×` faster per sample (`0.185×` time)**. However, at `256` samples 67js has **`6.33×` higher `relMSE`** (`0.019762` vs `0.003121`) and still has not reached Cycles' 256-spp error at `1024` samples (`0.005135`). Extending the 67js ladder to `2048` (`0.002679`) and `4096` (`0.001453`) samples brackets Cycles' 256-spp `relMSE` at **`1,740.5` samples (`6.80×` as many samples)**, giving **`T_eq = 10.331 s` sampling (`T_eq / T_cycles = 0.909×`)** and **`12.886 s` total trace (`0.958×`)**. Nearly the entire `5.4×` raw ray-tracing speed lead on this 3,072-triangle room is consumed by higher Monte Carlo variance (no light tree on bounces, white-noise PCG instead of Sobol + blue noise).
+- **Per-sample speed vs equal-error speed (`T_eq`) `[measured]`**: On `lit-interior` (`960 × 540`, `8` bounces, unclamped, undenoised), Cook (native) traces `256` samples in **`2.101 s`** median sampling time (`2.381 s` total trace) vs **`11.371 s`** (`13.456 s` total trace) in Cycles 5.3 OptiX — **`5.41×` faster per sample (`0.185×` time)**. However, at `256` samples 67js has **`6.33×` higher `relMSE`** (`0.019762` vs `0.003121`) and still has not reached Cycles' 256-spp error at `1024` samples (`0.005135`). Extending the 67js ladder to `2048` (`0.002679`) and `4096` (`0.001453`) samples brackets Cycles' 256-spp `relMSE` at **`1,740.5` samples (`6.80×` as many samples)**, giving **`T_eq = 10.331 s` sampling (`T_eq / T_cycles = 0.909×`)** and **`12.886 s` total trace (`0.958×`)**. Nearly the entire `5.4×` raw ray-tracing speed lead on this 3,072-triangle room is consumed by higher Monte Carlo variance (no light tree on bounces, white-noise PCG instead of Sobol + blue noise).
 - **Setup latency (`T_sync`), RAM, and VRAM `[measured]`**: Warm per-call setup is **`0.244 s`** median in 67js (`0.026 s` JS pack + `0.164 s` Vulkan adapter/device + `0.005 s` WGSL compile + `0.009 s` upload + `0.002 s` BLAS/TLAS) vs **`2.012 s`** in headless Blender/Cycles (`~1.80 s` Python/mesh build + `~0.21 s` Cycles OptiX sync), with the `wgpu` device, bind group layout, lookup table buffer and compiled pipelines cached for the life of the Node process (a pipeline cache of at most 32 kernels, dropped when the device is lost); the device and adapter figure above was measured before that cache, and only the scene buffers and the acceleration structures are built again on each call. Peak process-tree RSS is **`287.0 MiB`** in 67js vs **`590.2 MiB`** in Blender (`0.49×`). Cycles reports **`Mem: 351.0 MiB`** peak render memory; uncontended 67js runs at `2048–4096` spp measure **`211–433 MiB`** card VRAM delta (`769–998 MiB` total card VRAM above a `558–565 MiB` desktop baseline).
 - **Radiometric bias (`[measured]`)**: At `4096` samples against Cycles `4096` spp (`Seed 1`, whose `Seed 1` vs `Seed 2` noise floor is `relMSE = 0.000285`), 67js global per-channel mean ratios are **`R = 1.0104, G = 1.0090, B = 1.0068`** (`+1.04% R, +0.90% G, +0.68% B`, scalar `1.0092`), and **all `64 / 64` tiles** in an `8 × 8` grid lie within `1 ± 0.05` (`min = 0.9849`, `median = 1.0034`, `max = 1.0280`). Fitting `relMSE(N) = B_bias + V / N` across `16..4096` spp isolates a systematic bias plateau **`B_bias = 0.000542`** (`~1.9×` the 4096-spp reference noise floor) driven by sphere point-light falloff near the ceiling (`+2.8%`) and missing multiscatter GGX + light-sphere reflections on the glossy table (`-2.1%`).
 
@@ -26,12 +26,12 @@ Exported losslessly from [`bench/reference/scenes.js`](../bench/reference/scenes
 
 ### Hardware & Contention Disclosure
 
-- **Machine `[measured]`**: NVIDIA GeForce RTX 3060 (`12,288 MiB` VRAM), Windows, Node.js `v24.19.0`, Blender `5.3.0` (`CYCLES` `OPTIX`), `packages/render-native` (`wgpu 30.0.1`, Vulkan `EXPERIMENTAL_RAY_QUERY`).
+- **Machine `[measured]`**: NVIDIA GeForce RTX 3060 (`12,288 MiB` VRAM), Windows, Node.js `v24.19.0`, Blender `5.3.0` (`CYCLES` `OPTIX`), Cook (`wgpu 30.0.1`, Vulkan `EXPERIMENTAL_RAY_QUERY`).
 - **GPU scheduling & exclusivity `[measured]`**: Every GPU command ran at `BelowNormal` priority under the machine-wide `gpu-lock` wrapper and [`bench/cycles-parity/measure-gpu-run.py`](../bench/cycles-parity/measure-gpu-run.py) (`50 ms` `nvidia-smi` stream + `25 ms` process-tree RSS polling). During the `4096`-spp references and the `16..1024`-spp ladder, another session's light-slot Blender/Node workload shared the RTX 3060 (`gpuExclusive = false`, pre-run card VRAM `6,812–7,650 MiB`). To prevent drift from skewing engine comparisons, every ladder point ran **3 interleaved back-to-back pairs** (`Cycles` immediately followed by `67js` for `r1`, `r2`, `r3`). During the extended `2048` and `4096` spp 67js runs (`s2048-r1`, `s4096-r1`), the foreign render exited (`baselineCardVramMegabytes = 558–565 MiB`, `preRunGpuUtilizationPercent = 11%–14%`, only idle desktop Chrome attached), providing uncontended card VRAM delta measurements alongside Cycles' internal `Mem:` counter.
 
 ### Strictly Matched Parity Configuration
 
-| Parameter | Cycles 5.3 OptiX ([`render-cycles.py`](../bench/cycles-parity/render-cycles.py)) | 67js `render-native` ([`trace-native.mjs`](../bench/cycles-parity/trace-native.mjs)) | Why override default |
+| Parameter | Cycles 5.3 OptiX ([`render-cycles.py`](../bench/cycles-parity/render-cycles.py)) | Cook (native) ([`trace-native.mjs`](../bench/cycles-parity/trace-native.mjs)) | Why override default |
 | --- | --- | --- | --- |
 | Resolution | `960 × 540` (`100%`) | `width: 960, height: 540` | Same pixel grid (`518,400` pixels) |
 | Bounces | `max_bounces = 8`, `diffuse = glossy = transmission = volume = transparent_max = 8` | `bounces: 8` | Cycles defaults to `diffuse = 4, glossy = 4, max = 12`; 67js uses one shared limit |
@@ -47,7 +47,7 @@ Exported losslessly from [`bench/reference/scenes.js`](../bench/reference/scenes
 
 - **Source semantics `[source]`**:
   - In **Cycles** (`intern/cycles/scene/integrator.cpp:227`, `kernel/integrator/path_state.h:146`, `shade_surface.h:840-867`), setting `max_bounces = B` stores `kintegrator->max_bounce = B + 1`. Camera hits start at `path.bounce = 0`. Surface direct-light NEE (`integrate_surface_direct_light`) executes at `path.bounce = 0, 1, ..., B` (`B + 1` surface vertices). After sampling the BSDF at `bounce = B`, `bounce` increments to `B + 1 == max_bounce`, which sets `PATH_RAY_TERMINATE_AFTER_TRANSPARENT`: ray `B + 1` is traced **only** to accumulate emission/background MIS if it hits a light or escapes, and terminates immediately on any opaque surface without shading.
-  - In **67js** ([`packages/render-native/src/kernel.wgsl`](../packages/render-native/src/kernel.wgsl) lines `609-618`, `808-832`, `963-1048`), `tracePath` loops `for (var depth = 0; depth <= bounces; depth++)`, evaluating `addLights` (NEE) at `depth = 0, 1, ..., B` (`B + 1` surface vertices) and exiting after `depth = B` **without** tracing continuation ray `B + 1`.
+  - In **67js** ([`cook/src/kernel.wgsl`](https://github.com/codepawl/cook/blob/main/src/kernel.wgsl) lines `609-618`, `808-832`, `963-1048`), `tracePath` loops `for (var depth = 0; depth <= bounces; depth++)`, evaluating `addLights` (NEE) at `depth = 0, 1, ..., B` (`B + 1` surface vertices) and exiting after `depth = B` **without** tracing continuation ray `B + 1`.
   - **Subtle sky-MIS consequence `[source]` + `[measured]`**: For analytical lights (`point`, `spot`, `area`, `sun`), 67js uses pure NEE (`directWeight = 1 / selectionProbability`), so `bounces = B` matches Cycles `max_bounces = B` vertex-for-vertex (`B + 1` NEE evaluations). For the environment map (`weightMode = 1`), 67js multiplies NEE at `depth = B` by the MIS weight `p_env^2 / (p_env^2 + p_bsdf^2)` (`kernel.wgsl:609-613`) expecting `depth = B + 1` to add the complementary BSDF escape weight `p_bsdf^2 / (p_env^2 + p_bsdf^2)` in `addEscape`, which never runs on the final bounce `depth == B`.
 - **Transparent bounce limit `[source]` + `[measured]`**: Cycles' `path_state_next` (`kernel/integrator/path_state.h`) counts the transparent surface it passes and sets `PATH_RAY_TERMINATE_ON_NEXT_SURFACE` once the count reaches `transparent_max_bounce`, so a path always passes the first transparent surface, also with a limit of 0 (its own FIXME note), and ends at the next surface with only that surface's emission. A limit of 0 therefore renders the same picture as a limit of 1. Shadow rays may pass `max(transparent_max_bounce - transparent_bounce, 0)` transparent surfaces (`integrate_shadow_max_transparent_hits` in `intersect_shadow.h`), so the surfaces the camera path already passed count against the shadow ray's limit. Both are in the Cook kernel since #894, measured in "Transparent bounce limits" below. Before, Cook stopped at the first transparent surface when the limit was 0, and gave every shadow ray the full limit.
 - **Empirical white-furnace sphere check (`color = [0.8, 0.8, 0.8]`, `roughness = 1.0`, `specular = 0.0`, constant `1.0` sky, `128 × 128`, `256` spp) `[measured]`**:
@@ -94,7 +94,7 @@ Every row below reports the **median** and `[min, max]` spread across **3 interl
 
 ¹ *On `s16-r2` and `s16-r3`, Blender's post-render EXR ZIP write (`Saving: 00:48.97`) stalled on concurrent disk I/O while `render_stats` cleanly isolated actual OptiX path-tracing `samplingSeconds` (`0.488 s` median).*
 
-### 67js `packages/render-native` (Legacy Kernel) Sample Ladder
+### Cook (Legacy Kernel) Sample Ladder
 
 | Samples | `relMSE` vs Ref | Mean Ratio `(R, G, B)` | Setup `T_sync` (s) | Sampling (s) | Total Trace (s) | Process Wall (s) | Peak RAM (MiB) | Card VRAM Δ (MiB) | Peak Card VRAM (MiB) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -110,7 +110,7 @@ Every row below reports the **median** and `[min, max]` spread across **3 interl
 
 ### Setup (`T_sync`) Sub-Phase Breakdown (`256` spp Representative Run `r1`)
 
-- **67js `render-native` (`0.2056 s` total warm setup `[measured]`)**:
+- **Cook (native) (`0.2056 s` total warm setup `[measured]`)**:
   - JS scene flatten & pack (`buildTraceScene` + `buildNativeInput`): `0.0261 s`
   - `wgpu` Vulkan instance/adapter/device init (`deviceSetupSeconds`): `0.1637 s` (`79.6%` of warm setup; a cold driver-cache init on first boot measured `7.83 s`)
   - WGSL `kernel.wgsl` compile & pipeline creation (`compileSeconds`): `0.0048 s`
@@ -163,7 +163,7 @@ Row 7 (floor):   [1.0033, 1.0033, 0.9975, 0.9856, 0.9849, 0.9965, 1.0034, 1.0031
 ### Visible Differences and Causes from the Gap Table
 
 1. **Ceiling hotspot `+2.80%` (`room-ceiling` `1.0253`, tiles `(0, 3)..(0, 4)` at `1.0276–1.0280`) `[measured]` → Sphere point-light sampling mismatch `[source]`**:
-   - In [`packages/render-native/src/kernel.wgsl`](../packages/render-native/src/kernel.wgsl) (`randomOnSphere` + `pointLightFalloff`, lines `724-739`, `776-789`), 67js jitters a point uniformly over the entire `r = 0.05 m` sphere (including the back hemisphere) and evaluates `1 / max(d^2, r^2)` without solid-angle subtended-cone sampling. Cycles (`kernel/light/point.h`) samples the visible spherical cap uniformly in solid angle. At `0.40 m` vertical separation from the overhead key light (`y = 2.6` to `y = 3.0`), full-sphere jitter shifts the mean inverse-square kernel upward by `~2–3%`.
+   - In [`cook/src/kernel.wgsl`](https://github.com/codepawl/cook/blob/main/src/kernel.wgsl) (`randomOnSphere` + `pointLightFalloff`, lines `724-739`, `776-789`), 67js jitters a point uniformly over the entire `r = 0.05 m` sphere (including the back hemisphere) and evaluates `1 / max(d^2, r^2)` without solid-angle subtended-cone sampling. Cycles (`kernel/light/point.h`) samples the visible spherical cap uniformly in solid angle. At `0.40 m` vertical separation from the overhead key light (`y = 2.6` to `y = 3.0`), full-sphere jitter shifts the mean inverse-square kernel upward by `~2–3%`.
 2. **Darker glossy tabletop `-2.06%` (`table` `0.9794`, tiles `(5, 3)..(5, 4)` at `0.9863–0.9878`, and `maxAbsDiff = 0.729` on specular highlights) `[measured]` → Two Principled/light gaps `[source]`**:
    - **Principled v2 multiscatter GGX & dielectric Fresnel albedo** (`kernel.wgsl:441-582` vs Cycles `bsdf_microfacet.h` / `svm/closure.h`): 67js `principled-lite` uses single-scatter GGX with a polynomial directional-albedo approximation to weight the diffuse lobe under specular, losing energy at medium roughness (`roughness = 0.4` on `table`, `0.6` on `room-floor`).
    - **Light visibility & MIS on finite-radius lights** ([`docs/path-tracer.md`](path-tracer.md) line `37`): 67js point lights (`radius = 0.05 m`) are sampled by NEE only and cannot be intersected by camera or glossy BSDF rays (no MIS), whereas Cycles intersects and MIS-weights the `5 cm` sphere lights in glossy reflections on `table` (`roughness = 0.4`) and `vase` (`roughness = 0.2`).
@@ -179,7 +179,7 @@ Row 7 (floor):   [1.0033, 1.0033, 0.9975, 0.9856, 0.9849, 0.9965, 1.0034, 1.0031
 
 ### Equal-Sample (`256` spp) vs Equal-Error (`relMSE = 0.003121`) Comparison
 
-| Comparison Metric | Cycles 5.3 OptiX (`256` spp) | 67js `render-native` (`256` spp) | 67js Equal-Error (`~1,740.5` spp) | Ratio (`67js / Cycles`) |
+| Comparison Metric | Cycles 5.3 OptiX (`256` spp) | Cook (native) (`256` spp) | 67js Equal-Error (`~1,740.5` spp) | Ratio (`67js / Cycles`) |
 | --- | --- | --- | --- | --- |
 | Samples per pixel | `256` | `256` (`1.00×`) | **`1,740.51`** (bracket `[1024, 2048]`) | **`6.80×` samples** for equal `relMSE` |
 | `relMSE` vs Cycles `4096` Seed 1 | **`0.003121`** | `0.019762` (`6.33×` higher error) | **`0.003121`** (matched) | `6.33×` at `256` spp / `1.00×` at `T_eq` |
@@ -192,7 +192,7 @@ Row 7 (floor):   [1.0033, 1.0033, 0.9975, 0.9856, 0.9849, 0.9965, 1.0034, 1.0031
 
 Least-squares fit of $\text{relMSE}(N) = B_{\text{bias}} + \frac{V}{N}$ across the measured ladders (`[measured]`):
 
-- **67js `render-native` (`16..4096` spp)**:
+- **Cook (native) (`16..4096` spp)**:
   - $B_{\text{bias}} = \mathbf{0.000542}$ (`5.42 × 10⁻⁴`), $V_{\text{native}} = \mathbf{4.9246}$, $R^2 = \mathbf{0.999982}$ (residual RMSE `0.000406`).
   - Subtracting the reference's own finite-sample noise floor (`0.000285` at `4096` spp) leaves a true expected-image bias of $\Delta B \approx 0.000542 - 0.000285 = \mathbf{0.000257}$ (`2.57 × 10⁻⁴`).
   - Because $B_{\text{bias}} = 0.000542 < 0.003121$, 67js's bias floor does **not** prevent reaching Cycles' `256`-spp `relMSE` on `lit-interior` (`1,740.5` spp reaches `0.003121` cleanly). However, $B_{\text{bias}} = 0.000542$ **does** sit near Cycles' `1024`-spp `relMSE` (`0.000770`), proving quantitatively that past `~1,000` Cycles samples 67js hits an irreducible radiometric bias ceiling until M1 closes the sphere-light and Principled-BSDF gaps.
@@ -209,7 +209,7 @@ Least-squares fit of $\text{relMSE}(N) = B_{\text{bias}} + \frac{V}{N}$ across t
 
 Left to right: Cook's legacy kernel (256 samples), Cook's `cycles` kernel (4096 samples), Blender Cycles 5.3 (4096 samples). Linear output shown with the sRGB curve and no tone mapping.
 
-Milestone M1 expands parity verification for **Cook** (`packages/render-native` `--kernel cycles`) from `lit-interior` to six reference scenes from [`bench/reference/scenes.js`](../bench/reference/scenes.js): `spot-area`, `light-linking`, `metal`, `glass`, `outdoor-hdri`, and `lit-interior`. Every scene exports losslessly (`roundTripVerified = true`) via [`bench/cycles-parity/export-scene.mjs`](../bench/cycles-parity/export-scene.mjs) with Node asset loading handled in [`bench/cycles-parity/scene-bridge.mjs`](../bench/cycles-parity/scene-bridge.mjs) `[measured]`.
+Milestone M1 expands parity verification for **Cook** (`@codepawlhq/cook`, `--kernel cycles`) from `lit-interior` to six reference scenes from [`bench/reference/scenes.js`](../bench/reference/scenes.js): `spot-area`, `light-linking`, `metal`, `glass`, `outdoor-hdri`, and `lit-interior`. Every scene exports losslessly (`roundTripVerified = true`) via [`bench/cycles-parity/export-scene.mjs`](../bench/cycles-parity/export-scene.mjs) with Node asset loading handled in [`bench/cycles-parity/scene-bridge.mjs`](../bench/cycles-parity/scene-bridge.mjs) `[measured]`.
 
 ### M1 Acceptance Gates
 
@@ -265,9 +265,9 @@ Rendered on RTX 3060 (`wgpu 30.0.1` Vulkan `EXPERIMENTAL_RAY_QUERY`) at `960 × 
 
 - **GPU contention note `[measured]`**: All six `4096`-spp Cook renders ran at `BelowNormal` priority under `gpu-lock` while `3–5` concurrent light-slot GPU processes (Blender, Node, Chrome/FFmpeg) shared the RTX 3060 (`gpuExclusive = false`, pre-run card VRAM `1,240–1,955 MiB`, card utilization `100%`). Cold Vulkan SPIR-V pipeline compilation of the Cycles WGSL kernel measured **`60.9 s`** once per driver cache before the speed work below, and about **`20 s`** after it (`0.15–0.18 s` warm). The sampling times in this table were taken before that speed work, on a shared card; the per-sample times are in the next section.
 - **Closed Phase A bias gaps `[source]` + `[measured]`**:
-  - **Solid-angle spherical cap & analytic emitter MIS** ([`lights.wgsl`](../packages/render-native/src/cycles/lights.wgsl), [`integrator.wgsl`](../packages/render-native/src/cycles/integrator.wgsl)): eliminates the `+2.80%` ceiling hotspot and `-2.06%` tabletop deficit on `lit-interior`, tightening per-part ratios to `[1.0014, 1.0061]` and all `64 / 64` tiles to `[1.0003, 1.0082]`.
-  - **Principled v2 closures** ([`closure.wgsl`](../packages/render-native/src/cycles/closure.wgsl)): dielectric & conductor multiscatter GGX (`table_ggx_E` / `E_avg`), F82 metallic tint, full microfacet glass reflection/refraction with Beer-Lambert volume absorption, clearcoat albedo scaling, and sheen bring `metal` (`relMSE` `1.638` → `0.00544`) and `glass` (`relMSE` `0.00546` → `0.000076`) into sub-percent agreement with Cycles 5.3.
-  - **Final-vertex background MIS & `filter_glossy`** ([`integrator.wgsl`](../packages/render-native/src/cycles/integrator.wgsl)): tracing the `B + 1` emission/background termination ray resolves Phase A Gap 4 (`B = 0` uniform-sky sphere exact), and matching Cycles `bsdf_blur` (`filter_glossy = 1.0`) eliminates secondary reflective/refractive floor caustic spikes on `metal` and `glass`.
+  - **Solid-angle spherical cap & analytic emitter MIS** ([`lights.wgsl`](https://github.com/codepawl/cook/blob/main/src/cycles/lights.wgsl), [`integrator.wgsl`](https://github.com/codepawl/cook/blob/main/src/cycles/integrator.wgsl)): eliminates the `+2.80%` ceiling hotspot and `-2.06%` tabletop deficit on `lit-interior`, tightening per-part ratios to `[1.0014, 1.0061]` and all `64 / 64` tiles to `[1.0003, 1.0082]`.
+  - **Principled v2 closures** ([`closure.wgsl`](https://github.com/codepawl/cook/blob/main/src/cycles/closure.wgsl)): dielectric & conductor multiscatter GGX (`table_ggx_E` / `E_avg`), F82 metallic tint, full microfacet glass reflection/refraction with Beer-Lambert volume absorption, clearcoat albedo scaling, and sheen bring `metal` (`relMSE` `1.638` → `0.00544`) and `glass` (`relMSE` `0.00546` → `0.000076`) into sub-percent agreement with Cycles 5.3.
+  - **Final-vertex background MIS & `filter_glossy`** ([`integrator.wgsl`](https://github.com/codepawl/cook/blob/main/src/cycles/integrator.wgsl)): tracing the `B + 1` emission/background termination ray resolves Phase A Gap 4 (`B = 0` uniform-sky sphere exact), and matching Cycles `bsdf_blur` (`filter_glossy = 1.0`) eliminates secondary reflective/refractive floor caustic spikes on `metal` and `glass`.
 
 ### Milestone M1 Closure White-Furnace & Pearson Chi-Square Results
 
@@ -315,10 +315,10 @@ The two `anisotropic-ggx-*` probes (white base color, metallic `1`, roughness `0
 
 ### Selecting the kernel
 
-The native tracer runs the legacy kernel unless you ask for the Cycles-matching kernel (Cook's `cycles` kernel). Pass `kernel: 'cycles'` to `traceNative`, or set the environment variable `JS67_NATIVE_KERNEL=cycles` for a process; an explicit `kernel` option wins over the variable. Any other name throws an error that lists the two valid names. The `cycles` kernel reads a FORMAT-v2 scene pack ([`FORMAT-v2.md`](../packages/render-native/FORMAT-v2.md)), the legacy kernel a v1 pack, and passing one to the wrong kernel throws. The default image of every existing caller does not change.
+The native tracer runs the legacy kernel unless you ask for the Cycles-matching kernel (Cook's `cycles` kernel). Pass `kernel: 'cycles'` to `traceNative`, or set the environment variable `JS67_NATIVE_KERNEL=cycles` for a process; an explicit `kernel` option wins over the variable. Any other name throws an error that lists the two valid names. The `cycles` kernel reads a FORMAT-v2 scene pack ([`FORMAT-v2.md`](https://github.com/codepawl/cook/blob/main/FORMAT-v2.md)), the legacy kernel a v1 pack, and passing one to the wrong kernel throws. The default image of every existing caller does not change.
 
 ```js
-import { traceNative } from '@codepawlhq/67js-render-native';
+import { traceNative } from '@codepawlhq/cook';
 
 const result = traceNative(sceneInput, { width: 960, height: 540, samples: 256, kernel: 'cycles' });
 ```
@@ -851,7 +851,7 @@ uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-d
 
 ## Persistent in-process OIDN (#1025)
 
-The `oidnDenoise` tool pays for a process start, CUDA initialisation, the weights and three PFM files on every call. `createNativeOidnDenoiser` (render-native) and `createOidnDenoiser` (denoise package) keep one OIDN device, four buffers and the committed filter alive, and recommit only when the size or the set of guides changes. `trace-native.mjs --oidn-devices cuda,cuda-cli,cpu,cpu-cli` runs the in-process device (`cuda`) beside the tool (`cuda-cli`) on one trace; `node bench/oidn-cost/measure-oidn-cost.mjs --out <file>` writes the split below. Every number is measured on one Modal container with an NVIDIA A10 (driver 610.57) and a 24 thread Xeon, OIDN 2.5.1, quality high, colour plus albedo plus normal, seeded synthetic input, median of seven calls.
+The `oidnDenoise` tool pays for a process start, CUDA initialisation, the weights and three PFM files on every call. `createNativeOidnDenoiser` (Cook) and `createOidnDenoiser` (denoise package) keep one OIDN device, four buffers and the committed filter alive, and recommit only when the size or the set of guides changes. `trace-native.mjs --oidn-devices cuda,cuda-cli,cpu,cpu-cli` runs the in-process device (`cuda`) beside the tool (`cuda-cli`) on one trace; `node bench/oidn-cost/measure-oidn-cost.mjs --out <file>` writes the split below. Every number is measured on one Modal container with an NVIDIA A10 (driver 610.57) and a 24 thread Xeon, OIDN 2.5.1, quality high, colour plus albedo plus normal, seeded synthetic input, median of seven calls.
 
 | size | device | tool call s | of which process start to exit | in-process first call s (plus device creation) | in-process warm call s | warm: write / execute / read ms |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -891,7 +891,7 @@ Not covered: the Classroom scene (instancing, 854 instances, depth of field, whi
 
 ## Depth of field (#896, slice D1)
 
-A camera with an `fStop` is a thin lens in the `cycles` kernel, with Cycles' model: aperture radius `focal length / 1000 / (2 * f-stop)` metres, a disk or a regular polygon of `apertureBlades` corners, and a focus distance measured along the view axis. The kernel already held the lens maths (`camera.wgsl`, a port of Cycles' `camera.h`); this slice connects it: `createCamera` turns `fStop`, `focalLength` or `fov` with `sensorWidth`, `focusDistance`, `apertureBlades` and `apertureRotation` (degrees, Blender's sense) into the aperture fields of the params block. Layout and options: [FORMAT-v2.md](../packages/render-native/FORMAT-v2.md) and the [render-native README](../packages/render-native/README.md#depth-of-field-cycles-kernel). The kernel and the legacy kernel are unchanged. Motion blur is not in Cook; it is a known gap and out of scope for #896.
+A camera with an `fStop` is a thin lens in the `cycles` kernel, with Cycles' model: aperture radius `focal length / 1000 / (2 * f-stop)` metres, a disk or a regular polygon of `apertureBlades` corners, and a focus distance measured along the view axis. The kernel already held the lens maths (`camera.wgsl`, a port of Cycles' `camera.h`); this slice connects it: `createCamera` turns `fStop`, `focalLength` or `fov` with `sensorWidth`, `focusDistance`, `apertureBlades` and `apertureRotation` (degrees, Blender's sense) into the aperture fields of the params block. Layout and options: [FORMAT-v2.md](https://github.com/codepawl/cook/blob/main/FORMAT-v2.md) and the [Cook README](https://github.com/codepawl/cook/blob/main/README.md#depth-of-field-cycles-kernel). The kernel and the legacy kernel are unchanged. Motion blur is not in Cook; it is a known gap and out of scope for #896.
 
 Depth of field off: the packed params bytes and the random numbers drawn do not change. The lens sample (`lens_uv`) is drawn for every sample whether or not the aperture is above 0, and a pinhole camera writes the same lens words as before (`0`, `10`, `0`, `0`). Measured on an RTX 4090: 128-sample images of `lit-interior` and `glass` (480 x 270, fixed 32 samples per dispatch, seed 3), with this tree merged with origin/main and with origin/main's JavaScript on the same addon, have identical SHA-256 for the `cycles` and the `legacy` kernel (4 of 4), and two runs of this tree agree. Earlier runs, before the merge, on an L4 and on the 4090 gave the same hashes. The native node suite on the 4090: 194 tests, 191 pass, 0 fail, 3 skipped, with both GPU depth of field tests running.
 
@@ -1082,10 +1082,10 @@ The bridge is not exact. Cycles on the exported JSON has a mean radiance of 0.17
 
 ### Commands
 
-On a machine with Blender 5.3, Node, `uv` and the built `packages/render-native` addon (a GPU):
+On a machine with Blender 5.3, Node, `uv` and the built Cook addon (a GPU):
 
 ```sh
-(cd packages/render-native && node build.mjs)
+npm run cook:build
 bash bench/cycles-parity/run-classroom-parity.sh [--samples 1024] [--force export,cook,cycles,reference,diagnose]
 ```
 
@@ -1095,7 +1095,7 @@ Not covered: the 22 unexported instances and the bridge gap above; a scene that 
 
 ## Diffuse transmission (#1058)
 
-A thin sheet that lets diffuse light through (a curtain, a leaf, a lampshade) is the material fields `diffuseTransmission` (0 to 1) and `diffuseTransmissionColor` (the base colour when left out). The `cycles` kernel splits the diffuse layer at the weight: the usual lobe keeps `1 - weight`, and a cosine lobe on the far side of the surface, the Translucent BSDF of Cycles, takes `weight * colour`. The lobe is sampled and evaluated like the diffuse one (pdf `cos / pi`) and joins MIS, so a lamp behind the sheet lights its front by next event estimation and by BSDF sampling. The format is in [FORMAT-v2.md](../packages/render-native/FORMAT-v2.md), "Material extension records".
+A thin sheet that lets diffuse light through (a curtain, a leaf, a lampshade) is the material fields `diffuseTransmission` (0 to 1) and `diffuseTransmissionColor` (the base colour when left out). The `cycles` kernel splits the diffuse layer at the weight: the usual lobe keeps `1 - weight`, and a cosine lobe on the far side of the surface, the Translucent BSDF of Cycles, takes `weight * colour`. The lobe is sampled and evaluated like the diffuse one (pdf `cos / pi`) and joins MIS, so a lamp behind the sheet lights its front by next event estimation and by BSDF sampling. The format is in [FORMAT-v2.md](https://github.com/codepawl/cook/blob/main/FORMAT-v2.md), "Material extension records".
 
 Blender 5.3's Principled BSDF has no diffuse transmission weight (its transmission inputs are `Transmission Weight` and the dispersion pair), so `render-cycles.py` builds the split from nodes: a Principled BSDF at `(1 - weight) * base colour` plus a Translucent BSDF at `weight * colour`, added together. That matches Cook only for a dielectric, non-glass, non-subsurface material with no specular lobe, so the parity scenes set `specular: 0`, and `render-cycles.py` refuses `diffuseTransmission` together with `metallic`, `transmission` or `subsurface`: Cook scales the diffuse layer, and with it the far-side lobe, by what those layers leave of it, which the added Translucent node does not. With a specular lobe Cook multiplies the far-side lobe by the weight the specular layer leaves, as it does for the diffuse lobe, while the added Translucent BSDF is not attenuated: the two differ there, and that case is not measured.
 
@@ -1124,7 +1124,7 @@ A scene without the field is byte-identical to a build without this change. On a
 Commands, on a machine with Blender 5.3, Node, `uv`, a GPU and the built addon:
 
 ```sh
-(cd packages/render-native && node build.mjs)
+npm run cook:build
 uv run --no-project --with numpy python bench/cycles-parity/run-diffuse-transmission-parity.py artifacts/diffuse-transmission --samples 1024 --repeat-cycles-seed2
 uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-diffuse-transmission-figure.py artifacts/diffuse-transmission artifacts/diffuse-transmission/figure.jpg
 ```
@@ -1143,8 +1143,8 @@ if (-not $env:BLENDER_BIN) {
 }
 $OutDir = "artifacts/cycles-parity"
 
-# 2. Build packages/render-native if build/render-native.node is not present yet
-node packages/render-native/build.mjs
+# 2. Build Cook (npm run cook:build) if build/render-native.node is not present yet
+npm run cook:build
 
 # 3. Export all 7 reference scenes (the six M1 scenes and many-lights-500) and verify byte-identical round-trip packing
 foreach ($Scene in @("spot-area", "light-linking", "metal", "glass", "outdoor-hdri", "lit-interior", "many-lights-500")) {
@@ -1355,7 +1355,7 @@ Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` also writes `tex-e
 
 ## Native job materials (#1036)
 
-A native render job on the `cycles` kernel used to send v1 material tables, which hold base colour, metallic, roughness, emission, clearcoat, transmission, ior, normal scale, the mask cutoff, subsurface, the light mask and four atlas textures. The page now exports FORMAT-v2 for every `cycles` job (instanced or not) and lays the rest of each material over those fields (`carriedMaterialFields` in `packages/render-native/job-input.mjs`): blend opacity, sheen, `specular` and `specularColor`, anisotropy, iridescence, attenuation, the clearcoat, transmission, sheen, anisotropy and coat normal maps, and the record fields a material may set by their record names. `docs/agent-render-jobs.md` lists what the report still says it ignores.
+A native render job on the `cycles` kernel used to send v1 material tables, which hold base colour, metallic, roughness, emission, clearcoat, transmission, ior, normal scale, the mask cutoff, subsurface, the light mask and four atlas textures. The page now exports FORMAT-v2 for every `cycles` job (instanced or not) and lays the rest of each material over those fields (`carriedMaterialFields` in `job-input.mjs` of `@codepawlhq/cook`): blend opacity, sheen, `specular` and `specularColor`, anisotropy, iridescence, attenuation, the clearcoat, transmission, sheen, anisotropy and coat normal maps, and the record fields a material may set by their record names. `docs/agent-render-jobs.md` lists what the report still says it ignores.
 
 Same scene, same 4096 samples, 192 x 128, box filter, 8 bounces, seed 1, against Cycles 5.3 (4096 spp, `render-cycles.py`), RTX 4090 `[measured]`. `before` is the v1 tables (what a job sent), `after` the export a job sends now, `bench` the scene packed with `buildNativeInputV2` as the parity benches do. The gates are those of the M1 suite: per-channel mean ratio within 2 percent, 8 x 8 tiles within 5 percent.
 
@@ -1466,7 +1466,7 @@ Scenes of `bench/reference/scenes.js` whose Cycles reference changes with the ne
 Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
 
 ```sh
-node packages/render-native/build.mjs
+npm run cook:build
 uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/sphere-light --repeat-cycles-seed2 --reference-scenes spot-area,light-linking,lit-interior,many-lights-500
 ```
 
@@ -1480,7 +1480,7 @@ uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-par
 - **Sampling and pdf.** A point on the disk by the concentric map, pdf `t^2 / (cos * pi * r^2)` per steradian with `cos` the angle between the disk normal and the line to the receiver (Cycles: `invarea * light_pdf_area_to_solid_angle`). A path hits the disk where it crosses it in front of its origin (`ray_disk_intersect`) and uses the same pdf, so MIS against the BSDF is consistent. A spot's hit is one-sided as before.
 - **Radiance.** Unchanged: intensity over `pi r^2`, as for the sphere (Cycles uses one `eval_fac` for both). The power of a light does not change with the radius or the shape.
 - **Light tree.** The profile of the light is the disk's: `cos(theta_u) = d / sqrt(d^2 + r^2)` and the far distance `sqrt(d^2 + r^2)` (`point_light_tree_parameters`), where the sphere uses the angle of its silhouette.
-- **Request.** `softFalloff: true` on an entry of `environment.pointLights` or `spotLights` (scene recipes, `buildTraceScene`, the bench scene JSON); a boolean, anything else throws and says what to pass; `false` or a missing field is the sphere. The packer sets bit `32` (`SOFT_FALLOFF`) in the light record's `flags` for a light with a radius above 0 ([FORMAT-v2.md](../packages/render-native/FORMAT-v2.md)); the flattened path carries it in the third float of the light's last v1 texel, which nothing else reads, so every table of a scene without the field keeps its bytes.
+- **Request.** `softFalloff: true` on an entry of `environment.pointLights` or `spotLights` (scene recipes, `buildTraceScene`, the bench scene JSON); a boolean, anything else throws and says what to pass; `false` or a missing field is the sphere. The packer sets bit `32` (`SOFT_FALLOFF`) in the light record's `flags` for a light with a radius above 0 ([FORMAT-v2.md](https://github.com/codepawl/cook/blob/main/FORMAT-v2.md)); the flattened path carries it in the third float of the light's last v1 texel, which nothing else reads, so every table of a scene without the field keeps its bytes.
 - **Not drawn elsewhere.** The legacy kernel, the WebGL and WebGPU path tracers and the rasterizer ignore the field and draw the light as before.
 - **Reference.** `render-cycles.py` sets `use_soft_falloff` per light from the scene's `softFalloff` (off when absent, as since #1040). `--soft-falloff default|on|off` still overrides every light.
 
@@ -1505,7 +1505,7 @@ Without the field the output is the old output `[measured, one run each, the bui
 Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
 
 ```sh
-node packages/render-native/build.mjs
+npm run cook:build
 # the whole table above: every lamp scene and its -soft twin, with the seed floor
 uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/soft-falloff --soft-falloff off --repeat-cycles-seed2 --scenes bare-r0.05,bare-r0.18,bare-r0.5,enclosed-r0.18,poking-r0.18,bare-r0.05-soft,bare-r0.18-soft,bare-r0.5-soft,enclosed-r0.18-soft,poking-r0.18-soft
 # the picture (the narrow run of the poking lamp is enough for it)

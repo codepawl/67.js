@@ -175,7 +175,7 @@ class NativeRunnerTests(unittest.TestCase):
             open(os.path.join(script_directory, native_runner.TRACE_SCRIPT_PARTS[-1]), "w").close()
             with self.assertRaises(native_runner.CookSetupError) as caught:
                 native_runner.resolve_native_directory(directory, environment={})
-        self.assertIn("node build.mjs", str(caught.exception))
+        self.assertIn("npm run cook:build", str(caught.exception))
 
     def test_environment_variable_is_the_fallback(self):
         with tempfile.TemporaryDirectory() as directory:

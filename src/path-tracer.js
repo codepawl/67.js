@@ -56,7 +56,7 @@ const IGNORED_LAYERS = [
 const KERNEL_LAYER_MAPS = ['clearcoatTexture', 'clearcoatNormalTexture', 'anisotropyTexture', 'sheenColorTexture'];
 
 // The native kernel reads a coat's weight and roughness, and a sheen's tint and roughness, from one map each
-// (packages/render-native/job-input.mjs carries the map only when it cannot change the roughness).
+// (@codepawlhq/cook job-input carries the map only when it cannot change the roughness).
 function hasSplitLayerMap(material) {
   const maps = material.layerMaps ?? {};
   const coatIsSplit = Boolean(maps.clearcoatTexture) && material.clearcoatRoughness > 0 && maps.clearcoatTexture.image !== maps.clearcoatRoughnessTexture?.image;

@@ -61,7 +61,7 @@ export function buildLlmsText(tools) {
   const toolLines = tools.map(tool => `- \`${tool.name}\`: ${summarize(tool.description ?? '')}`).join('\n');
   return `# 67js
 
-> A 3D engine that AI agents drive. Glaze draws real-time scenes on WebGL2, and Cook path traces stills on the CPU or WebGL2, and on Vulkan with the optional render-native package. PNG, MP4 and GLB output comes from the same scene.
+> A 3D engine that AI agents drive. Glaze draws real-time scenes on WebGL2, and Cook path traces stills on the CPU or WebGL2, and on Vulkan with the optional Cook package. PNG, MP4 and GLB output comes from the same scene.
 
 67js has an MCP server (\`67js-mcp\`, ${tools.length} tools) that builds, edits, looks at and renders scenes from JSON recipes.
 The same engine is a JavaScript library for pages and Node. The library API is in the guide below.
@@ -70,7 +70,7 @@ Scenes are plain data with stable IDs, so an agent can edit by ID and check each
 ## Renderers
 
 - Glaze (\`Renderer67\`) is the real-time rasterizer. It runs on WebGL2 only.
-- Cook is the path tracer. Its backends are cpu (the default), gpu (WebGL2), webgpu (a software BVH in WGSL compute) and native (Vulkan ray queries, from the optional \`packages/render-native\`).
+- Cook is the path tracer. Its backends are cpu (the default), gpu (WebGL2), webgpu (a software BVH in WGSL compute) and native (Vulkan ray queries, from the optional Cook package, \`@codepawlhq/cook\`).
 - An experimental real-time path tracer runs on WebGPU with a WebGL2 fallback. The MCP server does not expose it. MCP render jobs take the cpu, gpu and native backends of Cook.
 - In the MCP server, \`--backend gpu\` means hardware WebGL2 in Chrome, and \`--backend cpu\` means software rendering.
 - Planned, not shipped: a \`quality\` setting that picks a tier (draft, realtime, realtime-high, final), and Glaze on WebGPU. Do not call either one. The roadmap is [issue 890](https://github.com/codepawl/67.js/issues/890).

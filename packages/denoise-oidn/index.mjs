@@ -127,14 +127,14 @@ const NATIVE_DEVICE_NAMES = /^(default|cpu|sycl|cuda|hip|metal|\d+)$/;
 
 /**
  * An OIDN device and filter that stay loaded between calls, so only the first call pays for the device, the weights and the
- * filter commit. `createNative` is `createNativeOidnDenoiser` of `@codepawlhq/67js-render-native`, whose addon links the
+ * filter commit. `createNative` is `createNativeOidnDenoiser` of `@codepawlhq/cook`, whose addon links the
  * OIDN library at run time; this package does not load the addon itself. Returns `{ denoise, close, deviceSeconds,
  * lastTimings, libraryPath }`; `denoise` takes what `denoiseWithOidn` takes and resolves with a new Float32Array.
  * Throws, with what to do, when the library or the addon is missing, so a caller can use `denoiseWithOidn` instead.
  */
 export function createOidnDenoiser({ createNative, device = 'cpu', quality = 'high', cleanAux = false, threads = 0, libraryPath = findOidnLibrary() } = {}) {
   if (typeof createNative !== 'function') {
-    throw new TypeError('createOidnDenoiser needs `createNative`: pass createNativeOidnDenoiser from the render-native package.');
+    throw new TypeError('createOidnDenoiser needs `createNative`: pass createNativeOidnDenoiser from the @codepawlhq/cook package.');
   }
   if (!libraryPath) {
     throw new Error('The OIDN shared library is not installed: run `npm run fetch` in the denoise package, or set OIDN_LIBRARY_PATH.');

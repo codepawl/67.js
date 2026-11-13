@@ -1,4 +1,4 @@
-// Traces an exported scene JSON on packages/render-native and writes linear RGB float32 (.npy) plus timing JSON.
+// Traces an exported scene JSON on Cook (@codepawlhq/cook) and writes linear RGB float32 (.npy) plus timing JSON.
 //   node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--seed 1]
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
@@ -7,7 +7,7 @@ import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
 import { buildInstancedTraceScene } from './instanced-scene.mjs';
-import * as renderNative from '../../packages/render-native/index.mjs';
+import * as renderNative from '@codepawlhq/cook';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
 import { denoiseRadiance } from '../../src/path-tracer-denoise.js';
@@ -259,7 +259,7 @@ const WARM_OIDN_CALLS = 3;
 /**
  * Comparison runs only: runs OIDN on the traced colour with the kernel's first-hit albedo and normal guides, once per
  * entry of --oidn-devices, and writes each result to <prefix>.oidn-<entry>.npy. A plain device name ("cuda") uses the
- * persistent in-process device of the render-native addon when the OIDN library is installed, and the oidnDenoise tool
+ * persistent in-process device of the Cook addon when the OIDN library is installed, and the oidnDenoise tool
  * otherwise; "cuda-cli" forces the tool (PFM files and a process per call). `seconds` is the median of three warm calls;
  * `firstCallSeconds` is everything the first image costs, including device creation for the in-process device.
  */
@@ -320,7 +320,7 @@ async function runCli() {
     throw new RangeError('Option --f-stop (depth of field) needs --kernel cycles: the legacy kernel draws a pinhole.');
   }
   if (!renderNative.findNativeAddon()) {
-    throw new Error('The render-native addon is missing. Build packages/render-native before running trace-native.mjs.');
+    throw new Error('The Cook addon is missing. Install @codepawlhq/cook and run `npm run cook:build` (or set COOK_ADDON_PATH) before running trace-native.mjs.');
   }
   const loadedDescription = JSON.parse(await readFile(options.sceneJsonPath, 'utf8'));
   const description = options.greyDiffuse ? applyGreyDiffuseOverride(loadedDescription) : loadedDescription;
@@ -394,7 +394,7 @@ async function runCli() {
     depthNpyPath,
     depthConvention: depthNpyPath ? 'ray-distance' : null,
     cameraVerticalFovDegrees: traceSource.camera.fov,
-    engine: options.kernel === 'cycles' ? 'cook-render-native' : '67js-render-native',
+    engine: '@codepawlhq/cook',
     kernel: traced.kernel ?? options.kernel,
     inputSchemaVersion: nativeInput.schemaVersion ?? 1,
     sceneId: description.id,

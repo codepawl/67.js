@@ -2,7 +2,7 @@
 // Run it through gpu-lock.
 //   node bench/native-tracer/recipe-bake.mjs <output directory> [--recipe tests/fixtures/demo-room.recipe.json] [--label run1]
 // Writes recipe-bake-<label>.json (seconds, the `bake` block of scene_inspect). The native package is used when it is built;
-// remove packages/render-native/build to see the fallback.
+// set COOK_DISABLE=1 to see the fallback.
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { constants, setPriority, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';

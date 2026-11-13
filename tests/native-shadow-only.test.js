@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import test from 'node:test';
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
 
-import { buildNativeInput, findNativeAddon, traceNative, upgradeNativeInputV1ToV2 } from '../packages/render-native/index.mjs';
-import { STRUCT_STRIDES_V2 } from '../packages/render-native/pack-input-v2.mjs';
 import { box } from '../src/geometry.js';
 import { createCamera } from '../src/path-tracer.js';
 import * as pack from '../src/path-tracer-gpu-pack.js';
 import { MATERIAL_TEXELS } from '../src/path-tracer-gpu-shader.js';
 import { buildTraceScene } from '../src/path-tracer-scene.js';
 
-const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const { buildNativeInput, findNativeAddon, traceNative, upgradeNativeInputV1ToV2 } = cook ?? {};
+const { STRUCT_STRIDES_V2 } = packV2 ?? {};
+
+const skipWithoutAddon = !cookInstalled || findNativeAddon() === null ? 'the native addon is not built' : false;
 const INSTANCE_VISIBILITY_CAMERA = 1;
 const INSTANCE_VISIBILITY_OFFSET = 116;
 const SIZE = 16;
@@ -63,7 +66,7 @@ function instanceVisibility(upgraded, instanceIndex) {
   return view.getUint32(instanceIndex * STRUCT_STRIDES_V2.instance + INSTANCE_VISIBILITY_OFFSET, true);
 }
 
-test('the material table flags a shadow-only part and leaves the table of a scene without one unchanged', () => {
+cookTest('the material table flags a shadow-only part and leaves the table of a scene without one unchanged', () => {
   const plain = buildTraceScene([floor(), caster()], environment);
   const withFlag = buildTraceScene([floor(), caster({ shadowOnly: true })], environment);
   assert.equal(plain.shadowOnlyParts, null);
@@ -79,7 +82,7 @@ test('the material table flags a shadow-only part and leaves the table of a scen
   assert.deepEqual(differing, [casterFloatOffset + pack.SHADOW_ONLY_SLOT], 'only the caster flag differs');
 });
 
-test('the cycles input hides a shadow-only part from camera rays and keeps every other ray bit', () => {
+cookTest('the cycles input hides a shadow-only part from camera rays and keeps every other ray bit', () => {
   const scene = buildTraceScene([floor(), caster({ shadowOnly: true })], environment);
   const camera = createCamera(cameraDescription, SIZE, SIZE);
   const input = buildNativeInput(scene, camera, { width: SIZE, height: SIZE, samples: 4, bounces: 2, seed: 1 }, pack);
@@ -94,7 +97,7 @@ test('the cycles input hides a shadow-only part from camera rays and keeps every
 });
 
 for (const kernel of ['legacy', 'cycles']) {
-  test(`the native ${kernel} kernel draws the shadow of a shadow-only caster and not the caster`, { skip: skipWithoutAddon }, () => {
+  cookTest(`the native ${kernel} kernel draws the shadow of a shadow-only caster and not the caster`, { skip: skipWithoutAddon }, () => {
     const lit = centreBrightness(render([floor()], kernel));
     const visibleCaster = centreBrightness(render([floor(), caster()], kernel));
     const shadowOnly = centreBrightness(render([floor(), caster({ shadowOnly: true })], kernel));
@@ -106,7 +109,7 @@ for (const kernel of ['legacy', 'cycles']) {
 }
 
 // Set COOK_SHADOW_ONLY_IMAGE_DIRECTORY to keep the three renders side by side (floor, visible caster, shadow-only caster) as a PPM.
-test('the native legacy kernel writes the comparison picture when asked', { skip: skipWithoutAddon || !process.env.COOK_SHADOW_ONLY_IMAGE_DIRECTORY }, () => {
+cookTest('the native legacy kernel writes the comparison picture when asked', { skip: skipWithoutAddon || !process.env.COOK_SHADOW_ONLY_IMAGE_DIRECTORY }, () => {
   const size = 128;
   const renders = [[floor()], [floor(), caster()], [floor(), caster({ shadowOnly: true })]].map(parts => render(parts, 'legacy', size));
   const pixels = Buffer.alloc(size * 3 * size * 3);

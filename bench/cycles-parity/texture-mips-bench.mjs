@@ -9,8 +9,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildNativeInputV2, traceNative } from '../../packages/render-native/index.mjs';
-import { TEXTURE_KIND_RGBA8_SRGB, buildMipChain, mipLevelCount, mipLevelSize } from '../../packages/render-native/texture-mips.mjs';
+import { buildNativeInputV2, traceNative } from '@codepawlhq/cook';
+import { TEXTURE_KIND_RGBA8_SRGB, buildMipChain, mipLevelCount, mipLevelSize } from '@codepawlhq/cook/texture-mips';
 import { createCamera } from '../../src/path-tracer.js';
 
 export const CHECKER_SIDE = 64;

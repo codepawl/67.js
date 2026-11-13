@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { getHeapStatistics } from 'node:v8';
 import * as pack from '../../src/path-tracer-gpu-pack.js';
-import { buildNativeInput } from '../../packages/render-native/pack-input.mjs';
-import { buildFlattenedJobNativeInput, buildJobNativeInput } from '../../packages/render-native/job-input.mjs';
+import { buildNativeInput } from '@codepawlhq/cook/pack-input';
+import { buildFlattenedJobNativeInput, buildJobNativeInput } from '@codepawlhq/cook/job-input';
 import { buildTraceScene, resolveTexture } from '../../src/path-tracer-scene.js';
 import { encodeNativeInputV2 } from '../../scripts/native-bake-page.js';
 import { readFlag } from './sequence-bench-core.mjs';
@@ -68,7 +68,7 @@ function packScene(variant, uniqueTriangles, maximumTriangles, encode) {
 
 // Without the base64 step (a table above the 536,870,888 characters of a V8 string cannot be encoded): the packed input goes to the tracer as it is.
 async function traceInput(input, samples) {
-  const tracer = await import('../../packages/render-native/index.mjs');
+  const tracer = await import('@codepawlhq/cook');
   const { width, height } = NATIVE_CAP_PACK_OPTIONS;
   const startedAt = performance.now();
   const traced = tracer.traceNative(input, { width, height, samples, kernel: 'cycles', noiseThreshold: 0 });
@@ -77,7 +77,7 @@ async function traceInput(input, samples) {
 }
 
 async function traceExported(exported, samples, pngPath) {
-  const tracer = await import('../../packages/render-native/index.mjs');
+  const tracer = await import('@codepawlhq/cook');
   const { traceFrameNative } = await import('../../scripts/agent-native-trace.mjs');
   const { width, height } = NATIVE_CAP_PACK_OPTIONS;
   const frame = await traceFrameNative({ tracer, exported: { ...exported, ignored: [] }, width, height, samples, bounces: NATIVE_CAP_PACK_OPTIONS.bounces, seed: 1, denoise: 'none', kernel: 'cycles' });

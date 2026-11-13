@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import {
+import { cookInstalled, cookModule, cookTest } from './support/cook.js';
+import { createCamera } from '../src/path-tracer.js';
+
+const cook = await cookModule();
+const packV2 = await cookModule('pack-input-v2');
+const {
   buildNativeInputV2,
   createNativeSession,
   findNativeAddon,
@@ -11,11 +15,10 @@ import {
   withPathRegenerationFlag,
   wrapNativeSession,
   KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET,
-} from '../packages/render-native/index.mjs';
-import { KERNEL_FLAG_WHITE_NOISE_SAMPLER, KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET } from '../packages/render-native/pack-input-v2.mjs';
-import { createCamera } from '../src/path-tracer.js';
+} = cook ?? {};
+const { KERNEL_FLAG_WHITE_NOISE_SAMPLER, KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET } = packV2 ?? {};
 
-const addonIsBuilt = findNativeAddon() !== null;
+const addonIsBuilt = cookInstalled && findNativeAddon() !== null;
 const skipWithoutAddon = addonIsBuilt ? false : 'the native addon is not built';
 const skipWithAddon = addonIsBuilt ? 'the addon is built; this test covers the missing addon' : false;
 
@@ -70,14 +73,14 @@ function readKernelFlags(kernelParams) {
 
 // ---- Argument checks: these run without the addon ----
 
-test('createNativeSession refuses an input that is not FORMAT-v2', () => {
+cookTest('createNativeSession refuses an input that is not FORMAT-v2', () => {
   assert.throws(() => createNativeSession(undefined), { name: 'TypeError', message: /FORMAT-v2 input object/ });
   assert.throws(() => createNativeSession(null), { name: 'TypeError' });
   assert.throws(() => createNativeSession({ schemaVersion: 1 }), { name: 'TypeError', message: /schemaVersion.*must be 2/ });
   assert.throws(() => createNativeSession({ triangles: new Float32Array(36), triangleCount: 1 }), { name: 'TypeError', message: /schemaVersion/ });
 });
 
-test('createNativeSession refuses a kernel parameter block of the wrong size', () => {
+cookTest('createNativeSession refuses a kernel parameter block of the wrong size', () => {
   const input = roomInput([0, 2.2, 6]);
   assert.throws(
     () => createNativeSession({ ...input, kernelParams: new Uint8Array(12) }),
@@ -86,14 +89,14 @@ test('createNativeSession refuses a kernel parameter block of the wrong size', (
   assert.throws(() => createNativeSession({ ...input, kernelParams: undefined }), { name: 'TypeError', message: /kernelParams/ });
 });
 
-test('createNativeSession runs the cycles kernel only', () => {
+cookTest('createNativeSession runs the cycles kernel only', () => {
   const input = roomInput([0, 2.2, 6]);
   assert.throws(() => createNativeSession(input, { kernel: 'legacy' }), { name: 'TypeError', message: /"cycles" kernel only/ });
   assert.throws(() => createNativeSession(input, { kernel: 'nonsense' }), { message: /Invalid native kernel/ });
   assert.throws(() => createNativeSession(input, null), { name: 'TypeError', message: /options/ });
 });
 
-test('createNativeSession checks its default options like traceNative does', () => {
+cookTest('createNativeSession checks its default options like traceNative does', () => {
   const input = roomInput([0, 2.2, 6]);
   assert.throws(() => createNativeSession(input, { samples: 0 }), { name: 'RangeError', message: /samples/ });
   assert.throws(() => createNativeSession(input, { sampler: 'nonsense' }), { message: /sampler/ });
@@ -101,11 +104,11 @@ test('createNativeSession checks its default options like traceNative does', () 
   assert.throws(() => createNativeSession(input, { maxSeconds: -1 }), { name: 'RangeError', message: /maxSeconds/ });
 });
 
-test('createNativeSession without the built addon says how to build it', { skip: skipWithAddon }, () => {
+cookTest('createNativeSession without the built addon says how to build it', { skip: skipWithAddon }, () => {
   assert.throws(() => createNativeSession(roomInput([0, 2.2, 6])), { message: /not built/ });
 });
 
-test('a session input carries the kernel parameters patched by the default options', () => {
+cookTest('a session input carries the kernel parameters patched by the default options', () => {
   const input = roomInput([0, 2.2, 6]);
   const unpatchedFlags = readKernelFlags(input.kernelParams);
   assert.equal(unpatchedFlags & KERNEL_FLAG_WHITE_NOISE_SAMPLER, 0, 'the packed input uses the blue-noise sampler');
@@ -114,7 +117,7 @@ test('a session input carries the kernel parameters patched by the default optio
   assert.equal(readKernelFlags(input.kernelParams), unpatchedFlags, 'the caller input is not modified');
 });
 
-test('a frame needs the size and the samples, from the defaults or from the call', () => {
+cookTest('a frame needs the size and the samples, from the defaults or from the call', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), { width: 24, height: 16 });
   assert.throws(
     () => resolveSessionFrame(sessionInput, { width: 24, height: 16 }, {}),
@@ -127,7 +130,7 @@ test('a frame needs the size and the samples, from the defaults or from the call
   assert.equal(frame.kernelParams.byteLength, 320);
 });
 
-test('a frame option replaces the default and an undefined one does not', () => {
+cookTest('a frame option replaces the default and an undefined one does not', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
   const defaults = { width: 24, height: 16, samples: 32 };
   const frame = resolveSessionFrame(sessionInput, defaults, { samples: 64, width: undefined });
@@ -135,7 +138,7 @@ test('a frame option replaces the default and an undefined one does not', () => 
   assert.equal(frame.width, 24);
 });
 
-test('a frame patches the sampler flag on its own copy of the parameters', () => {
+cookTest('a frame patches the sampler flag on its own copy of the parameters', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
   const defaults = { width: 24, height: 16, samples: 4 };
   const white = resolveSessionFrame(sessionInput, defaults, { sampler: 'white' });
@@ -145,7 +148,7 @@ test('a frame patches the sampler flag on its own copy of the parameters', () =>
   assert.equal(readKernelFlags(sessionInput.kernelParams) & KERNEL_FLAG_WHITE_NOISE_SAMPLER, 0);
 });
 
-test('a frame patches the glossy filter into the parameters it was given', () => {
+cookTest('a frame patches the glossy filter into the parameters it was given', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
   const defaults = { width: 24, height: 16, samples: 4 };
   const frame = resolveSessionFrame(sessionInput, defaults, { filterGlossy: 0 });
@@ -153,7 +156,7 @@ test('a frame patches the glossy filter into the parameters it was given', () =>
   assert.equal(view.getFloat32(KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET, true), 0);
 });
 
-test('a frame takes the camera of another packing through kernelParams', () => {
+cookTest('a frame takes the camera of another packing through kernelParams', () => {
   const first = roomInput([0, 2.2, 6]);
   const second = roomInput([1.5, 2.2, 5]);
   assert.notDeepEqual(first.kernelParams, second.kernelParams);
@@ -169,7 +172,7 @@ test('a frame takes the camera of another packing through kernelParams', () => {
   );
 });
 
-test('a frame refuses the legacy kernel, bad options and a bad options object', () => {
+cookTest('a frame refuses the legacy kernel, bad options and a bad options object', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
   const defaults = { width: 24, height: 16, samples: 4 };
   assert.throws(() => resolveSessionFrame(sessionInput, defaults, { kernel: 'legacy' }), { name: 'TypeError', message: /"cycles" kernel only/ });
@@ -177,7 +180,7 @@ test('a frame refuses the legacy kernel, bad options and a bad options object', 
   assert.throws(() => resolveSessionFrame(sessionInput, defaults, null), { name: 'TypeError', message: /renderOptions/ });
 });
 
-test('a wrapped session passes the frame to the addon and joins the reuse flags to the result', () => {
+cookTest('a wrapped session passes the frame to the addon and joins the reuse flags to the result', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
   const calls = [];
   const nativeSession = {
@@ -201,7 +204,7 @@ test('a wrapped session passes the frame to the addon and joins the reuse flags 
   assert.equal(session.closed, false);
 });
 
-test('a closed session refuses to render and closing twice frees the card once', () => {
+cookTest('a closed session refuses to render and closing twice frees the card once', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
   const calls = [];
   const nativeSession = {
@@ -232,7 +235,7 @@ function roomInputWith(changeScene, eye = [0, 2.2, 6], options = IMAGE_OPTIONS) 
 
 const DEFAULT_FRAME = { width: 24, height: 16, samples: 8 };
 
-test('a frame passes accumulate and targetSamples on and checks them', () => {
+cookTest('a frame passes accumulate and targetSamples on and checks them', () => {
   const sessionInput = resolveSessionCreation(roomInput([0, 2.2, 6]), {});
   const frame = resolveSessionFrame(sessionInput, DEFAULT_FRAME, { accumulate: true, targetSamples: 32 });
   assert.equal(frame.accumulate, true);
@@ -250,7 +253,7 @@ test('a frame passes accumulate and targetSamples on and checks them', () => {
   assert.throws(() => resolveSessionFrame(sessionInput, DEFAULT_FRAME, { accumulate: true, targetSamples: 4 }), { name: 'RangeError', message: /more than .targetSamples/ });
 });
 
-test('planNativeSessionUpdate sends nothing for the same input and only the tables whose bytes changed', () => {
+cookTest('planNativeSessionUpdate sends nothing for the same input and only the tables whose bytes changed', () => {
   const current = roomInput([0, 2.2, 6]);
   assert.deepEqual(planNativeSessionUpdate(current, roomInput([1.5, 2.2, 5])), {}, 'a camera is not a table');
 
@@ -269,7 +272,7 @@ test('planNativeSessionUpdate sends nothing for the same input and only the tabl
   assert.ok(!Object.keys(movePlan).includes('materials'));
 });
 
-test('planNativeSessionUpdate refuses a change of record counts and names it', () => {
+cookTest('planNativeSessionUpdate refuses a change of record counts and names it', () => {
   const current = roomInput([0, 2.2, 6]);
   const withExtraQuad = roomInputWith((scene) => {
     scene.instances.push({ geometry: UNIT_QUAD, matrix: horizontalQuadMatrix(1, 1, true), materialIndex: 0 });
@@ -281,7 +284,7 @@ test('planNativeSessionUpdate refuses a change of record counts and names it', (
   assert.throws(() => planNativeSessionUpdate(current, withExtraMaterial), { message: /`materialCount` changes from 2 to 3/ });
 });
 
-test('planNativeSessionUpdate refuses other geometry, other textures and an instance that places another mesh', () => {
+cookTest('planNativeSessionUpdate refuses other geometry, other textures and an instance that places another mesh', () => {
   const current = roomInput([0, 2.2, 6]);
   const bent = { ...current, triangles: new Uint8Array(current.triangles) };
   new DataView(bent.triangles.buffer).setFloat32(8, 0.5, true);
@@ -299,7 +302,7 @@ test('planNativeSessionUpdate refuses other geometry, other textures and an inst
   assert.throws(() => planNativeSessionUpdate(current, swappedMesh), { message: /instance 1 changes `triangleOffset` from \d+ to 77.*not change the mesh/ });
 });
 
-test('a wrapped session resets, resolves and updates through the addon and keeps the new defaults', () => {
+cookTest('a wrapped session resets, resolves and updates through the addon and keeps the new defaults', () => {
   const first = roomInput([0, 2.2, 6]);
   const second = roomInputWith((scene) => {
     scene.materials[0].color = [0.2, 0.5, 0.8];
@@ -347,7 +350,7 @@ test('a wrapped session resets, resolves and updates through the addon and keeps
   assert.deepEqual(frameAfterUpdate.kernelParams, updateCall.kernelParams, 'a frame after the update starts from the new kernel parameters');
 });
 
-test('a refused update changes nothing and a closed session refuses reset, resolve and update', () => {
+cookTest('a refused update changes nothing and a closed session refuses reset, resolve and update', () => {
   const current = roomInput([0, 2.2, 6]);
   const calls = [];
   const nativeSession = {
@@ -379,7 +382,7 @@ test('a refused update changes nothing and a closed session refuses reset, resol
   assert.deepEqual(calls, []);
 });
 
-test('an update the addon refuses leaves the wrapper diffing against the scene the addon still holds', () => {
+cookTest('an update the addon refuses leaves the wrapper diffing against the scene the addon still holds', () => {
   const current = roomInputWith(() => {});
   const changed = roomInputWith((scene) => {
     scene.materials[0].color = [0.2, 0.5, 0.8];
@@ -404,7 +407,7 @@ test('an update the addon refuses leaves the wrapper diffing against the scene t
 
 // ---- Renders on the GPU ----
 
-test('a session render equals the one-shot render byte for byte and the second frame reuses the setup', { skip: skipWithoutAddon }, () => {
+cookTest('a session render equals the one-shot render byte for byte and the second frame reuses the setup', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const oneShot = traceNative(input, options);
@@ -430,7 +433,7 @@ test('a session render equals the one-shot render byte for byte and the second f
   }
 });
 
-test('a frame that changes only the camera equals a fresh one-shot render of that camera', { skip: skipWithoutAddon }, () => {
+cookTest('a frame that changes only the camera equals a fresh one-shot render of that camera', { skip: skipWithoutAddon }, () => {
   const firstInput = roomInput([0, 2.2, 6]);
   const secondInput = roomInput([1.5, 2.2, 5]);
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
@@ -450,7 +453,7 @@ test('a frame that changes only the camera equals a fresh one-shot render of tha
   }
 });
 
-test('a frame with a camera equals a session packed with that camera, for a pinhole and a thin lens', { skip: skipWithoutAddon }, () => {
+cookTest('a frame with a camera equals a session packed with that camera, for a pinhole and a thin lens', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const session = createNativeSession(roomInput([0, 2.2, 6]));
   try {
@@ -471,7 +474,7 @@ test('a frame with a camera equals a session packed with that camera, for a pinh
   }
 });
 
-test('a frame seed changes the picture, the same seed repeats it and it equals a pack with that seed', { skip: skipWithoutAddon }, () => {
+cookTest('a frame seed changes the picture, the same seed repeats it and it equals a pack with that seed', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles', samples: 8 };
   const session = createNativeSession(roomInput([0, 2.2, 6]));
   try {
@@ -489,7 +492,7 @@ test('a frame seed changes the picture, the same seed repeats it and it equals a
   }
 });
 
-test('a frame with another sample count or image size equals the one-shot render and keeps what it can', { skip: skipWithoutAddon }, () => {
+cookTest('a frame with another sample count or image size equals the one-shot render and keeps what it can', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const session = createNativeSession(input);
@@ -511,7 +514,7 @@ test('a frame with another sample count or image size equals the one-shot render
   }
 });
 
-test('a session takes its default options and a frame option overrides them', { skip: skipWithoutAddon }, () => {
+cookTest('a session takes its default options and a frame option overrides them', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const session = createNativeSession(input, { ...IMAGE_OPTIONS, sampler: 'white' });
@@ -523,7 +526,7 @@ test('a session takes its default options and a frame option overrides them', { 
   }
 });
 
-test('a frame of another scene is refused', { skip: skipWithoutAddon }, () => {
+cookTest('a frame of another scene is refused', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const session = createNativeSession(input);
   try {
@@ -536,7 +539,7 @@ test('a frame of another scene is refused', { skip: skipWithoutAddon }, () => {
   }
 });
 
-test('rendering after close throws and the card is free for a new session', { skip: skipWithoutAddon }, () => {
+cookTest('rendering after close throws and the card is free for a new session', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const session = createNativeSession(input);
@@ -554,7 +557,7 @@ test('rendering after close throws and the card is free for a new session', { sk
 const ENV_WIDTH_BYTE_OFFSET = 192;
 const SOBOL_TABLE_OFFSET_BYTE_OFFSET = 296;
 
-test('a frame that changes the environment table shape or a texel pool offset is refused', { skip: skipWithoutAddon }, () => {
+cookTest('a frame that changes the environment table shape or a texel pool offset is refused', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const session = createNativeSession(input);
   try {
@@ -569,7 +572,7 @@ test('a frame that changes the environment table shape or a texel pool offset is
   }
 });
 
-test('a first frame that fails leaves the creation costs for the retry', { skip: skipWithoutAddon }, () => {
+cookTest('a first frame that fails leaves the creation costs for the retry', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const session = createNativeSession(input);
@@ -604,7 +607,7 @@ function renderInParts(session, options, parts, targetSamples = FILM_SAMPLES) {
   return last;
 }
 
-test('one image over several calls equals one render of the same samples, for both samplers, with and without path regeneration', { skip: skipWithoutAddon }, () => {
+cookTest('one image over several calls equals one render of the same samples, for both samplers, with and without path regeneration', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const session = createNativeSession(input);
   try {
@@ -628,7 +631,7 @@ test('one image over several calls equals one render of the same samples, for bo
   }
 });
 
-test('resolve gives the a-trous image of the film and traces nothing', { skip: skipWithoutAddon }, () => {
+cookTest('resolve gives the a-trous image of the film and traces nothing', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, samples: FILM_SAMPLES, kernel: 'cycles', denoise: 'atrous' };
   const oneShot = traceNative(input, options);
@@ -650,7 +653,7 @@ test('resolve gives the a-trous image of the film and traces nothing', { skip: s
   }
 });
 
-test('a call that does not belong to the film is refused and leaves the film as it was', { skip: skipWithoutAddon }, () => {
+cookTest('a call that does not belong to the film is refused and leaves the film as it was', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const movedCamera = roomInput([1.5, 2.2, 5]);
   const options = { ...IMAGE_OPTIONS, samples: 16, kernel: 'cycles' };
@@ -671,7 +674,7 @@ test('a call that does not belong to the film is refused and leaves the film as 
   }
 });
 
-test('reset starts over, a plain frame discards the image and resolve needs samples', { skip: skipWithoutAddon }, () => {
+cookTest('reset starts over, a plain frame discards the image and resolve needs samples', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, samples: FILM_SAMPLES, kernel: 'cycles' };
   const oneShot = traceNative(input, options);
@@ -706,7 +709,7 @@ function moveFloorAndLamp(scene) {
   scene.instances[2].matrix = horizontalQuadMatrix(1, 2.4, false);
 }
 
-test('an update of material values equals a fresh render of the final input and keeps the pipeline and the BLAS', { skip: skipWithoutAddon }, () => {
+cookTest('an update of material values equals a fresh render of the final input and keeps the pipeline and the BLAS', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const before = roomInput([0, 2.2, 6]);
   const after = roomInputWith(recolourFloor);
@@ -729,7 +732,7 @@ test('an update of material values equals a fresh render of the final input and 
   }
 });
 
-test('moving instances rebuilds only the TLAS and the next render equals a fresh render of the moved scene', { skip: skipWithoutAddon }, () => {
+cookTest('moving instances rebuilds only the TLAS and the next render equals a fresh render of the moved scene', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const before = roomInput([0, 2.2, 6]);
   const after = roomInputWith(moveFloorAndLamp);
@@ -755,7 +758,7 @@ test('moving instances rebuilds only the TLAS and the next render equals a fresh
   }
 });
 
-test('an update that changes what the kernel is specialized for compiles again and still equals a fresh render', { skip: skipWithoutAddon }, () => {
+cookTest('an update that changes what the kernel is specialized for compiles again and still equals a fresh render', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const before = roomInput([0, 2.2, 6]);
   const glass = roomInputWith((scene) => {
@@ -775,7 +778,7 @@ test('an update that changes what the kernel is specialized for compiles again a
   }
 });
 
-test('an update with a new camera only sends no table, and the same input again changes nothing', { skip: skipWithoutAddon }, () => {
+cookTest('an update with a new camera only sends no table, and the same input again changes nothing', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const first = roomInput([0, 2.2, 6]);
   const moved = roomInput([1.5, 2.2, 5]);
@@ -793,7 +796,7 @@ test('an update with a new camera only sends no table, and the same input again 
   }
 });
 
-test('an update ends the progressive image and the next one equals a fresh render of the final input', { skip: skipWithoutAddon }, () => {
+cookTest('an update ends the progressive image and the next one equals a fresh render of the final input', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, samples: FILM_SAMPLES, kernel: 'cycles' };
   const before = roomInput([0, 2.2, 6]);
   const after = roomInputWith(moveFloorAndLamp);
@@ -809,7 +812,7 @@ test('an update ends the progressive image and the next one equals a fresh rende
   }
 });
 
-test('an update that cannot be applied is refused before anything changes', { skip: skipWithoutAddon }, () => {
+cookTest('an update that cannot be applied is refused before anything changes', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const before = roomInput([0, 2.2, 6]);
   const session = createNativeSession(before);
@@ -830,7 +833,7 @@ test('an update that cannot be applied is refused before anything changes', { sk
   assert.throws(() => session.update(before), { message: /closed/ });
 });
 
-test('an updated session renders like a new session and the timings of both are printed', { skip: skipWithoutAddon }, () => {
+cookTest('an updated session renders like a new session and the timings of both are printed', { skip: skipWithoutAddon }, () => {
   const options = { ...IMAGE_OPTIONS, samples: 4, kernel: 'cycles' };
   const before = roomInput([0, 2.2, 6]);
   const after = roomInputWith(moveFloorAndLamp);

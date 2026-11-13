@@ -5,7 +5,7 @@
 //   node scripts/benchmark-native-dispatch-budget.mjs artifacts/dispatch-budget-bench.json [width height samples grid]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { buildNativeInputV2, createNativeSession } from '../packages/render-native/index.mjs';
+import { buildNativeInputV2, createNativeSession } from '@codepawlhq/cook';
 import { createCamera } from '../src/path-tracer.js';
 
 const [outputPath = 'artifacts/dispatch-budget-bench.json', widthText = '1920', heightText = '1080', samplesText = '64', gridText = '320'] =
