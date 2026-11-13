@@ -1,6 +1,6 @@
 import nodeTest from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, link, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, link, unlink, open } from 'node:fs/promises';
 import { watch, writeFileSync } from 'node:fs';
 import { tmpdir, constants, setPriority } from 'node:os';
 import { join } from 'node:path';
@@ -371,7 +371,49 @@ test('a lock is published whole: absent while the temporary file is written, com
   await controller.close();
 });
 
-test('a starter whose dead lock was replaced by another dead lock starts again and takes that one over', async context => {
+test('an unparseable lock is refused by naming the file to delete, and is not deleted', async context => {
+  const root = await temporary(context);
+  await writeFile(join(root, 'store.lock'), '{"schemaVersion":');
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), error => error.message.includes(join(root, 'store.lock')) && /delete/.test(error.message));
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), '{"schemaVersion":');
+});
+
+test('when the temporary name of a new lock cannot be removed, no lock is kept and the error says so', async context => {
+  const root = await temporary(context);
+  const busy = Object.assign(new Error('resource busy'), { code: 'EBUSY' });
+  const fileOperations = { unlink: async path => { if (path.includes('.tmp-')) throw busy; return unlink(path); } };
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { fileOperations } }), /Could not finish writing store\.lock.*not kept/);
+  assert.deepEqual((await readdir(root)).filter(name => name.startsWith('store.lock')), [], 'neither the lock nor a temporary file is left');
+});
+
+test('a failed write of the temporary file leaves no temporary file', async context => {
+  const root = await temporary(context);
+  const fileOperations = {
+    writeFile: async (path, ...rest) => {
+      await writeFile(path, 'partial', { flag: 'wx' });
+      throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+    },
+  };
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { fileOperations } }), /no space left/);
+  assert.deepEqual((await readdir(root)).filter(name => name.startsWith('store.lock')), []);
+});
+
+test('when hard links are unsupported and the fallback write fails, the half-made lock is removed', async context => {
+  const root = await temporary(context);
+  const fileOperations = {
+    link: async () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }); },
+    open: async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      return { writeFile: async () => { throw new Error('no space left on device'); }, close: () => handle.close() };
+    },
+  };
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { fileOperations } }), /no space left/);
+  assert.deepEqual((await readdir(root)).filter(name => name.startsWith('store.lock')), []);
+  const recovered = await createAgentRenderJobs({ root, limits, run: writeImage });
+  await recovered.close();
+});
+
+test('a starter whose dead lock was replaced by another dead lock starts again and takes that one over',async context => {
   const root = await temporary(context);
   await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
   let signalReached;

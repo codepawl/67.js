@@ -345,20 +345,57 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   // Writes the whole text to a private temporary file, then hard-links it to `targetPath` (atomic, EEXIST when the target is
   // taken) and removes the temporary name. The target therefore never exists empty or half written, even if the process is killed
   // or the disk fills. Where hard links are not supported it falls back to creating the target with `wx` and writing into it.
+  // The file operations used here can be replaced through `lockTakeoverHooks.fileOperations`, so tests can make one of them fail.
+  const publishOperations = { writeFile, link, open, unlink, ...lockTakeoverHooks.fileOperations };
+
+  // Removing the temporary name can fail for a moment (a virus scanner holding the file on Windows), so it is retried with a
+  // short backoff. The target must never be left with two names: that makes it fail the single-link check of the store.
+  async function removeTemporaryName(temporaryPath) {
+    let lastError;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await publishOperations.unlink(temporaryPath);
+        return;
+      } catch (error) {
+        if (error.code === 'ENOENT') return;
+        lastError = error;
+        await new Promise(resolveWait => setTimeout(resolveWait, 20 * 2 ** attempt));
+      }
+    }
+    throw lastError;
+  }
+
   async function publishFile(targetPath, text) {
     const temporaryPath = `${targetPath}.tmp-${randomUUID()}`;
-    await writeFile(temporaryPath, text, { flag: 'wx', mode: 0o600 });
+    let linked = false;
     try {
+      await publishOperations.writeFile(temporaryPath, text, { flag: 'wx', mode: 0o600 });
       await lockTakeoverHooks.beforeLockLink?.();
       try {
-        await link(temporaryPath, targetPath);
+        await publishOperations.link(temporaryPath, targetPath);
+        linked = true;
       } catch (error) {
         if (!['EPERM', 'ENOTSUP', 'ENOSYS', 'EOPNOTSUPP'].includes(error.code)) throw error;
-        const target = await open(targetPath, 'wx', 0o600);
-        try { await target.writeFile(text); }
-        finally { await target.close(); }
+        const target = await publishOperations.open(targetPath, 'wx', 0o600);
+        try {
+          await target.writeFile(text);
+        } catch (writeError) {
+          await target.close().catch(() => {});
+          await unlink(targetPath).catch(() => {});
+          throw writeError;
+        }
+        await target.close();
       }
       await lockTakeoverHooks.afterLockLink?.();
+      if (linked) {
+        try {
+          await removeTemporaryName(temporaryPath);
+        } catch (error) {
+          // Give the target back (only if it is still the file this call wrote) rather than keep a file with two names.
+          if (await readFile(targetPath, 'utf8').catch(() => null) === text) await unlink(targetPath).catch(() => {});
+          throw new Error(`Could not finish writing ${basename(targetPath)} (${error.code ?? error.message}); it was not kept. Close any program that holds files in the jobs folder and try again.`);
+        }
+      }
     } finally {
       await unlink(temporaryPath).catch(() => {});
     }
@@ -381,7 +418,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     try {
       return JSON.parse(await readFile(path, 'utf8'));
     } catch (error) {
-      if (error instanceof SyntaxError) throw new Error(LIVE_OWNER_MESSAGE);
+      if (error instanceof SyntaxError) throw new Error(`The job store lock ${path} is held by a live process or is incomplete. If no other 67js server uses this folder, delete ${path}.`);
       throw error;
     }
   }
