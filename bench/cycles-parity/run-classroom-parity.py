@@ -5,11 +5,14 @@ Run from the repository root on a machine with Blender 5.3 (Cycles OptiX), Node,
   python3 bench/cycles-parity/run-classroom-parity.py [--data-directory <folder>] [--samples 1024] [--force stage,stage] [--keep-glass]
 
 Stages, each skipped when its outputs already exist unless named in --force: export, cook, cycles, reference, compare.
+Outputs are reused only while the sample count, --keep-glass and the bridge and add-on code are the same as in the run that wrote them
+(artifacts/classroom/run-stamp.json); a change forces export, cook, cycles and reference again, so a number never comes from an older run.
 The scene is the Blender "Classroom" demo file (Christophe Seux, CC0). It is downloaded once into --data-directory (default
 ~/cook-data/classroom), outside the repository, and opened only with auto-run scripts disabled. Outputs go to artifacts/classroom/
 (ignored by Git); the summary is artifacts/classroom/summary.json and the figure artifacts/classroom/classroom-comparison.jpg.
 """
 import glob
+import hashlib
 import json
 import os
 import shutil
@@ -39,6 +42,35 @@ BLENDER_SEARCH_PATTERNS = (
 WIDTH = 960
 HEIGHT = 540
 DEPTH_SAMPLES = 1024
+STAMP_PATH = os.path.join(OUTPUT_DIRECTORY, "run-stamp.json")
+# Code that decides what the stages write; the tracer sources are not part of the stamp (use --force cook after rebuilding it).
+STAMPED_CODE_PATTERNS = (
+    os.path.join(HERE, "classroom_bridge.py"),
+    os.path.join(HERE, "render-cycles.py"),
+    os.path.join(HERE, "scene-bridge.mjs"),
+    os.path.join(HERE, "trace-native.mjs"),
+    os.path.join(REPOSITORY_ROOT, "packages", "blender-addon", "cook_blender", "*.py"),
+)
+STAGES_FORCED_BY_A_CHANGED_STAMP = {"export", "cook", "cycles", "reference"}
+current_stamp = None
+
+
+def inputs_stamp(samples, keep_glass, code_patterns=STAMPED_CODE_PATTERNS):
+    """What the outputs depend on: the sample count, the glass choice and a digest of the bridge and add-on code."""
+    digest = hashlib.sha256()
+    for pattern in code_patterns:
+        for code_path in sorted(glob.glob(pattern)):
+            digest.update(os.path.basename(code_path).encode("utf-8"))
+            with open(code_path, "rb") as handle:
+                digest.update(b"|".join(handle.read().splitlines()))
+    return {"samples": samples, "keepGlass": keep_glass, "codeDigest": digest.hexdigest()[:16]}
+
+
+def stages_forced_by_stale_outputs(previous_stamp, wanted_stamp):
+    """No stages when the stamp matches; the four that write results when it differs or is missing."""
+    if previous_stamp == wanted_stamp:
+        return set()
+    return set(STAGES_FORCED_BY_A_CHANGED_STAMP)
 
 
 def parse_arguments():
@@ -242,6 +274,13 @@ def main():
     summary = {"samples": options["samples"], "errors": {}}
     force = options["force"]
     samples = options["samples"]
+    global current_stamp
+    current_stamp = inputs_stamp(samples, options["keep_glass"])
+    previous_stamp = read_json(STAMP_PATH) if os.path.exists(STAMP_PATH) else None
+    forced_by_stamp = stages_forced_by_stale_outputs(previous_stamp, current_stamp)
+    if forced_by_stamp:
+        log(f"outputs are from other inputs (stamp {previous_stamp} against {current_stamp}); running {sorted(forced_by_stamp)} again")
+    force = force | forced_by_stamp
 
     def guarded(stage, action):
         try:
@@ -446,6 +485,9 @@ def copy_small_outputs():
 def finish(summary):
     with open(os.path.join(OUTPUT_DIRECTORY, "summary.json"), "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2, default=str)
+    if current_stamp is not None and not summary.get("errors"):
+        with open(STAMP_PATH, "w", encoding="utf-8") as handle:
+            json.dump(current_stamp, handle)
     copy_small_outputs()
     print("CLASSROOM_SUMMARY " + json.dumps(summary, default=str))
 

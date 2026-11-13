@@ -15,7 +15,6 @@ depth-of-field flags) and <outputDirectory>/classroom-report.json (counts and ev
 
 Both modes call prepare_scene first, so the two sides drop the same objects.
 """
-import base64
 import importlib.util
 import json
 import math
@@ -25,20 +24,15 @@ import time
 
 import bpy
 import numpy
-from mathutils import Euler, Matrix, Vector
+from mathutils import Euler, Vector
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 REPOSITORY_ROOT = os.path.abspath(os.path.join(SCRIPT_DIRECTORY, "..", ".."))
-BLENDER_TO_YUP = Matrix((
-    (1.0, 0.0, 0.0, 0.0),
-    (0.0, 0.0, 1.0, 0.0),
-    (0.0, -1.0, 0.0, 0.0),
-    (0.0, 0.0, 0.0, 1.0),
-))
-WATTS_PER_POINT_INTENSITY = 4.0 * math.pi
-WATTS_PER_AREA_INTENSITY = math.pi
+# The scene reading (camera, lights, world description, meshes) is shared with the Blender render add-on.
+sys.path.insert(0, os.path.join(REPOSITORY_ROOT, "packages", "blender-addon"))
+from cook_blender.scene_export import add_light_entry, build_camera_entries, column_major_yup_matrix, describe_world, encode_array, geometry_key, mesh_to_arrays  # noqa: E402
 HDR_RADIANCE_LIMIT = 60000.0
 HDR_WIDTH = 2048
 HDR_HEIGHT = 1024
@@ -49,7 +43,6 @@ PROBE_SAMPLES = 8
 BAKE_ROTATION_CANDIDATE_DEGREES = (0.0, 90.0, 180.0, 270.0)
 UNSUPPORTED_OBJECT_TYPES = ("CURVES", "POINTCLOUD", "VOLUME", "GREASEPENCIL", "GPENCIL")
 MESH_LIKE_OBJECT_TYPES = ("MESH", "CURVE", "SURFACE", "FONT", "META")
-IGNORED_MODIFIER_PROPERTIES = {"rna_type", "persistent_uid", "name", "show_expanded", "is_active", "is_override_data", "use_pin_to_last", "execution_time"}
 GREY_ALBEDO = 0.8
 RAY_VISIBILITY_ATTRIBUTES = {
     "camera": "visible_camera", "diffuse": "visible_diffuse", "glossy": "visible_glossy",
@@ -254,160 +247,7 @@ def prepare_scene(scene, keep_glass):
     return report
 
 
-# ---- Coordinates, camera, lights ----
-
-def to_yup(vector):
-    return [float(vector[0]), float(vector[2]), float(-vector[1])]
-
-
-def column_major_yup_matrix(blender_matrix):
-    matrix = BLENDER_TO_YUP @ blender_matrix
-    return [float(matrix[row][column]) for column in range(4) for row in range(4)]
-
-
-def effective_horizontal_sensor_width(camera_data, width, height):
-    fit = camera_data.sensor_fit
-    if fit == "AUTO":
-        fit = "HORIZONTAL" if width >= height else "VERTICAL"
-    if fit == "HORIZONTAL":
-        return camera_data.sensor_width
-    return camera_data.sensor_height * width / height
-
-
-def vertical_fov_degrees(camera_data, width, height):
-    horizontal_sensor_width = effective_horizontal_sensor_width(camera_data, width, height)
-    half_tangent_x = horizontal_sensor_width / (2.0 * camera_data.lens)
-    half_tangent_y = half_tangent_x * height / width
-    return math.degrees(2.0 * math.atan(half_tangent_y))
-
-
-def build_camera_entries(scene, width, height, report):
-    camera_object = scene.camera
-    camera_data = camera_object.data
-    if camera_data.type != "PERSP":
-        raise ValueError(f"Camera type {camera_data.type} is not supported: the bench draws perspective cameras only.")
-    world_matrix = camera_object.matrix_world
-    eye = world_matrix.translation.copy()
-    forward = (world_matrix.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized()
-    camera_up = (world_matrix.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized()
-    level_up = (Vector((0.0, 0.0, 1.0)) - forward * forward.z).normalized()
-    roll_degrees = math.degrees(math.acos(max(-1.0, min(1.0, camera_up.dot(level_up)))))
-    report["camera"] = {
-        "name": camera_object.name,
-        "lensMillimetres": camera_data.lens,
-        "sensorWidth": camera_data.sensor_width,
-        "sensorHeight": camera_data.sensor_height,
-        "sensorFit": camera_data.sensor_fit,
-        "shiftX": camera_data.shift_x,
-        "shiftY": camera_data.shift_y,
-        "rollDegrees": roll_degrees,
-        "clipStart": camera_data.clip_start,
-        "clipEnd": camera_data.clip_end,
-        "dofEnabled": camera_data.dof.use_dof,
-        "pixelAspect": scene.render.pixel_aspect_x / scene.render.pixel_aspect_y,
-        "frame": scene.frame_current,
-    }
-    camera_entry = {
-        "eye": to_yup(eye),
-        "target": to_yup(eye + forward),
-        "up": to_yup(level_up),
-        "fov": vertical_fov_degrees(camera_data, width, height),
-        "near": camera_data.clip_start,
-        "far": max(camera_data.clip_end, 1000.0),
-    }
-    lens_entry = {"enabled": False}
-    if camera_data.dof.use_dof:
-        dof = camera_data.dof
-        focus_distance = dof.focus_distance
-        if dof.focus_object is not None:
-            focus_distance = abs((dof.focus_object.matrix_world.translation - eye).dot(forward))
-        lens_entry = {
-            "enabled": True,
-            "fStop": dof.aperture_fstop,
-            "focusDistance": focus_distance,
-            "apertureBlades": dof.aperture_blades,
-            "apertureRotation": math.degrees(dof.aperture_rotation),
-            "apertureRatio": dof.aperture_ratio,
-            "sensorWidth": effective_horizontal_sensor_width(camera_data, width, height),
-        }
-    report["lens"] = lens_entry
-    return camera_entry, lens_entry
-
-
-def light_color_with_exposure(light_data):
-    exposure_scale = 2.0 ** getattr(light_data, "exposure", 0.0)
-    return [float(channel) for channel in light_data.color], light_data.energy * exposure_scale
-
-
-def add_light_entry(environment, light_object, light_matrix, report):
-    light_data = light_object.data
-    color, energy = light_color_with_exposure(light_data)
-    if energy <= 0.0:
-        return
-    position = to_yup(light_matrix.translation)
-    emission_direction = to_yup((light_matrix.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized())
-    if light_data.type == "SUN":
-        toward_light = [-component for component in emission_direction]
-        environment["keyColor"] = [channel * energy for channel in color]
-        environment["lightDirection"] = toward_light
-        environment["sunAngularRadius"] = light_data.angle / 2.0
-    elif light_data.type == "POINT":
-        environment["pointLights"].append({"position": position, "color": color, "intensity": energy / WATTS_PER_POINT_INTENSITY, "radius": light_data.shadow_soft_size})
-    elif light_data.type == "SPOT":
-        environment["spotLights"].append({
-            "position": position,
-            "color": color,
-            "intensity": energy / WATTS_PER_POINT_INTENSITY,
-            "radius": light_data.shadow_soft_size,
-            "direction": emission_direction,
-            "angle": light_data.spot_size / 2.0,
-            "penumbra": light_data.spot_blend,
-        })
-    elif light_data.type == "AREA":
-        scale = light_matrix.to_scale()
-        local_up = to_yup((light_matrix.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized())
-        shape = {"SQUARE": "rectangle", "RECTANGLE": "rectangle", "DISK": "disk", "ELLIPSE": "ellipse"}[light_data.shape]
-        width_value = light_data.size * abs(scale.x)
-        height_value = width_value if light_data.shape in ("SQUARE", "DISK") else light_data.size_y * abs(scale.y)
-        entry = {
-            "position": position,
-            "color": color,
-            "intensity": energy / WATTS_PER_AREA_INTENSITY,
-            "width": width_value,
-            "height": height_value,
-            "direction": emission_direction,
-            "up": [-component for component in local_up],
-            "shape": shape,
-            "spread": max(0.0001, min(math.pi, light_data.spread)),
-        }
-        environment["areaLights"].append(entry)
-        if getattr(light_data, "normalize", True) is False:
-            report["notes"].append(f"area light {light_object.name} has Normalize off, which the bench format cannot carry")
-    report["lightCounts"][light_data.type] = report["lightCounts"].get(light_data.type, 0) + 1
-
-
 # ---- World ----
-
-def describe_world(world):
-    if world is None:
-        return {"kind": "constant", "value": 0.0, "note": "no world"}
-    if not world.use_nodes or world.node_tree is None:
-        color = list(world.color)
-        return {"kind": "constant", "value": color[0], "color": color, "grey": max(color) - min(color) < 1e-6}
-    output_node = next((node for node in world.node_tree.nodes if node.type == "OUTPUT_WORLD" and node.is_active_output), None)
-    if output_node is None or not output_node.inputs["Surface"].is_linked:
-        return {"kind": "baked", "reason": "no linked world output"}
-    background_node = output_node.inputs["Surface"].links[0].from_node
-    if background_node.type != "BACKGROUND":
-        return {"kind": "baked", "reason": f"output reads a {background_node.type} node"}
-    color_socket = background_node.inputs["Color"]
-    strength_socket = background_node.inputs["Strength"]
-    if color_socket.is_linked or strength_socket.is_linked:
-        linked_types = [socket.links[0].from_node.type for socket in (color_socket, strength_socket) if socket.is_linked]
-        return {"kind": "baked", "reason": f"background inputs linked to {linked_types}"}
-    color = [float(channel) * strength_socket.default_value for channel in color_socket.default_value[:3]]
-    return {"kind": "constant", "value": color[0], "color": color, "grey": max(color) - min(color) < 1e-6}
-
 
 def create_probe_scene(name, world, width, height, samples, render_cycles):
     probe_scene = bpy.data.scenes.new(name)
@@ -514,70 +354,6 @@ def bake_world(world, work_directory, final_hdr_path, render_cycles, report):
 
 
 # ---- Geometry ----
-
-def modifier_signature(original_object):
-    """A text key for the modifier stack; None when a modifier reads another object, so two copies could evaluate differently."""
-    entries = []
-    for modifier in original_object.modifiers:
-        if not modifier.show_viewport:
-            continue
-        properties = []
-        for property_description in modifier.bl_rna.properties:
-            identifier = property_description.identifier
-            if identifier in IGNORED_MODIFIER_PROPERTIES or property_description.type == "COLLECTION":
-                continue
-            value = getattr(modifier, identifier)
-            if property_description.type == "POINTER":
-                if isinstance(value, bpy.types.Object):
-                    return None
-                properties.append((identifier, getattr(value, "name", None)))
-                continue
-            if hasattr(value, "__len__") and not isinstance(value, str):
-                value = tuple(value)
-            properties.append((identifier, value))
-        entries.append((modifier.type, tuple(properties)))
-    return repr(entries)
-
-
-def geometry_key(original_object):
-    if original_object.type == "MESH":
-        signature = modifier_signature(original_object)
-        if signature is not None:
-            return ("data", original_object.data.name, signature)
-    return ("object", original_object.name)
-
-
-def mesh_to_arrays(evaluated_object):
-    mesh = evaluated_object.to_mesh()
-    try:
-        mesh.calc_loop_triangles()
-        triangle_count = len(mesh.loop_triangles)
-        if triangle_count == 0:
-            return None
-        coordinates = numpy.empty(len(mesh.vertices) * 3, dtype=numpy.float32)
-        mesh.vertices.foreach_get("co", coordinates)
-        triangle_vertices = numpy.empty(triangle_count * 3, dtype=numpy.int32)
-        mesh.loop_triangles.foreach_get("vertices", triangle_vertices)
-        triangle_loops = numpy.empty(triangle_count * 3, dtype=numpy.int32)
-        mesh.loop_triangles.foreach_get("loops", triangle_loops)
-        corner_normals = numpy.empty(len(mesh.loops) * 3, dtype=numpy.float32)
-        mesh.corner_normals.foreach_get("vector", corner_normals)
-        positions = coordinates.reshape(-1, 3)[triangle_vertices]
-        normals = corner_normals.reshape(-1, 3)[triangle_loops]
-        stacked = numpy.concatenate([positions, normals], axis=1)
-        unique_rows, inverse = numpy.unique(stacked, axis=0, return_inverse=True)
-        return {
-            "positions": numpy.ascontiguousarray(unique_rows[:, :3], dtype=numpy.float32),
-            "normals": numpy.ascontiguousarray(unique_rows[:, 3:], dtype=numpy.float32),
-            "indices": numpy.ascontiguousarray(inverse.reshape(-1), dtype=numpy.uint32),
-        }
-    finally:
-        evaluated_object.to_mesh_clear()
-
-
-def encode_array(array):
-    return {"type": {"float32": "Float32Array", "uint32": "Uint32Array"}[array.dtype.name], "base64": base64.b64encode(array.tobytes()).decode("ascii")}
-
 
 def collect_scene_content(scene, width, height, report, glass_names):
     depsgraph = bpy.context.evaluated_depsgraph_get()
