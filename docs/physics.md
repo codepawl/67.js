@@ -412,7 +412,7 @@ The definition form of the same thing is `ocean` on the definition and `float` o
 
 ### Boats and wakes
 
-![A fishing boat turning through waves, with a wake of foam behind it](boat-wake-still.jpg)
+![A fishing boat turning through waves, with a wake of foam behind it](https://raw.githubusercontent.com/codepawl/67.js/main/docs/boat-wake-still.jpg)
 
 A floating hull becomes a boat with `float.boat`: throttle pushes the stern along the bow and the rudder pushes it sideways, so the hull still pitches and rolls on the waves. It turns like a real boat: faster water past the rudder turns it harder, and the keel stops it sliding sideways.
 
