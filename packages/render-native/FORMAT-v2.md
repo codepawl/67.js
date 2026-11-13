@@ -290,7 +290,7 @@ Convention: `direction` is always the **unit emission direction pointing from th
 | `0` | `12` | `16` | `vec3<f32>` | `position` | World-space centre (`point`, `spot`, `area_rect`, `area_disk`; unused for `sun`) |
 | `12` | `4` | `4` | `u32` | `light_type` | `0=point`, `1=spot`, `2=area_rect`, `3=area_disk`, `4=sun` |
 | `16` | `12` | `16` | `vec3<f32>` | `radiance` | Emitted linear RGB radiance (`W/(sr·m²)` for finite-area/sun, intensity `W/sr` when `radius == 0`) |
-| `28` | `4` | `4` | `u32` | `flags` | Bitmask: `1=CAST_SHADOW`, `2=MULTIPLE_IMPORTANCE`, `4=CAMERA_VISIBLE`, `8=PORTAL`, `16=NORMALIZE` |
+| `28` | `4` | `4` | `u32` | `flags` | Bitmask: `1=CAST_SHADOW`, `2=MULTIPLE_IMPORTANCE`, `4=CAMERA_VISIBLE`, `8=PORTAL`, `16=NORMALIZE`, `32=SOFT_FALLOFF` (a point or spot light with a radius is an oriented disk facing the shading point, as Blender's `use_soft_falloff`; clear: the sphere) |
 | `32` | `12` | `16` | `vec3<f32>` | `direction` | Unit world-space emission direction |
 | `44` | `4` | `4` | `f32` | `radius` | Sphere radius in metres for `point` / `spot` (`0.0` = delta emitter) |
 | `48` | `12` | `16` | `vec3<f32>` | `axis_u` | Unit tangent axis U for area / IES orientation |

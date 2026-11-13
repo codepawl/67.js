@@ -21,8 +21,8 @@ const ENVIRONMENT_FIELDS = [
 ];
 const EFFECT_FIELDS = ['exposure', 'saturation', 'contrast', 'temperature', 'vignette', 'grain', 'ambientOcclusion', 'ambientOcclusionRadius', 'bloom', 'depthOfField', 'motionBlur'];
 const SHADOW_FIELDS = ['target', 'extent', 'distance', 'near', 'far'];
-const POINT_LIGHT_FIELDS = ['position', 'color', 'intensity', 'radius', 'range', 'castShadow', 'affects'];
-const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color', 'intensity', 'radius', 'range', 'castShadow', 'ies', 'affects'];
+const POINT_LIGHT_FIELDS = ['position', 'color', 'intensity', 'radius', 'range', 'castShadow', 'softFalloff', 'affects'];
+const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color', 'intensity', 'radius', 'range', 'castShadow', 'softFalloff', 'ies', 'affects'];
 const AREA_LIGHT_FIELDS = ['position', 'direction', 'up', 'width', 'height', 'color', 'intensity', 'castShadow', 'ies', 'affects'];
 const VOLUME_VECTOR_FIELDS = ['minimum', 'maximum', 'color', 'ambient', 'drift'];
 const VOLUME_NUMBER_FIELDS = ['density', 'steps', 'anisotropy', 'noiseAmount', 'noiseScale', 'maxDistance', 'shadowAmbient', 'heightFalloff', 'detailOctaves', 'detailAmount', 'warp', 'contrast', 'profileSoftness', 'keyScattering', 'scatterOctaves', 'multiScatter', 'multiExtinction', 'multiAnisotropy', 'keyTransmittance', 'surfaceTransmittance'];
@@ -175,14 +175,17 @@ function rangeFrom(light) {
   return range;
 }
 
-// Only a light that casts shadows carries the field, so recipes without shadows keep their exported shape.
-function shadowFieldFrom(light) {
-  const castShadow = fallback(light.castShadow, false);
-  if (typeof castShadow !== 'boolean') {
-    throw invalidField('castShadow', castShadow, 'true or false', TypeError);
+// A light carries castShadow or softFalloff (an oriented disk, as Blender's Soft Falloff) only when true, so recipes without them keep their exported shape.
+function lightFlagFrom(light, name) {
+  const flag = fallback(light[name], false);
+  if (typeof flag !== 'boolean') {
+    throw invalidField(name, flag, 'true or false', TypeError);
   }
-  return castShadow ? { castShadow } : {};
+  return flag ? { [name]: flag } : {};
 }
+
+const shadowFieldFrom = light => lightFlagFrom(light, 'castShadow');
+const softFalloffFieldFrom = light => lightFlagFrom(light, 'softFalloff');
 
 function pointLightFrom(light) {
   knownKeys(light, POINT_LIGHT_FIELDS, 'point light');
@@ -193,6 +196,7 @@ function pointLightFrom(light) {
     radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'radius'),
     range: rangeFrom(light),
     ...shadowFieldFrom(light),
+    ...softFalloffFieldFrom(light),
     ...affectsFrom(light, 'point light'),
   };
 }
@@ -209,6 +213,7 @@ function spotLightFrom(light) {
     radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'radius'),
     range: rangeFrom(light),
     ...shadowFieldFrom(light),
+    ...softFalloffFieldFrom(light),
     ...affectsFrom(light, 'spot light'),
   };
 }

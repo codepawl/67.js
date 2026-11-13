@@ -1282,7 +1282,7 @@ mod tests {
     /// A point or spot light with a radius is a sphere (Blender's `use_soft_falloff` off, #1040): outside it Cook samples the cone
     /// of the sphere and a path that hits it uses the same cone pdf, inside it samples the surface, and the packed radiance is
     /// intensity over pi r^2 so the power does not change with the radius. The Cycles reference script switches
-    /// `use_soft_falloff` off to render the same light; with it on Cycles uses an oriented disk this kernel does not model.
+    /// `use_soft_falloff` off to render the same light; a light with the `SOFT_FALLOFF` flag is the oriented disk of Cycles (below).
     #[test]
     fn a_light_with_a_radius_is_a_sphere_with_one_pdf_for_sampling_and_hits() {
         let kernel = assemble_cycles_kernel().expect("the kernel assembles");
@@ -1295,6 +1295,50 @@ mod tests {
         assert!(kernel.contains("lgt_sphere_solid_angle_pdf(dist_sq, light.radius, hit_t, ray_origin, ray_dir, light.position)"));
         assert!(kernel.contains("if (hit_t <= t_min || hit_t >= t_max) {"));
         assert!(!kernel.contains("disk_light_sample"));
+    }
+
+    /// A light with `LIGHT_FLAG_SOFT_FALLOFF` (Blender's `use_soft_falloff`, #1060) is an oriented disk through its centre facing the
+    /// shading point: sampling, the pdf of a path that reaches the disk and the light tree profile all read the same flag, the radiance
+    /// is the sphere's, and a light without the flag takes the sphere branch untouched.
+    #[test]
+    fn a_soft_falloff_light_is_an_oriented_disk_for_sampling_hits_and_the_light_tree() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        assert!(kernel.contains("const LIGHT_FLAG_SOFT_FALLOFF: u32 = 32u;"));
+
+        let sampler_start = kernel.find("fn lgt_sample_point_or_spot_light(").expect("the point and spot sampler exists");
+        let sampler_end = sampler_start + kernel[sampler_start..].find("
+fn lgt_sample_area_light(").expect("the sampler ends");
+        let sampler = &kernel[sampler_start..sampler_end];
+        let flag_test = sampler.find("(light.flags & LIGHT_FLAG_SOFT_FALLOFF) != 0u").expect("the sampler tests the flag");
+        let sphere_branch = sampler.find("lgt_sample_uniform_cone(center_dir").expect("the sphere branch exists");
+        assert!(flag_test < sphere_branch, "the flag is tested before the sphere branch");
+        assert!(sampler.contains("return lgt_sample_soft_falloff_light(light, shading_pos, rand_uv);"));
+
+        let disk_start = kernel.find("fn lgt_sample_soft_falloff_light(").expect("the disk sampler exists");
+        let disk_end = disk_start + kernel[disk_start..].find("
+}
+").expect("the disk sampler ends");
+        let disk_sampler = &kernel[disk_start..disk_end];
+        assert!(disk_sampler.contains("let disk_normal = from_light / center_distance;"));
+        assert!(disk_sampler.contains("lgt_sample_unit_disk(rand_uv)"));
+        assert!(disk_sampler.contains("lgt_soft_falloff_solid_angle_pdf(light.radius, disk_normal, -wi, distance)"));
+        assert!(disk_sampler.contains("lgt_spot_attenuation(light, -wi)"));
+        assert!(disk_sampler.contains("light.radiance * (spot_weight * falloff)"));
+
+        let pdf_start = kernel.find("fn lgt_soft_falloff_solid_angle_pdf(").expect("the disk pdf exists");
+        let pdf_end = pdf_start + kernel[pdf_start..].find("
+}
+").expect("the disk pdf ends");
+        assert!(kernel[pdf_start..pdf_end].contains("(distance * distance) / (cos_light * PI * radius * radius)"));
+
+        assert!(kernel.contains("lgt_ray_soft_falloff_intersect(ray_origin, ray_dir, light, t_min, t_max, &disk_hit_t, &disk_pdf_solid_angle)"));
+        assert!(kernel.contains("let candidate_t = origin_distance / cos_angle;"));
+
+        let profile_start = kernel.find("fn ltr_sphere_light_profile(").expect("the point and spot tree profile exists");
+        let profile = &kernel[profile_start..profile_start + 900];
+        assert!(profile.contains("(light.flags & LIGHT_FLAG_SOFT_FALLOFF) != 0u"));
+        assert!(profile.contains("profile.cos_theta_u = min_distance / hypotenuse;"));
+        assert!(profile.contains("profile.max_distance = hypotenuse;"));
     }
 
     #[test]

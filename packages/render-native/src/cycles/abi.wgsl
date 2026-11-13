@@ -88,6 +88,8 @@ const LIGHT_FLAG_MULTIPLE_IMPORTANCE: u32 = 2u;
 const LIGHT_FLAG_CAMERA_VISIBLE: u32 = 4u;
 const LIGHT_FLAG_PORTAL: u32 = 8u;
 const LIGHT_FLAG_NORMALIZE: u32 = 16u;
+// A point or spot light with a radius is an oriented disk facing the shading point (Blender's `use_soft_falloff`), not a sphere.
+const LIGHT_FLAG_SOFT_FALLOFF: u32 = 32u;
 
 // `MaterialRecord.flags` bits.
 const MATERIAL_FLAG_MULTISCATTER_GGX: u32 = 1u;

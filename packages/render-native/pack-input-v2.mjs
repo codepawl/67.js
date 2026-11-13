@@ -82,6 +82,7 @@ const LIGHT_FLAG_MULTIPLE_IMPORTANCE = 2;
 const LIGHT_FLAG_CAMERA_VISIBLE = 4;
 const LIGHT_FLAG_PORTAL = 8;
 const LIGHT_FLAG_NORMALIZE = 16;
+const LIGHT_FLAG_SOFT_FALLOFF = 32;
 
 const MATERIAL_FLAG_MULTISCATTER_GGX = 1;
 const MATERIAL_FLAG_THIN_WALLED = 2;
@@ -1266,6 +1267,9 @@ function buildAnalyticLightEntries(lightsSection = {}) {
     if (radius > 0 && point.multipleImportance !== false) {
       flags |= LIGHT_FLAG_MULTIPLE_IMPORTANCE;
     }
+    if (radius > 0 && point.softFalloff === true) {
+      flags |= LIGHT_FLAG_SOFT_FALLOFF;
+    }
     if (point.cameraVisible === true) {
       flags |= LIGHT_FLAG_CAMERA_VISIBLE;
     }
@@ -1326,6 +1330,9 @@ function buildAnalyticLightEntries(lightsSection = {}) {
     }
     if (radius > 0 && spot.multipleImportance !== false) {
       flags |= LIGHT_FLAG_MULTIPLE_IMPORTANCE;
+    }
+    if (radius > 0 && spot.softFalloff === true) {
+      flags |= LIGHT_FLAG_SOFT_FALLOFF;
     }
     if (spot.cameraVisible === true) {
       flags |= LIGHT_FLAG_CAMERA_VISIBLE;
@@ -3154,6 +3161,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
         blend: lightFloats[b + 19],
         intensity: lightFloats[b + 20],
         range: lightFloats[b + 21],
+        softFalloff: lightFloats[b + 22] === 1,
       });
     } else {
       reconstructedLights.points.push({
@@ -3163,6 +3171,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
         radius: lightFloats[b + 11],
         intensity: lightFloats[b + 20],
         range: lightFloats[b + 21],
+        softFalloff: lightFloats[b + 22] === 1,
       });
     }
   }
