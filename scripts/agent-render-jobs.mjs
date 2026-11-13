@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, VIDEO_ENCODERS, AUDIO_FILE_PATTERN, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS } from '../src/agent-scene-capabilities.js';
+import { parseQuality } from './agent-render-quality.mjs';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { normalizeFilmTimeline, filmTimelineDuration } from '../src/film-timeline.js';
 import { OIDN_DEFAULT_SAMPLES, PATH_TRACER_DENOISERS, PATH_TRACER_JOB_LIMITS } from '../src/path-tracer-capabilities.js';
@@ -105,7 +106,7 @@ export function normalizeJobSettings(input, clips, recipe) {
 }
 
 function settingsFrom(input, clips, recipe) {
-  objectKeys(input, ['kind', 'width', 'height', 'fps', 'duration', 'animation', 'motion', 'rendererTime', 'passes', 'renderer', 'timeline', 'audio', 'encoder', 'transparent', 'format', 'multilayer', 'region'], 'settings');
+  objectKeys(input, ['kind', 'width', 'height', 'fps', 'duration', 'animation', 'motion', 'rendererTime', 'passes', 'renderer', 'timeline', 'audio', 'encoder', 'transparent', 'format', 'multilayer', 'region', 'quality'], 'settings');
   if (!['image', 'stills', 'video'].includes(input.kind)) throw new TypeError('kind must be image, stills or video.');
   const width = boundedNumber(input.width, 64, MAXIMUM_JOB_SIDE, 'width', true);
   const height = boundedNumber(input.height, 64, MAXIMUM_JOB_SIDE, 'height', true);
@@ -124,6 +125,7 @@ function settingsFrom(input, clips, recipe) {
   if (input.passes !== undefined) result.passes = passesFrom(input.passes, input.kind);
   if (input.renderer !== undefined) result.renderer = rendererFrom(input.renderer, input.passes);
   Object.assign(result, outputOptionsFrom(input, result));
+  if (input.quality !== undefined) result.quality = qualityFrom(input.quality, result.renderer);
   const lastSampleTime = input.kind === 'image' ? 0 : input.kind === 'stills' ? duration : (frameCount - 1) / fps;
   if (timelineStart !== undefined) {
     if (input.motion !== undefined || input.animation !== undefined) throw new TypeError('A timeline owns the motion clock; leave motion and animation out.');
@@ -215,6 +217,14 @@ function outputOptionsFrom(input, { kind, width, height, renderer, passes }) {
 
 const PATH_TRACER_BACKENDS = ['cpu', 'gpu', 'native'];
 const FRACTIONAL_RENDERER_FIELDS = new Set(['maxSeconds', 'noiseThreshold']);
+
+// quality final is the path tracer and the other tiers are the raster renderer; scene_render_submit fills in the renderer for final.
+function qualityFrom(quality, renderer) {
+  parseQuality(quality);
+  if (quality === 'final' && !renderer) throw new TypeError('quality final needs the path tracer: submit it with scene_render_submit, which adds renderer, or give settings.renderer.');
+  if (quality !== 'final' && renderer) throw new TypeError(`quality ${quality} is the raster renderer and cannot combine with renderer.`);
+  return quality;
+}
 
 function rendererFrom(renderer, passes) {
   objectKeys(renderer, ['type', 'backend', 'samples', 'bounces', 'denoise', 'seed', 'maxSeconds', 'noiseThreshold'], 'renderer');
