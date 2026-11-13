@@ -82,6 +82,29 @@ fn int_resolve_material_index(instance: InstanceRecord, triangle: TriangleRecord
   return select(instance.material_override, triangle.material_index, instance.material_override == INVALID_INDEX);
 }
 
+struct IntTriangleUvs {
+  uv0: vec2<f32>,
+  uv1: vec2<f32>,
+}
+
+// Both uv sets of a triangle at barycentrics (weight of vertex 1, weight of vertex 2). A triangle without a second set reads
+// the first for both.
+fn int_interpolate_triangle_uvs(triangle: TriangleRecord, barycentrics: vec2<f32>) -> IntTriangleUvs {
+  let u = barycentrics.x;
+  let v = barycentrics.y;
+  let w = 1.0 - u - v;
+  var uvs: IntTriangleUvs;
+  uvs.uv0 = w * vec2<f32>(triangle.uv0_u, triangle.uv0_v)
+    + u * vec2<f32>(triangle.uv1_u, triangle.uv1_v)
+    + v * vec2<f32>(triangle.uv2_u, triangle.uv2_v);
+  uvs.uv1 = select(
+    uvs.uv0,
+    w * triangle.uv_set1_0 + u * triangle.uv_set1_1 + v * triangle.uv_set1_2,
+    (triangle.flags & TRIANGLE_FLAG_HAS_UV1) != 0u,
+  );
+  return uvs;
+}
+
 fn int_evaluate_surface_opacity(triangle: TriangleRecord, material: MaterialRecord, barycentrics: vec2<f32>) -> f32 {
   if (material.alpha_mode == ALPHA_MODE_OPAQUE) {
     return 1.0;
@@ -90,22 +113,12 @@ fn int_evaluate_surface_opacity(triangle: TriangleRecord, material: MaterialReco
   if (material.base_color_tex < 0 && material.alpha_tex < 0) {
     return opacity;
   }
-  let u = barycentrics.x;
-  let v = barycentrics.y;
-  let w = 1.0 - u - v;
-  let uv0 = w * vec2<f32>(triangle.uv0_u, triangle.uv0_v)
-    + u * vec2<f32>(triangle.uv1_u, triangle.uv1_v)
-    + v * vec2<f32>(triangle.uv2_u, triangle.uv2_v);
-  let uv1 = select(
-    uv0,
-    w * triangle.uv_set1_0 + u * triangle.uv_set1_1 + v * triangle.uv_set1_2,
-    (triangle.flags & TRIANGLE_FLAG_HAS_UV1) != 0u,
-  );
+  let uvs = int_interpolate_triangle_uvs(triangle, barycentrics);
   if (material.base_color_tex >= 0) {
-    opacity *= texture_sample(material.base_color_tex, uv0, uv1).a;
+    opacity *= texture_sample(material.base_color_tex, uvs.uv0, uvs.uv1).a;
   }
   if (material.alpha_tex >= 0) {
-    opacity *= texture_sample(material.alpha_tex, uv0, uv1).r;
+    opacity *= texture_sample(material.alpha_tex, uvs.uv0, uvs.uv1).r;
   }
   return clamp(opacity, 0.0, 1.0);
 }
@@ -286,8 +299,11 @@ fn int_trace_shadow(
 
       let hit_tri = triangles[hit_tri_idx];
       let hit_mat = materials[int_resolve_material_index(hit_inst, hit_tri)];
-      let supports_transparent_shadow = hit_mat.alpha_mode == ALPHA_MODE_BLEND
-        || (hit_mat.flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0u;
+      // A cutout that passed its alpha test above is solid: its alpha reads 1 from there on, as it does for a ray that hits it
+      // and as Cycles sees the 0 or 1 of a cutoff node. Taking the stored alpha as partial transparency again lets light through
+      // every texel of a map whose alpha is below 1, a quarter of it at an alpha of 0.75 (#1030).
+      let supports_transparent_shadow = hit_mat.alpha_mode != ALPHA_MODE_MASK
+        && (hit_mat.alpha_mode == ALPHA_MODE_BLEND || (hit_mat.flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0u);
       if (supports_transparent_shadow) {
         let opacity = int_evaluate_surface_opacity(hit_tri, hit_mat, committed.barycentrics);
         if (opacity < 1.0) {

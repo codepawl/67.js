@@ -1166,8 +1166,8 @@ mod tests {
         assert!(reads_inside_fetch > 0);
         assert!(!kernel.contains("fn int_sample_texture_channel"));
         assert!(!kernel.contains("fn int_wrap_coord"));
-        assert!(kernel.contains("texture_sample(material.base_color_tex, uv0, uv1).a"));
-        assert!(kernel.contains("texture_sample(material.alpha_tex, uv0, uv1).r"));
+        assert!(kernel.contains("texture_sample(material.base_color_tex, uvs.uv0, uvs.uv1).a"));
+        assert!(kernel.contains("texture_sample(material.alpha_tex, uvs.uv0, uvs.uv1).r"));
     }
 
     /// Blender Cycles filters the stored values of an 8-bit sRGB image and decodes the blend. Decoding each texel before the

@@ -698,6 +698,16 @@ fn lgt_sample_emissive_triangle(point: ptr<function, ShadingPoint>, pick_u: f32,
   return lgt_sample_emissive_triangle_at(point, index, emissive_triangles[index].selection_pdf, sample_uv);
 }
 
+// The radiance of a light sample on an emitter with an emission map: the map read at the sampled point, as a ray that hits the
+// emitter reads it (closure_build), so light sampling and bounce rays estimate the same radiance. The packed `radiance` of such
+// an emitter is the mean of the decoded texels, which only steers the choice of emitter (#1030).
+fn lgt_textured_emitter_radiance(emitter: EmissiveTriangleRecord, bary_u: f32, bary_v: f32) -> vec3<f32> {
+  let mat = materials[emitter.material_index];
+  let uvs = int_interpolate_triangle_uvs(triangles[emitter.triangle_index], vec2<f32>(bary_u, bary_v));
+  let tint = max(max(mat.emission_color, vec3<f32>(0.0)) * texture_sample(mat.emission_tex, uvs.uv0, uvs.uv1).rgb, vec3<f32>(0.0));
+  return tint * max(mat.emission_strength, 0.0);
+}
+
 fn lgt_sample_emissive_triangle_at(point: ptr<function, ShadingPoint>, index: u32, selection_pdf: f32, sample_uv: vec2<f32>) -> LgtDirectSample {
   var out = lgt_empty_sample();
   let emitter = emissive_triangles[index];
@@ -736,6 +746,9 @@ fn lgt_sample_emissive_triangle_at(point: ptr<function, ShadingPoint>, index: u3
   out.wi = wi;
   out.distance = dist;
   out.radiance = emitter.radiance;
+  if (mat.emission_tex >= 0) {
+    out.radiance = lgt_textured_emitter_radiance(emitter, bary_u, bary_v);
+  }
   out.pdf = selection_pdf * pdf_solid_angle;
   out.target_instance = emitter.instance_index;
   out.target_triangle = emitter.triangle_index;
