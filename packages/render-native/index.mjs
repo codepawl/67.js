@@ -81,10 +81,13 @@ export function traceNative(input, options = {}) {
   validatePackOptions(options, 'traceNative', true);
   resolveSamplingOptions(options, 'traceNative');
   validatePathRegenerationOption(options.pathRegeneration, 'traceNative');
-  const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, bootstrapKernel, denoise } = options;
+  const { width, height, samples, maxSeconds, kernel, samplesPerDispatch, dispatchBudgetMs, bootstrapKernel, denoise } = options;
   const selectedKernel = resolveNativeKernel(kernel);
   const addon = loadAddon();
   if (selectedKernel === 'legacy') {
+    if (dispatchBudgetMs !== undefined) {
+      throw new TypeError('traceNative: `dispatchBudgetMs` tiles the Cycles kernel dispatches; pass kernel "cycles", or leave it out for the legacy kernel.');
+    }
     if (denoise === 'atrous') {
       throw new TypeError('traceNative: `denoise: "atrous"` filters the Cycles kernel result; pass kernel "cycles", or call denoiseAtrous with the traced guide buffers.');
     }
@@ -101,6 +104,7 @@ export function traceNative(input, options = {}) {
     height,
     samples,
     samplesPerDispatch,
+    dispatchBudgetMs,
     maxSeconds,
     bootstrapKernel,
     denoise,
@@ -424,9 +428,9 @@ export function resolveSessionFrame(sessionInput, sessionOptions, renderOptions)
   }
   baseKernelParams = withFrameCameraAndSeed(baseKernelParams, renderOptions.camera, renderOptions.seed, options);
   const kernelParams = patchedCyclesKernelParams(sessionInput, baseKernelParams, options, 'NativeSession.render');
-  const { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, accumulate, targetSamples } = options;
+  const { width, height, samples, samplesPerDispatch, dispatchBudgetMs, maxSeconds, bootstrapKernel, denoise, accumulate, targetSamples } = options;
   validateProgressiveOptions({ accumulate, targetSamples, samples });
-  return { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, kernelParams, accumulate, targetSamples };
+  return { width, height, samples, samplesPerDispatch, dispatchBudgetMs, maxSeconds, bootstrapKernel, denoise, kernelParams, accumulate, targetSamples };
 }
 
 const MAX_TARGET_SAMPLES = 16777216;
@@ -450,7 +454,7 @@ function validateProgressiveOptions({ accumulate, targetSamples, samples }) {
 // ---- Scene updates ----
 
 const UPDATE_COUNT_NAMES = [
-  'instanceCount', 'triangleCount', 'materialCount', 'emissiveTriangleCount', 'lightCount', 'lightTreeNodeCount', 'lightTreeEmitterCount', 'textureCount',
+  'instanceCount', 'triangleCount', 'materialCount', 'emissiveTriangleCount', 'lightCount', 'portalCount', 'lightTreeNodeCount', 'lightTreeEmitterCount', 'textureCount',
 ];
 // Tables a session update cannot change, with what each holds, for the error.
 const UPDATE_FIXED_TABLES = [

@@ -3,17 +3,24 @@
 
 const SPECULAR_GLOSSINESS = 'KHR_materials_pbrSpecularGlossiness';
 
-/** Paths (as arrays of keys) to every texture reference of a material that reads TEXCOORD_0. */
-function collectFirstSetTextureKeys(value, path = [], found = []) {
+/** Paths (as arrays of keys) to every texture reference of a material that reads the given UV set. */
+function collectTextureKeys(value, uvSet, path = [], found = []) {
   if (!value || typeof value !== 'object') return found;
   for (const [key, child] of Object.entries(value)) {
     if (!child || typeof child !== 'object') continue;
-    const isTextureReference = Number.isInteger(child.index) && (child.texCoord ?? 0) === 0;
+    const isTextureReference = Number.isInteger(child.index) && (child.texCoord ?? 0) === uvSet;
     if (isTextureReference) found.push([...path, key]);
-    else collectFirstSetTextureKeys(child, [...path, key], found);
+    else collectTextureKeys(child, uvSet, [...path, key], found);
   }
   return found;
 }
+
+function referenceAt(root, path) {
+  return path.reduce((node, key) => node[key], root);
+}
+
+// The shader samples only these slots with the second UV set; the base color map and the layer maps read the first.
+const SECOND_SET_SLOTS = new Set(['normalTexture', 'metallicRoughnessTexture', 'occlusionTexture', 'emissiveTexture']);
 
 /**
  * KHR_materials_pbrSpecularGlossiness to metallic-roughness, the way Blender's importer approximates it: the diffuse
@@ -41,39 +48,89 @@ function convertSpecularGlossiness(document, warnings) {
 }
 
 /**
- * A primitive without TEXCOORD_0 cannot sample a texture on the first UV set. Such a primitive gets its own copy of the
- * material without those textures, and the original stays for the primitives that do have UVs.
+ * A base color or layer map on TEXCOORD_1 cannot be sampled. When every map of the material reads TEXCOORD_1 (Blender
+ * writes this for a material whose only UV map is the second one), the primitives get that set as TEXCOORD_0 and the maps
+ * move with it. When the material also has maps on TEXCOORD_0, the maps that cannot read TEXCOORD_1 are dropped.
+ */
+function moveSecondSetTextures(document, warnings) {
+  const movedMaterials = new Set();
+  const movedNames = [];
+  const droppedNames = [];
+  document.materials?.forEach((material, index) => {
+    const secondSet = collectTextureKeys(material, 1);
+    const unsupported = secondSet.filter(path => !SECOND_SET_SLOTS.has(path.at(-1)));
+    if (!unsupported.length) return;
+    const name = material.name ?? `material ${index}`;
+    if (collectTextureKeys(material, 0).length === 0) {
+      for (const path of secondSet) {
+        const reference = referenceAt(material, path);
+        delete reference.texCoord;
+        // A KHR_texture_transform texCoord override of 1 would otherwise contradict the promoted set.
+        if (reference.extensions?.KHR_texture_transform) delete reference.extensions.KHR_texture_transform.texCoord;
+      }
+      movedMaterials.add(index);
+      movedNames.push(name);
+      return;
+    }
+    for (const path of unsupported) {
+      delete referenceAt(material, path.slice(0, -1))[path.at(-1)];
+      droppedNames.push(`${path.at(-1)} of ${name}`);
+    }
+  });
+  for (const mesh of document.meshes ?? []) {
+    for (const primitive of mesh.primitives ?? []) {
+      if (!movedMaterials.has(primitive.material) || !primitive.attributes) continue;
+      const secondSetAccessor = primitive.attributes.TEXCOORD_1;
+      delete primitive.attributes.TEXCOORD_1;
+      if (secondSetAccessor === undefined) delete primitive.attributes.TEXCOORD_0;
+      else primitive.attributes.TEXCOORD_0 = secondSetAccessor;
+    }
+  }
+  if (movedNames.length) warnings.push(`Read the textures of ${movedNames.join(', ')} from TEXCOORD_1 as the first UV set, because the base color and layer maps can only read the first.`);
+  if (droppedNames.length) warnings.push(`Dropped ${droppedNames.join(', ')}: a base color or layer map on TEXCOORD_1 cannot be sampled beside maps on TEXCOORD_0.`);
+}
+
+/**
+ * A primitive without the UV set a texture reads cannot sample it. Such a primitive gets its own copy of the material
+ * without those textures, and the original stays for the primitives that do have UVs.
  */
 function dropTexturesWithoutUvs(document, warnings) {
-  const copiesByMaterial = new Map();
+  const copiesByKey = new Map();
   const dropped = new Set();
+  const missingAttributes = new Set();
+  const materialNames = new Set();
   for (const mesh of document.meshes ?? []) {
     for (const primitive of mesh.primitives ?? []) {
       const material = document.materials?.[primitive.material];
-      if (primitive.attributes?.TEXCOORD_0 !== undefined || !material) continue;
-      const paths = collectFirstSetTextureKeys(material);
+      if (!material) continue;
+      const missingSets = [0, 1].filter(uvSet => primitive.attributes?.[`TEXCOORD_${uvSet}`] === undefined);
+      const paths = missingSets.flatMap(uvSet => collectTextureKeys(material, uvSet));
       if (!paths.length) continue;
-      if (!copiesByMaterial.has(primitive.material)) {
+      const key = `${primitive.material}:${missingSets.join()}`;
+      if (!copiesByKey.has(key)) {
         const copy = structuredClone(material);
         for (const path of paths) {
-          const parent = path.slice(0, -1).reduce((node, key) => node[key], copy);
-          delete parent[path.at(-1)];
+          delete referenceAt(copy, path.slice(0, -1))[path.at(-1)];
           dropped.add(path.at(-1));
         }
         document.materials.push(copy);
-        copiesByMaterial.set(primitive.material, document.materials.length - 1);
+        copiesByKey.set(key, document.materials.length - 1);
       }
-      primitive.material = copiesByMaterial.get(primitive.material);
+      for (const uvSet of missingSets) missingAttributes.add(`TEXCOORD_${uvSet}`);
+      materialNames.add(material.name ?? `material ${primitive.material}`);
+      primitive.material = copiesByKey.get(key);
     }
   }
   if (!dropped.size) return;
-  warnings.push(`Dropped ${[...dropped].sort().join(', ')} from primitives without TEXCOORD_0, which cannot sample a texture.`);
+  warnings.push(`Dropped ${[...dropped].sort().join(', ')} from primitives without ${[...missingAttributes].sort().join(' or ')}, which cannot sample a texture (material ${[...materialNames].sort().join(', ')}).`);
 }
 
 /** Rewrites the document in place and returns the warnings that tell the caller what changed. */
 export function applyGltfFallbacks(document) {
   const warnings = [];
   convertSpecularGlossiness(document, warnings);
+  moveSecondSetTextures(document, warnings);
   dropTexturesWithoutUvs(document, warnings);
   return warnings;
 }
+

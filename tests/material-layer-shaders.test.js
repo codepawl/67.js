@@ -41,7 +41,7 @@ test('the normal map transform is applied only when its feature is on', async ()
   const { createFragmentShader } = await import('../src/shaders.js');
   const plain = createFragmentShader(['normalMap']);
   const transformed = createFragmentShader(['normalMap', 'normalMapTransform']);
-  assert.match(transformed, /texture\(normalMap, textureUV \* normalMapTransform\.xy \+ normalMapTransform\.zw\)/);
-  assert.match(plain, /texture\(normalMap, textureUV\)/);
+  assert.match(transformed, /texture\(normalMap, normalCoordinates \* normalMapTransform\.xy \+ normalMapTransform\.zw\)/);
+  assert.match(plain, /texture\(normalMap, normalCoordinates\)/);
   assert.doesNotMatch(plain, /normalMapTransform/);
 });

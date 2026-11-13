@@ -333,9 +333,34 @@ function softFalloffOf(light, label) {
   return light.softFalloff ? { softFalloff: true } : {};
 }
 
+function resolveAreaLight(light, index) {
+  const normal = normalized(light.direction);
+  const guide = normalized(light.up ?? [0, 1, 0]);
+  const across = normalized([guide[1] * normal[2] - guide[2] * normal[1], guide[2] * normal[0] - guide[0] * normal[2], guide[0] * normal[1] - guide[1] * normal[0]]);
+  const along = [normal[1] * across[2] - normal[2] * across[1], normal[2] * across[0] - normal[0] * across[2], normal[0] * across[1] - normal[1] * across[0]];
+  return { bit: AREA_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, width: light.width, height: light.height, normal, across, along, profile: traceProfile(light) };
+}
+
+/**
+ * A portal is a rect area light with `portal: true`. It emits nothing: the native cycles kernel draws environment light
+ * through its rectangle, with the normal pointing into the room. The other tracers ignore it (describeIgnoredFeatures).
+ */
+function resolvePortal(light, lightIndex) {
+  const path = `environment.areaLights[${lightIndex}]`;
+  if (light.shape !== undefined && light.shape !== 'rect') {
+    throw new RangeError(`${path}.portal is only supported on a rect area light, got shape ${JSON.stringify(light.shape)}. Remove \`portal\` or use a rect light.`);
+  }
+  for (const field of ['width', 'height']) {
+    if (!(light[field] > 0)) throw new RangeError(`${path}.portal needs a ${field} above 0, got ${JSON.stringify(light[field])}. Pass the size of the opening in scene units.`);
+  }
+  const { across, along, normal } = resolveAreaLight(light, lightIndex);
+  return { position: light.position, width: light.width, height: light.height, normal, across, along };
+}
+
 function resolveLights(environment) {
+  const areaLights = environment.areaLights ?? [];
   const sunPower = Math.max(...(environment.keyColor ?? [0, 0, 0]));
-  const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.length ?? 0);
+  const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.filter(light => light.portal !== true).length ?? 0);
   if (lightCount > MAX_TRACE_LIGHTS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_LIGHTS} point, spot and area lights.`);
   return {
     sun: sunPower > 0 ? { bit: SUN_BIT, direction: normalized(environment.lightDirection ?? [0, 1, 0]), color: environment.keyColor, angularRadius: environment.sunAngularRadius ?? SUN_ANGULAR_RADIUS } : null,
@@ -347,13 +372,8 @@ function resolveLights(environment) {
       profile: traceProfile(light),
       blend: (1 - Math.cos(light.angle)) * (light.penumbra ?? 0),
     })),
-    areas: (environment.areaLights ?? []).map((light, index) => {
-      const normal = normalized(light.direction);
-      const guide = normalized(light.up ?? [0, 1, 0]);
-      const across = normalized([guide[1] * normal[2] - guide[2] * normal[1], guide[2] * normal[0] - guide[0] * normal[2], guide[0] * normal[1] - guide[1] * normal[0]]);
-      const along = [normal[1] * across[2] - normal[2] * across[1], normal[2] * across[0] - normal[0] * across[2], normal[0] * across[1] - normal[1] * across[0]];
-      return { bit: AREA_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, width: light.width, height: light.height, normal, across, along, profile: traceProfile(light) };
-    }),
+    areas: areaLights.map((light, index) => (light.portal === true ? null : resolveAreaLight(light, index))).filter(Boolean),
+    portals: areaLights.map((light, index) => (light.portal === true ? resolvePortal(light, index) : null)).filter(Boolean),
   };
 }
 
@@ -411,11 +431,11 @@ export function refuseLocalVolumes(scene, tracerName) {
 
 // The volumes of the trace, and the hidden parts that only bound a mesh volume: the rasterizer does not draw a part with
 // `visible: false`, and the trace leaves it out of the geometry too, so a part can shape smoke without becoming a wall.
-function resolveTraceLocalVolumes(input, parts) {
+function resolveTraceLocalVolumes(input, parts, volumeTime = 0) {
   if (!input?.length) return { volumes: null, boundsOnlyParts: [] };
   const resolved = resolveLocalVolumes(input, 'environment.localVolumes');
   const meshPartNames = new Set(resolved.filter(volume => volume.shape === 'mesh').map(volume => volume.part));
-  const volumes = bindLocalVolumeParts(resolved, parts).map((volume, index) => (volume.part ? prepareMeshVolume(volume, `environment.localVolumes[${index}]`) : volume));
+  const volumes = bindLocalVolumeParts(resolved, parts, { time: volumeTime }).map((volume, index) => (volume.part ? prepareMeshVolume(volume, `environment.localVolumes[${index}]`) : volume));
   return { volumes, boundsOnlyParts: parts.filter(part => meshPartNames.has(part.name) && part.visible === false) };
 }
 
@@ -637,7 +657,7 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes, 
  */
 export function buildTraceScene(allParts, environment = {}, options = {}) {
   const limits = { ...resolveTriangleLimits(options), instances: resolveInstanceLimit(options) };
-  const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts);
+  const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts, environment.volumeTime ?? 0);
   const parts = boundsOnlyParts.length ? allParts.filter(part => !boundsOnlyParts.includes(part)) : allParts;
   const tryInstancing = options.instancing === true && Array.isArray(parts) && parts.length > 0;
   const geometries = tryInstancing ? parts.map(traceGeometry) : undefined;

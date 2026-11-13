@@ -232,9 +232,10 @@ struct KernelParamsV2 {
   filter_glossy: f32,
 
   camera_env_scale: f32,
-  reserved_tail_a: u32,
-  reserved_tail_b: u32,
-  reserved_tail_c: u32,
+  // Light portals packed after the `light_count` emitters in the light table (FORMAT-v2.md).
+  portal_count: u32,
+  // Pixel origin of the tile this dispatch covers; the host writes it for every dispatch, `[0, 0]` for a whole-image dispatch.
+  tile_origin: vec2<u32>,
 }
 
 // 160 bytes (10 x 16 B), alignment 16 B.

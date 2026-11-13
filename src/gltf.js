@@ -27,7 +27,7 @@ const DEFAULT_LIMITS = Object.freeze({
 export const GLTF_CAPABILITIES = Object.freeze({
   formats: ['glb', 'gltf'],
   limits: DEFAULT_LIMITS,
-  supported: ['triangle meshes', 'world transforms', 'rigid node animations', 'four-influence skeletal skinning', 'joint node animations', 'relative POSITION/NORMAL morph targets', 'morph weight animations', 'PNG/JPEG/WebP base color textures', 'normal/occlusion/emissive/metallic-roughness textures', 'TEXCOORD_0', 'TEXCOORD_1 for occlusion, emissive and metallic-roughness textures', 'clearcoat, clearcoat roughness, clearcoat normal, anisotropy, sheen color and sheen roughness textures', 'linear RGB vertex colors, with the alpha of RGBA colors ignored and reported in warnings','metallic roughness factors', 'emissive factors', 'alpha mask and blend modes', 'double-sided materials', 'KHR_mesh_quantization', 'KHR_materials_emissive_strength', 'KHR_materials_clearcoat, transmission, volume, ior, specular, sheen, anisotropy and iridescence factors', 'KHR_texture_transform baked into UVs, with a normal map that differs by scale and offset applied in the shader', 'EXT_mesh_gpu_instancing expanded into parts', 'KHR_draco_mesh_compression with options.decoders.draco', 'EXT_meshopt_compression', 'KHR_texture_basisu with options.decoders.ktx2', 'EXT_texture_webp, with the PNG or JPEG fallback source when the browser cannot decode WebP', 'KHR_materials_unlit as the unlit material tag, with a base color map only', 'KHR_lights_punctual point and spot lights (up to eight each) and the first directional light, returned in lights as environment options'],
+  supported: ['triangle meshes', 'world transforms', 'rigid node animations', 'four-influence skeletal skinning', 'joint node animations', 'relative POSITION/NORMAL morph targets', 'morph weight animations', 'PNG/JPEG/WebP base color textures', 'normal/occlusion/emissive/metallic-roughness textures', 'TEXCOORD_0', 'TEXCOORD_1 for normal, occlusion, emissive and metallic-roughness textures, and for every map of a material whose maps all read it', 'clearcoat, clearcoat roughness, clearcoat normal, anisotropy, sheen color and sheen roughness textures', 'linear RGB vertex colors, with the alpha of RGBA colors ignored and reported in warnings','metallic roughness factors', 'emissive factors', 'alpha mask and blend modes', 'double-sided materials', 'KHR_mesh_quantization', 'KHR_materials_emissive_strength', 'KHR_materials_clearcoat, transmission, volume, ior, specular, sheen, anisotropy and iridescence factors', 'KHR_texture_transform baked into UVs, with a normal map that differs by scale and offset applied in the shader', 'EXT_mesh_gpu_instancing expanded into parts', 'KHR_draco_mesh_compression with options.decoders.draco', 'EXT_meshopt_compression', 'KHR_texture_basisu with options.decoders.ktx2', 'EXT_texture_webp, with the PNG or JPEG fallback source when the browser cannot decode WebP', 'KHR_materials_unlit as the unlit material tag, with a base color map only', 'KHR_lights_punctual point and spot lights (up to eight each) and the first directional light, returned in lights as environment options'],
   // The primitive's own material is drawn; the other variants are not selectable.
   ignoredExtensions: ['KHR_materials_variants', 'KHR_materials_dispersion', 'KHR_materials_diffuse_roughness', 'EXT_materials_bump', 'EXT_texture_avif'],
   optionalExtensions: 'Any other optional extension is ignored and named in warnings. One listed in extensionsRequired that 67js does not read is refused.',
@@ -47,10 +47,12 @@ async function loadLayerShadersFor(document) {
   if (usesLiquidShader) await import('./liquid-shader.js');
 }
 
-// Spec-gloss materials and textures on primitives without UVs are rewritten by a module that only a file needing it loads.
+// Spec-gloss materials, textures on primitives without UVs and base color or layer maps on TEXCOORD_1 are rewritten by a module that only a file needing it loads.
 function needsFallbacks(document) {
   const materials = document.materials ?? [];
   if (materials.some(material => material?.extensions?.KHR_materials_pbrSpecularGlossiness)) return true;
+  // Validation reads every material, used or not, so a second-set map on any of them needs the rewrite.
+  if (materials.some(material => /"texCoord":1/.test(JSON.stringify(material ?? {})))) return true;
   return (document.meshes ?? []).some(mesh => (mesh.primitives ?? []).some(primitive => {
     return primitive.attributes?.TEXCOORD_0 === undefined && JSON.stringify(materials[primitive.material] ?? {}).includes('"index"');
   }));
@@ -78,9 +80,9 @@ const MATERIAL_TEXTURES = [
   ['emissiveMap', 'emissiveTexture', 'srgb'],
 ];
 
-// Only these textures may read the second UV set, because the shader samples them with lightmapUV. The base color map is
-// sampled in the depth pass and by box mapping, and the normal map builds its tangent frame from the first set.
-const SECOND_UV_TEXTURES = ['metallicRoughnessTexture', 'occlusionTexture', 'emissiveTexture'];
+// Only these textures may read the second UV set, because the shader samples them with lightmapUV (the normal map also
+// builds its tangent frame from it). The base color map is sampled in the depth pass and by box mapping.
+const SECOND_UV_TEXTURES = ['normalTexture', 'metallicRoughnessTexture', 'occlusionTexture', 'emissiveTexture'];
 
 function materialTexture(material, field) {
   return ['baseColorTexture', 'metallicRoughnessTexture'].includes(field) ? material.pbrMetallicRoughness?.[field] : material[field];

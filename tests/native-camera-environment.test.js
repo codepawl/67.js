@@ -9,7 +9,7 @@ import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
 
 const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
 
-// `camera_env_scale` (byte 304) of KernelParamsV2; bytes 308 to 319 stay reserved and zero.
+// `camera_env_scale` (byte 304) of KernelParamsV2; bytes 308 to 311 hold portal_count and 312 to 319 the tile origin, zero in a pack.
 const CAMERA_ENV_SCALE_BYTE_OFFSET = 304;
 const PARAMS_TAIL_END = 320;
 

@@ -2,6 +2,9 @@
 // This module holds plain data only, so the MCP server, recipes, the glTF code and the renderer share one set of ranges.
 
 const UNIT = Object.freeze([0, 1]);
+// KHR_materials_specular allows any non-negative colour factor, and Blender writes 10 for glossy Cycles materials. The
+// reflectance is clamped to 1 after the IOR term (dielectricReflectance), so a value above 1 divided by that term is harmless.
+const SPECULAR_COLOR_MAXIMUM = 1000;
 // Bit 0 is the sun, then the point, spot and area lights in that order (light-link-bits.js). Every bit of the 32 bit integer is set.
 export const ALL_LIGHTS_MASK = -1;
 
@@ -46,7 +49,7 @@ export const MATERIAL_LAYER_SCALAR_RANGES = Object.freeze({
 export const MATERIAL_LAYER_COLOR_RANGES = Object.freeze({
   attenuationColor: UNIT,
   sheenColor: UNIT,
-  specularColor: Object.freeze([0, 4]),
+  specularColor: Object.freeze([0, SPECULAR_COLOR_MAXIMUM]),
 });
 
 function describeRange([minimum, maximum]) {

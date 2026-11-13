@@ -861,11 +861,14 @@ fn lgt_eval_camera_visible_radiance(direction: vec3<f32>) -> vec3<f32> {
   return lgt_eval_hdri_radiance(direction) * abs(scale);
 }
 
-fn lgt_environment_pdf(direction: vec3<f32>) -> f32 {
+fn lgt_environment_pdf(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
   let width = kernel_params.env_width;
   let height = kernel_params.env_height;
   if (width == 0u || height == 0u || kernel_params.background_mis_weight <= 0.0) {
     return 0.0;
+  }
+  if (lgt_portal_count() > 0u) {
+    return lgt_portal_pdf(origin, direction);
   }
   var polar = 0.0;
   let uv = lgt_direction_to_env_uv(direction, &polar);
@@ -881,12 +884,76 @@ fn lgt_environment_pdf(direction: vec3<f32>) -> f32 {
   return (marginal_prob * cond_prob * f32(width * height)) / (TWO_PI * PI * sin_polar);
 }
 
-fn lgt_sample_environment(sample_u4: vec4<f32>) -> LgtDirectSample {
+// Light portals (Cycles `LIGHT_PORTAL`): rectangles over a window that emit nothing. They sit in the light table after the
+// `light_count` emitters, so the light pick, the light tree and the emitter loops never see them. While a scene has any, the
+// environment is sampled by drawing a point on a portal and the pdf below replaces the importance table's.
+fn lgt_portal_count() -> u32 {
+  return kernel_params.portal_count;
+}
+
+// Solid-angle pdf of drawing `direction` from `origin` through one portal: distance^2 / (cos * area), 0 when the ray misses the
+// rectangle or the origin is behind it. Only the side the portal's normal faces counts, as in Cycles.
+fn lgt_single_portal_pdf(portal: LightRecord, origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+  let cos_at_portal = -dot(direction, portal.direction);
+  if (cos_at_portal <= 1.0e-6 || dot(origin - portal.position, portal.direction) <= 0.0) {
+    return 0.0;
+  }
+  let hit_t = dot(portal.position - origin, portal.direction) / dot(direction, portal.direction);
+  if (hit_t <= 0.0) {
+    return 0.0;
+  }
+  let offset_on_plane = origin + direction * hit_t - portal.position;
+  if (abs(dot(offset_on_plane, portal.axis_u)) > 0.5 * portal.size_u || abs(dot(offset_on_plane, portal.axis_v)) > 0.5 * portal.size_v) {
+    return 0.0;
+  }
+  return (hit_t * hit_t) / (cos_at_portal * portal.size_u * portal.size_v);
+}
+
+// Pdf of the portal strategy for `direction`: the portals it passes through, each picked with probability 1 / portal_count.
+fn lgt_portal_pdf(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
+  let portal_count = lgt_portal_count();
+  var total = 0.0;
+  for (var portal_index = 0u; portal_index < portal_count; portal_index += 1u) {
+    total += lgt_single_portal_pdf(lights[kernel_params.light_count + portal_index], origin, direction);
+  }
+  return total / f32(portal_count);
+}
+
+fn lgt_sample_environment_through_portal(shading_pos: vec3<f32>, sample_u4: vec4<f32>) -> LgtDirectSample {
+  var out = lgt_empty_sample();
+  let portal_count = lgt_portal_count();
+  let portal_index = min(u32(sample_u4.x * f32(portal_count)), portal_count - 1u);
+  let portal = lights[kernel_params.light_count + portal_index];
+  let point_on_portal = portal.position + portal.axis_u * ((sample_u4.z - 0.5) * portal.size_u) + portal.axis_v * ((sample_u4.w - 0.5) * portal.size_v);
+  let to_portal = point_on_portal - shading_pos;
+  let distance_to_portal = length(to_portal);
+  if (distance_to_portal <= 1.0e-8) {
+    return out;
+  }
+  let wi = to_portal / distance_to_portal;
+  let pdf_solid_angle = lgt_portal_pdf(shading_pos, wi);
+  if (pdf_solid_angle <= 0.0) {
+    return out;
+  }
+  out.valid = 1u;
+  out.is_delta = 0u;
+  out.wi = wi;
+  out.distance = 1.0e30;
+  out.radiance = lgt_eval_hdri_radiance(wi);
+  out.pdf = pdf_solid_angle;
+  out.cast_shadow = 1u;
+  return out;
+}
+
+fn lgt_sample_environment(shading_pos: vec3<f32>, sample_u4: vec4<f32>) -> LgtDirectSample {
   var out = lgt_empty_sample();
   let width = kernel_params.env_width;
   let height = kernel_params.env_height;
   if (width == 0u || height == 0u || kernel_params.background_mis_weight <= 0.0) {
     return out;
+  }
+  if (lgt_portal_count() > 0u) {
+    return lgt_sample_environment_through_portal(shading_pos, sample_u4);
   }
   let cdf_base = kernel_params.env_cdf_offset;
   let row = lgt_binary_search_env_cdf(cdf_base, height, sample_u4.x);
@@ -1121,7 +1188,7 @@ fn lgt_eval_escaped_ray(
     }
     var env_mis = 1.0;
     if (!is_camera_ray && !mis_skip && SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
-      let pdf_env = lgt_environment_pdf(ray_dir);
+      let pdf_env = lgt_environment_pdf(lgt_mis_position, ray_dir);
       env_mis = lgt_power_heuristic(prev_bsdf_pdf, pdf_env);
     }
     total += env_radiance * env_mis;

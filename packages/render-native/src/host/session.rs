@@ -8,12 +8,12 @@ use std::time::Instant;
 use napi::Result;
 use wgpu::util::DeviceExt;
 
-use crate::cycles::{unit_filter_table_words, CYCLES_LUT_WORDS};
+use crate::cycles::{portal_count_of, unit_filter_table_words, CYCLES_LUT_WORDS};
 use crate::host::accel::{
     build_acceleration_structure, build_empty_cycles_acceleration, create_vertex_buffer, unpack_triangles,
     INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS, TRIANGLE_RECORD_BYTES,
 };
-use crate::host::dispatch::{DispatchPlanner, DISPATCH_BUDGET_SECONDS};
+use crate::host::dispatch::{next_tile, DispatchPlanner, TileBudgetPlanner, DISPATCH_BUDGET_SECONDS};
 use crate::host::device::{failure, layout_entry, open_device, storage_buffer, storage_entry};
 use crate::host::film::{image_accumulation_bytes, read_accumulation};
 use crate::host::textures::upload_scene_buffers;
@@ -310,6 +310,8 @@ const LIGHT_TREE_EMITTER_BYTES: usize = 32;
 const CYCLES_SCENE_BUFFER_COUNT: usize = 9;
 const TEXTURE_DESCRIPTOR_BYTES: usize = 32;
 const CYCLES_SAMPLE_OFFSET_BYTE_OFFSET: u64 = 16;
+/// Byte offset of `tile_origin` in `KernelParamsV2` (two u32: the pixel column and row of the tile's first pixel).
+const CYCLES_TILE_ORIGIN_BYTE_OFFSET: u64 = 312;
 const LOBE_PROBE_WORKGROUP_SIZE: u32 = 64;
 const MAX_COMPUTE_WORKGROUPS_PER_DIMENSION: u64 = 65_535;
 
@@ -665,6 +667,19 @@ pub(crate) fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stri
     Ok(())
 }
 
+/// The portals are the last records of the lights table, after the `light_count` emitters, and the kernel reads them by the
+/// portal count of the parameter block. A table that is shorter than both counts would make the kernel read past its end.
+pub(crate) fn check_lights_hold_portals(lights: &[u8], light_count: u32, portal_count: u32) -> Result<()> {
+    let record_count = (lights.len() / LIGHT_RECORD_BYTES) as u64;
+    let needed = light_count as u64 + portal_count as u64;
+    if record_count < needed {
+        return Err(failure(format!(
+            "kernelParams claims {portal_count} light portals after {light_count} lights, but the lights buffer holds {record_count} records and needs {needed}. Pack the lights and kernelParams together with buildNativeInputV2."
+        )));
+    }
+    Ok(())
+}
+
 /// Byte offset of `kernel_flags` in `KernelParamsV2` and its light-tree bit (`KERNEL_FLAG_USE_LIGHT_TREE` in pack-input-v2.mjs).
 const KERNEL_PARAMS_KERNEL_FLAGS_BYTE: usize = 32;
 const KERNEL_FLAG_USE_LIGHT_TREE: u32 = 1;
@@ -751,6 +766,7 @@ pub(crate) fn validate_cycles_input(input: &NativeTraceInputV2) -> Result<()> {
         EMISSIVE_TRIANGLE_RECORD_BYTES,
     )?;
     validate_record_buffer("lights", &input.lights, input.light_count, LIGHT_RECORD_BYTES)?;
+    check_lights_hold_portals(&input.lights, input.light_count, portal_count_of(&input.kernel_params))?;
     validate_record_buffer(
         "lightTreeNodes",
         &input.light_tree_nodes,
@@ -773,6 +789,9 @@ pub(crate) enum DispatchPlan {
     Fixed(u32),
     /// Each dispatch is sized from the time of the last so none runs past the time budget; no batch is larger than `largest_batch`.
     TimeBudget { largest_batch: u32 },
+    /// Each dispatch covers a tile of pixels and a number of samples sized from the time of the last so none runs past
+    /// `budget_seconds`, with one submission in flight at a time; no batch is larger than `largest_batch`.
+    TileBudget { budget_seconds: f64, largest_batch: u32, width: u32, height: u32 },
 }
 
 pub(crate) struct CyclesTrace {
@@ -782,6 +801,11 @@ pub(crate) struct CyclesTrace {
     pub(crate) largest_batch: u32,
     /// The longest single dispatch; only measured when the dispatches are sized by time.
     pub(crate) longest_dispatch_seconds: Option<f64>,
+    /// How many dispatches the samples were drawn in.
+    pub(crate) dispatch_count: u32,
+    /// The pixels inside the image of the smallest and the largest tile one dispatch covered; only measured with a tile budget.
+    pub(crate) smallest_tile_pixels: Option<u64>,
+    pub(crate) largest_tile_pixels: Option<u64>,
 }
 
 /// Raises the error for a lost device, naming the dispatch that was running and how to lower the work per dispatch.
@@ -817,12 +841,16 @@ pub(crate) fn trace_cycles_samples(
     accumulation_bytes: u64,
     max_seconds: Option<f64>,
 ) -> Result<CyclesTrace> {
+    if let DispatchPlan::TileBudget { budget_seconds, largest_batch, width, height } = plan {
+        let budget = TileBudget { seconds: budget_seconds, largest_batch, width, height };
+        return trace_cycles_tiles(target, first_sample, samples, budget, accumulation_bytes, max_seconds);
+    }
     let trace_started = Instant::now();
     let device = target.device;
     let queue = target.queue;
     let mut planner = match plan {
         DispatchPlan::TimeBudget { largest_batch } => Some(DispatchPlanner::new(DISPATCH_BUDGET_SECONDS, largest_batch)),
-        DispatchPlan::Fixed(_) => None,
+        DispatchPlan::Fixed(_) | DispatchPlan::TileBudget { .. } => None,
     };
     let end_sample = first_sample + samples;
     let mut sample_offset = first_sample;
@@ -836,6 +864,7 @@ pub(crate) fn trace_cycles_samples(
             (Some(planner), _) => planner.next_batch(remaining_samples),
             (None, DispatchPlan::Fixed(step)) => remaining_samples.min(step.max(1)),
             (None, DispatchPlan::TimeBudget { .. }) => unreachable!("a time budget always has a planner"),
+            (None, DispatchPlan::TileBudget { .. }) => unreachable!("a tile budget returned before this loop"),
         };
         largest_batch = largest_batch.max(batch_samples);
         let dispatch_started = Instant::now();
@@ -843,20 +872,10 @@ pub(crate) fn trace_cycles_samples(
         dispatch_words[0..4].copy_from_slice(&sample_offset.to_le_bytes());
         dispatch_words[4..8].copy_from_slice(&batch_samples.to_le_bytes());
         queue.write_buffer(target.parameters, CYCLES_SAMPLE_OFFSET_BYTE_OFFSET, &dispatch_words);
+        // A whole-image dispatch starts at the origin, whatever the uploaded block carries in these words.
+        queue.write_buffer(target.parameters, CYCLES_TILE_ORIGIN_BYTE_OFFSET, &[0u8; 8]);
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("cycles sample batch"),
-        });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: None,
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(target.pipeline);
-            pass.set_bind_group(0, target.bind_group, &[]);
-            pass.dispatch_workgroups(groups.0, groups.1, 1);
-        }
-        queue.submit(Some(encoder.finish()));
+        submit_cycles_dispatch(target, groups);
 
         let dispatch_offset = sample_offset;
         sample_offset += batch_samples;
@@ -896,7 +915,117 @@ pub(crate) fn trace_cycles_samples(
         traced_seconds: trace_started.elapsed().as_secs_f64(),
         largest_batch,
         longest_dispatch_seconds,
+        dispatch_count,
+        smallest_tile_pixels: None,
+        largest_tile_pixels: None,
     })
+}
+
+/// The settings of a tile budget: the longest one dispatch may run, the most samples it may draw, and the image size.
+struct TileBudget {
+    seconds: f64,
+    largest_batch: u32,
+    width: u32,
+    height: u32,
+}
+
+/// Like `trace_cycles_samples` with a time budget, but each dispatch covers a tile of pixels as well as a batch of samples,
+/// and the host waits for it before it submits the next, so a display on the same GPU gets the queue between dispatches.
+/// Pixels never depend on each other and each pixel still takes its samples in order (a sweep draws samples
+/// `sample_offset..sample_offset + batch` on every tile before the next sweep begins), so the film is byte-identical to
+/// the whole-image dispatches of `trace_cycles_samples`.
+fn trace_cycles_tiles(
+    target: &CyclesDispatchTarget<'_>,
+    first_sample: u32,
+    samples: u32,
+    budget: TileBudget,
+    accumulation_bytes: u64,
+    max_seconds: Option<f64>,
+) -> Result<CyclesTrace> {
+    let trace_started = Instant::now();
+    let device = target.device;
+    let queue = target.queue;
+    let mut planner = TileBudgetPlanner::new(budget.seconds, budget.width, budget.height, budget.largest_batch);
+    let (grid_columns, grid_rows) = planner.grid();
+    let end_sample = first_sample + samples;
+    let mut sample_offset = first_sample;
+    let mut dispatch_count = 0u32;
+    let mut largest_batch = 0u32;
+    let mut longest_dispatch_seconds = 0.0f64;
+    let mut smallest_tile_pixels = u64::MAX;
+    let mut largest_tile_pixels = 0u64;
+
+    while sample_offset < end_sample {
+        let batch_samples = planner.sweep_samples(end_sample - sample_offset);
+        largest_batch = largest_batch.max(batch_samples);
+        let mut dispatch_words = [0u8; 8];
+        dispatch_words[0..4].copy_from_slice(&sample_offset.to_le_bytes());
+        dispatch_words[4..8].copy_from_slice(&batch_samples.to_le_bytes());
+        queue.write_buffer(target.parameters, CYCLES_SAMPLE_OFFSET_BYTE_OFFSET, &dispatch_words);
+
+        let mut cursor = 0u32;
+        while cursor < planner.cell_count() {
+            let tile = next_tile(cursor, planner.cell_budget(batch_samples), grid_columns, grid_rows);
+            cursor += tile.columns * tile.rows;
+            let (origin_x, origin_y) = tile.origin_pixels();
+            let mut origin_words = [0u8; 8];
+            origin_words[0..4].copy_from_slice(&origin_x.to_le_bytes());
+            origin_words[4..8].copy_from_slice(&origin_y.to_le_bytes());
+            queue.write_buffer(target.parameters, CYCLES_TILE_ORIGIN_BYTE_OFFSET, &origin_words);
+
+            let dispatch_started = Instant::now();
+            submit_cycles_dispatch(target, (tile.columns, tile.rows));
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            let dispatch_seconds = dispatch_started.elapsed().as_secs_f64();
+            fail_if_device_lost(target, sample_offset, batch_samples, end_sample)?;
+
+            let tile_pixels = tile.pixel_count(budget.width, budget.height);
+            planner.record(tile_pixels * batch_samples as u64, dispatch_seconds);
+            dispatch_count += 1;
+            longest_dispatch_seconds = longest_dispatch_seconds.max(dispatch_seconds);
+            smallest_tile_pixels = smallest_tile_pixels.min(tile_pixels);
+            largest_tile_pixels = largest_tile_pixels.max(tile_pixels);
+            if let Some(limit) = max_seconds {
+                if trace_started.elapsed().as_secs_f64() > limit {
+                    return Err(failure(format!(
+                        "The native trace passed its time limit of {limit} s after {sample_offset} of {end_sample} samples."
+                    )));
+                }
+            }
+        }
+        sample_offset += batch_samples;
+    }
+    // Leave the block at the origin for whoever reads it next; every whole-image dispatch writes it again anyway.
+    queue.write_buffer(target.parameters, CYCLES_TILE_ORIGIN_BYTE_OFFSET, &[0u8; 8]);
+
+    let sums = read_accumulation(device, queue, target.accumulation, accumulation_bytes);
+    fail_if_device_lost(target, end_sample.saturating_sub(largest_batch), largest_batch, end_sample)?;
+    Ok(CyclesTrace {
+        sums: sums?,
+        traced_seconds: trace_started.elapsed().as_secs_f64(),
+        largest_batch,
+        longest_dispatch_seconds: Some(longest_dispatch_seconds),
+        dispatch_count,
+        smallest_tile_pixels: Some(smallest_tile_pixels),
+        largest_tile_pixels: Some(largest_tile_pixels),
+    })
+}
+
+/// Encodes and submits one dispatch of `groups` workgroups with the target's pipeline and bind group.
+fn submit_cycles_dispatch(target: &CyclesDispatchTarget<'_>, groups: (u32, u32)) {
+    let mut encoder = target.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("cycles sample batch"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(target.pipeline);
+        pass.set_bind_group(0, target.bind_group, &[]);
+        pass.dispatch_workgroups(groups.0, groups.1, 1);
+    }
+    target.queue.submit(Some(encoder.finish()));
 }
 
 pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_source: String) -> Result<Vec<f32>> {
@@ -1009,6 +1138,16 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lights_buffer_must_hold_the_emitters_and_the_portals() {
+        let three_records = vec![0u8; 3 * LIGHT_RECORD_BYTES];
+        assert!(check_lights_hold_portals(&three_records, 2, 1).is_ok());
+        assert!(check_lights_hold_portals(&three_records, 3, 0).is_ok());
+        let message = check_lights_hold_portals(&three_records, 2, 2).unwrap_err().reason;
+        assert!(message.contains("2 light portals after 2 lights"), "{message}");
+        assert!(message.contains("holds 3 records and needs 4"), "{message}");
+    }
 
     #[test]
     fn pipeline_key_separates_entry_points_and_sources() {

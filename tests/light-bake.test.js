@@ -131,6 +131,16 @@ test('an emitting part is baked through the light map slot and still lights the 
   assert.ok(baked[7].material.lightMap);
 });
 
+test('a part whose maps read the second UV set is skipped with its material named, keeping its own UVs', () => {
+  const normalImage = { width: 2, height: 2, data: new Uint8ClampedArray(16).fill(128) };
+  const parts = smallRoom();
+  parts.push(placed('floor tiles', [1.5, 1, 1.5], [1, 2, 1], { name: 'Laminate floor', normalMap: { image: normalImage, colorSpace: 'linear', uvChannel: 1 } }));
+  const { parts: baked, report } = bakeLightmaps(parts, lamp, fastOptions);
+  assert.deepEqual(report.skipped.map(entry => entry.name), ['floor tiles']);
+  assert.match(report.skipped[0].reason, /Laminate floor.*normalMap.*TEXCOORD_1/);
+  assert.equal(baked[7], parts[7]);
+});
+
 test('a part marked as generating its own geometry is skipped', () => {
   const parts = smallRoom();
   parts[0] = { ...parts[0], generatesGeometry: true };

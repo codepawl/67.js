@@ -33,3 +33,157 @@ impl DispatchPlanner {
         self.next_batch = fitting_samples.clamp(1, growth_ceiling.max(1));
     }
 }
+
+/// The side in pixels of the square one workgroup covers (`@workgroup_size(8, 8, 1)` in integrator.wgsl). A tile is a
+/// rectangle of whole workgroups ("cells"), so its origin and size are multiples of this.
+pub(crate) const WORKGROUP_PIXELS: u32 = 8;
+
+const PIXELS_PER_CELL: u64 = (WORKGROUP_PIXELS as u64) * (WORKGROUP_PIXELS as u64);
+
+/// A dispatch whose measured time is at least this share of the budget is long enough that the fixed cost of a submission
+/// hardly shows in it, so its cost per pixel sample counts as a peak that later, differently priced tiles must respect.
+const PEAK_COST_MINIMUM_BUDGET_SHARE: f64 = 0.25;
+
+/// The planned size of the next dispatch may not fall below this share of the slowest cost per pixel sample seen, so a run
+/// of cheap tiles (sky) does not lead to a dispatch over expensive ones (geometry) that overruns the budget.
+const PEAK_COST_FLOOR_SHARE: f64 = 0.6;
+
+/// Only a dispatch of at least this many pixel samples sets the peak cost: a tiny one is mostly the fixed cost of a
+/// submission, and one stall in it would otherwise pin every later tile to the smallest size.
+const PEAK_COST_MINIMUM_WORK: u64 = 4096;
+
+/// The peak cost fades by this factor per dispatch, so one slow stretch of the image does not limit the rest of the render.
+const PEAK_COST_DECAY: f64 = 0.9;
+
+/// Dispatches are planned to this share of the budget, since the cost of a pixel varies across the image and the next
+/// tile may cost more than the last.
+const BUDGET_SAFETY_SHARE: f64 = 0.75;
+
+/// Pixels that keep a large GPU busy. Below a whole image a dispatch covers about this many pixels and draws more samples
+/// instead of a bigger tile: with several samples per thread the paths of a pixel fill each other's gaps (path
+/// regeneration), so the dispatch ends close to when the average thread does, not the slowest path of a one-sample tile.
+const SATURATING_TILE_PIXELS: u64 = 1 << 17;
+
+/// While the first sweep has not seen the whole image, no tile is larger than this many pixels. A run of cheap tiles (sky)
+/// would otherwise grow the tile to its fourfold limit each time and the first costly tile (geometry) would overrun the budget.
+const EXPLORING_TILE_PIXELS: u64 = SATURATING_TILE_PIXELS;
+
+/// A rectangle of workgroups on the grid that covers the image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TileCells {
+    pub(crate) column: u32,
+    pub(crate) row: u32,
+    pub(crate) columns: u32,
+    pub(crate) rows: u32,
+}
+
+impl TileCells {
+    /// The pixel position of the tile's top left corner.
+    pub(crate) fn origin_pixels(&self) -> (u32, u32) {
+        (self.column * WORKGROUP_PIXELS, self.row * WORKGROUP_PIXELS)
+    }
+
+    /// The pixels of the tile that lie inside a `width` x `height` image; the cells at the right and bottom edges may hang over.
+    pub(crate) fn pixel_count(&self, width: u32, height: u32) -> u64 {
+        let (origin_x, origin_y) = self.origin_pixels();
+        let covered_width = (self.columns * WORKGROUP_PIXELS).min(width.saturating_sub(origin_x));
+        let covered_height = (self.rows * WORKGROUP_PIXELS).min(height.saturating_sub(origin_y));
+        covered_width as u64 * covered_height as u64
+    }
+}
+
+/// The tile that starts at cell number `cursor` (row by row from the top left) and holds about `cell_budget` cells, never
+/// zero. Full rows when the budget is at least one row, else a part of one row, so a walk from cell 0 that advances by
+/// `columns * rows` covers every cell exactly once.
+pub(crate) fn next_tile(cursor: u32, cell_budget: u32, grid_columns: u32, grid_rows: u32) -> TileCells {
+    let column = cursor % grid_columns;
+    let row = cursor / grid_columns;
+    let budget = cell_budget.max(1);
+    if column != 0 || budget < grid_columns {
+        let columns = budget.min(grid_columns - column);
+        return TileCells { column, row, columns, rows: 1 };
+    }
+    let rows = (budget / grid_columns).min(grid_rows - row);
+    TileCells { column: 0, row, columns: grid_columns, rows }
+}
+
+/// Chooses the samples and the pixel tile of each dispatch from the measured time of the earlier ones, so that no dispatch
+/// holds the GPU queue longer than the budget and a display on the same GPU can draw between them.
+///
+/// A sweep covers the whole image with the same samples; the samples of a pixel are drawn in order across sweeps, which is
+/// what keeps the film byte-identical to a whole-image dispatch. While one dispatch cannot cover the image in the budget a
+/// sweep draws a single sample, tile by tile; once it can, a dispatch covers the image and grows in samples.
+pub(crate) struct TileBudgetPlanner {
+    budget_seconds: f64,
+    grid_columns: u32,
+    grid_rows: u32,
+    image_pixels: u64,
+    largest_batch: u32,
+    /// The pixel samples (pixels times samples) the next dispatch may hold.
+    allowed_work: u64,
+    slowest_seconds_per_work: f64,
+    /// Sweeps begun so far; the first one explores the cost across the image.
+    sweeps_begun: u32,
+}
+
+impl TileBudgetPlanner {
+    /// Starts at one workgroup and one sample, the smallest dispatch, to measure the cost of a pixel sample.
+    pub(crate) fn new(budget_seconds: f64, width: u32, height: u32, largest_batch: u32) -> Self {
+        Self {
+            budget_seconds,
+            grid_columns: width.div_ceil(WORKGROUP_PIXELS).max(1),
+            grid_rows: height.div_ceil(WORKGROUP_PIXELS).max(1),
+            image_pixels: (width as u64 * height as u64).max(1),
+            largest_batch: largest_batch.max(1),
+            allowed_work: PIXELS_PER_CELL,
+            slowest_seconds_per_work: 0.0,
+            sweeps_begun: 0,
+        }
+    }
+
+    pub(crate) fn grid(&self) -> (u32, u32) {
+        (self.grid_columns, self.grid_rows)
+    }
+
+    pub(crate) fn cell_count(&self) -> u32 {
+        self.grid_columns * self.grid_rows
+    }
+
+    /// The samples every dispatch of the sweep that starts now draws, never more than `remaining_samples`.
+    pub(crate) fn sweep_samples(&mut self, remaining_samples: u32) -> u32 {
+        self.sweeps_begun += 1;
+        let batch_pixels = if self.allowed_work >= self.image_pixels {
+            self.image_pixels
+        } else {
+            SATURATING_TILE_PIXELS.min(self.image_pixels)
+        };
+        let batches = (self.allowed_work / batch_pixels).min(self.largest_batch as u64) as u32;
+        batches.min(remaining_samples).max(1)
+    }
+
+    /// The cells the next tile of a sweep of `samples` samples may hold; at least one.
+    pub(crate) fn cell_budget(&self, samples: u32) -> u32 {
+        let sweep_work = samples.max(1) as u64;
+        if sweep_work * self.image_pixels <= self.allowed_work {
+            return self.cell_count();
+        }
+        let exploring_cap = if self.sweeps_begun <= 1 { EXPLORING_TILE_PIXELS / PIXELS_PER_CELL } else { u64::MAX };
+        let cells = (self.allowed_work / (sweep_work * PIXELS_PER_CELL)).min(exploring_cap);
+        cells.clamp(1, self.cell_count() as u64) as u32
+    }
+
+    /// Records that a dispatch of `work` pixel samples took `seconds` and sizes the next one to fit the budget.
+    pub(crate) fn record(&mut self, work: u64, seconds: f64) {
+        let work = work.max(1);
+        let seconds_per_work = (seconds / work as f64).max(1e-12);
+        self.slowest_seconds_per_work *= PEAK_COST_DECAY;
+        if work >= PEAK_COST_MINIMUM_WORK && seconds >= self.budget_seconds * PEAK_COST_MINIMUM_BUDGET_SHARE {
+            self.slowest_seconds_per_work = self.slowest_seconds_per_work.max(seconds_per_work);
+        }
+        let planning_cost = seconds_per_work.max(self.slowest_seconds_per_work * PEAK_COST_FLOOR_SHARE);
+        let fitting_work = (self.budget_seconds * BUDGET_SAFETY_SHARE / planning_cost).min(u64::MAX as f64) as u64;
+        let growth_ceiling = work.saturating_mul(BATCH_GROWTH_LIMIT as u64);
+        let largest_work = self.image_pixels.saturating_mul(self.largest_batch as u64);
+        self.allowed_work = fitting_work.min(growth_ceiling).min(largest_work).max(PIXELS_PER_CELL);
+    }
+}
