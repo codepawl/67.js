@@ -17,6 +17,7 @@ import { VEGETATION_CAPABILITY_NOTE } from '../src/agent-vegetation-notes.js';
 import { CROWD_CAPABILITY_NOTE } from '../src/agent-crowd-notes.js';
 import { SETTLE_CAPABILITY_NOTE } from '../src/settle-notes.js';
 import { RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom } from '../scripts/agent-render-estimate.mjs';
+import { RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget } from '../scripts/agent-render-budget.mjs';
 import { GAME_CAPABILITIES } from '../src/game-setup-notes.js';
 import { USER_PASS_CAPABILITIES } from '../src/user-pass.js';
 import { MESH_BLEND_CAPABILITIES } from '../src/mesh-blend.js';
@@ -132,7 +133,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     audioInputArguments, createAudioLibrary, measureStreamSeconds, filmTimelineDuration, filmTimelineShotStarts, sampleFilmTimeline, normalizeReview, REVIEW_LIMITS, isPreviewHost, BRANCH_LIMITS, validateBranchName, sessionProblem, SCENE_STORE_LIMITS,
     runAnnotateSession: async () => ({ outcome: 'timeout' }), openInDefaultBrowser: async () => {}, ANNOTATE_LIMITS,
     ...packLimits, createPackRegistry,
-    sampleBrowserHeap, exceedsMemoryGuard, RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom, RENDER_HISTORY_FILE, normalizeJobSettings,
+    sampleBrowserHeap, exceedsMemoryGuard, RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget, RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom, RENDER_HISTORY_FILE, normalizeJobSettings,
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
     runtimeOptions, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
     setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },

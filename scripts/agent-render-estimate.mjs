@@ -152,6 +152,8 @@ export function estimateRenderJob({ size, settings, backend, memoryBudgetMiB, hi
     seconds: round(modelSeconds * correction.seconds, 1),
     peakMemoryMiB: Math.round(modelPeakMemoryMiB * correction.memory),
     framesPerSecond: round(settings.frameCount / Math.max(0.001, modelSeconds * correction.seconds), 2),
+    frameSeconds: round(frameSeconds * correction.seconds, 4),
+    fixedSeconds: round((modelSeconds - frameSeconds * settings.frameCount) * correction.seconds, 2),
     basis: basisOf(correction, jobKind(settings, backend)),
     modelSeconds: round(modelSeconds, 1),
     modelPeakMemoryMiB: Math.round(modelPeakMemoryMiB),
