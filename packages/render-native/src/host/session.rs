@@ -8,7 +8,7 @@ use std::time::Instant;
 use napi::Result;
 use wgpu::util::DeviceExt;
 
-use crate::cycles::{unit_filter_table_words, CYCLES_LUT_WORDS};
+use crate::cycles::{portal_count_of, unit_filter_table_words, CYCLES_LUT_WORDS};
 use crate::host::accel::{
     build_acceleration_structure, build_empty_cycles_acceleration, create_vertex_buffer, unpack_triangles,
     INSTANCE_RECORD_BYTES, TRIANGLE_FLOATS, TRIANGLE_RECORD_BYTES,
@@ -665,6 +665,19 @@ pub(crate) fn validate_record_buffer(label: &str, bytes: &[u8], count: u32, stri
     Ok(())
 }
 
+/// The portals are the last records of the lights table, after the `light_count` emitters, and the kernel reads them by the
+/// portal count of the parameter block. A table that is shorter than both counts would make the kernel read past its end.
+pub(crate) fn check_lights_hold_portals(lights: &[u8], light_count: u32, portal_count: u32) -> Result<()> {
+    let record_count = (lights.len() / LIGHT_RECORD_BYTES) as u64;
+    let needed = light_count as u64 + portal_count as u64;
+    if record_count < needed {
+        return Err(failure(format!(
+            "kernelParams claims {portal_count} light portals after {light_count} lights, but the lights buffer holds {record_count} records and needs {needed}. Pack the lights and kernelParams together with buildNativeInputV2."
+        )));
+    }
+    Ok(())
+}
+
 /// Byte offset of `kernel_flags` in `KernelParamsV2` and its light-tree bit (`KERNEL_FLAG_USE_LIGHT_TREE` in pack-input-v2.mjs).
 const KERNEL_PARAMS_KERNEL_FLAGS_BYTE: usize = 32;
 const KERNEL_FLAG_USE_LIGHT_TREE: u32 = 1;
@@ -751,6 +764,7 @@ pub(crate) fn validate_cycles_input(input: &NativeTraceInputV2) -> Result<()> {
         EMISSIVE_TRIANGLE_RECORD_BYTES,
     )?;
     validate_record_buffer("lights", &input.lights, input.light_count, LIGHT_RECORD_BYTES)?;
+    check_lights_hold_portals(&input.lights, input.light_count, portal_count_of(&input.kernel_params))?;
     validate_record_buffer(
         "lightTreeNodes",
         &input.light_tree_nodes,
@@ -1009,6 +1023,16 @@ pub(crate) fn run_cycles_lobe_probe(options: &ProbeCyclesLobeOptions, shader_sou
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lights_buffer_must_hold_the_emitters_and_the_portals() {
+        let three_records = vec![0u8; 3 * LIGHT_RECORD_BYTES];
+        assert!(check_lights_hold_portals(&three_records, 2, 1).is_ok());
+        assert!(check_lights_hold_portals(&three_records, 3, 0).is_ok());
+        let message = check_lights_hold_portals(&three_records, 2, 2).unwrap_err().reason;
+        assert!(message.contains("2 light portals after 2 lights"), "{message}");
+        assert!(message.contains("holds 3 records and needs 4"), "{message}");
+    }
 
     #[test]
     fn pipeline_key_separates_entry_points_and_sources() {
