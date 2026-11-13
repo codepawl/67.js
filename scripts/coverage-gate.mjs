@@ -1,9 +1,9 @@
 // Merges the lcov files of the test shards, prints and summarises line, branch and function coverage, and fails when
-// any figure falls more than the allowed margin below the committed baseline (coverage-baseline.json).
+// any figure falls more than the allowed margin below the committed baseline (config/coverage-baseline.json).
 // Raising the baseline is a manual edit of that file. The function figure counts each function once per source line,
 // so the baseline was re-measured (93.4 to 92.28 on the same commit) when unnamed functions stopped being counted per shard.
 // The branch figure counts each branch once per source line and position on that line, for the same reason (see branchKey).
-// Usage: node scripts/coverage-gate.mjs <lcov file or folder>... [--baseline coverage-baseline.json] [--merged-out merged.lcov]
+// Usage: node scripts/coverage-gate.mjs <lcov file or folder>... [--baseline config/coverage-baseline.json] [--merged-out merged.lcov]
 import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -152,7 +152,7 @@ function toLcov(files) {
 function main() {
   const args = process.argv.slice(2);
   const inputs = [];
-  let baselinePath = 'coverage-baseline.json';
+  let baselinePath = 'config/coverage-baseline.json';
   let mergedOut = null;
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--baseline') baselinePath = args[++index];
@@ -180,7 +180,7 @@ function main() {
   console.log(table);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Coverage\n\n${table}\n`);
   if (results.some(result => !result.ok)) {
-    console.error('Coverage fell below the baseline. Add tests, or lower coverage-baseline.json on purpose.');
+    console.error('Coverage fell below the baseline. Add tests, or lower config/coverage-baseline.json on purpose.');
     process.exit(1);
   }
 }

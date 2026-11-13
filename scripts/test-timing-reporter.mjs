@@ -1,6 +1,6 @@
 // Node test reporter that writes how long each test file took, as JSON: { "tests/x.test.js": milliseconds }.
 // Use: node --test --test-reporter=./scripts/test-timing-reporter.mjs --test-reporter-destination=timings.json <files>
-// scripts/shard-test-files.mjs reads the committed copy (test-timings.json) to balance the shards.
+// scripts/shard-test-files.mjs reads the committed copy (config/test-timings.json) to balance the shards.
 import { relative } from 'node:path';
 
 export default async function* timingReporter(source) {

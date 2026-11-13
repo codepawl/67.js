@@ -6,7 +6,7 @@ import { constants, setPriority } from 'node:os';
 import { isBuiltin } from 'node:module';
 import { dirname, resolve, join, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import libraryConfiguration, { MCP_BUILD_RUNNING } from '../vite.lib.config.js';
+import libraryConfiguration, { MCP_BUILD_RUNNING } from '../config/vite.lib.config.js';
 
 // This script reruns the library configuration in memory; the flag keeps that run from rebuilding build/mcp again.
 process.env[MCP_BUILD_RUNNING] = '1';

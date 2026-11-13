@@ -1,8 +1,8 @@
 # Contributing to 67js
 
 This file covers setup, how to send a change, the checks it must pass, the code style and the release flow.
-Coding agents can start with [AGENTS.md](AGENTS.md), the short version. Everyone follows the [code of conduct](CODE_OF_CONDUCT.md).
-To ask a question or report a bug, see [SUPPORT.md](SUPPORT.md). Questions, ideas and finished work go in [Discussions](https://github.com/codepawl/67.js/discussions); a bug or a planned change goes in an issue.
+Coding agents can start with [AGENTS.md](AGENTS.md), the short version. Everyone follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
+To ask a question or report a bug, see [SUPPORT.md](.github/SUPPORT.md). Questions, ideas and finished work go in [Discussions](https://github.com/codepawl/67.js/discussions); a bug or a planned change goes in an issue.
 A maintainer gives a first answer to every issue and pull request within about 7 days.
 Coding agents are welcome to open pull requests. There is no disclosure box: the person who opens the pull request answers for it.
 

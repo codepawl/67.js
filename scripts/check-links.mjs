@@ -1,8 +1,8 @@
 // Checks that every relative link in the markdown and HTML files points at a file.
 // Usage: node scripts/check-links.mjs            the repository checkout
 //        node scripts/check-links.mjs --package  the packed npm archive, as a coding agent reads it in node_modules
-// A link resolves against its own folder, the root, `public/` or `docs/`, because the site serves
-// the docs and the public folder from one origin. The archive has no `public/`, so only the other bases apply.
+// A link resolves against its own folder, the root, `site/`, `public/` or `docs/`, because the site serves
+// the pages, the docs and the public folder from one origin. The archive has no `public/`, so only the other bases apply.
 import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,7 +37,7 @@ function collectFiles(folder, found) {
 
 function linkResolves(root, file, link) {
   const withoutQuery = link.split('?')[0];
-  const rootBases = [root, join(root, 'public'), join(root, 'docs')];
+  const rootBases = [root, join(root, 'site'), join(root, 'public'), join(root, 'docs')];
   const targets = withoutQuery.startsWith('/')
     ? rootBases.map((base) => join(base, withoutQuery))
     : [resolve(dirname(file), withoutQuery), ...rootBases.map((base) => join(base, withoutQuery))];

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
 
-const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const indexHtml = readFileSync(new URL('../site/index.html', import.meta.url), 'utf8');
 const heroModeScript = indexHtml.match(/<script id="hero-mode">([\s\S]*?)<\/script>/)?.[1];
 
 // Runs the inline script of index.html against a fake browser. Timers are collected, not run: call runTimers() to let POSTER_WAIT_MS pass.

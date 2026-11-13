@@ -14,8 +14,8 @@ test('the archive measurement runs every Vite build that prepare-release runs, i
 test('a staging build empties its folder once and writes the standalone module beside the library', () => {
   const builds = viteBuildArguments('build/.archive-1/build', () => true);
   assert.deepEqual(builds, [
-    ['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.lib.config.js', '--outDir', 'build/.archive-1/build', '--emptyOutDir'],
-    ['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.browser.config.js', '--outDir', 'build/.archive-1/build'],
+    ['node_modules/vite/bin/vite.js', 'build', '--config', 'config/vite.lib.config.js', '--outDir', 'build/.archive-1/build', '--emptyOutDir'],
+    ['node_modules/vite/bin/vite.js', 'build', '--config', 'config/vite.browser.config.js', '--outDir', 'build/.archive-1/build'],
   ]);
 });
 
@@ -25,7 +25,12 @@ test('an in-place build keeps the output folder of each config', () => {
 });
 
 test('a base branch from before the standalone module is measured with the library build alone', () => {
-  const builds = viteBuildArguments('staging', config => config === 'vite.lib.config.js');
+  const builds = viteBuildArguments('staging', config => config === 'config/vite.lib.config.js');
   assert.equal(builds.length, 1);
-  assert.equal(builds[0][3], 'vite.lib.config.js');
+  assert.equal(builds[0][3], 'config/vite.lib.config.js');
+});
+
+test('a base branch from before the configs moved into config/ is built from the repository root', () => {
+  const builds = viteBuildArguments('staging', config => !config.includes('/'));
+  assert.deepEqual(builds.map(viteArguments => viteArguments[3]), ['vite.lib.config.js', 'vite.browser.config.js']);
 });

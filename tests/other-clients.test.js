@@ -68,7 +68,7 @@ function linkedPaths(text) {
 
 function pageSources(path) {
   const name = path.replace(/^\//, '');
-  return [`public/${name}`, `docs/${name}`, name, name === 'changelog.md' ? 'CHANGELOG.md' : null].filter(Boolean);
+  return [`public/${name}`, `docs/${name}`, `site/${name}`, name, name === 'changelog.md' ? 'CHANGELOG.md' : null].filter(Boolean);
 }
 
 test('every page that llms.txt and the README link to exists in the package or on the site', () => {

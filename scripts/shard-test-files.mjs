@@ -1,6 +1,6 @@
 // Prints the test files of one shard, one path per line: node scripts/shard-test-files.mjs <shard 1..count> <count> [--untimed=hash]
 //
-// Files listed in test-timings.json (milliseconds per file, measured on CI) are dealt out longest first, each to the shard with the
+// Files listed in config/test-timings.json (milliseconds per file, measured on CI) are dealt out longest first, each to the shard with the
 // least time so far, which keeps every shard close to the same length.
 //
 // A file without a timing (a test file added since the last refresh) is dealt after all timed files, using the median timing as its
@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const rootDirectory = join(import.meta.dirname, '..');
-const timingsPath = join(rootDirectory, 'test-timings.json');
+const timingsPath = join(rootDirectory, 'config', 'test-timings.json');
 
 function hashedShard(fileName, count) {
   const digest = createHash('sha1').update(fileName).digest();

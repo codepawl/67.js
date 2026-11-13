@@ -5,7 +5,7 @@
 // another process (a live MCP test, a preview) reads them. build/ is ignored by git, so the MCP manifest still sees a clean tree.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, copyFileSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -45,13 +45,20 @@ function copyPackageSources(npmCli, stagingRoot) {
 
 // The Vite builds a release runs before npm pack, in the order prepare-release.mjs runs them. The library build empties the
 // output folder and the standalone module is written beside it. A base branch from before the standalone module has no
-// vite.browser.config.js, so it is measured without one.
-export const RELEASE_VITE_CONFIGS = ['vite.lib.config.js', 'vite.browser.config.js'];
+// vite.browser.config.js, so it is measured without one. A base branch from before the configs moved into config/ keeps them
+// at the repository root.
+export const RELEASE_VITE_CONFIGS = ['config/vite.lib.config.js', 'config/vite.browser.config.js'];
+
+function presentConfigFor(config, configExists) {
+  if (configExists(config)) return config;
+  const rootConfig = basename(config);
+  return configExists(rootConfig) ? rootConfig : null;
+}
 
 export function viteBuildArguments(outputFolder, configExists = existsSync) {
-  const presentConfigs = RELEASE_VITE_CONFIGS.filter(config => configExists(config));
-  return presentConfigs.map(config => {
-    const viteArguments = ['node_modules/vite/bin/vite.js', 'build', '--config', config];
+  const presentConfigs = RELEASE_VITE_CONFIGS.map(config => ({ config, found: presentConfigFor(config, configExists) })).filter(({ found }) => found);
+  return presentConfigs.map(({ config, found }) => {
+    const viteArguments = ['node_modules/vite/bin/vite.js', 'build', '--config', found];
     if (!outputFolder) return viteArguments;
     viteArguments.push('--outDir', outputFolder);
     if (config === RELEASE_VITE_CONFIGS[0]) viteArguments.push('--emptyOutDir');
