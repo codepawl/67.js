@@ -168,6 +168,54 @@ Time of the denoise step alone, 1920 by 1080 demo room: 1.6 s for OIDN against a
 
 OIDN's output is the same bytes run to run on one machine (the CPU device, two runs on each of the 24 captures, and two identical PNGs from an MCP job); it was not compared across machines or CPU generations, where OIDN does not promise it.
 
+## Path trace a GLB file with Cook
+
+One command turns a GLB, an HDRI and a camera, written as a `scene.json` file scene, into a path traced picture on the GPU, with the PNG, the raw linear light and a report of what the run cost. It needs the built native addon (`node build.mjs` in `packages/render-native`) and a Vulkan ray query card; without the addon it stops with exit code 2 and says so.
+
+```sh
+npm run render:file-cook -- --config scene.json --out out/frame --width 1280 --height 720 --samples 256 --camera camera.json
+```
+
+`scene.json` is the file `scripts/render-media.mjs --scene file` reads. A headless Chrome page loads the GLB with its textures, the command packs the scene into the native tables the render jobs use and Cook traces them with the `cycles` kernel. The camera of the scene description is used unless `--camera` names a file like `{ "eye": [0, 1.6, 6], "target": [0, 1, 0], "verticalFovDegrees": 40 }`.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--config <scene.json>`, `--out <prefix>` | required | The scene and the prefix of every file written. |
+| `--width`, `--height` | 800, 450 | Picture size, 16 to 8192. |
+| `--samples` | 128 | Paths per pixel, 1 to 100000. |
+| `--bounces` | 8 | 1 to 16. |
+| `--seed` | 1 | 0 to 2147483647. |
+| `--max-seconds` | 600 | Wall-clock limit of the trace, 1 to 86400. Passing it fails; there is no partial picture. |
+| `--denoise` | `oidn` | `oidn`, `atrous` or `none`. Without OIDN installed `oidn` falls back to `atrous`. |
+| `--write-raw` | off | With a denoiser, also write the picture before denoising. |
+| `--camera <camera.json>` | scene camera | `eye`, `target` and `verticalFovDegrees` (or `fov`) replace the camera. |
+| `--instancing` | off | Keep repeated geometry as instances (needed for scenes with many copies). |
+| `--chrome <path>`, `--software-gl` | | Chrome executable for the loader page, and SwiftShader for it. |
+| `--list-parts <regex>`, `--hide-parts <regex>` | | Write `<prefix>.parts.json` for matching parts, or leave them out. A pattern is tested against `<part name> material:<material name>`. |
+| `--patch-materials "<regex>={json}"` | | Change the matching materials before packing (repeatable), to test a scene fix such as `"glass={\"alphaMode\":\"OPAQUE\"}"`. |
+| `--help` | | Print the options. |
+
+Files written: `<prefix>.png` (ACES tone map and gamma, the 67js view transform), `<prefix>.linear.f32` (width x height x 3 little-endian floats, after the denoiser), `<prefix>.raw.png` and `<prefix>.raw.linear.f32` (before the denoiser, with `--write-raw`), `<prefix>.parts.json` (with `--list-parts`) and `<prefix>.json`, the report, which is also printed as one `FILE_NATIVE {json}` line.
+
+The report holds everything `traceFrameNative` reports (adapter, kernel, samples, `tracedSeconds`, denoiser, `triangles`, `instances`, `ignored`) plus:
+
+- `loadSeconds` (Chrome loads the GLB and textures), `packSeconds` (the native tables), `setupSeconds` (both) and `samplingSeconds` (the trace). The tracer's own set-up time is `tracerSetupSeconds`.
+- `triangleCount` (unique triangles) and `instanceCount` (`null` when the scene is flattened).
+- `peakGpuMemoryMiB`: the highest `memory.used` that `nvidia-smi` showed, sampled every 250 ms during the trace. It is the whole card, so other programs count; it is `null` with `peakGpuMemoryNote` when `nvidia-smi` is missing.
+- `ignoredFrameEffects`: frame effects of the scene description that the traced picture does not get, such as `exposure`, `saturation`, `contrast`, `temperature`, `vignette`, `grain`, `bloom`, `monochrome`, `fade` and `cinematic`. The traced picture is only tone mapped.
+
+Exit code 2 means the render-native package or its addon is missing (the message gives the build command); any other failure exits 1 with its message.
+
+Limits known today:
+
+- 1.5 million unique triangles with `--instancing`; fewer without it, since every copy counts.
+- At most 7 area lights.
+- Glass exported from Blender as soft alpha stays alpha (a see-through cutout, not refraction) unless you patch it, for example with `--patch-materials`.
+- There is no camera near clip, so geometry between the eye and the target is drawn.
+- Bloom and colour grade are not drawn (see above).
+
+Lights go in the scene description under `renderer.environment`: `keyColor` and `lightDirection` for the sun (`sunAngularRadius` sets its size), `areaLights` (`position`, `direction`, `width`, `height`, `color`, `intensity`; `portal: true` makes a window portal instead of an emitter) and `pointLights` (`position`, `color`, `intensity`, `radius`). The HDRI is the `hdri` path of the same file.
+
 ## Measured
 
 `npm run reference -- --path-tracer [--samples 32]` draws each reference scene with the tracer and scores it against the Cycles render of the same scene with FLIP (`bench/reference/path-tracer.json`). It leaves `baseline.json` and `images/` alone, and it needs the Cycles renders of an earlier `npm run reference`.

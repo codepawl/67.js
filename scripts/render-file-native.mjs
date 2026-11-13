@@ -1,71 +1,17 @@
 // Path traces a scene.json file scene (GLB + HDRI, as scripts/render-media.mjs --scene file reads it) on Cook, the native
 // tracer of packages/render-native. A headless Chrome page loads the GLB with the glTF loader (textures included), packs the
 // scene into native tables with the same code the MCP render job uses, and this process traces them.
-//   node scripts/render-file-native.mjs --config <scene.json> --out <prefix> [--width 800] [--height 450] [--samples 128]
-//     [--bounces 8] [--seed 1] [--denoise oidn|atrous|none] [--max-seconds 600] [--instancing] [--chrome <path>] [--software-gl]
-//     [--list-parts <regex>] [--hide-parts <regex>] [--patch-materials "<regex>={json}"]
+//   node scripts/render-file-native.mjs --config <scene.json> --out <prefix> [options]   (--help lists the options)
 // Writes <prefix>.png (ACES + gamma, 67js tone map), <prefix>.linear.f32 (width*height*3 little-endian floats) and <prefix>.json.
-import { chromium } from 'playwright';
+// Exit code 2: the native addon is not built. Exit code 1: any other failure.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareFileScene } from './file-scene.mjs';
 import { traceFrameNative } from './agent-native-trace.mjs';
-
-function readOption(argumentList, flagName, fallbackValue) {
-  const flagIndex = argumentList.indexOf(flagName);
-  if (flagIndex === -1) return fallbackValue;
-  const value = argumentList[flagIndex + 1];
-  if (value === undefined || value.startsWith('--')) throw new RangeError(`Flag ${flagName} requires a value.`);
-  return value;
-}
-
-function readIntegerOption(argumentList, flagName, fallbackValue) {
-  const parsed = Number(readOption(argumentList, flagName, fallbackValue));
-  if (!Number.isInteger(parsed) || parsed < 1) throw new RangeError(`Option ${flagName} must be a positive integer, got ${parsed}.`);
-  return parsed;
-}
-
-// Part patterns are tested against "<part name> material:<material name>".
-// --patch-materials '<part name regex>=<json material fields>' (repeatable) changes loaded materials before packing, to test a scene fix.
-function parsePatchMaterials(argumentList) {
-  const patches = [];
-  argumentList.forEach((argument, index) => {
-    if (argument !== '--patch-materials') return;
-    const value = argumentList[index + 1] ?? '';
-    const separator = value.lastIndexOf('={');
-    if (separator === -1) throw new RangeError(`Option --patch-materials needs "<part regex>={json}", got "${value}".`);
-    patches.push({ pattern: value.slice(0, separator), patch: JSON.parse(value.slice(separator + 1)) });
-  });
-  return patches;
-}
-
-function parseArguments(argumentList) {
-  const config = readOption(argumentList, '--config');
-  const outputPrefix = readOption(argumentList, '--out');
-  if (!config || !outputPrefix) throw new RangeError('Usage: node scripts/render-file-native.mjs --config <scene.json> --out <prefix> [--width 800] [--height 450] [--samples 128] [--bounces 8] [--seed 1] [--denoise oidn|atrous|none] [--max-seconds 600] [--instancing] [--chrome <path>] [--software-gl]');
-  const denoise = readOption(argumentList, '--denoise', 'oidn');
-  if (!['oidn', 'atrous', 'none'].includes(denoise)) throw new RangeError(`Option --denoise must be oidn, atrous or none, got "${denoise}".`);
-  return {
-    config: resolve(config),
-    outputPrefix: resolve(outputPrefix),
-    width: readIntegerOption(argumentList, '--width', 800),
-    height: readIntegerOption(argumentList, '--height', 450),
-    samples: readIntegerOption(argumentList, '--samples', 128),
-    bounces: readIntegerOption(argumentList, '--bounces', 8),
-    seed: readIntegerOption(argumentList, '--seed', 1),
-    maxSeconds: readIntegerOption(argumentList, '--max-seconds', 600),
-    denoise,
-    instancing: argumentList.includes('--instancing'),
-    chrome: readOption(argumentList, '--chrome'),
-    softwareGl: argumentList.includes('--software-gl'),
-    listParts: readOption(argumentList, '--list-parts'),
-    hideParts: readOption(argumentList, '--hide-parts'),
-    patchMaterials: parsePatchMaterials(argumentList),
-  };
-}
+import { MissingAddonError, USAGE, listIgnoredFrameEffects, parseArguments } from './render-file-native-options.mjs';
 
 function freePort() {
   return new Promise((resolvePort, reject) => {
@@ -133,14 +79,83 @@ async function loadOidnIfAvailable() {
   }
 }
 
+async function loadNativeTracer() {
+  let tracer;
+  try {
+    tracer = await import('../packages/render-native/index.mjs');
+  } catch {
+    throw new MissingAddonError();
+  }
+  if (!tracer.findNativeAddon()) throw new MissingAddonError();
+  return tracer;
+}
+
+const GPU_POLL_MILLISECONDS = 250;
+const GPU_POLL_SETTLE_MILLISECONDS = 300;
+
+/**
+ * Follows the used memory of the card while the trace runs. One nvidia-smi child prints a line every 250 ms by itself, because
+ * the native trace blocks this process and a timer here would not fire. The number is the whole card, so other processes count.
+ * `stop()` kills the child and resolves with { peakMiB, note }; peakMiB is null when nvidia-smi is not available.
+ */
+function startGpuMemoryPoller() {
+  const state = { peakMiB: null, note: null, bufferedText: '' };
+  const child = spawn('nvidia-smi', ['--query-gpu=memory.used', '--format=csv,noheader,nounits', '-lms', String(GPU_POLL_MILLISECONDS)], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  child.on('error', error => {
+    state.note = `nvidia-smi could not start (${error.code ?? error.message}), so the peak GPU memory was not measured.`;
+  });
+  child.stdout.on('data', chunk => {
+    state.bufferedText += chunk.toString();
+    const lines = state.bufferedText.split('\n');
+    state.bufferedText = lines.pop();
+    for (const line of lines) {
+      const usedMiB = Number(line.trim());
+      if (line.trim() !== '' && Number.isFinite(usedMiB)) state.peakMiB = Math.max(state.peakMiB ?? 0, usedMiB);
+    }
+  });
+  return {
+    async stop() {
+      try {
+        await new Promise(resolveSettled => setTimeout(resolveSettled, GPU_POLL_SETTLE_MILLISECONDS));
+      } finally {
+        child.kill();
+      }
+      if (state.peakMiB === null && !state.note) state.note = 'nvidia-smi printed no memory reading, so the peak GPU memory was not measured.';
+      return { peakMiB: state.peakMiB, note: state.note };
+    },
+  };
+}
+
+async function traceWithGpuMemory(traceOptions) {
+  const poller = startGpuMemoryPoller();
+  try {
+    const traced = await traceFrameNative(traceOptions);
+    const peak = await poller.stop();
+    return { traced, peak };
+  } finally {
+    await poller.stop();
+  }
+}
+
+async function writeRawPicture({ outputPrefix, rawLinear, width, height }) {
+  const [{ toneMapToRgba8 }, { encodePng }] = await Promise.all([import('../src/path-tracer.js'), import('../src/export-png.js')]);
+  const png = encodePng(toneMapToRgba8(rawLinear, width, height), width, height);
+  await writeFile(`${outputPrefix}.raw.png`, Buffer.from(png));
+  await writeFile(`${outputPrefix}.raw.linear.f32`, Buffer.from(rawLinear.buffer, rawLinear.byteOffset, rawLinear.byteLength));
+}
+
 async function main() {
   const options = parseArguments(process.argv.slice(2));
+  if (options.help) {
+    console.log(USAGE);
+    return;
+  }
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const tracer = await import('../packages/render-native/index.mjs');
-  if (!tracer.findNativeAddon()) throw new Error('The render-native addon is not built. Run "node build.mjs" in packages/render-native first.');
+  const tracer = await loadNativeTracer();
+  const { chromium } = await import('playwright');
   const world = prepareFileScene({ configPath: options.config });
   const { description } = world;
-  const camera = { eye: description.eye, target: description.target, fov: description.frame?.fov ?? 45 };
+  const camera = options.camera ?? { eye: description.eye, target: description.target, fov: description.frame?.fov ?? 45 };
   const { server, port } = await startViteServer(root);
   let browser;
   try {
@@ -166,13 +181,18 @@ async function main() {
       listParts: options.listParts ?? null, hideParts: options.hideParts ?? null, patchMaterials: options.patchMaterials });
     const packSeconds = (performance.now() - packStarted) / 1000;
     const denoiser = options.denoise === 'oidn' ? await loadOidnIfAvailable() : null;
-    const traced = await traceFrameNative({ tracer, exported, width: options.width, height: options.height, samples: options.samples, bounces: options.bounces, seed: options.seed,
+    const { traced, peak } = await traceWithGpuMemory({ tracer, exported, width: options.width, height: options.height, samples: options.samples, bounces: options.bounces, seed: options.seed,
       denoise: options.denoise, denoiser, maxSeconds: options.maxSeconds, kernel: 'cycles' });
     await mkdir(dirname(options.outputPrefix), { recursive: true });
     await writeFile(`${options.outputPrefix}.png`, Buffer.from(traced.data, 'base64'));
     await writeFile(`${options.outputPrefix}.linear.f32`, Buffer.from(traced.linear.buffer, traced.linear.byteOffset, traced.linear.byteLength));
+    if (options.writeRaw && traced.report.denoised) await writeRawPicture({ outputPrefix: options.outputPrefix, rawLinear: traced.rawLinear, width: options.width, height: options.height });
     if (exported.listedParts) await writeFile(`${options.outputPrefix}.parts.json`, `${JSON.stringify(exported.listedParts, null, 1)}\n`);
-    const report = { ...traced.report, partCount: exported.partCount, hiddenCount: exported.hiddenCount, loadSeconds, packSeconds, ignored: exported.ignored, materialsReason: exported.materialsReason };
+    const report = { ...traced.report, tracerSetupSeconds: traced.report.setupSeconds, partCount: exported.partCount, hiddenCount: exported.hiddenCount,
+      loadSeconds, packSeconds, setupSeconds: loadSeconds + packSeconds, samplingSeconds: traced.report.tracedSeconds,
+      triangleCount: exported.triangles, instanceCount: exported.instances ?? null,
+      peakGpuMemoryMiB: peak.peakMiB, ...(peak.note ? { peakGpuMemoryNote: peak.note } : {}),
+      ignoredFrameEffects: listIgnoredFrameEffects(description), ignored: exported.ignored, materialsReason: exported.materialsReason };
     await writeFile(`${options.outputPrefix}.json`, `${JSON.stringify(report, null, 2)}\n`);
     console.log(`FILE_NATIVE ${JSON.stringify(report)}`);
   } finally {
@@ -181,4 +201,9 @@ async function main() {
   }
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  console.error(error.message);
+  process.exit(error instanceof MissingAddonError ? 2 : 1);
+}
