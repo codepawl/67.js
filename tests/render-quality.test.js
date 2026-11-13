@@ -94,8 +94,9 @@ test('final gives way when the trace is estimated past maxSeconds, and stays fin
   assert.equal(slow.report.picked, 'realtime');
   assert.match(slow.report.steps[0].missing, /fits the 120 s limit on one frame.*1920x1080, 256 samples on the cpu backend/);
   assert.equal(slow.settings.renderer, undefined);
-  const gpu = applyQuality({ quality: 'final', base: large, backend: 'gpu', nativeTracer: false, estimateOf: estimateFor('gpu') });
-  assert.equal(gpu.report.picked, 'final');
-  const small = applyQuality({ quality: 'final', base, backend: 'cpu', nativeTracer: false, estimateOf: estimateFor('cpu') });
+  const fitting = applyQuality({ quality: 'final', base: { kind: 'image', width: 640, height: 360 }, backend: 'gpu', nativeTracer: false, estimateOf: estimateFor('gpu') });
+  assert.equal(applyQuality({ quality: 'final', base: large, backend: 'gpu', nativeTracer: false, estimateOf: estimateFor('gpu') }).report.picked, 'realtime-high');
+  assert.equal(fitting.report.picked, 'final');
+  const small = applyQuality({ quality: 'final', base: { kind: 'image', width: 128, height: 72 }, backend: 'cpu', nativeTracer: false, estimateOf: estimateFor('cpu') });
   assert.equal(small.report.picked, 'final');
 });
