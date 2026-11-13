@@ -1285,6 +1285,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           const size = sceneSizeFrom(await invoke('inspect', { sessionId, limit: Math.max(1, snapshot.recipe.nodes?.length ?? 1) }), snapshot.recipe);
           const history = await readRenderHistory();
           const estimateOf = rawSettings => estimateRenderJob({ size, settings: normalizeJobSettings(rawSettings, snapshot.clips, snapshot.recipe), backend, memoryBudgetMiB: memory, history, gpuTracerWarm });
+          if (settings?.quality !== undefined && settings.budget !== undefined) throw new TypeError('budget picks the tier: leave settings.quality out, or leave settings.budget out.');
           let jobSettings = settings;
           let budgetReport;
           let qualityReport;
@@ -1296,10 +1297,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             ({ settings: jobSettings, report: budgetReport } = chooseBudgetSettings({ base, budget, tracerBackend: backend === 'cpu' ? 'cpu' : 'gpu', frameCount, estimateOf, serverMemoryMiB: memory }));
           }
           if (settings?.quality !== undefined) {
-            if (settings.budget !== undefined) throw new TypeError('budget picks the tier: leave settings.quality out, or leave settings.budget out.');
             nativeTracerLocator ??= createNativeTracerLocator();
             const { quality, ...base } = settings;
-            ({ settings: jobSettings, report: qualityReport } = applyQuality({ quality, base, backend, nativeTracer: Boolean((await nativeTracerLocator.find()).tracer) }));
+            ({ settings: jobSettings, report: qualityReport } = applyQuality({ quality, base, backend, nativeTracer: Boolean((await nativeTracerLocator.find()).tracer), estimateOf }));
           }
           const estimate = estimateOf(jobSettings);
           estimateForNextJob = estimate;

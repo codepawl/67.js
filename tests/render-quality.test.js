@@ -85,3 +85,17 @@ test('a budget names the tier it picked, and its settings carry the quality', ()
   const tiny = choose({ framesPerSecond: 240 });
   assert.ok(['draft', 'realtime-high'].includes(tiny.report.picked.tier));
 });
+
+test('final gives way when the trace is estimated past maxSeconds, and stays final when it fits', () => {
+  const size = { parts: 40, assetParts: 0, triangles: 60000, materials: 4, textures: 0, lights: 3 };
+  const estimateFor = backend => raw => estimateRenderJob({ size, settings: normalizeJobSettings(raw, [], recipe), backend, memoryBudgetMiB: 192 });
+  const large = { kind: 'image', width: 1920, height: 1080 };
+  const slow = applyQuality({ quality: 'final', base: large, backend: 'cpu', nativeTracer: false, estimateOf: estimateFor('cpu') });
+  assert.equal(slow.report.picked, 'realtime');
+  assert.match(slow.report.steps[0].missing, /fits the 120 s limit on one frame.*1920x1080, 256 samples on the cpu backend/);
+  assert.equal(slow.settings.renderer, undefined);
+  const gpu = applyQuality({ quality: 'final', base: large, backend: 'gpu', nativeTracer: false, estimateOf: estimateFor('gpu') });
+  assert.equal(gpu.report.picked, 'final');
+  const small = applyQuality({ quality: 'final', base, backend: 'cpu', nativeTracer: false, estimateOf: estimateFor('cpu') });
+  assert.equal(small.report.picked, 'final');
+});

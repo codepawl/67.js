@@ -18,6 +18,8 @@ export const RASTER_TIER_OPTIONS = Object.freeze({
 /** The path tracer settings of the final tier; the backend is chosen per device. */
 export const FINAL_TIER_RENDERER = Object.freeze({ type: 'pathTracer', samples: 256, denoise: 'wavelet' });
 
+import { PATH_TRACER_JOB_LIMITS } from '../src/path-tracer-capabilities.js';
+
 const PATH_TRACER_ONLY_LIT_PNG = ['passes', 'transparent', 'region', 'multilayer'];
 
 export function parseQuality(value) {
@@ -64,26 +66,40 @@ export function tierReport({ backend, nativeTracer }) {
   });
 }
 
+function finalSettings(base, backend, nativeTracer) {
+  const tracerBackend = nativeTracer ? 'native' : backend === 'cpu' ? 'cpu' : 'gpu';
+  return { ...base, quality: 'final', renderer: { ...FINAL_TIER_RENDERER, backend: tracerBackend } };
+}
+
+/** The final tier's trace is stopped at renderer.maxSeconds a frame; a frame estimated past it would fail, so the tier is not offered. */
+function traceTooLong(settings, estimateOf) {
+  if (!estimateOf) return undefined;
+  const limit = settings.renderer.maxSeconds ?? PATH_TRACER_JOB_LIMITS.maxSeconds.default;
+  const frameSeconds = estimateOf(settings).frameSeconds;
+  if (frameSeconds <= limit) return undefined;
+  return `a trace that fits the ${limit} s limit on one frame (this job is estimated at ${Math.round(frameSeconds)} s a frame: ${settings.width}x${settings.height}, ${settings.renderer.samples} samples on the ${settings.renderer.backend} backend)`;
+}
+
 /**
  * Turns a requested tier into the job settings to run. A tier that cannot run gives way to the one below it, and every step
  * says what was missing. `base` is the caller's settings without `quality`; the result's `report` always names the tier picked.
+ * `estimateOf(settings)` is the job estimate: a final job whose frame is expected to outlast the path tracer's maxSeconds gives way too,
+ * since the job would fail past that limit instead of finishing.
  */
-export function applyQuality({ quality, base, backend, nativeTracer }) {
+export function applyQuality({ quality, base, backend, nativeTracer, estimateOf }) {
   const requested = parseQuality(quality);
   if (base.renderer !== undefined) throw new TypeError('quality picks the renderer: leave settings.renderer out, or leave settings.quality out to choose it yourself.');
   const steps = [];
   let tier = requested;
   while (true) {
-    const missing = missingCapability(tier, { backend, jobSettings: base });
+    const missing = missingCapability(tier, { backend, jobSettings: base })
+      ?? (tier === 'final' ? traceTooLong(finalSettings(base, backend, nativeTracer), estimateOf) : undefined);
     if (!missing) break;
     const lower = QUALITY_TIERS[QUALITY_TIERS.indexOf(tier) - 1];
     steps.push({ from: tier, to: lower, missing });
     tier = lower;
   }
-  const settings = { ...base, quality: tier };
-  if (tier === 'final') {
-    settings.renderer = { ...FINAL_TIER_RENDERER, backend: nativeTracer ? 'native' : backend === 'cpu' ? 'cpu' : 'gpu' };
-  }
+  const settings = tier === 'final' ? finalSettings(base, backend, nativeTracer) : { ...base, quality: tier };
   const message = steps.length
     ? `quality ${requested} could not run, so ${tier} ran: ${steps.map(step => `${step.from} lacks ${step.missing}`).join('; ')}.`
     : undefined;
