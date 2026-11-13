@@ -44,6 +44,10 @@ export function findVolumeGridSequence(names, label) {
       if (String(grid.size) !== String(first.size)) {
         throw new RangeError(`${label}.frames[${index}] ("${name}") has size ${grid.size} but frame 0 has ${first.size}; every frame of a sequence has one size`);
       }
+      const channels = Object.keys(grid.channels).join(', ');
+      if (channels !== Object.keys(first.channels).join(', ')) {
+        throw new RangeError(`${label}.frames[${index}] ("${name}") has channels ${channels} but frame 0 has ${Object.keys(first.channels).join(', ')}; every frame of a sequence has the same channels, so convert the whole sequence in one run with scripts/vdb-to-grid.py --sequence`);
+      }
     }
     grids.push(grid);
   });

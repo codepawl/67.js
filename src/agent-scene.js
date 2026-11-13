@@ -1837,8 +1837,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       if (time !== null && (!Number.isFinite(time) || time < 0 || time > 3600)) {
         throw invalidField('time', time, 'null or a number of seconds from 0 to 3600, such as 0.5');
       }
-      if (time !== null && !state.motionSampler && !state.physicsSampler && !state.clothSampler && !state.particleSampler && !state.assetRuntime.animators.length && !state.sequences.length) {
-        throw invalidField('time', time, 'null, because this recipe has no motion, physics, cloth, particles or placed asset clip to sample; add motion first');
+      if (time !== null && !state.motionSampler && !state.physicsSampler && !state.clothSampler && !state.particleSampler && !state.assetRuntime.animators.length && !state.sequences.length && !state.recipe.environment.localVolumes?.some(volume => volume.frames)) {
+        throw invalidField('time', time, 'null, because this recipe has no motion, physics, cloth, particles, placed asset clip or grid volume frames to sample; add motion first');
       }
       const pose = stagePose(state, time);
       rebakeAtPose(pose);
