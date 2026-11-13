@@ -273,7 +273,27 @@ test('a lock owned by a live process or written by something else is refused and
   assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), foreignLock);
 });
 
-test('restart marks unfinished records interrupted and rejects forged artifact paths',async context => {
+test('two takeovers of one dead lock at the same time leave exactly one owner and no raw file error', async context => {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const root = await temporary(context);
+    await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
+    const outcomes = await Promise.allSettled([
+      createAgentRenderJobs({ root, limits, run: writeImage }),
+      createAgentRenderJobs({ root, limits, run: writeImage }),
+    ]);
+    const owners = outcomes.filter(outcome => outcome.status === 'fulfilled');
+    const refusals = outcomes.filter(outcome => outcome.status === 'rejected');
+    assert.equal(owners.length, 1, `attempt ${attempt}: exactly one controller holds the lock`);
+    assert.equal(refusals.length, 1);
+    assert.match(refusals[0].reason.message, /live process/);
+    assert.equal(refusals[0].reason.code, undefined, 'a lost race is a clean refusal, not a raw file error');
+    assert.equal(JSON.parse(await readFile(join(root, 'store.lock'), 'utf8')).pid, process.pid);
+    await owners[0].value.close();
+    assert.deepEqual((await readdir(root)).filter(name => name.includes('.stale')), [], 'no moved-aside lock is left behind');
+  }
+});
+
+test('restart marks unfinished records interrupted and rejects forged artifact paths', async context => {
   const root = await temporary(context);
   const controller = await createAgentRenderJobs({ root, limits, run: writeImage });
   const { jobId } = await controller.submit(request());

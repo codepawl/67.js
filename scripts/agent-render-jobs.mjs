@@ -1,5 +1,5 @@
 import { readFileSync, unlinkSync } from 'node:fs';
-import { mkdir, open, readFile, writeFile, rename, unlink, rmdir, readdir, lstat, realpath } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile, rename, link, unlink, rmdir, readdir, lstat, realpath } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import { isAbsolute, join, resolve } from 'node:path';
 
@@ -43,6 +43,8 @@ export const EXPORT_DIRECTORY_NAME = 'exports';
 /** Recent estimate-versus-measured pairs the runtime keeps beside the jobs; the store counts its bytes and never reads it. */
 export const RENDER_HISTORY_FILE = 'render-history.json';
 const STORE_FILES = ['store.json', 'store.lock', EXPORT_DIRECTORY_NAME, RENDER_HISTORY_FILE];
+// A process taking over a dead lock renames it to this name for a moment; a controller scanning the store must not call it foreign.
+const MOVED_ASIDE_LOCK = /^store\.lock\.[0-9a-f-]{36}\.stale$/i;
 const INTERNAL_FILES =new Set(['owner.json', 'snapshot.json', 'asset.glb', 'status.json', 'status.json.pending']);
 
 function objectKeys(value, allowed, label) {
@@ -346,25 +348,61 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     process.once('exit', releaseLockOnExit);
   }
 
-  // A lock left by a killed server (the client's SIGTERM is TerminateProcess on Windows and runs no exit handler) names a dead
-  // PID. It is taken over only when the file is a well-formed lock; a live PID or an unrecognized file is still refused.
+  const LIVE_OWNER_MESSAGE = 'The job store is already owned by a live process.';
+
+  // Throws unless the file at `path` is a well-formed lock whose owner process no longer exists.
   // Limit: the operating system can give a dead owner's PID to an unrelated process, which then looks live and is refused until
-  // a person removes the file. The lock is removed only if its token is still the one that was read.
-  async function takeOverDeadOwnerLock() {
-    await regularFile(lockPath);
-    const owner = await readJson(lockPath, 4096);
+  // a person removes the file.
+  async function assertDeadOwner(path) {
+    await regularFile(path);
+    const owner = await readJson(path, 4096);
     objectKeys(owner, ['schemaVersion', 'pid', 'token'], 'store lock');
     if (owner.schemaVersion !== 1 || !UUID.test(owner.token)) throw new Error('Unrecognized job store lock.');
     boundedNumber(owner.pid, 1, 2147483647, 'lock process ID', true);
+    let ownerAlive = true;
     try {
       process.kill(owner.pid, 0);
     } catch (failure) {
-      if (failure.code !== 'ESRCH') throw failure;
-      const current = await readJson(lockPath, 4096);
-      if (current.token === owner.token) await unlink(lockPath);
-      return;
+      if (failure.code === 'ESRCH') ownerAlive = false;
+      else if (failure.code !== 'EPERM') throw failure;
     }
-    throw new Error('The job store is already owned by a live process.');
+    if (ownerAlive) throw new Error(LIVE_OWNER_MESSAGE);
+  }
+
+  // A lock left by a killed server (the client's SIGTERM is TerminateProcess on Windows and runs no exit handler) names a dead
+  // PID, and is taken over only when the file is a well-formed lock; a live PID or an unrecognized file is still refused.
+  // The takeover is atomic: the lock is renamed to a name only this process uses, and only the process whose rename succeeds goes
+  // on. It checks what it moved (another process may have replaced the lock after the first look) and puts a lock that is not
+  // dead back without overwriting anything. The lock is never unlinked by its shared path after a read.
+  // Returns when the lock is gone, whether this process or another one removed it.
+  async function takeOverDeadOwnerLock() {
+    try {
+      await assertDeadOwner(lockPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+    const stalePath = `${lockPath}.${lockToken}.stale`;
+    try {
+      await rename(lockPath, stalePath);
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+    try {
+      await assertDeadOwner(stalePath);
+    } catch (error) {
+      // On Windows the moved file can already be gone when a racing process finished first: nothing is left to take over.
+      if (error.code === 'ENOENT') return;
+      try {
+        await link(stalePath, lockPath);
+        await unlink(stalePath);
+      } catch {
+        // Another lock already took the place: keep the moved file for a person to inspect rather than overwrite anything.
+      }
+      throw error;
+    }
+    await unlink(stalePath);
   }
 
   async function acquireLock() {
@@ -376,7 +414,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       try {
         await createLockFile();
       } catch (retryError) {
-        if (retryError.code === 'EEXIST') throw new Error('Another process took the job store lock first. Try again.');
+        if (retryError.code === 'EEXIST') throw new Error(LIVE_OWNER_MESSAGE);
         throw retryError;
       }
     }
@@ -420,7 +458,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   async function storeBytes() {
     let bytes = 0;
     for (const name of await readdir(root)) {
-      if (name === EXPORT_DIRECTORY_NAME) continue;
+      if (name === EXPORT_DIRECTORY_NAME || MOVED_ASIDE_LOCK.test(name)) continue;
       if (['store.json', 'store.lock', RENDER_HISTORY_FILE].includes(name)) {
         bytes += (await regularFile(join(root, name))).size;
       } else {
@@ -471,7 +509,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   async function recover() {
     const names = await readdir(root);
     if (!names.includes('store.json')) {
-      if (names.some(name => name !== 'store.lock' && name !== EXPORT_DIRECTORY_NAME)) throw new Error('Job root contains foreign entries without store ownership.');
+      if (names.some(name => name !== 'store.lock' && name !== EXPORT_DIRECTORY_NAME && !MOVED_ASIDE_LOCK.test(name))) throw new Error('Job root contains foreign entries without store ownership.');
       storeId = randomUUID();
       await writeFile(join(root, 'store.json'), JSON.stringify({ schemaVersion: 1, storeId }), { flag: 'wx', mode: 0o600 });
     } else {
@@ -481,7 +519,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       storeId = metadata.storeId;
     }
     for (const name of await readdir(root)) {
-      if (STORE_FILES.includes(name)) continue;
+      if (STORE_FILES.includes(name) || MOVED_ASIDE_LOCK.test(name)) continue;
       if (isPending(name)) {
         const directory = await pendingDirectory(name);
         if (!(await readdir(directory)).length) await rmdir(directory);
