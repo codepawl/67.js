@@ -3,6 +3,7 @@
 // A volume that fits the closed mesh keeps the part: the CPU path tracer walks the mesh itself (path-tracer-volume.js,
 // prepareMeshVolume) and the rasterizer draws it into a depth buffer first (mesh-volume-pass.js).
 import { findVolumeGrid } from './volume-grid.js';
+import { findVolumeGridSequence, volumeGridFrameIndex } from './volume-grid-sequence.js';
 
 function weldedVertexIds(positions, tolerance) {
   const ids = new Map();
@@ -104,14 +105,16 @@ export function assertClosedMesh(part, label) {
 }
 
 /** Gives every grid volume (shape "grid") its registered grid, and its size from the grid file when the volume names none. */
-function bindLocalVolumeGrids(volumes, label) {
+function bindLocalVolumeGrids(volumes, label, time) {
   if (!volumes.some(volume => volume.shape === 'grid')) return volumes;
   return volumes.map((volume, index) => {
     if (volume.shape !== 'grid') return volume;
     const field = `${label}[${index}]`;
-    const gridData = findVolumeGrid(volume.grid, field);
+    // A sequence binds every frame (budget checked) and the one `time` selects; a still grid binds its one grid.
+    const gridFrames = volume.frames ? findVolumeGridSequence(volume.frames, field) : null;
+    const gridData = gridFrames ? gridFrames[volumeGridFrameIndex(gridFrames.length, volume.fps, time, volume.loop)] : findVolumeGrid(volume.grid, field);
     const size = volume.size ?? gridData.size;
-    if (!size) throw new RangeError(`${field}.size is required: grid "${volume.grid}" carries no size of its own`);
+    if (!size) throw new RangeError(`${field}.size is required: grid "${volume.grid ?? volume.frames[0]}" carries no size of its own`);
     return { ...volume, size, gridData };
   });
 }
@@ -128,8 +131,8 @@ function findPart(parts, name, label) {
  * Returns the resolved volumes with every mesh volume bound to its part. A volume with fit "bounds" becomes a box; one with
  * fit "mesh" keeps its part and also carries the bounds. Volumes that are not meshes are returned as they are.
  */
-export function bindLocalVolumeParts(input, parts, { label = 'environment.localVolumes' } = {}) {
-  const volumes = bindLocalVolumeGrids(input, label);
+export function bindLocalVolumeParts(input, parts, { label = 'environment.localVolumes', time = 0 } = {}) {
+  const volumes = bindLocalVolumeGrids(input, label, time);
   if (!volumes.some(volume => volume.shape === 'mesh')) return volumes;
   return volumes.map((volume, index) => {
     if (volume.shape !== 'mesh') return volume;

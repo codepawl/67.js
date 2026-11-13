@@ -36,7 +36,7 @@ test('documented MCP tool counts match the protocol listing', async () => {
   const statements = {
     'docs/learn/models-and-ai-agents.md': /(\d+) tools for authoring/,
     'docs/mcp.md': /Lists all (\d+) tools/,
-    'index.html': /(\d+) MCP tools/,
+    'site/index.html': /(\d+) MCP tools/,
     'scripts/smoke-mcp.mjs': /listing\.tools\.length, (\d+)\)/,
     'scripts/smoke-mcp-package.mjs': /listTools\(\)\)\.tools\.length, (\d+)\)/,
   };
