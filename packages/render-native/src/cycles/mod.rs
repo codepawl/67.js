@@ -1019,7 +1019,10 @@ mod specialization_tests {
             (KP_INSTANCE_COUNT_BYTE, input.instance_count),
             (KP_TRIANGLE_COUNT_BYTE, input.triangle_count),
             (KP_MATERIAL_COUNT_BYTE, input.material_count),
+            (KP_EMISSIVE_TRIANGLE_COUNT_BYTE, input.emissive_triangle_count),
             (KP_LIGHT_COUNT_BYTE, input.light_count),
+            (KP_LIGHT_TREE_NODE_COUNT_BYTE, input.light_tree_node_count),
+            (KP_TEXTURE_COUNT_BYTE, input.texture_count),
         ];
         for (byte_offset, count) in counts {
             kernel_params[byte_offset..byte_offset + 4].copy_from_slice(&count.to_le_bytes());
