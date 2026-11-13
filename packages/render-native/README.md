@@ -88,7 +88,7 @@ Measured on an RTX 3090 (not the RTX 3060 of the issue), 1920 x 1080, 64 spp, 8 
 | auto (no budget) | 1.02, 1.07 | 0.48 s | 5 |
 | `dispatchBudgetMs: 8` | 1.30, 1.27 | 14.6 ms | 222 |
 | `dispatchBudgetMs: 4` | 1.49 | 6.8 ms | 475 |
-
+ The light tree probe (`lightTreeProbe`, a test entry point that writes one record per pixel of the whole image) refuses `dispatchBudgetMs` with an error.
 A dispatch costs about 1 to 1.3 ms of wall time beyond its work on this box (submission, the wait, and the ramp-down at the end of a dispatch), so the smaller the budget the larger the extra: +18 to +28% at 8 ms and +46% at 4 ms against auto. A budget of 8 did not keep every dispatch under 10 ms here: the longest was 14.6 ms, because the cost of a pixel changes across the image (sky against terrain) and the next tile can cost more than the last. The desktop frame time during a render was not measured.
 
 To pass the option from the MCP render job later, add `dispatchBudgetMs` to the options the job forwards to `traceNative` (it already validates through `validatePackOptions`); no tool schema changes here.

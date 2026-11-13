@@ -144,3 +144,8 @@ test('a pack that carries garbage in the tile origin words renders the same pict
   assertSameBytes(reference, traceNative(garbage, { ...IMAGE_OPTIONS, kernel: 'cycles' }), 'garbage tile origin, no budget');
   assertSameBytes(reference, traceNative(garbage, { ...IMAGE_OPTIONS, kernel: 'cycles', dispatchBudgetMs: 4 }), 'garbage tile origin, budget 4');
 });
+
+test('a light tree probe render refuses a dispatch budget instead of tiling over itself', { skip: skipWithoutAddon }, () => {
+  const probeInput = buildRoomInput({ ...IMAGE_OPTIONS, lightSampling: 'tree', lightTreeProbe: true });
+  assert.throws(() => traceNative(probeInput, { ...IMAGE_OPTIONS, kernel: 'cycles', dispatchBudgetMs: 8 }), { message: /`dispatchBudgetMs` cannot be used with the light tree probe/ });
+});

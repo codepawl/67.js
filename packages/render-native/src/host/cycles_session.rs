@@ -269,6 +269,17 @@ pub(crate) fn choose_dispatch_plan(samples: u32, samples_per_dispatch: Option<u3
     }
 }
 
+/// The light tree probe entry point writes one record per pixel of the whole image and does not read the tile origin, so
+/// under a dispatch budget every tile would overwrite the top left corner.
+pub(crate) fn check_dispatch_budget_fits_entry_point(entry_point: &str, dispatch_budget_ms: Option<f64>) -> Result<()> {
+    if entry_point == "light_tree_probe" && dispatch_budget_ms.is_some() {
+        return Err(failure(
+            "`dispatchBudgetMs` cannot be used with the light tree probe (`lightTreeProbe`): the probe covers the whole image in one dispatch. Leave `dispatchBudgetMs` out for a probe render.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// A dispatch time budget splits each frame by pixel tiles as well as by samples. `samplesPerDispatch`, when also given,
 /// caps the samples of one dispatch; a tight `maxSeconds` needs no special case since the limit is checked after every dispatch.
 pub(crate) fn choose_tile_budget_plan(budget_ms: f64, request: &CyclesRenderRequest<'_>) -> DispatchPlan {
@@ -398,6 +409,7 @@ impl CyclesSession {
         let context = &self.context;
         let gpu = self.gpu.as_mut().ok_or_else(session_closed_failure)?;
 
+        check_dispatch_budget_fits_entry_point(trace_entry_point_for_params(&frame_kernel_params), request.dispatch_budget_ms)?;
         let compile_started = Instant::now();
         let pipeline_reused = ensure_pipeline(
             context,
@@ -700,6 +712,15 @@ fn clear_film(context: &CyclesDeviceContext, film: &SessionFilm) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dispatch_budget_is_refused_for_the_light_tree_probe_and_allowed_for_the_image() {
+        let refusal = check_dispatch_budget_fits_entry_point("light_tree_probe", Some(8.0)).unwrap_err();
+        assert!(refusal.reason.contains("dispatchBudgetMs"));
+        assert!(refusal.reason.contains("lightTreeProbe"));
+        assert!(check_dispatch_budget_fits_entry_point("light_tree_probe", None).is_ok());
+        assert!(check_dispatch_budget_fits_entry_point("main", Some(8.0)).is_ok());
+    }
 
     #[test]
     fn render_parameters_carry_the_image_size_and_the_sample_count_and_nothing_else() {
