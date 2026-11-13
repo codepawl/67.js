@@ -289,8 +289,47 @@ test('two takeovers of one dead lock at the same time leave exactly one owner an
     assert.equal(refusals[0].reason.code, undefined, 'a lost race is a clean refusal, not a raw file error');
     assert.equal(JSON.parse(await readFile(join(root, 'store.lock'), 'utf8')).pid, process.pid);
     await owners[0].value.close();
-    assert.deepEqual((await readdir(root)).filter(name => name.includes('.stale')), [], 'no moved-aside lock is left behind');
+    assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-')), [], 'no takeover claim is left behind');
   }
+});
+
+test('two slow readers of a dead lock and a fresh starter leave exactly the one controller that took it over', async context => {
+  const root = await temporary(context);
+  const deadToken = randomUUID();
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: deadToken }));
+  let openGate;
+  const gate = new Promise(resolveGate => { openGate = resolveGate; });
+  const pausedReaders = () => createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { beforeLockClaim: () => gate } });
+  const firstReader = pausedReaders();
+  const secondReader = pausedReaders();
+  // The readers have both judged the lock dead and wait before claiming it, while a third controller takes the store over.
+  const owner = await createAgentRenderJobs({ root, limits, run: writeImage });
+  const ownedLock = await readFile(join(root, 'store.lock'), 'utf8');
+  assert.notEqual(JSON.parse(ownedLock).token, deadToken);
+  openGate();
+  const outcomes = await Promise.allSettled([firstReader, secondReader, createAgentRenderJobs({ root, limits, run: writeImage })]);
+  for (const outcome of outcomes) {
+    assert.equal(outcome.status, 'rejected', 'only the controller that took the lock first owns it');
+    assert.match(outcome.reason.message, /live process/);
+  }
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), ownedLock, 'the owner lock is neither replaced nor stranded');
+  assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-')), []);
+  await owner.close();
+  assert.equal((await readdir(root)).includes('store.lock'), false);
+});
+
+test('a takeover claim left by a dead process is reported with the file to delete', async context => {
+  const root = await temporary(context);
+  const deadToken = randomUUID();
+  const lockText = JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: deadToken });
+  const claimName = `store.lock.claim-${deadToken}`;
+  await writeFile(join(root, 'store.lock'), lockText);
+  await writeFile(join(root, claimName), JSON.stringify({ pid: 2147483647, token: randomUUID() }));
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), error => error.message.includes(claimName) && /delete/.test(error.message));
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), lockText);
+  await unlink(join(root, claimName));
+  const recovered = await createAgentRenderJobs({ root, limits, run: writeImage });
+  await recovered.close();
 });
 
 test('restart marks unfinished records interrupted and rejects forged artifact paths', async context => {

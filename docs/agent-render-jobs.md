@@ -321,7 +321,7 @@ Quarantined admissions need explicit inspection and cleanup to reclaim their spa
 Their directories must contain regular files without links or aliases. Other entry types require repair.
 
 A client that closes the connection waits about two seconds before it kills the server, and a killed server leaves `store.lock` behind.
-The next controller takes over a lock when the file is well formed and its process ID belongs to no running process. It removes the file only if it still holds the token it read, then creates its own.
+The next controller takes over a lock when the file is well formed and its process ID belongs to no running process. Only one process can take over a given dead lock: it first creates a claim file `store.lock.claim-<token>`, re-reads the lock under that claim, and removes the lock only if it still holds the dead token, then creates its own. If a process is killed in that moment, the claim stays; the next start names the exact file to delete.
 A lock whose process is alive, or a file that is not a recognized lock, is still refused. The operating system can hand a dead owner's process ID to an unrelated process; that lock looks alive and stays until a person confirms nothing owns the dedicated private store and removes `store.lock`.
 
 A render or review job fails when its Node RSS passes 512 MiB or its browser heap passes 256 MiB. After each frame the browser heap is read, and when it is over the limit it is garbage collected and read again, so only memory the page still holds counts. A physics bake leaves tens of MiB of garbage after its first frame; a real leak survives the collection and still stops the job.
