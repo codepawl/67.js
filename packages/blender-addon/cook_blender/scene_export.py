@@ -388,7 +388,10 @@ def collect_parts(depsgraph, materials, report):
     for instance in depsgraph.object_instances:
         evaluated_object = instance.object
         original_object = evaluated_object.original
-        if original_object.hide_render or not instance.show_self:
+        # A copy made by an instancer (a collection instance, Geometry Nodes) renders when its instancer does, even when the
+        # object it copies is hidden from renders.
+        visibility_owner = instance.parent.original if instance.is_instance and instance.parent is not None else original_object
+        if visibility_owner.hide_render or not instance.show_self:
             continue
         if original_object.type == "LIGHT":
             add_light_entry(environment, evaluated_object, instance.matrix_world, report)
