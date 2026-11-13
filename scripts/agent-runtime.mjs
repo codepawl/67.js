@@ -32,6 +32,7 @@ import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js
 import { writeWebBuild } from './web-export.mjs';
 import { gameAssetIds } from '../src/game-assets.js';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR, RENDER_HISTORY_FILE, normalizeJobSettings } from './agent-render-jobs.mjs';
+import { RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget } from './agent-render-budget.mjs';
 import { RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom } from './agent-render-estimate.mjs';
 import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
@@ -896,7 +897,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           maximumFileBytes: MAXIMUM_PACK_FILE_BYTES, maximumJsonBytes: MAXIMUM_PACK_JSON_BYTES, maximumItemsPerKind: MAXIMUM_PACK_ITEMS_PER_KIND,
           use: 'scene_asset_catalog lists packs: name, version, license, author, description and item ids. GLBs, images, looks and environments carry assetId values that work in scene_create_asset, look, hdri and texture fields. Materials and recipes are read with scene_asset_catalog { pack, material } or { pack, recipe }: pass a recipe to scene_create, and a material as a materials entry or a scene_apply set-material. Packs are installed by the user (unzip into the --packs folder); a tool call never downloads one. Invalid packs are skipped and listed under packs.rejected with the reason.',
         },
-        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1, estimate: RENDER_ESTIMATE_NOTE,
+        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1, estimate: RENDER_ESTIMATE_NOTE, budget: RENDER_BUDGET_NOTE,
           maximumWidth: MAXIMUM_JOB_SIDE, maximumHeight: MAXIMUM_JOB_SIDE, maximumPixels: MAXIMUM_JOB_PIXELS,
           maximumDuration: MAXIMUM_VIDEO_SECONDS, maximumFps: 30, maximumFrames: 900, maximumStills: 8,
           encoder: 'H.264', encoders: VIDEO_ENCODERS, audio: Boolean(audioRoot), timeline: true, previewSuspendedDuringJob: true,
@@ -1260,12 +1261,23 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         try {
           // The estimate is made before the job exists, because the job suspends the scene and starts at once.
           const size = sceneSizeFrom(await invoke('inspect', { sessionId, limit: Math.max(1, snapshot.recipe.nodes?.length ?? 1) }), snapshot.recipe);
-          const estimate = estimateRenderJob({ size, settings: normalizeJobSettings(settings, snapshot.clips, snapshot.recipe), backend, memoryBudgetMiB: memory, history: await readRenderHistory(), gpuTracerWarm });
+          const history = await readRenderHistory();
+          const estimateOf = rawSettings => estimateRenderJob({ size, settings: normalizeJobSettings(rawSettings, snapshot.clips, snapshot.recipe), backend, memoryBudgetMiB: memory, history, gpuTracerWarm });
+          let jobSettings = settings;
+          let budgetReport;
+          if (settings?.budget !== undefined) {
+            const { budget: budgetInput, ...base } = settings;
+            if (base.renderer !== undefined) throw new TypeError('budget picks the renderer: leave settings.renderer out, or leave settings.budget out to choose it yourself.');
+            const budget = parseBudget(budgetInput);
+            const frameCount = normalizeJobSettings(base, snapshot.clips, snapshot.recipe).frameCount;
+            ({ settings: jobSettings, report: budgetReport } = chooseBudgetSettings({ base, budget, tracerBackend: backend === 'cpu' ? 'cpu' : 'gpu', frameCount, estimateOf }));
+          }
+          const estimate = estimateOf(jobSettings);
           estimateForNextJob = estimate;
           try {
             const submitted = await controller.submit({ sessionId, sourceRevision: snapshot.sourceRevision,
-              snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings });
-            return { ...submitted, estimate };
+              snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings: jobSettings });
+            return { ...submitted, estimate, ...(budgetReport ? { budget: budgetReport } : {}) };
           } catch (error) {
             if (estimateForNextJob === estimate) estimateForNextJob = undefined;
             throw error;

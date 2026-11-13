@@ -202,6 +202,14 @@ When a job completes, `scene_render_result` has `metrics.report`, one record of 
 
 Limits of the estimate: it covers a job's own time, not the wait for a busy machine; memory is the sampled Node RSS plus the browser JS heap, which is a lower bound for GPU memory; path tracer estimates assume the CPU or GPU backend named in the settings, and a native tracer that cannot run falls back (see `fallbacks`).
 
+### Render budget
+
+`settings.budget` lets a job choose its own renderer and size from what you can spend: `{ "secondsPerFrame": 2 }` for an offline render, `{ "framesPerSecond": 30 }` for a realtime preview, and optionally `"memoryMiB"` (64 to 65536) as a cap on the estimated peak memory. Give exactly one of `secondsPerFrame` (0.001 to 3600) and `framesPerSecond` (0.01 to 240). `width` and `height` stay the largest frame you want; `renderer` must be left out, because the budget picks it. A job that cannot go through the path tracer (`passes`, `transparent`, `region`, `multilayer`, a `format` other than png) only considers raster.
+
+The runtime estimates these candidates with the cost model above (history correction included), best looking first, and takes the first one that fits: the path tracer at 256, 64 and 16 samples with the wavelet denoiser at full size on the runtime's backend, then the raster renderer at full size, 0.75, 0.5 and 0.25 scale (sides rounded, even for video, at least 64). The ladder is the whole choice for now: named quality tiers are a later slice of #904. A candidate fits when its estimated seconds per frame (the whole job divided by its frames, so scene build time counts) is at most 85% of the budget, because the estimate is only good to a few tens of percent, and its estimated peak memory is within `memoryMiB`. The same scene, budget and history always give the same pick.
+
+`scene_render_submit` returns `budget` beside `estimate`: `requested`, `picked` (label, size, renderer or `raster`, expected seconds per frame and memory), `fits`, `reason` (which better candidate was too expensive, or why nothing fits) and `considered`, every candidate with its expected cost. When nothing fits, the cheapest candidate runs anyway and `fits` is false; raise the budget or shorten the job. `scripts/measure-render-budget.mjs` submits tight, middle, loose and 30 fps budgets on two scenes and prints what each picked beside the measured time.
+
 ### Response format
 
 `scene_review`, `scene_render_status`, `scene_render_result` and `scene_capabilities` take `response_format`: `concise` or `detailed`.
