@@ -847,13 +847,18 @@ fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
   return lgt_eval_hdri_texel(direction) * kernel_params.env_color;
 }
 
-// The environment as a path the camera reaches it through straight transmission only: with `environment.cameraIntensity`
-// set, the pack carries that strength as `camera_env_color`; otherwise it is the lighting radiance.
+// The environment as a path the camera reaches it through straight transmission only. `camera_env_scale` is one word:
+// all bits zero is no `environment.cameraIntensity` (the lighting radiance); a negative word is an absolute strength,
+// used when the lighting intensity is 0; otherwise (also -0.0, a black view) it is the factor on the lighting radiance.
 fn lgt_eval_camera_visible_radiance(direction: vec3<f32>) -> vec3<f32> {
-  if (kernel_params.camera_env_enabled == 0u) {
+  let scale = kernel_params.camera_env_scale;
+  if (bitcast<u32>(scale) == 0u) {
     return lgt_eval_hdri_radiance(direction);
   }
-  return lgt_eval_hdri_texel(direction) * kernel_params.camera_env_color;
+  if (scale < 0.0) {
+    return lgt_eval_hdri_texel(direction) * -scale;
+  }
+  return lgt_eval_hdri_radiance(direction) * abs(scale);
 }
 
 fn lgt_environment_pdf(direction: vec3<f32>) -> f32 {

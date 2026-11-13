@@ -9,9 +9,8 @@ import { buildTraceScene, resolveTexture } from '../src/path-tracer-scene.js';
 
 const skipWithoutAddon = findNativeAddon() === null ? 'the native addon is not built' : false;
 
-// `camera_env_color` (bytes 304 to 315) and `camera_env_enabled` (316) of KernelParamsV2.
-const CAMERA_ENV_COLOR_BYTE_OFFSET = 304;
-const CAMERA_ENV_ENABLED_BYTE_OFFSET = 316;
+// `camera_env_scale` (byte 304) of KernelParamsV2; bytes 308 to 319 stay reserved and zero.
+const CAMERA_ENV_SCALE_BYTE_OFFSET = 304;
 const PARAMS_TAIL_END = 320;
 
 const SIZE = 128;
@@ -39,13 +38,19 @@ function bytesOf(view) {
 }
 
 function paramsTail(input) {
-  return bytesOf(input.kernelParams).subarray(CAMERA_ENV_COLOR_BYTE_OFFSET, PARAMS_TAIL_END);
+  return bytesOf(input.kernelParams).subarray(CAMERA_ENV_SCALE_BYTE_OFFSET, PARAMS_TAIL_END);
 }
 
-function tailFloats(input) {
-  const tail = Uint8Array.from(paramsTail(input));
-  const view = new DataView(tail.buffer);
-  return { color: [0, 4, 8].map(offset => view.getFloat32(offset, true)), enabled: view.getUint32(12, true) };
+function scaleWord(input) {
+  return bytesOf(input.kernelParams).readUInt32LE(CAMERA_ENV_SCALE_BYTE_OFFSET);
+}
+
+function scaleValue(input) {
+  return bytesOf(input.kernelParams).readFloatLE(CAMERA_ENV_SCALE_BYTE_OFFSET);
+}
+
+function reservedBytes(input) {
+  return bytesOf(input.kernelParams).subarray(CAMERA_ENV_SCALE_BYTE_OFFSET + 4, PARAMS_TAIL_END);
 }
 
 function pixelOfWindowCorner(x, y) {
@@ -116,34 +121,34 @@ test('cameraIntensity is checked at the public boundary and the error says what 
   assert.throws(() => buildTraceScene(roomParts(1), { cameraIntensity: 0.2 }), /environment\.cameraIntensity needs environment\.map/);
 });
 
-test('the packed words hold the camera strength, and only they differ from a pack without the field', () => {
+test('the packed word holds the camera factor, and only it differs from a pack without the field', () => {
   const camera = cameraFor(ROOM_CAMERA);
   const plain = jobInputOf(roomParts(1), { map: skyMap(1) }, camera);
   const withField = jobInputOf(roomParts(1), { map: skyMap(1), cameraIntensity: 0.2 }, camera);
+  assert.equal(scaleWord(plain), 0, 'a scene without the field leaves the word zero');
+  assert.equal(bytesOf(plain.kernelParams).length, 320);
   const absentBytes = bytesOf(plain.kernelParams);
-  assert.deepEqual(tailFloats(plain), { color: [0, 0, 0], enabled: 0 }, 'a scene without the field leaves the tail zero');
   const fieldBytes = bytesOf(withField.kernelParams);
-  assert.equal(Buffer.compare(absentBytes.subarray(0, CAMERA_ENV_COLOR_BYTE_OFFSET), fieldBytes.subarray(0, CAMERA_ENV_COLOR_BYTE_OFFSET)), 0, 'no earlier word moves');
-  const packed = tailFloats(withField);
-  assert.equal(packed.enabled, 1);
-  assert.deepEqual(packed.color, [0.2, 0.2, 0.2].map(Math.fround));
+  assert.equal(Buffer.compare(absentBytes.subarray(0, CAMERA_ENV_SCALE_BYTE_OFFSET), fieldBytes.subarray(0, CAMERA_ENV_SCALE_BYTE_OFFSET)), 0, 'no earlier word moves');
+  assert.equal(scaleValue(withField), Math.fround(0.2));
+  assert.deepEqual([...reservedBytes(withField)], new Array(12).fill(0), 'bytes 308 to 319 stay reserved');
   assert.equal(Buffer.compare(bytesOf(plain.instances), bytesOf(withField.instances)), 0);
   assert.equal(Buffer.compare(bytesOf(plain.materials), bytesOf(withField.materials)), 0);
   assert.equal(Buffer.compare(bytesOf(plain.environmentTexels), bytesOf(withField.environmentTexels)), 0, 'the map and its tables are the same');
-  assert.equal(fieldBytes.readUInt32LE(CAMERA_ENV_ENABLED_BYTE_OFFSET), 1);
 });
 
-test('the strength is absolute, in the units of the map intensity, also with a dark or black lighting intensity', () => {
+test('the word is the factor on the lighting intensity, a signed zero for a black view, and an absolute strength when the lighting is off', () => {
   const camera = cameraFor(ROOM_CAMERA);
-  const brighter = tailFloats(jobInputOf(roomParts(1), { map: skyMap(2), cameraIntensity: 0.5 }, camera));
-  assert.deepEqual(brighter.color, [0.5, 0.5, 0.5]);
-  const lightingOff = tailFloats(jobInputOf(roomParts(1), { map: skyMap(0), cameraIntensity: 0.3 }, camera));
-  assert.deepEqual(lightingOff.color, [0.3, 0.3, 0.3].map(Math.fround));
-  assert.equal(lightingOff.enabled, 1);
-  const black = tailFloats(jobInputOf(roomParts(1), { map: skyMap(1), cameraIntensity: 0 }, camera));
-  assert.deepEqual(black, { color: [0, 0, 0], enabled: 1 }, 'zero is a black view, not "absent"');
-  const equal = tailFloats(jobInputOf(roomParts(1), { map: skyMap(1.5), cameraIntensity: 1.5 }, camera));
-  assert.deepEqual(equal.color, [1.5, 1.5, 1.5]);
+  const brighter = jobInputOf(roomParts(1), { map: skyMap(2), cameraIntensity: 0.5 }, camera);
+  assert.equal(scaleValue(brighter), 0.25);
+  const black = jobInputOf(roomParts(1), { map: skyMap(1), cameraIntensity: 0 }, camera);
+  assert.equal(scaleWord(black), 0x80000000, 'zero is a black view (-0.0), not "absent"');
+  const equal = jobInputOf(roomParts(1), { map: skyMap(1.5), cameraIntensity: 1.5 }, camera);
+  assert.equal(scaleValue(equal), 1);
+  const lightingOff = jobInputOf(roomParts(1), { map: skyMap(0), cameraIntensity: 0.3 }, camera);
+  assert.equal(scaleValue(lightingOff), -Math.fround(0.3), 'a negative word is an absolute strength');
+  const lightingOffBlack = jobInputOf(roomParts(1), { map: skyMap(0), cameraIntensity: 0 }, camera);
+  assert.equal(scaleWord(lightingOffBlack), 0x80000000);
 });
 
 test('the CPU, WebGL and WebGPU tracers report that they ignore cameraIntensity; the native cycles kernel does not', () => {
