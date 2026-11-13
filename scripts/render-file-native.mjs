@@ -28,6 +28,7 @@ function readIntegerOption(argumentList, flagName, fallbackValue) {
   return parsed;
 }
 
+// Part patterns are tested against "<part name> material:<material name>".
 // --patch-materials '<part name regex>=<json material fields>' (repeatable) changes loaded materials before packing, to test a scene fix.
 function parsePatchMaterials(argumentList) {
   const patches = [];
@@ -110,7 +111,7 @@ async function exportTablesInPage({ width, height, bounces, seed, instancing, ca
       .map(key => [key, part.material?.[key]]).filter(([, value]) => value !== undefined)),
     hasColorTexture: Boolean(part.material?.map),
   });
-  const matchingParts = (pattern, allParts) => (pattern ? allParts.filter(part => new RegExp(pattern, 'i').test(part.name ?? '')) : []);
+  const matchingParts = (pattern, allParts) => (pattern ? allParts.filter(part => new RegExp(pattern, 'i').test(`${part.name ?? ''} material:${part.material?.name ?? ''}`)) : []);
   const listedParts = listParts ? matchingParts(listParts, window.__scene.parts).map(describePart) : null;
   for (const { pattern, patch } of patchMaterials) {
     for (const part of matchingParts(pattern, window.__scene.parts)) Object.assign(part.material, patch);
