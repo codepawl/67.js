@@ -58,6 +58,9 @@ export const KERNEL_FLAG_PATH_REGENERATION = 1024;
 /** Set when any texture of the pool stores mip levels; the kernel then carries a ray footprint (see FORMAT-v2.md). */
 export const KERNEL_FLAG_TEXTURE_MIPS = 2048;
 
+/** `flags` of a material extension record: the diffuse transmission colour multiplies the base colour. */
+const MATERIAL_EXTENSION_FLAG_TINTS_BASE_COLOR = 1;
+
 const INSTANCE_VISIBILITY_CAMERA = 1;
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
@@ -661,6 +664,81 @@ function resolveSubsurfaceFields(material, baseColor) {
 }
 
 /**
+ * The thin-sheet diffuse transmission of a material: `diffuseTransmission` (0..1) splits the diffuse layer between the
+ * reflecting lobe and a cosine lobe on the far side, tinted by `diffuseTransmissionColor` (the base colour when it is left
+ * out). Returns null for a material without it, which then packs no extension record.
+ */
+export function validateDiffuseTransmission(material) {
+  const { diffuseTransmission, diffuseTransmissionColor } = material;
+  if (diffuseTransmission !== undefined) {
+    const isWeight = typeof diffuseTransmission === 'number' && diffuseTransmission >= 0 && diffuseTransmission <= 1;
+    if (!isWeight) {
+      throw new RangeError(`diffuseTransmission must be a number between 0 and 1, got ${String(diffuseTransmission)}. Use 0 for a sheet that lets no light through.`);
+    }
+  }
+  if (diffuseTransmissionColor !== undefined) {
+    const isColor = (Array.isArray(diffuseTransmissionColor) || ArrayBuffer.isView(diffuseTransmissionColor))
+      && diffuseTransmissionColor.length === 3
+      && Array.from(diffuseTransmissionColor).every(channel => typeof channel === 'number' && channel >= 0 && channel <= 1);
+    if (!isColor) {
+      throw new RangeError(`diffuseTransmissionColor must be three linear RGB numbers between 0 and 1, got ${String(diffuseTransmissionColor)}. Pass [red, green, blue], or leave it out to use the base colour.`);
+    }
+  }
+}
+
+function resolveDiffuseTransmission(material) {
+  validateDiffuseTransmission(material);
+  const weight = material.diffuseTransmission ?? 0;
+  if (!(weight > 0)) {
+    return null;
+  }
+  const color = material.diffuseTransmissionColor;
+  return {
+    weight,
+    color: color ? Array.from(color) : [1, 1, 1],
+    tintsBaseColor: !color,
+  };
+}
+
+/**
+ * One 256 B extension record (`FORMAT-v2.md`, "Material extension records"): the weight where `metallic` sits in a material
+ * record, the colour where `base_color` sits and the extension flags where `flags` sits.
+ */
+function packMaterialExtensionRecord(diffuseTransmission) {
+  const buffer = new ArrayBuffer(STRUCT_STRIDES_V2.material);
+  if (!diffuseTransmission) {
+    return new Uint8Array(buffer);
+  }
+  const f32 = new Float32Array(buffer);
+  const u32 = new Uint32Array(buffer);
+  f32[0] = diffuseTransmission.color[0];
+  f32[1] = diffuseTransmission.color[1];
+  f32[2] = diffuseTransmission.color[2];
+  f32[3] = diffuseTransmission.weight;
+  u32[48] = diffuseTransmission.tintsBaseColor ? MATERIAL_EXTENSION_FLAG_TINTS_BASE_COLOR : 0;
+  return new Uint8Array(buffer);
+}
+
+/**
+ * The material table of a list of packed records. When any record carries diffuse transmission, a second run of
+ * `records.length` extension records follows the records (the header's `materialCount` still counts the first run only);
+ * otherwise the table is the records alone, as it always was.
+ */
+function packMaterialTable(materialRecords) {
+  const stride = STRUCT_STRIDES_V2.material;
+  const usesDiffuseTransmission = materialRecords.some(record => record.diffuseTransmission);
+  const runCount = Math.max(1, materialRecords.length);
+  const table = new Uint8Array(runCount * stride * (usesDiffuseTransmission ? 2 : 1));
+  materialRecords.forEach((record, index) => table.set(record.bytes, index * stride));
+  if (usesDiffuseTransmission) {
+    materialRecords.forEach((record, index) => {
+      table.set(packMaterialExtensionRecord(record.diffuseTransmission), (runCount + index) * stride);
+    });
+  }
+  return { table, usesDiffuseTransmission };
+}
+
+/**
  * Packs one `MaterialRecord` (256 B) matching `FORMAT-v2.md` section 4 and `src/cycles/abi.wgsl`.
  */
 export function packMaterialRecordV2(material = {}, textureCollector = null) {
@@ -723,6 +801,7 @@ export function packMaterialRecordV2(material = {}, textureCollector = null) {
 
   const { emissionColor, emissionStrength } = resolveEmissionFields(material);
   const subsurface = resolveSubsurfaceFields(material, baseColor);
+  const diffuseTransmission = resolveDiffuseTransmission(material);
   const normalScale = Array.isArray(material.normalScale) || ArrayBuffer.isView(material.normalScale)
     ? 0.5 * (Math.abs(Number(material.normalScale[0] ?? 1)) + Math.abs(Number(material.normalScale[1] ?? 1)))
     : Number(material.normalScale ?? 1);
@@ -883,6 +962,7 @@ export function packMaterialRecordV2(material = {}, textureCollector = null) {
     bytes: new Uint8Array(buffer),
     alphaMode,
     usesSubsurface: subsurface.weight > 0,
+    diffuseTransmission,
     isEmissive: (flags & MATERIAL_FLAG_EMISSIVE_MIS) !== 0 && luminance(meanEmissiveRadiance) > 0,
     meanEmissiveRadiance,
   };
@@ -2321,9 +2401,17 @@ function hashMaterialRecordBytes(bytes) {
   return hash >>> 0;
 }
 
+// The diffuse transmission of a record lives in its extension record, outside its 256 bytes, so it is compared on its own.
+function diffuseTransmissionsAreEqual(first, second) {
+  if (!first || !second) return !first && !second;
+  if (!Object.is(first.weight, second.weight) || first.tintsBaseColor !== second.tintsBaseColor) return false;
+  return first.color.every((value, channel) => Object.is(value, second.color[channel]));
+}
+
 function materialRecordsAreEqual(first, second) {
   if (first.isEmissive !== second.isEmissive || first.usesSubsurface !== second.usesSubsurface || first.alphaMode !== second.alphaMode) return false;
   if (first.meanEmissiveRadiance.some((value, channel) => !Object.is(value, second.meanEmissiveRadiance[channel]))) return false;
+  if (!diffuseTransmissionsAreEqual(first.diffuseTransmission, second.diffuseTransmission)) return false;
   const firstWords = materialRecordWords(first.bytes);
   const secondWords = materialRecordWords(second.bytes);
   for (let index = 0; index < firstWords.length; index++) {
@@ -2337,8 +2425,7 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, r
     ? reducedMaterials.materialRecords
     : rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
   const { records: materialRecords, recordIndexOf } = shareEqualMaterialRecords(partRecords);
-  const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
-  materialRecords.forEach((rec, index) => materialsBuffer.set(rec.bytes, index * STRUCT_STRIDES_V2.material));
+  const { table: materialsBuffer } = packMaterialTable(materialRecords);
 
   const forceNonOpaqueGeometries = new Set();
   const firstDefaultMatByGeo = new Map();
@@ -2491,8 +2578,7 @@ function packFlattenedTraceScene(scene, rawParts, textureCollector) {
     return rawMat ? { ...rawMat, ...resolvedMat } : resolvedMat;
   });
   const materialRecords = mergedMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
-  const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
-  materialRecords.forEach((rec, index) => materialsBuffer.set(rec.bytes, index * STRUCT_STRIDES_V2.material));
+  const { table: materialsBuffer } = packMaterialTable(materialRecords);
 
   const totalSceneTriangles = Math.floor((scene.indices?.length ?? 0) / 3);
   const trianglesByPart = new Map();
@@ -2892,8 +2978,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     texturePoolMaxBytes: options.texturePoolMaxBytes,
   });
 
-  const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
-  materialRecords.forEach((rec, idx) => materialsBuffer.set(rec.bytes, idx * STRUCT_STRIDES_V2.material));
+  const { table: materialsBuffer } = packMaterialTable(materialRecords);
 
   const trianglesByMat = new Map();
   for (let slot = 0; slot < triangleCount; slot++) {

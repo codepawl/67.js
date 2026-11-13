@@ -97,6 +97,23 @@ test('any differing material field keeps its own record', () => {
   }
 });
 
+test('the diffuse transmission of a record, which sits outside its 256 bytes, keeps records apart', () => {
+  const sheet = { color: [0.6, 0.5, 0.4], roughness: 0.5, diffuseTransmission: 0.5 };
+  const variations = {
+    none: { diffuseTransmission: 0 },
+    weight: { diffuseTransmission: 0.6 },
+    colour: { diffuseTransmissionColor: [0.9, 0.2, 0.2] },
+  };
+  for (const [name, change] of Object.entries(variations)) {
+    const { records } = shareEqualMaterialRecords([packMaterialRecordV2(sheet), packMaterialRecordV2({ ...sheet, ...change })]);
+    assert.equal(records.length, 2, `a sheet that differs in ${name} shares nothing`);
+  }
+  const tinted = { ...sheet, diffuseTransmissionColor: [0.9, 0.2, 0.2] };
+  const { records, recordIndexOf } = shareEqualMaterialRecords([sheet, tinted, sheet, tinted].map(material => packMaterialRecordV2(material)));
+  assert.equal(records.length, 2);
+  assert.deepEqual([0, 1, 2, 3].map(recordIndexOf), [0, 1, 0, 1]);
+});
+
 test('records that differ only in a texture slot stay apart, equal textures share', () => {
   const imageA = { image: { width: 1, height: 1, data: new Uint8ClampedArray([255, 0, 0, 255]) }, colorSpace: 'srgb' };
   const imageB = { image: { width: 1, height: 1, data: new Uint8ClampedArray([0, 0, 255, 255]) }, colorSpace: 'srgb' };

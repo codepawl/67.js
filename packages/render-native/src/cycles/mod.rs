@@ -271,6 +271,7 @@ pub(crate) struct SceneSpecialization {
     has_thin_film: bool,
     has_f82: bool,
     has_normal_map: bool,
+    has_diffuse_transmission: bool,
     max_closure_lobes: u32,
     max_closure_candidates: u32,
     has_finite_lights: bool,
@@ -299,6 +300,10 @@ pub(crate) fn scan_scene_specialization(input: &NativeTraceInputV2) -> SceneSpec
     let mut has_thin_film = false;
     let mut has_f82 = false;
     let mut has_normal_map = false;
+    // A material table that holds a second set of `material_count` records carries the extension records of diffuse
+    // transmission (FORMAT-v2.md, "Material extension records"); each material then adds at most one lobe for the far side.
+    let has_diffuse_transmission = mat_count > 0 && mats.len() >= 2 * mat_count * MATERIAL_RECORD_STRIDE;
+    let diffuse_transmission_lobe = u32::from(has_diffuse_transmission);
     let mut max_closure_lobes: u32 = if mat_count > 0 { 1 } else { 4 };
     let mut max_closure_candidates: u32 = if mat_count > 0 { 1 } else { 7 };
 
@@ -369,7 +374,7 @@ pub(crate) fn scan_scene_specialization(input: &NativeTraceInputV2) -> SceneSpec
             transmission_from_texture: transmission_tex >= 0,
             thin_walled: (flags & MATERIAL_FLAG_THIN_WALLED) != 0,
         });
-        let candidate_lobes = trans_lobe + sheen_lobe + coat_lobe + base_lobes;
+        let candidate_lobes = trans_lobe + sheen_lobe + coat_lobe + base_lobes + diffuse_transmission_lobe;
         max_closure_candidates = max_closure_candidates.max(candidate_lobes.clamp(1, 7));
         max_closure_lobes = max_closure_lobes.max(candidate_lobes.clamp(1, 4));
     }
@@ -438,6 +443,7 @@ pub(crate) fn scan_scene_specialization(input: &NativeTraceInputV2) -> SceneSpec
         has_thin_film,
         has_f82,
         has_normal_map,
+        has_diffuse_transmission,
         max_closure_lobes,
         max_closure_candidates,
         has_finite_lights,
@@ -470,6 +476,7 @@ pub(crate) fn specialize_kernel_source(source: &str, scene: &SceneSpecialization
         has_thin_film,
         has_f82,
         has_normal_map,
+        has_diffuse_transmission,
         max_closure_lobes,
         max_closure_candidates,
         has_finite_lights,
@@ -503,6 +510,10 @@ pub(crate) fn specialize_kernel_source(source: &str, scene: &SceneSpecialization
     specialize!(THIN_FILM, has_thin_film);
     specialize!(F82, has_f82);
     specialize!(NORMAL_MAP, has_normal_map);
+    // Unlike the other sentinels this one defaults to `false`, so a kernel compiled without specialization reads no extension records.
+    if has_diffuse_transmission {
+        result = result.replace("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;", "const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;");
+    }
     specialize!(EMISSIVE_TRIANGLES, has_emissive_triangles);
     specialize!(ANALYTIC_LIGHTS, has_analytic_lights);
     specialize!(FINITE_LIGHTS, has_finite_lights);
@@ -681,6 +692,33 @@ mod specialization_tests {
         assert!(result.contains("const SCENE_HAS_VOLUME: bool = true;"), "VOLUME should stay true");
         assert!(result.contains("const SCENE_HAS_GLASS: bool = true;"), "GLASS should stay true");
         assert!(result.contains("const SCENE_HAS_ENV_IMPORTANCE: bool = true;"), "ENV_IMPORTANCE should stay true");
+    }
+
+    #[test]
+    fn diffuse_transmission_follows_the_extension_records_of_the_material_table() {
+        let kp = make_kp(0, 0.0, 0, 0, 0.0);
+        let one_material = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let inst = make_default_inst();
+        let lights = make_default_light();
+        let source = "const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;";
+
+        let without_extension = dummy_input(&kp, &one_material, &lights, &inst);
+        let result = specialize_cycles_kernel(source, &without_extension);
+        assert_eq!(result, source, "no extension records, no lobe: the default stays false");
+
+        let mut with_extension_table = one_material.clone();
+        with_extension_table.extend_from_slice(&vec![0u8; MATERIAL_RECORD_STRIDE]);
+        let mut with_extension = dummy_input(&kp, &with_extension_table, &lights, &inst);
+        with_extension.material_count = 1;
+        let result = specialize_cycles_kernel(source, &with_extension);
+        assert!(result.contains("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;"), "one extension record per material");
+        let scene = scan_scene_specialization(&with_extension);
+        let plain_scene = scan_scene_specialization(&without_extension);
+        assert_eq!(
+            scene.max_closure_candidates,
+            plain_scene.max_closure_candidates + 1,
+            "the far side lobe is one more candidate"
+        );
     }
 
     #[test]
@@ -1159,6 +1197,58 @@ mod tests {
         let footprint_call = build_body.find("point.uv_footprint = int_uv_footprint(").expect("the footprint is computed");
         assert!(flag_test < footprint_call);
         assert!(build_body.contains("point.uv_footprint = 0.0;"));
+    }
+
+    /// The thin-sheet lobe is a cosine lobe on the far side of the shading normal that the closure builds only from the
+    /// material extension record, splits off the diffuse layer, and that the integrator treats as a transmission bounce
+    /// which leaves the medium alone.
+    #[test]
+    fn the_diffuse_transmission_lobe_splits_the_diffuse_layer_and_samples_the_far_side() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        assert!(
+            kernel.contains("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;"),
+            "an unspecialized kernel (a probe, a test) must not read extension records"
+        );
+        assert!(
+            kernel.contains("SCENE_HAS_DIFFUSE_TRANSMISSION && arrayLength(&materials) >= 2u * kernel_params.material_count"),
+            "the read of an extension record is guarded by the table length"
+        );
+        assert!(kernel.contains("const LOBE_DIFFUSE_TRANSMISSION: u32 = 7u;"));
+
+        let build_start = kernel.find("fn closure_build(").expect("the closure builder exists");
+        let build_body = &kernel[build_start..];
+        let extension_read = build_body
+            .find("materials[kernel_params.material_count + (*point).material_index]")
+            .expect("the extension record follows the material records");
+        let diffuse_split = build_body
+            .find("let diffuse_weight = base_color * layer_weight * (1.0 - diffuse_transmission_weight);")
+            .expect("the weight splits the diffuse layer");
+        let far_side_lobe = build_body
+            .find("closure_diffuse_transmission_setup_lobe(shading_n, diffuse_transmission_lobe_weight)")
+            .expect("the far side lobe is built from the same layer weight");
+        assert!(extension_read < diffuse_split && diffuse_split < far_side_lobe);
+        assert!(build_body.contains("SCENE_HAS_DIFFUSE_TRANSMISSION
+    && closure.lobe_count < CLOSURE_CANDIDATE_CAPACITY"));
+
+        let eval_start = kernel.find("fn bsdf_diffuse_transmission_eval(").expect("the lobe is evaluated");
+        let eval_end = eval_start + kernel[eval_start..].find("
+}").expect("the evaluation ends");
+        let eval_body = &kernel[eval_start..eval_end];
+        assert!(eval_body.contains("let cos_far_side = -dot((*lobe).normal, wi);"));
+        assert!(eval_body.contains("(*lobe).weight * pdf"));
+        let sample_start = kernel.find("fn bsdf_diffuse_transmission_sample(").expect("the lobe is sampled");
+        let sample_end = sample_start + kernel[sample_start..].find("
+}").expect("the sampler ends");
+        let sample_body = &kernel[sample_start..sample_end];
+        assert!(sample_body.contains("bsdf_diffuse_sample_cos_hemisphere(-(*lobe).normal, rand)"));
+        assert!(sample_body.contains("dot(geometric_normal, wi) >= 0.0"), "a sample must leave through the far side");
+
+        let integrator_start = kernel.find("fn int_closure_has_transmission(").expect("the transmission test exists");
+        let integrator_end = integrator_start + kernel[integrator_start..].find("
+}").expect("the test ends");
+        assert!(kernel[integrator_start..integrator_end].contains("LOBE_DIFFUSE_TRANSMISSION"));
+        assert!(kernel.contains("(SCENE_HAS_GLASS || SCENE_HAS_DIFFUSE_TRANSMISSION) && int_closure_has_transmission(&closure)"));
+        assert!(kernel.contains("&& !is_diffuse_transmission"), "a sheet is not a medium boundary");
     }
 
     /// The mip levels sit after level 0 in one run of words (`texture_fetch_texel` stays the only reader of the pool).

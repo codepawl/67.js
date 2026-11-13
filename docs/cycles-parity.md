@@ -1091,6 +1091,44 @@ Output goes to `artifacts/classroom/` (ignored by Git): `summary.json`, `classro
 
 Not covered: the 22 unexported instances and the bridge gap above; a scene that keeps Blender's default disk lights (#1060); 4096 samples.
 
+## Diffuse transmission (#1058)
+
+A thin sheet that lets diffuse light through (a curtain, a leaf, a lampshade) is the material fields `diffuseTransmission` (0 to 1) and `diffuseTransmissionColor` (the base colour when left out). The `cycles` kernel splits the diffuse layer at the weight: the usual lobe keeps `1 - weight`, and a cosine lobe on the far side of the surface, the Translucent BSDF of Cycles, takes `weight * colour`. The lobe is sampled and evaluated like the diffuse one (pdf `cos / pi`) and joins MIS, so a lamp behind the sheet lights its front by next event estimation and by BSDF sampling. The format is in [FORMAT-v2.md](../packages/render-native/FORMAT-v2.md), "Material extension records".
+
+Blender 5.3's Principled BSDF has no diffuse transmission weight (its transmission inputs are `Transmission Weight` and the dispersion pair), so `render-cycles.py` builds the split from nodes: a Principled BSDF at `(1 - weight) * base colour` plus a Translucent BSDF at `weight * colour`, added together. That matches Cook only for a dielectric, non-glass, non-subsurface material with no specular lobe, so the parity scenes set `specular: 0`, and `render-cycles.py` refuses `diffuseTransmission` together with `metallic`, `transmission` or `subsurface`: Cook scales the diffuse layer, and with it the far-side lobe, by what those layers leave of it, which the added Translucent node does not. With a specular lobe Cook multiplies the far-side lobe by the weight the specular layer leaves, as it does for the diffuse lobe, while the added Translucent BSDF is not attenuated: the two differ there, and that case is not measured.
+
+### Scenes `[measured]`
+
+`bench/cycles-parity/make-diffuse-transmission-scenes.mjs` writes three scenes: a vertical sheet (3 x 2.4 m, base colour `[0.8, 0.75, 0.7]`, light colour `[0.95, 0.55, 0.25]`, weight 0.6) above a grey floor, lit by a rectangular lamp 1.6 m behind it (`sheet-backlit`), lit by a lamp above and in front of the picture (`sheet-front`), and the backlit sheet at weight 0 (`sheet-backlit-weight-0`, which must read as an opaque sheet with the lamp hidden behind it). The world is a constant 0.05. Cook (`--kernel cycles`) and Cycles 5.3.0 render each at 480 x 270, 1024 samples, 8 bounces.
+
+| Scene | Cook mean per channel (R, G, B) | Cook over Cycles, channel means | 8 x 8 tile ratios, min to max | Cycles seed 2 over seed 1, channel means | Cycles seed 2 over seed 1, tiles |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `sheet-backlit` | 0.0998, 0.0690, 0.0473 | 0.99998, 0.99999, 0.99999 | 0.9996 to 1.0002 | 0.99997, 0.99998, 0.99999 | 0.9998 to 1.0002 |
+| `sheet-front` | 0.0722, 0.0651, 0.0593 | 0.99998, 0.99999, 0.99999 | 0.9998 to 1.0002 | 0.99998, 0.99999, 0.99999 | 0.9998 to 1.0002 |
+| `sheet-backlit-weight-0` | 0.0387, 0.0378, 0.0370 | 0.99999, 0.99999, 0.99999 | 0.9996 to 1.0003 | 0.99999, 0.99999, 1.00000 | 0.9997 to 1.0004 |
+
+All 64 tiles of each scene are eligible and within 5 percent, and the channel means are within 2 percent by a wide margin. Cook sits inside the Cycles seed-to-seed spread: with a smooth lamp and one sheet the images are nearly noise free (relative MSE 2e-6 to 5e-6 between Cook and Cycles, 6e-6 or less between two Cycles seeds), so these scenes test the lobe's weight, colour, sides and light transport, not a noisy estimator. 
+
+![Cook (left), Cycles 5.3 (middle) and the backlit sheet at weight 0 (right), for the backlit sheet, the front-lit sheet and the opaque control](translucent-1058.jpg)
+
+Path flags, from the Cycles source (`intern/cycles/kernel/closure/bsdf_diffuse.h`, `bsdf_translucent_sample`, and `intern/cycles/kernel/integrator/path_state.h`, `path_state_next`): the translucent sample is labelled transmit and diffuse. `path_state_next` therefore counts it against the transmission bounce limit (not the diffuse one) and sets the transmission and the diffuse ray visibility together. Cook does the same: the bounce counts as a transmission bounce, leaves the medium alone and casts its next ray with both visibility bits.
+
+### Closed form and identity `[measured]`
+
+`tests/native-diffuse-transmission.test.js` lights one sheet with a sun at normal incidence and has a closed form for it. A plain diffuse sheet of albedo `a` lit from the front shines `a * E / pi` (the test checks that against the sun's irradiance, 5 percent). A sheet of weight `w` and colour `a` lit from behind shines `w * a * E / pi` on its front, and lit from the front `(1 - w)` times the plain sheet (each 2 percent per channel). An opaque sheet lit from behind stays dark, and a sheet at weight 1 reflects nothing. All of them pass on the GPU box.
+
+A scene without the field is byte-identical to a build without this change. On a rented RTX-class box, `origin/main` and this branch were built side by side and fed the same exported scenes (192 x 108, 16 samples, 4 bounces, seed 1, both kernels): the SHA-256 of the kernel output is equal for `lit-interior`, `glass`, `brick-room` and `material-spheres` with `--kernel cycles` and with `--kernel legacy`, and the packed tables (kernel parameters, instances, triangles, materials, lights, textures, environment) hash the same.
+
+Commands, on a machine with Blender 5.3, Node, `uv`, a GPU and the built addon:
+
+```sh
+(cd packages/render-native && node build.mjs)
+uv run --no-project --with numpy python bench/cycles-parity/run-diffuse-transmission-parity.py artifacts/diffuse-transmission --samples 1024 --repeat-cycles-seed2
+uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-diffuse-transmission-figure.py artifacts/diffuse-transmission artifacts/diffuse-transmission/figure.jpg
+```
+
+Not covered: the legacy kernel, the WebGPU and WebGL tracers, the raster renderer and glTF `KHR_materials_diffuse_transmission` import ignore the field; a base colour map or vertex colours with a transmitting sheet (Cook tints the far-side lobe by them; `render-cycles.py` refuses that case); a material that also has a specular lobe, coat or sheen, as above; metal, glass and subsurface (refused by the reference script).
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:

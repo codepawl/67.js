@@ -5,7 +5,7 @@
 // part looks the same whether or not other geometry in the scene is shared. The maps go from the materials into the FORMAT-v2
 // texture pool without the v1 atlas, so the pool (1 GiB) is the limit on them, not the atlas (4096 x 16384 texels).
 import { buildNativeV1Tables, packNativeMaterialTables, withVirtualAtlas } from './pack-input.mjs';
-import { buildNativeInputV2, reduceV1MaterialTable, upgradeNativeInputV1ToV2 } from './pack-input-v2.mjs';
+import { buildNativeInputV2, reduceV1MaterialTable, upgradeNativeInputV1ToV2, validateDiffuseTransmission } from './pack-input-v2.mjs';
 
 const ALL_LIGHT_GROUPS = 0xffffffff;
 
@@ -50,8 +50,20 @@ function cyclesAnisotropyFields(material, roughness) {
   };
 }
 
+// A thin sheet that lets diffuse light through (a curtain, a leaf, a lampshade): the share of the diffuse layer that leaves
+// through the far side, and the colour of that light (the base colour when it is left out). The ranges follow the other layers
+// of material-layers.js: a weight between 0 and 1, a linear colour with each channel between 0 and 1.
+function diffuseTransmissionFields(material) {
+  validateDiffuseTransmission(material);
+  const { diffuseTransmission, diffuseTransmissionColor } = material;
+  if (!(diffuseTransmission > 0)) return {};
+  const fields = { diffuseTransmission };
+  if (diffuseTransmissionColor !== undefined) fields.diffuseTransmissionColor = Array.from(diffuseTransmissionColor);
+  return fields;
+}
+
 function layerFields(material, resolved) {
-  const fields = {};
+  const fields = { ...diffuseTransmissionFields(material) };
   if (material.specular !== undefined) fields.specular = material.specular;
   if (material.specularColor !== undefined && !isWhite(material.specularColor)) fields.specularColor = material.specularColor;
   if (material.anisotropy > 0) Object.assign(fields, cyclesAnisotropyFields(material, resolved.roughness));
