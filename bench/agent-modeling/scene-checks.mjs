@@ -107,6 +107,25 @@ function sunLight(check, recipe) {
   return { pass: problems.length === 0, detail: problems.join('; ') || `sun ${keyColor.map(round)} at ${keyIntensity}` };
 }
 
+// A scaled unit box rests on the ground or on a top face when its underside is within 3 cm of that height.
+function restsOnSupport(check, recipe) {
+  const node = recipe.nodes.find(candidate => candidate.id === check.node);
+  if (!node) return { pass: false, detail: `no node ${check.node}` };
+  const underside = (node.translation?.[1] ?? 0) - (node.scale?.[1] ?? 1) / 2;
+  const supportHeights = check.supports.map(supportId => {
+    const support = recipe.nodes.find(candidate => candidate.id === supportId);
+    return (support.translation?.[1] ?? 0) + (support.scale?.[1] ?? 1) / 2;
+  });
+  const gap = Math.min(...supportHeights.map(height => Math.abs(underside - height)));
+  return { pass: gap <= 0.03, detail: `${check.node} underside is ${round(gap)} m from the nearest support` };
+}
+
+// Key light times exposure is what reaches the sensor; too much clips the frame to white, too little leaves it black.
+function litRange(check, recipe) {
+  const strength = (recipe.environment?.keyIntensity ?? 0.8) * (recipe.effects?.exposure ?? 1);
+  return { pass: inRange(strength, check.range), detail: `key intensity times exposure is ${round(strength)}` };
+}
+
 function materialOf(check, recipe) {
   const node = recipe.nodes.find(candidate => candidate.id === check.node);
   const material = recipe.materials.find(candidate => candidate.id === node?.material);
@@ -159,7 +178,7 @@ function trackLower(check, recipe) {
   return { pass: slope(last) < slope(first) * 0.6, detail: `steepness ${round(slope(first))} to ${round(slope(last))}` };
 }
 
-const SCENE_CHECKS = { cameraAims, cameraOrbit, cameraDolly, lights, sunLight, materialOf, track, trackRedder, trackLower,
+const SCENE_CHECKS = { cameraAims, cameraOrbit, cameraDolly, lights, sunLight, restsOnSupport, litRange, materialOf, track, trackRedder, trackLower,
   environmentValue: (check, recipe) => fieldValue(check, recipe.environment, 'environment'),
   effectsValue: (check, recipe) => fieldValue(check, recipe.effects, 'effects') };
 

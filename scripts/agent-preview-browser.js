@@ -31,7 +31,7 @@ import { clipFromGltfAnimation } from '../src/skeleton-pose.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 import { AGENT_SCENE_DEFAULT_LIMITS } from '../src/agent-scene-capabilities.js';
 import { describeApplication } from '../src/agent-apply-report.js';
-import { framingProblems, placementProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
+import { framingProblems, placementProblems, textureProblems, exposureProblems, lumaShares } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../src/agent-branches.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../src/agent-asset-limits.js';
 import { describeMarks, validateMarks } from '../src/agent-annotate.js';
@@ -183,7 +183,7 @@ function sampleFrameShares() {
 
 /**
  * Warnings about the frame just drawn from `camera`: framing, a stale bake and exposure (when `exposure` is given, the
- * effects.exposure drawn with). Imported assets have no part bounds or bake, so they get the exposure check only.
+ * effects.exposure drawn with). Imported assets have no part bounds or bake, so they get the texture and exposure checks only.
  * `placement` adds the floating and intersecting parts, which only scene_look reports: a render job would repeat them
  * for every frame of a moving scene.
  */
@@ -195,6 +195,8 @@ function viewProblems(record, camera, exposure, { placement = false } = {}) {
     if (placement) problems.push(...placementProblems({ boxes }));
   }
   if (record.scene.bakeStaleness) problems.push(...record.scene.bakeStaleness());
+  problems.push(...textureProblems({ parts: record.scene.parts }));
+  if (record.scene.flushLeftovers) problems.push(...record.scene.flushLeftovers());
   if (exposure !== undefined) problems.push(...exposureProblems({ shares: sampleFrameShares(), exposure }));
   return problems;
 }
@@ -1244,6 +1246,17 @@ window.__agentPreview = {
       metadata: { sessionId, revision: record.scene.revision, topologyRevision: record.scene.topologyRevision,
         motionTime: record.scene.motionTime ?? null, ...render, ...(labels ? { labels } : {}) },
     };
+  },
+  // The findings of a view without drawing it, for a job whose frames the page does not draw (the path tracer). Exposure is
+  // left out because it reads the drawn frame.
+  findings({ sessionId, animation, motionTime }) {
+    const record = requireSession(sessionId);
+    if (record.asset && (animation !== undefined || motionTime !== undefined)) {
+      record.scene.sampleFrame({ ...(animation === undefined ? {} : { animation }), ...(motionTime === undefined ? {} : { motionTime }) });
+    } else if (motionTime !== undefined) {
+      record.scene.sampleMotion(motionTime);
+    }
+    return { diagnostics: viewProblems(record, record.scene.camera, undefined, { placement: true }) };
   },
   // One frame for scene_ask_user: the look, plus the camera it was drawn with so the marks can be turned into rays later.
   annotateFrame({ sessionId }) {

@@ -54,6 +54,7 @@ own mesh report:
 | camera-closeup, camera-orbit | Frame the statue in a close-up; a 6 second camera orbit of at least 180 degrees (`scenes.mjs`) |
 | light-key-fill, light-spot-shadow | A warm sun plus a cool point fill; one shadow-casting spotlight aimed at the statue |
 | look-metal, look-fog | A polished gold material; a thin cool fog with a readable exposure |
+| findings-fix | A stage with a crate floating 0.65 m above the floor and a key light at intensity 40. The agent is told only that one object is placed wrongly and the lighting is bad. Run it with the findings (default) and with `--findings off`, which hides `diagnostics` from `scene_look`, to see what the findings are worth in tool calls, images read (`imagesRead` in each record, `imagesPerRun` in the summary) and success. Not in the default bench set |
 | sunset-timelapse, film-reveal | Sun direction and colour tracks over 4 s; a 6 second dolly-in reveal with an exposure fade |
 
 `references.mjs` holds one hand-built solution per task. `tests/agent-modeling-suite.test.js` checks that every

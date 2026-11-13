@@ -255,6 +255,62 @@ export function placementProblems({ boxes }) {
   return problems;
 }
 
+const TEXTURE_FIELDS = ['map', 'normalMap', 'metallicRoughnessMap', 'emissiveMap', 'occlusionMap', 'aovMap', 'transmissionMap'];
+
+/** Why a texture descriptor cannot be drawn, or null when it can: no image, an image of no size, or fewer pixel bytes than its size needs. */
+function textureFault(descriptor) {
+  const image = descriptor.image;
+  if (!image) return 'has no image';
+  if (!(image.width > 0 && image.height > 0)) return 'has an image of no size';
+  const hasPixelBytes = image.data !== undefined && image.data !== null && !image.compressed;
+  if (hasPixelBytes && image.data.length < image.width * image.height * 4) return 'has fewer pixel bytes than its size needs';
+  return null;
+}
+
+/**
+ * Findings for materials that name a texture the renderer cannot draw (`texture-missing`): the field is set but its
+ * image is absent, empty or truncated, so the part draws flat where the texture should be. `parts` are drawable
+ * parts ({ name, material }); parts that share a material are one finding with every part in `nodes`.
+ */
+export function textureProblems({ parts }) {
+  const byFault = new Map();
+  for (const part of parts) {
+    for (const field of TEXTURE_FIELDS) {
+      const descriptor = part.material?.[field];
+      if (!descriptor) continue;
+      const fault = textureFault(descriptor);
+      if (!fault) continue;
+      const key = `${field}|${fault}|${part.material.id ?? part.name}`;
+      const entry = byFault.get(key) ?? { field, fault, material: part.material.id, names: [] };
+      entry.names.push(part.name);
+      byFault.set(key, entry);
+    }
+  }
+  return [...byFault.values()].slice(0, MAXIMUM_PLACEMENT_FINDINGS).map(({ field, fault, material, names }) => {
+    const owner = names.length > 1 ? `${names.length} parts use` : `${names[0]} uses`;
+    const effect = field === 'map' ? 'the surface draws as its plain colour' : `the ${field} has no effect`;
+    return warning('texture-missing', names[0],
+      `${owner} ${material ? `material ${material}` : 'a material'} whose ${field} ${fault}, so ${effect}.`,
+      `Fix the image behind ${field}${material ? ` of material ${material}` : ''} (re-add the asset or catalog image), or remove the field with scene_apply set-material.`,
+      { ...namedNodes(names), field, ...(material ? { material } : {}) });
+  });
+}
+
+/**
+ * What a path traced job cannot report. The tracer writes the lit image only: it has no object ID, depth or normal pass,
+ * and the page never draws the frame it traces, so there is no frame to read exposure from. Part findings (framing,
+ * floating, intersecting, textures, z-fighting) come from part bounds and materials and still run.
+ */
+export function pathTracerFindingsLimit() {
+  return {
+    kind: 'findings-unavailable',
+    severity: 'info',
+    target: 'renderer',
+    message: 'This job is path traced. The tracer writes the lit image only, so exposure findings and the object ID, depth and normal passes are unavailable; the page draws no raster frame to read them from.',
+    fix: 'Check exposure with scene_look or a raster job (leave renderer out), then trace. Part findings (framing, floating, intersecting, textures, z-fighting) are reported as usual.',
+  };
+}
+
 /** Adds a frame's diagnostics to `metrics.diagnostics`, keeping one entry per kind, target and message across a job's frames, up to 16 entries. */
 export function mergeFrameDiagnostics(metrics, frameDiagnostics) {
   if (!frameDiagnostics?.length) return;

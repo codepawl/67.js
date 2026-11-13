@@ -216,7 +216,7 @@ const FRACTIONAL_RENDERER_FIELDS = new Set(['maxSeconds', 'noiseThreshold']);
 function rendererFrom(renderer, passes) {
   objectKeys(renderer, ['type', 'backend', 'samples', 'bounces', 'denoise', 'seed', 'maxSeconds', 'noiseThreshold'], 'renderer');
   if (renderer.type !== 'pathTracer') throw new TypeError('renderer.type must be pathTracer.');
-  if (passes !== undefined) throw new RangeError('The path tracer writes the lit image only: leave passes out.');
+  if (passes !== undefined) throw new RangeError('The path tracer writes the lit image only and has no object ID, depth or normal pass: leave passes out, or leave renderer out to render the passes on the raster renderer.');
   const denoise = renderer.denoise ?? true;
   if (typeof denoise !== 'boolean' && !PATH_TRACER_DENOISERS.includes(denoise)) throw new TypeError(`renderer.denoise must be a boolean or one of ${PATH_TRACER_DENOISERS.join(', ')}.`);
   const backend = renderer.backend ?? 'cpu';
