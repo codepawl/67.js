@@ -2,6 +2,7 @@
 # Runs the add-on checks on the GPU machine, from the repository root: the Python tests, the exporter test in Blender, and the
 # Cook against Cycles comparison for the fixture scenes. Needs Blender (BLENDER, default ~/blender/blender), node, uv and a Vulkan GPU.
 # Usage: bash packages/blender-addon/tests/run-checks.sh [samples]
+# GPU_LOCK_COMMAND, when set, is put in front of each render (a wrapper that queues jobs on a shared card).
 set -u
 export PATH="$HOME/.local/bin:$PATH"
 BLENDER="${BLENDER:-$HOME/blender/blender}"
@@ -29,7 +30,7 @@ echo "exporter test exit code: $exporter_exit"
 render_and_compare() {
   local variant="$1" name="$2" gpu_lock=""
   echo "== render $name"
-  [ -f "$HOME/.agents/tools/gpu-lock.sh" ] && gpu_lock="bash $HOME/.agents/tools/gpu-lock.sh"
+  gpu_lock="${GPU_LOCK_COMMAND:-}"
   $gpu_lock "$BLENDER" -b --factory-startup --python-exit-code 1 --python packages/blender-addon/tests/render_cook_and_cycles.py -- "$variant" "$OUT/$name" "$SAMPLES" > "$OUT/$name.log" 2>&1
   local render_exit=$?
   grep -E "^(COOK|RENDER_DONE)|Error|Traceback" "$OUT/$name.log" | head -40
