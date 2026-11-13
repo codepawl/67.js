@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
 
@@ -103,6 +103,39 @@ fn lock_resetting_when_poisoned<Value>(cache: &Mutex<Option<Value>>) -> MutexGua
 
 fn lock_device_cache() -> MutexGuard<'static, Option<CachedDevice>> {
     lock_resetting_when_poisoned(device_cache())
+}
+
+/// Number of Node environments (the main thread and worker threads) that loaded the addon and have not shut down yet.
+static LIVE_ENVIRONMENTS: AtomicUsize = AtomicUsize::new(0);
+
+/// Called when a Node environment loads the addon.
+pub(crate) fn note_environment_loaded() {
+    LIVE_ENVIRONMENTS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Called from the environment cleanup hook. The last environment to shut down releases the cached GPU device.
+///
+/// Why this exists (issue #1136): the cache lives in a static, and statics are never dropped, so the Vulkan device stayed
+/// open until the process called `exit()`. On Linux with the NVIDIA driver, the exit handlers of its libEGL_nvidia then
+/// `dlclose` driver libraries while the driver's own worker threads (`[vkps] Update`, `[vkcf] Analysis`, `[vkrt] Analysis`,
+/// created for the open device) were still running code in them. A thread that ran in an unloaded library died with
+/// SIGSEGV after all work had finished (17 of 40 runs of a one-render script on the box). Destroying the device before `exit()`
+/// makes the driver stop those threads while its libraries are still mapped. Sessions that are still alive keep their own
+/// clones; their finalizers run during the same environment teardown and free the rest.
+pub(crate) fn note_environment_closing() {
+    let remaining = LIVE_ENVIRONMENTS.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
+    if remaining == 0 {
+        release_cached_device();
+    }
+}
+
+fn release_cached_device() {
+    let released = lock_device_cache().take();
+    if let Some(cached) = released {
+        // Wait for submitted work first so the driver has nothing in flight when the device is destroyed.
+        let _ = cached.device.poll(wgpu::PollType::wait_indefinitely());
+        drop(cached);
+    }
 }
 
 /// Returns cloned device/queue/metadata from the cache, opening once per process.
