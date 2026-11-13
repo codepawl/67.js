@@ -1861,6 +1861,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     // After sampleMotion, the lights, sun and sky the motion tracks set at that time; the recipe keeps its authored values.
     get environment() {
       const environment = structuredClone(state.recipe.environment);
+      // The time a grid sequence plays at (#1045): the rasterizer and the path tracer both pick the frame from it.
+      if (environment.localVolumes?.some(volume => volume.frames)) environment.volumeTime = state.motionTime;
       return state.movedLook ?agentSceneModule('motion').motionEnvironment(environment, state.movedLook) : environment;
     },
     /** World bounds ({ name, min, max }) of the visible mesh parts in the current pose; parts with no known bounds are left out. */

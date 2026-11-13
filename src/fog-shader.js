@@ -79,12 +79,12 @@ function bindFieldAndLights(renderer, post, volume) {
 
 // The local volumes of the frame (environment.localVolumes), checked and packed once before the post program is chosen, so a bad
 // field or a renderer without depth or HDR throws before any program is bound. Returns the count packed, or 0 for an empty list.
-function prepareLocalVolumes(renderer, input, frame) {
+function prepareLocalVolumes(renderer, input, frame, volumeTime = 0) {
   const resolved = resolveLocalVolumes(input, 'environment.localVolumes');
   if (resolved.length === 0) return 0;
   if (!renderer.depth || !renderer.hdr || renderer.transparent || renderer.benchmark) throw new Error('Local volumes require depth:true, active HDR and an opaque canvas');
   const buffers = (renderer.localVolumeBuffers ??= createLocalVolumeBuffers());
-  packLocalVolumes(bindLocalVolumeParts(resolved, renderer.sceneParts), buffers);
+  packLocalVolumes(bindLocalVolumeParts(resolved, renderer.sceneParts, { time: volumeTime }), buffers);
   drawMeshVolumes(renderer, frame);
   return buffers.count;
 }
@@ -119,13 +119,17 @@ function localGridTexture(renderer, grid) {
   const context = renderer.context;
   const cached = renderer.localGridTextureCache;
   if (cached && cached.grid === grid) return cached.texture;
-  if (cached) context.deleteTexture(cached.texture);
-  const texture = context.createTexture();
-  context.bindTexture(context.TEXTURE_3D, texture);
-  context.texParameteri(context.TEXTURE_3D, context.TEXTURE_MIN_FILTER, context.LINEAR);
-  context.texParameteri(context.TEXTURE_3D, context.TEXTURE_MAG_FILTER, context.LINEAR);
-  for (const wrap of [context.TEXTURE_WRAP_S, context.TEXTURE_WRAP_T, context.TEXTURE_WRAP_R]) context.texParameteri(context.TEXTURE_3D, wrap, context.CLAMP_TO_EDGE);
   const resolution = grid ? grid.resolution : [1, 1, 1];
+  // The next frame of a sequence has the resolution of the one before: overwrite its texture instead of making a new one.
+  const reuse = cached && cached.resolution.join('x') === resolution.join('x');
+  const texture = reuse ? cached.texture : context.createTexture();
+  if (cached && !reuse) context.deleteTexture(cached.texture);
+  context.bindTexture(context.TEXTURE_3D, texture);
+  if (!reuse) {
+    context.texParameteri(context.TEXTURE_3D, context.TEXTURE_MIN_FILTER, context.LINEAR);
+    context.texParameteri(context.TEXTURE_3D, context.TEXTURE_MAG_FILTER, context.LINEAR);
+    for (const wrap of [context.TEXTURE_WRAP_S, context.TEXTURE_WRAP_T, context.TEXTURE_WRAP_R]) context.texParameteri(context.TEXTURE_3D, wrap, context.CLAMP_TO_EDGE);
+  }
   const voxels = resolution[0] * resolution[1] * resolution[2];
   const texels = new Uint16Array(voxels * 4);
   if (grid) {
@@ -137,8 +141,12 @@ function localGridTexture(renderer, grid) {
     }
   }
   context.pixelStorei(context.UNPACK_ALIGNMENT, 1);
-  context.texImage3D(context.TEXTURE_3D, 0, context.RGBA16F, resolution[0], resolution[1], resolution[2], 0, context.RGBA, context.HALF_FLOAT, texels);
-  renderer.localGridTextureCache = { grid, texture };
+  if (reuse) {
+    context.texSubImage3D(context.TEXTURE_3D, 0, 0, 0, 0, resolution[0], resolution[1], resolution[2], context.RGBA, context.HALF_FLOAT, texels);
+  } else {
+    context.texImage3D(context.TEXTURE_3D, 0, context.RGBA16F, resolution[0], resolution[1], resolution[2], 0, context.RGBA, context.HALF_FLOAT, texels);
+  }
+  renderer.localGridTextureCache = { grid, texture, resolution };
   return texture;
 }
 
