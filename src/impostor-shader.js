@@ -111,7 +111,7 @@ function addViewBlend(source) {
   const gradients = 'dFdx(textureUV), dFdy(textureUV)';
   return source
     .replace('texture(baseMap, textureUV)', () => `textureGrad(baseMap, cardUV, ${gradients})`)
-    .replace(/texture\(normalMap, textureUV([^)]*)\)/, (match, transform) => `textureGrad(normalMap, cardUV${transform}, ${gradients})`)
+    .replace(/texture\(normalMap, normalCoordinates([^)]*)\)/, (match, transform) => `textureGrad(normalMap, cardUV${transform}, ${gradients})`)
     .replace('in vec2 textureUV, lightmapUV;', () => `in vec2 textureUV, lightmapUV;\n${VIEW_BLEND_FRAGMENT}`)
     .replace('void main() {', () => 'void main() {\n  cardUV = pickCardUV();');
 }
