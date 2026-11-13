@@ -24,6 +24,12 @@ Unidirectional path tracing against the triangle BVH that the [light bake](light
 - Rough metal that keeps its light: the GGX lobe gives back the light that bounces between microfacets (Fdez-Aguera 2019, from a table of the lobe's albedo), and after a bounce that spread the light the glossy lobes are widened the way Cycles does with `filter_glossy` 1, so a floor lit through a steel surface does not turn into rare, very bright speckles (#959).
 - Emission: `emission` times `emissiveColor` (the base colour when none is given) times the `emissiveMap` texel at the hit, so a screen or a sign glows with its picture and lights what is near it. An emissive surface is found by the paths that hit it, not sampled as a light, so a small bright panel is noisy at low sample counts.
 - Volume fog: `environment.volumeFog` is traced as a homogeneous medium inside its box, with its `density`, `color` (the scattering albedo), `anisotropy` (Henyey-Greenstein) and `maxDistance`. The distance to each scattering event is drawn from the exact free-flight distribution, so there is no step count and no banding. Every event is lit by next-event estimation (sun, point, spot, area lights and the sky, with shadow rays) and light reaching a surface through the fog is dimmed by it. Fog events count as bounces. `noiseAmount`, `noiseScale`, `drift`, `steps` and the `ambient` glow are rasterizer tricks and are not used.
+- Sky strength seen by the camera (native `cycles` kernel only, #1121): `environment.cameraIntensity` (a number of 0 or more, in the units of `map.intensity`; left out, the camera sees the sky at the lighting intensity and nothing changes) is the strength of the sky for a camera ray and for a ray that reaches it from the camera through a cutout, a transparent surface or smooth glass, while the sky keeps lighting the scene at `map.intensity`. It is what Cycles does with a Light Path 'Is Camera Ray' mix in the world, and it replaces a second trace with the opaque surfaces black. The strength applies until the path first bounces off a diffuse or glossy surface, reflects (also off glass), crosses rough glass or a translucent surface, or scatters in fog; sun disks and emissive surfaces are not scaled. The CPU, WebGL and WebGPU tracers ignore it and `report.ignored` says so.
+
+  ```js
+  // A room lit by the sky at full strength; the view through its window is drawn at 0.2 of it, in one pass.
+  const environment = { map: createEnvironmentMap({ width, height, data, intensity: 1 }), cameraIntensity: 0.2 };
+  ```
 
 ## Subsurface
 

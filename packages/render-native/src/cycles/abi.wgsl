@@ -231,7 +231,8 @@ struct KernelParamsV2 {
   sobol_table_offset: u32,
   filter_glossy: f32,
 
-  reserved_tail: vec4<u32>,
+  camera_env_color: vec3<f32>,
+  camera_env_enabled: u32,
 }
 
 // 160 bytes (10 x 16 B), alignment 16 B.
