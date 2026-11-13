@@ -811,11 +811,12 @@ fn lgt_env_uv_to_direction(uv: vec2<f32>, polar_out: ptr<function, f32>) -> vec3
   );
 }
 
-fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
+// The map as sampled, before the environment colour (the intensity) is applied; with no map it is one.
+fn lgt_eval_hdri_texel(direction: vec3<f32>) -> vec3<f32> {
   let width = kernel_params.env_width;
   let height = kernel_params.env_height;
   if (width == 0u || height == 0u) {
-    return kernel_params.env_color;
+    return vec3<f32>(1.0);
   }
   var polar = 0.0;
   let uv = lgt_direction_to_env_uv(direction, &polar);
@@ -839,7 +840,25 @@ fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
     let texel = environment_texels[row * width + col].xyz;
     accum += texel * (weight_x * weight_y);
   }
-  return accum * kernel_params.env_color;
+  return accum;
+}
+
+fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
+  return lgt_eval_hdri_texel(direction) * kernel_params.env_color;
+}
+
+// The environment as a path the camera reaches it through straight transmission only. `camera_env_scale` is one word:
+// all bits zero is no `environment.cameraIntensity` (the lighting radiance); a negative word is an absolute strength,
+// used when the lighting intensity is 0; otherwise (also -0.0, a black view) it is the factor on the lighting radiance.
+fn lgt_eval_camera_visible_radiance(direction: vec3<f32>) -> vec3<f32> {
+  let scale = kernel_params.camera_env_scale;
+  if (bitcast<u32>(scale) == 0u) {
+    return lgt_eval_hdri_radiance(direction);
+  }
+  if (scale < 0.0) {
+    return lgt_eval_hdri_texel(direction) * -scale;
+  }
+  return lgt_eval_hdri_radiance(direction) * abs(scale);
 }
 
 fn lgt_environment_pdf(direction: vec3<f32>) -> f32 {
@@ -1085,6 +1104,7 @@ fn lgt_eval_escaped_ray(
   ray_dir: vec3<f32>,
   is_camera_ray: bool,
   is_transparent_background_ray: bool,
+  camera_visible_environment: bool,
   mis_skip: bool,
   prev_bsdf_pdf: f32,
   receiver_lo: u32,
@@ -1093,7 +1113,12 @@ fn lgt_eval_escaped_ray(
   var total = vec3<f32>(0.0);
 
   if (!is_transparent_background_ray) {
-    let env_radiance = lgt_eval_hdri_radiance(ray_dir);
+    var env_radiance: vec3<f32>;
+    if (camera_visible_environment) {
+      env_radiance = lgt_eval_camera_visible_radiance(ray_dir);
+    } else {
+      env_radiance = lgt_eval_hdri_radiance(ray_dir);
+    }
     var env_mis = 1.0;
     if (!is_camera_ray && !mis_skip && SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
       let pdf_env = lgt_environment_pdf(ray_dir);

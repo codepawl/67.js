@@ -1614,6 +1614,26 @@ function compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, fr
   return compensatedTotal;
 }
 
+/**
+ * The one word `camera_env_scale` (FORMAT-v2.md, section 1) for `environment.cameraIntensity`; 0 (all bits) when the scene sets none.
+ * With a lighting intensity above 0 the word is `cameraIntensity / intensity`, the factor the kernel multiplies the lighting
+ * colour by, so a tinted `options.envColor` keeps its tint and equal strengths give the factor 1 (the same bits as no field).
+ * A black view (`cameraIntensity` 0) is the factor -0, which is not the zero word. With a lighting intensity of 0 there is no
+ * lighting colour to scale, so the word is `-cameraIntensity`: a negative word is an absolute, untinted strength.
+ */
+function resolveCameraEnvScale(cameraIntensity, intensity) {
+  if (cameraIntensity === undefined || cameraIntensity === null) {
+    return 0;
+  }
+  if (typeof cameraIntensity !== 'number' || !Number.isFinite(cameraIntensity) || cameraIntensity < 0) {
+    throw new RangeError(`environment.cameraIntensity must be a finite number of 0 or more (got ${cameraIntensity}). Pass 0.2 to draw the view through a window at 0.2 of the sky, or leave it out to use the lighting intensity.`);
+  }
+  if (cameraIntensity === 0) {
+    return -0;
+  }
+  return intensity > 0 ? cameraIntensity / intensity : -cameraIntensity;
+}
+
 function packEnvironmentTexelsV2(environment, options = {}) {
   if (!environment || !(environment.width > 0 && environment.height > 0)) {
     const bg = options.backgroundColor ?? [0, 0, 0];
@@ -1625,6 +1645,7 @@ function packEnvironmentTexelsV2(environment, options = {}) {
       envRotation: 0,
       envColor: [Number(bg[0]), Number(bg[1]), Number(bg[2])],
       envTotalWeight: 0,
+      cameraEnvScale: 0,
     };
   }
 
@@ -1711,6 +1732,7 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     envRotation,
     envColor: [Number(envColor[0]), Number(envColor[1]), Number(envColor[2])],
     envTotalWeight: totalWeight,
+    cameraEnvScale: resolveCameraEnvScale(environment.cameraIntensity, intensity),
   };
 }
 
@@ -2344,7 +2366,7 @@ function packKernelParamsV2({
   // KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4 = 75
   f32[KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4] = filterGlossy;
 
-  u32[76] = 0;
+  f32[76] = packedEnvironment.cameraEnvScale;
   u32[77] = 0;
   u32[78] = 0;
   u32[79] = 0;
@@ -3337,6 +3359,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
       intensity: paramF32[26],
       cosine: paramF32[28],
       sine: paramF32[29],
+      ...(paramU32[61] !== 0 ? { cameraIntensity: Math.abs(paramF32[61]) } : {}),
     }
     : null;
 
