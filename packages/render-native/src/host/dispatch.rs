@@ -57,12 +57,16 @@ const PEAK_COST_DECAY: f64 = 0.9;
 
 /// Dispatches are planned to this share of the budget, since the cost of a pixel varies across the image and the next
 /// tile may cost more than the last.
-const BUDGET_SAFETY_SHARE: f64 = 0.85;
+const BUDGET_SAFETY_SHARE: f64 = 0.75;
 
 /// Pixels that keep a large GPU busy. Below a whole image a dispatch covers about this many pixels and draws more samples
 /// instead of a bigger tile: with several samples per thread the paths of a pixel fill each other's gaps (path
 /// regeneration), so the dispatch ends close to when the average thread does, not the slowest path of a one-sample tile.
 const SATURATING_TILE_PIXELS: u64 = 1 << 17;
+
+/// While the first sweep has not seen the whole image, no tile is larger than this many pixels. A run of cheap tiles (sky)
+/// would otherwise grow the tile to its fourfold limit each time and the first costly tile (geometry) would overrun the budget.
+const EXPLORING_TILE_PIXELS: u64 = SATURATING_TILE_PIXELS;
 
 /// A rectangle of workgroups on the grid that covers the image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +122,8 @@ pub(crate) struct TileBudgetPlanner {
     /// The pixel samples (pixels times samples) the next dispatch may hold.
     allowed_work: u64,
     slowest_seconds_per_work: f64,
+    /// Sweeps begun so far; the first one explores the cost across the image.
+    sweeps_begun: u32,
 }
 
 impl TileBudgetPlanner {
@@ -131,6 +137,7 @@ impl TileBudgetPlanner {
             largest_batch: largest_batch.max(1),
             allowed_work: PIXELS_PER_CELL,
             slowest_seconds_per_work: 0.0,
+            sweeps_begun: 0,
         }
     }
 
@@ -143,7 +150,8 @@ impl TileBudgetPlanner {
     }
 
     /// The samples every dispatch of the sweep that starts now draws, never more than `remaining_samples`.
-    pub(crate) fn sweep_samples(&self, remaining_samples: u32) -> u32 {
+    pub(crate) fn sweep_samples(&mut self, remaining_samples: u32) -> u32 {
+        self.sweeps_begun += 1;
         let batch_pixels = if self.allowed_work >= self.image_pixels {
             self.image_pixels
         } else {
@@ -159,7 +167,8 @@ impl TileBudgetPlanner {
         if sweep_work * self.image_pixels <= self.allowed_work {
             return self.cell_count();
         }
-        let cells = self.allowed_work / (sweep_work * PIXELS_PER_CELL);
+        let exploring_cap = if self.sweeps_begun <= 1 { EXPLORING_TILE_PIXELS / PIXELS_PER_CELL } else { u64::MAX };
+        let cells = (self.allowed_work / (sweep_work * PIXELS_PER_CELL)).min(exploring_cap);
         cells.clamp(1, self.cell_count() as u64) as u32
     }
 
