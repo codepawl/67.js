@@ -31,7 +31,8 @@ import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAM
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { writeWebBuild } from './web-export.mjs';
 import { gameAssetIds } from '../src/game-assets.js';
-import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
+import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR, RENDER_HISTORY_FILE, normalizeJobSettings } from './agent-render-jobs.mjs';
+import { RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom } from './agent-render-estimate.mjs';
 import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
 import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, startVideoEncoderInPage } from './gpu-frame-reader.mjs';
@@ -139,6 +140,25 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   let catalogPromise;
   let packsPromise;
   let jobsPromise;
+  // Set by submitJob for the one job that may run; runJob takes it. Kept in the job folder, the history never leaves the machine.
+  let estimateForNextJob;
+  let gpuTracerWarm = false;
+  async function readRenderHistory() {
+    try {
+      return parseHistory(await readFile(join(jobRoot, RENDER_HISTORY_FILE), 'utf8'));
+    } catch {
+      return [];
+    }
+  }
+  // The history only sharpens later estimates, so a failed write never fails the job that finished.
+  async function rememberRenderJob({ settings, estimate, report }) {
+    try {
+      const history = historyWithJob(await readRenderHistory(), { settings, backend, estimate, report });
+      await writeFile(join(jobRoot, RENDER_HISTORY_FILE), JSON.stringify(history), { mode: 0o600 });
+    } catch (error) {
+      console.error(`67js could not save the render history: ${error.message}`);
+    }
+  }
   const savedGlbPaths = [];
   const savedWebBuildPaths = [];
   function jobs() {
@@ -518,6 +538,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
 
   async function runJob({ jobId, sessionId, directory, snapshot, settings, signal, progress }) {
     let jobPage;
+    let session;
     let encoder;
     let frameReceiver;
     // A stills or video job of native frames renders them all through one session; it is closed when the job ends.
@@ -525,8 +546,18 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     let pageEncodes = false;
     let suspended = false;
     const started = performance.now();
+    // One job runs at a time, so the estimate made at submission belongs to the job that starts next.
+    const estimate = estimateForNextJob;
+    estimateForNextJob = undefined;
     const metrics = { backend, requestedWidth: settings.width, requestedHeight: settings.height,
       renderSeconds: 0, captureSeconds: 0, peakNodeBytes: 0, peakBrowserHeap: 0, maximumPendingFrames: 1 };
+    async function recordPeakMemory() {
+      metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
+      metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, await sampleBrowserHeap(session));
+      if (exceedsMemoryGuard({ nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap })) {
+        throw new Error('Render job exceeded its Node RSS or sampled browser heap guard.');
+      }
+    }
     const abort = () => { jobPage?.close().catch(() => {}); };
     signal.addEventListener('abort', abort, { once: true });
     try {
@@ -551,7 +582,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       const height = settings.kind === 'video' ? Math.floor(created.render.height / 2) * 2 : created.render.height;
       if (width < 64 || height < 64) throw new Error('Render budget reduced the job below its minimum output size.');
       await jobPage.setViewportSize({ width, height });
-      const session = await jobPage.context().newCDPSession(jobPage);
+      session = await jobPage.context().newCDPSession(jobPage);
       const region = settings.region;
       if (settings.format && settings.format !== 'png') await jobPage.evaluate(prepareInput => window.__agentPreview.prepareFloatOutput(prepareInput), { sessionId: jobId });
       if (settings.passes?.includes('wireframe')) await jobPage.evaluate(prepareInput => window.__agentPreview.prepareWireframe(prepareInput), { sessionId: jobId });
@@ -668,6 +699,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             await writeFile(join(directory, `${filename}.partial`), tracedBytes, { flag: 'wx' });
             artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: 'image/png' });
           }
+          await recordPeakMemory();
           await progress({ frames: frame + 1, maximumPendingFrames: 1 });
           continue;
         }
@@ -774,12 +806,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           }
         }
           }
-        metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
-        const heapBytes = await sampleBrowserHeap(session);
-        metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, heapBytes);
-        if (exceedsMemoryGuard({ nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap })) {
-          throw new Error('Render job exceeded its Node RSS or sampled browser heap guard.');
-        }
+        await recordPeakMemory();
         await progress({ frames: frame + 1, maximumPendingFrames: 1 });
       }
       if (encoder) {
@@ -789,6 +816,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         artifacts.push({ temporary: 'render.mp4.partial', filename: 'render.mp4', mimeType: 'video/mp4' });
       }
       metrics.elapsedSeconds = (performance.now() - started) / 1000;
+      metrics.report = renderReport({ estimate, settings, metrics });
+      if (settings.renderer?.backend === 'gpu') gpuTracerWarm = true;
+      await rememberRenderJob({ settings, estimate, report: metrics.report });
       return { artifacts, metrics };
     } finally {
       signal.removeEventListener('abort', abort);
@@ -866,7 +896,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           maximumFileBytes: MAXIMUM_PACK_FILE_BYTES, maximumJsonBytes: MAXIMUM_PACK_JSON_BYTES, maximumItemsPerKind: MAXIMUM_PACK_ITEMS_PER_KIND,
           use: 'scene_asset_catalog lists packs: name, version, license, author, description and item ids. GLBs, images, looks and environments carry assetId values that work in scene_create_asset, look, hdri and texture fields. Materials and recipes are read with scene_asset_catalog { pack, material } or { pack, recipe }: pass a recipe to scene_create, and a material as a materials entry or a scene_apply set-material. Packs are installed by the user (unzip into the --packs folder); a tool call never downloads one. Invalid packs are skipped and listed under packs.rejected with the reason.',
         },
-        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1,
+        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1, estimate: RENDER_ESTIMATE_NOTE,
           maximumWidth: MAXIMUM_JOB_SIDE, maximumHeight: MAXIMUM_JOB_SIDE, maximumPixels: MAXIMUM_JOB_PIXELS,
           maximumDuration: MAXIMUM_VIDEO_SECONDS, maximumFps: 30, maximumFrames: 900, maximumStills: 8,
           encoder: 'H.264', encoders: VIDEO_ENCODERS, audio: Boolean(audioRoot), timeline: true, previewSuspendedDuringJob: true,
@@ -1228,8 +1258,18 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         const assetBytes = snapshot.recipe.format === '67js.asset' ? await (await catalog()).read(snapshot.recipe.assetId) : undefined;
         phase = 'rendering';
         try {
-          return await controller.submit({ sessionId, sourceRevision: snapshot.sourceRevision,
-            snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings });
+          // The estimate is made before the job exists, because the job suspends the scene and starts at once.
+          const size = sceneSizeFrom(await invoke('inspect', { sessionId, limit: Math.max(1, snapshot.recipe.nodes?.length ?? 1) }), snapshot.recipe);
+          const estimate = estimateRenderJob({ size, settings: normalizeJobSettings(settings, snapshot.clips, snapshot.recipe), backend, memoryBudgetMiB: memory, history: await readRenderHistory(), gpuTracerWarm });
+          estimateForNextJob = estimate;
+          try {
+            const submitted = await controller.submit({ sessionId, sourceRevision: snapshot.sourceRevision,
+              snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings });
+            return { ...submitted, estimate };
+          } catch (error) {
+            if (estimateForNextJob === estimate) estimateForNextJob = undefined;
+            throw error;
+          }
         } catch (error) {
           phase = 'ready';
           throw error;

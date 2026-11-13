@@ -190,6 +190,18 @@ Imported clip sampling remains available through `set-animation`.
 
 `scene_ask_user` is for a change the person cannot put in words. It renders the current view, opens it in their default browser on a loopback address under a random path, and waits up to `timeoutSeconds` (default 300, at most 900) for them to pin up to 16 points with a note of at most 280 characters each and press Send. Each mark comes back with its pixel, the `partId` and world `point` and `normal` the pin lands on (all `null` on empty sky), the `distance` from the camera and the part's `material`, plus the `view` camera and a PNG with the numbered pins. A cancelled or timed-out page returns `outcome` `cancelled` or `timeout` with no marks. Nothing leaves the machine and the tool takes no code or remote URL. Not yet marks: lasso regions, dragged transforms, colours, saved views and film times (issue #922 lists them).
 
+### Render estimate and report
+
+`scene_render_submit` returns `estimate` beside the job record, so an agent can see what a job costs on this device before it waits for it: `seconds`, `peakMemoryMiB` (Node plus browser heap), `framesPerSecond`, `basis` and the scene numbers it used (`parts`, `triangles` counting every placed node, `materials`, `textures`, `lights`). `scene_capabilities` topic `jobs` has the one-line summary.
+
+The estimate is a fixed cost model in `scripts/agent-render-estimate.mjs` (`COST_MODEL`): a start-up cost, a scene build cost per triangle, a per-frame cost from pixels, triangles, lights and passes, and for the path tracer a cost per pixel, sample and bounce (capped by `renderer.maxSeconds`) plus a build cost per triangle. The first GPU path trace in a server process adds about 10 s for its kernel. The same scene and settings always give the same numbers. The constants were fitted to jobs measured with `node scripts/measure-render-estimate.mjs`, which renders a small, a medium and a large scene and prints estimate against measurement; run it again after changing the model.
+
+The runtime keeps the last 16 jobs on this machine in `render-history.json` in the jobs folder: each entry holds the model's estimate and the measurement of one finished job, with its kind (raster or path tracer, image or video, backend). Once two jobs of the same kind are there, the estimate is multiplied by the median measured-over-estimated ratio of those jobs, never by more than 4 either way, and `basis` says so. The file stays on the machine; a damaged file counts as no history. `modelSeconds` and `modelPeakMemoryMiB` are the numbers before this correction.
+
+When a job completes, `scene_render_result` has `metrics.report`, one record of what happened: `measured` (`seconds`, `peakMemoryMiB`, `frames`, `secondsPerFrame`), the `estimate` it was compared with and `secondsRatio` (measured over estimated), `samplesDrawn` and `samplesRequested` for a path trace, and `fallbacks`, a list of sentences for everything that ran differently from the request (a frame cut down to fit `--memory`, a backend that fell back, a denoiser that was swapped). `report` stays in the concise answer; the raw counters it is built from (`peakNodeBytes`, `peakBrowserHeap`, `elapsedSeconds`) are in the detailed one.
+
+Limits of the estimate: it covers a job's own time, not the wait for a busy machine; memory is the sampled Node RSS plus the browser JS heap, which is a lower bound for GPU memory; path tracer estimates assume the CPU or GPU backend named in the settings, and a native tracer that cannot run falls back (see `fallbacks`).
+
 ### Response format
 
 `scene_review`, `scene_render_status`, `scene_render_result` and `scene_capabilities` take `response_format`: `concise` or `detailed`.
