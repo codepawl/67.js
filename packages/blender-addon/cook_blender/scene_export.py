@@ -223,8 +223,15 @@ def export_environment_texture(world, work_directory, report):
 
 def geometry_nodes_input_values(modifier):
     """The custom properties of a modifier (Geometry Nodes inputs), as a tuple; None when one names another object or collection."""
+    if modifier.type != "NODES":
+        return ()
+    try:
+        keys = list(modifier.keys())
+    except TypeError:
+        # This Blender build keeps the inputs somewhere this reader does not know: treat the object as its own geometry.
+        return None
     values = []
-    for key in modifier.keys():
+    for key in keys:
         value = modifier[key]
         if isinstance(value, (bpy.types.Object, bpy.types.Collection)):
             return None
