@@ -783,11 +783,88 @@ export function createFlightController(options = {}) {
   });
 }
 
+// Boat: throttle axis (moveForward) and rudder axis (moveX, positive turns right). The hull is a floating body of a live physics system
+// (createPhysicsSystem, with float.boat on the body), so the controller pushes nothing itself: each step it hands the two axes to
+// physics.setBoatControls, which applies them as forces at the stern, and it reads the hull pose back. The runtime lists the physics
+// system after the controller. state.yaw is 0 facing -Z like the other controllers, state.roll and state.pitch are the hull's tilt in radians.
+export function createBoatController(options = {}) {
+  const owner = 'createBoatController';
+  const input = requireInput(owner, options.input);
+  const physics = options.physics;
+  if (!physics || typeof physics.setBoatControls !== 'function' || typeof physics.getPose !== 'function') {
+    throw new TypeError(`${owner} physics must be a physics system from createPhysicsSystem, got ${describe(physics)}. Pass the system that holds the boat body.`);
+  }
+  if (typeof options.body !== 'string' || options.body.length === 0) {
+    throw new TypeError(`${owner} body must be the name of the boat body in the physics system, such as "boat", got ${describe(options.body)}.`);
+  }
+  const bodyName = options.body;
+  const node = validateNode(owner, options.node);
+  const names = { throttle: options.throttle ?? 'moveForward', rudder: options.rudder ?? 'moveX' };
+  const readPose = () => physics.getPose(bodyName);
+  const start = readPose().translation;
+  const state = {
+    position: [...start],
+    previousPosition: [...start],
+    velocity: [0, 0, 0],
+    yaw: 0,
+    pitch: 0,
+    roll: 0,
+    forwardSpeed: 0,
+    speed: 0,
+    throttle: 0,
+    steer: 0,
+    grounded: false,
+    airborne: false,
+    braking: false,
+  };
+
+  function writeNode() {
+    writeNodePose(node, state.position, state.yaw);
+    if (node && 'rotationX' in node) node.rotationX = state.pitch;
+    if (node && 'rotationZ' in node) node.rotationZ = state.roll;
+  }
+
+  function readHull(stepSeconds) {
+    const { translation, rotation: [x, y, z, w] } = readPose();
+    const bowX = -2 * (x * z + w * y);
+    const bowZ = -(1 - 2 * (x * x + y * y));
+    state.previousPosition = [...state.position];
+    state.position = [...translation];
+    state.velocity = state.position.map((value, axis) => (value - state.previousPosition[axis]) / stepSeconds);
+    state.yaw = Math.atan2(bowX, -bowZ);
+    state.forwardSpeed = state.velocity[0] * bowX + state.velocity[2] * bowZ;
+    state.speed = Math.hypot(state.velocity[0], state.velocity[2]);
+    state.pitch = Math.asin(clamp(-2 * (y * z - w * x), -1, 1));
+    state.roll = Math.atan2(2 * (w * z + x * y), 1 - 2 * (x * x + z * z));
+  }
+
+  function advance(stepSeconds) {
+    if (!(stepSeconds > 0)) return;
+    state.throttle = clamp(input.getAxis(names.throttle), -1, 1);
+    state.steer = clamp(input.getAxis(names.rudder), -1, 1);
+    physics.setBoatControls(bodyName, { throttle: state.throttle, rudder: state.steer });
+    readHull(stepSeconds);
+    writeNode();
+  }
+
+  return finishController({
+    name: options.name ?? 'boat',
+    kind: 'boat',
+    state,
+    writeNode,
+    advance,
+    teleport() {
+      throw new RangeError(`${owner} cannot teleport: the hull belongs to the physics system. Set its pose there.`);
+    },
+  });
+}
+
 const MAXIMUM_REGISTERED_KINDS = 64;
 const controllerFactories = new Map([
   ['character', createCharacterController],
   ['vehicle', createVehicleController],
   ['flight', createFlightController],
+  ['boat', createBoatController],
 ]);
 const rigFactories = new Map([
   ['follow', createFollowCamera],

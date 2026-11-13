@@ -35,7 +35,8 @@ const PROPERTIES = {
     sunElevation: 1, sunRotation: 1, turbidity: 1, groundAlbedo: 1, aerialPerspective: 1, ozone: 1,
   },
   // Frame effects: exposure, and the focus distance of the depth of field (needs effects.depthOfField.blur above 0).
-  effects: { exposure: 1, focusDistance: 1 },
+  // distortionStrength and flashIntensity are gains from 0 to 1 on every source of the distortion and flash steps.
+  effects: { exposure: 1, focusDistance: 1, distortionStrength: 1, flashIntensity: 1 },
 };
 // Kinds with one target in the scene, so a track names no ID.
 const SINGLETON_KINDS = new Set(['camera', 'sun', 'environment', 'effects']);
@@ -50,7 +51,7 @@ const LOOK_RANGES = {
     ambientIntensity: [0, 100], fillIntensity: [0, 100], environmentIntensity: [0, 100], environmentRotation: [-100, 100],
     sunElevation: [-90, 90], sunRotation: [-360, 360], turbidity: [1, 10], groundAlbedo: [0, 1], aerialPerspective: [0, 4], ozone: [0, 10],
   },
-  effects: { exposure: [0.01, 16], focusDistance: [0.01, 100000] },
+  effects: { exposure: [0.01, 16], focusDistance: [0.01, 100000], distortionStrength: [0, 1], flashIntensity: [0, 1] },
   geometry: { oceanTime: [-1e6, 1e6] },
 };
 const INTERPOLATIONS = ['LINEAR', 'STEP', 'SMOOTH', 'CUBICSPLINE'];
@@ -157,6 +158,12 @@ function checkLookTarget(track, recipe) {
   }
   if (kind === 'effects' && property === 'focusDistance' && !(recipe.effects.depthOfField?.blur > 0)) {
     throw invalidField('motion.tracks.property', 'effects.focusDistance', 'a track only when effects.depthOfField.blur is above 0, such as blur 2; a camera with an fStop focuses on its target, so move the camera target track instead');
+  }
+  if (kind === 'effects' && property === 'distortionStrength' && !recipe.effects.distortion?.length) {
+    throw invalidField('motion.tracks.property', 'effects.distortionStrength', 'a track only when effects.distortion names a source, such as { "shape": "ring" }');
+  }
+  if (kind === 'effects' && property === 'flashIntensity' && !recipe.effects.flash?.length) {
+    throw invalidField('motion.tracks.property', 'effects.flashIntensity', 'a track only when effects.flash names a source, such as { "intensity": 4 }');
   }
   if (kind === 'environment' && PHYSICAL_SKY_TRACK_PROPERTIES.has(property) && recipe.environment.sky?.type !== 'physical') {
     throw invalidField('motion.tracks.property', `environment.${property}`, 'a track only when environment.sky is { "type": "physical" }');
@@ -808,7 +815,9 @@ export function motionEnvironment(environment, sampled) {
 
 /** Effects (a clone the caller may change) with the exposure and focus distance a sampled motion sets. */
 export function motionEffects(effects, sampled) {
-  const { exposure, focusDistance } = sampled.effects;
+  const { exposure, focusDistance, distortionStrength, flashIntensity } = sampled.effects;
+  for (const source of distortionStrength === undefined ? [] : effects.distortion ?? []) source.strength *= distortionStrength;
+  for (const source of flashIntensity === undefined ? [] : effects.flash ?? []) source.intensity *= flashIntensity;
   if (exposure !== undefined) effects.exposure = exposure;
   if (focusDistance !== undefined) effects.depthOfField.focusDistance = focusDistance;
   return effects;

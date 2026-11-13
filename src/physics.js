@@ -882,6 +882,11 @@ export function applyBuoyancyImpulses(preparedScene, bodies, time) {
   buoyancyModule.applyBuoyancy(preparedScene, bodies, time);
 }
 
+/** Set the live throttle and rudder of a resolved boat (see physics-boat.js). */
+export function setBoatControls(boat, controls, label) {
+  buoyancyModule.setBoatControls(boat, controls, label);
+}
+
 /** Push every dynamic body by the force fields at `fieldTime`, as one impulse over a step. */
 export function applyForceFieldImpulses(preparedScene, bodies, fieldTime) {
   const fieldAccel = [0, 0, 0];
@@ -1201,6 +1206,8 @@ function recordedScene(preparedScene, timeline, recording) {
     bodyIndex,
     sample,
     bindParts,
+    /** The stern of a boat body in body space, [x, y, z], or null when the body has no boat. */
+    sternOf: name => preparedScene.buoyancy?.floating.find(floater => floater.bodyIndex === bodyIndex(name))?.boat?.stern ?? null,
     colliderNames: Object.freeze(preparedScene.colliders.map(collider => preparedScene.bodies[collider.body].name)),
     /** Contact and sensor start or stop events in step order, with collider indices into colliderNames. */
     contactEvents: Object.freeze(recording.contactEvents),
