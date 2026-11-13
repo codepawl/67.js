@@ -8,7 +8,10 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createAgentRenderJobs, jobDeadlineMs } from '../scripts/agent-render-jobs.mjs';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const limits = { maxOutputBytes: 1024, maxFrameBytes: 128, maxStoreBytes: 1024 ** 2, cleanupMs: 100 };
+// close() waits this long for an aborted job to settle. It is a liveness bound, not a speed target: under load the
+// settle step (a few file writes) can take far longer than 100 ms. The test that proves the bound uses its own 10 ms.
+const LIVENESS_BOUND_MILLISECONDS = 5000;
+const limits = { maxOutputBytes: 1024, maxFrameBytes: 128, maxStoreBytes: 1024 ** 2, cleanupMs: LIVENESS_BOUND_MILLISECONDS };
 const request = () => ({ sourceRevision: 7, snapshot: { recipe: { format: 'fixture', color: [1, 0, 0] } }, settings: { kind: 'image', width: 64, height: 64 } });
 
 function deferred() {
@@ -463,6 +466,7 @@ test('a path tracer job runs on the cpu unless it asks for the gpu, and film job
   await assert.rejects(submitWith({ backend: 'metal' }), /backend must be cpu, gpu or native/);
   const film = await submitWith({ backend: 'gpu', samples: 16 }, 'video');
   assert.equal(controller.status(film.jobId).settings.renderer.samples, 16);
+  await terminal(controller, film.jobId);
   await controller.close();
 });
 
