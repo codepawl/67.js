@@ -289,7 +289,54 @@ Motion blur needs camera `motion` tracks and a render job with `settings.motion`
 With `motionBlur.objects` above zero, a part that moves between `motion.start + elapsed - shutter` and `motion.start + elapsed` also smears along its own screen path while the still background stays sharp (`1` is the full shutter). It reads each pixel's part from an object ID pass, so it costs a second draw of the frame, and it replaces the camera smear on that frame, since it covers the camera's motion too. A part is moved as one rigid body by its node transform: a skinned or morphed part, an imported asset and a translucent part are not smeared per object.
 Both effects compile their shader and allocate their targets the first time a frame uses them, and a scene that leaves them at zero pays nothing.
 
-The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `glare`, `lensDistortion`, `stylize` and `composite`. Each is its own group, off until a recipe names it, and a group at its neutral values draws nothing. They run on the resolved HDR frame, before bloom and tone mapping, in this order: depth of field, motion blur, glare, lens distortion, color balance, stylize, composite. Like the two above they are deterministic, and `colorBalance`, `glare`, `lensDistortion`, `stylize` and `composite` load their code and shaders only for a recipe that names one.
+The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `distortion`, `flash`, `glare`, `lensDistortion`, `stylize` and `composite`. Each is its own group, off until a recipe names it, and a group at its neutral values draws nothing. They run on the resolved HDR frame, before bloom and tone mapping, in this order: depth of field, motion blur, distortion, flash, glare, lens distortion, color balance, stylize, composite. Like the two above they are deterministic, and `colorBalance`, `glare`, `lensDistortion`, `stylize` and `composite` load their code and shaders only for a recipe that names one.
+
+### Air distortion and flash
+
+![A street before and after the shock ring and heat haze: the ring bends the building edges, the haze shimmers around the fire, and the cars in front stay put.](https://raw.githubusercontent.com/codepawl/67.js/main/docs/post-distortion-comparison.jpg)
+
+A blast sells itself in its first frames: a flash, a ring that bends the air, and shimmer above the fire. `effects.distortion` bends the picture behind it, and `effects.flash` lifts the light around a point for a moment. Both are steps you place in the scene, like a light, and both follow the scene clock, so any frame renders the same.
+
+```json
+{ "effects": {
+  "flash": { "node": "bomb", "startTime": 0, "attack": 0, "decay": 0.15, "intensity": 3.5, "radius": 6, "ambient": 0.15 },
+  "distortion": [
+    { "shape": "ring", "node": "bomb", "startTime": 0, "speed": 45, "thickness": 2.2, "strength": 1, "falloff": 0.6, "edge": 0.5 },
+    { "shape": "haze", "centre": [0, 3, -16], "region": "sphere", "size": [5, 4, 5], "noiseScale": 1.1, "scroll": 3, "strength": 0.9 }
+  ]
+} }
+```
+
+Each step takes one source or a list of up to four. Every source places itself with `centre` (`[x, y, z]` metres) or with `node`, the ID of a node it follows; the recipe fails with the node IDs it has when one is unknown.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `distortion.shape` | required | `ring` or `haze` |
+| `distortion.startTime` | `0` | Ring only. Seconds on the scene clock, `0` to `3600` |
+| `distortion.speed` | `40` | Ring only. Metres per second, `0` to `10000`; the radius at time `t` is `speed * (t - startTime)` |
+| `distortion.thickness` | `1.5` | Ring only. Metres, `0.01` to `1000` |
+| `distortion.strength` | `0.5` ring, `0.3` haze | `0` to `1`. At `1` the picture shifts by up to 15 percent of the image height for a ring and 4 percent for haze |
+| `distortion.falloff` | `0.4` | Ring only. `0` to `20`; the strength decays as `exp(-falloff * seconds)` while the ring grows |
+| `distortion.edge` | `0` | Ring only. `0` to `2`. A warm light lift on the thin band at the ring radius, scaled by the ring's strength, so the front reads as a visible edge on flat walls. Off by default |
+| `distortion.maxRadius` | `200` | Ring only. Metres, `0.01` to `100000`; the ring vanishes past it |
+| `distortion.region` | `box` | Haze only. `box` or `sphere` |
+| `distortion.size` | `[2, 2, 2]` | Haze only. Half-extents in metres, each `0.01` to `1000` |
+| `distortion.noiseScale` | `1.5` | Haze only. Noise cells per metre, `0.01` to `100` |
+| `distortion.scroll` | `1` | Haze only. Metres per second the shimmer rises, `0` to `100` |
+| `flash.startTime` | `0` | Seconds on the scene clock |
+| `flash.attack` | `0.05` | Seconds to rise to full brightness, `0` to `60`; `0` is instant |
+| `flash.decay` | `0.4` | Seconds to fall from full brightness to zero, `0.01` to `60` |
+| `flash.intensity` | `4` | `0` to `1000`, linear scene light added at the point |
+| `flash.color` | `[1, 0.85, 0.6]` | Three numbers, `0` to `1` |
+| `flash.radius` | `50` | Metres, `0.01` to `100000`. The light is `intensity / (1 + (distance / radius)^2)`, so it halves at this distance from the point |
+| `flash.ambient` | `0` | `0` to `0.5`. A screen-wide gain at the flash's peak (`0.15` is 15 percent), so the frame far from the point does not read dark beside it |
+| `*.time` | `0` | Seconds. The scene sets it from the playhead; set it yourself to hold a still of a scene with no motion |
+
+The ring bends the picture where the line of sight passes the centre at the ring radius, and the haze shifts it by noise taken inside its box or sphere. Both read the depth buffer: a surface in front of the bending air is not dragged along, and air behind a wall does nothing. The flash adds light before bloom and tone mapping, so a bright flash feeds bloom where bloom is on. Surfaces are lit by their distance from the point; sky is lit by the distance of its line of sight.
+
+Animate them with the clock and with motion tracks. `sampleMotion` and a timeline set the time of every source, and a followed node carries its source along. A track `{ "kind": "effects", "property": "distortionStrength" }` or `"flashIntensity"` multiplies every source of that step by a gain from `0` to `1`, to fade or to key them by hand; it needs the step in the recipe. A mask on `colorBalance`, `stylize` or `composite` cannot be combined with an active distortion, because the mask is built in the undistorted frame. The steps draw nothing, and load no code, in a recipe that does not name them.
+
+To reproduce the picture and the clip: `node bench/post/air-distortion.mjs --out=artifacts/air-distortion`.
 
 ## Directional shadows
 
