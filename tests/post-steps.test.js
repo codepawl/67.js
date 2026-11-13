@@ -34,7 +34,7 @@ function fakeRenderer(context) {
   };
 }
 
-const STAGE_NAMES = ['Glare', 'Lens distortion', 'Color balance', 'Stylize', 'Composite'];
+const STAGE_NAMES = ['Distortion', 'Flash', 'Glare', 'Lens distortion', 'Color balance', 'Stylize', 'Composite'];
 
 test('a look that names no step resolves exactly as before', async () => {
   await loadAgentSceneModules({});
@@ -87,7 +87,7 @@ test('each stage draws only for a frame that sets its step, and frees its target
   const context = recordingContext(calls);
   const renderer = installPostSteps(installCameraEffects(fakeRenderer(context)));
   assert.deepEqual(renderer.postStages.slice(2).map(stage => stage.name), STAGE_NAMES);
-  assert.equal(installPostSteps(renderer).postStages.length, 7);
+  assert.equal(installPostSteps(renderer).postStages.length, 9);
   const unset = { eye: [0, 1, 5], effects: {} };
   const neutral = { eye: [0, 1, 5], effects: { colorBalance: {}, glare: {}, lensDistortion: {}, stylize: {}, composite: {} } };
   const named = [

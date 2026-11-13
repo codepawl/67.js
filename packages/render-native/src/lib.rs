@@ -4,8 +4,8 @@
 mod cycles;
 mod host;
 
-use napi::bindgen_prelude::{Float32Array, Uint32Array, Uint8Array};
-use napi::Result;
+use napi::bindgen_prelude::{Float32Array, Object, Uint32Array, Uint8Array};
+use napi::{Env, Result};
 use napi_derive::napi;
 
 use crate::host::denoise::{atrous_denoise, DenoiseInput};
@@ -19,8 +19,16 @@ use crate::host::cycles_session::{
 };
 use crate::host::cycles_update::UpdatableTable;
 use crate::host::session::{
-    get_cached_device, prepare_scene, run_cycles_lobe_probe, trace_samples, CyclesTrace, JobShape,
+    get_cached_device, note_environment_closing, note_environment_loaded, prepare_scene, run_cycles_lobe_probe, trace_samples, CyclesTrace, JobShape,
 };
+
+/// Registers the shutdown step that destroys the GPU device before the process exits (see `note_environment_closing`).
+#[napi(module_exports)]
+pub fn register_exit_cleanup(_exports: Object, env: Env) -> Result<()> {
+    note_environment_loaded();
+    env.add_env_cleanup_hook((), |()| note_environment_closing())?;
+    Ok(())
+}
 
 const KERNEL_SOURCE: &str = include_str!("kernel.wgsl");
 /// The texel entry point of the light bake, appended to the kernel for a bake only.
