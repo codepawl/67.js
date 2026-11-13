@@ -235,3 +235,25 @@ fn an_expensive_region_after_cheap_tiles_does_not_get_a_dispatch_sized_for_the_c
     cautious.record(200_000, 0.0001);
     assert!(cheap_allowed < cautious.cell_budget(1), "the peak cost of the first tile limits the next ones");
 }
+
+#[test]
+fn one_stalled_tiny_dispatch_does_not_pin_the_tiles_small() {
+    let mut planner = TileBudgetPlanner::new(BUDGET_SECONDS, 1920, 1080, 1);
+    // The first 64 pixel dispatch stalls for 0.3 s (a driver hiccup), then normal ones follow.
+    planner.record(64, 0.3);
+    for _ in 0..40 {
+        let work = planner.cell_budget(1) as u64 * 64;
+        planner.record(work, work as f64 * 1e-8 + 0.0002);
+    }
+    assert!(planner.cell_budget(1) > 1000, "{} cells", planner.cell_budget(1));
+}
+
+#[test]
+fn below_a_whole_image_a_dispatch_draws_more_samples_on_a_tile_that_keeps_the_card_busy() {
+    // 1920 x 1080 at 1e-8 s a pixel sample: a whole-image sample takes 21 ms, the budget 8 ms.
+    let dispatches = play_render(1920, 1080, 64, 0.0002, 1e-8, 64);
+    let steady: Vec<_> = dispatches.iter().skip(12).collect();
+    assert!(steady.iter().all(|(_, work)| *work >= 1 << 16), "tiles stay large enough to fill the card: {steady:?}");
+    assert!(dispatches.len() < 400, "{} dispatches", dispatches.len());
+    assert!(steady.iter().all(|(seconds, _)| *seconds <= BUDGET_SECONDS * 1.05));
+}

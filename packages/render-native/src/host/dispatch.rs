@@ -46,7 +46,23 @@ const PEAK_COST_MINIMUM_BUDGET_SHARE: f64 = 0.25;
 
 /// The planned size of the next dispatch may not fall below this share of the slowest cost per pixel sample seen, so a run
 /// of cheap tiles (sky) does not lead to a dispatch over expensive ones (geometry) that overruns the budget.
-const PEAK_COST_FLOOR_SHARE: f64 = 0.5;
+const PEAK_COST_FLOOR_SHARE: f64 = 0.6;
+
+/// Only a dispatch of at least this many pixel samples sets the peak cost: a tiny one is mostly the fixed cost of a
+/// submission, and one stall in it would otherwise pin every later tile to the smallest size.
+const PEAK_COST_MINIMUM_WORK: u64 = 4096;
+
+/// The peak cost fades by this factor per dispatch, so one slow stretch of the image does not limit the rest of the render.
+const PEAK_COST_DECAY: f64 = 0.9;
+
+/// Dispatches are planned to this share of the budget, since the cost of a pixel varies across the image and the next
+/// tile may cost more than the last.
+const BUDGET_SAFETY_SHARE: f64 = 0.85;
+
+/// Pixels that keep a large GPU busy. Below a whole image a dispatch covers about this many pixels and draws more samples
+/// instead of a bigger tile: with several samples per thread the paths of a pixel fill each other's gaps (path
+/// regeneration), so the dispatch ends close to when the average thread does, not the slowest path of a one-sample tile.
+const SATURATING_TILE_PIXELS: u64 = 1 << 17;
 
 /// A rectangle of workgroups on the grid that covers the image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,8 +144,13 @@ impl TileBudgetPlanner {
 
     /// The samples every dispatch of the sweep that starts now draws, never more than `remaining_samples`.
     pub(crate) fn sweep_samples(&self, remaining_samples: u32) -> u32 {
-        let whole_image_batches = (self.allowed_work / self.image_pixels).min(self.largest_batch as u64) as u32;
-        whole_image_batches.min(remaining_samples).max(1)
+        let batch_pixels = if self.allowed_work >= self.image_pixels {
+            self.image_pixels
+        } else {
+            SATURATING_TILE_PIXELS.min(self.image_pixels)
+        };
+        let batches = (self.allowed_work / batch_pixels).min(self.largest_batch as u64) as u32;
+        batches.min(remaining_samples).max(1)
     }
 
     /// The cells the next tile of a sweep of `samples` samples may hold; at least one.
@@ -146,11 +167,12 @@ impl TileBudgetPlanner {
     pub(crate) fn record(&mut self, work: u64, seconds: f64) {
         let work = work.max(1);
         let seconds_per_work = (seconds / work as f64).max(1e-12);
-        if seconds >= self.budget_seconds * PEAK_COST_MINIMUM_BUDGET_SHARE {
+        self.slowest_seconds_per_work *= PEAK_COST_DECAY;
+        if work >= PEAK_COST_MINIMUM_WORK && seconds >= self.budget_seconds * PEAK_COST_MINIMUM_BUDGET_SHARE {
             self.slowest_seconds_per_work = self.slowest_seconds_per_work.max(seconds_per_work);
         }
         let planning_cost = seconds_per_work.max(self.slowest_seconds_per_work * PEAK_COST_FLOOR_SHARE);
-        let fitting_work = (self.budget_seconds / planning_cost).min(u64::MAX as f64) as u64;
+        let fitting_work = (self.budget_seconds * BUDGET_SAFETY_SHARE / planning_cost).min(u64::MAX as f64) as u64;
         let growth_ceiling = work.saturating_mul(BATCH_GROWTH_LIMIT as u64);
         let largest_work = self.image_pixels.saturating_mul(self.largest_batch as u64);
         self.allowed_work = fitting_work.min(growth_ceiling).min(largest_work).max(PIXELS_PER_CELL);
