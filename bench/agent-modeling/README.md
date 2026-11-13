@@ -10,11 +10,11 @@ earns its place only if it raises these numbers.
 
 Both arms now:
 
-- deny the kill commands, `Get-Process`, `wmic`, `cmd`, `powershell` and `pwsh` as Bash rules, and the PowerShell tool (`shell-arm-safety.mjs`). Claude Code refuses a compound command that contains one of them, such as `echo a && taskkill ...`.
+- deny, for Claude Code agents, the kill commands, `Get-Process`, `wmic`, `cmd`, `powershell` and `pwsh` as Bash rules, and the PowerShell tool (`shell-arm-safety.mjs`). Claude Code refuses a compound command that contains one of them, such as `echo a && taskkill ...`.
 - tell the agent in the prompt never to stop processes and to close its own browser.
 - refuse to start unless `AGENT_BENCH_SHELL_ARMS=1` is set.
 
-A script the agent writes can still start a process killer from inside node, which the rules cannot see. Set `AGENT_BENCH_SHELL_ARMS=1` only on a machine where nothing else runs, never on a shared workstation. The MCP arms (`run.mjs`, `bench.mjs`, `blender.mjs`) give the agent no shell and need no opt-in.
+`llms-only.mjs --agent agy` gets no deny rules: its settings file allows `command(*)`, so only the prompt rule and the opt-in cover it. A script the agent writes can still start a process killer from inside node, which the rules cannot see. Set `AGENT_BENCH_SHELL_ARMS=1` only on a machine where nothing else runs, never on a shared workstation. The MCP arms (`run.mjs`, `bench.mjs`, `blender.mjs`) give the agent no shell and need no opt-in.
 
 ## Tasks
 
