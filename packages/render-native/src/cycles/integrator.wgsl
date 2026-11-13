@@ -706,8 +706,8 @@ fn int_accumulate_volume_direct_sample(
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-  let pixel_x = global_id.x;
-  let pixel_y = global_id.y;
+  let pixel_x = global_id.x + kernel_params.tile_origin.x;
+  let pixel_y = global_id.y + kernel_params.tile_origin.y;
   if (pixel_x >= kernel_params.image_width || pixel_y >= kernel_params.image_height) {
     return;
   }

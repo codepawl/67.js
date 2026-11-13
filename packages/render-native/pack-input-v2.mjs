@@ -1819,6 +1819,24 @@ export function validateMaxSeconds(maxSeconds, callerName) {
   }
 }
 
+// The shortest dispatch time budget a caller may ask for: a dispatch costs a submission and a wait, so a budget below this
+// cannot be met and only adds dispatches. The longest stays under the 2 s driver timeout (the default dispatch is about 500 ms).
+export const MIN_DISPATCH_BUDGET_MS = 1;
+export const MAX_DISPATCH_BUDGET_MS = 1000;
+
+/** Rejects a `dispatchBudgetMs` that is not a finite number from 1 to 1000; `undefined` keeps the whole-image dispatches. */
+export function validateDispatchBudgetMs(dispatchBudgetMs, callerName) {
+  if (dispatchBudgetMs === undefined) {
+    return;
+  }
+  requireNumberType(dispatchBudgetMs, 'dispatchBudgetMs', callerName);
+  if (!Number.isFinite(dispatchBudgetMs) || dispatchBudgetMs < MIN_DISPATCH_BUDGET_MS || dispatchBudgetMs > MAX_DISPATCH_BUDGET_MS) {
+    throw new RangeError(
+      `${callerName}: \`dispatchBudgetMs\` must be a finite number of milliseconds from ${MIN_DISPATCH_BUDGET_MS} to ${MAX_DISPATCH_BUDGET_MS}; got ${dispatchBudgetMs}. Pass about 8 to keep a display on the same GPU smooth, or leave it out for dispatches of about 500 ms.`
+    );
+  }
+}
+
 /** Rejects an image whose accumulation buffer would not fit one storage buffer on the device. */
 export function validateImagePixelCount(width, height, callerName) {
   if (width * height > MAX_TRACE_PIXELS) {
@@ -1966,6 +1984,7 @@ export function validatePackOptions(options, callerName, requireDimensionsAndSam
   // samplesPerDispatch is optional (undefined means "let the addon choose"); only validate when provided.
   requireFiniteIntegerInRangeIfPresent(samplesPerDispatch, 'samplesPerDispatch', 1, 65536, callerName);
   validateMaxSeconds(options.maxSeconds, callerName);
+  validateDispatchBudgetMs(options.dispatchBudgetMs, callerName);
   resolveSamplingOptions(options, callerName);
   resolveEnvCompensationFraction(options.envCompensation, callerName);
   validateDenoiseOption(options.denoise, callerName);
