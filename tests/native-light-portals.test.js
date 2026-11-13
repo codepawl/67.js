@@ -18,7 +18,7 @@ const SEEDS = [1, 2, 3, 4];
 // The room is 4 wide, 3 high and 4 deep, its walls are 0.2 thick slabs, and its west wall has a window 2 wide and 1 high.
 function slab(centerX, centerY, centerZ, sizeX, sizeY, sizeZ) {
   const matrix = new Float32Array([sizeX, 0, 0, 0, 0, sizeY, 0, 0, 0, 0, sizeZ, 0, centerX, centerY, centerZ, 1]);
-  return { name: 'wall', geometry: box(0, 1), matrix, material: { color: [0.7, 0.7, 0.7] } };
+  return { name: 'wall', geometry: box(0, 1), matrix, material: { color: [0.35, 0.35, 0.35] } };
 }
 
 function roomParts({ withCeiling, withOutsideBox }) {
