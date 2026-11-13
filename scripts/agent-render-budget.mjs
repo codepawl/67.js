@@ -3,7 +3,7 @@
 // would cost, so the same scene, budget and history always give the same pick.
 
 /** What scene_capabilities topic jobs says about the budget. The details are in docs/mcp.md. */
-export const RENDER_BUDGET_NOTE = 'settings.budget { secondsPerFrame | framesPerSecond, memoryMiB? } replaces hand-picked renderer settings: width and height become the largest frame, and the job takes the best candidate whose estimate fits (path tracer at 256, 64 or 16 samples, then raster at scale 1, 0.75, 0.5, 0.25). secondsPerFrame counts the whole job divided by its frames; framesPerSecond is a render-speed budget (not settings.fps, the video rate) and counts only the per-frame cost, leaving startup and scene build out. A pick is expected to use at most 85% of the time. submit returns budget { picked, fits, reason, considered }; when nothing fits the cheapest candidate runs and fits is false.';
+export const RENDER_BUDGET_NOTE = 'settings.budget { secondsPerFrame | framesPerSecond, memoryMiB? } replaces hand-picked renderer settings: width and height become the largest frame, and the job takes the best candidate whose estimate fits (path tracer at 256, 64 or 16 samples, then raster at scale 1, 0.75, 0.5, 0.25). secondsPerFrame counts the whole job divided by its frames; framesPerSecond is a render-speed budget (not settings.fps, the video rate) and counts only the per-frame cost, leaving startup and scene build out. A pick is expected to use at most 85% of the time. submit returns budget { picked, fits, reason, considered }, and picked.tier names the quality tier (final, realtime-high or realtime, draft); when nothing fits the cheapest candidate runs and fits is false.';
 
 export const BUDGET_LIMITS = Object.freeze({
   secondsPerFrame: Object.freeze({ minimum: 0.001, maximum: 3600 }),
@@ -59,7 +59,7 @@ export function budgetCandidates(base, tracerBackend) {
   const tracerAllowed = !TRACER_BLOCKERS.some(name => base[name]) && !(base.format && base.format !== 'png');
   if (tracerAllowed) {
     for (const samples of PATH_TRACER_SAMPLE_STEPS) {
-      candidates.push({ label: `path tracer, ${samples} samples, full size`, settings: { ...base, renderer: { type: 'pathTracer', backend: tracerBackend, samples, denoise: 'wavelet' } } });
+      candidates.push({ tier: 'final', label: `path tracer, ${samples} samples, full size`, settings: { ...base, quality: 'final', renderer: { type: 'pathTracer', backend: tracerBackend, samples, denoise: 'wavelet' } } });
     }
   }
   // A region is placed in pixels of the full frame, so a region job keeps the full size.
@@ -67,7 +67,9 @@ export function budgetCandidates(base, tracerBackend) {
     const { width, height } = scaledSize(base, scale);
     const previous = candidates[candidates.length - 1]?.settings;
     if (previous && !previous.renderer && previous.width === width && previous.height === height) continue;
-    candidates.push({ label: `raster, ${scale === 1 ? 'full size' : `${scale} scale`}`, settings: { ...base, width, height } });
+    // Full size raster is Glaze at its best for the device; a smaller frame is the draft tier. The estimate cannot tell realtime from realtime-high, so realtime is never picked here.
+    const tier = scale === 1 ? (tracerBackend === 'cpu' ? 'realtime' : 'realtime-high') : 'draft';
+    candidates.push({ tier, label: `raster, ${scale === 1 ? 'full size' : `${scale} scale`}`, settings: { ...base, width, height, quality: tier } });
   }
   return candidates;
 }
@@ -114,11 +116,11 @@ export function chooseBudgetSettings({ base, budget, tracerBackend, frameCount, 
     settings,
     report: {
       requested,
-      picked: { label, width: settings.width, height: settings.height, renderer: settings.renderer ? { backend: settings.renderer.backend, samples: settings.renderer.samples, denoise: settings.renderer.denoise } : 'raster', expected: { ...cost(picked.estimate), secondsPerFrame: picked.secondsPerFrame } },
+      picked: { tier: picked.tier, label, width: settings.width, height: settings.height, renderer: settings.renderer ? { backend: settings.renderer.backend, samples: settings.renderer.samples, denoise: settings.renderer.denoise } : 'raster', expected: { ...cost(picked.estimate), secondsPerFrame: picked.secondsPerFrame } },
       fits: Boolean(fitting),
       reason: fitting ? reasonForFit(picked, considered, budget) : reasonForMiss(picked, budget, frameCount),
       ...(warnings.length ? { warnings } : {}),
-      considered: considered.map(candidate => ({ label: candidate.label, secondsPerFrame: candidate.secondsPerFrame, peakMemoryMiB: candidate.estimate.peakMemoryMiB, fits: fits(candidate) })),
+      considered: considered.map(candidate => ({ tier: candidate.tier, label: candidate.label, secondsPerFrame: candidate.secondsPerFrame, peakMemoryMiB: candidate.estimate.peakMemoryMiB, fits: fits(candidate) })),
       ...(failures.length ? { skipped: failures } : {}),
     },
   };

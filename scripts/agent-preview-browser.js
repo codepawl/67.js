@@ -21,6 +21,7 @@ import { assetCopyKey, recipeAssetNeeds } from '../src/agent-scene-assets.js';
 import { exportGlb } from '../src/export.js';
 import '../src/texture-update.js';
 import { updatePartVertices } from '../src/update-part-vertices.js';
+import { rasterOptionsFor } from './agent-render-quality.mjs';
 import { hasPatternTextures } from './agent-preview-textures.js';
 import { TEXTURE_SEQUENCE_LIMITS } from '../src/texture-sequence-limits.js';
 import { registerCatalogEnvironment, registerCatalogLook } from '../src/look-catalog.js';
@@ -526,7 +527,7 @@ function cascadesFor(scene) {
   return count > 0 ? agentSceneModule('cascades').createCascadedShadows({ count }) : null;
 }
 
-function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = false }) {
+function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = false, tier = 'realtime' }) {
   probeSnippets(scene);
   const placement = automaticGroundPlacement(scene);
   const renderer = installCoplanarDiagnostics(installRenderPasses(installCameraEffects(new Renderer67(canvas, scene.parts, {
@@ -540,7 +541,7 @@ function initializeRenderer(scene, { memoryBudgetMiB, backend, transparent = fal
     skyOpenness,
     fogSkyVisibility,
     pixelRatio: 1,
-    samples: backend === 'cpu' ? 1 : 4,
+    ...rasterOptionsFor(tier, backend),
     memoryBudgetMiB,
     transparent,
   }))));
@@ -582,14 +583,14 @@ function objectMotionFor(record, motionTime, forVelocity = false) {
   return { current, previous };
 }
 
-function createPreview(scene, { sessionId, memoryBudgetMiB, backend, transparent = false }, asset, placedAssets, sequenceFrames) {
+function createPreview(scene, { sessionId, memoryBudgetMiB, backend, transparent = false, tier = 'realtime' }, asset, placedAssets, sequenceFrames) {
   if (leasedRecord) throw new Error('The scene renderer is leased to a render job.');
   validatePreviewCamera(scene.camera);
   let renderer;
   try {
     releaseOtherRenderers(null);
-    renderer = initializeRenderer(scene, { memoryBudgetMiB, backend, transparent });
-    const record = { scene, renderer, asset, placedAssets, sessionId, options: { memoryBudgetMiB, backend, transparent },
+    renderer = initializeRenderer(scene, { memoryBudgetMiB, backend, transparent, tier });
+    const record = { scene, renderer, asset, placedAssets, sessionId, options: { memoryBudgetMiB, backend, transparent, tier },
       checkpoints: new Map(), evictedCheckpointIds: [], branches: createBranchStore(), rendererTopology: scene.topologyRevision, rendererTextured: sceneIsTextured(scene), sequenceFrames };
     draw(record);
     const result = status(record);
