@@ -95,6 +95,16 @@ Texture rendering requires batches grouped by geometry and texture identity.
 The image descriptor requires sRGB sampling with conversion to linear RGB before lighting.
 The importer rejects a requested texture that fails to decode, rather than returning an untextured material.
 
+## Memory of a very large file
+
+A 224 MiB GLB (5.4 million vertices, 65 small textures) takes about 460 MB of the page's JavaScript heap once decoded, plus the 225 MB of file bytes, and the converted vertex arrays come on top. `parseGltf` now keeps less of that alive:
+- it drops its reference to the file bytes as soon as the decoder has read them, and the returned release function no longer holds the decoder's file bytes or accessor reader;
+- it frees a primitive's decoded attribute arrays right after the last node that uses them is converted, so decoded and converted copies are not both alive for the whole file. On the Barbershop export this took the heap after loading from 734 MB to 541 MB `[measured, usedJSHeapSize, same scene, same box]`.
+
+A file over `maxBytes` (256 MiB by default) fails before decoding with an error that names the size, the limit and the value to pass. A file with too many texture pixels is scaled down to `maxTexturePixels`, or fails naming that option.
+
+`scripts/render-media.mjs --scene file` serves a GLB above 32 MiB from a local HTTP server that streams it from disk. Handing a file that size to the page through a Playwright route copies it through the browser protocol as one message and closed the whole browser tab (a 225 MB file did, with nothing else loading).
+
 ## Loading a large scene without a long freeze
 
 Building a renderer on a big asset blocks the page while the driver links the shader program, uploads textures and packs batches.

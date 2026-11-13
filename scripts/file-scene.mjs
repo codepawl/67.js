@@ -1,5 +1,6 @@
 import { readFileSync, existsSync, statSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { resolve, dirname, join, basename } from 'node:path';
+import { LARGE_ASSET_BYTES } from './asset-server.mjs';
 
 const ASSET_FIELDS = ['glb', 'hdri'];
 const MAXIMUM_KEY_FILE_BYTES = 64 * 1024 ** 2;
@@ -49,7 +50,7 @@ export function resolveAssetPath(assetPath, { configDirectory, root }) {
 }
 
 /** Reads scene.json and swaps each asset path for a /__file/asset/<n>/<name> URL the export script answers from disk. */
-export function prepareFileScene({ configPath, root }) {
+export function prepareFileScene({ configPath, root, largeAssetOrigin, largeAssetBytes = LARGE_ASSET_BYTES }) {
   const file = resolve(configPath);
   const description = JSON.parse(readFileSync(file, 'utf8'));
   const configDirectory = dirname(file);
@@ -58,7 +59,9 @@ export function prepareFileScene({ configPath, root }) {
     if (/^[a-z]+:/i.test(assetPath)) throw new Error(`Remote asset URLs are not allowed: ${assetPath}`);
     const diskPath = resolveAssetPath(assetPath, { configDirectory, root: root ? resolve(root) : null });
     assets.push(diskPath);
-    return `/__file/asset/${assets.length - 1}/${encodeURIComponent(basename(diskPath))}`;
+    const name = encodeURIComponent(basename(diskPath));
+    const isLarge = largeAssetOrigin && statSync(diskPath).size > largeAssetBytes;
+    return isLarge ? `${largeAssetOrigin}/asset/${assets.length - 1}/${name}` : `/__file/asset/${assets.length - 1}/${name}`;
   };
   for (const field of ASSET_FIELDS) {
     if (typeof description[field] !== 'string') throw new Error(`scene.json needs a "${field}" path.`);
