@@ -1,4 +1,4 @@
-import { readFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, unlinkSync, constants as fsConstants } from 'node:fs';
 import { mkdir, open, readFile, writeFile, rename, link, unlink, rmdir, readdir, lstat, realpath } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import { basename, isAbsolute, join, resolve } from 'node:path';
@@ -407,16 +407,29 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     process.once('exit', releaseLockOnExit);
   }
 
+  // Opens a small coordination file once and checks and reads it through the same handle, so the size check and the read cannot
+  // see two different files (CodeQL js/file-system-race). A path that is not a plain file, or is larger than `maximum`, gives null.
+  async function readSmallFile(path, maximum) {
+    const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    try {
+      const details = await handle.stat();
+      if (!details.isFile() || details.size > maximum) return null;
+      return await handle.readFile('utf8');
+    } finally {
+      await handle.close();
+    }
+  }
+
   const LIVE_OWNER_MESSAGE = 'The job store is already owned by a live process.';
 
   // Reads a lock another process may be writing. A file that does not parse is a starter that has not finished (or a lock that was
   // cut short), so it is treated as owned by a live process and never surfaces a raw SyntaxError. The hard link a starter makes
   // for a moment is allowed here, unlike in the job files.
   async function readLockFile(path) {
-    const details = await lstat(path);
-    if (!details.isFile() || details.size > 4096) throw new Error('Unrecognized job store lock.');
+    const text = await readSmallFile(path, 4096);
+    if (text === null) throw new Error('Unrecognized job store lock.');
     try {
-      return JSON.parse(await readFile(path, 'utf8'));
+      return JSON.parse(text);
     } catch (error) {
       if (error instanceof SyntaxError) throw new Error(`The job store lock ${path} is held by a live process or is incomplete. If no other 67js server uses this folder, delete ${path}.`);
       throw error;
@@ -500,9 +513,9 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     const interrupted = new Error(`A job store takeover was interrupted or left an unreadable claim. Confirm that no process owns the store, then delete ${basename(claimPath)} in the jobs folder.`);
     let claim;
     try {
-      const details = await lstat(claimPath);
-      if (!details.isFile() || details.size > 4096) throw interrupted;
-      claim = JSON.parse(await readFile(claimPath, 'utf8'));
+      const text = await readSmallFile(claimPath, 4096);
+      if (text === null) throw interrupted;
+      claim = JSON.parse(text);
     } catch (error) {
       if (error.code === 'ENOENT') return; // The holder finished.
       throw interrupted;
