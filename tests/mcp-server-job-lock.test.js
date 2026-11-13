@@ -12,16 +12,43 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 const serverEntry = new URL('../bin/67js-mcp.mjs', import.meta.url).pathname.replace(/^\/(\w:)/, '$1');
 const hasBuild = existsSync(new URL('../build/mcp/server.mjs', import.meta.url));
 
-// Starts the server on `jobsDirectory`, takes the job store lock with a status call on an unknown job (no browser needed),
-// then closes the connection the way client.close() does and reports whether the lock file is still there.
-async function startAskAndClose(jobsDirectory) {
+function waitForProcessExit(processId) {
+  return new Promise((resolveExit, rejectExit) => {
+    const deadline = Date.now() + 30000;
+    const timer = setInterval(() => {
+      try {
+        process.kill(processId, 0);
+      } catch (error) {
+        clearInterval(timer);
+        if (error.code === 'ESRCH') resolveExit();
+        else rejectExit(error);
+        return;
+      }
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        rejectExit(new Error(`Server process ${processId} did not exit.`));
+      }
+    }, 50);
+  });
+}
+
+// Starts the server on `jobsDirectory` and takes the job store lock with a status call on an unknown job (no browser needed).
+async function startAndTakeLock(jobsDirectory) {
   const transport = new StdioClientTransport({ command: process.execPath, args: [serverEntry, '--backend', 'cpu', '--jobs', jobsDirectory], stderr: 'ignore' });
   const client = new Client({ name: 'job-lock-test', version: '1.0.0' });
   await client.connect(transport);
+  const serverProcessId = transport.pid;
   const result = await client.callTool({ name: 'scene_render_status', arguments: { jobId: randomUUID() } });
   assert.equal(result.isError, true, 'an unknown job is an error, not a crash');
   assert.ok(existsSync(join(jobsDirectory, 'store.lock')), 'the server holds the lock while it runs');
+  return { client, serverProcessId };
+}
+
+// Closes the connection the way client.close() does, waits for the server process to exit, then reports whether the lock is still there.
+async function startAskAndClose(jobsDirectory) {
+  const { client, serverProcessId } = await startAndTakeLock(jobsDirectory);
   await client.close();
+  await waitForProcessExit(serverProcessId);
   return existsSync(join(jobsDirectory, 'store.lock'));
 }
 
@@ -32,7 +59,17 @@ test('the MCP server gives back store.lock when the client closes, so the next r
   assert.equal(await startAskAndClose(jobsDirectory), false, 'second run starts and leaves no lock');
 });
 
-test('a process that exits without closing the job controller still removes its lock', { timeout: 30000 }, async context => {
+test('a server killed without cleanup leaves a lock that the next start takes over', { skip: !hasBuild && 'run npm run build:lib first', timeout: 60000 }, async context => {
+  const jobsDirectory = await mkdtemp(join(tmpdir(), '67js-job-lock-'));
+  context.after(() => rm(jobsDirectory, { recursive: true, force: true }));
+  const { serverProcessId } = await startAndTakeLock(jobsDirectory);
+  process.kill(serverProcessId, 'SIGKILL');
+  await waitForProcessExit(serverProcessId);
+  assert.ok(existsSync(join(jobsDirectory, 'store.lock')), 'a killed server cannot give back its lock');
+  assert.equal(await startAskAndClose(jobsDirectory), false, 'the next start takes over the dead owner lock and then gives it back');
+});
+
+test('a process that exits without closing the job controller still removes its lock',{ timeout: 30000 }, async context => {
   const jobsDirectory = await mkdtemp(join(tmpdir(), '67js-job-lock-'));
   context.after(() => rm(jobsDirectory, { recursive: true, force: true }));
   const controllerUrl = new URL('../scripts/agent-render-jobs.mjs', import.meta.url).href;

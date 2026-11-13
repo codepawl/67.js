@@ -320,9 +320,9 @@ Malformed published job records require repair before the controller can reopen 
 Quarantined admissions need explicit inspection and cleanup to reclaim their space.
 Their directories must contain regular files without links or aliases. Other entry types require repair.
 
-The controller never removes a dead process's lock automatically.
-After a crash, confirm that no process owns the dedicated private store before manually removing `store.lock`.
-This conservative repair step prevents two recovery processes from deleting a newly acquired lock.
+A client that closes the connection waits about two seconds before it kills the server, and a killed server leaves `store.lock` behind.
+The next controller takes over a lock when the file is well formed and its process ID belongs to no running process. Only one process can take over a given dead lock: it first creates a claim file `store.lock.claim-<token>`, re-reads the lock under that claim, and removes the lock only if it still holds the dead token, then creates its own. Locks and claims are written to a temporary file and linked into place, so they never exist empty or half written; a lock that still does not parse is treated as owned by a live starter. If the lock changed under the claim, the start begins again once. A process killed while it holds a claim leaves the claim behind, which blocks the takeover of that one lock; the next start names the exact `store.lock.claim-<token>` file to delete, and does the same for a claim it cannot read.
+A lock whose process is alive, or a file that is not a recognized lock, is still refused. The operating system can hand a dead owner's process ID to an unrelated process; that lock looks alive and stays until a person confirms nothing owns the dedicated private store and removes `store.lock`.
 
 A render or review job fails when its Node RSS passes 512 MiB or its browser heap passes 256 MiB. After each frame the browser heap is read, and when it is over the limit it is garbage collected and read again, so only memory the page still holds counts. A physics bake leaves tens of MiB of garbage after its first frame; a real leak survives the collection and still stops the job.
 

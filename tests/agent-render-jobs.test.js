@@ -1,6 +1,6 @@
 import nodeTest from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, link, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, link, unlink, open } from 'node:fs/promises';
 import { watch, writeFileSync } from 'node:fs';
 import { tmpdir, constants, setPriority } from 'node:os';
 import { join } from 'node:path';
@@ -261,6 +261,176 @@ test('runner traversal and oversized outputs fail without final artifacts', asyn
   await traversal.close();
 });
 
+test('a lock owned by a live process or written by something else is refused and left in place', async context => {
+  const root = await temporary(context);
+  const liveLock = JSON.stringify({ schemaVersion: 1, pid: process.pid, token: randomUUID() });
+  await writeFile(join(root, 'store.lock'), liveLock);
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /live process/);
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), liveLock);
+  const foreignLock = JSON.stringify({ schemaVersion: 2, pid: 2147483647, token: 'not-a-token' });
+  await writeFile(join(root, 'store.lock'), foreignLock);
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /Unrecognized job store lock/);
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), foreignLock);
+});
+
+test('two takeovers of one dead lock at the same time leave exactly one owner and no raw file error', async context => {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const root = await temporary(context);
+    await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
+    const outcomes = await Promise.allSettled([
+      createAgentRenderJobs({ root, limits, run: writeImage }),
+      createAgentRenderJobs({ root, limits, run: writeImage }),
+    ]);
+    const owners = outcomes.filter(outcome => outcome.status === 'fulfilled');
+    const refusals = outcomes.filter(outcome => outcome.status === 'rejected');
+    assert.equal(owners.length, 1, `attempt ${attempt}: exactly one controller holds the lock`);
+    assert.equal(refusals.length, 1);
+    assert.match(refusals[0].reason.message, /live process/);
+    assert.equal(refusals[0].reason.code, undefined, 'a lost race is a clean refusal, not a raw file error');
+    assert.equal(JSON.parse(await readFile(join(root, 'store.lock'), 'utf8')).pid, process.pid);
+    await owners[0].value.close();
+    assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-') || name.includes('.tmp-')), [], 'no takeover claim or temporary file is left behind');
+  }
+});
+
+test('two slow readers of a dead lock and a fresh starter leave exactly the one controller that took it over', async context => {
+  const root = await temporary(context);
+  const deadToken = randomUUID();
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: deadToken }));
+  let openGate;
+  const gate = new Promise(resolveGate => { openGate = resolveGate; });
+  const pausedReaders = () => createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { beforeLockClaim: () => gate } });
+  const firstReader = pausedReaders();
+  const secondReader = pausedReaders();
+  // The readers have both judged the lock dead and wait before claiming it, while a third controller takes the store over.
+  const owner = await createAgentRenderJobs({ root, limits, run: writeImage });
+  const ownedLock = await readFile(join(root, 'store.lock'), 'utf8');
+  assert.notEqual(JSON.parse(ownedLock).token, deadToken);
+  openGate();
+  const outcomes = await Promise.allSettled([firstReader, secondReader, createAgentRenderJobs({ root, limits, run: writeImage })]);
+  for (const outcome of outcomes) {
+    assert.equal(outcome.status, 'rejected', 'only the controller that took the lock first owns it');
+    assert.match(outcome.reason.message, /live process/);
+  }
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), ownedLock, 'the owner lock is neither replaced nor stranded');
+  assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-')), []);
+  await owner.close();
+  assert.equal((await readdir(root)).includes('store.lock'), false);
+});
+
+test('a takeover claim left by a dead process is reported with the file to delete', async context => {
+  const root = await temporary(context);
+  const deadToken = randomUUID();
+  const lockText = JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: deadToken });
+  const claimName = `store.lock.claim-${deadToken}`;
+  await writeFile(join(root, 'store.lock'), lockText);
+  await writeFile(join(root, claimName), JSON.stringify({ pid: 2147483647, token: randomUUID() }));
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), error => error.message.includes(claimName) && /delete/.test(error.message));
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), lockText);
+  await unlink(join(root, claimName));
+  const recovered = await createAgentRenderJobs({ root, limits, run: writeImage });
+  await recovered.close();
+});
+
+test('an empty or unreadable takeover claim is reported with the file to delete', async context => {
+  const root = await temporary(context);
+  const deadToken = randomUUID();
+  const claimName = `store.lock.claim-${deadToken}`;
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: deadToken }));
+  for (const claimText of ['', '{"pid":']) {
+    await writeFile(join(root, claimName), claimText);
+    await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), error => error.message.includes(claimName) && /delete/.test(error.message));
+  }
+});
+
+test('a lock that does not parse yet is refused as owned by a live starter, not as a raw syntax error', async context => {
+  const root = await temporary(context);
+  await writeFile(join(root, 'store.lock'), '');
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /live process/);
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), '');
+});
+
+test('a lock is published whole: absent while the temporary file is written, complete the moment it exists', async context => {
+  const root = await temporary(context);
+  const seen = [];
+  const lockText = () => readFile(join(root, 'store.lock'), 'utf8').catch(error => (error.code === 'ENOENT' ? null : Promise.reject(error)));
+  const controller = await createAgentRenderJobs({
+    root,
+    limits,
+    run: writeImage,
+    lockTakeoverHooks: {
+      beforeLockLink: async () => { seen.push(['before', await lockText()]); },
+      afterLockLink: async () => { seen.push(['after', await lockText()]); },
+    },
+  });
+  assert.equal(seen[0][0], 'before');
+  assert.equal(seen[0][1], null, 'no lock file exists while its content is being written');
+  assert.equal(seen[1][0], 'after');
+  assert.equal(JSON.parse(seen[1][1]).schemaVersion, 1, 'the lock is complete as soon as it exists');
+  assert.deepEqual((await readdir(root)).filter(name => name.includes('.tmp-')), [], 'no temporary file is left behind');
+  await controller.close();
+});
+
+test('an unparseable lock is refused by naming the file to delete, and is not deleted', async context => {
+  const root = await temporary(context);
+  await writeFile(join(root, 'store.lock'), '{"schemaVersion":');
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), error => error.message.includes(join(root, 'store.lock')) && /delete/.test(error.message));
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), '{"schemaVersion":');
+});
+
+test('when the temporary name of a new lock cannot be removed, no lock is kept and the error says so', async context => {
+  const root = await temporary(context);
+  const busy = Object.assign(new Error('resource busy'), { code: 'EBUSY' });
+  const fileOperations = { unlink: async path => { if (path.includes('.tmp-')) throw busy; return unlink(path); } };
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { fileOperations } }), /Could not finish writing store\.lock.*not kept/);
+  assert.deepEqual((await readdir(root)).filter(name => name.startsWith('store.lock')), [], 'neither the lock nor a temporary file is left');
+});
+
+test('a failed write of the temporary file leaves no temporary file', async context => {
+  const root = await temporary(context);
+  const fileOperations = {
+    writeFile: async (path, ...rest) => {
+      await writeFile(path, 'partial', { flag: 'wx' });
+      throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+    },
+  };
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { fileOperations } }), /no space left/);
+  assert.deepEqual((await readdir(root)).filter(name => name.startsWith('store.lock')), []);
+});
+
+test('when hard links are unsupported and the fallback write fails, the half-made lock is removed', async context => {
+  const root = await temporary(context);
+  const fileOperations = {
+    link: async () => { throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' }); },
+    open: async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      return { writeFile: async () => { throw new Error('no space left on device'); }, close: () => handle.close() };
+    },
+  };
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { fileOperations } }), /no space left/);
+  assert.deepEqual((await readdir(root)).filter(name => name.startsWith('store.lock')), []);
+  const recovered = await createAgentRenderJobs({ root, limits, run: writeImage });
+  await recovered.close();
+});
+
+test('a starter whose dead lock was replaced by another dead lock starts again and takes that one over',async context => {
+  const root = await temporary(context);
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
+  let signalReached;
+  const reached = new Promise(resolveReached => { signalReached = resolveReached; });
+  let openGate;
+  const gate = new Promise(resolveGate => { openGate = resolveGate; });
+  const slowReader = createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { beforeLockClaim: async () => { signalReached(); await gate; } } });
+  await reached;
+  // A starter took the first dead lock over and then died as well, leaving a second dead lock.
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
+  openGate();
+  const controller = await slowReader;
+  assert.equal(JSON.parse(await readFile(join(root, 'store.lock'), 'utf8')).pid, process.pid);
+  assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-') || name.includes('.tmp-')), []);
+  await controller.close();
+});
+
 test('restart marks unfinished records interrupted and rejects forged artifact paths', async context => {
   const root = await temporary(context);
   const controller = await createAgentRenderJobs({ root, limits, run: writeImage });
@@ -273,11 +443,7 @@ test('restart marks unfinished records interrupted and rejects forged artifact p
   status.artifacts = [];
   await writeFile(statusPath, JSON.stringify(status));
   await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
-  const staleLock = await readFile(join(root, 'store.lock'));
-  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /explicit repair/);
-  assert.deepEqual(await readFile(join(root, 'store.lock')), staleLock);
-  // The test owns this root and performs the explicit stale-lock repair.
-  await unlink(join(root, 'store.lock'));
+  // The lock names a dead process, so the next controller takes it over without a manual repair.
   const recovered = await createAgentRenderJobs({ root, limits, run: writeImage });
   assert.equal(recovered.status(jobId).state, 'interrupted');
   await recovered.close();
