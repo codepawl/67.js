@@ -29,9 +29,7 @@ const KP_EMISSIVE_TRIANGLE_COUNT_BYTE: usize = 96; // u32[24]
 const KP_LIGHT_COUNT_BYTE: usize = 100;     // u32[25]
 const KP_LIGHT_TREE_NODE_COUNT_BYTE: usize = 104; // u32[26]
 const KP_TEXTURE_COUNT_BYTE: usize = 108;   // u32[27]
-/// `camera_env_enabled`: bit 0 is the camera environment flag, bits 8 and up hold `portal_count` (FORMAT-v2.md, section 1).
-pub(crate) const KP_CAMERA_ENV_WORD_BYTE: usize = 316; // u32[79]
-pub(crate) const PORTAL_COUNT_SHIFT: u32 = 8;
+pub(crate) const KP_PORTAL_COUNT_BYTE: usize = 308; // u32[77]
 
 // ---- MaterialRecord byte offsets (256-byte stride, verified against pack-input-v2.mjs) ----
 const MAT_METALLIC_BYTE: usize = 12;           // f32[3]
@@ -80,19 +78,10 @@ const LIGHT_TYPE_AREA_DISK: u32 = 3;
 
 /// The number of light portals a parameter block claims, 0 for a block too short to hold the word.
 pub(crate) fn portal_count_of(kernel_params: &[u8]) -> u32 {
-    if kernel_params.len() < KP_CAMERA_ENV_WORD_BYTE + 4 {
+    if kernel_params.len() < KP_PORTAL_COUNT_BYTE + 4 {
         return 0;
     }
-    read_u32_le(kernel_params, KP_CAMERA_ENV_WORD_BYTE) >> PORTAL_COUNT_SHIFT
-}
-
-/// The value of a scene-bound word: the portal count for the word that shares its bits with the camera environment flag
-/// (a per-frame setting), the raw word for every other one.
-fn scene_bound_word(kernel_params: &[u8], byte_offset: usize) -> u32 {
-    if byte_offset == KP_CAMERA_ENV_WORD_BYTE {
-        return read_u32_le(kernel_params, byte_offset) >> PORTAL_COUNT_SHIFT;
-    }
-    read_u32_le(kernel_params, byte_offset)
+    read_u32_le(kernel_params, KP_PORTAL_COUNT_BYTE)
 }
 
 fn read_u32_le(bytes: &[u8], byte_offset: usize) -> u32 {
@@ -207,7 +196,7 @@ const SCENE_BOUND_FIELDS: [(&str, usize); 17] = [
     ("iesTableOffset", 284),
     ("backgroundMisWeight", 292),
     ("sobolTableOffset", 296),
-    ("portalCount", KP_CAMERA_ENV_WORD_BYTE),
+    ("portalCount", KP_PORTAL_COUNT_BYTE),
 ];
 
 /// Checks that a frame's kernel parameters describe the scene the session holds: every scene-bound word (see
@@ -219,8 +208,8 @@ pub(crate) fn check_frame_params_keep_scene_counts(session_kernel_params: &[u8],
                 "kernelParams must hold the 320 byte KernelParamsV2 block to read {name} at byte {byte_offset}."
             )));
         }
-        let session_word = scene_bound_word(session_kernel_params, byte_offset);
-        let frame_word = scene_bound_word(frame_kernel_params, byte_offset);
+        let session_word = read_u32_le(session_kernel_params, byte_offset);
+        let frame_word = read_u32_le(frame_kernel_params, byte_offset);
         if session_word != frame_word {
             return Err(failure(format!(
                 "The kernelParams of this frame change {name} (byte {byte_offset}) from {session_word} to {frame_word} (raw 32 bit words), but the session scene was uploaded with the first value. A session renders one scene; pack the frame from the same scene (only the camera and the render settings may differ) or create a new session."
@@ -246,8 +235,8 @@ pub(crate) fn check_update_params_keep_scene_shape(session_kernel_params: &[u8],
                 "kernelParams must hold the 320 byte KernelParamsV2 block to read {name} at byte {byte_offset}."
             )));
         }
-        let session_word = scene_bound_word(session_kernel_params, byte_offset);
-        let update_word = scene_bound_word(update_kernel_params, byte_offset);
+        let session_word = read_u32_le(session_kernel_params, byte_offset);
+        let update_word = read_u32_le(update_kernel_params, byte_offset);
         if session_word != update_word {
             return Err(failure(format!(
                 "The update changes {name} (byte {byte_offset}) from {session_word} to {update_word} (raw 32 bit words). A session update keeps the shape of the scene it holds (the record counts, the environment and the textures); create a new session for this input."
@@ -1003,9 +992,8 @@ mod specialization_tests {
         assert!(message.contains("320"), "{message}");
     }
 
-    fn set_portal_count(kernel_params: &mut [u8], portal_count: u32, camera_environment_enabled: bool) {
-        let word = (portal_count << PORTAL_COUNT_SHIFT) | u32::from(camera_environment_enabled);
-        kernel_params[KP_CAMERA_ENV_WORD_BYTE..KP_CAMERA_ENV_WORD_BYTE + 4].copy_from_slice(&word.to_le_bytes());
+    fn set_portal_count(kernel_params: &mut [u8], portal_count: u32) {
+        kernel_params[KP_PORTAL_COUNT_BYTE..KP_PORTAL_COUNT_BYTE + 4].copy_from_slice(&portal_count.to_le_bytes());
     }
 
     #[test]
@@ -1029,17 +1017,17 @@ mod specialization_tests {
         }
         assert_eq!(input.light_count, 1);
 
-        set_portal_count(&mut kernel_params, 0, true);
+        set_portal_count(&mut kernel_params, 0);
         input = dummy_input(&kernel_params, &mat, &lights, &inst);
-        assert!(check_counts_match_kernel_params(&input).is_ok(), "no portals: the camera environment flag alone is fine");
+        assert!(check_counts_match_kernel_params(&input).is_ok(), "no portals");
 
         let two_records = [make_default_light(), make_default_light()].concat();
-        set_portal_count(&mut kernel_params, 1, true);
+        set_portal_count(&mut kernel_params, 1);
         input = dummy_input(&kernel_params, &mat, &two_records, &inst);
         input.light_count = 1;
         assert!(check_counts_match_kernel_params(&input).is_ok(), "one light and one portal fit two records");
 
-        set_portal_count(&mut kernel_params, 3, false);
+        set_portal_count(&mut kernel_params, 3);
         input = dummy_input(&kernel_params, &mat, &two_records, &inst);
         input.light_count = 1;
         let message = check_counts_match_kernel_params(&input).unwrap_err().reason;
@@ -1048,17 +1036,12 @@ mod specialization_tests {
     }
 
     #[test]
-    fn a_frame_or_update_may_not_change_the_portal_count_but_may_toggle_the_camera_environment() {
+    fn a_frame_or_update_may_not_change_the_portal_count() {
         let mut session_params = make_kp(0, 0.0, 512, 256, 3.0);
-        set_portal_count(&mut session_params, 2, false);
-
-        let mut camera_environment_on = session_params.clone();
-        set_portal_count(&mut camera_environment_on, 2, true);
-        assert!(check_frame_params_keep_scene_counts(&session_params, &camera_environment_on).is_ok());
-        assert!(check_update_params_keep_scene_shape(&session_params, &camera_environment_on).is_ok());
+        set_portal_count(&mut session_params, 2);
 
         let mut other_portals = session_params.clone();
-        set_portal_count(&mut other_portals, 3, false);
+        set_portal_count(&mut other_portals, 3);
         let frame_message = check_frame_params_keep_scene_counts(&session_params, &other_portals).unwrap_err().to_string();
         assert!(frame_message.contains("portalCount"), "{frame_message}");
         assert!(frame_message.contains("from 2 to 3"), "{frame_message}");

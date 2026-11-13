@@ -12,9 +12,9 @@ const skipWithoutAddon = hasAddon ? false : 'the native addon is not built';
 
 const LIGHT_FLAG_PORTAL = 8;
 const LIGHT_FLAG_WORD_INDEX = 7;
-// `camera_env_enabled` (byte 316): bit 0 the camera environment flag, bits 8 and up the portal count (FORMAT-v2.md, section 1).
-const CAMERA_ENV_WORD = 79;
-const PORTAL_COUNT_SHIFT = 8;
+// `portal_count` (byte 308, FORMAT-v2.md section 1) and `camera_env_scale` (byte 304).
+const PORTAL_COUNT_PARAM_WORD = 77;
+const CAMERA_ENV_SCALE_PARAM_WORD = 76;
 const SEEDS = [1, 2, 3, 4];
 
 // The room is 4 wide, 3 high and 4 deep, its walls are 0.2 thick slabs, and its west wall has a window 2 wide and 1 high.
@@ -135,8 +135,7 @@ test('the v2 packer appends a portal record after the emitters and counts it apa
   const packed = packRoom([WINDOW_PORTAL, emitter]);
   assert.equal(packed.lightCount, 1, 'the portal is not an emitter');
   assert.equal(packed.portalCount, 1);
-  assert.equal(parameterWord(packed, CAMERA_ENV_WORD) >>> PORTAL_COUNT_SHIFT, 1);
-  assert.equal(parameterWord(packed, CAMERA_ENV_WORD) & 1, 0, 'the camera environment flag is separate');
+  assert.equal(parameterWord(packed, PORTAL_COUNT_PARAM_WORD), 1);
   assert.equal(packed.lightTreeEmitterCount, 1, 'the light tree holds the emitter only');
   assert.equal(lightRecordWords(packed, 0)[LIGHT_FLAG_WORD_INDEX] & LIGHT_FLAG_PORTAL, 0);
   const portalRecord = lightRecordWords(packed, 1);
@@ -145,13 +144,14 @@ test('the v2 packer appends a portal record after the emitters and counts it apa
   assert.deepEqual(Array.from(new Float32Array(portalRecord.buffer, portalRecord.byteOffset + 16, 3)), [0, 0, 0], 'radiance');
 });
 
-test('the portal count shares the camera environment word and a scene without portals keeps that word as it was', () => {
+test('the portal count has its own word, next to the camera environment scale, and a scene without portals leaves it 0', () => {
   const withoutPortal = packRoom([]);
-  assert.equal(parameterWord(withoutPortal, CAMERA_ENV_WORD), 0);
+  assert.equal(parameterWord(withoutPortal, PORTAL_COUNT_PARAM_WORD), 0);
   assert.equal(withoutPortal.portalCount, 0);
   const scene = buildTraceScene(roomParts({ withCeiling: true, withOutsideBox: false }), { map: skyMap(), areaLights: [WINDOW_PORTAL], cameraIntensity: 0.2 });
   const packed = buildNativeInputV2(scene, createCamera(ROOM_CAMERA, 8, 8), { width: 8, height: 8, samples: 1 });
-  assert.equal(parameterWord(packed, CAMERA_ENV_WORD), (1 << PORTAL_COUNT_SHIFT) | 1, 'one portal and the camera environment flag');
+  assert.equal(parameterWord(packed, PORTAL_COUNT_PARAM_WORD), 1);
+  assert.notEqual(parameterWord(packed, CAMERA_ENV_SCALE_PARAM_WORD), 0, 'the camera environment scale is kept');
 });
 
 test('a scene with only a portal has no emitters and no light tree', () => {

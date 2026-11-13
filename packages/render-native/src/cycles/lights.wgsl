@@ -847,13 +847,18 @@ fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
   return lgt_eval_hdri_texel(direction) * kernel_params.env_color;
 }
 
-// The environment as a path the camera reaches it through straight transmission only: with `environment.cameraIntensity`
-// set, the pack carries that strength as `camera_env_color`; otherwise it is the lighting radiance.
+// The environment as a path the camera reaches it through straight transmission only. `camera_env_scale` is one word:
+// all bits zero is no `environment.cameraIntensity` (the lighting radiance); a negative word is an absolute strength,
+// used when the lighting intensity is 0; otherwise (also -0.0, a black view) it is the factor on the lighting radiance.
 fn lgt_eval_camera_visible_radiance(direction: vec3<f32>) -> vec3<f32> {
-  if ((kernel_params.camera_env_enabled & KERNEL_CAMERA_ENV_ENABLED_BIT) == 0u) {
+  let scale = kernel_params.camera_env_scale;
+  if (bitcast<u32>(scale) == 0u) {
     return lgt_eval_hdri_radiance(direction);
   }
-  return lgt_eval_hdri_texel(direction) * kernel_params.camera_env_color;
+  if (scale < 0.0) {
+    return lgt_eval_hdri_texel(direction) * -scale;
+  }
+  return lgt_eval_hdri_radiance(direction) * abs(scale);
 }
 
 fn lgt_environment_pdf(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
@@ -883,7 +888,7 @@ fn lgt_environment_pdf(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
 // `light_count` emitters, so the light pick, the light tree and the emitter loops never see them. While a scene has any, the
 // environment is sampled by drawing a point on a portal and the pdf below replaces the importance table's.
 fn lgt_portal_count() -> u32 {
-  return kernel_params.camera_env_enabled >> KERNEL_PORTAL_COUNT_SHIFT;
+  return kernel_params.portal_count;
 }
 
 // Solid-angle pdf of drawing `direction` from `origin` through one portal: distance^2 / (cos * area), 0 when the ray misses the
