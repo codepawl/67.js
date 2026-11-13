@@ -30,7 +30,7 @@ function numberBetween(value, minimum, maximum, label) {
 }
 
 function hasAnimatedScene(recipe) {
-  return Boolean(recipe?.motion || recipe?.physics || recipe?.cloth);
+  return Boolean(recipe?.motion || recipe?.physics || recipe?.cloth || recipe?.environment?.localVolumes?.some(volume => volume?.frames));
 }
 
 /**
