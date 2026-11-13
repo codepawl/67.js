@@ -151,6 +151,26 @@ test('a base color map on TEXCOORD_1 beside maps on TEXCOORD_0 is dropped with t
   assert.ok(warnings.some(warning => /Dropped baseColorTexture of mixed/.test(warning)));
 });
 
+test('an unused material with a base color map on TEXCOORD_1 does not fail the file', async () => {
+  const document = twoUvSetDocument({ name: 'used' });
+  document.materials.push({ name: 'unused', pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 1 } } });
+  const { parts } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.equal(parts.length, 1);
+});
+
+test('a KHR_texture_transform texCoord of 1 is promoted with the map', async () => {
+  const document = twoUvSetDocument({
+    name: 'tiled',
+    pbrMetallicRoughness: {
+      baseColorTexture: { index: 0, texCoord: 1, extensions: { KHR_texture_transform: { texCoord: 1, scale: [2, 2] } } },
+    },
+  });
+  document.extensionsUsed = ['KHR_texture_transform'];
+  const { parts } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.ok(parts[0].material.map);
+  assert.deepEqual([...parts[0].geometry.uvs], [0, 0, 4, 0, 0, 4]);
+});
+
 test('a normal map on texCoord 1 loads and reads the second UV set', async () => {
   const secondUvs = new Float32Array([0, 0, 2, 0, 0, 2]);
   const document = JSON.parse(triangleDocument({ normalTexture: { index: 0, texCoord: 1 } }, { withUvs: true }));

@@ -51,10 +51,10 @@ async function loadLayerShadersFor(document) {
 function needsFallbacks(document) {
   const materials = document.materials ?? [];
   if (materials.some(material => material?.extensions?.KHR_materials_pbrSpecularGlossiness)) return true;
+  // Validation reads every material, used or not, so a second-set map on any of them needs the rewrite.
+  if (materials.some(material => /"texCoord":1/.test(JSON.stringify(material ?? {})))) return true;
   return (document.meshes ?? []).some(mesh => (mesh.primitives ?? []).some(primitive => {
-    const definition = JSON.stringify(materials[primitive.material] ?? {});
-    if (primitive.attributes?.TEXCOORD_0 === undefined && definition.includes('"index"')) return true;
-    return /"texCoord":1/.test(definition);
+    return primitive.attributes?.TEXCOORD_0 === undefined && JSON.stringify(materials[primitive.material] ?? {}).includes('"index"');
   }));
 }
 

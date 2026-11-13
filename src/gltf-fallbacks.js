@@ -62,7 +62,12 @@ function moveSecondSetTextures(document, warnings) {
     if (!unsupported.length) return;
     const name = material.name ?? `material ${index}`;
     if (collectTextureKeys(material, 0).length === 0) {
-      for (const path of secondSet) delete referenceAt(material, path).texCoord;
+      for (const path of secondSet) {
+        const reference = referenceAt(material, path);
+        delete reference.texCoord;
+        // A KHR_texture_transform texCoord override of 1 would otherwise contradict the promoted set.
+        if (reference.extensions?.KHR_texture_transform) delete reference.extensions.KHR_texture_transform.texCoord;
+      }
       movedMaterials.add(index);
       movedNames.push(name);
       return;
