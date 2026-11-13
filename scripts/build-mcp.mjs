@@ -7,6 +7,7 @@ import { isBuiltin } from 'node:module';
 import { dirname, resolve, join, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import libraryConfiguration, { MCP_BUILD_RUNNING } from '../vite.lib.config.js';
+import { sourceDigest } from './source-digest.mjs';
 
 // This script reruns the library configuration in memory; the flag keeps that run from rebuilding build/mcp again.
 process.env[MCP_BUILD_RUNNING] = '1';
@@ -234,6 +235,7 @@ export async function buildMcp({ outDir = join(root, 'build', 'mcp'), libraryDir
     packageVersion: metadata.version,
     sourceCommit: revision.stdout.trim(),
     sourceDirty: Boolean(status.stdout.trim()),
+    sourceDigest: await sourceDigest(root),
     nodeTarget: 'node20',
     buildTool: { name: 'vite', version: (await packageAt(join(root, 'node_modules', 'vite'))).metadata.version },
     externalDependencies: [{ name: 'playwright-core', version: (await packageAt(join(root, 'node_modules', 'playwright-core'))).metadata.version }],

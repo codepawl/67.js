@@ -1,5 +1,12 @@
 # Release verification
 
+## Fresh build gate
+
+`npm pack` and `npm publish` run `prepack`, which rebuilds `build/` from `src/` (`npm run build:lib`) and then runs `node scripts/check-build-fresh.mjs`. The MCP build records `sourceDigest`, a hash of every file under `src/`, in `build/mcp/manifest.json`; the check fails the pack when that digest or `packageVersion` no longer matches the tree. A pack that skipped the rebuild (scripts turned off, a copied `build/`) therefore stops instead of shipping a game runtime or `build/mcp/server.mjs` that disagrees with `src/`. Run it by hand with `node scripts/check-build-fresh.mjs`.
+
+Why it exists (#975): the 0.19.0 tarball was reported to carry a game runtime without `player.animation`, `maximumSpeed` and `npcs`. Its manifest says it was built from commit `3261feaa` with a clean tree, and that commit's `src/game-setup.js` has none of those fields (the animation and NPC work landed after it), so that build matched its own source. The tarball carries no `src/`, which the report assumed it did. The gate closes the real gap that remains: nothing proved a build matched the checkout it was packed from.
+
+
 ## 0.15.0: preview shares the package chunks (measured 2026-10-31)
 
 The MCP preview page no longer bundles its own engine copy; it imports the chunks of the package build.

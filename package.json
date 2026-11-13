@@ -156,7 +156,7 @@
     "build": "node scripts/prepare-release.mjs && node scripts/build-pack-index.mjs && vite build",
     "build:lib": "vite build --config vite.lib.config.js && vite build --config vite.browser.config.js",
     "prepare:release": "node scripts/prepare-release.mjs",
-    "prepack": "npm run build:lib",
+    "prepack": "npm run build:lib && node scripts/check-build-fresh.mjs",
     "deploy": "node scripts/deploy.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "llms": "node scripts/generate-llms.mjs",
