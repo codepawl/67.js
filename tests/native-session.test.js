@@ -454,6 +454,7 @@ test('a frame with a camera equals a session packed with that camera, for a pinh
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
   const session = createNativeSession(roomInput([0, 2.2, 6]));
   try {
+    session.render(options);
     for (const view of [{ eye: [1.5, 2.2, 5] }, { eye: [-2, 1.6, 4.5], fStop: 2.8, focusDistance: 4.5 }]) {
       const camera = createCamera({ target: [0, 0.5, 0], fov: 45, ...view }, options.width, options.height);
       const cameraFrame = session.render({ ...options, camera });
