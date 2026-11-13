@@ -1194,6 +1194,51 @@ function packEmissiveTriangleBuffer(emissiveList) {
   };
 }
 
+function isDiskAreaLight(area) {
+  return area.shape === 'disk' || area.shape === 'ellipse' || area.lightType === LIGHT_TYPE_AREA_DISK;
+}
+
+// A portal emits nothing: it only marks a window for the environment sampler, so it has no radiance and no pick weight. It
+// is a rectangle whose normal faces into the room, and its record goes after the emitters (packAnalyticLightsBuffer).
+function buildPortalEntry(area, width, height) {
+  if (isDiskAreaLight(area)) {
+    throw new RangeError('Area light `portal: true` needs a rect light; a disk or ellipse portal is not supported. Pass a rect area light, or drop `portal`.');
+  }
+  const direction = normalizeVec3(area.normal ?? area.direction, [0, -1, 0]);
+  let axisU;
+  let axisV;
+  if (area.across && area.along) {
+    axisU = normalizeVec3(area.across, [1, 0, 0]);
+    axisV = normalizeVec3(area.along, [0, 0, 1]);
+  } else {
+    const guide = normalizeVec3(area.up ?? [0, 1, 0], [0, 1, 0]);
+    axisU = normalizeVec3(crossVec3(guide, direction), [1, 0, 0]);
+    axisV = normalizeVec3(crossVec3(direction, axisU), [0, 0, 1]);
+  }
+  return {
+    isPortal: true,
+    position: [Number(area.position[0]), Number(area.position[1]), Number(area.position[2])],
+    lightType: LIGHT_TYPE_AREA_RECT,
+    radiance: [0, 0, 0],
+    flags: LIGHT_FLAG_PORTAL,
+    direction,
+    radius: 0,
+    axisU,
+    sizeU: width,
+    axisV,
+    sizeV: height,
+    cosHalfAngle: 0,
+    spotBlend: 0,
+    tanHalfSpread: 0,
+    spreadNormalization: 0,
+    areaOrSolidAngle: width * height,
+    maxDistance: 1e30,
+    masks: lightBitMaskWords(area.bit, area.lightGroupMaskLo, area.lightGroupMaskHi),
+    weight: 0,
+    isDistant: false,
+  };
+}
+
 function buildAnalyticLightEntries(lightsSection = {}) {
   const records = [];
 
@@ -1364,15 +1409,23 @@ function buildAnalyticLightEntries(lightsSection = {}) {
     });
   }
 
+  for (const portal of lightsSection.portals ?? []) {
+    records.push(buildPortalEntry(portal, Number(portal.width), Number(portal.height)));
+  }
+
   for (const area of lightsSection.areas ?? []) {
     const intensity = Math.max(0, Number(area.intensity ?? 0));
     const color = area.color ?? [1, 1, 1];
     const width = Math.max(1e-6, Number(area.width ?? area.sizeU ?? 1));
     const height = Math.max(1e-6, Number(area.height ?? area.sizeV ?? width));
+    if (area.portal === true) {
+      records.push(buildPortalEntry(area, width, height));
+      continue;
+    }
     if (!(intensity > 0) || !(luminance(color) > 0)) {
       continue;
     }
-    const isDisk = area.shape === 'disk' || area.shape === 'ellipse' || area.lightType === LIGHT_TYPE_AREA_DISK;
+    const isDisk = isDiskAreaLight(area);
     const surfaceArea = isDisk ? Math.PI * 0.25 * width * height : width * height;
     const radianceScale = intensity / surfaceArea;
     const radiance = [color[0] * radianceScale, color[1] * radianceScale, color[2] * radianceScale];
@@ -1407,9 +1460,6 @@ function buildAnalyticLightEntries(lightsSection = {}) {
     if (area.cameraVisible === true) {
       flags |= LIGHT_FLAG_CAMERA_VISIBLE;
     }
-    if (area.portal === true) {
-      flags |= LIGHT_FLAG_PORTAL;
-    }
     const masks = lightBitMaskWords(area.bit, area.lightGroupMaskLo, area.lightGroupMaskHi);
     const weight = Math.max(1e-6, Math.PI * luminance(color) * intensity);
     records.push({
@@ -1438,11 +1488,63 @@ function buildAnalyticLightEntries(lightsSection = {}) {
   return records;
 }
 
-function packAnalyticLightsBuffer(entries) {
+function writeLightRecord(buffer, index, entry, selectionPdf, cdfUpper) {
+  const baseByte = index * STRUCT_STRIDES_V2.light;
+  const f32 = new Float32Array(buffer.buffer, baseByte, 32);
+  const u32 = new Uint32Array(buffer.buffer, baseByte, 32);
+  const i32 = new Int32Array(buffer.buffer, baseByte, 32);
+
+  f32[0] = entry.position[0];
+  f32[1] = entry.position[1];
+  f32[2] = entry.position[2];
+  u32[3] = entry.lightType >>> 0;
+
+  f32[4] = entry.radiance[0];
+  f32[5] = entry.radiance[1];
+  f32[6] = entry.radiance[2];
+  u32[7] = entry.flags >>> 0;
+
+  f32[8] = entry.direction[0];
+  f32[9] = entry.direction[1];
+  f32[10] = entry.direction[2];
+  f32[11] = entry.radius;
+
+  f32[12] = entry.axisU[0];
+  f32[13] = entry.axisU[1];
+  f32[14] = entry.axisU[2];
+  f32[15] = entry.sizeU;
+
+  f32[16] = entry.axisV[0];
+  f32[17] = entry.axisV[1];
+  f32[18] = entry.axisV[2];
+  f32[19] = entry.sizeV;
+
+  f32[20] = entry.cosHalfAngle;
+  f32[21] = entry.spotBlend;
+  f32[22] = entry.tanHalfSpread;
+  f32[23] = entry.spreadNormalization;
+
+  f32[24] = entry.areaOrSolidAngle;
+  f32[25] = entry.maxDistance;
+  i32[26] = -1;
+  u32[27] = 0;
+
+  f32[28] = selectionPdf;
+  f32[29] = cdfUpper;
+  u32[30] = entry.masks.lo >>> 0;
+  u32[31] = entry.masks.hi >>> 0;
+}
+
+// Emitters come first, `lightCount` of them, with the pick pdf and cdf over their weights. Portals follow them, `portalCount`
+// records the pick never reaches (FORMAT-v2.md section 6).
+function packAnalyticLightsBuffer(allEntries) {
+  const entries = allEntries.filter(entry => entry.isPortal !== true);
+  const portals = allEntries.filter(entry => entry.isPortal === true);
   const count = entries.length;
-  const buffer = new Uint8Array(Math.max(1, count) * STRUCT_STRIDES_V2.light);
+  const buffer = new Uint8Array(Math.max(1, count + portals.length) * STRUCT_STRIDES_V2.light);
+  portals.forEach((portal, portalIndex) => writeLightRecord(buffer, count + portalIndex, portal, 0, 1));
   if (count === 0) {
-    return { lights: buffer, lightCount: 0, analyticLightTotalWeight: 0, boundsMin: null, boundsMax: null, maskOr: 0, hasDistant: false };
+    return { lights: buffer, lightCount: 0, portalCount: portals.length, analyticLightTotalWeight: 0, boundsMin: null, boundsMax: null, maskOr: 0, hasDistant: false };
   }
   let totalWeight = 0;
   for (const entry of entries) {
@@ -1459,51 +1561,7 @@ function packAnalyticLightsBuffer(entries) {
     const pdf = entry.weight / totalWeight;
     cumulative += pdf;
     const cdfUpper = index === count - 1 ? 1.0 : Math.min(1.0, cumulative);
-
-    const baseByte = index * STRUCT_STRIDES_V2.light;
-    const f32 = new Float32Array(buffer.buffer, baseByte, 32);
-    const u32 = new Uint32Array(buffer.buffer, baseByte, 32);
-    const i32 = new Int32Array(buffer.buffer, baseByte, 32);
-
-    f32[0] = entry.position[0];
-    f32[1] = entry.position[1];
-    f32[2] = entry.position[2];
-    u32[3] = entry.lightType >>> 0;
-
-    f32[4] = entry.radiance[0];
-    f32[5] = entry.radiance[1];
-    f32[6] = entry.radiance[2];
-    u32[7] = entry.flags >>> 0;
-
-    f32[8] = entry.direction[0];
-    f32[9] = entry.direction[1];
-    f32[10] = entry.direction[2];
-    f32[11] = entry.radius;
-
-    f32[12] = entry.axisU[0];
-    f32[13] = entry.axisU[1];
-    f32[14] = entry.axisU[2];
-    f32[15] = entry.sizeU;
-
-    f32[16] = entry.axisV[0];
-    f32[17] = entry.axisV[1];
-    f32[18] = entry.axisV[2];
-    f32[19] = entry.sizeV;
-
-    f32[20] = entry.cosHalfAngle;
-    f32[21] = entry.spotBlend;
-    f32[22] = entry.tanHalfSpread;
-    f32[23] = entry.spreadNormalization;
-
-    f32[24] = entry.areaOrSolidAngle;
-    f32[25] = entry.maxDistance;
-    i32[26] = -1;
-    u32[27] = 0;
-
-    f32[28] = pdf;
-    f32[29] = cdfUpper;
-    u32[30] = entry.masks.lo >>> 0;
-    u32[31] = entry.masks.hi >>> 0;
+    writeLightRecord(buffer, index, entry, pdf, cdfUpper);
 
     maskOr = (maskOr | entry.masks.lo) >>> 0;
     if (entry.isDistant) {
@@ -1520,6 +1578,7 @@ function packAnalyticLightsBuffer(entries) {
   return {
     lights: buffer,
     lightCount: count,
+    portalCount: portals.length,
     analyticLightTotalWeight: totalWeight,
     boundsMin: boundsMin[0] <= boundsMax[0] ? boundsMin : null,
     boundsMax: boundsMin[0] <= boundsMax[0] ? boundsMax : null,
@@ -2193,7 +2252,7 @@ function packKernelParamsV2({
   // KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4 = 75
   f32[KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4] = filterGlossy;
 
-  u32[76] = 0;
+  u32[76] = (counts.portalCount ?? 0) >>> 0;
   u32[77] = 0;
   u32[78] = 0;
   u32[79] = 0;
@@ -2736,6 +2795,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
     materialCount: packedGeometry.materialCount,
     emissiveTriangleCount: packedEmissives.emissiveTriangleCount,
     lightCount: packedLights.lightCount,
+    portalCount: packedLights.portalCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
     textureCount: packedTextures.textureCount,
     usesTextureMips: packedTextures.usesTextureMips,
@@ -2767,6 +2827,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
     emissiveTriangleCount: counts.emissiveTriangleCount,
     lights: packedLights.lights,
     lightCount: counts.lightCount,
+    portalCount: counts.portalCount,
     lightTreeNodes: packedLightTree.lightTreeNodes,
     lightTreeNodeCount: counts.lightTreeNodeCount,
     lightTreeEmitters: packedLightTree.lightTreeEmitters,
@@ -3232,6 +3293,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     materialCount: materialRecords.length,
     emissiveTriangleCount: packedEmissives.emissiveTriangleCount,
     lightCount: packedLights.lightCount,
+    portalCount: packedLights.portalCount,
     lightTreeNodeCount: packedLightTree.lightTreeNodeCount,
     textureCount: packedTextures.textureCount,
     usesTextureMips: packedTextures.usesTextureMips,
@@ -3263,6 +3325,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     emissiveTriangleCount: counts.emissiveTriangleCount,
     lights: packedLights.lights,
     lightCount: counts.lightCount,
+    portalCount: counts.portalCount,
     lightTreeNodes: packedLightTree.lightTreeNodes,
     lightTreeNodeCount: counts.lightTreeNodeCount,
     lightTreeEmitters: packedLightTree.lightTreeEmitters,

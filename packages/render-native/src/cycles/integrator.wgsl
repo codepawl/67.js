@@ -918,7 +918,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
           smp_seek(&rng, step, SMP_SLOT_VOLUME_ENVIRONMENT);
-          let env_samp = lgt_sample_environment(smp_next_4d(&rng));
+          let env_samp = lgt_sample_environment(scatter_pos, smp_next_4d(&rng));
           int_accumulate_volume_direct_sample(env_samp, scatter_pos, ray_dir, throughput, bounce, transparent_bounces, &sample_radiance);
         }
 
@@ -1086,7 +1086,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
           if (SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
             smp_seek(&rng, step, SMP_SLOT_ENVIRONMENT);
-            direct_sample = lgt_sample_environment(smp_next_4d(&rng));
+            direct_sample = lgt_sample_environment(point.position, smp_next_4d(&rng));
           }
         }
         int_accumulate_direct_sample(direct_sample, &closure, &point, wo, throughput, medium_sigma, in_medium, bounce, transparent_bounces, &sample_radiance);

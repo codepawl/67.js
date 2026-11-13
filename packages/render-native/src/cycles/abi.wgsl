@@ -231,7 +231,11 @@ struct KernelParamsV2 {
   sobol_table_offset: u32,
   filter_glossy: f32,
 
-  reserved_tail: vec4<u32>,
+  // Light portals packed after the `light_count` emitters in the light table (FORMAT-v2.md).
+  portal_count: u32,
+  reserved_tail_y: u32,
+  reserved_tail_z: u32,
+  reserved_tail_w: u32,
 }
 
 // 160 bytes (10 x 16 B), alignment 16 B.
