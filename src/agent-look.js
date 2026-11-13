@@ -3,7 +3,7 @@ import { mat4 } from 'gl-matrix';
 import { createLightingState, updateLightingState, MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS, MAXIMUM_SPECULAR_ANTI_ALIASING } from './lighting.js';
 import { resolveEffects } from './effects.js';
 import { resolveVolumeFog } from './volumetric.js';
-import { resolveLocalVolumes } from './local-volumes.js';
+import { resolveLocalVolumesWith } from './local-volume-resolve.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
 import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
@@ -11,6 +11,11 @@ import { lightShapeSupport, postStepSupport } from './shader-registry.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
 import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference } from './look-catalog.js';
 import { DEFAULT_LIGHTING_SETUP, LIGHTING_SETUP_NAMES, DEFAULT_AMBIENT_OCCLUSION } from './agent-scene-capabilities.js';
+
+// Grid volumes resolve in the volumeGrid module, which loads when a recipe names shape "grid".
+function resolveGridVolumeOnDemand(input, resolved, label) {
+  return agentSceneModule('volumeGrid').resolveGridVolume(input, resolved, label);
+}
 
 // The longest list in a look is the longest light list.
 const MAX_LOOK_ARRAY_ENTRIES = Math.max(MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS);
@@ -325,7 +330,7 @@ function environmentFrom(input = {}) {
   }
   // Optional like the lights above, so a recipe without local volumes keeps its exported shape.
   if (input.localVolumes !== undefined) {
-    environment.localVolumes = copiedJson(resolveLocalVolumes(input.localVolumes, 'environment.localVolumes'));
+    environment.localVolumes = copiedJson(resolveLocalVolumesWith(resolveGridVolumeOnDemand, input.localVolumes, 'environment.localVolumes'));
   }
   if (input.shadowCascades !== undefined) {
     environment.shadowCascades = shadowCascadesFrom(input.shadowCascades);
