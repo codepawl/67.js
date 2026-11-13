@@ -7,6 +7,7 @@ import { normalizeFilmTimeline, sampleFilmTimeline } from '../src/film-timeline.
 import { encodeVolumeGrid, registerVolumeGrid } from '../src/volume-grid.js';
 import { findVolumeGridSequence, volumeGridFrameIndex } from '../src/volume-grid-sequence.js';
 import { bindLocalVolumeParts } from '../src/local-volume-parts.js';
+import { resolveLocalVolumes } from '../src/local-volumes.js';
 
 const FRAME_NAMES = ['clock-0', 'clock-1', 'clock-2', 'clock-3'];
 
@@ -63,6 +64,23 @@ test('the film timeline gives a grid-only recipe a motion time per shot, so a sh
   const scene = createAgentScene(recipe);
   scene.sampleMotion(late.motionTime);
   assert.equal(frameAt(scene.environment), 3);
+});
+
+test('a recipe may list far more than 16 frames, and the scene keeps the whole list in its export', () => {
+  const frames = Array.from({ length: 300 }, (unused, index) => `long-${index}.67vg`);
+  const recipe = gridOnlyRecipe({ environment: { localVolumes: [{ shape: 'grid', frames, fps: 24, center: [0, 1, 0], size: [1, 1, 1] }] } });
+  const exported = createAgentScene(recipe).exportRecipe();
+  assert.deepEqual(exported.environment.localVolumes[0].frames, frames);
+  recipe.environment.localVolumes[0].frames.push('too-many.67vg', ...frames.slice(0, 212));
+  assert.throws(() => createAgentScene(recipe), /at most 512 entries/);
+});
+
+test('a resolved grid volume resolves again to the same volume, as a scene does when it rebuilds its look', () => {
+  for (const volume of [{ shape: 'grid', grid: 'still', center: [0, 1, 0] }, { shape: 'grid', frames: ['a', 'b'], fps: 12, loop: false, center: [0, 1, 0] }]) {
+    const once = resolveLocalVolumes([volume]);
+    assert.deepEqual(resolveLocalVolumes(once), once);
+  }
+  assert.throws(() => resolveLocalVolumes([{ shape: 'grid', grid: 'still', center: [0, 1, 0], noiseAmount: 0.3 }]), /noiseAmount does not apply to a grid volume/);
 });
 
 test('frames that carry different channels are refused, with the converter run that fixes it', () => {
