@@ -79,15 +79,17 @@ Measured on one machine (RTX 4090, Blender 5.3.0, Cycles OptiX, Cook through thi
 | --- | --- | --- | --- |
 | `small`: floor with an image on Base Color, three objects sharing one mesh, an emissive cube, a sun, a point light, a constant world | 1.0003, 1.0002, 1.0002 | 0.9991 to 1.0025 | pass |
 | `hdri`: the same objects lit by an environment image with a broad warm lobe | 0.9975, 0.9973, 0.9968 | 0.9961 to 0.9998 | pass |
-| `maps`: `small` with images on Roughness, Normal and Alpha | 1.0136, 1.0067, 1.0066 | 0.9753 to 1.1682 | means pass, tiles fail (60 of 64 within 5 percent) |
-| `hdri-patch`: `hdri` with the lobe replaced by a patch of 8 x 6 pixels at 30 to 20 times the sky | 0.9042, 0.9170, 0.9674 | 0.7906 to 0.9976 | fail |
+| `maps`: `small` with images on Roughness, Normal and Alpha | 1.0127, 1.0062, 1.0060 | 0.9754 to 1.0929 | means pass, tiles fail (59 of 64 within 5 percent) |
+| `hdri-patch`: `hdri` with the lobe replaced by a patch of 8 x 6 pixels at 30 to 20 times the sky, no environment cap | 0.9981, 0.9978, 0.9983 | 0.9957 to 1.0002 | pass |
+| `hdri-patch` with the environment cap at 16 (the packer's default) | 0.9042, 0.9170, 0.9674 | 0.7906 to 0.9976 | fail |
 
 The picture `docs/cook-blender-addon-900.jpg` shows `small` and `hdri`, Cycles on the left and Cook on the right.
 
-What the failures are, as far as measured:
+What the numbers show:
 
-- `maps`: the failing tiles are on the three balls, which carry the normal map. The bump shading is close but not the same; the roughness ramp and the alpha cutout match. The cause is not isolated: it may be this add-on's normal map export or the kernel's normal map handling `[open]`.
-- `hdri-patch`: the add-on writes the same kind of file for this map as for `hdri`, which passes, so the gap follows the small bright source and not the export `[inferred]`. Cook is 9.6 percent darker in red over the frame, and up to 35 percent darker on the worst floor tiles.
+- Environment cap: the native packer limits every environment texel to 16 unless told otherwise (`DEFAULT_HDRI_RADIANCE_LIMIT`), and the `radianceLimit` in the scene file is read only by the bench bridge. The patch (30, 26, 20) is above 16, so its energy was lost: that was the whole `hdri-patch` gap. The add-on now passes `--hdri-radiance-limit none` to `trace-native.mjs` (a new flag; absent keeps the packer's default) unless the **Environment Cap** setting is above 0. With no cap the scene passes; with the cap at 16 it reproduces the earlier failure `[measured, same scene, same box]`.
+- Maps, one at a time (each against Cycles): roughness image alone passes (means 1.0002, tiles 0.9993 to 1.0022); alpha image alone passes (means 0.9994 to 1.0007, tiles 0.9744 to 1.0047); the normal map alone carried the failing tiles (60 of 64 within 5 percent, worst tile 1.1697, relMSE 0.0906).
+- Normal map convention: with the green channel inverted before Cook reads it, the normal-map scene's relMSE falls from 0.0906 to 0.0021 and 59 of 64 tiles are within 5 percent (worst tile 1.0927). The add-on now inverts green: Blender's bitangent follows V upward and Cook's V runs downward, so the unflipped image bumps the wrong way. Five tiles on the balls are still outside 5 percent (up to 9 percent); the remaining gap is not explained `[open]`. The tangent handedness of the kernel itself was not read; the measurement above is the evidence.
 
 The Cook render call includes starting Node, packing and the device set-up; it took 0.6 to 1.0 s here (Cycles' render call took 0.4 to 0.6 s). `maps` took 15.5 s on its first run and 1.0 s on the rerun, so the first run paid a one-time cost `[cause not found]`. These are single runs, not a speed comparison.
 
