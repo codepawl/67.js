@@ -31,6 +31,8 @@ renderer.updateParts(allParts);
 - `pose.heading` is yaw about +Y, zero when facing +z. `pitch` is positive nose up. `roll` is positive when the left side rises (leaning right), which is what a left turn produces.
 - Steering is positive toward the left.
 
+A boat is not a wheeled vehicle: it floats on the ocean and is steered by forces at the stern, as a `boat` controller live and as keyframed controls in a bake. See [Boats and wakes](physics.md#boats-and-wakes) and the [boat controller](player.md#boat-controller).
+
 ## Describing the vehicle
 
 `createVehicleRig({ parts | graph | asset, body, wheels, forwardAxis, wheelbase, maxSteerAngle })` takes exactly one source.

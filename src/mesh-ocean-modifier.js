@@ -1,5 +1,6 @@
 import { GROUP_PREFIX, createMeshData } from './mesh-data.js';
 import { oceanWaves, oceanSurfaceAt } from './ocean-waves.js';
+import { normalizeWake, wakeAt } from './ocean-wake.js';
 import { registerModifierNormalizer, registerModifierRunner } from './mesh-modifiers.js';
 
 export { oceanWaves, oceanSurfaceAt };
@@ -9,8 +10,8 @@ export const MAX_OCEAN_WORK = 50_000_000;
 const UP_AXES = Object.freeze({ x: 0, y: 1, z: 2 });
 const MAX_SEED = 0x7fffffff;
 
-/** Displace every vertex by the sea and write the vertex group `foam`; `axis` is the up axis of the sea. */
-export function oceanMesh(mesh, { axis, windSpeed, direction, choppiness, size, seed, time, resolution }) {
+/** Displace every vertex by the sea and write the vertex group `foam`; `axis` is the up axis of the sea. A `wake` adds foam and a trough along its points. */
+export function oceanMesh(mesh, { axis, windSpeed, direction, choppiness, size, seed, time, resolution, wake }) {
   const waves = oceanWaves({ windSpeed, direction, size, seed, resolution });
   if (waves.length * mesh.vertexCount > MAX_OCEAN_WORK) {
     throw new RangeError(`ocean would make ${waves.length * mesh.vertexCount} wave evaluations, over the limit of ${MAX_OCEAN_WORK}. Lower resolution or use a coarser grid.`);
@@ -18,6 +19,9 @@ export function oceanMesh(mesh, { axis, windSpeed, direction, choppiness, size, 
   const up = UP_AXES[axis];
   const first = (up + 1) % 3;
   const second = (up + 2) % 3;
+  // Wake points are [x, z] for a y-up sea: the two horizontal axes in ascending order.
+  const horizontalLow = up === 0 ? 1 : 0;
+  const horizontalHigh = up === 2 ? 1 : 2;
   const positions = new Float32Array(mesh.positions);
   const foam = new Float32Array(mesh.vertexCount);
   for (let vertex = 0; vertex < mesh.vertexCount; vertex++) {
@@ -26,6 +30,11 @@ export function oceanMesh(mesh, { axis, windSpeed, direction, choppiness, size, 
     positions[vertex * 3 + first] += surface.moveX;
     positions[vertex * 3 + second] += surface.moveZ;
     foam[vertex] = surface.foam;
+    if (wake?.points.length) {
+      const trail = wakeAt(wake, positions[vertex * 3 + horizontalLow], positions[vertex * 3 + horizontalHigh]);
+      positions[vertex * 3 + up] += trail.offset;
+      foam[vertex] = Math.max(foam[vertex], trail.foam);
+    }
   }
   const attributes = { ...mesh.attributes, point: { ...mesh.attributes.point, [`${GROUP_PREFIX}foam`]: { data: foam, size: 1 } } };
   return createMeshData({
@@ -44,6 +53,7 @@ function normalizeOcean(edit, normalized, index, { finiteNumber, integerInRange 
   normalized.seed = edit.seed === undefined ? 0 : integerInRange(edit.seed, index, 'seed', 0, MAX_SEED);
   normalized.time = edit.time === undefined ? 0 : finiteNumber(edit.time, index, 'time', { minimum: -1e6, maximum: 1e6 });
   normalized.resolution = edit.resolution === undefined ? 8 : integerInRange(edit.resolution, index, 'resolution', 1, MAX_OCEAN_RESOLUTION);
+  if (edit.wake !== undefined) normalized.wake = normalizeWake(edit.wake, `Mesh edit ${index} wake`);
 }
 
 registerModifierNormalizer('ocean', normalizeOcean);

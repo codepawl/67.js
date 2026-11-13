@@ -1188,7 +1188,7 @@ function stagePose(stagedState, time) {
  * every ocean node's `time` set to the sampled value, so it equals the still of a recipe that writes that time into the node. The last
  * result of each geometry is kept, so a repeated time reuses the geometry and the renderer sees no change.
  */
-function oceanTimeGeometries(stagedState, sampled) {
+function oceanTimeGeometries(stagedState, sampled, time) {
   const patches = sampled?.geometries;
   if (!patches?.size) {
     return new Map();
@@ -1197,15 +1197,21 @@ function oceanTimeGeometries(stagedState, sampled) {
   const geometries = new Map();
   for (const [geometryId, patch] of patches) {
     let frame = frames.get(geometryId);
-    if (frame?.time !== patch.oceanTime) {
+    const wakeField = stagedState.physicsSampler?.wakeField?.(geometryId, time);
+    const key = wakeField ? `${patch.oceanTime}|${time}` : patch.oceanTime;
+    if (frame?.key !== key) {
       const definition = stagedState.recipe.geometries.find(candidate => candidate.id === geometryId);
-      const stack = definition.stack.map(node => (node.op === 'ocean' ? { ...node, time: patch.oceanTime } : node));
+      const stack = definition.stack.map(node => (node.op === 'ocean' ? { ...node, ...wakeField, time: patch.oceanTime } : node));
       const scope = cutterScopeOf(stagedState.recipe.geometries);
-      frame = { time: patch.oceanTime, geometry: Object.freeze(generateGeometry({ ...definition, stack }, stagedState.maxGeometryVertices, scope)) };
+      frame = { key, geometry: Object.freeze(generateGeometry({ ...definition, stack }, stagedState.maxGeometryVertices, scope)) };
       frames.set(geometryId, frame);
     }
     for (const node of stagedState.recipe.nodes) {
-      if (node.geometry === geometryId) geometries.set(node.id, frame.geometry);
+      if (node.geometry !== geometryId) continue;
+      // A water part draws the ocean's foam group as foam, as the first build of the part does.
+      const material = stagedState.recipe.materials?.find(candidate => candidate.id === node.material);
+      const drawn = material && frame.geometry.vertexGroups?.foam ? agentSceneModule('mesh').waterFoamGeometry(frame.geometry, material) : frame.geometry;
+      geometries.set(node.id, drawn);
     }
   }
   return geometries;
@@ -1216,7 +1222,7 @@ function sampledGeometries(stagedState, time, sampled) {
   if (time === null) {
     return null;
   }
-  const geometries = oceanTimeGeometries(stagedState, sampled);
+  const geometries = oceanTimeGeometries(stagedState, sampled, time);
   for (const sampler of [stagedState.clothSampler, stagedState.particleSampler]) {
     sampler?.sample(time)?.forEach((geometry, nodeId) => geometries.set(nodeId, geometry));
   }

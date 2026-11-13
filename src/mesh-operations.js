@@ -24,7 +24,7 @@ export const MODIFIER_OPERATIONS = /* @__PURE__ */ Object.freeze({
   bounding_box: { fields: [], tags: [] },
   convex_hull: { fields: [], tags: [] },
   build: { fields: ['order', 'axis', 'seed', 'frame', 'start', 'length', 'reverse'], tags: [] },
-  ocean: { fields: ['axis', 'windSpeed', 'direction', 'choppiness', 'size', 'seed', 'time', 'resolution'], tags: [] },
+  ocean: { fields: ['axis', 'windSpeed', 'direction', 'choppiness', 'size', 'seed', 'time', 'resolution', 'wake'], tags: [] },
 });
 
 export const MESH_EDIT_OPERATIONS = /* @__PURE__ */ Object.freeze({
