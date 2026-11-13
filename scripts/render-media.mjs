@@ -169,7 +169,7 @@ export async function renderMedia(values = process.argv.slice(2)) {
     const query = new URLSearchParams({ export: '1', width: String(width), height: String(height), aspect, memory: String(memory), samples: String(backend === 'cpu' ? 1 : preset.samples) });
     if (scene === 'file') {
       const assetPaths = [];
-      assetServer = await startAssetServer(assetPaths);
+      assetServer = await startAssetServer(assetPaths, { pageOrigin: `http://127.0.0.1:${serverPort}` });
       const world = prepareFileScene({ configPath: options.config, root: options.root, largeAssetOrigin: assetServer.origin });
       assetPaths.push(...world.assets);
       await page.route('**/__file/**', async (request) => {
