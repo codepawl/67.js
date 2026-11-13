@@ -1,7 +1,7 @@
 <p align="center">
-  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/hero-classroom.webp" alt="A sunlit classroom with wooden desks and chairs, a green chalkboard and tall windows, rendered by 67js" width="100%"></a>
+  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/hero-classroom.webp" alt="A sunlit classroom with wooden desks and chairs, a chalkboard and tall windows with blinds, path traced by 67js" width="100%"></a>
   <br>
-  <sub>Classroom by Christophe Seux, CC0, from the Blender demo files, rendered in 67js</sub>
+  <sub>Classroom by Christophe Seux, CC0, from the Blender demo files, path traced in 67js with Cook</sub>
 </p>
 
 <p align="center">
