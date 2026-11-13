@@ -338,27 +338,47 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   let storeId;
   let lockHeld = false;
 
+  async function createLockFile() {
+    const lock = await open(lockPath, 'wx', 0o600);
+    try { await lock.writeFile(JSON.stringify({ schemaVersion: 1, pid: process.pid, token: lockToken })); }
+    finally { await lock.close(); }
+    lockHeld = true;
+    process.once('exit', releaseLockOnExit);
+  }
+
+  // A lock left by a killed server (the client's SIGTERM is TerminateProcess on Windows and runs no exit handler) names a dead
+  // PID. It is taken over only when the file is a well-formed lock; a live PID or an unrecognized file is still refused.
+  // Limit: the operating system can give a dead owner's PID to an unrelated process, which then looks live and is refused until
+  // a person removes the file. The lock is removed only if its token is still the one that was read.
+  async function takeOverDeadOwnerLock() {
+    await regularFile(lockPath);
+    const owner = await readJson(lockPath, 4096);
+    objectKeys(owner, ['schemaVersion', 'pid', 'token'], 'store lock');
+    if (owner.schemaVersion !== 1 || !UUID.test(owner.token)) throw new Error('Unrecognized job store lock.');
+    boundedNumber(owner.pid, 1, 2147483647, 'lock process ID', true);
+    try {
+      process.kill(owner.pid, 0);
+    } catch (failure) {
+      if (failure.code !== 'ESRCH') throw failure;
+      const current = await readJson(lockPath, 4096);
+      if (current.token === owner.token) await unlink(lockPath);
+      return;
+    }
+    throw new Error('The job store is already owned by a live process.');
+  }
+
   async function acquireLock() {
     try {
-      const lock = await open(lockPath, 'wx', 0o600);
-      try { await lock.writeFile(JSON.stringify({ schemaVersion: 1, pid: process.pid, token: lockToken })); }
-      finally { await lock.close(); }
-      lockHeld = true;
-      process.once('exit', releaseLockOnExit);
+      await createLockFile();
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      await regularFile(lockPath);
-      const owner = await readJson(lockPath, 4096);
-      objectKeys(owner, ['schemaVersion', 'pid', 'token'], 'store lock');
-      if (owner.schemaVersion !== 1 || !UUID.test(owner.token)) throw new Error('Unrecognized job store lock.');
-      boundedNumber(owner.pid, 1, 2147483647, 'lock process ID', true);
+      await takeOverDeadOwnerLock();
       try {
-        process.kill(owner.pid, 0);
-        throw new Error('The job store is already owned by a live process.');
-      } catch (failure) {
-        if (failure.code !== 'ESRCH') throw failure;
+        await createLockFile();
+      } catch (retryError) {
+        if (retryError.code === 'EEXIST') throw new Error('Another process took the job store lock first. Try again.');
+        throw retryError;
       }
-      throw new Error('Stale job store lock requires explicit repair. Verify that no process owns the store before removing store.lock.');
     }
   }
 

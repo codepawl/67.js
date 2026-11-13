@@ -320,9 +320,9 @@ Malformed published job records require repair before the controller can reopen 
 Quarantined admissions need explicit inspection and cleanup to reclaim their space.
 Their directories must contain regular files without links or aliases. Other entry types require repair.
 
-The controller never removes a dead process's lock automatically.
-After a crash, confirm that no process owns the dedicated private store before manually removing `store.lock`.
-This conservative repair step prevents two recovery processes from deleting a newly acquired lock.
+A client that closes the connection waits about two seconds before it kills the server, and a killed server leaves `store.lock` behind.
+The next controller takes over a lock when the file is well formed and its process ID belongs to no running process. It removes the file only if it still holds the token it read, then creates its own.
+A lock whose process is alive, or a file that is not a recognized lock, is still refused. The operating system can hand a dead owner's process ID to an unrelated process; that lock looks alive and stays until a person confirms nothing owns the dedicated private store and removes `store.lock`.
 
 A render or review job fails when its Node RSS passes 512 MiB or its browser heap passes 256 MiB. After each frame the browser heap is read, and when it is over the limit it is garbage collected and read again, so only memory the page still holds counts. A physics bake leaves tens of MiB of garbage after its first frame; a real leak survives the collection and still stops the job.
 

@@ -261,7 +261,19 @@ test('runner traversal and oversized outputs fail without final artifacts', asyn
   await traversal.close();
 });
 
-test('restart marks unfinished records interrupted and rejects forged artifact paths', async context => {
+test('a lock owned by a live process or written by something else is refused and left in place', async context => {
+  const root = await temporary(context);
+  const liveLock = JSON.stringify({ schemaVersion: 1, pid: process.pid, token: randomUUID() });
+  await writeFile(join(root, 'store.lock'), liveLock);
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /live process/);
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), liveLock);
+  const foreignLock = JSON.stringify({ schemaVersion: 2, pid: 2147483647, token: 'not-a-token' });
+  await writeFile(join(root, 'store.lock'), foreignLock);
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /Unrecognized job store lock/);
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), foreignLock);
+});
+
+test('restart marks unfinished records interrupted and rejects forged artifact paths',async context => {
   const root = await temporary(context);
   const controller = await createAgentRenderJobs({ root, limits, run: writeImage });
   const { jobId } = await controller.submit(request());
@@ -273,11 +285,7 @@ test('restart marks unfinished records interrupted and rejects forged artifact p
   status.artifacts = [];
   await writeFile(statusPath, JSON.stringify(status));
   await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
-  const staleLock = await readFile(join(root, 'store.lock'));
-  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /explicit repair/);
-  assert.deepEqual(await readFile(join(root, 'store.lock')), staleLock);
-  // The test owns this root and performs the explicit stale-lock repair.
-  await unlink(join(root, 'store.lock'));
+  // The lock names a dead process, so the next controller takes it over without a manual repair.
   const recovered = await createAgentRenderJobs({ root, limits, run: writeImage });
   assert.equal(recovered.status(jobId).state, 'interrupted');
   await recovered.close();
