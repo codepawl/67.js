@@ -93,7 +93,11 @@ export async function runDefaultLook(argumentsGiven) {
     generatedBy: 'npm run reference -- --default-look',
     settings: { width: IMAGE_WIDTH, height: IMAGE_HEIGHT, cyclesSamples: CYCLES_SAMPLES, pixelRatio: 1, reference: 'Blender Cycles, view transform applied as 67js applies it (ACES fit, gamma 2.2), 8 bit' },
   });
-  await writeFile(`${outputDirectory}/default-look.json`, `${JSON.stringify(report, null, 1)}\n`);
+  const isFullRun = sceneIds.length === SCENE_IDS.length && SCENE_IDS.every((sceneId) => sceneIds.includes(sceneId));
+  // A --scene subset must not replace the committed four-scene report, so it goes to the work directory.
+  const reportPath = isFullRun ? `${outputDirectory}/default-look.json` : `${workDirectory}/default-look-subset.json`;
+  await writeFile(reportPath, `${JSON.stringify(report, null, 1)}\n`);
+  console.log(`Report: ${reportPath}`);
   console.log(scoreTable(report));
   console.log(report.proposals.length === 0 ? 'No default change wins on three scenes.' : `Proposals: ${report.proposals.map(({ challenger, wins }) => `${challenger} (${wins.join(', ')})`).join('; ')}`);
 }
