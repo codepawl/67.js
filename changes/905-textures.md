@@ -1,0 +1,1 @@
+- `scene_look` and render jobs also report materials whose texture is missing and parts that z-fight, naming the parts, and a path traced job says why exposure findings and render passes are unavailable (#905)

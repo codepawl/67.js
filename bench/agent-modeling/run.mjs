@@ -2,7 +2,7 @@
 // server, then grades the recipe the agent exported.
 //
 // node bench/agent-modeling/run.mjs --claude <claude executable> [--model sonnet] [--tasks crate,bolt]
-//   [--runs 3] [--run-name <name>] [--budget 3] [--timeout 1200] [--label baseline] [--skill] [--branches off] [--relations off] [--backend gpu|cpu] [--resume <run name>]
+//   [--runs 3] [--run-name <name>] [--budget 3] [--timeout 1200] [--label baseline] [--skill] [--branches off] [--relations off] [--findings off] [--backend gpu|cpu] [--resume <run name>]
 //
 // --runs repeats every task that many times, each in a fresh session; the summary reports success rate, tool calls,
 // tool errors, tokens and cost for the model and for each task.
@@ -11,6 +11,8 @@
 // the instructions. Records carry branchCalls, the tool calls that passed a branch name, so a run shows whether agents used them.
 // --relations off does the same for relations: no relations field in the node schemas and no relations entry in
 // scene_capabilities. Records carry relationCalls, the tool calls that sent a relations list.
+// --findings off hides the structured findings (`diagnostics`) from scene_look, the control for measuring what they are worth.
+// Records carry imagesRead, the tool results that held a picture.
 // --skill puts the build-67js-scene entry point and its mesh reference in the system prompt. That measures what the
 // skill's knowledge is worth, not whether an agent would load the skill on its own.
 //
@@ -46,6 +48,7 @@ const { values: options } = parseArgs({
     skill: { type: 'boolean', default: false },
     branches: { type: 'string', default: 'on' },
     relations: { type: 'string', default: 'on' },
+    findings: { type: 'string', default: 'on' },
     resume: { type: 'string' },
     'run-name': { type: 'string' },
     backend: { type: 'string', default: 'gpu' },
@@ -66,7 +69,7 @@ async function skillPrompt() {
 function mcpConfig(assetDirectory) {
   return { mcpServers: { [MCP_SERVER_NAME]: {
     command: process.execPath,
-    args: [join(repository, 'scripts', 'mcp-server.mjs'), '--backend', options.backend, '--memory', '192', '--branches', options.branches, '--relations', options.relations, ...(assetDirectory ? ['--assets', assetDirectory] : [])],
+    args: [join(repository, 'scripts', 'mcp-server.mjs'), '--backend', options.backend, '--memory', '192', '--branches', options.branches, '--relations', options.relations, '--findings', options.findings, ...(assetDirectory ? ['--assets', assetDirectory] : [])],
   } } };
 }
 
@@ -110,7 +113,7 @@ function textOf(content) {
 
 /** Tool calls, errors, the model, usage and the last exported recipe from a stream-json transcript. */
 function readTranscript(output) {
-  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, branchCalls: 0, relationCalls: 0, pathQueries: 0, fixRounds: 0, recipe: null, result: null };
+  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, branchCalls: 0, relationCalls: 0, imagesRead: 0, pathQueries: 0, fixRounds: 0, recipe: null, result: null };
   const steps = [];
   const exportCalls = new Set();
   for (const line of output.split('\n')) {
@@ -141,6 +144,7 @@ function readTranscript(output) {
       for (const block of event.message?.content ?? []) {
         if (block.type !== 'tool_result') continue;
         if (block.is_error) summary.toolErrors++;
+        if (Array.isArray(block.content) && block.content.some(part => part.type === 'image')) summary.imagesRead++;
         if (!exportCalls.has(block.tool_use_id) || block.is_error) continue;
         try {
           const exported = JSON.parse(textOf(block.content));
@@ -202,6 +206,7 @@ async function runTask(task, attempt, systemPromptAddition) {
       toolsByName: transcript.toolsByName,
       branchCalls: transcript.branchCalls,
       relationCalls: transcript.relationCalls,
+      imagesRead: transcript.imagesRead,
       pathQueries: transcript.pathQueries,
       features: transcript.recipe ? recipeFeatures(transcript.recipe) : null,
       look: transcript.recipe ? await scoreLookSafely(task.id, transcript.recipe, { imageDirectory: join(rawDirectory, 'look', String(attempt)) }) : null,
@@ -231,6 +236,7 @@ async function runTaskWithInfraRetry(task, attempt, systemPromptAddition) {
 
 if (!['on', 'off'].includes(options.branches)) throw new RangeError('--branches must be on or off');
 if (!['on', 'off'].includes(options.relations)) throw new RangeError('--relations must be on or off');
+if (!['on', 'off'].includes(options.findings)) throw new RangeError('--findings must be on or off');
 const tasks = options.tasks ? options.tasks.split(',').map(taskById) : TASKS;
 await mkdir(rawDirectory, { recursive: true });
 await mkdir(resultsDirectory, { recursive: true });
@@ -250,6 +256,7 @@ function summarize() {
     skill: options.skill,
     branches: options.branches,
     relations: options.relations,
+    findings: options.findings,
     runsPerTask: attempts,
     passed: records.filter(record => record.pass).length,
     tasks: records.length,
