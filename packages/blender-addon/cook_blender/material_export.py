@@ -4,7 +4,7 @@ Reads the Principled BSDF that feeds the active material output (also a lone Dif
 or an Image Texture node linked directly to it; anything else is replaced by the socket's constant value and recorded once in
 `notes` under the material name, so the render log can say what was approximated.
 """
-import base64
+import os
 
 import numpy
 
@@ -45,12 +45,15 @@ def rgb_of(socket_value):
 
 
 class MaterialExporter:
-    def __init__(self):
+    def __init__(self, asset_directory):
+        """Texture pixels are written into `asset_directory`, one file per distinct image; the scene description names the files."""
+        self.asset_directory = asset_directory
         self.entries = []
         self.images = []
         self.notes = {}
         self._index_by_material = {}
         self._index_by_image = {}
+        self._texture_bytes = 0
 
     # ---- Table access ----
 
@@ -69,12 +72,13 @@ class MaterialExporter:
     def _register_image(self, key, pixels_top_first_uint8):
         if key not in self._index_by_image:
             height, width, _ = pixels_top_first_uint8.shape
-            self._index_by_image[key] = len(self.images)
-            self.images.append({
-                "width": width,
-                "height": height,
-                "data": {"type": "Uint8ClampedArray", "base64": base64.b64encode(pixels_top_first_uint8.tobytes()).decode("ascii")},
-            })
+            image_index = len(self.images)
+            self._texture_bytes += pixels_top_first_uint8.nbytes
+            conversions.check_texture_budget(self._texture_bytes, image_index + 1)
+            file_name = conversions.texture_file_name(image_index)
+            pixels_top_first_uint8.tofile(os.path.join(self.asset_directory, file_name))
+            self._index_by_image[key] = image_index
+            self.images.append({"width": width, "height": height, "assetFile": file_name})
         return self._index_by_image[key]
 
     @staticmethod

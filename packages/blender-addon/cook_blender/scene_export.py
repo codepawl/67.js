@@ -213,10 +213,10 @@ def export_environment_texture(world, work_directory, report):
     rows = environment_image_rows(image) * float(strength_socket.default_value)
     rows = numpy.minimum(rows, conversions.HDR_RADIANCE_LIMIT)
     os.makedirs(work_directory, exist_ok=True)
-    hdr_path = os.path.join(work_directory, "world.hdr")
+    hdr_path = os.path.join(work_directory, conversions.WORLD_IMAGE_FILE_NAME)
     conversions.write_radiance_hdr(hdr_path, conversions.blender_environment_to_cook_rows(rows))
     report["worldImage"] = {"name": image.name, "width": image.size[0], "height": image.size[1]}
-    return {"type": "hdri", "file": hdr_path, "intensity": 1.0, "radianceLimit": conversions.HDR_RADIANCE_LIMIT}
+    return {"type": "hdri", "assetFile": conversions.WORLD_IMAGE_FILE_NAME, "intensity": 1.0, "radianceLimit": conversions.HDR_RADIANCE_LIMIT}
 
 
 # ---- Geometry ----
@@ -441,7 +441,8 @@ def export_scene(depsgraph, width, height, work_directory):
         report["notes"].append("Film > Transparent is on; Cook renders an opaque background and writes alpha 1")
     if scene.render.pixel_aspect_x != scene.render.pixel_aspect_y:
         report["notes"].append("the pixel aspect is not 1:1; Cook renders square pixels")
-    materials = MaterialExporter()
+    os.makedirs(work_directory, exist_ok=True)
+    materials = MaterialExporter(work_directory)
     environment, geometries, parts = collect_parts(depsgraph, materials, report)
     if not parts:
         raise ValueError("The scene has no visible mesh to render. Check that objects are enabled for rendering (the camera icon in the Outliner).")

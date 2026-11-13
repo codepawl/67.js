@@ -26,11 +26,11 @@ A missing folder, an unbuilt addon or a missing Node stops the render with a mes
 | Objects that share mesh data, and collection instances | instances of one geometry, not copies of the triangles |
 | Point, sun, spot and area lights (colour, power, radius or angle, spot size and blend, area shape and size, spread) | the same units as the Cycles parity bridge ([`classroom_bridge.py`](../bench/cycles-parity/classroom_bridge.py) shares this code) |
 | World: a constant colour (with Strength), or an Environment Texture on Background colour | a constant world, or an HDRI written as a Radiance file and turned to Cook's orientation |
-| The active camera: perspective, sensor fit, roll, depth of field (f-stop, focus distance or object, blades, rotation) | pinhole or thin lens |
+| The active camera: perspective, sensor fit (Auto fits the 36 mm sensor width to the longer side of the frame, so a portrait frame has a vertical sensor of 36 mm, as in Cycles), roll, depth of field (f-stop, focus distance or object, blades, rotation) | pinhole or thin lens |
 | Principled BSDF: Base Color, Metallic, Roughness, Emission Color and Strength, Alpha, IOR, Specular IOR Level, Transmission Weight, Coat Weight and Roughness | constant values; Base Color, Emission Color, Metallic, Roughness and Alpha also as an Image Texture linked directly to the socket, and Normal from a tangent-space Normal Map node fed by an image |
 | Diffuse and Emission shaders as the only surface | a diffuse or an emissive material |
 | Hide in Renders, ray visibility (camera, diffuse, glossy, transmission, shadow) | the same flags |
-| Render passes: Combined, and Depth (Z) when "Z" is enabled on the view layer | Combined and a Z pass converted from the tracer's ray distance |
+| Render passes: Combined, and Depth (Z) when "Z" is enabled on the view layer | Combined and a Z pass converted from the tracer's ray distance (see the edge limit below) |
 
 Metallic and Roughness images are combined into one map (roughness in green, metallic in blue); if they differ in size the Metallic one is left out. An Alpha that comes from an image is cut out at 0.5, not blended.
 
@@ -43,7 +43,14 @@ Everything below is reported **once per material** in the render log (a `COOK ma
 - Volume and Displacement outputs, Sheen, Subsurface, Anisotropic, Thin Film and a non-white Specular Tint: left out.
 - Image Texture node projections other than Flat, Closest interpolation, extension modes other than Repeat, and a Vector input: read as a flat, linearly filtered, repeating lookup with the first UV map.
 - More than one sun (the first is used), light nodes, light linking, blackbody temperature, light shadow and diffuse/specular factors, shadow-catcher and holdout objects, Film > Transparent, a pixel aspect other than 1:1, hair and curves objects, point clouds, volumes and Grease Pencil, orthographic and panoramic cameras (an error that says to use Perspective), camera lens shift, the render border and motion blur.
+- The Z pass is not coverage-corrected: the tracer averages the first-hit distance over all samples of a pixel and counts a missed ray as 0, and it returns no hit count or alpha to divide by. A silhouette pixel that is half background therefore gets about half the distance (Cycles writes the distance of the surface), which shows as a dark halo along edges in a depth of field or fog composite. Interior pixels and pixels whose samples all hit are right. The render log carries a note whenever Z is enabled. To fix it the tracer would need to return a per-pixel count of samples that hit a surface (or the summed film weight of hits), next to the depth sum.
 - Geometry whose evaluated shape differs per instance of one object (some Geometry Nodes setups) is exported once per object datablock: check the result. `[untested]`
+
+## Textures and the render folder
+
+Each distinct image is written as raw 8-bit RGBA into the render's private temporary folder (`texture-0.rgba`, `texture-1.rgba`, ...), and the world image as `world.hdr` in the same folder. `scene.json` names them with `assetFile`, a bare file name. `trace-native.mjs` reads such a file only from the folder that holds the scene file (`resolveAssetFile` in [`scene-bridge.mjs`](../bench/cycles-parity/scene-bridge.mjs) refuses a path, an absolute path, a parent reference and a name with a NUL byte, for images and for the world image alike). Pixels are never embedded as base64 text, so a scene with many large textures no longer runs into the string limit of Node (about 512 MB) and the Python side does not hold the encoded copy in memory.
+
+The tracer keeps every texture in memory, so the total is limited to 1 GiB (16 distinct 4096 x 4096 RGBA images). Over that the render stops with a message that gives the count and the total in MB and says to lower the texture size or use fewer distinct images `[the limit is a guard, not a measured ceiling of the tracer]`.
 
 ## Settings and environment
 
@@ -67,7 +74,7 @@ blender -b --factory-startup --python-exit-code 1 --python packages/blender-addo
 bash packages/blender-addon/tests/run-checks.sh 256
 ```
 
-`run-checks.sh` renders two fixture scenes (`tests/scene_fixtures.py`) with Cycles (OptiX) and with Cook at the same samples (256), 8 bounces, box filter of width 1, no denoiser and no clamping, and compares them with the repository's [`compare.py`](../bench/cycles-parity/compare.py) gates: the mean ratio of each channel within 2 percent and every 8x8 tile within 5 percent. It writes `artifacts/900/cook-blender-addon-900.jpg`.
+`run-checks.sh` renders the fixture scenes (`tests/scene_fixtures.py`, including `portrait`: `small` at 270 x 480 with sensor fit Auto, which fails the tile gate at once when the field of view is wrong) with Cycles (OptiX) and with Cook at the same samples (256), 8 bounces, box filter of width 1, no denoiser and no clamping, and compares them with the repository's [`compare.py`](../bench/cycles-parity/compare.py) gates: the mean ratio of each channel within 2 percent and every 8x8 tile within 5 percent. It writes `artifacts/900/cook-blender-addon-900.jpg`.
 
 `bash packages/blender-addon/tests/run-classroom-check.sh` renders the Classroom demo through the add-on engine, then runs `bench/cycles-parity/run-classroom-parity.sh`, which reads the scene with the same code (see the Classroom section of [cycles-parity.md](./cycles-parity.md)).
 

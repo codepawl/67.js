@@ -115,6 +115,8 @@ class CookRenderEngine(bpy.types.RenderEngine):
         log(f"exported {report['partCount']} parts over {report['geometryCount']} geometries ({report['uniqueTriangleCount']} unique triangles), {report['materialCount']} materials")
         if scene.render.use_border:
             report["notes"].append("the render border is ignored; the whole frame is rendered")
+        if any(view_layer.use_pass_z for view_layer in scene.view_layers):
+            report["notes"].append(conversions.DEPTH_COVERAGE_NOTE)
         for note in report["notes"]:
             self.report({"WARNING"}, f"Cook: {note}")
             log(f"note: {note}")

@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy
 
@@ -14,6 +15,7 @@ ADDON_PARENT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__fi
 sys.path.insert(0, ADDON_PARENT)
 
 from cook_blender import blender_conversions as conversions  # noqa: E402
+from cook_blender import material_export  # noqa: E402
 from cook_blender import native_runner  # noqa: E402
 
 IDENTITY_ROWS = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
@@ -37,11 +39,29 @@ class CoordinateTests(unittest.TestCase):
         self.assertEqual(flat[12:15], [1.0, 3.0, -2.0])
         self.assertEqual(flat[15], 1.0)
 
-    def test_field_of_view_uses_the_sensor_fit(self):
-        wide = conversions.effective_horizontal_sensor_width("AUTO", 36.0, 24.0, 1920, 1080)
-        tall = conversions.effective_horizontal_sensor_width("AUTO", 36.0, 24.0, 1080, 1920)
-        self.assertEqual(wide, 36.0)
-        self.assertAlmostEqual(tall, 24.0 * 1080 / 1920)
+    def test_sensor_width_follows_the_sensor_fit_in_both_orientations(self):
+        def sensor_across_width(sensor_fit, width, height):
+            return conversions.effective_horizontal_sensor_width(sensor_fit, 36.0, 24.0, width, height)
+
+        # AUTO puts sensor_width on the longer side and never reads sensor_height.
+        self.assertAlmostEqual(sensor_across_width("AUTO", 1920, 1080), 36.0)
+        self.assertAlmostEqual(sensor_across_width("AUTO", 1080, 1920), 36.0 * 1080 / 1920)
+        self.assertAlmostEqual(sensor_across_width("AUTO", 1000, 1000), 36.0)
+        # HORIZONTAL puts sensor_width across the width, VERTICAL puts sensor_height across the height.
+        self.assertAlmostEqual(sensor_across_width("HORIZONTAL", 1920, 1080), 36.0)
+        self.assertAlmostEqual(sensor_across_width("HORIZONTAL", 1080, 1920), 36.0)
+        self.assertAlmostEqual(sensor_across_width("VERTICAL", 1920, 1080), 24.0 * 1920 / 1080)
+        self.assertAlmostEqual(sensor_across_width("VERTICAL", 1080, 1920), 24.0 * 1080 / 1920)
+
+    def test_portrait_auto_field_of_view_matches_cycles(self):
+        sensor_across_width = conversions.effective_horizontal_sensor_width("AUTO", 36.0, 24.0, 1080, 1920)
+        vertical_fov = conversions.vertical_fov_degrees(sensor_across_width, 50.0, 1080, 1920)
+        # Vertical sensor 36 mm at 50 mm focal length: 2 * atan(18 / 50) = 39.6 degrees.
+        self.assertAlmostEqual(vertical_fov, 39.5978, places=3)
+        landscape_sensor = conversions.effective_horizontal_sensor_width("AUTO", 36.0, 24.0, 1920, 1080)
+        self.assertAlmostEqual(conversions.vertical_fov_degrees(landscape_sensor, 50.0, 1920, 1080), 22.89, delta=0.01)
+
+    def test_square_field_of_view(self):
         self.assertAlmostEqual(conversions.vertical_fov_degrees(36.0, 18.0, 1000, 1000), 90.0)
 
 
@@ -198,6 +218,52 @@ class NoteTests(unittest.TestCase):
         conversions.note_once(notes, "Clay", "Roughness is procedural")
         conversions.note_once(notes, "Clay", "Sheen is set")
         self.assertEqual(notes, {"Clay": ["Roughness is procedural", "Sheen is set"]})
+
+
+class TextureFileTests(unittest.TestCase):
+    def test_each_distinct_image_becomes_one_named_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            exporter = material_export.MaterialExporter(directory)
+            first = numpy.arange(2 * 3 * 4, dtype=numpy.uint8).reshape(2, 3, 4)
+            second = numpy.full((1, 1, 4), 7, dtype=numpy.uint8)
+            self.assertEqual(exporter._register_image(("first", "srgb"), first), 0)
+            self.assertEqual(exporter._register_image(("second", "linear"), second), 1)
+            self.assertEqual(exporter._register_image(("first", "srgb"), first), 0)
+            self.assertEqual(exporter.images, [
+                {"width": 3, "height": 2, "assetFile": "texture-0.rgba"},
+                {"width": 1, "height": 1, "assetFile": "texture-1.rgba"},
+            ])
+            with open(os.path.join(directory, "texture-0.rgba"), "rb") as handle:
+                self.assertEqual(handle.read(), first.tobytes())
+            self.assertEqual(sorted(os.listdir(directory)), ["texture-0.rgba", "texture-1.rgba"])
+
+    def test_six_4k_textures_fit_the_budget_and_files_are_numbered(self):
+        four_k_bytes = 4096 * 4096 * 4
+        conversions.check_texture_budget(6 * four_k_bytes, 6)
+        self.assertEqual(conversions.texture_file_name(5), "texture-5.rgba")
+
+    def test_textures_over_the_limit_are_refused_with_totals_and_a_fix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            exporter = material_export.MaterialExporter(directory)
+            with mock.patch.object(conversions, "TEXTURE_BYTE_LIMIT", 50):
+                exporter._register_image(("small", "srgb"), numpy.zeros((2, 2, 4), dtype=numpy.uint8))
+                with self.assertRaises(ValueError) as raised:
+                    exporter._register_image(("large", "srgb"), numpy.zeros((4, 4, 4), dtype=numpy.uint8))
+            message = str(raised.exception)
+            self.assertIn("2 distinct textures", message)
+            self.assertIn("Lower the texture size", message)
+            self.assertIn("fewer distinct images", message)
+
+    def test_the_limit_is_one_gibibyte(self):
+        conversions.check_texture_budget(conversions.TEXTURE_BYTE_LIMIT, 16)
+        with self.assertRaises(ValueError):
+            conversions.check_texture_budget(conversions.TEXTURE_BYTE_LIMIT + 1, 17)
+
+
+class DepthNoteTests(unittest.TestCase):
+    def test_the_depth_note_names_the_coverage_limit(self):
+        self.assertIn("averages missed rays as 0", conversions.DEPTH_COVERAGE_NOTE)
+        self.assertIn("halo", conversions.DEPTH_COVERAGE_NOTE)
 
 
 if __name__ == "__main__":

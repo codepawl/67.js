@@ -19,6 +19,28 @@ AREA_SHAPES = {"SQUARE": "rectangle", "RECTANGLE": "rectangle", "DISK": "disk", 
 LUMINANCE_WEIGHTS = (0.2126, 0.7152, 0.0722)
 
 
+# The tracer holds every texture in memory, so the total is bounded: 1 GiB is 16 distinct 4096 x 4096 RGBA images.
+TEXTURE_BYTE_LIMIT = 1 << 30
+WORLD_IMAGE_FILE_NAME = "world.hdr"
+DEPTH_COVERAGE_NOTE = (
+    "the Depth pass averages missed rays as 0, so a silhouette pixel that is partly background gets a smaller Z than Cycles writes; "
+    "expect a dark halo along edges in depth of field or fog composites"
+)
+
+
+def texture_file_name(image_index):
+    return f"texture-{image_index}.rgba"
+
+
+def check_texture_budget(total_bytes, image_count):
+    """Raises when the textures exported so far pass the limit; the message gives the totals and what to change."""
+    if total_bytes > TEXTURE_BYTE_LIMIT:
+        raise ValueError(
+            f"The scene's {image_count} distinct textures add up to {total_bytes / (1 << 20):.0f} MB, above the {TEXTURE_BYTE_LIMIT / (1 << 20):.0f} MB "
+            "Cook loads. Lower the texture size (Image > Resize) or use fewer distinct images."
+        )
+
+
 def to_yup(vector):
     return [float(vector[0]), float(vector[2]), float(-vector[1])]
 
@@ -33,12 +55,18 @@ def column_major_yup_matrix(blender_matrix_rows):
 
 
 def effective_horizontal_sensor_width(sensor_fit, sensor_width, sensor_height, width, height):
-    fit = sensor_fit
-    if fit == "AUTO":
-        fit = "HORIZONTAL" if width >= height else "VERTICAL"
-    if fit == "HORIZONTAL":
+    """The sensor size across the image width, following Blender and Cycles.
+
+    AUTO fits the longer image side to `sensor_width` (`sensor_height` is not read), so a portrait frame has a vertical sensor of
+    `sensor_width`. HORIZONTAL fits the width to `sensor_width`; VERTICAL fits the height to `sensor_height`. The pixel aspect ratio
+    is not applied (the exporter reports it)."""
+    if sensor_fit == "HORIZONTAL":
         return sensor_width
-    return sensor_height * width / height
+    if sensor_fit == "VERTICAL":
+        return sensor_height * width / height
+    if width >= height:
+        return sensor_width
+    return sensor_width * width / height
 
 
 def vertical_fov_degrees(horizontal_sensor_width, lens_millimetres, width, height):

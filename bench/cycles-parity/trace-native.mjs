@@ -327,7 +327,8 @@ async function runCli() {
   await mkdir(dirname(options.outputPrefix), { recursive: true });
   const totalStarted = performance.now();
   const buildStarted = performance.now();
-  const traceSource = await reconstructTraceSceneSource(description);
+  // Files named by `assetFile` (texture images, the world image) are read from the folder that holds the scene file, and only from there.
+  const traceSource = await reconstructTraceSceneSource(description, undefined, { assetDirectory: dirname(options.sceneJsonPath) });
   if (options.instancing && options.kernel !== 'cycles') {
     throw new RangeError('Option --instancing needs --kernel cycles: the legacy kernel packs flattened scenes only.');
   }

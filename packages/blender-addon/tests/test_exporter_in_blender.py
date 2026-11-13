@@ -44,7 +44,7 @@ def decode_floats(encoded):
 
 def test_small_scene():
     scene = scene_fixtures.build_small_scene("small")
-    description, lens, report, _ = export(scene)
+    description, lens, report, work_directory = export(scene)
     ball_parts = [part for part in description["parts"] if part["name"].startswith("Ball")]
     check(len(ball_parts) == 3, "three objects sharing one mesh give three parts")
     check(len({part["geometry"] for part in ball_parts}) == 1, "the three parts share one geometry, not three copies of the triangles")
@@ -60,6 +60,10 @@ def test_small_scene():
     glow_material = description["materials"][glow_part["material"]]
     check(glow_material["emission"] == 15.0 and glow_material["emissiveColor"] == [1.0, 0.6000000238418579, 0.20000000298023224], "an emissive material keeps its strength and colour")
     check(len(description["images"]) == 1 and description["images"][0]["width"] == scene_fixtures.CHECKER_SIZE, "the image table holds the one checker image")
+    checker_entry = description["images"][0]
+    check("data" not in checker_entry and "/" not in checker_entry["assetFile"] and "\\" not in checker_entry["assetFile"], "an image is named by a file in the render folder, not embedded")
+    checker_file = os.path.join(work_directory, checker_entry["assetFile"])
+    check(os.path.getsize(checker_file) == scene_fixtures.CHECKER_SIZE * scene_fixtures.CHECKER_SIZE * 4, "the image file holds width x height x 4 bytes")
     check(abs(description["camera"]["fov"] - math.degrees(2 * math.atan(18.0 / 35.0 * 270 / 480))) < 1e-3, "the camera field of view is exported")
     check(not report["materialNotes"], "a fully supported scene reports no material notes")
     check(lens == {"enabled": False}, "a camera without depth of field has no lens entry")
@@ -159,11 +163,23 @@ def test_lights_and_camera():
         raise AssertionError("FAILED: an orthographic camera was accepted")
 
 
+def test_portrait_camera_follows_sensor_fit_auto():
+    scene = scene_fixtures.build_small_scene("small", 270, 480)
+    scene.camera.data.dof.use_dof = True
+    scene.camera.data.dof.focus_distance = 5.0
+    description, lens, _, _ = export(scene, 270, 480)
+    # AUTO puts the 36 mm sensor on the longer side, which is the height of a portrait frame.
+    expected_fov = math.degrees(2 * math.atan(18.0 / 35.0))
+    check(abs(description["camera"]["fov"] - expected_fov) < 1e-3, "a portrait AUTO camera has a vertical field of view from the 36 mm sensor")
+    check(abs(lens["sensorWidth"] - 36.0 * 270 / 480) < 1e-6, "the depth of field lens uses the horizontal sensor width of a portrait frame")
+
+
 def test_hdri_world():
     scene = scene_fixtures.build_small_scene("hdri")
     description, _, report, work_directory = export(scene)
     check(description["world"]["type"] == "hdri", "an environment image becomes an HDRI world")
-    hdr_path = description["world"]["file"]
+    check("file" not in description["world"], "the HDRI is named by a file in the render folder, never by a path")
+    hdr_path = os.path.join(work_directory, description["world"]["assetFile"])
     with open(hdr_path, "rb") as handle:
         magic = handle.read(10)
     check(magic == b"#?RADIANCE", "the HDRI is written as a Radiance file")
@@ -271,7 +287,7 @@ def test_geometry_nodes_instances():
 
 
 def main():
-    for test in (test_small_scene, test_collection_instances, test_material_slots_and_notes, test_other_surface_shaders, test_lights_and_camera, test_hdri_world, test_world_without_a_background_uses_the_fallback, test_geometry_edge_cases, test_scene_notes_and_color_spaces, test_geometry_nodes_instances):
+    for test in (test_small_scene, test_collection_instances, test_material_slots_and_notes, test_other_surface_shaders, test_lights_and_camera, test_portrait_camera_follows_sensor_fit_auto, test_hdri_world, test_world_without_a_background_uses_the_fallback, test_geometry_edge_cases, test_scene_notes_and_color_spaces, test_geometry_nodes_instances):
         test()
     print(f"{len(CHECKS_PASSED)} checks passed", flush=True)
 
