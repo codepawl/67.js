@@ -1,6 +1,7 @@
 import { answerCapabilities } from './capabilities-topics.mjs';
 import { BRANCH_NAME_PATTERN } from '../src/agent-branches.js';
 import { McpServer } from '@modelcontextprotocol/server';
+import { resolveJobRoot } from './agent-job-root.mjs';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { describeSchemaInputsWithReceivedValues } from './mcp-input-errors.mjs';
@@ -1007,6 +1008,8 @@ export async function runMcpCli({ argumentsValue = process.argv.slice(2),
   if (!['cpu', 'gpu'].includes(options.backend) || !Number.isInteger(options.memory) || options.memory < 32 || options.memory > MAXIMUM_MEMORY_MIB) {
     throw new Error(`Backend must be cpu or gpu, and memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
+  // Checked here, not in the runtime factory: the SDK calls the factory only when the first client connects.
+  options.jobs = resolveJobRoot(options.jobs);
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   // Not awaited: the check fills in while the client connects and never delays or fails the start.
   const updateCheck = startUpdateCheck({ currentVersion: version });

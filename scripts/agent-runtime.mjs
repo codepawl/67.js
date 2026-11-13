@@ -31,6 +31,7 @@ import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAM
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { writeWebBuild } from './web-export.mjs';
 import { gameAssetIds } from '../src/game-assets.js';
+import { resolveJobRoot } from './agent-job-root.mjs';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR, RENDER_HISTORY_FILE, normalizeJobSettings } from './agent-render-jobs.mjs';
 import { RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget } from './agent-render-budget.mjs';
 import { RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom } from './agent-render-estimate.mjs';
@@ -109,9 +110,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   if (packsRoot !== undefined && (typeof packsRoot !== 'string' || !isAbsolute(packsRoot))) {
     throw new TypeError('Packs root must be an explicit absolute directory path.');
   }
-  if (jobRoot !== undefined && (typeof jobRoot !== 'string' || !isAbsolute(jobRoot))) {
-    throw new TypeError('Job root must be an explicit absolute directory path.');
-  }
+  jobRoot = resolveJobRoot(jobRoot);
   const importMapScript = addonSet.addons.length === 0 ? '' : `<script type="importmap">${JSON.stringify(addonImportMap(packageMetadata.exports))}</script>`;
   // The one inline script is the import map; its hash is allowed so script-src stays 'self'. No addons, no hash.
   const importMapHash = addonSet.addons.length === 0 ? '' : ` 'sha256-${createHash('sha256').update(importMapScript.slice(importMapScript.indexOf('>') + 1, -'</script>'.length)).digest('base64')}'`;
@@ -162,10 +161,25 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   }
   const savedGlbPaths = [];
   const savedWebBuildPaths = [];
+  // Capabilities must work without the job store: a store that cannot open is reported here, not thrown.
+  async function jobRecords() {
+    if (!jobRoot) return { records: [] };
+    try {
+      const records = (await jobs()).list().map(record => ({ jobId: record.jobId, state: record.state,
+        sourceRevision: record.sourceRevision, progress: record.progress }));
+      return { records };
+    } catch (error) {
+      return { records: [], unavailable: error.message };
+    }
+  }
   function jobs() {
     if (!jobRoot) throw new Error('Configure --jobs with an absolute output directory before submitting render jobs.');
     if (!jobsPromise && closing) throw new Error('The agent runtime is closing or closed.');
-    jobsPromise ??= createAgentRenderJobs({ root: jobRoot, run: runJob });
+    // A failed creation is not kept: the next call tries again instead of repeating the first error until restart.
+    jobsPromise ??= createAgentRenderJobs({ root: jobRoot, run: runJob }).catch(error => {
+      jobsPromise = undefined;
+      throw error;
+    });
     return jobsPromise;
   }
   // The caller never names a path: files get a server-chosen name in the jobs folder, and only the newest few are kept.
@@ -902,8 +916,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           maximumDuration: MAXIMUM_VIDEO_SECONDS, maximumFps: 30, maximumFrames: 900, maximumStills: 8,
           encoder: 'H.264', encoders: VIDEO_ENCODERS, audio: Boolean(audioRoot), timeline: true, previewSuspendedDuringJob: true,
           glbExport: { maximumBytes: MAXIMUM_GLB_BYTES, maximumKept: MAXIMUM_KEPT_GLBS, maximumTextureSize: 4096 },
-          records: jobRoot ? (await jobs()).list().map(record => ({ jobId: record.jobId, state: record.state,
-            sourceRevision: record.sourceRevision, progress: record.progress })) : [] },
+          ...(await jobRecords()) },
         addons: addonCapabilities({ addons: addonSet.addons.filter(addon => !refusedAddons.some(refused => refused.name === addon.name)), skipped: addonSet.skipped, registered: registeredByAddon, refused: refusedAddons }),
         unsupported: ['remote asset providers', 'arbitrary code execution', 'imported morph track authoring'],
       };

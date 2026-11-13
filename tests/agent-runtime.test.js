@@ -135,7 +135,7 @@ async function reviewRuntimeHarness({ failShot, blockShot = false, oversize = fa
     ...packLimits, createPackRegistry,
     sampleBrowserHeap, exceedsMemoryGuard, RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget, RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom, RENDER_HISTORY_FILE, normalizeJobSettings,
     chromium: { launch: async () => browser }, URL, Buffer, process, performance, clearTimeout,
-    runtimeOptions, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
+    runtimeOptions, resolveJobRoot: path => path, mkdir, rm, join, isAbsolute, fileURLToPath, writeWebBuild, EXPORT_DIRECTORY_NAME, createAgentRenderJobs: async () => ({ list: () => [], close: async () => {} }), ...contextOverrides,
     setTimeout: (callback, delay) => { deadlines.push(delay); return setTimeout(callback, delay); },
   });
   new Script(`${source}\nglobalThis.runtime = createAgentRuntime({ backend: 'cpu', ...runtimeOptions });`).runInContext(context);
