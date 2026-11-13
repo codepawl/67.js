@@ -156,7 +156,7 @@ test('the CPU, WebGL and WebGPU tracers report that they ignore cameraIntensity;
   assert.ok(!describeIgnoredFeatures(parts, { map: skyMap(1) }, 'cpu').some(note => note.includes('cameraIntensity')));
 });
 
-test('a window drawn at 0.2 leaves every pixel that does not see the sky through the glass byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, () => {
+test('a window drawn at 0.2 leaves every pixel that does not see the sky through the glass byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, context => {
   const camera = cameraFor(ROOM_CAMERA);
   const samples = 256;
   const reference = traceOf(roomParts(1), { map: skyMap(1) }, camera, samples);
@@ -176,20 +176,22 @@ test('a window drawn at 0.2 leaves every pixel that does not see the sky through
     const ratio = scaled.mean[channel] / full.mean[channel];
     assert.ok(Math.abs(ratio - 0.2) < 0.002, `window mean ratio in channel ${channel} is ${ratio}`);
   }
+  context.diagnostic(`byte-identical pixels ${compared}, window pixels ${full.count}, window mean ratio ${scaled.mean.map((value, channel) => value / full.mean[channel])}`);
 });
 
-test('an open scene scales the sky pixels by the factor and leaves the object pixels byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, () => {
+// The ball is about 49 pixels in radius at this size: the object region stays inside it, the sky region outside it.
+test('an open scene scales the sky pixels by the factor and leaves the object pixels byte for byte', { skip: skipWithoutAddon, timeout: 600000 }, context => {
   const camera = cameraFor({ eye: [0, 0, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 30 });
   const samples = 64;
   const reference = traceOf(sphereParts(), { map: uniformSkyMap(1) }, camera, samples);
   const halved = traceOf(sphereParts(), { map: uniformSkyMap(1), cameraIntensity: 0.5 }, camera, samples);
   const centreDistance = (row, column) => Math.hypot(row + 0.5 - SIZE / 2, column + 0.5 - SIZE / 2);
-  const objectPixels = pixelsEqual(reference, halved, (row, column) => centreDistance(row, column) < 0.8 * SIZE * 0.19);
+  const objectPixels = pixelsEqual(reference, halved, (row, column) => centreDistance(row, column) < SIZE * 0.3);
   assert.ok(objectPixels > 200, `object pixels compared: ${objectPixels}`);
   let skyPixels = 0;
   for (let row = 0; row < SIZE; row++) {
     for (let column = 0; column < SIZE; column++) {
-      if (centreDistance(row, column) < SIZE * 0.3) continue;
+      if (centreDistance(row, column) < SIZE * 0.42) continue;
       const base = pixelIndex(row, column);
       for (let channel = 0; channel < 3; channel++) {
         const expected = reference[base + channel] * 0.5;
@@ -198,7 +200,8 @@ test('an open scene scales the sky pixels by the factor and leaves the object pi
       skyPixels++;
     }
   }
-  assert.ok(skyPixels > 5000, `sky pixels compared: ${skyPixels}`);
+  assert.ok(skyPixels > 4000, `sky pixels compared: ${skyPixels}`);
+  context.diagnostic(`object pixels byte-identical ${objectPixels}, sky pixels at 0.5 of the reference ${skyPixels}`);
 });
 
 test('a camera strength equal to the lighting intensity is the same image as leaving the field out', { skip: skipWithoutAddon, timeout: 600000 }, () => {
