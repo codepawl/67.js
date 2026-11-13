@@ -293,7 +293,7 @@ The named post steps are `depthOfField` (defocus from depth), `colorBalance`, `d
 
 ### Air distortion and flash
 
-![A street before and after the shock ring and heat haze: the ring bends the building edges, the haze shimmers around the fire, and the cars in front stay put.](post-distortion-comparison.jpg)
+![A street before and after the shock ring and heat haze: the ring bends the building edges, the haze shimmers around the fire, and the cars in front stay put.](https://raw.githubusercontent.com/codepawl/67.js/main/docs/post-distortion-comparison.jpg)
 
 A blast sells itself in its first frames: a flash, a ring that bends the air, and shimmer above the fire. `effects.distortion` bends the picture behind it, and `effects.flash` lifts the light around a point for a moment. Both are steps you place in the scene, like a light, and both follow the scene clock, so any frame renders the same.
 
