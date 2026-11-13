@@ -883,8 +883,8 @@ fn lgt_single_portal_pdf(portal: LightRecord, origin: vec3<f32>, direction: vec3
   if (hit_t <= 0.0) {
     return 0.0;
   }
-  let offset = origin + direction * hit_t - portal.position;
-  if (abs(dot(offset, portal.axis_u)) > 0.5 * portal.size_u || abs(dot(offset, portal.axis_v)) > 0.5 * portal.size_v) {
+  let offset_on_plane = origin + direction * hit_t - portal.position;
+  if (abs(dot(offset_on_plane, portal.axis_u)) > 0.5 * portal.size_u || abs(dot(offset_on_plane, portal.axis_v)) > 0.5 * portal.size_v) {
     return 0.0;
   }
   return (hit_t * hit_t) / (cos_at_portal * portal.size_u * portal.size_v);
