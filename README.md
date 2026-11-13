@@ -1,5 +1,7 @@
 <p align="center">
-  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/hero-airport.webp" alt="A camera dollies along a row of Kestrel Airways 787s at a glass terminal, rendered by 67js" width="100%"></a>
+  <a href="https://67js.codepawl.com"><img src="https://67js.codepawl.com/previews/hero-classroom.webp" alt="A sunlit classroom with wooden desks and chairs, a green chalkboard and tall windows, rendered by 67js" width="100%"></a>
+  <br>
+  <sub>Classroom by Christophe Seux, CC0, from the Blender demo files, rendered in 67js</sub>
 </p>
 
 <p align="center">
