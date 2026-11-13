@@ -57,9 +57,12 @@ function buildRoomScene({ withPortal, withCeiling = true, withOutsideBox = false
 }
 
 const ROOM_CAMERA = { eye: [1.6, 1.4, 1.7], target: [-1, 1, -0.6], fov: 70 };
+// Looks away from the window at the wall it lights, so the seeds differ only by the light that reaches the room, not by the
+// anti-aliased edge of the bright window.
+const WALL_CAMERA = { eye: [-1.4, 1.3, 1.2], target: [2, 1, -0.5], fov: 70 };
 
-function trace(scene, options) {
-  const camera = createCamera(ROOM_CAMERA, options.width, options.height);
+function trace(scene, options, cameraDescription = ROOM_CAMERA) {
+  const camera = createCamera(cameraDescription, options.width, options.height);
   const input = buildNativeInputV2(scene, camera, options);
   return traceNative(input, { ...options, kernel: 'cycles' });
 }
@@ -169,7 +172,7 @@ test('a portal keeps the mean of a room lit through a window', { skip: skipWitho
 
 test('a portal cuts the change between seeds of a frozen camera by at least 4 times', { skip: skipWithoutAddon }, t => {
   const common = { width: 48, height: 32, samples: 64, samplesPerDispatch: 64 };
-  const framesOf = withPortal => SEEDS.map(seed => trace(buildRoomScene({ withPortal }), { ...common, seed }).rgba);
+  const framesOf = withPortal => SEEDS.map(seed => trace(buildRoomScene({ withPortal }), { ...common, seed }, WALL_CAMERA).rgba);
   const differenceWithout = meanSeedDifference(framesOf(false));
   const differenceWith = meanSeedDifference(framesOf(true));
   const ratio = differenceWithout / differenceWith;
