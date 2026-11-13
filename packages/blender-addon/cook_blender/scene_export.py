@@ -394,9 +394,9 @@ def collect_parts(depsgraph, materials, report):
         if original_object.type not in MESH_LIKE_OBJECT_TYPES:
             continue
         key = geometry_key(original_object, use_render_flags=True)
-        if instance.is_instance and evaluated_object.type == "MESH":
-            # Geometry Nodes instances share one original (their host); the instanced mesh itself tells them apart.
-            key = key + ("instance", evaluated_mesh_digest(evaluated_object.data))
+        if evaluated_object.type == "MESH":
+            # Geometry Nodes instances share one original (their host); the evaluated mesh itself tells them apart.
+            key = key + (evaluated_mesh_digest(evaluated_object.data),)
         if key not in geometry_indices:
             groups = mesh_to_triangle_groups(evaluated_object, include_uvs=True, split_by_material=True)
             geometry_indices[key] = {}
