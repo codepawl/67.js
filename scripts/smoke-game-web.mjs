@@ -47,7 +47,7 @@ function creatureSample() {
     format: '67js.scene', schemaVersion: 1,
     geometries: [{ id: 'block', type: 'box', bevel: 0 }, { id: 'ball', type: 'sphere' }],
     materials: [
-      { id: 'grass', color: [0.2, 0.45, 0.2] }, { id: 'fur', color: [0.85, 0.45, 0.2] },
+      { id: 'grass', color: [1, 1, 1], pattern: { type: 'stone', size: 2 } }, { id: 'fur', color: [0.85, 0.45, 0.2] },
       { id: 'gold', color: [0.95, 0.75, 0.1], metallic: 0.8, roughness: 0.3 }, { id: 'flag', color: [0.2, 0.4, 0.9] },
     ],
     nodes: [

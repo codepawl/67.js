@@ -20,6 +20,8 @@ Tool `scene_apply`:
 
 `world: true` makes the sky the background too.
 
+Time of day comes from the sun alone: `"sky": { "type": "physical", "preset": "golden-hour" }` (also `sunset`, `blue-hour`) sets sun elevation and azimuth, and the key, sky and haze follow from one atmosphere, so a low sun reads warm with no grading. Put `sunElevation` or `sunRotation` beside a preset to move the sun; a preset starts the sky again, so earlier sky fields are dropped.
+
 ## HDRI from the catalog
 
 Call `scene_asset_catalog` (no arguments). It lists two shipped HDRIs, `sky-clouds` and `studio-softbox`, two shipped

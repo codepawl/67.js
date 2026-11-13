@@ -361,7 +361,8 @@ function resolveLights(environment) {
  * The environment map as radiance lookups plus a luminance-weighted table, so a direction can be drawn in proportion
  * to the light it brings. `pdf` is per steradian.
  */
-function resolveEnvironment(map) {
+function resolveEnvironment(map, cameraIntensity) {
+  requireCameraIntensity(map, cameraIntensity);
   if (!map) return null;
   const { width, height, channels, data, intensity, rotation } = map;
   const cosine = Math.cos(rotation);
@@ -380,7 +381,21 @@ function resolveEnvironment(map) {
     total += rowTotal;
     rowCumulative[row] = total;
   }
-  return { width, height, channels, data, intensity, cosine, sine, rowCumulative, pixelCumulative, total };
+  const resolved = { width, height, channels, data, intensity, cosine, sine, rowCumulative, pixelCumulative, total };
+  // Only the native "cycles" kernel reads it; absent means the sky is seen at the strength that lights the scene.
+  if (cameraIntensity !== undefined) resolved.cameraIntensity = cameraIntensity;
+  return resolved;
+}
+
+/** `environment.cameraIntensity` is the sky strength a camera ray sees (through glass too), in the units of the map intensity. */
+function requireCameraIntensity(map, cameraIntensity) {
+  if (cameraIntensity === undefined) return;
+  if (typeof cameraIntensity !== 'number' || !Number.isFinite(cameraIntensity) || cameraIntensity < 0) {
+    throw new RangeError(`environment.cameraIntensity must be a finite number of 0 or more (got ${cameraIntensity}). Pass 0.2 to draw the view through a window at 0.2 of the sky, or leave it out to use the map intensity.`);
+  }
+  if (!map) {
+    throw new RangeError('environment.cameraIntensity needs environment.map: it scales the sky a camera ray sees, and there is no sky. Add an environment map or remove cameraIntensity.');
+  }
 }
 
 /** A scene that crossed a thread boundary has lost its ray query function: build it again from the arrays. */
@@ -604,7 +619,7 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes, 
     materials,
     traceMaterials,
     lights: resolveLights(environment),
-    environment: resolveEnvironment(environment.map),
+    environment: resolveEnvironment(environment.map, environment.cameraIntensity),
     volume: resolveTraceVolume(environment.volumeFog),
     localVolumes,
     surfaceOffset: extent * 1e-5,
@@ -642,7 +657,7 @@ export function buildTraceScene(allParts, environment = {}, options = {}) {
     // Per part FORMAT-v2 visibility bits for the native "cycles" kernel; the "legacy" kernel and the other tracers do not read them.
     partRayVisibility: flattenedRayVisibility(parts),
     lights: resolveLights(environment),
-    environment: resolveEnvironment(environment.map),
+    environment: resolveEnvironment(environment.map, environment.cameraIntensity),
     volume: resolveTraceVolume(environment.volumeFog),
     localVolumes,
     surfaceOffset: extent * 1e-5,

@@ -75,6 +75,10 @@ Both read the same input names as the character controller, use the same `mover`
 
 `createFlightController(options)`: free flight along the nose. `moveX` yaws, `moveForward` pitches (positive climbs), `run` boosts and `jump` brakes (`yawAxis`, `pitchAxis`, `boost`, `brake`). Speed eases between `brakeSpeed` (6), `cruiseSpeed` (14) and `boostSpeed` (24); pitch levels out after `levelSeconds` (0.6) with no input and is limited to `maximumPitch` (1.2). A wall stops it, the ground is skimmed, and a box that starts above its height is flown under. State: `pitch`, `roll` (bank, for animation), `speed`, `velocity`, `boosting`, `grounded`.
 
+### Boat controller
+
+`createBoatController({ input, physics, body, node })` drives a boat on the ocean. `moveForward` is the throttle (negative reverses) and `moveX` is the rudder (positive turns right); rename them with `throttle` and `rudder`. It pushes nothing itself: each fixed step it calls `physics.setBoatControls(body, { throttle, rudder })` on a [live physics system](physics-runtime.md) whose `body` floats with `float.boat` ([Boats and wakes](physics.md#boats-and-wakes)), then reads the hull pose back, so the hull bobs and rolls on the waves. List the physics system after the controller in the runtime. State: `position`, `yaw` (0 faces -Z), `pitch`, `roll`, `forwardSpeed` (signed), `speed`, `throttle`, `steer`. The hull cannot be teleported through the controller; set its pose in the physics system. Pair it with the `chase` camera. `startGame` does not build a boat yet, because its live physics (Jolt) has no buoyancy; build the system with `createPhysicsSystem` as above.
+
 ## More camera rigs
 
 - `createOrbitCamera`: free look around the subject at `distance` (6). Name a `zoom` axis to change the distance between `minimumDistance` (1) and `maximumDistance` (50) at `zoomSpeed` (8) units per second.
@@ -92,7 +96,7 @@ const camera = createChaseCamera({ subject: car.state, clipEye: clip });
 
 ## Custom kinds and swapping
 
-`registerController(kind, factory)` and `registerCameraRig(kind, factory)` add a kind (up to 64 names, built-ins cannot be replaced). A controller factory returns a runtime system with `state.position` and a `fixedUpdate` or `update` function; a rig factory returns a system with `subject` and `pose(context) => { eye, target, up }`. `createController(kind, options)` and `createCameraRigOfKind(kind, options)` build one by name; `listControllerKinds()` and `listCameraRigKinds()` list them (`character`, `vehicle`, `flight`; `follow`, `firstPerson`, `topDown`, `orbit`, `chase`, `sideScroller`).
+`registerController(kind, factory)` and `registerCameraRig(kind, factory)` add a kind (up to 64 names, built-ins cannot be replaced). A controller factory returns a runtime system with `state.position` and a `fixedUpdate` or `update` function; a rig factory returns a system with `subject` and `pose(context) => { eye, target, up }`. `createController(kind, options)` and `createCameraRigOfKind(kind, options)` build one by name; `listControllerKinds()` and `listCameraRigKinds()` list them (`character`, `vehicle`, `flight`, `boat`; `follow`, `firstPerson`, `topDown`, `orbit`, `chase`, `sideScroller`).
 
 `replaceController(runtime, name, kind, options)` swaps the controller system for another kind at the same position and yaw. `replaceCameraRig(runtime, name, kind, options)` swaps the rig and keeps its subject and yaw but not its input: pass `input` again in `options` if the new rig reads it. After a controller swap, point the rig at the new `state`:
 

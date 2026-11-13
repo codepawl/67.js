@@ -766,6 +766,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   var medium_sigma = vec3<f32>(0.0);
   var in_medium = false;
   var is_camera_ray = true;
+  // True while the path is the camera ray or has only passed straight through transparent surfaces and smooth glass transmission.
+  // An escape then reads the environment at its camera strength. A diffuse, glossy, rough or reflection bounce and a volume scatter clear it.
+  var camera_visible_environment = true;
   var is_transparent_bg_ray = false;
   var mis_skip = true;
   var prev_bsdf_pdf = 0.0;
@@ -818,6 +821,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       medium_sigma = vec3<f32>(0.0);
       in_medium = false;
       is_camera_ray = true;
+      camera_visible_environment = true;
       is_transparent_bg_ray = (kernel_params.kernel_flags & KERNEL_FLAG_TRANSPARENT_BACKGROUND) != 0u;
       mis_skip = true;
       prev_bsdf_pdf = 0.0;
@@ -905,7 +909,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         throughput *= kernel_params.volume_albedo;
         let scatter_pos = ray_origin + ray_dir * volume_scatter_t;
         if (!recorded_features) {
-          first_depth = volume_scatter_t;
+          // Depth stays the distance to the first surface of the camera ray, which the trace above already found, so fog
+          // does not pull the averaged depth short. A ray that hits no surface writes 0, as it does without fog.
+          first_depth = select(0.0, surface_hit.t, surface_hit.hit != 0u);
           first_albedo = clamp(kernel_params.volume_albedo, vec3<f32>(0.0), vec3<f32>(1.0));
           first_normal = -ray_dir;
           recorded_features = true;
@@ -949,6 +955,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         self_instance = INVALID_INDEX;
         self_triangle = INVALID_INDEX;
         is_camera_ray = false;
+        camera_visible_environment = false;
         is_transparent_bg_ray = false;
         mis_skip = false;
         prev_bsdf_pdf = phase_pdf;
@@ -965,6 +972,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           ray_dir,
           is_camera_ray,
           is_transparent_bg_ray,
+          camera_visible_environment,
           mis_skip,
           prev_bsdf_pdf,
           prev_recv_lo,
@@ -1182,6 +1190,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       ray_t_max = 1.0e30;
       self_instance = point.instance_index;
       self_triangle = point.triangle_index;
+      camera_visible_environment = camera_visible_environment && is_transmission && !is_diffuse_transmission && is_singular;
       is_camera_ray = false;
       is_transparent_bg_ray = false;
       mis_skip = is_singular;

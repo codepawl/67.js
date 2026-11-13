@@ -1,7 +1,7 @@
-import { readFileSync, unlinkSync } from 'node:fs';
-import { mkdir, open, readFile, writeFile, rename, unlink, rmdir, readdir, lstat, realpath } from 'node:fs/promises';
+import { readFileSync, unlinkSync, constants as fsConstants } from 'node:fs';
+import { mkdir, open, readFile, writeFile, rename, link, unlink, rmdir, readdir, lstat, realpath } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { RENDER_PASS_NAMES, RENDER_OUTPUT_FORMATS, MAXIMUM_JOB_FPS, VIDEO_ENCODERS, AUDIO_FILE_PATTERN, MAXIMUM_VIDEO_SECONDS, MAXIMUM_JOB_SIDE, MAXIMUM_JOB_PIXELS } from '../src/agent-scene-capabilities.js';
 import { parseQuality } from './agent-render-quality.mjs';
@@ -44,6 +44,9 @@ export const EXPORT_DIRECTORY_NAME = 'exports';
 /** Recent estimate-versus-measured pairs the runtime keeps beside the jobs; the store counts its bytes and never reads it. */
 export const RENDER_HISTORY_FILE = 'render-history.json';
 const STORE_FILES = ['store.json', 'store.lock', EXPORT_DIRECTORY_NAME, RENDER_HISTORY_FILE];
+// A starter taking over a dead lock holds a claim file, and a starter publishing a lock or claim holds a temporary file, for a
+// moment (a crash can leave one). A controller scanning the store must not call these foreign.
+const LOCK_CLAIM = /^store\.lock\.(claim-[0-9a-f-]{36}|(claim-[0-9a-f-]{36}\.)?tmp-[0-9a-f-]{36})$/i;
 const INTERNAL_FILES =new Set(['owner.json', 'snapshot.json', 'asset.glb', 'status.json', 'status.json.pending']);
 
 function objectKeys(value, allowed, label) {
@@ -328,7 +331,8 @@ async function hashFile(path, maximum) {
 }
 
 /** Persistent controller. The trusted runner must stop its owned browser and encoder when aborted. */
-export async function createAgentRenderJobs({ root, run, limits: inputLimits = {} }) {
+// `lockTakeoverHooks` is a seam for tests that need to pause a process at a chosen point of the lock takeover.
+export async function createAgentRenderJobs({ root, run, limits: inputLimits = {}, lockTakeoverHooks = {} }) {
   if (typeof root !== 'string' || !isAbsolute(root)) throw new TypeError('Job root must be an explicit absolute directory.');
   if (typeof run !== 'function') throw new TypeError('run must be an async render callback.');
   objectKeys(inputLimits, Object.keys(DEFAULT_LIMITS), 'limits');
@@ -348,27 +352,222 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   let storeId;
   let lockHeld = false;
 
-  async function acquireLock() {
+  // Writes the whole text to a private temporary file, then hard-links it to `targetPath` (atomic, EEXIST when the target is
+  // taken) and removes the temporary name. The target therefore never exists empty or half written, even if the process is killed
+  // or the disk fills. Where hard links are not supported it falls back to creating the target with `wx` and writing into it.
+  // The file operations used here can be replaced through `lockTakeoverHooks.fileOperations`, so tests can make one of them fail.
+  const publishOperations = { writeFile, link, open, unlink, ...lockTakeoverHooks.fileOperations };
+
+  // Removing the temporary name can fail for a moment (a virus scanner holding the file on Windows), so it is retried with a
+  // short backoff. The target must never be left with two names: that makes it fail the single-link check of the store.
+  async function removeTemporaryName(temporaryPath) {
+    let lastError;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await publishOperations.unlink(temporaryPath);
+        return;
+      } catch (error) {
+        if (error.code === 'ENOENT') return;
+        lastError = error;
+        await new Promise(resolveWait => setTimeout(resolveWait, 20 * 2 ** attempt));
+      }
+    }
+    throw lastError;
+  }
+
+  async function publishFile(targetPath, text) {
+    const temporaryPath = `${targetPath}.tmp-${randomUUID()}`;
+    let linked = false;
     try {
-      const lock = await open(lockPath, 'wx', 0o600);
-      try { await lock.writeFile(JSON.stringify({ schemaVersion: 1, pid: process.pid, token: lockToken })); }
-      finally { await lock.close(); }
-      lockHeld = true;
-      process.once('exit', releaseLockOnExit);
+      await publishOperations.writeFile(temporaryPath, text, { flag: 'wx', mode: 0o600 });
+      await lockTakeoverHooks.beforeLockLink?.();
+      try {
+        await publishOperations.link(temporaryPath, targetPath);
+        linked = true;
+      } catch (error) {
+        if (!['EPERM', 'ENOTSUP', 'ENOSYS', 'EOPNOTSUPP'].includes(error.code)) throw error;
+        const target = await publishOperations.open(targetPath, 'wx', 0o600);
+        try {
+          await target.writeFile(text);
+        } catch (writeError) {
+          await target.close().catch(() => {});
+          await unlink(targetPath).catch(() => {});
+          throw writeError;
+        }
+        await target.close();
+      }
+      await lockTakeoverHooks.afterLockLink?.();
+      if (linked) {
+        try {
+          await removeTemporaryName(temporaryPath);
+        } catch (error) {
+          // Give the target back (only if it is still the file this call wrote) rather than keep a file with two names.
+          if (await readFile(targetPath, 'utf8').catch(() => null) === text) await unlink(targetPath).catch(() => {});
+          throw new Error(`Could not finish writing ${basename(targetPath)} (${error.code ?? error.message}); it was not kept. Close any program that holds files in the jobs folder and try again.`);
+        }
+      }
+    } finally {
+      await unlink(temporaryPath).catch(() => {});
+    }
+  }
+
+  async function createLockFile() {
+    await publishFile(lockPath, JSON.stringify({ schemaVersion: 1, pid: process.pid, token: lockToken }));
+    lockHeld = true;
+    process.once('exit', releaseLockOnExit);
+  }
+
+  // Opens a small coordination file once and checks and reads it through the same handle, so the size check and the read cannot
+  // see two different files (CodeQL js/file-system-race). A path that is not a plain file, or is larger than `maximum`, gives null.
+  async function readSmallFile(path, maximum) {
+    const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    try {
+      const details = await handle.stat();
+      if (!details.isFile() || details.size > maximum) return null;
+      return await handle.readFile('utf8');
+    } finally {
+      await handle.close();
+    }
+  }
+
+  const LIVE_OWNER_MESSAGE = 'The job store is already owned by a live process.';
+
+  // Reads a lock another process may be writing. A file that does not parse is a starter that has not finished (or a lock that was
+  // cut short), so it is treated as owned by a live process and never surfaces a raw SyntaxError. The hard link a starter makes
+  // for a moment is allowed here, unlike in the job files.
+  async function readLockFile(path) {
+    const text = await readSmallFile(path, 4096);
+    if (text === null) throw new Error('Unrecognized job store lock.');
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error(`The job store lock ${path} is held by a live process or is incomplete. If no other 67js server uses this folder, delete ${path}.`);
+      throw error;
+    }
+  }
+
+  // Throws unless the file at `path` is a well-formed lock whose owner process no longer exists.
+  // Limit: the operating system can give a dead owner's PID to an unrelated process, which then looks live and is refused until
+  // a person removes the file.
+  async function assertDeadOwner(path) {
+    const owner = await readLockFile(path);
+    objectKeys(owner, ['schemaVersion', 'pid', 'token'], 'store lock');
+    if (owner.schemaVersion !== 1 || !UUID.test(owner.token)) throw new Error('Unrecognized job store lock.');
+    boundedNumber(owner.pid, 1, 2147483647, 'lock process ID', true);
+    let ownerAlive = true;
+    try {
+      process.kill(owner.pid, 0);
+    } catch (failure) {
+      if (failure.code === 'ESRCH') ownerAlive = false;
+      else if (failure.code !== 'EPERM') throw failure;
+    }
+    if (ownerAlive) throw new Error(LIVE_OWNER_MESSAGE);
+    return owner.token;
+  }
+
+  // A lock left by a killed server (the client's SIGTERM is TerminateProcess on Windows and runs no exit handler) names a dead
+  // PID, and is taken over only when the file is a well-formed lock; a live PID or an unrecognized file is still refused.
+  //
+  // Why two processes cannot both end up owning the store: the shared lock path is never renamed or moved aside. A taker first
+  // reads the dead lock (token T0), then creates the claim file `store.lock.claim-<T0>` with `wx`, so only one process can hold
+  // the claim for T0. T0 can never become live again (its owner is gone), and the only process that replaces T0 with a new lock
+  // is the claim holder. A slow reader that validated T0 earlier and gets the claim later re-reads the lock under the claim, sees
+  // a different token (or no file), and takes over nothing. The holder unlinks the lock only while the file still holds T0.
+  // The claim is published whole (never empty), so a process killed while holding it is the only way one stays behind: that
+  // blocks the takeover of that one token, which is rare but real. The claim records its owner; one whose process is gone, or
+  // that cannot be read, is reported with the exact file to delete and is not recovered by itself.
+  // Returns 'lock-changed' when the lock under the claim was no longer the one this call validated (another process replaced
+  // it), and otherwise when the lock is gone or taken over; the caller then tries to create its own or starts again.
+  async function takeOverDeadOwnerLock(isRetry = false) {
+    let deadOwnerToken;
+    try {
+      deadOwnerToken = await assertDeadOwner(lockPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') return 'gone';
+      throw error;
+    }
+    await lockTakeoverHooks.beforeLockClaim?.();
+    const claimPath = `${lockPath}.claim-${deadOwnerToken}`;
+    try {
+      await publishFile(claimPath, JSON.stringify({ pid: process.pid, token: lockToken }));
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      await regularFile(lockPath);
-      const owner = await readJson(lockPath, 4096);
-      objectKeys(owner, ['schemaVersion', 'pid', 'token'], 'store lock');
-      if (owner.schemaVersion !== 1 || !UUID.test(owner.token)) throw new Error('Unrecognized job store lock.');
-      boundedNumber(owner.pid, 1, 2147483647, 'lock process ID', true);
+      await refuseDeadClaim(claimPath);
+      if (isRetry) throw new Error(LIVE_OWNER_MESSAGE);
+      await waitForClaimToEnd(claimPath);
+      return takeOverDeadOwnerLock(true);
+    }
+    try {
+      let current;
       try {
-        process.kill(owner.pid, 0);
-        throw new Error('The job store is already owned by a live process.');
-      } catch (failure) {
-        if (failure.code !== 'ESRCH') throw failure;
+        current = await readLockFile(lockPath);
+      } catch (error) {
+        if (error.code === 'ENOENT') return 'gone';
+        throw error;
       }
-      throw new Error('Stale job store lock requires explicit repair. Verify that no process owns the store before removing store.lock.');
+      if (current.token !== deadOwnerToken) return 'lock-changed';
+      await unlink(lockPath);
+      await createLockFile();
+      return 'taken-over';
+    } catch (error) {
+      if (error.code === 'EEXIST') throw new Error(LIVE_OWNER_MESSAGE);
+      throw error;
+    } finally {
+      await unlink(claimPath).catch(() => {});
+    }
+  }
+
+  // A claim whose process is gone, or that cannot be read, is not recovered here: someone confirms nothing owns the store and
+  // deletes the named file.
+  async function refuseDeadClaim(claimPath) {
+    const interrupted = new Error(`A job store takeover was interrupted or left an unreadable claim. Confirm that no process owns the store, then delete ${basename(claimPath)} in the jobs folder.`);
+    let claim;
+    try {
+      const text = await readSmallFile(claimPath, 4096);
+      if (text === null) throw interrupted;
+      claim = JSON.parse(text);
+    } catch (error) {
+      if (error.code === 'ENOENT') return; // The holder finished.
+      throw interrupted;
+    }
+    if (!Number.isInteger(claim?.pid) || claim.pid < 1) throw interrupted;
+    try {
+      process.kill(claim.pid, 0);
+    } catch (failure) {
+      if (failure.code === 'ESRCH') throw interrupted;
+    }
+  }
+
+  async function waitForClaimToEnd(claimPath) {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      try {
+        await lstat(claimPath);
+      } catch (error) {
+        if (error.code === 'ENOENT') return;
+        throw error;
+      }
+      await new Promise(resolveWait => setTimeout(resolveWait, 20));
+    }
+  }
+
+  // When the lock changed between this call's first look and its claim (a starter took the dead lock over and then died too),
+  // the whole acquire starts again once, so the new dead lock can be taken over instead of being reported as live.
+  async function acquireLock(isSecondAttempt = false) {
+    try {
+      await createLockFile();
+      return;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    const outcome = await takeOverDeadOwnerLock();
+    if (lockHeld) return;
+    if (outcome === 'lock-changed' && !isSecondAttempt) return acquireLock(true);
+    try {
+      await createLockFile();
+    } catch (retryError) {
+      if (retryError.code === 'EEXIST') throw new Error(LIVE_OWNER_MESSAGE);
+      throw retryError;
     }
   }
 
@@ -410,7 +609,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   async function storeBytes() {
     let bytes = 0;
     for (const name of await readdir(root)) {
-      if (name === EXPORT_DIRECTORY_NAME) continue;
+      if (name === EXPORT_DIRECTORY_NAME || LOCK_CLAIM.test(name)) continue;
       if (['store.json', 'store.lock', RENDER_HISTORY_FILE].includes(name)) {
         bytes += (await regularFile(join(root, name))).size;
       } else {
@@ -461,7 +660,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   async function recover() {
     const names = await readdir(root);
     if (!names.includes('store.json')) {
-      if (names.some(name => name !== 'store.lock' && name !== EXPORT_DIRECTORY_NAME)) throw new Error('Job root contains foreign entries without store ownership.');
+      if (names.some(name => name !== 'store.lock' && name !== EXPORT_DIRECTORY_NAME && !LOCK_CLAIM.test(name))) throw new Error('Job root contains foreign entries without store ownership.');
       storeId = randomUUID();
       await writeFile(join(root, 'store.json'), JSON.stringify({ schemaVersion: 1, storeId }), { flag: 'wx', mode: 0o600 });
     } else {
@@ -471,7 +670,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
       storeId = metadata.storeId;
     }
     for (const name of await readdir(root)) {
-      if (STORE_FILES.includes(name)) continue;
+      if (STORE_FILES.includes(name) || LOCK_CLAIM.test(name)) continue;
       if (isPending(name)) {
         const directory = await pendingDirectory(name);
         if (!(await readdir(directory)).length) await rmdir(directory);

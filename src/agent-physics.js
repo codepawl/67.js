@@ -5,6 +5,8 @@ import { createRagdoll, ragdollPatches, ragdollReport } from './ragdoll.js';
 import { bakePhysicsScene, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader } from './physics.js';
 import { normalizeForceFields } from './force-fields.js';
 import { normalizeFloat } from './physics-buoyancy.js';
+import { rotateByQuaternion } from './physics-values.js';
+import { MAX_WAKE_POINTS, wakeTrail } from './ocean-wake.js';
 import { AGENT_SCENE_CAPABILITIES } from './agent-scene-capabilities.js';
 
 export { loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader };
@@ -599,6 +601,50 @@ export function physicsBakeKey(recipe, geometryRecords) {
 }
 
 /**
+ * The wake of the first boat body that asks for one, or null: a function (geometryId, time) that returns the `wake` field for the
+ * ocean nodes of the sea geometry (the at most 64 points behind the stern, a pure function of the bake), or undefined for another geometry.
+ */
+function createBoatWake(physics, scene) {
+  const body = physics.bodies.find(candidate => candidate.float?.boat?.wake);
+  if (!body) return null;
+  const { width, strength, height, lifetime } = body.float.boat.wake;
+  const stern = scene.sternOf(body.node);
+  const bodyOffset = scene.bodyIndex(body.node) * 7;
+  const pose = new Float32Array(scene.bodyNames.length * 7);
+  const sternAt = time => {
+    scene.sample(time, pose);
+    const offset = rotateByQuaternion(stern, { x: pose[bodyOffset + 3], y: pose[bodyOffset + 4], z: pose[bodyOffset + 5], w: pose[bodyOffset + 6] });
+    return [pose[bodyOffset] + offset[0], pose[bodyOffset + 2] + offset[2]];
+  };
+  const sample = time => {
+    const [x, z] = sternAt(Math.max(0, time));
+    const [earlierX, earlierZ] = sternAt(Math.max(0, time - scene.timestep));
+    return { x, z, speed: Math.hypot(x - earlierX, z - earlierZ) / scene.timestep };
+  };
+  // Before time 0 the hull is taken to have been under way on a straight line at its first velocity, so a hull that starts moving has a wake at once.
+  const sampleWithRunIn = time => {
+    if (time >= 0) return sample(time);
+    const [startX, startZ] = sternAt(0);
+    const [nextX, nextZ] = sternAt(scene.timestep);
+    return { x: startX + (startX - nextX) / scene.timestep * -time, z: startZ + (startZ - nextZ) / scene.timestep * -time, speed: Math.hypot(nextX - startX, nextZ - startZ) / scene.timestep };
+  };
+  // White water where the hull meets the sea: one point at the middle of the hull and one at the bow (the stern is the head of the trail).
+  const hullCollar = (time, trailStrength) => {
+    const [sternX, sternZ] = sternAt(time);
+    const centreX = pose[bodyOffset];
+    const centreZ = pose[bodyOffset + 2];
+    return [[centreX, centreZ, trailStrength, width * 0.75], [2 * centreX - sternX, 2 * centreZ - sternZ, trailStrength, width * 0.5]];
+  };
+  return (geometryId, time) => {
+    if (geometryId !== physics.ocean.geometry) return undefined;
+    const at = Math.min(time, scene.duration);
+    const trail = wakeTrail({ sample: sampleWithRunIn, time: at, lifetime, width, strength, count: MAX_WAKE_POINTS - 2 });
+    const underway = trail.length > 0 ? trail[0][2] : 0;
+    return { wake: { points: [...hullCollar(at, underway), ...trail], height } };
+  };
+}
+
+/**
  * Bake the physics section with Rapier. The solver must already be loaded (see loadPhysicsEngine).
  * The result is a pure function of time: `sample(t)` returns node patches and a seek never replays the solver.
  */
@@ -619,6 +665,7 @@ export function bakeAgentPhysics(physics, recipe, geometries) {
   let reportCache = null;
   return Object.freeze({
     duration: physics.duration,
+    wakeField: createBoatWake(physics, scene),
     sample(time) {
       scene.sample(time, pose);
       ragdoll?.writePatches(readBodyPose, ragdollTable);

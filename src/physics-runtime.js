@@ -4,7 +4,7 @@
 // so the bake path and the live path share one adapter. Another engine plugs in as an object with the same shape as
 // `rapierAdapter`; see docs/physics-runtime.md. Nothing here touches the film path.
 import { mat4, quat } from 'gl-matrix';
-import { applyBuoyancyImpulses, applyForceFieldImpulses, createRapierWorld, loadPhysicsBuoyancy, loadPhysicsEngine, prepareLivePhysics, requireRapier } from './physics.js';
+import { applyBuoyancyImpulses, applyForceFieldImpulses, createRapierWorld, loadPhysicsBuoyancy, loadPhysicsEngine, prepareLivePhysics, requireRapier, setBoatControls as setBoatControlsOn } from './physics.js';
 
 export const PHYSICS_RUNTIME_LIMITS = Object.freeze({
   maximumListeners: 64,
@@ -410,6 +410,16 @@ export async function createPhysicsSystem(definition, options = {}) {
       assertAlive();
       const index = requireBodyType(bodyName, 'applyImpulse', 'dynamic');
       world.applyImpulse(index, finiteVector(impulse, 3, 'applyImpulse impulse'), point === undefined ? undefined : finiteVector(point, 3, 'applyImpulse point'));
+      return system;
+    },
+    /** Set throttle and rudder (-1 to 1) of a boat body (float.boat); they hold until set again and replace its control keyframes. */
+    setBoatControls(bodyName, controls) {
+      assertAlive();
+      const index = bodyIndexOf(bodyName, 'setBoatControls');
+      const floater = prepared.buoyancy?.floating.find(candidate => candidate.bodyIndex === index);
+      if (!floater?.boat) throw new TypeError(`setBoatControls needs a body with float.boat; "${bodyName}" has none. Add float: { boat: {} } to it.`);
+      if (controls === null || typeof controls !== 'object') throw new TypeError('setBoatControls needs { throttle, rudder }, each from -1 to 1.');
+      setBoatControlsOn(floater.boat, controls, `setBoatControls("${bodyName}")`);
       return system;
     },
     /** Pose of a body after the last step: { translation, rotation }. */
