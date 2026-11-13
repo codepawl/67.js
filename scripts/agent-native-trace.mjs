@@ -244,7 +244,7 @@ export async function traceFrameNative({ tracer, exported, width, height, sample
   const [{ toneMapToRgba8 }, { encodePng }] = await Promise.all([import('../src/path-tracer.js'), import('../src/export-png.js')]);
   const png = encodePng(toneMapToRgba8(linear, width, height), width, height);
   report.seconds = (performance.now() - started) / 1000;
-  return { data: Buffer.from(png).toString('base64'), report };
+  return { data: Buffer.from(png).toString('base64'), report, linear };
 }
 
 function floatsToBase64(values) {
