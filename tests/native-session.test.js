@@ -450,6 +450,45 @@ test('a frame that changes only the camera equals a fresh one-shot render of tha
   }
 });
 
+test('a frame with a camera equals a session packed with that camera, for a pinhole and a thin lens', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
+  const session = createNativeSession(roomInput([0, 2.2, 6]));
+  try {
+    session.render(options);
+    for (const view of [{ eye: [1.5, 2.2, 5] }, { eye: [-2, 1.6, 4.5], fStop: 2.8, focusDistance: 4.5 }]) {
+      const camera = createCamera({ target: [0, 0.5, 0], fov: 45, ...view }, options.width, options.height);
+      const cameraFrame = session.render({ ...options, camera });
+      const freshSession = createNativeSession(buildNativeInputV2(buildRoomScene(), camera, options));
+      try {
+        assertSameBytes(freshSession.render(options), cameraFrame, 'the camera frame against a session packed with that camera');
+      } finally {
+        freshSession.close();
+      }
+      assert.equal(cameraFrame.accelerationReused, true);
+    }
+  } finally {
+    session.close();
+  }
+});
+
+test('a frame seed changes the picture, the same seed repeats it and it equals a pack with that seed', { skip: skipWithoutAddon }, () => {
+  const options = { ...IMAGE_OPTIONS, kernel: 'cycles', samples: 8 };
+  const session = createNativeSession(roomInput([0, 2.2, 6]));
+  try {
+    const seedThree = session.render({ ...options, seed: 3 });
+    const seedFour = session.render({ ...options, seed: 4 });
+    const seedThreeAgain = session.render({ ...options, seed: 3 });
+    assert.ok(!bytesOf(seedThree, 'rgba').equals(bytesOf(seedFour, 'rgba')), 'two seeds give two pictures');
+    assertSameBytes(seedThree, seedThreeAgain, 'seed 3 twice');
+    const packedWithSeedFour = buildNativeInputV2(buildRoomScene(), createCamera({ eye: [0, 2.2, 6], target: [0, 0.5, 0], fov: 45 }, options.width, options.height), { ...options, seed: 4 });
+    assertSameBytes(traceNative(packedWithSeedFour, options), seedFour, 'a frame seed against a one-shot render packed with it');
+    const seedAndCamera = session.render({ ...options, seed: 4, camera: createCamera({ eye: [0, 2.2, 6], target: [0, 0.5, 0], fov: 45 }, options.width, options.height) });
+    assertSameBytes(seedFour, seedAndCamera, 'seed with the camera of the session');
+  } finally {
+    session.close();
+  }
+});
+
 test('a frame with another sample count or image size equals the one-shot render and keeps what it can', { skip: skipWithoutAddon }, () => {
   const input = roomInput([0, 2.2, 6]);
   const options = { ...IMAGE_OPTIONS, kernel: 'cycles' };
