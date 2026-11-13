@@ -1,7 +1,7 @@
 // Measures the four `quality` tiers of scene_render_submit on this machine, and checks that two budgets pick different tiers and meet
 // them. One scene, one frame size, three runs per tier; the calls differ only in `quality`.
 //   node bench/tiers/measure-quality.mjs [--backend gpu|cpu] [--runs 3] [--out bench/tiers/results/quality-tiers.json]
-// Run it through the GPU lock (bash ~/.agents/tools/gpu-lock.sh node bench/tiers/measure-quality.mjs) so it waits for a free card.
+// Run it through the GPU lock (a GPU job lock that waits for a free card) so it waits for a free card.
 // VRAM is the rise of the card's used memory over its idle value while a job runs (nvidia-smi, sampled every 100 ms); it counts
 // every process on the card, so read it on an idle one. RAM is the job's sampled Node RSS plus browser heap (metrics.report).
 import { execFile } from 'node:child_process';
