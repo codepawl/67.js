@@ -40,7 +40,9 @@ const MAXIMUM_JSON_BYTES = 1024 ** 2;
 const MAXIMUM_ASSET_BYTES = AGENT_ASSET_LIMITS.maxBytes;
 /** Sibling folder of the job directories where the runtime keeps GLB exports; the store never reads or counts it. */
 export const EXPORT_DIRECTORY_NAME = 'exports';
-const STORE_FILES = ['store.json', 'store.lock', EXPORT_DIRECTORY_NAME];
+/** Recent estimate-versus-measured pairs the runtime keeps beside the jobs; the store counts its bytes and never reads it. */
+export const RENDER_HISTORY_FILE = 'render-history.json';
+const STORE_FILES = ['store.json', 'store.lock', EXPORT_DIRECTORY_NAME, RENDER_HISTORY_FILE];
 const INTERNAL_FILES =new Set(['owner.json', 'snapshot.json', 'asset.glb', 'status.json', 'status.json.pending']);
 
 function objectKeys(value, allowed, label) {
@@ -92,6 +94,11 @@ function bakedPhysicsDuration(recipe) {
 
 function playsPhysics(recipe) {
   return Boolean(recipe?.physics || recipe?.cloth || recipe?.particles);
+}
+
+/** The settings of a job as the store keeps them: every default filled in, every limit checked. */
+export function normalizeJobSettings(input, clips, recipe) {
+  return settingsFrom(input, clips, recipe);
 }
 
 function settingsFrom(input, clips, recipe) {
@@ -394,7 +401,7 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     let bytes = 0;
     for (const name of await readdir(root)) {
       if (name === EXPORT_DIRECTORY_NAME) continue;
-      if (['store.json', 'store.lock'].includes(name)) {
+      if (['store.json', 'store.lock', RENDER_HISTORY_FILE].includes(name)) {
         bytes += (await regularFile(join(root, name))).size;
       } else {
         if (isPending(name)) {
