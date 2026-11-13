@@ -43,6 +43,11 @@ function writeParameters(scene, camera, options, lightCount, atlasWidth, subsurf
   floats.set([...(volume?.maximum ?? [0, 0, 0]), volume?.anisotropy ?? 0], 52);
   floats.set([...(volume?.albedo ?? [1, 1, 1]), volume?.maxDistance ?? 0], 56);
   words.set([subsurfaceOffset, 0, 0, 0], 60);
+  // Word 61 carries `environment.cameraIntensity` for the "cycles" kernel upgrade; all bits zero means none, so a strength of 0 is stored as -0.
+  // The legacy kernel does not read it.
+  if (environment?.cameraIntensity !== undefined) {
+    floats[61] = environment.cameraIntensity === 0 ? -0 : environment.cameraIntensity;
+  }
   return new Uint8Array(buffer);
 }
 

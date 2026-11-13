@@ -15,7 +15,7 @@ import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../../src/agen
 import { sessionProblem, SCENE_STORE_LIMITS } from '../../src/agent-errors.js';
 import { AGENT_SCENE_DEFAULT_LIMITS } from '../../src/agent-scene-capabilities.js';
 import { describeApplication } from '../../src/agent-apply-report.js';
-import { framingProblems, placementProblems, exposureProblems, lumaShares } from '../../src/frame-checks.js';
+import { framingProblems, placementProblems, textureProblems, exposureProblems, lumaShares } from '../../src/frame-checks.js';
 import { agentAssetDecodeOptions, withCatalogLimitAdvice } from '../../src/agent-asset-limits.js';
 import { sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache } from '../../scripts/agent-walkmap.js';
 import { describeMarks, validateMarks } from '../../src/agent-annotate.js';
@@ -84,7 +84,7 @@ export function previewHarness() {
     // The harness loads Manifold from node_modules directly, so the preview's served-file loader is ignored.
     setManifoldModuleLoader: () => {},
     needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader: () => {},
-    describeMarks, validateMarks, sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, SCENE_STORE_LIMITS, AGENT_SCENE_DEFAULT_LIMITS, describeApplication, framingProblems, placementProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
+    describeMarks, validateMarks, sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, SCENE_STORE_LIMITS, AGENT_SCENE_DEFAULT_LIMITS, describeApplication, framingProblems, placementProblems, textureProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
     applyProjection, applyCameraFields, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
     // Line art needs a real renderer with render passes, so the fault-injected one gets a no-op install.
     agentSceneModule: name => (name === 'lineArt' ? { installLineArt: renderer => renderer } : name === 'userPass' ? { ...agentSceneModule(name), installUserPasses: renderer => renderer } : agentSceneModule(name)), agentSceneModuleLoaded, createBranchStore, printableLabel,

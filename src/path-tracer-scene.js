@@ -333,9 +333,34 @@ function softFalloffOf(light, label) {
   return light.softFalloff ? { softFalloff: true } : {};
 }
 
+function resolveAreaLight(light, index) {
+  const normal = normalized(light.direction);
+  const guide = normalized(light.up ?? [0, 1, 0]);
+  const across = normalized([guide[1] * normal[2] - guide[2] * normal[1], guide[2] * normal[0] - guide[0] * normal[2], guide[0] * normal[1] - guide[1] * normal[0]]);
+  const along = [normal[1] * across[2] - normal[2] * across[1], normal[2] * across[0] - normal[0] * across[2], normal[0] * across[1] - normal[1] * across[0]];
+  return { bit: AREA_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, width: light.width, height: light.height, normal, across, along, profile: traceProfile(light) };
+}
+
+/**
+ * A portal is a rect area light with `portal: true`. It emits nothing: the native cycles kernel draws environment light
+ * through its rectangle, with the normal pointing into the room. The other tracers ignore it (describeIgnoredFeatures).
+ */
+function resolvePortal(light, lightIndex) {
+  const path = `environment.areaLights[${lightIndex}]`;
+  if (light.shape !== undefined && light.shape !== 'rect') {
+    throw new RangeError(`${path}.portal is only supported on a rect area light, got shape ${JSON.stringify(light.shape)}. Remove \`portal\` or use a rect light.`);
+  }
+  for (const field of ['width', 'height']) {
+    if (!(light[field] > 0)) throw new RangeError(`${path}.portal needs a ${field} above 0, got ${JSON.stringify(light[field])}. Pass the size of the opening in scene units.`);
+  }
+  const { across, along, normal } = resolveAreaLight(light, lightIndex);
+  return { position: light.position, width: light.width, height: light.height, normal, across, along };
+}
+
 function resolveLights(environment) {
+  const areaLights = environment.areaLights ?? [];
   const sunPower = Math.max(...(environment.keyColor ?? [0, 0, 0]));
-  const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.length ?? 0);
+  const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.filter(light => light.portal !== true).length ?? 0);
   if (lightCount > MAX_TRACE_LIGHTS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_LIGHTS} point, spot and area lights.`);
   return {
     sun: sunPower > 0 ? { bit: SUN_BIT, direction: normalized(environment.lightDirection ?? [0, 1, 0]), color: environment.keyColor, angularRadius: environment.sunAngularRadius ?? SUN_ANGULAR_RADIUS } : null,
@@ -347,13 +372,8 @@ function resolveLights(environment) {
       profile: traceProfile(light),
       blend: (1 - Math.cos(light.angle)) * (light.penumbra ?? 0),
     })),
-    areas: (environment.areaLights ?? []).map((light, index) => {
-      const normal = normalized(light.direction);
-      const guide = normalized(light.up ?? [0, 1, 0]);
-      const across = normalized([guide[1] * normal[2] - guide[2] * normal[1], guide[2] * normal[0] - guide[0] * normal[2], guide[0] * normal[1] - guide[1] * normal[0]]);
-      const along = [normal[1] * across[2] - normal[2] * across[1], normal[2] * across[0] - normal[0] * across[2], normal[0] * across[1] - normal[1] * across[0]];
-      return { bit: AREA_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, width: light.width, height: light.height, normal, across, along, profile: traceProfile(light) };
-    }),
+    areas: areaLights.map((light, index) => (light.portal === true ? null : resolveAreaLight(light, index))).filter(Boolean),
+    portals: areaLights.map((light, index) => (light.portal === true ? resolvePortal(light, index) : null)).filter(Boolean),
   };
 }
 
@@ -361,7 +381,8 @@ function resolveLights(environment) {
  * The environment map as radiance lookups plus a luminance-weighted table, so a direction can be drawn in proportion
  * to the light it brings. `pdf` is per steradian.
  */
-function resolveEnvironment(map) {
+function resolveEnvironment(map, cameraIntensity) {
+  requireCameraIntensity(map, cameraIntensity);
   if (!map) return null;
   const { width, height, channels, data, intensity, rotation } = map;
   const cosine = Math.cos(rotation);
@@ -380,7 +401,21 @@ function resolveEnvironment(map) {
     total += rowTotal;
     rowCumulative[row] = total;
   }
-  return { width, height, channels, data, intensity, cosine, sine, rowCumulative, pixelCumulative, total };
+  const resolved = { width, height, channels, data, intensity, cosine, sine, rowCumulative, pixelCumulative, total };
+  // Only the native "cycles" kernel reads it; absent means the sky is seen at the strength that lights the scene.
+  if (cameraIntensity !== undefined) resolved.cameraIntensity = cameraIntensity;
+  return resolved;
+}
+
+/** `environment.cameraIntensity` is the sky strength a camera ray sees (through glass too), in the units of the map intensity. */
+function requireCameraIntensity(map, cameraIntensity) {
+  if (cameraIntensity === undefined) return;
+  if (typeof cameraIntensity !== 'number' || !Number.isFinite(cameraIntensity) || cameraIntensity < 0) {
+    throw new RangeError(`environment.cameraIntensity must be a finite number of 0 or more (got ${cameraIntensity}). Pass 0.2 to draw the view through a window at 0.2 of the sky, or leave it out to use the map intensity.`);
+  }
+  if (!map) {
+    throw new RangeError('environment.cameraIntensity needs environment.map: it scales the sky a camera ray sees, and there is no sky. Add an environment map or remove cameraIntensity.');
+  }
 }
 
 /** A scene that crossed a thread boundary has lost its ray query function: build it again from the arrays. */
@@ -604,7 +639,7 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes, 
     materials,
     traceMaterials,
     lights: resolveLights(environment),
-    environment: resolveEnvironment(environment.map),
+    environment: resolveEnvironment(environment.map, environment.cameraIntensity),
     volume: resolveTraceVolume(environment.volumeFog),
     localVolumes,
     surfaceOffset: extent * 1e-5,
@@ -642,7 +677,7 @@ export function buildTraceScene(allParts, environment = {}, options = {}) {
     // Per part FORMAT-v2 visibility bits for the native "cycles" kernel; the "legacy" kernel and the other tracers do not read them.
     partRayVisibility: flattenedRayVisibility(parts),
     lights: resolveLights(environment),
-    environment: resolveEnvironment(environment.map),
+    environment: resolveEnvironment(environment.map, environment.cameraIntensity),
     volume: resolveTraceVolume(environment.volumeFog),
     localVolumes,
     surfaceOffset: extent * 1e-5,

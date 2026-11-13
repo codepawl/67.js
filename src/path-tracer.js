@@ -996,7 +996,10 @@ export function describeIgnoredFeatures(parts, environment, backend = 'cpu', { k
   if (fog?.density > 0 && fog.ambient) notes.add('volumeFog.ambient is not added: the fog is lit by the traced lights and sky.');
   const hasSoftFalloff = [...(environment?.pointLights ?? []), ...(environment?.spotLights ?? [])].some(light => light.softFalloff === true);
   if (hasSoftFalloff && !kernelMaterials) notes.add('softFalloff is ignored: only the native cycles kernel draws a light as an oriented disk, the other tracers draw a sphere.');
+  const hasPortal = (environment?.areaLights ?? []).some(light => light.portal === true);
+  if (hasPortal && !kernelMaterials) notes.add('Light portals (areaLights with portal: true) are ignored: only the native cycles kernel samples the environment through them, the other tracers draw no light from a portal.');
   if (!environment?.map) notes.add('There is no environment map, so the sky is black and only the lights shine.');
+  if (environment?.cameraIntensity !== undefined && !kernelMaterials) notes.add('cameraIntensity is ignored: only the native cycles kernel draws the sky a camera ray sees at its own strength, the other tracers use the map intensity.');
   for (const part of parts) {
     const material = part.material ?? {};
     for (const field of IGNORED_MAP_FIELDS) if (material[field]) notes.add(`${field} is ignored.`);

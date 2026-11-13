@@ -14,6 +14,17 @@ const linkPattern = /(?:\]\(|href="|src=")([^)"#\s]+)/g;
 const knownGeneratedLinks = new Set(['/release.json', '/changelog.json', './main.js']);
 const externalPattern = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 
+// Files git tracks or would track. Git-ignored build output such as `public/guide.md` is not checked.
+// Returns null outside a git checkout (the packed archive), where every file is checked.
+function listNonIgnoredFiles(root) {
+  try {
+    const output = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
+    return new Set(output.split('\0').filter(Boolean).map((name) => resolve(root, name)));
+  } catch {
+    return null;
+  }
+}
+
 function collectFiles(folder, found) {
   for (const name of readdirSync(folder)) {
     if (skippedFolders.has(name)) continue;
@@ -34,7 +45,8 @@ function linkResolves(root, file, link) {
 }
 
 function findBrokenLinks(root) {
-  const files = collectFiles(root, []);
+  const visible = listNonIgnoredFiles(root);
+  const files = collectFiles(root, []).filter((file) => !visible || visible.has(resolve(file)));
   const broken = [];
   for (const file of files) {
     const text = readFileSync(file, 'utf8');

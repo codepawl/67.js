@@ -113,3 +113,34 @@ test('session frames under a dispatch budget give the same bytes as frames witho
     session.close();
   }
 });
+
+const TILE_ORIGIN_BYTE_OFFSET = 312;
+const PARAMS_BYTES = 320;
+
+function parameterBytes(input) {
+  return Buffer.from(input.kernelParams.buffer, input.kernelParams.byteOffset, input.kernelParams.byteLength);
+}
+
+function withGarbageTileOrigin(input) {
+  const copy = Buffer.from(parameterBytes(input));
+  copy.writeUInt32LE(0xdeadbeef, TILE_ORIGIN_BYTE_OFFSET);
+  copy.writeUInt32LE(0x12345678, TILE_ORIGIN_BYTE_OFFSET + 4);
+  return { ...input, kernelParams: new Uint8Array(copy.buffer, copy.byteOffset, copy.byteLength) };
+}
+
+test('the packer leaves the tile origin words 312 to 319 at zero and does not touch 304 to 311', () => {
+  const input = buildRoomInput(IMAGE_OPTIONS);
+  const bytes = parameterBytes(input);
+  assert.equal(bytes.length, PARAMS_BYTES);
+  assert.ok(bytes.subarray(TILE_ORIGIN_BYTE_OFFSET, PARAMS_BYTES).every((byte) => byte === 0));
+  const withBudget = buildRoomInput({ ...IMAGE_OPTIONS, dispatchBudgetMs: 8 });
+  assert.ok(parameterBytes(withBudget).equals(bytes), 'a dispatch budget does not change the packed bytes');
+});
+
+test('a pack that carries garbage in the tile origin words renders the same picture, whole or tiled', { skip: skipWithoutAddon }, () => {
+  const input = buildRoomInput(IMAGE_OPTIONS);
+  const garbage = withGarbageTileOrigin(input);
+  const reference = traceNative(input, { ...IMAGE_OPTIONS, kernel: 'cycles' });
+  assertSameBytes(reference, traceNative(garbage, { ...IMAGE_OPTIONS, kernel: 'cycles' }), 'garbage tile origin, no budget');
+  assertSameBytes(reference, traceNative(garbage, { ...IMAGE_OPTIONS, kernel: 'cycles', dispatchBudgetMs: 4 }), 'garbage tile origin, budget 4');
+});
