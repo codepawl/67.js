@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { register } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 register('./root-loader.mjs', import.meta.url);
@@ -244,6 +244,35 @@ export async function serializeSceneDescription(sceneId, rawScene) {
   };
 }
 
+/**
+ * The path of `fileName` inside `assetDirectory`, for the files a scene description names with `assetFile` (the Blender add-on writes
+ * texture images and the world image next to scene.json). Only a bare file name is accepted: a path, an absolute path or a parent
+ * reference from the scene file is refused, so a scene file cannot make the reader open anything outside its own folder.
+ */
+export function resolveAssetFile(assetDirectory, fileName) {
+  if (typeof fileName !== 'string' || fileName === '' || fileName === '.' || fileName === '..' || /[/\x5c\x00]/.test(fileName)) {
+    throw new RangeError(`The scene names the asset file ${JSON.stringify(fileName)}, which is not a bare file name. Name a file in the scene folder without any folder part, such as "texture-0.rgba".`);
+  }
+  if (typeof assetDirectory !== 'string' || assetDirectory === '') {
+    throw new RangeError(`The scene names the asset file "${fileName}" but no asset directory was given. Pass the folder that holds scene.json as the assetDirectory option.`);
+  }
+  const directoryPath = resolve(assetDirectory);
+  const filePath = resolve(directoryPath, fileName);
+  if (dirname(filePath) !== directoryPath) {
+    throw new RangeError(`The asset file "${fileName}" resolves outside the scene folder. Name a file in the scene folder without any folder part.`);
+  }
+  return filePath;
+}
+
+async function readImageFromAssetFile(imageEntry, assetDirectory) {
+  const bytes = await readFile(resolveAssetFile(assetDirectory, imageEntry.assetFile));
+  const expectedByteCount = imageEntry.width * imageEntry.height * 4;
+  if (!Number.isInteger(expectedByteCount) || bytes.byteLength !== expectedByteCount) {
+    throw new RangeError(`The image file "${imageEntry.assetFile}" holds ${bytes.byteLength} bytes, but ${imageEntry.width} x ${imageEntry.height} RGBA needs ${expectedByteCount}.`);
+  }
+  return { width: imageEntry.width, height: imageEntry.height, data: new Uint8ClampedArray(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)) };
+}
+
 function restorePlainValue(value, decodedImages) {
   if (!value || typeof value !== 'object') {
     return value;
@@ -264,10 +293,15 @@ function restorePlainValue(value, decodedImages) {
   return restored;
 }
 
-async function rebuildEnvironmentMap(worldDescription, repositoryRootPath = REPOSITORY_ROOT_PATH) {
+async function rebuildEnvironmentMap(worldDescription, repositoryRootPath = REPOSITORY_ROOT_PATH, assetDirectory = undefined) {
   const { createEnvironmentMap, parseRadianceHdr } = await import('../../src/hdri.js');
   if (worldDescription.type === 'constant') {
-    const constantData = new Float32Array(8 * 4 * 3).fill(worldDescription.value);
+    // `color` carries a tinted constant world; the grey `value` alone is what the parity bridges write.
+    const [red, green, blue] = worldDescription.color ?? [worldDescription.value, worldDescription.value, worldDescription.value];
+    const constantData = new Float32Array(8 * 4 * 3);
+    for (let pixelOffset = 0; pixelOffset < constantData.length; pixelOffset += 3) {
+      constantData.set([red, green, blue], pixelOffset);
+    }
     return createEnvironmentMap({
       width: 8,
       height: 4,
@@ -276,7 +310,10 @@ async function rebuildEnvironmentMap(worldDescription, repositoryRootPath = REPO
     });
   }
   if (worldDescription.type === 'hdri') {
-    const hdriBytes = await readFile(join(repositoryRootPath, worldDescription.file));
+    const hdriPath = worldDescription.assetFile !== undefined
+      ? resolveAssetFile(assetDirectory, worldDescription.assetFile)
+      : resolve(repositoryRootPath, worldDescription.file);
+    const hdriBytes = await readFile(hdriPath);
     const parsedHdri = parseRadianceHdr(hdriBytes.buffer.slice(hdriBytes.byteOffset, hdriBytes.byteOffset + hdriBytes.byteLength));
     const cappedData = parsedHdri.data.map((radiance) => Math.min(radiance, worldDescription.radianceLimit));
     return createEnvironmentMap({
@@ -289,12 +326,13 @@ async function rebuildEnvironmentMap(worldDescription, repositoryRootPath = REPO
   throw new RangeError(`Unsupported world description type "${worldDescription.type}".`);
 }
 
-export async function reconstructTraceSceneSource(description, repositoryRootPath = REPOSITORY_ROOT_PATH) {
+export async function reconstructTraceSceneSource(description, repositoryRootPath = REPOSITORY_ROOT_PATH, { assetDirectory } = {}) {
   const { applyLightLinks } = await import('../../src/light-linking.js');
-  const decodedImages = (description.images ?? []).map((imageEntry) => ({
-    width: imageEntry.width,
-    height: imageEntry.height,
-    data: decodeTypedArray(imageEntry.data),
+  const decodedImages = await Promise.all((description.images ?? []).map(async (imageEntry) => {
+    if (imageEntry.assetFile !== undefined) {
+      return readImageFromAssetFile(imageEntry, assetDirectory);
+    }
+    return { width: imageEntry.width, height: imageEntry.height, data: decodeTypedArray(imageEntry.data) };
   }));
   const decodedGeometries = description.geometries.map((geometryEntry) => {
     const restoredGeometry = {
@@ -320,7 +358,7 @@ export async function reconstructTraceSceneSource(description, repositoryRootPat
     material: decodedMaterials[partEntry.material],
     ...(partEntry.rayVisibility ? { rayVisibility: partEntry.rayVisibility } : {}),
   }));
-  const environmentMap = await rebuildEnvironmentMap(description.world, repositoryRootPath);
+  const environmentMap = await rebuildEnvironmentMap(description.world, repositoryRootPath, assetDirectory);
   const fullEnvironment = {
     ...description.environment,
     map: environmentMap,

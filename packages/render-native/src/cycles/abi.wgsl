@@ -88,6 +88,8 @@ const LIGHT_FLAG_MULTIPLE_IMPORTANCE: u32 = 2u;
 const LIGHT_FLAG_CAMERA_VISIBLE: u32 = 4u;
 const LIGHT_FLAG_PORTAL: u32 = 8u;
 const LIGHT_FLAG_NORMALIZE: u32 = 16u;
+// A point or spot light with a radius is an oriented disk facing the shading point (Blender's `use_soft_falloff`), not a sphere.
+const LIGHT_FLAG_SOFT_FALLOFF: u32 = 32u;
 
 // `MaterialRecord.flags` bits.
 const MATERIAL_FLAG_MULTISCATTER_GGX: u32 = 1u;
@@ -97,6 +99,8 @@ const MATERIAL_FLAG_DOUBLE_SIDED: u32 = 8u;
 const MATERIAL_FLAG_EMISSIVE_MIS: u32 = 16u;
 const MATERIAL_FLAG_F82_METALLIC: u32 = 32u;
 const MATERIAL_FLAG_HAS_SHADER_GRAPH: u32 = 64u;
+// `flags` of a material extension record: the diffuse transmission colour tints the base colour instead of replacing it.
+const MATERIAL_EXTENSION_FLAG_TINTS_BASE_COLOR: u32 = 1u;
 
 // `MaterialRecord.alpha_mode` values.
 const ALPHA_MODE_OPAQUE: u32 = 0u;
@@ -108,6 +112,8 @@ const MAX_CLOSURE_LOBES: u32 = 4u; // SPECIALIZE_LOBES
 const MAX_CLOSURE_CANDIDATES: u32 = 7u; // SPECIALIZE_CANDIDATES
 const CLOSURE_PRUNES_CANDIDATES: bool = MAX_CLOSURE_CANDIDATES > MAX_CLOSURE_LOBES;
 const CLOSURE_SCRATCH_LOBES: u32 = select(1u, MAX_CLOSURE_CANDIDATES, CLOSURE_PRUNES_CANDIDATES);
+// How many lobes `closure_add_candidate` can take before the closure is built.
+const CLOSURE_CANDIDATE_CAPACITY: u32 = select(MAX_CLOSURE_LOBES, MAX_CLOSURE_CANDIDATES, CLOSURE_PRUNES_CANDIDATES);
 
 // Scene feature flags. The host rewrites `true` to `false` for features the packed scene never uses,
 // so the guarded code is dead in that pipeline. `true` is the safe default.
@@ -120,6 +126,9 @@ const SCENE_HAS_SHEEN: bool = true;
 const SCENE_HAS_ANISOTROPY: bool = true;
 const SCENE_HAS_THIN_FILM: bool = true;
 const SCENE_HAS_F82: bool = true;
+// The material table holds an extension record per material after its `material_count` records (FORMAT-v2.md). Unlike the
+// flags above, `false` is the safe default: only the host's specialization turns it on, for a table that carries them.
+const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;
 const SCENE_HAS_NORMAL_MAP: bool = true;
 const SCENE_HAS_EMISSIVE_TRIANGLES: bool = true;
 const SCENE_HAS_ANALYTIC_LIGHTS: bool = true;
@@ -134,6 +143,7 @@ const LOBE_GLASS_GGX: u32 = 3u;
 const LOBE_COAT_GGX: u32 = 4u;
 const LOBE_SHEEN: u32 = 5u;
 const LOBE_TRANSPARENT: u32 = 6u;
+const LOBE_DIFFUSE_TRANSMISSION: u32 = 7u;
 
 // `Lobe.flags` bits.
 const LOBE_FLAG_MULTISCATTER: u32 = 1u;

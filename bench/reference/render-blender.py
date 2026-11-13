@@ -13,6 +13,7 @@
 #   ... -- <work directory> --material-ids [scene ids]  Workbench, flat colours: <id>-materials.npy holds the material index under each pixel (0 is the sky,
 #   n is the nth name in <id>-materials.json), so a difference between two renders can be split by material.
 #   ... -- <work directory> --print-materials [scene ids]  prints each material's Principled values as built, one JSON line per scene.
+# REFERENCE_WIDTH, REFERENCE_HEIGHT and REFERENCE_CYCLES_SAMPLES in the environment replace 960, 540 and 256 (the default look bench draws small).
 # Light units were measured on a white plane: sun strength equals irradiance, a point or spot light has 4 pi watts for each
 # unit of 67js intensity, and an area light has pi watts for each unit.
 import base64
@@ -27,9 +28,9 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-WIDTH = 960
-HEIGHT = 540
-CYCLES_SAMPLES = 256
+WIDTH = int(os.environ.get("REFERENCE_WIDTH", 960))
+HEIGHT = int(os.environ.get("REFERENCE_HEIGHT", 540))
+CYCLES_SAMPLES = int(os.environ.get("REFERENCE_CYCLES_SAMPLES", 256))
 EEVEE_SAMPLES = 64
 WATTS_PER_INTENSITY = 4 * math.pi
 WATTS_PER_AREA_INTENSITY = math.pi

@@ -6,7 +6,8 @@ Run from the repository root on a machine with Blender 5.3, Node, a GPU and the 
 It exports `lit-interior`, writes the scenes of make-sphere-light-scenes.mjs, renders each one with Cycles (grey diffuse
 everywhere) and with Cook, and prints one result line per scene. Options:
     --samples 1024  --width 480  --height 270  --bounces 8
-    --soft-falloff default,off     Cycles `use_soft_falloff` settings to render (default: the Blender default and off)
+    --soft-falloff default,off     Cycles `use_soft_falloff` settings to render for the sphere scenes (default: the Blender default and off).
+                                   The `-soft` scenes carry `softFalloff: true` and are compared with Cycles following the scene (Soft Falloff on).
     --scenes a,b                   only these scenes
     --label before                 name of the Cook run in the output
     --repeat-cycles-seed2          also render Cycles with seed 2 for the seed-to-seed floor
@@ -38,6 +39,12 @@ HIDDEN_PREFIXES = ("enclosed-hidden", "poking-hidden")
 # Blender default of 8 at least, which leaves the one bounce rows comparable (#1070).
 MINIMUM_TRANSPARENT_BOUNCES = 8
 SPHERE_SCENE_PREFIXES = ("bare-", "enclosed-", "poking-")
+SOFT_FALLOFF_SCENE_SUFFIX = "-soft"
+FOLLOW_SCENE = "scene"  # render-cycles.py reads each light's own softFalloff field
+
+
+def falloff_settings_for_scene(name, falloff_settings):
+    return [FOLLOW_SCENE] if name.endswith(SOFT_FALLOFF_SCENE_SUFFIX) else falloff_settings
 
 
 def read_flag(argument_list, flag_name, fallback):
@@ -76,7 +83,9 @@ def render_cycles(blender, scene_path, prefix, options, bounces, seed, soft_fall
     command = [blender, "-b", "--factory-startup", "--python", os.path.join(HERE, "render-cycles.py"), "--", scene_path, prefix,
                "--samples", str(options["samples"]), "--bounces", str(bounces), "--seed", str(seed),
                "--width", str(options["width"]), "--height", str(options["height"]),
-               "--soft-falloff", soft_falloff, "--transparent-bounces", str(max(bounces, MINIMUM_TRANSPARENT_BOUNCES))]
+               "--transparent-bounces", str(max(bounces, MINIMUM_TRANSPARENT_BOUNCES))]
+    if soft_falloff != FOLLOW_SCENE:
+        command += ["--soft-falloff", soft_falloff]
     if grey_diffuse:
         command.append("--grey-diffuse")
     run(command)
@@ -145,7 +154,7 @@ def run_sphere_scenes(blender, scene_names, options, falloff_settings, label, re
         bounce_counts = [options["bounces"], 1] if name in DIRECT_ONLY_SCENES else [options["bounces"]]
         for bounces in bounce_counts:
             suffix = "" if bounces == options["bounces"] else f"-b{bounces}"
-            run_pair(blender, scene_path, name, suffix, bounces, options, falloff_settings, label, hidden, True, results)
+            run_pair(blender, scene_path, name, suffix, bounces, options, falloff_settings_for_scene(name, falloff_settings), label, hidden, True, results)
         if name in INSTANCED_CONTROL_SCENES:
             run_pair(blender, scene_path, name, "-instanced", options["bounces"], options, falloff_settings, label, True, True, results)
 
@@ -161,7 +170,7 @@ def run_seed_floor(blender, scene_names, options, falloff_settings):
     floor = {}
     for name in scene_names:
         scene_path = os.path.join(options["output_directory"], "scenes", f"{name}.json")
-        for setting in falloff_settings:
+        for setting in falloff_settings_for_scene(name, falloff_settings):
             first = os.path.join(options["output_directory"], "renders", f"{name}-cycles-{setting}")
             second = f"{first}-seed2"
             render_cycles(blender, scene_path, second, options, options["bounces"], 2, setting)

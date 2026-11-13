@@ -1,76 +1,23 @@
-import { finiteRange } from './volumetric.js';
+import { MAX_LOCAL_VOLUMES, LOCAL_VOLUME_MAXIMUM_STEPS, resolveLocalVolumesWith } from './local-volume-resolve.js';
 import { localVolumeNoise } from './local-volume-noise.js';
+import { sampleVolumeGrid, volumeGridFloats } from './volume-grid.js';
+import { resolveGridVolume, LOCAL_VOLUME_GRID_MAXIMUM_STEPS } from './local-volume-grid.js';
 
-// Local volumes: up to MAX_LOCAL_VOLUMES boxes, spheres or parts (shape "mesh") that absorb and emit light and, with `scatter`, scatter
-// the key light and the sky, for candle haze, smoke puffs and glowing fog in one place. They sit beside environment.volumeFog (the one scattering volume) and need no fog. The post pass marches
-// each one separately and composites them from the nearest entry to the farthest, so overlapping volumes are an approximation.
+export * from './local-volume-resolve.js';
+export { LOCAL_VOLUME_GRID_MAXIMUM_STEPS };
 
-export const MAX_LOCAL_VOLUMES = 8;
-export const LOCAL_VOLUME_SHAPES = Object.freeze(['box', 'sphere', 'mesh']);
-export const LOCAL_VOLUME_FIT = Object.freeze(['bounds', 'mesh']);
-export const LOCAL_VOLUME_FIELDS = Object.freeze(['shape', 'part', 'fit', 'center', 'size', 'radius', 'density', 'falloff', 'absorption', 'emission', 'emissionStrength', 'scatter', 'blur', 'noiseAmount', 'noiseScale', 'steps']);
-export const LOCAL_VOLUME_MAXIMUM_STEPS = 32;
-
-function vectorField(value, minimum, maximum, label) {
-  if (!Array.isArray(value) || value.length !== 3) throw new TypeError(`${label} must be an array of three numbers`);
-  return value.map(component => finiteRange(component, minimum, maximum, label));
-}
-
-function resolveLocalVolume(input, label) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError(`${label} must be an object`);
-  for (const field of Object.keys(input)) {
-    if (!LOCAL_VOLUME_FIELDS.includes(field)) throw new TypeError(`${label} has no field "${field}"; use ${LOCAL_VOLUME_FIELDS.join(', ')}`);
-  }
-  const shape = input.shape ?? 'box';
-  if (!LOCAL_VOLUME_SHAPES.includes(shape)) throw new RangeError(`${label}.shape must be one of ${LOCAL_VOLUME_SHAPES.join(', ')}`);
-  const resolved = {
-    shape,
-    ...(shape === 'mesh' ? {} : { center: vectorField(input.center, -1e5, 1e5, `${label}.center`) }),
-    density: finiteRange(input.density ?? 1, 0, 100, `${label}.density`),
-    falloff: finiteRange(input.falloff ?? 0.5, 0, 1, `${label}.falloff`),
-    absorption: vectorField(input.absorption ?? [1, 1, 1], 0, 1, `${label}.absorption`),
-    emission: vectorField(input.emission ?? [0, 0, 0], 0, 1, `${label}.emission`),
-    emissionStrength: finiteRange(input.emissionStrength ?? 1, 0, 1000, `${label}.emissionStrength`),
-    scatter: finiteRange(input.scatter ?? 0, 0, 1, `${label}.scatter`),
-    blur: finiteRange(input.blur ?? 1, 0, 1, `${label}.blur`),
-    noiseAmount: finiteRange(input.noiseAmount ?? 0, 0, 1, `${label}.noiseAmount`),
-    noiseScale: finiteRange(input.noiseScale ?? 1, 0.001, 100, `${label}.noiseScale`),
-    steps: finiteRange(input.steps ?? 16, 4, LOCAL_VOLUME_MAXIMUM_STEPS, `${label}.steps`),
-  };
-  if (!Number.isInteger(resolved.steps)) throw new RangeError(`${label}.steps must be an integer`);
-  if (shape === 'mesh') {
-    if (typeof input.part !== 'string' || input.part === '') throw new TypeError(`${label}.part must be the name of the part that bounds the volume`);
-    for (const field of ['center', 'size', 'radius']) {
-      if (input[field] !== undefined) throw new TypeError(`${label}.${field} belongs to a box or a sphere; a mesh volume takes its place and size from the part named in ${label}.part`);
-    }
-    if (resolved.scatter > 0 && (input.fit ?? 'bounds') === 'mesh') throw new RangeError(`${label}.scatter is not drawn inside a volume that fits the closed mesh; use fit "bounds" or scatter 0`);
-    resolved.part = input.part;
-    resolved.fit = input.fit ?? 'bounds';
-    if (!LOCAL_VOLUME_FIT.includes(resolved.fit)) throw new RangeError(`${label}.fit must be one of ${LOCAL_VOLUME_FIT.join(', ')}`);
-    return resolved;
-  }
-  if (input.part !== undefined || input.fit !== undefined) throw new TypeError(`${label}.part and ${label}.fit belong to shape "mesh"`);
-  if (shape === 'sphere') {
-    if (input.size !== undefined) throw new TypeError(`${label}.size belongs to a box; a sphere takes radius`);
-    resolved.radius = finiteRange(input.radius, 0.001, 1e4, `${label}.radius`);
-  } else {
-    if (input.radius !== undefined) throw new TypeError(`${label}.radius belongs to a sphere; a box takes size [width, height, depth]`);
-    resolved.size = vectorField(input.size, 0.001, 1e4, `${label}.size`);
-  }
-  return resolved;
-}
-
-/** Checks a list of local volumes and returns them with every default filled in. Throws an error that names the field. */
+/**
+ * Checks a list of local volumes and returns them with every default filled in, grid volumes included. Throws an error that names the field.
+ * The scene entry calls resolveLocalVolumesWith instead, so the grid resolver loads with the grid module and not with every scene.
+ */
 export function resolveLocalVolumes(input, label = 'localVolumes') {
-  if (!Array.isArray(input)) throw new TypeError(`${label} must be an array of volumes`);
-  if (input.length > MAX_LOCAL_VOLUMES) throw new RangeError(`${label} holds at most ${MAX_LOCAL_VOLUMES} volumes, got ${input.length}`);
-  return input.map((volume, index) => resolveLocalVolume(volume, `${label}[${index}]`));
+  return resolveLocalVolumesWith(resolveGridVolume, input, label);
 }
 
 /** The uniform arrays the post shader reads, one vec4 per volume. Pass resolved volumes. */
 export function createLocalVolumeBuffers() {
   const size = MAX_LOCAL_VOLUMES * 4;
-  return { count: 0, blurred: false, meshParts: [], centers: new Float32Array(size), extents: new Float32Array(size), absorption: new Float32Array(size), emission: new Float32Array(size), steps: new Float32Array(size), axes: new Float32Array(size * 3) };
+  return { count: 0, blurred: false, meshParts: [], grid: new Float32Array(size), gridVolume: null, centers: new Float32Array(size), extents: new Float32Array(size), absorption: new Float32Array(size), emission: new Float32Array(size), steps: new Float32Array(size), axes: new Float32Array(size * 3) };
 }
 
 const IDENTITY_AXES = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1]);
@@ -82,6 +29,8 @@ export function packLocalVolumes(volumes, buffers) {
   if (volumes.some(volume => volume.shape === 'mesh' && !volume.center)) throw new RangeError('A mesh volume names a part: bind it with bindLocalVolumeParts before packing');
   buffers.count = volumes.length;
   buffers.meshParts = [];
+  buffers.gridVolume = null;
+  buffers.grid.fill(0);
   buffers.blurred = volumes.some(volume => volume.blur > 0 && volume.density > 0);
   volumes.forEach((volume, index) => {
     const at = index * 4;
@@ -93,6 +42,11 @@ export function packLocalVolumes(volumes, buffers) {
     buffers.emission.set([...volume.emission.map(channel => channel * volume.emissionStrength), volume.noiseScale], at);
     buffers.steps.set([volume.steps, packedShape === PACKED_SHAPE_MESH ? buffers.meshParts.length : 0, volume.scatter ?? 0, volume.blur ?? 0], at);
     if (packedShape === PACKED_SHAPE_MESH) buffers.meshParts.push({ part: volume.part, label: `environment.localVolumes[${index}]` });
+    if (volume.shape === 'grid') {
+      if (buffers.gridVolume) throw new RangeError('At most one volume in a scene takes shape "grid" for now; merge the grids into one file');
+      buffers.gridVolume = volume;
+      buffers.grid.set([1, volume.temperatureScale, volume.blackbodyIntensity * volume.emissionStrength, volume.anisotropy], at);
+    }
     const axes = volume.axes ?? IDENTITY_AXES;
     for (let axis = 0; axis < 3; axis++) buffers.axes.set([axes[axis * 3], axes[axis * 3 + 1], axes[axis * 3 + 2], 0], (index * 3 + axis) * 4);
   });
@@ -172,9 +126,24 @@ export function warpedFadePosition(position, noiseAmount, noise) {
   return clamped + (0.5 - noise) * noiseAmount * LOCAL_VOLUME_EDGE_WARP * 4 * clamped * (1 - clamped);
 }
 
+const gridScratch = new Float64Array(3);
+
+/** Writes the density, temperature and flame of a grid volume at a world point into `out` (all 0 outside its box) and returns it. */
+export function localVolumeGridSample(volume, x, y, z, out) {
+  const unitX = (x - volume.center[0]) / volume.size[0] + 0.5;
+  const unitY = (y - volume.center[1]) / volume.size[1] + 0.5;
+  const unitZ = (z - volume.center[2]) / volume.size[2] + 0.5;
+  if (unitX < 0 || unitX > 1 || unitY < 0 || unitY > 1 || unitZ < 0 || unitZ > 1) {
+    out[0] = out[1] = out[2] = 0;
+    return out;
+  }
+  return sampleVolumeGrid(volumeGridFloats(volume.gridData), volume.gridData.resolution, unitX, unitY, unitZ, out);
+}
+
 /** The density factor of a volume at a point: 1 at the core, fading over the outer `falloff` share, times the noise factor (up to 2) when `noiseAmount` is above 0, as the post shader does. With noise the fade edge is also pushed in and out (LOCAL_VOLUME_EDGE_WARP). */
 export function localVolumeProfile(volume, x, y, z, withNoise = true) {
   if (volume.shape === 'mesh') return 1;
+  if (volume.gridData) return localVolumeGridSample(volume, x, y, z, gridScratch)[0];
   let offsetX = x - volume.center[0];
   let offsetY = y - volume.center[1];
   let offsetZ = z - volume.center[2];

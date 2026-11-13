@@ -4,6 +4,18 @@ The suite measures how well an agent models through the 67js MCP tools. It recor
 what each success costs in tool calls, tokens and time. It is the yardstick from the modeling plan: a mesh feature
 earns its place only if it raises these numbers.
 
+## Shell arms
+
+`threejs.mjs` and `llms-only.mjs` give the agent a real shell on the machine that runs them. On 2026-11-13 a Sonnet agent in the three.js arm cleaned up its headless Chrome with `taskkill //F //IM chrome.exe //T` and `Get-Process chrome,node | Stop-Process -Force`. That killed the user's own Chrome, every other `node` process and other agents' browsers (#1138). The "process disappeared" stop in the 2026-11-07 three.js run below was probably the same cause.
+
+Both arms now:
+
+- deny, for Claude Code agents, the kill commands, `Get-Process`, `wmic`, `cmd`, `powershell` and `pwsh` as Bash rules, and the PowerShell tool (`shell-arm-safety.mjs`). Claude Code refuses a compound command that contains one of them, such as `echo a && taskkill ...`.
+- tell the agent in the prompt never to stop processes and to close its own browser.
+- refuse to start unless `AGENT_BENCH_SHELL_ARMS=1` is set.
+
+`llms-only.mjs --agent agy` gets no deny rules: its settings file allows `command(*)`, so only the prompt rule and the opt-in cover it. A script the agent writes can still start a process killer from inside node, which the rules cannot see. Set `AGENT_BENCH_SHELL_ARMS=1` only on a machine where nothing else runs, never on a shared workstation. The MCP arms (`run.mjs`, `bench.mjs`, `blender.mjs`) give the agent no shell and need no opt-in.
+
 ## Tasks
 
 Each task in `tasks.mjs` is a prompt with sizes in metres plus machine checks. The checks look only at the object the
@@ -54,6 +66,7 @@ own mesh report:
 | camera-closeup, camera-orbit | Frame the statue in a close-up; a 6 second camera orbit of at least 180 degrees (`scenes.mjs`) |
 | light-key-fill, light-spot-shadow | A warm sun plus a cool point fill; one shadow-casting spotlight aimed at the statue |
 | look-metal, look-fog | A polished gold material; a thin cool fog with a readable exposure |
+| findings-fix | A stage with a crate floating 0.65 m above the floor and a key light at intensity 40. The agent is told only that one object is placed wrongly and the lighting is bad. Run it with the findings (default) and with `--findings off`, which hides `diagnostics` from `scene_look`, to see what the findings are worth in tool calls, images read (`imagesRead` in each record, `imagesPerRun` in the summary) and success. Not in the default bench set |
 | sunset-timelapse, film-reveal | Sun direction and colour tracks over 4 s; a 6 second dolly-in reveal with an exposure fade |
 
 `references.mjs` holds one hand-built solution per task. `tests/agent-modeling-suite.test.js` checks that every
@@ -473,6 +486,21 @@ The three.js half of issue #31 and the 67js side of the same table. The Blender 
 - 67js failures: none in the checks. One harness fault: the `bracket` look images failed because the look page could not fetch the boolean wasm (`both async and sync fetching of the wasm failed`), which threw away the whole look record, silhouette included. The silhouette was scored again afterwards from the exported recipe, and the record carries `imagesError`. `scoreLook` should score the silhouette before it renders images.
 - A first attempt of the 67js run failed on every task because the checkout had no `build/mcp` folder (`npm run build:lib` creates it); those results were discarded. The first three.js run stopped after `bolt` when its process disappeared, so `window`, `table`, `fence` and `bracket` were run again as a second run and joined with `compare-threejs.mjs`.
 - Limits: 1 run per cell, one model, tasks the 67js suite was built around (they favour 67js's checks, not three.js). The `window` three.js failure label came from an earlier wording of the same check.
+
+### Blind pairwise look judge (2026-11-13, issue #987)
+
+The silhouette look score does not say which render a person or a vision model prefers. `pairwise-judge.mjs` shows the render of system A and the render of system B for one task as "first" and "second", in a seeded random order (`default-judge.mjs`'s `firstSideOf`; the repeats of one task swap sides), and asks which is the better finished render. It records the winner per task and attempt, then wins per system and an exact two-sided binomial p against 0.5. A control shows system A's own render on both sides: any preference for "first" or "second" is position bias, and a pairwise result no larger than the control's is not a preference for a system. Calls go through headless `claude -p` on the subscription, one per task, attempt and pairing.
+
+```sh
+node bench/agent-modeling/pairwise-judge.mjs --name <result name> --model sonnet --tasks crate,bolt,window,table,fence,bracket --attempts 1 \
+  --a "67js MCP=artifacts/agent-modeling/<67js run>/look/{attempt}/{task}-three-quarter.png" \
+  --b "three.js by code=artifacts/agent-modeling/<three.js run>/{task}-{attempt}.png"
+node bench/agent-modeling/compare-threejs.mjs <67js run json> <three.js run json> <output json> --pairwise bench/agent-modeling/results/<result name>.json
+```
+
+Each side is `label=image pattern` with `{task}` and `{attempt}` filled in. `--control-only` skips the pairing and runs only the control on side A; `--seed` changes the order. The judge writes `results/<result name>.json` (summary and one record per call, with the note the judge gave), and `compare-threejs.mjs --pairwise` prints wins per system, the p and the control next to the usual tables. Run records also carry `fixRounds`, next to `toolCalls` and `toolErrors`: the number of write steps after the first render (`scene_apply` or `scene_create_asset` after the first `scene_look` or render for 67js; `Write` or `Edit` after the first `node` run for three.js). A run that renders once has 0. Records from before this change have none and print `-`.
+
+Run on 2026-11-13 (measured): the raw renders of the 2026-11-07 head-to-head run are no longer on disk (only the scene numbers are in the result file), so the pairing was not re-run. The control ran on the 67js three-quarter renders that exist (`crate`, `bolt`, `table`, `chair`, `gear`, three attempts each, Sonnet, 15 calls, $1.76): the judge picked "first" 7 times and "second" 8 times, p = 1.0, so no position bias at this size. `results/2026-11-13-pairwise-control-67js.json`. The next three.js run saves `scene.png` in `artifacts/agent-modeling/<run>/`, which is what the `--b` pattern above reads.
 
 ### Blender MCP half (2026-11-07, issue #31)
 

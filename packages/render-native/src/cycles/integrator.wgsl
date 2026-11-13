@@ -82,6 +82,29 @@ fn int_resolve_material_index(instance: InstanceRecord, triangle: TriangleRecord
   return select(instance.material_override, triangle.material_index, instance.material_override == INVALID_INDEX);
 }
 
+struct IntTriangleUvs {
+  uv0: vec2<f32>,
+  uv1: vec2<f32>,
+}
+
+// Both uv sets of a triangle at barycentrics (weight of vertex 1, weight of vertex 2). A triangle without a second set reads
+// the first for both.
+fn int_interpolate_triangle_uvs(triangle: TriangleRecord, barycentrics: vec2<f32>) -> IntTriangleUvs {
+  let u = barycentrics.x;
+  let v = barycentrics.y;
+  let w = 1.0 - u - v;
+  var uvs: IntTriangleUvs;
+  uvs.uv0 = w * vec2<f32>(triangle.uv0_u, triangle.uv0_v)
+    + u * vec2<f32>(triangle.uv1_u, triangle.uv1_v)
+    + v * vec2<f32>(triangle.uv2_u, triangle.uv2_v);
+  uvs.uv1 = select(
+    uvs.uv0,
+    w * triangle.uv_set1_0 + u * triangle.uv_set1_1 + v * triangle.uv_set1_2,
+    (triangle.flags & TRIANGLE_FLAG_HAS_UV1) != 0u,
+  );
+  return uvs;
+}
+
 fn int_evaluate_surface_opacity(triangle: TriangleRecord, material: MaterialRecord, barycentrics: vec2<f32>) -> f32 {
   if (material.alpha_mode == ALPHA_MODE_OPAQUE) {
     return 1.0;
@@ -90,22 +113,12 @@ fn int_evaluate_surface_opacity(triangle: TriangleRecord, material: MaterialReco
   if (material.base_color_tex < 0 && material.alpha_tex < 0) {
     return opacity;
   }
-  let u = barycentrics.x;
-  let v = barycentrics.y;
-  let w = 1.0 - u - v;
-  let uv0 = w * vec2<f32>(triangle.uv0_u, triangle.uv0_v)
-    + u * vec2<f32>(triangle.uv1_u, triangle.uv1_v)
-    + v * vec2<f32>(triangle.uv2_u, triangle.uv2_v);
-  let uv1 = select(
-    uv0,
-    w * triangle.uv_set1_0 + u * triangle.uv_set1_1 + v * triangle.uv_set1_2,
-    (triangle.flags & TRIANGLE_FLAG_HAS_UV1) != 0u,
-  );
+  let uvs = int_interpolate_triangle_uvs(triangle, barycentrics);
   if (material.base_color_tex >= 0) {
-    opacity *= texture_sample(material.base_color_tex, uv0, uv1).a;
+    opacity *= texture_sample(material.base_color_tex, uvs.uv0, uvs.uv1).a;
   }
   if (material.alpha_tex >= 0) {
-    opacity *= texture_sample(material.alpha_tex, uv0, uv1).r;
+    opacity *= texture_sample(material.alpha_tex, uvs.uv0, uvs.uv1).r;
   }
   return clamp(opacity, 0.0, 1.0);
 }
@@ -286,8 +299,11 @@ fn int_trace_shadow(
 
       let hit_tri = triangles[hit_tri_idx];
       let hit_mat = materials[int_resolve_material_index(hit_inst, hit_tri)];
-      let supports_transparent_shadow = hit_mat.alpha_mode == ALPHA_MODE_BLEND
-        || (hit_mat.flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0u;
+      // A cutout that passed its alpha test above is solid: its alpha reads 1 from there on, as it does for a ray that hits it
+      // and as Cycles sees the 0 or 1 of a cutoff node. Taking the stored alpha as partial transparency again lets light through
+      // every texel of a map whose alpha is below 1, a quarter of it at an alpha of 0.75 (#1030).
+      let supports_transparent_shadow = hit_mat.alpha_mode != ALPHA_MODE_MASK
+        && (hit_mat.alpha_mode == ALPHA_MODE_BLEND || (hit_mat.flags & MATERIAL_FLAG_TRANSPARENT_SHADOW) != 0u);
       if (supports_transparent_shadow) {
         let opacity = int_evaluate_surface_opacity(hit_tri, hit_mat, committed.barycentrics);
         if (opacity < 1.0) {
@@ -356,7 +372,7 @@ fn int_camera_ray_cone() -> vec2<f32> {
 // coat or glass lobe by twice its roughness alpha (at most one radian); a mirror or a straight-through lobe not at all.
 // The curvature of the surface is not counted.
 fn int_bounce_cone_spread(closure: ptr<function, Closure>, sampled_lobe_type: u32) -> f32 {
-  if (sampled_lobe_type == LOBE_DIFFUSE || sampled_lobe_type == LOBE_SHEEN) {
+  if (sampled_lobe_type == LOBE_DIFFUSE || sampled_lobe_type == LOBE_SHEEN || sampled_lobe_type == LOBE_DIFFUSE_TRANSMISSION) {
     return 1.0;
   }
   var widest_alpha = 0.0;
@@ -538,7 +554,11 @@ fn int_apply_filter_glossy(closure: ptr<function, Closure>, inv_filter_glossy: f
 }
 
 fn int_is_singular_bsdf_sample(closure: ptr<function, Closure>, point: ptr<function, ShadingPoint>, sample: ClosureSample) -> bool {
-  if (sample.sampled_lobe_type == LOBE_DIFFUSE || sample.sampled_lobe_type == LOBE_SHEEN) {
+  if (
+    sample.sampled_lobe_type == LOBE_DIFFUSE
+    || sample.sampled_lobe_type == LOBE_SHEEN
+    || sample.sampled_lobe_type == LOBE_DIFFUSE_TRANSMISSION
+  ) {
     return false;
   }
   let wi_below = dot((*point).geometric_normal, sample.wi) < 0.0;
@@ -566,7 +586,8 @@ fn int_is_singular_bsdf_sample(closure: ptr<function, Closure>, point: ptr<funct
 
 fn int_closure_has_transmission(closure: ptr<function, Closure>) -> bool {
   for (var lobe_index = 0u; lobe_index < (*closure).lobe_count; lobe_index += 1u) {
-    if ((*closure).lobes[lobe_index].lobe_type == LOBE_GLASS_GGX) {
+    let lobe_type = (*closure).lobes[lobe_index].lobe_type;
+    if (lobe_type == LOBE_GLASS_GGX || lobe_type == LOBE_DIFFUSE_TRANSMISSION) {
       return true;
     }
   }
@@ -1031,7 +1052,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       }
 
       let picks_through_tree = lgt_use_light_tree() && (kernel_params.light_count + kernel_params.emissive_triangle_count) > 0u;
-      let closure_has_transmission = SCENE_HAS_GLASS && int_closure_has_transmission(&closure);
+      let closure_has_transmission = (SCENE_HAS_GLASS || SCENE_HAS_DIFFUSE_TRANSMISSION) && int_closure_has_transmission(&closure);
       for (var direct_source = 0u; direct_source < 3u; direct_source += 1u) {
         if ((kernel_params.kernel_flags & KERNEL_FLAG_TEST_BSDF_ONLY) != 0u) {
           break;
@@ -1097,15 +1118,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
       bounce += 1u;
       let cos_ng_wi = dot(point.geometric_normal, bsdf_sample.wi);
-      let is_transmission = (bsdf_sample.sampled_lobe_type == LOBE_GLASS_GGX || bsdf_sample.sampled_lobe_type == LOBE_GLOSSY_GGX) && cos_ng_wi < 0.0;
+      // Cycles counts a sample of the translucent lobe as a transmission bounce, and like a thin-walled sheet it leaves the medium alone.
+      let is_diffuse_transmission = bsdf_sample.sampled_lobe_type == LOBE_DIFFUSE_TRANSMISSION;
+      let is_transmission = ((bsdf_sample.sampled_lobe_type == LOBE_GLASS_GGX || bsdf_sample.sampled_lobe_type == LOBE_GLOSSY_GGX) && cos_ng_wi < 0.0)
+        || is_diffuse_transmission;
 
       if (is_transmission) {
         transmission_bounces += 1u;
         ray_visibility = INSTANCE_VISIBILITY_TRANSMISSION;
+        if (is_diffuse_transmission) {
+          // Cycles labels the translucent sample transmit and diffuse: path_state_next adds the diffuse visibility to the
+          // transmission one, and leaves the diffuse bounce counter alone.
+          ray_visibility |= INSTANCE_VISIBILITY_DIFFUSE;
+        }
         if (transmission_bounces >= limit_transmission) {
           terminate_on_hit = true;
         }
-        if ((material.flags & MATERIAL_FLAG_THIN_WALLED) == 0u) {
+        if ((material.flags & MATERIAL_FLAG_THIN_WALLED) == 0u && !is_diffuse_transmission) {
           if (point.front_face != 0u) {
             medium_sigma = max(closure.absorption_sigma, vec3<f32>(0.0));
             in_medium = medium_sigma.x > 0.0 || medium_sigma.y > 0.0 || medium_sigma.z > 0.0;

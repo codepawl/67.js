@@ -438,6 +438,15 @@ fn closure_transparent_setup_lobe(normal: vec3<f32>, weight: vec3<f32>) -> Lobe 
   return lobe;
 }
 
+fn closure_diffuse_transmission_setup_lobe(normal: vec3<f32>, weight: vec3<f32>) -> Lobe {
+  var lobe = closure_empty_lobe();
+  lobe.weight = weight;
+  lobe.sample_weight = bsdf_mf_average(weight);
+  lobe.normal = normal;
+  lobe.lobe_type = LOBE_DIFFUSE_TRANSMISSION;
+  return lobe;
+}
+
 fn closure_thin_glass_transmission_alpha(alpha: f32, eta: f32) -> f32 {
   let safe_eta = max(eta, 1e-4);
   return clamp(alpha * 3.4 * abs(safe_eta - 1.0) * bsdf_mf_sqr(safe_eta - 0.5) / (safe_eta * safe_eta * safe_eta), 0.0, 1.0);
@@ -819,7 +828,22 @@ fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure {
     layer_weight = closure_layering_weight(spec_setup.layer_albedo, layer_weight);
   }
 
-  let diffuse_weight = base_color * layer_weight;
+  // A thin sheet that lets diffuse light through: the weight splits the diffuse layer between the reflecting lobe and the
+  // lobe on the far side, so the specular layers above keep their strength. The extension record of the material holds the
+  // weight (in `metallic`) and the colour (in `base_color`); the kernel reads it here.
+  var diffuse_transmission_weight = 0.0;
+  var diffuse_transmission_color = vec3<f32>(0.0);
+  // The length test keeps a table without extension records (a probe, a test) from being read past its end.
+  if (SCENE_HAS_DIFFUSE_TRANSMISSION && arrayLength(&materials) >= 2u * kernel_params.material_count) {
+    let extension = materials[kernel_params.material_count + (*point).material_index];
+    diffuse_transmission_weight = clamp(extension.metallic, 0.0, 1.0);
+    diffuse_transmission_color = max(extension.base_color, vec3<f32>(0.0));
+    if ((extension.flags & MATERIAL_EXTENSION_FLAG_TINTS_BASE_COLOR) != 0u) {
+      diffuse_transmission_color = diffuse_transmission_color * base_color;
+    }
+  }
+
+  let diffuse_weight = base_color * layer_weight * (1.0 - diffuse_transmission_weight);
   if (bsdf_mf_max_component(diffuse_weight) > CLOSURE_WEIGHT_CUTOFF) {
     let diff_lobe = bsdf_diffuse_setup_lobe(
       shading_n,
@@ -830,6 +854,18 @@ fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure {
     );
     if (diff_lobe.sample_weight > 0.0) {
       closure_add_candidate(&closure, &candidates, diff_lobe);
+    }
+  }
+
+  let diffuse_transmission_lobe_weight = diffuse_transmission_color * (diffuse_transmission_weight * layer_weight);
+  if (
+    SCENE_HAS_DIFFUSE_TRANSMISSION
+    && closure.lobe_count < CLOSURE_CANDIDATE_CAPACITY
+    && bsdf_mf_max_component(diffuse_transmission_lobe_weight) > CLOSURE_WEIGHT_CUTOFF
+  ) {
+    let transmission_lobe = closure_diffuse_transmission_setup_lobe(shading_n, diffuse_transmission_lobe_weight);
+    if (transmission_lobe.sample_weight > 0.0) {
+      closure_add_candidate(&closure, &candidates, transmission_lobe);
     }
   }
 
@@ -874,6 +910,10 @@ fn closure_build(point: ptr<function, ShadingPoint>, wo: vec3<f32>) -> Closure {
 fn closure_eval_single_lobe(lobe: ptr<function, Lobe>, wi: vec3<f32>, wo: vec3<f32>) -> BsdfMfEval {
   if ((*lobe).lobe_type == LOBE_DIFFUSE) {
     let d = bsdf_diffuse_eval(lobe, wi, wo);
+    return BsdfMfEval(d.value, d.pdf);
+  }
+  if ((*lobe).lobe_type == LOBE_DIFFUSE_TRANSMISSION) {
+    let d = bsdf_diffuse_transmission_eval(lobe, wi);
     return BsdfMfEval(d.value, d.pdf);
   }
   if ((*lobe).lobe_type == LOBE_GLOSSY_GGX) {
@@ -922,6 +962,10 @@ fn closure_sample_single_lobe(
 ) -> BsdfMfSample {
   if ((*lobe).lobe_type == LOBE_DIFFUSE) {
     let s = bsdf_diffuse_sample(lobe, geometric_normal, wo, rand_xy);
+    return BsdfMfSample(s.wi, s.pdf, s.eval, false);
+  }
+  if ((*lobe).lobe_type == LOBE_DIFFUSE_TRANSMISSION) {
+    let s = bsdf_diffuse_transmission_sample(lobe, geometric_normal, rand_xy);
     return BsdfMfSample(s.wi, s.pdf, s.eval, false);
   }
   if ((*lobe).lobe_type == LOBE_GLOSSY_GGX) {
@@ -995,7 +1039,7 @@ fn closure_eval_albedo(closure: ptr<function, Closure>, wo: vec3<f32>) -> vec3<f
   var albedo = vec3<f32>(0.0);
   for (var i: u32 = 0u; i < (*closure).lobe_count; i = i + 1u) {
     var lobe_copy = (*closure).lobes[i];
-    if (lobe_copy.lobe_type == LOBE_DIFFUSE || lobe_copy.lobe_type == LOBE_SHEEN) {
+    if (lobe_copy.lobe_type == LOBE_DIFFUSE || lobe_copy.lobe_type == LOBE_SHEEN || lobe_copy.lobe_type == LOBE_DIFFUSE_TRANSMISSION) {
       albedo = albedo + lobe_copy.weight;
     } else if (lobe_copy.lobe_type == LOBE_GLOSSY_GGX) {
       let fr = bsdf_mf_eval_glossy_fresnel(&lobe_copy, max(dot(lobe_copy.normal, wo), 0.0));

@@ -45,6 +45,10 @@ Variants: `scene_apply` with a `branch` name, compare in one `scene_review` (a `
   `sunset` warm low light. Do not hand-tune key, fill and ambient first.
 - The preview draws a floor with a contact shadow under the lowest geometry. `environment.ground: false` removes it,
   so never add a floor node only for the shadow.
+- Sizes: `box` is a unit cube; `cylinder` and `sphere` have radius 1, so node scale x/z (cylinder) or scale (sphere) is the
+  radius, not the diameter. A 6-segment cylinder has flats on Z (1.732 x scale apart) and corners on X.
+- Stack parts from numbers: write each part's bottom and top Y first, adding the Y of the surface it stands on (a height "above
+  the slab" is measured from the slab's top, not from Y = 0). After building, compare `scene_inspect` bounds with the task's numbers.
 - Reuse one geometry ID for repeated parts and move them with node transforms.
 - Put parts against each other with node `relations` (`attach`, `gap`, `flush`, `align`, `centered`) so one `set-node`
   resizes the body and the handle follows.

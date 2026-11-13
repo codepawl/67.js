@@ -18,8 +18,10 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createRunGuard } from './run-guard.mjs';
+import { SHELL_ARM_DENIED_TOOLS, SHELL_ARM_PROCESS_RULE, assertShellArmAllowed } from './shell-arm-safety.mjs';
 import { removeLocalPaths, totalsByModel, totalsOf } from './aggregate.mjs';
 import { checkOne } from './check.mjs';
+import { countFixRounds, isCodeRender, isCodeWrite } from './fix-rounds.mjs';
 import { camerasForTask, worldGeometriesOf } from './look.mjs';
 import { countTips, lineHits, sectionLoops, signedVolume } from './measure.mjs';
 import { checkPng } from './png-check.mjs';
@@ -40,7 +42,8 @@ Write a Node.js script named build.mjs that does three things and run it:
    world space (apply each mesh's world matrix) and indices as a flat triangle list.
 3. Renders the scene to scene.png, 512 by 512 pixels, with headless Google Chrome (installed; use --use-angle=swiftshader
    --enable-unsafe-swiftshader --enable-webgl --ignore-gpu-blocklist so it needs no GPU). There is no internet access.
-The files build.mjs, geometry.json and scene.png are what gets graded. When they exist, reply with one line saying so.`;
+The files build.mjs, geometry.json and scene.png are what gets graded. When they exist, reply with one line saying so.
+${SHELL_ARM_PROCESS_RULE}`;
 
 /** Measures an array of { positions, indices } meshes like measure.mjs does for a recipe, welding shared corners first. */
 export function measureGeometries(rawGeometries) {
@@ -136,7 +139,8 @@ export async function scoreSilhouetteOfGeometries(taskId, rawGeometries) {
 }
 
 export function readTranscript(output) {
-  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, result: null };
+  const summary = { model: null, toolCalls: 0, toolErrors: 0, toolsByName: {}, fixRounds: 0, result: null };
+  const steps = [];
   for (const line of output.split('\n')) {
     if (!line.trim().startsWith('{')) continue;
     let event;
@@ -151,6 +155,7 @@ export function readTranscript(output) {
         if (block.type !== 'tool_use' || block.name === 'ToolSearch') continue;
         summary.toolCalls++;
         summary.toolsByName[block.name] = (summary.toolsByName[block.name] ?? 0) + 1;
+        steps.push({ name: block.name, input: block.input });
       }
     }
     if (event.type === 'user') {
@@ -160,6 +165,7 @@ export function readTranscript(output) {
     }
     if (event.type === 'result') summary.result = event;
   }
+  summary.fixRounds = countFixRounds(steps, { isRender: isCodeRender, isWrite: isCodeWrite });
   return summary;
 }
 
@@ -183,6 +189,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       label: { type: 'string', default: 'threejs' },
     },
   });
+  assertShellArmAllowed();
   const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const runName = `${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-${options.model}-${options.label}`;
   const rawDirectory = join(repository, 'artifacts', 'agent-modeling', runName);
@@ -201,7 +208,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const child = spawn(options.claude, [
       '-p', prompt, '--model', options.model, '--output-format', 'stream-json', '--verbose', '--strict-mcp-config',
       '--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-      '--disallowedTools', ...BUILT_IN_TOOLS_DENIED,
+      '--disallowedTools', ...BUILT_IN_TOOLS_DENIED, ...SHELL_ARM_DENIED_TOOLS,
       '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--no-session-persistence',
     ], { cwd: workingDirectory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
@@ -267,6 +274,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             model: transcript.model,
             toolCalls: transcript.toolCalls,
             toolErrors: transcript.toolErrors,
+            fixRounds: transcript.fixRounds,
             toolsByName: transcript.toolsByName,
             look: silhouette ? { silhouette } : null,
             turns: transcript.result?.num_turns ?? null,

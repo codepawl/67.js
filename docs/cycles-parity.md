@@ -2,6 +2,8 @@
 
 Milestone M0 measures today's native path tracer ([`packages/render-native`](../packages/render-native/README.md), legacy `kernel.wgsl` on `wgpu 30.0.1` Vulkan `EXPERIMENTAL_RAY_QUERY`) against **Blender 5.3.0 Cycles OptiX** under matched unbiased settings on a single reference scene before any Cycles-kernel port changes land.
 
+The Blender add-on that renders a Blender scene with Cook, built on the same scene reading as the Classroom bridge, is described in [blender-addon.md](./blender-addon.md) (#900).
+
 All claims below are tagged `[measured]` (from benchmark artifacts produced by [`bench/cycles-parity/`](../bench/cycles-parity/run-m0-suite.py)), `[source]` (verified in 67js or Blender 5.3 source), or `[inferred]`.
 
 ## Summary Verdict
@@ -1091,6 +1093,44 @@ Output goes to `artifacts/classroom/` (ignored by Git): `summary.json`, `classro
 
 Not covered: the 22 unexported instances and the bridge gap above; a scene that keeps Blender's default disk lights (#1060); 4096 samples.
 
+## Diffuse transmission (#1058)
+
+A thin sheet that lets diffuse light through (a curtain, a leaf, a lampshade) is the material fields `diffuseTransmission` (0 to 1) and `diffuseTransmissionColor` (the base colour when left out). The `cycles` kernel splits the diffuse layer at the weight: the usual lobe keeps `1 - weight`, and a cosine lobe on the far side of the surface, the Translucent BSDF of Cycles, takes `weight * colour`. The lobe is sampled and evaluated like the diffuse one (pdf `cos / pi`) and joins MIS, so a lamp behind the sheet lights its front by next event estimation and by BSDF sampling. The format is in [FORMAT-v2.md](../packages/render-native/FORMAT-v2.md), "Material extension records".
+
+Blender 5.3's Principled BSDF has no diffuse transmission weight (its transmission inputs are `Transmission Weight` and the dispersion pair), so `render-cycles.py` builds the split from nodes: a Principled BSDF at `(1 - weight) * base colour` plus a Translucent BSDF at `weight * colour`, added together. That matches Cook only for a dielectric, non-glass, non-subsurface material with no specular lobe, so the parity scenes set `specular: 0`, and `render-cycles.py` refuses `diffuseTransmission` together with `metallic`, `transmission` or `subsurface`: Cook scales the diffuse layer, and with it the far-side lobe, by what those layers leave of it, which the added Translucent node does not. With a specular lobe Cook multiplies the far-side lobe by the weight the specular layer leaves, as it does for the diffuse lobe, while the added Translucent BSDF is not attenuated: the two differ there, and that case is not measured.
+
+### Scenes `[measured]`
+
+`bench/cycles-parity/make-diffuse-transmission-scenes.mjs` writes three scenes: a vertical sheet (3 x 2.4 m, base colour `[0.8, 0.75, 0.7]`, light colour `[0.95, 0.55, 0.25]`, weight 0.6) above a grey floor, lit by a rectangular lamp 1.6 m behind it (`sheet-backlit`), lit by a lamp above and in front of the picture (`sheet-front`), and the backlit sheet at weight 0 (`sheet-backlit-weight-0`, which must read as an opaque sheet with the lamp hidden behind it). The world is a constant 0.05. Cook (`--kernel cycles`) and Cycles 5.3.0 render each at 480 x 270, 1024 samples, 8 bounces.
+
+| Scene | Cook mean per channel (R, G, B) | Cook over Cycles, channel means | 8 x 8 tile ratios, min to max | Cycles seed 2 over seed 1, channel means | Cycles seed 2 over seed 1, tiles |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `sheet-backlit` | 0.0998, 0.0690, 0.0473 | 0.99998, 0.99999, 0.99999 | 0.9996 to 1.0002 | 0.99997, 0.99998, 0.99999 | 0.9998 to 1.0002 |
+| `sheet-front` | 0.0722, 0.0651, 0.0593 | 0.99998, 0.99999, 0.99999 | 0.9998 to 1.0002 | 0.99998, 0.99999, 0.99999 | 0.9998 to 1.0002 |
+| `sheet-backlit-weight-0` | 0.0387, 0.0378, 0.0370 | 0.99999, 0.99999, 0.99999 | 0.9996 to 1.0003 | 0.99999, 0.99999, 1.00000 | 0.9997 to 1.0004 |
+
+All 64 tiles of each scene are eligible and within 5 percent, and the channel means are within 2 percent by a wide margin. Cook sits inside the Cycles seed-to-seed spread: with a smooth lamp and one sheet the images are nearly noise free (relative MSE 2e-6 to 5e-6 between Cook and Cycles, 6e-6 or less between two Cycles seeds), so these scenes test the lobe's weight, colour, sides and light transport, not a noisy estimator. 
+
+![Cook (left), Cycles 5.3 (middle) and the backlit sheet at weight 0 (right), for the backlit sheet, the front-lit sheet and the opaque control](translucent-1058.jpg)
+
+Path flags, from the Cycles source (`intern/cycles/kernel/closure/bsdf_diffuse.h`, `bsdf_translucent_sample`, and `intern/cycles/kernel/integrator/path_state.h`, `path_state_next`): the translucent sample is labelled transmit and diffuse. `path_state_next` therefore counts it against the transmission bounce limit (not the diffuse one) and sets the transmission and the diffuse ray visibility together. Cook does the same: the bounce counts as a transmission bounce, leaves the medium alone and casts its next ray with both visibility bits.
+
+### Closed form and identity `[measured]`
+
+`tests/native-diffuse-transmission.test.js` lights one sheet with a sun at normal incidence and has a closed form for it. A plain diffuse sheet of albedo `a` lit from the front shines `a * E / pi` (the test checks that against the sun's irradiance, 5 percent). A sheet of weight `w` and colour `a` lit from behind shines `w * a * E / pi` on its front, and lit from the front `(1 - w)` times the plain sheet (each 2 percent per channel). An opaque sheet lit from behind stays dark, and a sheet at weight 1 reflects nothing. All of them pass on the GPU box.
+
+A scene without the field is byte-identical to a build without this change. On a rented RTX-class box, `origin/main` and this branch were built side by side and fed the same exported scenes (192 x 108, 16 samples, 4 bounces, seed 1, both kernels): the SHA-256 of the kernel output is equal for `lit-interior`, `glass`, `brick-room` and `material-spheres` with `--kernel cycles` and with `--kernel legacy`, and the packed tables (kernel parameters, instances, triangles, materials, lights, textures, environment) hash the same.
+
+Commands, on a machine with Blender 5.3, Node, `uv`, a GPU and the built addon:
+
+```sh
+(cd packages/render-native && node build.mjs)
+uv run --no-project --with numpy python bench/cycles-parity/run-diffuse-transmission-parity.py artifacts/diffuse-transmission --samples 1024 --repeat-cycles-seed2
+uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-diffuse-transmission-figure.py artifacts/diffuse-transmission artifacts/diffuse-transmission/figure.jpg
+```
+
+Not covered: the legacy kernel, the WebGPU and WebGL tracers, the raster renderer and glTF `KHR_materials_diffuse_transmission` import ignore the field; a base colour map or vertex colours with a transmitting sheet (Cook tints the far-side lobe by them; `render-cycles.py` refuses that case); a material that also has a specular lobe, coat or sheen, as above; metal, glass and subsurface (refused by the reference script).
+
 ## Reproducible Commands
 
 Run from the repository root in PowerShell. Set `$env:BLENDER_BIN` if Blender 5.3 is installed outside `C:\Program Files\Blender Foundation\Blender 5.3\blender.exe`, and pass an untracked `<out-dir>` (such as `artifacts/cycles-parity`) so binary `.exr` and `.npy` files stay out of Git:
@@ -1279,9 +1319,37 @@ Cook over Cycles, 2048 spp, 960 x 540, seed 1, mean ratio R, G, B and relMSE (ep
 | `tex-split-room`, `tex-split-flat` (no texture) | 1.000 | 1.000 |
 | `brick-graph` (graph material with a map) | 0.9817, 0.9880, 0.9925; 1.61e-2 | 0.9817, 0.9879, 0.9923; 1.61e-2 |
 
-Still open: the mask quad is 1.1 to 1.5 percent bright. Two renders of the diagnostic scenes (`tex-mask-alone`: the mask quad without the backdrop; `tex-mask-opaque-map`: the backdrop plus the same mask material over an opaque map) put it off the texture read: with the backdrop removed the quad is 1.0021, 1.0022, 1.0012 (measured in a build that also blended colour weighted by alpha, which did not move the full scene beyond 0.2 percent, so it was dropped), and with an opaque map under the mask material the whole scene is 1.0001. The ratio map of `tex-split-mask` puts the excess in the columns of the cutout holes and in the strip of backdrop below the quad, where Cook is up to 40 percent brighter: the light that reaches the backdrop past a cutout, not the colour of the quad. The cause there is not known.
+The three items this left open (the cutout quad, the mean of an emission map, `brick-graph`) are split and settled in the next section.
 
-Two known differences from Cycles remain in the read of a map and are not changed here. Cycles premultiplies the stored values of a byte image by alpha before the filter and divides by alpha after it when the alpha output is used; the kernel filters straight colour and alpha independently, which differs only where alpha varies between neighbouring texels. And the packed mean colour of an emissive map (`meanLinearRgb`, used for the radiance of a light sample on a textured emitter) is still the mean of the decoded texels, a few percent above the filtered read on a high-contrast sRGB map.
+## What was left of #1030 (cutout, emission map, brick-graph)
+
+Cook `cycles` kernel over Blender Cycles 5.3, 960 x 540, 1024 spp, seed 1, RTX 4090, mean ratio R, G, B and relMSE (eps 0.01) `[measured]`; `bench/cycles-parity/residual-run.sh` renders every table below (scenes from `residual-variants.mjs` and `texture-scenes.mjs`).
+
+**1. The cutout quad was bright because a shadow ray treated the solid texels of a cutout as partly transparent.** Splitting `tex-split-mask` by light: the world light alone is 1.0012, 1.0020, 1.0045 (`mask-world-only`), the point lights alone 1.0158, 1.0129, 1.0167 (`mask-lights-only`), with the excess in the cells of the shadow of the quad and up to 26 percent there. The excess depends on the stored alpha beyond the cutoff, not on where the cutoff sits:
+
+| Stored alpha of the mask map | Cook over Cycles |
+| --- | --- |
+| 0 and 255 (`mask-binary-alpha`) | 0.9991, 0.9981, 1.0014 |
+| ramp of `tex-split-mask`, solid texels at 0.53 to 0.97 | 1.0129, 1.0108, 1.0143 |
+| 77 and 178 (`mask-two-level-alpha`), solid texels at 0.70 | 1.0197, 1.0163, 1.0190 |
+| ramp moved off the exact tie at 0.5 (`mask-off-tie-ramp`) | 1.0128, 1.0104, 1.0138 |
+
+Cook's own picture of the ramp over its picture of the binary map was 1.0117, 1.0085, 1.0096 (up to 10 percent in the shadow cells); Cycles' own two pictures differ by 0.2 to 0.4 percent. Moving the cutoff to 0.46 or 0.54 did not move the far shadow cells (the right column stayed at 1.09 to 1.13), and a transparent bounce limit of 64 on both sides gave the same picture as 8, so neither the hole edge nor the bounce count was the cause. The cause is in `int_trace_shadow`: a texel that passed the alpha test was committed as a hit, and then `MATERIAL_FLAG_TRANSPARENT_SHADOW` (set for every material by default) made the ray take the stored alpha as partial transparency again, so light passed through a texel of alpha 0.7 by 30 percent. Cycles sees the 0 or 1 of the cutoff node, and a camera ray that hits the texel treats it as solid (`closure_build` sets the opacity to 1), so Cook was the one that was wrong. A cutout texel above the cutoff now blocks a shadow ray fully. After the change:
+
+| Scene | Before | After |
+| --- | --- | --- |
+| `tex-split-mask` | 1.0129, 1.0108, 1.0143; 1.27e-3 | 0.9994, 1.0010, 1.0033; 3.25e-4 |
+| `mask-lights-only` | 1.0158, 1.0129, 1.0167; 1.29e-3 | 0.9994, 1.0011, 1.0034; 2.71e-4 |
+| `mask-two-level-alpha` | 1.0197, 1.0163, 1.0190; 2.02e-3 | 1.0002, 1.0020, 1.0030; 1.71e-4 |
+| `tex-repeat` (both quads) | 1.0128, 1.0061, 1.0095; 1.28e-3 | 0.9994, 1.0004, 1.0021; 3.27e-4 |
+| `tex-wraps` (not a scoring scene: the bridge builds the colour map only) | 1.0372, 1.0215, 1.0224; 1.25e-2 | 1.0254, 1.0159, 1.0148; 1.13e-2 |
+| `brick-graph` | 0.9817, 0.9879, 0.9923; 1.61e-2 | same |
+
+Cook's picture of the ramp over its picture of the binary map is now 1.0000 in all three channels (relMSE 9e-13): the stored alpha beyond the cutoff no longer moves the picture. The alpha filter order of Cycles (premultiplied bytes, divided after) is not the cause: it changes the colour of the quad, not the alpha test, and the binary map was already right. The scenes without a cutout are byte for byte what they were (SHA-256 of the pictures of `lit-interior`, `glass`, `many-lights-500` and `brick-graph` on both kernels, 160 x 90, 16 spp, against a build of the base commit; the `legacy` kernel is untouched for every scene; the packed tables of the untextured scenes are equal). Only `tex-repeat` and `tex-wraps` on the `cycles` kernel differ, as they hold cutouts.
+
+**2. The mean of an emission map is not a radiance.** `lgt_sample_emissive_triangle_at` returned the packed `meanLinearRgb` times the emission colour as the radiance of a light sample, where a ray that hits the emitter reads the map. Cycles evaluates the emission shader at the sampled point of the light (`light_sample_shader_eval` in `kernel/light/light.h`, from memory of the source, not read here; the measurement below is what decides), so the mean is a bias, not an estimate: its expectation over the emitter is the mean of the decoded texels, 6.5 percent above the mean of the filtered reads on the `tex-emit-srgb` map (0.4700 against 0.4414, red). On `tex-emit-floor` (a diffuse floor lit by a 4 x 4 two-tone sRGB checker), Cook over Cycles with light sampling alone was 1.0763, 1.0477, 1.0131 and with bounce rays alone 1.0001, 1.0000, 1.0000, so the bias sat entirely in the light samples (both together: 1.0704, 1.0440, 1.0121). A light sample on an emitter with an emission map now reads the map at its barycentrics (`lgt_textured_emitter_radiance`); light sampling alone, bounce rays alone and both give 1.0001, 1.0000, 1.0000 (relMSE 1.6e-5, 9.1e-5, 1.0e-5). The packed mean stays as the weight that picks an emitter (the light tree and the emitter list), where an estimate of the mean is all that is needed and a difference only changes noise. A material without an emission map takes the old branch, so those scenes did not change.
+
+**3. `brick-graph` is the comparison, not the kernel.** `render-cycles.py` builds the colour map of the material but not its normal map, so Cook shades a bumped wall against a flat one in Cycles. With the normal map removed from the Cook scene (`brick-no-normal-map`) Cook over Cycles is 0.9997, 0.9997, 0.9998 (relMSE 2.5e-5), the same as `brick-flat` (0.9997, 0.9997, 0.9998), and with it 0.9817, 0.9879, 0.9923; the lost light sits in the cells of the wall (0.92 to 0.95 against 1.00 elsewhere). So it is neither of the causes above, and no kernel change is needed. A first Normal Map node on the Cycles side (tangent space, green up, strength 1) moved the ratio to 1.0203, 1.0137, 1.0103 with relMSE 1.3e-1, so the convention of the bake and the node do not agree yet; it was not kept. Until the reference builds the map, `brick-graph` says nothing about Cook's texture read.
 
 Commands: `node bench/cycles-parity/texture-scenes.mjs <dir>` also writes `tex-emit-srgb`, `tex-emit-linear`, `tex-split-*`, `tex-mask-alone` and `tex-mask-opaque-map`; `native-texture-sampler.test.js` holds a GPU-gated test of the seam between a black and a white texel (0.214 linear when blended before decoding, 0.5 when decoded first).
 
@@ -1346,7 +1414,7 @@ On the Classroom scene Cook rendered the seven point lights with a radius 41 per
 - Cook implements the sphere (`lgt_sample_point_or_spot_light`, `lgt_sphere_solid_angle_pdf` in `lights.wgsl`), with the radiance `intensity / (pi r^2)` that Cycles uses (`eval_fac` in `PointLight::copy_to_kernel`), so the power does not change with the radius.
 - `render-cycles.py` never set the property, so every Cycles reference with a light radius used the disk and Cook the sphere. The two agree far from geometry (radius 0.05 m: 0.05 percent apart) and drift as the lamp grows or touches geometry.
 
-Fix: `render-cycles.py` sets `use_soft_falloff` explicitly, to off by default, so both renderers draw a sphere. `--soft-falloff default|on|off` keeps the Blender default (`default`) or the disk (`on`) available. The kernel and the packer are unchanged (SHA-256 of the Cook output is identical to `origin/main`, below). Cook has no disk light, so a scene authored in Blender with the default Soft Falloff still differs by the amounts in the left column.
+Fix: `render-cycles.py` sets `use_soft_falloff` explicitly, to off by default, so both renderers draw a sphere. `--soft-falloff default|on|off` keeps the Blender default (`default`) or the disk (`on`) available. The kernel and the packer are unchanged (SHA-256 of the Cook output is identical to `origin/main`, below). Cook had no disk light then, so a scene authored in Blender with the default Soft Falloff differed by the amounts in the left column; [Soft Falloff lights](#soft-falloff-lights-1060) adds it.
 
 Cook over Cycles mean radiance (the three channels agree to 4 digits on grey diffuse scenes), 1024 spp, 480 x 270, 8 bounces, box filter, seed 1, one RTX 4090, Blender 5.3.0 OptiX, all materials grey diffuse, one lamp of intensity 8 at 1.6 m in the `lit-interior` room (`make-sphere-light-scenes.mjs`). "Before" is Cycles with the Blender default (disk), "after" is Cycles with Soft Falloff off `[measured]`:
 
@@ -1404,6 +1472,50 @@ uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-par
 
 `make-sphere-light-scenes.mjs` writes the lamp scenes and `run-sphere-light-parity.py` renders them with Cook and with Cycles (Soft Falloff default and off) and prints one line per scene. The scenes hidden from shadow rays need `--instancing` in `trace-native.mjs` and `rayVisibility` in `render-cycles.py`, which come with the Classroom bridge (#896). `tests/cycles-sphere-light-parity.test.js` pins the default and the closed form (floor radiance `albedo / pi * intensity / d^2` for radius 0, 0.18 and 0.5 m).
 
+## Soft Falloff lights (#1060)
+
+[Sphere lights and Soft Falloff](#sphere-lights-and-soft-falloff-1040) left Cook with the sphere only: a scene authored in Blender with the default `use_soft_falloff` on rendered 4 to 400 percent apart from its Cycles reference. A point or spot light now takes `softFalloff: true` and the `cycles` kernel draws it as Cycles does (`kernel/light/point.h` and `spot.h`, the branch without `is_sphere`):
+
+- **Shape.** A disk of the light's radius through its centre, perpendicular to the line from the centre to the shading point, so it faces whatever it lights. There is no inside or outside: a spot's cone applies at every distance, where the sphere skips it inside the radius.
+- **Sampling and pdf.** A point on the disk by the concentric map, pdf `t^2 / (cos * pi * r^2)` per steradian with `cos` the angle between the disk normal and the line to the receiver (Cycles: `invarea * light_pdf_area_to_solid_angle`). A path hits the disk where it crosses it in front of its origin (`ray_disk_intersect`) and uses the same pdf, so MIS against the BSDF is consistent. A spot's hit is one-sided as before.
+- **Radiance.** Unchanged: intensity over `pi r^2`, as for the sphere (Cycles uses one `eval_fac` for both). The power of a light does not change with the radius or the shape.
+- **Light tree.** The profile of the light is the disk's: `cos(theta_u) = d / sqrt(d^2 + r^2)` and the far distance `sqrt(d^2 + r^2)` (`point_light_tree_parameters`), where the sphere uses the angle of its silhouette.
+- **Request.** `softFalloff: true` on an entry of `environment.pointLights` or `spotLights` (scene recipes, `buildTraceScene`, the bench scene JSON); a boolean, anything else throws and says what to pass; `false` or a missing field is the sphere. The packer sets bit `32` (`SOFT_FALLOFF`) in the light record's `flags` for a light with a radius above 0 ([FORMAT-v2.md](../packages/render-native/FORMAT-v2.md)); the flattened path carries it in the third float of the light's last v1 texel, which nothing else reads, so every table of a scene without the field keeps its bytes.
+- **Not drawn elsewhere.** The legacy kernel, the WebGL and WebGPU path tracers and the rasterizer ignore the field and draw the light as before.
+- **Reference.** `render-cycles.py` sets `use_soft_falloff` per light from the scene's `softFalloff` (off when absent, as since #1040). `--soft-falloff default|on|off` still overrides every light.
+
+Closed form `[derived, checked by tests/cycles-sphere-light-parity.test.js on the GPU]`: a disk of radius `r` and radiance `I / (pi r^2)` facing a floor point at distance `d` from its centre, with every part of the disk above the floor, gives `E = I cos(beta) / (d^2 + r^2)` with `cos(beta) = h / d` (the azimuth term of the floor's cosine integrates to zero). The test lights a diffuse floor from 2 m with a point and a spot light of radius 0.18, 0.5 and 1 m, averages the pixel patch it renders, and stays within 3 percent of the integral over the same patch for all six, while a light without the field keeps the sphere's value.
+
+Cook over Cycles mean radiance on the lamp scenes of [#1040](#sphere-lights-and-soft-falloff-1040) (grey diffuse room, lamp of intensity 8 at 1.6 m, 1024 spp, 480 x 270, 8 bounces, box filter, seed 1, one RTX 4090, Blender 5.3.0 OptiX) `[measured]`. "Sphere" is Cook without the field against Cycles with Soft Falloff off, "soft" is Cook with `softFalloff: true` against Cycles with it on. "Seed floor" is Cycles seed 2 over seed 1 in the same setting:
+
+| Scene | Sphere mean | Soft mean | Sphere / soft tiles within 5 % | Sphere / soft relMSE | Seed floor mean, sphere / soft | Seed floor relMSE, sphere / soft |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| bare room, radius 0.05 m | 1.0001 | 1.0001 | 64 / 64 | 0.000471 / 0.000471 | 1.0001 / 1.0000 | 0.000543 / 0.000542 |
+| bare room, radius 0.18 m | 1.0001 | 1.0001 | 64 / 64 | 0.000472 / 0.000468 | 1.0001 / 1.0000 | 0.000543 / 0.000538 |
+| bare room, radius 0.5 m | 1.0001 | 1.0001 | 64 / 64 | 0.000480 / 0.000449 | 1.0001 / 1.0000 | 0.000551 / 0.000516 |
+| 0.18 m lamp inside an open-bottomed shade | 1.0011 | 1.0012 | 64 / 64 | 0.146 / 0.105 | 1.0003 / 1.0004 | 0.161 / 0.116 |
+| 0.18 m lamp poking through the shade walls | 0.9901 | 1.0039 | 64 / 63 | 0.120 / 0.192 | 1.0005 / 1.0016 | 0.120 / 0.202 |
+
+All ten means are within 1 percent of Cycles. The poking lamp with Soft Falloff on has one tile outside 5 percent (1.059; the tiles of the seed floor run from 0.966 to 1.043 on that scene), so its relMSE sits at the noise floor (0.192 against 0.202). Cook's sphere against Cycles' default disk was 1.0059, 1.0441, 1.1584 and 5.138 for the 0.18 m, 0.5 m, shade and poking lamps (the #1040 table): the difference this section removes.
+
+Without the field the output is the old output `[measured, one run each, the build of origin/main and this branch beside each other on the same box]`: the SHA-256 of every packed table (flattened v1, flattened job v2 and an instanced scene) of `lit-interior`, `many-lights-500` and `spot-area` is equal, and so is the SHA-256 of the traced float image of each scene on the `cycles` and on the `legacy` kernel (64 spp, seed 3, 4 bounces, 480 x 270). `bench/cycles-parity/packed-table-hashes.mjs --scenes lit-interior,many-lights-500,spot-area` prints the table hashes.
+
+![Cook with the lamp as a sphere (left, mean radiance 0.5605), Cook with softFalloff true (middle, 0.1095) and Cycles with Soft Falloff on (right, 0.1091) for a 0.18 m lamp poking through a shade, 1024 spp, one exposure for the three panels. The sphere is 5.1 times the Cycles panel; Cook's soft falloff is 1.004 times it.](cook-soft-falloff-comparison.jpg)
+
+Commands (from the repository root, Blender 5.3 on the path or in `~/blender`):
+
+```sh
+node packages/render-native/build.mjs
+# the whole table above: every lamp scene and its -soft twin, with the seed floor
+uv run --no-project --with numpy python bench/cycles-parity/run-sphere-light-parity.py artifacts/soft-falloff --soft-falloff off --repeat-cycles-seed2 --scenes bare-r0.05,bare-r0.18,bare-r0.5,enclosed-r0.18,poking-r0.18,bare-r0.05-soft,bare-r0.18-soft,bare-r0.5-soft,enclosed-r0.18-soft,poking-r0.18-soft
+# the picture (the narrow run of the poking lamp is enough for it)
+uv run --no-project --with numpy --with pillow python bench/cycles-parity/make-soft-falloff-figure.py --cook-sphere artifacts/soft-falloff/renders/poking-r0.18-cook.npy --cook-soft artifacts/soft-falloff/renders/poking-r0.18-soft-cook.npy --cycles-soft artifacts/soft-falloff/renders/poking-r0.18-soft-cycles-scene.npy --output docs/cook-soft-falloff-comparison.jpg
+# the identity evidence: run it on origin/main and on this branch and compare the output
+node bench/cycles-parity/packed-table-hashes.mjs --scenes lit-interior,many-lights-500,spot-area
+```
+
+`make-sphere-light-scenes.mjs` writes every lamp with a radius twice, as `<id>` (sphere) and `<id>-soft` (`softFalloff: true`); `run-sphere-light-parity.py` compares the `-soft` scenes with Cycles following the scene and the others with the `--soft-falloff` settings.
+
 ## Triangle bound of a native scene (#1041)
 
 `buildTraceScene` bounds a scene at 400,000 triangles for the CPU and WebGL tracers, which hold the triangles in JavaScript and in browser memory. A scene built for the native tracer asks for another bound with `maximumTriangles`, an integer from 1 to `MAX_NATIVE_TRACE_TRIANGLES` (4,000,000, the size the large sequence section measured on the card). Two costs are bounded apart: the unique triangles (once per shared geometry, or all triangles of a flattened scene) by `maximumTriangles`, and the triangles with every copy counted by four times that, 16,000,000 at the ceiling. The second bound is a guard and not a measured edge `[inferred: the kernel builds one bottom-level structure per geometry, so a copy costs an instance record]`. A render job on the Cycles-matching kernel passes 1,500,000 (`NATIVE_JOB_MAXIMUM_TRIANGLES` in `scripts/native-bake-page.js`); the legacy kernel keeps 400,000.
@@ -1434,3 +1546,145 @@ Tracing the packed input on the card (480 by 270, 16 samples, GPU memory of the 
 | 3,998,792 | 7 | 1.31 | 0.13 | 0.55 | 1,961 |
 
 Same picture: the 1,002,528 triangle scene (four meshes, two of them shared by a second instance) exported through the job path as instances, and again as a flattened scene of the same parts (about 1.5 million triangles after expansion), gave the same PNG, SHA-256 `165939ce…01404`, both times. The instanced export took 10.7 s and 2.6 GB of peak RSS; the flattened one 19.5 s and 4.2 GB.
+
+## Instance bound of a native scene (#1055)
+
+`buildTraceScene` bounds an instanced scene at 65,536 instances (one per part) for the CPU and WebGL tracers. A scene built for the native tracer asks for another bound with `maximumInstances`, an integer from 1 to `MAX_NATIVE_TRACE_INSTANCES` (1,000,000). A render job on the Cycles-matching kernel passes 1,000,000 (`NATIVE_JOB_MAXIMUM_INSTANCES` in `scripts/native-bake-page.js`, 500,000 before #1100); the legacy kernel never instances, and the CPU and WebGL tracers keep 65,536 and its error text. The option is separate from `maximumTriangles`: the unique and total triangle bounds apply as before, so copies of a large mesh still hit the total bound (four times `maximumTriangles`) long before the instance bound.
+
+Every place on the way to the kernel that could assume 65,536 instances, read in the code `[measured by reading]`:
+
+| place | limit |
+| --- | --- |
+| `MAX_TRACE_INSTANCES` check in `requireInstancedCaps` (`src/path-tracer-scene.js`) | the only 65,536; a guard for the CPU and WebGL paths, now a caller-set bound |
+| `packInstancedGeometry` and `writeInstanceRecordBytes` (`pack-input-v2.mjs`), `job-input.mjs` | none; counts are 32-bit and the loops are linear |
+| instance table, 160 bytes per instance | 160 MB at 1,000,000 |
+| material table, 256 bytes per distinct material record (#1100: parts whose materials are equal share one record; before, one per part) | 256 MB at 1,000,000 when every part has a material of its own, under 1 KB when the copies share a few |
+| emissive and light tree records that store an instance index | `u32`; the light tree takes 4,194,304 emitters (`LIGHT_TREE_MAX_EMITTERS`), which bounds emissive copies, not plain ones |
+| WGSL `instance_custom_data` and `int_resolve_instance_index` | the hardware custom index has 24 bits: 16,777,216 (`MAX_TLAS_INSTANCES` in `host/accel.rs`) |
+| V8 string of the job export | see below; this is the bound of the job |
+
+Measured before #1100 (one 256-byte material record per part) on an RTX 4090 box, one process per row, a field of two-triangle cards sharing one geometry (`bench/cycles-parity/native-instance-measure.mjs`), packed the way the job page does and traced at 160 by 120 with 16 samples `[measured]`:
+
+| instances | pack s | base64 s | material table MB | all tables, base64 characters | peak RSS MB | traced s | acceleration build s | card MB (process included) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 65,538 | 0.34 | 0.94 | 16.8 | 36.4 M | 520 | 0.37 | 0.011 | 610 |
+| 250,001 | 1.17 | 3.53 | 64.0 | 138.7 M | 1,295 | 0.58 | 0.050 | 704 |
+| 500,001 | 3.24 | 7.13 | 128.0 | 277.3 M | 2,363 | 0.73 | 0.100 | 796 |
+| 1,000,000 | 7.17 | 14.34 | 256.0 | 554.7 M | 4,511 | 1.59 | 0.193 | 1,557 |
+
+Before #1100 each instance cost 416 bytes packed (160 for the instance and 256 for its material record) and 555 base64 characters, because the packer wrote one material record per part even when a thousand copies of one mesh used one material.
+
+Since #1100 the packer gives parts whose 256-byte records are equal one record (`shareEqualMaterialRecords` in `pack-input-v2.mjs`), so a copy that uses a material another part already uses costs the 160 bytes of its instance record and 214 base64 characters. Same card field (two materials and a ground, so three records), one process per row, RTX 4090 box, default Node heap, the first 750,002 and 1,000,000 rows traced at 160 by 120 with 16 samples `[measured]`:
+
+| instances | pack s | instance table bytes | material table bytes | tables, bytes per instance | all tables, base64 characters | peak RSS MB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100,002 before | 0.51 | 16,000,320 | 25,600,512 | 416.0 | 55.5 M | 679 |
+| 100,002 | 0.77 | 16,000,320 | 768 | 160.0 | 21.3 M | 587 |
+| 500,002 before | 2.94 | 80,000,320 | 128,000,512 | 416.0 | 277.3 M | 2,356 |
+| 500,002 | 4.02 | 80,000,320 | 768 | 160.0 | 106.7 M | 1,884 |
+| 750,002 | 4.69 | 120,000,320 | 768 | 160.0 | 160.0 M | 2,730 |
+| 1,000,000 | 6.97 | 160,000,000 | 768 | 160.0 | 213.3 M | 3,568 |
+
+The pack takes 30 to 50% longer in these runs (it hashes and compares every part's record), within the spread of a shared machine; the memory is lower, because the encoded tables are smaller. The 750,002 and 1,000,000 instance rows traced in 0.84 s and 1.21 s; the 1,000,000 row has no counterpart before, since its tables were 554.7 M characters and did not fit. A part whose material equals no other still costs 416 bytes and 555 characters, so the worst case is unchanged: 1,000,000 parts that all differ stay refused by the size check below.
+
+What bounds the instance count `[measured, inferred for the reason]`: the table bytes and V8 strings, not the card or the acceleration build. Every table of one export shares one message, and one V8 string cannot exceed 536,870,888 characters. The export sums the real base64 length of every table (`4 * ceil(bytes / 3)` each) before encoding, and refuses above 95% of that limit (510,027,343 characters, `NATIVE_EXPORT_MAXIMUM_CHARACTERS`) with a `RangeError` that names the total and the largest tables and says to pass fewer parts or fewer unique triangles. The job rethrows that refusal (as it does the texture pool one), so the job report says why the native export failed and no other packing is tried. With shared records 1,000,000 instances are 213 M characters, 42% of the limit. Worked example `[measured]`: 1,500,000 unique triangles are 448 M characters (299 each), which leaves 62 M for instances: with shared records 280,008 instances export (507.7 M characters) and 330,008 are refused (518.4 M); before #1100, at 555 each, about 110,000 fitted and 150,000 were refused (they now export at 480.0 M). The job stops at 1,000,000 instances, which is the library ceiling and the largest size measured on the card and in Node; the earlier 500,000 followed from the table bytes of one material record per part. The card was never the limit: the acceleration build took 0.17 s at 1,000,000 instances. The hardware allows 16,777,216 instances, and nothing above 1,000,000 instances was measured.
+
+What makes two records distinct `[measured by reading]`: a part names its material by index (the triangle's `material_index`, the instance's `material_override`, the emissive entry's `material_index`), and the 256-byte record holds every value of the material, its flags and the index of every texture slot (equal images share one texture index). Two records are equal exactly when their bytes are equal and they derive the same emission, alpha mode and subsurface flag (`meanEmissiveRadiance`, `isEmissive`, `alphaMode`, `usesSubsurface`; each follows from the bytes, and the comparison checks them as well). Light-group masks, ray visibility and the object colour live on the instance, so they never keep two records apart. This branch has no separate record for a diffuse-transmission extension. The flattened packer (`buildFlattenedJobNativeInput` and the v1 upgrade) keeps one record per part: each part there is a mesh of its own, so no copy pays for one, and the legacy kernel reads the v1 tables and is untouched. The index remapping: the triangle record names the record of the mesh's first copy, a later copy gets a `material_override` only when its record differs, an explicit `materialOverride` or `overrideMaterial` is kept and points at the shared record, and an index past the table is left as it is.
+
+Session updates: a session keeps its tables at the size it was created with, and an update replaces the whole `materials` and `instances` tables with the ones packed from the new frame, so a changed material cannot reach a part that was packed with a record of its own. When parts share a record and one of them changes, the next frame packs one record more, `materialCount` changes and the session refuses the update (`planNativeSessionUpdate` throws, and the sequence takes a new session for that frame). That is copy-on-write at pack time. It was chosen over leaving the records of animated parts unshared because the packer cannot know which parts will change, and an extra session per divergence is the whole cost; the pictures are exact either way. A part whose track gives it values that equal no other part, or a material that several parts name by one id (they share a record before and after), keeps the `updated` route. Measured on 8-frame jobs through the job export and `createNativeSequence` (`bench/cycles-parity/native-shared-record-identity.mjs`, 96 by 72, 8 samples) `[measured]`: when the animated card starts equal to seven others the routes are `new-session`, `new-session`, then `updated` six times (before: `new-session`, then `updated` seven times), and when it differs from the start they are `new-session`, then `updated` seven times, as before; each frame equals its one-shot render byte for byte. The demo room of `bench/native-tracer/sequence-job.mjs` animates `plaster`, a material id of its own, so its routes should not change `[inferred by reading the recipe]`, but that job did not start in the box's headless Chrome (`Connection closed`, before and after the change), so it was not run.
+
+Pictures (#1055): scenes under the old bounds are byte for byte the same. The PNG SHA-256 of three scenes (the 20,000 triangle cap scene with copies, a field of 3,000 shared cards and the same cards merged) on the job export of `cycles` instanced, `cycles` flattened and `legacy` are equal on `main` and on this change, and the refusal of the scene the flattened and legacy routes cannot take has the same words (`bench/cycles-parity/native-identity-pngs.mjs`, `[measured]`). Over the old bound, `tests/native-instancing-limit.test.js` traces 85,537 parts (the last 20,000 red, all past index 65,536) and the same cards merged into two meshes: 3,381 red pixels in both, mean ratio within 2% per channel, tiles within 5%, and a relative mean squared error of 1.5e-7, against 1.4e-3 between two seeds of the merged picture.
+
+Pictures (#1100) `[measured]`: `bench/cycles-parity/native-shared-record-identity.mjs` hashes the pictures of four scenes of eight cards (textures, emitters, two materials, metal and glass) on `cycles` instanced, `cycles` flattened, `legacy` and an explicit-override pack, and two 8-frame session sequences, on the build before the change and on the build after it: all 18 hashes are equal (the instanced packs go from 9 records to 3). The PNG of the 250,001-card field is byte for byte the same (SHA-256 372e60c2e317...). `tests/native-shared-material-records.test.js` renders a shared pack and the same pack with one record per instance and compares them byte for byte.
+
+Not measured: Chrome's memory for a page that builds 1,000,000 parts (the numbers above are Node's, whose default heap held the 1,000,000-part case at 2.4 GB used and 3.6 GB resident), and the demo room sequence job.
+
+Not measured: Chrome's memory for a page that builds 500,000 parts (the numbers above are Node's), and a scene whose copies are emissive (each emissive copy adds light tree emitters and emissive records).
+
+## Mean radiance on the `metal` scene (#959)
+
+Question: does Cook match Cycles' mean on `metal` within 0.1 percent per channel, and is the error outside the fireflies at or below Cycles' own? `[measured]` on a rented RTX 4090 (Blender 5.3.0 Cycles on OptiX, Cook on Vulkan), `960 x 540`, `bounces = 8`, box filter, no clamp, no denoise, `filter_glossy = 1`, Sobol-Burley on Cook's side.
+
+A single image's mean is heavy tailed (fireflies), so the standard error comes from the spread across seeds: [`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py) averages each side's per-seed channel means and combines the two standard errors (delta method). [`metal-mean-suite.sh`](../bench/cycles-parity/metal-mean-suite.sh) renders everything below (24 seeds a side by default, `SEED_COUNT` changes it).
+
+### Mean ratio, 24 seeds a side at 1024 spp (Cook over Cycles, R / G / B, plus or minus one standard error)
+
+| Kernel | Mean ratio | Standard error | Within 0.1 percent |
+| --- | --- | --- | --- |
+| `cycles` | 0.99921 / 0.99930 / 0.99946 | 0.00021 / 0.00019 / 0.00015 | yes, off by 0.079 / 0.070 / 0.054 percent |
+| `legacy` | 0.99856 / 0.99753 / 0.99629 | 0.00028 / 0.00025 / 0.00019 | no, off by 0.14 / 0.25 / 0.37 percent |
+
+Control: Cycles seeds 1 to 6 over seeds 7 to 12 gives 1.0005 / 1.0005 / 1.0004, plus or minus 0.0004, so the comparison itself resolves about 0.04 percent with six seeds. With 24 a side the one-standard-error band of the `cycles` kernel is 0.02 percent, and its 95 percent band reaches 0.12 percent on red and 0.11 percent on green, so "within 0.1 percent" is met by the estimate and not by a strict 95 percent bound.
+
+Per part (the noisy ones are fireflies on the chrome, gold and steel; the floor and copper have no fireflies, their error is the bias): `cycles` kernel floor 0.9991 / 0.9992 / 0.9994 (52 percent of the pixels), copper 0.9993 / 0.9994 / 0.9996, chrome 0.995 +- 0.003, gold 0.9995 +- 0.0008, steel 1.0007 +- 0.0012. The `legacy` kernel floor is 0.9977 / 0.9947 / 0.9910 and copper 0.9945 / 0.9911 / 0.9904.
+
+### Error outside the fireflies, 256 spp against Cycles at 4096 spp seed 1 (relMSE without the 100 worst pixels)
+
+| Image | relMSE | relMSE without the 100 worst pixels | Images |
+| --- | --- | --- | --- |
+| Cycles 256 spp (its own noise, seeds 2 to 4) | 0.0486 +- 0.0239 | 0.000382 +- 0.0000013 | 3 |
+| Cook `cycles` kernel 256 spp | 0.0211 +- 0.0095 | 0.000184 +- 0.0000015 | 4 |
+| Cook `legacy` kernel 256 spp | 0.0930 +- 0.0585 | 0.000713 +- 0.0000038 | 4 |
+
+The `cycles` kernel is at 0.48 times Cycles' own error, the `legacy` kernel at 1.87 times. (Both rows share the noise of the 4096 spp reference, which is about 0.00005 in the same measure.)
+
+### Splits
+
+Each pair is Cook `cycles` against Cycles, 6 seeds, 512 spp `[measured]`.
+
+| Split | Mean ratio R / G / B | Floor ratio (no fireflies) |
+| --- | --- | --- |
+| direct light only (`bounces = 0`) | 0.99901 / 0.99913 / 0.99935 | 0.9991 / 0.9992 / 0.9994 |
+| 1 bounce | 0.99892 / 0.99907 / 0.99933 | 0.9991 / 0.9992 / 0.9994 |
+| 2 bounces | 0.99888 / 0.99904 / 0.99932 | 0.9991 / 0.9992 / 0.9994 |
+| 4 bounces | 0.99889 / 0.99904 / 0.99932 | 0.9991 / 0.9992 / 0.9994 |
+| both sides clamp at 10 (direct and indirect) | 1.00117 / 1.00079 / 1.00017 | 0.9991 / 0.9992 / 0.9994 |
+
+The floor's 0.06 to 0.09 percent deficit is already there with direct light only and does not change with the bounce count, so it is not a glossy, multiscatter or bounce-depth effect `[measured]`; it sits in how the sky lights the floor `[measured in the next section, #1104: Blender's world capped the interpolated sky value, Cook caps the texels; the harness now caps the texels]`. The ratios in this table and in the one above were measured with the older script that capped after the lookup. With a clamp of 10 on both sides, the means move apart by up to 1.9 percent on gold: the two clamps are not the same operation, and the default (no clamp) is the one compared above. Two further splits were tried and are not valid: `filter_glossy = 0` on the Cycles side was refused by the render script, and Cook's `nee-only` against Cycles' `--light-mis off` differ by 15 to 20 percent because they do not switch off the same thing.
+
+### What this says about #959
+
+The `cycles` kernel meets both open boxes of #959 on `metal`: the mean is within 0.1 percent per channel, and the error without the 100 worst pixels is below Cycles' own. The `legacy` kernel meets the second and not the first (blue 0.37 percent low). The 0.06 to 0.09 percent floor deficit is isolated in the next section.
+
+## The floor's direct light on the `metal` scene (#1104)
+
+Question: why is the noise-free floor 0.06 to 0.09 percent darker in Cook's `cycles` kernel than in Cycles with direct light only? `[measured]` on the same RTX 4090 box (Blender 5.3.0 on OptiX, Cook on Vulkan). [`floor-direct-light-suite.sh`](../bench/cycles-parity/floor-direct-light-suite.sh) renders it; [`make-floor-scenes.py`](../bench/cycles-parity/make-floor-scenes.py) writes the scenes and [`floor-closed-form.py`](../bench/cycles-parity/floor-closed-form.py) the closed forms.
+
+Setup: the `metal` floor alone, as a Lambert surface of albedo 0.8 (`--grey-diffuse`), zero bounces, 256 x 144 pixels, 256 spp, 4 to 8 seeds a side, the camera straight down (every pixel sees the same light, no horizon, edge or shadow) or the `metal` camera with the floor pixels picked by Cycles' part ids. Standard errors come from the spread across seeds ([`mean-ratio-seeds.py`](../bench/cycles-parity/mean-ratio-seeds.py)).
+
+### The offset is the sky, not the sun, and it is not shadows or the metal objects
+
+Cook over Cycles, straight-down floor, with the script as it was (the interpolated sky value capped), R / G / B:
+
+| Light | Cook over Cycles | Cook over its closed form | Cycles over its closed form |
+| --- | --- | --- | --- |
+| sun only | 1.00002 (all channels, error below 0.000005) | 1.00000 | 0.99998 |
+| flat sky, texels 128 and 255 (importance table, no structure) | 1.00000 | 1.00000 | 1.00000 |
+| constant world 0.5 | 1.00000 | 1.00000 | 1.00000 |
+| Kloofendal sky | 0.99832 / 0.99874 / 0.99936, +- 0.000004 / 0.000003 / 0.000002 | 1.00000 | 1.00168 / 1.00126 / 1.00064 |
+| sun and Kloofendal sky | 0.99941 / 0.99949 / 0.99967, +- 0.000002 | 1.00000 | 1.00059 / 1.00051 / 1.00033 |
+
+The closed forms are albedo / pi times the sun colour times the cosine of the sun against the floor normal, and albedo / pi times the cosine-weighted hemisphere integral of the sky read from the Radiance file's own bytes (bilinear in the map, 200,000 polar steps). Cook agrees with all of them to 0.001 percent. From the `metal` camera, with no metal objects in the scene, the floor pixels give the same: sun 1.0000, sky 0.9983 / 0.9988 / 0.9994, both 0.9994 / 0.9995 / 0.9997. So the offset is there without the objects (not their shadows or occlusion), is the same from a grazing view as from above (not the pixel filter, the horizon or a ray offset), and sits wholly in the sky. The sun disc size and normalisation are right (sun only, Cook 1.00000 of the closed form), and so is the accumulation: the sun-only picture at 32 and at 4096 spp gives 1.00002 both times.
+
+### Not the sampling
+
+On Cycles' side the sky floor stays at 1.00168 / 1.00126 / 1.00064 of the closed form with the world's sampling set to none (the sky found by BSDF sampling only, so no importance map at all), with the importance map at 4096 instead of 1024, and with the world's sun extraction off (`sun_threshold = 0`). The flat skies show Cycles decodes a Radiance texel without a +0.5 mantissa offset. A pass over the pictures of the sky itself (`sky-lookup-shift.py`, background pixels, no lighting) finds identical pixels looking level, straight up and from the `metal` camera, and a difference only 45 degrees up (Cycles 1.1 / 0.9 / 0.5 percent brighter in the fit, 0.27 percent in the mean).
+
+### Cause
+
+`bench/cycles-parity/render-cycles.py` limited the sky by a `Minimum` node after the Environment Texture node, so it capped the interpolated value. Cook and the 67js runtime cap the texels (`radianceLimit`, 16) before the map is interpolated and sampled. The Kloofendal map has 244 texels above 16 (the largest channel value is 61,184; probably what is left of the sun in the original map `[guessed]`), and bilinear interpolation of the raw texels next to them gives values above 16 that the cap then cuts to 16 where Cook's neighbours stay at their own lower values. Computed from the file with `uv run --no-project --with numpy python bench/cycles-parity/floor-closed-form.py --cap-order` (a 1024 by 2048 polar and azimuth grid, bilinear lookup of the raw texels, then the cap; the texel count and the maximum come from the same command): capping after the lookup raises the floor's sky term by 1.00177 / 1.00132 / 1.00067 against capping before. That is what was measured on Cycles (1.00168 / 1.00126 / 1.00064); the two differ by 0.01 percent, which a 1024 by 2048 grid of the integral can account for `[inferred]`. Cook was right. It is a difference of the comparison, not a defect of the kernel.
+
+### After the change to the script
+
+The script now caps the image's texels before the lookup (`--radiance-cap before-lookup`, the default); `--radiance-cap after-lookup` reproduces the old behaviour. Same scenes, Cycles rendered again:
+
+| Light | Cook over Cycles | Cycles over its closed form |
+| --- | --- | --- |
+| Kloofendal sky, straight down | 0.99999 / 0.99999 / 0.99999, +- 0.000003 / 0.000003 / 0.000002 | 1.00001 |
+| sun and Kloofendal sky, straight down | 1.00001, +- 0.000001 | 0.99999 |
+| `metal` camera, floor pixels: sun, sky, both | 1.0000, 1.0000, 1.0000 | |
+| `metal` scene, 0 bounces, 6 seeds at 512 spp, floor part (270,046 pixels) | 0.9998 / 0.9998 / 0.9998 | |
+
+The same `metal` scene with direct light only, whole picture: 0.99931 / 0.99938 / 0.99951, +- 0.0009 / 0.0008 / 0.0006 (fireflies on the chrome set the error), copper 1.0000 / 0.9999 / 0.9999. The earlier 0.9991 / 0.9992 / 0.9994 floor became 0.9998.
+
+Not isolated: the `metal` floor keeps a 0.02 percent deficit with the metal objects in the scene and its own material (roughness 0.8, not the Lambert override), which the floor-only Lambert scenes do not show. What it comes from (the objects' shadows and occlusion edges, or the floor's specular lobe) was not split. The #959 tables above were measured before the script change and were not repeated.

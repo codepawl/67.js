@@ -1,0 +1,1 @@
+- `scene_render_submit` returns the expected time and peak memory of a render job before it runs, and `scene_render_result` ends with one report of the measured time, peak memory, samples drawn and what fell back and why (#905)

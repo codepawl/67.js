@@ -1,0 +1,1 @@
+- The `cycles` kernel now matches Cycles on textured cutouts and emitters: a light sample on an emission map reads the map at its point, and a shadow ray no longer lets light through the solid texels of a cutout whose alpha is below 1 (#1030)

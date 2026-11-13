@@ -1,7 +1,8 @@
 // SHA-256 of every packed table of two scenes under the old 400,000 triangle bound, to show a change to buildTraceScene's triangle bound
 // leaves the bytes alone (#1041): the lit-interior reference scene (flattened, as v1 tables and as FORMAT-v2 job tables) and an
 // instanced scene (FORMAT-v2 job tables). Run it before and after a change and compare the output.
-//   node bench/cycles-parity/packed-table-hashes.mjs [--native-bound]
+//   node bench/cycles-parity/packed-table-hashes.mjs [--native-bound] [--scenes lit-interior,many-lights-500,spot-area]
+// --scenes hashes those reference scenes (#1060: a change to the light tables must leave scenes without the new field byte for byte).
 // --native-bound builds with maximumTriangles, which a build before #1041 ignores.
 import { createHash } from 'node:crypto';
 import { createCamera } from '../../src/path-tracer.js';
@@ -24,8 +25,8 @@ function hashTables(input) {
   return hashes;
 }
 
-async function litInteriorHashes(buildOptions) {
-  const { traceSource } = await loadReferenceScene('lit-interior');
+async function referenceSceneHashes(sceneName, buildOptions) {
+  const { traceSource } = await loadReferenceScene(sceneName);
   const camera = createCamera(traceSource.camera, LIT_INTERIOR_OPTIONS.width, LIT_INTERIOR_OPTIONS.height);
   const scene = buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment, buildOptions);
   return {
@@ -41,4 +42,13 @@ function instancedSceneHashes(buildOptions) {
 }
 
 const buildOptions = process.argv.includes('--native-bound') ? { maximumTriangles: 4_000_000 } : {};
-console.log(JSON.stringify({ litInterior: await litInteriorHashes(buildOptions), instanced: instancedSceneHashes(buildOptions) }, null, 1));
+const scenesFlagIndex = process.argv.indexOf('--scenes');
+if (scenesFlagIndex === -1) {
+  console.log(JSON.stringify({ litInterior: await referenceSceneHashes('lit-interior', buildOptions), instanced: instancedSceneHashes(buildOptions) }, null, 1));
+} else {
+  const hashesByScene = {};
+  for (const sceneName of process.argv[scenesFlagIndex + 1].split(',')) {
+    hashesByScene[sceneName] = await referenceSceneHashes(sceneName, buildOptions);
+  }
+  console.log(JSON.stringify({ scenes: hashesByScene, instanced: instancedSceneHashes(buildOptions) }, null, 1));
+}

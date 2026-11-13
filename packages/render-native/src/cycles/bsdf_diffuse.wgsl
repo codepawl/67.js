@@ -155,3 +155,28 @@ fn bsdf_diffuse_sample(
   let evaluated = bsdf_diffuse_eval(lobe, wi, wo);
   return BsdfDiffuseSample(wi, evaluated.pdf, evaluated.value);
 }
+
+// DIFFUSE TRANSMISSION (the thin-sheet Translucent BSDF of Cycles, kernel/closure/bsdf_diffuse.h): a cosine lobe on the side of
+// the surface away from the viewer. `normal` faces the viewer, so the lobe is the diffuse lobe of `-normal`.
+fn bsdf_diffuse_transmission_eval(lobe: ptr<function, Lobe>, wi: vec3<f32>) -> BsdfDiffuseEval {
+  let cos_far_side = -dot((*lobe).normal, wi);
+  if (cos_far_side <= 0.0) {
+    return BsdfDiffuseEval(vec3<f32>(0.0), 0.0);
+  }
+  let pdf = cos_far_side * INV_PI;
+  return BsdfDiffuseEval((*lobe).weight * pdf, pdf);
+}
+
+fn bsdf_diffuse_transmission_sample(
+  lobe: ptr<function, Lobe>,
+  geometric_normal: vec3<f32>,
+  rand: vec2<f32>,
+) -> BsdfDiffuseSample {
+  let sampled = bsdf_diffuse_sample_cos_hemisphere(-(*lobe).normal, rand);
+  let wi = sampled.xyz;
+  if (sampled.w <= 0.0 || dot(geometric_normal, wi) >= 0.0) {
+    return BsdfDiffuseSample(vec3<f32>(0.0), 0.0, vec3<f32>(0.0));
+  }
+  let evaluated = bsdf_diffuse_transmission_eval(lobe, wi);
+  return BsdfDiffuseSample(wi, evaluated.pdf, evaluated.value);
+}

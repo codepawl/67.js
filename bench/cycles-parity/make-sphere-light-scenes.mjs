@@ -2,7 +2,8 @@
 // a bare room with one lamp, and the same lamp inside a small open-bottomed shade, with the shade seen or hidden by shadow rays.
 //   node bench/cycles-parity/make-sphere-light-scenes.mjs <exportedSceneJson> <outputDirectory>
 // Run it with --grey-diffuse on both renderers so only the light differs. A shade part carries `rayVisibility: { shadow: false }`
-// when hidden from shadow rays; trace-native.mjs needs --instancing to read it.
+// when hidden from shadow rays; trace-native.mjs needs --instancing to read it. Every lamp with a radius is written twice: as a sphere
+// (`<id>`) and with `softFalloff: true` (`<id>-soft`, #1060), the oriented disk of Blender's Soft Falloff, which render-cycles.py also reads.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -46,7 +47,7 @@ function createShadeParts(halfWidth, rayVisibility) {
   ];
 }
 
-function createVariant(baseDescription, id, lampRadius, shade) {
+function createVariant(baseDescription, id, lampRadius, shade, softFalloff) {
   const roomParts = baseDescription.parts.slice(0, ROOM_PART_COUNT);
   const shadeParts = shade ? createShadeParts(shade.halfWidth, shade.hiddenFromShadowRays ? { shadow: false } : undefined) : [];
   return {
@@ -55,7 +56,7 @@ function createVariant(baseDescription, id, lampRadius, shade) {
     parts: [...roomParts, ...shadeParts],
     environment: {
       ...baseDescription.environment,
-      pointLights: [{ position: LAMP_POSITION, color: [1, 1, 1], intensity: LAMP_INTENSITY, radius: lampRadius, castShadow: true }],
+      pointLights: [{ position: LAMP_POSITION, color: [1, 1, 1], intensity: LAMP_INTENSITY, radius: lampRadius, castShadow: true, ...(softFalloff ? { softFalloff: true } : {}) }],
       spotLights: [],
       areaLights: [],
     },
@@ -76,6 +77,12 @@ function listVariants() {
   return variants;
 }
 
+function listVariantsWithSoftFalloff() {
+  return listVariants().flatMap(variant => (variant.radius > 0
+    ? [{ ...variant, softFalloff: false }, { ...variant, id: `${variant.id}-soft`, softFalloff: true }]
+    : [{ ...variant, softFalloff: false }]));
+}
+
 const argumentList = process.argv.slice(2);
 if (argumentList.length < 2) {
   throw new RangeError('Usage: node bench/cycles-parity/make-sphere-light-scenes.mjs <exportedSceneJson> <outputDirectory>');
@@ -83,8 +90,8 @@ if (argumentList.length < 2) {
 const baseDescription = JSON.parse(await readFile(resolve(argumentList[0]), 'utf8'));
 const scenesDirectory = join(resolve(argumentList[1]), 'scenes');
 await mkdir(scenesDirectory, { recursive: true });
-for (const variant of listVariants()) {
-  const description = createVariant(baseDescription, variant.id, variant.radius, variant.shade);
+for (const variant of listVariantsWithSoftFalloff()) {
+  const description = createVariant(baseDescription, variant.id, variant.radius, variant.shade, variant.softFalloff);
   await writeFile(join(scenesDirectory, `${variant.id}.json`), JSON.stringify(description));
   console.log(variant.id);
 }
