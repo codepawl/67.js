@@ -43,10 +43,30 @@ function copyPackageSources(npmCli, stagingRoot) {
   }
 }
 
+// The Vite builds a release runs before npm pack, in the order prepare-release.mjs runs them. The library build empties the
+// output folder and the standalone module is written beside it. A base branch from before the standalone module has no
+// vite.browser.config.js, so it is measured without one.
+export const RELEASE_VITE_CONFIGS = ['vite.lib.config.js', 'vite.browser.config.js'];
+
+export function viteBuildArguments(outputFolder, configExists = existsSync) {
+  const presentConfigs = RELEASE_VITE_CONFIGS.filter(config => configExists(config));
+  return presentConfigs.map(config => {
+    const viteArguments = ['node_modules/vite/bin/vite.js', 'build', '--config', config];
+    if (!outputFolder) return viteArguments;
+    viteArguments.push('--outDir', outputFolder);
+    if (config === RELEASE_VITE_CONFIGS[0]) viteArguments.push('--emptyOutDir');
+    return viteArguments;
+  });
+}
+
+function buildLibrary(outputFolder) {
+  for (const viteArguments of viteBuildArguments(outputFolder)) run(viteArguments);
+}
+
 // The base measurement runs this script inside a throwaway checkout of the base branch, whose build-mcp.mjs may predate
 // --library-dir. Nothing else reads that checkout, so building in place there is safe and measures the same way.
 function measureInPlace(npmCli) {
-  run(['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.lib.config.js']);
+  buildLibrary(null);
   run(['scripts/build-mcp.mjs']);
   return packedFiles(npmCli, '.').size;
 }
@@ -59,7 +79,7 @@ export function measureArchiveBytes() {
   const stagingRoot = mkdtempSync(join('build', '.archive-'));
   try {
     const stagingBuild = join(stagingRoot, 'build');
-    run(['node_modules/vite/bin/vite.js', 'build', '--config', 'vite.lib.config.js', '--outDir', stagingBuild, '--emptyOutDir']);
+    buildLibrary(stagingBuild);
     run(['scripts/build-mcp.mjs', '--out-dir', join(stagingBuild, 'mcp'), '--library-dir', stagingBuild]);
     copyPackageSources(npmCli, stagingRoot);
     return packedFiles(npmCli, stagingRoot).size;
