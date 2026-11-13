@@ -2001,15 +2001,36 @@ export function resolveFilterParameters(options = {}) {
   return { filterType, filterWidth };
 }
 
-function isOrthographicCamera(camera, options) {
-  return camera?.orthographic === true || options.orthographic === true;
+// True when the camera or the options ask for it, false when one says false, else `heldOrthographic` (the bit of the block being patched).
+function isOrthographicCamera(camera, options, heldOrthographic = false) {
+  if (camera?.orthographic === true || options.orthographic === true) {
+    return true;
+  }
+  if (camera?.orthographic === false || options.orthographic === false) {
+    return false;
+  }
+  return heldOrthographic;
+}
+
+const THIN_LENS_FIELD_NAMES = ['apertureRadius', 'focalDistance', 'apertureBlades', 'apertureRotation'];
+
+// The options of the thin lens: those the caller gave, else the ones the block already holds.
+function thinLensOptionsWithHeld(options, heldThinLens) {
+  const merged = { ...heldThinLens };
+  for (const fieldName of THIN_LENS_FIELD_NAMES) {
+    if (options[fieldName] !== undefined) {
+      merged[fieldName] = options[fieldName];
+    }
+  }
+  return merged;
 }
 
 /**
  * The camera words of the kernel params block as numbers: eye, view axes scaled by the half extents, near and far, sensor
- * shift and thin lens. `farDistance` is the far plane when neither `options.far` nor `camera.far` gives one.
+ * shift and thin lens. `heldWords` holds what to use when neither `options` nor `camera` gives a field: `far` (a pack takes the
+ * scene's far distance), and for a camera-only update `near`, `lensShift` and the thin lens fields of the block being patched.
  */
-function resolveCameraWordsV2(camera, options, farDistance, callerName) {
+function resolveCameraWordsV2(camera, options, heldWords, callerName) {
   const eye = camera?.eye ?? camera?.position ?? [0, 0, 0];
   const forward = normalizeVec3(camera?.forward ?? [0, 0, -1], [0, 0, -1]);
   const halfWidth = Number(camera?.halfWidth ?? 1);
@@ -2023,10 +2044,10 @@ function resolveCameraWordsV2(camera, options, farDistance, callerName) {
     ? [Number(rawUp[0]), Number(rawUp[1]), Number(rawUp[2])]
     : [Number(rawUp[0]) * halfHeight, Number(rawUp[1]) * halfHeight, Number(rawUp[2]) * halfHeight];
 
-  const near = Math.max(0, Number(options.near ?? camera?.near ?? 0));
-  const far = Math.max(near + 1e-3, Number(options.far ?? camera?.far ?? farDistance ?? 1e30));
-  const lensShift = camera?.lensShift ?? options.lensShift ?? [0, 0];
-  const thinLens = resolveThinLensParameters(camera, options, callerName);
+  const near = Math.max(0, Number(options.near ?? camera?.near ?? heldWords.near ?? 0));
+  const far = Math.max(near + 1e-3, Number(options.far ?? camera?.far ?? heldWords.far ?? 1e30));
+  const lensShift = camera?.lensShift ?? options.lensShift ?? heldWords.lensShift ?? [0, 0];
+  const thinLens = resolveThinLensParameters(camera, thinLensOptionsWithHeld(options, heldWords.thinLens), callerName);
   return { eye, forward, scaledRight, scaledUp, near, far, lensShift, thinLens };
 }
 
@@ -2067,6 +2088,22 @@ const KERNEL_PARAMS_V2_CAMERA_BYTE_LENGTH = 80;
 const MAX_SEED = 0xffffffff;
 const ASPECT_RELATIVE_TOLERANCE = 1e-3;
 
+// The camera fields a block holds, which a camera-only update keeps for every field the caller leaves out.
+function readHeldCameraWords(view) {
+  const wordAt = wordIndex => view.getFloat32(wordIndex * 4, true);
+  return {
+    near: wordAt(31),
+    far: wordAt(35),
+    lensShift: [wordAt(44), wordAt(45)],
+    thinLens: {
+      apertureRadius: wordAt(39),
+      focalDistance: wordAt(43),
+      apertureBlades: view.getUint32(46 * 4, true),
+      apertureRotation: wordAt(47),
+    },
+  };
+}
+
 function requireKernelParamsV2Block(kernelParams, callerName) {
   if (!(kernelParams instanceof Uint8Array) || kernelParams.byteLength !== STRUCT_STRIDES_V2.kernelParams) {
     throw new TypeError(
@@ -2104,13 +2141,18 @@ function requireCameraMatchesAspect(cameraWords, width, height, callerName) {
 /**
  * Returns a copy of the `kernelParams` block of a FORMAT-v2 input with another camera and, when given, another seed. Only
  * the camera words (eye, view axes, near, far, sensor shift, thin lens: bytes 112 to 191), the orthographic bit of the kernel
- * flags and the seed word change, by the code `buildNativeInputV2` runs, so the result equals the block of a full repack
- * with that camera. `camera` is the object `buildNativeInputV2` takes. `options` may hold `seed`, the camera options of
- * `buildNativeInputV2` (`near`, `far`, `lensShift`, `orthographic`, `apertureRadius`, `focalDistance`, `apertureBlades`,
- * `apertureRotation`) and `width` and `height` (default: the size in the block) to check the camera's aspect against.
- * A camera without a `far` keeps the far plane of the block, which the full pack derives from the scene's size.
- * Throws when the block is not FORMAT-v2, the camera is not an object, its aspect does not match the image or `seed` is not a
- * whole number from 0 to 4294967295.
+ * flags and the seed word can change, and they are written by the code `buildNativeInputV2` runs. `camera` is the object
+ * `buildNativeInputV2` takes. For each of `near`, `far`, `lensShift`, `orthographic` and the thin lens fields
+ * (`apertureRadius`, `focalDistance`, `apertureBlades`, `apertureRotation`), a value given by the caller wins (the packer's
+ * order: `options` before the camera for `near`, `far`, `orthographic`; the camera before `options` for `lensShift` and the
+ * thin lens), else the value the block already holds (set when it was packed, from its camera or its pack options). So a camera
+ * that is a bare view keeps the block's lens, near plane, sensor shift, far plane and orthographic bit, and a camera that
+ * carries its own (such as a thin lens camera from `createCamera` with an `fStop`) replaces them. The seed is replaced only
+ * when `options.seed` is given. `options.width` and `options.height` (default: the size in the block) are the image size the
+ * camera's aspect is checked against.
+ * With every such field on the camera or in `options`, the result equals the block of a full repack. Throws when the block is
+ * not FORMAT-v2, the camera is not an object, its aspect does not match the image or `seed` is not a whole number from 0
+ * to 4294967295.
  */
 export function packCameraParams(kernelParams, camera, options = {}) {
   const callerName = 'packCameraParams';
@@ -2125,8 +2167,8 @@ export function packCameraParams(kernelParams, camera, options = {}) {
 
   const patchedParams = new Uint8Array(kernelParams);
   const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
-  const heldFar = view.getFloat32(KERNEL_PARAMS_V2_CAMERA_FAR_BYTE_OFFSET, true);
-  const cameraWords = resolveCameraWordsV2(camera, options, heldFar, callerName);
+  const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
+  const cameraWords = resolveCameraWordsV2(camera, options, readHeldCameraWords(view), callerName);
   const width = options.width ?? view.getUint32(KERNEL_PARAMS_V2_WIDTH_BYTE_OFFSET, true);
   const height = options.height ?? view.getUint32(KERNEL_PARAMS_V2_HEIGHT_BYTE_OFFSET, true);
   requireCameraMatchesAspect(cameraWords, width, height, callerName);
@@ -2138,8 +2180,8 @@ export function packCameraParams(kernelParams, camera, options = {}) {
     KERNEL_PARAMS_V2_CAMERA_FIRST_BYTE_OFFSET
   );
 
-  const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
-  const patchedFlags = isOrthographicCamera(camera, options)
+  const heldOrthographic = (flags & KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) !== 0;
+  const patchedFlags = isOrthographicCamera(camera, options, heldOrthographic)
     ? (flags | KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) >>> 0
     : (flags & ~KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) >>> 0;
   view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
@@ -2221,7 +2263,7 @@ function packKernelParamsV2({
   const minBounceRr = Math.max(0, Math.round(Number(options.minBounceRr ?? 3)));
   const { filterType, filterWidth } = resolveFilterParameters(options);
 
-  const cameraWords = resolveCameraWordsV2(camera, options, farDistance, 'buildNativeInputV2');
+  const cameraWords = resolveCameraWordsV2(camera, options, { far: farDistance }, 'buildNativeInputV2');
 
   u32[0] = FORMAT_V2_MAGIC;
   u32[1] = FORMAT_V2_VERSION;

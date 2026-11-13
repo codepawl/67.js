@@ -85,7 +85,61 @@ test('packCameraParams follows the camera options of the packer: orthographic bi
   assert.deepEqual(packCameraParams(heldBlock, camera), fullBlock(camera));
   const orthographicBlock = fullBlock(camera);
   const backToPerspective = cameraFor(pinholeView);
-  assert.deepEqual(packCameraParams(orthographicBlock, backToPerspective, { far: 123.5 }), fullBlock(backToPerspective));
+  assert.deepEqual(packCameraParams(orthographicBlock, backToPerspective, { far: 123.5, orthographic: false, lensShift: [0, 0] }), fullBlock(backToPerspective));
+  assert.deepEqual(packCameraParams(orthographicBlock, { ...backToPerspective, orthographic: false }, { far: 123.5, lensShift: [0, 0] }), fullBlock(backToPerspective));
+});
+
+const packOptionsForCamera = {
+  near: 0.25,
+  far: 90,
+  orthographic: true,
+  lensShift: [0.05, -0.02],
+  apertureRadius: 0.02,
+  focalDistance: 5.5,
+  apertureBlades: 6,
+  apertureRotation: 0.3,
+};
+
+test('packCameraParams keeps what the block was packed with through pack options when the camera leaves it out', () => {
+  const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }), packOptionsForCamera);
+  const bareCamera = cameraFor(pinholeView);
+  const patched = packCameraParams(heldBlock, bareCamera);
+  const expected = fullBlock(bareCamera, packOptionsForCamera);
+  assert.deepEqual(patched, expected, 'the same bytes as a full pack with the same pack options and the new camera');
+  assert.notDeepEqual(patched.slice(CAMERA_FIRST_BYTE, CAMERA_LAST_BYTE + 1), heldBlock.slice(CAMERA_FIRST_BYTE, CAMERA_LAST_BYTE + 1), 'the camera words changed');
+  const words = new Float32Array(patched.buffer, patched.byteOffset, patched.byteLength / 4);
+  const wordsAsIntegers = new Uint32Array(patched.buffer, patched.byteOffset, patched.byteLength / 4);
+  assert.equal(words[31], 0.25, 'near plane kept');
+  assert.equal(words[35], 90, 'far plane kept');
+  assert.deepEqual([words[44], words[45]].map(value => Math.round(value * 1000)), [50, -20], 'sensor shift kept');
+  assert.ok(Math.abs(words[39] - 0.02) < 1e-7, 'aperture radius kept');
+  assert.equal(words[43], 5.5, 'focal distance kept');
+  assert.equal(wordsAsIntegers[46], 6, 'aperture blades kept');
+  assert.ok(Math.abs(words[47] - 0.3) < 1e-6, 'aperture rotation kept');
+  assert.notEqual(wordsAsIntegers[8] & 8, 0, 'orthographic bit kept');
+});
+
+test('packCameraParams lets a field the camera or the options carry win over the block', () => {
+  const heldBlock = fullBlock(cameraFor({ eye: [0, 2.2, 6] }), packOptionsForCamera);
+  const ownCamera = {
+    ...cameraFor(thinLensView),
+    near: 0.5,
+    far: 40,
+    lensShift: [0.2, 0.1],
+    orthographic: false,
+    apertureBlades: 0,
+  };
+  const patched = packCameraParams(heldBlock, ownCamera);
+  assert.deepEqual(patched, fullBlock(ownCamera), 'every field comes from the camera or from the thin lens it carries');
+  const words = new Float32Array(patched.buffer, patched.byteOffset, patched.byteLength / 4);
+  assert.equal(words[31], 0.5);
+  assert.equal(words[35], 40);
+  assert.equal(new Uint32Array(patched.buffer, patched.byteOffset, patched.byteLength / 4)[8] & 8, 0, 'orthographic bit cleared by the camera');
+  const withOptions = packCameraParams(heldBlock, cameraFor(pinholeView), { near: 0.75, apertureRadius: 0 });
+  const optionWords = new Float32Array(withOptions.buffer, withOptions.byteOffset, withOptions.byteLength / 4);
+  assert.equal(optionWords[31], 0.75, 'near from the options');
+  assert.equal(optionWords[39], 0, 'aperture radius from the options');
+  assert.equal(optionWords[43], 5.5, 'focal distance still from the block');
 });
 
 test('packCameraParams validates the block, the camera, the seed and the aspect', () => {
@@ -123,8 +177,17 @@ test('a frame with a camera and a seed carries them in its block and refuses a b
 
   const seedOnly = resolveSessionFrame(sessionInput, defaults, { seed: 5 });
   assert.deepEqual(seedOnly.kernelParams, resolveSessionFrame({ ...sessionInput, kernelParams: fullBlock(cameraFor({ eye: [0, 2.2, 6] }), { seed: 5 }) }, defaults, {}).kernelParams);
-  const defaultSeed = resolveSessionFrame(sessionInput, { ...defaults, seed: 6 }, {});
-  assert.equal(new DataView(defaultSeed.kernelParams.buffer, defaultSeed.kernelParams.byteOffset).getUint32(SEED_BYTE, true), 6);
+  const sessionWithSeed = resolveSessionCreation(input, { seed: 6 });
+  const explicitBlock = fullBlock(cameraFor({ eye: [3, 2, 5] }), { seed: 9 });
+  const readSeed = kernelParams => new DataView(kernelParams.buffer, kernelParams.byteOffset).getUint32(SEED_BYTE, true);
+  assert.equal(readSeed(resolveSessionFrame(sessionWithSeed, { ...defaults, seed: 6 }, { kernelParams: explicitBlock }).kernelParams), 9, 'a session seed leaves the seed of an explicit block alone');
+  assert.equal(readSeed(resolveSessionFrame(sessionWithSeed, { ...defaults, seed: 6 }, {}).kernelParams), readSeed(sessionInput.kernelParams), 'a session seed leaves the packed seed alone');
+  assert.deepEqual(
+    resolveSessionFrame(sessionWithSeed, { ...defaults, seed: 6 }, { kernelParams: explicitBlock }).kernelParams,
+    resolveSessionFrame(sessionInput, defaults, { kernelParams: explicitBlock }).kernelParams,
+    'a frame without a seed of its own is byte identical with or without a session seed'
+  );
+  assert.equal(readSeed(resolveSessionFrame(sessionWithSeed, { ...defaults, seed: 6 }, { kernelParams: explicitBlock, seed: 12 }).kernelParams), 12, 'a seed given to render wins');
 
   assert.throws(() => resolveSessionFrame(sessionInput, defaults, { seed: -3 }), { name: 'RangeError', message: /NativeSession.render.*seed/ });
   assert.throws(() => resolveSessionFrame(sessionInput, defaults, { seed: 2.5 }), { name: 'RangeError', message: /seed/ });

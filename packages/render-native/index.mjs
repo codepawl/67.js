@@ -150,13 +150,14 @@ function withSeed(kernelParams, seed) {
   return patchedParams;
 }
 
-// The frame's block with the camera and seed that `render` was given: the camera replaces the camera words of the block the
-// frame would use, and a seed (a frame option or a session default) replaces the seed word.
-function withFrameCameraAndSeed(baseKernelParams, camera, options) {
+// The frame's block with the camera and seed that the caller gave to `render` itself: the camera replaces the camera words of the
+// block the frame would use, and the seed replaces the seed word. A seed in the session options is not applied: it is usually the
+// pack options' seed, which the input already carries, and writing it would override the seed of a block passed per frame.
+function withFrameCameraAndSeed(baseKernelParams, camera, seed, frameSize) {
   if (camera !== undefined) {
-    return packCameraParams(baseKernelParams, camera, { width: options.width, height: options.height, seed: options.seed });
+    return packCameraParams(baseKernelParams, camera, { width: frameSize.width, height: frameSize.height, seed });
   }
-  return options.seed === undefined ? baseKernelParams : withSeed(baseKernelParams, options.seed);
+  return seed === undefined ? baseKernelParams : withSeed(baseKernelParams, seed);
 }
 
 function hasFilterOptions(options) {
@@ -404,7 +405,6 @@ export function resolveSessionCreation(input, options, callerName = 'createNativ
   }
   requireCyclesKernelOption(options.kernel, callerName);
   validatePackOptions(options, callerName);
-  validateSeedOption(options.seed, callerName);
   return { ...input, kernelParams: patchedCyclesKernelParams(input, input.kernelParams, options, callerName) };
 }
 
@@ -416,13 +416,13 @@ export function resolveSessionFrame(sessionInput, sessionOptions, renderOptions)
   const options = mergeDefinedOptions(sessionOptions, renderOptions);
   requireCyclesKernelOption(options.kernel, 'NativeSession.render');
   validatePackOptions(options, 'NativeSession.render', true);
-  validateSeedOption(options.seed, 'NativeSession.render');
+  validateSeedOption(renderOptions.seed, 'NativeSession.render');
   let baseKernelParams = sessionInput.kernelParams;
   if (renderOptions.kernelParams !== undefined) {
     requireSessionKernelParams(renderOptions.kernelParams, 'NativeSession.render');
     baseKernelParams = renderOptions.kernelParams;
   }
-  baseKernelParams = withFrameCameraAndSeed(baseKernelParams, renderOptions.camera, options);
+  baseKernelParams = withFrameCameraAndSeed(baseKernelParams, renderOptions.camera, renderOptions.seed, options);
   const kernelParams = patchedCyclesKernelParams(sessionInput, baseKernelParams, options, 'NativeSession.render');
   const { width, height, samples, samplesPerDispatch, maxSeconds, bootstrapKernel, denoise, accumulate, targetSamples } = options;
   validateProgressiveOptions({ accumulate, targetSamples, samples });
@@ -583,8 +583,9 @@ export function wrapNativeSession(nativeSession, sessionInput, sessionOptions) {
  * frame at the same size also keeps the film. `renderOptions.camera` brings another camera of the same scene (the object
  * `buildNativeInputV2` takes, built for the frame's size) and `seed` another sampling seed, both without packing the scene
  * again: the frame's block is the session's block with those words replaced (see `packCameraParams`). `renderOptions.kernelParams`
- * brings the block of a second `buildNativeInputV2` call instead, and `camera` and `seed` then apply on top of it. A `seed` is
- * written whenever it is given (a whole number from 0 to 4294967295); without one the block's seed stays. `options` are defaults for every frame. `close()` frees the card.
+ * brings the block of a second `buildNativeInputV2` call instead, and `camera` and `seed` then apply on top of it. A `seed` given
+ * to `render` is written (a whole number from 0 to 4294967295); without one the block's seed stays, and a `seed` in the session
+ * `options` is not applied. `options` are defaults for every frame. `close()` frees the card.
  * A frame equals the `traceNative` render of the same input and options byte for byte.
  *
  * Progressive film: `render({ samples, accumulate: true, targetSamples })` adds `samples` to the image instead of starting a new
