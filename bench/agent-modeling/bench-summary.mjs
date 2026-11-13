@@ -42,6 +42,7 @@ export function benchTotals(allRecords, runs) {
     passPowK: share(everyRun.length),
     passAtK: share(anyRun.length),
     callsPerRun: mean(records.map(record => record.toolCalls)),
+    imagesPerRun: mean(records.map(record => record.imagesRead ?? 0)),
     errorsPerRun: mean(records.map(record => record.toolErrors)),
     inputTokensPerRun: mean(records.map(record => record.inputTokens), 0),
     outputTokensPerRun: mean(records.map(record => record.outputTokens), 0),

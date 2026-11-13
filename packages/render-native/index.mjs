@@ -427,7 +427,7 @@ function validateProgressiveOptions({ accumulate, targetSamples, samples }) {
 // ---- Scene updates ----
 
 const UPDATE_COUNT_NAMES = [
-  'instanceCount', 'triangleCount', 'materialCount', 'emissiveTriangleCount', 'lightCount', 'lightTreeNodeCount', 'lightTreeEmitterCount', 'textureCount',
+  'instanceCount', 'triangleCount', 'materialCount', 'emissiveTriangleCount', 'lightCount', 'portalCount', 'lightTreeNodeCount', 'lightTreeEmitterCount', 'textureCount',
 ];
 // Tables a session update cannot change, with what each holds, for the error.
 const UPDATE_FIXED_TABLES = [

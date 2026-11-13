@@ -2,7 +2,7 @@ import './support/load-agent-scene-modules.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAgentScene } from '../src/agent-scene.js';
-import { exposureProblems, framingProblems, lumaShares, mergeFrameDiagnostics, placementProblems } from '../src/frame-checks.js';
+import { exposureProblems, framingProblems, lumaShares, mergeFrameDiagnostics, pathTracerFindingsLimit, placementProblems, textureProblems } from '../src/frame-checks.js';
 import { closedRoom, closedRoomWithoutBake } from './support/agent-bake-rooms.mjs';
 
 function sceneWithCamera(camera) {
@@ -219,4 +219,67 @@ test('a blown-out frame reports how much is clipped', () => {
   assert.equal(finding.whitePercent, 100);
   const [black] = exposureProblems({ shares: lumaShares(frameOf(0)), exposure: 1 });
   assert.equal(black.blackPercent, 100);
+});
+
+function partWith(name, material) {
+  return { name, material };
+}
+
+const goodImage = { width: 2, height: 2, data: new Uint8ClampedArray(16) };
+
+test('a material whose map has no image is a texture-missing finding that names the parts and the field', () => {
+  const broken = { id: 'brick', map: { colorSpace: 'srgb' } };
+  const problems = textureProblems({ parts: [partWith('wall', broken), partWith('floor', broken), partWith('lamp', { id: 'steel' })] });
+  assert.equal(problems.length, 1);
+  const [problem] = problems;
+  assert.equal(problem.kind, 'texture-missing');
+  assert.deepEqual(problem.nodes, ['wall', 'floor']);
+  assert.equal(problem.field, 'map');
+  assert.equal(problem.material, 'brick');
+  assert.match(problem.message, /2 parts use material brick whose map has no image/);
+  assert.match(problem.fix, /set-material/);
+});
+
+test('empty and truncated texture images are reported and a good image is not', () => {
+  const parts = [
+    partWith('a', { id: 'm1', normalMap: { image: { width: 0, height: 0 } } }),
+    partWith('b', { id: 'm2', map: { image: { width: 4, height: 4, data: new Uint8ClampedArray(8) } } }),
+    partWith('c', { id: 'm3', map: { image: goodImage }, emissiveMap: { image: { width: 4, height: 4, compressed: { name: 'bc7' } } } }),
+  ];
+  const problems = textureProblems({ parts });
+  assert.deepEqual(problems.map(problem => [problem.target, problem.field]), [['a', 'normalMap'], ['b', 'map']]);
+  assert.match(problems[0].message, /image of no size/);
+  assert.match(problems[1].message, /fewer pixel bytes/);
+  assert.deepEqual(textureProblems({ parts: [partWith('ok', { id: 'm', map: { image: goodImage } })] }), []);
+});
+
+test('texture findings are capped at 8 per scene', () => {
+  const parts = Array.from({ length: 12 }, (unused, index) => partWith(`p${index}`, { id: `m${index}`, map: {} }));
+  assert.equal(textureProblems({ parts }).length, 8);
+});
+
+test('a path traced job says why exposure findings and passes are unavailable', () => {
+  const limit = pathTracerFindingsLimit();
+  assert.equal(limit.kind, 'findings-unavailable');
+  assert.equal(limit.severity, 'info');
+  assert.match(limit.message, /object ID, depth and normal/);
+  assert.match(limit.fix, /scene_look/);
+});
+
+test('a scene reports the z-fighting its ranking left over, and none when it opted out', async () => {
+  const { loadAgentSceneModules } = await import('../src/agent-scene-modules.js');
+  await loadAgentSceneModules({ environment: { resolveCoplanar: 'offset' } });
+  const scene = createAgentScene({ ...sceneWithCamera({ eye: [3, 2, 4], target: [0, 0, 0], fov: 45 }), environment: { resolveCoplanar: false } });
+  assert.deepEqual(scene.flushLeftovers(), []);
+});
+
+test('the findings-unavailable note survives 20 part findings when it is merged first', () => {
+  const partFindings = Array.from({ length: 20 }, (unused, index) => ({ kind: 'floating-node', severity: 'warning', target: `part${index}`, message: `part${index} floats` }));
+  const metrics = {};
+  mergeFrameDiagnostics(metrics, [pathTracerFindingsLimit(), ...partFindings]);
+  assert.equal(metrics.diagnostics.length, 16);
+  assert.equal(metrics.diagnostics[0].kind, 'findings-unavailable');
+  const droppedWhenLast = {};
+  mergeFrameDiagnostics(droppedWhenLast, [...partFindings, pathTracerFindingsLimit()]);
+  assert.equal(droppedWhenLast.diagnostics.some(entry => entry.kind === 'findings-unavailable'), false);
 });

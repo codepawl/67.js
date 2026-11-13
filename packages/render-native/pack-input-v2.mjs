@@ -1673,6 +1673,40 @@ function compensateEnvironmentWeights(pixelWeights, rowTotals, width, height, fr
   return compensatedTotal;
 }
 
+const CAMERA_ENV_PORTAL_COUNT_SHIFT = 8;
+const MAX_PORTAL_COUNT = 0xffffff;
+
+/**
+ * The `camera_env_enabled` word (FORMAT-v2.md, section 1): bit 0 is the camera environment flag and bits 8 and up hold the
+ * number of light portals, so a pack without portals keeps the word it had before portals existed.
+ */
+function packCameraEnvironmentWord(cameraEnvironmentEnabled, portalCount) {
+  if (!Number.isInteger(portalCount) || portalCount < 0 || portalCount > MAX_PORTAL_COUNT) {
+    throw new RangeError(`The scene has ${portalCount} light portals; at most ${MAX_PORTAL_COUNT} fit the kernel parameters. Remove portals from the scene.`);
+  }
+  return ((portalCount << CAMERA_ENV_PORTAL_COUNT_SHIFT) | (cameraEnvironmentEnabled ? 1 : 0)) >>> 0;
+}
+
+/**
+ * The colour the map is multiplied by on a path the camera sees the environment through (FORMAT-v2.md, section 1,
+ * `camera_env_color`), or null when the scene sets no `cameraIntensity`. It is absolute, in the units of the map intensity: the
+ * lighting colour is scaled by `cameraIntensity / intensity`, so a tinted `options.envColor` keeps its tint, and equal
+ * strengths give the lighting colour back bit for bit.
+ */
+function resolveCameraEnvColor(cameraIntensity, intensity, lightingColor) {
+  if (cameraIntensity === undefined || cameraIntensity === null) {
+    return null;
+  }
+  if (typeof cameraIntensity !== 'number' || !Number.isFinite(cameraIntensity) || cameraIntensity < 0) {
+    throw new RangeError(`environment.cameraIntensity must be a finite number of 0 or more (got ${cameraIntensity}). Pass 0.2 to draw the view through a window at 0.2 of the sky, or leave it out to use the lighting intensity.`);
+  }
+  if (!(intensity > 0)) {
+    return [cameraIntensity, cameraIntensity, cameraIntensity];
+  }
+  const ratio = cameraIntensity / intensity;
+  return [lightingColor[0] * ratio, lightingColor[1] * ratio, lightingColor[2] * ratio];
+}
+
 function packEnvironmentTexelsV2(environment, options = {}) {
   if (!environment || !(environment.width > 0 && environment.height > 0)) {
     const bg = options.backgroundColor ?? [0, 0, 0];
@@ -1684,6 +1718,7 @@ function packEnvironmentTexelsV2(environment, options = {}) {
       envRotation: 0,
       envColor: [Number(bg[0]), Number(bg[1]), Number(bg[2])],
       envTotalWeight: 0,
+      cameraEnvColor: null,
     };
   }
 
@@ -1770,6 +1805,7 @@ function packEnvironmentTexelsV2(environment, options = {}) {
     envRotation,
     envColor: [Number(envColor[0]), Number(envColor[1]), Number(envColor[2])],
     envTotalWeight: totalWeight,
+    cameraEnvColor: resolveCameraEnvColor(environment.cameraIntensity, intensity, envColor),
   };
 }
 
@@ -2252,10 +2288,11 @@ function packKernelParamsV2({
   // KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4 = 75
   f32[KERNEL_PARAMS_V2_FILTER_GLOSSY_BYTE_OFFSET / 4] = filterGlossy;
 
-  u32[76] = (counts.portalCount ?? 0) >>> 0;
-  u32[77] = 0;
-  u32[78] = 0;
-  u32[79] = 0;
+  const cameraEnvColor = packedEnvironment.cameraEnvColor;
+  f32[76] = cameraEnvColor ? cameraEnvColor[0] : 0;
+  f32[77] = cameraEnvColor ? cameraEnvColor[1] : 0;
+  f32[78] = cameraEnvColor ? cameraEnvColor[2] : 0;
+  u32[79] = packCameraEnvironmentWord(cameraEnvColor !== null && cameraEnvColor !== undefined, counts.portalCount ?? 0);
 
   return new Uint8Array(buffer);
 }
@@ -3247,6 +3284,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
       intensity: paramF32[26],
       cosine: paramF32[28],
       sine: paramF32[29],
+      ...(paramU32[62] === 1 ? { cameraIntensity: paramF32[61] } : {}),
     }
     : null;
 

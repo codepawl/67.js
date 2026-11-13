@@ -31,6 +31,10 @@ const BINDING_TEXTURE_TEXELS: u32 = 9u;
 const BINDING_ENVIRONMENT_TEXELS: u32 = 10u;
 const BINDING_FILM_ACCUMULATION: u32 = 11u;
 
+// `KernelParamsV2.camera_env_enabled` layout: the flag in bit 0, the light portal count from bit 8 up.
+const KERNEL_CAMERA_ENV_ENABLED_BIT: u32 = 1u;
+const KERNEL_PORTAL_COUNT_SHIFT: u32 = 8u;
+
 // `KernelParamsV2.kernel_flags` bits.
 const KERNEL_FLAG_USE_LIGHT_TREE: u32 = 1u;
 const KERNEL_FLAG_HAS_VOLUME: u32 = 2u;
@@ -231,11 +235,10 @@ struct KernelParamsV2 {
   sobol_table_offset: u32,
   filter_glossy: f32,
 
-  // Light portals packed after the `light_count` emitters in the light table (FORMAT-v2.md).
-  portal_count: u32,
-  reserved_tail_y: u32,
-  reserved_tail_z: u32,
-  reserved_tail_w: u32,
+  camera_env_color: vec3<f32>,
+  // Bit 0: `environment.cameraIntensity` is set. Bits 8 and up: the number of light portals stored after the `light_count`
+  // emitters in the light table (FORMAT-v2.md). Read the parts with `KERNEL_CAMERA_ENV_ENABLED_BIT` and `portal_count()`.
+  camera_env_enabled: u32,
 }
 
 // 160 bytes (10 x 16 B), alignment 16 B.

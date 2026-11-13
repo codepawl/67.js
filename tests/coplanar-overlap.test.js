@@ -39,6 +39,7 @@ test('a sign flush with a wall is reported with both parts, the area and a fix',
   assert.equal(warnings.length, 1);
   const [warning] = warnings;
   assert.deepEqual(warning.parts, ['sign', 'wall']);
+  assert.deepEqual(warning.nodes, ['sign', 'wall']);
   assert.match(warning.message, /sign and wall/);
   assert.ok(warning.area > 0.45 && warning.area < 1.1, `shared area ${warning.area}`);
   assert.match(warning.fix, /decal: true/);
@@ -106,6 +107,7 @@ test('what the ranking leaves over is reported with its reason and a fix', () =>
     ['coplanar-overlap', 'warning', 'BuildingWalls', 'rank-overflow'],
     ['coplanar-overlap', 'warning', 'Lid', 'collapsed-node'],
   ]);
+  assert.deepEqual(problems[0].nodes, ['BuildingWalls']);
   assert.equal(problems[0].message, 'BuildingWalls: 22 triangles sit in stacks deeper than 15 near-coplanar faces and may flicker far away.');
   assert.equal(problems[0].fix, 'Remove the duplicate faces in the asset.');
   for (const reason of ['double-sided-gap', 'unchecked']) {

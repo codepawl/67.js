@@ -396,3 +396,24 @@ test('fix rounds count the writes after the first render, in both systems', () =
   assert.equal(summary.toolCalls, 6);
   assert.equal(summary.fixRounds, 2);
 });
+
+test('the findings-fix task fails its starting scene and each half-fix, and passes the reference', async () => {
+  const task = taskById('findings-fix');
+  const start = structuredClone(task.startRecipe);
+  const startGrade = await gradeRecipe(task, start);
+  assert.equal(startGrade.pass, false);
+  assert.ok(startGrade.results.some(result => result.kind === 'restsOnSupport' && !result.pass));
+  assert.ok(startGrade.results.some(result => result.kind === 'litRange' && !result.pass));
+
+  const onlyLowered = structuredClone(start);
+  onlyLowered.nodes.find(node => node.id === 'crate').translation = [1.6, 0.25, 0.4];
+  const loweredGrade = await gradeRecipe(task, onlyLowered);
+  assert.deepEqual(loweredGrade.results.filter(result => !result.pass).map(result => result.kind), ['litRange']);
+
+  const onlyDimmed = structuredClone(start);
+  onlyDimmed.environment.keyIntensity = 1;
+  const dimmedGrade = await gradeRecipe(task, onlyDimmed);
+  assert.deepEqual(dimmedGrade.results.filter(result => !result.pass).map(result => result.kind), ['restsOnSupport']);
+
+  assert.equal((await gradeRecipe(task, structuredClone(REFERENCES['findings-fix']))).pass, true);
+});

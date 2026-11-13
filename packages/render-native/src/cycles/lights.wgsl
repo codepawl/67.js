@@ -811,11 +811,12 @@ fn lgt_env_uv_to_direction(uv: vec2<f32>, polar_out: ptr<function, f32>) -> vec3
   );
 }
 
-fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
+// The map as sampled, before the environment colour (the intensity) is applied; with no map it is one.
+fn lgt_eval_hdri_texel(direction: vec3<f32>) -> vec3<f32> {
   let width = kernel_params.env_width;
   let height = kernel_params.env_height;
   if (width == 0u || height == 0u) {
-    return kernel_params.env_color;
+    return vec3<f32>(1.0);
   }
   var polar = 0.0;
   let uv = lgt_direction_to_env_uv(direction, &polar);
@@ -839,7 +840,20 @@ fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
     let texel = environment_texels[row * width + col].xyz;
     accum += texel * (weight_x * weight_y);
   }
-  return accum * kernel_params.env_color;
+  return accum;
+}
+
+fn lgt_eval_hdri_radiance(direction: vec3<f32>) -> vec3<f32> {
+  return lgt_eval_hdri_texel(direction) * kernel_params.env_color;
+}
+
+// The environment as a path the camera reaches it through straight transmission only: with `environment.cameraIntensity`
+// set, the pack carries that strength as `camera_env_color`; otherwise it is the lighting radiance.
+fn lgt_eval_camera_visible_radiance(direction: vec3<f32>) -> vec3<f32> {
+  if ((kernel_params.camera_env_enabled & KERNEL_CAMERA_ENV_ENABLED_BIT) == 0u) {
+    return lgt_eval_hdri_radiance(direction);
+  }
+  return lgt_eval_hdri_texel(direction) * kernel_params.camera_env_color;
 }
 
 fn lgt_environment_pdf(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
@@ -869,7 +883,7 @@ fn lgt_environment_pdf(origin: vec3<f32>, direction: vec3<f32>) -> f32 {
 // `light_count` emitters, so the light pick, the light tree and the emitter loops never see them. While a scene has any, the
 // environment is sampled by drawing a point on a portal and the pdf below replaces the importance table's.
 fn lgt_portal_count() -> u32 {
-  return kernel_params.portal_count;
+  return kernel_params.camera_env_enabled >> KERNEL_PORTAL_COUNT_SHIFT;
 }
 
 // Solid-angle pdf of drawing `direction` from `origin` through one portal: distance^2 / (cos * area), 0 when the ray misses the
@@ -1152,6 +1166,7 @@ fn lgt_eval_escaped_ray(
   ray_dir: vec3<f32>,
   is_camera_ray: bool,
   is_transparent_background_ray: bool,
+  camera_visible_environment: bool,
   mis_skip: bool,
   prev_bsdf_pdf: f32,
   receiver_lo: u32,
@@ -1160,7 +1175,12 @@ fn lgt_eval_escaped_ray(
   var total = vec3<f32>(0.0);
 
   if (!is_transparent_background_ray) {
-    let env_radiance = lgt_eval_hdri_radiance(ray_dir);
+    var env_radiance: vec3<f32>;
+    if (camera_visible_environment) {
+      env_radiance = lgt_eval_camera_visible_radiance(ray_dir);
+    } else {
+      env_radiance = lgt_eval_hdri_radiance(ray_dir);
+    }
     var env_mis = 1.0;
     if (!is_camera_ray && !mis_skip && SCENE_HAS_ENV_IMPORTANCE && kernel_params.env_width > 0u && kernel_params.env_height > 0u && kernel_params.background_mis_weight > 0.0) {
       let pdf_env = lgt_environment_pdf(lgt_mis_position, ray_dir);
