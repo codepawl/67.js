@@ -3,7 +3,7 @@ import { mat4 } from 'gl-matrix';
 import { createLightingState, updateLightingState, MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS, MAXIMUM_SPECULAR_ANTI_ALIASING } from './lighting.js';
 import { resolveEffects } from './effects.js';
 import { resolveVolumeFog } from './volumetric.js';
-import { resolveLocalVolumes } from './local-volumes.js';
+import { resolveLocalVolumesWith } from './local-volume-resolve.js';
 import { LIQUID_OPTICS, resolveLiquidOptics } from './liquid-optics.js';
 import { createLightingSetupMap, createCatalogEnvironmentMap, lightingSetupFields } from './lighting-setups.js';
 import { agentSceneModule } from './agent-scene-modules.js';
@@ -11,6 +11,11 @@ import { lightShapeSupport, postStepSupport } from './shader-registry.js';
 import { VIEW_TRANSFORM_NAMES, LOOK_NAMES } from './view-transform-names.js';
 import { BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAMES, isEnvironmentReference, isCubeLookReference } from './look-catalog.js';
 import { DEFAULT_LIGHTING_SETUP, LIGHTING_SETUP_NAMES, DEFAULT_AMBIENT_OCCLUSION } from './agent-scene-capabilities.js';
+
+// Grid volumes resolve in the volumeGrid module, which loads when a recipe names shape "grid".
+function resolveGridVolumeOnDemand(input, resolved, label) {
+  return agentSceneModule('volumeGrid').resolveGridVolume(input, resolved, label);
+}
 
 // The longest list in a look is the longest light list.
 const MAX_LOOK_ARRAY_ENTRIES = Math.max(MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS);
@@ -21,8 +26,8 @@ const ENVIRONMENT_FIELDS = [
 ];
 const EFFECT_FIELDS = ['exposure', 'saturation', 'contrast', 'temperature', 'vignette', 'grain', 'ambientOcclusion', 'ambientOcclusionRadius', 'bloom', 'depthOfField', 'motionBlur'];
 const SHADOW_FIELDS = ['target', 'extent', 'distance', 'near', 'far'];
-const POINT_LIGHT_FIELDS = ['position', 'color', 'intensity', 'radius', 'range', 'castShadow', 'affects'];
-const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color', 'intensity', 'radius', 'range', 'castShadow', 'ies', 'affects'];
+const POINT_LIGHT_FIELDS = ['position', 'color', 'intensity', 'radius', 'range', 'castShadow', 'softFalloff', 'affects'];
+const SPOT_LIGHT_FIELDS = ['position', 'direction', 'angle', 'penumbra', 'color', 'intensity', 'radius', 'range', 'castShadow', 'softFalloff', 'ies', 'affects'];
 const AREA_LIGHT_FIELDS = ['position', 'direction', 'up', 'width', 'height', 'color', 'intensity', 'castShadow', 'ies', 'affects'];
 const VOLUME_VECTOR_FIELDS = ['minimum', 'maximum', 'color', 'ambient', 'drift'];
 const VOLUME_NUMBER_FIELDS = ['density', 'steps', 'anisotropy', 'noiseAmount', 'noiseScale', 'maxDistance', 'shadowAmbient', 'heightFalloff', 'detailOctaves', 'detailAmount', 'warp', 'contrast', 'profileSoftness', 'keyScattering', 'scatterOctaves', 'multiScatter', 'multiExtinction', 'multiAnisotropy', 'keyTransmittance', 'surfaceTransmittance'];
@@ -175,14 +180,17 @@ function rangeFrom(light) {
   return range;
 }
 
-// Only a light that casts shadows carries the field, so recipes without shadows keep their exported shape.
-function shadowFieldFrom(light) {
-  const castShadow = fallback(light.castShadow, false);
-  if (typeof castShadow !== 'boolean') {
-    throw invalidField('castShadow', castShadow, 'true or false', TypeError);
+// A light carries castShadow or softFalloff (an oriented disk, as Blender's Soft Falloff) only when true, so recipes without them keep their exported shape.
+function lightFlagFrom(light, name) {
+  const flag = fallback(light[name], false);
+  if (typeof flag !== 'boolean') {
+    throw invalidField(name, flag, 'true or false', TypeError);
   }
-  return castShadow ? { castShadow } : {};
+  return flag ? { [name]: flag } : {};
 }
+
+const shadowFieldFrom = light => lightFlagFrom(light, 'castShadow');
+const softFalloffFieldFrom = light => lightFlagFrom(light, 'softFalloff');
 
 function pointLightFrom(light) {
   knownKeys(light, POINT_LIGHT_FIELDS, 'point light');
@@ -193,6 +201,7 @@ function pointLightFrom(light) {
     radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'radius'),
     range: rangeFrom(light),
     ...shadowFieldFrom(light),
+    ...softFalloffFieldFrom(light),
     ...affectsFrom(light, 'point light'),
   };
 }
@@ -209,6 +218,7 @@ function spotLightFrom(light) {
     radius: numberInRange(fallback(light.radius, 0.05), 0.001, 1e6, 'radius'),
     range: rangeFrom(light),
     ...shadowFieldFrom(light),
+    ...softFalloffFieldFrom(light),
     ...affectsFrom(light, 'spot light'),
   };
 }
@@ -320,7 +330,7 @@ function environmentFrom(input = {}) {
   }
   // Optional like the lights above, so a recipe without local volumes keeps its exported shape.
   if (input.localVolumes !== undefined) {
-    environment.localVolumes = copiedJson(resolveLocalVolumes(input.localVolumes, 'environment.localVolumes'));
+    environment.localVolumes = copiedJson(resolveLocalVolumesWith(resolveGridVolumeOnDemand, input.localVolumes, 'environment.localVolumes'));
   }
   if (input.shadowCascades !== undefined) {
     environment.shadowCascades = shadowCascadesFrom(input.shadowCascades);

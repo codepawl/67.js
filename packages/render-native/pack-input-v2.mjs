@@ -58,6 +58,9 @@ export const KERNEL_FLAG_PATH_REGENERATION = 1024;
 /** Set when any texture of the pool stores mip levels; the kernel then carries a ray footprint (see FORMAT-v2.md). */
 export const KERNEL_FLAG_TEXTURE_MIPS = 2048;
 
+/** `flags` of a material extension record: the diffuse transmission colour multiplies the base colour. */
+const MATERIAL_EXTENSION_FLAG_TINTS_BASE_COLOR = 1;
+
 const INSTANCE_VISIBILITY_CAMERA = 1;
 const INSTANCE_DEFAULT_VISIBILITY = 1 | 2 | 4 | 8 | 16 | 32;
 const INSTANCE_FLAG_NEGATIVE_SCALE = 64;
@@ -79,6 +82,7 @@ const LIGHT_FLAG_MULTIPLE_IMPORTANCE = 2;
 const LIGHT_FLAG_CAMERA_VISIBLE = 4;
 const LIGHT_FLAG_PORTAL = 8;
 const LIGHT_FLAG_NORMALIZE = 16;
+const LIGHT_FLAG_SOFT_FALLOFF = 32;
 
 const MATERIAL_FLAG_MULTISCATTER_GGX = 1;
 const MATERIAL_FLAG_THIN_WALLED = 2;
@@ -100,6 +104,23 @@ const TEXTURE_FORMAT_RG16_FLOAT = 3;
 // (`open_device` in src/host/device.rs), so a pool past this size cannot be bound.
 export const TEXTURE_POOL_MAX_BYTES = 1 << 30;
 const BYTES_PER_MEBIBYTE = 1 << 20;
+
+/** Thrown when the textures of a scene do not fit the pool. `texturePoolFull` lets a caller tell it from other packer refusals. */
+export class TexturePoolFullError extends RangeError {
+  constructor(message) {
+    super(message);
+    this.name = 'TexturePoolFullError';
+    this.texturePoolFull = true;
+  }
+}
+
+function validateTexturePoolMaxBytes(value, callerName) {
+  if (value === undefined) return TEXTURE_POOL_MAX_BYTES;
+  if (!Number.isInteger(value) || value < 16 || value > TEXTURE_POOL_MAX_BYTES) {
+    throw new RangeError(`${callerName}: \`texturePoolMaxBytes\` must be an integer from 16 to ${TEXTURE_POOL_MAX_BYTES} (the pool limit); got ${value}. It can only lower the limit.`);
+  }
+  return value;
+}
 
 const DEFAULT_HDRI_RADIANCE_LIMIT = 16;
 const SUN_DEFAULT_HALF_ANGLE = Math.PI / 360;
@@ -295,8 +316,9 @@ function joinMipLevels(levelZeroWords, mipChain) {
  * that is filtered linearly and has more than one texel; a texture can say `mips: true` or `mips: false` to differ from that.
  * The default is level 0 only, which is what Blender Cycles reads.
  */
-function createTextureCollector({ textureMips } = {}) {
+function createTextureCollector({ textureMips, texturePoolMaxBytes } = {}) {
   validateTextureMipsOption(textureMips, 'textureMips', 'createTextureCollector');
+  const poolMaxBytes = validateTexturePoolMaxBytes(texturePoolMaxBytes, 'createTextureCollector');
   const indexByKey = new Map();
   const dataIdMap = new WeakMap();
   let nextDataId = 1;
@@ -326,14 +348,14 @@ function createTextureCollector({ textureMips } = {}) {
 
   // Checked before a texture is converted, so an oversize image fails fast instead of after allocating its words.
   function assertRoomInPool(wordCount, width, height) {
-    if ((totalWords + wordCount) * 4 <= TEXTURE_POOL_MAX_BYTES) {
+    if ((totalWords + wordCount) * 4 <= poolMaxBytes) {
       return;
     }
     const neededMebibytes = Math.ceil(wordCount * 4 / BYTES_PER_MEBIBYTE);
     const usedMebibytes = Math.ceil(totalWords * 4 / BYTES_PER_MEBIBYTE);
-    throw new RangeError(
+    throw new TexturePoolFullError(
       `The texture pool is full: the ${width}x${height} texture needs ${neededMebibytes} MiB and the ${descriptors.length} before it take ${usedMebibytes} MiB, ` +
-      `but one pool holds at most ${TEXTURE_POOL_MAX_BYTES / BYTES_PER_MEBIBYTE} MiB. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.`,
+      `but one pool holds at most ${poolMaxBytes / BYTES_PER_MEBIBYTE} MiB. Pass smaller textures: downscale the largest maps or drop the ones the look does not need.`,
     );
   }
 
@@ -483,13 +505,15 @@ function createTextureCollector({ textureMips } = {}) {
     return record;
   }
 
-  function addPackedRgba8Words(words, width, height, isSrgb, repeat) {
+  // `wordsOrReader` is the level 0 words, or a function that makes them: it runs after the pool check, so a texture that does not fit is never read.
+  function addPackedRgba8Words(wordsOrReader, width, height, isSrgb, repeat) {
     const pixelCount = width * height;
     const mipCount = resolveMipCount(undefined, false, width, height);
     const atlasKind = isSrgb ? TEXTURE_KIND_RGBA8_SRGB : TEXTURE_KIND_RGBA8;
     const mipWords = mipCount > 1 ? mipChainWordCount(atlasKind, width, height) : 0;
     const alignedWords = packedWordCount(TEXTURE_FORMAT_RGBA8_UNORM, pixelCount, mipWords);
     assertRoomInPool(alignedWords, width, height);
+    const words = typeof wordsOrReader === 'function' ? wordsOrReader() : wordsOrReader;
     let padded = new Uint32Array(alignedWords);
     padded.set(words.subarray(0, pixelCount));
     if (mipCount > 1) {
@@ -641,6 +665,81 @@ function resolveSubsurfaceFields(material, baseColor) {
 }
 
 /**
+ * The thin-sheet diffuse transmission of a material: `diffuseTransmission` (0..1) splits the diffuse layer between the
+ * reflecting lobe and a cosine lobe on the far side, tinted by `diffuseTransmissionColor` (the base colour when it is left
+ * out). Returns null for a material without it, which then packs no extension record.
+ */
+export function validateDiffuseTransmission(material) {
+  const { diffuseTransmission, diffuseTransmissionColor } = material;
+  if (diffuseTransmission !== undefined) {
+    const isWeight = typeof diffuseTransmission === 'number' && diffuseTransmission >= 0 && diffuseTransmission <= 1;
+    if (!isWeight) {
+      throw new RangeError(`diffuseTransmission must be a number between 0 and 1, got ${String(diffuseTransmission)}. Use 0 for a sheet that lets no light through.`);
+    }
+  }
+  if (diffuseTransmissionColor !== undefined) {
+    const isColor = (Array.isArray(diffuseTransmissionColor) || ArrayBuffer.isView(diffuseTransmissionColor))
+      && diffuseTransmissionColor.length === 3
+      && Array.from(diffuseTransmissionColor).every(channel => typeof channel === 'number' && channel >= 0 && channel <= 1);
+    if (!isColor) {
+      throw new RangeError(`diffuseTransmissionColor must be three linear RGB numbers between 0 and 1, got ${String(diffuseTransmissionColor)}. Pass [red, green, blue], or leave it out to use the base colour.`);
+    }
+  }
+}
+
+function resolveDiffuseTransmission(material) {
+  validateDiffuseTransmission(material);
+  const weight = material.diffuseTransmission ?? 0;
+  if (!(weight > 0)) {
+    return null;
+  }
+  const color = material.diffuseTransmissionColor;
+  return {
+    weight,
+    color: color ? Array.from(color) : [1, 1, 1],
+    tintsBaseColor: !color,
+  };
+}
+
+/**
+ * One 256 B extension record (`FORMAT-v2.md`, "Material extension records"): the weight where `metallic` sits in a material
+ * record, the colour where `base_color` sits and the extension flags where `flags` sits.
+ */
+function packMaterialExtensionRecord(diffuseTransmission) {
+  const buffer = new ArrayBuffer(STRUCT_STRIDES_V2.material);
+  if (!diffuseTransmission) {
+    return new Uint8Array(buffer);
+  }
+  const f32 = new Float32Array(buffer);
+  const u32 = new Uint32Array(buffer);
+  f32[0] = diffuseTransmission.color[0];
+  f32[1] = diffuseTransmission.color[1];
+  f32[2] = diffuseTransmission.color[2];
+  f32[3] = diffuseTransmission.weight;
+  u32[48] = diffuseTransmission.tintsBaseColor ? MATERIAL_EXTENSION_FLAG_TINTS_BASE_COLOR : 0;
+  return new Uint8Array(buffer);
+}
+
+/**
+ * The material table of a list of packed records. When any record carries diffuse transmission, a second run of
+ * `records.length` extension records follows the records (the header's `materialCount` still counts the first run only);
+ * otherwise the table is the records alone, as it always was.
+ */
+function packMaterialTable(materialRecords) {
+  const stride = STRUCT_STRIDES_V2.material;
+  const usesDiffuseTransmission = materialRecords.some(record => record.diffuseTransmission);
+  const runCount = Math.max(1, materialRecords.length);
+  const table = new Uint8Array(runCount * stride * (usesDiffuseTransmission ? 2 : 1));
+  materialRecords.forEach((record, index) => table.set(record.bytes, index * stride));
+  if (usesDiffuseTransmission) {
+    materialRecords.forEach((record, index) => {
+      table.set(packMaterialExtensionRecord(record.diffuseTransmission), (runCount + index) * stride);
+    });
+  }
+  return { table, usesDiffuseTransmission };
+}
+
+/**
  * Packs one `MaterialRecord` (256 B) matching `FORMAT-v2.md` section 4 and `src/cycles/abi.wgsl`.
  */
 export function packMaterialRecordV2(material = {}, textureCollector = null) {
@@ -703,6 +802,7 @@ export function packMaterialRecordV2(material = {}, textureCollector = null) {
 
   const { emissionColor, emissionStrength } = resolveEmissionFields(material);
   const subsurface = resolveSubsurfaceFields(material, baseColor);
+  const diffuseTransmission = resolveDiffuseTransmission(material);
   const normalScale = Array.isArray(material.normalScale) || ArrayBuffer.isView(material.normalScale)
     ? 0.5 * (Math.abs(Number(material.normalScale[0] ?? 1)) + Math.abs(Number(material.normalScale[1] ?? 1)))
     : Number(material.normalScale ?? 1);
@@ -863,6 +963,7 @@ export function packMaterialRecordV2(material = {}, textureCollector = null) {
     bytes: new Uint8Array(buffer),
     alphaMode,
     usesSubsurface: subsurface.weight > 0,
+    diffuseTransmission,
     isEmissive: (flags & MATERIAL_FLAG_EMISSIVE_MIS) !== 0 && luminance(meanEmissiveRadiance) > 0,
     meanEmissiveRadiance,
   };
@@ -1166,6 +1267,9 @@ function buildAnalyticLightEntries(lightsSection = {}) {
     if (radius > 0 && point.multipleImportance !== false) {
       flags |= LIGHT_FLAG_MULTIPLE_IMPORTANCE;
     }
+    if (radius > 0 && point.softFalloff === true) {
+      flags |= LIGHT_FLAG_SOFT_FALLOFF;
+    }
     if (point.cameraVisible === true) {
       flags |= LIGHT_FLAG_CAMERA_VISIBLE;
     }
@@ -1226,6 +1330,9 @@ function buildAnalyticLightEntries(lightsSection = {}) {
     }
     if (radius > 0 && spot.multipleImportance !== false) {
       flags |= LIGHT_FLAG_MULTIPLE_IMPORTANCE;
+    }
+    if (radius > 0 && spot.softFalloff === true) {
+      flags |= LIGHT_FLAG_SOFT_FALLOFF;
     }
     if (spot.cameraVisible === true) {
       flags |= LIGHT_FLAG_CAMERA_VISIBLE;
@@ -1894,6 +2001,196 @@ export function resolveFilterParameters(options = {}) {
   return { filterType, filterWidth };
 }
 
+// True when the camera or the options ask for it, false when one says false, else `heldOrthographic` (the bit of the block being patched).
+function isOrthographicCamera(camera, options, heldOrthographic = false) {
+  if (camera?.orthographic === true || options.orthographic === true) {
+    return true;
+  }
+  if (camera?.orthographic === false || options.orthographic === false) {
+    return false;
+  }
+  return heldOrthographic;
+}
+
+const THIN_LENS_FIELD_NAMES = ['apertureRadius', 'focalDistance', 'apertureBlades', 'apertureRotation'];
+
+// The options of the thin lens: those the caller gave, else the ones the block already holds.
+function thinLensOptionsWithHeld(options, heldThinLens) {
+  const merged = { ...heldThinLens };
+  for (const fieldName of THIN_LENS_FIELD_NAMES) {
+    if (options[fieldName] !== undefined) {
+      merged[fieldName] = options[fieldName];
+    }
+  }
+  return merged;
+}
+
+/**
+ * The camera words of the kernel params block as numbers: eye, view axes scaled by the half extents, near and far, sensor
+ * shift and thin lens. `heldWords` holds what to use when neither `options` nor `camera` gives a field: `far` (a pack takes the
+ * scene's far distance), and for a camera-only update `near`, `lensShift` and the thin lens fields of the block being patched.
+ */
+function resolveCameraWordsV2(camera, options, heldWords, callerName) {
+  const eye = camera?.eye ?? camera?.position ?? [0, 0, 0];
+  const forward = normalizeVec3(camera?.forward ?? [0, 0, -1], [0, 0, -1]);
+  const halfWidth = Number(camera?.halfWidth ?? 1);
+  const halfHeight = Number(camera?.halfHeight ?? 1);
+  const rawRight = camera?.right ?? [1, 0, 0];
+  const rawUp = camera?.above ?? camera?.up ?? [0, 1, 0];
+  const scaledRight = camera?.scaledAxes
+    ? [Number(rawRight[0]), Number(rawRight[1]), Number(rawRight[2])]
+    : [Number(rawRight[0]) * halfWidth, Number(rawRight[1]) * halfWidth, Number(rawRight[2]) * halfWidth];
+  const scaledUp = camera?.scaledAxes
+    ? [Number(rawUp[0]), Number(rawUp[1]), Number(rawUp[2])]
+    : [Number(rawUp[0]) * halfHeight, Number(rawUp[1]) * halfHeight, Number(rawUp[2]) * halfHeight];
+
+  const near = Math.max(0, Number(options.near ?? camera?.near ?? heldWords.near ?? 0));
+  const far = Math.max(near + 1e-3, Number(options.far ?? camera?.far ?? heldWords.far ?? 1e30));
+  const lensShift = camera?.lensShift ?? options.lensShift ?? heldWords.lensShift ?? [0, 0];
+  const thinLens = resolveThinLensParameters(camera, thinLensOptionsWithHeld(options, heldWords.thinLens), callerName);
+  return { eye, forward, scaledRight, scaledUp, near, far, lensShift, thinLens };
+}
+
+function writeCameraWordsV2(f32, u32, cameraWords) {
+  const { eye, forward, scaledRight, scaledUp, near, far, lensShift, thinLens } = cameraWords;
+  f32[28] = Number(eye[0]);
+  f32[29] = Number(eye[1]);
+  f32[30] = Number(eye[2]);
+  f32[31] = near;
+
+  f32[32] = forward[0];
+  f32[33] = forward[1];
+  f32[34] = forward[2];
+  f32[35] = far;
+
+  f32[36] = scaledRight[0];
+  f32[37] = scaledRight[1];
+  f32[38] = scaledRight[2];
+  f32[39] = thinLens.apertureRadius;
+
+  f32[40] = scaledUp[0];
+  f32[41] = scaledUp[1];
+  f32[42] = scaledUp[2];
+  f32[43] = thinLens.focalDistance;
+
+  f32[44] = Number(lensShift[0] ?? 0);
+  f32[45] = Number(lensShift[1] ?? 0);
+  u32[46] = thinLens.apertureBlades >>> 0;
+  f32[47] = thinLens.apertureRotation;
+}
+
+const KERNEL_PARAMS_V2_SEED_BYTE_OFFSET = 28;
+const KERNEL_PARAMS_V2_WIDTH_BYTE_OFFSET = 8;
+const KERNEL_PARAMS_V2_HEIGHT_BYTE_OFFSET = 12;
+const KERNEL_PARAMS_V2_CAMERA_FIRST_BYTE_OFFSET = 112;
+const KERNEL_PARAMS_V2_CAMERA_FAR_BYTE_OFFSET = 140;
+const KERNEL_PARAMS_V2_CAMERA_BYTE_LENGTH = 80;
+const MAX_SEED = 0xffffffff;
+const ASPECT_RELATIVE_TOLERANCE = 1e-3;
+
+// The camera fields a block holds, which a camera-only update keeps for every field the caller leaves out.
+function readHeldCameraWords(view) {
+  const wordAt = wordIndex => view.getFloat32(wordIndex * 4, true);
+  return {
+    near: wordAt(31),
+    far: wordAt(35),
+    lensShift: [wordAt(44), wordAt(45)],
+    thinLens: {
+      apertureRadius: wordAt(39),
+      focalDistance: wordAt(43),
+      apertureBlades: view.getUint32(46 * 4, true),
+      apertureRotation: wordAt(47),
+    },
+  };
+}
+
+function requireKernelParamsV2Block(kernelParams, callerName) {
+  if (!(kernelParams instanceof Uint8Array) || kernelParams.byteLength !== STRUCT_STRIDES_V2.kernelParams) {
+    throw new TypeError(
+      `${callerName}: \`kernelParams\` must be a Uint8Array of ${STRUCT_STRIDES_V2.kernelParams} bytes (the KernelParamsV2 block of buildNativeInputV2).`
+    );
+  }
+  const header = new DataView(kernelParams.buffer, kernelParams.byteOffset, 8);
+  if (header.getUint32(0, true) !== FORMAT_V2_MAGIC || header.getUint32(4, true) !== FORMAT_V2_VERSION) {
+    throw new TypeError(
+      `${callerName}: \`kernelParams\` does not start with the FORMAT-v2 magic and version ${FORMAT_V2_VERSION}; pass the block of buildNativeInputV2.`
+    );
+  }
+}
+
+/** Throws unless `seed` is absent or a whole number from 0 to 4294967295 (a u32 word; larger values would wrap without notice). */
+export function validateSeedOption(seed, callerName) {
+  if (seed === undefined) {
+    return;
+  }
+  if (!Number.isInteger(seed) || seed < 0 || seed > MAX_SEED) {
+    throw new RangeError(`${callerName}: \`seed\` must be a whole number from 0 to ${MAX_SEED}, got ${JSON.stringify(seed)}.`);
+  }
+}
+
+function requireCameraMatchesAspect(cameraWords, width, height, callerName) {
+  const cameraAspect = Math.hypot(...cameraWords.scaledRight) / Math.hypot(...cameraWords.scaledUp);
+  const imageAspect = width / height;
+  if (!Number.isFinite(cameraAspect) || Math.abs(cameraAspect - imageAspect) > ASPECT_RELATIVE_TOLERANCE * imageAspect) {
+    throw new RangeError(
+      `${callerName}: the camera has a width to height ratio of ${cameraAspect} but the image is ${width}x${height} (${imageAspect}). Build the camera with createCamera(view, ${width}, ${height}) for this image size, or pass \`width\` and \`height\` of the frame.`
+    );
+  }
+}
+
+/**
+ * Returns a copy of the `kernelParams` block of a FORMAT-v2 input with another camera and, when given, another seed. Only
+ * the camera words (eye, view axes, near, far, sensor shift, thin lens: bytes 112 to 191), the orthographic bit of the kernel
+ * flags and the seed word can change, and they are written by the code `buildNativeInputV2` runs. `camera` is the object
+ * `buildNativeInputV2` takes. For each of `near`, `far`, `lensShift`, `orthographic` and the thin lens fields
+ * (`apertureRadius`, `focalDistance`, `apertureBlades`, `apertureRotation`), a value given by the caller wins (the packer's
+ * order: `options` before the camera for `near`, `far`, `orthographic`; the camera before `options` for `lensShift` and the
+ * thin lens), else the value the block already holds (set when it was packed, from its camera or its pack options). So a camera
+ * that is a bare view keeps the block's lens, near plane, sensor shift, far plane and orthographic bit, and a camera that
+ * carries its own (such as a thin lens camera from `createCamera` with an `fStop`) replaces them. The seed is replaced only
+ * when `options.seed` is given. `options.width` and `options.height` (default: the size in the block) are the image size the
+ * camera's aspect is checked against.
+ * With every such field on the camera or in `options`, the result equals the block of a full repack. Throws when the block is
+ * not FORMAT-v2, the camera is not an object, its aspect does not match the image or `seed` is not a whole number from 0
+ * to 4294967295.
+ */
+export function packCameraParams(kernelParams, camera, options = {}) {
+  const callerName = 'packCameraParams';
+  requireKernelParamsV2Block(kernelParams, callerName);
+  if (!camera || typeof camera !== 'object') {
+    throw new TypeError(`${callerName}: \`camera\` must be a camera object such as the one createCamera returns.`);
+  }
+  if (options === null || typeof options !== 'object') {
+    throw new TypeError(`${callerName}: \`options\` must be an object.`);
+  }
+  validateSeedOption(options.seed, callerName);
+
+  const patchedParams = new Uint8Array(kernelParams);
+  const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
+  const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
+  const cameraWords = resolveCameraWordsV2(camera, options, readHeldCameraWords(view), callerName);
+  const width = options.width ?? view.getUint32(KERNEL_PARAMS_V2_WIDTH_BYTE_OFFSET, true);
+  const height = options.height ?? view.getUint32(KERNEL_PARAMS_V2_HEIGHT_BYTE_OFFSET, true);
+  requireCameraMatchesAspect(cameraWords, width, height, callerName);
+
+  const scratchWords = new ArrayBuffer(STRUCT_STRIDES_V2.kernelParams);
+  writeCameraWordsV2(new Float32Array(scratchWords), new Uint32Array(scratchWords), cameraWords);
+  patchedParams.set(
+    new Uint8Array(scratchWords, KERNEL_PARAMS_V2_CAMERA_FIRST_BYTE_OFFSET, KERNEL_PARAMS_V2_CAMERA_BYTE_LENGTH),
+    KERNEL_PARAMS_V2_CAMERA_FIRST_BYTE_OFFSET
+  );
+
+  const heldOrthographic = (flags & KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) !== 0;
+  const patchedFlags = isOrthographicCamera(camera, options, heldOrthographic)
+    ? (flags | KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) >>> 0
+    : (flags & ~KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) >>> 0;
+  view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
+  if (options.seed !== undefined) {
+    view.setUint32(KERNEL_PARAMS_V2_SEED_BYTE_OFFSET, options.seed, true);
+  }
+  return patchedParams;
+}
+
 function packKernelParamsV2({
   camera,
   options,
@@ -1941,7 +2238,7 @@ function packKernelParamsV2({
   if (usesSubsurface) {
     kernelFlags |= KERNEL_FLAG_HAS_SUBSURFACE;
   }
-  if (camera?.orthographic === true || options.orthographic === true) {
+  if (isOrthographicCamera(camera, options)) {
     kernelFlags |= KERNEL_FLAG_ORTHOGRAPHIC_CAMERA;
   }
   if (adaptiveThreshold > 0) {
@@ -1966,23 +2263,7 @@ function packKernelParamsV2({
   const minBounceRr = Math.max(0, Math.round(Number(options.minBounceRr ?? 3)));
   const { filterType, filterWidth } = resolveFilterParameters(options);
 
-  const eye = camera?.eye ?? camera?.position ?? [0, 0, 0];
-  const forward = normalizeVec3(camera?.forward ?? [0, 0, -1], [0, 0, -1]);
-  const halfWidth = Number(camera?.halfWidth ?? 1);
-  const halfHeight = Number(camera?.halfHeight ?? 1);
-  const rawRight = camera?.right ?? [1, 0, 0];
-  const rawUp = camera?.above ?? camera?.up ?? [0, 1, 0];
-  const scaledRight = camera?.scaledAxes
-    ? [Number(rawRight[0]), Number(rawRight[1]), Number(rawRight[2])]
-    : [Number(rawRight[0]) * halfWidth, Number(rawRight[1]) * halfWidth, Number(rawRight[2]) * halfWidth];
-  const scaledUp = camera?.scaledAxes
-    ? [Number(rawUp[0]), Number(rawUp[1]), Number(rawUp[2])]
-    : [Number(rawUp[0]) * halfHeight, Number(rawUp[1]) * halfHeight, Number(rawUp[2]) * halfHeight];
-
-  const cameraNear = Math.max(0, Number(options.near ?? camera?.near ?? 0));
-  const cameraFar = Math.max(cameraNear + 1e-3, Number(options.far ?? camera?.far ?? farDistance ?? 1e30));
-  const lensShift = camera?.lensShift ?? options.lensShift ?? [0, 0];
-  const thinLens = resolveThinLensParameters(camera, options, 'buildNativeInputV2');
+  const cameraWords = resolveCameraWordsV2(camera, options, { far: farDistance }, 'buildNativeInputV2');
 
   u32[0] = FORMAT_V2_MAGIC;
   u32[1] = FORMAT_V2_VERSION;
@@ -2019,30 +2300,7 @@ function packKernelParamsV2({
   u32[26] = counts.lightTreeNodeCount >>> 0;
   u32[27] = counts.textureCount >>> 0;
 
-  f32[28] = Number(eye[0]);
-  f32[29] = Number(eye[1]);
-  f32[30] = Number(eye[2]);
-  f32[31] = cameraNear;
-
-  f32[32] = forward[0];
-  f32[33] = forward[1];
-  f32[34] = forward[2];
-  f32[35] = cameraFar;
-
-  f32[36] = scaledRight[0];
-  f32[37] = scaledRight[1];
-  f32[38] = scaledRight[2];
-  f32[39] = thinLens.apertureRadius;
-
-  f32[40] = scaledUp[0];
-  f32[41] = scaledUp[1];
-  f32[42] = scaledUp[2];
-  f32[43] = thinLens.focalDistance;
-
-  f32[44] = Number(lensShift[0] ?? 0);
-  f32[45] = Number(lensShift[1] ?? 0);
-  u32[46] = thinLens.apertureBlades >>> 0;
-  f32[47] = thinLens.apertureRotation;
+  writeCameraWordsV2(f32, u32, cameraWords);
 
   u32[48] = packedEnvironment.envWidth >>> 0;
   u32[49] = packedEnvironment.envHeight >>> 0;
@@ -2094,7 +2352,7 @@ function packKernelParamsV2({
   return new Uint8Array(buffer);
 }
 
-function buildGeometryTriangleItem(geometry, triIndex, defaultMaterialIndex, meshId, materialRecords) {
+function buildGeometryTriangleItem(geometry, triIndex, defaultMaterialIndex, meshId, materialRecords, recordIndexOf = index => index) {
   const { positions, normals, uvs, uv1s, colors, tangents, indices, triangleMaterial } = geometry;
   const i0 = indices[triIndex * 3];
   const i1 = indices[triIndex * 3 + 1];
@@ -2148,7 +2406,7 @@ function buildGeometryTriangleItem(geometry, triIndex, defaultMaterialIndex, mes
     flags |= TRIANGLE_FLAG_HAS_UV1;
   }
 
-  const materialIndex = triangleMaterial ? triangleMaterial[triIndex] : defaultMaterialIndex;
+  const materialIndex = triangleMaterial ? recordIndexOf(triangleMaterial[triIndex]) : defaultMaterialIndex;
   const matInfo = materialRecords[materialIndex];
   const isOpaque = (matInfo?.alphaMode ?? ALPHA_MODE_OPAQUE) === ALPHA_MODE_OPAQUE;
 
@@ -2254,12 +2512,78 @@ function shareEmissiveOffsets(meshSlot, emittedLocalIndices, instanceIndex) {
   }
 }
 
+/**
+ * Gives parts whose material records are equal one record. Two records are equal when their 256 bytes are, which holds the base
+ * values, the flags, every texture index (equal textures share an index in the collector) and the extension fields, and when
+ * the derived emission they were packed with is. The unique records keep the order of their first part, so a scene without
+ * equal records keeps its table, and `recordIndexOf` maps a part's material index to its record's index; an index past the
+ * table (no record) stays as it is.
+ */
+export function shareEqualMaterialRecords(materialRecords) {
+  const uniqueRecords = [];
+  const recordIndexByPart = new Array(materialRecords.length);
+  const uniqueIndicesByHash = new Map();
+  materialRecords.forEach((record, partIndex) => {
+    const hash = hashMaterialRecordBytes(record.bytes);
+    const candidates = uniqueIndicesByHash.get(hash);
+    const sameIndex = candidates?.find(uniqueIndex => materialRecordsAreEqual(uniqueRecords[uniqueIndex], record));
+    if (sameIndex !== undefined) {
+      recordIndexByPart[partIndex] = sameIndex;
+      return;
+    }
+    recordIndexByPart[partIndex] = uniqueRecords.length;
+    if (candidates) candidates.push(uniqueRecords.length);
+    else uniqueIndicesByHash.set(hash, [uniqueRecords.length]);
+    uniqueRecords.push(record);
+  });
+  return {
+    records: uniqueRecords,
+    recordIndexOf: partIndex => recordIndexByPart[partIndex] ?? partIndex,
+  };
+}
+
+// The words of a record, read in place when its bytes are aligned (the records `packMaterialRecordV2` returns are).
+function materialRecordWords(bytes) {
+  const wordCount = bytes.byteLength / 4;
+  return bytes.byteOffset % 4 === 0
+    ? new Uint32Array(bytes.buffer, bytes.byteOffset, wordCount)
+    : new Uint32Array(Uint8Array.from(bytes).buffer);
+}
+
+function hashMaterialRecordBytes(bytes) {
+  const words = materialRecordWords(bytes);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < words.length; index++) {
+    hash = Math.imul(hash ^ words[index], 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+// The diffuse transmission of a record lives in its extension record, outside its 256 bytes, so it is compared on its own.
+function diffuseTransmissionsAreEqual(first, second) {
+  if (!first || !second) return !first && !second;
+  if (!Object.is(first.weight, second.weight) || first.tintsBaseColor !== second.tintsBaseColor) return false;
+  return first.color.every((value, channel) => Object.is(value, second.color[channel]));
+}
+
+function materialRecordsAreEqual(first, second) {
+  if (first.isEmissive !== second.isEmissive || first.usesSubsurface !== second.usesSubsurface || first.alphaMode !== second.alphaMode) return false;
+  if (first.meanEmissiveRadiance.some((value, channel) => !Object.is(value, second.meanEmissiveRadiance[channel]))) return false;
+  if (!diffuseTransmissionsAreEqual(first.diffuseTransmission, second.diffuseTransmission)) return false;
+  const firstWords = materialRecordWords(first.bytes);
+  const secondWords = materialRecordWords(second.bytes);
+  for (let index = 0; index < firstWords.length; index++) {
+    if (firstWords[index] !== secondWords[index]) return false;
+  }
+  return true;
+}
+
 function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, reducedMaterials) {
-  const materialRecords = reducedMaterials
+  const partRecords = reducedMaterials
     ? reducedMaterials.materialRecords
     : rawMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
-  const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
-  materialRecords.forEach((rec, index) => materialsBuffer.set(rec.bytes, index * STRUCT_STRIDES_V2.material));
+  const { records: materialRecords, recordIndexOf } = shareEqualMaterialRecords(partRecords);
+  const { table: materialsBuffer } = packMaterialTable(materialRecords);
 
   const forceNonOpaqueGeometries = new Set();
   const firstDefaultMatByGeo = new Map();
@@ -2267,12 +2591,12 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, r
     const inst = instancesInput[instIdx];
     const geometry = inst?.geometry;
     if (!geometry) continue;
-    const defaultMat = Number(inst.materialIndex ?? 0);
+    const defaultMat = recordIndexOf(Number(inst.materialIndex ?? 0));
     if (!firstDefaultMatByGeo.has(geometry)) {
       firstDefaultMatByGeo.set(geometry, defaultMat);
     }
     const overrideMat = inst.materialOverride !== undefined
-      ? (inst.materialOverride >>> 0)
+      ? recordIndexOf(inst.materialOverride >>> 0)
       : (!geometry.triangleMaterial && defaultMat !== firstDefaultMatByGeo.get(geometry) ? (defaultMat >>> 0) : INVALID_INDEX_V2);
     if (overrideMat !== INVALID_INDEX_V2) {
       const matAlphaMode = materialRecords[overrideMat]?.alphaMode ?? ALPHA_MODE_OPAQUE;
@@ -2293,9 +2617,9 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, r
     if (!geometry?.positions || !geometry?.indices) {
       throw new TypeError(`Instance[${instIdx}] requires a geometry with positions and indices.`);
     }
-    const defaultMaterialIndex = Number(inst.materialIndex ?? 0);
+    const defaultMaterialIndex = recordIndexOf(Number(inst.materialIndex ?? 0));
     let materialOverride = inst.materialOverride !== undefined
-      ? (inst.materialOverride >>> 0)
+      ? recordIndexOf(inst.materialOverride >>> 0)
       : (inst.overrideMaterial === true ? (defaultMaterialIndex >>> 0) : INVALID_INDEX_V2);
 
     let meshSlot = meshCache.get(geometry);
@@ -2306,7 +2630,7 @@ function packInstancedGeometry(instancesInput, rawMaterials, textureCollector, r
       const opaque = [];
       const cutout = [];
       for (let t = 0; t < triCount; t++) {
-        const item = buildGeometryTriangleItem(geometry, t, defaultMaterialIndex, blasIndex, materialRecords);
+        const item = buildGeometryTriangleItem(geometry, t, defaultMaterialIndex, blasIndex, materialRecords, recordIndexOf);
         if (item.isOpaque && !forceNonOpaque) {
           opaque.push(item);
         } else {
@@ -2412,8 +2736,7 @@ function packFlattenedTraceScene(scene, rawParts, textureCollector) {
     return rawMat ? { ...rawMat, ...resolvedMat } : resolvedMat;
   });
   const materialRecords = mergedMaterials.map(mat => packMaterialRecordV2(mat, textureCollector));
-  const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
-  materialRecords.forEach((rec, index) => materialsBuffer.set(rec.bytes, index * STRUCT_STRIDES_V2.material));
+  const { table: materialsBuffer } = packMaterialTable(materialRecords);
 
   const totalSceneTriangles = Math.floor((scene.indices?.length ?? 0) / 3);
   const trianglesByPart = new Map();
@@ -2546,7 +2869,7 @@ export function buildNativeInputV2(scene, camera, options = {}) {
       throw new TypeError('buildNativeInputV2 option `reducedMaterials` must be the result of reduceV1MaterialTable (materialRecords and textureCollector).');
     }
   }
-  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector({ textureMips: options.textureMips });
+  const textureCollector = reducedMaterials?.textureCollector ?? createTextureCollector({ textureMips: options.textureMips, texturePoolMaxBytes: options.texturePoolMaxBytes });
   const packedGeometry = explicitInstances
     ? packInstancedGeometry(explicitInstances, options.materials ?? scene.materials ?? [{}], textureCollector, reducedMaterials)
     : packFlattenedTraceScene(scene, options.parts ?? scene.parts, textureCollector);
@@ -2607,6 +2930,18 @@ export function buildNativeInputV2(scene, camera, options = {}) {
   };
 }
 
+// The words of a texture that was never copied into an atlas (`packVirtualAtlas` in pack-input.mjs): its RGBA8 bytes as
+// little-endian words, the layout the atlas rows hold.
+function virtualTextureWords(texture, width, height) {
+  const byteCount = width * height * 4;
+  if (texture.data.length < byteCount) {
+    throw new RangeError(`A ${width}x${height} material texture needs ${byteCount} bytes of RGBA8 pixels but its data holds ${texture.data.length}. Pass data of width * height * 4 bytes.`);
+  }
+  const words = new Uint32Array(width * height);
+  new Uint8Array(words.buffer).set(texture.data.subarray(0, byteCount));
+  return words;
+}
+
 function extractAtlasSubtexture(atlasWords, atlasWidth, rectX, rectY, width, height) {
   const words = new Uint32Array(width * height);
   for (let row = 0; row < height; row++) {
@@ -2652,9 +2987,11 @@ function withCarriedFields(descriptor, carried, textureCollector) {
  * `carriedFields`, when given, holds one `carriedMaterialFields` result per material for everything the tables cannot hold
  * (blend opacity, sheen, specular, anisotropy, iridescence, attenuation, the layer textures and the rest of the record).
  * `materials` holds the table with the subsurface table after it, `atlas` the atlas words and `atlasWidth` their row width.
+ * `virtualTextures`, when given, replaces the atlas: the rectangle of a map is `{ x: its index in that list, y: 0 }` and the
+ * map is read from the list, so the texture pool is the only limit on the maps.
  */
-export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields, textureMips }) {
-  const textureCollector = createTextureCollector({ textureMips });
+export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords, atlasWidth, subsurfaceVec4Offset, materialCount, carriedFields, textureMips, virtualTextures, texturePoolMaxBytes }) {
+  const textureCollector = createTextureCollector({ textureMips, texturePoolMaxBytes });
   const atlasCache = new Map();
 
   function registerAtlasRect(rectX, rectY, width, height, flagsValue) {
@@ -2672,8 +3009,9 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
     }
     const repeat = (flags & 1) !== 0;
     const isSrgb = (flags & 2) !== 0;
-    const subWords = extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h);
-    const added = textureCollector.addPackedRgba8Words(subWords, w, h, isSrgb, repeat);
+    const added = virtualTextures
+      ? textureCollector.addPackedRgba8Words(() => virtualTextureWords(virtualTextures[x], w, h), w, h, isSrgb, repeat)
+      : textureCollector.addPackedRgba8Words(extractAtlasSubtexture(atlasWords, atlasWidth, x, y, w, h), w, h, isSrgb, repeat);
     atlasCache.set(key, added);
     return added;
   }
@@ -2750,9 +3088,10 @@ export function reduceV1MaterialTable({ materials: matSource, atlas: atlasWords,
  * Upgrades a legacy v1 `buildNativeInput` payload to `FORMAT-v2` (`schemaVersion: 2`) so existing callers passing v1
  * inputs with `kernel: 'cycles'` or `JS67_NATIVE_KERNEL=cycles` run without changing call sites. `carriedFields` (one
  * `carriedMaterialFields` result per material) adds what the v1 material table cannot hold; without it the records hold the
- * v1 fields alone.
+ * v1 fields alone. `partRayVisibility` (a flattened scene's `partRayVisibility`, one FORMAT-v2 visibility byte per material)
+ * sets the ray kinds each material's instance is visible to; without it a shadow-only material is hidden from camera rays alone.
  */
-export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = undefined) {
+export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = undefined, partRayVisibility = null) {
   if (v1Input?.schemaVersion === FORMAT_V2_VERSION) {
     return v1Input;
   }
@@ -2793,10 +3132,11 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
     materialCount,
     carriedFields,
     textureMips: options.textureMips,
+    virtualTextures: v1Input.virtualTextures,
+    texturePoolMaxBytes: options.texturePoolMaxBytes,
   });
 
-  const materialsBuffer = new Uint8Array(Math.max(1, materialRecords.length) * STRUCT_STRIDES_V2.material);
-  materialRecords.forEach((rec, idx) => materialsBuffer.set(rec.bytes, idx * STRUCT_STRIDES_V2.material));
+  const { table: materialsBuffer } = packMaterialTable(materialRecords);
 
   const trianglesByMat = new Map();
   for (let slot = 0; slot < triangleCount; slot++) {
@@ -2910,7 +3250,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
       opaqueTriangleCount: opaque.length,
       totalTriangleCount: ordered.length,
       materialOverride: INVALID_INDEX_V2,
-      visibilityFlags: materialShadowOnly[matIdx] ? INSTANCE_DEFAULT_VISIBILITY & ~INSTANCE_VISIBILITY_CAMERA : INSTANCE_DEFAULT_VISIBILITY,
+      visibilityFlags: partRayVisibility?.[matIdx] ?? (materialShadowOnly[matIdx] ? INSTANCE_DEFAULT_VISIBILITY & ~INSTANCE_VISIBILITY_CAMERA : INSTANCE_DEFAULT_VISIBILITY),
       lightGroupMaskLo: maskLo,
       lightGroupMaskHi: maskHi,
       emissiveBaseOffset,
@@ -2972,6 +3312,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
         blend: lightFloats[b + 19],
         intensity: lightFloats[b + 20],
         range: lightFloats[b + 21],
+        softFalloff: lightFloats[b + 22] === 1,
       });
     } else {
       reconstructedLights.points.push({
@@ -2981,6 +3322,7 @@ export function upgradeNativeInputV1ToV2(v1Input, options = {}, carriedFields = 
         radius: lightFloats[b + 11],
         intensity: lightFloats[b + 20],
         range: lightFloats[b + 21],
+        softFalloff: lightFloats[b + 22] === 1,
       });
     }
   }

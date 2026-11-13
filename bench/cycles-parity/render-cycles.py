@@ -23,6 +23,20 @@ RAY_VISIBILITY_ATTRIBUTES = {
     "camera": "visible_camera", "diffuse": "visible_diffuse", "glossy": "visible_glossy",
     "transmission": "visible_transmission", "volumeScatter": "visible_volume_scatter", "shadow": "visible_shadow",
 }
+
+# Set by --soft-falloff. Blender 4 and later build a point or spot light with a radius as an oriented disk while Light.use_soft_falloff
+# is on (the default) and as a sphere while it is off. Cook draws the sphere unless a light carries `softFalloff: true`, so without the flag
+# each light follows its own `softFalloff` field and a light without one is a sphere. `--soft-falloff default|on|off` overrides every light
+# (default keeps the Blender default, represented here by None).
+SOFT_FALLOFF_FROM_SCENE = "scene"
+soft_falloff_setting = SOFT_FALLOFF_FROM_SCENE
+# Set by --light-mis off: lights stop being hit by BSDF rays and are sampled by next event estimation only (a diagnostic).
+light_mis_enabled = True
+# Set by --radiance-cap. Cook and the 67js runtime limit the texels of a sky map before they are interpolated (before-lookup, the default);
+# the Blender world used to limit the interpolated value instead (after-lookup), which lets the texels beside a very bright spot add energy.
+radiance_cap_before_lookup = True
+# Set by --cycles-property name=value (repeatable): diagnostic overrides of scene.cycles properties, such as light_sampling_threshold=0.
+cycles_property_assignments = []
 Y_UP_TO_Z_UP = Matrix((
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 0.0, -1.0, 0.0),
@@ -54,12 +68,31 @@ GREY_DIFFUSE_ENTRY = {"color": [0.8, 0.8, 0.8], "metallic": 0.0, "roughness": 1.
 DEFAULT_DEPTH_SAMPLES = 64
 
 
+SOFT_FALLOFF_VALUES = {"default": None, "on": True, "off": False}
+
+
+def read_soft_falloff(argument_list):
+    if "--soft-falloff" not in argument_list:
+        return SOFT_FALLOFF_FROM_SCENE
+    value = read_flag_value(argument_list, "--soft-falloff", "off")
+    if value not in SOFT_FALLOFF_VALUES:
+        raise ValueError(f"--soft-falloff must be default, on or off, got {value!r}.")
+    return SOFT_FALLOFF_VALUES[value]
+
+
+def read_radiance_cap_order(argument_list):
+    value = read_flag_value(argument_list, "--radiance-cap", "before-lookup")
+    if value not in ("before-lookup", "after-lookup"):
+        raise ValueError(f"--radiance-cap must be before-lookup or after-lookup, got {value!r}.")
+    return value == "before-lookup"
+
+
 def parse_cli_arguments():
     if "--" not in sys.argv:
         raise ValueError("Pass script arguments after '--': <sceneJsonPath> <outputPrefix> [options].")
     argument_list = sys.argv[sys.argv.index("--") + 1:]
     if len(argument_list) < 2 or argument_list[0].startswith("--") or argument_list[1].startswith("--"):
-        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
+        raise ValueError("Usage: blender -b --factory-startup --python bench/cycles-parity/render-cycles.py -- <sceneJsonPath> <outputPrefix> [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--keep-exr] [--part-ids] [--grey-diffuse] [--radiance-cap before-lookup|after-lookup] [--world-property name=value] [--soft-falloff default|on|off (default: each light's softFalloff field, off when absent)] [--z-depth] [--depth-samples 64] [--denoise none|oidn-gpu|oidn-cpu] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]")
     return {
         "scene_json_path": os.path.abspath(argument_list[0]),
         "output_prefix": os.path.abspath(argument_list[1]),
@@ -86,6 +119,9 @@ def parse_cli_arguments():
         "aperture_blades": int(read_flag_value(argument_list, "--aperture-blades", "0")),
         "aperture_rotation": float(read_flag_value(argument_list, "--aperture-rotation", "0")),
         "sensor_width": float(read_flag_value(argument_list, "--sensor-width", "36")),
+        "soft_falloff": read_soft_falloff(argument_list),
+        "light_mis": read_flag_value(argument_list, "--light-mis", "on") != "off",
+        "radiance_cap_before_lookup": read_radiance_cap_order(argument_list),
     }
 
 
@@ -294,6 +330,44 @@ def configure_principled_layers(material, principled_node, material_entry):
         material.node_tree.links.new(absorption_node.outputs["Volume"], output_node.inputs["Volume"])
 
 
+def configure_diffuse_transmission(material, principled_node, material_entry, has_vertex_colors):
+    """Cook's `diffuseTransmission` splits the diffuse layer between the reflecting lobe and a cosine lobe on the far side.
+
+    Blender 5.3's Principled BSDF has no diffuse transmission weight, so the split is built from nodes: the Principled BSDF
+    keeps `(1 - weight) * base colour`, and a Translucent BSDF tinted by `weight * colour` is added to it. The specular layer
+    stays whole, which matches Cook where the material has no specular lobe (`specular: 0`, as the parity scenes use).
+    """
+    weight = material_entry.get("diffuseTransmission", 0.0)
+    if weight <= 0.0:
+        return
+    unsupported_layers = []
+    if material_entry.get("metallic", 0.0) > 0.0:
+        unsupported_layers.append("metallic")
+    if material_entry.get("transmission", 0.0) > 0.0 or material_entry.get("tag") == "liquid":
+        unsupported_layers.append("transmission")
+    if (material_entry.get("subsurface") or {}).get("weight", 0.0) > 0.0:
+        unsupported_layers.append("subsurface")
+    if unsupported_layers:
+        raise ValueError(
+            "diffuseTransmission is measured for dielectric, non-glass, non-subsurface materials only: the kernel scales the "
+            "diffuse layer by what metal, glass and subsurface leave of it, and the Translucent node added here does not. "
+            "Remove " + ", ".join(unsupported_layers) + " from the material."
+        )
+    if "map" in material_entry or has_vertex_colors:
+        raise ValueError("diffuseTransmission is mapped for a plain base colour only: remove the map or the vertex colours.")
+    base_color = material_entry["color"]
+    transmission_color = material_entry.get("diffuseTransmissionColor", base_color)
+    set_linear_rgba_socket(principled_node.inputs["Base Color"], [channel * (1.0 - weight) for channel in base_color])
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    translucent_node = nodes.new("ShaderNodeBsdfTranslucent")
+    set_linear_rgba_socket(translucent_node.inputs["Color"], [channel * weight for channel in transmission_color])
+    add_node = nodes.new("ShaderNodeAddShader")
+    links.new(principled_node.outputs["BSDF"], add_node.inputs[0])
+    links.new(translucent_node.outputs["BSDF"], add_node.inputs[1])
+    links.new(add_node.outputs["Shader"], nodes["Material Output"].inputs["Surface"])
+
+
 def build_blender_material(material_name, material_entry, has_vertex_colors, image_entries, built_images):
     material = bpy.data.materials.new(material_name)
     principled_node = material.node_tree.nodes["Principled BSDF"]
@@ -316,6 +390,7 @@ def build_blender_material(material_name, material_entry, has_vertex_colors, ima
         connect_base_color_texture(material, principled_node, material_entry, has_vertex_colors, image_entries, built_images)
     elif has_vertex_colors:
         connect_vertex_colors(material, principled_node, material_entry)
+    configure_diffuse_transmission(material, principled_node, material_entry, has_vertex_colors)
     return material
 
 
@@ -348,6 +423,16 @@ def build_scene_objects(scene, description):
         scene.collection.objects.link(mesh_object)
 
 
+def limit_image_radiance(image, radiance_limit):
+    channel_count = image.channels
+    pixels = numpy.empty(image.size[0] * image.size[1] * channel_count, dtype=numpy.float32)
+    image.pixels.foreach_get(pixels)
+    colors = pixels.reshape(-1, channel_count)
+    colors[:, :3] = numpy.minimum(colors[:, :3], radiance_limit)
+    image.pixels.foreach_set(colors.reshape(-1))
+    image.update()
+
+
 def build_world_shader(scene, world_description, repository_root):
     world = bpy.data.worlds.new("World")
     scene.world = world
@@ -365,6 +450,8 @@ def build_world_shader(scene, world_description, repository_root):
         mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, ENVIRONMENT_ROTATION_Z)
         environment_node = nodes.new("ShaderNodeTexEnvironment")
         environment_node.image = bpy.data.images.load(os.path.join(repository_root, world_description["file"]))
+        if radiance_cap_before_lookup:
+            limit_image_radiance(environment_node.image, world_description["radianceLimit"])
         links.new(coordinate_node.outputs["Generated"], mapping_node.inputs["Vector"])
         links.new(mapping_node.outputs["Vector"], environment_node.inputs["Vector"])
         cap_node = nodes.new("ShaderNodeVectorMath")
@@ -387,11 +474,21 @@ def attach_light_receivers(light_object, receiver_names):
     light_object.light_linking.receiver_collection = receiver_collection
 
 
+def apply_soft_falloff_setting(light_data, light_entry):
+    if soft_falloff_setting == SOFT_FALLOFF_FROM_SCENE:
+        light_data.use_soft_falloff = light_entry.get("softFalloff") is True
+    elif soft_falloff_setting is not None:
+        light_data.use_soft_falloff = soft_falloff_setting
+    if not light_mis_enabled:
+        light_data.cycles.use_multiple_importance_sampling = False
+
+
 def add_spot_light(scene, light_index, spot_entry):
     light_data = bpy.data.lights.new(f"Spot-{light_index}", "SPOT")
     light_data.energy = spot_entry["intensity"] * WATTS_PER_POINT_INTENSITY
     light_data.color = spot_entry["color"]
     light_data.shadow_soft_size = spot_entry["radius"]
+    apply_soft_falloff_setting(light_data, spot_entry)
     light_data.spot_size = 2.0 * spot_entry["angle"]
     light_data.spot_blend = spot_entry["penumbra"]
     spot_object = bpy.data.objects.new(f"Spot-{light_index}", light_data)
@@ -451,6 +548,7 @@ def build_scene_lights(scene, environment_entry):
         point_data.energy = point_entry["intensity"] * WATTS_PER_POINT_INTENSITY
         point_data.color = point_entry["color"]
         point_data.shadow_soft_size = point_entry["radius"]
+        apply_soft_falloff_setting(point_data, point_entry)
         point_object = bpy.data.objects.new(f"Point-{light_index}", point_data)
         point_object.location = convert_position_to_blender(point_entry["position"])
         scene.collection.objects.link(point_object)
@@ -556,7 +654,49 @@ def configure_cycles_parity(scene, options):
     scene.cycles.volume_bounces = bounces
     transparent_bounces = options["transparent_bounces"]
     scene.cycles.transparent_max_bounces = bounces if transparent_bounces is None else transparent_bounces
+    for property_assignment in cycles_property_assignments:
+        apply_cycles_property(scene, property_assignment)
     return used_devices
+
+
+# One --cycles-property name=value, applied after every setting above so that the override is what renders.
+def apply_cycles_property(scene, property_assignment):
+    if "=" not in property_assignment:
+        raise ValueError(f"--cycles-property takes name=value, got {property_assignment!r}.")
+    property_name, property_text = property_assignment.split("=", 1)
+    if not hasattr(scene.cycles, property_name):
+        raise ValueError(f"--cycles-property names a scene.cycles property, and {property_name!r} is not one.")
+    current_value = getattr(scene.cycles, property_name)
+    try:
+        property_value = json.loads(property_text)
+    except json.JSONDecodeError:
+        raise ValueError(f"--cycles-property {property_name} takes a JSON value such as 0, 0.5, true or \"NAME\", got {property_text!r}.")
+    if isinstance(current_value, bool) != isinstance(property_value, bool):
+        raise ValueError(f"--cycles-property {property_name} is {'a boolean' if isinstance(current_value, bool) else 'not a boolean'}, got {property_text!r}.")
+    if isinstance(current_value, int) and not isinstance(property_value, int):
+        raise ValueError(f"--cycles-property {property_name} is a whole number, got {property_text!r}.")
+    if isinstance(current_value, str) != isinstance(property_value, str):
+        raise ValueError(f"--cycles-property {property_name} is {'a name in quotes' if isinstance(current_value, str) else 'a number'}, got {property_text!r}.")
+    setattr(scene.cycles, property_name, type(current_value)(property_value))
+
+
+# One --world-property name=value (a diagnostic): sets a property of the world's Cycles settings, such as sampling_method="NONE"
+# (the sky is then found by BSDF sampling only) or sample_map_resolution=4096. Blender versions keep these on world.cycles or on world.
+def apply_world_property(world, property_assignment):
+    if "=" not in property_assignment:
+        raise ValueError(f"--world-property takes name=value, got {property_assignment!r}.")
+    property_name, property_text = property_assignment.split("=", 1)
+    try:
+        property_value = json.loads(property_text)
+    except json.JSONDecodeError:
+        raise ValueError(f"--world-property {property_name} takes a JSON value such as 0, 0.5, true or \"NAME\", got {property_text!r}.")
+    for owner in (world.cycles, world):
+        if hasattr(owner, property_name):
+            setattr(owner, property_name, property_value)
+            print("WORLD_PROPERTY " + json.dumps({"name": property_name, "value": property_value, "readBack": str(getattr(owner, property_name))}))
+            return
+    sampling_names = [name for name in dir(world.cycles) + dir(world) if "sampl" in name or "resolution" in name]
+    raise ValueError(f"--world-property {property_name!r} is on neither world.cycles nor world; names that mention sampling: {sampling_names}")
 
 
 def parse_megabytes_from_stats(stats_text):
@@ -710,8 +850,28 @@ def main():
     build_started = time.perf_counter()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
+    global soft_falloff_setting
+    soft_falloff_setting = options["soft_falloff"]
+    global light_mis_enabled
+    light_mis_enabled = options["light_mis"]
+    global radiance_cap_before_lookup
+    radiance_cap_before_lookup = options["radiance_cap_before_lookup"]
+    global cycles_property_assignments
+    cycles_property_assignments = []
+    for index, token in enumerate(sys.argv):
+        if token != "--cycles-property":
+            continue
+        if index + 1 >= len(sys.argv):
+            raise ValueError("--cycles-property takes name=value after it.")
+        cycles_property_assignments.append(sys.argv[index + 1])
     build_scene_objects(scene, description)
     build_world_shader(scene, description["world"], repository_root)
+    for index, token in enumerate(sys.argv):
+        if token != "--world-property":
+            continue
+        if index + 1 >= len(sys.argv):
+            raise ValueError("--world-property takes name=value after it.")
+        apply_world_property(scene.world, sys.argv[index + 1])
     build_scene_lights(scene, description["environment"])
     lens_options = resolve_lens_options(options, description["camera"])
     build_camera_object(scene, description["camera"], lens_options, options["width"] / options["height"])

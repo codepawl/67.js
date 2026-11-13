@@ -1,4 +1,5 @@
 // Renders the reference scenes in 67js and Blender, then scores them: npm run reference
+// --default-look [--skip-blender] [--scene <id>,<id>] scores four bare scenes in 67js and three.js against Cycles (default-look.mjs, issue #988); nothing else here runs.
 // --ambient-occlusion <strength> [--ambient-occlusion-radius <units>] turns occlusion on (off by default).
 // --bake [<id>,<id>] [--bake-preset <name>] bakes bounced light into the named scenes (every scene when no ids follow) before 67js draws them;
 // Blender still gets the plain scene.
@@ -15,6 +16,13 @@ import { constants, setPriority } from 'node:os';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+
+// --default-look scores bare scenes in 67js and three.js against Cycles (issue #988): bench/reference/default-look.mjs.
+if (process.argv.includes('--default-look')) {
+  const { runDefaultLook } = await import('./default-look.mjs');
+  await runDefaultLook(process.argv.slice(2));
+  process.exit(process.exitCode ?? 0);
+}
 
 // --khronos draws the Khronos sample assets in artifacts/khronos (Blender imports the same files) into their own work
 // directory, and scores them into khronos.json. Nothing in baseline.json or images/<scene>.jpg changes.

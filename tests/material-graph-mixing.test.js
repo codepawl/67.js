@@ -125,3 +125,16 @@ test('scene_capabilities lists the new outputs and mixing nodes', () => {
     assert.ok(nodes.mixing.includes(`"${name}"`), name);
   }
 });
+
+test('describeIgnoredFeatures names softFalloff on a point or spot light unless the native cycles kernel draws it', () => {
+  const softFalloffNote = /softFalloff is ignored/;
+  const softPoint = { pointLights: [{ position: [0, 2, 0], radius: 0.2, softFalloff: true }] };
+  const softSpot = { spotLights: [{ position: [0, 2, 0], direction: [0, -1, 0], radius: 0.2, softFalloff: true }] };
+  const spherePoint = { pointLights: [{ position: [0, 2, 0], radius: 0.2, softFalloff: false }, { position: [1, 2, 0], radius: 0.2 }] };
+  for (const backend of ['cpu', 'gpu', 'webgpu']) {
+    assert.ok(describeIgnoredFeatures([], softPoint, backend).some(note => softFalloffNote.test(note)));
+    assert.ok(describeIgnoredFeatures([], softSpot, backend).some(note => softFalloffNote.test(note)));
+  }
+  assert.ok(!describeIgnoredFeatures([], spherePoint).some(note => softFalloffNote.test(note)));
+  assert.ok(!describeIgnoredFeatures([], softPoint, 'cpu', { kernelMaterials: true }).some(note => softFalloffNote.test(note)));
+});

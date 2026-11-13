@@ -120,4 +120,6 @@ const THREE = createThreeCompat({ ...core, loadGltf });
 
 It accepts `Scene`, `Group`, `Mesh`, the box, plane, sphere, cylinder and torus geometries, `MeshStandardMaterial`, `MeshPhysicalMaterial`, both cameras, the light classes, `GLTFLoader`, `OrbitControls` and `WebGLRenderer` with `setAnimationLoop`. For any other three.js name it throws an error that names the 67js call to use. For example, `THREE.MeshBasicMaterial` tells you to use `MeshStandardMaterial` with `emissive`, which is `material.emission` in 67js.
 
+To move a scene you already have, the [three.js bridge](../three-bridge.md) imports a three.js object tree as 67js parts and builds three.js meshes from parts.
+
 The addon is a bridge for code that an agent writes from memory. For new code, write parts directly: it is shorter and has no extra layer.

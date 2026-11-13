@@ -103,8 +103,20 @@ async function renderVariant({ label, noFloor, directory }) {
   console.log(`${label}: ${COLD_TASKS.length * VIEW_ORDER.length} images`);
 }
 
-function imageBlock(bytes) {
+export function imageBlock(bytes) {
   return { type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } };
+}
+
+/** One headless `claude -p` call on the subscription with no tools. `content` is a list of text and image blocks. */
+export function callClaudeJudge({ claude, model, content }) {
+  const message = JSON.stringify({ type: 'user', message: { role: 'user', content } });
+  const result = spawnSync(claude, ['-p', '--model', model, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    '--tools', '', '--system-prompt', JUDGE_ROLE, '--strict-mcp-config', '--no-session-persistence', '--max-budget-usd', '0.2'],
+  { input: `${message}\n`, encoding: 'utf8', timeout: 300000, maxBuffer: 64 * 1024 * 1024 });
+  const final = result.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line)).find(event => event.type === 'result');
+  const text = String(final?.result ?? '');
+  const match = /WINNER:\s*(first|second)/i.exec(text);
+  return { answer: match ? match[1].toLowerCase() : null, costUsd: final?.total_cost_usd ?? 0, note: text.split('\n').find(line => line.trim()) };
 }
 
 function askJudge({ claude, model, firstDirectory, secondDirectory, taskId }) {
@@ -114,14 +126,7 @@ function askJudge({ claude, model, firstDirectory, secondDirectory, taskId }) {
       content.push({ type: 'text', text: `View "${view}", first render:` }, imageBlock(images[view].first));
       content.push({ type: 'text', text: `View "${view}", second render:` }, imageBlock(images[view].second));
     }
-    const message = JSON.stringify({ type: 'user', message: { role: 'user', content } });
-    const result = spawnSync(claude, ['-p', '--model', model, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-      '--tools', '', '--system-prompt', JUDGE_ROLE, '--strict-mcp-config', '--no-session-persistence', '--max-budget-usd', '0.2'],
-    { input: `${message}\n`, encoding: 'utf8', timeout: 300000, maxBuffer: 64 * 1024 * 1024 });
-    const final = result.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line)).find(event => event.type === 'result');
-    const text = String(final?.result ?? '');
-    const match = /WINNER:\s*(first|second)/i.exec(text);
-    return { answer: match ? match[1].toLowerCase() : null, costUsd: final?.total_cost_usd ?? 0, note: text.split('\n').find(line => line.trim()) };
+    return callClaudeJudge({ claude, model, content });
   });
 }
 

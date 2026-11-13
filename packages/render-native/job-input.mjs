@@ -2,9 +2,10 @@
 // FORMAT-v2 material record holds, so the job takes what the tables carry from the tables (a scene that uses nothing else packs
 // to the bytes it always did) and lays the rest of the material over it: blend opacity, sheen, specular, anisotropy,
 // iridescence, attenuation and the layer textures. A flattened scene and an instanced one go through the same records, so a
-// part looks the same whether or not other geometry in the scene is shared.
-import { buildNativeInput, packNativeMaterialTables } from './pack-input.mjs';
-import { buildNativeInputV2, reduceV1MaterialTable, upgradeNativeInputV1ToV2 } from './pack-input-v2.mjs';
+// part looks the same whether or not other geometry in the scene is shared. The maps go from the materials into the FORMAT-v2
+// texture pool without the v1 atlas, so the pool (1 GiB) is the limit on them, not the atlas (4096 x 16384 texels).
+import { buildNativeV1Tables, packNativeMaterialTables, withVirtualAtlas } from './pack-input.mjs';
+import { buildNativeInputV2, reduceV1MaterialTable, upgradeNativeInputV1ToV2, validateDiffuseTransmission } from './pack-input-v2.mjs';
 
 const ALL_LIGHT_GROUPS = 0xffffffff;
 
@@ -49,8 +50,20 @@ function cyclesAnisotropyFields(material, roughness) {
   };
 }
 
+// A thin sheet that lets diffuse light through (a curtain, a leaf, a lampshade): the share of the diffuse layer that leaves
+// through the far side, and the colour of that light (the base colour when it is left out). The ranges follow the other layers
+// of material-layers.js: a weight between 0 and 1, a linear colour with each channel between 0 and 1.
+function diffuseTransmissionFields(material) {
+  validateDiffuseTransmission(material);
+  const { diffuseTransmission, diffuseTransmissionColor } = material;
+  if (!(diffuseTransmission > 0)) return {};
+  const fields = { diffuseTransmission };
+  if (diffuseTransmissionColor !== undefined) fields.diffuseTransmissionColor = Array.from(diffuseTransmissionColor);
+  return fields;
+}
+
 function layerFields(material, resolved) {
-  const fields = {};
+  const fields = { ...diffuseTransmissionFields(material) };
   if (material.specular !== undefined) fields.specular = material.specular;
   if (material.specularColor !== undefined && !isWhite(material.specularColor)) fields.specularColor = material.specularColor;
   if (material.anisotropy > 0) Object.assign(fields, cyclesAnisotropyFields(material, resolved.roughness));
@@ -156,15 +169,17 @@ export function buildJobNativeInput(scene, camera, options, pack, resolveTexture
   if (!scene?.instances || !scene.traceMaterials) {
     throw new TypeError('buildJobNativeInput packs an instanced scene: build it with buildTraceScene(parts, environment, { instancing: true }) and share a geometry between two parts.');
   }
-  const tables = packNativeMaterialTables(scene.traceMaterials, null, pack);
+  const tables = packNativeMaterialTables(scene.traceMaterials, null, withVirtualAtlas(pack));
   const reducedMaterials = reduceV1MaterialTable({
     materials: tables.materials,
     atlas: tables.atlas,
     atlasWidth: tables.atlasWidth,
+    virtualTextures: tables.virtualTextures,
     subsurfaceVec4Offset: tables.subsurfaceVec4Offset,
     materialCount: scene.traceMaterials.length,
     carriedFields: carriedMaterialFieldsOfScene(scene, resolveTexture),
     textureMips: options.textureMips,
+    texturePoolMaxBytes: options.texturePoolMaxBytes,
   });
   const instances = scene.instances.map(instance => {
     const lightMask = reducedMaterials.materialLightMasks[instance.materialIndex] ?? ALL_LIGHT_GROUPS;
@@ -185,6 +200,7 @@ export function buildFlattenedJobNativeInput(scene, camera, options, pack, resol
   const upgradeOptions = {
     ...(options.samples === undefined ? {} : { samples: options.samples }),
     ...(options.textureMips === undefined ? {} : { textureMips: options.textureMips }),
+    ...(options.texturePoolMaxBytes === undefined ? {} : { texturePoolMaxBytes: options.texturePoolMaxBytes }),
   };
-  return upgradeNativeInputV1ToV2(buildNativeInput(scene, camera, options, pack), upgradeOptions, carriedFields);
+  return upgradeNativeInputV1ToV2(buildNativeV1Tables(scene, camera, options, withVirtualAtlas(pack)), upgradeOptions, carriedFields, scene.partRayVisibility ?? null);
 }

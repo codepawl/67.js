@@ -14,9 +14,17 @@ import { liftRankedTriangles } from './flush-lift.js';
 // and colours, one resolved material per part, the lights in plain arrays, and the environment map as a sampling table.
 
 export const MAX_TRACE_TRIANGLES = 400_000;
+// The bound a scene built for the native "cycles" tracer may ask for with `options.maximumTriangles` (unique triangles of an
+// instanced scene, all triangles of a flattened one). The CPU and WebGL tracers never pass it and keep MAX_TRACE_TRIANGLES.
+export const MAX_NATIVE_TRACE_TRIANGLES = 4_000_000;
+// With that option an instanced scene also counts every copy: at most this many times `maximumTriangles` triangles in total.
+export const NATIVE_INSTANCED_TOTAL_FACTOR = 4;
 export const MAX_TRACE_PARTS = 1024;
 // An instanced trace counts triangles once per shared geometry and bounds the copies on their own.
 export const MAX_TRACE_INSTANCES = 65_536;
+// The bound a scene built for the native "cycles" tracer may ask for with `options.maximumInstances`. The CPU and WebGL tracers
+// never pass it and keep MAX_TRACE_INSTANCES.
+export const MAX_NATIVE_TRACE_INSTANCES = 1_000_000;
 export const MAX_TRACE_LIGHTS = 32;
 // A Blender sun of 1 degree, which is what the reference harness gives Cycles.
 export const SUN_ANGULAR_RADIUS = Math.PI / 360;
@@ -258,7 +266,30 @@ function writeWorldPart(world, part, geometry, partIndex, vertexOffset, triangle
   world.triangleMaterial.fill(partIndex, triangleOffset, triangleOffset + geometry.indices.length / 3);
 }
 
-function flattenParts(parts, geometries = parts.map(traceGeometry)) {
+/**
+ * The triangle bounds of one build: the CPU and WebGL default, or the native bound an exporter for the "cycles" kernel
+ * asks for with `maximumTriangles`. A bad value is refused here so a typo cannot lift the bound.
+ */
+function resolveTriangleLimits(options) {
+  const requested = options?.maximumTriangles;
+  if (requested === undefined) return { native: false, unique: MAX_TRACE_TRIANGLES, total: Infinity };
+  if (!Number.isInteger(requested) || requested < 1 || requested > MAX_NATIVE_TRACE_TRIANGLES) {
+    throw new RangeError(`buildTraceScene option maximumTriangles is an integer from 1 to ${MAX_NATIVE_TRACE_TRIANGLES} for the native path tracer, got ${requested}. Leave it out for the CPU and WebGL path tracers, which take at most ${MAX_TRACE_TRIANGLES} triangles.`);
+  }
+  return { native: true, unique: requested, total: requested * NATIVE_INSTANCED_TOTAL_FACTOR };
+}
+
+/** The instance bound of one build: the CPU and WebGL default, or the native bound asked for with `maximumInstances`. */
+function resolveInstanceLimit(options) {
+  const requested = options?.maximumInstances;
+  if (requested === undefined) return { native: false, count: MAX_TRACE_INSTANCES };
+  if (!Number.isInteger(requested) || requested < 1 || requested > MAX_NATIVE_TRACE_INSTANCES) {
+    throw new RangeError(`buildTraceScene option maximumInstances is an integer from 1 to ${MAX_NATIVE_TRACE_INSTANCES} for the native path tracer, got ${requested}. Leave it out for the CPU and WebGL path tracers, which take at most ${MAX_TRACE_INSTANCES} instances.`);
+  }
+  return { native: true, count: requested };
+}
+
+function flattenParts(parts, geometries = parts.map(traceGeometry), limits = resolveTriangleLimits()) {
   let vertexTotal = 0;
   let indexTotal = 0;
   parts.forEach((part, index) => validatePart(part, geometries[index]));
@@ -266,7 +297,11 @@ function flattenParts(parts, geometries = parts.map(traceGeometry)) {
     vertexTotal += geometry.positions.length / 3;
     indexTotal += geometry.indices.length;
   }
-  if (indexTotal / 3 > MAX_TRACE_TRIANGLES) throw new RangeError(`A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`);
+  if (indexTotal / 3 > limits.unique) {
+    throw new RangeError(limits.native
+      ? `A native path trace takes at most ${limits.unique} triangles in total, got ${indexTotal / 3}. Share geometry between copies (they stay instances) or simplify the meshes.`
+      : `A path trace takes at most ${MAX_TRACE_TRIANGLES} triangles in total.`);
+  }
   const world = allocateWorld(vertexTotal, indexTotal);
   let vertexOffset = 0;
   let triangleOffset = 0;
@@ -289,15 +324,24 @@ function traceProfile(light) {
   return light.ies === undefined ? null : lightShapeSupport.profile(light.ies);
 }
 
+// A point or spot light with a radius is a sphere unless it asks for the oriented disk of Blender's Soft Falloff. Only the `cycles` native kernel draws the disk.
+function softFalloffOf(light, label) {
+  if (light.softFalloff === undefined) return {};
+  if (typeof light.softFalloff !== 'boolean') {
+    throw new TypeError(`${label}.softFalloff must be true (a disk, as Blender's Soft Falloff) or false (a sphere), got ${JSON.stringify(light.softFalloff)}. Leave it out for the sphere.`);
+  }
+  return light.softFalloff ? { softFalloff: true } : {};
+}
+
 function resolveLights(environment) {
   const sunPower = Math.max(...(environment.keyColor ?? [0, 0, 0]));
   const lightCount = (environment.pointLights?.length ?? 0) + (environment.spotLights?.length ?? 0) + (environment.areaLights?.length ?? 0);
   if (lightCount > MAX_TRACE_LIGHTS) throw new RangeError(`A path trace takes at most ${MAX_TRACE_LIGHTS} point, spot and area lights.`);
   return {
     sun: sunPower > 0 ? { bit: SUN_BIT, direction: normalized(environment.lightDirection ?? [0, 1, 0]), color: environment.keyColor, angularRadius: environment.sunAngularRadius ?? SUN_ANGULAR_RADIUS } : null,
-    points: (environment.pointLights ?? []).map((light, index) => ({ bit: POINT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0 })),
+    points: (environment.pointLights ?? []).map((light, index) => ({ bit: POINT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0, ...softFalloffOf(light, `environment.pointLights[${index}]`) })),
     spots: (environment.spotLights ?? []).map((light, index) => ({
-      bit: SPOT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0,
+      bit: SPOT_FIRST_BIT + index, position: light.position, color: light.color, intensity: light.intensity, radius: light.radius ?? 0, range: light.range ?? 0, ...softFalloffOf(light, `environment.spotLights[${index}]`),
       direction: normalized(light.direction),
       cosineHalfAngle: Math.cos(light.angle),
       profile: traceProfile(light),
@@ -360,8 +404,80 @@ function resolveTraceLocalVolumes(input, parts) {
   return { volumes, boundsOnlyParts: parts.filter(part => meshPartNames.has(part.name) && part.visible === false) };
 }
 
-// Camera rays skip a shadow-only part; every other ray kind still sees it (visibility bits 2, 4, 8, 16 and 32 of FORMAT-v2).
-const INSTANCE_VISIBILITY_WITHOUT_CAMERA = 2 | 4 | 8 | 16 | 32;
+// FORMAT-v2 instance visibility bits, the same names a part's `rayVisibility` takes.
+export const RAY_VISIBILITY_BITS = Object.freeze({ camera: 1, diffuse: 2, glossy: 4, transmission: 8, shadow: 16, volumeScatter: 32 });
+const ALL_RAY_KINDS = 63;
+
+function describePart(part, index) {
+  return typeof part?.name === 'string' && part.name ? `part "${part.name}"` : `part ${index}`;
+}
+
+function requireRayVisibilityObject(rayVisibility, label) {
+  if (rayVisibility === null || typeof rayVisibility !== 'object' || Array.isArray(rayVisibility)) {
+    throw new TypeError(`${label} rayVisibility must be an object such as { shadow: false } with keys from ${Object.keys(RAY_VISIBILITY_BITS).join(', ')}, got ${JSON.stringify(rayVisibility)}.`);
+  }
+}
+
+function rayKindBit(kind, value, label) {
+  const bit = RAY_VISIBILITY_BITS[kind];
+  if (bit === undefined) {
+    throw new TypeError(`${label} rayVisibility has the unknown ray kind "${kind}": use ${Object.keys(RAY_VISIBILITY_BITS).join(', ')}.`);
+  }
+  if (typeof value !== 'boolean') {
+    throw new TypeError(`${label} rayVisibility.${kind} must be true or false, got ${JSON.stringify(value)}.`);
+  }
+  return bit;
+}
+
+/**
+ * The FORMAT-v2 visibility bits of one part: `rayVisibility: { camera, diffuse, glossy, transmission, shadow, volumeScatter }`
+ * (a kind set to false hides the part from those rays) and `shadowOnly` as camera off. `castShadow` is a raster flag that
+ * library code sets by default, so it never reaches these bits. A part that hides from nothing gets 63, every ray kind.
+ */
+export function partRayVisibilityFlags(part, index = 0) {
+  const label = describePart(part, index);
+  let flags = ALL_RAY_KINDS;
+  if (part.rayVisibility !== undefined) {
+    requireRayVisibilityObject(part.rayVisibility, label);
+    for (const [kind, value] of Object.entries(part.rayVisibility)) {
+      const bit = rayKindBit(kind, value, label);
+      if (value === false) flags &= ~bit;
+    }
+  }
+  requireEmitterStaysVisibleToBounces(part, flags, label);
+  if (part.shadowOnly === true) {
+    if ((flags & RAY_VISIBILITY_BITS.shadow) === 0) {
+      throw new TypeError(`${label} sets shadowOnly with rayVisibility.shadow: false, which would hide it from every ray: keep shadow rays on, or drop shadowOnly.`);
+    }
+    flags &= ~RAY_VISIBILITY_BITS.camera;
+  }
+  return flags;
+}
+
+const BOUNCE_RAY_BITS = RAY_VISIBILITY_BITS.diffuse | RAY_VISIBILITY_BITS.glossy | RAY_VISIBILITY_BITS.transmission;
+
+/**
+ * The kernel samples an emissive mesh by next-event estimation with a multiple-importance weight below 1 and weights its
+ * bounce hits to match. Hiding the emitter from a bounce ray culls those hits while the sampled share stays, so part of its
+ * light would vanish. Camera, shadow and volume rays do not take part in that weighting, so those stay allowed.
+ */
+function requireEmitterStaysVisibleToBounces(part, flags, label) {
+  if ((flags & BOUNCE_RAY_BITS) === BOUNCE_RAY_BITS) return;
+  if (!(part.material?.emission > 0)) return;
+  throw new TypeError(`${label} emits light and sets rayVisibility.diffuse, glossy or transmission to false, which would drop part of its light. Hide an emitter with camera: false or shadow: false instead, or keep diffuse, glossy and transmission true.`);
+}
+
+// True when the part's rayVisibility turns at least one ray kind off; an empty object or all true is the default.
+function hidesFromSomeRay(part) {
+  return part.rayVisibility !== undefined && Object.values(part.rayVisibility).includes(false);
+}
+
+// One byte per part for a flattened scene, or null when no part hides from a ray kind (shadowOnly alone keeps its own path).
+function flattenedRayVisibility(parts) {
+  const flags = parts.map((part, index) => partRayVisibilityFlags(part, index));
+  if (!parts.some(hidesFromSomeRay)) return null;
+  return Uint8Array.from(flags);
+}
 
 /**
  * True when the part keeps the geometry object it was authored with, so its copies can share one bottom-level structure.
@@ -385,9 +501,11 @@ function measureInstancedParts(parts, geometries) {
   const seen = new Set();
   let uniqueGeometries = 0;
   let uniqueTriangles = 0;
+  let totalTriangles = 0;
   parts.forEach((part, index) => {
     const geometry = geometries[index];
     validateMatrix(part);
+    totalTriangles += geometry.indices.length / 3;
     if (sharesAuthoredGeometry(part, geometry)) {
       if (seen.has(geometry)) return;
       seen.add(geometry);
@@ -396,18 +514,21 @@ function measureInstancedParts(parts, geometries) {
     uniqueGeometries++;
     uniqueTriangles += geometry.indices.length / 3;
   });
-  return { uniqueGeometries, uniqueTriangles };
+  return { uniqueGeometries, uniqueTriangles, totalTriangles };
 }
 
-function requireInstancedCaps(parts, { uniqueGeometries, uniqueTriangles }) {
-  if (parts.length > MAX_TRACE_INSTANCES) {
-    throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_INSTANCES} instances, got ${parts.length}. Pass fewer parts, or merge small copies into one mesh.`);
+function requireInstancedCaps(parts, { uniqueGeometries, uniqueTriangles, totalTriangles }, limits) {
+  if (parts.length > limits.instances.count) {
+    throw new RangeError(`An instanced ${limits.instances.native ? 'native ' : ''}path trace takes at most ${limits.instances.count} instances, got ${parts.length}. Pass fewer parts, or merge small copies into one mesh.`);
   }
   if (uniqueGeometries > MAX_TRACE_PARTS) {
     throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_PARTS} distinct geometries, got ${uniqueGeometries}. Share one geometry object between copies instead of building a new one per part.`);
   }
-  if (uniqueTriangles > MAX_TRACE_TRIANGLES) {
-    throw new RangeError(`An instanced path trace takes at most ${MAX_TRACE_TRIANGLES} unique triangles, counted once per shared geometry, got ${uniqueTriangles}. Share geometry between copies or simplify the meshes.`);
+  if (uniqueTriangles > limits.unique) {
+    throw new RangeError(`An instanced path trace takes at most ${limits.unique} unique triangles, counted once per shared geometry, got ${uniqueTriangles}. Share geometry between copies or simplify the meshes.`);
+  }
+  if (totalTriangles > limits.total) {
+    throw new RangeError(`An instanced native path trace takes at most ${limits.total} triangles with every copy counted, got ${totalTriangles}. Pass fewer copies of the large meshes or simplify them.`);
   }
 }
 
@@ -429,7 +550,8 @@ function instanceFor(part, geometry, partIndex, material) {
     lightMask: material.lightMask,
   };
   if (part.material?.lightMaskHi !== undefined) instance.lightMaskHi = part.material.lightMaskHi;
-  if (part.shadowOnly === true) instance.visibilityFlags = INSTANCE_VISIBILITY_WITHOUT_CAMERA;
+  const visibilityFlags = partRayVisibilityFlags(part, partIndex);
+  if (visibilityFlags !== ALL_RAY_KINDS) instance.visibilityFlags = visibilityFlags;
   return instance;
 }
 
@@ -471,8 +593,8 @@ function boundingBoxOf(positions) {
  * list a flattened scene calls `materials`), with no world-space triangle arrays and no CPU BVH. Only
  * `buildNativeInputV2` reads this shape, for the native "cycles" kernel.
  */
-function buildInstancedTraceScene(parts, geometries, environment, localVolumes) {
-  requireInstancedCaps(parts, measureInstancedParts(parts, geometries));
+function buildInstancedTraceScene(parts, geometries, environment, localVolumes, limits) {
+  requireInstancedCaps(parts, measureInstancedParts(parts, geometries), limits);
   const traceMaterials = parts.map(part => resolveMaterial(part.material ?? {}));
   const materials = parts.map((part, index) => ({ ...(part.material ?? {}), ...traceMaterials[index] }));
   const instances = parts.map((part, index) => instanceFor(part, geometries[index], index, materials[index]));
@@ -493,16 +615,20 @@ function buildInstancedTraceScene(parts, geometries, environment, localVolumes) 
 /**
  * Builds the scene a path trace reads. With `options.instancing` and at least one geometry shared by two parts, the result
  * holds `instances` instead of flattened triangles (see `buildInstancedTraceScene`); with no shared geometry, or without the
- * option, it is the flattened scene, unchanged.
+ * option, it is the flattened scene, unchanged. `options.maximumTriangles` (an integer up to MAX_NATIVE_TRACE_TRIANGLES) is for
+ * a scene exported to the native "cycles" tracer only: it replaces the 400,000 triangle bound of the CPU and WebGL tracers.
+ * `options.maximumInstances` (an integer up to MAX_NATIVE_TRACE_INSTANCES) does the same for the 65,536 instances of an
+ * instanced scene; a flattened scene has no instances and keeps its part bound.
  */
 export function buildTraceScene(allParts, environment = {}, options = {}) {
+  const limits = { ...resolveTriangleLimits(options), instances: resolveInstanceLimit(options) };
   const { volumes: localVolumes, boundsOnlyParts } = resolveTraceLocalVolumes(environment.localVolumes, allParts);
   const parts = boundsOnlyParts.length ? allParts.filter(part => !boundsOnlyParts.includes(part)) : allParts;
   const tryInstancing = options.instancing === true && Array.isArray(parts) && parts.length > 0;
   const geometries = tryInstancing ? parts.map(traceGeometry) : undefined;
-  if (tryInstancing && countSharedGeometries(parts, geometries) > 0) return buildInstancedTraceScene(parts, geometries, environment, localVolumes);
+  if (tryInstancing && countSharedGeometries(parts, geometries) > 0) return buildInstancedTraceScene(parts, geometries, environment, localVolumes, limits);
   if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_TRACE_PARTS) throw new RangeError(`A path trace takes 1 to ${MAX_TRACE_PARTS} parts.`);
-  const geometry = flattenParts(parts, geometries);
+  const geometry = flattenParts(parts, geometries, limits);
   const bvh = buildTriangleBvh(geometry.positions, geometry.indices);
   let extent = 1e-3;
   for (let index = 0; index < geometry.positions.length; index++) extent = Math.max(extent, Math.abs(geometry.positions[index]));
@@ -513,6 +639,8 @@ export function buildTraceScene(allParts, environment = {}, options = {}) {
     // The parts' own materials: the fields resolveMaterial leaves out, which the native "cycles" kernel shades.
     partMaterials: parts.map(part => part.material ?? {}),
     shadowOnlyParts: parts.some(part => part.shadowOnly === true) ? Uint8Array.from(parts, part => (part.shadowOnly === true ? 1 : 0)) : null,
+    // Per part FORMAT-v2 visibility bits for the native "cycles" kernel; the "legacy" kernel and the other tracers do not read them.
+    partRayVisibility: flattenedRayVisibility(parts),
     lights: resolveLights(environment),
     environment: resolveEnvironment(environment.map),
     volume: resolveTraceVolume(environment.volumeFog),

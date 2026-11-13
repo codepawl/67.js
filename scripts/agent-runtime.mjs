@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { sampleBrowserHeap, exceedsMemoryGuard } from './agent-memory-guard.mjs';
 import { lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -18,7 +19,10 @@ import { PATH_TRACER_CAPABILITIES } from '../src/path-tracer-capabilities.js';
 import { chooseDenoiser, finishWithOidn } from './agent-path-trace-denoise.mjs';
 import { createNativeSequence } from './agent-native-sequence.mjs';
 import { chooseNativeInstancing, chooseNativeKernel, chooseTraceBackend, createNativeTracerLocator, isNativeTimeLimitError, traceFrameNative, traceTexelsNative } from './agent-native-trace.mjs';
+import { addonCapabilities, addonFileFor, addonImportMap } from './mcp-addons.mjs';
 import { createAgentAssetCatalog } from './agent-asset-catalog.mjs';
+import { createPackRegistry } from './agent-packs.mjs';
+import { MAXIMUM_INSTALLED_PACKS, MAXIMUM_PACK_BYTES, MAXIMUM_PACK_FILES, MAXIMUM_PACK_FILE_BYTES, MAXIMUM_PACK_JSON_BYTES, MAXIMUM_PACK_ITEMS_PER_KIND, PACK_CONTENT_KINDS } from '../src/pack-manifest.js';
 import { geometryOnlyGlb } from './agent-query-asset.mjs';
 import { AGENT_ASSET_LIMITS, assertCombinedAssetBytes } from '../src/agent-asset-limits.js';
 import { recipeAssetNeeds } from '../src/agent-scene-assets.js';
@@ -27,7 +31,10 @@ import { catalogLookReferences, BUNDLED_ENVIRONMENT_NAMES, BUNDLED_CUBE_LOOK_NAM
 import { TEXTURE_SEQUENCE_CAPABILITIES } from '../src/texture-sequence-limits.js';
 import { writeWebBuild } from './web-export.mjs';
 import { gameAssetIds } from '../src/game-assets.js';
-import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR } from './agent-render-jobs.mjs';
+import { resolveJobRoot } from './agent-job-root.mjs';
+import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR, RENDER_HISTORY_FILE, normalizeJobSettings } from './agent-render-jobs.mjs';
+import { RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget } from './agent-render-budget.mjs';
+import { RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom } from './agent-render-estimate.mjs';
 import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
 import { createFrameEncoder } from './frame-encoder.mjs';
 import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, startVideoEncoderInPage } from './gpu-frame-reader.mjs';
@@ -38,7 +45,7 @@ import { runAnnotateSession } from './annotate-session.mjs';
 import { openInDefaultBrowser } from './annotate-open.mjs';
 import { ANNOTATE_LIMITS } from '../src/agent-annotate.js';
 import { normalizeReview, REVIEW_LIMITS } from './agent-review.mjs';
-import { mergeFrameDiagnostics } from '../src/frame-checks.js';
+import { mergeFrameDiagnostics, pathTracerFindingsLimit } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 
@@ -74,7 +81,7 @@ function bakeAfterOperations(operations) {
 const SYNC_TOLERANCE_SECONDS = 0.05;
 // The preview page imports engine chunks that sit beside the package entries, one folder above preview.js.
 const ENGINE_CHUNK_URL = /^\/[\w.-]+\.js$/;
-const html = '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#182126}canvas{display:block;width:100vw;height:100vh}</style></head><body><canvas></canvas><script type="module" src="/preview.js"></script></body></html>';
+const pageHtml = importMapScript => '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#182126}canvas{display:block;width:100vw;height:100vh}</style></head><body><canvas></canvas>' + importMapScript + '<script type="module" src="/preview.js"></script></body></html>';
 
 /** Local, serialized browser preview. No browser is launched until scene creation. */
 // Optional peer dependencies the page loads from the host's node_modules. Rapier ships its WASM inside rapier.mjs.
@@ -84,8 +91,8 @@ const VENDOR_FILES = Object.freeze({
   '/vendor/rapier.js': { resolve: require => join(dirname(require.resolve('@dimforge/rapier3d-compat')), 'rapier.mjs'), type: 'application/javascript; charset=utf-8' },
 });
 
-export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', browser: browserPath, memory = 192, assets: assetRoot,
-  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot, openPage = openInDefaultBrowser,
+export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', browser: browserPath, memory = 192, assets: assetRoot, packs: packsRoot,
+  jobs: jobRoot, ffmpeg = 'ffmpeg', audio: audioRoot, openPage = openInDefaultBrowser, addons: addonSet = { addons: [], skipped: [] },
   previewUrl = new URL(/* @vite-ignore */ '../build/mcp/preview.js', import.meta.url) } = {}) {
   if (!['gpu', 'cpu'].includes(backend)) {
     throw new RangeError('backend must be gpu or cpu.');
@@ -100,9 +107,15 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   if (assetRoot !== undefined && (typeof assetRoot !== 'string' || !isAbsolute(assetRoot))) {
     throw new TypeError('Asset root must be an explicit absolute directory path.');
   }
-  if (jobRoot !== undefined && (typeof jobRoot !== 'string' || !isAbsolute(jobRoot))) {
-    throw new TypeError('Job root must be an explicit absolute directory path.');
+  if (packsRoot !== undefined && (typeof packsRoot !== 'string' || !isAbsolute(packsRoot))) {
+    throw new TypeError('Packs root must be an explicit absolute directory path.');
   }
+  jobRoot = resolveJobRoot(jobRoot);
+  const importMapScript = addonSet.addons.length === 0 ? '' : `<script type="importmap">${JSON.stringify(addonImportMap(packageMetadata.exports))}</script>`;
+  // The one inline script is the import map; its hash is allowed so script-src stays 'self'. No addons, no hash.
+  const importMapHash = addonSet.addons.length === 0 ? '' : ` 'sha256-${createHash('sha256').update(importMapScript.slice(importMapScript.indexOf('>') + 1, -'</script>'.length)).digest('base64')}'`;
+  const registeredByAddon = {};
+  const refusedAddons = [];
   const audioLibrary = audioRoot === undefined ? undefined : createAudioLibrary(audioRoot);
   if (typeof ffmpeg !== 'string' || !ffmpeg || (ffmpeg !== 'ffmpeg' && (!isAbsolute(ffmpeg) || !existsSync(ffmpeg)))) {
     throw new TypeError('FFmpeg must be on PATH or configured with an existing absolute executable path.');
@@ -125,13 +138,48 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
   let queue = Promise.resolve();
   let closing;
   let catalogPromise;
+  let packsPromise;
   let jobsPromise;
+  // Set by submitJob for the one job that may run; runJob takes it. Kept in the job folder, the history never leaves the machine.
+  let estimateForNextJob;
+  let gpuTracerWarm = false;
+  async function readRenderHistory() {
+    try {
+      return parseHistory(await readFile(join(jobRoot, RENDER_HISTORY_FILE), 'utf8'));
+    } catch {
+      return [];
+    }
+  }
+  // The history only sharpens later estimates, so a failed write never fails the job that finished.
+  async function rememberRenderJob({ settings, estimate, report }) {
+    try {
+      const history = historyWithJob(await readRenderHistory(), { settings, backend, estimate, report });
+      await writeFile(join(jobRoot, RENDER_HISTORY_FILE), JSON.stringify(history), { mode: 0o600 });
+    } catch (error) {
+      console.error(`67js could not save the render history: ${error.message}`);
+    }
+  }
   const savedGlbPaths = [];
   const savedWebBuildPaths = [];
+  // Capabilities must work without the job store: a store that cannot open is reported here, not thrown.
+  async function jobRecords() {
+    if (!jobRoot) return { records: [] };
+    try {
+      const records = (await jobs()).list().map(record => ({ jobId: record.jobId, state: record.state,
+        sourceRevision: record.sourceRevision, progress: record.progress }));
+      return { records };
+    } catch (error) {
+      return { records: [], unavailable: error.message };
+    }
+  }
   function jobs() {
     if (!jobRoot) throw new Error('Configure --jobs with an absolute output directory before submitting render jobs.');
     if (!jobsPromise && closing) throw new Error('The agent runtime is closing or closed.');
-    jobsPromise ??= createAgentRenderJobs({ root: jobRoot, run: runJob });
+    // A failed creation is not kept: the next call tries again instead of repeating the first error until restart.
+    jobsPromise ??= createAgentRenderJobs({ root: jobRoot, run: runJob }).catch(error => {
+      jobsPromise = undefined;
+      throw error;
+    });
     return jobsPromise;
   }
   // The caller never names a path: files get a server-chosen name in the jobs folder, and only the newest few are kept.
@@ -158,9 +206,15 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     phase = 'ready';
   }
   function catalog() {
-    if (!assetRoot) throw new Error('Configure --assets with an absolute directory before importing GLB assets.');
-    catalogPromise ??= createAgentAssetCatalog(assetRoot);
+    if (!assetRoot && !packsRoot) throw new Error('Configure --assets or --packs with an absolute directory before importing GLB assets.');
+    catalogPromise ??= packs().then(registry => createAgentAssetCatalog(assetRoot ?? null, registry?.files));
     return catalogPromise;
+  }
+  // Installed data-only packs (docs/packs.md): checked once per runtime; their GLB, image, look and HDRI files join the catalog.
+  function packs() {
+    if (!packsRoot) return Promise.resolve(null);
+    packsPromise ??= createPackRegistry(packsRoot, { packageVersion: packageMetadata.version });
+    return packsPromise;
   }
 
   /** Bytes of the catalog assets a recipe or edit list places, base64 by asset id, for the page that decodes them. */
@@ -272,6 +326,37 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     });
   }
 
+  // Only files inside an allowlisted addon's own package folder, found by the index it was given at startup.
+  function serveAddonFile(url, response) {
+    const path = addonFileFor(addonSet.addons, url.split('?')[0]);
+    if (path === null) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    readFile(path).then(bytes => {
+      response.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      response.end(bytes);
+    }, () => {
+      response.writeHead(404);
+      response.end();
+    });
+  }
+
+  // Loads each allowlisted addon in the page. One that fails is skipped with its reason; the others stay.
+  async function loadAddons() {
+    for (const [index, addon] of addonSet.addons.entries()) {
+      try {
+        const added = await page.evaluate(input => window.__agentPreview.loadAddon(input), { url: `/addons/${index}/${addon.entry}`, name: addon.name, extensionPoints: addon.extensionPoints });
+        registeredByAddon[addon.name] = added;
+      } catch (error) {
+        const reason = String(error.message).replace(/^page\.evaluate: /, '').split('\n')[0];
+        refusedAddons.push({ name: addon.name, reason });
+        console.error(`67js addon ${addon.name} skipped: ${reason}`);
+      }
+    }
+  }
+
   // Mesh booleans load Manifold and recipe physics loads Rapier, both optional peer dependencies, from the host's
   // node_modules. Without one the page gets a 404 and the edit reports the install command.
   function serveVendorFile({ resolve, type }, response) {
@@ -309,7 +394,11 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return;
         }
         response.setHeader('Cache-Control', 'no-store');
-        response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' blob:");
+        response.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'${importMapHash}; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' blob:`);
+        if (request.method === 'GET' && request.url.startsWith('/addons/')) {
+          serveAddonFile(request.url, response);
+          return;
+        }
         const vendor = request.method === 'GET' ? VENDOR_FILES[request.url] : undefined;
         if (vendor) {
           serveVendorFile(vendor, response);
@@ -325,7 +414,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           return;
         }
         response.setHeader('Content-Type', request.url === '/' ? 'text/html; charset=utf-8' : 'application/javascript; charset=utf-8');
-        response.end(request.url === '/' ? html : code);
+        response.end(request.url === '/' ? pageHtml(importMapScript) : code);
       });
       httpServer.on('upgrade', (request, socket, head) => {
         const accepted = isPreviewHost(request.headers.host, httpServer.address().port)
@@ -360,6 +449,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       });
       await page.goto(origin);
       await page.waitForFunction(() => Boolean(window.__agentPreview));
+      await loadAddons();
       phase = 'ready';
     } catch (error) {
       phase = 'failed';
@@ -463,6 +553,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
 
   async function runJob({ jobId, sessionId, directory, snapshot, settings, signal, progress }) {
     let jobPage;
+    let session;
     let encoder;
     let frameReceiver;
     // A stills or video job of native frames renders them all through one session; it is closed when the job ends.
@@ -470,8 +561,18 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     let pageEncodes = false;
     let suspended = false;
     const started = performance.now();
+    // One job runs at a time, so the estimate made at submission belongs to the job that starts next.
+    const estimate = estimateForNextJob;
+    estimateForNextJob = undefined;
     const metrics = { backend, requestedWidth: settings.width, requestedHeight: settings.height,
       renderSeconds: 0, captureSeconds: 0, peakNodeBytes: 0, peakBrowserHeap: 0, maximumPendingFrames: 1 };
+    async function recordPeakMemory() {
+      metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
+      metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, await sampleBrowserHeap(session));
+      if (exceedsMemoryGuard({ nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap })) {
+        throw new Error('Render job exceeded its Node RSS or sampled browser heap guard.');
+      }
+    }
     const abort = () => { jobPage?.close().catch(() => {}); };
     signal.addEventListener('abort', abort, { once: true });
     try {
@@ -496,7 +597,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       const height = settings.kind === 'video' ? Math.floor(created.render.height / 2) * 2 : created.render.height;
       if (width < 64 || height < 64) throw new Error('Render budget reduced the job below its minimum output size.');
       await jobPage.setViewportSize({ width, height });
-      const session = await jobPage.context().newCDPSession(jobPage);
+      session = await jobPage.context().newCDPSession(jobPage);
       const region = settings.region;
       if (settings.format && settings.format !== 'png') await jobPage.evaluate(prepareInput => window.__agentPreview.prepareFloatOutput(prepareInput), { sessionId: jobId });
       if (settings.passes?.includes('wireframe')) await jobPage.evaluate(prepareInput => window.__agentPreview.prepareWireframe(prepareInput), { sessionId: jobId });
@@ -603,6 +704,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           metrics.width = width;
           metrics.height = height;
           metrics.pathTracer = traced.report;
+          if (frame === 0) {
+            const looked = await jobPage.evaluate(input => window.__agentPreview.findings(input), frameInput);
+            mergeFrameDiagnostics(metrics, [pathTracerFindingsLimit(), ...looked.diagnostics]);
+          }
           if (traced.report.nativeSession) (metrics.nativeSessionRoutes ??= []).push(traced.report.nativeSession.path);
           const tracedBytes = Buffer.from(traced.data, 'base64');
           if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced frame exceeded 12 MiB.');
@@ -613,6 +718,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             await writeFile(join(directory, `${filename}.partial`), tracedBytes, { flag: 'wx' });
             artifacts.push({ temporary: `${filename}.partial`, filename, mimeType: 'image/png' });
           }
+          await recordPeakMemory();
           await progress({ frames: frame + 1, maximumPendingFrames: 1 });
           continue;
         }
@@ -719,12 +825,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           }
         }
           }
-        metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
-        const heap = await session.send('Runtime.getHeapUsage');
-        metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, heap.usedSize);
-        if (metrics.peakNodeBytes > 512 * 1024 ** 2 || metrics.peakBrowserHeap > 256 * 1024 ** 2) {
-          throw new Error('Render job exceeded its Node RSS or sampled browser heap guard.');
-        }
+        await recordPeakMemory();
         await progress({ frames: frame + 1, maximumPendingFrames: 1 });
       }
       if (encoder) {
@@ -734,6 +835,9 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         artifacts.push({ temporary: 'render.mp4.partial', filename: 'render.mp4', mimeType: 'video/mp4' });
       }
       metrics.elapsedSeconds = (performance.now() - started) / 1000;
+      metrics.report = renderReport({ estimate, settings, metrics });
+      if (settings.renderer?.backend === 'gpu') gpuTracerWarm = true;
+      await rememberRenderJob({ settings, estimate, report: metrics.report });
       return { artifacts, metrics };
     } finally {
       signal.removeEventListener('abort', abort);
@@ -805,13 +909,19 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           maximumJoints: AGENT_ASSET_LIMITS.maxJoints, maximumClips: AGENT_ASSET_LIMITS.maxClips,
           commands: ['set-root', 'set-asset-node', 'set-motion', 'set-animation', 'set-material', 'set-camera', 'set-environment', 'set-effects', 'set-shadow'],
         },
-        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1,
+        packs: {
+          configured: Boolean(packsRoot), format: '67js.pack', manifest: '67js-pack.json', contentKinds: Object.keys(PACK_CONTENT_KINDS),
+          extensions: PACK_CONTENT_KINDS, maximumPacks: MAXIMUM_INSTALLED_PACKS, maximumFiles: MAXIMUM_PACK_FILES, maximumBytes: MAXIMUM_PACK_BYTES,
+          maximumFileBytes: MAXIMUM_PACK_FILE_BYTES, maximumJsonBytes: MAXIMUM_PACK_JSON_BYTES, maximumItemsPerKind: MAXIMUM_PACK_ITEMS_PER_KIND,
+          use: 'scene_asset_catalog lists packs: name, version, license, author, description and item ids. GLBs, images, looks and environments carry assetId values that work in scene_create_asset, look, hdri and texture fields. Materials and recipes are read with scene_asset_catalog { pack, material } or { pack, recipe }: pass a recipe to scene_create, and a material as a materials entry or a scene_apply set-material. Packs are installed by the user (unzip into the --packs folder); a tool call never downloads one. Invalid packs are skipped and listed under packs.rejected with the reason.',
+        },
+        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1, estimate: RENDER_ESTIMATE_NOTE, budget: RENDER_BUDGET_NOTE,
           maximumWidth: MAXIMUM_JOB_SIDE, maximumHeight: MAXIMUM_JOB_SIDE, maximumPixels: MAXIMUM_JOB_PIXELS,
           maximumDuration: MAXIMUM_VIDEO_SECONDS, maximumFps: 30, maximumFrames: 900, maximumStills: 8,
           encoder: 'H.264', encoders: VIDEO_ENCODERS, audio: Boolean(audioRoot), timeline: true, previewSuspendedDuringJob: true,
           glbExport: { maximumBytes: MAXIMUM_GLB_BYTES, maximumKept: MAXIMUM_KEPT_GLBS, maximumTextureSize: 4096 },
-          records: jobRoot ? (await jobs()).list().map(record => ({ jobId: record.jobId, state: record.state,
-            sourceRevision: record.sourceRevision, progress: record.progress })) : [] },
+          ...(await jobRecords()) },
+        addons: addonCapabilities({ addons: addonSet.addons.filter(addon => !refusedAddons.some(refused => refused.name === addon.name)), skipped: addonSet.skipped, registered: registeredByAddon, refused: refusedAddons }),
         unsupported: ['remote asset providers', 'arbitrary code execution', 'imported morph track authoring'],
       };
     },
@@ -825,8 +935,20 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         return result;
       });
     },
-    assetCatalog() {
-      return enqueue(async () => assetRoot ? { configured: true, ...(await catalog()).list() } : { configured: false, assets: [] });
+    /** The catalog with the installed packs; `{ pack, recipe }` or `{ pack, material }` reads one pack item's JSON instead. */
+    assetCatalog({ pack, recipe, material } = {}) {
+      return enqueue(async () => {
+        if (pack !== undefined || recipe !== undefined || material !== undefined) {
+          if (!packsRoot) throw new Error('Configure --packs with an absolute directory to read pack items.');
+          if (pack === undefined || (recipe === undefined) === (material === undefined)) {
+            throw new RangeError('Pass pack with exactly one of recipe or material, such as { "pack": "example-starter", "recipe": "workshop" }; scene_asset_catalog without arguments lists them.');
+          }
+          const kind = recipe === undefined ? 'materials' : 'recipes';
+          return { pack, [kind === 'recipes' ? 'recipe' : 'material']: recipe ?? material, json: (await packs()).read(kind, pack, recipe ?? material) };
+        }
+        if (!assetRoot && !packsRoot) return { configured: false, assets: [] };
+        return { configured: true, ...(await catalog()).list(), ...(packsRoot && { packs: (await packs()).list() }) };
+      });
     },
     createAsset({ recipe }) {
       return enqueue(async () => {
@@ -1031,8 +1153,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
                 width: settings.width, height: settings.height, columns: settings.columns, labels: settings.labels });
               if (backend === 'cpu' && !/swiftshader/i.test(rendered.graphics)) throw new Error('CPU review did not select SwiftShader.');
               peakNodeBytes = Math.max(peakNodeBytes, process.memoryUsage().rss);
-              peakBrowserHeap = Math.max(peakBrowserHeap, (await session.send('Runtime.getHeapUsage')).usedSize);
-              if (peakNodeBytes > 512 * 1024 ** 2 || peakBrowserHeap > 256 * 1024 ** 2) {
+              peakBrowserHeap = Math.max(peakBrowserHeap, await sampleBrowserHeap(session));
+              if (exceedsMemoryGuard({ nodeBytes: peakNodeBytes, browserHeapBytes: peakBrowserHeap })) {
                 throw new Error('Review exceeded its Node RSS or sampled browser heap guard.');
               }
               shots[index] = { ...rendered, ...(group.branch === undefined ? {} : { branch: group.branch, branchStale: branchRecipe.stale }) };
@@ -1154,8 +1276,29 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
         const assetBytes = snapshot.recipe.format === '67js.asset' ? await (await catalog()).read(snapshot.recipe.assetId) : undefined;
         phase = 'rendering';
         try {
-          return await controller.submit({ sessionId, sourceRevision: snapshot.sourceRevision,
-            snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings });
+          // The estimate is made before the job exists, because the job suspends the scene and starts at once.
+          const size = sceneSizeFrom(await invoke('inspect', { sessionId, limit: Math.max(1, snapshot.recipe.nodes?.length ?? 1) }), snapshot.recipe);
+          const history = await readRenderHistory();
+          const estimateOf = rawSettings => estimateRenderJob({ size, settings: normalizeJobSettings(rawSettings, snapshot.clips, snapshot.recipe), backend, memoryBudgetMiB: memory, history, gpuTracerWarm });
+          let jobSettings = settings;
+          let budgetReport;
+          if (settings?.budget !== undefined) {
+            const { budget: budgetInput, ...base } = settings;
+            if (base.renderer !== undefined) throw new TypeError('budget picks the renderer: leave settings.renderer out, or leave settings.budget out to choose it yourself.');
+            const budget = parseBudget(budgetInput);
+            const frameCount = normalizeJobSettings(base, snapshot.clips, snapshot.recipe).frameCount;
+            ({ settings: jobSettings, report: budgetReport } = chooseBudgetSettings({ base, budget, tracerBackend: backend === 'cpu' ? 'cpu' : 'gpu', frameCount, estimateOf, serverMemoryMiB: memory }));
+          }
+          const estimate = estimateOf(jobSettings);
+          estimateForNextJob = estimate;
+          try {
+            const submitted = await controller.submit({ sessionId, sourceRevision: snapshot.sourceRevision,
+              snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings: jobSettings });
+            return { ...submitted, estimate, ...(budgetReport ? { budget: budgetReport } : {}) };
+          } catch (error) {
+            if (estimateForNextJob === estimate) estimateForNextJob = undefined;
+            throw error;
+          }
         } catch (error) {
           phase = 'ready';
           throw error;

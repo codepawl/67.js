@@ -12,7 +12,7 @@ All integers and IEEE-754 `f32` values are **little-endian**. Every structured r
 | `1` | `scene_tlas` | `acceleration_structure` | Hardware TLAS | — | — | Top-level acceleration structure over per-mesh BLASes |
 | `2` | `instances` | `storage, read` | `InstanceRecord` | `160` | `16` | Per-instance transforms, BLAS/triangle offsets, visibility, light mask |
 | `3` | `triangles` | `storage, read` | `TriangleRecord` | `224` | `16` | Object-space mesh triangles (opaque first, then alpha-cutout per BLAS) |
-| `4` | `materials` | `storage, read` | `MaterialRecord` | `256` | `16` | Principled BSDF v2 parameters, flags, absorption, texture indices |
+| `4` | `materials` | `storage, read` | `MaterialRecord` | `256` | `16` | Principled BSDF v2 parameters, flags, absorption, texture indices; then, only for a scene with diffuse transmission, one extension record per material |
 | `5` | `emissive_triangles` | `storage, read` | `EmissiveTriangleRecord` | `96` | `16` | World-space emissive triangle list for NEE and BSDF-hit MIS |
 | `6` | `lights` | `storage, read` | `LightRecord` | `128` | `16` | Analytic lights (`point`, `spot`, `area_rect`, `area_disk`, `sun`) |
 | `7` | `light_tree_nodes` | `storage, read` | `LightTreeNode` | `64` | `16` | Orientation-aware light BVH nodes over analytic + emissive emitters |
@@ -95,6 +95,8 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 
 The four thin-lens words (`aperture_radius`, `focal_distance`, `aperture_blades`, `aperture_rotation`, bytes 156, 172, 184 and 188) are set by `resolveThinLensParameters` in `pack-input-v2.mjs`, from the camera object that `createCamera` returns for a camera with an `fStop` (or from `options.apertureRadius`, `focalDistance`, `apertureBlades`, `apertureRotation`). A pinhole writes `0`, `10`, `0` and `0`, as before, so its params bytes do not change. Cycles' model: the aperture radius is `focal length (mm) / 1000 / (2 * f-stop)`, a point on the lens (a disk, or a regular polygon of `aperture_blades` corners turned by `aperture_rotation`) is the ray origin, and the ray goes through the point that lies `focal_distance` along `camera_forward` from the pinhole ray (the focus distance is measured on the view axis, not along the ray). The lens sample is the kernel's existing `lens_uv` draw, taken for every sample whether or not the aperture is 0, so depth of field does not move any other random number. A FORMAT-v1 input carries the same four values in the unused fourth float of the eye, forward, right and above vectors (floats 3, 7, 11 and 15 of the 64-float block); the legacy kernel ignores them and `upgradeNativeInputV1ToV2` reads them back.
 
+A frame that moves only the camera does not need a repack: `packCameraParams(kernelParams, camera, { seed })` in `pack-input-v2.mjs` rewrites the camera words (bytes 112 to 191), the orthographic bit of `kernel_flags` (byte 32) and, only when given, the seed (byte 28) of a block with the code the packer runs. Near, far, sensor shift, the four thin-lens words and the orthographic bit that the camera object and the options leave out keep the value in the block; one the caller gives replaces it. `session.render({ camera, seed })` uses it, and a `seed` in the session options is not applied.
+
 ---
 
 ## 2. Instance Table — `InstanceRecord` (`@binding(2)`)
@@ -135,6 +137,7 @@ When `InstanceRecord.emissive_base_offset != 0xFFFFFFFF` and `TriangleRecord.loc
 
 **Sharing rules.** Instances that share a mesh share one slice of `triangles` (one BLAS, one `triangle_offset`), so everything in a `TriangleRecord` is the same for every copy. What can differ per copy lives in the `InstanceRecord`: the transform, `material_override`, `visibility_flags`, the light masks, the object id, random and colour, and `emissive_base_offset`. The packer applies these rules:
 
+- Parts whose `MaterialRecord` bytes are equal (and that derive the same emission) share one record: `material_count` counts distinct records, a copy needs a `material_override` only when its record differs from the first copy's, and every `material_index` (triangle, override, emissive entry) names the shared record. A session update that makes shared parts differ changes `material_count` and is refused.
 - A mesh with per-triangle materials is not shared; its triangles are baked into world space and traced with an identity transform.
 - `local_emissive_offset` counts the triangles that keep an area after an instance's transform, in triangle order, and is the same for every copy. A copy that would emit a different set of triangles is refused. A copy whose resolved material is not emissive gets `emissive_base_offset = 0xFFFFFFFF`, so its triangles never index the emissive list.
 - A shadow-only copy clears the camera bit of `visibility_flags` and keeps the others. A mirrored copy (negative determinant) sets the negative-scale bit.
@@ -237,6 +240,20 @@ Includes all Principled BSDF v2 fields needed for Cycles parity:
 | `248` | `4` | `4` | `i32` | `alpha_tex` | `TextureDescriptor` index, or `-1` |
 | `252` | `4` | `4` | `i32` | `bump_tex` | `TextureDescriptor` index, or `-1` |
 
+### Material extension records (diffuse transmission)
+
+The record above has no free word, so a field added later does not change its stride. A scene whose materials use **diffuse transmission** (a thin sheet that lets diffuse light through, such as a curtain, a leaf or a lampshade) appends a second run of `material_count` records of the same 256 bytes to the `materials` buffer: extension record `m` sits at record index `material_count + m`, and `material_count` in the header still counts the first run only. A scene without it sends the buffer it always did (`material_count` records), so its tables are byte-identical to a build without the feature. The host tells the two apart by the buffer length (`>= 2 * material_count * 256`), and the kernel's `SCENE_HAS_DIFFUSE_TRANSMISSION` constant is rewritten to `false` for the rest, so their pipelines contain none of the code.
+
+Only three words of an extension record are read; the others are `0`:
+
+| Byte Offset | WGSL Type | Field (name of the word it reuses) | Description |
+| ---: | :--- | :--- | :--- |
+| `0` | `vec3<f32>` | `base_color` | Linear RGB colour of the light that leaves through the far side |
+| `12` | `f32` | `metallic` | Diffuse transmission weight `[0, 1]`: the share of the diffuse layer that goes to the far side |
+| `192` | `u32` | `flags` | `1=TINTS_BASE_COLOR`: the colour multiplies the base colour of the shading point (a map or a vertex colour included) instead of replacing it; the packer sets it when the material gives no `diffuseTransmissionColor` |
+
+The kernel splits the diffuse layer at the weight `w`: the reflecting diffuse lobe keeps `(1 - w)` of its weight and a `LOBE_DIFFUSE_TRANSMISSION` lobe takes `w * colour` times the same layer weight, so the specular layers above the diffuse keep their strength. The lobe is a cosine lobe on the side of the shading normal away from the viewer, with value and pdf `cos / pi` (Cycles' Translucent BSDF); a sample must also leave through the far side of the geometric normal. A sample of it counts as a transmission bounce and leaves the medium of the path alone, and the light tree and the MIS pdf of the previous bounce treat the shading point as transmissive. The weight is read as `diffuseTransmission` and the colour as `diffuseTransmissionColor` on a part's material (`job-input.mjs` checks the ranges: a number from `0` to `1`, three numbers from `0` to `1`).
+
 ---
 
 ## 5. Emissive Triangle List — `EmissiveTriangleRecord` (`@binding(5)`)
@@ -275,7 +292,7 @@ Convention: `direction` is always the **unit emission direction pointing from th
 | `0` | `12` | `16` | `vec3<f32>` | `position` | World-space centre (`point`, `spot`, `area_rect`, `area_disk`; unused for `sun`) |
 | `12` | `4` | `4` | `u32` | `light_type` | `0=point`, `1=spot`, `2=area_rect`, `3=area_disk`, `4=sun` |
 | `16` | `12` | `16` | `vec3<f32>` | `radiance` | Emitted linear RGB radiance (`W/(sr·m²)` for finite-area/sun, intensity `W/sr` when `radius == 0`) |
-| `28` | `4` | `4` | `u32` | `flags` | Bitmask: `1=CAST_SHADOW`, `2=MULTIPLE_IMPORTANCE`, `4=CAMERA_VISIBLE`, `8=PORTAL`, `16=NORMALIZE` |
+| `28` | `4` | `4` | `u32` | `flags` | Bitmask: `1=CAST_SHADOW`, `2=MULTIPLE_IMPORTANCE`, `4=CAMERA_VISIBLE`, `8=PORTAL`, `16=NORMALIZE`, `32=SOFT_FALLOFF` (a point or spot light with a radius is an oriented disk facing the shading point, as Blender's `use_soft_falloff`; clear: the sphere) |
 | `32` | `12` | `16` | `vec3<f32>` | `direction` | Unit world-space emission direction |
 | `44` | `4` | `4` | `f32` | `radius` | Sphere radius in metres for `point` / `spot` (`0.0` = delta emitter) |
 | `48` | `12` | `16` | `vec3<f32>` | `axis_u` | Unit tangent axis U for area / IES orientation |

@@ -117,7 +117,11 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npm run prepare:release
       - run: npm run check:links:package
+      # The size job measures growth against the base branch. Here the archive is compared with its own commit, so a release
+      # build step that measure-archive.mjs leaves out fails every pull request, not only the push that publishes (#1093).
       - run: npm run smoke:package
+        env:
+          SIZE_BASE_REF: HEAD
       - run: npm run smoke:mcp-package
 
   # Users may start the MCP server with bunx, so the packed server also runs the package smoke under bun.

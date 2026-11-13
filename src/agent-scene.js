@@ -25,7 +25,7 @@ import { OWN_SECTIONS as NULLABLE_SECTION_OPERATIONS } from './agent-apply-repor
 export { describeApplication } from './agent-apply-report.js';
 export {
   needsMeshBooleans, loadMeshBooleans, meshBooleansLoaded, setManifoldModuleLoader,
-  needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader,
+  needsPhysics, needsBuoyancy, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader,
   loadAgentSceneModules, loadAllAgentSceneModules, registerAgentSceneFont, allAgentSceneModulesLoaded, agentSceneModulesNeeded,
 } from './agent-scene-modules.js';
 
@@ -1876,6 +1876,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     },
     /** The bake-stale warning, or none: see `staleBakeProblems` in `agent-bake.js`. */
     bakeStaleness: staleBakeProblems,
+    /** The z-fighting the draw-time ranking could not settle, as coplanar-overlap findings; none when the scene opted out (the renderer reports its pairs) or has none. */
+    flushLeftovers() {
+      return state.recipe.environment.resolveCoplanar === false ? [] : coplanarProblems();
+    },
     get postPasses() {
       return structuredClone(state.recipe.postPasses ?? []);
     },
@@ -1898,6 +1902,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
       const exported = bakeRigExport(state.recipe, state.graph, state.motionSampler, options);
       publishPose(state, stagePose(state, state.motionTime));
       return exported;
+    },
+    /** Gives a scene created without placed assets the pool of decoded catalog assets, so a later edit can place the first one. */
+    provideAssets(pool) {
+      options = { ...options, assets: pool };
     },
     apply(inputOperations, options = {}) {
       expected(options);
@@ -1933,7 +1941,8 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
             knownKeys(patch[nestedField], nestedKeys, nestedField);
             merged[nestedField] = { ...candidate[lookField][nestedField], ...patch[nestedField] };
           }
-          if (patch.sky) merged.sky = { ...candidate[lookField].sky, ...patch.sky };
+          // A preset starts the sky again from its own sun, so fields kept from the earlier sky never hide it.
+          if (patch.sky) merged.sky = { ...!patch.sky.preset && candidate[lookField].sky, type: 'physical', ...patch.sky };
           candidate[lookField] = merged;
           continue;
         }

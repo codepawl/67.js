@@ -1,0 +1,1 @@
+- Packs refuse remote URLs hidden in JSON keys and JSON nested more than 64 levels deep, and a pack folder may hold only the manifest, its listed files and LICENSE, README, NOTICE, CHANGELOG or AUTHORS text documents (#984)

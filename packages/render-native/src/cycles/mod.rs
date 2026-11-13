@@ -271,6 +271,7 @@ pub(crate) struct SceneSpecialization {
     has_thin_film: bool,
     has_f82: bool,
     has_normal_map: bool,
+    has_diffuse_transmission: bool,
     max_closure_lobes: u32,
     max_closure_candidates: u32,
     has_finite_lights: bool,
@@ -299,6 +300,10 @@ pub(crate) fn scan_scene_specialization(input: &NativeTraceInputV2) -> SceneSpec
     let mut has_thin_film = false;
     let mut has_f82 = false;
     let mut has_normal_map = false;
+    // A material table that holds a second set of `material_count` records carries the extension records of diffuse
+    // transmission (FORMAT-v2.md, "Material extension records"); each material then adds at most one lobe for the far side.
+    let has_diffuse_transmission = mat_count > 0 && mats.len() >= 2 * mat_count * MATERIAL_RECORD_STRIDE;
+    let diffuse_transmission_lobe = u32::from(has_diffuse_transmission);
     let mut max_closure_lobes: u32 = if mat_count > 0 { 1 } else { 4 };
     let mut max_closure_candidates: u32 = if mat_count > 0 { 1 } else { 7 };
 
@@ -369,7 +374,7 @@ pub(crate) fn scan_scene_specialization(input: &NativeTraceInputV2) -> SceneSpec
             transmission_from_texture: transmission_tex >= 0,
             thin_walled: (flags & MATERIAL_FLAG_THIN_WALLED) != 0,
         });
-        let candidate_lobes = trans_lobe + sheen_lobe + coat_lobe + base_lobes;
+        let candidate_lobes = trans_lobe + sheen_lobe + coat_lobe + base_lobes + diffuse_transmission_lobe;
         max_closure_candidates = max_closure_candidates.max(candidate_lobes.clamp(1, 7));
         max_closure_lobes = max_closure_lobes.max(candidate_lobes.clamp(1, 4));
     }
@@ -438,6 +443,7 @@ pub(crate) fn scan_scene_specialization(input: &NativeTraceInputV2) -> SceneSpec
         has_thin_film,
         has_f82,
         has_normal_map,
+        has_diffuse_transmission,
         max_closure_lobes,
         max_closure_candidates,
         has_finite_lights,
@@ -470,6 +476,7 @@ pub(crate) fn specialize_kernel_source(source: &str, scene: &SceneSpecialization
         has_thin_film,
         has_f82,
         has_normal_map,
+        has_diffuse_transmission,
         max_closure_lobes,
         max_closure_candidates,
         has_finite_lights,
@@ -503,6 +510,10 @@ pub(crate) fn specialize_kernel_source(source: &str, scene: &SceneSpecialization
     specialize!(THIN_FILM, has_thin_film);
     specialize!(F82, has_f82);
     specialize!(NORMAL_MAP, has_normal_map);
+    // Unlike the other sentinels this one defaults to `false`, so a kernel compiled without specialization reads no extension records.
+    if has_diffuse_transmission {
+        result = result.replace("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;", "const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;");
+    }
     specialize!(EMISSIVE_TRIANGLES, has_emissive_triangles);
     specialize!(ANALYTIC_LIGHTS, has_analytic_lights);
     specialize!(FINITE_LIGHTS, has_finite_lights);
@@ -681,6 +692,33 @@ mod specialization_tests {
         assert!(result.contains("const SCENE_HAS_VOLUME: bool = true;"), "VOLUME should stay true");
         assert!(result.contains("const SCENE_HAS_GLASS: bool = true;"), "GLASS should stay true");
         assert!(result.contains("const SCENE_HAS_ENV_IMPORTANCE: bool = true;"), "ENV_IMPORTANCE should stay true");
+    }
+
+    #[test]
+    fn diffuse_transmission_follows_the_extension_records_of_the_material_table() {
+        let kp = make_kp(0, 0.0, 0, 0, 0.0);
+        let one_material = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let inst = make_default_inst();
+        let lights = make_default_light();
+        let source = "const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;";
+
+        let without_extension = dummy_input(&kp, &one_material, &lights, &inst);
+        let result = specialize_cycles_kernel(source, &without_extension);
+        assert_eq!(result, source, "no extension records, no lobe: the default stays false");
+
+        let mut with_extension_table = one_material.clone();
+        with_extension_table.extend_from_slice(&vec![0u8; MATERIAL_RECORD_STRIDE]);
+        let mut with_extension = dummy_input(&kp, &with_extension_table, &lights, &inst);
+        with_extension.material_count = 1;
+        let result = specialize_cycles_kernel(source, &with_extension);
+        assert!(result.contains("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = true;"), "one extension record per material");
+        let scene = scan_scene_specialization(&with_extension);
+        let plain_scene = scan_scene_specialization(&without_extension);
+        assert_eq!(
+            scene.max_closure_candidates,
+            plain_scene.max_closure_candidates + 1,
+            "the far side lobe is one more candidate"
+        );
     }
 
     #[test]
@@ -1128,8 +1166,8 @@ mod tests {
         assert!(reads_inside_fetch > 0);
         assert!(!kernel.contains("fn int_sample_texture_channel"));
         assert!(!kernel.contains("fn int_wrap_coord"));
-        assert!(kernel.contains("texture_sample(material.base_color_tex, uv0, uv1).a"));
-        assert!(kernel.contains("texture_sample(material.alpha_tex, uv0, uv1).r"));
+        assert!(kernel.contains("texture_sample(material.base_color_tex, uvs.uv0, uvs.uv1).a"));
+        assert!(kernel.contains("texture_sample(material.alpha_tex, uvs.uv0, uvs.uv1).r"));
     }
 
     /// Blender Cycles filters the stored values of an 8-bit sRGB image and decodes the blend. Decoding each texel before the
@@ -1161,6 +1199,58 @@ mod tests {
         assert!(build_body.contains("point.uv_footprint = 0.0;"));
     }
 
+    /// The thin-sheet lobe is a cosine lobe on the far side of the shading normal that the closure builds only from the
+    /// material extension record, splits off the diffuse layer, and that the integrator treats as a transmission bounce
+    /// which leaves the medium alone.
+    #[test]
+    fn the_diffuse_transmission_lobe_splits_the_diffuse_layer_and_samples_the_far_side() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        assert!(
+            kernel.contains("const SCENE_HAS_DIFFUSE_TRANSMISSION: bool = false;"),
+            "an unspecialized kernel (a probe, a test) must not read extension records"
+        );
+        assert!(
+            kernel.contains("SCENE_HAS_DIFFUSE_TRANSMISSION && arrayLength(&materials) >= 2u * kernel_params.material_count"),
+            "the read of an extension record is guarded by the table length"
+        );
+        assert!(kernel.contains("const LOBE_DIFFUSE_TRANSMISSION: u32 = 7u;"));
+
+        let build_start = kernel.find("fn closure_build(").expect("the closure builder exists");
+        let build_body = &kernel[build_start..];
+        let extension_read = build_body
+            .find("materials[kernel_params.material_count + (*point).material_index]")
+            .expect("the extension record follows the material records");
+        let diffuse_split = build_body
+            .find("let diffuse_weight = base_color * layer_weight * (1.0 - diffuse_transmission_weight);")
+            .expect("the weight splits the diffuse layer");
+        let far_side_lobe = build_body
+            .find("closure_diffuse_transmission_setup_lobe(shading_n, diffuse_transmission_lobe_weight)")
+            .expect("the far side lobe is built from the same layer weight");
+        assert!(extension_read < diffuse_split && diffuse_split < far_side_lobe);
+        assert!(build_body.contains("SCENE_HAS_DIFFUSE_TRANSMISSION
+    && closure.lobe_count < CLOSURE_CANDIDATE_CAPACITY"));
+
+        let eval_start = kernel.find("fn bsdf_diffuse_transmission_eval(").expect("the lobe is evaluated");
+        let eval_end = eval_start + kernel[eval_start..].find("
+}").expect("the evaluation ends");
+        let eval_body = &kernel[eval_start..eval_end];
+        assert!(eval_body.contains("let cos_far_side = -dot((*lobe).normal, wi);"));
+        assert!(eval_body.contains("(*lobe).weight * pdf"));
+        let sample_start = kernel.find("fn bsdf_diffuse_transmission_sample(").expect("the lobe is sampled");
+        let sample_end = sample_start + kernel[sample_start..].find("
+}").expect("the sampler ends");
+        let sample_body = &kernel[sample_start..sample_end];
+        assert!(sample_body.contains("bsdf_diffuse_sample_cos_hemisphere(-(*lobe).normal, rand)"));
+        assert!(sample_body.contains("dot(geometric_normal, wi) >= 0.0"), "a sample must leave through the far side");
+
+        let integrator_start = kernel.find("fn int_closure_has_transmission(").expect("the transmission test exists");
+        let integrator_end = integrator_start + kernel[integrator_start..].find("
+}").expect("the test ends");
+        assert!(kernel[integrator_start..integrator_end].contains("LOBE_DIFFUSE_TRANSMISSION"));
+        assert!(kernel.contains("(SCENE_HAS_GLASS || SCENE_HAS_DIFFUSE_TRANSMISSION) && int_closure_has_transmission(&closure)"));
+        assert!(kernel.contains("&& !is_diffuse_transmission"), "a sheet is not a medium boundary");
+    }
+
     /// The mip levels sit after level 0 in one run of words (`texture_fetch_texel` stays the only reader of the pool).
     #[test]
     fn a_mip_level_is_found_by_walking_the_halving_chain_from_level_0() {
@@ -1187,6 +1277,68 @@ mod tests {
                 "a level after 0 decodes tap {tap} before the blend"
             );
         }
+    }
+
+    /// A point or spot light with a radius is a sphere (Blender's `use_soft_falloff` off, #1040): outside it Cook samples the cone
+    /// of the sphere and a path that hits it uses the same cone pdf, inside it samples the surface, and the packed radiance is
+    /// intensity over pi r^2 so the power does not change with the radius. The Cycles reference script switches
+    /// `use_soft_falloff` off to render the same light; a light with the `SOFT_FALLOFF` flag is the oriented disk of Cycles (below).
+    #[test]
+    fn a_light_with_a_radius_is_a_sphere_with_one_pdf_for_sampling_and_hits() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        let sampler_start = kernel.find("fn lgt_sample_point_or_spot_light(").expect("the point and spot sampler exists");
+        let sampler_end = sampler_start + kernel[sampler_start..].find("\nfn lgt_sample_area_light(").expect("the sampler ends");
+        let sampler = &kernel[sampler_start..sampler_end];
+        assert!(sampler.contains("lgt_sample_uniform_cone(center_dir, one_minus_cos_sphere, rand_uv, &cos_theta)"));
+        assert!(sampler.contains("pdf_solid_angle = 1.0 / max(TWO_PI * one_minus_cos_sphere, 1.0e-30)"));
+        assert!(sampler.contains("lgt_sample_uniform_sphere(rand_uv)"));
+        assert!(kernel.contains("lgt_sphere_solid_angle_pdf(dist_sq, light.radius, hit_t, ray_origin, ray_dir, light.position)"));
+        assert!(kernel.contains("if (hit_t <= t_min || hit_t >= t_max) {"));
+        assert!(!kernel.contains("disk_light_sample"));
+    }
+
+    /// A light with `LIGHT_FLAG_SOFT_FALLOFF` (Blender's `use_soft_falloff`, #1060) is an oriented disk through its centre facing the
+    /// shading point: sampling, the pdf of a path that reaches the disk and the light tree profile all read the same flag, the radiance
+    /// is the sphere's, and a light without the flag takes the sphere branch untouched.
+    #[test]
+    fn a_soft_falloff_light_is_an_oriented_disk_for_sampling_hits_and_the_light_tree() {
+        let kernel = assemble_cycles_kernel().expect("the kernel assembles");
+        assert!(kernel.contains("const LIGHT_FLAG_SOFT_FALLOFF: u32 = 32u;"));
+
+        let sampler_start = kernel.find("fn lgt_sample_point_or_spot_light(").expect("the point and spot sampler exists");
+        let sampler_end = sampler_start + kernel[sampler_start..].find("
+fn lgt_sample_area_light(").expect("the sampler ends");
+        let sampler = &kernel[sampler_start..sampler_end];
+        let flag_test = sampler.find("(light.flags & LIGHT_FLAG_SOFT_FALLOFF) != 0u").expect("the sampler tests the flag");
+        let sphere_branch = sampler.find("lgt_sample_uniform_cone(center_dir").expect("the sphere branch exists");
+        assert!(flag_test < sphere_branch, "the flag is tested before the sphere branch");
+        assert!(sampler.contains("return lgt_sample_soft_falloff_light(light, shading_pos, rand_uv);"));
+
+        let disk_start = kernel.find("fn lgt_sample_soft_falloff_light(").expect("the disk sampler exists");
+        let disk_end = disk_start + kernel[disk_start..].find("
+}
+").expect("the disk sampler ends");
+        let disk_sampler = &kernel[disk_start..disk_end];
+        assert!(disk_sampler.contains("let disk_normal = from_light / center_distance;"));
+        assert!(disk_sampler.contains("lgt_sample_unit_disk(rand_uv)"));
+        assert!(disk_sampler.contains("lgt_soft_falloff_solid_angle_pdf(light.radius, disk_normal, -wi, distance)"));
+        assert!(disk_sampler.contains("lgt_spot_attenuation(light, -wi)"));
+        assert!(disk_sampler.contains("light.radiance * (spot_weight * falloff)"));
+
+        let pdf_start = kernel.find("fn lgt_soft_falloff_solid_angle_pdf(").expect("the disk pdf exists");
+        let pdf_end = pdf_start + kernel[pdf_start..].find("
+}
+").expect("the disk pdf ends");
+        assert!(kernel[pdf_start..pdf_end].contains("(distance * distance) / (cos_light * PI * radius * radius)"));
+
+        assert!(kernel.contains("lgt_ray_soft_falloff_intersect(ray_origin, ray_dir, light, t_min, t_max, &disk_hit_t, &disk_pdf_solid_angle)"));
+        assert!(kernel.contains("let candidate_t = origin_distance / cos_angle;"));
+
+        let profile_start = kernel.find("fn ltr_sphere_light_profile(").expect("the point and spot tree profile exists");
+        let profile = &kernel[profile_start..profile_start + 900];
+        assert!(profile.contains("(light.flags & LIGHT_FLAG_SOFT_FALLOFF) != 0u"));
+        assert!(profile.contains("profile.cos_theta_u = min_distance / hypotenuse;"));
+        assert!(profile.contains("profile.max_distance = hypotenuse;"));
     }
 
     #[test]

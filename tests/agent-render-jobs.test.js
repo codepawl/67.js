@@ -8,7 +8,10 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createAgentRenderJobs, jobDeadlineMs } from '../scripts/agent-render-jobs.mjs';
 
 setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
-const limits = { maxOutputBytes: 1024, maxFrameBytes: 128, maxStoreBytes: 1024 ** 2, cleanupMs: 100 };
+// close() waits this long for an aborted job to settle. It is a liveness bound, not a speed target: under load the
+// settle step (a few file writes) can take far longer than 100 ms. The test that proves the bound uses its own 10 ms.
+const LIVENESS_BOUND_MILLISECONDS = 5000;
+const limits = { maxOutputBytes: 1024, maxFrameBytes: 128, maxStoreBytes: 1024 ** 2, cleanupMs: LIVENESS_BOUND_MILLISECONDS };
 const request = () => ({ sourceRevision: 7, snapshot: { recipe: { format: 'fixture', color: [1, 0, 0] } }, settings: { kind: 'image', width: 64, height: 64 } });
 
 function deferred() {
@@ -87,7 +90,29 @@ test('a scene that places a clip takes motion settings without authored motion, 
   assert.equal((await terminal(controller, submitted.jobId)).state, 'completed');
   assert.equal(controller.status(submitted.jobId).settings.motion.start, 2);
   input.snapshot.recipe = { format: '67js.scene', nodes: [{ id: 'prop', asset: { id } }] };
-  await assert.rejects(controller.submit(input), /authored motion or a placed clip/);
+  await assert.rejects(controller.submit(input), /authored motion, physics .* a placed clip/);
+  await controller.release(submitted.jobId);
+  await controller.close();
+});
+
+test('a scene with physics takes motion settings, defaults the video to the bake length and stops at its end', async context => {
+  const root = await temporary(context);
+  const controller = await createAgentRenderJobs({ root, limits, run: writeImage });
+  const input = request();
+  input.snapshot.recipe = { format: '67js.scene', physics: { duration: 2, bodies: [] } };
+  input.settings = { kind: 'video', width: 64, height: 64, fps: 10, motion: { start: 0 } };
+  const submitted = await controller.submit(input);
+  assert.equal(controller.status(submitted.jobId).settings.duration, 2);
+  assert.equal(controller.status(submitted.jobId).settings.frameCount, 20);
+  await terminal(controller, submitted.jobId);
+  input.settings.duration = 3;
+  await assert.rejects(controller.submit(input), /physics bake duration of 2 s/);
+  input.snapshot.recipe = { format: '67js.scene', cloth: { duration: 1, sheets: [] } };
+  input.settings = { kind: 'image', width: 64, height: 64, motion: { start: 0.5 } };
+  const clothJob = await controller.submit(input);
+  assert.equal(controller.status(clothJob.jobId).settings.motion.start, 0.5);
+  await terminal(controller, clothJob.jobId);
+  await controller.release(clothJob.jobId);
   await controller.release(submitted.jobId);
   await controller.close();
 });
@@ -441,6 +466,7 @@ test('a path tracer job runs on the cpu unless it asks for the gpu, and film job
   await assert.rejects(submitWith({ backend: 'metal' }), /backend must be cpu, gpu or native/);
   const film = await submitWith({ backend: 'gpu', samples: 16 }, 'video');
   assert.equal(controller.status(film.jobId).settings.renderer.samples, 16);
+  await terminal(controller, film.jobId);
   await controller.close();
 });
 

@@ -549,8 +549,8 @@ export function createAgentAssetScene(asset, inputRecipe, { sources } = {}) {
     if (meshEdits.length) {
       result.meshEdits = meshEdits;
     }
-    if ((candidate.motion?.ik?.length || candidate.motion?.footLock) && Math.max(...result.root.scale) - Math.min(...result.root.scale) > 1e-3 * Math.max(...result.root.scale)) {
-      throw invalidField('root.scale', result.root.scale, 'the same number on every axis, such as [1, 1, 1], because motion ik and footLock need a uniform asset root scale');
+    if ((candidate.motion?.ik?.length || candidate.motion?.springs || candidate.motion?.footLock) && Math.max(...result.root.scale) - Math.min(...result.root.scale) > 1e-3 * Math.max(...result.root.scale)) {
+      throw invalidField('root.scale', result.root.scale, 'the same number on every axis, such as [1, 1, 1], because motion ik, springs and footLock need a uniform asset root scale');
     }
     result.motion = agentMotion.normalizeAgentMotion(candidate.motion, motionRecipe(result));
     if (candidate.physics !== undefined && candidate.physics !== null) {

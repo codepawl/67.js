@@ -9,6 +9,7 @@ const MODULE_LOADERS = {
   text: () => import('./text-geometry.js'),
   motion: () => import('./agent-motion.js'),
   motionBake: () => import('./agent-motion-bake.js'),
+  springs: () => import('./spring-bones.js'),
   settle: () => import('./agent-settle.js'),
   drive: () => import('./agent-drive.js'),
   physics: () => import('./agent-physics.js'),
@@ -42,6 +43,7 @@ const MODULE_LOADERS = {
   objectMotionBlur: () => import('./object-motion-blur.js'),
   postSteps: () => import('./post-steps.js'),
   materialSnippet: () => import('./material-snippet.js'),
+  volumeGrid: () => import('./local-volume-grid.js'),
 };
 
 const loadedModules = {};
@@ -56,6 +58,7 @@ const MODULE_MARKERS = {
   text: ['"type":"text"'],
   motion: ['"motion":{', '"bake-motion"'],
   motionBake: ['"bake-motion"'],
+  springs: ['"springs":{'],
   settle: ['"type":"settle"'],
   drive: ['"drive":{'],
   physics: ['"physics":{', '"fracture-node"'],
@@ -95,6 +98,7 @@ const MODULE_MARKERS = {
   userPass: ['"postPasses"'],
   game: ['"game":{', '"set-game"'],
   materialSnippet: ['"snippet":{'],
+  volumeGrid: ['"shape":"grid"'],
   // Only a motionBlur object that sets a non-zero `objects` loads it; the common `"shutter":0` look does not.
   objectMotionBlur: [/"motionBlur":\{[^}]*"objects":(?!0[,}])/],
   postSteps: [/"(?:colorBalance|glare|lensDistortion|stylize|composite)"|"(?:distortion|flash)":[\[{]/],
@@ -109,6 +113,11 @@ export function needsMeshBooleans(value) {
 export function needsPhysics(value) {
   const text = JSON.stringify(value ?? null);
   return text.includes('"physics":{') || text.includes('"fracture-node"') || text.includes('"type":"settle"');
+}
+
+/** True when a recipe has a body with a float field, so the host passes { buoyancy: true } to loadPhysicsEngine. */
+export function needsBuoyancy(value) {
+  return JSON.stringify(value ?? null).includes('"float":{');
 }
 
 /** Names of the on-demand modules a recipe, or a list of edit operations, needs. */

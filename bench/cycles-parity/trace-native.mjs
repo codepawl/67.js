@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { createCamera } from '../../src/path-tracer.js';
 import * as packModule from '../../src/path-tracer-gpu-pack.js';
 import { buildTraceSceneWithManyLights } from './trace-scene-many-lights.mjs';
-import { buildInstancedTraceSceneInBatches } from './instanced-scene-in-batches.mjs';
+import { buildInstancedTraceScene } from './instanced-scene.mjs';
 import * as renderNative from '../../packages/render-native/index.mjs';
 import { writeFloat32Npy } from './npy.mjs';
 import { reconstructTraceSceneSource } from './scene-bridge.mjs';
@@ -113,9 +113,18 @@ function parseLightSamplingOption(argumentList) {
   return aliasedLightSampling === 'auto' ? lightSampling : aliasedLightSampling;
 }
 
+/** `--hdri-radiance-limit <number|none>`: the cap the packer puts on environment texels; absent keeps the packer's default (16). */
+function parseHdriRadianceLimit(argumentList) {
+  if (!argumentList.includes('--hdri-radiance-limit')) {
+    return undefined;
+  }
+  const requested = readFlagValue(argumentList, '--hdri-radiance-limit', 'none');
+  return requested === 'none' ? Infinity : parseNumberOption(argumentList, '--hdri-radiance-limit', 16, 0);
+}
+
 function parseTraceArguments(argumentList) {
   if (argumentList.length < 2 || argumentList[0].startsWith('--') || argumentList[1].startsWith('--')) {
-    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda,cpu-cli,cuda-cli] [--grey-diffuse] [--write-depth] [--instancing] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]');
+    throw new RangeError('Usage: node bench/cycles-parity/trace-native.mjs <sceneJsonPath> <outputPrefix> [--kernel legacy|cycles] [--samples 256] [--bounces 8] [--transparent-bounces 8] [--seed 1] [--width 960] [--height 540] [--sampler white|sobol-burley] [--light-sampling auto|tree|uniform] [--path-regeneration | --no-path-regeneration] [--env-compensation 0..1] [--filter-type box|gaussian|blackman-harris] [--filter-width 1.0] [--clamp-direct 0] [--clamp-indirect 0] [--firefly-clamp 1e9] [--noise-threshold 0] [--denoise none|wavelet|atrous] [--oidn-devices cpu,cuda,cpu-cli,cuda-cli] [--hdri-radiance-limit N|none] [--grey-diffuse] [--write-depth] [--instancing] [--f-stop 2.8 [--focus-distance m] [--aperture-blades 0|3..64] [--aperture-rotation degrees] [--sensor-width 36]]');
   }
   return {
     sceneJsonPath: resolve(argumentList[0]),
@@ -150,6 +159,7 @@ function parseTraceArguments(argumentList) {
       ? parseIntegerOption(argumentList, '--samples-per-dispatch', 16, 1)
       : undefined,
     maxSeconds: parseNumberOption(argumentList, '--max-seconds', 1800, 1),
+    hdriRadianceLimit: parseHdriRadianceLimit(argumentList),
     greyDiffuse: argumentList.includes('--grey-diffuse'),
     writeDepth: argumentList.includes('--write-depth'),
     instancing: argumentList.includes('--instancing'),
@@ -317,12 +327,12 @@ async function runCli() {
   await mkdir(dirname(options.outputPrefix), { recursive: true });
   const totalStarted = performance.now();
   const buildStarted = performance.now();
-  const traceSource = await reconstructTraceSceneSource(description);
+  // Files named by `assetFile` (texture images, the world image) are read from the folder that holds the scene file, and only from there.
+  const traceSource = await reconstructTraceSceneSource(description, undefined, { assetDirectory: dirname(options.sceneJsonPath) });
   if (options.instancing && options.kernel !== 'cycles') {
     throw new RangeError('Option --instancing needs --kernel cycles: the legacy kernel packs flattened scenes only.');
   }
-  const instancedBatches = options.instancing ? buildInstancedTraceSceneInBatches(traceSource.parts, traceSource.environment) : null;
-  const traceScene = instancedBatches ? instancedBatches.scene : buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
+  const traceScene = options.instancing ? buildInstancedTraceScene(traceSource.parts, traceSource.environment) : buildTraceSceneWithManyLights(traceSource.parts, traceSource.environment);
   // render-cycles.py takes the lens from the flags only, so a lens set in the scene file is dropped here to keep the two sides comparable.
   const { fStop: ignoredSceneFStop, ...sceneCameraWithoutLens } = traceSource.camera;
   const camera = createCamera({ ...sceneCameraWithoutLens, ...options.lens }, options.width, options.height);
@@ -416,7 +426,6 @@ async function runCli() {
     triangleCount: nativeInput.triangleCount,
     instanceCount: nativeInput.instanceCount ?? null,
     instancing: options.instancing,
-    instanceBatches: instancedBatches ? instancedBatches.uniqueTrianglesPerBatch : null,
     adapter: traced.adapter,
     backend: traced.backend,
     features: traced.features,

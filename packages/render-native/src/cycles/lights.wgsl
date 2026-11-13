@@ -337,6 +337,107 @@ fn lgt_binary_search_env_cdf(base_offset: u32, count: u32, pick_u: f32) -> u32 {
   return low;
 }
 
+// Uniform point on the unit disk by Shirley and Chiu's concentric map, which keeps the stratification of the sample pair.
+fn lgt_sample_unit_disk(rand_uv: vec2<f32>) -> vec2<f32> {
+  let offset = 2.0 * rand_uv - vec2<f32>(1.0);
+  if (offset.x == 0.0 && offset.y == 0.0) {
+    return vec2<f32>(0.0);
+  }
+  if (abs(offset.x) > abs(offset.y)) {
+    let angle = (PI / 4.0) * (offset.y / offset.x);
+    return offset.x * vec2<f32>(cos(angle), sin(angle));
+  }
+  let angle = PI / 2.0 - (PI / 4.0) * (offset.x / offset.y);
+  return offset.y * vec2<f32>(cos(angle), sin(angle));
+}
+
+// Area-to-solid-angle pdf of a point on the soft falloff disk (Cycles: 1 / (pi r^2) times t^2 / cos). `disk_normal` points from
+// the light to the receiver and `to_receiver_dir` is the unit direction from the light point to the receiver.
+fn lgt_soft_falloff_solid_angle_pdf(radius: f32, disk_normal: vec3<f32>, to_receiver_dir: vec3<f32>, distance: f32) -> f32 {
+  let cos_light = dot(disk_normal, to_receiver_dir);
+  if (cos_light <= 0.0) {
+    return 0.0;
+  }
+  return (distance * distance) / (cos_light * PI * radius * radius);
+}
+
+// Point or spot light with `use_soft_falloff` on: a disk of the light's radius through its centre, perpendicular to the line to the
+// shading point. The radiance is that of the sphere (intensity over pi r^2), and a spot's cone applies at every distance.
+fn lgt_sample_soft_falloff_light(light: LightRecord, shading_pos: vec3<f32>, rand_uv: vec2<f32>) -> LgtDirectSample {
+  var out = lgt_empty_sample();
+  out.cast_shadow = select(0u, 1u, (light.flags & LIGHT_FLAG_CAST_SHADOW) != 0u);
+  let from_light = shading_pos - light.position;
+  let center_distance = length(from_light);
+  if (center_distance <= 1.0e-8) {
+    return out;
+  }
+  let disk_normal = from_light / center_distance;
+  var disk_x: vec3<f32>;
+  var disk_y: vec3<f32>;
+  lgt_make_orthonormal_basis(disk_normal, &disk_x, &disk_y);
+  let disk_offset = lgt_sample_unit_disk(rand_uv);
+  let light_point = light.position + (disk_x * disk_offset.x + disk_y * disk_offset.y) * light.radius;
+  let to_light = light_point - shading_pos;
+  let distance = length(to_light);
+  if (distance <= 1.0e-8) {
+    return out;
+  }
+  let wi = to_light / distance;
+  let pdf_solid_angle = lgt_soft_falloff_solid_angle_pdf(light.radius, disk_normal, -wi, distance);
+  let falloff = lgt_range_falloff(distance, light.max_distance);
+  if (falloff <= 0.0 || pdf_solid_angle <= 0.0) {
+    return out;
+  }
+  var spot_weight = 1.0;
+  if (light.light_type == LIGHT_TYPE_SPOT) {
+    spot_weight = lgt_spot_attenuation(light, -wi);
+    if (spot_weight <= 0.0) {
+      return out;
+    }
+  }
+  out.valid = 1u;
+  out.is_delta = select(1u, 0u, (light.flags & LIGHT_FLAG_MULTIPLE_IMPORTANCE) != 0u);
+  out.wi = wi;
+  out.distance = distance;
+  out.radiance = light.radiance * (spot_weight * falloff);
+  out.pdf = light.selection_pdf * pdf_solid_angle;
+  return out;
+}
+
+// A path against the soft falloff disk, which faces the ray origin. Returns false when the ray misses it, leaves it behind or
+// reaches it outside (t_min, t_max).
+fn lgt_ray_soft_falloff_intersect(
+  ray_origin: vec3<f32>,
+  ray_dir: vec3<f32>,
+  light: LightRecord,
+  t_min: f32,
+  t_max: f32,
+  hit_t: ptr<function, f32>,
+  pdf_solid_angle: ptr<function, f32>,
+) -> bool {
+  let from_light = ray_origin - light.position;
+  let origin_distance = length(from_light);
+  if (origin_distance <= 1.0e-8) {
+    return false;
+  }
+  let disk_normal = from_light / origin_distance;
+  let cos_angle = dot(disk_normal, -ray_dir);
+  if (cos_angle <= 0.0) {
+    return false;
+  }
+  let candidate_t = origin_distance / cos_angle;
+  if (candidate_t <= t_min || candidate_t >= t_max) {
+    return false;
+  }
+  let offset = ray_origin + ray_dir * candidate_t - light.position;
+  if (dot(offset, offset) >= light.radius * light.radius) {
+    return false;
+  }
+  *hit_t = candidate_t;
+  *pdf_solid_angle = lgt_soft_falloff_solid_angle_pdf(light.radius, disk_normal, -ray_dir, candidate_t);
+  return true;
+}
+
 fn lgt_sample_point_or_spot_light(light: LightRecord, shading_pos: vec3<f32>, rand_uv: vec2<f32>) -> LgtDirectSample {
   var out = lgt_empty_sample();
   out.cast_shadow = select(0u, 1u, (light.flags & LIGHT_FLAG_CAST_SHADOW) != 0u);
@@ -368,6 +469,10 @@ fn lgt_sample_point_or_spot_light(light: LightRecord, shading_pos: vec3<f32>, ra
     out.radiance = light.radiance * (spot_weight * falloff / dist_sq);
     out.pdf = light.selection_pdf;
     return out;
+  }
+
+  if ((light.flags & LIGHT_FLAG_SOFT_FALLOFF) != 0u) {
+    return lgt_sample_soft_falloff_light(light, shading_pos, rand_uv);
   }
 
   let radius = light.radius;
@@ -593,6 +698,16 @@ fn lgt_sample_emissive_triangle(point: ptr<function, ShadingPoint>, pick_u: f32,
   return lgt_sample_emissive_triangle_at(point, index, emissive_triangles[index].selection_pdf, sample_uv);
 }
 
+// The radiance of a light sample on an emitter with an emission map: the map read at the sampled point, as a ray that hits the
+// emitter reads it (closure_build), so light sampling and bounce rays estimate the same radiance. The packed `radiance` of such
+// an emitter is the mean of the decoded texels, which only steers the choice of emitter (#1030).
+fn lgt_textured_emitter_radiance(emitter: EmissiveTriangleRecord, bary_u: f32, bary_v: f32) -> vec3<f32> {
+  let mat = materials[emitter.material_index];
+  let uvs = int_interpolate_triangle_uvs(triangles[emitter.triangle_index], vec2<f32>(bary_u, bary_v));
+  let tint = max(max(mat.emission_color, vec3<f32>(0.0)) * texture_sample(mat.emission_tex, uvs.uv0, uvs.uv1).rgb, vec3<f32>(0.0));
+  return tint * max(mat.emission_strength, 0.0);
+}
+
 fn lgt_sample_emissive_triangle_at(point: ptr<function, ShadingPoint>, index: u32, selection_pdf: f32, sample_uv: vec2<f32>) -> LgtDirectSample {
   var out = lgt_empty_sample();
   let emitter = emissive_triangles[index];
@@ -631,6 +746,9 @@ fn lgt_sample_emissive_triangle_at(point: ptr<function, ShadingPoint>, index: u3
   out.wi = wi;
   out.distance = dist;
   out.radiance = emitter.radiance;
+  if (mat.emission_tex >= 0) {
+    out.radiance = lgt_textured_emitter_radiance(emitter, bary_u, bary_v);
+  }
   out.pdf = selection_pdf * pdf_solid_angle;
   out.target_instance = emitter.instance_index;
   out.target_triangle = emitter.triangle_index;
@@ -831,6 +949,32 @@ fn lgt_eval_analytic_lights_along_segment(
       }
       let is_spot = light.light_type == LIGHT_TYPE_SPOT;
       if (is_spot && dot(ray_dir, ray_origin - light.position) >= 0.0) {
+        continue;
+      }
+      if ((light.flags & LIGHT_FLAG_SOFT_FALLOFF) != 0u) {
+        var disk_hit_t = 0.0;
+        var disk_pdf_solid_angle = 0.0;
+        if (!lgt_ray_soft_falloff_intersect(ray_origin, ray_dir, light, t_min, t_max, &disk_hit_t, &disk_pdf_solid_angle)) {
+          continue;
+        }
+        let disk_falloff = lgt_range_falloff(disk_hit_t, light.max_distance);
+        if (disk_falloff <= 0.0) {
+          continue;
+        }
+        var disk_spot_weight = 1.0;
+        if (is_spot) {
+          disk_spot_weight = lgt_spot_attenuation(light, -ray_dir);
+          if (disk_spot_weight <= 0.0) {
+            continue;
+          }
+        }
+        var disk_mis_weight = 1.0;
+        if (!(is_camera_ray || mis_skip)) {
+          let disk_pdf_nee = lgt_selection_probability(index, light.selection_pdf) * disk_pdf_solid_angle;
+          disk_mis_weight = lgt_power_heuristic(prev_bsdf_pdf, disk_pdf_nee);
+        }
+        let disk_medium_atten = select(vec3<f32>(1.0), exp(-medium_sigma * max(disk_hit_t - t_min, 0.0)), in_medium);
+        total += light.radiance * disk_medium_atten * (disk_spot_weight * disk_falloff * disk_mis_weight);
         continue;
       }
       var hit_t = 0.0;

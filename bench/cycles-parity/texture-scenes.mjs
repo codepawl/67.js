@@ -128,6 +128,43 @@ function emissiveProbeScene(colorSpace) {
   };
 }
 
+// A high-contrast two-tone sRGB checker, one texel per square.
+function contrastChecker() {
+  const size = 4;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const offset = (y * size + x) * 4;
+      const bright = (x + y) & 1;
+      data[offset] = bright ? 235 : 25;
+      data[offset + 1] = bright ? 180 : 40;
+      data[offset + 2] = bright ? 60 : 120;
+      data[offset + 3] = 255;
+    }
+  }
+  return { width: size, height: size, data };
+}
+
+// A textured emitter that lights a diffuse floor. The floor only sees the emitter through light sampling and through bounce rays
+// that happen to hit it, so a mean colour used as the radiance of a light sample (instead of the map read at the sampled
+// point) shows as a floor brighter under light sampling alone than under bounce rays alone (#1030).
+function emissiveFloorScene(colorSpace) {
+  const emissiveMap = { image: contrastChecker(), colorSpace };
+  const floorMatrix = new Float32Array([1.5, 0, 0, 0, 0, 0, -1.4, 0, 0, 1, 0, 0, 0, -1, 1.6, 1]);
+  const floor = {
+    name: 'floor',
+    geometry: quadGeometry(1),
+    matrix: floorMatrix,
+    material: { tag: 'surface', metallic: 0, roughness: 0.9, emission: 0, color: [0.6, 0.6, 0.6] },
+  };
+  return {
+    parts: [part('emitter', quadGeometry(4), [0, 0.2, 0], [1, 1, 1], { color: [0, 0, 0], emission: 4, emissiveColor: [1, 1, 1], emissiveMap }), floor],
+    blenderWorld: { type: 'constant', value: 0 },
+    environment: { ...environment(), pointLights: [] },
+    camera: { eye: [0, 2.2, 5], target: [0, -0.6, 1], up: [0, 1, 0], fov: 45, near: 0.1, far: 50 },
+  };
+}
+
 // The mask quad of tex-repeat without the backdrop that receives its shadow, and with an opaque map under the same mask material.
 // Cook over Cycles on these two says whether a gap on the mask quad sits on the quad, in its shadow or in the cutout itself.
 function maskDiagnosticScene(variant) {
@@ -166,6 +203,7 @@ export const TEXTURE_SCENES = {
   'tex-wraps': textureWrapsScene,
   'tex-emit-srgb': () => emissiveProbeScene('srgb'),
   'tex-emit-linear': () => emissiveProbeScene('linear'),
+  'tex-emit-floor': () => emissiveFloorScene('srgb'),
   'tex-mask-alone': () => maskDiagnosticScene('alone'),
   'tex-mask-opaque-map': () => maskDiagnosticScene('opaque'),
   'tex-split-room': () => textureSplitScene('none'),

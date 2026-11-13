@@ -7,6 +7,10 @@ import { GALLERY_LIGHT_POSITIONS } from '../bench/agent-modeling/gallery.mjs';
 import { COLONNADE_BEST_PLACE, COLONNADE_LIGHT_POSITIONS } from '../bench/agent-modeling/colonnade.mjs';
 import { DUSK_GRADES } from '../bench/agent-modeling/dusk.mjs';
 import { EASING_PLAIN_SOLUTION } from '../bench/agent-modeling/easing.mjs';
+import { binomialP } from '../bench/agent-modeling/default-judge.mjs';
+import { countFixRounds, isMcpRender, isMcpWrite } from '../bench/agent-modeling/fix-rounds.mjs';
+import { judgePairs, pairwiseTable, planPairs, runPairwise, summarizePairing } from '../bench/agent-modeling/pairwise-judge.mjs';
+import { readTranscript as readThreejsTranscript } from '../bench/agent-modeling/threejs.mjs';
 
 test('the look pick passes the golden grade and fails the dim, the pale and a moved scene', async () => {
   const task = taskById('look-pick');
@@ -297,4 +301,119 @@ test('the plain overshoot task forbids easings in its prompt and grades the hand
   const task = taskById('overshoot-lift-plain');
   assert.match(task.prompt, /do not use the easing field/);
   assert.deepEqual(failedKinds(await gradeRecipe(task, structuredClone(REFERENCES['overshoot-lift-plain']))), []);
+});
+
+const PAIRWISE_SIDES = {
+  a: { label: '67js MCP', pattern: 'renders/mcp/{attempt}/{task}.png' },
+  b: { label: 'three.js by code', pattern: 'renders/code/{task}-{attempt}.png' },
+};
+
+test('the pairwise order is a function of the seed, and repeats of one task swap sides', () => {
+  const tasks = ['crate', 'bolt', 'table'];
+  const plan = seed => planPairs({ tasks, attempts: 3, seed, sides: PAIRWISE_SIDES }).map(pair => `${pair.task}${pair.attempt}${pair.firstSide}`);
+  assert.deepEqual(plan(53), plan(53));
+  assert.notDeepEqual(plan(53), plan(54));
+  const pairs = planPairs({ tasks, attempts: 3, seed: 53, sides: PAIRWISE_SIDES });
+  for (const pair of pairs.filter(candidate => candidate.attempt === 2)) {
+    const first = pairs.find(candidate => candidate.task === pair.task && candidate.attempt === 1);
+    assert.notEqual(pair.firstSide, first.firstSide, 'attempt 2 shows the other side first');
+  }
+  const crate = pairs[0];
+  assert.equal(crate.firstLabel, PAIRWISE_SIDES[crate.firstSide].label);
+  assert.match(crate.firstImage.replaceAll('\\', '/'), crate.firstSide === 'a' ? /renders\/mcp\/1\/crate\.png$/ : /renders\/code\/crate-1\.png$/);
+});
+
+test('the pairwise win count follows a fixed set of answers and its exact p', async () => {
+  const tasks = ['crate', 'bolt', 'table', 'fence', 'window', 'bracket'];
+  const pairs = planPairs({ tasks, attempts: 1, seed: 53, sides: PAIRWISE_SIDES });
+  // The stub always names side B's image, wherever it sits, except for the last task, which it gives to side A.
+  const ask = async pair => {
+    const wantedSide = pair.task === 'bracket' ? 'a' : 'b';
+    return { answer: pair.firstSide === wantedSide ? 'first' : 'second', costUsd: 0.01 };
+  };
+  const records = await judgePairs({ pairs, ask });
+  const summary = summarizePairing({ records, labels: { a: '67js MCP', b: 'three.js by code' }, control: false });
+  assert.deepEqual(summary.wins, { '67js MCP': 1, 'three.js by code': 5 });
+  assert.equal(summary.trials, 6);
+  assert.ok(Math.abs(summary.pValue - 0.21875) < 1e-9, 'two-sided p of 5 of 6 is 14/64');
+  assert.equal(summary.costUsd, 0.06);
+  const undecided = await judgePairs({ pairs: pairs.slice(0, 2), ask: async () => ({ answer: null }) });
+  assert.equal(summarizePairing({ records: undecided, labels: { a: 'a', b: 'b' }, control: false }).trials, 0);
+});
+
+test('the binomial p matches known values', () => {
+  assert.equal(binomialP(0, 0), 1);
+  assert.equal(binomialP(9, 18), 1);
+  assert.ok(Math.abs(binomialP(18, 18) - 2 * 0.5 ** 18) < 1e-12);
+  assert.ok(Math.abs(binomialP(0, 10) - 2 / 1024) < 1e-12);
+  assert.ok(Math.abs(binomialP(13, 18) - 0.096) < 0.001, '13 of 18 is not significant');
+});
+
+test('the control pairs one render with itself and reports position bias', async () => {
+  const pairs = planPairs({ tasks: ['crate', 'bolt', 'table', 'chair'], attempts: 2, seed: 53, sides: PAIRWISE_SIDES, control: true });
+  assert.equal(pairs.length, 8);
+  for (const pair of pairs) {
+    assert.equal(pair.firstImage, pair.secondImage, 'identical input on both sides');
+    assert.equal(pair.firstLabel, '67js MCP');
+    assert.equal(pair.secondLabel, '67js MCP');
+  }
+  const records = await judgePairs({ pairs, ask: async () => ({ answer: 'first' }) });
+  const summary = summarizePairing({ records, labels: { a: '67js MCP', b: 'three.js by code' }, control: true });
+  assert.equal(summary.pickedFirst, 8);
+  assert.equal(summary.pickedSecond, 0);
+  assert.ok(summary.pBias < 0.01, 'always picking first is position bias');
+});
+
+test('runPairwise calls the judge once per pair and once per control pair, with no model', async () => {
+  let calls = 0;
+  const result = await runPairwise({ ask: async () => { calls++; return { answer: calls % 2 ? 'first' : 'second' }; }, tasks: ['crate', 'bolt'], attempts: 2, seed: 53, sides: PAIRWISE_SIDES });
+  assert.equal(calls, 8);
+  assert.equal(result.pairing.records.length, 4);
+  assert.equal(result.control.records.length, 4);
+  assert.match(pairwiseTable(result), /Exact p/);
+  calls = 0;
+  const controlOnly = await runPairwise({ ask: async () => { calls++; return { answer: 'first' }; }, tasks: ['crate'], attempts: 3, seed: 53, sides: PAIRWISE_SIDES, controlOnly: true });
+  assert.equal(calls, 3);
+  assert.equal(controlOnly.pairing, null);
+});
+
+test('fix rounds count the writes after the first render, in both systems', () => {
+  const mcpSteps = ['scene_create', 'scene_apply', 'scene_look', 'scene_apply', 'scene_look', 'scene_apply', 'scene_export_recipe']
+    .map(name => ({ name: `mcp__67js__${name}` }));
+  assert.equal(countFixRounds(mcpSteps, { isRender: isMcpRender, isWrite: isMcpWrite }), 2);
+  assert.equal(countFixRounds(mcpSteps.slice(0, 2), { isRender: isMcpRender, isWrite: isMcpWrite }), 0, 'never rendered');
+
+  const toolUse = (name, input) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: name, name, input }] } });
+  const transcript = [
+    toolUse('Write', { file_path: 'build.mjs' }),
+    toolUse('Bash', { command: 'node build.mjs' }),
+    toolUse('Edit', { file_path: 'build.mjs' }),
+    toolUse('Bash', { command: 'node build.mjs' }),
+    toolUse('Write', { file_path: 'build.mjs' }),
+    toolUse('Bash', { command: 'node build.mjs' }),
+  ].join('\n');
+  const summary = readThreejsTranscript(transcript);
+  assert.equal(summary.toolCalls, 6);
+  assert.equal(summary.fixRounds, 2);
+});
+
+test('the findings-fix task fails its starting scene and each half-fix, and passes the reference', async () => {
+  const task = taskById('findings-fix');
+  const start = structuredClone(task.startRecipe);
+  const startGrade = await gradeRecipe(task, start);
+  assert.equal(startGrade.pass, false);
+  assert.ok(startGrade.results.some(result => result.kind === 'restsOnSupport' && !result.pass));
+  assert.ok(startGrade.results.some(result => result.kind === 'litRange' && !result.pass));
+
+  const onlyLowered = structuredClone(start);
+  onlyLowered.nodes.find(node => node.id === 'crate').translation = [1.6, 0.25, 0.4];
+  const loweredGrade = await gradeRecipe(task, onlyLowered);
+  assert.deepEqual(loweredGrade.results.filter(result => !result.pass).map(result => result.kind), ['litRange']);
+
+  const onlyDimmed = structuredClone(start);
+  onlyDimmed.environment.keyIntensity = 1;
+  const dimmedGrade = await gradeRecipe(task, onlyDimmed);
+  assert.deepEqual(dimmedGrade.results.filter(result => !result.pass).map(result => result.kind), ['restsOnSupport']);
+
+  assert.equal((await gradeRecipe(task, structuredClone(REFERENCES['findings-fix']))).pass, true);
 });

@@ -1,6 +1,7 @@
 import { answerCapabilities } from './capabilities-topics.mjs';
 import { BRANCH_NAME_PATTERN } from '../src/agent-branches.js';
 import { McpServer } from '@modelcontextprotocol/server';
+import { resolveJobRoot } from './agent-job-root.mjs';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { describeSchemaInputsWithReceivedValues } from './mcp-input-errors.mjs';
@@ -16,8 +17,10 @@ import { MATERIAL_PATTERN_TYPES, MATERIAL_MAPPINGS, LIGHTING_SETUP_NAMES, RENDER
 import { MATERIAL_LAYER_SCALAR_RANGES, MATERIAL_LAYER_COLOR_RANGES } from '../src/material-layers.js';
 import { SUBSURFACE_RANGES } from '../src/subsurface-limits.js';
 import { responseFormatField, chosenFormat, conciseReview, conciseJobStatus, conciseJobResult, withoutNotes } from './mcp-response-format.mjs';
+import { resolveAddons } from './mcp-addons.mjs';
 import { createCallLogger, CALL_LOG_ENVIRONMENT_VARIABLE } from './mcp-call-log.mjs';
 import { startUpdateCheck, updateNoticeText, describeUpdateCheck } from '../src/mcp-update-check.js';
+import { installVolumeGridFiles } from '../src/mcp-volume-grids.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
 
 describeSchemaInputsWithReceivedValues();
@@ -345,8 +348,8 @@ function primitiveGeometries(identified) {
   const id = identified ? { id: identifier } : {};
   return [
     z.strictObject({ ...id, type: z.literal('box'), bevel: finite.optional().describe('Unit cube, -0.5 to 0.5. The default bevel of 0.08 rounds its edges and is scaled with the node; set 0 for exact sizes and crisp edges.'), subdivisions: detail(1, 128) }),
-    z.strictObject({ ...id, type: z.literal('cylinder'), segments, bevel: finite.optional().describe('Radius 1, height 1, centred. The default bevel of 0.025 rounds its rims; set 0 for exact sizes and crisp edges.'), bevelSegments: detail(1, 128) }),
-    z.strictObject({ ...id, type: z.literal('sphere'), segments, rings: detail(2, 2048) }),
+    z.strictObject({ ...id, type: z.literal('cylinder'), segments, bevel: finite.optional().describe('The default bevel of 0.025 rounds its rims; set 0 for exact sizes and crisp edges.'), bevelSegments: detail(1, 128) }).describe('Radius 1, height 1: node scale x and z are the radius, not the diameter. With 6 segments the flats sit on Z, 1.732 x scale apart, and the corners on X, 2 x scale apart.'),
+    z.strictObject({ ...id, type: z.literal('sphere'), segments, rings: detail(2, 2048) }).describe('Radius 1: node scale is the radius.'),
     z.strictObject({ ...id, type: z.literal('torus'), tubeRadius: finite.optional(), segments, sides: detail(3, 128), arc: finite.optional(), start: finite.optional() }),
     z.strictObject({ ...id, type: z.literal('lathe'), profile: z.array(point2).min(2).max(4096), segments, startAngle: finite.optional(), sweep: finite.optional() }),
     z.strictObject({ ...id, type: z.literal('extrude'), contour: ring, holes: z.array(ring).max(128).optional(), depth: finite.optional(), steps: detail(1, 256), bevel: finite.optional(), bevelThickness: finite.optional(), bevelSegments: detail(1, 32) }),
@@ -585,6 +588,7 @@ const ikSolver = z.discriminatedUnion('type', [
 const motion = z.strictObject({
   duration: z.number().min(0.1).max(30),
   ik: z.array(ikSolver).max(16).optional().describe('Inverse kinematics run after the tracks and any selected clip, in order, on recipes and imported assets. IDs are recipe node IDs or an asset\'s node-N IDs; find them with scene_inspect kind hierarchy. scene_inspect reports motionIk: whether each solver reaches its target across the clip.'),
+  springs: z.record(z.string(), z.unknown()).optional().describe('Spring bones for hair, tails and soft parts, VRM model: { chains: [{ bones, stiffness, dragForce, gravityPower, gravityDir, hitRadius, colliders }], colliders: [{ id, bone, type, offset, radius }] }. scene_capabilities springBones has the ranges.'),
   constraints: z.array(constraint).max(32).optional().describe('Blender-style node constraints, run in order after the tracks, drivers and IK, each on the pose the one before left: copy_location, copy_rotation, copy_scale, limit_location, limit_rotation, track_to, child_of, floor. Euler angles are XYZ in degrees; space defaults to world. Same result at any time, so seeking equals playing.'),
   drivers: z.array(driver).max(32).optional().describe('Drive one node component or material property from a bounded expression over time and other nodes\' values. A driven property cannot also have a track.'),
   loop: z.boolean().optional(),
@@ -618,6 +622,7 @@ const physicsBody = z.strictObject({
   angularVelocity: vector3.optional(),
   layer: z.number().int().min(0).max(15).optional(),
   collidesWith: z.array(z.number().int().min(0).max(15)).max(16).optional().describe('Layers hit; both bodies must list each other. Defaults to all.'),
+  float: z.record(z.string(), z.unknown()).optional().describe('Floats on physics.ocean (dynamic bodies only): drag 2 and angularDrag 2 (1/s, 0-100) damp the body while it is under water; points is 1-16 [x,y,z] in body space (default a 2 x 2 grid at mid height). Each point pushes up by waterDensity x gravity x (volume / points) x its submerged fraction, so density 500 settles at half depth; spread points over a hull so it rolls upright. Needs a volume: not trimesh.'),
 });
 const physicsJoint = z.strictObject({
   type: z.enum(['spherical', 'revolute', 'prismatic', 'fixed']),
@@ -633,6 +638,7 @@ const physics = z.strictObject({
   gravity: vector3.optional().describe('Defaults to [0, -9.81, 0].'),
   bodies: z.array(physicsBody).min(1).max(64),
   joints: z.array(physicsJoint).max(64).optional().describe('Joint bodies are the node IDs of physics bodies.'),
+  ocean: z.record(z.string(), z.unknown()).optional().describe('Sea for floating bodies: geometry is a mesh geometry whose stack has an ocean node (axis y) whose waves they ride; level is the world height of the calm sea (leave it out to follow the drawn sea; a different value adds a warning to the scene_inspect physics report); waterDensity 1000 kg/m3. The sea clock at physics time 0 is the ocean node time, so drive an oceanTime track at 1 s per s to keep the drawn sea in step.'),
 }).describe('Rigid bodies recorded offline with Rapier (optional peer) at 60 fps and seeked by motionTime. scene_inspect reports contacts and resting state. A node cannot have a body and a motion translation or rotation track.');
 const looseRecord = z.record(z.string(), z.unknown()).meta({ id: 'LooseRecord' });
 const clothSheet = z.strictObject({
@@ -653,6 +659,7 @@ const cloth = z.strictObject({
 }).describe('Baked at 60 fps, seeked by motionTime. Units, defaults: scene_capabilities cloth.');
 // The full motion schema (tracks, ik, constraints, drivers) is in scene_create's recipe. scene_apply and asset recipes
 // take the same object, validated by the backend, without repeating about 35 KB of schema in each tool.
+const packName = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/).max(64);
 const recipeMotionReference = z.record(z.string(), z.unknown()).describe('The same object as recipe.motion in scene_create: duration, loop, tracks, ik, constraints, drivers. Read that tool for the fields. On an imported asset it also takes layers, up to 8 clips played at motion time before tracks and ik: { clip (scene_inspect animations id), mask: { joints, descendants, exclude } of node IDs, weight, speed, offset, loop, additive, reference, bones: { clip node: asset node } to retarget by name, morph } or from: { asset, clip } for a clip of another catalog asset retargeted onto this humanoid (scale, rootMotion). motion also takes drive (a car along a path, see scene_capabilities motionDrive) and footLock (true or { contactHeight, contactSpeed, blend, ground }) and { kind: "morph", id: target name, property: "weight" } tracks. A masked layer waves while another walks.');
 const boneRecord = z.strictObject({
   name: z.string().min(1).max(64).describe('Unique within the armature. Humanoid rigs use the canonical names (hips, spine, chest, neck, head, leftUpperArm, leftLowerArm, leftHand, leftUpperLeg, leftLowerLeg, leftFoot, leftToes, and right...) so retarget works.'),
@@ -786,6 +793,7 @@ const renderSettings = z.strictObject({
   motion: z.strictObject({ start: z.number().min(0).max(3600).optional() }).optional(),
   rendererTime: z.strictObject({ start: z.number().min(0).max(3600).optional(), rate: z.number().min(-16).max(16).optional() }).optional(),
   renderer: z.looseObject({ type: z.literal('pathTracer'), backend: z.enum(['cpu', 'gpu', 'native']).optional() }).meta({ description: 'Path tracer. Also samples, bounces, denoise, seed, maxSeconds, noiseThreshold: scene_capabilities pathTracer.' }).pipe(z.strictObject({ type: z.literal('pathTracer'), backend: z.enum(['cpu', 'gpu', 'native']).optional(), samples: z.number().optional(), bounces: z.number().optional(), denoise: z.union([z.boolean(), z.enum(['wavelet', 'oidn', 'none'])]).optional(), seed: z.number().optional(), maxSeconds: z.number().optional(), noiseThreshold: z.number().optional() })).optional(),
+  budget: z.strictObject({ secondsPerFrame: z.number().optional(), framesPerSecond: z.number().optional(), memoryMiB: z.number().optional() }).optional().describe('Pick renderer, samples and size to fit; not with renderer. scene_capabilities jobs.'),
   timeline: z.strictObject({ start: z.number().min(0).max(60).optional() }).optional().describe('Play the recipe timeline from start (default 0); it owns the motion clock, so leave motion and animation out.'),
   audio: z.strictObject({ file: z.string().max(68), offset: z.number().min(0).max(3600).optional(), track: z.enum(['aac', 'pcm']).optional() }).optional().describe('Video only: a file in the --audio folder, mixed in from offset seconds.'),
   encoder: z.enum(VIDEO_ENCODERS).optional().describe('Video only: cpu (default) or nvenc.'),
@@ -868,7 +876,7 @@ function jsonResult(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }
 
-export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true, callLogPath = process.env[CALL_LOG_ENVIRONMENT_VARIABLE], updateAvailable = () => null } = {}) {
+export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true, findings = true, callLogPath = process.env[CALL_LOG_ENVIRONMENT_VARIABLE], updateAvailable = () => null } = {}) {
   const newerVersion = updateAvailable();
   let updateReported = false;
   const logCall = createCallLogger(callLogPath);
@@ -878,6 +886,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   const restoreBranchField = branches ? { branch: branchName.optional() } : {};
   const restoreCheckpointId = checkpointFields.checkpointId.optional();
   const branchInstructions = branches ? ' To try variants, give scene_apply a branch name for each (the scene stays put), compare them in one scene_review with a branch per shot, then keep the best with scene_restore and its branch.' : '';
+  installVolumeGridFiles();
   const server = new McpServer({ name: '67js-scene', version }, {
     instructions: 'Start with scene_capabilities. Create a procedural recipe with scene_create, or select a configured GLB digest from scene_asset_catalog and use scene_create_asset. Pass its sessionId to work on several open scenes; without it the last used scene is used. Inspect stable IDs and save a checkpoint before editing. Apply small batches with the current expectedRevision and check committed, revision and renderSucceeded. A committed edit can have a separate renderError; do not retry it with an old revision.'+branchInstructions+' Pass labels: true to scene_look or scene_review to match part names to the image. Use scene_look to judge the actual image, or scene_review with the current expectedRevision to compare independent camera and motion samples in one grid while preserving the source pose. When jobs are configured, scene_render_submit captures an immutable snapshot. Poll scene_render_status, cancel when needed, and retrieve verified local artifact metadata with scene_render_result after completion. Preview rendering and edits pause during a job; source revision and checkpoints survive. Release outputs with scene_render_release. Export the final recipe and dispose the scene when finished. No arbitrary JavaScript, remote URLs or caller-selected output paths are exposed.'+(newerVersion ? updateNoticeText(newerVersion) : ''),
   });
@@ -922,7 +931,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
     return jsonResult(pendingUpdate === null ? shown : { ...shown, updateAvailable: pendingUpdate });
   });
   register('scene_create', 'Create a render scene from a JSON recipe; the result has its sessionId. Several scenes stay open; past the cap the least recently used one is closed.', z.strictObject({ recipe: relations ? recipe : recipeWithoutRelations }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.create(argumentsValue)));
-  register('scene_asset_catalog', 'List content-bound GLB and PNG, JPEG or WebP image IDs from the configured local asset directory. No arbitrary paths or downloads.', z.strictObject({}), readOnly, async () => jsonResult(await runtime.assetCatalog()));
+  register('scene_asset_catalog', 'List content-bound GLB, image, HDRI and look IDs from the asset directory and installed packs. pack with recipe or material reads that item. No paths or downloads; scene_capabilities packs.', z.strictObject({ pack: packName.optional(), recipe: packName.optional(), material: packName.optional() }), readOnly, async argumentsValue => jsonResult(await runtime.assetCatalog(argumentsValue)));
   register('scene_create_asset', 'Create the active scene from a catalog GLB and editable asset recipe. Preserves supported maps, skins, morphs and clips. The result has its sessionId.', z.strictObject({ recipe: assetRecipe }), { ...edit, destructiveHint: false }, async argumentsValue => jsonResult(await runtime.createAsset(argumentsValue)));
   register('scene_inspect', 'Read revision, counts and selected nodes. For a recipe with physics, the result lists body final positions, resting times, contacts and sensor enter/leave events. Bounds describe authored geometry rather than shader displacement.', z.strictObject({ ...sessionFields, ids: z.array(identifier).max(4096).optional().describe('Selected node IDs; an imported node means its parts and those below. Omit to inspect scene order.'), kind: z.enum(['meshes', 'hierarchy']).optional().describe('Imported assets only: hierarchy exposes stable source-node IDs and joints.'), offset: z.number().int().min(0).max(4096).optional().describe('Imported assets only: pagination offset.'), limit: z.number().int().min(1).max(4096).optional().describe('Maximum returned node records. Defaults to 64.'), includeBounds: z.boolean().optional().describe('Include world geometry bounds. Defaults to false.'), path: z.record(z.string(), z.unknown()).optional().describe('Walking route over a ground node, around holes: fields in scene_capabilities navigation.') }), readOnly, async argumentsValue => jsonResult(await runtime.inspect(argumentsValue)));
   register('scene_walkmap', 'Walkable map on a grid: rows of . walkable, x blocked, # no surface. keepOut (m) avoids obstacles. assetId: query a big catalog GLB, no render.', z.strictObject({ ...sessionFields, assetId: z.string().regex(/^[a-f0-9]{64}$/).optional(), min: z.tuple([z.number(), z.number()]), max: z.tuple([z.number(), z.number()]), cellSize: z.number().min(0.05).default(1), clearance: z.number().min(0).default(2), keepOut: z.number().min(0).optional(), streetY: z.number().optional(), includeCells: z.boolean().optional() }), readOnly, async argumentsValue => jsonResult(await runtime.walkMap(argumentsValue)));
@@ -931,7 +940,10 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   register('mesh_stack', 'Set the non-destructive modifier stack of a recipe mesh geometry (ops and fields: scene_capabilities meshModifiers), evaluated after its edits, each prefix cached. apply: n moves the first n nodes into the edit log, as Blender\'s Apply modifier. Atomic like scene_apply. Returns the revision, render status and mesh report.', z.strictObject({ ...sessionFields, expectedRevision, geometry: identifier.describe('ID of a geometry with type mesh.'), stack: meshStack.optional().describe('The whole new stack. Omit to keep the current stack (for example with apply).'), apply: z.number().int().min(0).max(16).optional() }), edit, async argumentsValue => jsonResult(await runtime.setMeshStack(argumentsValue)));
   register('scene_apply', 'Atomically edit transforms, look, camera or materials. Procedural scenes support membership and set-motion authoring. Imported assets support set-root, set-asset-node, set-motion and absolute set-animation sampling. Successful batches increment revision once. Returns results (one entry per operation, with a warning when it changed nothing) and a diff of added, removed and changed IDs, not the node list (call scene_inspect for that).', z.strictObject({ ...sessionFields, expectedRevision, operations: z.array(relations ? operation : operationWithoutRelations).min(1).max(256).describe('Node/material/camera/root/animation commands use flat fields. Motion, look patches and add commands contain nested records. Backend validates each scene mode before publication.'), ...branchField }), edit, async argumentsValue => jsonResult(await runtime.apply(argumentsValue)));
   register('scene_look', 'Render the active scene as a bounded PNG, optionally with part labels. Optional authored motionTime seeks without changing revision; null restores the authored base pose. Omit to retain the last preview pose.', z.strictObject({ ...sessionFields, motionTime: z.number().min(0).max(3600).nullable().optional(), width: z.number().int().min(64).max(1024).default(768).describe('PNG width in pixels.'), height: z.number().int().min(64).max(1024).default(512).describe('PNG height in pixels.'), labels: labelsFlag }), readOnly, async argumentsValue => {
-    const { data, mimeType, metadata } = await runtime.look(argumentsValue);
+    const { data, mimeType, metadata: lookMetadata } = await runtime.look(argumentsValue);
+    // --findings off is the benchmark control: the same look without the structured findings.
+    const { diagnostics: _findings, ...metadataWithoutFindings } = lookMetadata;
+    const metadata = findings ? lookMetadata : metadataWithoutFindings;
     return { content: [{ type: 'image', data, mimeType }, { type: 'text', text: JSON.stringify(metadata) }], structuredContent: metadata };
   });
   register('scene_ask_user', 'Open the view in the browser so the person pins points with notes; waits for Send. Use for a change hard to say in words. Returns marks with partId, point, normal, note, and the marked PNG.', z.strictObject({ ...sessionFields, prompt: z.string().max(200).optional().describe('Line shown above the picture.'), maxMarks: z.number().int().min(1).max(16).default(16), timeoutSeconds: z.number().int().min(10).max(900).default(300) }), askUser, async argumentsValue => {
@@ -985,22 +997,29 @@ export async function runCheckUpdateCli({ version = packageMetadata.version } = 
 export async function runMcpCli({ argumentsValue = process.argv.slice(2),
   previewUrl = new URL(/* @vite-ignore */ '../build/mcp/preview.js', import.meta.url), version = packageMetadata.version } = {}) {
   const options = { backend: 'gpu', memory: 192 };
+  const allowedAddonNames = [];
   for (let index = 0; index < argumentsValue.length; index += 2) {
     const name = argumentsValue[index];
     const value = argumentsValue[index + 1];
-    if (!['--backend', '--browser', '--memory', '--assets', '--jobs', '--ffmpeg', '--audio', '--branches', '--relations'].includes(name) || value === undefined) {
-      throw new Error(`Use --backend cpu|gpu, --browser <local executable path>, --memory <32..${MAXIMUM_MEMORY_MIB} MiB>, --assets <absolute GLB directory>, --jobs <absolute private output directory>, --ffmpeg <absolute executable>, --audio <absolute folder of .wav, .mp3, .ogg or .flac files for video jobs>, --branches on|off and --relations on|off (both default on).`);
+    if (!['--backend', '--browser', '--memory', '--assets', '--packs', '--jobs', '--ffmpeg', '--audio', '--branches', '--relations', '--findings', '--addons', '--allow-addon'].includes(name) || value === undefined) {
+      throw new Error(`Use --addons <absolute folder with node_modules> with one --allow-addon <package name> for each allowed addon (repeatable, chosen only here), --backend cpu|gpu, --browser <local executable path>, --memory <32..${MAXIMUM_MEMORY_MIB} MiB>, --assets <absolute GLB directory>, --packs <absolute folder of data-only packs>, --jobs <absolute private output directory>, --ffmpeg <absolute executable>, --audio <absolute folder of .wav, .mp3, .ogg or .flac files for video jobs>, --branches on|off, --relations on|off and --findings on|off (all default on; off hides the findings in scene_look for benchmark controls).`);
     }
-    options[name.slice(2)] = name === '--memory' ? Number(value) : value;
+    if (name === '--allow-addon') allowedAddonNames.push(value);
+    else options[name.slice(2)] = name === '--memory' ? Number(value) : value;
   }
+  const addonSet = resolveAddons({ folder: options.addons, names: allowedAddonNames, version });
+  for (const { name, reason } of addonSet.skipped) console.error(`67js addon ${name} skipped: ${reason}`);
+  options.addons = addonSet;
   if (!['cpu', 'gpu'].includes(options.backend) || !Number.isInteger(options.memory) || options.memory < 32 || options.memory > MAXIMUM_MEMORY_MIB) {
     throw new Error(`Backend must be cpu or gpu, and memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
+  // Checked here, not in the runtime factory: the SDK calls the factory only when the first client connects.
+  options.jobs = resolveJobRoot(options.jobs);
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   // Not awaited: the check fills in while the client connects and never delays or fails the start.
   const updateCheck = startUpdateCheck({ currentVersion: version });
   const { createAgentRuntime } = await import('./agent-runtime.mjs');
-  const handle = serveStdio(() => createAgentMcpServer(createAgentRuntime({ ...options, previewUrl }), { version, branches: options.branches !== 'off', relations: options.relations !== 'off', updateAvailable: updateCheck.current }), {
+  const handle = serveStdio(() => createAgentMcpServer(createAgentRuntime({ ...options, previewUrl }), { version, branches: options.branches !== 'off', relations: options.relations !== 'off', findings: options.findings !== 'off', updateAvailable: updateCheck.current }), {
     transport: new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 2 * 1024 * 1024 }),
     onerror: error => console.error(`67js MCP error: ${error.message}`),
   });
