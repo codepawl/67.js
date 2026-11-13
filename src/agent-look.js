@@ -81,7 +81,10 @@ function knownKeys(value, fields, label) {
 }
 
 // Domain resolvers accept ordinary values. Copy descriptors first so accessors never execute.
-function copiedJson(input, depth = 0, ancestors = new Set()) {
+// A grid sequence (environment.localVolumes[].frames) may list as many names as local-volume-grid.js allows; keep this in step with VOLUME_GRID_SEQUENCE_MAX_FRAMES.
+const MAX_FRAME_NAMES = 512;
+
+function copiedJson(input, depth = 0, ancestors = new Set(), arrayLimit = MAX_LOOK_ARRAY_ENTRIES) {
   if (depth > 32) {
     throw new RangeError('Look JSON nesting exceeds 32 levels.');
   }
@@ -98,8 +101,8 @@ function copiedJson(input, depth = 0, ancestors = new Set()) {
     throw new TypeError('Look must contain acyclic plain JSON data.');
   }
   const array = Array.isArray(input);
-  if (array && (Object.getPrototypeOf(input) !== Array.prototype || input.length > MAX_LOOK_ARRAY_ENTRIES)) {
-    throw new TypeError(`Look JSON arrays must be ordinary arrays with at most ${MAX_LOOK_ARRAY_ENTRIES} entries.`);
+  if (array && (Object.getPrototypeOf(input) !== Array.prototype || input.length > arrayLimit)) {
+    throw new TypeError(`Look JSON arrays must be ordinary arrays with at most ${arrayLimit} entries.`);
   }
   if (!array) {
     plainObject(input, 'Look');
@@ -120,7 +123,7 @@ function copiedJson(input, depth = 0, ancestors = new Set()) {
     if (array && key !== String(result.length)) {
       throw new TypeError('Look JSON arrays must be dense without extra fields.');
     }
-    result[key] = copiedJson(descriptor.value, depth + 1, ancestors);
+    result[key] = copiedJson(descriptor.value, depth + 1, ancestors, key === 'frames' ? MAX_FRAME_NAMES : MAX_LOOK_ARRAY_ENTRIES);
   }
   if (array && result.length !== input.length) {
     throw new TypeError('Look JSON arrays cannot contain trailing holes.');

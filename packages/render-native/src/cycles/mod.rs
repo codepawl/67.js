@@ -7,6 +7,7 @@ pub(crate) use luts::CYCLES_LUT_WORDS;
 use napi::Result;
 
 use crate::host::device::failure;
+use crate::host::session::check_lights_hold_portals;
 use crate::NativeTraceInputV2;
 
 const KERNEL_MANIFEST_SOURCE: &str = include_str!("kernel-manifest.txt");
@@ -28,6 +29,7 @@ const KP_EMISSIVE_TRIANGLE_COUNT_BYTE: usize = 96; // u32[24]
 const KP_LIGHT_COUNT_BYTE: usize = 100;     // u32[25]
 const KP_LIGHT_TREE_NODE_COUNT_BYTE: usize = 104; // u32[26]
 const KP_TEXTURE_COUNT_BYTE: usize = 108;   // u32[27]
+pub(crate) const KP_PORTAL_COUNT_BYTE: usize = 308; // u32[77]
 
 // ---- MaterialRecord byte offsets (256-byte stride, verified against pack-input-v2.mjs) ----
 const MAT_METALLIC_BYTE: usize = 12;           // f32[3]
@@ -73,6 +75,14 @@ const ALPHA_MODE_BLEND: u32 = 2;
 // ---- Light types ----
 const LIGHT_TYPE_AREA_RECT: u32 = 2;
 const LIGHT_TYPE_AREA_DISK: u32 = 3;
+
+/// The number of light portals a parameter block claims, 0 for a block too short to hold the word.
+pub(crate) fn portal_count_of(kernel_params: &[u8]) -> u32 {
+    if kernel_params.len() < KP_PORTAL_COUNT_BYTE + 4 {
+        return 0;
+    }
+    read_u32_le(kernel_params, KP_PORTAL_COUNT_BYTE)
+}
 
 fn read_u32_le(bytes: &[u8], byte_offset: usize) -> u32 {
     u32::from_le_bytes(bytes[byte_offset..byte_offset + 4].try_into().unwrap())
@@ -161,7 +171,7 @@ pub(crate) fn check_counts_match_kernel_params(input: &NativeTraceInputV2) -> Re
             )));
         }
     }
-    Ok(())
+    check_lights_hold_portals(&input.lights, input.light_count, portal_count_of(kernel_params))
 }
 
 /// The words of `KernelParamsV2` that describe scene data a session uploaded or compiled for once: the record counts that
@@ -169,7 +179,7 @@ pub(crate) fn check_counts_match_kernel_params(input: &NativeTraceInputV2) -> Re
 /// selection weights. A frame may not change them; every other word (camera, lens, seed, bounces, clamps, filter, adaptive
 /// sampling, exposure, fog, kernel flags) is a per-frame setting. Fog and the kernel flags select pipeline variants, which a
 /// session recompiles on its own when they change.
-const SCENE_BOUND_FIELDS: [(&str, usize); 16] = [
+const SCENE_BOUND_FIELDS: [(&str, usize); 17] = [
     ("instanceCount", KP_INSTANCE_COUNT_BYTE),
     ("triangleCount", KP_TRIANGLE_COUNT_BYTE),
     ("materialCount", KP_MATERIAL_COUNT_BYTE),
@@ -186,6 +196,7 @@ const SCENE_BOUND_FIELDS: [(&str, usize); 16] = [
     ("iesTableOffset", 284),
     ("backgroundMisWeight", 292),
     ("sobolTableOffset", 296),
+    ("portalCount", KP_PORTAL_COUNT_BYTE),
 ];
 
 /// Checks that a frame's kernel parameters describe the scene the session holds: every scene-bound word (see
@@ -979,6 +990,64 @@ mod specialization_tests {
         let input = dummy_input(&[0u8; 16], &mat, &lights, &inst);
         let message = check_counts_match_kernel_params(&input).unwrap_err().reason;
         assert!(message.contains("320"), "{message}");
+    }
+
+    fn set_portal_count(kernel_params: &mut [u8], portal_count: u32) {
+        kernel_params[KP_PORTAL_COUNT_BYTE..KP_PORTAL_COUNT_BYTE + 4].copy_from_slice(&portal_count.to_le_bytes());
+    }
+
+    #[test]
+    fn counts_check_refuses_more_portals_than_the_lights_buffer_holds() {
+        let mat = make_mat(0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, -1, -1);
+        let inst = make_default_inst();
+        let lights = make_default_light();
+        let mut kernel_params = make_kp(0, 0.0, 0, 0, 0.0);
+        let mut input = dummy_input(&kernel_params, &mat, &lights, &inst);
+        let counts = [
+            (KP_INSTANCE_COUNT_BYTE, input.instance_count),
+            (KP_TRIANGLE_COUNT_BYTE, input.triangle_count),
+            (KP_MATERIAL_COUNT_BYTE, input.material_count),
+            (KP_EMISSIVE_TRIANGLE_COUNT_BYTE, input.emissive_triangle_count),
+            (KP_LIGHT_COUNT_BYTE, input.light_count),
+            (KP_LIGHT_TREE_NODE_COUNT_BYTE, input.light_tree_node_count),
+            (KP_TEXTURE_COUNT_BYTE, input.texture_count),
+        ];
+        for (byte_offset, count) in counts {
+            kernel_params[byte_offset..byte_offset + 4].copy_from_slice(&count.to_le_bytes());
+        }
+        assert_eq!(input.light_count, 1);
+
+        set_portal_count(&mut kernel_params, 0);
+        input = dummy_input(&kernel_params, &mat, &lights, &inst);
+        assert!(check_counts_match_kernel_params(&input).is_ok(), "no portals");
+
+        let two_records = [make_default_light(), make_default_light()].concat();
+        set_portal_count(&mut kernel_params, 1);
+        input = dummy_input(&kernel_params, &mat, &two_records, &inst);
+        input.light_count = 1;
+        assert!(check_counts_match_kernel_params(&input).is_ok(), "one light and one portal fit two records");
+
+        set_portal_count(&mut kernel_params, 3);
+        input = dummy_input(&kernel_params, &mat, &two_records, &inst);
+        input.light_count = 1;
+        let message = check_counts_match_kernel_params(&input).unwrap_err().reason;
+        assert!(message.contains("3 light portals after 1 lights"), "{message}");
+        assert!(message.contains("holds 2 records and needs 4"), "{message}");
+    }
+
+    #[test]
+    fn a_frame_or_update_may_not_change_the_portal_count() {
+        let mut session_params = make_kp(0, 0.0, 512, 256, 3.0);
+        set_portal_count(&mut session_params, 2);
+
+        let mut other_portals = session_params.clone();
+        set_portal_count(&mut other_portals, 3);
+        let frame_message = check_frame_params_keep_scene_counts(&session_params, &other_portals).unwrap_err().to_string();
+        assert!(frame_message.contains("portalCount"), "{frame_message}");
+        assert!(frame_message.contains("from 2 to 3"), "{frame_message}");
+        let update_message = check_update_params_keep_scene_shape(&session_params, &other_portals).unwrap_err().to_string();
+        assert!(update_message.contains("portalCount"), "{update_message}");
+        assert!(update_message.contains("from 2 to 3"), "{update_message}");
     }
 }
 

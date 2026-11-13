@@ -232,7 +232,8 @@ struct KernelParamsV2 {
   filter_glossy: f32,
 
   camera_env_scale: f32,
-  reserved_tail_a: u32,
+  // Light portals packed after the `light_count` emitters in the light table (FORMAT-v2.md).
+  portal_count: u32,
   reserved_tail_b: u32,
   reserved_tail_c: u32,
 }

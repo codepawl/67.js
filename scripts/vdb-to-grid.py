@@ -6,6 +6,11 @@
 
     uv run --no-project scripts/vdb-to-grid.py frame.vdb out.67vg --max-resolution 128
     uv run --no-project scripts/vdb-to-grid.py frame.vdb out.67vg --map flame=flames --map temperature=heat
+    uv run --no-project scripts/vdb-to-grid.py "sim/smoke_*.vdb" blast --sequence --max-resolution 128
+
+With --sequence the first argument is a glob and the second a name prefix: the matching files, in numeric order, become blast_0000.67vg,
+blast_0001.67vg and so on, all on one box and resolution (the union of every frame's box) with the same channels (a channel any frame has, zero in the others), and the script prints the `frames` list for the
+volume. Frame size at 128 cubed is 4 MiB per channel and at 256 cubed 32 MiB; a sequence may hold 256 MiB in all (docs/volumetric.md).
 
 The reader is written here, so no OpenVDB build or wheel is needed (none is published for Windows). It reads OpenVDB file
 versions 222 and later with float grids of tree shape 5-4-3 (the shape every DCC tool writes), stored as full or half floats,
@@ -16,7 +21,9 @@ to 4 bytes, then each channel as half floats with x fastest, then y, then z. The
 is turned so its z becomes y.
 """
 import argparse
+import glob
 import json
+import re
 import struct
 import sys
 import zlib
@@ -26,6 +33,8 @@ import numpy
 
 MAGIC = 0x56444220
 LEAF_DIMENSION = 8
+MAXIMUM_SEQUENCE_FRAMES = 512  # src/volume-grid-sequence.js
+MAXIMUM_SEQUENCE_BYTES = 256 * 1024 * 1024
 LEVEL_LOG2 = (3, 4, 5)  # leaf, first internal node, second internal node (child counts 8^3, 16^3, 32^3 per node)
 COMPRESS_ZIP = 0x1
 COMPRESS_ACTIVE_MASK = 0x2
@@ -289,13 +298,110 @@ def write_grid(path, channels, size, source):
             output.write(numpy.ascontiguousarray(array.transpose(2, 1, 0)).astype("<f2").tobytes())  # x fastest
 
 
+def natural_key(path):
+    """Sorts frame_2 before frame_10: digit runs compare as numbers."""
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", str(path))]
+
+
+def choose_channels(grids, name_map, source_name):
+    """The VDB grid each channel is read from. Stops with the file's name when it has no density grid."""
+    chosen = {}
+    for channel in CHANNEL_NAMES:
+        for candidate in name_map.get(channel, DEFAULT_SOURCE_NAMES[channel]):
+            if candidate in grids:
+                chosen[channel] = candidate
+                break
+    if "density" not in chosen:
+        raise SystemExit(f"{source_name}: no density grid; the file holds: {', '.join(grids) or 'no float grids'}. Pass --map density=<grid name>")
+    return chosen
+
+
+def output_resolution(box_shape, arguments):
+    """The resolution a box is written at, and its edge lengths in voxels, in the output's axis order."""
+    scale = min(1.0, arguments.max_resolution / max(box_shape))
+    target = tuple(max(1, round(extent * scale)) for extent in box_shape)
+    if arguments.up == "z":
+        target = (target[0], target[2], target[1])
+    return target
+
+
+def convert(grids, chosen, density_leaves, box_minimum, box_maximum, arguments, source_name, output_path, channel_names=None):
+    """Writes one grid file on the box [box_minimum, box_maximum). Returns the target resolution and its size in VDB units.
+
+    `channel_names` (sequence mode) lists the channels every frame carries: one this frame lacks, or holds no voxels of, is written as zeros, so
+    all the frames of a sequence have the same channels. Without it a channel that is empty in the file is left out.
+    """
+    box_shape = tuple(int(extent) for extent in box_maximum - box_minimum)
+    voxel = grids[chosen["density"]]["voxel_size"]
+    wanted = channel_names or list(chosen)
+    aligned = {}
+    for channel in wanted:
+        leaves = density_leaves if channel == "density" else (leaves_of(grids[chosen[channel]]) if channel in chosen else [])
+        if leaves or channel_names:
+            aligned[channel] = densify(leaves, box_minimum, box_shape)
+        else:
+            print(f"channel {channel} ({chosen[channel]}) is empty in {source_name} and is left out", file=sys.stderr)
+    size_metres = [box_shape[axis] * voxel[axis] for axis in range(3)]
+    target = output_resolution(box_shape, arguments)
+    if arguments.up == "z":
+        # (x, y, z) -> (x, z, -y): rotate the z-up box to y up without mirroring it.
+        aligned = {channel: numpy.flip(array, axis=1).transpose(0, 2, 1) for channel, array in aligned.items()}
+        size_metres = [size_metres[0], size_metres[2], size_metres[1]]
+    outputs = {channel: resample(array, target) for channel, array in aligned.items()}
+    write_grid(output_path, outputs, [round(extent, 6) for extent in size_metres], source_name)
+    peaks = {channel: float(array.max()) for channel, array in outputs.items()}
+    voxels = int(numpy.prod(target))
+    print(f"wrote {output_path}: {target[0]}x{target[1]}x{target[2]} voxels, channels {list(outputs)}, "
+          f"{voxels * 2 * len(outputs)} bytes of data, size {size_metres} (VDB units), channel maxima {peaks}")
+    return target, size_metres
+
+
+def convert_sequence(files, name_map, arguments):
+    # Pass one reads only what the plan needs from each frame: its density box and which channels hold voxels. Every frame is then put on the union of
+    # the boxes and carries the union of the channels, so the whole sequence has one resolution and one channel list.
+    union_minimum = union_maximum = None
+    present = set()
+    for file in files:
+        grids = read_vdb(file)
+        chosen = choose_channels(grids, name_map, file)
+        density_leaves = leaves_of(grids[chosen["density"]])
+        if density_leaves:
+            present.add("density")
+            frame_minimum, frame_maximum = bounds_of(density_leaves)
+            union_minimum = frame_minimum if union_minimum is None else numpy.minimum(union_minimum, frame_minimum)
+            union_maximum = frame_maximum if union_maximum is None else numpy.maximum(union_maximum, frame_maximum)
+        else:
+            print(f"{file}: the density grid has no voxels; this frame is written empty", file=sys.stderr)
+        present.update(channel for channel in chosen if channel != "density" and leaves_of(grids[chosen[channel]]))
+    if union_minimum is None:
+        raise SystemExit(f"no density voxels in any of the {len(files)} files matching {arguments.vdb!r}")
+    channel_names = [channel for channel in CHANNEL_NAMES if channel in present]
+    box_shape = tuple(int(extent) for extent in union_maximum - union_minimum)
+    shape = output_resolution(box_shape, arguments)
+    total = int(numpy.prod(shape)) * 2 * len(channel_names) * len(files)
+    if total > MAXIMUM_SEQUENCE_BYTES:
+        raise SystemExit(f"{len(files)} frames of {shape[0]}x{shape[1]}x{shape[2]} with {len(channel_names)} channels ({', '.join(channel_names)}) are {total} bytes, "
+                         f"over the {MAXIMUM_SEQUENCE_BYTES} byte limit of a sequence; nothing was written. Use a lower --max-resolution or fewer frames")
+    names = []
+    for index, file in enumerate(files):
+        grids = read_vdb(file)
+        chosen = choose_channels(grids, name_map, file)
+        density_leaves = leaves_of(grids[chosen["density"]])
+        name = f"{arguments.output}_{index:04d}.67vg"
+        convert(grids, chosen, density_leaves, union_minimum, union_maximum, arguments, Path(file).name, name, channel_names)
+        names.append(Path(name).name)
+    print(f"{len(files)} frames of {shape[0]}x{shape[1]}x{shape[2]}, channels {channel_names}, {total} bytes in all (a sequence may hold {MAXIMUM_SEQUENCE_BYTES}); the volume's frames:")
+    print(json.dumps(names))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("vdb")
-    parser.add_argument("output")
+    parser.add_argument("vdb", help="a VDB file, or with --sequence a glob such as 'sim/smoke_*.vdb'")
+    parser.add_argument("output", help="the grid file, or with --sequence the name prefix of the numbered files")
     parser.add_argument("--max-resolution", type=int, default=128, help=f"longest axis in voxels, at most {MAXIMUM_AXIS} (default 128)")
     parser.add_argument("--map", action="append", default=[], metavar="CHANNEL=GRID", help="read a channel from another VDB grid name, e.g. flame=fire")
     parser.add_argument("--up", choices=("y", "z"), default="z", help="the VDB's up axis (default z, as Blender and EmberGen write); the output is y up")
+    parser.add_argument("--sequence", action="store_true", help="convert every file the glob matches, in numeric order, onto one shared box, resolution and channel list")
     arguments = parser.parse_args()
     if not 2 <= arguments.max_resolution <= MAXIMUM_AXIS:
         parser.error(f"--max-resolution must be 2 to {MAXIMUM_AXIS}")
@@ -305,46 +411,21 @@ def main():
         if channel not in CHANNEL_NAMES or not grid_name:
             parser.error(f"--map takes CHANNEL=GRID with CHANNEL one of {', '.join(CHANNEL_NAMES)}")
         name_map[channel] = (grid_name,)
-    grids = read_vdb(arguments.vdb)
-    chosen = {}
-    for channel in CHANNEL_NAMES:
-        for candidate in name_map.get(channel, DEFAULT_SOURCE_NAMES[channel]):
-            if candidate in grids:
-                chosen[channel] = candidate
-                break
-    if "density" not in chosen:
-        raise SystemExit(f"no density grid; the file holds: {', '.join(grids) or 'no float grids'}. Pass --map density=<grid name>")
-    # Every channel is put on the box that holds the density.
-    density_leaves = leaves_of(grids[chosen["density"]])
-    if not density_leaves:
-        raise SystemExit("the density grid has no voxels")
-    box_minimum, box_maximum = bounds_of(density_leaves)
-    box_shape = tuple(int(extent) for extent in box_maximum - box_minimum)
-    voxel = grids[chosen["density"]]["voxel_size"]
-    aligned = {"density": densify(density_leaves, box_minimum, box_shape)}
-    for channel, grid_name in chosen.items():
-        if channel == "density":
-            continue
-        leaves = leaves_of(grids[grid_name])
-        if leaves:
-            aligned[channel] = densify(leaves, box_minimum, box_shape)
-        else:
-            print(f"channel {channel} ({grid_name}) is empty in this frame and is left out", file=sys.stderr)
-    longest = max(box_shape)
-    scale = min(1.0, arguments.max_resolution / longest)
-    target = tuple(max(1, round(extent * scale)) for extent in box_shape)
-    size_metres = [box_shape[axis] * voxel[axis] for axis in range(3)]
-    if arguments.up == "z":
-        # (x, y, z) -> (x, z, -y): rotate the z-up box to y up without mirroring it.
-        aligned = {channel: numpy.flip(array, axis=1).transpose(0, 2, 1) for channel, array in aligned.items()}
-        target = (target[0], target[2], target[1])
-        size_metres = [size_metres[0], size_metres[2], size_metres[1]]
-    outputs = {channel: resample(array, target) for channel, array in aligned.items()}
-    write_grid(arguments.output, outputs, [round(extent, 6) for extent in size_metres], Path(arguments.vdb).name)
-    peaks = {channel: float(array.max()) for channel, array in outputs.items()}
-    voxels = int(numpy.prod(target))
-    print(f"wrote {arguments.output}: {target[0]}x{target[1]}x{target[2]} voxels, channels {list(outputs)}, "
-          f"{voxels * 2 * len(outputs)} bytes of data, size {size_metres} (VDB units), channel maxima {peaks}")
+    if not arguments.sequence:
+        grids = read_vdb(arguments.vdb)
+        chosen = choose_channels(grids, name_map, arguments.vdb)
+        density_leaves = leaves_of(grids[chosen["density"]])
+        if not density_leaves:
+            raise SystemExit(f"{arguments.vdb}: the density grid has no voxels")
+        box_minimum, box_maximum = bounds_of(density_leaves)
+        convert(grids, chosen, density_leaves, box_minimum, box_maximum, arguments, Path(arguments.vdb).name, arguments.output)
+        return
+    files = sorted(glob.glob(arguments.vdb), key=natural_key)
+    if not files:
+        raise SystemExit(f"no file matches {arguments.vdb!r}; quote the glob so the shell passes it on")
+    if len(files) > MAXIMUM_SEQUENCE_FRAMES:
+        raise SystemExit(f"{len(files)} files match, over the {MAXIMUM_SEQUENCE_FRAMES} frames a sequence may hold; narrow the glob")
+    convert_sequence(files, name_map, arguments)
 
 
 if __name__ == "__main__":

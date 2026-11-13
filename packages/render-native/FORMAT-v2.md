@@ -92,7 +92,7 @@ Total size: **320 bytes** (`20 × 16 B`), alignment: **16 bytes**.
 | `296` | `4` | `4` | `u32` | `sobol_table_offset` | Word offset into `texture_texels` for Sobol / blue-noise tables |
 | `300` | `4` | `4` | `f32` | `filter_glossy` | Cycles Filter Glossy (`blur_glossy`) factor (`0.0` = off, default `1.0`) |
 | `304` | `4` | `4` | `f32` | `camera_env_scale` | `environment.cameraIntensity` as one word: all bits `0` when the scene sets none; `+x` (or `-0.0`) is the factor on `env_color`; `-x` is an absolute strength (see below) |
-| `308` | `4` | `4` | `u32` | `reserved_tail_a` | Reserved (`0`) |
+| `308` | `4` | `4` | `u32` | `portal_count` | Light portals stored after the `light_count` emitters in the light table (section 6); `0` for none |
 | `312` | `4` | `4` | `u32` | `reserved_tail_b` | Reserved (`0`) |
 | `316` | `4` | `4` | `u32` | `reserved_tail_c` | Reserved (`0`) |
 
@@ -316,6 +316,8 @@ Convention: `direction` is always the **unit emission direction pointing from th
 | `116` | `4` | `4` | `f32` | `cdf_upper` | Inclusive cumulative probability in `(0, 1]` |
 | `120` | `4` | `4` | `u32` | `light_group_mask_lo` | Low 32 bits of 64-bit emitter light-linking mask |
 | `124` | `4` | `4` | `u32` | `light_group_mask_hi` | High 32 bits of 64-bit emitter light-linking mask |
+
+**Light portals.** The table holds `light_count` emitters, then `portal_count` portal records (kernel params, section 1). A portal is a rect area light (`light_type` `2`) whose `flags` are exactly `PORTAL`: it has `radiance` `0`, no `selection_pdf` or `cdf_upper` weight, and is not in the light tree, the pick or any emitter loop, and no ray sees it. `direction` is the normal and points into the room (the side the shading points are on), `axis_u` and `axis_v` span the rectangle, and `size_u` and `size_v` are its width and height. While `portal_count` is above `0` and the scene has an environment map, the kernel replaces the environment importance table by portals: next-event estimation draws a portal uniformly and a point uniformly on it, and the solid-angle pdf of a direction, for that draw and for the MIS weight of a BSDF ray that escapes, is `(1 / portal_count)` times the sum, over the portals the ray passes through from the front, of `distance^2 / (cos * width * height)`. A direction through no portal has pdf `0`, so a BSDF ray that escapes there takes the whole weight. A shading point behind a portal gets no portal sample.
 
 ---
 

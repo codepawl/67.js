@@ -60,7 +60,7 @@ For one test file: `node --test tests/<area>.test.js`.
 - No new runtime dependency in the core. Optional features go in an addon.
 - Scene builders are deterministic for the same seed; tests compare geometry byte for byte.
 - Validate input at the public boundary and throw an error that says what failed and what to pass instead. Agents read these errors.
-- MCP tools accept no arbitrary code and no remote asset URLs ([SECURITY.md](SECURITY.md)). Keep every count and size bounded.
+- MCP tools accept no arbitrary code and no remote asset URLs ([SECURITY.md](.github/SECURITY.md)). Keep every count and size bounded.
 - Update the guide in `docs/` for the feature you change.
 
 ## Checks a person or a GPU runs

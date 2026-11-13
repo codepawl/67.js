@@ -886,6 +886,17 @@ function hasTriangleWithArea(positions, indices) {
   return false;
 }
 
+/** Once the last node that uses a decoded source has been converted, its raw attribute arrays are not read again: let them go. */
+function releaseDecodedGeometry(source, remainingUsers) {
+  const remaining = remainingUsers.get(source) - 1;
+  remainingUsers.set(source, remaining);
+  if (remaining > 0) return;
+  source.attributes = null;
+  source.index = null;
+  source.morphPositions = null;
+  source.morphNormals = null;
+}
+
 async function convertGeometry(source, primitive, secondUvSet, onIgnoredVertexAlpha, onRepair, checkpoint) {
   const { position, normal, uv, uv1, color, skinIndex, skinWeight } = source.attributes;
   const zeroedBy = label => count => onRepair(`${count} non-finite ${label} value(s) were set to 0`);
@@ -1271,6 +1282,8 @@ export async function parseGltf(data, options = {}) {
   let gltf;
   try {
     gltf = await decodeGltf({ document, glbBinary: binaryChunk(data), resourceBytes, decoders, limits, imageTargets: textureScaling.targetByImageIndex, sharedTextures: options.sharedTextures });
+    // The decoded sources hold everything the conversion reads. Dropping the file bytes lets a 200 MB GLB leave memory before the copies below are made.
+    data = null;
     if (resampler) warnings.push(...resampler.apply(gltf, limits));
     const parts = [];
     const bindings = [];
@@ -1381,8 +1394,11 @@ export async function parseGltf(data, options = {}) {
     // Converting a large scene is one long block; handing the thread back every few milliseconds keeps the page responding. Same nodes, same order.
     const traversed = [];
     gltf.scene.traverse(node => traversed.push(node));
+    const remainingUsers = new Map();
+    for (const { geometry } of traversed) remainingUsers.set(geometry, (remainingUsers.get(geometry) ?? 0) + 1);
     for (const node of traversed) {
       await visitNode(node);
+      if (node.geometry) releaseDecodedGeometry(node.geometry, remainingUsers);
       await checkpoint();
     }
     const toleratedNodes = Object.assign(new Set(), { collecting: true });
