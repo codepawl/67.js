@@ -113,7 +113,7 @@ export function planChecks(changedPaths, { skipTests = false, release = false } 
     command: ['npm', 'run', 'coverage:gate', '--', 'coverage'],
     skipped: testSkip,
     dependsOn: 'unit tests and coverage',
-    fix: 'Add tests for the new code. coverage-baseline.json may only go up.',
+    fix: 'Add tests for the new code. config/coverage-baseline.json may only go up.',
   });
   return checks;
 }

@@ -3,9 +3,9 @@
 ## Read first
 
 - The [guide](https://67js.codepawl.com/guide.md) covers install, scenes, materials, animation and export.
-- The [MCP reference](docs/mcp.md) lists every tool, its limits and its errors.
+- The [MCP reference](../docs/mcp.md) lists every tool, its limits and its errors.
 - [llms.txt](https://67js.codepawl.com/llms.txt) is the same guide as plain text for an agent.
-- The skills [build-67js-scene](skills/build-67js-scene/SKILL.md) and [render-67js-media](skills/render-67js-media/SKILL.md) teach an agent the MCP tools.
+- The skills [build-67js-scene](../skills/build-67js-scene/SKILL.md) and [render-67js-media](../skills/render-67js-media/SKILL.md) teach an agent the MCP tools.
 
 ## Ask or report
 

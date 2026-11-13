@@ -9,6 +9,7 @@ import { FILM_DURATION } from '../src/film.js';
 import { RENDER_PRESETS } from '../src/budget.js';
 import { createFrameEncoder } from './frame-encoder.mjs';
 import { prepareFileScene, readCameraKeys } from './file-scene.mjs';
+import { startAssetServer } from './asset-server.mjs';
 import { DEFAULT_PAGE_ENCODER_QUANTIZER, createFrameReceiver, installFrameReaderInPage, startFrameServer, startVideoEncoderInPage } from './gpu-frame-reader.mjs';
 
 function argumentsFrom(values) {
@@ -136,6 +137,7 @@ export async function renderMedia(values = process.argv.slice(2)) {
   let browser;
   let frameReceiver;
   let frameServer;
+  let assetServer;
   let encoder;
   let peakNodeBytes = 0;
   let peakBrowserHeap = 0;
@@ -166,7 +168,10 @@ export async function renderMedia(values = process.argv.slice(2)) {
     const route = scene === 'object' ? 'object.html' : `${scene}.html`;
     const query = new URLSearchParams({ export: '1', width: String(width), height: String(height), aspect, memory: String(memory), samples: String(backend === 'cpu' ? 1 : preset.samples) });
     if (scene === 'file') {
-      const world = prepareFileScene({ configPath: options.config, root: options.root });
+      const assetPaths = [];
+      assetServer = await startAssetServer(assetPaths, { pageOrigin: `http://127.0.0.1:${serverPort}` });
+      const world = prepareFileScene({ configPath: options.config, root: options.root, largeAssetOrigin: assetServer.origin });
+      assetPaths.push(...world.assets);
       await page.route('**/__file/**', async (request) => {
         const { pathname } = new URL(request.request().url());
         if (pathname === '/__file/config.json') await request.fulfill({ json: world.description });
@@ -344,7 +349,10 @@ export async function renderMedia(values = process.argv.slice(2)) {
       try { await browser?.close(); }
       finally {
         try { await frameServer?.close(); }
-        finally { server.kill(); }
+        finally {
+          try { await assetServer?.close(); }
+          finally { server.kill(); }
+        }
       }
     }
   }

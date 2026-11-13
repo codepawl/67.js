@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { sitePages } from './scripts/vite-site-pages.mjs';
 
 const headers = {
   'Cross-Origin-Opener-Policy': 'same-origin',
@@ -30,33 +31,33 @@ function serveLocalFolders() {
 }
 
 export default defineConfig({
-  plugins: [serveLocalFolders()],
+  plugins: [serveLocalFolders(), sitePages()],
   server: { headers, watch: { ignored: ['**/.claude/**'] } },
   // Scan only the project's own pages. Agent worktrees under .claude hold hundreds of copies of them and made the first page load take 13 s.
   // The browser denoiser page imports `denoiser`, which is installed by hand (bench/reference/denoise-browser.mjs). Scanning it
   // failed the whole scan, so gl-matrix was found at runtime and Vite reloaded pages in the middle of tests (issue #314).
   optimizeDeps: {
-    entries: ['*.html', 'bench/**/*.html', '!bench/reference/denoise-browser/**'],
+    entries: ['site/*.html', 'bench/**/*.html', '!bench/reference/denoise-browser/**'],
     include: ['gl-matrix'],
   },
   preview: { headers },
   build: {
     rolldownOptions: {
       input: {
-        home: 'index.html',
-        downloads: 'downloads.html',
-        object: 'object.html',
-        nature: 'nature.html',
-        film: 'film.html',
-        motion: 'motion.html',
-        modeling: 'modeling.html',
-        view2d: 'view2d.html',
-        assets: 'assets.html',
-        guide: 'getting-started.html',
-        docs: 'docs.html',
-        changelog: 'changelog.html',
-        showcase: 'showcase.html',
-        marketplace: 'marketplace.html',
+        home: 'site/index.html',
+        downloads: 'site/downloads.html',
+        object: 'site/object.html',
+        nature: 'site/nature.html',
+        film: 'site/film.html',
+        motion: 'site/motion.html',
+        modeling: 'site/modeling.html',
+        view2d: 'site/view2d.html',
+        assets: 'site/assets.html',
+        guide: 'site/getting-started.html',
+        docs: 'site/docs.html',
+        changelog: 'site/changelog.html',
+        showcase: 'site/showcase.html',
+        marketplace: 'site/marketplace.html',
       },
     },
   },

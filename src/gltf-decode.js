@@ -115,6 +115,11 @@ function normalizedWeights(weights) {
   return { array: values, itemSize: 4, count: weights.count, normalized: false, componentType: 5126 };
 }
 
+// Built outside decodeGltf so the returned function does not keep the scope's file bytes and accessor reader alive.
+function releaserFor(releasers) {
+  return () => releasers.forEach(releaseOne => releaseOne());
+}
+
 /**
  * Decode the selected glTF scene into plain scene nodes, geometry sources, materials, textures and animation clips.
  * The result has the shape the Renderer67 conversion in gltf.js reads. Nothing here imports three.js: Draco, meshopt
@@ -431,7 +436,7 @@ export async function decodeGltf({ document, glbBinary, resourceBytes, decoders,
     return node;
   }
 
-  const release = () => releasers.forEach(releaseOne => releaseOne());
+  const release = releaserFor(releasers);
   try {
     const sceneDefinition = document.scenes?.[document.scene ?? 0];
     if (!sceneDefinition) throw new Error('glTF has no default scene.');
