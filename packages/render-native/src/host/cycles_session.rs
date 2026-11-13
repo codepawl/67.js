@@ -39,6 +39,8 @@ pub(crate) struct CyclesRenderRequest<'a> {
     pub(crate) height: u32,
     pub(crate) samples: u32,
     pub(crate) samples_per_dispatch: Option<u32>,
+    /// The longest one dispatch may run, in milliseconds; absent keeps the whole-image dispatches of about half a second.
+    pub(crate) dispatch_budget_ms: Option<f64>,
     pub(crate) max_seconds: Option<f64>,
     pub(crate) bootstrap_kernel: bool,
     /// A KernelParamsV2 block for this frame (another camera, seed or filter of the same scene); absent means the block
@@ -267,6 +269,17 @@ pub(crate) fn choose_dispatch_plan(samples: u32, samples_per_dispatch: Option<u3
     }
 }
 
+/// A dispatch time budget splits each frame by pixel tiles as well as by samples. `samplesPerDispatch`, when also given,
+/// caps the samples of one dispatch; a tight `maxSeconds` needs no special case since the limit is checked after every dispatch.
+pub(crate) fn choose_tile_budget_plan(budget_ms: f64, request: &CyclesRenderRequest<'_>) -> DispatchPlan {
+    DispatchPlan::TileBudget {
+        budget_seconds: budget_ms / 1000.0,
+        largest_batch: request.samples_per_dispatch.unwrap_or(request.samples).max(1),
+        width: request.width,
+        height: request.height,
+    }
+}
+
 fn session_closed_failure() -> napi::Error {
     failure("This native session is closed. Create a new one with createNativeSession(input) before rendering again.")
 }
@@ -420,7 +433,10 @@ impl CyclesSession {
             device_lost: &context.device_lost,
             device_error: &context.device_error,
         };
-        let plan = choose_dispatch_plan(request.samples, request.samples_per_dispatch, request.max_seconds);
+        let plan = match request.dispatch_budget_ms {
+            Some(budget_ms) => choose_tile_budget_plan(budget_ms, request),
+            None => choose_dispatch_plan(request.samples, request.samples_per_dispatch, request.max_seconds),
+        };
         let trace = trace_cycles_samples(
             &target,
             film_use.first_sample,

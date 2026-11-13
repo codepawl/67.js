@@ -231,7 +231,9 @@ struct KernelParamsV2 {
   sobol_table_offset: u32,
   filter_glossy: f32,
 
-  reserved_tail: vec4<u32>,
+  // Pixel origin of the tile this dispatch covers; the host writes it per dispatch, `[0, 0]` for a whole-image dispatch.
+  tile_origin: vec2<u32>,
+  reserved_tail: vec2<u32>,
 }
 
 // 160 bytes (10 x 16 B), alignment 16 B.
