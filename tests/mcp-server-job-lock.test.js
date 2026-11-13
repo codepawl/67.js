@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,4 +42,15 @@ test('a process that exits without closing the job controller still removes its 
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', source], { encoding: 'utf8' });
   assert.equal(child.status, 0, child.stderr);
   assert.equal(existsSync(join(jobsDirectory, 'store.lock')), false);
+});
+
+test('the MCP server refuses an unusable --jobs path at startup, naming the flag', { skip: !hasBuild && 'run npm run build:lib first', timeout: 60000 }, async context => {
+  const directory = await mkdtemp(join(tmpdir(), '67js-jobs-file-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, 'not-a-directory');
+  await writeFile(filePath, 'x');
+  const result = spawnSync(process.execPath, [serverEntry, '--backend', 'cpu', '--jobs', filePath], { input: '', encoding: 'utf8', timeout: 30000 });
+  assert.notEqual(result.status, 0, 'the process exits with a failure instead of waiting for a client');
+  assert.match(result.stderr, /--jobs /);
+  assert.match(result.stderr, /real, existing directory/);
 });

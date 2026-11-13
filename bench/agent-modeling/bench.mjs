@@ -3,7 +3,7 @@
 // Runs use the Claude Code subscription, so the summary has tokens, calls and time and never dollars.
 //
 // node bench/agent-modeling/bench.mjs --claude <claude executable> --models haiku,sonnet,opus --runs 3 --label baseline
-//   [--tasks crate,look-fog] [--smoke] [--backend gpu|cpu] [--budget 3] [--timeout 1200] [--resume]
+//   [--tasks crate,look-fog] [--smoke] [--findings off] [--backend gpu|cpu] [--budget 3] [--timeout 1200] [--resume]
 //
 // --smoke runs the two smoke tasks once. --resume continues the same label (same models, same --runs): attempts already
 // recorded are skipped. The summary goes to bench/agent-modeling/results/bench-<label>.json and holds the per-run records
@@ -29,6 +29,7 @@ const { values: options } = parseArgs({
     budget: { type: 'string', default: '3' },
     timeout: { type: 'string', default: '1200' },
     resume: { type: 'boolean', default: false },
+    findings: { type: 'string', default: 'on' },
   },
 });
 
@@ -44,7 +45,7 @@ function runModel(model) {
     join(import.meta.dirname, 'run.mjs'),
     '--claude', options.claude, '--model', model, '--tasks', taskIds.join(','), '--runs', String(runs),
     '--backend', options.backend, '--budget', options.budget, '--timeout', options.timeout,
-    '--label', benchName, '--run-name', runName,
+    '--findings', options.findings, '--label', benchName, '--run-name', runName,
     ...(options.resume ? ['--resume', runName] : []),
   ];
   return new Promise((resolvePromise, reject) => {

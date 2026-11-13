@@ -1875,6 +1875,10 @@ export function createAgentScene(input, inputLimits = {}, options = {}) {
     },
     /** The bake-stale warning, or none: see `staleBakeProblems` in `agent-bake.js`. */
     bakeStaleness: staleBakeProblems,
+    /** The z-fighting the draw-time ranking could not settle, as coplanar-overlap findings; none when the scene opted out (the renderer reports its pairs) or has none. */
+    flushLeftovers() {
+      return state.recipe.environment.resolveCoplanar === false ? [] : coplanarProblems();
+    },
     get postPasses() {
       return structuredClone(state.recipe.postPasses ?? []);
     },

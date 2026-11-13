@@ -1,6 +1,7 @@
 import { answerCapabilities } from './capabilities-topics.mjs';
 import { BRANCH_NAME_PATTERN } from '../src/agent-branches.js';
 import { McpServer } from '@modelcontextprotocol/server';
+import { resolveJobRoot } from './agent-job-root.mjs';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { describeSchemaInputsWithReceivedValues } from './mcp-input-errors.mjs';
@@ -874,7 +875,7 @@ function jsonResult(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }
 
-export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true, callLogPath = process.env[CALL_LOG_ENVIRONMENT_VARIABLE], updateAvailable = () => null } = {}) {
+export function createAgentMcpServer(runtime, { version = packageMetadata.version, branches = true, relations = true, findings = true, callLogPath = process.env[CALL_LOG_ENVIRONMENT_VARIABLE], updateAvailable = () => null } = {}) {
   const newerVersion = updateAvailable();
   let updateReported = false;
   const logCall = createCallLogger(callLogPath);
@@ -937,7 +938,10 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   register('mesh_stack', 'Set the non-destructive modifier stack of a recipe mesh geometry (ops and fields: scene_capabilities meshModifiers), evaluated after its edits, each prefix cached. apply: n moves the first n nodes into the edit log, as Blender\'s Apply modifier. Atomic like scene_apply. Returns the revision, render status and mesh report.', z.strictObject({ ...sessionFields, expectedRevision, geometry: identifier.describe('ID of a geometry with type mesh.'), stack: meshStack.optional().describe('The whole new stack. Omit to keep the current stack (for example with apply).'), apply: z.number().int().min(0).max(16).optional() }), edit, async argumentsValue => jsonResult(await runtime.setMeshStack(argumentsValue)));
   register('scene_apply', 'Atomically edit transforms, look, camera or materials. Procedural scenes support membership and set-motion authoring. Imported assets support set-root, set-asset-node, set-motion and absolute set-animation sampling. Successful batches increment revision once. Returns results (one entry per operation, with a warning when it changed nothing) and a diff of added, removed and changed IDs, not the node list (call scene_inspect for that).', z.strictObject({ ...sessionFields, expectedRevision, operations: z.array(relations ? operation : operationWithoutRelations).min(1).max(256).describe('Node/material/camera/root/animation commands use flat fields. Motion, look patches and add commands contain nested records. Backend validates each scene mode before publication.'), ...branchField }), edit, async argumentsValue => jsonResult(await runtime.apply(argumentsValue)));
   register('scene_look', 'Render the active scene as a bounded PNG, optionally with part labels. Optional authored motionTime seeks without changing revision; null restores the authored base pose. Omit to retain the last preview pose.', z.strictObject({ ...sessionFields, motionTime: z.number().min(0).max(3600).nullable().optional(), width: z.number().int().min(64).max(1024).default(768).describe('PNG width in pixels.'), height: z.number().int().min(64).max(1024).default(512).describe('PNG height in pixels.'), labels: labelsFlag }), readOnly, async argumentsValue => {
-    const { data, mimeType, metadata } = await runtime.look(argumentsValue);
+    const { data, mimeType, metadata: lookMetadata } = await runtime.look(argumentsValue);
+    // --findings off is the benchmark control: the same look without the structured findings.
+    const { diagnostics: _findings, ...metadataWithoutFindings } = lookMetadata;
+    const metadata = findings ? lookMetadata : metadataWithoutFindings;
     return { content: [{ type: 'image', data, mimeType }, { type: 'text', text: JSON.stringify(metadata) }], structuredContent: metadata };
   });
   register('scene_ask_user', 'Open the view in the browser so the person pins points with notes; waits for Send. Use for a change hard to say in words. Returns marks with partId, point, normal, note, and the marked PNG.', z.strictObject({ ...sessionFields, prompt: z.string().max(200).optional().describe('Line shown above the picture.'), maxMarks: z.number().int().min(1).max(16).default(16), timeoutSeconds: z.number().int().min(10).max(900).default(300) }), askUser, async argumentsValue => {
@@ -995,8 +999,8 @@ export async function runMcpCli({ argumentsValue = process.argv.slice(2),
   for (let index = 0; index < argumentsValue.length; index += 2) {
     const name = argumentsValue[index];
     const value = argumentsValue[index + 1];
-    if (!['--backend', '--browser', '--memory', '--assets', '--packs', '--jobs', '--ffmpeg', '--audio', '--branches', '--relations', '--addons', '--allow-addon'].includes(name) || value === undefined) {
-      throw new Error(`Use --addons <absolute folder with node_modules> with one --allow-addon <package name> for each allowed addon (repeatable, chosen only here), --backend cpu|gpu, --browser <local executable path>, --memory <32..${MAXIMUM_MEMORY_MIB} MiB>, --assets <absolute GLB directory>, --packs <absolute folder of data-only packs>, --jobs <absolute private output directory>, --ffmpeg <absolute executable>, --audio <absolute folder of .wav, .mp3, .ogg or .flac files for video jobs>, --branches on|off and --relations on|off (both default on).`);
+    if (!['--backend', '--browser', '--memory', '--assets', '--packs', '--jobs', '--ffmpeg', '--audio', '--branches', '--relations', '--findings', '--addons', '--allow-addon'].includes(name) || value === undefined) {
+      throw new Error(`Use --addons <absolute folder with node_modules> with one --allow-addon <package name> for each allowed addon (repeatable, chosen only here), --backend cpu|gpu, --browser <local executable path>, --memory <32..${MAXIMUM_MEMORY_MIB} MiB>, --assets <absolute GLB directory>, --packs <absolute folder of data-only packs>, --jobs <absolute private output directory>, --ffmpeg <absolute executable>, --audio <absolute folder of .wav, .mp3, .ogg or .flac files for video jobs>, --branches on|off, --relations on|off and --findings on|off (all default on; off hides the findings in scene_look for benchmark controls).`);
     }
     if (name === '--allow-addon') allowedAddonNames.push(value);
     else options[name.slice(2)] = name === '--memory' ? Number(value) : value;
@@ -1007,11 +1011,13 @@ export async function runMcpCli({ argumentsValue = process.argv.slice(2),
   if (!['cpu', 'gpu'].includes(options.backend) || !Number.isInteger(options.memory) || options.memory < 32 || options.memory > MAXIMUM_MEMORY_MIB) {
     throw new Error(`Backend must be cpu or gpu, and memory must be an integer from 32 to ${MAXIMUM_MEMORY_MIB} MiB.`);
   }
+  // Checked here, not in the runtime factory: the SDK calls the factory only when the first client connects.
+  options.jobs = resolveJobRoot(options.jobs);
   setPriority(0, constants.priority.PRIORITY_BELOW_NORMAL);
   // Not awaited: the check fills in while the client connects and never delays or fails the start.
   const updateCheck = startUpdateCheck({ currentVersion: version });
   const { createAgentRuntime } = await import('./agent-runtime.mjs');
-  const handle = serveStdio(() => createAgentMcpServer(createAgentRuntime({ ...options, previewUrl }), { version, branches: options.branches !== 'off', relations: options.relations !== 'off', updateAvailable: updateCheck.current }), {
+  const handle = serveStdio(() => createAgentMcpServer(createAgentRuntime({ ...options, previewUrl }), { version, branches: options.branches !== 'off', relations: options.relations !== 'off', findings: options.findings !== 'off', updateAvailable: updateCheck.current }), {
     transport: new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 2 * 1024 * 1024 }),
     onerror: error => console.error(`67js MCP error: ${error.message}`),
   });
