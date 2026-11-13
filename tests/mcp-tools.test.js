@@ -164,6 +164,10 @@ test('SDK advertises the complete strict JSON contract and truthful annotations'
     assert.ok(answer.fields, `${topic} has an outline of its fields`);
   }
   assert.equal((await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'meshEdit.bevel' } })).structuredContent.fields.op, '"bevel"');
+  // #1116: agents read a cylinder's node scale as a diameter and built a hex head twice too wide.
+  const geometryBranches = (await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'geometries' } })).structuredContent.fields.branches;
+  assert.match(geometryBranches.cylinder.note, /scale x and z are the radius, not the diameter/);
+  assert.match(geometryBranches.sphere.note, /scale is the radius/);
   assert.equal((await client.callTool({ name: 'scene_capabilities', arguments: { topic: 'nope' } })).isError, true);
   const look = tools.find(tool => tool.name === 'scene_look');
   assert.equal(look.annotations.readOnlyHint, true);

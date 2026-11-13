@@ -178,6 +178,8 @@ Every tool schema is read on every turn, so `node scripts/measure-tool-cost.mjs`
 The checks run on part bounds and on that small copy of the frame, so they cost almost nothing. Scenes of over 256 parts get no floating or intersection findings. `src/frame-checks.js` holds them.
 
 The recipe uses `format: '67js.scene'` and `schemaVersion: 1`.
+Primitive sizes come from the node scale: a `box` is a unit cube, and `cylinder` and `sphere` have radius 1, so scale x and z (cylinder) or scale (sphere) is the radius, never the diameter. A 6-segment cylinder is a hexagonal prism with its corners on X (2 x scale apart) and its flats on Z (1.732 x scale apart); for a hex part W wide across the flats, scale x and z by W / 1.732.
+
 Supported geometry types are `box`, `cylinder`, `sphere`, `torus`, `lathe`, `extrude`, `tube`, `curve`, `sdf`, `text`, `grid`, `terrain`, and `mesh`. The fields of `curve` and `text` are listed by `scene_capabilities` (`curveText.details`) and not repeated in every tool schema. Text uses the bundled font only; the MCP accepts no font file or URL.
 A `mesh` geometry starts from one of the others as `base` and replays an edit log; see [mesh.md](mesh.md).
 Geometry fields remain flat inside each geometry record.

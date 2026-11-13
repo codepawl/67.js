@@ -346,8 +346,8 @@ function primitiveGeometries(identified) {
   const id = identified ? { id: identifier } : {};
   return [
     z.strictObject({ ...id, type: z.literal('box'), bevel: finite.optional().describe('Unit cube, -0.5 to 0.5. The default bevel of 0.08 rounds its edges and is scaled with the node; set 0 for exact sizes and crisp edges.'), subdivisions: detail(1, 128) }),
-    z.strictObject({ ...id, type: z.literal('cylinder'), segments, bevel: finite.optional().describe('Radius 1, height 1, centred. The default bevel of 0.025 rounds its rims; set 0 for exact sizes and crisp edges.'), bevelSegments: detail(1, 128) }),
-    z.strictObject({ ...id, type: z.literal('sphere'), segments, rings: detail(2, 2048) }),
+    z.strictObject({ ...id, type: z.literal('cylinder'), segments, bevel: finite.optional().describe('The default bevel of 0.025 rounds its rims; set 0 for exact sizes and crisp edges.'), bevelSegments: detail(1, 128) }).describe('Radius 1, height 1: node scale x and z are the radius, not the diameter. With 6 segments the flats sit on Z, 1.732 x scale apart, and the corners on X, 2 x scale apart.'),
+    z.strictObject({ ...id, type: z.literal('sphere'), segments, rings: detail(2, 2048) }).describe('Radius 1: node scale is the radius.'),
     z.strictObject({ ...id, type: z.literal('torus'), tubeRadius: finite.optional(), segments, sides: detail(3, 128), arc: finite.optional(), start: finite.optional() }),
     z.strictObject({ ...id, type: z.literal('lathe'), profile: z.array(point2).min(2).max(4096), segments, startAngle: finite.optional(), sweep: finite.optional() }),
     z.strictObject({ ...id, type: z.literal('extrude'), contour: ring, holes: z.array(ring).max(128).optional(), depth: finite.optional(), steps: detail(1, 256), bevel: finite.optional(), bevelThickness: finite.optional(), bevelSegments: detail(1, 32) }),
