@@ -77,3 +77,48 @@ test('the same scene, budget and history give the same pick', () => {
   const plain = choose({ secondsPerFrame: 1 }).report.considered.find(candidate => candidate.label === 'raster, full size');
   assert.ok(corrected.secondsPerFrame > plain.secondsPerFrame);
 });
+
+test('a region job keeps the full frame instead of throwing on a smaller candidate', () => {
+  const chosen = choose({ secondsPerFrame: 0.001 }, { region: { x: 100, y: 100, width: 400, height: 300 } });
+  assert.equal(chosen.settings.width, 1280);
+  assert.deepEqual(chosen.report.considered.map(candidate => candidate.label), ['raster, full size']);
+});
+
+test('one candidate that cannot be estimated is skipped, and none usable names the budget', () => {
+  const failing = raw => {
+    if (raw.renderer) throw new RangeError('tracer refused');
+    return estimateRenderJob({ size, settings: normalizeJobSettings(raw, [], recipe), backend: 'gpu', history: [] });
+  };
+  const chosen = chooseBudgetSettings({ base, budget: parseBudget({ secondsPerFrame: 600 }), tracerBackend: 'gpu', frameCount: 1, estimateOf: failing });
+  assert.equal(chosen.report.picked.label, 'raster, full size');
+  assert.equal(chosen.report.skipped.length, 3);
+  const none = () => { throw new RangeError('no'); };
+  assert.throws(() => chooseBudgetSettings({ base, budget: parseBudget({ secondsPerFrame: 600 }), tracerBackend: 'gpu', frameCount: 1, estimateOf: none }), /budget found no candidate/);
+});
+
+test('scaling keeps the aspect, holds the 64 px floor on the short side and drops same-size duplicates', () => {
+  const wide = budgetCandidates({ kind: 'image', width: 1920, height: 80 }, 'gpu').filter(candidate => !candidate.settings.renderer);
+  assert.deepEqual(wide.map(candidate => [candidate.settings.width, candidate.settings.height]), [[1920, 80], [1536, 64]]);
+  const small = budgetCandidates({ kind: 'image', width: 64, height: 64 }, 'gpu').filter(candidate => !candidate.settings.renderer);
+  assert.equal(small.length, 1);
+});
+
+test('a frame rate budget counts the per-frame cost and leaves startup out', () => {
+  const rate = choose({ framesPerSecond: 15 });
+  assert.equal(rate.report.fits, true);
+  assert.equal(rate.settings.renderer, undefined);
+  assert.match(rate.report.warnings.join(' '), /not counted against framesPerSecond/);
+  const perJob = choose({ secondsPerFrame: 1 / 30 });
+  assert.equal(perJob.report.fits, false);
+  assert.match(perJob.report.reason, /Startup and scene build alone take about/);
+});
+
+test('the fit test uses unrounded seconds and the server memory cap is reported', () => {
+  const estimateOf = () => ({ seconds: 0.8504, frameSeconds: 0.01, fixedSeconds: 0.84, peakMemoryMiB: 100 });
+  const regionBase = { ...base, region: { x: 0, y: 0, width: 64, height: 64 } };
+  const edge = chooseBudgetSettings({ base: regionBase, budget: parseBudget({ secondsPerFrame: 1 }), tracerBackend: 'gpu', frameCount: 1, estimateOf });
+  assert.equal(edge.report.fits, false);
+  const server = chooseBudgetSettings({ base, budget: parseBudget({ secondsPerFrame: 600, memoryMiB: 4096 }), tracerBackend: 'gpu', frameCount: 1, estimateOf, serverMemoryMiB: 192 });
+  assert.match(server.report.warnings.join(' '), /above the server --memory render-target cap of 192 MiB/);
+  assert.match(server.report.warnings.join(' '), /may still shrink the frame/);
+});

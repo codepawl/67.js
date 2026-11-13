@@ -1270,7 +1270,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             if (base.renderer !== undefined) throw new TypeError('budget picks the renderer: leave settings.renderer out, or leave settings.budget out to choose it yourself.');
             const budget = parseBudget(budgetInput);
             const frameCount = normalizeJobSettings(base, snapshot.clips, snapshot.recipe).frameCount;
-            ({ settings: jobSettings, report: budgetReport } = chooseBudgetSettings({ base, budget, tracerBackend: backend === 'cpu' ? 'cpu' : 'gpu', frameCount, estimateOf }));
+            ({ settings: jobSettings, report: budgetReport } = chooseBudgetSettings({ base, budget, tracerBackend: backend === 'cpu' ? 'cpu' : 'gpu', frameCount, estimateOf, serverMemoryMiB: memory }));
           }
           const estimate = estimateOf(jobSettings);
           estimateForNextJob = estimate;
