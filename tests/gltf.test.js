@@ -497,7 +497,7 @@ test('all glTF map channels preserve sampler, linear data, sRGB color, scales, s
 
 test('map preflight rejects unsupported UVs, sampler states, invalid scales and missing geometry UVs', async () => {
   const changes = [
-    [document => { document.materials[0].normalTexture.texCoord = 1; }, /TEXCOORD_0/],
+    [document => { document.materials[0].normalTexture.texCoord = 2; }, /TEXCOORD_0 or TEXCOORD_1/],
     [document => { document.materials[0].normalTexture.scale = 'invalid'; }, /finite float/],
     [document => { document.materials[0].normalTexture.scale = '1'; }, /finite float/],
     [document => { document.materials[0].occlusionTexture.strength = 2; }, /strength/],

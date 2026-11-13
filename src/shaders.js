@@ -573,8 +573,9 @@ float normalMapVariance = 0.0;
 vec3 mappedNormal(vec3 normal) {
   vec3 positionX = dFdx(worldPosition);
   vec3 positionY = dFdy(worldPosition);
-  vec2 uvX = dFdx(textureUV);
-  vec2 uvY = dFdy(textureUV);
+  vec2 normalCoordinates = mapUV(hasNormalMap);
+  vec2 uvX = dFdx(normalCoordinates);
+  vec2 uvY = dFdy(normalCoordinates);
   float uvScale = max(max(abs(uvX.x), abs(uvX.y)), max(abs(uvY.x), abs(uvY.y)));
   if (uvScale == 0.0) return normal;
   uvX /= uvScale;
@@ -591,7 +592,7 @@ vec3 mappedNormal(vec3 normal) {
   tangent = normalize(tangent);
   float handedness = dot(cross(normal, tangent), bitangent) < 0.0 ? -1.0 : 1.0;
   bitangent = normalize(cross(normal, tangent)) * handedness;
-  vec3 sampled = texture(normalMap, textureUV${featureCode("normalUv")}).xyz * 2.0 - 1.0;
+  vec3 sampled = texture(normalMap, normalCoordinates${featureCode("normalUv")}).xyz * 2.0 - 1.0;
   float filteredLength = clamp(length(sampled), 0.05, 1.0);
   normalMapVariance = (1.0 - filteredLength) / filteredLength;
   sampled.xy *= normalScale;

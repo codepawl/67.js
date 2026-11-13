@@ -98,3 +98,87 @@ test('an unlit material with a base color map and no UVs loads without the map',
   assert.equal(parts[0].material.map, undefined);
   assert.ok(warnings.some(warning => /Dropped baseColorTexture/.test(warning)));
 });
+
+test('a material that loses a texture to missing UVs is named in the warning and the mesh is kept', async () => {
+  const document = triangleDocument({ name: 'plank', pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }, { withUvs: false });
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(document));
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0].material.map, undefined);
+  assert.ok(warnings.some(warning => /Dropped baseColorTexture.*material plank/.test(warning)));
+});
+
+test('KHR_materials_specular colour factors above 4 load', async () => {
+  const document = triangleDocument({
+    name: 'glossy wood',
+    extensions: { KHR_materials_specular: { specularColorFactor: [10, 9.6, 9.8] } },
+  }, { withUvs: true, extensionsRequired: ['KHR_materials_specular'] });
+  const { parts } = await withImageDecoder(() => parseGltf(document));
+  assert.deepEqual(parts[0].material.specularColor, [10, 9.6, 9.8]);
+});
+
+/** A triangle with TEXCOORD_0 and a different TEXCOORD_1, so a test can tell which set a map reads. */
+function twoUvSetDocument(material) {
+  const document = JSON.parse(triangleDocument(material, { withUvs: true }));
+  document.meshes[0].primitives[0].attributes.TEXCOORD_1 = 2;
+  document.accessors.push({ bufferView: 2, componentType: 5126, count: 3, type: 'VEC2' });
+  document.bufferViews.push({ buffer: 0, byteOffset: 60, byteLength: 24 });
+  document.buffers[0] = { byteLength: 84, uri: dataUri(TRIANGLE_POSITIONS, TRIANGLE_UVS, new Float32Array([0, 0, 2, 0, 0, 2])) };
+  return document;
+}
+
+test('a material whose maps all read TEXCOORD_1 loads with that set as its UVs', async () => {
+  const document = twoUvSetDocument({
+    name: 'Laminate floor',
+    normalTexture: { index: 0, texCoord: 1 },
+    pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 1 } },
+  });
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.ok(parts[0].material.map, 'the base color map is kept');
+  assert.equal(parts[0].material.map.uvChannel, 0);
+  assert.deepEqual([...parts[0].geometry.uvs], [0, 0, 2, 0, 0, 2]);
+  assert.ok(warnings.some(warning => /Laminate floor.*TEXCOORD_1/.test(warning)));
+});
+
+test('a base color map on TEXCOORD_1 beside maps on TEXCOORD_0 is dropped with the material named', async () => {
+  const document = twoUvSetDocument({
+    name: 'mixed',
+    emissiveTexture: { index: 0 },
+    pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 1 } },
+  });
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.equal(parts[0].material.map, undefined);
+  assert.ok(parts[0].material.emissiveMap);
+  assert.ok(warnings.some(warning => /Dropped baseColorTexture of mixed/.test(warning)));
+});
+
+test('an unused material with a base color map on TEXCOORD_1 does not fail the file', async () => {
+  const document = twoUvSetDocument({ name: 'used' });
+  document.materials.push({ name: 'unused', pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 1 } } });
+  const { parts } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.equal(parts.length, 1);
+});
+
+test('a KHR_texture_transform texCoord of 1 is promoted with the map', async () => {
+  const document = twoUvSetDocument({
+    name: 'tiled',
+    pbrMetallicRoughness: {
+      baseColorTexture: { index: 0, texCoord: 1, extensions: { KHR_texture_transform: { texCoord: 1, scale: [2, 2] } } },
+    },
+  });
+  document.extensionsUsed = ['KHR_texture_transform'];
+  const { parts } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.ok(parts[0].material.map);
+  assert.deepEqual([...parts[0].geometry.uvs], [0, 0, 4, 0, 0, 4]);
+});
+
+test('a normal map on texCoord 1 loads and reads the second UV set', async () => {
+  const secondUvs = new Float32Array([0, 0, 2, 0, 0, 2]);
+  const document = JSON.parse(triangleDocument({ normalTexture: { index: 0, texCoord: 1 } }, { withUvs: true }));
+  document.meshes[0].primitives[0].attributes.TEXCOORD_1 = 2;
+  document.accessors.push({ bufferView: 2, componentType: 5126, count: 3, type: 'VEC2' });
+  document.bufferViews.push({ buffer: 0, byteOffset: 60, byteLength: 24 });
+  document.buffers[0] = { byteLength: 84, uri: dataUri(TRIANGLE_POSITIONS, TRIANGLE_UVS, secondUvs) };
+  const { parts } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
+  assert.equal(parts[0].material.normalMap.uvChannel, 1);
+  assert.ok(parts[0].geometry.lightUvs, 'the second UV set is kept on the geometry');
+});
