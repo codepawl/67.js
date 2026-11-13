@@ -9,6 +9,14 @@ function demoteHeadings(markdown) {
   return parts.map(part => part.startsWith('```') ? part : part.replace(/^(#{1,5}) /gm, '#$1 ')).join('');
 }
 
+// A learn page links to its sibling docs with `../x.md`, which only resolves from `docs/learn/`. In the one-file guide
+// at `/guide.md` those links would 404, so they point at the page on GitHub like the links in `docs/guide.md`.
+const docsUrl = 'https://github.com/codepawl/67.js/blob/main/docs/';
+
+export function absoluteDocsLinks(markdown) {
+  return markdown.replace(/\]\(\.\.\/([^)\s]+)\)/g, (_match, path) => `](${docsUrl}${path})`);
+}
+
 /** Return the complete plain-text guide for a checkout at `root`. */
 export async function plainGuide(root) {
   const guide = (await readFile(resolve(root, 'docs/guide.md'), 'utf8')).replace(/\r\n/g, '\n');
@@ -21,6 +29,6 @@ export async function plainGuide(root) {
   const topics = [...guideTopics(guide), ...learnTopics(sources)].filter(topic => !(topic.id in topicAliases));
   const { topics: ordered } = orderTopics(topics);
   const introduction = guide.slice(0, guide.search(/^## /m)).trimEnd();
-  const body = ordered.map(topic => (learnIds.has(topic.id) ? demoteHeadings(topic.raw) : topic.raw).trim());
+  const body = ordered.map(topic => (learnIds.has(topic.id) ? absoluteDocsLinks(demoteHeadings(topic.raw)) : topic.raw).trim());
   return `${introduction}\n\n${body.join('\n\n')}\n`;
 }
