@@ -44,7 +44,7 @@ import { runAnnotateSession } from './annotate-session.mjs';
 import { openInDefaultBrowser } from './annotate-open.mjs';
 import { ANNOTATE_LIMITS } from '../src/agent-annotate.js';
 import { normalizeReview, REVIEW_LIMITS } from './agent-review.mjs';
-import { mergeFrameDiagnostics } from '../src/frame-checks.js';
+import { mergeFrameDiagnostics, pathTracerFindingsLimit } from '../src/frame-checks.js';
 import { BRANCH_LIMITS, validateBranchName } from '../src/agent-branches.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../src/agent-errors.js';
 
@@ -690,6 +690,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           metrics.width = width;
           metrics.height = height;
           metrics.pathTracer = traced.report;
+          if (frame === 0) {
+            const looked = await jobPage.evaluate(input => window.__agentPreview.findings(input), frameInput);
+            mergeFrameDiagnostics(metrics, [...looked.diagnostics, pathTracerFindingsLimit()]);
+          }
           if (traced.report.nativeSession) (metrics.nativeSessionRoutes ??= []).push(traced.report.nativeSession.path);
           const tracedBytes = Buffer.from(traced.data, 'base64');
           if (tracedBytes.length > MAXIMUM_JOB_FRAME_BYTES) throw new Error('Path traced frame exceeded 12 MiB.');
