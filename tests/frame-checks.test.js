@@ -272,3 +272,14 @@ test('a scene reports the z-fighting its ranking left over, and none when it opt
   const scene = createAgentScene({ ...sceneWithCamera({ eye: [3, 2, 4], target: [0, 0, 0], fov: 45 }), environment: { resolveCoplanar: false } });
   assert.deepEqual(scene.flushLeftovers(), []);
 });
+
+test('the findings-unavailable note survives 20 part findings when it is merged first', () => {
+  const partFindings = Array.from({ length: 20 }, (unused, index) => ({ kind: 'floating-node', severity: 'warning', target: `part${index}`, message: `part${index} floats` }));
+  const metrics = {};
+  mergeFrameDiagnostics(metrics, [pathTracerFindingsLimit(), ...partFindings]);
+  assert.equal(metrics.diagnostics.length, 16);
+  assert.equal(metrics.diagnostics[0].kind, 'findings-unavailable');
+  const droppedWhenLast = {};
+  mergeFrameDiagnostics(droppedWhenLast, [...partFindings, pathTracerFindingsLimit()]);
+  assert.equal(droppedWhenLast.diagnostics.some(entry => entry.kind === 'findings-unavailable'), false);
+});

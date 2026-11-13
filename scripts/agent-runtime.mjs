@@ -692,7 +692,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           metrics.pathTracer = traced.report;
           if (frame === 0) {
             const looked = await jobPage.evaluate(input => window.__agentPreview.findings(input), frameInput);
-            mergeFrameDiagnostics(metrics, [...looked.diagnostics, pathTracerFindingsLimit()]);
+            mergeFrameDiagnostics(metrics, [pathTracerFindingsLimit(), ...looked.diagnostics]);
           }
           if (traced.report.nativeSession) (metrics.nativeSessionRoutes ??= []).push(traced.report.nativeSession.path);
           const tracedBytes = Buffer.from(traced.data, 'base64');
