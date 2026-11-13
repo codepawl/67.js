@@ -1,8 +1,10 @@
 # Tier benchmark (issue #904)
 
-Each row says what ran. The tier names are working names from the render roadmap (#890): `draft`, `realtime`, `realtime-high`, `final`. The `quality` setting that picks a tier is planned (#904), so none of these names is an API today. `realtime-high` is planned (#901, #902) and cannot be measured.
+Each row says what ran. The tier names are working names from the render roadmap (#890): `draft`, `realtime`, `realtime-high`, `final`. `realtime-high` is planned (#901, #902) and cannot be measured.
 
 Depends on #921 (`bench/cycles-parity`, [`docs/cycles-parity.md`](../../docs/cycles-parity.md)): the Cycles script, the native trace script, `compare.py` and `measure-gpu-run.py` are reused. The Cook against Cycles numbers on one scene are in that document; this suite repeats them with the other Cook backends beside them.
+
+The `quality` setting that picks a tier is now in the MCP render tools; `measure-quality.mjs` measures the four tiers through it and the table is in [`docs/mcp.md`](../../docs/mcp.md) under "Render quality".
 
 ## Result (six scenes, 960 by 540, idle card, 2026-11-11)
 

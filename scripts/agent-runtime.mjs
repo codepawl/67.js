@@ -33,6 +33,7 @@ import { writeWebBuild } from './web-export.mjs';
 import { gameAssetIds } from '../src/game-assets.js';
 import { resolveJobRoot } from './agent-job-root.mjs';
 import { createAgentRenderJobs, EXPORT_DIRECTORY_NAME, HIGH_PRECISION_FRAME_FACTOR, RENDER_HISTORY_FILE, normalizeJobSettings } from './agent-render-jobs.mjs';
+import { RENDER_QUALITY_NOTE, applyQuality, tierReport } from './agent-render-quality.mjs';
 import { RENDER_BUDGET_NOTE, chooseBudgetSettings, parseBudget } from './agent-render-budget.mjs';
 import { RENDER_ESTIMATE_NOTE, estimateRenderJob, historyWithJob, parseHistory, renderReport, sceneSizeFrom } from './agent-render-estimate.mjs';
 import { encodeRenderOutput, encodeMultilayerExr } from './render-output-encoders.mjs';
@@ -589,7 +590,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
       jobPage.setDefaultTimeout(15000);
       await jobPage.goto(origin);
       await jobPage.waitForFunction(() => Boolean(window.__agentPreview));
-      const input = { sessionId: jobId, recipe: snapshot.recipe, memoryBudgetMiB: memory, backend, ...(settings.transparent ? { transparent: true } : {}),
+      const input = { sessionId: jobId, recipe: snapshot.recipe, memoryBudgetMiB: memory, backend, ...(settings.transparent ? { transparent: true } : {}), ...(settings.quality ? { tier: settings.quality } : {}),
         ...(snapshot.assetBytes ? { data: snapshot.assetBytes.toString('base64'), ...(await motionSources([snapshot.recipe.motion])) } : await placedAssetData(snapshot.recipe)) };
       const created = await jobPage.evaluate(({ method, input }) => window.__agentPreview[method](input),
         { method: snapshot.assetBytes ? 'createAsset' : 'create', input });
@@ -893,6 +894,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
 
   return Object.freeze({
     async capabilities() {
+      const deviceTiers = async () => {
+        nativeTracerLocator ??= createNativeTracerLocator();
+        return tierReport({ backend, nativeTracer: Boolean((await nativeTracerLocator.find()).tracer) });
+      };
       return {
         scene: { ...AGENT_SCENE_CAPABILITIES, game: GAME_CAPABILITIES, postPasses: USER_PASS_CAPABILITIES, meshBlend: MESH_BLEND_CAPABILITIES, materialSnippet: MATERIAL_SNIPPET_CAPABILITIES, vegetation: VEGETATION_CAPABILITY_NOTE, crowd: CROWD_CAPABILITY_NOTE, settle: SETTLE_CAPABILITY_NOTE, textureSequence: TEXTURE_SEQUENCE_CAPABILITIES },
         sceneLimits: SCENE_LIMITS,
@@ -915,7 +920,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           maximumFileBytes: MAXIMUM_PACK_FILE_BYTES, maximumJsonBytes: MAXIMUM_PACK_JSON_BYTES, maximumItemsPerKind: MAXIMUM_PACK_ITEMS_PER_KIND,
           use: 'scene_asset_catalog lists packs: name, version, license, author, description and item ids. GLBs, images, looks and environments carry assetId values that work in scene_create_asset, look, hdri and texture fields. Materials and recipes are read with scene_asset_catalog { pack, material } or { pack, recipe }: pass a recipe to scene_create, and a material as a materials entry or a scene_apply set-material. Packs are installed by the user (unzip into the --packs folder); a tool call never downloads one. Invalid packs are skipped and listed under packs.rejected with the reason.',
         },
-        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1, estimate: RENDER_ESTIMATE_NOTE, budget: RENDER_BUDGET_NOTE,
+        jobs: { configured: Boolean(jobRoot), kinds: ['image', 'stills', 'video'], passes: RENDER_PASS_NAMES, pathTracer: PATH_TRACER_CAPABILITIES, maximumActiveJobs: 1, estimate: RENDER_ESTIMATE_NOTE, budget: RENDER_BUDGET_NOTE, quality: RENDER_QUALITY_NOTE, tiers: await deviceTiers(),
           maximumWidth: MAXIMUM_JOB_SIDE, maximumHeight: MAXIMUM_JOB_SIDE, maximumPixels: MAXIMUM_JOB_PIXELS,
           maximumDuration: MAXIMUM_VIDEO_SECONDS, maximumFps: 30, maximumFrames: 900, maximumStills: 8,
           encoder: 'H.264', encoders: VIDEO_ENCODERS, audio: Boolean(audioRoot), timeline: true, previewSuspendedDuringJob: true,
@@ -1280,8 +1285,10 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           const size = sceneSizeFrom(await invoke('inspect', { sessionId, limit: Math.max(1, snapshot.recipe.nodes?.length ?? 1) }), snapshot.recipe);
           const history = await readRenderHistory();
           const estimateOf = rawSettings => estimateRenderJob({ size, settings: normalizeJobSettings(rawSettings, snapshot.clips, snapshot.recipe), backend, memoryBudgetMiB: memory, history, gpuTracerWarm });
+          if (settings?.quality !== undefined && settings.budget !== undefined) throw new TypeError('budget picks the tier: leave settings.quality out, or leave settings.budget out.');
           let jobSettings = settings;
           let budgetReport;
+          let qualityReport;
           if (settings?.budget !== undefined) {
             const { budget: budgetInput, ...base } = settings;
             if (base.renderer !== undefined) throw new TypeError('budget picks the renderer: leave settings.renderer out, or leave settings.budget out to choose it yourself.');
@@ -1289,12 +1296,17 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
             const frameCount = normalizeJobSettings(base, snapshot.clips, snapshot.recipe).frameCount;
             ({ settings: jobSettings, report: budgetReport } = chooseBudgetSettings({ base, budget, tracerBackend: backend === 'cpu' ? 'cpu' : 'gpu', frameCount, estimateOf, serverMemoryMiB: memory }));
           }
+          if (settings?.quality !== undefined) {
+            nativeTracerLocator ??= createNativeTracerLocator();
+            const { quality, ...base } = settings;
+            ({ settings: jobSettings, report: qualityReport } = applyQuality({ quality, base, backend, nativeTracer: Boolean((await nativeTracerLocator.find()).tracer), estimateOf }));
+          }
           const estimate = estimateOf(jobSettings);
           estimateForNextJob = estimate;
           try {
             const submitted = await controller.submit({ sessionId, sourceRevision: snapshot.sourceRevision,
               snapshot: { recipe: snapshot.recipe, clips: snapshot.clips, ...(assetBytes ? { assetBytes } : {}) }, settings: jobSettings });
-            return { ...submitted, estimate, ...(budgetReport ? { budget: budgetReport } : {}) };
+            return { ...submitted, estimate, ...(budgetReport ? { budget: budgetReport } : {}), ...(qualityReport ? { quality: qualityReport } : {}) };
           } catch (error) {
             if (estimateForNextJob === estimate) estimateForNextJob = undefined;
             throw error;

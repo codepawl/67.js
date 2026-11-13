@@ -10,6 +10,7 @@ import { agentSceneModule, agentSceneModuleLoaded } from '../../src/agent-scene-
 import { createAgentAssetScene } from '../../src/agent-asset.js';
 import { parseGltf } from '../../src/gltf.js';
 import { hasPatternTextures } from '../../scripts/agent-preview-textures.js';
+import { rasterOptionsFor } from '../../scripts/agent-render-quality.mjs';
 import { assetCopyKey, recipeAssetNeeds } from '../../src/agent-scene-assets.js';
 import { BRANCH_LIMITS, createBranchStore, printableLabel } from '../../src/agent-branches.js';
 import { sessionProblem, SCENE_STORE_LIMITS } from '../../src/agent-errors.js';
@@ -84,7 +85,7 @@ export function previewHarness() {
     // The harness loads Manifold from node_modules directly, so the preview's served-file loader is ignored.
     setManifoldModuleLoader: () => {},
     needsPhysics, loadPhysicsEngine, physicsEngineLoaded, setPhysicsModuleLoader: () => {},
-    describeMarks, validateMarks, sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, Uint8Array, atob, sessionProblem, SCENE_STORE_LIMITS, AGENT_SCENE_DEFAULT_LIMITS, describeApplication, framingProblems, placementProblems, textureProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
+    describeMarks, validateMarks, sceneQueryFor, summarizeWalkMap, walkOptionsFor, createQueryOnlyCache, parseGltf, hasPatternTextures, rasterOptionsFor, Uint8Array, atob, sessionProblem, SCENE_STORE_LIMITS, AGENT_SCENE_DEFAULT_LIMITS, describeApplication, framingProblems, placementProblems, textureProblems, exposureProblems, lumaShares, assetCopyKey, recipeAssetNeeds, agentAssetDecodeOptions, withCatalogLimitAdvice,
     applyProjection, applyCameraFields, mat4, resolveAgentShadow, agentEnvironmentMap, BRANCH_LIMITS,
     // Line art needs a real renderer with render passes, so the fault-injected one gets a no-op install.
     agentSceneModule: name => (name === 'lineArt' ? { installLineArt: renderer => renderer } : name === 'userPass' ? { ...agentSceneModule(name), installUserPasses: renderer => renderer } : agentSceneModule(name)), agentSceneModuleLoaded, createBranchStore, printableLabel,
