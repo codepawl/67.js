@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Package export path to source file. The library build maps each addon entry name to its source.
 async function entryFiles() {
   const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
-  const libraryConfig = await readFile(resolve(root, 'vite.lib.config.js'), 'utf8');
+  const libraryConfig = await readFile(resolve(root, 'config/vite.lib.config.js'), 'utf8');
   const sources = Object.fromEntries([...libraryConfig.matchAll(/^\s*'?([\w-]+)'?:\s*'(src\/[\w-]+\.js)'/gm)].map(match => [match[1], match[2]]));
   const entries = [];
   for (const exportPath of Object.keys(packageJson.exports)) {

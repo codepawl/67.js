@@ -1,6 +1,6 @@
 // Removes the line comments inside GLSL template literals, so the published bundles do not carry explanations
 // that only a person reading src/ needs. JavaScript comments are left to the minifier.
-// Used as a plugin by vite.lib.config.js and scripts/measure-size.mjs, so the size budgets measure the same text.
+// Used as a plugin by config/vite.lib.config.js and scripts/measure-size.mjs, so the size budgets measure the same text.
 import { readFile } from 'node:fs/promises';
 
 const GLSL_MARKER = /#version 300 es|^uniform /m;

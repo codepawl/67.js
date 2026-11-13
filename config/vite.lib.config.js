@@ -2,9 +2,9 @@ import { defineConfig } from 'vite';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { glslCommentStripperForVite } from './scripts/strip-glsl-comments.mjs';
+import { glslCommentStripperForVite } from '../scripts/strip-glsl-comments.mjs';
 
-const projectRoot = fileURLToPath(new URL('.', import.meta.url));
+const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 export const MCP_BUILD_RUNNING = 'SIXTYSEVEN_MCP_BUILD_RUNNING';
 
 // build/mcp/preview.js imports the hashed chunks of this build, and emptyOutDir deletes build/mcp, so a library build on its
