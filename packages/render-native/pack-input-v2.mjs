@@ -2001,6 +2001,154 @@ export function resolveFilterParameters(options = {}) {
   return { filterType, filterWidth };
 }
 
+function isOrthographicCamera(camera, options) {
+  return camera?.orthographic === true || options.orthographic === true;
+}
+
+/**
+ * The camera words of the kernel params block as numbers: eye, view axes scaled by the half extents, near and far, sensor
+ * shift and thin lens. `farDistance` is the far plane when neither `options.far` nor `camera.far` gives one.
+ */
+function resolveCameraWordsV2(camera, options, farDistance, callerName) {
+  const eye = camera?.eye ?? camera?.position ?? [0, 0, 0];
+  const forward = normalizeVec3(camera?.forward ?? [0, 0, -1], [0, 0, -1]);
+  const halfWidth = Number(camera?.halfWidth ?? 1);
+  const halfHeight = Number(camera?.halfHeight ?? 1);
+  const rawRight = camera?.right ?? [1, 0, 0];
+  const rawUp = camera?.above ?? camera?.up ?? [0, 1, 0];
+  const scaledRight = camera?.scaledAxes
+    ? [Number(rawRight[0]), Number(rawRight[1]), Number(rawRight[2])]
+    : [Number(rawRight[0]) * halfWidth, Number(rawRight[1]) * halfWidth, Number(rawRight[2]) * halfWidth];
+  const scaledUp = camera?.scaledAxes
+    ? [Number(rawUp[0]), Number(rawUp[1]), Number(rawUp[2])]
+    : [Number(rawUp[0]) * halfHeight, Number(rawUp[1]) * halfHeight, Number(rawUp[2]) * halfHeight];
+
+  const near = Math.max(0, Number(options.near ?? camera?.near ?? 0));
+  const far = Math.max(near + 1e-3, Number(options.far ?? camera?.far ?? farDistance ?? 1e30));
+  const lensShift = camera?.lensShift ?? options.lensShift ?? [0, 0];
+  const thinLens = resolveThinLensParameters(camera, options, callerName);
+  return { eye, forward, scaledRight, scaledUp, near, far, lensShift, thinLens };
+}
+
+function writeCameraWordsV2(f32, u32, cameraWords) {
+  const { eye, forward, scaledRight, scaledUp, near, far, lensShift, thinLens } = cameraWords;
+  f32[28] = Number(eye[0]);
+  f32[29] = Number(eye[1]);
+  f32[30] = Number(eye[2]);
+  f32[31] = near;
+
+  f32[32] = forward[0];
+  f32[33] = forward[1];
+  f32[34] = forward[2];
+  f32[35] = far;
+
+  f32[36] = scaledRight[0];
+  f32[37] = scaledRight[1];
+  f32[38] = scaledRight[2];
+  f32[39] = thinLens.apertureRadius;
+
+  f32[40] = scaledUp[0];
+  f32[41] = scaledUp[1];
+  f32[42] = scaledUp[2];
+  f32[43] = thinLens.focalDistance;
+
+  f32[44] = Number(lensShift[0] ?? 0);
+  f32[45] = Number(lensShift[1] ?? 0);
+  u32[46] = thinLens.apertureBlades >>> 0;
+  f32[47] = thinLens.apertureRotation;
+}
+
+const KERNEL_PARAMS_V2_SEED_BYTE_OFFSET = 28;
+const KERNEL_PARAMS_V2_WIDTH_BYTE_OFFSET = 8;
+const KERNEL_PARAMS_V2_HEIGHT_BYTE_OFFSET = 12;
+const KERNEL_PARAMS_V2_CAMERA_FIRST_BYTE_OFFSET = 112;
+const KERNEL_PARAMS_V2_CAMERA_FAR_BYTE_OFFSET = 140;
+const KERNEL_PARAMS_V2_CAMERA_BYTE_LENGTH = 80;
+const MAX_SEED = 0xffffffff;
+const ASPECT_RELATIVE_TOLERANCE = 1e-3;
+
+function requireKernelParamsV2Block(kernelParams, callerName) {
+  if (!(kernelParams instanceof Uint8Array) || kernelParams.byteLength !== STRUCT_STRIDES_V2.kernelParams) {
+    throw new TypeError(
+      `${callerName}: \`kernelParams\` must be a Uint8Array of ${STRUCT_STRIDES_V2.kernelParams} bytes (the KernelParamsV2 block of buildNativeInputV2).`
+    );
+  }
+  const header = new DataView(kernelParams.buffer, kernelParams.byteOffset, 8);
+  if (header.getUint32(0, true) !== FORMAT_V2_MAGIC || header.getUint32(4, true) !== FORMAT_V2_VERSION) {
+    throw new TypeError(
+      `${callerName}: \`kernelParams\` does not start with the FORMAT-v2 magic and version ${FORMAT_V2_VERSION}; pass the block of buildNativeInputV2.`
+    );
+  }
+}
+
+/** Throws unless `seed` is absent or a whole number from 0 to 4294967295 (a u32 word; larger values would wrap without notice). */
+export function validateSeedOption(seed, callerName) {
+  if (seed === undefined) {
+    return;
+  }
+  if (!Number.isInteger(seed) || seed < 0 || seed > MAX_SEED) {
+    throw new RangeError(`${callerName}: \`seed\` must be a whole number from 0 to ${MAX_SEED}, got ${JSON.stringify(seed)}.`);
+  }
+}
+
+function requireCameraMatchesAspect(cameraWords, width, height, callerName) {
+  const cameraAspect = Math.hypot(...cameraWords.scaledRight) / Math.hypot(...cameraWords.scaledUp);
+  const imageAspect = width / height;
+  if (!Number.isFinite(cameraAspect) || Math.abs(cameraAspect - imageAspect) > ASPECT_RELATIVE_TOLERANCE * imageAspect) {
+    throw new RangeError(
+      `${callerName}: the camera has a width to height ratio of ${cameraAspect} but the image is ${width}x${height} (${imageAspect}). Build the camera with createCamera(view, ${width}, ${height}) for this image size, or pass \`width\` and \`height\` of the frame.`
+    );
+  }
+}
+
+/**
+ * Returns a copy of the `kernelParams` block of a FORMAT-v2 input with another camera and, when given, another seed. Only
+ * the camera words (eye, view axes, near, far, sensor shift, thin lens: bytes 112 to 191), the orthographic bit of the kernel
+ * flags and the seed word change, by the code `buildNativeInputV2` runs, so the result equals the block of a full repack
+ * with that camera. `camera` is the object `buildNativeInputV2` takes. `options` may hold `seed`, the camera options of
+ * `buildNativeInputV2` (`near`, `far`, `lensShift`, `orthographic`, `apertureRadius`, `focalDistance`, `apertureBlades`,
+ * `apertureRotation`) and `width` and `height` (default: the size in the block) to check the camera's aspect against.
+ * A camera without a `far` keeps the far plane of the block, which the full pack derives from the scene's size.
+ * Throws when the block is not FORMAT-v2, the camera is not an object, its aspect does not match the image or `seed` is not a
+ * whole number from 0 to 4294967295.
+ */
+export function packCameraParams(kernelParams, camera, options = {}) {
+  const callerName = 'packCameraParams';
+  requireKernelParamsV2Block(kernelParams, callerName);
+  if (!camera || typeof camera !== 'object') {
+    throw new TypeError(`${callerName}: \`camera\` must be a camera object such as the one createCamera returns.`);
+  }
+  if (options === null || typeof options !== 'object') {
+    throw new TypeError(`${callerName}: \`options\` must be an object.`);
+  }
+  validateSeedOption(options.seed, callerName);
+
+  const patchedParams = new Uint8Array(kernelParams);
+  const view = new DataView(patchedParams.buffer, patchedParams.byteOffset, patchedParams.byteLength);
+  const heldFar = view.getFloat32(KERNEL_PARAMS_V2_CAMERA_FAR_BYTE_OFFSET, true);
+  const cameraWords = resolveCameraWordsV2(camera, options, heldFar, callerName);
+  const width = options.width ?? view.getUint32(KERNEL_PARAMS_V2_WIDTH_BYTE_OFFSET, true);
+  const height = options.height ?? view.getUint32(KERNEL_PARAMS_V2_HEIGHT_BYTE_OFFSET, true);
+  requireCameraMatchesAspect(cameraWords, width, height, callerName);
+
+  const scratchWords = new ArrayBuffer(STRUCT_STRIDES_V2.kernelParams);
+  writeCameraWordsV2(new Float32Array(scratchWords), new Uint32Array(scratchWords), cameraWords);
+  patchedParams.set(
+    new Uint8Array(scratchWords, KERNEL_PARAMS_V2_CAMERA_FIRST_BYTE_OFFSET, KERNEL_PARAMS_V2_CAMERA_BYTE_LENGTH),
+    KERNEL_PARAMS_V2_CAMERA_FIRST_BYTE_OFFSET
+  );
+
+  const flags = view.getUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, true);
+  const patchedFlags = isOrthographicCamera(camera, options)
+    ? (flags | KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) >>> 0
+    : (flags & ~KERNEL_FLAG_ORTHOGRAPHIC_CAMERA) >>> 0;
+  view.setUint32(KERNEL_PARAMS_V2_KERNEL_FLAGS_BYTE_OFFSET, patchedFlags, true);
+  if (options.seed !== undefined) {
+    view.setUint32(KERNEL_PARAMS_V2_SEED_BYTE_OFFSET, options.seed, true);
+  }
+  return patchedParams;
+}
+
 function packKernelParamsV2({
   camera,
   options,
@@ -2048,7 +2196,7 @@ function packKernelParamsV2({
   if (usesSubsurface) {
     kernelFlags |= KERNEL_FLAG_HAS_SUBSURFACE;
   }
-  if (camera?.orthographic === true || options.orthographic === true) {
+  if (isOrthographicCamera(camera, options)) {
     kernelFlags |= KERNEL_FLAG_ORTHOGRAPHIC_CAMERA;
   }
   if (adaptiveThreshold > 0) {
@@ -2073,23 +2221,7 @@ function packKernelParamsV2({
   const minBounceRr = Math.max(0, Math.round(Number(options.minBounceRr ?? 3)));
   const { filterType, filterWidth } = resolveFilterParameters(options);
 
-  const eye = camera?.eye ?? camera?.position ?? [0, 0, 0];
-  const forward = normalizeVec3(camera?.forward ?? [0, 0, -1], [0, 0, -1]);
-  const halfWidth = Number(camera?.halfWidth ?? 1);
-  const halfHeight = Number(camera?.halfHeight ?? 1);
-  const rawRight = camera?.right ?? [1, 0, 0];
-  const rawUp = camera?.above ?? camera?.up ?? [0, 1, 0];
-  const scaledRight = camera?.scaledAxes
-    ? [Number(rawRight[0]), Number(rawRight[1]), Number(rawRight[2])]
-    : [Number(rawRight[0]) * halfWidth, Number(rawRight[1]) * halfWidth, Number(rawRight[2]) * halfWidth];
-  const scaledUp = camera?.scaledAxes
-    ? [Number(rawUp[0]), Number(rawUp[1]), Number(rawUp[2])]
-    : [Number(rawUp[0]) * halfHeight, Number(rawUp[1]) * halfHeight, Number(rawUp[2]) * halfHeight];
-
-  const cameraNear = Math.max(0, Number(options.near ?? camera?.near ?? 0));
-  const cameraFar = Math.max(cameraNear + 1e-3, Number(options.far ?? camera?.far ?? farDistance ?? 1e30));
-  const lensShift = camera?.lensShift ?? options.lensShift ?? [0, 0];
-  const thinLens = resolveThinLensParameters(camera, options, 'buildNativeInputV2');
+  const cameraWords = resolveCameraWordsV2(camera, options, farDistance, 'buildNativeInputV2');
 
   u32[0] = FORMAT_V2_MAGIC;
   u32[1] = FORMAT_V2_VERSION;
@@ -2126,30 +2258,7 @@ function packKernelParamsV2({
   u32[26] = counts.lightTreeNodeCount >>> 0;
   u32[27] = counts.textureCount >>> 0;
 
-  f32[28] = Number(eye[0]);
-  f32[29] = Number(eye[1]);
-  f32[30] = Number(eye[2]);
-  f32[31] = cameraNear;
-
-  f32[32] = forward[0];
-  f32[33] = forward[1];
-  f32[34] = forward[2];
-  f32[35] = cameraFar;
-
-  f32[36] = scaledRight[0];
-  f32[37] = scaledRight[1];
-  f32[38] = scaledRight[2];
-  f32[39] = thinLens.apertureRadius;
-
-  f32[40] = scaledUp[0];
-  f32[41] = scaledUp[1];
-  f32[42] = scaledUp[2];
-  f32[43] = thinLens.focalDistance;
-
-  f32[44] = Number(lensShift[0] ?? 0);
-  f32[45] = Number(lensShift[1] ?? 0);
-  u32[46] = thinLens.apertureBlades >>> 0;
-  f32[47] = thinLens.apertureRotation;
+  writeCameraWordsV2(f32, u32, cameraWords);
 
   u32[48] = packedEnvironment.envWidth >>> 0;
   u32[49] = packedEnvironment.envHeight >>> 0;

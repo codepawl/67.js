@@ -87,6 +87,19 @@ session.close();                                                    // frees the
 
 `renderOptions.kernelParams` is the `kernelParams` of another `buildNativeInputV2` call on the same scene, which is how a frame gets another camera (or seed, bounces or filter). The seven record counts must match the session scene, or the frame throws and names the count. Changing materials, lights or instance transforms is `session.update` (below); other changes to the scene need a new session.
 
+**Camera only (a film of a static scene).** `render({ camera, seed })` sends only the camera: pass the camera object that `buildNativeInputV2` takes (built with `createCamera(view, width, height)` for the frame's size, thin lens included) and the session writes it into its own `kernelParams`, with no scene packing per frame:
+
+```js
+for (let frame = 0; frame < frameCount; frame++) {
+  const camera = createCamera({ eye: path(frame), target, fov: 40, fStop: 4, focusDistance: 6 }, 480, 270);
+  const picture = session.render({ width: 480, height: 270, samples: 32, camera });
+}
+```
+
+The same work is exported as `packCameraParams(kernelParams, camera, options)`, which returns a new 320 byte block from `input.kernelParams` with only the camera words (bytes 112 to 191), the orthographic bit of `kernel_flags` and, when `options.seed` is given, the seed word replaced; the bytes equal those of a full `buildNativeInputV2` with that camera. It uses the packer's own camera code, so it follows the layout when that moves; do not copy bytes by hand. A camera without `far` keeps the far plane of the block (the packer derives it from the scene size). It throws when the block is not FORMAT-v2, when the camera's width to height ratio is not the image's (a camera built for another size would stretch the picture), and for a `seed` that is not a whole number from 0 to 4294967295. `render` checks the camera against the size of the frame.
+
+`seed` is a frame option: `render({ seed })`, or a default of `createNativeSession(input, { seed })`, is written into the block the frame uses, so two seeds give two noise patterns and one seed repeats its picture. Without a seed the block keeps the seed it was packed with (`0` unless `buildNativeInputV2` got one). Before this option a `seed` passed to `render` or `traceNative` with a packed v2 input was ignored, because the seed is a pack-time word of the input; `traceNative` still works that way, so pack the seed with the input there. `camera` and `seed` apply on top of `renderOptions.kernelParams` when that is given too.
+
 A frame may change these words of the 320 byte block: the camera, lens, aperture and sensor shift (bytes 112 to 191), `seed`, the bounce limits, clamps, filter, adaptive sampling, `film_exposure`, `filter_glossy`, the environment rotation and colour (204, 208), the fog fields (224 to 267) and `kernel_flags`. Fog and the kernel flags select kernel variants, so such a frame recompiles (`pipelineReused` is false). The other words describe data the session uploaded or compiled for, and a frame that changes one throws and names it: the seven record counts (84 to 108), `env_width`, `env_height`, `env_cdf_offset`, `env_total_weight` (192, 196, 200, 220), `emissive_total_weight`, `analytic_light_total_weight` (268, 272), `ies_table_offset` (284), `background_mis_weight` (292) and `sobol_table_offset` (296). A frame with another HDRI, or one where the session had none, needs a new session. A frame that fails leaves the creation costs for the next frame that succeeds, which then reports them.
 
 A frame is byte-identical to the `traceNative` render of the same input and options: `traceNative` runs a session that renders once. `render` after `close()` throws, and so does a frame on a session whose device was lost; the error says to create a new session. A plain frame clears the film and starts at sample 0.
