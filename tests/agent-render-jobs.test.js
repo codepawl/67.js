@@ -289,7 +289,7 @@ test('two takeovers of one dead lock at the same time leave exactly one owner an
     assert.equal(refusals[0].reason.code, undefined, 'a lost race is a clean refusal, not a raw file error');
     assert.equal(JSON.parse(await readFile(join(root, 'store.lock'), 'utf8')).pid, process.pid);
     await owners[0].value.close();
-    assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-')), [], 'no takeover claim is left behind');
+    assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-') || name.includes('.tmp-')), [], 'no takeover claim or temporary file is left behind');
   }
 });
 
@@ -330,6 +330,63 @@ test('a takeover claim left by a dead process is reported with the file to delet
   await unlink(join(root, claimName));
   const recovered = await createAgentRenderJobs({ root, limits, run: writeImage });
   await recovered.close();
+});
+
+test('an empty or unreadable takeover claim is reported with the file to delete', async context => {
+  const root = await temporary(context);
+  const deadToken = randomUUID();
+  const claimName = `store.lock.claim-${deadToken}`;
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: deadToken }));
+  for (const claimText of ['', '{"pid":']) {
+    await writeFile(join(root, claimName), claimText);
+    await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), error => error.message.includes(claimName) && /delete/.test(error.message));
+  }
+});
+
+test('a lock that does not parse yet is refused as owned by a live starter, not as a raw syntax error', async context => {
+  const root = await temporary(context);
+  await writeFile(join(root, 'store.lock'), '');
+  await assert.rejects(createAgentRenderJobs({ root, limits, run: writeImage }), /live process/);
+  assert.equal(await readFile(join(root, 'store.lock'), 'utf8'), '');
+});
+
+test('a lock is published whole: absent while the temporary file is written, complete the moment it exists', async context => {
+  const root = await temporary(context);
+  const seen = [];
+  const lockText = () => readFile(join(root, 'store.lock'), 'utf8').catch(error => (error.code === 'ENOENT' ? null : Promise.reject(error)));
+  const controller = await createAgentRenderJobs({
+    root,
+    limits,
+    run: writeImage,
+    lockTakeoverHooks: {
+      beforeLockLink: async () => { seen.push(['before', await lockText()]); },
+      afterLockLink: async () => { seen.push(['after', await lockText()]); },
+    },
+  });
+  assert.equal(seen[0][0], 'before');
+  assert.equal(seen[0][1], null, 'no lock file exists while its content is being written');
+  assert.equal(seen[1][0], 'after');
+  assert.equal(JSON.parse(seen[1][1]).schemaVersion, 1, 'the lock is complete as soon as it exists');
+  assert.deepEqual((await readdir(root)).filter(name => name.includes('.tmp-')), [], 'no temporary file is left behind');
+  await controller.close();
+});
+
+test('a starter whose dead lock was replaced by another dead lock starts again and takes that one over', async context => {
+  const root = await temporary(context);
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
+  let signalReached;
+  const reached = new Promise(resolveReached => { signalReached = resolveReached; });
+  let openGate;
+  const gate = new Promise(resolveGate => { openGate = resolveGate; });
+  const slowReader = createAgentRenderJobs({ root, limits, run: writeImage, lockTakeoverHooks: { beforeLockClaim: async () => { signalReached(); await gate; } } });
+  await reached;
+  // A starter took the first dead lock over and then died as well, leaving a second dead lock.
+  await writeFile(join(root, 'store.lock'), JSON.stringify({ schemaVersion: 1, pid: 2147483647, token: randomUUID() }));
+  openGate();
+  const controller = await slowReader;
+  assert.equal(JSON.parse(await readFile(join(root, 'store.lock'), 'utf8')).pid, process.pid);
+  assert.deepEqual((await readdir(root)).filter(name => name.includes('.claim-') || name.includes('.tmp-')), []);
+  await controller.close();
 });
 
 test('restart marks unfinished records interrupted and rejects forged artifact paths', async context => {

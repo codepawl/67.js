@@ -1,5 +1,5 @@
 import { readFileSync, unlinkSync } from 'node:fs';
-import { mkdir, open, readFile, writeFile, rename, unlink, rmdir, readdir, lstat, realpath } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile, rename, link, unlink, rmdir, readdir, lstat, realpath } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
@@ -43,8 +43,9 @@ export const EXPORT_DIRECTORY_NAME = 'exports';
 /** Recent estimate-versus-measured pairs the runtime keeps beside the jobs; the store counts its bytes and never reads it. */
 export const RENDER_HISTORY_FILE = 'render-history.json';
 const STORE_FILES = ['store.json', 'store.lock', EXPORT_DIRECTORY_NAME, RENDER_HISTORY_FILE];
-// A process taking over a dead lock holds a claim file with this name for a moment; a controller scanning the store must not call it foreign.
-const LOCK_CLAIM = /^store\.lock\.claim-[0-9a-f-]{36}$/i;
+// A starter taking over a dead lock holds a claim file, and a starter publishing a lock or claim holds a temporary file, for a
+// moment (a crash can leave one). A controller scanning the store must not call these foreign.
+const LOCK_CLAIM = /^store\.lock\.(claim-[0-9a-f-]{36}|(claim-[0-9a-f-]{36}\.)?tmp-[0-9a-f-]{36})$/i;
 const INTERNAL_FILES =new Set(['owner.json', 'snapshot.json', 'asset.glb', 'status.json', 'status.json.pending']);
 
 function objectKeys(value, allowed, label) {
@@ -341,22 +342,55 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   let storeId;
   let lockHeld = false;
 
+  // Writes the whole text to a private temporary file, then hard-links it to `targetPath` (atomic, EEXIST when the target is
+  // taken) and removes the temporary name. The target therefore never exists empty or half written, even if the process is killed
+  // or the disk fills. Where hard links are not supported it falls back to creating the target with `wx` and writing into it.
+  async function publishFile(targetPath, text) {
+    const temporaryPath = `${targetPath}.tmp-${randomUUID()}`;
+    await writeFile(temporaryPath, text, { flag: 'wx', mode: 0o600 });
+    try {
+      await lockTakeoverHooks.beforeLockLink?.();
+      try {
+        await link(temporaryPath, targetPath);
+      } catch (error) {
+        if (!['EPERM', 'ENOTSUP', 'ENOSYS', 'EOPNOTSUPP'].includes(error.code)) throw error;
+        const target = await open(targetPath, 'wx', 0o600);
+        try { await target.writeFile(text); }
+        finally { await target.close(); }
+      }
+      await lockTakeoverHooks.afterLockLink?.();
+    } finally {
+      await unlink(temporaryPath).catch(() => {});
+    }
+  }
+
   async function createLockFile() {
-    const lock = await open(lockPath, 'wx', 0o600);
-    try { await lock.writeFile(JSON.stringify({ schemaVersion: 1, pid: process.pid, token: lockToken })); }
-    finally { await lock.close(); }
+    await publishFile(lockPath, JSON.stringify({ schemaVersion: 1, pid: process.pid, token: lockToken }));
     lockHeld = true;
     process.once('exit', releaseLockOnExit);
   }
 
   const LIVE_OWNER_MESSAGE = 'The job store is already owned by a live process.';
 
+  // Reads a lock another process may be writing. A file that does not parse is a starter that has not finished (or a lock that was
+  // cut short), so it is treated as owned by a live process and never surfaces a raw SyntaxError. The hard link a starter makes
+  // for a moment is allowed here, unlike in the job files.
+  async function readLockFile(path) {
+    const details = await lstat(path);
+    if (!details.isFile() || details.size > 4096) throw new Error('Unrecognized job store lock.');
+    try {
+      return JSON.parse(await readFile(path, 'utf8'));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error(LIVE_OWNER_MESSAGE);
+      throw error;
+    }
+  }
+
   // Throws unless the file at `path` is a well-formed lock whose owner process no longer exists.
   // Limit: the operating system can give a dead owner's PID to an unrelated process, which then looks live and is refused until
   // a person removes the file.
   async function assertDeadOwner(path) {
-    await regularFile(path);
-    const owner = await readJson(path, 4096);
+    const owner = await readLockFile(path);
     objectKeys(owner, ['schemaVersion', 'pid', 'token'], 'store lock');
     if (owner.schemaVersion !== 1 || !UUID.test(owner.token)) throw new Error('Unrecognized job store lock.');
     boundedNumber(owner.pid, 1, 2147483647, 'lock process ID', true);
@@ -379,23 +413,23 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
   // the claim for T0. T0 can never become live again (its owner is gone), and the only process that replaces T0 with a new lock
   // is the claim holder. A slow reader that validated T0 earlier and gets the claim later re-reads the lock under the claim, sees
   // a different token (or no file), and takes over nothing. The holder unlinks the lock only while the file still holds T0.
-  // A process killed between creating and removing a claim (a window of microseconds) blocks the takeover of that one token; the
-  // claim records its owner, so a claim of a dead process is reported with the exact file to delete and is not recovered by itself.
-  // Returns when the lock is gone, whether this process or another one removed it; the caller then tries to create its own.
+  // The claim is published whole (never empty), so a process killed while holding it is the only way one stays behind: that
+  // blocks the takeover of that one token, which is rare but real. The claim records its owner; one whose process is gone, or
+  // that cannot be read, is reported with the exact file to delete and is not recovered by itself.
+  // Returns 'lock-changed' when the lock under the claim was no longer the one this call validated (another process replaced
+  // it), and otherwise when the lock is gone or taken over; the caller then tries to create its own or starts again.
   async function takeOverDeadOwnerLock(isRetry = false) {
     let deadOwnerToken;
     try {
       deadOwnerToken = await assertDeadOwner(lockPath);
     } catch (error) {
-      if (error.code === 'ENOENT') return;
+      if (error.code === 'ENOENT') return 'gone';
       throw error;
     }
     await lockTakeoverHooks.beforeLockClaim?.();
     const claimPath = `${lockPath}.claim-${deadOwnerToken}`;
     try {
-      const claim = await open(claimPath, 'wx', 0o600);
-      try { await claim.writeFile(JSON.stringify({ pid: process.pid, token: lockToken })); }
-      finally { await claim.close(); }
+      await publishFile(claimPath, JSON.stringify({ pid: process.pid, token: lockToken }));
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       await refuseDeadClaim(claimPath);
@@ -406,14 +440,15 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     try {
       let current;
       try {
-        current = await readJson(lockPath, 4096);
+        current = await readLockFile(lockPath);
       } catch (error) {
-        if (error.code === 'ENOENT') return;
+        if (error.code === 'ENOENT') return 'gone';
         throw error;
       }
-      if (current.token !== deadOwnerToken) return;
+      if (current.token !== deadOwnerToken) return 'lock-changed';
       await unlink(lockPath);
       await createLockFile();
+      return 'taken-over';
     } catch (error) {
       if (error.code === 'EEXIST') throw new Error(LIVE_OWNER_MESSAGE);
       throw error;
@@ -422,20 +457,24 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     }
   }
 
-  // A claim whose process is gone is not recovered here: someone confirms nothing owns the store and deletes the named file.
+  // A claim whose process is gone, or that cannot be read, is not recovered here: someone confirms nothing owns the store and
+  // deletes the named file.
   async function refuseDeadClaim(claimPath) {
+    const interrupted = new Error(`A job store takeover was interrupted or left an unreadable claim. Confirm that no process owns the store, then delete ${basename(claimPath)} in the jobs folder.`);
     let claim;
     try {
-      claim = await readJson(claimPath, 4096);
-    } catch {
-      return; // Gone already, or still being written by its holder.
+      const details = await lstat(claimPath);
+      if (!details.isFile() || details.size > 4096) throw interrupted;
+      claim = JSON.parse(await readFile(claimPath, 'utf8'));
+    } catch (error) {
+      if (error.code === 'ENOENT') return; // The holder finished.
+      throw interrupted;
     }
+    if (!Number.isInteger(claim?.pid) || claim.pid < 1) throw interrupted;
     try {
       process.kill(claim.pid, 0);
     } catch (failure) {
-      if (failure.code === 'ESRCH') {
-        throw new Error(`A job store takeover was interrupted. Confirm that no process owns the store, then delete ${basename(claimPath)} in the jobs folder.`);
-      }
+      if (failure.code === 'ESRCH') throw interrupted;
     }
   }
 
@@ -452,19 +491,23 @@ export async function createAgentRenderJobs({ root, run, limits: inputLimits = {
     }
   }
 
-  async function acquireLock() {
+  // When the lock changed between this call's first look and its claim (a starter took the dead lock over and then died too),
+  // the whole acquire starts again once, so the new dead lock can be taken over instead of being reported as live.
+  async function acquireLock(isSecondAttempt = false) {
     try {
       await createLockFile();
+      return;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      await takeOverDeadOwnerLock();
-      if (lockHeld) return;
-      try {
-        await createLockFile();
-      } catch (retryError) {
-        if (retryError.code === 'EEXIST') throw new Error(LIVE_OWNER_MESSAGE);
-        throw retryError;
-      }
+    }
+    const outcome = await takeOverDeadOwnerLock();
+    if (lockHeld) return;
+    if (outcome === 'lock-changed' && !isSecondAttempt) return acquireLock(true);
+    try {
+      await createLockFile();
+    } catch (retryError) {
+      if (retryError.code === 'EEXIST') throw new Error(LIVE_OWNER_MESSAGE);
+      throw retryError;
     }
   }
 
