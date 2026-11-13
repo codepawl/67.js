@@ -20,6 +20,7 @@ import { responseFormatField, chosenFormat, conciseReview, conciseJobStatus, con
 import { resolveAddons } from './mcp-addons.mjs';
 import { createCallLogger, CALL_LOG_ENVIRONMENT_VARIABLE } from './mcp-call-log.mjs';
 import { startUpdateCheck, updateNoticeText, describeUpdateCheck } from '../src/mcp-update-check.js';
+import { installVolumeGridFiles } from '../src/mcp-volume-grids.js';
 import { MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_AREA_LIGHTS } from '../src/light-limits.js';
 
 describeSchemaInputsWithReceivedValues();
@@ -885,6 +886,7 @@ export function createAgentMcpServer(runtime, { version = packageMetadata.versio
   const restoreBranchField = branches ? { branch: branchName.optional() } : {};
   const restoreCheckpointId = checkpointFields.checkpointId.optional();
   const branchInstructions = branches ? ' To try variants, give scene_apply a branch name for each (the scene stays put), compare them in one scene_review with a branch per shot, then keep the best with scene_restore and its branch.' : '';
+  installVolumeGridFiles();
   const server = new McpServer({ name: '67js-scene', version }, {
     instructions: 'Start with scene_capabilities. Create a procedural recipe with scene_create, or select a configured GLB digest from scene_asset_catalog and use scene_create_asset. Pass its sessionId to work on several open scenes; without it the last used scene is used. Inspect stable IDs and save a checkpoint before editing. Apply small batches with the current expectedRevision and check committed, revision and renderSucceeded. A committed edit can have a separate renderError; do not retry it with an old revision.'+branchInstructions+' Pass labels: true to scene_look or scene_review to match part names to the image. Use scene_look to judge the actual image, or scene_review with the current expectedRevision to compare independent camera and motion samples in one grid while preserving the source pose. When jobs are configured, scene_render_submit captures an immutable snapshot. Poll scene_render_status, cancel when needed, and retrieve verified local artifact metadata with scene_render_result after completion. Preview rendering and edits pause during a job; source revision and checkpoints survive. Release outputs with scene_render_release. Export the final recipe and dispose the scene when finished. No arbitrary JavaScript, remote URLs or caller-selected output paths are exposed.'+(newerVersion ? updateNoticeText(newerVersion) : ''),
   });

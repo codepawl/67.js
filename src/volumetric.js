@@ -11,6 +11,12 @@ export function finiteRange(value, minimum, maximum, label) {
   return value;
 }
 
+/** Three numbers in a range, as a new array. */
+export function vectorField(value, minimum, maximum, label) {
+  if (!Array.isArray(value) || value.length !== 3) throw new TypeError(`${label} must be an array of three numbers`);
+  return value.map(component => finiteRange(component, minimum, maximum, label));
+}
+
 function vector(value, minimum, maximum, label) {
   if (value?.length !== 3) throw new TypeError(`${label} requires three components`);
   for (let axis = 0; axis < 3; axis++) finiteRange(value[axis], minimum, maximum, label);

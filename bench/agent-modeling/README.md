@@ -4,6 +4,18 @@ The suite measures how well an agent models through the 67js MCP tools. It recor
 what each success costs in tool calls, tokens and time. It is the yardstick from the modeling plan: a mesh feature
 earns its place only if it raises these numbers.
 
+## Shell arms
+
+`threejs.mjs` and `llms-only.mjs` give the agent a real shell on the machine that runs them. On 2026-11-13 a Sonnet agent in the three.js arm cleaned up its headless Chrome with `taskkill //F //IM chrome.exe //T` and `Get-Process chrome,node | Stop-Process -Force`. That killed the user's own Chrome, every other `node` process and other agents' browsers (#1138). The "process disappeared" stop in the 2026-11-07 three.js run below was probably the same cause.
+
+Both arms now:
+
+- deny, for Claude Code agents, the kill commands, `Get-Process`, `wmic`, `cmd`, `powershell` and `pwsh` as Bash rules, and the PowerShell tool (`shell-arm-safety.mjs`). Claude Code refuses a compound command that contains one of them, such as `echo a && taskkill ...`.
+- tell the agent in the prompt never to stop processes and to close its own browser.
+- refuse to start unless `AGENT_BENCH_SHELL_ARMS=1` is set.
+
+`llms-only.mjs --agent agy` gets no deny rules: its settings file allows `command(*)`, so only the prompt rule and the opt-in cover it. A script the agent writes can still start a process killer from inside node, which the rules cannot see. Set `AGENT_BENCH_SHELL_ARMS=1` only on a machine where nothing else runs, never on a shared workstation. The MCP arms (`run.mjs`, `bench.mjs`, `blender.mjs`) give the agent no shell and need no opt-in.
+
 ## Tasks
 
 Each task in `tasks.mjs` is a prompt with sizes in metres plus machine checks. The checks look only at the object the

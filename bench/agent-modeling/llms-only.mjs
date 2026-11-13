@@ -15,6 +15,7 @@ import { parseArgs } from 'node:util';
 import { removeLocalPaths, totalsByModel } from './aggregate.mjs';
 import { checkPng } from './png-check.mjs';
 import { createRunGuard } from './run-guard.mjs';
+import { SHELL_ARM_DENIED_TOOLS, SHELL_ARM_PROCESS_RULE, assertShellArmAllowed } from './shell-arm-safety.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const TASK_ID = 'llms-only-png';
@@ -22,7 +23,8 @@ const BUILT_IN_TOOLS_DENIED = ['WebFetch', 'WebSearch', 'Agent', 'Task', 'Notebo
 const PROMPT = `Write a Node.js script named render.mjs in the current folder that renders a 3D scene to a PNG file named scene.png, 512 by 512 pixels, and run it.
 The scene: a red sphere resting on a grey ground plane, seen from a three-quarter view above.
 The 67js package is installed in node_modules. This folder also holds llms.txt, the map of its documentation. You have no internet access and no MCP tools, so use only llms.txt and the files in node_modules.
-Google Chrome is installed. When scene.png exists, reply with one line saying so.`;
+Google Chrome is installed. When scene.png exists, reply with one line saying so.
+${SHELL_ARM_PROCESS_RULE}`;
 
 const { values: options } = parseArgs({
   options: {
@@ -60,7 +62,7 @@ function claudeArguments() {
     '--output-format', 'stream-json', '--verbose',
     '--strict-mcp-config',
     '--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-    '--disallowedTools', ...BUILT_IN_TOOLS_DENIED,
+    '--disallowedTools', ...BUILT_IN_TOOLS_DENIED, ...SHELL_ARM_DENIED_TOOLS,
     '--permission-mode', 'dontAsk',
     '--setting-sources', 'project',
     '--no-session-persistence',
@@ -80,6 +82,7 @@ function agyArguments(settingsPath) {
 }
 
 function runAgent(workingDirectory, settingsPath) {
+  assertShellArmAllowed();
   const executable = options.agent === 'agy' ? options.agy : options.claude;
   const argumentsList = options.agent === 'agy' ? agyArguments(settingsPath) : claudeArguments();
   return new Promise(resolvePromise => {

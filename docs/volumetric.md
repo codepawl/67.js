@@ -98,7 +98,7 @@ Parts also take `receiveShadow`, `holdout`, `shadowCatcher` and `visible`; see [
 
 Resolved depth adds four estimated bytes per rendered pixel, or 2,073,600 bytes at 960 × 540. The planner reduces render dimensions when needed. The target is allocated at construction/resize, reused across frames and released by `dispose()`. The march adds no additional volume textures or geometry, but shading cost grows with covered pixels and step count.
 
-This implements one bounded medium, a directional source with shadows and up to 8 unshadowed point and spot lights. Multiple scattering, attenuation toward the source, transparent depth, volume grids, particles, temporal accumulation and half-resolution rendering remain unfinished. The legacy film explosion is separate and does not use this depth-clipped medium. Fog runs after bloom extraction, so scattering itself does not feed bloom.
+This implements one bounded medium, a directional source with shadows and up to 8 unshadowed point and spot lights. Multiple scattering, attenuation toward the source, transparent depth, volume grids in the fog itself (local volumes take grids, below), particles, temporal accumulation and half-resolution rendering remain unfinished. The legacy film explosion is separate and does not use this depth-clipped medium. Fog runs after bloom extraction, so scattering itself does not feed bloom.
 
 Measured at 1920 × 1080 with 24 steps on an RTX 3060 shared with other jobs, whole frame (a small scene, fog and read-back): the fog as before 3.6 to 3.7 ms; with a field 4.8 to 5.1 ms (about 1.3 ms more); with 8 point lights 7.3 to 7.4 ms (about 0.46 ms per light); both 8.6 to 8.8 ms. Numbers move with other jobs on the card.
 
@@ -175,6 +175,44 @@ A volume with `scatter` above `0` returns, in each step, `scatter * (1 - exp(-ex
 ### Reference render and frame time
 
 `node bench/reference/local-volumes.mjs gpu` draws a smoky room (a haze box with noise and a glowing noisy puff, `bench/reference/images/local-volumes.png`) and the same room without volumes (`local-volumes-plain.png`), and times both: 960 x 540, 4x MSAA, median of 200 frames with readback, three rounds with the order alternating. On the RTX 3060 shared with other jobs (2026-11-10) the room without volumes took 1.34, 1.25 and 1.07 ms, and with the two volumes 2.13, 2.11 and 1.54 ms, so the pair costs about 0.5 to 0.9 ms at this size (noisy; treat it as a range).
+
+### Grid volumes
+
+A simulated explosion, fire or smoke plume is a grid of numbers, not a noise box. `shape: "grid"` fills a box with a 3D texture of `density` and, optionally, `temperature` and `flame`, so a frame exported from EmberGen, Houdini or Blender draws in the rasterizer and the CPU path tracer. `node bench/reference/volume-grid.mjs <grid file> <png>` draws one converted frame of the CC0 "Ground Explosion" by JangaFX over a sandy ground and prints the frame time.
+
+```json
+{ "environment": { "localVolumes": [
+  { "shape": "grid", "grid": "blast.67vg", "center": [0, 2.2, 0], "density": 4, "emission": [1, 0.45, 0.12], "emissionStrength": 14, "temperatureScale": 1000, "blackbodyIntensity": 0.3 }
+] } }
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `grid` | required | The name of a grid: `registerVolumeGrid(name, bytes)` registers one in a page or a script, and in the MCP server a name ending in `.67vg` loads from the working directory (or `JS67_GRID_DIRECTORY`), never from a path |
+| `center`, `size` | required, the grid file's own size | The box the grid fills. A grid never extends past it |
+| `density` | `1` | Density scale, `0` to `100`: extinction per unit length is the grid's density times this times `absorption` (Blender's Density) |
+| `absorption` | `[1, 1, 1]` | The colour the smoke absorbs (Blender's Absorption Color, the same field as other volumes) |
+| `emission`, `emissionStrength` | `[0, 0, 0]`, `1` | Light given off per unit length times the `flame` channel (the density when the grid has no flame channel) |
+| `temperatureScale` | `1` | Kelvin per unit of the `temperature` channel |
+| `blackbodyIntensity` | `0` | `0` to `1`. Adds the blackbody light of the temperature, times `emissionStrength`. `0` ignores the temperature channel (Blender's Blackbody Intensity). The colour is Tanner Helland's Planckian fit, brightness `(kelvin / 1500)^4` up to 50 |
+| `anisotropy` | `0` | `-0.9` to `0.9`. The Henyey-Greenstein asymmetry of the key light's scatter when `scatter` is above 0 |
+| `steps` | `64` | `4` to `128` samples through the box |
+| `scatter`, `blur` | as other volumes | The same lit-volume and blur behaviour. `falloff`, `noiseAmount` and `noiseScale` do not apply: the grid has its own detail |
+
+One grid volume per scene for now. The rasterizer samples a RGBA16F 3D texture (linear, clamped; r density, g temperature, b flame); the CPU path tracer samples the same half floats trilinearly, so the two agree to filtering. Without a grid volume, local volumes draw exactly as before.
+
+**Grid file.** `"67VG"`, a uint32 version (1), a uint32 header length, a JSON header `{ "resolution": [x, y, z], "channels": ["density", "flame"], "size": [x, y, z] }` padded to 4 bytes, then each channel as half floats, x fastest, then y, then z, y up. Each axis is 1 to 256 and the data at most 64 MiB; anything past that is refused with the limit and the `--max-resolution` to use.
+
+**From a VDB.** `uv run --no-project scripts/vdb-to-grid.py frame.vdb blast.67vg --max-resolution 128` reads OpenVDB float grids by their usual names (`density`; `temperature` or `heat`; `flame`, `flames` or `fire`), turns a z-up file to y up, box-averages down to the resolution and writes the file. `--map flame=burn` reads a channel from another grid name and `--up y` leaves the axes alone. The reader is in the script (OpenVDB file version 222 or later, float grids, none or zip compression; Blosc files stop with an error), so it needs numpy only: no OpenVDB wheel exists for Windows, and `pyopenvdb` on PyPI is a 2020 Python 3.7 build.
+
+Bytes per frame, two bytes per voxel per channel (measured on the "Ground Explosion" frames, which are 144 x 88 x 136 voxels at most):
+
+| Resolution | density | density + flame | density + temperature + flame |
+| --- | --- | --- | --- |
+| 128 x 128 x 128 | 4.2 MB | 8.4 MB | 12.6 MB |
+| 256 x 256 x 256 | 33.6 MB | 67.1 MB (the limit is 64 MiB, so 256 cubed fits two channels) | over the limit |
+
+The 3D texture on the GPU is RGBA16F, 8 bytes per voxel whatever the channels: 16.8 MB at 128 cubed, 134 MB at 256 cubed.
 
 ### Not covered yet
 

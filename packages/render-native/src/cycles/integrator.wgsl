@@ -909,7 +909,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         throughput *= kernel_params.volume_albedo;
         let scatter_pos = ray_origin + ray_dir * volume_scatter_t;
         if (!recorded_features) {
-          first_depth = volume_scatter_t;
+          // Depth stays the distance to the first surface of the camera ray, which the trace above already found, so fog
+          // does not pull the averaged depth short. A ray that hits no surface writes 0, as it does without fog.
+          first_depth = select(0.0, surface_hit.t, surface_hit.hit != 0u);
           first_albedo = clamp(kernel_params.volume_albedo, vec3<f32>(0.0), vec3<f32>(1.0));
           first_normal = -ray_dir;
           recorded_features = true;
