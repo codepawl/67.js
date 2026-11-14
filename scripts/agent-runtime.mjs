@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { sampleBrowserHeap, exceedsMemoryGuard } from './agent-memory-guard.mjs';
+import { sampleBrowserHeap, exceedsMemoryGuard, nativeNodeAllowanceBytes } from './agent-memory-guard.mjs';
 import { lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -574,6 +574,8 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     // A native video job blends each frame into the ones before it, so the noise the denoiser leaves does not shimmer.
     let nativeTemporal;
     let nativeTemporalShotIndex;
+    // Extra Node RSS the job may hold while the native tracer and OIDN run in this process; 0 until a frame really traces natively.
+    let nativeAllowanceBytes = 0;
     let pageEncodes = false;
     let suspended = false;
     const started = performance.now();
@@ -585,7 +587,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
     async function recordPeakMemory() {
       metrics.peakNodeBytes = Math.max(metrics.peakNodeBytes, process.memoryUsage().rss);
       metrics.peakBrowserHeap = Math.max(metrics.peakBrowserHeap, await sampleBrowserHeap(session));
-      if (exceedsMemoryGuard({ nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap })) {
+      if (exceedsMemoryGuard({ nodeBytes: metrics.peakNodeBytes, browserHeapBytes: metrics.peakBrowserHeap, nativeAllowanceBytes })) {
         throw new Error('Render job exceeded its Node RSS or sampled browser heap guard.');
       }
     }
@@ -686,6 +688,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
           let backendNote = trace.note;
           if (trace.backend === 'native') {
             let exportedScene = false;
+            nativeAllowanceBytes = nativeNodeAllowanceBytes({ width, height });
             const usesSession = settings.frameCount > 1 && process.env.JS67_NATIVE_SESSIONS !== 'off';
             // Only a video blends over time: the stills of one job are separate pictures, and each must stand alone.
             const blendsOverTime = usesSession && settings.kind === 'video' && chooseNativeKernel() === 'cycles' && chooseNativeTemporal();
@@ -707,6 +710,7 @@ export function createAgentRuntime({ kernelWorkers = true, backend = 'gpu', brow
               if (isNativeTimeLimitError(error)) throw error;
               nativeSequence?.close();
               nativeSequence = undefined;
+              nativeAllowanceBytes = 0;
               nativeTemporal?.restart('a frame rendered on another backend');
               // Only a tracer or adapter failure makes the tracer unusable; a scene that failed to export says so for this job alone.
               if (exportedScene) nativeTracerLocator.markUnusable(error.message);

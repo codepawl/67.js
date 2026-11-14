@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BROWSER_HEAP_LIMIT_BYTES, NODE_RSS_LIMIT_BYTES, exceedsMemoryGuard, sampleBrowserHeap } from '../scripts/agent-memory-guard.mjs';
+import { BROWSER_HEAP_LIMIT_BYTES, NODE_RSS_LIMIT_BYTES, exceedsMemoryGuard, nativeNodeAllowanceBytes, sampleBrowserHeap } from '../scripts/agent-memory-guard.mjs';
 
 const MEBIBYTE = 1024 ** 2;
 
@@ -47,4 +47,25 @@ test('the Node limit is unchanged and still enforced', () => {
   assert.equal(NODE_RSS_LIMIT_BYTES, 512 * MEBIBYTE);
   assert.equal(exceedsMemoryGuard({ nodeBytes: NODE_RSS_LIMIT_BYTES + 1, browserHeapBytes: 0 }), true);
   assert.equal(exceedsMemoryGuard({ nodeBytes: NODE_RSS_LIMIT_BYTES, browserHeapBytes: BROWSER_HEAP_LIMIT_BYTES }), false);
+});
+
+test('a native job gets 256 MiB plus 1 KiB a pixel on top of the Node limit, capped at 2 GiB', () => {
+  assert.equal(nativeNodeAllowanceBytes({ width: 960, height: 540 }), 256 * MEBIBYTE + 960 * 540 * 1024);
+  assert.equal(nativeNodeAllowanceBytes({ width: 1, height: 1 }), 256 * MEBIBYTE + 1024);
+  assert.equal(nativeNodeAllowanceBytes({ width: 7680, height: 4320 }), 2048 * MEBIBYTE);
+  assert.throws(() => nativeNodeAllowanceBytes({ width: 0, height: 540 }), /positive integer width and height/);
+});
+
+test('a native 960 x 540 job at 800 MiB of Node RSS passes while the same RSS stops a non-native job', () => {
+  const nativeAllowanceBytes = nativeNodeAllowanceBytes({ width: 960, height: 540 });
+  assert.equal(exceedsMemoryGuard({ nodeBytes: 800 * MEBIBYTE, browserHeapBytes: 0, nativeAllowanceBytes }), false);
+  assert.equal(exceedsMemoryGuard({ nodeBytes: 800 * MEBIBYTE, browserHeapBytes: 0 }), true);
+});
+
+test('a runaway native job still stops, and the allowance does not loosen the browser heap limit', () => {
+  const nativeAllowanceBytes = nativeNodeAllowanceBytes({ width: 960, height: 540 });
+  const limit = NODE_RSS_LIMIT_BYTES + nativeAllowanceBytes;
+  assert.equal(exceedsMemoryGuard({ nodeBytes: limit, browserHeapBytes: 0, nativeAllowanceBytes }), false);
+  assert.equal(exceedsMemoryGuard({ nodeBytes: limit + 1, browserHeapBytes: 0, nativeAllowanceBytes }), true);
+  assert.equal(exceedsMemoryGuard({ nodeBytes: 0, browserHeapBytes: BROWSER_HEAP_LIMIT_BYTES + 1, nativeAllowanceBytes }), true);
 });

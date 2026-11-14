@@ -326,6 +326,8 @@ A lock whose process is alive, or a file that is not a recognized lock, is still
 
 A render or review job fails when its Node RSS passes 512 MiB or its browser heap passes 256 MiB. After each frame the browser heap is read, and when it is over the limit it is garbage collected and read again, so only memory the page still holds counts. A physics bake leaves tens of MiB of garbage after its first frame; a real leak survives the collection and still stops the job.
 
+A job that traces on the native path tracer holds more in the Node process, because the tracer tables, the OIDN denoiser, the frame planes and the temporal history all live there. Such a job gets an extra allowance on top of the 512 MiB: 256 MiB plus 1 KiB for each pixel of the frame, never more than 2 GiB. A 960 x 540 native video job may use about 1.25 GiB of Node RSS, a 1920 x 1080 one reaches the cap of 2.5 GiB (512 MiB plus 2 GiB). The allowance starts with the first native frame and is dropped when the job falls back to another backend. These numbers are estimates until the Linux run of #1186 is measured. A job over its limit still fails.
+
 | Budget | Default |
 | --- | --- |
 | Retained records | 32 |
