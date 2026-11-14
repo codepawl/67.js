@@ -180,7 +180,6 @@ test('unsupported features fail explicitly before loading resources', async () =
     [document => { document.extensionsRequired = ['KHR_materials_unknown_vendor']; }, /KHR_materials_unknown_vendor/],
     [document => { document.buffers[0].uri = 'external.bin'; }, /baseUrl/],
     [document => { document.nodes[2].children = [0]; }, /Cyclic/],
-    [document => { document.materials[0].pbrMetallicRoughness.metallicFactor = 2; }, /metallic/],
     [document => { document.accessors[1].count = 4; }, /TEXCOORD_0/],
   ];
   for (const [edit, expected] of cases) await assert.rejects(parseGltf(triangleAsset(edit)), expected);

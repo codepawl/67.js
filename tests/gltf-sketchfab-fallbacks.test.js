@@ -182,3 +182,24 @@ test('a normal map on texCoord 1 loads and reads the second UV set', async () =>
   assert.equal(parts[0].material.normalMap.uvChannel, 1);
   assert.ok(parts[0].geometry.lightUvs, 'the second UV set is kept on the geometry');
 });
+
+test('a texCoord of -1 drops that map with a warning and keeps the mesh', async () => {
+  const material = { name: 'scissors_metal', pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: -1 } } };
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(triangleDocument(material, { withUvs: false })));
+  assert.equal(parts.length, 1);
+  assert.ok(warnings.some(warning => warning.includes('baseColorTexture of scissors_metal') && warning.includes('negative texCoord')));
+});
+
+test('a roughness or metallic factor outside 0..1 is clamped with a warning', async () => {
+  const material = { name: 'pages_mat', pbrMetallicRoughness: { roughnessFactor: 2, metallicFactor: -0.5 } };
+  const { parts, warnings } = await parseGltf(triangleDocument(material, { withUvs: false }));
+  assert.equal(parts[0].material.roughness, 1);
+  assert.equal(parts[0].material.metallic, 0);
+  assert.ok(warnings.some(warning => warning.includes('roughnessFactor 2 of pages_mat') && warning.includes('metallicFactor -0.5')));
+});
+
+test('in-range factors add no repair warning', async () => {
+  const material = { name: 'fine', pbrMetallicRoughness: { roughnessFactor: 0.5 } };
+  const { warnings } = await parseGltf(triangleDocument(material, { withUvs: false }));
+  assert.ok(!warnings.some(warning => warning.startsWith('Clamped') || warning.includes('negative texCoord')));
+});
