@@ -122,14 +122,14 @@ test('a normal map on the second UV set loads on that set', async () => {
   assert.equal(part.geometry.lightUvs.length, part.geometry.positions.length / 3 * 2);
 });
 
-test('a base color map alone on the second UV set stays on that set', async () => {
+test('a base color map alone on the second UV set is promoted to the first set', async () => {
   const material = { name: 'Floor', color: [1, 1, 1], metallic: 0, roughness: 0.5, map: descriptorFor(6, 'srgb', 1) };
   const source = boxPart(material, { secondUvSet: true });
   const imported = await parseGltf(exportGlb([source]));
   const part = imported.parts[0];
-  assert.equal(part.material.map.uvChannel, 1);
-  assert.equal(part.geometry.lightUvs.length, part.geometry.positions.length / 3 * 2);
-  assert.deepEqual(imported.warnings, []);
+  assert.equal(part.material.map.uvChannel, 0);
+  assert.equal(part.geometry.uvs.length, part.geometry.positions.length / 3 * 2);
+  assert.ok(imported.warnings.some(warning => /material 0.*TEXCOORD_1/.test(warning)));
 });
 
 test('a base color map on the second UV set beside a first-set map keeps both maps', async () => {

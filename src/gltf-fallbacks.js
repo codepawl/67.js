@@ -44,17 +44,24 @@ function convertSpecularGlossiness(document, warnings) {
   warnings.push(`${SPECULAR_GLOSSINESS} converted to metallic-roughness (diffuse color as base color, metallic 0, roughness 1 - glossiness, specular color not read) in ${converted.join(', ')}.`);
 }
 
-/** True when the texture reference carries a KHR_texture_transform that moves the UVs. */
+// The shader samples these slots with the second UV set as they are; the path tracer and the light bake read only the
+// first set, so the other maps of an all-TEXCOORD_1 material still move to it.
+const SECOND_SET_SLOTS = new Set(['normalTexture', 'metallicRoughnessTexture', 'occlusionTexture', 'emissiveTexture']);
+
+/** True when the texture reference carries a KHR_texture_transform that moves the UVs (an identity transform does not). */
 function hasUvTransform(reference) {
   const transform = reference.extensions?.KHR_texture_transform;
-  return Boolean(transform && (transform.offset || transform.rotation || transform.scale));
+  if (!transform) return false;
+  const { offset = [0, 0], rotation = 0, scale = [1, 1] } = transform;
+  return JSON.stringify([offset, rotation, scale]) !== JSON.stringify([[0, 0], 0, [1, 1]]);
 }
 
 /**
- * Every map can read TEXCOORD_1 itself, but Crucible bakes a KHR_texture_transform into the UVs of one set and cannot do
- * that for TEXCOORD_1. When every map of the material reads TEXCOORD_1 and one carries a transform, the primitives get
- * that set as TEXCOORD_0 and the maps move with it, so the transform bakes. When the material also has maps on
- * TEXCOORD_0, a map on TEXCOORD_1 with a transform is dropped.
+ * Maps can read TEXCOORD_1 themselves, but the path tracer and the light bake read only the first set, and Crucible bakes
+ * a KHR_texture_transform into the UVs of one set only. When every map of the material reads TEXCOORD_1 (Blender writes
+ * this for a material whose only UV map is the second one) and one is a base color or layer map or carries a transform,
+ * the primitives get that set as TEXCOORD_0 and the maps move with it. When the material also has maps on TEXCOORD_0,
+ * only a map on TEXCOORD_1 with a transform is dropped; the others keep reading their own set.
  */
 function moveSecondSetTextures(document, warnings) {
   const movedMaterials = new Set();
@@ -63,7 +70,8 @@ function moveSecondSetTextures(document, warnings) {
   document.materials?.forEach((material, index) => {
     const secondSet = collectTextureKeys(material, 1);
     const transformed = secondSet.filter(path => hasUvTransform(referenceAt(material, path)));
-    if (!transformed.length) return;
+    const needsFirstSet = secondSet.some(path => !SECOND_SET_SLOTS.has(path.at(-1))) || transformed.length > 0;
+    if (!needsFirstSet) return;
     const name = material.name ?? `material ${index}`;
     if (collectTextureKeys(material, 0).length === 0) {
       for (const path of secondSet) {
@@ -90,7 +98,7 @@ function moveSecondSetTextures(document, warnings) {
       else primitive.attributes.TEXCOORD_0 = secondSetAccessor;
     }
   }
-  if (movedNames.length) warnings.push(`Read the textures of ${movedNames.join(', ')} from TEXCOORD_1 as the first UV set, so that their KHR_texture_transform can be baked into it.`);
+  if (movedNames.length) warnings.push(`Read the textures of ${movedNames.join(', ')} from TEXCOORD_1 as the first UV set, because the path tracer, the light bake and a KHR_texture_transform read only the first set.`);
   if (droppedNames.length) warnings.push(`Dropped ${droppedNames.join(', ')}: a KHR_texture_transform on TEXCOORD_1 cannot be baked beside maps on TEXCOORD_0.`);
 }
 

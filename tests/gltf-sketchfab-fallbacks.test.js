@@ -126,16 +126,29 @@ function twoUvSetDocument(material) {
   return document;
 }
 
-test('a material whose maps all read TEXCOORD_1 keeps both sets and samples the second', async () => {
+test('a material whose maps all read TEXCOORD_1 loads with that set as its UVs', async () => {
   const document = twoUvSetDocument({
     name: 'Laminate floor',
     normalTexture: { index: 0, texCoord: 1 },
     pbrMetallicRoughness: { baseColorTexture: { index: 0, texCoord: 1 } },
   });
   const { parts, warnings } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
-  assert.equal(parts[0].material.map.uvChannel, 1);
+  assert.ok(parts[0].material.map, 'the base color map is kept');
+  assert.equal(parts[0].material.map.uvChannel, 0);
+  assert.deepEqual([...parts[0].geometry.uvs], [0, 0, 2, 0, 0, 2]);
+  assert.ok(warnings.some(warning => /Laminate floor.*TEXCOORD_1/.test(warning)));
+});
+
+test('an identity KHR_texture_transform on a TEXCOORD_1 map beside a TEXCOORD_0 map is not a transform', async () => {
+  const document = twoUvSetDocument({
+    name: 'identity',
+    normalTexture: { index: 0, texCoord: 1, extensions: { KHR_texture_transform: { offset: [0, 0] } } },
+    pbrMetallicRoughness: { baseColorTexture: { index: 0 } },
+  });
+  document.extensionsUsed = ['KHR_texture_transform'];
+  const { parts, warnings } = await withImageDecoder(() => parseGltf(JSON.stringify(document)));
   assert.equal(parts[0].material.normalMap.uvChannel, 1);
-  assert.deepEqual([...parts[0].geometry.lightUvs], [0, 0, 2, 0, 0, 2]);
+  assert.equal(parts[0].material.map.uvChannel, 0);
   assert.deepEqual(warnings, []);
 });
 

@@ -206,7 +206,8 @@ function skipReason(part) {
   if (part.skin || part.morph || part.geometry.skinIndices || part.geometry.morphTargets) return 'skinned or morphing parts move, so a fixed lightmap would not follow';
   if ((material.tag ?? 'surface') !== 'surface') return `the ${material.tag} material draws its own look`;
   if (material.opacity !== undefined && material.opacity < 1 || material.alphaMode && material.alphaMode !== 'opaque') return 'it is transparent';
-  const mapsOnSecondSet = MAP_FIELDS.filter(field => material[field]?.uvChannel === 1);
+  const layerMapsOnSecondSet = Object.entries(material.layerMaps ?? {}).filter(([, map]) => map?.uvChannel === 1).map(([field]) => field);
+  const mapsOnSecondSet = [...MAP_FIELDS.filter(field => material[field]?.uvChannel === 1), ...layerMapsOnSecondSet];
   if (mapsOnSecondSet.length) {
     return `material ${material.name ?? 'without a name'} reads ${mapsOnSecondSet.join(', ')} from the second UV set (TEXCOORD_1), which the bake would replace with the lightmap atlas`;
   }

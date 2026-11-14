@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../src/material-layer-shaders.js';
+import { CrucibleRenderer } from '../src/renderer.js';
 import { createDepthFragmentShader, createDepthVertexShader, createFragmentShader } from '../src/shaders.js';
 
 const LAYER_TEXTURE_FEATURES = ['clearcoatTexture', 'clearcoatRoughnessTexture', 'clearcoatNormalTexture', 'sheenColorTexture', 'sheenRoughnessTexture', 'anisotropyTexture'];
@@ -33,4 +34,21 @@ test('every layer map samples through its own flag', () => {
     assert.doesNotMatch(source, new RegExp(`texture\\(${name}, textureUV\\)`), `${name} still reads textureUV`);
     assert.ok(source.includes(`mapUV(${name}On)`), `${name} is not sampled through its flag`);
   }
+});
+
+test('the shadow alpha pass binds the map flag as 2 for a base colour map on the second UV set', () => {
+  const renderer = Object.create(CrucibleRenderer.prototype);
+  renderer.depthAlphaUniforms = { alphaMasked: 'masked', alphaCutoff: 'cutoff', materialOpacity: 'opacity', hasBaseMap: 'hasBaseMap' };
+  renderer.uniforms = {};
+  const flags = [];
+  renderer.context = {
+    CULL_FACE: 2884, TEXTURE0: 33984, TEXTURE_2D: 3553,
+    enable() {}, disable() {}, activeTexture() {}, bindTexture() {},
+    uniform1f(name, value) { if (name === 'hasBaseMap') flags.push(value); },
+  };
+  const batch = { doubleSided: true, alphaMode: 'mask', alphaCutoff: 0.5, opacity: 1, textures: [{}] };
+  renderer.applyAlphaState({ ...batch, mapState: [{ uvChannel: 1 }] }, false);
+  renderer.applyAlphaState({ ...batch, mapState: [{ uvChannel: 0 }] }, false);
+  renderer.applyAlphaState({ ...batch, mapState: [null] }, false);
+  assert.deepEqual(flags, [2, 1, 0]);
 });

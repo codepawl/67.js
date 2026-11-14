@@ -141,6 +141,16 @@ test('a part whose maps read the second UV set is skipped with its material name
   assert.equal(baked[7], parts[7]);
 });
 
+test('a part with a layer map on the second UV set is skipped with the map named', () => {
+  const clearcoatImage = { width: 2, height: 2, data: new Uint8ClampedArray(16).fill(128) };
+  const parts = smallRoom();
+  parts.push(placed('coated floor', [1.5, 1, 1.5], [1, 2, 1], { name: 'Coated', layerMaps: { clearcoatTexture: { image: clearcoatImage, colorSpace: 'linear', uvChannel: 1 } } }));
+  const { parts: baked, report } = bakeLightmaps(parts, lamp, fastOptions);
+  assert.deepEqual(report.skipped.map(entry => entry.name), ['coated floor']);
+  assert.match(report.skipped[0].reason, /Coated.*clearcoatTexture.*TEXCOORD_1/);
+  assert.equal(baked[7], parts[7]);
+});
+
 test('a part marked as generating its own geometry is skipped', () => {
   const parts = smallRoom();
   parts[0] = { ...parts[0], generatesGeometry: true };
