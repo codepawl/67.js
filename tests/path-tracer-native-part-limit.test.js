@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { NATIVE_JOB_MAXIMUM_PARTS } from '../scripts/native-bake-page.js';
+import { exportNativeSceneTables, NATIVE_JOB_MAXIMUM_PARTS } from '../scripts/native-bake-page.js';
+import { createCamera } from '../src/path-tracer.js';
+import * as pack from '../src/path-tracer-gpu-pack.js';
+import { cookModule, cookTest } from './support/cook.js';
 import {
-  buildTraceScene, MAX_NATIVE_TRACE_INSTANCES, MAX_NATIVE_TRACE_PARTS, MAX_NATIVE_TRACE_TRIANGLES, MAX_TRACE_PARTS,
+  buildTraceScene, MAX_NATIVE_TRACE_INSTANCES, MAX_NATIVE_TRACE_PARTS, MAX_NATIVE_TRACE_TRIANGLES, MAX_TRACE_PARTS, refuseLocalVolumes, resolveTexture,
 } from '../src/path-tracer-scene.js';
 
 const MATERIAL = { color: [0.8, 0.8, 0.8] };
@@ -41,7 +44,7 @@ test('the native option takes more than 1,024 parts in a flattened scene', () =>
 
 test('a native flattened scene past maximumParts names the limit and what to do', () => {
   assert.throws(() => buildTraceScene(stripParts(5, 1), {}, { maximumParts: 4 }),
-    { name: 'RangeError', message: /native path trace takes 1 to 4 parts, got 5\. Merge small meshes/ });
+    { name: 'RangeError', message: /^A native path trace takes 1 to 4 parts, got 5\. Merge small meshes into one part\.$/ });
 });
 
 test('a two million triangle instanced scene of 2,000 distinct meshes passes the native bounds', () => {
@@ -70,4 +73,39 @@ test('maximumParts outside 1 to 1,000,000 is refused', () => {
   for (const bad of [0, -1, 1.5, MAX_NATIVE_TRACE_PARTS + 1, '5']) {
     assert.throws(() => buildTraceScene(stripParts(1, 1), {}, { maximumParts: bad }), { name: 'RangeError', message: /maximumParts is an integer from 1 to 1000000/ });
   }
+});
+
+test('an empty or missing parts list with maximumParts asks for a part, not for merging', () => {
+  for (const parts of [[], undefined]) {
+    assert.throws(() => buildTraceScene(parts, {}, { maximumParts: 10 }),
+      { name: 'RangeError', message: /native path trace takes 1 to 10 parts.*Pass at least one part with geometry\./ });
+  }
+  assert.throws(() => buildTraceScene([], {}, { maximumParts: 10 }), error => !/Merge small meshes/.test(error.message));
+});
+
+const jobInputModule = await cookModule('job-input');
+const packInputModule = await cookModule('pack-input');
+const { buildFlattenedJobNativeInput, buildJobNativeInput } = jobInputModule ?? {};
+const { buildNativeInput } = packInputModule ?? {};
+const camera = createCamera({ eye: [0, 0, 8], target: [0, 0, 0], fov: 50 }, 8, 8);
+const packOptions = { width: 8, height: 8, bounces: 2, seed: 1, fireflyClamp: 20, noiseThreshold: 0 };
+const ENVIRONMENT = { keyColor: [1, 1, 1], lightDirection: [0, 1, 0] };
+const modules = { buildTraceScene, refuseLocalVolumes, resolveTexture, buildNativeInput, buildJobNativeInput, buildFlattenedJobNativeInput, pack };
+
+function exportParts(partCount, kernel, instancing) {
+  const distinct = stripParts(partCount - 1, 1);
+  const parts = [...distinct, { ...distinct[0], name: 'copy' }];
+  return exportNativeSceneTables({ parts, environment: ENVIRONMENT, camera, options: packOptions, kernel, instancing, modules });
+}
+
+cookTest('a native render job with the cycles kernel exports more than 1,024 parts, flattened and instanced', () => {
+  const partCount = MAX_TRACE_PARTS + 100;
+  const flattened = exportParts(partCount, 'cycles', false);
+  assert.equal(flattened.triangleCount, partCount);
+  const instanced = exportParts(partCount, 'cycles', true);
+  assert.equal(instanced.instances, partCount);
+});
+
+cookTest('a native render job with the legacy kernel still refuses 1,025 parts', () => {
+  assert.throws(() => exportParts(MAX_TRACE_PARTS + 1, 'legacy', false), { name: 'RangeError', message: /1 to 1024 parts/ });
 });

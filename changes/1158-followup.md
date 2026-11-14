@@ -1,0 +1,1 @@
+- Reports a native trace of zero parts and a bound over 1,024 parts exported by the cycles kernel: an empty scene says to pass a part instead of merging meshes, the docs name which tracers keep 1,024 parts, and the export has tests for flattened and instanced scenes.
